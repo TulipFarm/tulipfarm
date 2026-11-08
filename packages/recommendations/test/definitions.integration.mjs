@@ -48,7 +48,7 @@ test(
       const definition = {
         version: 1,
         name: 'Prepare a checklist',
-        trigger: { kind: 'manual' },
+        triggers: [],
         steps: [{ id: 'copy', kind: 'transform', fields: { text: { kind: 'input', path: ['text'] } } }],
       };
       await service.save(workspaceId, userId, id, { revision, expectedRevision: null, definition });

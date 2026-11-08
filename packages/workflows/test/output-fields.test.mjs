@@ -15,7 +15,7 @@ const id = '11111111-1111-4111-8111-111111111111';
 const literal = value => ({ kind: 'literal', value });
 const input = { kind: 'input', path: [] };
 const ref = (step, path) => ({ kind: 'step', step, path });
-const definition = steps => ({ version: 1, name: 'Outputs', trigger: { kind: 'manual' }, steps });
+const definition = steps => ({ version: 1, name: 'Outputs', triggers: [], steps });
 const check = (source, path) =>
   authoredDefinitionSchema.safeParse(
     definition([source, { id: 'copy', kind: 'transform', fields: { value: ref(source.id, path) } }]),

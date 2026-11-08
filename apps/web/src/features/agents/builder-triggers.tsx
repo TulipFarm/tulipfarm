@@ -5,31 +5,39 @@ import { Button } from '@tulipfarm/sprout/button';
 import { CheckboxField } from '@tulipfarm/sprout/field';
 import { FormSection } from '@tulipfarm/sprout/form';
 import { TriggerIcon } from '@/features/workflows/workflow-summary';
-import { setupTriggerLabel } from './setup-review';
+import { useSetupTriggerNames } from './setup-review';
 
-export type BuilderTrigger = AgentSetup['triggers'][number] & { sponsorConsent: boolean };
+export type BuilderTrigger = AgentSetup['triggers'][number];
 
 export function BuilderTriggers({
+  workspaceId,
   slug,
-  tableNames,
   value,
+  prompt,
+  sponsor,
   onChange,
+  onSponsor,
   disabled,
   showErrors,
   activating,
 }: {
+  workspaceId: string;
   slug: string;
-  tableNames: ReadonlyMap<string, string>;
   value: BuilderTrigger[];
+  prompt: string | undefined;
+  sponsor: boolean;
   onChange: (value: BuilderTrigger[]) => void;
+  onSponsor: (value: boolean) => void;
   disabled: boolean;
   showErrors: boolean;
   activating: boolean;
 }) {
+  const name = useSetupTriggerNames(workspaceId, value);
+  const unattended = value.filter(item => unattendedTrigger(item.trigger));
   return (
     <FormSection
-      title="Workflow triggers"
-      description="Activating creates one workflow per trigger that runs this agent. To add a trigger, ask in chat or add an agent step to a workflow."
+      title="Triggers"
+      description="Activating saves these triggers to this agent's workflow. To add a trigger, ask in chat."
       meta={value.length ? `${value.length} added` : undefined}
     >
       {!value.length && (
@@ -49,40 +57,37 @@ export function BuilderTriggers({
         </Button>
       </p>
       {value.map((item, index) => (
-        <section key={item.id} aria-label={`Trigger ${index + 1}`} className="grid min-w-0 gap-3 border-t pt-4">
-          <div className="flex items-start gap-3">
-            <TriggerIcon trigger={item.trigger} />
-            <div className="grid min-w-0 flex-1 gap-1 text-sm">
-              <h3 className="font-medium">{setupTriggerLabel(item.trigger, tableNames)}</h3>
-              <p className="whitespace-pre-wrap wrap-anywhere">{item.prompt}</p>
-            </div>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label={`Remove trigger ${index + 1}`}
-              disabled={disabled}
-              onClick={() => onChange(value.filter(other => other.id !== item.id))}
-            >
-              <Trash2 aria-hidden="true" />
-            </Button>
-          </div>
-          {unattendedTrigger(item.trigger) && (
-            <CheckboxField
-              id={`builder-trigger-${item.id}`}
-              label="I sponsor this trigger"
-              helper="Its runs use your current permissions and create private tasks."
-              disabled={disabled}
-              checked={item.sponsorConsent}
-              error={
-                showErrors && activating && !item.sponsorConsent ? 'Sponsor this trigger to activate it.' : undefined
-              }
-              onCheckedChange={checked =>
-                onChange(value.map(other => (other.id === item.id ? { ...other, sponsorConsent: checked } : other)))
-              }
-            />
-          )}
+        <section key={item.id} aria-label={`Trigger ${index + 1}`} className="flex items-center gap-3 border-t pt-4">
+          <TriggerIcon trigger={item.trigger} />
+          <h3 className="min-w-0 flex-1 text-sm font-medium wrap-anywhere">{name(item)}</h3>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label={`Remove ${name(item)}`}
+            disabled={disabled}
+            onClick={() => onChange(value.filter(other => other.id !== item.id))}
+          >
+            <Trash2 aria-hidden="true" />
+          </Button>
         </section>
       ))}
+      {!!value.length && prompt && (
+        <div className="grid gap-1 border-t pt-4 text-sm">
+          <p className="font-medium">Task for each run</p>
+          <p className="whitespace-pre-wrap wrap-anywhere">{prompt}</p>
+        </div>
+      )}
+      {unattended.length > 0 && (
+        <CheckboxField
+          id="builder-trigger-sponsor"
+          label={`I sponsor ${unattended.length === 1 ? name(unattended[0]!) : `these ${unattended.length} triggers`}`}
+          helper="Runs use your current permissions and create private tasks."
+          disabled={disabled}
+          checked={sponsor}
+          error={showErrors && activating && !sponsor ? 'Sponsor the triggers to activate them.' : undefined}
+          onCheckedChange={onSponsor}
+        />
+      )}
     </FormSection>
   );
 }

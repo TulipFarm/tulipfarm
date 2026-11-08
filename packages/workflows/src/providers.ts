@@ -13,7 +13,13 @@ import {
 import { changeGrant, listGrants } from './sharing.ts';
 import { credentialCipher, type IntegrationKeyring } from '@tulipfarm/integrations/credentials';
 import { qualified } from '@tulipfarm/workspace-storage/runtime';
-import { definitionSchema, idSchema, payloadSchema } from './contracts.ts';
+import {
+  definitionSchema,
+  idSchema,
+  identifiedProviderTriggerSchema,
+  payloadSchema,
+  type Trigger,
+} from './contracts.ts';
 import {
   providerIntegrationInputSchema,
   providerIntegrationSchema,
@@ -93,7 +99,7 @@ export function createWorkflowProviders(runtime: WorkflowRuntime, options: Provi
     return cipher.decrypt(workspaceId, row.id, saved.generation, saved.envelope);
   }
   async function check(workspaceId: string, user: string, value: unknown) {
-    const trigger = providerTriggerSchema.parse(value);
+    const trigger = z.union([providerTriggerSchema, identifiedProviderTriggerSchema]).parse(value);
     return transaction(workspaceId, async tx => {
       const actor = await workflowMember(tx, user);
       const row = await authorize(tx, trigger, actor.membershipId);
@@ -110,14 +116,14 @@ export function createWorkflowProviders(runtime: WorkflowRuntime, options: Provi
     tx: AuthorizationTransaction,
     workflowId: string,
     revision: string,
-    trigger: ProviderTrigger,
+    trigger: Extract<Trigger, { kind: 'provider' }>,
   ) {
     const sponsor = await requireSponsor(tx, workflowId, revision);
     await authorize(tx, trigger, sponsor.sponsor_membership_id);
     const cursor = providerCursorSchema.parse({ since: new Date().toISOString(), until: null, page: null });
     await tx.client.query(
-      `INSERT INTO ${table(tx, 'tf_provider_polls')} (workflow_id,revision,integration_id,cursor,fence) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (workflow_id) DO UPDATE SET revision=$2,integration_id=$3,cursor=$4,fence=$5,next_poll=clock_timestamp(),last_success=NULL,error=NULL`,
-      [workflowId, revision, trigger.integrationId, JSON.stringify(cursor), randomUUID()],
+      `INSERT INTO ${table(tx, 'tf_provider_polls')} (workflow_id,trigger_id,revision,integration_id,cursor,fence) VALUES ($1,$6,$2,$3,$4,$5) ON CONFLICT (workflow_id,trigger_id) DO UPDATE SET revision=$2,integration_id=$3,cursor=$4,fence=$5,next_poll=clock_timestamp(),last_success=NULL,error=NULL`,
+      [workflowId, revision, trigger.integrationId, JSON.stringify(cursor), randomUUID(), trigger.id],
     );
     // Waiting events belong to the previous activation; a backlog they formed would disable this one on its first poll.
     await tx.client.query(`DELETE FROM ${table(tx, 'tf_provider_events')} WHERE workflow_id=$1 AND NOT admitted`, [
@@ -272,7 +278,7 @@ export function createWorkflowProviders(runtime: WorkflowRuntime, options: Provi
           );
           if (!value.enabled)
             await tx.client.query(
-              `UPDATE ${table(tx, 'tf_workflow_runs')} r SET status='blocked',error='provider-disabled' FROM ${table(tx, 'tf_workflow_revisions')} d WHERE d.workflow_id=r.workflow_id AND d.id=r.revision AND d.definition->'trigger'->>'integrationId'=$1 AND r.status IN ('queued','running','waiting')`,
+              `UPDATE ${table(tx, 'tf_workflow_runs')} r SET status='blocked',error='provider-disabled' FROM ${table(tx, 'tf_workflow_revisions')} d WHERE d.workflow_id=r.workflow_id AND d.id=r.revision AND EXISTS (SELECT 1 FROM jsonb_array_elements(d.definition->'triggers') t WHERE t->>'kind'='provider' AND t->>'integrationId'=$1) AND r.status IN ('queued','running','waiting')`,
               [id],
             );
           await audit(tx, actor.membershipId, id, !value.enabled ? 'disable' : value.token ? 'rotate' : 'enable');
@@ -287,7 +293,7 @@ export function createWorkflowProviders(runtime: WorkflowRuntime, options: Provi
       await requireGrant(tx, actor.membershipId, workflowId, 'manage');
       const row = (
         await tx.client.query(
-          `SELECT p.last_success::text AS "lastSuccess",p.error,p.next_poll::text AS "nextPoll",(SELECT count(*)::integer FROM ${table(tx, 'tf_provider_events')} e WHERE e.workflow_id=p.workflow_id AND e.revision=p.revision AND NOT e.admitted) AS pending FROM ${table(tx, 'tf_provider_polls')} p WHERE workflow_id=$1`,
+          `SELECT min(p.last_success)::text AS "lastSuccess",(array_agg(p.error ORDER BY p.trigger_id) FILTER (WHERE p.error IS NOT NULL))[1] AS error,min(p.next_poll)::text AS "nextPoll",(SELECT count(*)::integer FROM ${table(tx, 'tf_provider_events')} e WHERE e.workflow_id=$1 AND e.revision=w.active_revision AND NOT e.admitted) AS pending FROM ${table(tx, 'tf_provider_polls')} p JOIN ${table(tx, 'tf_workflows')} w ON w.id=p.workflow_id AND w.active_revision=p.revision WHERE p.workflow_id=$1 GROUP BY w.active_revision`,
           [idSchema.parse(workflowId)],
         )
       ).rows[0];
@@ -298,15 +304,23 @@ export function createWorkflowProviders(runtime: WorkflowRuntime, options: Provi
     const claim = await transaction(workspaceId, async tx => {
       const rows = (
         await tx.client.query(
-          `SELECT p.workflow_id,p.revision,p.cursor,r.definition FROM ${table(tx, 'tf_provider_polls')} p JOIN ${table(tx, 'tf_workflows')} w ON w.id=p.workflow_id AND w.active_revision=p.revision JOIN ${table(tx, 'tf_workflow_revisions')} r ON r.workflow_id=w.id AND r.id=p.revision WHERE w.enabled AND p.next_poll<=clock_timestamp() ORDER BY p.next_poll,p.workflow_id LIMIT 1`,
+          `SELECT p.workflow_id,p.trigger_id,p.revision,p.cursor,r.definition FROM ${table(tx, 'tf_provider_polls')} p JOIN ${table(tx, 'tf_workflows')} w ON w.id=p.workflow_id AND w.active_revision=p.revision JOIN ${table(tx, 'tf_workflow_revisions')} r ON r.workflow_id=w.id AND r.id=p.revision JOIN ${table(tx, 'tf_workflow_triggers')} t ON t.workflow_id=p.workflow_id AND t.trigger_id=p.trigger_id WHERE w.enabled AND t.enabled AND p.next_poll<=clock_timestamp() ORDER BY p.next_poll,p.workflow_id,p.trigger_id LIMIT 1`,
         )
       ).rows;
       const row = rows[0];
       if (!row) return null;
       const workflowId = idSchema.parse(row.workflow_id),
         revision = idSchema.parse(row.revision),
-        trigger = definitionSchema.parse(row.definition).trigger;
-      if (trigger.kind !== 'provider') return null;
+        definition = definitionSchema.parse(row.definition),
+        trigger = definition.triggers.find(item => item.id === row.trigger_id);
+      if (trigger?.kind !== 'provider') return null;
+      // Triggers reading the same source see the same events; one event starts one run that lists all of them.
+      const order = definition.triggers
+        .filter(
+          item =>
+            item.kind === 'provider' && item.integrationId === trigger.integrationId && item.event === trigger.event,
+        )
+        .map(item => item.id);
       try {
         const sponsor = await requireSponsor(tx, workflowId);
         const source = await authorize(tx, trigger, sponsor.sponsor_membership_id);
@@ -323,13 +337,14 @@ export function createWorkflowProviders(runtime: WorkflowRuntime, options: Provi
         if (pending >= 1000) throw new ProviderFailure('source-invalid');
         const fence = randomUUID();
         await tx.client.query(
-          `UPDATE ${table(tx, 'tf_provider_polls')} SET fence=$2,next_poll=clock_timestamp()+interval '5 minutes' WHERE workflow_id=$1`,
-          [workflowId, fence],
+          `UPDATE ${table(tx, 'tf_provider_polls')} SET fence=$2,next_poll=clock_timestamp()+interval '5 minutes' WHERE workflow_id=$1 AND trigger_id=$3`,
+          [workflowId, fence, trigger.id],
         );
         return {
           workflowId,
           revision,
           trigger,
+          order,
           source,
           sponsor,
           fence,
@@ -342,8 +357,8 @@ export function createWorkflowProviders(runtime: WorkflowRuntime, options: Provi
           error instanceof AccessDenied ? 'workflow.disable.sponsor-access-lost' : 'workflow.disable.provider-backlog',
         );
         await tx.client.query(
-          `UPDATE ${table(tx, 'tf_provider_polls')} SET error='authority-or-capacity',next_poll=clock_timestamp()+interval '1 minute' WHERE workflow_id=$1`,
-          [workflowId],
+          `UPDATE ${table(tx, 'tf_provider_polls')} SET error='authority-or-capacity',next_poll=clock_timestamp()+interval '1 minute' WHERE workflow_id=$1 AND trigger_id=$2`,
+          [workflowId, trigger.id],
         );
         return null;
       }
@@ -360,8 +375,8 @@ export function createWorkflowProviders(runtime: WorkflowRuntime, options: Provi
         if (source.generation !== claim.source.generation) return;
         const live = (
           await tx.client.query(
-            `SELECT 1 FROM ${table(tx, 'tf_provider_polls')} p JOIN ${table(tx, 'tf_workflows')} w ON w.id=p.workflow_id WHERE p.workflow_id=$1 AND p.fence=$2 AND p.revision=$3 AND w.enabled AND w.active_revision=$3`,
-            [claim.workflowId, claim.fence, claim.revision],
+            `SELECT 1 FROM ${table(tx, 'tf_provider_polls')} p JOIN ${table(tx, 'tf_workflows')} w ON w.id=p.workflow_id WHERE p.workflow_id=$1 AND p.trigger_id=$4 AND p.fence=$2 AND p.revision=$3 AND w.enabled AND w.active_revision=$3`,
+            [claim.workflowId, claim.fence, claim.revision, claim.trigger.id],
           )
         ).rowCount;
         if (!live) return;
@@ -377,23 +392,54 @@ export function createWorkflowProviders(runtime: WorkflowRuntime, options: Provi
           );
         if (pending + page.events.filter(item => item.kind === claim.trigger.event).length > 1000)
           throw new ProviderFailure('source-invalid');
-        for (const item of page.events)
-          if (item.kind === claim.trigger.event)
+        for (const item of page.events) {
+          if (item.kind !== claim.trigger.event) continue;
+          const queued = (
             await tx.client.query(
-              `INSERT INTO ${table(tx, 'tf_provider_events')} (workflow_id,revision,event_key,payload) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING`,
-              [claim.workflowId, claim.revision, item.key, JSON.stringify(payloadSchema.parse(item.payload))],
+              `SELECT fired_trigger_ids AS fired,admitted FROM ${table(tx, 'tf_provider_events')} WHERE workflow_id=$1 AND revision=$2 AND event_key=$3 AND trigger_id=ANY($4::text[]) FOR UPDATE`,
+              [claim.workflowId, claim.revision, item.key, claim.order],
+            )
+          ).rows[0] as { fired: string[]; admitted: boolean } | undefined;
+          if (!queued)
+            await tx.client.query(
+              `INSERT INTO ${table(tx, 'tf_provider_events')} (workflow_id,revision,trigger_id,fired_trigger_ids,event_key,payload) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING`,
+              [
+                claim.workflowId,
+                claim.revision,
+                claim.trigger.id,
+                [claim.trigger.id],
+                item.key,
+                JSON.stringify(payloadSchema.parse(item.payload)),
+              ],
             );
+          else if (!queued.admitted && !queued.fired.includes(claim.trigger.id))
+            await tx.client.query(
+              `UPDATE ${table(tx, 'tf_provider_events')} SET fired_trigger_ids=$4 WHERE workflow_id=$1 AND revision=$2 AND event_key=$3 AND trigger_id=ANY($5::text[])`,
+              [
+                claim.workflowId,
+                claim.revision,
+                item.key,
+                claim.order.filter(id => id === claim.trigger.id || queued.fired.includes(id)),
+                claim.order,
+              ],
+            );
+        }
         await tx.client.query(
-          `UPDATE ${table(tx, 'tf_provider_polls')} SET cursor=$2,last_success=clock_timestamp(),error=NULL,next_poll=clock_timestamp()+$3*interval '1 second' WHERE workflow_id=$1`,
-          [claim.workflowId, JSON.stringify(page.cursor), page.cursor.page ? 60 : claim.trigger.minutes * 60],
+          `UPDATE ${table(tx, 'tf_provider_polls')} SET cursor=$2,last_success=clock_timestamp(),error=NULL,next_poll=clock_timestamp()+$3*interval '1 second' WHERE workflow_id=$1 AND trigger_id=$4`,
+          [
+            claim.workflowId,
+            JSON.stringify(page.cursor),
+            page.cursor.page ? 60 : claim.trigger.minutes * 60,
+            claim.trigger.id,
+          ],
         );
       });
     } catch (error) {
       const failure = error instanceof ProviderFailure ? error : new ProviderFailure('unavailable');
       await transaction(workspaceId, async tx => {
         await tx.client.query(
-          `UPDATE ${table(tx, 'tf_provider_polls')} SET error=$3,next_poll=clock_timestamp()+$4*interval '1 second' WHERE workflow_id=$1 AND fence=$2`,
-          [claim.workflowId, claim.fence, failure.code, failure.retrySeconds],
+          `UPDATE ${table(tx, 'tf_provider_polls')} SET error=$3,next_poll=clock_timestamp()+$4*interval '1 second' WHERE workflow_id=$1 AND trigger_id=$5 AND fence=$2`,
+          [claim.workflowId, claim.fence, failure.code, failure.retrySeconds, claim.trigger.id],
         );
       });
     }

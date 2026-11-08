@@ -39,24 +39,23 @@ test('restored setup preserves distinct scopes and needs explicit consent for un
   draft.access.scope = [{ assetId, permissions: ['table.row.read'] }];
   draft.access.limits = [{ assetId, permissions: ['table.row.read', 'table.row.update'] }];
   draft.triggers = [
-    {
-      id: triggerId,
-      trigger: { kind: 'cron', expression: '0 9 * * 1', timezone: 'UTC' },
-      prompt: 'Prepare the weekly update.',
-      sponsorConsent: false,
-    },
-    { id: randomUUID(), trigger: { kind: 'manual' }, prompt: 'Answer on demand.', sponsorConsent: false },
+    { id: triggerId, trigger: { kind: 'cron', expression: '0 9 * * 1', timezone: 'UTC' } },
+    { id: randomUUID(), label: 'On request', trigger: { kind: 'event', name: 'weekly_update' } },
   ];
+  draft.prompt = 'Prepare the weekly update.';
   const saved = parseBuilder(draft, member, false, agent).setup;
   assert.ok(saved);
   assert.notDeepEqual(saved.scope, saved.limits);
   assert.deepEqual(saved.triggers[0], {
     id: triggerId,
     trigger: { kind: 'cron', expression: '0 9 * * 1', timezone: 'UTC' },
-    prompt: 'Prepare the weekly update.',
-    limits: undefined,
   });
+  assert.equal(saved.prompt, 'Prepare the weekly update.');
   assert.equal(parseBuilder(draft, member, true, agent).problems[0]?.step, 'triggers');
-  draft.triggers[0]!.sponsorConsent = true;
+  draft.sponsorConsent = true;
   assert.equal(parseBuilder(draft, member, true, agent).setup?.triggers.length, 2);
+  draft.prompt = undefined;
+  assert.deepEqual(parseBuilder(draft, member, false, agent).problems, [
+    { step: 'triggers', message: 'Triggers need a prompt.' },
+  ]);
 });

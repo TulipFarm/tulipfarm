@@ -154,7 +154,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       const definition = {
         version: 1,
         name: 'Submitted forms',
-        trigger: { kind: 'provider', integrationId, event: 'created', minutes: 1 },
+        triggers: [{ id: 'provider', kind: 'provider', integrationId, event: 'created', minutes: 1 }],
         steps: [{ id: 'result', kind: 'transform', fields: { data: { kind: 'input', path: [] } } }],
       };
       assert.equal((await call(`/${id}`, 'PUT', { revision, expectedRevision: null, definition })).status, 200);

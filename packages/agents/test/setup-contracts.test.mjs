@@ -7,8 +7,9 @@ import {
   agentSetupSchema,
   publishAgentSetupSchema,
   saveAgentSetupDraftSchema,
+  sponsorConsented,
 } from '../src/setup-contracts.ts';
-import { agentTriggerLabel, previewAgentTriggerCadence } from '../src/agent-trigger-workflows.ts';
+import { agentLinkedDefinition, previewAgentTriggerCadence } from '../src/agent-trigger-workflows.ts';
 import { agentSetupDigest } from '../src/setup.ts';
 import { authoringProposalSchema, draftDecisionSchema } from '../src/draft-contracts.ts';
 import { frameworkCallSchema, discoverTools } from '../src/tools.ts';
@@ -38,6 +39,8 @@ const input = () => ({
   expectedSavedRevision: null,
   expectedPolicyVersion: 0,
   expectedActivationIds: [],
+  expectedWorkflowRevision: null,
+  expectedWorkflowGeneration: null,
   setup: setup(),
 });
 
@@ -55,12 +58,22 @@ test('setup surrounds the unchanged strict definition and enforces existing limi
       false,
     );
   assert.equal(agentSetupSchema.safeParse({ ...setup(), enrollment: [member, member] }).success, false);
-  const trigger = { id: randomUUID(), trigger: { kind: 'interval', minutes: 60 }, prompt: 'Check pending requests.' };
-  assert.equal(agentSetupSchema.safeParse({ ...setup(), triggers: [trigger, trigger] }).success, false);
+  const trigger = { id: randomUUID(), trigger: { kind: 'interval', minutes: 60 } };
+  const prompt = 'Check pending requests.';
+  assert.equal(agentSetupSchema.safeParse({ ...setup(), prompt, triggers: [trigger] }).success, true);
+  assert.equal(agentSetupSchema.safeParse({ ...setup(), prompt, triggers: [trigger, trigger] }).success, false);
   assert.equal(
-    agentSetupSchema.safeParse({ ...setup(), triggers: [{ ...trigger, prompt: 'x'.repeat(8001) }] }).success,
+    agentSetupSchema.safeParse({ ...setup(), triggers: [trigger] }).success,
+    false,
+    'triggers need a prompt',
+  );
+  assert.equal(
+    agentSetupSchema.safeParse({ ...setup(), prompt: 'x'.repeat(8001), triggers: [trigger] }).success,
     false,
   );
+  const many = count => Array.from({ length: count }, () => ({ ...trigger, id: randomUUID() }));
+  assert.equal(agentSetupSchema.safeParse({ ...setup(), prompt, triggers: many(20) }).success, true);
+  assert.equal(agentSetupSchema.safeParse({ ...setup(), prompt, triggers: many(21) }).success, false);
 });
 
 test('setups and consent stored before triggers moved to Workflows read as triggers', () => {
@@ -78,34 +91,72 @@ test('setups and consent stored before triggers moved to Workflows read as trigg
       },
     ],
   });
-  assert.deepEqual(parsed.triggers, [{ id, trigger, prompt: 'Prepare the weekly update.', limits }]);
+  assert.deepEqual(
+    { prompt: parsed.prompt, runLimits: parsed.runLimits, triggers: parsed.triggers },
+    { prompt: 'Prepare the weekly update.', runLimits: limits, triggers: [{ id, trigger }] },
+  );
   assert.equal('schedules' in parsed, false);
   assert.deepEqual(agentSetupConsentSchema.parse({ sponsorScheduleIds: [id], replaceChannels: [] }), {
+    sponsor: false,
     sponsorTriggerIds: [id],
     replaceChannels: [],
   });
 });
 
-test('trigger workflow names say when the agent runs', () => {
-  assert.equal(
-    agentTriggerLabel({ kind: 'cron', expression: '0 9 * * 1', timezone: 'Asia/Kolkata' }),
-    'Every Monday at 09:00 (Asia/Kolkata)',
-  );
-  assert.equal(
-    agentTriggerLabel({ kind: 'cron', expression: '30 7 * * 1-5', timezone: 'America/New_York' }),
-    'Every weekday at 07:30 (America/New York)',
-  );
-  assert.equal(agentTriggerLabel({ kind: 'cron', expression: '0 9 1 * *', timezone: 'UTC' }), 'Cron 0 9 1 * * (UTC)');
+test('activation needs sponsor consent only for unattended triggers', () => {
+  const cron = { id: randomUUID(), trigger: { kind: 'cron', expression: '0 9 * * 1', timezone: 'Asia/Kolkata' } };
+  const declined = { sponsor: false, replaceChannels: [] };
+  assert.equal(sponsorConsented(declined, []), true);
+  assert.equal(sponsorConsented(declined, [cron]), false);
+  assert.equal(sponsorConsented({ ...declined, sponsor: true }, [cron]), true);
+  assert.equal(sponsorConsented({ ...declined, sponsorTriggerIds: [cron.id] }, [cron]), true);
+});
+
+test('setups with a prompt on each trigger read as one prompt, without manual entries', () => {
+  const [hourly, manual] = [randomUUID(), randomUUID()];
+  const parsed = agentSetupSchema.parse({
+    ...setup(),
+    triggers: [
+      { id: manual, trigger: { kind: 'manual' }, prompt: 'Summarize the inbox.', limits },
+      { id: hourly, trigger: { kind: 'interval', minutes: 60 }, prompt: 'Summarize the inbox.', limits },
+    ],
+  });
   assert.deepEqual(
-    [60, 120, 1440, 2880, 90].map(minutes => agentTriggerLabel({ kind: 'interval', minutes })),
-    ['Every hour', 'Every 2 hours', 'Every day', 'Every 2 days', 'Every 90 minutes'],
+    { prompt: parsed.prompt, runLimits: parsed.runLimits, triggers: parsed.triggers },
+    {
+      prompt: 'Summarize the inbox.',
+      runLimits: limits,
+      triggers: [{ id: hourly, trigger: { kind: 'interval', minutes: 60 } }],
+    },
   );
-  assert.equal(agentTriggerLabel({ kind: 'manual' }), 'Run by hand');
-  assert.equal(
-    agentTriggerLabel({ kind: 'once', at: '2026-11-06T15:30:00Z', timezone: 'Asia/Kolkata' }),
-    'Once on 6 Nov 2026 at 21:00 (Asia/Kolkata)',
+});
+
+test('an agent setup becomes one Workflow whose triggers all run the setup prompt', () => {
+  const [hourly, inbound] = [randomUUID(), randomUUID()];
+  const definition = agentLinkedDefinition(
+    { id: member, name: 'Helper' },
+    {
+      prompt: 'Check in.',
+      runLimits: limits,
+      triggers: [
+        { id: hourly, trigger: { kind: 'interval', minutes: 60 } },
+        { id: inbound, label: 'Inbound', trigger: { kind: 'webhook' } },
+      ],
+    },
   );
-  assert.equal(agentTriggerLabel({ kind: 'once', at: '2026-11-06T15:30:00Z' }), 'Once on 6 Nov 2026 at 15:30 (UTC)');
+  assert.deepEqual(
+    definition.triggers.map(trigger => [trigger.id, trigger.kind, trigger.label]),
+    [
+      [`t_${hourly.replaceAll('-', '')}`, 'interval', undefined],
+      [`t_${inbound.replaceAll('-', '')}`, 'webhook', 'Inbound'],
+    ],
+  );
+  assert.equal(definition.name, 'Helper');
+  assert.deepEqual(
+    definition.steps.map(step => [step.kind, step.prompt, step.limits]),
+    [['agent', { kind: 'literal', value: 'Check in.' }, limits]],
+  );
+  assert.throws(() => agentLinkedDefinition({ id: member, name: 'Helper' }, { triggers: [] }));
 });
 
 test('the review digest freezes setup, versions and identity, not transport request identity', () => {
@@ -117,6 +168,7 @@ test('the review digest freezes setup, versions and identity, not transport requ
     { ...value, expectedVersion: 1 },
     { ...value, expectedPolicyVersion: 1 },
     { ...value, expectedActivationIds: [randomUUID()] },
+    { ...value, expectedWorkflowRevision: randomUUID(), expectedWorkflowGeneration: 1 },
     { ...value, setup: { ...value.setup, enrollment: [randomUUID()] } },
     {
       ...value,

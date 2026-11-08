@@ -45,7 +45,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       const definition = {
         version: 1,
         name: 'HTTP example',
-        trigger: { kind: 'webhook' },
+        triggers: [{ id: 'webhook', kind: 'webhook' }],
         steps: [{ id: 'copy', kind: 'transform', fields: { event: { kind: 'input', path: [] } } }],
       };
       assert.equal((await app.inject({ method: 'GET', url: base })).statusCode, 401);
@@ -59,7 +59,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
           definition: {
             version: 1,
             name: 'Bad output',
-            trigger: { kind: 'manual' },
+            triggers: [],
             steps: [
               { id: 'source', kind: 'transform', fields: { total: { kind: 'literal', value: 12 } } },
               {
@@ -205,7 +205,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       await service.save(w.id, w.userId, scheduled, {
         revision: onceRevision,
         expectedRevision: null,
-        definition: { ...definition, trigger: { kind: 'once', at: '2099-01-01T00:00:00Z' } },
+        definition: { ...definition, triggers: [{ id: 'once', kind: 'once', at: '2099-01-01T00:00:00Z' }] },
       });
       await service.sponsorship(w.id, w.userId, scheduled, {
         sponsorMembershipId: w.membershipId,
@@ -217,7 +217,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
         '2099-01-01T00:00:00.000Z',
       );
       await db.platform.query(
-        `UPDATE "${w.names.schema}".tf_workflows SET next_run_at=clock_timestamp()-interval '1 second' WHERE id=$1`,
+        `UPDATE "${w.names.schema}".tf_workflow_triggers SET next_run_at=clock_timestamp()-interval '1 second' WHERE workflow_id=$1`,
         [scheduled],
       );
       await Promise.all([service.due(w.id), service.due(w.id)]);
@@ -234,7 +234,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       await service.save(w.id, w.userId, eventId, {
         revision: eventRevision,
         expectedRevision: null,
-        definition: { ...definition, trigger: { kind: 'event', name: 'form_submitted' } },
+        definition: { ...definition, triggers: [{ id: 'event', kind: 'event', name: 'form_submitted' }] },
       });
       await service.activate(w.id, w.userId, eventId, {
         commandId: randomUUID(),

@@ -75,7 +75,14 @@ export function ValueControl({
     const step = earlier[index];
     return step ? `Output of step ${index + 1} (${stepTitle(step)})` : 'Output of a removed or later step';
   };
-  const source = value.kind === 'literal' ? 'literal' : value.kind === 'step' ? `step:${value.step}` : 'input';
+  const source =
+    value.kind === 'literal'
+      ? 'literal'
+      : value.kind === 'step'
+        ? `step:${value.step}`
+        : value.kind === 'trigger'
+          ? `trigger:${value.path[0] ?? 'id'}`
+          : 'input';
   return (
     <div className="flex flex-wrap gap-2">
       <Select
@@ -88,7 +95,9 @@ export function ValueControl({
               ? { kind: 'literal', value: '' }
               : next === 'input'
                 ? input()
-                : { kind: 'step', step: next.slice(5), path: [] },
+                : next === 'trigger:id' || next === 'trigger:kind'
+                  ? { kind: 'trigger', path: [next === 'trigger:id' ? 'id' : 'kind'] }
+                  : { kind: 'step', step: next.slice(5), path: [] },
           );
         }}
       >
@@ -98,12 +107,18 @@ export function ValueControl({
               ? 'Fixed value'
               : value.kind === 'input'
                 ? 'Workflow input'
-                : stepName(value.step)}
+                : value.kind === 'trigger'
+                  ? value.path[0] === 'kind'
+                    ? 'Trigger kind'
+                    : 'Trigger ID'
+                  : stepName(value.step)}
           </SelectValue>
         </SelectTrigger>
         <SelectContent>
           <SelectItem value="literal">Fixed value</SelectItem>
           <SelectItem value="input">Workflow input</SelectItem>
+          <SelectItem value="trigger:id">Trigger ID</SelectItem>
+          <SelectItem value="trigger:kind">Trigger kind</SelectItem>
           {earlier.map(step => (
             <SelectItem key={step.id} value={`step:${step.id}`}>
               {stepName(step.id)}
@@ -118,7 +133,7 @@ export function ValueControl({
           placeholder={typed ? 'Number, true, false, or text' : undefined}
           onText={text => onChange({ kind: 'literal', value: typed ? typedLiteral(text) : text })}
         />
-      ) : (
+      ) : value.kind === 'trigger' ? null : (
         <OutputPathControl key={source} id={id} value={value} earlier={earlier} onChange={onChange} />
       )}
     </div>

@@ -57,7 +57,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       definition: {
         version: 1,
         name: 'HTTP failure',
-        trigger: { kind: 'manual' },
+        triggers: [],
         steps: [{ id: 'request', kind: 'http', method: 'POST', url: 'https://example.test', headers: {} }],
       },
     });

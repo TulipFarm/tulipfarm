@@ -95,13 +95,13 @@ const workflow = {
   enabled: false,
   generation: 1,
   nextRunAt: null,
-  activeTrigger: null,
-  webhookConfigured: false,
+  activeTriggers: null,
+  triggers: [],
   capabilities: { read: true, invoke: true, manage: true },
   definition: {
     version: 1,
     name: 'Order review',
-    trigger: { kind: 'manual' },
+    triggers: [],
     steps: [
       prepare('prepare'),
       {

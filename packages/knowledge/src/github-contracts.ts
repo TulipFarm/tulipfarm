@@ -180,6 +180,8 @@ export type GitHubRepository = {
   fullName: string;
   visibility: 'public' | 'private' | 'internal';
   title: string;
+  /** The numeric ID of the account that owns the repository, which workflow GitHub triggers match on. */
+  ownerId?: string;
 };
 // `readable` is the reader's own current pull access, observed with their own account at `accessedAt`.
 export type GitHubRepositoryAccess = GitHubRepository & { accessedAt: string; readable: boolean };
@@ -321,6 +323,7 @@ const repositorySchema = z.strictObject({
   fullName: githubRepositoryNameSchema,
   visibility: z.enum(['public', 'private', 'internal']),
   title: z.string().max(512),
+  ownerId: githubRepositoryIdSchema.optional(),
 });
 export const githubKnowledgeDiscoverySchema = z.strictObject({
   binding: githubCorpusBindingSchema,

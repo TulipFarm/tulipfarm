@@ -86,8 +86,8 @@ try {
         enabled: false,
         generation: 1,
         nextRunAt: null,
-        activeTrigger: null,
-        webhookConfigured: false,
+        activeTriggers: null,
+        triggers: [],
         capabilities: { read: true, invoke: true, manage: true },
         definition: reviewDefinition('Expense review'),
       },
@@ -201,7 +201,7 @@ try {
         assert.equal(body.revision, workflows[0].revision);
         workflows[0].enabled = body.enabled;
         workflows[0].activeRevision = body.revision;
-        workflows[0].activeTrigger = workflows[0].definition.trigger;
+        workflows[0].activeTriggers = workflows[0].definition.triggers;
         workflows[0].generation++;
         json = workflows[0];
       } else if (path.includes('/workflows/') && path.endsWith('/runs')) {
@@ -339,7 +339,7 @@ try {
     {
       const viewer = page.getByRole('region', { name: 'Expense review workflow', exact: true });
       await viewer.getByRole('figure', { name: 'Read-only workflow diagram', exact: true }).waitFor();
-      await assertConfiguration(viewer, 0, workflows[0].definition.trigger);
+      await assertConfiguration(viewer, 0, workflows[0].definition.triggers);
       await assertConfiguration(viewer, 2, workflows[0].definition.steps[1]);
       await viewer.getByRole('button', { name: 'Edit in chat', exact: true }).waitFor();
       assert.equal(await page.getByLabel('Name', { exact: true }).count(), 0);
@@ -433,7 +433,7 @@ try {
       assert.equal(executionWrites[0].enabled, true);
       assert.deepEqual(executionWrites[0].limits, policy.limits);
       await page.getByRole('tab', { name: 'Triggers', exact: true }).click();
-      await page.getByRole('region', { name: 'Agent workflow triggers', exact: true }).waitFor();
+      await page.getByRole('region', { name: 'Agent triggers', exact: true }).waitFor();
       if (process.env.P1_SCREENSHOT_DIR)
         await page.screenshot({
           path: `${process.env.P1_SCREENSHOT_DIR}/p1-${mobile ? 'mobile' : 'desktop'}.png`,

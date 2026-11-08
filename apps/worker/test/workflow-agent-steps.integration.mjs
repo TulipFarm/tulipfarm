@@ -105,7 +105,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         definition: {
           version: 1,
           name: 'Read contact',
-          trigger: { kind: 'manual' },
+          triggers: [],
           steps: [
             {
               id: 'read',

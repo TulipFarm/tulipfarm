@@ -19,7 +19,7 @@ import { providerSetupFetch } from '../../workflows/test/provider-fixture.mjs';
 const weekdayReview = {
   version: 1,
   name: 'Review open tickets',
-  trigger: { kind: 'cron', expression: '0 9 * * 1-5', timezone: 'America/New_York' },
+  triggers: [{ id: 'cron', kind: 'cron', expression: '0 9 * * 1-5', timezone: 'America/New_York' }],
   steps: [{ id: 'review', kind: 'human', prompt: 'Review open tickets.', timeoutSeconds: 86400 }],
 };
 
@@ -127,14 +127,17 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     const definition = {
       version: 1,
       name: 'Updated orders',
-      trigger: { kind: 'provider', integrationId: sheets, event: 'updated', minutes: 1 },
+      triggers: [{ id: 'provider', kind: 'provider', integrationId: sheets, event: 'updated', minutes: 1 }],
       steps: [{ id: 'copy', kind: 'transform', fields: { order: { kind: 'input', path: [] } } }],
     };
     const invalid = (
       await turn([
         {
           tool: 'workflows.draft',
-          definition: JSON.stringify({ ...definition, trigger: { ...definition.trigger, integrationId: forms } }),
+          definition: JSON.stringify({
+            ...definition,
+            triggers: [{ ...definition.triggers[0], integrationId: forms }],
+          }),
           activate: true,
         },
       ])
@@ -244,7 +247,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     const sharedDefinition = {
       version: 1,
       name: 'Shared manual review',
-      trigger: { kind: 'manual' },
+      triggers: [],
       steps: [{ id: 'copy', kind: 'transform', fields: {} }],
     };
     await service.save(w.id, w.userId, sharedId, {
@@ -301,7 +304,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     const definition = {
       version: 1,
       name: 'Ask the support agent',
-      trigger: { kind: 'manual' },
+      triggers: [],
       steps: [
         {
           id: 'review',
@@ -655,7 +658,10 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     decision: 'save',
   });
   const [saved] = await workflows.list(w.id, user);
-  const third = await draft({ ...weekdayReview, trigger: { ...weekdayReview.trigger, expression: '0 8 * * 1-5' } });
+  const third = await draft({
+    ...weekdayReview,
+    triggers: [{ ...weekdayReview.triggers[0], expression: '0 8 * * 1-5' }],
+  });
   assert.equal(third.change, 'update', 'after a save, the next draft edits the saved workflow');
   assert.equal(third.workflowId, saved.id);
   assert.equal((await drafts.read(w.id, user, chatId, third.draftId)).proposal.input.expectedRevision, saved.revision);
@@ -737,6 +743,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     return { chatId, output };
   }
   const trigger = {
+    id: 'record',
     kind: 'record',
     tableId: tickets.id,
     field: {
@@ -751,15 +758,19 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
   const reminder = {
     version: 1,
     name: 'Ticket due reminder',
-    trigger,
+    triggers: [trigger],
     steps: [{ id: 'note', kind: 'transform', fields: { record: { kind: 'input', path: ['recordId'] } } }],
   };
   const draft = async (user, definition) =>
     (await chatTool(user, { tool: 'workflows.draft', definition: JSON.stringify(definition), activate: true })).output;
 
   assert.equal(
-    (await draft(w.userId, { ...reminder, trigger: { ...trigger, field: { ...trigger.field, fieldId: meeting.id } } }))
-      .error,
+    (
+      await draft(w.userId, {
+        ...reminder,
+        triggers: [{ ...trigger, field: { ...trigger.field, fieldId: meeting.id } }],
+      })
+    ).error,
     'record-field-unavailable',
     'a date trigger on a timestamp field is refused',
   );
@@ -767,7 +778,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     (
       await draft(w.userId, {
         ...reminder,
-        trigger: { ...trigger, field: { ...trigger.field, timezone: 'Mars/Olympus_Mons' } },
+        triggers: [{ ...trigger, field: { ...trigger.field, timezone: 'Mars/Olympus_Mons' } }],
       })
     ).error,
     'invalid-schedule',
@@ -776,10 +787,12 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     (
       await draft(w.userId, {
         ...reminder,
-        trigger: {
-          ...trigger,
-          filter: { ...trigger.filter, value: { kind: 'single-select', optionId: randomUUID() } },
-        },
+        triggers: [
+          {
+            ...trigger,
+            filter: { ...trigger.filter, value: { kind: 'single-select', optionId: randomUUID() } },
+          },
+        ],
       })
     ).error,
     'record-field-unavailable',
@@ -817,7 +830,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     { activation: 'activated', enabled: true },
   );
   const [saved] = await workflows.list(w.id, w.userId);
-  assert.deepEqual(saved.definition.trigger, trigger);
+  assert.deepEqual(saved.definition.triggers, [trigger]);
   assert.equal(saved.sponsorMembershipId, w.membershipId);
   assert.deepEqual(saved.upcomingRecords, [], 'record dates appear after the first sweep');
 
@@ -840,7 +853,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
   const review = {
     version: 1,
     name: 'Weekly review',
-    trigger: { kind: 'cron', expression: '0 9 * * 1', timezone: 'America/New_York' },
+    triggers: [{ id: 'cron', kind: 'cron', expression: '0 9 * * 1', timezone: 'America/New_York' }],
     steps: reminder.steps,
   };
   const shared = randomUUID(),
@@ -871,13 +884,15 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     { activation: 'audience-required', enabled: false },
     'a history reader without table access stops activation but keeps the saved revision',
   );
-  assert.deepEqual((await workflows.list(w.id, w.userId)).find(item => item.id === shared).definition.trigger, trigger);
+  assert.deepEqual((await workflows.list(w.id, w.userId)).find(item => item.id === shared).definition.triggers, [
+    trigger,
+  ]);
 
   const title = tickets.fields[0];
   const logTicket = {
     version: 1,
     name: 'Log ticket',
-    trigger: { kind: 'manual' },
+    triggers: [],
     steps: [
       {
         id: 'add',
@@ -916,6 +931,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
   );
 
   const rowTrigger = {
+    id: 'row',
     kind: 'row',
     tableId: tickets.id,
     event: 'updated',
@@ -925,13 +941,13 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
   const stageChange = {
     version: 1,
     name: 'Stage change note',
-    trigger: rowTrigger,
+    triggers: [rowTrigger],
     steps: [
       { id: 'note', kind: 'transform', fields: { stage: { kind: 'input', path: ['values', stage.id, 'value'] } } },
     ],
   };
   assert.equal(
-    (await draft(w.userId, { ...stageChange, trigger: { ...rowTrigger, fieldIds: [randomUUID()] } })).error,
+    (await draft(w.userId, { ...stageChange, triggers: [{ ...rowTrigger, fieldIds: [randomUUID()] }] })).error,
     'record-field-unavailable',
     'a row trigger watching a field the table lacks is refused before review',
   );

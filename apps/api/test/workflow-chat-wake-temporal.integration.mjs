@@ -42,7 +42,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
     const definition = {
       version: 1,
       name: 'Long pause',
-      trigger: { kind: 'manual' },
+      triggers: [],
       steps: [{ id: 'pause', kind: 'delay', seconds: 300 * 86400 }],
     };
     const saved = await service.save(w.id, w.userId, id, { revision, expectedRevision: null, definition });

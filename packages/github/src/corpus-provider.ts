@@ -55,6 +55,7 @@ const repositorySchema = z.object({
   default_branch: z.string().min(1).max(255).optional(),
   description: z.string().max(4096).nullable().optional(),
   permissions: z.object({ pull: z.boolean() }).partial().optional(),
+  owner: z.object({ id: z.number().int().positive() }).optional(),
 });
 type RepositoryBody = z.infer<typeof repositorySchema>;
 const userSchema = z
@@ -324,6 +325,7 @@ function repository(body: RepositoryBody): GitHubRepository {
     fullName: body.full_name,
     visibility: body.visibility ?? (body.private ? 'private' : 'public'),
     title: (body.description ? `${body.full_name} — ${oneLine(body.description)}` : body.full_name).slice(0, 512),
+    ...(body.owner ? { ownerId: String(body.owner.id) } : {}),
   };
 }
 type Phase = 'docs' | 'code' | 'issues' | 'discussions' | 'commits';

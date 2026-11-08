@@ -39,7 +39,7 @@ test(
         definition: {
           version: 1,
           name: 'Slack wake',
-          trigger: { kind: 'manual' },
+          triggers: [],
           steps: [
             {
               id: 'send',

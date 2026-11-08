@@ -113,7 +113,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     const addLead = {
       version: 1,
       name: 'Add lead',
-      trigger: { kind: 'manual' },
+      triggers: [],
       steps: [
         {
           id: 'add',
@@ -233,7 +233,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     const rename = await save(w, {
       version: 1,
       name: 'Rename lead',
-      trigger: { kind: 'manual' },
+      triggers: [],
       steps: [
         {
           id: 'rename',
@@ -271,7 +271,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     const logOnce = await save(w, {
       version: 1,
       name: 'Log once',
-      trigger: { kind: 'manual' },
+      triggers: [],
       steps: [
         {
           id: 'add',
@@ -335,9 +335,10 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       AccessDenied,
       'a chat draft gets the same check before review',
     );
-    assert.equal(
-      await service.checkTableSteps(w.id, w.userId, { ...addLead, trigger: { kind: 'webhook' } }),
-      undefined,
+    assert.deepEqual(
+      await service.checkTableSteps(w.id, w.userId, { ...addLead, triggers: [{ id: 'webhook', kind: 'webhook' }] }),
+      await service.checkTableSteps(w.id, w.userId, addLead),
+      'an unattended trigger passes for a member who can write the table',
     );
 
     await service.share(w.id, w.userId, lead.id, {
@@ -357,7 +358,11 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     );
     assert.equal(await rowCount(), readOnly);
 
-    const intake = await save(w, { ...addLead, name: 'Webhook intake', trigger: { kind: 'webhook' } });
+    const intake = await save(w, {
+      ...addLead,
+      name: 'Webhook intake',
+      triggers: [{ id: 'webhook', kind: 'webhook' }],
+    });
     await service.share(w.id, w.userId, intake.id, {
       principal: { kind: 'person', id: bob.membershipId },
       permissions: ['read', 'invoke'],
@@ -371,13 +376,12 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       'a sponsor needs every write permission the steps use',
     );
     await assert.rejects(
-      service.checkTableSteps(w.id, bob.userId, { ...addLead, trigger: { kind: 'webhook' } }),
+      service.checkTableSteps(w.id, bob.userId, { ...addLead, triggers: [{ id: 'webhook', kind: 'webhook' }] }),
       { message: 'table-step-access-denied' },
       'a chat draft of an unattended workflow needs the drafter to hold the write permissions',
     );
-    assert.equal(
-      await service.checkTableSteps(w.id, bob.userId, addLead),
-      undefined,
+    await assert.doesNotReject(
+      service.checkTableSteps(w.id, bob.userId, addLead),
       'a manual draft only needs read at review time',
     );
     await db.platform.query(`DELETE FROM ${table('tf_grants')} WHERE team_id=$1`, [team]);
@@ -398,15 +402,18 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     const reminder = await save(w, {
       version: 1,
       name: 'Mark overdue',
-      trigger: {
-        kind: 'record',
-        tableId: leads.id,
-        field: {
-          kind: 'timestamp',
-          fieldId: fields.due.id,
-          offset: { direction: 'after', amount: 0, unit: 'minutes' },
+      triggers: [
+        {
+          id: 'record',
+          kind: 'record',
+          tableId: leads.id,
+          field: {
+            kind: 'timestamp',
+            fieldId: fields.due.id,
+            offset: { direction: 'after', amount: 0, unit: 'minutes' },
+          },
         },
-      },
+      ],
       steps: [
         {
           id: 'mark',
@@ -433,14 +440,16 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         [fields.due.id]: { kind: 'timestamp', value: dueSoon },
       },
     });
-    await db.databaseAdmin.query(`UPDATE ${table('tf_workflows')} SET next_run_at=clock_timestamp() WHERE id=$1`, [
-      reminder.id,
-    ]);
+    await db.databaseAdmin.query(
+      `UPDATE ${table('tf_workflow_triggers')} SET next_run_at=clock_timestamp() WHERE workflow_id=$1`,
+      [reminder.id],
+    );
     await service.due(w.id);
     await new Promise(resolve => setTimeout(resolve, 2000));
-    await db.databaseAdmin.query(`UPDATE ${table('tf_workflows')} SET next_run_at=clock_timestamp() WHERE id=$1`, [
-      reminder.id,
-    ]);
+    await db.databaseAdmin.query(
+      `UPDATE ${table('tf_workflow_triggers')} SET next_run_at=clock_timestamp() WHERE workflow_id=$1`,
+      [reminder.id],
+    );
     await service.due(w.id);
     const [fired] = await service.history(w.id, w.userId, reminder.id).then(page => page.runs);
     assert.deepEqual(fired.input.token, invoice.token, 'record runs carry the row token');

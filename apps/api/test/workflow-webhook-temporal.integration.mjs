@@ -44,7 +44,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
         definition: {
           version: 1,
           name: 'Private webhook workflow',
-          trigger: { kind: 'webhook' },
+          triggers: [{ id: 'webhook', kind: 'webhook' }],
           steps: [
             { id: 'copy', kind: 'transform', fields: { order: { kind: 'input', path: ['order'] } } },
             { id: 'pause', kind: 'delay', seconds: 1 },

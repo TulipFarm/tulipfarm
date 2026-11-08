@@ -8,51 +8,50 @@ import type {
 
 type Workflow = z.infer<typeof workflowSchema>;
 export type WebhookMode = z.infer<typeof webhookModeSchema>;
-type TriggerKind = Workflow['definition']['trigger']['kind'];
+type RawWebhook = z.infer<typeof rawWebhookSchema>;
+type WebhookTrigger = Extract<Workflow['definition']['triggers'][number], { kind: 'webhook' }>;
 
-const triggerName: Record<TriggerKind, string> = {
-  manual: 'manual',
-  webhook: 'webhook',
-  event: 'event',
-  once: 'one-time',
-  interval: 'repeating',
-  cron: 'schedule',
-  provider: 'connected service',
-  github: 'GitHub event',
-  record: 'record date',
-  row: 'row change',
-};
+/** Webhook triggers in the saved or active revision, saved order first, each listed once by ID. */
+export function webhookTriggers(workflow: Workflow) {
+  const saved = workflow.definition.triggers.filter((trigger): trigger is WebhookTrigger => trigger.kind === 'webhook');
+  const active = (workflow.activeTriggers ?? []).filter(
+    (trigger): trigger is WebhookTrigger => trigger.kind === 'webhook' && !saved.some(item => item.id === trigger.id),
+  );
+  return [...saved, ...active];
+}
 
-export function webhookStatus(workflow: Workflow) {
-  const saved = workflow.definition.trigger.kind;
-  const active = workflow.activeTrigger?.kind ?? null;
-  const receiving = workflow.enabled && active === 'webhook' && workflow.webhookConfigured;
+/** The state of one webhook trigger's endpoint. */
+export function webhookStatus(workflow: Workflow, triggerId: string) {
+  const state = workflow.triggers.find(item => item.id === triggerId && item.kind === 'webhook');
+  const inSaved = workflow.definition.triggers.some(item => item.id === triggerId && item.kind === 'webhook');
+  const configured = !!state?.webhook?.configured;
+  const receiving = workflow.enabled && !!state?.enabled && configured;
   const endpoint = receiving
     ? 'Receiving requests. Calls that use the current key start the active revision.'
-    : workflow.enabled && active === 'webhook'
-      ? 'Not receiving requests. Create a key to start accepting calls.'
-      : active === null
+    : !workflow.enabled
+      ? 'Not receiving requests. The workflow is turned off.'
+      : !state
         ? 'Not receiving requests. Activate the saved revision to accept calls.'
-        : !workflow.enabled
-          ? 'Not receiving requests. The workflow is disabled. Activate the saved revision to accept calls.'
-          : `Not receiving requests. The active revision uses a ${triggerName[active]} trigger. Activate the saved revision to accept calls.`;
+        : !state.enabled
+          ? 'Not receiving requests. This trigger is switched off.'
+          : 'Not receiving requests. Create a key to start accepting calls.';
   return {
-    visible: saved === 'webhook' || active === 'webhook',
-    configured: workflow.webhookConfigured,
+    active: !!state,
+    configured,
     receiving,
     endpoint,
+    mode: state?.webhook?.mode ?? null,
+    rotation: state?.webhook?.rotation ?? null,
+    previous: state?.webhook?.previous ?? null,
     change:
-      active === 'webhook' && saved !== 'webhook'
-        ? `The saved revision uses a ${triggerName[saved]} trigger. Activating it stops this endpoint and deletes the webhook key.`
+      state && !inSaved
+        ? 'The saved revision removes this trigger. Activating it stops this endpoint and deletes its key.'
         : null,
   };
 }
 
-type RawWebhook = z.infer<typeof rawWebhookSchema>;
-
-export function webhookPayload(workflow: Workflow): RawWebhook | undefined {
-  const trigger = workflow.activeTrigger?.kind === 'webhook' ? workflow.activeTrigger : workflow.definition.trigger;
-  return trigger.kind === 'webhook' ? trigger.payload : undefined;
+export function webhookPayload(workflow: Workflow, triggerId: string): RawWebhook | undefined {
+  return webhookTriggers(workflow).find(trigger => trigger.id === triggerId)?.payload;
 }
 
 const credential: Record<WebhookMode, string> = {

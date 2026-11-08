@@ -53,7 +53,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
         definition: {
           version: 1,
           name: 'Big order check',
-          trigger: { kind: 'manual' },
+          triggers: [],
           steps: [
             {
               id: 'check',

@@ -79,7 +79,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
         definition: {
           version: 1,
           name: 'Add lead',
-          trigger: { kind: 'manual' },
+          triggers: [],
           steps: [
             {
               id: 'add',

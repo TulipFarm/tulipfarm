@@ -16,6 +16,7 @@ import { useWorkflowDefinition, useWorkflowRun } from './queries';
 import { NamedWorkflowViewer } from './named-viewer';
 import { workflowRunStates } from './run-projection';
 import { runErrorNote, runNote, stepNote } from './run-notes';
+import { startedByPerson } from './triggers';
 
 export type WorkflowReference =
   | { kind: 'draft'; chatId: string; draftId: string }
@@ -87,7 +88,7 @@ export function WorkflowDefinition({
             key: `definition:${workflowId}:${detail.revision}`,
             definition: detail.definition,
             labels: {
-              actor: ['manual', 'event'].includes(detail.definition.trigger.kind)
+              actor: startedByPerson(detail.definition.triggers)
                 ? 'the person who starts it'
                 : (detail.actor?.name ?? 'an unassigned person'),
             },

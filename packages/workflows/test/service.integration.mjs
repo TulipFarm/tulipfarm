@@ -33,7 +33,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       const definition = {
         version: 1,
         name: 'Review order',
-        trigger: { kind: 'manual' },
+        triggers: [],
         steps: [
           { id: 'copy', kind: 'transform', fields: { amount: { kind: 'input', path: ['amount'] } } },
           { id: 'review', kind: 'human', prompt: 'Approve this order?', timeoutSeconds: 60 },
@@ -175,7 +175,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
                   return typeof value === 'function' ? value.bind(client) : value;
                 }
                 return async (sql, params) => {
-                  if (typeof sql === 'string' && /w\.next_run_at\s*<=/.test(sql)) {
+                  if (typeof sql === 'string' && /t\.next_run_at\s*<=/.test(sql)) {
                     // An empty table always plans as a sequential scan; disabling it shows whether the index can serve this query.
                     await client.query('SET LOCAL enable_seqscan = off');
                     plans.push((await client.query(`EXPLAIN (FORMAT JSON) ${sql}`, params)).rows[0]['QUERY PLAN']);
@@ -190,7 +190,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     await createWorkflows(explaining).due(w.id);
     const conditions = [];
     const visit = node => {
-      if (node['Index Name'] === 'tf_workflow_schedule_due') conditions.push(node['Index Cond']);
+      if (node['Index Name'] === 'tf_workflow_triggers_due') conditions.push(node['Index Cond']);
       (node.Plans ?? []).forEach(visit);
     };
     plans.forEach(plan => visit(plan[0].Plan));
@@ -266,7 +266,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         await service.save(w.id, w.userId, id, {
           revision,
           expectedRevision: null,
-          definition: { version: 1, name: 'Sweep', trigger, steps },
+          definition: { version: 1, name: 'Sweep', triggers: [{ id: trigger.kind, ...trigger }], steps },
         });
         await service.sponsorship(w.id, w.userId, id, {
           sponsorMembershipId: w.membershipId,
@@ -281,23 +281,23 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         healthyProvider = await launch({ kind: 'provider', integrationId, event: 'created', minutes: 1 });
       const event = ({ id, revision }, key, age) =>
         db.platform.query(
-          `INSERT INTO ${table('tf_provider_events')} (workflow_id,revision,event_key,payload,created_at) VALUES ($1,$2,$3,$4,clock_timestamp()-$5*interval '1 second')`,
+          `INSERT INTO ${table('tf_provider_events')} (workflow_id,revision,trigger_id,fired_trigger_ids,event_key,payload,created_at) VALUES ($1,$2,'provider','{provider}',$3,$4,clock_timestamp()-$5*interval '1 second')`,
           [id, revision, key, JSON.stringify({ values: [key] }), age],
         );
       for (let n = 0; n < 20; n++) await event(brokenProvider, `row-${n}`, 100 - n);
       await event(healthyProvider, 'row-0', 1);
       await db.platform.query(
-        `UPDATE ${table('tf_workflows')} SET next_run_at=date_trunc('second',clock_timestamp())-interval '2 minutes' WHERE id=$1`,
+        `UPDATE ${table('tf_workflow_triggers')} SET next_run_at=date_trunc('second',clock_timestamp())-interval '2 minutes' WHERE workflow_id=$1`,
         [brokenSchedule.id],
       );
       await db.platform.query(
-        `UPDATE ${table('tf_workflows')} SET next_run_at=clock_timestamp()-interval '1 minute' WHERE id=$1`,
+        `UPDATE ${table('tf_workflow_triggers')} SET next_run_at=clock_timestamp()-interval '1 minute' WHERE workflow_id=$1`,
         [healthySchedule.id],
       );
       const nextRun = async ({ id }) =>
         (
           await db.platform.query(
-            `SELECT to_char(next_run_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS at FROM ${table('tf_workflows')} WHERE id=$1`,
+            `SELECT to_char(next_run_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS at FROM ${table('tf_workflow_triggers')} WHERE workflow_id=$1`,
             [id],
           )
         ).rows[0].at;

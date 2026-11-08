@@ -67,6 +67,7 @@ import { slackActionsFromEnvironment } from '@tulipfarm/agents/slack-environment
 import { definitionSharingCandidatesSchema } from '@tulipfarm/agents/saved-contracts';
 import { createAgentSetup, type AgentSetupOptions } from '@tulipfarm/agents/setup';
 import {
+  agentLinkedWorkflowSchema,
   agentSetupDraftSchema,
   agentSetupReceiptSchema,
   publishAgentSetupSchema,
@@ -202,6 +203,14 @@ export function registerAgents(
       request => {
         const p = setupCommand.parse(request.params);
         return setup.advance(p.workspaceId, user(request), p.commandId);
+      },
+    );
+    routes.get(
+      `${base}/:agentId/linked-workflow`,
+      { schema: schema('getAgentLinkedWorkflowV1', agent, agentLinkedWorkflowSchema) },
+      request => {
+        const p = agent.parse(request.params);
+        return setup.linkedWorkflow(p.workspaceId, user(request), p.agentId);
       },
     );
     routes.get(

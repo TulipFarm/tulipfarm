@@ -69,6 +69,7 @@ async function environment(t) {
     taskLimits: limits,
     slackSender: 'user',
     slackChannels: [],
+    ...(triggers.length ? { prompt: 'Check in.' } : {}),
     triggers,
   });
   /** One chat turn as the worker runs it: inventory sources, then each tool's sources feed the next call. */
@@ -107,7 +108,7 @@ async function environment(t) {
       commandId: randomUUID(),
       digest: draft.digest,
       decision: 'activate',
-      consent: { sponsorTriggerIds: proposal.input.setup.triggers.map(item => item.id), replaceChannels: [] },
+      consent: { sponsor: true, replaceChannels: [] },
     });
     assert.equal((await writer.prepare(w.id, outcome.receipt.commandId)).status, 'accepted');
     const active = await setup.advance(w.id, admin.userId, outcome.setupReceipt.commandId);
@@ -135,6 +136,8 @@ async function environment(t) {
       expectedSavedRevision: null,
       expectedPolicyVersion: 0,
       expectedActivationIds: [],
+      expectedWorkflowRevision: null,
+      expectedWorkflowGeneration: null,
       setup: {
         definition: { name, instructions: 'Answer briefly.', tools: [] },
         owningTeamId: null,
@@ -146,7 +149,7 @@ async function environment(t) {
       version: draft.version,
       digest: draft.digest,
       decision: 'activate',
-      consent: { sponsorTriggerIds: [], replaceChannels: [] },
+      consent: { sponsor: false, replaceChannels: [] },
     });
     const definition = await setup.definitionCommand(w.id, admin.userId, command.commandId);
     assert.equal((await writer.prepare(w.id, definition.commandId)).status, 'accepted');
@@ -159,7 +162,6 @@ async function environment(t) {
 const cron = () => ({
   id: randomUUID(),
   trigger: { kind: 'cron', expression: '0 9 * * 1-5', timezone: 'Asia/Kolkata' },
-  prompt: 'Check in.',
 });
 
 test('an agent created through chat setup runs a manual task', async t => {
@@ -172,6 +174,8 @@ test('an agent created through chat setup runs a manual task', async t => {
     setup: f.setupInput(triggers),
     expectedPolicyVersion: 0,
     expectedActivationIds: [],
+    expectedWorkflowRevision: null,
+    expectedWorkflowGeneration: null,
   }));
   const draft = await f.chatDraft(
     [{ tool: 'skills.read', skillId: 'agent-authoring' }, { tool: 'agents.context' }],
@@ -207,6 +211,8 @@ test('a builder agent edited through chat to add a trigger keeps running tasks',
         setup: f.setupInput(edited),
         expectedPolicyVersion: state.policy_version,
         expectedActivationIds: activations,
+        expectedWorkflowRevision: null,
+        expectedWorkflowGeneration: null,
       },
     };
   };

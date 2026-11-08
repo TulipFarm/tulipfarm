@@ -1,4 +1,9 @@
-import { agentSetupSchema, unattendedTrigger, type AgentSetupDraft } from '@tulipfarm/agents/setup-contracts';
+import {
+  agentSetupSchema,
+  unattendedTrigger,
+  type AgentSetup,
+  type AgentSetupDraft,
+} from '@tulipfarm/agents/setup-contracts';
 import type { AgentAuthoringSource } from '@tulipfarm/agents/authoring-assistance-contracts';
 import { defaultTaskLimits, limitDraft, parseLimits } from '../tasks/limits.ts';
 import type { AgentInput } from './api';
@@ -13,6 +18,10 @@ export type BuilderDraft = {
   access: BuilderAccessDraft;
   channels: BuilderChannel[];
   triggers: BuilderTrigger[];
+  /** What each trigger asks the agent; set in chat, kept as is here. */
+  prompt: string | undefined;
+  runLimits: AgentSetup['runLimits'];
+  sponsorConsent: boolean;
   source: AgentAuthoringSource;
 };
 export type BuilderInitial = Pick<
@@ -23,6 +32,8 @@ export type BuilderInitial = Pick<
   | 'expectedSavedRevision'
   | 'expectedPolicyVersion'
   | 'expectedActivationIds'
+  | 'expectedWorkflowRevision'
+  | 'expectedWorkflowGeneration'
   | 'commandId'
 >;
 
@@ -54,7 +65,10 @@ export function builderDraft(initial?: BuilderInitial): BuilderDraft {
       channelResponses: null,
       replaceConsent: false,
     })),
-    triggers: (setup?.triggers ?? []).map(trigger => ({ ...trigger, sponsorConsent: false })),
+    triggers: setup?.triggers ?? [],
+    prompt: setup?.prompt,
+    runLimits: setup?.runLimits,
+    sponsorConsent: false,
   };
 }
 export function builderDefinition(draft: BuilderDraft): BuilderDraft['definition'] {
@@ -81,8 +95,8 @@ export function parseBuilder(draft: BuilderDraft, membershipId: string, activati
   const limits = parseLimits(draft.access.taskLimits, { kind: 'start' });
   if (!limits.ok) problems.push({ step: 'access', message: 'Check the execution limits.' });
   if (activating) {
-    if (draft.triggers.some(trigger => unattendedTrigger(trigger.trigger) && !trigger.sponsorConsent))
-      problems.push({ step: 'triggers', message: 'Sponsor each trigger that runs on its own before activation.' });
+    if (draft.triggers.some(trigger => unattendedTrigger(trigger.trigger)) && !draft.sponsorConsent)
+      problems.push({ step: 'triggers', message: 'Sponsor the triggers before activation.' });
     if (draft.channels.some(channel => !channel.detach && !channel.channelResponses))
       problems.push({
         step: 'triggers',
@@ -110,7 +124,9 @@ export function parseBuilder(draft: BuilderDraft, membershipId: string, activati
       replaceAgentId,
       ...(detach === undefined ? {} : { detach }),
     })),
-    triggers: draft.triggers.map(({ id, trigger, prompt, limits }) => ({ id, trigger, prompt, limits })),
+    triggers: draft.triggers,
+    ...(draft.prompt === undefined ? {} : { prompt: draft.prompt }),
+    ...(draft.runLimits === undefined ? {} : { runLimits: draft.runLimits }),
   });
   if (!parsed.success && !problems.length)
     for (const issue of parsed.error.issues) {
@@ -123,7 +139,7 @@ export function parseBuilder(draft: BuilderDraft, membershipId: string, activati
               : issue.path[1] === 'tools' || issue.path[1] === 'mcp'
                 ? 'access'
                 : 'basics'
-            : field === 'triggers' || field === 'slackChannels'
+            : field === 'triggers' || field === 'slackChannels' || field === 'prompt' || field === 'runLimits'
               ? 'triggers'
               : 'access',
         message: issue.message,

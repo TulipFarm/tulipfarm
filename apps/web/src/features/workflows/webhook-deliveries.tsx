@@ -14,6 +14,7 @@ type Workflow = z.infer<typeof workflowSchema>;
 export function WebhookDeliveries({
   workspaceId,
   workflow,
+  triggerId,
   test,
   testRun,
   onTest,
@@ -22,13 +23,14 @@ export function WebhookDeliveries({
 }: {
   workspaceId: string;
   workflow: Workflow;
+  triggerId: string;
   test: ButtonState;
   testRun: string | null;
   onTest: () => void;
   onOpenRun: (runId: string) => void;
   onDenied: () => void;
 }) {
-  const read = useWebhookDeliveries(workspaceId, workflow.id);
+  const read = useWebhookDeliveries(workspaceId, workflow.id, triggerId);
   const state = read.state;
   useEffect(() => {
     if (state.kind === 'unavailable') onDenied();
@@ -44,8 +46,8 @@ export function WebhookDeliveries({
     }
   };
   return (
-    <section aria-labelledby="webhook-deliveries" className="space-y-3">
-      <h3 id="webhook-deliveries" className="font-medium">
+    <section aria-labelledby={`webhook-deliveries-${triggerId}`} className="space-y-3">
+      <h3 id={`webhook-deliveries-${triggerId}`} className="font-medium">
         Recent deliveries
       </h3>
       <p className="text-sm text-muted-foreground">

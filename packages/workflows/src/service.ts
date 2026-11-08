@@ -20,16 +20,17 @@ import {
   auditWorkflow,
   disableAutomatically,
   disabledReasonColumn,
+  workflowCompatibility,
 } from './authorization.ts';
 import { changeGrant, listGrants, sharingCandidates } from './sharing.ts';
 import {
   afterCommit,
   qualified,
   type createWorkspaceRuntime,
-  commonCompatibility,
   StorageUnavailableError,
 } from '@tulipfarm/workspace-storage/runtime';
 import { log, trackEvent } from '@tulipfarm/observability';
+import type { Generation } from '@tulipfarm/tables/store';
 import {
   isSecretHeader,
   activationSchema,
@@ -64,6 +65,14 @@ import {
   statusSchema,
   transform,
   triggerSchema,
+  triggerIdSchema,
+  triggerSwitchSchema,
+  triggerSummary,
+  isScheduleTrigger,
+  isUnattendedTrigger,
+  runTriggerKey,
+  manualRunTrigger,
+  webhookModeSchema,
   unfinishedStatuses,
   waitUntilInstant,
   workflowSchema,
@@ -84,6 +93,7 @@ import {
 import { calendarOccurrences, missedOccurrences, nextOccurrence } from './schedule.ts';
 import { calendarRangeSchema, calendarFollowSchema, workflowCalendarSchema } from './calendar-contracts.ts';
 import { createWorkflowProviders, type ProviderOptions } from './providers.ts';
+import { providerCursorSchema } from './provider-contracts.ts';
 import { administrativeCommand, WorkflowConflict, WorkflowLimitReached, workflowLimits } from './commands.ts';
 import { canonical } from '@tulipfarm/workflow-snippets/canonical';
 import { credentialCipher } from '@tulipfarm/integrations/credentials';
@@ -172,6 +182,15 @@ async function databaseNow(tx: AuthorizationTransaction) {
 // A workflow that failed in a sweep sits out the next ones, so a lasting failure neither repeats every minute nor holds
 // sweep places ahead of due work. Its next_run_at stays put, so the retry keeps the original due time and lateness window.
 const failedSweepRetry = '5 minutes';
+/** The trigger ID the original single-trigger webhook URL resolves to. */
+const legacyWebhookTriggerId = 'webhook';
+/** The trigger a run is attributed to, and every trigger whose occurrence or event it carries, in definition order. */
+type Fired = { triggerId: string | null; firedTriggerIds: string[] };
+const manualFired: Fired = { triggerId: null, firedTriggerIds: [] };
+const firedBy = (triggerIds: readonly string[]): Fired => ({
+  triggerId: triggerIds[0] ?? null,
+  firedTriggerIds: [...triggerIds],
+});
 const agentTextLimit = 8000;
 const truncatedMarker = '…[truncated]';
 /** Appends trigger data to an agent prompt as JSON the agent should treat as data, cut to the task text limit. */
@@ -180,6 +199,14 @@ function withAgentContext(prompt: string, context: unknown) {
   return text.length <= agentTextLimit
     ? text
     : `${text.slice(0, agentTextLimit - truncatedMarker.length)}${truncatedMarker}`;
+}
+/** The data an agent step with `triggerContext` receives: the trigger that started the run, and for event-driven triggers the event itself. */
+function triggerContext(trigger: Trigger | null, event: unknown) {
+  if (!trigger) return { trigger: manualRunTrigger };
+  return {
+    trigger: { id: trigger.id, kind: trigger.kind, label: trigger.label ?? null, summary: triggerSummary(trigger) },
+    ...(isScheduleTrigger(trigger) ? {} : { event: event ?? {} }),
+  };
 }
 /** Common migration that links workflows to the agent they were created for. */
 export const agentWorkflowCommonVersion = 39;
@@ -275,7 +302,7 @@ export function createWorkflows(
     definition: z.infer<typeof definitionSchema>,
     membershipId: string,
   ) {
-    await authorizeSource(tx, definition.trigger, membershipId);
+    for (const trigger of definition.triggers) await authorizeSource(tx, trigger, membershipId);
     await requireTableStepReader(tx, membershipId, definition);
     await requireAgentStepReader(tx, membershipId, definition);
     for (const step of definition.steps)
@@ -309,6 +336,8 @@ export function createWorkflows(
     ).rows;
     const outputs = new Map<string, z.infer<typeof payloadSchema>>();
     for (const row of rows) if (row.status === 'completed') outputs.set(row.step_id, payloadSchema.parse(row.output));
+    const startedBy = definition.triggers.find(trigger => trigger.id === run.trigger_id);
+    outputs.set(runTriggerKey, startedBy ? { id: startedBy.id, kind: startedBy.kind } : manualRunTrigger);
     const next = nextStep(definition.steps, outputs);
     if (
       next?.step.id !== stepId ||
@@ -361,7 +390,7 @@ export function createWorkflows(
     const step = definition.steps.find(step => step.id === stepId);
     if (step?.kind !== 'slack-message') throw new AccessDenied();
     const authored = (value: typeof step.text): boolean => {
-      if (value.kind === 'literal' || value.kind === 'template') return true;
+      if (value.kind === 'literal' || value.kind === 'template' || value.kind === 'trigger') return true;
       if (value.kind === 'input') return false;
       const source = definition.steps.find(step => step.id === value.step);
       if (!source) throw new AccessDenied();
@@ -390,10 +419,35 @@ export function createWorkflows(
     ).rows)
       woken.add(idSchema.parse(row.id));
   }
+  /** The state each trigger ID keeps outside revisions: its switch, next due time, fired once time and webhook keys. */
+  async function triggerStates(tx: WorkflowTransaction, workflowId: string) {
+    const rows = (
+      await tx.client.query(
+        `SELECT t.trigger_id AS id,t.kind,t.enabled,${utcInstant('t.next_run_at')} AS "nextRunAt",${utcInstant('t.once_fired_at')} AS "onceFiredAt",${webhookColumns(tx, 't')} FROM ${table(tx, 'tf_workflow_triggers')} t WHERE t.workflow_id=$1`,
+        [idSchema.parse(workflowId)],
+      )
+    ).rows;
+    return new Map(
+      z
+        .object({
+          id: z.string(),
+          kind: z.string(),
+          enabled: z.boolean(),
+          nextRunAt: z.string().nullable(),
+          onceFiredAt: z.string().nullable(),
+          webhookMode: webhookModeSchema.nullable(),
+          previousMode: webhookModeSchema.nullable(),
+          previousExpiresAt: z.string().nullable(),
+        })
+        .array()
+        .parse(rows)
+        .map(row => [row.id, row]),
+    );
+  }
   async function read(tx: WorkflowTransaction, id: string, membershipId?: string) {
     const row = (
       await tx.client.query(
-        `SELECT w.id,w.revision,w.active_revision AS "activeRevision",w.enabled,w.generation,${utcInstant('w.next_run_at')} AS "nextRunAt",w.sponsor_membership_id AS "sponsorMembershipId",(w.sponsorship_id IS NOT NULL AND w.sponsorship_revision=w.revision) AS "sponsorshipAccepted",r.definition,a.definition->'trigger' AS "activeTrigger",${disabledReasonColumn(tx, 'w')},${webhookColumns(tx, 'w')},${tx.commonVersion >= 1 ? utcInstant('w.archived_at') : 'NULL'} AS "archivedAt",${agentLinked(tx) ? 'w.agent_id' : 'NULL'} AS "agentId" FROM ${table(tx, 'tf_workflows')} w JOIN ${table(tx, 'tf_workflow_revisions')} r ON r.workflow_id=w.id AND r.id=w.revision LEFT JOIN ${table(tx, 'tf_workflow_revisions')} a ON a.workflow_id=w.id AND a.id=w.active_revision WHERE w.id=$1`,
+        `SELECT w.id,w.revision,w.active_revision AS "activeRevision",w.enabled,w.generation,w.sponsor_membership_id AS "sponsorMembershipId",(w.sponsorship_id IS NOT NULL AND w.sponsorship_revision=w.revision) AS "sponsorshipAccepted",r.definition,a.definition->'triggers' AS "activeTriggers",${disabledReasonColumn(tx, 'w')},${tx.commonVersion >= 1 ? utcInstant('w.archived_at') : 'NULL'} AS "archivedAt",${agentLinked(tx) ? 'w.agent_id' : 'NULL'} AS "agentId" FROM ${table(tx, 'tf_workflows')} w JOIN ${table(tx, 'tf_workflow_revisions')} r ON r.workflow_id=w.id AND r.id=w.revision LEFT JOIN ${table(tx, 'tf_workflow_revisions')} a ON a.workflow_id=w.id AND a.id=w.active_revision WHERE w.id=$1`,
         [idSchema.parse(id)],
       )
     ).rows[0];
@@ -420,41 +474,71 @@ export function createWorkflows(
             )
           ).rows.map(item => idSchema.parse(item.membership_id))
         : [];
-    const { previousMode, previousExpiresAt, ...workflow } = row;
-    const activeTrigger = row.activeTrigger === null ? null : triggerSchema.parse(row.activeTrigger);
-    const rowQueue = membershipId && capabilities.read ? await readRowQueue(tx, id, membershipId, activeTrigger) : null;
-    const result = {
-      ...workflow,
+    const activeTriggers = row.activeTriggers === null ? null : triggerSchema.array().parse(row.activeTriggers);
+    const states = await triggerStates(tx, id);
+    const triggers = (activeTriggers ?? []).map(trigger => {
+      const state = states.get(trigger.id);
+      const enabled = state?.enabled ?? true;
+      return {
+        id: trigger.id,
+        kind: trigger.kind,
+        enabled,
+        summary: trigger.label ?? triggerSummary(trigger),
+        // A record or row trigger's next_run_at is only its next read of the table, not a run anyone scheduled.
+        nextRunAt: row.enabled && enabled && isScheduleTrigger(trigger) ? (state?.nextRunAt ?? null) : null,
+        webhook:
+          trigger.kind === 'webhook'
+            ? {
+                configured: !!state?.webhookMode,
+                mode: state?.webhookMode ?? null,
+                rotation: webhookRotation(tx),
+                previous:
+                  state?.previousMode && state.previousExpiresAt
+                    ? { mode: state.previousMode, expiresAt: state.previousExpiresAt }
+                    : null,
+              }
+            : null,
+      };
+    });
+    const scheduled = triggers.flatMap(trigger => (trigger.nextRunAt ? [trigger.nextRunAt] : [])).sort();
+    const rowQueue =
+      membershipId && capabilities.read ? await readRowQueue(tx, id, membershipId, activeTriggers) : null;
+    const recordTriggers = (activeTriggers ?? []).filter(
+      (trigger): trigger is RecordTrigger => trigger.kind === 'record' && states.get(trigger.id)?.enabled !== false,
+    );
+    // The sweep timer also rereads the table every minute, so a record trigger's next run is its earliest occurrence.
+    // Null tells a viewer who cannot read every record table that dates are hidden, not that none are due.
+    let upcomingRecords = null;
+    if (recordTriggers.length && membershipId && capabilities.read) {
+      let readable = true;
+      for (const trigger of recordTriggers)
+        if (!(await canReadRecords(tx, membershipId, trigger.tableId))) readable = false;
+      if (readable)
+        upcomingRecords = row.enabled ? await upcomingRecordOccurrences(tx, id, row.activeRevision, 10) : [];
+    }
+    const nextRunAt = [...scheduled, ...(upcomingRecords?.[0] ? [upcomingRecords[0].dueAt] : [])].sort()[0] ?? null;
+    return workflowSchema.parse({
+      ...row,
+      nextRunAt,
+      activeTriggers,
+      triggers,
       rowQueue,
-      webhookConfigured: row.webhookMode !== null,
-      webhookRotation: webhookRotation(tx),
-      webhookPrevious: previousMode ? { mode: previousMode, expiresAt: previousExpiresAt } : null,
+      upcomingRecords,
       sponsor,
       capabilities,
       historyAudience,
-    };
-    // A row workflow's next_run_at is only its next read of the table, not a run anyone scheduled.
-    if (activeTrigger?.kind === 'row') return workflowSchema.parse({ ...result, nextRunAt: null });
-    if (activeTrigger?.kind !== 'record') return workflowSchema.parse(result);
-    // The sweep timer also rereads the table every minute, so a record workflow's next run is its earliest occurrence.
-    // Null tells a viewer who cannot read the table that dates are hidden, not that none are due.
-    const upcomingRecords =
-      membershipId && capabilities.read && (await canReadRecords(tx, membershipId, activeTrigger.tableId))
-        ? row.enabled
-          ? await upcomingRecordOccurrences(tx, id, row.activeRevision, 10)
-          : []
-        : null;
-    return workflowSchema.parse({ ...result, nextRunAt: upcomingRecords?.[0]?.dueAt ?? null, upcomingRecords });
+    });
   }
   async function readRowQueue(
     tx: WorkflowTransaction,
     id: string,
     membershipId: string,
-    activeTrigger: Trigger | null,
+    activeTriggers: readonly Trigger[] | null,
   ) {
-    if (activeTrigger?.kind === 'row' && !(await canReadRecords(tx, membershipId, activeTrigger.tableId))) return null;
+    const rowTriggers = (activeTriggers ?? []).filter(trigger => trigger.kind === 'row');
+    for (const trigger of rowTriggers) if (!(await canReadRecords(tx, membershipId, trigger.tableId))) return null;
     if (tx.commonVersion < rowTriggerCommonVersion)
-      return activeTrigger?.kind === 'row'
+      return rowTriggers.length
         ? { available: false, pending: 0, blocked: 0, cancelled: 0, oldestAt: null, blockers: [] }
         : null;
     const sources = (
@@ -463,7 +547,7 @@ export function createWorkflows(
         [id],
       )
     ).rows;
-    if (!sources.length && activeTrigger?.kind !== 'row') return null;
+    if (!sources.length && !rowTriggers.length) return null;
     for (const source of sources) if (!(await canReadRecords(tx, membershipId, source.table_id))) return null;
     const counts = (
       await tx.client.query(
@@ -496,21 +580,48 @@ export function createWorkflows(
     await requireRecordZone(tx, trigger);
     return generation;
   }
-  async function githubRepositoryConnected(tx: WorkflowTransaction, trigger: GitHubTrigger, membershipId: string) {
+  /** Repositories connected through an active or paused Knowledge GitHub source the member belongs to. */
+  const connectedRepositories = (tx: WorkflowTransaction) =>
+    `FROM ${table(tx, 'tf_knowledge_github_repositories')} r
+    JOIN ${table(tx, 'tf_knowledge_github_members')} m ON m.source_id=r.source_id
+    JOIN ${table(tx, 'tf_knowledge_sources')} s ON s.id=r.source_id
+    WHERE r.state='active' AND m.membership_id=$1 AND s.state IN ('active','paused')`;
+  async function githubRepositoryConnected(tx: WorkflowTransaction, repositoryId: string, membershipId: string) {
     return (
       (
-        await tx.client.query(
-          `SELECT 1 FROM ${table(tx, 'tf_knowledge_github_repositories')} r
-          JOIN ${table(tx, 'tf_knowledge_github_members')} m ON m.source_id=r.source_id
-          JOIN ${table(tx, 'tf_knowledge_sources')} s ON s.id=r.source_id
-          WHERE r.repository_id=$1 AND r.state='active' AND m.membership_id=$2 AND s.state IN ('active','paused') LIMIT 1`,
-          [trigger.repositoryId, membershipId],
-        )
+        await tx.client.query(`SELECT 1 ${connectedRepositories(tx)} AND r.repository_id=$2 LIMIT 1`, [
+          membershipId,
+          repositoryId,
+        ])
       ).rowCount === 1
     );
   }
+  /** Every listed repository is connected for the member, or at least one repository of the named account is. */
+  async function githubTriggerConnected(tx: WorkflowTransaction, trigger: GitHubTrigger, membershipId: string) {
+    const { repositories } = trigger;
+    if (!Array.isArray(repositories))
+      return (
+        (
+          await tx.client.query(`SELECT 1 ${connectedRepositories(tx)} AND r.owner_id=$2 LIMIT 1`, [
+            membershipId,
+            repositories.organizationId,
+          ])
+        ).rowCount === 1
+      );
+    const connected = z
+      .number()
+      .parse(
+        (
+          await tx.client.query(
+            `SELECT count(DISTINCT r.repository_id)::int AS count ${connectedRepositories(tx)} AND r.repository_id=ANY($2::text[])`,
+            [membershipId, repositories],
+          )
+        ).rows[0]?.count,
+      );
+    return connected === repositories.length;
+  }
   async function requireGitHubRepository(tx: WorkflowTransaction, trigger: GitHubTrigger, membershipId: string) {
-    if (!(await githubRepositoryConnected(tx, trigger, membershipId)))
+    if (!(await githubTriggerConnected(tx, trigger, membershipId)))
       throw new WorkflowConflict('github-repository-not-connected');
   }
   /** The repositories a `github` trigger may name for this user: the same rule as the save check. */
@@ -520,15 +631,14 @@ export function createWorkflows(
       async tx => {
         const { membershipId } = await workflowMember(tx, user);
         const { rows } = await tx.client.query(
-          `SELECT DISTINCT r.repository_id AS "repositoryId", r.full_name AS "fullName"
-        FROM ${table(tx, 'tf_knowledge_github_repositories')} r
-        JOIN ${table(tx, 'tf_knowledge_github_members')} m ON m.source_id=r.source_id
-        JOIN ${table(tx, 'tf_knowledge_sources')} s ON s.id=r.source_id
-        WHERE r.state='active' AND m.membership_id=$1 AND s.state IN ('active','paused')
+          `SELECT DISTINCT r.repository_id AS "repositoryId", r.full_name AS "fullName", r.owner_id AS "ownerId"
+        ${connectedRepositories(tx)}
         ORDER BY "fullName" LIMIT 200`,
           [membershipId],
         );
-        return z.array(z.object({ repositoryId: z.string(), fullName: z.string() })).parse(rows);
+        return z
+          .array(z.object({ repositoryId: z.string(), fullName: z.string(), ownerId: z.string().nullable() }))
+          .parse(rows);
       },
       'read',
     );
@@ -539,19 +649,16 @@ export function createWorkflows(
       requireGitHubRepository(tx, trigger, (await workflowMember(tx, user)).membershipId),
     );
   }
-  async function activeTriggerKind(tx: WorkflowTransaction, id: string, revision: string | null) {
-    if (revision === null) return null;
-    return z
-      .string()
-      .nullable()
-      .parse(
-        (
-          await tx.client.query(
-            `SELECT definition->'trigger'->>'kind' AS kind FROM ${table(tx, 'tf_workflow_revisions')} WHERE workflow_id=$1 AND id=$2`,
-            [id, revision],
-          )
-        ).rows[0]?.kind ?? null,
-      );
+  async function revisionHasGitHub(tx: WorkflowTransaction, id: string, revision: string | null) {
+    if (revision === null) return false;
+    return (
+      (
+        await tx.client.query(
+          `SELECT 1 FROM ${table(tx, 'tf_workflow_revisions')} d CROSS JOIN jsonb_array_elements(d.definition->'triggers') t WHERE d.workflow_id=$1 AND d.id=$2 AND t->>'kind'='github' LIMIT 1`,
+          [id, revision],
+        )
+      ).rowCount === 1
+    );
   }
   function removeGitHubSubscriptionAfterCommit(
     tx: WorkflowTransaction,
@@ -598,7 +705,7 @@ export function createWorkflows(
     return transaction(workspaceId, async tx => {
       const { membershipId } = await workflowMember(tx, user);
       const labels = await requireTableStepFields(tx, membershipId, definition);
-      if (!['manual', 'event'].includes(definition.trigger.kind))
+      if (definition.triggers.some(isUnattendedTrigger))
         await requireTableStepAuthority(tx, definition, membershipId, []);
       return labels;
     });
@@ -658,17 +765,27 @@ export function createWorkflows(
         const current = await read(tx, row.id, actor.membershipId);
         const personal = row.personal === true,
           following = row.following === true;
-        const projected =
-          current.enabled && current.activeTrigger && current.nextRunAt && (personal || following)
-            ? current.activeTrigger.kind === 'record'
-              ? {
-                  times: (current.upcomingRecords ?? [])
-                    .map(item => item.dueAt)
-                    .filter(at => Date.parse(at) >= Date.parse(range.from) && Date.parse(at) < Date.parse(range.to)),
-                  more: (current.upcomingRecords?.length ?? 0) === 10,
-                }
-              : calendarOccurrences(current.activeTrigger, current.nextRunAt, range.from, range.to)
-            : { times: [], more: false };
+        const projected = { times: [] as string[], more: false };
+        if (current.enabled && (personal || following)) {
+          // Schedule triggers due at the same time start one run, so their times merge.
+          const times = new Set<string>();
+          for (const trigger of current.activeTriggers ?? []) {
+            const state = current.triggers.find(item => item.id === trigger.id);
+            if (!state?.enabled) continue;
+            if (trigger.kind === 'record') {
+              for (const item of current.upcomingRecords ?? [])
+                if (Date.parse(item.dueAt) >= Date.parse(range.from) && Date.parse(item.dueAt) < Date.parse(range.to))
+                  times.add(item.dueAt);
+              projected.more ||= (current.upcomingRecords?.length ?? 0) === 10;
+            } else if (state.nextRunAt) {
+              const occurrences = calendarOccurrences(trigger, state.nextRunAt, range.from, range.to);
+              for (const at of occurrences.times) times.add(at);
+              projected.more ||= occurrences.more;
+            }
+          }
+          projected.times = [...times].sort().slice(0, 250);
+          projected.more ||= times.size > 250;
+        }
         const occurrences: z.infer<typeof workflowCalendarSchema>['workflows'][number]['occurrences'] =
           projected.times.map(at => ({ at, status: 'Scheduled' }));
         more ||= projected.more;
@@ -774,7 +891,7 @@ export function createWorkflows(
     const input = saveSchema.parse(value);
     const forAgentId = link.forAgentId === undefined ? null : idSchema.parse(link.forAgentId);
     try {
-      nextOccurrence(input.definition.trigger, new Date());
+      for (const trigger of input.definition.triggers) nextOccurrence(trigger, new Date());
     } catch {
       throw new WorkflowConflict('invalid-schedule');
     }
@@ -815,13 +932,24 @@ export function createWorkflows(
       }
       requireCodeRunner(input.definition);
       requireAgentRunner(input.definition);
-      const trigger = input.definition.trigger;
-      if (trigger.kind === 'provider') await providers.authorize(tx, trigger, actor.membershipId);
-      if (trigger.kind === 'once' && Date.parse(trigger.at) <= (await databaseNow(tx)).getTime())
-        throw new WorkflowConflict('schedule-in-past');
-      if (trigger.kind === 'record') await savableRecordSource(tx, trigger, actor.membershipId);
-      if (trigger.kind === 'row') await savableRowSource(tx, trigger, actor.membershipId);
-      if (trigger.kind === 'github') await requireGitHubRepository(tx, trigger, actor.membershipId);
+      const states = await triggerStates(tx, id);
+      const kept = await keptOnceTimes(tx, id);
+      for (const trigger of input.definition.triggers) {
+        const state = states.get(trigger.id);
+        if (state && state.kind !== trigger.kind) throw new WorkflowConflict('trigger-kind-changed');
+        if (trigger.kind === 'provider') await providers.authorize(tx, trigger, actor.membershipId);
+        // An unchanged once trigger may stay after its time has passed; it never fires again.
+        if (
+          trigger.kind === 'once' &&
+          !kept.has(onceKey(trigger.id, trigger.at)) &&
+          !(state?.onceFiredAt && Date.parse(state.onceFiredAt) === Date.parse(trigger.at)) &&
+          Date.parse(trigger.at) <= (await databaseNow(tx)).getTime()
+        )
+          throw new WorkflowConflict('schedule-in-past');
+        if (trigger.kind === 'record') await savableRecordSource(tx, trigger, actor.membershipId);
+        if (trigger.kind === 'row') await savableRowSource(tx, trigger, actor.membershipId);
+        if (trigger.kind === 'github') await requireGitHubRepository(tx, trigger, actor.membershipId);
+      }
       await requireTableStepFields(tx, actor.membershipId, input.definition);
       await requireAgentStepReader(tx, actor.membershipId, input.definition);
       if ((previous?.revision ?? null) !== input.expectedRevision) throw new WorkflowConflict('stale-revision');
@@ -839,6 +967,11 @@ export function createWorkflows(
         `INSERT INTO ${table(tx, 'tf_workflow_revisions')} (workflow_id,id,definition,author_membership_id) VALUES ($1,$2,$3,$4)`,
         [id, input.revision, JSON.stringify(input.definition), actor.membershipId],
       );
+      for (const trigger of input.definition.triggers)
+        await tx.client.query(
+          `INSERT INTO ${table(tx, 'tf_workflow_triggers')} (workflow_id,trigger_id,kind) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`,
+          [id, trigger.id, trigger.kind],
+        );
       if (previous)
         await tx.client.query(
           `UPDATE ${table(tx, 'tf_workflows')} SET revision=$2,generation=generation+1 WHERE id=$1`,
@@ -850,6 +983,47 @@ export function createWorkflows(
       );
       return read(tx, id, actor.membershipId);
     });
+  }
+  /**
+   * Sets each trigger's next due time for the activated triggers, or clears it. A once trigger whose time already fired
+   * or has passed never fires again; switched-off triggers keep a due time so the sweep records what they skip.
+   */
+  async function setTriggerTimes(
+    tx: WorkflowTransaction,
+    id: string,
+    triggers: readonly Trigger[],
+    clearOthers = true,
+  ) {
+    const now = await databaseNow(tx);
+    const states = await triggerStates(tx, id);
+    const times = triggers.map(trigger => {
+      const fired =
+        trigger.kind === 'once' &&
+        (Date.parse(trigger.at) <= now.getTime() ||
+          (states.get(trigger.id)?.onceFiredAt != null &&
+            Date.parse(states.get(trigger.id)!.onceFiredAt!) === Date.parse(trigger.at)));
+      return fired ? null : nextOccurrence(trigger, now);
+    });
+    await tx.client.query(
+      `UPDATE ${table(tx, 'tf_workflow_triggers')} t SET next_run_at=d.next FROM (SELECT * FROM unnest($2::text[],$3::timestamptz[]) AS d(trigger_id,next)) d WHERE t.workflow_id=$1 AND t.trigger_id=d.trigger_id`,
+      [id, triggers.map(trigger => trigger.id), times],
+    );
+    if (clearOthers)
+      await tx.client.query(
+        `UPDATE ${table(tx, 'tf_workflow_triggers')} SET next_run_at=NULL WHERE workflow_id=$1 AND next_run_at IS NOT NULL AND trigger_id<>ALL($2::text[])`,
+        [id, triggers.map(trigger => trigger.id)],
+      );
+  }
+  const onceKey = (triggerId: string, at: string) => `${triggerId} ${Date.parse(at)}`;
+  /** The once triggers of the saved and active revisions, by ID and time; keeping one unchanged skips the future-time check. */
+  async function keptOnceTimes(tx: WorkflowTransaction, id: string) {
+    const rows = (
+      await tx.client.query(
+        `SELECT t->>'id' AS id,t->>'at' AS at FROM ${table(tx, 'tf_workflows')} w JOIN ${table(tx, 'tf_workflow_revisions')} d ON d.workflow_id=w.id AND d.id IN (w.revision,w.active_revision) CROSS JOIN jsonb_array_elements(d.definition->'triggers') t WHERE w.id=$1 AND t->>'kind'='once'`,
+        [id],
+      )
+    ).rows;
+    return new Set(rows.map(row => onceKey(z.string().parse(row.id), z.string().parse(row.at))));
   }
   async function activate(workspaceId: string, user: string, id: string, value: unknown) {
     const input = activationSchema.parse(value);
@@ -876,53 +1050,62 @@ export function createWorkflows(
             requireCodeRunner(current.definition);
             requireAgentRunner(current.definition);
           }
-          const trigger = current.definition.trigger;
-          if (enabled && !['manual', 'event'].includes(trigger.kind)) {
+          const triggers = current.definition.triggers;
+          if (enabled && triggers.some(isUnattendedTrigger)) {
             // The caller manages this workflow, so a missing sponsorship or sponsor grant is a conflict, not lost access.
             const sponsor = await workflowSponsor(tx, id, revision).catch((error: unknown) => {
               throw error instanceof AccessDenied ? new WorkflowConflict('sponsorship-required') : error;
             });
             if (!(await hasGrant(tx, sponsor.sponsor_membership_id, id, 'invoke')))
               throw new WorkflowConflict('sponsor-access-lost');
-            await requireTableStepAuthority(
-              tx,
-              current.definition,
-              sponsor.sponsor_membership_id,
-              (
-                await tx.client.query(
-                  `SELECT membership_id FROM ${table(tx, 'tf_workflow_history_audience')} WHERE workflow_id=$1`,
-                  [id],
+            const audience = (
+              await tx.client.query(
+                `SELECT membership_id FROM ${table(tx, 'tf_workflow_history_audience')} WHERE workflow_id=$1`,
+                [id],
+              )
+            ).rows.map(row => idSchema.parse(row.membership_id));
+            await requireTableStepAuthority(tx, current.definition, sponsor.sponsor_membership_id, audience);
+            await requireAgentStepAuthority(tx, current.definition, sponsor.sponsor_membership_id, audience);
+          }
+          const githubTriggers = triggers.filter(
+            (trigger): trigger is Extract<Trigger, { kind: 'github' }> => trigger.kind === 'github',
+          );
+          if (enabled) {
+            const now = (await databaseNow(tx)).getTime();
+            for (const trigger of triggers)
+              if (
+                trigger.kind === 'once' &&
+                Date.parse(trigger.at) <= now &&
+                !current.activeTriggers?.some(
+                  item =>
+                    item.id === trigger.id && item.kind === 'once' && Date.parse(item.at) === Date.parse(trigger.at),
                 )
-              ).rows.map(row => idSchema.parse(row.membership_id)),
-            );
-            await requireAgentStepAuthority(
-              tx,
-              current.definition,
-              sponsor.sponsor_membership_id,
-              (
-                await tx.client.query(
-                  `SELECT membership_id FROM ${table(tx, 'tf_workflow_history_audience')} WHERE workflow_id=$1`,
-                  [id],
-                )
-              ).rows.map(row => idSchema.parse(row.membership_id)),
-            );
+              )
+                throw new WorkflowConflict('schedule-in-past');
+            for (const trigger of triggers) {
+              if (trigger.kind === 'provider') await providers.activate(tx, id, revision, trigger);
+              if (trigger.kind === 'record' || trigger.kind === 'row') {
+                const sponsor = (await requireSponsor(tx, id, revision)).sponsor_membership_id;
+                await requireRecordAudience(tx, trigger, [sponsor]);
+                if (trigger.kind === 'record') await recordSource(tx, trigger, sponsor);
+                else await savableRowSource(tx, trigger, sponsor);
+              }
+              if (trigger.kind === 'github') {
+                if (!options.githubSubscriptions) throw new WorkflowConflict('github-trigger-unavailable');
+                await requireGitHubRepository(
+                  tx,
+                  trigger,
+                  (await requireSponsor(tx, id, revision)).sponsor_membership_id,
+                );
+              }
+            }
+            if (githubTriggers.length)
+              await tx.client.query(
+                `DELETE FROM ${table(tx, 'tf_provider_events')} WHERE workflow_id=$1 AND NOT admitted`,
+                [id],
+              );
           }
-          if (enabled && trigger.kind === 'provider') await providers.activate(tx, id, revision, trigger);
-          if (enabled && (trigger.kind === 'record' || trigger.kind === 'row')) {
-            const sponsor = (await requireSponsor(tx, id, revision)).sponsor_membership_id;
-            await requireRecordAudience(tx, trigger, [sponsor]);
-            if (trigger.kind === 'record') await recordSource(tx, trigger, sponsor);
-            else await savableRowSource(tx, trigger, sponsor);
-          }
-          if (enabled && trigger.kind === 'github') {
-            if (!options.githubSubscriptions) throw new WorkflowConflict('github-trigger-unavailable');
-            await requireGitHubRepository(tx, trigger, (await requireSponsor(tx, id, revision)).sponsor_membership_id);
-            await tx.client.query(
-              `DELETE FROM ${table(tx, 'tf_provider_events')} WHERE workflow_id=$1 AND NOT admitted`,
-              [id],
-            );
-          }
-          const wasGitHub = (await activeTriggerKind(tx, id, current.activeRevision)) === 'github';
+          const wasGitHub = await revisionHasGitHub(tx, id, current.activeRevision);
           // Occurrences not yet fired belong to the previous activation; the next sweep recomputes them from this one.
           if (tx.commonVersion >= recordTriggerCommonVersion) {
             await tx.client.query(
@@ -940,31 +1123,32 @@ export function createWorkflows(
               id,
               randomUUID(),
             ]);
-          const fired =
-            trigger.kind === 'once' &&
-            (
-              await tx.client.query(
-                `SELECT 1 FROM ${table(tx, 'tf_workflow_runs')} WHERE workflow_id=$1 AND revision=$2 AND request_key LIKE 'schedule:%' LIMIT 1`,
-                [id, revision],
-              )
-            ).rowCount === 1;
-          const next = fired ? null : nextOccurrence(trigger, await databaseNow(tx));
           const generation = z
             .number()
             .parse(
               (
                 await tx.client.query(
-                  `UPDATE ${table(tx, 'tf_workflows')} SET active_revision=$2,enabled=$3,next_run_at=$4,generation=generation+1 WHERE id=$1 RETURNING generation`,
-                  [id, revision, enabled, next],
+                  `UPDATE ${table(tx, 'tf_workflows')} SET active_revision=$2,enabled=$3,generation=generation+1 WHERE id=$1 RETURNING generation`,
+                  [id, revision, enabled],
                 )
               ).rows[0]?.generation,
             );
+          await setTriggerTimes(tx, id, enabled ? triggers : []);
           // Written before commit so a failure fails the activation; a row left by a rollback is inert and the fan-out deletes it.
-          if (enabled && trigger.kind === 'github')
-            await options.githubSubscriptions?.replace({ workspaceId, workflowId: id, revision, generation, trigger });
+          if (enabled && githubTriggers.length)
+            await options.githubSubscriptions?.replace({
+              workspaceId,
+              workflowId: id,
+              revision,
+              generation,
+              triggers: githubTriggers,
+            });
           else if (wasGitHub) removeGitHubSubscriptionAfterCommit(tx, workspaceId, id, generation);
-          if (trigger.kind !== 'webhook')
-            await tx.client.query(`UPDATE ${table(tx, 'tf_workflows')} SET ${webhookCleared(tx)} WHERE id=$1`, [id]);
+          // A webhook key belongs to a trigger of the activated revision; keys of other trigger IDs are cleared.
+          await tx.client.query(
+            `UPDATE ${table(tx, 'tf_workflow_triggers')} SET ${webhookCleared(tx)} WHERE workflow_id=$1 AND trigger_id<>ALL($2::text[]) AND (webhook_digest IS NOT NULL OR webhook_secret IS NOT NULL OR webhook_previous IS NOT NULL)`,
+            [id, triggers.filter(trigger => trigger.kind === 'webhook').map(trigger => trigger.id)],
+          );
           if (!enabled)
             for (const row of (
               await tx.client.query(
@@ -1020,17 +1204,21 @@ export function createWorkflows(
     woken: Set<string>,
     withAgent: boolean,
   ) {
-    const wasGitHub = (await activeTriggerKind(tx, id, activeRevision)) === 'github';
+    const wasGitHub = await revisionHasGitHub(tx, id, activeRevision);
     const generation = z
       .number()
       .parse(
         (
           await tx.client.query(
-            `UPDATE ${table(tx, 'tf_workflows')} SET archived_at=clock_timestamp(),enabled=false,next_run_at=NULL,${webhookCleared(tx)},${agentLinked(tx) ? `archived_with_agent=${withAgent},` : ''}generation=generation+1 WHERE id=$1 RETURNING generation`,
+            `UPDATE ${table(tx, 'tf_workflows')} SET archived_at=clock_timestamp(),enabled=false,${agentLinked(tx) ? `archived_with_agent=${withAgent},` : ''}generation=generation+1 WHERE id=$1 RETURNING generation`,
             [id],
           )
         ).rows[0]?.generation,
       );
+    await tx.client.query(
+      `UPDATE ${table(tx, 'tf_workflow_triggers')} SET next_run_at=NULL,${webhookCleared(tx)} WHERE workflow_id=$1`,
+      [id],
+    );
     if (wasGitHub) removeGitHubSubscriptionAfterCommit(tx, workspaceId, id, generation);
     await tx.client.query(`UPDATE ${table(tx, 'tf_provider_polls')} SET fence=$2 WHERE workflow_id=$1`, [
       id,
@@ -1107,11 +1295,142 @@ export function createWorkflows(
         },
         async () => {
           if (current.archivedAt === null) throw new WorkflowConflict('workflow-not-archived');
+          // A workflow restored by hand owns its public URL again instead of forwarding it to the workflow it was combined into.
+          await tx.client.query(`DELETE FROM ${table(tx, 'tf_workflow_webhook_aliases')} WHERE old_workflow_id=$1`, [
+            id,
+          ]);
           await restoreRow(tx, id, actor.membershipId);
         },
       );
       return read(tx, id, actor.membershipId);
     });
+  }
+  /**
+   * Switches one trigger on or off outside revisions. It takes the workflow row lock the sweep takes, so a switch and a
+   * sweep never both decide the same due time. Switching off settles what the trigger queued; switching on starts from
+   * its next occurrence, so occurrences missed while off never run.
+   */
+  async function switchTrigger(workspaceId: string, user: string, id: string, value: unknown) {
+    const input = triggerSwitchSchema.parse(value);
+    return wakeAfter(workspaceId, async tx => {
+      const actor = await workflowMember(tx, user);
+      await requireGrant(tx, actor.membershipId, id, 'manage');
+      await tx.client.query(`SELECT 1 FROM ${table(tx, 'tf_workflows')} WHERE id=$1 FOR UPDATE`, [idSchema.parse(id)]);
+      const current = await read(tx, id);
+      await administrativeCommand(
+        tx,
+        {
+          ...input,
+          generation: current.generation,
+          membershipId: actor.membershipId,
+          operation: 'trigger-switch',
+          target: current.id,
+          request: input,
+        },
+        async () => {
+          await requireUnarchived(tx, id);
+          const state = (await triggerStates(tx, id)).get(input.triggerId);
+          if (!state) throw new WorkflowConflict('trigger-not-found');
+          if (state.enabled === input.enabled) return;
+          const trigger = current.activeTriggers?.find(item => item.id === input.triggerId) ?? null;
+          if (input.enabled && trigger && isUnattendedTrigger(trigger)) {
+            if (!current.enabled || current.activeRevision === null) throw new WorkflowConflict('sponsor-required');
+            try {
+              await requireSponsor(tx, id, current.activeRevision);
+            } catch (error) {
+              if (error instanceof AccessDenied) throw new WorkflowConflict('sponsor-required');
+              throw error;
+            }
+          }
+          const triggers = table(tx, 'tf_workflow_triggers');
+          await tx.client.query(
+            `UPDATE ${triggers} SET enabled=$3,switched_on_at=CASE WHEN $3 THEN clock_timestamp() ELSE switched_on_at END WHERE workflow_id=$1 AND trigger_id=$2`,
+            [id, input.triggerId, input.enabled],
+          );
+          if (input.enabled) {
+            if (current.enabled && trigger) await setTriggerTimes(tx, id, [trigger], false);
+            // Record occurrences that fell due while off are dropped; later ones still run.
+            await tx.client.query(
+              `UPDATE ${table(tx, 'tf_workflow_record_occurrences')} SET fired_at=clock_timestamp() WHERE workflow_id=$1 AND trigger_id=$2 AND fired_at IS NULL AND due_at<=clock_timestamp()`,
+              [id, input.triggerId],
+            );
+            // Polling restarts from now, so provider events from while it was off never run.
+            await tx.client.query(
+              `UPDATE ${table(tx, 'tf_provider_polls')} SET cursor=$3,fence=$4,next_poll=clock_timestamp(),error=NULL WHERE workflow_id=$1 AND trigger_id=$2`,
+              [
+                id,
+                input.triggerId,
+                JSON.stringify(
+                  providerCursorSchema.parse({ since: (await databaseNow(tx)).toISOString(), until: null, page: null }),
+                ),
+                randomUUID(),
+              ],
+            );
+          } else await settleSwitchedOff(tx, id, input.triggerId);
+          await tx.client.query(`UPDATE ${table(tx, 'tf_workflows')} SET generation=generation+1 WHERE id=$1`, [id]);
+          await auditWorkflow(
+            tx,
+            actor.membershipId,
+            input.enabled ? 'workflow.trigger.enable' : 'workflow.trigger.disable',
+            id,
+          );
+        },
+      );
+      return read(tx, id, actor.membershipId);
+    });
+  }
+  /**
+   * Settles what a switched-off trigger queued with `trigger-disabled` instead of holding it until it is switched back on.
+   * An event that also matched a trigger still switched on stays queued for that one. Due schedule times stay, so the
+   * next sweep records the skipped occurrence and advances them.
+   */
+  async function settleSwitchedOff(tx: WorkflowTransaction, id: string, triggerId: string) {
+    const live = `ARRAY(SELECT t.trigger_id FROM ${table(tx, 'tf_workflow_triggers')} t WHERE t.workflow_id=$1 AND t.enabled)`;
+    await tx.client.query(
+      `UPDATE ${table(tx, 'tf_workflow_row_events')} SET state='ignored',reason='trigger-disabled',settled_at=clock_timestamp(),attempted_at=clock_timestamp(),snapshot=NULL WHERE workflow_id=$1 AND settled_at IS NULL AND $2=ANY(trigger_ids) AND NOT trigger_ids && ${live}`,
+      [id, triggerId],
+    );
+    await tx.client.query(
+      `UPDATE ${table(tx, 'tf_workflow_record_occurrences')} SET fired_at=clock_timestamp() WHERE workflow_id=$1 AND trigger_id=$2 AND fired_at IS NULL AND due_at<=clock_timestamp()`,
+      [id, triggerId],
+    );
+    await tx.client.query(
+      `UPDATE ${table(tx, 'tf_provider_polls')} SET fence=$3 WHERE workflow_id=$1 AND trigger_id=$2`,
+      [id, triggerId, randomUUID()],
+    );
+    const events = (
+      await tx.client.query(
+        `SELECT e.revision,e.trigger_id,e.fired_trigger_ids,e.event_key,e.payload FROM ${table(tx, 'tf_provider_events')} e WHERE e.workflow_id=$1 AND NOT e.admitted AND $2=ANY(e.fired_trigger_ids) AND NOT e.fired_trigger_ids && ${live} ORDER BY e.created_at,e.event_key`,
+        [id, triggerId],
+      )
+    ).rows;
+    for (const event of events) {
+      const revision = idSchema.parse(event.revision),
+        first = z.string().parse(event.trigger_id),
+        fired = z.array(z.string()).parse(event.fired_trigger_ids),
+        definition = (
+          await tx.client.query(
+            `SELECT definition FROM ${table(tx, 'tf_workflow_revisions')} WHERE workflow_id=$1 AND id=$2`,
+            [id, revision],
+          )
+        ).rows[0]?.definition;
+      const kind = definition
+        ? (definitionSchema.parse(definition).triggers.find(item => item.id === first)?.kind ?? 'provider')
+        : 'provider';
+      await skip(
+        tx,
+        id,
+        revision,
+        `${kind}:${revision}:${first}:${z.string().parse(event.event_key)}`,
+        payloadSchema.parse(event.payload),
+        'trigger-disabled',
+        firedBy(fired),
+      );
+      await tx.client.query(
+        `UPDATE ${table(tx, 'tf_provider_events')} SET admitted=true WHERE workflow_id=$1 AND revision=$2 AND trigger_id=$3 AND event_key=$4`,
+        [id, revision, first, event.event_key],
+      );
+    }
   }
   async function cancelRowEvents(workspaceId: string, user: string, id: string, value: unknown) {
     const input = commandSchema.parse(value);
@@ -1120,7 +1439,7 @@ export function createWorkflows(
       await requireGrant(tx, actor.membershipId, id, 'manage');
       if (tx.commonVersion < rowTriggerCommonVersion) throw new WorkflowConflict('record-trigger-unavailable');
       const current = await read(tx, id);
-      if (!(await readRowQueue(tx, id, actor.membershipId, current.activeTrigger))) throw new AccessDenied();
+      if (!(await readRowQueue(tx, id, actor.membershipId, current.activeTriggers))) throw new AccessDenied();
       await administrativeCommand(
         tx,
         {
@@ -1149,6 +1468,7 @@ export function createWorkflows(
     key: string,
     input: z.infer<typeof payloadSchema>,
     membershipId: string | null,
+    fired: Fired = manualFired,
     replayed: (input: z.infer<typeof payloadSchema>, trigger: Trigger | null) => unknown = value => value,
   ) {
     const current = await read(tx, workflowId);
@@ -1163,18 +1483,21 @@ export function createWorkflows(
       )
     ).rows[0];
     const activeDefinition = active ? definitionSchema.parse(active.definition) : null,
-      trigger = activeDefinition?.trigger ?? null;
+      trigger = activeDefinition?.triggers.find(item => item.id === fired.triggerId) ?? null;
     if (activeDefinition) await authorizeSources(tx, activeDefinition, membershipId);
     const existing = (
       await tx.client.query(
-        `SELECT r.id,r.input,r.membership_id,d.definition FROM ${table(tx, 'tf_workflow_runs')} r JOIN ${table(tx, 'tf_workflow_revisions')} d ON d.workflow_id=r.workflow_id AND d.id=r.revision WHERE r.workflow_id=$1 AND r.request_key=$2`,
+        `SELECT r.id,r.input,r.membership_id,r.trigger_id,d.definition FROM ${table(tx, 'tf_workflow_runs')} r JOIN ${table(tx, 'tf_workflow_revisions')} d ON d.workflow_id=r.workflow_id AND d.id=r.revision WHERE r.workflow_id=$1 AND r.request_key=$2`,
         [workflowId, key],
       )
     ).rows[0];
     if (existing) {
       if (
         canonical(
-          replayed(payloadSchema.parse(existing.input), definitionSchema.parse(existing.definition).trigger),
+          replayed(
+            payloadSchema.parse(existing.input),
+            definitionSchema.parse(existing.definition).triggers.find(item => item.id === existing.trigger_id) ?? null,
+          ),
         ) !== canonical(replayed(input, trigger)) ||
         existing.membership_id !== membershipId
       )
@@ -1200,7 +1523,7 @@ export function createWorkflows(
     const runId = randomUUID(),
       scheduledFor = /^(schedule|record):/.test(key) ? scheduledInstant(input) : null;
     await tx.client.query(
-      `INSERT INTO ${table(tx, 'tf_workflow_runs')} (id,workflow_id,revision,request_key,membership_id,input,sponsorship_id,scheduled_for) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      `INSERT INTO ${table(tx, 'tf_workflow_runs')} (id,workflow_id,revision,request_key,membership_id,input,sponsorship_id,scheduled_for,trigger_id,fired_trigger_ids) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
       [
         runId,
         workflowId,
@@ -1210,6 +1533,8 @@ export function createWorkflows(
         JSON.stringify(input),
         sponsor?.sponsorship_id ?? null,
         scheduledFor,
+        fired.triggerId,
+        fired.firedTriggerIds,
       ],
     );
     if (sponsor)
@@ -1229,14 +1554,16 @@ export function createWorkflows(
       | 'previous-run-unfinished'
       | 'missed-occurrences-coalesced'
       | 'record-values-too-large'
-      | 'github-repository-not-connected',
+      | 'github-repository-not-connected'
+      | 'trigger-disabled',
+    fired: Fired,
   ) {
     // Workspaces below common version 2 reject the skipped status until the rollout reaches them.
     if (tx.commonVersion < 1) return;
     const sponsor = await workflowSponsor(tx, workflowId);
     const scheduledFor = scheduledInstant(input);
     const inserted = await tx.client.query(
-      `INSERT INTO ${table(tx, 'tf_workflow_runs')} (id,workflow_id,revision,request_key,membership_id,input,sponsorship_id,status,error,scheduled_for) VALUES ($1,$2,$3,$4,$5,$6,$7,'skipped',$8,$9) ON CONFLICT (workflow_id,request_key) DO NOTHING RETURNING id`,
+      `INSERT INTO ${table(tx, 'tf_workflow_runs')} (id,workflow_id,revision,request_key,membership_id,input,sponsorship_id,status,error,scheduled_for,trigger_id,fired_trigger_ids) VALUES ($1,$2,$3,$4,$5,$6,$7,'skipped',$8,$9,$10,$11) ON CONFLICT (workflow_id,request_key) DO NOTHING RETURNING id`,
       [
         randomUUID(),
         workflowId,
@@ -1247,6 +1574,8 @@ export function createWorkflows(
         sponsor.sponsorship_id,
         reason,
         scheduledFor,
+        fired.triggerId,
+        fired.firedTriggerIds,
       ],
     );
     if (inserted.rowCount === 1)
@@ -1364,7 +1693,7 @@ export function createWorkflows(
       await requireRunAccess(tx, actor.membershipId, id, runId, false);
       const row = (
         await tx.client.query(
-          `SELECT r.id,r.workflow_id AS "workflowId",r.revision,r.status,split_part(r.request_key,':',1) AS source,r.input,r.created_at::text AS "createdAt",${utcInstant('r.scheduled_for')} AS "scheduledFor",${utcInstant('r.started_at')} AS "startedAt",${utcInstant('r.finished_at')} AS "finishedAt",r.error,r.membership_id,d.definition FROM ${table(tx, 'tf_workflow_runs')} r JOIN ${table(tx, 'tf_workflow_revisions')} d ON d.workflow_id=r.workflow_id AND d.id=r.revision WHERE r.id=$1 AND r.workflow_id=$2`,
+          `SELECT r.id,r.workflow_id AS "workflowId",r.revision,r.status,split_part(r.request_key,':',1) AS source,r.input,r.created_at::text AS "createdAt",${utcInstant('r.scheduled_for')} AS "scheduledFor",${utcInstant('r.started_at')} AS "startedAt",${utcInstant('r.finished_at')} AS "finishedAt",r.error,r.trigger_id AS "triggerId",r.fired_trigger_ids AS "firedTriggerIds",r.membership_id,d.definition FROM ${table(tx, 'tf_workflow_runs')} r JOIN ${table(tx, 'tf_workflow_revisions')} d ON d.workflow_id=r.workflow_id AND d.id=r.revision WHERE r.id=$1 AND r.workflow_id=$2`,
           [runId, id],
         )
       ).rows[0];
@@ -1386,8 +1715,8 @@ export function createWorkflows(
       const runs = async (statuses: readonly string[], limit: number | null) =>
         (
           await tx.client.query(
-            `WITH visible AS (SELECT r.* FROM ${table(tx, 'tf_workflow_runs')} r WHERE workflow_id=$1 AND ((sponsorship_id IS NULL AND membership_id=$2 AND (request_key LIKE 'manual:%' OR request_key LIKE 'event:%')) OR EXISTS (SELECT 1 FROM ${table(tx, 'tf_workflow_run_audience')} a WHERE a.run_id=r.id AND a.membership_id=$2))) SELECT id,workflow_id AS "workflowId",revision,status,split_part(request_key,':',1) AS source,input,created_at::text AS "createdAt",${utcInstant('scheduled_for')} AS "scheduledFor",${utcInstant('started_at')} AS "startedAt",${utcInstant('finished_at')} AS "finishedAt",error,to_char(created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') || '~' || id AS cursor FROM visible WHERE status=ANY($3::text[]) AND ($4::timestamptz IS NULL OR (created_at,id)<($4::timestamptz,$5::uuid)) ORDER BY created_at DESC,id DESC LIMIT $6`,
-            [id, actor.membershipId, statuses, beforeAt ?? null, beforeId ?? null, limit],
+            `WITH visible AS (SELECT r.* FROM ${table(tx, 'tf_workflow_runs')} r WHERE workflow_id=$1 AND ((sponsorship_id IS NULL AND membership_id=$2 AND (request_key LIKE 'manual:%' OR request_key LIKE 'event:%')) OR EXISTS (SELECT 1 FROM ${table(tx, 'tf_workflow_run_audience')} a WHERE a.run_id=r.id AND a.membership_id=$2))) SELECT id,workflow_id AS "workflowId",revision,status,split_part(request_key,':',1) AS source,input,created_at::text AS "createdAt",${utcInstant('scheduled_for')} AS "scheduledFor",${utcInstant('started_at')} AS "startedAt",${utcInstant('finished_at')} AS "finishedAt",error,trigger_id AS "triggerId",fired_trigger_ids AS "firedTriggerIds",to_char(created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') || '~' || id AS cursor FROM visible WHERE status=ANY($3::text[]) AND ($4::timestamptz IS NULL OR (created_at,id)<($4::timestamptz,$5::uuid)) AND ($7::text IS NULL OR $7=ANY(fired_trigger_ids)) ORDER BY created_at DESC,id DESC LIMIT $6`,
+            [id, actor.membershipId, statuses, beforeAt ?? null, beforeId ?? null, limit, query.triggerId ?? null],
           )
         ).rows;
       const finished = statusSchema.options.filter(
@@ -1463,9 +1792,9 @@ export function createWorkflows(
       await requireGrant(tx, input.sponsorMembershipId, id, 'invoke');
       await requireUnarchived(tx, id);
       const current = await read(tx, id, actor.membershipId);
-      const trigger = current.definition.trigger;
-      if (trigger.kind === 'record' || trigger.kind === 'row')
-        await requireRecordAudience(tx, trigger, [input.sponsorMembershipId, ...input.historyAudience]);
+      for (const trigger of current.definition.triggers)
+        if (trigger.kind === 'record' || trigger.kind === 'row')
+          await requireRecordAudience(tx, trigger, [input.sponsorMembershipId, ...input.historyAudience]);
       await requireTableStepAuthority(tx, current.definition, input.sponsorMembershipId, input.historyAudience);
       await authorizeSources(tx, current.definition, input.sponsorMembershipId);
       for (const recipient of input.historyAudience) {
@@ -1485,9 +1814,10 @@ export function createWorkflows(
           recipient,
         ]);
       await tx.client.query(
-        `UPDATE ${table(tx, 'tf_workflows')} SET sponsor_membership_id=$2,sponsorship_id=$3,sponsorship_revision=revision,enabled=false,next_run_at=NULL,generation=generation+1 WHERE id=$1`,
+        `UPDATE ${table(tx, 'tf_workflows')} SET sponsor_membership_id=$2,sponsorship_id=$3,sponsorship_revision=revision,enabled=false,generation=generation+1 WHERE id=$1`,
         [id, input.sponsorMembershipId, input.sponsorMembershipId === actor.membershipId ? randomUUID() : null],
       );
+      await setTriggerTimes(tx, id, []);
       await liveRuns(tx, id, woken);
       await tx.client.query(`UPDATE ${table(tx, 'tf_provider_polls')} SET fence=$2 WHERE workflow_id=$1`, [
         id,
@@ -1509,9 +1839,9 @@ export function createWorkflows(
       const current = await read(tx, id, actor.membershipId);
       if (current.sponsorMembershipId !== actor.membershipId || !current.historyAudience.length)
         throw new AccessDenied();
-      const trigger = current.definition.trigger;
-      if (trigger.kind === 'record' || trigger.kind === 'row')
-        await requireRecordAudience(tx, trigger, [actor.membershipId, ...current.historyAudience]);
+      for (const trigger of current.definition.triggers)
+        if (trigger.kind === 'record' || trigger.kind === 'row')
+          await requireRecordAudience(tx, trigger, [actor.membershipId, ...current.historyAudience]);
       await requireTableStepAuthority(tx, current.definition, actor.membershipId, current.historyAudience);
       await authorizeSources(tx, current.definition, actor.membershipId);
       for (const recipient of current.historyAudience) {
@@ -1582,13 +1912,23 @@ export function createWorkflows(
       return { saved: true };
     });
   }
-  async function webhookKey(workspaceId: string, user: string, id: string, value: unknown) {
+  async function webhookKey(
+    workspaceId: string,
+    user: string,
+    id: string,
+    value: unknown,
+    triggerId: string = legacyWebhookTriggerId,
+  ) {
     const input = webhookKeySchema.parse(value);
     return transaction(workspaceId, async tx => {
       const actor = await workflowMember(tx, user),
         current = await read(tx, id);
       await requireGrant(tx, actor.membershipId, id, 'manage');
-      if (current.definition.trigger.kind !== 'webhook' && current.activeTrigger?.kind !== 'webhook')
+      if (
+        ![...current.definition.triggers, ...(current.activeTriggers ?? [])].some(
+          trigger => trigger.id === triggerId && trigger.kind === 'webhook',
+        )
+      )
         throw new WorkflowConflict('trigger-not-webhook');
       let key: string | null = null;
       await administrativeCommand(
@@ -1614,8 +1954,8 @@ export function createWorkflows(
           const bearerDigest = issued.stored.mode === 'bearer' ? issued.stored.digest : null;
           if (!rotation)
             await tx.client.query(
-              `UPDATE ${table(tx, 'tf_workflows')} SET webhook_digest=$2,generation=generation+1 WHERE id=$1`,
-              [id, bearerDigest],
+              `UPDATE ${table(tx, 'tf_workflow_triggers')} SET webhook_digest=$3 WHERE workflow_id=$1 AND trigger_id=$2`,
+              [id, triggerId, bearerDigest],
             );
           else {
             const previous =
@@ -1623,8 +1963,8 @@ export function createWorkflows(
                 ? currentKey(
                     (
                       await tx.client.query(
-                        `SELECT webhook_digest,webhook_secret FROM ${table(tx, 'tf_workflows')} WHERE id=$1`,
-                        [id],
+                        `SELECT webhook_digest,webhook_secret FROM ${table(tx, 'tf_workflow_triggers')} WHERE workflow_id=$1 AND trigger_id=$2`,
+                        [id, triggerId],
                       )
                     ).rows[0],
                   )
@@ -1634,16 +1974,18 @@ export function createWorkflows(
                 ? { mode: issued.stored.mode, generation: issued.stored.generation, envelope: issued.stored.envelope }
                 : null;
             await tx.client.query(
-              `UPDATE ${table(tx, 'tf_workflows')} SET webhook_digest=$2,webhook_secret=$3,webhook_previous=$4,webhook_previous_expires_at=CASE WHEN $4::jsonb IS NULL THEN NULL ELSE clock_timestamp()+$5*interval '1 second' END,generation=generation+1 WHERE id=$1`,
+              `UPDATE ${table(tx, 'tf_workflow_triggers')} SET webhook_digest=$2,webhook_secret=$3,webhook_previous=$4,webhook_previous_expires_at=CASE WHEN $4::jsonb IS NULL THEN NULL ELSE clock_timestamp()+$5*interval '1 second' END WHERE workflow_id=$1 AND trigger_id=$6`,
               [
                 id,
                 bearerDigest,
                 secret && JSON.stringify(secret),
                 previous && JSON.stringify(previous),
                 input.graceSeconds,
+                triggerId,
               ],
             );
           }
+          await tx.client.query(`UPDATE ${table(tx, 'tf_workflows')} SET generation=generation+1 WHERE id=$1`, [id]);
           key = issued.key;
           await auditWorkflow(tx, actor.membershipId, 'workflow.webhook.rotate', id);
         },
@@ -1651,7 +1993,13 @@ export function createWorkflows(
       return { workflow: await read(tx, id, actor.membershipId), key };
     });
   }
-  async function revokePreviousWebhookKey(workspaceId: string, user: string, id: string, value: unknown) {
+  async function revokePreviousWebhookKey(
+    workspaceId: string,
+    user: string,
+    id: string,
+    value: unknown,
+    triggerId: string = legacyWebhookTriggerId,
+  ) {
     const input = commandSchema.parse(value);
     return transaction(workspaceId, async tx => {
       const actor = await workflowMember(tx, user),
@@ -1670,11 +2018,12 @@ export function createWorkflows(
         },
         async () => {
           await requireUnarchived(tx, id);
-          if (!current.webhookPrevious) return;
-          await tx.client.query(
-            `UPDATE ${table(tx, 'tf_workflows')} SET webhook_previous=NULL,webhook_previous_expires_at=NULL,generation=generation+1 WHERE id=$1`,
-            [id],
+          const revoked = await tx.client.query(
+            `UPDATE ${table(tx, 'tf_workflow_triggers')} SET webhook_previous=NULL,webhook_previous_expires_at=NULL WHERE workflow_id=$1 AND trigger_id=$2 AND webhook_previous_expires_at>clock_timestamp()`,
+            [id, triggerId],
           );
+          if (!revoked.rowCount) return;
+          await tx.client.query(`UPDATE ${table(tx, 'tf_workflows')} SET generation=generation+1 WHERE id=$1`, [id]);
           await auditWorkflow(tx, actor.membershipId, 'workflow.webhook.revoke', id);
         },
       );
@@ -1691,27 +2040,126 @@ export function createWorkflows(
     }
     return null;
   }
-  async function activeWebhook(tx: WorkflowTransaction, id: string, columns = '') {
-    const row = (
+  /** Where a public delivery goes: an archived workflow combined into another forwards to the trigger its webhook moved to. */
+  async function webhookTarget(tx: WorkflowTransaction, id: string, triggerId: string) {
+    const alias = (
       await tx.client.query(
-        `SELECT ${columns}r.definition FROM ${table(tx, 'tf_workflows')} w JOIN ${table(tx, 'tf_workflow_revisions')} r ON r.workflow_id=w.id AND r.id=w.active_revision WHERE w.id=$1 AND w.enabled`,
+        `SELECT workflow_id,trigger_id FROM ${table(tx, 'tf_workflow_webhook_aliases')} WHERE old_workflow_id=$1`,
         [idSchema.parse(id)],
       )
     ).rows[0];
-    const trigger = row ? definitionSchema.parse(row.definition).trigger : null;
-    return row && trigger?.kind === 'webhook' ? { row, trigger } : null;
+    return alias
+      ? { id: idSchema.parse(alias.workflow_id), triggerId: z.string().parse(alias.trigger_id) }
+      : { id, triggerId };
   }
-  async function webhook(workspaceId: string, id: string, delivery: WebhookDelivery) {
+  /**
+   * Moves one webhook trigger's key, rotation, previous key, delivery log and spent signatures to another trigger, for
+   * combining workflows. Signing keys are sealed to their workflow, so they are resealed for the target. With `alias`,
+   * the source workflow's public URL forwards to the target until the source is restored by hand. Call it in the
+   * transaction that archives the source; the target trigger row must exist.
+   */
+  async function moveWebhookTrigger(
+    tx: WorkflowTransaction,
+    workspaceId: string,
+    move: {
+      from: { workflowId: string; triggerId: string };
+      to: { workflowId: string; triggerId: string };
+      alias: boolean;
+    },
+  ) {
+    const from = {
+        workflowId: idSchema.parse(move.from.workflowId),
+        triggerId: triggerIdSchema.parse(move.from.triggerId),
+      },
+      to = { workflowId: idSchema.parse(move.to.workflowId), triggerId: triggerIdSchema.parse(move.to.triggerId) };
+    const triggers = table(tx, 'tf_workflow_triggers');
+    const source = (
+      await tx.client.query(
+        `SELECT webhook_digest,webhook_secret,webhook_previous,webhook_previous_expires_at FROM ${triggers} WHERE workflow_id=$1 AND trigger_id=$2 FOR UPDATE`,
+        [from.workflowId, from.triggerId],
+      )
+    ).rows[0];
+    const target = await tx.client.query(
+      `SELECT kind FROM ${triggers} WHERE workflow_id=$1 AND trigger_id=$2 FOR UPDATE`,
+      [to.workflowId, to.triggerId],
+    );
+    if (!source || target.rows[0]?.kind !== 'webhook') throw new WorkflowConflict('trigger-not-webhook');
+    const reseal = (value: unknown) => {
+      if (value === null || value === undefined) return null;
+      const stored = storedWebhookKeySchema.parse(
+        'mode' in z.record(z.string(), z.unknown()).parse(value) ? value : { mode: 'signed', ...(value as object) },
+      );
+      if (stored.mode === 'bearer') return stored;
+      const key = cipher.decrypt(workspaceId, from.workflowId, stored.generation, stored.envelope, 'workflow-webhook');
+      return {
+        ...stored,
+        envelope: cipher.encrypt(workspaceId, to.workflowId, stored.generation, key, 'workflow-webhook'),
+      };
+    };
+    await tx.client.query(
+      `UPDATE ${triggers} SET webhook_digest=$3,webhook_secret=$4,webhook_previous=$5,webhook_previous_expires_at=$6 WHERE workflow_id=$1 AND trigger_id=$2`,
+      [
+        to.workflowId,
+        to.triggerId,
+        source.webhook_digest,
+        source.webhook_secret === null ? null : JSON.stringify(reseal(source.webhook_secret)),
+        source.webhook_previous === null ? null : JSON.stringify(reseal(source.webhook_previous)),
+        source.webhook_previous_expires_at,
+      ],
+    );
+    await tx.client.query(`UPDATE ${triggers} SET ${webhookCleared(tx)} WHERE workflow_id=$1 AND trigger_id=$2`, [
+      from.workflowId,
+      from.triggerId,
+    ]);
+    await tx.client.query(
+      `UPDATE ${table(tx, 'tf_workflow_webhook_deliveries')} SET workflow_id=$3,trigger_id=$4 WHERE workflow_id=$1 AND trigger_id=$2`,
+      [from.workflowId, from.triggerId, to.workflowId, to.triggerId],
+    );
+    const signatures = table(tx, 'tf_workflow_webhook_signatures');
+    await tx.client.query(
+      `INSERT INTO ${signatures} (workflow_id,trigger_id,signature,received_at) SELECT $3,$4,signature,received_at FROM ${signatures} WHERE workflow_id=$1 AND trigger_id=$2 ON CONFLICT DO NOTHING`,
+      [from.workflowId, from.triggerId, to.workflowId, to.triggerId],
+    );
+    await tx.client.query(`DELETE FROM ${signatures} WHERE workflow_id=$1 AND trigger_id=$2`, [
+      from.workflowId,
+      from.triggerId,
+    ]);
+    if (move.alias)
+      await tx.client.query(
+        `INSERT INTO ${table(tx, 'tf_workflow_webhook_aliases')} (old_workflow_id,workflow_id,trigger_id) VALUES ($1,$2,$3) ON CONFLICT (old_workflow_id) DO UPDATE SET workflow_id=EXCLUDED.workflow_id,trigger_id=EXCLUDED.trigger_id`,
+        [from.workflowId, to.workflowId, to.triggerId],
+      );
+    // Forwarding chains stay one hop: aliases that pointed at the source now point at the target.
+    await tx.client.query(
+      `UPDATE ${table(tx, 'tf_workflow_webhook_aliases')} SET workflow_id=$3,trigger_id=$4 WHERE workflow_id=$1 AND trigger_id=$2`,
+      [from.workflowId, from.triggerId, to.workflowId, to.triggerId],
+    );
+  }
+  /** The webhook trigger with this ID in the active revision of an enabled workflow, with its key state. */
+  async function activeWebhook(tx: WorkflowTransaction, id: string, triggerId: string) {
+    const row = (
+      await tx.client.query(
+        `SELECT t.enabled,t.webhook_digest,t.webhook_secret,CASE WHEN t.webhook_previous_expires_at>clock_timestamp() THEN t.webhook_previous END AS webhook_previous,extract(epoch FROM clock_timestamp())::float8 AS now,r.definition FROM ${table(tx, 'tf_workflows')} w JOIN ${table(tx, 'tf_workflow_revisions')} r ON r.workflow_id=w.id AND r.id=w.active_revision JOIN ${table(tx, 'tf_workflow_triggers')} t ON t.workflow_id=w.id AND t.trigger_id=$2 WHERE w.id=$1 AND w.enabled`,
+        [idSchema.parse(id), triggerIdSchema.parse(triggerId)],
+      )
+    ).rows[0];
+    const trigger = row ? definitionSchema.parse(row.definition).triggers.find(item => item.id === triggerId) : null;
+    return row && trigger?.kind === 'webhook' ? { row, trigger, enabled: row.enabled === true } : null;
+  }
+  async function webhook(
+    workspaceId: string,
+    id: string,
+    delivery: WebhookDelivery,
+    triggerId: string = legacyWebhookTriggerId,
+  ) {
     const proofs = webhookProof(delivery);
     if (!proofs.length) throw new WebhookRejected('key-missing');
     const outcome = await transaction(workspaceId, async tx => {
-      const rotation = webhookRotation(tx);
-      const active = await activeWebhook(
-        tx,
-        id,
-        `w.webhook_digest,${rotation ? `w.webhook_secret,CASE WHEN w.webhook_previous_expires_at>clock_timestamp() THEN w.webhook_previous END AS webhook_previous,` : 'NULL AS webhook_secret,NULL AS webhook_previous,'}extract(epoch FROM clock_timestamp())::float8 AS now,`,
-      );
+      if (!triggerIdSchema.safeParse(triggerId).success) throw new WebhookRejected('workflow-inactive');
+      ({ id, triggerId } = await webhookTarget(tx, id, triggerId));
+      const active = await activeWebhook(tx, id, triggerId);
       if (!active) throw new WebhookRejected('workflow-inactive');
+      if (!active.enabled) throw new WebhookRejected('trigger-disabled');
       const { row, trigger } = active;
       const keys = [
         currentKey(row),
@@ -1728,8 +2176,8 @@ export function createWorkflows(
           [id, tolerance * 2],
         );
         const recorded = await tx.client.query(
-          `INSERT INTO ${table(tx, 'tf_workflow_webhook_signatures')} (workflow_id,signature) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
-          [id, proof.signature],
+          `INSERT INTO ${table(tx, 'tf_workflow_webhook_signatures')} (workflow_id,trigger_id,signature) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`,
+          [id, triggerId, proof.signature],
         );
         if (recorded.rowCount !== 1) throw new WorkflowConflict('webhook-signature-replayed');
         // A refusal these exact bytes would always get keeps the signature spent, so a captured request cannot be resent for free.
@@ -1762,7 +2210,7 @@ export function createWorkflows(
   ) {
     if (!trigger.payload) {
       const input = startSchema.parse(value);
-      return admit(tx, id, `webhook:${input.requestId}`, input.input, null);
+      return admit(tx, id, `webhook:${trigger.id}:${input.requestId}`, input.input, null, firedBy([trigger.id]));
     }
     const body = payloadSchema.parse(value),
       { dedupe } = trigger.payload;
@@ -1793,16 +2241,31 @@ export function createWorkflows(
       !Array.isArray(run)
         ? run.body
         : run;
-    return admit(tx, id, `webhook:${dedupe.source}:${digest(canonical([dedupe, dedupeValue]))}`, input, null, sentBody);
+    return admit(
+      tx,
+      id,
+      `webhook:${trigger.id}:${dedupe.source}:${digest(canonical([dedupe, dedupeValue]))}`,
+      input,
+      null,
+      firedBy([trigger.id]),
+      sentBody,
+    );
   }
   /** Sends a sample shaped for the active trigger through the same admission as a verified delivery. The server cannot present a bearer key it stores only as a hash, so the manager's grant stands in for the key. */
-  async function testWebhook(workspaceId: string, user: string, id: string, value: unknown) {
+  async function testWebhook(
+    workspaceId: string,
+    user: string,
+    id: string,
+    value: unknown,
+    triggerId: string = legacyWebhookTriggerId,
+  ) {
     const input = webhookTestSchema.parse(value);
     return transaction(workspaceId, async tx => {
       const actor = await workflowMember(tx, user);
       await requireGrant(tx, actor.membershipId, id, 'manage');
-      const active = await activeWebhook(tx, id);
+      const active = await activeWebhook(tx, id, triggerId);
       if (!active) throw new WorkflowConflict('workflow-inactive');
+      if (!active.enabled) throw new WorkflowConflict('trigger-disabled');
       const sample = webhookSample(active.trigger, input.requestId);
       return receive(tx, id, active.trigger, sample.body, sample.headers);
     });
@@ -1815,40 +2278,64 @@ export function createWorkflows(
     bodyBytes: number | null;
   } & ({ requestId: string | null } | { sent: { body: unknown; headers: WebhookHeaders } });
   /** Keeps a bounded log entry for a delivery attempt, including rejected ones, in its own transaction so a rolled-back delivery still leaves a trace. Never stores the body or a credential. */
-  async function recordWebhookDelivery(workspaceId: string, id: string, record: DeliveryRecord) {
+  async function recordWebhookDelivery(
+    workspaceId: string,
+    id: string,
+    record: DeliveryRecord,
+    triggerId: string = legacyWebhookTriggerId,
+  ) {
     const workflowId = idSchema.parse(id),
       outcome = webhookOutcomeSchema.parse(record.outcome);
+    if (!triggerIdSchema.safeParse(triggerId).success) return;
     // Logging decides no access, so unverified callers' entries must not queue behind the workspace authorization lock.
-    await runtime.transaction(idSchema.parse(workspaceId), commonCompatibility, async tx => {
+    await runtime.transaction(idSchema.parse(workspaceId), workflowCompatibility, async tx => {
       if (!webhookLog(tx)) return;
+      const target = await webhookTarget(tx, workflowId, triggerId);
+      const [logId, logTrigger] = [target.id, target.triggerId];
       let requestId: string | null;
       if ('requestId' in record) requestId = record.requestId;
       else {
         const active = (
           await tx.client.query(
             `SELECT r.definition FROM ${table(tx, 'tf_workflows')} w JOIN ${table(tx, 'tf_workflow_revisions')} r ON r.workflow_id=w.id AND r.id=w.active_revision WHERE w.id=$1`,
-            [workflowId],
+            [logId],
           )
         ).rows[0];
         requestId = deliveryRequestId(
-          active ? definitionSchema.parse(active.definition).trigger : null,
+          (active ? definitionSchema.parse(active.definition).triggers.find(item => item.id === logTrigger) : null) ??
+            null,
           record.sent.body,
           record.sent.headers,
         );
       }
       const deliveries = table(tx, 'tf_workflow_webhook_deliveries');
       const inserted = await tx.client.query(
-        `INSERT INTO ${deliveries} (id,workflow_id,status,outcome,request_id,body_bytes,run_id,test) SELECT $1,w.id,$3,$4,$5,$6,$7,$8 FROM ${table(tx, 'tf_workflows')} w WHERE w.id=$2`,
-        [randomUUID(), workflowId, record.status, outcome, requestId, record.bodyBytes, record.runId, record.test],
+        `INSERT INTO ${deliveries} (id,workflow_id,trigger_id,status,outcome,request_id,body_bytes,run_id,test) SELECT $1,w.id,$9,$3,$4,$5,$6,$7,$8 FROM ${table(tx, 'tf_workflows')} w WHERE w.id=$2`,
+        [
+          randomUUID(),
+          logId,
+          record.status,
+          outcome,
+          requestId,
+          record.bodyBytes,
+          record.runId,
+          record.test,
+          logTrigger,
+        ],
       );
       if (inserted.rowCount)
         await tx.client.query(
-          `DELETE FROM ${deliveries} WHERE workflow_id=$1 AND (received_at<clock_timestamp()-$2*interval '1 day' OR id NOT IN (SELECT id FROM ${deliveries} WHERE workflow_id=$1 ORDER BY received_at DESC,id DESC LIMIT $3))`,
-          [workflowId, webhookDeliveryRetention.days, webhookDeliveryRetention.count],
+          `DELETE FROM ${deliveries} WHERE workflow_id=$1 AND trigger_id=$4 AND (received_at<clock_timestamp()-$2*interval '1 day' OR id NOT IN (SELECT id FROM ${deliveries} WHERE workflow_id=$1 AND trigger_id=$4 ORDER BY received_at DESC,id DESC LIMIT $3))`,
+          [logId, webhookDeliveryRetention.days, webhookDeliveryRetention.count, logTrigger],
         );
     });
   }
-  async function webhookDeliveries(workspaceId: string, user: string, id: string) {
+  async function webhookDeliveries(
+    workspaceId: string,
+    user: string,
+    id: string,
+    triggerId: string = legacyWebhookTriggerId,
+  ) {
     return transaction(workspaceId, async tx => {
       const actor = await workflowMember(tx, user);
       await requireGrant(tx, actor.membershipId, id, 'manage');
@@ -1857,8 +2344,14 @@ export function createWorkflows(
         available: true,
         deliveries: (
           await tx.client.query(
-            `SELECT d.id,${utcInstant('d.received_at')} AS "receivedAt",d.status,d.outcome,CASE WHEN d.run_id IS NULL OR v.visible THEN d.request_id END AS "requestId",d.body_bytes AS "bodyBytes",d.run_id IS NOT NULL AS "runStarted",CASE WHEN v.visible THEN d.run_id END AS "runId",d.test FROM ${table(tx, 'tf_workflow_webhook_deliveries')} d CROSS JOIN LATERAL (SELECT EXISTS (SELECT 1 FROM ${table(tx, 'tf_workflow_run_audience')} a WHERE a.run_id=d.run_id AND a.membership_id=$2) AS visible) v WHERE d.workflow_id=$1 AND d.received_at>=clock_timestamp()-$3*interval '1 day' ORDER BY d.received_at DESC,d.id DESC LIMIT $4`,
-            [idSchema.parse(id), actor.membershipId, webhookDeliveryRetention.days, webhookDeliveryRetention.count],
+            `SELECT d.id,${utcInstant('d.received_at')} AS "receivedAt",d.status,d.outcome,CASE WHEN d.run_id IS NULL OR v.visible THEN d.request_id END AS "requestId",d.body_bytes AS "bodyBytes",d.run_id IS NOT NULL AS "runStarted",CASE WHEN v.visible THEN d.run_id END AS "runId",d.test FROM ${table(tx, 'tf_workflow_webhook_deliveries')} d CROSS JOIN LATERAL (SELECT EXISTS (SELECT 1 FROM ${table(tx, 'tf_workflow_run_audience')} a WHERE a.run_id=d.run_id AND a.membership_id=$2) AS visible) v WHERE d.workflow_id=$1 AND d.trigger_id=$5 AND d.received_at>=clock_timestamp()-$3*interval '1 day' ORDER BY d.received_at DESC,d.id DESC LIMIT $4`,
+            [
+              idSchema.parse(id),
+              actor.membershipId,
+              webhookDeliveryRetention.days,
+              webhookDeliveryRetention.count,
+              triggerIdSchema.parse(triggerId),
+            ],
           )
         ).rows,
       });
@@ -1871,77 +2364,149 @@ export function createWorkflows(
       await requireGrant(tx, actor.membershipId, id, 'invoke');
       const row = (
         await tx.client.query(
-          `SELECT r.definition FROM ${table(tx, 'tf_workflows')} w JOIN ${table(tx, 'tf_workflow_revisions')} r ON r.workflow_id=w.id AND r.id=w.active_revision WHERE w.id=$1 AND w.enabled`,
+          `SELECT r.definition,ARRAY(SELECT t.trigger_id FROM ${table(tx, 'tf_workflow_triggers')} t WHERE t.workflow_id=w.id AND t.enabled) AS enabled FROM ${table(tx, 'tf_workflows')} w JOIN ${table(tx, 'tf_workflow_revisions')} r ON r.workflow_id=w.id AND r.id=w.active_revision WHERE w.id=$1 AND w.enabled`,
           [idSchema.parse(id)],
         )
       ).rows[0];
-      const trigger = row ? definitionSchema.parse(row.definition).trigger : null;
-      if (trigger?.kind !== 'event' || trigger.name !== eventName) throw new AccessDenied();
+      const enabled = new Set(z.array(z.string()).parse(row?.enabled ?? []));
+      const matched = row
+        ? definitionSchema
+            .parse(row.definition)
+            .triggers.filter(
+              trigger => trigger.kind === 'event' && trigger.name === eventName && enabled.has(trigger.id),
+            )
+            .map(trigger => trigger.id)
+        : [];
+      if (!matched.length) throw new AccessDenied();
       const { runId } = await admit(
         tx,
         id,
         `event:${actor.membershipId}:${input.requestId}`,
         input.input,
         actor.membershipId,
+        firedBy(matched),
       );
       return { runId };
     });
   }
+  type TriggerState<T extends Trigger = Trigger> = { trigger: T; enabled: boolean };
+  type ScheduleTrigger = Extract<Trigger, { kind: 'once' | 'interval' | 'cron' }>;
+  /** Every record trigger reads the table in one sweep; an occurrence several of them share starts one run, attributed to the first. */
   async function fireRecordOccurrences(
     tx: WorkflowTransaction,
     workflowId: string,
     revision: string,
-    trigger: RecordTrigger,
+    triggers: TriggerState<RecordTrigger>[],
     sweptAt: Date,
     sweepDue: string,
   ) {
-    return sweepTable(tx, workflowId, revision, sweptAt, async sponsor => {
-      const generation = await recordSource(tx, trigger, sponsor);
-      await reconcileRecordOccurrences(tx, workflowId, revision, trigger, generation, sweepDue);
-      const missed = await settleMissedRecordOccurrences(tx, workflowId, revision, sweptAt);
-      if (missed)
-        await skip(
-          tx,
-          workflowId,
-          revision,
-          `record:${revision}:missed:${sweptAt.toISOString()}`,
-          { tableId: trigger.tableId, ...missed },
-          'missed-occurrences-coalesced',
+    const enabled = triggers.filter(state => state.enabled).map(state => state.trigger),
+      enabledIds = enabled.map(trigger => trigger.id),
+      disabledIds = triggers.filter(state => !state.enabled).map(state => state.trigger.id);
+    return sweepTable(tx, workflowId, revision, sweptAt, enabledIds, disabledIds, async sponsor => {
+      if (disabledIds.length)
+        await tx.client.query(
+          `UPDATE ${table(tx, 'tf_workflow_record_occurrences')} SET fired_at=clock_timestamp() WHERE workflow_id=$1 AND trigger_id=ANY($2::text[]) AND fired_at IS NULL AND due_at<=clock_timestamp()`,
+          [workflowId, disabledIds],
         );
-      for (const occurrence of await dueRecordOccurrences(tx, workflowId, revision, sweptAt)) {
-        const run = await recordRunInput(tx, generation, trigger, occurrence),
+      const generations = new Map<string, Generation>();
+      for (const trigger of enabled) {
+        const generation = await recordSource(tx, trigger, sponsor);
+        generations.set(trigger.id, generation);
+        await reconcileRecordOccurrences(tx, workflowId, revision, trigger, generation, sweepDue);
+        const missed = await settleMissedRecordOccurrences(tx, workflowId, revision, trigger.id, sweptAt);
+        if (missed)
+          await skip(
+            tx,
+            workflowId,
+            revision,
+            `record:${revision}:missed:${trigger.id}:${sweptAt.toISOString()}`,
+            { tableId: trigger.tableId, ...missed },
+            'missed-occurrences-coalesced',
+            firedBy([trigger.id]),
+          );
+      }
+      if (!enabled.length) return;
+      for (const occurrence of await dueRecordOccurrences(tx, workflowId, revision, enabledIds, sweptAt)) {
+        const matched = enabled.filter(trigger => occurrence.triggerIds.includes(trigger.id)),
+          [first] = matched;
+        if (!first) continue;
+        const fired = firedBy(matched.map(trigger => trigger.id)),
+          generation = generations.get(first.id);
+        if (!generation) continue;
+        const run = await recordRunInput(tx, generation, first, occurrence),
           key = `record:${revision}:${occurrence.recordId}:${occurrence.dueAt}`;
-        if (run?.kind === 'run') await admit(tx, workflowId, key, run.input, null);
-        if (run?.kind === 'too-large') await skip(tx, workflowId, revision, key, run.input, 'record-values-too-large');
-        await markRecordOccurrenceFired(tx, workflowId, revision, occurrence);
+        if (run?.kind === 'run') await admit(tx, workflowId, key, run.input, null, fired);
+        if (run?.kind === 'too-large')
+          await skip(tx, workflowId, revision, key, run.input, 'record-values-too-large', fired);
+        await markRecordOccurrenceFired(tx, workflowId, revision, fired.firedTriggerIds, occurrence);
       }
     });
   }
+  /** Sets the next table read of the given triggers. Switched-off triggers stop reading until switched back on. */
+  async function setSweepTimes(
+    tx: WorkflowTransaction,
+    workflowId: string,
+    times: { triggerId: string; next: string | null }[],
+  ) {
+    if (!times.length) return;
+    await tx.client.query(
+      `UPDATE ${table(tx, 'tf_workflow_triggers')} t SET next_run_at=d.next FROM (SELECT * FROM unnest($2::text[],$3::timestamptz[]) AS d(trigger_id,next)) d WHERE t.workflow_id=$1 AND t.trigger_id=d.trigger_id`,
+      [workflowId, times.map(time => time.triggerId), times.map(time => time.next)],
+    );
+  }
+  /** One change matching several row triggers starts one run, with the input of the first trigger it matched. */
   async function fireRowChanges(
     tx: WorkflowTransaction,
     workflowId: string,
     revision: string,
-    trigger: RowTrigger,
+    triggers: TriggerState<RowTrigger>[],
     sweptAt: Date,
   ) {
     if (tx.commonVersion < rowTriggerCommonVersion) return 'unavailable';
+    const enabled = triggers.filter(state => state.enabled).map(state => state.trigger);
+    const retry = (next: string | null) =>
+      setSweepTimes(
+        tx,
+        workflowId,
+        triggers.map(state => ({ triggerId: state.trigger.id, next: state.enabled ? next : null })),
+      );
+    const later = new Date(sweptAt.getTime() + 60000).toISOString();
     try {
       const sponsor = (await requireSponsor(tx, workflowId)).sponsor_membership_id;
-      const generation = await rowSource(tx, trigger, sponsor);
+      const generations = new Map<string, Generation>();
+      for (const trigger of enabled) generations.set(trigger.id, await rowSource(tx, trigger, sponsor));
       for (const change of await dueRowChanges(tx, workflowId, revision)) {
-        const run = await rowRunInput(tx, workflowId, revision, generation, trigger, change),
-          key = `row:${revision}:${change.historyId}`;
-        if (run.kind === 'blocked') {
-          await blockRowChange(tx, workflowId, revision, change, run.reason);
-          continue;
+        const key = `row:${revision}:${change.historyId}`,
+          fired: string[] = [];
+        let input: z.infer<typeof payloadSchema> | undefined,
+          blocked: 'values-too-large' | 'values-unavailable' | undefined;
+        for (const trigger of enabled) {
+          const generation = generations.get(trigger.id);
+          if (!generation || !change.triggerIds.includes(trigger.id)) continue;
+          const run = await rowRunInput(tx, workflowId, revision, generation, trigger, change);
+          if (run.kind === 'blocked') blocked ??= run.reason;
+          if (run.kind !== 'run') continue;
+          fired.push(trigger.id);
+          if (input === undefined) input = run.input;
         }
-        if (run.kind === 'ignored') {
-          await settleRowChange(tx, workflowId, revision, change, 'ignored');
+        if (input === undefined) {
+          if (blocked) await blockRowChange(tx, workflowId, revision, change, blocked);
+          else
+            await settleRowChange(
+              tx,
+              workflowId,
+              revision,
+              change,
+              'ignored',
+              null,
+              enabled.some(trigger => change.triggerIds.includes(trigger.id)) ? null : 'trigger-disabled',
+            );
           continue;
         }
         await tx.client.query('SAVEPOINT row_admission');
         try {
-          const admitted = await admit(tx, workflowId, key, run.input, null);
+          const admitted = await admit(tx, workflowId, key, input, null, firedBy(fired));
           await settleRowChange(tx, workflowId, revision, change, 'admitted', admitted.runId);
           await tx.client.query('RELEASE SAVEPOINT row_admission');
         } catch (error) {
@@ -1949,10 +2514,7 @@ export function createWorkflows(
           await tx.client.query('RELEASE SAVEPOINT row_admission');
           if (!(error instanceof WorkflowLimitReached)) throw error;
           await blockRowChange(tx, workflowId, revision, change, 'capacity');
-          await tx.client.query(
-            `UPDATE ${table(tx, 'tf_workflows')} SET next_run_at=$2::timestamptz+interval '1 minute' WHERE id=$1`,
-            [workflowId, sweptAt.toISOString()],
-          );
+          await retry(later);
           return error.scope === 'workspace' ? 'workspace-limit' : 'limited';
         }
       }
@@ -1967,20 +2529,20 @@ export function createWorkflows(
       }
       throw error;
     }
-    await tx.client.query(
-      `UPDATE ${table(tx, 'tf_workflows')} SET next_run_at=$2::timestamptz+interval '1 minute' WHERE id=$1`,
-      [workflowId, sweptAt.toISOString()],
-    );
+    await retry(later);
     return 'fired';
   }
-  /** Reads a table trigger's source as its sponsor, then schedules the next sweep at the earliest waiting occurrence, or a minute out to pick up edits. */
+  /** Reads record triggers' source as the sponsor, then schedules each trigger's next sweep at its earliest waiting occurrence, or a minute out to pick up edits. */
   async function sweepTable(
     tx: WorkflowTransaction,
     workflowId: string,
     revision: string,
     sweptAt: Date,
+    enabledIds: string[],
+    disabledIds: string[],
     fire: (sponsor: string) => Promise<void>,
   ) {
+    const off: { triggerId: string; next: string | null }[] = disabledIds.map(triggerId => ({ triggerId, next: null }));
     try {
       await fire((await requireSponsor(tx, workflowId)).sponsor_membership_id);
     } catch (error) {
@@ -1994,46 +2556,79 @@ export function createWorkflows(
       }
       // Unfired occurrences stay due, so the next sweep retries them once a slot frees. This sweep read the table, so it marks the read.
       if (error instanceof WorkflowLimitReached) {
-        await tx.client.query(`UPDATE ${table(tx, 'tf_workflows')} SET next_run_at=$2 WHERE id=$1`, [
-          workflowId,
-          sweptAt.toISOString(),
+        await setSweepTimes(tx, workflowId, [
+          ...enabledIds.map(triggerId => ({ triggerId, next: sweptAt.toISOString() })),
+          ...off,
         ]);
         return error.scope === 'workspace' ? 'workspace-limit' : 'limited';
       }
       throw error;
     }
-    await tx.client.query(`UPDATE ${table(tx, 'tf_workflows')} SET next_run_at=$2 WHERE id=$1`, [
-      workflowId,
-      await nextRecordSweep(tx, workflowId, revision, sweptAt),
-    ]);
+    const times = [...off];
+    for (const triggerId of enabledIds)
+      times.push({ triggerId, next: await nextRecordSweep(tx, workflowId, revision, triggerId, sweptAt) });
+    await setSweepTimes(tx, workflowId, times);
     return 'fired';
   }
   async function admitProviderEvent(tx: WorkflowTransaction, workflowId: string, event: Record<string, unknown>) {
-    const trigger = definitionSchema.parse(event.definition).trigger;
-    if (trigger.kind !== 'provider' && trigger.kind !== 'github') return 'ignored';
+    const definition = definitionSchema.parse(event.definition),
+      triggerId = z.string().parse(event.trigger_id),
+      listed = new Set(z.array(z.string()).parse(event.fired_trigger_ids)),
+      enabled = new Set(z.array(z.string()).parse(event.enabled_ids));
     const revision = idSchema.parse(event.revision);
-    const key = `${trigger.kind}:${revision}:${z.string().parse(event.event_key)}`;
-    const payload = payloadSchema.parse(event.payload);
     const admitted = () =>
       tx.client.query(
-        `UPDATE ${table(tx, 'tf_provider_events')} SET admitted=true WHERE workflow_id=$1 AND revision=$2 AND event_key=$3`,
-        [workflowId, event.revision, event.event_key],
+        `UPDATE ${table(tx, 'tf_provider_events')} SET admitted=true WHERE workflow_id=$1 AND revision=$2 AND trigger_id=$3 AND event_key=$4`,
+        [workflowId, revision, triggerId, event.event_key],
       );
+    const matched = definition.triggers.filter(
+      trigger => (trigger.kind === 'provider' || trigger.kind === 'github') && listed.has(trigger.id),
+    );
+    const live = matched.filter(trigger => enabled.has(trigger.id)),
+      [trigger] = live;
+    const payload = payloadSchema.parse(event.payload);
     try {
-      // A disconnected repository only pauses delivery: reconnecting it in Knowledge resumes runs without re-enabling.
-      if (
-        trigger.kind === 'github' &&
-        !(await githubRepositoryConnected(
+      if (!trigger) {
+        const [first] = matched;
+        if (!first) {
+          await admitted();
+          return 'ignored';
+        }
+        // Switched-off triggers settle what they queued instead of holding it until they are switched back on.
+        await skip(
           tx,
-          trigger,
-          (await workflowSponsor(tx, workflowId, revision)).sponsor_membership_id,
-        ))
-      ) {
-        await skip(tx, workflowId, revision, key, payload, 'github-repository-not-connected');
+          workflowId,
+          revision,
+          `${first.kind}:${revision}:${triggerId}:${z.string().parse(event.event_key)}`,
+          payload,
+          'trigger-disabled',
+          firedBy(matched.map(item => item.id)),
+        );
         await admitted();
         return 'skipped';
       }
-      await admit(tx, workflowId, key, payload, null);
+      if (trigger.kind !== 'provider' && trigger.kind !== 'github') return 'ignored';
+      const key = `${trigger.kind}:${revision}:${triggerId}:${z.string().parse(event.event_key)}`,
+        fired = firedBy(live.map(item => item.id));
+      // A disconnected repository only pauses delivery: reconnecting it in Knowledge resumes runs without re-enabling.
+      const repositoryId = z
+        .string()
+        .nullable()
+        .parse(event.github_repository_id ?? null);
+      const sponsor =
+        trigger.kind === 'github' ? (await workflowSponsor(tx, workflowId, revision)).sponsor_membership_id : null;
+      if (
+        trigger.kind === 'github' &&
+        sponsor !== null &&
+        !(repositoryId === null
+          ? await githubTriggerConnected(tx, trigger, sponsor)
+          : await githubRepositoryConnected(tx, repositoryId, sponsor))
+      ) {
+        await skip(tx, workflowId, revision, key, payload, 'github-repository-not-connected', fired);
+        await admitted();
+        return 'skipped';
+      }
+      await admit(tx, workflowId, key, payload, null, fired);
       await admitted();
     } catch (error) {
       if (error instanceof AccessDenied) {
@@ -2045,42 +2640,149 @@ export function createWorkflows(
     }
     return 'admitted';
   }
-  async function fireSchedule(tx: WorkflowTransaction, row: Record<string, unknown>, sweptAt: Date) {
-    const trigger = definitionSchema.parse(row.definition).trigger;
+  type DueTrigger<T extends Trigger = Trigger> = TriggerState<T> & { due: string; scheduledFor: string };
+  /**
+   * Fires everything due for one workflow. Its trigger rows stay locked until the sweep commits, so grouping, the overlap check and
+   * admission see one consistent set of runs and trigger times. The workflow row is only share-locked, like row capture does, so a
+   * table write still in flight cannot stall the sweep.
+   */
+  async function fireWorkflow(tx: WorkflowTransaction, row: Record<string, unknown>, sweptAt: Date) {
     const workflowId = idSchema.parse(row.id),
       revision = idSchema.parse(row.revision),
-      scheduledFor = z.iso.datetime().parse(row.scheduled_for);
-    if (trigger.kind === 'record')
-      return fireRecordOccurrences(tx, workflowId, revision, trigger, sweptAt, scheduledFor);
-    if (trigger.kind === 'row') return fireRowChanges(tx, workflowId, revision, trigger, sweptAt);
-    const due = z.string().parse(row.due);
-    const key = trigger.kind === 'once' ? `schedule:${revision}:${due}` : `schedule:${due}`;
-    // An agent's trigger workflow runs one task at a time, whatever started the live run.
-    const overlapping =
-      (trigger.kind === 'cron' || trigger.kind === 'interval') &&
-      (
-        await tx.client.query(
-          `SELECT 1 FROM ${table(tx, 'tf_workflow_runs')} WHERE workflow_id=$1 AND ${agentLinked(tx) ? `(request_key LIKE 'schedule:%' OR EXISTS (SELECT 1 FROM ${table(tx, 'tf_workflows')} WHERE id=$1 AND agent_id IS NOT NULL))` : `request_key LIKE 'schedule:%'`} AND status IN ('queued','running','waiting') LIMIT 1`,
-          [workflowId],
-        )
-      ).rowCount === 1;
-    const missed = missedOccurrences(trigger, new Date(scheduledFor), sweptAt);
+      definition = definitionSchema.parse(row.definition);
+    const locked = await tx.client.query(
+      `SELECT 1 FROM ${table(tx, 'tf_workflows')} WHERE id=$1 AND enabled AND active_revision=$2 FOR SHARE`,
+      [workflowId, revision],
+    );
+    if (locked.rowCount !== 1) return 'ignored';
+    const states = (
+      await tx.client.query(
+        `SELECT trigger_id,enabled,next_run_at::text AS due,${utcInstant('next_run_at')} AS scheduled_for,next_run_at<=$2::timestamptz AS due_now FROM ${table(tx, 'tf_workflow_triggers')} WHERE workflow_id=$1 ORDER BY trigger_id FOR UPDATE`,
+        [workflowId, sweptAt.toISOString()],
+      )
+    ).rows;
+    const byId = new Map(states.map(state => [z.string().parse(state.trigger_id), state]));
+    const stale = states
+      .filter(state => state.due_now === true && !definition.triggers.some(trigger => trigger.id === state.trigger_id))
+      .map(state => z.string().parse(state.trigger_id));
+    if (stale.length)
+      await tx.client.query(
+        `UPDATE ${table(tx, 'tf_workflow_triggers')} SET next_run_at=NULL WHERE workflow_id=$1 AND trigger_id=ANY($2::text[])`,
+        [workflowId, stale],
+      );
+    const due: DueTrigger[] = [],
+      known: TriggerState[] = [];
+    for (const trigger of definition.triggers) {
+      const state = byId.get(trigger.id);
+      if (!state) continue;
+      known.push({ trigger, enabled: state.enabled === true });
+      if (state.due_now === true)
+        due.push({
+          trigger,
+          enabled: state.enabled === true,
+          due: z.string().parse(state.due),
+          scheduledFor: z.iso.datetime().parse(state.scheduled_for),
+        });
+    }
+    const schedules = due.filter((item): item is DueTrigger<ScheduleTrigger> => isScheduleTrigger(item.trigger));
+    if (schedules.length) {
+      const outcome = await fireSchedule(tx, workflowId, revision, schedules, sweptAt);
+      if (outcome !== 'fired') return outcome;
+    }
+    const recordsDue = due.filter(item => item.trigger.kind === 'record');
+    if (recordsDue.length) {
+      const outcome = await fireRecordOccurrences(
+        tx,
+        workflowId,
+        revision,
+        known.filter((item): item is TriggerState<RecordTrigger> => item.trigger.kind === 'record'),
+        sweptAt,
+        recordsDue.map(item => item.scheduledFor).sort()[0] ?? sweptAt.toISOString(),
+      );
+      if (outcome !== 'fired') return outcome;
+    }
+    if (due.some(item => item.trigger.kind === 'row'))
+      return fireRowChanges(
+        tx,
+        workflowId,
+        revision,
+        known.filter((item): item is TriggerState<RowTrigger> => item.trigger.kind === 'row'),
+        sweptAt,
+      );
+    return 'fired';
+  }
+  /**
+   * Schedule triggers due together start one run: it lists them in definition order and is scheduled for the earliest.
+   * Each trigger's own missed occurrences are recorded separately, and switched-off triggers skip theirs.
+   */
+  async function fireSchedule(
+    tx: WorkflowTransaction,
+    workflowId: string,
+    revision: string,
+    due: DueTrigger<ScheduleTrigger>[],
+    sweptAt: Date,
+  ) {
+    const onceKey = (item: DueTrigger) => `schedule:${revision}:${item.trigger.id}:${item.due}`;
+    const live = due.filter(item => item.enabled),
+      off = due.filter(item => !item.enabled);
+    const missed = new Map(
+      live.map(item => [item.trigger.id, missedOccurrences(item.trigger, new Date(item.scheduledFor), sweptAt)]),
+    );
+    const earliest = live.reduce<DueTrigger<ScheduleTrigger> | undefined>(
+      (first, item) => (!first || item.scheduledFor < first.scheduledFor ? item : first),
+      undefined,
+    );
     try {
-      if (overlapping) {
-        await requireSponsor(tx, workflowId);
+      for (const item of off)
         await skip(
           tx,
           workflowId,
           revision,
-          key,
-          missed ? { ...missed, scheduledFor, missedCount: missed.missedCount + 1 } : { scheduledFor },
-          'previous-run-unfinished',
+          `${item.trigger.kind === 'once' ? onceKey(item) : `schedule:${item.due}:${item.trigger.id}`}:disabled`,
+          { scheduledFor: item.scheduledFor },
+          'trigger-disabled',
+          firedBy([item.trigger.id]),
         );
-      } else {
-        await admit(tx, workflowId, key, { scheduledFor }, null);
-        if (missed) await skip(tx, workflowId, revision, `${key}:missed`, missed, 'missed-occurrences-coalesced');
+      if (earliest) {
+        const scheduledFor = earliest.scheduledFor,
+          fired = firedBy(live.map(item => item.trigger.id)),
+          key = live.length === 1 && earliest.trigger.kind === 'once' ? onceKey(earliest) : `schedule:${earliest.due}`;
+        // The overlap rule covers every schedule trigger, once included. An agent's trigger workflow runs one task at a time, whatever started the live run.
+        const overlapping =
+          (
+            await tx.client.query(
+              `SELECT 1 FROM ${table(tx, 'tf_workflow_runs')} WHERE workflow_id=$1 AND ${agentLinked(tx) ? `(request_key LIKE 'schedule:%' OR EXISTS (SELECT 1 FROM ${table(tx, 'tf_workflows')} WHERE id=$1 AND agent_id IS NOT NULL))` : `request_key LIKE 'schedule:%'`} AND status IN ('queued','running','waiting') LIMIT 1`,
+              [workflowId],
+            )
+          ).rowCount === 1;
+        const only = live.length === 1 ? missed.get(earliest.trigger.id) : null;
+        if (overlapping) {
+          await requireSponsor(tx, workflowId);
+          await skip(
+            tx,
+            workflowId,
+            revision,
+            key,
+            only ? { ...only, scheduledFor, missedCount: only.missedCount + 1 } : { scheduledFor },
+            'previous-run-unfinished',
+            fired,
+          );
+        } else await admit(tx, workflowId, key, { scheduledFor }, null, fired);
+        for (const item of live) {
+          const count = missed.get(item.trigger.id);
+          if (count && !(overlapping && live.length === 1))
+            await skip(
+              tx,
+              workflowId,
+              revision,
+              `${key}:missed:${item.trigger.id}`,
+              count,
+              'missed-occurrences-coalesced',
+              firedBy([item.trigger.id]),
+            );
+        }
         // The admitted run records the revocation in history as blocked; disabling stops later occurrences from repeating it.
-        await requireSponsor(tx, workflowId);
+        if (!overlapping) await requireSponsor(tx, workflowId);
       }
     } catch (error) {
       if (error instanceof AccessDenied) {
@@ -2090,11 +2792,20 @@ export function createWorkflows(
       if (error instanceof WorkflowLimitReached) return error.scope === 'workspace' ? 'workspace-limit' : 'limited';
       throw error;
     }
-    const intervalAnchor = trigger.kind === 'interval' ? new Date(missed?.missedThrough ?? scheduledFor) : sweptAt;
-    await tx.client.query(`UPDATE ${table(tx, 'tf_workflows')} SET next_run_at=$2 WHERE id=$1`, [
-      workflowId,
-      trigger.kind === 'once' ? null : nextOccurrence(trigger, intervalAnchor),
-    ]);
+    for (const item of due) {
+      const { trigger } = item;
+      const anchor =
+        trigger.kind === 'interval' ? new Date(missed.get(trigger.id)?.missedThrough ?? item.scheduledFor) : sweptAt;
+      await tx.client.query(
+        `UPDATE ${table(tx, 'tf_workflow_triggers')} SET next_run_at=$3,once_fired_at=CASE WHEN $4::timestamptz IS NULL THEN once_fired_at ELSE $4::timestamptz END WHERE workflow_id=$1 AND trigger_id=$2`,
+        [
+          workflowId,
+          trigger.id,
+          trigger.kind === 'once' ? null : nextOccurrence(trigger, anchor),
+          trigger.kind === 'once' ? new Date(trigger.at).toISOString() : null,
+        ],
+      );
+    }
     return 'fired';
   }
   /** Runs one workflow's share of the sweep so an unexpected error, even one that aborts the SQL transaction, costs only that workflow. */
@@ -2128,7 +2839,7 @@ export function createWorkflows(
         AND w.id NOT IN (SELECT e.subject_id FROM ${table(tx, 'tf_audit_events')} e WHERE e.operation='workflow.sweep-failed' AND e.created_at>clock_timestamp()-interval '${failedSweepRetry}')`;
       const events = (
         await tx.client.query(
-          `SELECT e.workflow_id,e.revision,e.event_key,e.payload,r.definition FROM ${table(tx, 'tf_provider_events')} e JOIN ${table(tx, 'tf_workflows')} w ON w.id=e.workflow_id AND w.active_revision=e.revision JOIN ${table(tx, 'tf_workflow_revisions')} r ON r.workflow_id=w.id AND r.id=e.revision WHERE w.enabled AND NOT e.admitted AND ${belowRunLimits} ORDER BY e.created_at,e.event_key LIMIT 20`,
+          `SELECT e.workflow_id,e.revision,e.trigger_id,e.fired_trigger_ids,e.event_key,e.payload,e.github_repository_id,r.definition,ARRAY(SELECT t.trigger_id FROM ${table(tx, 'tf_workflow_triggers')} t WHERE t.workflow_id=e.workflow_id AND t.enabled) AS enabled_ids FROM ${table(tx, 'tf_provider_events')} e JOIN ${table(tx, 'tf_workflows')} w ON w.id=e.workflow_id AND w.active_revision=e.revision JOIN ${table(tx, 'tf_workflow_revisions')} r ON r.workflow_id=w.id AND r.id=e.revision WHERE w.enabled AND NOT e.admitted AND ${belowRunLimits} ORDER BY e.created_at,e.event_key LIMIT 20`,
           [workflowLimits.member, workflowLimits.workflow, workflowLimits.parked],
         )
       ).rows;
@@ -2143,13 +2854,13 @@ export function createWorkflows(
       const sweptAt = await databaseNow(tx);
       const schedules = (
         await tx.client.query(
-          `SELECT w.id,w.active_revision AS revision,w.next_run_at::text AS due,${utcInstant('w.next_run_at')} AS scheduled_for,r.definition FROM ${table(tx, 'tf_workflows')} w JOIN ${table(tx, 'tf_workflow_revisions')} r ON r.workflow_id=w.id AND r.id=w.active_revision WHERE w.enabled AND w.next_run_at<=$4::timestamptz AND ${belowRunLimits} ORDER BY w.next_run_at,w.id LIMIT 20`,
+          `SELECT w.id,w.active_revision AS revision,r.definition FROM (SELECT t.workflow_id,min(t.next_run_at) AS first FROM ${table(tx, 'tf_workflow_triggers')} t WHERE t.next_run_at<=$4::timestamptz GROUP BY t.workflow_id) d JOIN ${table(tx, 'tf_workflows')} w ON w.id=d.workflow_id JOIN ${table(tx, 'tf_workflow_revisions')} r ON r.workflow_id=w.id AND r.id=w.active_revision WHERE w.enabled AND ${belowRunLimits} ORDER BY d.first,w.id LIMIT 20`,
           [workflowLimits.member, workflowLimits.workflow, workflowLimits.parked, sweptAt.toISOString()],
         )
       ).rows;
       for (const row of schedules) {
         const workflowId = idSchema.parse(row.id);
-        if ((await isolated(tx, workflowId, () => fireSchedule(tx, row, sweptAt))) === 'workspace-limit') break;
+        if ((await isolated(tx, workflowId, () => fireWorkflow(tx, row, sweptAt))) === 'workspace-limit') break;
       }
       // A parked run needs no redispatch until its due time, when it stops counting as parked.
       const rows = (
@@ -2259,15 +2970,17 @@ export function createWorkflows(
         return { kind: 'done' };
       }
       const definition = definitionSchema.parse(raw.definition);
-      try {
-        await authorizeSource(tx, definition.trigger, idSchema.parse(raw.membership_id));
-      } catch {
-        await tx.client.query(`UPDATE ${table(tx, 'tf_workflow_runs')} SET status='blocked',error=$2 WHERE id=$1`, [
-          work.runId,
-          `${definition.trigger.kind}-authority-revoked`,
-        ]);
-        return { kind: 'done' };
-      }
+      for (const trigger of definition.triggers)
+        try {
+          await authorizeSource(tx, trigger, idSchema.parse(raw.membership_id));
+        } catch {
+          await tx.client.query(`UPDATE ${table(tx, 'tf_workflow_runs')} SET status='blocked',error=$2 WHERE id=$1`, [
+            work.runId,
+            `${trigger.kind}-authority-revoked`,
+          ]);
+          return { kind: 'done' };
+        }
+      const startedBy = definition.triggers.find(trigger => trigger.id === raw.trigger_id) ?? null;
       try {
         await requireTableStepReader(tx, idSchema.parse(raw.membership_id), definition);
       } catch {
@@ -2306,6 +3019,7 @@ export function createWorkflows(
       const outputs = new Map<string, z.infer<typeof payloadSchema>>();
       for (const row of rows)
         if (row.status === 'completed') outputs.set(z.string().parse(row.step_id), payloadSchema.parse(row.output));
+      outputs.set(runTriggerKey, startedBy ? { id: startedBy.id, kind: startedBy.kind } : manualRunTrigger);
       const next = nextStep(definition.steps, outputs);
       if (!next) {
         await tx.client.query(`UPDATE ${table(tx, 'tf_workflow_runs')} SET status='completed' WHERE id=$1`, [
@@ -2473,7 +3187,9 @@ export function createWorkflows(
             .min(1)
             .max(8000)
             .parse(resolveValue(step.prompt, input, outputs));
-          if (step.context) text = withAgentContext(text, resolveValue(step.context, input, outputs));
+          const context = step.context ? resolveValue(step.context, input, outputs) : input;
+          if (step.triggerContext) text = withAgentContext(text, triggerContext(startedBy, context));
+          else if (step.context) text = withAgentContext(text, context);
         } catch {
           return fail('agent-prompt-invalid');
         }
@@ -2793,6 +3509,8 @@ export function createWorkflows(
     activate,
     archive,
     restore,
+    switchTrigger,
+    moveWebhookTrigger,
     cancelRowEvents,
     start,
     history,

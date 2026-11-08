@@ -82,7 +82,7 @@ test('recent endpoints return the newest three accessible items, not UUID order'
       definition: {
         version: 1,
         name: `Workflow ${index}`,
-        trigger: { kind: 'manual' },
+        triggers: [],
         steps: [{ id: 'copy', kind: 'transform', fields: { value: { kind: 'literal', value: index } } }],
       },
     });

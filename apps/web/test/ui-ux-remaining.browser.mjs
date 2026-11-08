@@ -151,13 +151,13 @@ const workflows = Array.from({ length: 20 }, (_, i) => ({
   enabled: false,
   generation: 1,
   nextRunAt: null,
-  activeTrigger: null,
-  webhookConfigured: false,
+  activeTriggers: null,
+  triggers: [],
   capabilities: { read: true, invoke: true, manage: true },
   definition: {
     version: 1,
     name: `Customer review ${i + 1}`,
-    trigger: { kind: 'manual' },
+    triggers: [],
     steps: [{ id: 'review', kind: 'human', prompt: 'Review the customer request.', timeoutSeconds: 86400 }],
   },
 }));

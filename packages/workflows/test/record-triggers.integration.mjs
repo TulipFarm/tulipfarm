@@ -17,7 +17,7 @@ import {
 } from '@tulipfarm/tables/store';
 import { AccessDenied } from '@tulipfarm/access';
 import { createWorkflows } from '../src/service.ts';
-import { activate } from './commands.fixture.mjs';
+import { activate, switchTrigger } from './commands.fixture.mjs';
 
 const pick = ({ enabled, disabledReason }) => ({ enabled, disabledReason });
 
@@ -174,7 +174,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       await service.save(w.id, who.userId, id, {
         revision: workflowRevision,
         expectedRevision: null,
-        definition: { version: 1, name: 'Reminder', trigger, steps },
+        definition: { version: 1, name: 'Reminder', triggers: [{ id: 'record', ...trigger }], steps },
       });
       await service.sponsorship(w.id, who.userId, id, {
         sponsorMembershipId: who.membershipId,
@@ -186,7 +186,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     const workflow = async (who, id) => (await service.list(w.id, who.userId)).find(item => item.id === id);
     const sweep = async id => {
       await db.databaseAdmin.query(
-        `UPDATE ${table('tf_workflows')} SET next_run_at=clock_timestamp() WHERE id=$1 AND enabled`,
+        `UPDATE ${table('tf_workflow_triggers')} SET next_run_at=clock_timestamp() WHERE workflow_id=$1 AND workflow_id IN (SELECT id FROM ${table('tf_workflows')} WHERE enabled)`,
         [id],
       );
       await service.due(w.id);
@@ -282,6 +282,22 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       'edits, deletes, restores and a date set back never refire an occurrence that already ran',
     );
 
+    const missedAt = new Date(Date.now() + 3600000 + 1500).toISOString(),
+      keptAt = new Date(Date.now() + 2 * 86400000).toISOString();
+    await create({ title: 'Missed while off', meeting: missedAt });
+    const kept = await create({ title: 'Kept while off', meeting: keptAt });
+    await upcoming(meetings);
+    await switchTrigger(service, w.id, w.userId, meetings, 'record', false);
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    await sweep(meetings);
+    await switchTrigger(service, w.id, w.userId, meetings, 'record', true);
+    assert.deepEqual(
+      await upcoming(meetings),
+      { [kept.id]: new Date(Date.parse(keptAt) - 3600000).toISOString() },
+      'switching a record trigger off and on drops the occurrence that fell due meanwhile and keeps later ones',
+    );
+    assert.deepEqual(await runs(), fired, 'the occurrence that fell due while off never runs');
+
     const isOpen = { fieldId: fields.status.id, match: 'is', value: { kind: 'single-select', optionId: open.id } };
     const opened = await create({ title: 'Opened', due: day(springForward, 2), status: open });
     const shut = await create({ title: 'Shut', due: day(springForward, 2), status: closed });
@@ -347,7 +363,11 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     const hourBefore = new Date(Date.parse(inTwoDays) - 3600000).toISOString();
     assert.deepEqual(
       await upcoming(notUrgent),
-      { [calm.id]: hourBefore, [unmarked.id]: hourBefore },
+      {
+        [calm.id]: hourBefore,
+        [unmarked.id]: hourBefore,
+        [kept.id]: new Date(Date.parse(keptAt) - 3600000).toISOString(),
+      },
       'a yes or no filter on a timestamp trigger keeps "no" and empty values',
     );
 
@@ -404,12 +424,15 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     const oversized = await create({ title: 'Oversized', meeting: soon, notes: '\u0001'.repeat(10000) });
     await new Promise(resolve => setTimeout(resolve, 2000));
     await db.databaseAdmin.query(
-      `UPDATE ${table('tf_workflows')} SET next_run_at=clock_timestamp() - CASE WHEN id=$1 THEN interval '1 second' ELSE interval '0' END WHERE id=ANY($2)`,
+      `UPDATE ${table('tf_workflow_triggers')} SET next_run_at=clock_timestamp() - CASE WHEN workflow_id=$1 THEN interval '1 second' ELSE interval '0' END WHERE next_run_at IS NOT NULL AND workflow_id IN (SELECT id FROM ${table('tf_workflows')} WHERE id=ANY($2))`,
       [noted, [noted, meetings]],
     );
     await service.due(w.id);
     const oversizedRuns = async id =>
-      (await service.history(w.id, w.userId, id).then(page => page.runs))
+      [
+        ...(await service.history(w.id, w.userId, id).then(page => page.runs)),
+        ...(await service.history(w.id, w.userId, id, { status: 'skipped' }).then(page => page.runs)),
+      ]
         .filter(run => run.input.recordId === oversized.id)
         .map(run => ({ status: run.status, error: run.error, input: run.input }));
     assert.deepEqual(
@@ -463,7 +486,11 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       );
     // The workflow last read the table three hours ago and has sat at its run cap since.
     await db.databaseAdmin.query(
-      `UPDATE ${table('tf_workflows')} SET activated_at=activated_at - interval '5 hours',next_run_at=next_run_at - interval '3 hours' WHERE id=$1`,
+      `UPDATE ${table('tf_workflows')} SET activated_at=activated_at - interval '5 hours' WHERE id=$1`,
+      [capped],
+    );
+    await db.databaseAdmin.query(
+      `UPDATE ${table('tf_workflow_triggers')} SET next_run_at=next_run_at - interval '3 hours' WHERE workflow_id=$1`,
       [capped],
     );
     const hoursAgo = hours => new Date(Date.now() - hours * 3600000).toISOString();
@@ -521,7 +548,11 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       );
     // The workflow last read the table a week ago and has sat at its run cap since.
     await db.databaseAdmin.query(
-      `UPDATE ${table('tf_workflows')} SET activated_at=activated_at - interval '8 days',next_run_at=clock_timestamp() - interval '7 days' WHERE id=$1`,
+      `UPDATE ${table('tf_workflows')} SET activated_at=activated_at - interval '8 days' WHERE id=$1`,
+      [stalled],
+    );
+    await db.databaseAdmin.query(
+      `UPDATE ${table('tf_workflow_triggers')} SET next_run_at=clock_timestamp() - interval '7 days' WHERE workflow_id=$1`,
       [stalled],
     );
     const occurrenceAt = hours => new Date(Date.now() - hours * 3600000).toISOString();
@@ -533,7 +564,10 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     for (const at of [sixDays, threeDays, yesterday]) await create({ title: 'Stalled', meeting: meetingFor(at) });
     const fresh = await create({ title: 'Stalled', meeting: meetingFor(recent) });
     const stalledRuns = async () =>
-      (await service.history(w.id, w.userId, stalled).then(page => page.runs))
+      [
+        ...(await service.history(w.id, w.userId, stalled).then(page => page.runs)),
+        ...(await service.history(w.id, w.userId, stalled, { status: 'skipped' }).then(page => page.runs)),
+      ]
         .filter(run => run.source === 'record')
         .map(run => ({ status: run.status, error: run.error, input: run.input }))
         .map(({ input: { values: _values, ...input }, ...run }) => ({ ...run, input }));

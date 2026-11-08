@@ -18,6 +18,7 @@ export function AgentDraftSummary({
   skills,
   tools,
   channelNames,
+  postsTo = [],
   triggerLabels,
   onEdit,
 }: {
@@ -28,6 +29,8 @@ export function AgentDraftSummary({
   skills: SkillSelections;
   tools: readonly ToolName[];
   channelNames: readonly string[];
+  /** Slack channels the agent may post to, even with no channel attached. */
+  postsTo?: readonly string[];
   triggerLabels: readonly string[];
   onEdit?: ((step: BuilderStep) => void) | undefined;
 }) {
@@ -66,17 +69,21 @@ export function AgentDraftSummary({
               step: 'triggers',
               Icon: MessageSquare,
               term: 'Slack',
-              value: channelNames.length
-                ? channelNames.map(channel => (channel.startsWith('#') ? channel : `#${channel}`)).join(', ')
-                : 'Not attached',
+              value:
+                [
+                  channelNames.length
+                    ? `Replies in ${channelNames.map(channel => (channel.startsWith('#') ? channel : `#${channel}`)).join(', ')}`
+                    : '',
+                  postsTo.length ? `Posts to ${postsTo.join(', ')}` : '',
+                ]
+                  .filter(Boolean)
+                  .join('. ') || 'Not attached',
             },
             {
               step: 'triggers',
               Icon: CalendarClock,
-              term: 'Workflow triggers',
-              value: triggerLabels.length
-                ? `${triggerLabels.length} workflow trigger${triggerLabels.length === 1 ? '' : 's'}`
-                : 'Manual use only',
+              term: 'Triggers',
+              value: triggerLabels.length ? triggerLabels.join('; ') : 'No triggers',
             },
           ] as const
         ).map(({ step, Icon, term, value }) => (

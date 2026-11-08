@@ -64,7 +64,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         await service.save(w.id, w.userId, id, {
           revision,
           expectedRevision: null,
-          definition: { version: 1, name, trigger: { kind: 'manual' }, steps },
+          definition: { version: 1, name, triggers: [], steps },
         });
         await activate(service, w.id, w.userId, id, revision, true);
         return { id, revision };

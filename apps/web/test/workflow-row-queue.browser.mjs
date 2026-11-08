@@ -79,7 +79,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
         definition: {
           version: 1,
           name: 'Every new order',
-          trigger: { kind: 'row', tableId, event: 'created' },
+          triggers: [{ id: 'new_order', kind: 'row', tableId, event: 'created' }],
           steps: [{ id: 'review', kind: 'human', prompt: 'Check the order.', timeoutSeconds: 3600 }],
         },
       });

@@ -150,6 +150,14 @@ test(
             if (method === 'GET') return route.fulfill({ json: [] });
           }
           if (path === '/v1/feature-flags') return route.fulfill({ json: {} });
+          if (path.endsWith('/integrations')) return route.fulfill({ json: { integrations: [] } });
+          if (path.endsWith('/github/accounts')) return route.fulfill({ json: { configured: true, accounts: [] } });
+          if (path.endsWith(`/github/chats/${chatId}/selection`))
+            return route.fulfill({ json: { accountId: null, generation: null, version: 0 } });
+          if (path.endsWith(`/github/chats/${chatId}/batches`)) return route.fulfill({ json: { batches: [] } });
+          if (path.endsWith('/system-package-installations'))
+            return route.fulfill({ json: { installations: [], nextCursor: null } });
+          if (path.endsWith('/governance')) return route.fulfill({ status: 404, json: { error: 'not-found' } });
           throw new Error(`Unexpected API request ${method} ${path}`);
         });
 
@@ -274,14 +282,11 @@ test(
               ...(handoff ? { detach: true } : {}),
             },
           ],
+          prompt: 'Prepare a weekly policy update.',
+          runLimits: { toolCalls: 10, activeMilliseconds: 60000, credits: 10 },
           triggers: [
-            {
-              id: triggerId,
-              trigger: { kind: 'cron', expression: '0 9 * * 1', timezone: 'Asia/Kolkata' },
-              prompt: 'Prepare a weekly policy update.',
-              limits: { toolCalls: 10, activeMilliseconds: 60000, credits: 10 },
-            },
-            { id: randomUUID(), trigger: { kind: 'manual' }, prompt: 'Answer a policy question on request.' },
+            { id: triggerId, trigger: { kind: 'cron', expression: '0 9 * * 1', timezone: 'Asia/Kolkata' } },
+            { id: randomUUID(), trigger: { kind: 'event', name: 'policy_question' } },
           ],
         };
         const view = {
@@ -297,6 +302,8 @@ test(
               expectedSavedRevision: null,
               expectedPolicyVersion: 0,
               expectedActivationIds: [],
+              expectedWorkflowRevision: null,
+              expectedWorkflowGeneration: null,
               owningTeamId: fixture.team.id,
               definition: {
                 name: 'People Ops chat helper',
@@ -432,6 +439,7 @@ test(
           assert.equal(saved.slackSender, 'app');
           assert.deepEqual(saved.slackChannels, setup.slackChannels);
           assert.deepEqual(saved.triggers, setup.triggers);
+          assert.equal(saved.prompt, setup.prompt);
           assert.equal(decisions.length, 0, 'manual handoff is not chat approval');
           deny = true;
           await page.goto(
@@ -452,8 +460,8 @@ test(
           const exhausted = reads;
           await page.clock.runFor(30000);
           assert.equal(reads, exhausted, 'checks stop once the budget is used');
-          const sponsor = card.getByRole('checkbox', { name: /^I sponsor trigger/ });
-          assert.equal(await sponsor.count(), 1, 'a trigger run by hand needs no sponsor');
+          const sponsor = card.getByRole('checkbox', { name: /^I sponsor / });
+          assert.equal(await sponsor.count(), 1, 'an event trigger needs no sponsor');
           await sponsor.check();
           await card.getByRole('checkbox', { name: /Replace the existing agent/ }).check();
           await card.getByRole('button', { name: 'Create and activate', exact: true }).click();
@@ -469,7 +477,7 @@ test(
             .waitFor();
           assert.equal(decisions.length, 2);
           assert.deepEqual(decisions[0], decisions[1]);
-          assert.deepEqual(decisions[0].consent, { sponsorTriggerIds: [triggerId], replaceChannels: ['CPEOPLE'] });
+          assert.deepEqual(decisions[0].consent, { sponsor: true, replaceChannels: ['CPEOPLE'] });
         }
         assert.deepEqual(errors, []);
         await page.close();

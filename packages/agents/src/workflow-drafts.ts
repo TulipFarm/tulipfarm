@@ -14,9 +14,10 @@ import type {
 } from '@tulipfarm/workflows/contracts';
 import type { GitHubSubscriptions } from '@tulipfarm/workflows/github-triggers';
 import type { AgentStorage } from './store.ts';
+import type { AgentTrigger } from './setup-contracts.ts';
 import type { DraftOutcome, WorkflowLifecycleProposal, WorkflowProposal } from './draft-contracts.ts';
 
-type Trigger = Definition['trigger'];
+type Trigger = AgentTrigger;
 type Workflow = z.infer<typeof workflowSchema>;
 type DraftProblem = { error: string; instruction: string };
 type FilterLabels = { field: string; match: RecordFilter['match']; value: string | null };
@@ -30,6 +31,7 @@ export type WorkflowDrafts = {
   githubRepositories(actor: HumanActor): Promise<{ repositoryId: string; fullName: string }[]>;
   problem(actor: HumanActor, definition: Definition): Promise<DraftProblem | null>;
   sourceProblem(actor: HumanActor, trigger: Trigger): Promise<DraftProblem | null>;
+  sourcesProblem(actor: HumanActor, triggers: readonly Trigger[]): Promise<DraftProblem | null>;
   recordSource(
     actor: HumanActor,
     trigger: Extract<Trigger, { kind: 'record' }>,
@@ -50,7 +52,7 @@ function lifecycleCommandId(kind: WorkflowLifecycleProposal['kind'], commandId: 
   const hex = createHash('sha256').update(`${kind}:${commandId}:${workflowId}`).digest('hex');
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-8${hex.slice(13, 16)}-${((Number.parseInt(hex[16]!, 16) & 3) | 8).toString(16)}${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
 }
-const unattended = (trigger: Trigger) => !['manual', 'event'].includes(trigger.kind);
+const unattended = (trigger: Trigger) => trigger.kind !== 'event';
 const githubProblems: Record<string, DraftProblem> = {
   'github-repository-not-connected': {
     error: 'github-repository-not-connected',
@@ -127,7 +129,6 @@ export function nextWorkflowRun(trigger: Trigger, now = new Date()): string | nu
         .next()
         .toDate()
         .toISOString();
-    case 'manual':
     case 'webhook':
     case 'event':
     case 'provider':
@@ -147,13 +148,21 @@ export function previewWorkflowRun(trigger: Trigger, now = new Date()) {
   const next = nextWorkflowRun(trigger, now);
   return trigger.kind === 'once' && next !== null && Date.parse(next) <= now.getTime() ? null : next;
 }
+/** The earliest next run among a Workflow's triggers. */
+export function previewWorkflowRuns(triggers: readonly Trigger[], now = new Date()) {
+  return (
+    triggers
+      .map(trigger => previewWorkflowRun(trigger, now))
+      .filter(next => next !== null)
+      .sort()[0] ?? null
+  );
+}
 
 export function workflowDefinitionProblem(
   definition: Definition,
   now = new Date(),
   codeSteps = workflowCodeStepsEnabled(),
 ) {
-  const trigger = definition.trigger;
   if (!codeSteps && definition.steps.some(step => step.kind === 'code'))
     return {
       error: 'code-steps-unavailable',
@@ -170,19 +179,21 @@ export function workflowDefinitionProblem(
       instruction:
         'Slack message text cannot come from an agent or HTTP step, including through a transform or code step, because such a message is refused when the run sends it. Use literal text, run input, table step output, or a template of them, and tell the human what is not possible.',
     };
-  try {
-    nextWorkflowRun(trigger, now);
-  } catch {
-    return {
-      error: 'invalid-schedule',
-      instruction: 'The cron expression or IANA timezone is invalid. Correct it and draft again.',
-    };
+  for (const trigger of definition.triggers) {
+    try {
+      nextWorkflowRun(trigger, now);
+    } catch {
+      return {
+        error: 'invalid-schedule',
+        instruction: 'The cron expression or IANA timezone is invalid. Correct it and draft again.',
+      };
+    }
+    if (trigger.kind === 'once' && Date.parse(trigger.at) <= now.getTime())
+      return {
+        error: 'schedule-in-past',
+        instruction: 'A one-time trigger must be in the future. Confirm the intended time with the human.',
+      };
   }
-  if (trigger.kind === 'once' && Date.parse(trigger.at) <= now.getTime())
-    return {
-      error: 'schedule-in-past',
-      instruction: 'A one-time trigger must be in the future. Confirm the intended time with the human.',
-    };
   return null;
 }
 
@@ -194,10 +205,10 @@ export function summarizeWorkflow(workflow: Workflow) {
     activeRevision: workflow.activeRevision,
     enabled: workflow.enabled,
     nextRunAt: workflow.nextRunAt,
-    trigger: workflow.definition.trigger,
+    triggers: workflow.definition.triggers,
     steps: workflow.definition.steps.map(step => ({ id: step.id, kind: step.kind })),
     canManage: workflow.capabilities.manage,
-    webhookConfigured: workflow.webhookConfigured,
+    webhookConfigured: workflow.triggers.some(trigger => trigger.webhook?.configured === true),
   };
 }
 
@@ -239,11 +250,20 @@ export function createWorkflowDrafts(
     }
   }
   const recordSource = (actor: HumanActor, trigger: Extract<Trigger, { kind: 'record' }>) =>
-    labelled(recordProblems, () => service.recordSourceLabels(workspaceId, actor.userId, trigger));
+    labelled(recordProblems, () =>
+      service.recordSourceLabels(workspaceId, actor.userId, { ...trigger, id: trigger.kind }),
+    );
   const rowSource = (actor: HumanActor, trigger: Extract<Trigger, { kind: 'row' }>) =>
-    labelled(rowProblems, () => service.rowSourceLabels(workspaceId, actor.userId, trigger));
+    labelled(rowProblems, () => service.rowSourceLabels(workspaceId, actor.userId, { ...trigger, id: trigger.kind }));
   const tableStepSources = (actor: HumanActor, definition: Definition) =>
     labelled(tableStepProblems, () => service.checkTableSteps(workspaceId, actor.userId, definition));
+  async function sourcesProblem(actor: HumanActor, triggers: readonly Trigger[]) {
+    for (const trigger of triggers) {
+      const found = await sourceProblem(actor, trigger);
+      if (found) return found;
+    }
+    return null;
+  }
   async function sourceProblem(actor: HumanActor, trigger: Trigger) {
     if (trigger.kind === 'provider') {
       try {
@@ -289,7 +309,7 @@ export function createWorkflowDrafts(
   async function problem(actor: HumanActor, definition: Definition) {
     return (
       workflowDefinitionProblem(definition, new Date(), codeSteps) ??
-      (await sourceProblem(actor, definition.trigger)) ??
+      (await sourcesProblem(actor, definition.triggers)) ??
       tableStepProblem(actor, definition)
     );
   }
@@ -298,7 +318,7 @@ export function createWorkflowDrafts(
     const expected = proposal.kind === 'workflow' ? proposal.input.expectedRevision : proposal.input.revision;
     if ((current?.revision ?? null) !== expected) return true;
     if (proposal.kind === 'workflow') return (await problem(actor, proposal.input.definition)) !== null;
-    return proposal.input.enabled && (await sourceProblem(actor, proposal.input.definition.trigger)) !== null;
+    return proposal.input.enabled && (await sourcesProblem(actor, proposal.input.definition.triggers)) !== null;
   }
   async function activation(
     actor: HumanActor,
@@ -307,7 +327,7 @@ export function createWorkflowDrafts(
     commandId: string,
   ): Promise<DraftOutcome> {
     let current = workflow;
-    if (enabled && unattended(current.definition.trigger) && !current.sponsorshipAccepted) {
+    if (enabled && current.definition.triggers.some(unattended) && !current.sponsorshipAccepted) {
       if (
         (current.sponsorMembershipId && current.sponsorMembershipId !== actor.membershipId) ||
         !current.capabilities.invoke
@@ -410,6 +430,7 @@ export function createWorkflowDrafts(
     githubRepositories,
     problem,
     sourceProblem,
+    sourcesProblem,
     recordSource,
     rowSource,
     tableStepSources,

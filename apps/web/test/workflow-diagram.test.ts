@@ -18,7 +18,7 @@ const check = (id: string, ifMet: string[], otherwise: string[]): Step => ({
   otherwise,
 });
 const definition = (steps: Step[]): Definition =>
-  definitionSchema.parse({ version: 1, name: 'Request review', trigger: { kind: 'manual' }, steps });
+  definitionSchema.parse({ version: 1, name: 'Request review', triggers: [], steps });
 const labels = { actor: 'Run requester' };
 
 test('each mock uses a valid definition for every display state and trigger', () => {
@@ -40,9 +40,32 @@ test('each mock uses a valid definition for every display state and trigger', ()
   }
   for (const trigger of Object.values(mockTriggers)) {
     const view = mockWorkflowView('catalog', 'draft', trigger);
-    assert.equal(view.definition.trigger.kind, trigger.kind);
+    assert.deepEqual(
+      view.definition.triggers.map(item => item.kind),
+      [trigger.kind],
+    );
     assert.ok(workflowGraph(view.definition, view.labels).nodes[0]?.summary);
   }
+});
+
+test('a workflow with several triggers shows each one, and none means a person starts it', () => {
+  const mixed = mockWorkflowView('mixed', 'draft');
+  const graph = workflowGraph(mixed.definition, mixed.labels);
+  assert.equal(graph.nodes[0]?.title, '4 triggers');
+  assert.equal(graph.nodes[0]?.summary, 'Weekday digest, Webhook received, GitHub event, At a scheduled time');
+  const facts = graph.details.$trigger?.facts ?? [];
+  assert.deepEqual(
+    facts.find(fact => fact.label === 'Weekday digest'),
+    { label: 'Weekday digest', value: '0 9 * * 1-5 / Asia/Kolkata' },
+  );
+  assert.ok(
+    facts.some(fact => fact.label.startsWith('Webhook received: ')),
+    'trigger facts name the trigger they belong to',
+  );
+  assert.equal(graph.details.$trigger?.configuration, mixed.definition.triggers);
+  const manual = workflowGraph(definition([step('only')]), labels).nodes[0];
+  assert.equal(manual?.title, 'Started by a person');
+  assert.equal(manual?.summary, 'A person with run access starts it');
 });
 
 test('all twelve step types and the 32-step limit have inspectable content', () => {
@@ -227,13 +250,23 @@ test('row triggers name their event and table, with a fallback while the table n
   assert.equal(rowTriggerLine(row('created'), undefined), 'When a row is added');
   assert.equal(rowTriggerLine(row('updated'), undefined), 'When a row changes');
   assert.equal(rowTriggerLine(row('deleted'), undefined), 'When a row is deleted');
-  const graph = workflowGraph(
-    definitionSchema.parse({ version: 1, name: 'Order cleanup', trigger: row('deleted'), steps: [step('a')] }),
-    { ...labels, tables: { [tableId]: 'Orders' } },
-  );
-  assert.equal(graph.nodes[0]?.title, 'When a row is deleted from Orders');
-  assert.equal(graph.nodes[0]?.summary, 'Orders');
-  assert.equal(graph.details.$trigger?.facts[0]?.value, 'When a row is deleted from Orders');
+  const graph = (trigger: object) =>
+    workflowGraph(
+      definitionSchema.parse({
+        version: 1,
+        name: 'Order cleanup',
+        triggers: [{ id: 'cleanup', ...row('deleted'), ...trigger }],
+        steps: [step('a')],
+      }),
+      { ...labels, tables: { [tableId]: 'Orders' } },
+    );
+  assert.equal(graph({}).nodes[0]?.title, 'When a row is deleted from Orders');
+  assert.equal(graph({}).nodes[0]?.summary, 'Orders');
+  assert.equal(graph({}).details.$trigger?.facts[0]?.label, 'When a row is deleted from Orders');
+  assert.deepEqual(graph({ label: 'Cleanup' }).details.$trigger?.facts[0], {
+    label: 'Cleanup',
+    value: 'When a row is deleted from Orders',
+  });
 });
 
 test('delay and wait-until display readable times consistently in the inspector', () => {

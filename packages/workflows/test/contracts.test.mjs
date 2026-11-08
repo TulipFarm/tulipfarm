@@ -13,32 +13,114 @@ import {
   saveSchema,
   slackTextFromUnverifiedSource,
   transform,
+  triggerSummary,
   waitUntilInstant,
 } from '../src/contracts.ts';
 import { githubWorkflowPayload } from '../src/github-triggers.ts';
 
-test('a GitHub trigger names only actions its event has, each once', () => {
-  const trigger = actions =>
-    githubTriggerSchema.safeParse({ kind: 'github', repositoryId: '42', event: 'star', actions }).success;
-  assert.equal(trigger(undefined), true);
-  assert.equal(trigger(['created', 'deleted']), true);
-  assert.equal(trigger(['opened']), false);
-  assert.equal(trigger(['created', 'created']), false);
+test('a one-off trigger summary names the local date and time', () => {
   assert.equal(
-    githubTriggerSchema.safeParse({ kind: 'github', repositoryId: '42', event: 'push', actions: ['created'] }).success,
+    triggerSummary({ id: 'once', kind: 'once', at: '2026-11-06T15:30:00Z', timezone: 'Asia/Kolkata' }),
+    'Once on 6 Nov 2026 at 21:00 (Asia/Kolkata)',
+  );
+  assert.equal(
+    triggerSummary({ id: 'once', kind: 'once', at: '2026-11-06T15:30:00Z' }),
+    'Once on 6 Nov 2026 at 15:30 (UTC)',
+  );
+});
+
+test('a GitHub trigger names only actions its event has, each once', () => {
+  const trigger = (events, repositories = ['42']) =>
+    githubTriggerSchema.safeParse({ kind: 'github', repositories, events }).success;
+  assert.equal(trigger([{ event: 'star' }]), true);
+  assert.equal(trigger([{ event: 'star', actions: ['created', 'deleted'] }]), true);
+  assert.equal(trigger([{ event: 'star', actions: ['opened'] }]), false);
+  assert.equal(trigger([{ event: 'star', actions: ['created', 'created'] }]), false);
+  assert.equal(trigger([{ event: 'push', actions: ['created'] }]), false);
+  assert.equal(trigger([{ event: 'fork' }]), false);
+  assert.equal(trigger([{ event: 'star' }, { event: 'star', actions: ['created'] }]), false);
+  assert.equal(
+    trigger([
+      { event: 'issues', actions: ['opened'] },
+      { event: 'pull_request', actions: ['opened'] },
+    ]),
+    true,
+  );
+});
+
+test('a GitHub trigger watches listed repositories or every repository of an account, including future ones', () => {
+  const trigger = repositories =>
+    githubTriggerSchema.safeParse({ kind: 'github', repositories, events: [{ event: 'star' }] }).success;
+  assert.equal(trigger({ organizationId: '7', includeFuture: true }), true);
+  assert.equal(trigger({ organizationId: '7', includeFuture: false }), false);
+  assert.equal(trigger(Array.from({ length: 1000 }, (_, index) => String(index + 1))), true);
+  assert.equal(trigger(Array.from({ length: 1001 }, (_, index) => String(index + 1))), false);
+  assert.equal(trigger(['42', '42']), false);
+  assert.equal(trigger([]), false);
+});
+
+test('a workflow has up to 20 triggers, each with a unique well-formed ID, and no single trigger key', () => {
+  const steps = [{ id: 'note', kind: 'transform', fields: { note: { kind: 'literal', value: 'hi' } } }];
+  const parse = triggers => definitionSchema.safeParse({ version: 1, name: 'Many', triggers, steps });
+  const hourly = id => ({ id, kind: 'interval', minutes: 60 });
+  const issues = result => result.error.issues.map(issue => [issue.path, issue.message]);
+  assert.equal(parse([]).success, true);
+  assert.equal(parse([hourly('hourly'), { id: 'inbound', label: 'Inbound', kind: 'webhook' }]).success, true);
+  assert.equal(parse(Array.from({ length: 20 }, (_, index) => hourly(`t${index}`))).success, true);
+  assert.deepEqual(issues(parse(Array.from({ length: 21 }, (_, index) => hourly(`t${index}`)))), [
+    [['triggers'], 'too-many-triggers'],
+  ]);
+  assert.deepEqual(issues(parse([hourly('same'), { id: 'same', kind: 'webhook' }])), [
+    [['triggers', 1, 'id'], 'Duplicate trigger ID'],
+  ]);
+  for (const id of ['Upper', '1st', '_x', 'a-b', 'a'.repeat(49)])
+    assert.deepEqual(
+      parse([hourly(id)]).error.issues.map(issue => issue.path),
+      [['triggers', 0, 'id']],
+      id,
+    );
+  assert.equal(parse([hourly('a'.repeat(48))]).success, true);
+  assert.equal(
+    definitionSchema.safeParse({ version: 1, name: 'Old', trigger: { kind: 'interval', minutes: 60 }, steps }).success,
     false,
   );
-  assert.equal(githubTriggerSchema.safeParse({ kind: 'github', repositoryId: '42', event: 'fork' }).success, false);
+});
+
+test('a condition on the starting trigger ID must name a trigger of the workflow', () => {
+  const parse = id =>
+    definitionSchema.safeParse({
+      version: 1,
+      name: 'Branch by trigger',
+      triggers: [{ id: 'hourly', kind: 'interval', minutes: 60 }],
+      steps: [
+        {
+          id: 'check',
+          kind: 'condition',
+          when: { left: { kind: 'trigger', path: ['id'] }, op: 'eq', right: { kind: 'literal', value: id } },
+          ifMet: ['note'],
+          otherwise: [],
+        },
+        { id: 'note', kind: 'transform', fields: { note: { kind: 'literal', value: 'hi' } } },
+      ],
+    });
+  assert.equal(parse('hourly').success, true);
+  assert.deepEqual(
+    parse('daily').error.issues.map(issue => [issue.path, issue.message]),
+    [[['steps', 0, 'when'], 'No trigger has this ID']],
+  );
 });
 
 test('saving rejects copied signature and secret headers but stored revisions still parse', () => {
   const webhook = headers => ({
     version: 1,
     name: 'GitHub pushes',
-    trigger: {
-      kind: 'webhook',
-      payload: { mode: 'raw', dedupe: { source: 'header', name: 'x-github-delivery' }, headers },
-    },
+    triggers: [
+      {
+        id: 'webhook',
+        kind: 'webhook',
+        payload: { mode: 'raw', dedupe: { source: 'header', name: 'x-github-delivery' }, headers },
+      },
+    ],
     steps: [{ id: 'note', kind: 'transform', fields: { event: { kind: 'input', path: [] } } }],
   });
   assert.equal(authoredDefinitionSchema.safeParse(webhook(['x-github-event', 'x-github-hook-id'])).success, true);
@@ -54,7 +136,7 @@ test('saving rejects copied signature and secret headers but stored revisions st
     assert.equal(authored.success, false, header);
     assert.deepEqual(
       authored.error.issues.map(issue => issue.path),
-      [['trigger', 'payload', 'headers', 1]],
+      [['triggers', 0, 'payload', 'headers', 1]],
     );
     assert.equal(definitionSchema.safeParse(webhook(['x-github-event', header])).success, true, `stored ${header}`);
   }
@@ -67,7 +149,7 @@ test('saving rejects a nonexistent earlier output field but historical definitio
     kind: 'transform',
     fields: { total: { kind: 'step', step: 'source', path: ['nonsense'] } },
   };
-  const definition = { version: 1, name: 'Output path repro', trigger: { kind: 'manual' }, steps: [source, copy] };
+  const definition = { version: 1, name: 'Output path repro', triggers: [], steps: [source, copy] };
   assert.equal(definitionSchema.safeParse(definition).success, true);
   const saved = saveSchema.safeParse({
     revision: '11111111-1111-4111-8111-111111111111',
@@ -94,13 +176,13 @@ test('ordered definitions reject forward references and transforms resolve liter
     accepted: true,
     label: 'Done',
   });
-  assert.throws(() => definitionSchema.parse({ version: 1, name: 'Test', trigger: { kind: 'manual' }, steps: [step] }));
+  assert.throws(() => definitionSchema.parse({ version: 1, name: 'Test', triggers: [], steps: [step] }));
   assert.throws(() => transform(step, {}, new Map([['review', { yes: true }]])), /missing-value/);
   assert.equal(
     definitionSchema.parse({
       version: 1,
       name: 'Test',
-      trigger: { kind: 'manual' },
+      triggers: [],
       steps: [{ id: 'review', kind: 'human', prompt: 'Review', timeoutSeconds: 60 }, step],
     }).steps.length,
     2,
@@ -115,7 +197,7 @@ test('native Slack workflow messages require destination IDs and bounded text ma
     text: { kind: 'input', path: ['values', 'title', 'value'] },
   };
   const parse = step =>
-    definitionSchema.safeParse({ version: 1, name: 'Tickets', trigger: { kind: 'manual' }, steps: [step] }).success;
+    definitionSchema.safeParse({ version: 1, name: 'Tickets', triggers: [], steps: [step] }).success;
   assert.equal(parse(step), true);
   assert.equal(parse({ ...step, destinationId: 'C12345' }), false);
   for (const value of ['', 'x'.repeat(4001), 12, { kind: 'text', value: 'Title' }])
@@ -157,7 +239,7 @@ test('a Slack message template fills each placeholder from run values and names 
     definitionSchema.safeParse({
       version: 1,
       name: 'Stars',
-      trigger: { kind: 'manual' },
+      triggers: [],
       steps: [{ id: 'notify', kind: 'slack-message', destinationId: '7c0b8c7e-4f0e-4e3b-9a52-0d3f1f2b6a11', text }],
     }).success;
   assert.equal(parse(template), true);
@@ -191,8 +273,7 @@ test('a Slack message template is unverified when any of its values comes from a
 
 test('agent steps use a prior value as a bounded task prompt', () => {
   const agentId = '7c0b8c7e-4f0e-4e3b-9a52-0d3f1f2b6a11';
-  const parse = steps =>
-    definitionSchema.safeParse({ version: 1, name: 'Agent', trigger: { kind: 'manual' }, steps }).success;
+  const parse = steps => definitionSchema.safeParse({ version: 1, name: 'Agent', triggers: [], steps }).success;
   assert.equal(
     parse([
       {
@@ -233,7 +314,7 @@ test('HTTP steps require HTTPS, keep credential values out of definitions, and r
     definitionSchema.safeParse({
       version: 1,
       name: 'Notify',
-      trigger: { kind: 'manual' },
+      triggers: [],
       steps: [{ id: 'message', kind: 'transform', fields: { text: { kind: 'input', path: ['text'] } } }, step],
     }).success;
   const valid = {
@@ -252,7 +333,7 @@ test('HTTP steps require HTTPS, keep credential values out of definitions, and r
       .safeParse({
         version: 1,
         name: 'Notify',
-        trigger: { kind: 'manual' },
+        triggers: [],
         steps: [{ ...valid, body: undefined, url: 'hooks' }],
       })
       .error?.issues.map(issue => [issue.code, issue.path.join('.')]),
@@ -265,7 +346,7 @@ test('HTTP steps require HTTPS, keep credential values out of definitions, and r
 });
 
 test('wait-until steps accept ISO instants or earlier references and delays allow up to 366 days', () => {
-  const definition = steps => ({ version: 1, name: 'Wait', trigger: { kind: 'manual' }, steps });
+  const definition = steps => ({ version: 1, name: 'Wait', triggers: [], steps });
   const parse = steps => definitionSchema.safeParse(definition(steps)).success;
   assert.equal(
     parse([{ id: 'start', kind: 'wait-until', at: { kind: 'literal', value: '2027-01-31T09:00:00+01:00' } }]),
@@ -293,8 +374,7 @@ test('wait-until steps accept ISO instants or earlier references and delays allo
 test('table steps validate their table, fields, limit and references to earlier steps', () => {
   const tableId = '7c0b8c7e-4f0e-4e3b-9a52-0d3f1f2b6a11',
     fieldId = '1d6f0f5a-2b9e-4c41-8f7a-5e0c4b1a9d22';
-  const parse = steps =>
-    definitionSchema.safeParse({ version: 1, name: 'Rows', trigger: { kind: 'manual' }, steps }).success;
+  const parse = steps => definitionSchema.safeParse({ version: 1, name: 'Rows', triggers: [], steps }).success;
   const find = {
     id: 'find',
     kind: 'find-rows',
@@ -343,8 +423,12 @@ test('row triggers name one event, watch fields only on updates, and refuse step
     otherId = '2e7a1b6c-3c0f-4d52-9a8b-6f1d5c2b0e33';
   const note = { id: 'note', kind: 'transform', fields: { id: { kind: 'input', path: ['recordId'] } } };
   const parse = (trigger, steps = [note]) =>
-    definitionSchema.safeParse({ version: 1, name: 'Rows', trigger: { kind: 'row', tableId, ...trigger }, steps })
-      .success;
+    definitionSchema.safeParse({
+      version: 1,
+      name: 'Rows',
+      triggers: [{ id: 'row', kind: 'row', tableId, ...trigger }],
+      steps,
+    }).success;
   assert.equal(parse({ event: 'created' }), true);
   assert.equal(parse({ event: 'deleted' }), true);
   assert.equal(parse({ event: 'updated', fieldIds: [fieldId] }), true);
@@ -403,7 +487,7 @@ test('record filters compare text, yes or no and options for equality, numbers a
 });
 
 test('condition steps branch over later steps and only read steps that run whenever they run', () => {
-  const parse = steps => definitionSchema.safeParse({ version: 1, name: 'Branch', trigger: { kind: 'manual' }, steps });
+  const parse = steps => definitionSchema.safeParse({ version: 1, name: 'Branch', triggers: [], steps });
   const note = id => ({ id, kind: 'transform', fields: { note: { kind: 'literal', value: id } } });
   const check = (
     branches,
@@ -558,7 +642,7 @@ test('conditions compare typed table values, dates and plain JSON, and walk past
   const steps = definitionSchema.parse({
     version: 1,
     name: 'Walk',
-    trigger: { kind: 'manual' },
+    triggers: [],
     steps: [
       { id: 'check', kind: 'condition', when: when(1, 'eq', 1), ifMet: ['inner'], otherwise: ['other'] },
       { id: 'inner', kind: 'condition', when: when(1, 'eq', 2), ifMet: ['deep'], otherwise: [] },

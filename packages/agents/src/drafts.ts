@@ -37,7 +37,7 @@ import {
 import { createAgentRecordTools } from './record-tools.ts';
 import { requireDraftSources } from './draft-sources.ts';
 import { bindFileSources } from '@tulipfarm/conversations/file-references';
-import { createWorkflowDrafts, previewWorkflowRun } from './workflow-drafts.ts';
+import { createWorkflowDrafts, previewWorkflowRuns } from './workflow-drafts.ts';
 import { createDefinitionLifecycleDrafts } from './definition-lifecycle-drafts.ts';
 import { createProjectDrafts } from './project-drafts.ts';
 import { createFileDrafts } from './file-drafts.ts';
@@ -53,6 +53,8 @@ import { requireSkillGrant } from '@tulipfarm/access';
 import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import { createAgentSetup, type AgentSetupOptions } from './setup.ts';
 import { agentSetupSchema } from './setup-contracts.ts';
+import { agentLinkedWorkflow } from './agent-trigger-workflows.ts';
+import { agentWorkflowCommonVersion } from '@tulipfarm/workflows';
 
 const sourcesSchema = sourceDependenciesSchema;
 const rowSchema = z.object({
@@ -206,6 +208,11 @@ export function createAuthoringDrafts(
       if (proposal.input.setup) {
         if (proposal.input.expectedPolicyVersion === undefined || proposal.input.expectedActivationIds === undefined)
           throw new AgentError('setup-review-versions-required', 400);
+        if (
+          proposal.input.expectedWorkflowRevision === undefined ||
+          proposal.input.expectedWorkflowGeneration === undefined
+        )
+          throw new AgentError('setup-draft-outdated', 400);
         agentSetupSchema.parse({
           ...proposal.input.setup,
           definition: proposal.input.definition,
@@ -329,6 +336,15 @@ export function createAuthoringDrafts(
       ).rows.map(row => z.uuid().parse(row.id));
       if (canonicalJson(active) !== canonicalJson([...(proposal.input.expectedActivationIds ?? [])].sort()))
         return true;
+      if ((tx as AgentTransaction & { commonVersion: number }).commonVersion >= agentWorkflowCommonVersion) {
+        const linked = await agentLinkedWorkflow(tx, proposal.targetId);
+        if (
+          (linked?.revision ?? null) !== (proposal.input.expectedWorkflowRevision ?? null) ||
+          (linked?.generation ?? null) !== (proposal.input.expectedWorkflowGeneration ?? null) ||
+          linked?.archived
+        )
+          return true;
+      }
     }
     return (
       head?.revision !== proposal.input.expectedSoulRevision ||
@@ -525,7 +541,7 @@ export function createAuthoringDrafts(
           workflowId: proposal.targetId,
           change: proposal.input.expectedRevision === null ? 'create' : 'update',
           activateOnSave: proposal.input.activate,
-          nextRunAt: previewWorkflowRun(proposal.input.definition.trigger),
+          nextRunAt: previewWorkflowRuns(proposal.input.definition.triggers),
           instruction: `Nothing has been saved${proposal.input.activate ? ' or activated' : ''}. The human must review the trigger, next run and steps on the chat card and choose ${proposal.input.activate ? 'Save and activate' : 'Save'}. Never treat chat text as approval.`,
         };
       if (proposal.kind === 'workflow-activation')
@@ -633,7 +649,7 @@ export function createAuthoringDrafts(
           change,
           agentId: proposal.targetId,
           instruction:
-            'Nothing has been saved or activated. The human must review Basics, Skills, Access and Triggers on this exact card, then choose Save draft or Create and activate. Sponsoring unattended triggers and replacing channel agents require explicit card consent. Activating creates one Workflow per trigger that runs this agent. Model prose is never consent.',
+            'Nothing has been saved or activated. The human must review Basics, Skills, Access and Triggers on this exact card, then choose Save draft or Create and activate. Sponsoring unattended triggers and replacing channel agents require explicit card consent. Activating saves every trigger and the one prompt to the linked Workflow of this agent. Model prose is never consent.',
         };
       return {
         draftId: id,
@@ -715,12 +731,14 @@ export function createAuthoringDrafts(
           : false;
       const workflowNextRunAt =
         row.proposal.kind === 'workflow' || (row.proposal.kind === 'workflow-activation' && row.proposal.input.enabled)
-          ? previewWorkflowRun(row.proposal.input.definition.trigger)
+          ? previewWorkflowRuns(row.proposal.input.definition.triggers)
           : null;
-      const trigger = isWorkflow(row.proposal) ? row.proposal.input.definition.trigger : null;
+      const triggers = isWorkflow(row.proposal) ? row.proposal.input.definition.triggers : [];
+      const recordTrigger = triggers.find(trigger => trigger.kind === 'record'),
+        rowTrigger = triggers.find(trigger => trigger.kind === 'row');
       const workflowDrafts = createWorkflowDrafts(bound, workspaceId);
-      const recordSource = trigger?.kind === 'record' ? await workflowDrafts.recordSource(actor, trigger) : null;
-      const rowSource = trigger?.kind === 'row' ? await workflowDrafts.rowSource(actor, trigger) : null;
+      const recordSource = recordTrigger ? await workflowDrafts.recordSource(actor, recordTrigger) : null;
+      const rowSource = rowTrigger ? await workflowDrafts.rowSource(actor, rowTrigger) : null;
       const tableStepSources = isWorkflow(row.proposal)
         ? await workflowDrafts.tableStepSources(actor, row.proposal.input.definition)
         : null;
@@ -813,6 +831,8 @@ export function createAuthoringDrafts(
             expectedSavedRevision: proposal.input.expectedSavedRevision,
             expectedPolicyVersion: proposal.input.expectedPolicyVersion,
             expectedActivationIds: proposal.input.expectedActivationIds,
+            expectedWorkflowRevision: proposal.input.expectedWorkflowRevision ?? null,
+            expectedWorkflowGeneration: proposal.input.expectedWorkflowGeneration ?? null,
             setup: {
               ...proposal.input.setup,
               definition: proposal.input.definition,
@@ -824,7 +844,7 @@ export function createAuthoringDrafts(
             version: saved.version,
             digest: saved.digest,
             decision: input.decision,
-            consent: input.consent ?? { sponsorTriggerIds: [], replaceChannels: [] },
+            consent: input.consent ?? { sponsor: false, replaceChannels: [] },
           });
           outcome = {
             kind: 'agent',

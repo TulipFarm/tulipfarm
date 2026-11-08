@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { maxTriggers } from '@tulipfarm/workflows/contracts';
 
 const fieldFixes: Record<string, string> = {
   name: 'Enter a workflow name.',
@@ -16,8 +17,12 @@ const fieldFixes: Record<string, string> = {
   fields: 'Map at least one field.',
 };
 
+const triggerFixes: Record<string, string> = {
+  id: 'Use a trigger ID that starts with a lowercase letter and uses only lowercase letters, numbers, and underscores.',
+  label: 'Use a label from 1 to 100 characters.',
+};
+
 const fieldNames: Record<string, string> = {
-  trigger: 'trigger',
   when: 'condition',
   ifMet: 'steps to run when the condition is met',
   otherwise: 'steps to run otherwise',
@@ -39,26 +44,35 @@ const sentence = (text: string) => (/[.!?]$/.test(text) ? text : `${text}.`);
 function problem(issue: z.core.$ZodIssue, stepLabel: (index: number) => string | undefined) {
   const [head, index, ...rest] = issue.path;
   const stepIndex = head === 'steps' && typeof index === 'number' ? index : null;
+  const triggerIndex = head === 'triggers' && typeof index === 'number' ? index : null;
   const where =
     stepIndex !== null
       ? (stepLabel(stepIndex) ?? `Step ${stepIndex + 1}`)
-      : head === 'trigger'
-        ? 'Trigger'
-        : head === 'name'
-          ? 'Name'
-          : head === 'steps'
-            ? 'Steps'
-            : 'Workflow';
-  const fields = (stepIndex === null ? issue.path : rest).filter((part): part is string => typeof part === 'string');
+      : triggerIndex !== null
+        ? `Trigger ${triggerIndex + 1}`
+        : head === 'triggers'
+          ? 'Triggers'
+          : head === 'name'
+            ? 'Name'
+            : head === 'steps'
+              ? 'Steps'
+              : 'Workflow';
+  const fields = (stepIndex === null && triggerIndex === null ? issue.path : rest).filter(
+    (part): part is string => typeof part === 'string',
+  );
   const field = fields.at(-1);
   const fix =
     issue.code === 'custom'
       ? sentence(issue.message)
-      : field && fieldFixes[field]
-        ? fieldFixes[field]
-        : head === 'steps' && stepIndex === null
-          ? 'Keep 1 to 32 steps.'
-          : `Check the ${fields.map(part => fieldNames[part] ?? part.replaceAll('_', ' ')).at(-1) ?? 'step settings'}.`;
+      : triggerIndex !== null && field && triggerFixes[field]
+        ? triggerFixes[field]
+        : field && fieldFixes[field]
+          ? fieldFixes[field]
+          : head === 'steps' && stepIndex === null
+            ? 'Keep 1 to 32 steps.'
+            : head === 'triggers' && triggerIndex === null
+              ? `Keep up to ${maxTriggers} triggers.`
+              : `Check the ${fields.map(part => fieldNames[part] ?? part.replaceAll('_', ' ')).at(-1) ?? (triggerIndex === null ? 'step settings' : 'trigger settings')}.`;
   return `${where}: ${fix}`;
 }
 

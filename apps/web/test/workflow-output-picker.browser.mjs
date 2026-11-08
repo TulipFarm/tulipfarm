@@ -26,13 +26,13 @@ const initial = () => ({
   enabled: false,
   generation: 1,
   nextRunAt: null,
-  activeTrigger: null,
-  webhookConfigured: false,
+  activeTriggers: null,
+  triggers: [],
   capabilities: { read: true, manage: true, invoke: true },
   definition: {
     version: 1,
     name: 'Output picker proof',
-    trigger: { kind: 'manual' },
+    triggers: [],
     steps: [
       {
         id: 'source',

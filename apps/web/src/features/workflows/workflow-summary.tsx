@@ -4,6 +4,7 @@ import {
   ChevronRightIcon,
   ClockIcon,
   GitPullRequestIcon,
+  LayersIcon,
   PlayIcon,
   PlugIcon,
   RepeatIcon,
@@ -14,17 +15,16 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { Status, type StatusState } from '@tulipfarm/sprout/status';
-import type { Definition, DisabledReason, workflowSchema } from '@tulipfarm/workflows/contracts';
+import type { DisabledReason, TriggerKind, workflowSchema } from '@tulipfarm/workflows/contracts';
 import type { z } from 'zod';
-import { cronSummary, ordinaryCron } from './calendar-schedule';
-import { rowTriggerLine, triggerTitles, workflowDuration } from './diagram-model';
+import { liveTriggers, triggersLine } from './triggers';
+
+export { triggerLine } from './triggers';
 
 type Workflow = z.infer<typeof workflowSchema>;
-type Trigger = Definition['trigger'];
 export type WorkflowState = { mark: StatusState; label: string; detail?: string | undefined };
 
-const triggerIcons: Record<Trigger['kind'], LucideIcon> = {
-  manual: PlayIcon,
+export const triggerIcons: Record<TriggerKind, LucideIcon> = {
   webhook: WebhookIcon,
   event: ZapIcon,
   provider: PlugIcon,
@@ -36,19 +36,18 @@ const triggerIcons: Record<Trigger['kind'], LucideIcon> = {
   row: Rows3Icon,
 };
 
-/** The trigger that starts runs now: the active revision's while enabled, otherwise the saved one. */
-export const liveTrigger = (workflow: Workflow) =>
-  workflow.enabled ? (workflow.activeTrigger ?? workflow.definition.trigger) : workflow.definition.trigger;
-
-export function triggerLine(trigger: Trigger, tableNames?: ReadonlyMap<string, string>) {
-  if (trigger.kind === 'row') return rowTriggerLine(trigger, tableNames?.get(trigger.tableId));
-  if (trigger.kind === 'interval') return `Every ${workflowDuration(trigger.minutes * 60)}`;
-  if (trigger.kind === 'cron' && ordinaryCron(trigger.expression)) return cronSummary(trigger).replace(/\.$/, '');
-  return triggerTitles[trigger.kind];
-}
-
-export function TriggerIcon({ trigger, size = 'md' }: { trigger: Trigger; size?: 'md' | 'lg' }) {
-  const Icon = triggerIcons[trigger.kind];
+/** One trigger's icon, a play icon for a Workflow started only by hand, or a stack for several triggers. */
+export function TriggerIcon({
+  trigger,
+  triggers = trigger ? [trigger] : [],
+  size = 'md',
+}: {
+  trigger?: { kind: string };
+  triggers?: readonly { kind: string }[];
+  size?: 'md' | 'lg';
+}) {
+  const Icon =
+    triggers.length > 1 ? LayersIcon : ((triggers[0] && triggerIcons[triggers[0].kind as TriggerKind]) ?? PlayIcon);
   return (
     <span
       aria-hidden="true"
@@ -75,7 +74,7 @@ export function WorkflowRow({
   onOpen: () => void;
 }) {
   const id = useId();
-  const trigger = liveTrigger(workflow);
+  const triggers = liveTriggers(workflow);
   return (
     <a
       href={href}
@@ -89,12 +88,12 @@ export function WorkflowRow({
       }}
       className="flex min-h-16 items-center gap-3 px-4 py-3 outline-none transition-colors hover:bg-muted/60 focus-visible:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
     >
-      <TriggerIcon trigger={trigger} />
+      <TriggerIcon triggers={triggers} />
       <span className="flex min-w-0 flex-1 flex-col gap-x-3 gap-y-1 sm:flex-row sm:items-center">
         <span className="min-w-0 flex-1">
           <span className="block truncate font-medium text-foreground">{workflow.definition.name}</span>
           <span id={`${id}-trigger`} className="block truncate text-sm text-muted-foreground">
-            {triggerLine(trigger, tableNames)}
+            {triggersLine(triggers, tableNames)}
           </span>
         </span>
         <span id={`${id}-status`} className="sm:w-56 sm:shrink-0">
@@ -121,10 +120,14 @@ export function StatusLine({ state }: { state: WorkflowState }) {
 const formatTime = (value: string) =>
   new Date(value).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 const nextRun = (workflow: Workflow) => (workflow.nextRunAt ? `Next run ${formatTime(workflow.nextRunAt)}` : undefined);
-const sponsorSource: Partial<Record<Definition['trigger']['kind'], string>> = {
-  record: ' or to read the table its record trigger watches',
-  row: ' or to read the table its row trigger watches',
-  provider: ' or to use the connected app its trigger polls',
+const sponsorSource: Partial<Record<TriggerKind, string>> = {
+  record: 'to read the table a record trigger watches',
+  row: 'to read the table a row trigger watches',
+  provider: 'to use the connected app a trigger polls',
+};
+const sponsorNeeds = (workflow: Workflow) => {
+  const needs = [...new Set(liveTriggers(workflow).flatMap(trigger => sponsorSource[trigger.kind] ?? []))];
+  return needs.length ? ` or ${needs.join(' or ')}` : '';
 };
 export const disabledReasons: Record<
   DisabledReason,
@@ -132,8 +135,7 @@ export const disabledReasons: Record<
 > = {
   'sponsor-access-lost': {
     status: 'sponsor lost access',
-    explanation: workflow =>
-      `its sponsor lost access needed to run it${sponsorSource[(workflow.activeTrigger ?? workflow.definition.trigger).kind] ?? ''}`,
+    explanation: workflow => `its sponsor lost access needed to run it${sponsorNeeds(workflow)}`,
     recovery: 'Restore that access or choose a sponsor who has it, then activate the saved revision.',
   },
   'record-field-unavailable': {

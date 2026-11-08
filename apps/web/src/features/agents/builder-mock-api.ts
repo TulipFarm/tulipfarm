@@ -182,7 +182,13 @@ if (import.meta.env.DEV && /^\/agent-builder-mock(?:\/|$)/.test(window.location.
       const input = saveAgentSetupDraftSchema.parse(JSON.parse(String(init?.body)));
       const agentId = path.split('/').at(-2)!;
       const { requestId: _requestId, expectedVersion, ...setup } = input;
-      const draft = { ...setup, agentId, version: expectedVersion + 1, digest: 'e'.repeat(64) };
+      const draft = {
+        ...setup,
+        agentId,
+        version: expectedVersion + 1,
+        digest: 'e'.repeat(64),
+        legacy: 'current' as const,
+      };
       setups.set(agentId, draft);
       persist();
       return Response.json(draft);

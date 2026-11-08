@@ -16,7 +16,11 @@ import {
 export type RowTrigger = Extract<Trigger, { kind: 'row' }>;
 export const rowTriggerCommonVersion = 1;
 const table = (tx: AuthorizationTransaction, name: string) => qualified(tx.schema, name);
-const changeSchema = z.object({ historyId: idSchema, changedAt: z.iso.datetime() });
+const changeSchema = z.object({
+  historyId: idSchema,
+  changedAt: z.iso.datetime(),
+  triggerIds: z.array(z.string()).min(1),
+});
 export type RowChange = z.infer<typeof changeSchema>;
 const valuesSchema = z.record(z.string(), z.unknown());
 
@@ -40,7 +44,7 @@ export async function dueRowChanges(tx: AuthorizationTransaction, workflowId: st
     .parse(
       (
         await tx.client.query(
-          `SELECT history_id AS "historyId",${utcInstant('changed_at')} AS "changedAt" FROM ${table(tx, 'tf_workflow_row_events')} WHERE workflow_id=$1 AND revision=$2 AND settled_at IS NULL ORDER BY attempted_at NULLS FIRST,changed_at,history_id LIMIT $3`,
+          `SELECT history_id AS "historyId",${utcInstant('changed_at')} AS "changedAt",trigger_ids AS "triggerIds" FROM ${table(tx, 'tf_workflow_row_events')} WHERE workflow_id=$1 AND revision=$2 AND settled_at IS NULL ORDER BY attempted_at NULLS FIRST,changed_at,history_id LIMIT $3`,
           [workflowId, revision, rowEventBatchSize],
         )
       ).rows,
@@ -54,10 +58,11 @@ export async function settleRowChange(
   change: RowChange,
   state: 'admitted' | 'ignored',
   runId: string | null = null,
+  reason: 'trigger-disabled' | null = null,
 ) {
   await tx.client.query(
-    `UPDATE ${table(tx, 'tf_workflow_row_events')} SET state=$4,reason=NULL,settled_at=clock_timestamp(),attempted_at=clock_timestamp(),run_id=$5,snapshot=NULL WHERE workflow_id=$1 AND revision=$2 AND history_id=$3 AND settled_at IS NULL`,
-    [workflowId, revision, change.historyId, state, runId],
+    `UPDATE ${table(tx, 'tf_workflow_row_events')} SET state=$4,reason=$6,settled_at=clock_timestamp(),attempted_at=clock_timestamp(),run_id=$5,snapshot=NULL WHERE workflow_id=$1 AND revision=$2 AND history_id=$3 AND settled_at IS NULL`,
+    [workflowId, revision, change.historyId, state, runId, reason],
   );
 }
 

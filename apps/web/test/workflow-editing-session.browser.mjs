@@ -9,7 +9,7 @@ const id = n => `${n.repeat(8)}-${n.repeat(4)}-4${n.repeat(3)}-8${n.repeat(3)}-$
 const definition = {
   version: 1,
   name: 'Review',
-  trigger: { kind: 'manual' },
+  triggers: [],
   steps: [{ id: 'review', kind: 'human', prompt: 'Review it.', timeoutSeconds: 86400 }],
 };
 const workflow = { id: id('a'), revision: id('b'), definition, archivedAt: null, enabled: false, activeRevision: null };

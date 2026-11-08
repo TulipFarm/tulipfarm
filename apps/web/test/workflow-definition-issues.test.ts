@@ -15,7 +15,7 @@ test('definition problems name the step and the fix instead of a generic message
   const error = failure({
     version: 1,
     name: 'Orders',
-    trigger: { kind: 'manual' },
+    triggers: [],
     steps: [
       prepare('first'),
       {
@@ -36,7 +36,7 @@ test('definition problems name the step and the fix instead of a generic message
       failure({
         version: 1,
         name: 'Orders',
-        trigger: { kind: 'manual' },
+        triggers: [],
         steps: [{ id: 'call', kind: 'http', method: 'GET', url: 'http://example.com' }],
       }),
     ),
@@ -47,7 +47,7 @@ test('definition problems name the step and the fix instead of a generic message
       failure({
         version: 1,
         name: 'Orders',
-        trigger: { kind: 'manual' },
+        triggers: [],
         steps: [{ id: 'call', kind: 'http', method: 'GET', url: 'example' }],
       }),
     ),
@@ -57,17 +57,67 @@ test('definition problems name the step and the fix instead of a generic message
 });
 
 test('definition problems cover names, triggers, step counts, JSON syntax, and unknown failures', () => {
+  assert.deepEqual(definitionProblems(failure({ version: 1, name: '', triggers: [], steps: [prepare('first')] })), [
+    'Name: Enter a workflow name.',
+  ]);
+  assert.deepEqual(definitionProblems(failure({ version: 1, name: 'Orders', triggers: [], steps: [] })), [
+    'Steps: Keep 1 to 32 steps.',
+  ]);
   assert.deepEqual(
-    definitionProblems(failure({ version: 1, name: '', trigger: { kind: 'manual' }, steps: [prepare('first')] })),
-    ['Name: Enter a workflow name.'],
+    definitionProblems(
+      failure({
+        version: 1,
+        name: 'Orders',
+        triggers: [
+          { id: 'weekly', kind: 'event', name: 'weekly' },
+          { id: 'nightly', kind: 'cron' },
+        ],
+        steps: [prepare('first')],
+      }),
+    ),
+    ['Trigger 2: Check the expression.', 'Trigger 2: Check the timezone.'],
   );
   assert.deepEqual(
-    definitionProblems(failure({ version: 1, name: 'Orders', trigger: { kind: 'manual' }, steps: [] })),
-    ['Steps: Keep 1 to 32 steps.'],
+    definitionProblems(
+      failure({
+        version: 1,
+        name: 'Orders',
+        triggers: [
+          { id: 'Bad Id', kind: 'event', name: 'weekly' },
+          { id: 'hook', kind: 'webhook' },
+        ],
+        steps: [prepare('first')],
+      }),
+    ),
+    [
+      'Trigger 1: Use a trigger ID that starts with a lowercase letter and uses only lowercase letters, numbers, and underscores.',
+    ],
+    'a trigger ID problem names the trigger, not a step',
   );
   assert.deepEqual(
-    definitionProblems(failure({ version: 1, name: 'Orders', trigger: { kind: 'cron' }, steps: [prepare('first')] })),
-    ['Trigger: Check the expression.', 'Trigger: Check the timezone.'],
+    definitionProblems(
+      failure({
+        version: 1,
+        name: 'Orders',
+        triggers: [
+          { id: 'hook', kind: 'webhook' },
+          { id: 'hook', kind: 'webhook' },
+        ],
+        steps: [prepare('first')],
+      }),
+    ),
+    ['Trigger 2: Duplicate trigger ID.'],
+  );
+  assert.deepEqual(
+    definitionProblems(
+      failure({
+        version: 1,
+        name: 'Orders',
+        triggers: Array.from({ length: 21 }, (_, index) => ({ id: `hook_${index}`, kind: 'webhook' })),
+        steps: [prepare('first')],
+      }),
+    ),
+    ['Triggers: Keep up to 20 triggers.'],
   );
   assert.deepEqual(definitionProblems(new SyntaxError('Unexpected token')), [
     'The definition is not valid JSON. Check for a missing comma, quote, or bracket.',
@@ -81,7 +131,7 @@ test('each step problem appears once with its own fix', () => {
   const error = failure({
     version: 1,
     name: 'Orders',
-    trigger: { kind: 'manual' },
+    triggers: [],
     steps: [{ id: 'Bad Id', kind: 'delay', seconds: 0 }],
   });
   assert.deepEqual(definitionProblems(error), [

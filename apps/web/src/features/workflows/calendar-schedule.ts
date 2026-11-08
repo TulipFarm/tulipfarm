@@ -1,7 +1,7 @@
-import { normalizeCronExpression, triggerSchema, type Definition } from '@tulipfarm/workflows/contracts';
+import { normalizeCronExpression, triggerSchema, type Trigger } from '@tulipfarm/workflows/contracts';
 import { nextCronOccurrences } from '@tulipfarm/workflows/schedule';
 
-export type CronTrigger = Extract<Definition['trigger'], { kind: 'cron' }>;
+export type CronTrigger = Omit<Extract<Trigger, { kind: 'cron' }>, 'id' | 'label'>;
 
 export const cronDayChoices = [
   ['*', 'Every day'],
@@ -47,7 +47,7 @@ export function validateCron(trigger: CronTrigger) {
   } catch {
     return { field: 'timezone', problem: 'Enter a valid IANA time zone.', runs: [] as string[] };
   }
-  const parsed = triggerSchema.safeParse(trigger);
+  const parsed = triggerSchema.safeParse({ ...trigger, id: 'cron' });
   if (!parsed.success || parsed.data.kind !== 'cron')
     return { field: 'expression', problem: 'Enter a valid five-field cron expression.', runs: [] as string[] };
   try {
@@ -60,7 +60,7 @@ export function validateCron(trigger: CronTrigger) {
 /** Mirrors the server's spacing check, which measures the first two runs after a fixed date. */
 export function cronGapMinutes(trigger: CronTrigger) {
   try {
-    const [first, second] = nextCronOccurrences(trigger, new Date('2024-01-01T00:00:00.000Z'));
+    const [first, second] = nextCronOccurrences({ ...trigger, id: 'cron' }, new Date('2024-01-01T00:00:00.000Z'));
     return first && second ? (Date.parse(second) - Date.parse(first)) / 60000 : null;
   } catch {
     return null;

@@ -1,11 +1,12 @@
 import type { FastifyInstance } from 'fastify';
+import { workflowWebhookOperations } from './abuse.ts';
 import { authConfig } from './auth.ts';
 
 export function protectBusinessRequests(app: FastifyInstance) {
   const origin = authConfig().webOrigin;
   app.addHook('onRequest', async (request, reply) => {
     reply.header('Cache-Control', 'no-store');
-    if (request.routeOptions.schema?.operationId === 'receiveWorkflowWebhookV1') return;
+    if (workflowWebhookOperations.has(request.routeOptions.schema?.operationId ?? '')) return;
     if (request.routeOptions.schema?.operationId === 'receiveSlackEventV1') return;
     if (request.routeOptions.schema?.operationId === 'receiveGitHubKnowledgeEventV1') return;
     if (request.routeOptions.schema?.operationId === 'receiveGitHubEventV1') return;

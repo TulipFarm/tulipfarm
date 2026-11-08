@@ -18,7 +18,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { fieldPath } from './definition-edits';
 import type { useWorkflowRuns } from './queries';
 
-type Reference = Exclude<Extract<Definition['steps'][number], { kind: 'wait-until' }>['at'], { kind: 'literal' }>;
+type Reference = Exclude<
+  Extract<Definition['steps'][number], { kind: 'wait-until' }>['at'],
+  { kind: 'literal' } | { kind: 'trigger' }
+>;
 type History = ReturnType<typeof useWorkflowRuns>;
 type OutputContext = {
   shapes: Map<string, OutputShape>;

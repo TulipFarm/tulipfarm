@@ -341,8 +341,15 @@ test('agent compilation preserves independent limits, grants, skill pins, MCP an
   assert.equal(setup.definition.skills[1].id, 'table-authoring');
   assert.equal(setup.definition.mcp[0].integrationId, selected.mcp.id);
   assert.deepEqual(setup.triggers[0].trigger, agent.schedules[0].trigger);
-  assert.equal(setup.triggers[0].prompt, agent.schedules[0].action.text);
-  assert.deepEqual(setup.triggers[0].limits, agent.schedules[0].action.limits);
+  assert.equal(setup.prompt, agent.schedules[0].action.text);
+  assert.deepEqual(setup.runLimits, agent.schedules[0].action.limits);
+  agent.schedules.push({ ...agent.schedules[0], key: 'weekly', trigger: { kind: 'interval', minutes: 10080 } });
+  assert.equal(compiler.agent(agent, { 'leave-management-procedure': 'c'.repeat(64) }).triggers.length, 2);
+  agent.schedules[1].action = { ...agent.schedules[0].action, text: 'Review other records' };
+  assert.throws(
+    () => compiler.agent(agent, { 'leave-management-procedure': 'c'.repeat(64) }),
+    /share one prompt and limits/,
+  );
 });
 
 test('portable field mappings resolve select options and relationship rows to each installation identity', async () => {

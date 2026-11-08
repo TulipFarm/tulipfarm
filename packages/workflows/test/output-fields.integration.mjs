@@ -81,7 +81,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     const definition = path => ({
       version: 1,
       name: 'Check live output fields',
-      trigger: { kind: 'manual' },
+      triggers: [],
       steps: [
         { id: 'find', kind: 'find-rows', tableId: schema.id, filters: [], limit: 5 },
         { id: 'copy', kind: 'transform', fields: { value: { kind: 'step', step: 'find', path } } },

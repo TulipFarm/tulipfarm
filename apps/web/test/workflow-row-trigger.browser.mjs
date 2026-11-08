@@ -71,6 +71,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       const service = createWorkflows(runtime);
       const steps = [{ id: 'note', kind: 'human', prompt: 'Check the order.', timeoutSeconds: 3600 }];
       const rowTrigger = {
+        id: 'large_orders',
         kind: 'row',
         tableId: orders.id,
         event: 'updated',
@@ -78,6 +79,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
         filter: { fieldId: amount.id, match: 'gte', value: { kind: 'numeric', value: '1000' } },
       };
       const recordTrigger = {
+        id: 'shipped',
         kind: 'record',
         tableId: orders.id,
         field: {
@@ -92,12 +94,12 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       await service.save(w.id, w.userId, randomUUID(), {
         revision: randomUUID(),
         expectedRevision: null,
-        definition: { version: 1, name: 'Large order check', trigger: rowTrigger, steps },
+        definition: { version: 1, name: 'Large order check', triggers: [rowTrigger], steps },
       });
       await service.save(w.id, w.userId, randomUUID(), {
         revision: randomUUID(),
         expectedRevision: null,
-        definition: { version: 1, name: 'Shipped follow-up', trigger: recordTrigger, steps },
+        definition: { version: 1, name: 'Shipped follow-up', triggers: [recordTrigger], steps },
       });
 
       const workspace = {
@@ -165,67 +167,75 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       await page.goto(`${origin}/row-proof/workflows`);
       const originalRow = await saved('Large order check');
       let viewer = await openWorkflow(page, originalRow);
-      let inspector = await assertConfiguration(viewer, 0, rowTrigger);
+      let inspector = await assertConfiguration(viewer, 0, [rowTrigger]);
       await inspector.getByText('When a row in Orders changes', { exact: true }).first().waitFor();
       const editedRow = await saveWorkflow(
         service,
         w,
         {
           ...originalRow.definition,
-          trigger: {
-            ...rowTrigger,
-            fieldIds: [status.id, shipped.id],
-            filter: { fieldId: amount.id, match: 'gte', value: { kind: 'numeric', value: '2000' } },
-          },
+          triggers: [
+            {
+              ...rowTrigger,
+              fieldIds: [status.id, shipped.id],
+              filter: { fieldId: amount.id, match: 'gte', value: { kind: 'numeric', value: '2000' } },
+            },
+          ],
           steps: [{ ...steps[0], prompt: 'Call the customer.' }],
         },
         originalRow,
       );
       viewer = await openWorkflow(page, editedRow);
-      await assertConfiguration(viewer, 0, editedRow.definition.trigger);
+      await assertConfiguration(viewer, 0, editedRow.definition.triggers);
       await assertConfiguration(viewer, 1, editedRow.definition.steps[0]);
-      assert.deepEqual(editedRow.definition.trigger, {
-        ...rowTrigger,
-        fieldIds: [status.id, shipped.id],
-        filter: { fieldId: amount.id, match: 'gte', value: { kind: 'numeric', value: '2000' } },
-      });
+      assert.deepEqual(editedRow.definition.triggers, [
+        {
+          ...rowTrigger,
+          fieldIds: [status.id, shipped.id],
+          filter: { fieldId: amount.id, match: 'gte', value: { kind: 'numeric', value: '2000' } },
+        },
+      ]);
       assert.equal(editedRow.definition.steps[0].prompt, 'Call the customer.');
 
       const originalRecord = await saved('Shipped follow-up');
       viewer = await openWorkflow(page, originalRecord);
-      inspector = await assertConfiguration(viewer, 0, recordTrigger);
+      inspector = await assertConfiguration(viewer, 0, [recordTrigger]);
       await inspector.getByText('Orders', { exact: true }).first().waitFor();
       const nonempty = await saveWorkflow(
         service,
         w,
         {
           ...originalRecord.definition,
-          trigger: { ...recordTrigger, filter: { fieldId: shipped.id, match: 'is-not-empty' } },
+          triggers: [{ ...recordTrigger, filter: { fieldId: shipped.id, match: 'is-not-empty' } }],
         },
         originalRecord,
       );
       viewer = await openWorkflow(page, nonempty);
-      await assertConfiguration(viewer, 0, nonempty.definition.trigger);
+      await assertConfiguration(viewer, 0, nonempty.definition.triggers);
       const editedRecord = await saveWorkflow(
         service,
         w,
         {
           ...nonempty.definition,
-          trigger: {
-            ...recordTrigger,
-            filter: { fieldId: shipped.id, match: 'lte', value: { kind: 'date', value: '2027-01-31' } },
-          },
+          triggers: [
+            {
+              ...recordTrigger,
+              filter: { fieldId: shipped.id, match: 'lte', value: { kind: 'date', value: '2027-01-31' } },
+            },
+          ],
           steps: [{ ...steps[0], prompt: 'Ask for a review.' }],
         },
         nonempty,
       );
       viewer = await openWorkflow(page, editedRecord);
-      await assertConfiguration(viewer, 0, editedRecord.definition.trigger);
+      await assertConfiguration(viewer, 0, editedRecord.definition.triggers);
       await assertConfiguration(viewer, 1, editedRecord.definition.steps[0]);
-      assert.deepEqual(editedRecord.definition.trigger, {
-        ...recordTrigger,
-        filter: { fieldId: shipped.id, match: 'lte', value: { kind: 'date', value: '2027-01-31' } },
-      });
+      assert.deepEqual(editedRecord.definition.triggers, [
+        {
+          ...recordTrigger,
+          filter: { fieldId: shipped.id, match: 'lte', value: { kind: 'date', value: '2027-01-31' } },
+        },
+      ]);
       assert.equal(editedRecord.definition.steps[0].prompt, 'Ask for a review.');
       assert.deepEqual(errors, []);
     } finally {

@@ -76,7 +76,7 @@ const policy = {
 const definition = {
   version: 1,
   name: 'Review customers',
-  trigger: { kind: 'manual' },
+  triggers: [],
   steps: [
     { id: 'review_customers', kind: 'agent', agentId: aid, prompt: { kind: 'literal', value: 'Review customers.' } },
   ],

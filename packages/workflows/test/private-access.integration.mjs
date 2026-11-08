@@ -58,7 +58,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       const definition = {
         version: 1,
         name: 'Private review',
-        trigger: { kind: 'manual' },
+        triggers: [],
         steps: [{ id: 'review', kind: 'human', prompt: 'Decide', timeoutSeconds: 60 }],
       };
       const saved = await service.save(w.id, creator.userId, id, { revision, expectedRevision: null, definition });
@@ -221,7 +221,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       await service.save(w.id, creator.userId, scheduled, {
         revision: scheduledRevision,
         expectedRevision: null,
-        definition: { ...definition, trigger: { kind: 'interval', minutes: 1 } },
+        definition: { ...definition, triggers: [{ id: 'interval', kind: 'interval', minutes: 1 }] },
       });
       await assert.rejects(activate(service, w.id, creator.userId, scheduled, scheduledRevision, true), {
         message: 'sponsorship-required',
@@ -252,7 +252,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       await service.acceptSponsorship(w.id, requester.userId, scheduled, { expectedGeneration: 2 });
       await activate(service, w.id, creator.userId, scheduled, scheduledRevision, true);
       await db.platform.query(
-        `UPDATE ${table('tf_workflows')} SET next_run_at=clock_timestamp()-interval '1 minute' WHERE id=$1`,
+        `UPDATE ${table('tf_workflow_triggers')} SET next_run_at=clock_timestamp()-interval '1 minute' WHERE workflow_id=$1`,
         [scheduled],
       );
       await service.due(w.id);
@@ -276,7 +276,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       const beforeSweep = (await service.list(w.id, creator.userId)).find(item => item.id === scheduled);
       assert.equal(beforeSweep.disabledReason, null);
       await db.platform.query(
-        `UPDATE ${table('tf_workflows')} SET next_run_at=clock_timestamp()-interval '1 minute' WHERE id=$1`,
+        `UPDATE ${table('tf_workflow_triggers')} SET next_run_at=clock_timestamp()-interval '1 minute' WHERE workflow_id=$1`,
         [scheduled],
       );
       for (const work of await service.due(w.id)) await service.advance(work);
@@ -333,7 +333,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         'handoff does not share previous history',
       );
       await db.platform.query(
-        `UPDATE ${table('tf_workflows')} SET next_run_at=clock_timestamp()-interval '1 minute' WHERE id=$1`,
+        `UPDATE ${table('tf_workflow_triggers')} SET next_run_at=clock_timestamp()-interval '1 minute' WHERE workflow_id=$1`,
         [scheduled],
       );
       await service.due(w.id);
@@ -387,7 +387,10 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       await service.save(w.id, creator.userId, providerId, {
         revision: providerRevision,
         expectedRevision: null,
-        definition: { ...definition, trigger: { kind: 'provider', integrationId, event: 'created', minutes: 1 } },
+        definition: {
+          ...definition,
+          triggers: [{ id: 'provider', kind: 'provider', integrationId, event: 'created', minutes: 1 }],
+        },
       });
       await service.share(w.id, creator.userId, providerId, {
         principal: { kind: 'person', id: requester.membershipId },
@@ -401,7 +404,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       await service.providers.poll(w.id);
       assert.ok(provider.requests.length, 'real local HTTP provider called');
       await db.platform.query(
-        `INSERT INTO ${table('tf_provider_events')} (workflow_id,revision,event_key,payload) VALUES ($1,$2,'test-event','{"secret":true}')`,
+        `INSERT INTO ${table('tf_provider_events')} (workflow_id,revision,trigger_id,fired_trigger_ids,event_key,payload) VALUES ($1,$2,'provider','{provider}','test-event','{"secret":true}')`,
         [providerId, providerRevision],
       );
       await service.due(w.id);
@@ -430,7 +433,10 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       await service.save(w.id, creator.userId, polledId, {
         revision: polledRevision,
         expectedRevision: null,
-        definition: { ...definition, trigger: { kind: 'provider', integrationId, event: 'created', minutes: 1 } },
+        definition: {
+          ...definition,
+          triggers: [{ id: 'provider', kind: 'provider', integrationId, event: 'created', minutes: 1 }],
+        },
       });
       await service.sponsorship(w.id, creator.userId, polledId, {
         sponsorMembershipId: creator.membershipId,
@@ -449,7 +455,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         [integrationId, creator.membershipId],
       );
       await db.platform.query(
-        `INSERT INTO ${table('tf_provider_events')} (workflow_id,revision,event_key,payload) VALUES ($1,$2,'after-loss-1','{}'),($1,$2,'after-loss-2','{}')`,
+        `INSERT INTO ${table('tf_provider_events')} (workflow_id,revision,trigger_id,fired_trigger_ids,event_key,payload) VALUES ($1,$2,'provider','{provider}','after-loss-1','{}'),($1,$2,'provider','{provider}','after-loss-2','{}')`,
         [providerId, providerRevision],
       );
       await service.due(w.id);
@@ -480,7 +486,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         creator.membershipId,
       ]);
       await db.platform.query(
-        `UPDATE ${table('tf_workflows')} SET next_run_at=clock_timestamp()-interval '1 minute' WHERE id=$1`,
+        `UPDATE ${table('tf_workflow_triggers')} SET next_run_at=clock_timestamp()-interval '1 minute' WHERE workflow_id=$1`,
         [scheduled],
       );
       await service.due(w.id);

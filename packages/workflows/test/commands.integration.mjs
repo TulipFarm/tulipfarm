@@ -41,7 +41,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       const definition = {
         version: 1,
         name: 'Command replay',
-        trigger: { kind: 'webhook' },
+        triggers: [{ id: 'webhook', kind: 'webhook' }],
         steps: [{ id: 'review', kind: 'human', prompt: 'Approve?', timeoutSeconds: 86400 }],
       };
       await service.save(w.id, w.userId, id, { revision, expectedRevision: null, definition });
@@ -180,7 +180,7 @@ test('human waits remain actionable after fifty newer terminal runs', { timeout:
       definition: {
         version: 1,
         name: 'Long wait',
-        trigger: { kind: 'manual' },
+        triggers: [],
         steps: [{ id: 'review', kind: 'human', prompt: 'Still waiting', timeoutSeconds: 86400 }],
       },
     });
@@ -246,7 +246,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       const definition = {
         version: 1,
         name: 'Obsolete intake',
-        trigger: { kind: 'webhook' },
+        triggers: [{ id: 'webhook', kind: 'webhook' }],
         steps: [{ id: 'review', kind: 'human', prompt: 'Approve?', timeoutSeconds: 86400 }],
       };
       await service.save(w.id, w.userId, id, { revision, expectedRevision: null, definition });
@@ -274,12 +274,12 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         await service.save(w.id, w.userId, randomUUID(), {
           revision: randomUUID(),
           expectedRevision: null,
-          definition: { ...definition, trigger: { kind: 'manual' } },
+          definition: { ...definition, triggers: [] },
         });
       await service.save(w.id, w.userId, randomUUID(), {
         revision: randomUUID(),
         expectedRevision: null,
-        definition: { ...definition, trigger: { kind: 'manual' } },
+        definition: { ...definition, triggers: [] },
       });
 
       const archive = { commandId: randomUUID(), expectedGeneration: 4 };
@@ -327,19 +327,21 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       assert.deepEqual(
         (
           await db.platform.query(
-            `SELECT enabled,next_run_at,webhook_digest,webhook_secret,webhook_previous,archived_at IS NOT NULL AS archived,generation FROM ${table('tf_workflows')} WHERE id=$1`,
+            `SELECT enabled,archived_at IS NOT NULL AS archived,generation FROM ${table('tf_workflows')} WHERE id=$1`,
             [id],
           )
         ).rows[0],
-        {
-          enabled: false,
-          next_run_at: null,
-          webhook_digest: null,
-          webhook_secret: null,
-          webhook_previous: null,
-          archived: true,
-          generation: 5,
-        },
+        { enabled: false, archived: true, generation: 5 },
+      );
+      assert.deepEqual(
+        (
+          await db.platform.query(
+            `SELECT count(*)::int AS live FROM ${table('tf_workflow_triggers')} WHERE workflow_id=$1 AND (next_run_at IS NOT NULL OR webhook_digest IS NOT NULL OR webhook_secret IS NOT NULL OR webhook_previous IS NOT NULL)`,
+            [id],
+          )
+        ).rows[0],
+        { live: 0 },
+        'archiving clears every trigger schedule and webhook key',
       );
       assert.deepEqual(
         (

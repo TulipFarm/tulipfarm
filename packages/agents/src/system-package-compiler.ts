@@ -298,7 +298,7 @@ export function packageCompiler(pkg: SystemPackage, bindings: PackageBindings, i
     return authoredDefinitionSchema.parse({
       version: 1,
       name: resource.name,
-      trigger: compiledTrigger,
+      triggers: compiledTrigger.kind === 'manual' ? [] : [{ id: compiledTrigger.kind, ...compiledTrigger }],
       steps: resource.steps.map(step => {
         if (step.kind === 'agent') {
           const { agent, ...rest } = step;
@@ -408,6 +408,14 @@ export function packageCompiler(pkg: SystemPackage, bindings: PackageBindings, i
     if (resource?.kind !== 'integration') throw new Error('Expected integration reference');
     return binding(resource.binding.key, 'integration');
   }
+  /** An agent runs one prompt for all its triggers, so every package schedule must share it. */
+  function schedulePrompt(schedules: Extract<PackageResource, { kind: 'agent' }>['schedules']) {
+    const [first] = schedules;
+    if (!first) return {};
+    if (schedules.some(item => canonicalJson(item.action) !== canonicalJson(first.action)))
+      throw new Error('Agent schedules must share one prompt and limits');
+    return { prompt: first.action.text, runLimits: first.action.limits };
+  }
   function agent(resource: Extract<PackageResource, { kind: 'agent' }>, revisions: Record<string, string>) {
     const scope = (entries: typeof resource.scope) =>
       entries.map(entry => ({
@@ -454,16 +462,15 @@ export function packageCompiler(pkg: SystemPackage, bindings: PackageBindings, i
         replaceAgentId: replaceAgent ? resolve(replaceAgent) : null,
         ...(detach === undefined ? {} : { detach }),
       })),
-      // Package schedules become agent trigger Workflows, sponsored by the installer.
+      // Package schedules become triggers of the agent's linked Workflow, sponsored by the installer.
       triggers: resource.schedules.map(schedule => ({
         id: packageIdentity(installationId, `schedule:${resource.key}:${schedule.key}`),
         trigger:
           schedule.trigger.kind === 'cron'
             ? { ...schedule.trigger, timezone: timezone(schedule.trigger.timezone) }
             : schedule.trigger,
-        prompt: schedule.action.text,
-        limits: schedule.action.limits,
       })),
+      ...schedulePrompt(resource.schedules),
     });
   }
   function file(resource: Extract<PackageResource, { kind: 'file' }>) {

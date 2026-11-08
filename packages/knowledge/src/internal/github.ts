@@ -313,6 +313,7 @@ export function createGitHubKnowledge({
   // Common migration 0006 allows commit items and records each repository's indexed commit head; until a workspace
   // is migrated, its sources index every selected kind except commits.
   const storesCommits = (tx: Tx) => ((tx as { commonVersion?: number }).commonVersion ?? 0) >= 7;
+  const storesOwner = (tx: Tx) => ((tx as { commonVersion?: number }).commonVersion ?? 0) >= 48;
   async function transaction<T>(workspaceId: string, operation: (tx: Tx) => Promise<T>) {
     return runtime.transaction(uuidSchema.parse(workspaceId), commonCompatibility, async raw => {
       const tx = store.bind(raw);
@@ -579,8 +580,17 @@ export function createGitHubKnowledge({
       );
       for (const r of inspected.repositories)
         await tx.client.query(
-          `INSERT INTO ${table(tx, 'github_repositories')} (source_id,repository_id,full_name,visibility,title) VALUES ($1,$2,$3,$4,$5)`,
-          [input.commandId, r.repositoryId, r.fullName, r.visibility, r.title.slice(0, 512) || r.fullName],
+          storesOwner(tx)
+            ? `INSERT INTO ${table(tx, 'github_repositories')} (source_id,repository_id,full_name,visibility,title,owner_id) VALUES ($1,$2,$3,$4,$5,$6)`
+            : `INSERT INTO ${table(tx, 'github_repositories')} (source_id,repository_id,full_name,visibility,title) VALUES ($1,$2,$3,$4,$5)`,
+          [
+            input.commandId,
+            r.repositoryId,
+            r.fullName,
+            r.visibility,
+            r.title.slice(0, 512) || r.fullName,
+            ...(storesOwner(tx) ? [r.ownerId ?? null] : []),
+          ],
         );
       await store.source(tx, human, input.commandId, true);
       await handOver(
@@ -1040,13 +1050,16 @@ export function createGitHubKnowledge({
       if (!advanced.rowCount) throw new KnowledgeError('superseded');
       if (owner)
         await tx.client.query(
-          `UPDATE ${table(tx, 'github_repositories')} SET state='active',failure=NULL,full_name=$3,visibility=$4,title=$5 WHERE source_id=$1 AND repository_id=$2`,
+          storesOwner(tx)
+            ? `UPDATE ${table(tx, 'github_repositories')} SET state='active',failure=NULL,full_name=$3,visibility=$4,title=$5,owner_id=COALESCE($6,owner_id) WHERE source_id=$1 AND repository_id=$2`
+            : `UPDATE ${table(tx, 'github_repositories')} SET state='active',failure=NULL,full_name=$3,visibility=$4,title=$5 WHERE source_id=$1 AND repository_id=$2`,
           [
             sourceId,
             repositoryId,
             observed.fullName,
             observed.visibility,
             observed.title.slice(0, 512) || observed.fullName,
+            ...(storesOwner(tx) ? [observed.ownerId ?? null] : []),
           ],
         );
       const r = repositorySchema.parse(
@@ -1618,6 +1631,20 @@ export function createGitHubKnowledge({
           )
           .map(row => row.repository_id),
       );
+      // Rows stored before owners were recorded learn theirs here, so account-wide workflow triggers can match them. The
+      // owner is a fact about the repository, so every source's row for it learns it; rows another pass holds are left.
+      if (storesOwner(tx)) {
+        const owned = [...found.values()].filter(r => r.ownerId);
+        if (owned.length)
+          await tx.client.query(
+            `UPDATE ${table(tx, 'github_repositories')} r SET owner_id=u.owner_id FROM (
+              SELECT c.source_id,c.repository_id,o.owner_id FROM ${table(tx, 'github_repositories')} c
+              JOIN unnest($1::text[],$2::text[]) AS o(repository_id,owner_id) ON o.repository_id=c.repository_id
+              WHERE c.owner_id IS NULL ORDER BY c.source_id,c.repository_id FOR UPDATE OF c SKIP LOCKED
+            ) u WHERE r.source_id=u.source_id AND r.repository_id=u.repository_id`,
+            [owned.map(r => r.repositoryId), owned.map(r => r.ownerId)],
+          );
+      }
       let room =
         githubCorpusLimits.repositories -
         z
@@ -1636,8 +1663,17 @@ export function createGitHubKnowledge({
         if (room <= 0) break;
         if (known.has(r.repositoryId)) continue;
         await tx.client.query(
-          `INSERT INTO ${table(tx, 'github_repositories')} (source_id,repository_id,full_name,visibility,title) VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`,
-          [s.source_id, r.repositoryId, r.fullName, r.visibility, r.title.slice(0, 512) || r.fullName],
+          storesOwner(tx)
+            ? `INSERT INTO ${table(tx, 'github_repositories')} (source_id,repository_id,full_name,visibility,title,owner_id) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING`
+            : `INSERT INTO ${table(tx, 'github_repositories')} (source_id,repository_id,full_name,visibility,title) VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`,
+          [
+            s.source_id,
+            r.repositoryId,
+            r.fullName,
+            r.visibility,
+            r.title.slice(0, 512) || r.fullName,
+            ...(storesOwner(tx) ? [r.ownerId ?? null] : []),
+          ],
         );
         room--;
       }

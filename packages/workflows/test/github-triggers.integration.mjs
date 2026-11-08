@@ -8,7 +8,7 @@ import { workspaceTableMigrations } from '../../workspaces/src/table-migrations.
 import { createWorkspaceRuntime, qualified } from '@tulipfarm/workspace-storage/runtime';
 import { createWorkflows } from '../src/service.ts';
 import { createGitHubSubscriptions, createGitHubWorkflowFanOut } from '../src/github-triggers.ts';
-import { activate } from './commands.fixture.mjs';
+import { activate, switchTrigger } from './commands.fixture.mjs';
 
 const migration = name => readFile(new URL(`../../../apps/database/migrations/${name}`, import.meta.url), 'utf8');
 
@@ -21,7 +21,8 @@ test(
     try {
       await db.platform.query(`SET search_path TO app; DROP TABLE IF EXISTS app.accounts;
 ${await migration('0001_baseline.sql')}
-${await migration('0008_github_workflow_subscriptions.sql')}`);
+${await migration('0008_github_workflow_subscriptions.sql')}
+${await migration('0009_github_workflow_trigger_subscriptions.sql')}`);
       const w = await db.create(await workspaceTableMigrations());
       const table = name => qualified(w.names.schema, name);
       runtime = createWorkspaceRuntime({
@@ -30,14 +31,22 @@ ${await migration('0008_github_workflow_subscriptions.sql')}`);
         databaseConnectionBudget: 20,
         resolveCredential: async id => ({ workspaceId: id, generation: 1, connectionString: db.login(w) }),
       });
-      const service = createWorkflows(runtime, { githubSubscriptions: createGitHubSubscriptions(db.platform) });
+      // Subscriptions take a pool and check out one client per replacement; the fixture's single client stands in for it.
+      const pool = {
+        query: (...args) => db.platform.query(...args),
+        connect: async () => ({ query: (...args) => db.platform.query(...args), release() {} }),
+      };
+      const service = createWorkflows(runtime, { githubSubscriptions: createGitHubSubscriptions(pool) });
       const fanOut = createGitHubWorkflowFanOut(db.platform, runtime);
       const id = randomUUID(),
         revision = randomUUID();
       const definition = {
         version: 1,
         name: 'Stars',
-        trigger: { kind: 'github', repositoryId: '42', event: 'star', actions: ['created'] },
+        triggers: [
+          { id: 'github', kind: 'github', repositories: ['42'], events: [{ event: 'star', actions: ['created'] }] },
+          { id: 'stars', kind: 'github', repositories: ['42'], events: [{ event: 'star' }] },
+        ],
         steps: [{ id: 'copy', kind: 'transform', fields: { login: { kind: 'input', path: ['sender'] } } }],
       };
       const star = (deliveryId, action = 'created', login = 'octocat') =>
@@ -49,14 +58,16 @@ ${await migration('0008_github_workflow_subscriptions.sql')}`);
       const subscriptions = async () =>
         (
           await db.platform.query(
-            'SELECT repository_id,event,actions FROM app.github_workflow_subscriptions WHERE workflow_id=$1',
+            `SELECT s.trigger_id,s.events,ARRAY(SELECT r.repository_id FROM app.github_workflow_subscription_repositories r
+              WHERE (r.workspace_id,r.workflow_id,r.trigger_id)=(s.workspace_id,s.workflow_id,s.trigger_id)) AS repositories
+            FROM app.github_workflow_subscriptions s WHERE s.workflow_id=$1`,
             [id],
           )
         ).rows;
       const events = async () =>
         (
           await db.platform.query(
-            `SELECT event_key,payload->>'sender' AS sender FROM ${table('tf_provider_events')} WHERE workflow_id=$1 ORDER BY event_key`,
+            `SELECT event_key,payload->>'sender' AS sender,fired_trigger_ids FROM ${table('tf_provider_events')} WHERE workflow_id=$1 ORDER BY event_key`,
             [id],
           )
         ).rows;
@@ -84,7 +95,7 @@ ${await migration('0008_github_workflow_subscriptions.sql')}`);
         [source],
       );
       assert.deepEqual(await service.githubRepositories(w.id, w.userId), [
-        { repositoryId: '42', fullName: 'acme/app' },
+        { repositoryId: '42', fullName: 'acme/app', ownerId: null },
       ]);
 
       await service.save(w.id, w.userId, id, { revision, expectedRevision: null, definition });
@@ -93,8 +104,12 @@ ${await migration('0008_github_workflow_subscriptions.sql')}`);
         historyAudience: [w.membershipId],
       });
       await activate(service, w.id, w.userId, id, revision, true);
-      assert.deepEqual(await subscriptions(), [{ repository_id: '42', event: 'star', actions: ['created'] }]);
+      assert.deepEqual(await subscriptions(), [
+        { trigger_id: 'github', events: [{ event: 'star', actions: ['created'] }], repositories: ['42'] },
+        { trigger_id: 'stars', events: [{ event: 'star' }], repositories: ['42'] },
+      ]);
 
+      await switchTrigger(service, w.id, w.userId, id, 'stars', false);
       await star('d-deleted', 'deleted');
       await fanOut({ event: 'watch', deliveryId: 'd-watch', body: { action: 'started', repository: { id: 42 } } });
       await fanOut({
@@ -105,11 +120,23 @@ ${await migration('0008_github_workflow_subscriptions.sql')}`);
       assert.deepEqual(await events(), [], 'another action, event or repository does not reach the workflow');
       await star('d-1');
       await star('d-1');
-      assert.deepEqual(await events(), [{ event_key: 'd-1', sender: 'octocat' }], 'a redelivery is queued once');
+      assert.deepEqual(
+        await events(),
+        [{ event_key: 'd-1', sender: 'octocat', fired_trigger_ids: ['github'] }],
+        'a redelivery is queued once',
+      );
       await service.due(w.id);
       assert.deepEqual(
         (await service.history(w.id, w.userId, id).then(page => page.runs)).map(run => run.input.sender),
         ['octocat'],
+      );
+      await switchTrigger(service, w.id, w.userId, id, 'stars', true);
+      await switchTrigger(service, w.id, w.userId, id, 'github', false);
+      await star('d-1');
+      assert.deepEqual(
+        (await events()).map(event => event.event_key),
+        ['d-1'],
+        'a redelivery stays one event when a trigger switch changes which trigger matches it',
       );
 
       await activate(service, w.id, w.userId, id, revision, false);

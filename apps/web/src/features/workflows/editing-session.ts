@@ -9,7 +9,7 @@ type View = 'list' | 'definition' | 'runs' | 'settings';
 const initial: Definition = {
   version: 1,
   name: 'Review a request',
-  trigger: { kind: 'manual' },
+  triggers: [],
   steps: [
     { id: 'request', kind: 'transform', fields: { request: { kind: 'input', path: [] } } },
     { id: 'review', kind: 'human', prompt: 'Review this request and provide your decision.', timeoutSeconds: 86400 },

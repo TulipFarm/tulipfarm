@@ -122,7 +122,12 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
 
     const service = createWorkflows(runtime);
     const steps = [{ id: 'note', kind: 'transform', fields: { record: { kind: 'input', path: ['recordId'] } } }];
-    const definition = trigger => ({ version: 1, name: 'Lead follow-up', trigger, steps });
+    const definition = trigger => ({
+      version: 1,
+      name: 'Lead follow-up',
+      triggers: [{ id: trigger.kind, ...trigger }],
+      steps,
+    });
     const launch = async (trigger, workflowSteps = steps) => {
       const id = randomUUID(),
         workflowRevision = randomUUID();
@@ -140,7 +145,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     };
     const sweep = async () => {
       await db.databaseAdmin.query(
-        `UPDATE ${table('tf_workflows')} SET next_run_at=LEAST(next_run_at,clock_timestamp()) WHERE enabled`,
+        `UPDATE ${table('tf_workflow_triggers')} SET next_run_at=LEAST(next_run_at,clock_timestamp()) WHERE next_run_at IS NOT NULL AND workflow_id IN (SELECT id FROM ${table('tf_workflows')} WHERE enabled)`,
       );
       await service.due(w.id);
     };
@@ -412,7 +417,9 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       await db.databaseAdmin.query(
         `UPDATE ${table('tf_workflow_runs')} SET status='completed' WHERE status IN ('queued','waiting')`,
       );
-      await db.databaseAdmin.query(`UPDATE ${table('tf_workflows')} SET next_run_at=clock_timestamp() WHERE enabled`);
+      await db.databaseAdmin.query(
+        `UPDATE ${table('tf_workflow_triggers')} SET next_run_at=clock_timestamp() WHERE next_run_at IS NOT NULL AND workflow_id IN (SELECT id FROM ${table('tf_workflows')} WHERE enabled)`,
+      );
       await createWorkflows(runtime).due(w.id);
     }
     const admitted = (
@@ -495,9 +502,10 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       new Set([earlierCommit.id, laterCommit.id]),
       'a transaction started before activation, with a two-hour-old change time, still captures its later mutation after another transaction commits and sweeps',
     );
-    await db.databaseAdmin.query(`UPDATE ${table('tf_workflows')} SET next_run_at=clock_timestamp() WHERE id=$1`, [
-      durable,
-    ]);
+    await db.databaseAdmin.query(
+      `UPDATE ${table('tf_workflow_triggers')} SET next_run_at=clock_timestamp() WHERE workflow_id=$1`,
+      [durable],
+    );
     const captured = Promise.withResolvers(),
       releaseFirst = Promise.withResolvers();
     const firstWriter = runtime.transaction(
@@ -628,9 +636,10 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
           }),
         ),
     };
-    await db.databaseAdmin.query(`UPDATE ${table('tf_workflows')} SET next_run_at=clock_timestamp() WHERE id=$1`, [
-      durable,
-    ]);
+    await db.databaseAdmin.query(
+      `UPDATE ${table('tf_workflow_triggers')} SET next_run_at=clock_timestamp() WHERE workflow_id=$1`,
+      [durable],
+    );
     await createWorkflows(failing).due(w.id);
     assert.equal(failedAdmission, true);
     assert.equal(

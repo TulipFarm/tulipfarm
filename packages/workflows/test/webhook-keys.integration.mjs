@@ -11,7 +11,7 @@ const keyring = { activeKeyId: 'fixture', keys: { fixture: '5a'.repeat(32) } };
 const definition = {
   version: 1,
   name: 'Signed intake',
-  trigger: { kind: 'webhook' },
+  triggers: [{ id: 'webhook', kind: 'webhook' }],
   steps: [{ id: 'review', kind: 'human', prompt: 'Approve?', timeoutSeconds: 86400 }],
 };
 const sign = (key, timestamp, raw) => `sha256=${createHmac('sha256', key).update(`${timestamp}.${raw}`).digest('hex')}`;
@@ -83,12 +83,17 @@ test(
       const { workflow, key } = await rotate('signed');
       assert.match(key, /^[a-f0-9]{64}$/);
       assert.deepEqual(
-        [workflow.webhookConfigured, workflow.webhookMode, workflow.webhookPrevious, workflow.webhookRotation],
+        [
+          workflow.triggers.some(trigger => trigger.webhook?.configured),
+          workflow.triggers[0].webhook.mode,
+          workflow.triggers[0].webhook.previous,
+          workflow.triggers[0].webhook.rotation,
+        ],
         [true, 'signed', null, true],
       );
       const stored = (
         await db.platform.query(
-          `SELECT webhook_digest,webhook_secret::text AS secret FROM ${table('tf_workflows')} WHERE id=$1`,
+          `SELECT webhook_digest,webhook_secret::text AS secret FROM ${table('tf_workflow_triggers')} WHERE workflow_id=$1`,
           [id],
         )
       ).rows[0];
@@ -187,7 +192,10 @@ test(
         service.webhook(w.id, id, { ...githubRequest, headers: { 'x-hub-signature-256': `sha256=${'0'.repeat(64)}` } }),
         AccessDenied,
       );
-      assert.equal((await service.list(w.id, w.userId)).find(item => item.id === id).webhookMode, 'github');
+      assert.equal(
+        (await service.list(w.id, w.userId)).find(item => item.id === id).triggers[0].webhook.mode,
+        'github',
+      );
 
       const stripeSecret = 'whsec_workflow_test_signing_secret_123';
       const stripe = await rotate('stripe', { secret: stripeSecret });
@@ -213,9 +221,15 @@ test(
         }),
         { message: 'webhook-signature-expired' },
       );
-      assert.equal((await service.list(w.id, w.userId)).find(item => item.id === id).webhookMode, 'stripe');
+      assert.equal(
+        (await service.list(w.id, w.userId)).find(item => item.id === id).triggers[0].webhook.mode,
+        'stripe',
+      );
       const stored = (
-        await db.platform.query(`SELECT webhook_secret::text AS secret FROM ${table('tf_workflows')} WHERE id=$1`, [id])
+        await db.platform.query(
+          `SELECT webhook_secret::text AS secret FROM ${table('tf_workflow_triggers')} WHERE workflow_id=$1`,
+          [id],
+        )
       ).rows[0].secret;
       assert.equal(stored.includes(stripeSecret), false, 'The Stripe secret is encrypted at rest');
       assert.equal(stripe.key, null, 'A provider-generated secret is not returned by the server');
@@ -233,11 +247,11 @@ test(
     const { service, w, id, rotate, table, db } = setup;
     try {
       const first = await rotate('bearer');
-      assert.equal(first.workflow.webhookPrevious, null, 'The first key has no predecessor');
+      assert.equal(first.workflow.triggers[0].webhook.previous, null, 'The first key has no predecessor');
       const second = await rotate('signed');
-      assert.equal(second.workflow.webhookMode, 'signed');
-      assert.equal(second.workflow.webhookPrevious.mode, 'bearer');
-      const expiresIn = Date.parse(second.workflow.webhookPrevious.expiresAt) - Date.now();
+      assert.equal(second.workflow.triggers[0].webhook.mode, 'signed');
+      assert.equal(second.workflow.triggers[0].webhook.previous.mode, 'bearer');
+      const expiresIn = Date.parse(second.workflow.triggers[0].webhook.previous.expiresAt) - Date.now();
       assert.ok(expiresIn > 86300000 && expiresIn <= 86400000, 'The previous key is accepted for 24 hours by default');
       assert.match(
         (await service.webhook(w.id, id, bearer(first.key))).runId,
@@ -260,7 +274,7 @@ test(
       );
 
       await db.platform.query(
-        `UPDATE ${table('tf_workflows')} SET webhook_previous_expires_at=clock_timestamp()-interval '1 second' WHERE id=$1`,
+        `UPDATE ${table('tf_workflow_triggers')} SET webhook_previous_expires_at=clock_timestamp()-interval '1 second' WHERE workflow_id=$1`,
         [id],
       );
       await assert.rejects(
@@ -268,10 +282,13 @@ test(
         AccessDenied,
         'The previous key stops after its grace period',
       );
-      assert.equal((await service.list(w.id, w.userId)).find(item => item.id === id).webhookPrevious, null);
+      assert.equal(
+        (await service.list(w.id, w.userId)).find(item => item.id === id).triggers[0].webhook.previous,
+        null,
+      );
 
       const third = await rotate('bearer', { graceSeconds: 3600 });
-      const graceIn = Date.parse(third.workflow.webhookPrevious.expiresAt) - Date.now();
+      const graceIn = Date.parse(third.workflow.triggers[0].webhook.previous.expiresAt) - Date.now();
       assert.ok(graceIn > 3500000 && graceIn <= 3600000);
       assert.match(
         (await service.webhook(w.id, id, signed(second.key, envelope()))).runId,
@@ -280,7 +297,7 @@ test(
       );
       const revoke = { commandId: randomUUID(), expectedGeneration: third.workflow.generation };
       const revoked = await service.revokePreviousWebhookKey(w.id, w.userId, id, revoke);
-      assert.equal(revoked.webhookPrevious, null);
+      assert.equal(revoked.triggers[0].webhook.previous, null);
       assert.equal(
         (await service.revokePreviousWebhookKey(w.id, w.userId, id, revoke)).generation,
         revoked.generation,
@@ -328,58 +345,25 @@ test(
 );
 
 test(
-  'workspaces before common version 5 keep single bearer keys without signing or grace',
+  'workspaces before the multiple-triggers migration report workflows unavailable',
   { timeout: 120000 },
   async () => {
-    const setup = await webhookWorkspace((await workspaceTableMigrations()).slice(0, 4));
-    const { service, w, id, rotate } = setup;
+    const db = await fixture();
+    const w = await db.create((await workspaceTableMigrations()).slice(0, 47));
+    const runtime = createWorkspaceRuntime({
+      replicaCount: 1,
+      reservedConnections: 2,
+      databaseConnectionBudget: 20,
+      resolveCredential: async id => ({ workspaceId: id, generation: 1, connectionString: db.login(w) }),
+    });
     try {
-      await assert.rejects(rotate('signed'), { message: 'webhook-signing-unavailable' });
-      const first = await rotate('bearer');
-      const second = await rotate('bearer');
-      assert.deepEqual(
-        [second.workflow.webhookMode, second.workflow.webhookPrevious, second.workflow.webhookRotation],
-        ['bearer', null, false],
-      );
-      await assert.rejects(service.webhook(w.id, id, bearer(first.key)), AccessDenied);
-      assert.match((await service.webhook(w.id, id, bearer(second.key))).runId, /^[a-f0-9-]{36}$/);
-      await assert.rejects(
-        service.revokePreviousWebhookKey(w.id, w.userId, id, {
-          commandId: randomUUID(),
-          expectedGeneration: second.workflow.generation,
-        }),
-        { message: 'webhook-signing-unavailable' },
-      );
-    } finally {
-      await setup.close();
-    }
-  },
-);
-
-test(
-  'workspaces before common version 7 report no delivery log and still accept test sends',
-  { timeout: 120000 },
-  async () => {
-    const setup = await webhookWorkspace((await workspaceTableMigrations()).slice(0, 6));
-    const { service, w, id } = setup;
-    try {
-      await service.recordWebhookDelivery(w.id, id, {
-        status: 404,
-        outcome: 'key-missing',
-        test: false,
-        runId: null,
-        bodyBytes: 10,
-        requestId: null,
-      });
-      assert.deepEqual(await service.webhookDeliveries(w.id, w.userId, id), { available: false, deliveries: [] });
-      const requestId = randomUUID();
-      const sent = await service.testWebhook(w.id, w.userId, id, { requestId });
-      assert.deepEqual(await service.testWebhook(w.id, w.userId, id, { requestId }), {
-        runId: sent.runId,
-        replayed: true,
+      await assert.rejects(createWorkflows(runtime, { keyring }).list(w.id, w.userId), {
+        name: 'StorageUnavailableError',
+        message: /incompatible_version/,
       });
     } finally {
-      await setup.close();
+      await runtime.close();
+      await db.close();
     }
   },
 );

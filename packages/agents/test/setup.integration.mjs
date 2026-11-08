@@ -14,7 +14,8 @@ import { createConversations } from '../../conversations/src/index.ts';
 import { createConversationExecutor } from '../../conversations/src/runtime.ts';
 import { createAuthoringDrafts } from '../src/drafts.ts';
 import { createChatTools } from '../src/tools.ts';
-import { agentTriggerDefinition } from '../src/agent-trigger-workflows.ts';
+import { agentLinkedDefinition, agentLinkedWorkflowId } from '../src/agent-trigger-workflows.ts';
+import { agentWorkflowTriggerId } from '../src/setup-contracts.ts';
 import { createWorkflows } from '@tulipfarm/workflows';
 
 const limits = { toolCalls: 10, activeMilliseconds: 60000, credits: 10 };
@@ -87,6 +88,8 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     expectedSavedRevision: null,
     expectedPolicyVersion: 0,
     expectedActivationIds: [],
+    expectedWorkflowRevision: null,
+    expectedWorkflowGeneration: null,
     setup: setup(),
     ...overrides,
   });
@@ -96,7 +99,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     digest: draft.digest,
     decision: choice,
     consent: {
-      sponsorTriggerIds: draft.setup.triggers.map(selected => selected.id),
+      sponsor: true,
       replaceChannels: draft.setup.slackChannels
         .filter(channel => channel.replaceAgentId)
         .map(channel => channel.channel),
@@ -147,14 +150,13 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
 test('draft choices persist inactive; publication has one Soul write and one activation across retries', async t => {
   const f = await environment(t),
     service = createAgentSetup(f.runtime);
-  const weekdays = prompt => ({
+  const weekdays = () => ({
     id: randomUUID(),
     trigger: { kind: 'cron', expression: '0 9 * * 1-5', timezone: 'Asia/Kolkata' },
-    prompt,
   });
-  const triggers = [weekdays('Check urgent tasks.'), weekdays('Prepare daily summary.')];
+  const triggers = [weekdays(), { ...weekdays(), label: 'Second check' }];
   const value = await f.input({
-    setup: { ...f.setup(), policy: { grants: [], personGrants: [] }, triggers },
+    setup: { ...f.setup(), policy: { grants: [], personGrants: [] }, prompt: 'Check urgent tasks.', triggers },
   });
   const draft = await service.saveDraft(f.w.id, f.user, f.agentId, value);
   assert.deepEqual(await service.saveDraft(f.w.id, f.user, f.agentId, value), draft);
@@ -166,7 +168,7 @@ test('draft choices persist inactive; publication has one Soul write and one act
   assert.equal((await service.advance(f.w.id, f.user, save.commandId)).status, 'saved');
   assert.equal((await f.state()).agent.enabled, false);
   assert.deepEqual((await f.state()).workflows, []);
-  assert.deepEqual(save.workflows, []);
+  assert.equal(save.workflowId, null);
   const activationInput = f.decision(draft);
   const command = await service.publish(f.w.id, f.user, f.agentId, activationInput);
   assert.equal(
@@ -188,28 +190,32 @@ test('draft choices persist inactive; publication has one Soul write and one act
   const active = await f.state();
   assert.equal(active.agent.enabled, true);
   assert.deepEqual(active.activations, [done.activationId]);
-  assert.equal(active.workflows.length, 2);
+  assert.equal(active.workflows.length, 1, 'every trigger of the agent belongs to its one linked Workflow');
+  const [row] = active.workflows;
+  assert.equal(done.workflowId, row.id);
+  assert.equal(row.id, agentLinkedWorkflowId(f.agentId));
+  assert.equal(row.enabled, true);
+  assert.equal(row.sponsor_membership_id, f.member, 'the consenting reviewer sponsors the unattended triggers');
+  assert.equal(row.definition.name, 'Setup helper');
   assert.deepEqual(
-    done.workflows.map(item => item.workflowId).sort(),
-    active.workflows.map(row => row.id),
+    row.definition.triggers,
+    triggers.map(selected => ({
+      ...selected.trigger,
+      id: agentWorkflowTriggerId(selected.id),
+      ...(selected.label ? { label: selected.label } : {}),
+    })),
   );
-  for (const selected of triggers) {
-    const workflowId = done.workflows.find(item => item.triggerId === selected.id).workflowId;
-    const row = active.workflows.find(item => item.id === workflowId);
-    assert.equal(row.enabled, true);
-    assert.equal(row.sponsor_membership_id, f.member, 'the consenting reviewer sponsors the unattended trigger');
-    assert.equal(row.definition.name, 'Setup helper: Every weekday at 09:00 (Asia/Kolkata)');
-    assert.deepEqual(row.definition.trigger, selected.trigger);
-    assert.deepEqual(row.definition.steps, [
-      {
-        id: 'run_agent',
-        kind: 'agent',
-        agentId: f.agentId,
-        prompt: { kind: 'literal', value: selected.prompt },
-        limits,
-      },
-    ]);
-  }
+  assert.deepEqual(row.definition.steps, [
+    {
+      id: 'run_agent',
+      kind: 'agent',
+      agentId: f.agentId,
+      prompt: { kind: 'literal', value: 'Check urgent tasks.' },
+      context: { kind: 'input', path: [] },
+      triggerContext: true,
+      limits,
+    },
+  ]);
   assert.equal(f.writes(), 1);
   assert.equal(
     (await f.db.platform.query(`SELECT count(*)::integer AS n FROM ${f.table('tf_agent_commands')}`)).rows[0].n,
@@ -228,7 +234,8 @@ for (const resume of ['new-stage', 'fresh-page'])
     const localSetup = {
       ...f.setup(),
       policy: { grants: [], personGrants: [] },
-      triggers: [{ id: randomUUID(), trigger: { kind: 'interval', minutes: 60 }, prompt: 'Check the daily queue.' }],
+      prompt: 'Check the daily queue.',
+      triggers: [{ id: randomUUID(), trigger: { kind: 'interval', minutes: 60 } }],
     };
     const original = await service.saveDraft(f.w.id, f.user, f.agentId, await f.input({ setup: localSetup }));
     const saved = await service.publish(f.w.id, f.user, f.agentId, f.decision(original, 'save'));
@@ -279,7 +286,7 @@ for (const resume of ['new-stage', 'fresh-page'])
     await assert.rejects(
       resumed.publish(f.w.id, f.user, f.agentId, {
         ...decision,
-        consent: { sponsorTriggerIds: [], replaceChannels: [] },
+        consent: { sponsor: false, replaceChannels: [] },
       }),
       /trigger-sponsor-consent-required/,
     );
@@ -295,7 +302,7 @@ for (const resume of ['new-stage', 'fresh-page'])
     ]);
     assert.deepEqual((await f.state()).activations, [activated.activationId]);
     assert.equal((await f.state()).workflows.length, 1);
-    assert.equal((await f.state()).workflows[0].definition.name, 'Setup helper: Every hour');
+    assert.equal((await f.state()).workflows[0].definition.name, 'Setup helper');
     assert.equal(f.writes(), resume === 'new-stage' ? 2 : 1);
     assert.deepEqual(await resumed.advance(f.w.id, f.user, command.commandId), activated);
     assert.equal((await resumed.publish(f.w.id, f.user, f.agentId, decision)).commandId, command.commandId);
@@ -420,7 +427,8 @@ test('post-Soul setup failures roll back every DB effect and resume with stable 
       setup: {
         ...f.setup(),
         slackChannels: [{ channel: 'C123', expectedVersion: 0, replaceAgentId: null }],
-        triggers: [{ id: randomUUID(), trigger: { kind: 'interval', minutes: 60 }, prompt: 'Check once per hour.' }],
+        prompt: 'Check once per hour.',
+        triggers: [{ id: randomUUID(), trigger: { kind: 'interval', minutes: 60 } }],
       },
     }),
   );
@@ -448,9 +456,7 @@ test('post-Soul setup failures roll back every DB effect and resume with stable 
   assert.equal(active.status, 'active');
   assert.equal(active.activationId, command.activationId);
   assert.equal((await f.state()).workflows.length, 1);
-  assert.deepEqual(active.workflows, [
-    { triggerId: draft.setup.triggers[0].id, workflowId: (await f.state()).workflows[0].id },
-  ]);
+  assert.equal(active.workflowId, (await f.state()).workflows[0].id);
   assert.deepEqual(await service.advance(f.w.id, f.user, command.commandId), active);
   assert.equal(
     (
@@ -560,9 +566,10 @@ test('review versions, sponsorship, replacement and current membership are enfor
     setup: {
       ...f.setup(),
       slackChannels: [{ channel: 'C123', expectedVersion: 2, replaceAgentId: randomUUID() }],
+      prompt: 'Check.',
       triggers: [
-        { id: randomUUID(), trigger: { kind: 'interval', minutes: 60 }, prompt: 'Check.' },
-        { id: randomUUID(), trigger: { kind: 'manual' }, prompt: 'Check when asked.' },
+        { id: randomUUID(), trigger: { kind: 'interval', minutes: 60 } },
+        { id: randomUUID(), trigger: { kind: 'event', name: 'check_requested' } },
       ],
     },
   });
@@ -582,14 +589,14 @@ test('review versions, sponsorship, replacement and current membership are enfor
   await assert.rejects(
     service.publish(f.w.id, f.user, f.agentId, {
       ...f.decision(draft),
-      consent: { sponsorTriggerIds: [], replaceChannels: [] },
+      consent: { sponsor: false, replaceChannels: [] },
     }),
     /trigger-sponsor-consent-required/,
   );
   await assert.rejects(
     service.publish(f.w.id, f.user, f.agentId, {
       ...f.decision(draft),
-      // A manual trigger runs only when a member starts it, so it needs no sponsor.
+      // An event trigger runs only when a member starts it, so consent stored per trigger need not name it.
       consent: { sponsorTriggerIds: [draft.setup.triggers[0].id], replaceChannels: [] },
     }),
     /slack-replacement-consent-required/,
@@ -654,7 +661,15 @@ test('chat full setup approves the same coordinator; historical drafts stay save
         expectedSoulRevision: await f.head(),
         definition,
         owningTeamId,
-        ...(full ? { setup, expectedPolicyVersion: 0, expectedActivationIds: [] } : {}),
+        ...(full
+          ? {
+              setup,
+              expectedPolicyVersion: 0,
+              expectedActivationIds: [],
+              expectedWorkflowRevision: null,
+              expectedWorkflowGeneration: null,
+            }
+          : {}),
       },
     };
     await createConversationExecutor(f.runtime, async ({ executeTool }) => {
@@ -679,7 +694,7 @@ test('chat full setup approves the same coordinator; historical drafts stay save
     commandId: randomUUID(),
     digest: full.digest,
     decision: 'activate',
-    consent: { sponsorTriggerIds: [], replaceChannels: [] },
+    consent: { sponsor: false, replaceChannels: [] },
   };
   const outcome = await drafts.decide(f.w.id, f.user, chatId, full.draftId, decision);
   assert.equal(outcome.kind, 'agent');
@@ -695,13 +710,13 @@ test('chat full setup approves the same coordinator; historical drafts stay save
   assert.equal(replayed.setupReceipt.status, 'active');
 });
 
-async function activeAgent(f, triggers = []) {
+async function activeAgent(f, triggers = [], prompt = 'Check the queue.') {
   const service = createAgentSetup(f.runtime);
   const draft = await service.saveDraft(
     f.w.id,
     f.user,
     f.agentId,
-    await f.input({ setup: { ...f.setup(), triggers } }),
+    await f.input({ setup: { ...f.setup(), ...(triggers.length ? { prompt } : {}), triggers } }),
   );
   const command = await service.publish(f.w.id, f.user, f.agentId, f.decision(draft));
   await f.accept(service, command);
@@ -713,14 +728,14 @@ async function activeAgent(f, triggers = []) {
 test('archiving an agent archives only its trigger workflows; restoring brings them back disabled', async t => {
   const f = await environment(t),
     agents = createSavedAgentService(f.runtime);
-  await activeAgent(f, [{ id: randomUUID(), trigger: { kind: 'interval', minutes: 60 }, prompt: 'Check the queue.' }]);
+  await activeAgent(f, [{ id: randomUUID(), trigger: { kind: 'interval', minutes: 60 } }]);
   const unlinkedId = randomUUID();
   await createWorkflows(f.runtime, { agentSteps: true }).save(f.w.id, f.user, unlinkedId, {
     revision: randomUUID(),
     expectedRevision: null,
-    definition: agentTriggerDefinition(
+    definition: agentLinkedDefinition(
       { id: f.agentId, name: 'Setup helper' },
-      { trigger: { kind: 'manual' }, prompt: 'Run by hand.' },
+      { prompt: 'Run by hand.', triggers: [] },
     ),
   });
   const unlinked = async () =>

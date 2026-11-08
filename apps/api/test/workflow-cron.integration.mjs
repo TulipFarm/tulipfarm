@@ -12,7 +12,12 @@ import { registerWorkflows } from '../src/workflows.ts';
 import { protectBusinessRequests } from '../src/business.ts';
 
 const steps = [{ id: 'copy', kind: 'transform', fields: { at: { kind: 'input', path: ['scheduledFor'] } } }];
-const definition = (name, trigger) => ({ version: 1, name, trigger, steps });
+const definition = (name, trigger) => ({
+  version: 1,
+  name,
+  triggers: trigger.kind === 'manual' ? [] : [{ id: trigger.kind, ...trigger }],
+  steps,
+});
 const minutesFromNow = iso => (Date.parse(iso) - Date.now()) / 60000;
 
 test(
@@ -45,7 +50,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       });
       const base = `/workspaces/${w.id}/workflows`;
       const headers = { origin: 'http://localhost:5173', cookie: 'test-session=admin' };
-      const workflows = `${escapeIdentifier(w.names.schema)}.tf_workflows`;
+      const triggers = `${escapeIdentifier(w.names.schema)}.tf_workflow_triggers`;
       const memberships = `${escapeIdentifier(w.names.schema)}.tf_memberships`;
       const operator = { id: 'workflow-schedule-operator', membershipId: randomUUID() };
       await db.databaseAdmin.query(`INSERT INTO ${memberships} (id,user_id,role) VALUES ($1,$2,'member')`, [
@@ -53,10 +58,10 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
         operator.id,
       ]);
       const elapse = (id, interval = '3 hours') =>
-        db.databaseAdmin.query(`UPDATE ${workflows} SET next_run_at=clock_timestamp()-$2::interval WHERE id=$1`, [
-          id,
-          interval,
-        ]);
+        db.databaseAdmin.query(
+          `UPDATE ${triggers} SET next_run_at=clock_timestamp()-$2::interval WHERE workflow_id=$1`,
+          [id, interval],
+        );
       const http = async (method, url, payload) => {
         const response = await app.inject({ method, url, headers, payload });
         assert.equal(response.statusCode, 200, response.body);
@@ -132,7 +137,8 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
 
       const dueAt = async id =>
         new Date(
-          (await db.databaseAdmin.query(`SELECT next_run_at FROM ${workflows} WHERE id=$1`, [id])).rows[0].next_run_at,
+          (await db.databaseAdmin.query(`SELECT next_run_at FROM ${triggers} WHERE workflow_id=$1`, [id])).rows[0]
+            .next_run_at,
         ).toISOString();
       await elapse(cronId, '3 hours');
       await elapse(intervalId, '150 minutes');

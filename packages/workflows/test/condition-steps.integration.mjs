@@ -35,7 +35,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     const definition = {
       version: 1,
       name: 'Route order',
-      trigger: { kind: 'manual' },
+      triggers: [],
       steps: [
         {
           id: 'large',
