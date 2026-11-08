@@ -245,4 +245,30 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     assert.equal(await count('tf_table_proposals'), 1);
     assert.equal(await count('tf_table_catalog'), catalogTables);
   });
+  await t.test('chat cites the requester’s own memory, but never another member’s', async () => {
+    await db.platform.query(`UPDATE ${s}.tf_memberships SET role='admin' WHERE id=$1`, [actor.membershipId]);
+    const other = randomUUID();
+    await db.platform.query(`INSERT INTO ${s}.tf_memberships(id,user_id,role) VALUES($1,'other-member','member')`, [
+      other,
+    ]);
+    const newTable = randomUUID();
+    const plans = JSON.stringify({
+      plans: [{ ...input.plans[0], tableId: newTable, target: { ...input.plans[0].target, id: newTable } }],
+    });
+    // Chat adds the requester's personal memory to every call's sources.
+    const memory = membershipId => ({
+      ...context,
+      callId: randomUUID(),
+      origin: { ...context.origin, sources: [{ kind: 'personal-memory', membershipId }] },
+    });
+    await assert.rejects(
+      tools.invokeWithSources(memory(other), { tool: 'tables.propose', input: plans }),
+      AccessDenied,
+    );
+    assert.equal(await count('tf_table_proposals'), 1);
+    const output = (await tools.invokeWithSources(memory(actor.membershipId), { tool: 'tables.propose', input: plans }))
+      .result;
+    assert.equal(output.status, 'pending');
+    assert.equal(await count('tf_table_proposals'), 2);
+  });
 });

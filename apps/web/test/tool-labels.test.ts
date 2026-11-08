@@ -152,7 +152,10 @@ test('a denied step names the table permission it needs and where to ask for it'
     tool({ tool: 'tables.propose', status: 'blocked' }),
     tool({ tool: 'rows.update', status: 'blocked' }),
   ]);
-  assert.match(String(propose?.detail), /Create rows and Update rows .* Table access/);
+  assert.match(
+    String(propose?.detail),
+    /needs a table permission you don’t have, such as Create tables .* Table access/,
+  );
   assert.match(String(update?.detail), /needs Update rows on the table/);
   assert.doesNotMatch(String(propose?.detail), /review your permissions/);
 });
