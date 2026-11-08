@@ -31,6 +31,13 @@ export async function proveBlockedTableBrowser(input) {
     page.setDefaultTimeout(15000);
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
+    const failed = [];
+    page.on('response', response => {
+      const path = new URL(response.url()).pathname;
+      if (path.includes('/tables/') && response.status() >= 400) failed.push(`${response.status()} ${path}`);
+    });
+    const rowLink = locator => locator.getByRole('link', { name: 'private-invalid-number', exact: true });
+    const problem = /“private-invalid-number” can’t be converted to the new field type\./;
     let outcomeState = 'slow';
     await page.route('**/v1/**', async route => {
       const path = new URL(route.request().url()).pathname;
@@ -70,12 +77,21 @@ export async function proveBlockedTableBrowser(input) {
     await page.goto(`${origin}/blocked-proof/chat/${input.chatId}`);
     await page.getByRole('status', { name: 'Loading tables' }).first().waitFor();
     const blocked = page.getByRole('region', { name: 'Blocked table changes', exact: true }).first();
-    await blocked.getByText(input.recordId, { exact: true }).waitFor();
-    await blocked.getByText(input.fieldId, { exact: true }).waitFor();
-    await blocked.getByText('conversion-failed', { exact: true }).waitFor();
-    assert.match(await blocked.innerText(), /1 invalid record\./);
+    await rowLink(blocked).waitFor();
+    const invalidRows = blocked.getByRole('table', { name: 'Invalid rows' });
+    assert.equal(
+      new URL(await rowLink(blocked).getAttribute('href'), origin).searchParams.get('row'),
+      input.recordId,
+      'Each invalid row opens that row',
+    );
+    await invalidRows.getByText('Amount', { exact: true }).waitFor();
+    await invalidRows.getByText(problem).waitFor();
+    const invalidText = await invalidRows.innerText();
+    assert.equal(invalidText.includes(input.recordId), false, 'Rows are named, not listed by ID');
+    assert.equal(invalidText.includes(input.fieldId), false, 'Fields are named, not listed by ID');
+    assert.equal(invalidText.includes('conversion-failed'), false, 'Error codes read in plain words');
+    assert.match(await blocked.innerText(), /1 invalid row\./);
     assert.equal(await blocked.getByRole('button', { name: /Approve/ }).count(), 0);
-    assert.equal((await page.locator('body').innerText()).includes('private-invalid-number'), false);
     assert.equal(await blocked.locator('a').filter({ hasText: 'Open table' }).count(), 1);
     outcomeState = 'failed';
     await page.reload();
@@ -87,12 +103,12 @@ export async function proveBlockedTableBrowser(input) {
     await blocked.waitFor();
     await input.deny(true);
     await blocked.getByRole('button', { name: 'Check report access' }).click();
-    await page.getByText('Table unavailable', { exact: true }).first().waitFor();
-    assert.equal(await page.getByText(input.recordId, { exact: true }).count(), 0);
+    await blocked.waitFor({ state: 'detached' });
+    assert.equal(await rowLink(page).count(), 0);
     assert.equal(await page.locator('a').filter({ hasText: 'Open table' }).count(), 0);
     await input.deny(false);
-    await page.getByRole('button', { name: 'Check access again' }).first().click();
-    await blocked.waitFor();
+    await page.reload();
+    await rowLink(blocked).waitFor();
     for (const theme of ['light', 'dark']) {
       await page.evaluate(theme => {
         document.documentElement.classList.remove('light', 'dark');
@@ -117,22 +133,15 @@ export async function proveBlockedTableBrowser(input) {
     await page.getByRole('button', { name: 'Send message', exact: true }).click();
     assert.equal((await sent).status(), 200);
     await input.processReply();
-    await page
-      .getByRole('region', { name: 'Table change proposal', exact: true })
-      .last()
-      .getByText('Awaiting your review', { exact: true })
-      .waitFor();
-    await blocked.getByText('conversion-failed', { exact: true }).waitFor();
+    await page.getByRole('main').getByText('Awaiting your review', { exact: true }).last().waitFor();
+    await blocked.getByText(problem).waitFor();
     await page.reload();
-    await blocked.getByText(input.recordId, { exact: true }).waitFor();
-    await page
-      .getByRole('region', { name: 'Table change proposal', exact: true })
-      .last()
-      .getByText('Awaiting your review', { exact: true })
-      .waitFor();
+    await rowLink(blocked).waitFor();
+    await page.getByRole('main').getByText('Awaiting your review', { exact: true }).last().waitFor();
     assert.deepEqual(errors, []);
+    assert.deepEqual(failed, []);
     process.stdout.write(
-      'Blocked report browser passed: persisted tool result, recovery, revocation, correction chat, new proposal, reload, mobile/dark.\n',
+      'Blocked report browser passed: named rows and values, persisted tool result, recovery, revocation, correction chat, new proposal, reload, mobile/dark.\n',
     );
   } finally {
     await browser?.close();
