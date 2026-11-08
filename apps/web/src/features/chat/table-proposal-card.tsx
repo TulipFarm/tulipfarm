@@ -72,8 +72,6 @@ type ProposalCardProps = {
   userId: string;
   membershipId?: string | null | undefined;
   order?: number;
-  /** Called once when an approval made from this card finishes creating new tables. */
-  onCreated?: ((tables: string[]) => void) | undefined;
 };
 
 export function TableProposalCard({
@@ -84,7 +82,6 @@ export function TableProposalCard({
   membershipId,
   order = 0,
   correct,
-  onCreated,
 }: ProposalCardProps & { correct: () => void }) {
   const { workspaceSlug } = workspaceRoute.useParams();
   const api = useMemo(() => proposalApi(workspaceId, chatId, id), [workspaceId, chatId, id]);
@@ -103,7 +100,6 @@ export function TableProposalCard({
               userId={userId}
               membershipId={membershipId}
               order={order}
-              onCreated={onCreated}
             />
           ) : (
             <section
@@ -222,15 +218,7 @@ const badgeVariant = (status: ProposalView['status']) =>
           ? 'secondary'
           : 'warning';
 
-function ValidTableProposalCard({
-  workspaceId,
-  chatId,
-  id,
-  userId,
-  membershipId,
-  order = 0,
-  onCreated,
-}: ProposalCardProps) {
+function ValidTableProposalCard({ workspaceId, chatId, id, userId, membershipId, order = 0 }: ProposalCardProps) {
   const { workspaceSlug } = workspaceRoute.useParams();
   const api = useMemo(() => proposalApi(workspaceId, chatId, id), [workspaceId, chatId, id]);
   const identity = { chatId, proposalId: id };
@@ -269,13 +257,6 @@ function ValidTableProposalCard({
     const timer = setTimeout(() => void refresh(), Math.max(0, wait));
     return () => clearTimeout(timer);
   }, [pending, expiresAt]);
-  const approvedHere = useRef(false);
-  useEffect(() => {
-    if (!approvedHere.current || loaded?.status !== 'completed' || !available) return;
-    const created = available.manifest.plans.filter(plan => plan.input.kind === 'schema' && !plan.before);
-    approvedHere.current = false;
-    if (created.length) onCreated?.(created.map(plan => plan.after.label));
-  }, [loaded?.status, available, onCreated]);
   const autoOpened = useRef(false);
   useEffect(() => {
     if (autoOpened.current || !canvas || !dock?.latest || loaded?.status !== 'pending' || !hasSchemaPlan) return;
@@ -397,7 +378,6 @@ function ValidTableProposalCard({
             dock?.activate();
             if (action === 'approve' || action === 'resume') {
               approvalFocus.current = document.activeElement;
-              approvedHere.current = true;
             }
             const common = { commandId: crypto.randomUUID(), digest: view.digest };
             const command: ProposalCommand =

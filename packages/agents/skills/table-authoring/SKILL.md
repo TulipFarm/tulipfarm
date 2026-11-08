@@ -77,14 +77,12 @@ A pending proposal is a review card, not a saved or active schema. Chat cannot w
 
 Mention a review card only after `tables.propose` returned a pending proposal in this turn. If the call failed, or you did not make it, say that no review was created. Never mention a proposal version that no call returned.
 
-## 5. Add an example row
+## 5. After approval
 
-After the person approves and a new table is created, add one realistic example
-row to each new table. When a new table links to another table, add or reuse a
-row in the linked table and set the link, so the relation is exercised too. Then
-read the rows back to confirm every value saved. If a row write fails, find the
-cause, fix it (for example with a corrected schema proposal), and try again.
-Tell the person what you added and that they can edit or delete the example.
+Approving a new table creates an empty table. Do not add rows the person did not
+ask for, including example or sample rows. You may offer to add an example row
+in your own reply; write it only after the person accepts. When you do add rows,
+read them back to confirm every value saved, and tell the person what you added.
 
 For rows in an existing table, chat can use `rows.create`, `rows.create.batch`, `rows.update`, and `rows.delete` under the person's current permissions. Read `schema.inspect` once, use its field IDs and applied revision, and use `rows.create.batch` for multiple new rows in one atomic write. A row-tool result, not this procedure or a draft, proves what was written. Named agents keep their separate action approval rules.
 
