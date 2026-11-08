@@ -21,3 +21,16 @@ test('tables that share a name read with their owning team and short id', () => 
   assert.equal(labels.get('cccccccc-3333'), 'Pull Requests · Team dddddddd · cccccccc');
   assert.equal(labels.get('eeeeeeee-4444'), 'Invoices');
 });
+
+test('a table owned by the admin team reads as Workspace admins even when that team is not listed', () => {
+  const labels = tableLabels(
+    [
+      { id: '33333333-aaaa', name: 'Invoices', owningTeamId: '8a62a927-admin' },
+      { id: '55555555-bbbb', name: 'Invoices', owningTeamId: 'team-ops' },
+    ],
+    [{ id: 'team-ops', name: 'Operations' }],
+    '8a62a927-admin',
+  );
+  assert.equal(labels.get('33333333-aaaa'), 'Invoices · Workspace admins · 33333333');
+  assert.equal(labels.get('55555555-bbbb'), 'Invoices · Operations · 55555555');
+});

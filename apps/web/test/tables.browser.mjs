@@ -1748,12 +1748,10 @@ try {
   await page.getByLabel('Person receiving access').click();
   await page.getByRole('option', { name: 'Ada (ada@example.com)', exact: true }).click();
   assert.equal(await page.getByLabel('Person receiving access').innerText(), 'Ada (ada@example.com)');
+  // A grant for yourself saves without reloading workspace access, so the selected person stays.
   await person.getByRole('checkbox', { name: 'Read rows', exact: true }).click();
-  await page.getByLabel('Person receiving access').getByText('Select a person', { exact: true }).waitFor();
-  await page.getByLabel('Person receiving access').click();
-  await page.getByRole('option', { name: 'Ada (ada@example.com)', exact: true }).click();
+  await person.getByRole('status').filter({ hasText: 'Individual grant saved.' }).waitFor();
   assert.equal(await page.getByLabel('Person receiving access').innerText(), 'Ada (ada@example.com)');
-  await person.getByRole('checkbox', { name: 'Read rows', exact: true }).waitFor();
   assert.equal(await person.getByRole('checkbox', { name: 'Read rows', exact: true }).isChecked(), true);
   assert.deepEqual(grantWrites[0], {
     membershipId: memberId,
@@ -1767,11 +1765,8 @@ try {
   grantWriteStatus = 200;
   await person.getByRole('button', { name: 'Reload individual grants', exact: true }).click();
   await person.getByRole('checkbox', { name: 'Read rows', exact: true }).click();
-  await page.getByLabel('Person receiving access').getByText('Select a person', { exact: true }).waitFor();
-  await page.getByLabel('Person receiving access').click();
-  await page.getByRole('option', { name: 'Ada (ada@example.com)', exact: true }).click();
+  await person.getByRole('status').filter({ hasText: 'Individual grant saved.' }).waitFor();
   assert.equal(await page.getByLabel('Person receiving access').innerText(), 'Ada (ada@example.com)');
-  await person.getByRole('checkbox', { name: 'Read rows', exact: true }).waitFor();
   assert.equal(await person.getByRole('checkbox', { name: 'Read rows', exact: true }).isChecked(), false);
   assert.equal(grantWrites.at(-1).granted, false);
   assert.deepEqual(singleFileReads, [], 'Table views read file names in batches, never one file at a time');
