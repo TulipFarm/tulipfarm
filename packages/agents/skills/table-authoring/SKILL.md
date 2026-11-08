@@ -106,7 +106,7 @@ ask for, including example or sample rows. You may offer to add an example row
 in your own reply; write it only after the person accepts. When you do add rows,
 read them back to confirm every value saved, and tell the person what you added.
 
-Write rows only to the table the person named. If that table does not exist yet or its proposal is not approved, say so and write nothing; never use a similar table instead. For rows in an existing table, chat can use `rows.create`, `rows.create.batch`, `rows.update`, and `rows.delete` under the person's current permissions. Read `schema.inspect` once, use its field IDs and applied revision, and use `rows.create.batch` for multiple new rows in one atomic write. A row-tool result, not this procedure or a draft, proves what was written. Named agents keep their separate action approval rules.
+Write rows only to the table the person named. If that table does not exist yet or its proposal is not approved, say so and write nothing; never use a similar table instead. For rows in an existing table, chat can use `rows.create`, `rows.create.batch`, `rows.update`, and `rows.delete` under the person's current permissions. Read `schema.inspect` once, use its field IDs and applied revision, and use `rows.create.batch` for up to 5 new rows in one atomic write. More than 5 rows in one reply, rows for a table the person didn't name, and rows changed in a reply that prepares a table change each need the person's approval on a chat card, so the row tools return review drafts instead of writing. A row-tool result, not this procedure or a draft, proves what was written. Named agents keep their separate action approval rules.
 
 ## When a call fails
 

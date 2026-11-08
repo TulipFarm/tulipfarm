@@ -74,11 +74,12 @@ One version identifies all apps and images of a release.
   gain a `rows` expression that gives listed rows their own value. In Schema
   history, a revert entry is now headed by the summary of the change it
   reversed instead of an execution ID.
-- Chat no longer writes rows directly to a table that nobody in the chat named,
-  so rows meant for a table that isn't ready yet can't land in a similarly named
-  one. A reply that prepares a table change can't also create, update or delete
-  rows, so values that block a field conversion are reported and left for the
-  person to decide. Refused writes change nothing and tell the agent why.
+- Chat writes rows directly only when the person named the table and the reply
+  changes 5 rows or fewer. Larger writes, writes to a table nobody named, and
+  row changes in a reply that prepares a table change now need approval on a
+  chat card. Rows meant for a table that isn't ready yet no longer land in a
+  similarly named one, and values that block a field conversion are reported
+  for the person to fix instead of being worked around with new rows.
 - The blocked schema change report in chat now wraps each row's problem and
   fix text inside the card instead of running past its edge, and on narrow
   screens shows each invalid row as a stacked card of row, field, value and
