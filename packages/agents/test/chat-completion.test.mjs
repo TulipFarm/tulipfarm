@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { claimsActionOutcome, completionCheckEvidence, inferWithTools } from '../src/inference.ts';
+import { claimsActionOutcome, completionCheckEvidence, inferWithTools, unbackedImportClaim } from '../src/inference.ts';
 import { completionEvaluation, evaluationMessages } from './completion-evaluation-fixture.mjs';
 import {
   formats,
@@ -399,6 +399,67 @@ test('a reply that reports an action outcome is checked even without a tool call
     assert.equal(claimsActionOutcome(text), true, text);
   for (const text of ['Hello. How can I help?', 'You are welcome.', 'A row is one item in a table.'])
     assert.equal(claimsActionOutcome(text), false, text);
+});
+
+test('an import presented for review needs a pending proposal receipt from this reply', () => {
+  const pending = [
+    {
+      kind: 'results',
+      results: [{ id: 'p', name: 'tables_propose', output: '{"id":"x","status":"pending"}', error: false }],
+    },
+  ];
+  const failed = [
+    {
+      kind: 'results',
+      results: [{ id: 'p', name: 'tables_propose', output: '{"error":"import-values-invalid"}', error: false }],
+    },
+  ];
+  for (const text of [
+    'I prepared the import of 10 orders and will send it for human review.',
+    'Here is the import review: 10 rows will be added. Do you confirm this import?',
+    'The import review card is ready below.',
+  ]) {
+    assert.equal(unbackedImportClaim(text, [])?.status, 'continue', text);
+    assert.equal(unbackedImportClaim(text, failed)?.status, 'continue', text);
+    assert.equal(unbackedImportClaim(text, pending), undefined, text);
+  }
+  for (const text of [
+    'No import review was created: row 2 has "Pending", which isn’t a Status option.',
+    'Which file should I import?',
+  ])
+    assert.equal(unbackedImportClaim(text, []), undefined, text);
+});
+
+test('an unbacked import review is sent back without the completion model until a proposal exists', async t => {
+  const outcomes = checkOutcomes(t);
+  const replies = [
+    nativeReply('azure', { text: 'Here is the import review. Do you confirm this import?' }),
+    nativeReply('azure', { calls: [use('tables.propose', { input: '{"plans":[]}' })] }),
+    nativeReply('azure', { text: 'The import review card is ready below.' }),
+    selectReply('azure', verdict('waiting')),
+  ];
+  const requests = [],
+    executed = [];
+  t.mock.method(globalThis, 'fetch', async (_url, init) => {
+    requests.push(JSON.parse(init.body));
+    return Response.json(replies.shift());
+  });
+  const result = await inferWithTools(
+    nativeRoutes.azure,
+    [{ role: 'user', text: 'Import orders.csv into Orders.' }],
+    async call => {
+      executed.push(call.tool);
+      return { id: '00000000-0000-4000-8000-000000000001', status: 'pending' };
+    },
+  );
+  assert.equal(result.text, 'The import review card is ready below.');
+  assert.deepEqual(executed, ['tables.propose']);
+  assert.deepEqual(
+    requests.map(request => isCompletionRequest(request)),
+    [false, false, false, true],
+  );
+  assert.match(JSON.stringify(requests[1].messages), /no tables\.propose call in this reply returned a pending review/);
+  assert.deepEqual(outcomes, ['continue', 'done']);
 });
 
 test('a tool-free reply that claims rows were created is checked and sent back to do the work', async t => {

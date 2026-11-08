@@ -1837,6 +1837,39 @@ export function claimsActionOutcome(text: string) {
   return outcomeClaim.test(text);
 }
 
+const importReviewClaim = new RegExp(
+  [
+    String.raw`\bhere(?:'|’)?s? (?:is )?(?:the |your |an? )?(?:file )?import\b`,
+    String.raw`\b(?:i|we)(?:'|’)?(?:ve| have)? (?:prepared|staged|set up|created|proposed) (?:the |this |your |an? )?(?:file )?import\b`,
+    String.raw`\bconfirm (?:this|the) import\b`,
+    String.raw`\b(?:send|submit) (?:it|this|the import|this import) for (?:human )?(?:review|approval)\b`,
+    String.raw`\bimport (?:review )?(?:card )?(?:is )?(?:ready|below|above|shown)\b`,
+  ].join('|'),
+  'i',
+);
+const proposeTool = nativeToolName('tables.propose');
+/**
+ * Why a reply that presents an import for review must do more work: it has no pending `tables.propose` receipt in
+ * this reply, so no review card exists. Decided without the completion model, which has accepted such replies.
+ */
+export function unbackedImportClaim(candidate: string, items: readonly LoopItem[]) {
+  if (!importReviewClaim.test(candidate)) return undefined;
+  const pending = items.some(
+    item =>
+      item.kind === 'results' &&
+      item.results.some(
+        result => result.name === proposeTool && !result.error && /"status":"pending"/.test(result.output),
+      ),
+  );
+  return pending
+    ? undefined
+    : {
+        status: 'continue' as const,
+        reason:
+          'The reply presents an import for review, but no tables.propose call in this reply returned a pending review. Prepare the file with tables.import.file and propose the import, or say plainly that no review was created and why.',
+      };
+}
+
 type EvidenceEntry =
   | { kind: 'turn'; turn: ChatTextTurn }
   | { kind: 'model'; text: string; calls: { id: string; name: string; input: unknown }[] }
@@ -3012,67 +3045,77 @@ export async function inferWithTools(
       if (rendered) preview(rendered.input.summary);
       // The check catches unfinished tool work. A first-try answer that used no work tool has nothing to catch,
       // unless it reports an outcome that only a tool call could have produced.
-      if (!workToolUsed && !corrections && !completionCorrections && !finalizing && !claimsActionOutcome(candidate)) {
+      const unbacked = unbackedImportClaim(candidate, items);
+      if (
+        !unbacked &&
+        !workToolUsed &&
+        !corrections &&
+        !completionCorrections &&
+        !finalizing &&
+        !claimsActionOutcome(candidate)
+      ) {
         recordChatCompletionCheck('skipped_no_tools');
         return accept();
       }
-      let checked: z.infer<typeof completionCheckSchema>['decision'];
-      report('finishing');
-      try {
-        checked = await withChatModelRequest('completion', () => {
-          // Reasoning models spend output tokens before deciding, so the check keeps the route's full output budget.
-          const route = inferenceRouteSchema.parse(tools?.completionCheck ?? config);
-          // The check's request stays within its model's window, with a tenth spare for the estimate's error.
-          const window = tools?.completionCheckWindow ?? limits?.window;
-          const fixed = scaled(Buffer.byteLength(completionCheckPrompt) + completionCheckSchemaBytes);
-          const maxBytes =
-            window === undefined
-              ? undefined
-              : Math.max(
-                  4096,
-                  Math.floor(((Math.floor(window * 0.9) - route.maxOutputTokens - fixed) * 4) / tokenScale),
-                );
-          const evidence = observeChatDetailSync('completion-context', () =>
-            completionCheckEvidence(
-              items,
-              candidate,
-              finalizing ? 0 : Math.max(0, chatToolCallLimit - calls),
-              maxBytes,
-            ),
-          );
-          recordChatRequestSizes({
-            'completion-evidence': Buffer.byteLength(evidence),
-            candidate: Buffer.byteLength(candidate),
-          });
-          return send(
-            observeChatDetailSync('serialize', () =>
-              chatRequest(
-                route,
-                [{ role: 'user', text: evidence }],
-                completionCheckPrompt,
-                z.toJSONSchema(completionCheckSchema),
+      let checked: z.infer<typeof completionCheckSchema>['decision'] | undefined = unbacked;
+      if (!checked) {
+        report('finishing');
+        try {
+          checked = await withChatModelRequest('completion', () => {
+            // Reasoning models spend output tokens before deciding, so the check keeps the route's full output budget.
+            const route = inferenceRouteSchema.parse(tools?.completionCheck ?? config);
+            // The check's request stays within its model's window, with a tenth spare for the estimate's error.
+            const window = tools?.completionCheckWindow ?? limits?.window;
+            const fixed = scaled(Buffer.byteLength(completionCheckPrompt) + completionCheckSchemaBytes);
+            const maxBytes =
+              window === undefined
+                ? undefined
+                : Math.max(
+                    4096,
+                    Math.floor(((Math.floor(window * 0.9) - route.maxOutputTokens - fixed) * 4) / tokenScale),
+                  );
+            const evidence = observeChatDetailSync('completion-context', () =>
+              completionCheckEvidence(
+                items,
+                candidate,
+                finalizing ? 0 : Math.max(0, chatToolCallLimit - calls),
+                maxBytes,
               ),
-            ),
-            body => {
-              const selected = decision(route, body);
-              const parsed =
-                selected.kind === 'decision' ? completionCheckSchema.safeParse(unwrapDecision(selected.value)) : null;
-              if (!parsed?.success)
-                throw new ModelCallError(selected.kind === 'failure' ? selected.reason : 'invalid-decision', {
-                  outputStarted: false,
-                });
-              return { value: parsed.data.decision, failed: false };
-            },
-            undefined,
-            route,
-          );
-        });
-      } catch (error) {
-        recordChatCompletionCheck('error');
-        // A check model that fails must not discard a finished answer; admission, authorization and cancellation still end the turn.
-        if (error instanceof ModelCallError && !signal?.aborted) return accept();
-        preview('');
-        throw error;
+            );
+            recordChatRequestSizes({
+              'completion-evidence': Buffer.byteLength(evidence),
+              candidate: Buffer.byteLength(candidate),
+            });
+            return send(
+              observeChatDetailSync('serialize', () =>
+                chatRequest(
+                  route,
+                  [{ role: 'user', text: evidence }],
+                  completionCheckPrompt,
+                  z.toJSONSchema(completionCheckSchema),
+                ),
+              ),
+              body => {
+                const selected = decision(route, body);
+                const parsed =
+                  selected.kind === 'decision' ? completionCheckSchema.safeParse(unwrapDecision(selected.value)) : null;
+                if (!parsed?.success)
+                  throw new ModelCallError(selected.kind === 'failure' ? selected.reason : 'invalid-decision', {
+                    outputStarted: false,
+                  });
+                return { value: parsed.data.decision, failed: false };
+              },
+              undefined,
+              route,
+            );
+          });
+        } catch (error) {
+          recordChatCompletionCheck('error');
+          // A check model that fails must not discard a finished answer; admission, authorization and cancellation still end the turn.
+          if (error instanceof ModelCallError && !signal?.aborted) return accept();
+          preview('');
+          throw error;
+        }
       }
       recordChatCompletionCheck(
         checked.status === 'continue' ? 'continue' : 'done',

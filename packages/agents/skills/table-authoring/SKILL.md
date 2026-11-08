@@ -64,11 +64,11 @@ Archive and restore:
 
 Imports from a CSV or XLSX file:
 
-1. Load the import tools with `tools_search`, then call `tables.import.attachments` to list this chat's files with their `attachmentId` and `contentDigest`.
+1. Call `tables.import.attachments` to list this chat's files with their `attachmentId` and `contentDigest`. Both import tools are always offered; never call the API directly to import.
 2. Call `tables.import.file` with one returned `attachmentId` and `contentDigest`, and `selection` as a JSON string. It prepares the file for review in this reply and writes nothing.
    - CSV: `{"format":"csv","delimiter":";","header":{"kind":"row","row":1},"conversions":{"Amount":"numeric","Order date":"date"},"empty":"null"}`. Read the delimiter (`,`, `;`, `\t` or `|`) from the file's header line.
    - XLSX: the same with `"format":"xlsx","sheet":"<tab name>"` instead of `delimiter`.
-   - `conversions` maps a source column to `text`, `numeric`, `boolean`, `date` (YYYY-MM-DD) or `timestamp`. Give each mapped column the type of its destination field from `schema.inspect`; unlisted columns stay text.
+   - `conversions` maps a source column to `text`, `numeric`, `boolean`, `date` (YYYY-MM-DD) or `timestamp`. It is optional: unlisted columns stay text, and the import converts text to each destination field's type. Leave single-select and multi-select columns as text; their values are matched to the field's option labels, ignoring case. Multi-select cells may list labels separated by commas.
 3. Propose `{kind:"import",tableId,expectedRevision,dependsOn:[],reference:{kind:"file",attachmentId,contentDigest},matchFieldIds,mappings}`. Copy the reference from step 2 unchanged; `matchFieldIds` must equal one of the table's unique keys, and each mapping pairs a source column with a field ID.
 
 Prepare the file again in each reply that proposes the import. Never invent an `attachmentId` or `contentDigest`, or reuse one from an earlier reply without preparing it again.
@@ -110,7 +110,9 @@ For rows in an existing table, chat can use `rows.create`, `rows.create.batch`, 
 ## When a call fails
 
 - `invalid-arguments`: correct the payload and submit a new proposal.
-- `import-file-failed`: `tables.import.file` could not prepare the file and returned a `reason`. It is not a permission denial, and the import tools remain available. Follow its `instruction`: correct the selection and prepare again when it says so; otherwise tell the person the `reason` in your own words, including any row and column it names.
+- `import-file-failed`: `tables.import.file` could not prepare the file and returned a `reason`. It is not a permission denial, and the import tools remain available. With code `attachment-unknown`, the `attachmentId` or `contentDigest` was wrong: list the attachments again and copy them exactly. Follow its `instruction`: correct the selection and prepare again when it says so; otherwise tell the person the `reason` in your own words, including any row and column it names.
+- `import-values-invalid`: the file was read, but some values don't fit the table. Its `reason` and `problems` name each row, column, value and field, and the valid options where they apply. Tell the person all of them and the next step; never drop or change values to make the import pass.
+- `import-mapping-invalid`: the plan names a column the file lacks, a field the table lacks, or match fields that aren't a unique key. Correct the plan from `problems` and propose again.
 - `import-not-prepared`: the import plan names a file that was not prepared in this reply. This is not a permission denial. Prepare it with `tables.import.attachments` and `tables.import.file`, then propose again.
 - `table-title-immutable`: keep the original table title and prepare a new proposal
   for the requested field changes. Neither its title nor its readable name can be renamed.

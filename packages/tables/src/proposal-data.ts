@@ -8,9 +8,13 @@ import {
 } from '@tulipfarm/access';
 import {
   fieldIdSchema,
+  TableValidationError,
+  valueSchema,
   valuesSchema,
   validateRecord,
+  validateValue,
   type TableDefinition,
+  type TableField,
   type TableValue,
   type TableValues,
 } from './definition.ts';
@@ -21,8 +25,10 @@ import {
   audienceSchema,
   effectSchema,
   importSnapshotSchema,
+  TableImportPlanError,
   TableProposalError,
   TableProposalValidationError,
+  type ImportProblem,
   type ProposalPlan,
   type TableEffect,
 } from './proposal-contracts.ts';
@@ -336,6 +342,68 @@ export type ImportMatch = {
   keyValue: unknown[];
   mapped: TableValues;
 };
+type ImportSourceValue = z.infer<typeof importSnapshotSchema>['rows'][number][string];
+type Converted = { value: TableValue } | { problem: ImportProblem['code']; expected?: string[] };
+
+const sourceText = (value: NonNullable<ImportSourceValue>) => {
+  if (value.kind === 'boolean') return String(value.value);
+  if ('value' in value) return String(value.value);
+  return null;
+};
+const problemValue = (value: ImportSourceValue) => {
+  const text = value ? sourceText(value) : null;
+  return text === null ? null : text.length > 40 ? `${text.slice(0, 39)}…` : text;
+};
+const optionKey = (label: string) => label.trim().toLocaleLowerCase('en-US');
+
+function matchOption(field: Extract<TableField, { kind: 'single-select' | 'multi-select' }>, text: string) {
+  const active = field.options.filter(option => !option.retired);
+  const wanted = text.trim();
+  const exact = active.filter(option => option.label.trim() === wanted);
+  if (exact.length === 1) return exact[0]!.id;
+  const loose = active.filter(option => optionKey(option.label) === optionKey(wanted));
+  return loose.length === 1 ? loose[0]!.id : null;
+}
+
+/**
+ * Converts one prepared file value to the destination field's kind. A file value is text unless its
+ * column had a conversion, so a column mapped to a select field matches option labels here.
+ */
+export function convertImportValue(field: TableField, value: ImportSourceValue): Converted {
+  if (value === null) return { value: null };
+  if (value.kind === field.kind) return { value };
+  const text = sourceText(value);
+  if (text === null || field.kind === 'relationship' || field.kind === 'file') return { problem: 'type-mismatch' };
+  if (field.kind === 'text') return { value: { kind: 'text', value: text } };
+  const trimmed = text.trim();
+  if (trimmed === '') return { value: null };
+  const options = 'options' in field ? field.options.filter(option => !option.retired).map(o => o.label) : [];
+  if (field.kind === 'single-select') {
+    const optionId = matchOption(field, trimmed);
+    return optionId ? { value: { kind: 'single-select', optionId } } : { problem: 'unmapped-value', expected: options };
+  }
+  if (field.kind === 'multi-select') {
+    const whole = matchOption(field, trimmed);
+    const parts = whole
+      ? [whole]
+      : trimmed
+          .split(/[,;]/)
+          .map(part => part.trim())
+          .filter(Boolean)
+          .map(part => matchOption(field, part));
+    if (parts.some(part => part === null)) return { problem: 'unmapped-value', expected: options };
+    return { value: { kind: 'multi-select', optionIds: [...new Set(parts as NonNullable<typeof whole>[])] } };
+  }
+  const candidate =
+    field.kind === 'boolean'
+      ? /^(true|false)$/i.test(trimmed)
+        ? { kind: 'boolean', value: trimmed.toLowerCase() === 'true' }
+        : null
+      : { kind: field.kind, value: trimmed };
+  const parsed = candidate && valueSchema.safeParse(candidate);
+  return parsed?.success ? { value: parsed.data } : { problem: 'conversion-failed' };
+}
+
 export function importEffects(
   plan: Extract<ProposalPlan, { kind: 'import' }>,
   definition: TableDefinition,
@@ -345,47 +413,150 @@ export function importEffects(
   matches: ImportMatch[] = [],
 ) {
   const ids = [...plan.matchFieldIds].sort().map(id => fieldIdSchema.parse(id));
-  const key = (values: TableValues) => {
-    const parts = ids.map(id => values[id]);
-    if (parts.some(part => part === null || part === undefined)) throw new TableProposalError('invalid-import');
-    return canonicalJson(
-      parts.map(part =>
-        part?.kind === 'numeric'
-          ? {
-              ...part,
-              value: part.value
-                .replace(/(\.\d*?)0+$/, '$1')
-                .replace(/\.$/, '')
-                .replace(/^-0$/, '0'),
-            }
-          : part,
-      ),
-    );
+  const fields = new Map(definition.fields.map(field => [String(field.id), field]));
+  const label = (id: string) => fields.get(id)?.label ?? null;
+  const unique = definition.uniqueKeys.find(key => canonicalJson([...key.fieldIds].sort()) === canonicalJson(ids));
+  if (!unique)
+    throw new TableImportPlanError([
+      {
+        row: null,
+        column: null,
+        fieldId: null,
+        field: ids
+          .map(id => label(id) ?? id)
+          .join(', ')
+          .slice(0, 200),
+        code: 'key-not-unique',
+        value: null,
+        expected: definition.uniqueKeys.slice(0, 20).map(key =>
+          key.fieldIds
+            .map(id => label(id) ?? id)
+            .join(' + ')
+            .slice(0, 200),
+        ),
+      },
+    ]);
+  const setup: ImportProblem[] = [];
+  const columns = rows[0] ? Object.keys(rows[0]) : null;
+  for (const mapping of plan.mappings) {
+    if (columns && !columns.includes(mapping.sourceColumn))
+      setup.push({
+        row: null,
+        column: mapping.sourceColumn.slice(0, 120),
+        fieldId: mapping.fieldId,
+        field: label(mapping.fieldId),
+        code: 'unknown-column',
+        value: null,
+        expected: columns.slice(0, 20).map(column => column.slice(0, 200)),
+      });
+    if (!fields.has(mapping.fieldId))
+      setup.push({
+        row: null,
+        column: mapping.sourceColumn.slice(0, 120),
+        fieldId: mapping.fieldId.slice(0, 100),
+        field: null,
+        code: 'unknown-field',
+        value: null,
+        expected: definition.fields.slice(0, 20).map(field => field.label),
+      });
+  }
+  for (const id of ids)
+    if (!plan.mappings.some(mapping => mapping.fieldId === id))
+      setup.push({ row: null, column: null, fieldId: id, field: label(id), code: 'key-unmapped', value: null });
+  if (setup.length) throw new TableImportPlanError(setup);
+  const normalized = (values: TableValues) =>
+    ids.map(id => {
+      const part = values[id];
+      return part?.kind === 'numeric'
+        ? {
+            ...part,
+            value: part.value
+              .replace(/(\.\d*?)0+$/, '$1')
+              .replace(/\.$/, '')
+              .replace(/^-0$/, '0'),
+          }
+        : part;
+    });
+  const key = (values: TableValues) => canonicalJson(normalized(values));
+  const problems: ImportProblem[] = [];
+  let total = 0;
+  const report = (problem: ImportProblem) => {
+    total++;
+    if (problems.length < 100) problems.push(problem);
   };
   const existing = new Map<string, (typeof records)[number]>();
   for (const row of records) {
-    if (ids.some(id => row.values[id] === null)) continue;
+    if (ids.some(id => row.values[id] === null || row.values[id] === undefined)) continue;
     const match = key(row.values);
-    if (existing.has(match)) throw new TableProposalError('invalid-import');
+    if (existing.has(match))
+      report({
+        row: null,
+        column: null,
+        fieldId: null,
+        field: ids
+          .map(id => label(id) ?? id)
+          .join(', ')
+          .slice(0, 200),
+        code: 'existing-duplicate-key',
+        value: null,
+      });
     existing.set(match, row);
   }
-  const seen = new Set<string>(),
+  const columnOf = (fieldId: string) =>
+    plan.mappings.find(mapping => mapping.fieldId === fieldId)?.sourceColumn ?? null;
+  const seen = new Map<string, number>(),
     effects: TableEffect[] = [];
   for (const [index, row] of rows.entries()) {
-    const mapped = valuesSchema.parse(
-      Object.fromEntries(
-        plan.mappings.map(mapping => {
-          if (!Object.hasOwn(row, mapping.sourceColumn)) throw new TableProposalError('invalid-import');
-          return [mapping.fieldId, row[mapping.sourceColumn]];
-        }),
-      ),
-    );
+    const at = (fieldId: string | null, code: ImportProblem['code'], value: ImportSourceValue, expected?: string[]) =>
+      report({
+        row: index + 1,
+        column: fieldId ? (columnOf(fieldId)?.slice(0, 120) ?? null) : null,
+        fieldId: fieldId?.slice(0, 100) ?? null,
+        field: fieldId ? label(fieldId) : null,
+        code,
+        value: problemValue(value),
+        ...(expected?.length ? { expected: expected.slice(0, 20).map(item => item.slice(0, 200)) } : {}),
+      });
+    const before = total;
+    const converted: Record<string, TableValue> = {};
+    for (const mapping of plan.mappings) {
+      const field = fields.get(mapping.fieldId)!;
+      const source = row[mapping.sourceColumn] ?? null;
+      const result = convertImportValue(field, source);
+      if ('problem' in result) at(field.id, result.problem, source, result.expected);
+      else {
+        try {
+          converted[field.id] = validateValue(field, result.value);
+        } catch (error) {
+          if (!(error instanceof TableValidationError)) throw error;
+          at(field.id, result.value === null ? 'missing-field' : 'invalid-output', source);
+        }
+      }
+    }
+    if (total > before) continue;
+    const mapped = valuesSchema.parse(converted);
+    if (ids.some(id => mapped[id] === null || mapped[id] === undefined)) {
+      for (const id of ids) if (mapped[id] === null || mapped[id] === undefined) at(id, 'missing-key', null);
+      continue;
+    }
     const match = key(mapped);
-    if (seen.has(match)) throw new TableProposalError('invalid-import');
-    seen.add(match);
+    const first = seen.get(match);
+    if (first !== undefined) {
+      at(ids[0]!, 'duplicate-key', row[columnOf(ids[0]!) ?? ''] ?? null, [`row ${first}`]);
+      continue;
+    }
+    seen.set(match, index + 1);
     const current = existing.get(match);
-    const unique = definition.uniqueKeys.find(key => canonicalJson([...key.fieldIds].sort()) === canonicalJson(ids));
-    if (!unique) throw new TableProposalError('invalid-import');
+    let after: TableValues;
+    try {
+      after = validateRecord(definition, { ...current?.values, ...mapped });
+    } catch (error) {
+      if (!(error instanceof TableValidationError)) throw error;
+      const fieldId = error.fieldId && fields.has(error.fieldId) ? error.fieldId : null;
+      at(fieldId, 'missing-field', null);
+      continue;
+    }
+    if (total) continue;
     const recordId = current?.id ?? identity(index);
     const keyValue = unique.fieldIds.map(id => {
       const part = mapped[id];
@@ -400,9 +571,9 @@ export function importEffects(
       throw new TableProposalError('invalid-import');
     });
     matches.push({ sourceIndex: index, recordId, matched: Boolean(current), keyId: unique.id, keyValue, mapped });
-    const after = validateRecord(definition, { ...current?.values, ...mapped });
     const effect = changedEffect(recordId, current?.values ?? null, after, ids);
     if (effect) effects.push(effect);
   }
+  if (total) throw new TableImportPlanError(problems, total);
   return effects;
 }

@@ -3,7 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { test } from 'node:test';
 import { Client } from 'pg';
 import { AccessDenied } from '@tulipfarm/access';
-import { createTableImports, requireImportFiles } from '../../tables/dist/imports.js';
+import { createTableImports, requireImportFiles, TableImportError } from '../../tables/dist/imports.js';
 
 test(
   'imports bind real SQL ownership, immutable bytes, completed receipts, source revocation and independent Files authority',
@@ -145,6 +145,15 @@ test(
         adapter.prepareFile(runtime, tx.workspaceId, actor, origin, reference, { ...selection, empty: 'text' }),
         /snapshot-conflict/,
       );
+      for (const wrong of [
+        { ...reference, attachmentId: id() },
+        { ...reference, contentDigest: 'f'.repeat(64) },
+      ])
+        await assert.rejects(
+          adapter.prepareFile(runtime, tx.workspaceId, actor, origin, wrong, selection),
+          error => error instanceof TableImportError && error.code === 'attachment-unknown',
+          'A wrong file reference is a correctable mistake, not a permission denial',
+        );
       await assert.rejects(adapter.readSnapshot(tx, { ...actor, membershipId: id() }, origin, reference), AccessDenied);
       await assert.rejects(
         adapter.readSnapshot(tx, actor, { ...origin, conversationId: id() }, reference),

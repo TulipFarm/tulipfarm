@@ -12,6 +12,7 @@ import {
   createTableProposalDecisions,
   tableProposalDigest,
 } from '../../../tables/dist/proposals.js';
+import { TableImportPlanError } from '../../../tables/dist/proposal-contracts.js';
 import { definitionSchema, valuesSchema } from '../../src/definition.ts';
 import { canonicalJson } from '../../src/canonical.ts';
 import { createTableService } from '../../../tables/dist/service.js';
@@ -518,6 +519,90 @@ ${await readFile(new URL('../../../../apps/database/migrations/0001_baseline.sql
         assert.equal((await service.status(workspace.id, actor.userId, chat, id)).status, 'approved');
         await setup.platform.query(`UPDATE ${s}.tf_memberships SET role='admin' WHERE id=$1`, [actor.membershipId]);
       });
+      await t.test(
+        'file text imports into a single-select field by option label and names values that don’t fit',
+        async () => {
+          const name = textField('Order'),
+            open = randomUUID(),
+            shipped = randomUUID();
+          const status = {
+            id: randomUUID(),
+            label: 'Status',
+            kind: 'single-select',
+            required: false,
+            options: [
+              { id: open, label: 'Open', retired: false },
+              { id: shipped, label: 'Shipped', retired: false },
+            ],
+          };
+          const definition = {
+            ...tableDefinition({ owningTeamId: team, label: 'Orders', fields: [name, status] }),
+            uniqueKeys: [{ id: randomUUID(), fieldIds: [name.id], nulls: 'distinct' }],
+          };
+          const created = await createTableWithRows({ db: setup, workspace, runtime, definition, records: [] });
+          const resultId = randomUUID();
+          await setup.platform.query(
+            `INSERT INTO ${s}.tf_conversation_tool_calls(id,conversation_id,turn_id,sequence,tool,status) VALUES($1,$2,$3,2,'google.read','completed')`,
+            [resultId, chat, turn],
+          );
+          let rows = [
+            { Order: { kind: 'text', value: 'A-1' }, State: { kind: 'text', value: 'open' } },
+            { Order: { kind: 'text', value: 'A-2' }, State: { kind: 'text', value: 'Shipped' } },
+          ];
+          const service = createTableProposals({
+            ...options,
+            imports: {
+              readSnapshot: async () => ({
+                contentDigest: tableProposalDigest(rows),
+                sources: [{ kind: 'private-conversation', conversationId: chat }],
+                rows,
+              }),
+            },
+          });
+          const input = () => ({
+            plans: [
+              {
+                kind: 'import',
+                tableId: definition.id,
+                expectedRevision: created.revision,
+                dependsOn: [],
+                reference: { kind: 'integration', resultId, contentDigest: tableProposalDigest(rows) },
+                matchFieldIds: [name.id],
+                mappings: [
+                  { sourceColumn: 'Order', fieldId: name.id },
+                  { sourceColumn: 'State', fieldId: status.id },
+                ],
+              },
+            ],
+          });
+          const id = randomUUID();
+          assert.equal((await service.propose(workspace.id, actor, id, origin, input())).status, 'pending');
+          const effects = await service.effects(workspace.id, actor.userId, chat, id, definition.id, { limit: 10 });
+          assert.deepEqual(
+            effects.items.map(item => item.effect.after[status.id].optionId).sort(),
+            [open, shipped].sort(),
+          );
+          rows = [...rows, { Order: { kind: 'text', value: 'A-3' }, State: { kind: 'text', value: 'Pending' } }];
+          await assert.rejects(
+            service.propose(workspace.id, actor, randomUUID(), origin, input()),
+            error =>
+              error instanceof TableImportPlanError &&
+              !(error instanceof AccessDenied) &&
+              canonicalJson(error.problems) ===
+                canonicalJson([
+                  {
+                    row: 3,
+                    column: 'State',
+                    fieldId: status.id,
+                    field: 'Status',
+                    code: 'unmapped-value',
+                    value: 'Pending',
+                    expected: ['Open', 'Shipped'],
+                  },
+                ]),
+          );
+        },
+      );
       await t.test('a newer draft of the same table replaces the older one and blocks its approval', async () => {
         const create = (label, revises) => {
           const definition = tableDefinition({ owningTeamId: team, label, fields: [textField('Name')] });
@@ -554,7 +639,13 @@ ${await readFile(new URL('../../../../apps/database/migrations/0001_baseline.sql
         assert.deepEqual(await detail({ result: second, sources: [] }), { status: 'waiting', proposal: true });
         assert.deepEqual(await detail({ error: 'invalid-arguments', issues: [] }), {
           status: 'completed',
-          detail: 'Corrected and resubmitted.',
+          detail: 'No review prepared: the request wasn’t valid.',
+        });
+        const valuesReason =
+          'No review prepared: 1 value in the file doesn’t fit the table. Row 3, column "State": "Pending" isn’t an option of Status (Open, Shipped).';
+        assert.deepEqual(await detail({ error: 'import-values-invalid', reason: valuesReason, problems: [] }), {
+          status: 'completed',
+          detail: valuesReason,
         });
         const importFailure = tableImportFailure(new TableImportError('malformed-file'));
         assert.deepEqual(
