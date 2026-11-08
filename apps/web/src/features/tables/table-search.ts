@@ -18,6 +18,8 @@ const list = (item: string, max: number) =>
     .catch(undefined);
 /** Links keep the applied filter as canonical RSQL. Longer filters stay usable but are refused for links rather than truncated. */
 export const linkQueryCharacters = 4000;
+/** Links may name more grouping fields than a summary allows, so the page can explain the limit instead of dropping them. */
+export const linkGroupFields = 16;
 export const legacyOps = ['eq', 'ne', 'lt', 'lte', 'gt', 'gte', 'is-null', 'not-null'] as const;
 export const tableListSorts = ['name', '-name', 'records', '-records', 'changed', '-changed'] as const;
 export type TableListOrder = (typeof tableListSorts)[number];
@@ -33,7 +35,7 @@ export const tableRowsSearchSchema = z.object({
   q: typed(255),
   where: typed(linkQueryCharacters),
   order: list(`-?${uuid}`, queryLimits.sortKeys),
-  group: list(uuid, queryLimits.groupBy),
+  group: list(uuid, linkGroupFields),
   calc: list(`(count|(sum|avg|min|max)\\.${uuid})`, queryLimits.metrics),
   cols: list(uuid, 64),
   // Page layout, each layout's fields, and the open search mode are shared in links too.

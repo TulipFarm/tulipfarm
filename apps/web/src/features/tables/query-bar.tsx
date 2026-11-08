@@ -1411,9 +1411,11 @@ function SummaryMenu({
     metric.fn === 'count'
       ? 'Count'
       : `${metricLabels[metric.fn]} of ${fieldOf(definition, metric.fieldId ?? '')?.label ?? 'field'}`;
-  const label = summarized(view)
-    ? `Grouped${view.groupBy.length ? ` by ${view.groupBy.map(id => fieldOf(definition, id)?.label).join(', ')}` : ''}`
-    : 'Customize';
+  const label = view.groupBy.length
+    ? `Grouped by ${view.groupBy.map(id => fieldOf(definition, id)?.label).join(', ')}`
+    : summarized(view)
+      ? 'Summary'
+      : 'Customize';
   const nextMetric = (): QueryMetric => {
     const numeric = measurable('sum')[0];
     return view.metrics.some(metric => metric.fn === 'count') && numeric

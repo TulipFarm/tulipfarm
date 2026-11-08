@@ -14,6 +14,7 @@ import {
   type QueryRule,
   type TableQueryRequest,
 } from '@tulipfarm/tables/query';
+import { queryLimits } from '@tulipfarm/tables/query-limits';
 import type { TableDefinition as CoreDefinition } from '@tulipfarm/tables/definition';
 import type { TableDefinition } from './api';
 import { linkQueryCharacters, type legacyOps, type TableRowsSearch } from './table-search.ts';
@@ -147,10 +148,7 @@ export function tableView(search: TableRowsSearch, definition: Definition): Tabl
         (metric.fieldId &&
           metricKinds[metric.fn as Exclude<MetricFunction, 'count'>].includes(field(metric.fieldId)?.kind ?? 'file')),
     );
-  const groupBy = ids(search.group).filter(id => {
-    const target = field(id);
-    return !!target && sortable(target);
-  });
+  const groupBy = groupLink(search) ? [] : usableGroups(search, definition);
   const select = ids(search.cols).filter(id => field(id));
   const text = search.q?.trim();
   return {
@@ -164,6 +162,28 @@ export function tableView(search: TableRowsSearch, definition: Definition): Tabl
     metrics: metrics.length || !groupBy.length ? metrics : [{ fn: 'count' }],
     ...(select.length ? { select } : {}),
   };
+}
+
+const linkGroups = (search: TableRowsSearch) => (search.group ? search.group.toLowerCase().split(',') : []);
+const usableGroups = (search: TableRowsSearch, definition: Definition) =>
+  linkGroups(search).filter(id => {
+    const target = definition.fields.find(item => item.id === id);
+    return !!target && sortable(target);
+  });
+
+/** Why a link's grouping can't run: too many or repeated fields. Such links show no summary until the grouping is fixed. */
+export function groupLink(search: TableRowsSearch) {
+  const groups = linkGroups(search);
+  if (new Set(groups).size < groups.length)
+    return 'A summary can’t group by the same field twice. Remove the repeated group to continue.';
+  if (groups.length > queryLimits.groupBy)
+    return 'A summary can group by up to two fields. Remove a group to continue.';
+  return null;
+}
+
+/** The grouping that fixes an invalid link: its first distinct fields this table can group by, up to the limit. */
+export function fixedGroups(search: TableRowsSearch, definition: Definition) {
+  return [...new Set(usableGroups(search, definition))].slice(0, queryLimits.groupBy);
 }
 
 /** URL changes for a new applied view. Old single sort/filter keys are always cleared once the user changes the view. */
