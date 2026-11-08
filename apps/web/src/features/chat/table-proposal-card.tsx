@@ -224,6 +224,9 @@ function InvalidRowsWithValues({
   );
 }
 
+// Table cells don't wrap by default. Row, field and value keep whole words; the problem text takes the remaining width.
+const wrapCell = 'whitespace-normal wrap-break-word';
+
 function InvalidRowsTable({
   workspaceSlug,
   report,
@@ -253,6 +256,7 @@ function InvalidRowsTable({
     <Table
       aria-label="Invalid rows"
       aria-busy={loading || undefined}
+      narrow="stack"
       data={items}
       getRowId={item => item.recordId}
       columns={[
@@ -260,29 +264,25 @@ function InvalidRowsTable({
           key: 'label',
           header: 'Row',
           cell: item => (
-            <Button
-              variant="link"
-              nativeButton={false}
-              render={
-                <Link
-                  to="/$workspaceSlug/tables/$tableId"
-                  params={{ workspaceSlug, tableId: report.tableId }}
-                  search={{ row: item.recordId }}
-                />
-              }
+            <Link
+              to="/$workspaceSlug/tables/$tableId"
+              params={{ workspaceSlug, tableId: report.tableId }}
+              search={{ row: item.recordId }}
             >
-              <span className={item.label ? 'whitespace-normal break-words text-left' : 'break-all font-mono text-xs'}>
+              <span
+                className={`font-medium text-primary-text underline-offset-4 hover:underline in-focus-visible:underline ${item.label ? wrapCell : 'break-all font-mono text-xs'}`}
+              >
                 {item.label ?? (loading ? 'Loading row…' : item.recordId)}
               </span>
-            </Button>
+            </Link>
           ),
         },
-        { key: 'field', header: 'Field', cell: item => <span className="break-words">{item.field}</span> },
-        { key: 'value', header: 'Value', cell: item => <span className="break-words">{item.value}</span> },
+        { key: 'field', header: 'Field', cell: item => <span className={wrapCell}>{item.field}</span> },
+        { key: 'value', header: 'Value', cell: item => <span className={wrapCell}>{item.value}</span> },
         {
           key: 'problem',
           header: 'Problem and fix',
-          cell: item => <span className="break-words">{item.problem}</span>,
+          cell: item => <span className="whitespace-normal wrap-anywhere">{item.problem}</span>,
         },
       ]}
     />
