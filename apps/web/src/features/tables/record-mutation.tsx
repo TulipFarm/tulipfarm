@@ -6,10 +6,16 @@ import { useTableWrite } from './use-table-write';
 import type { RecordMutation, TableApi } from './api';
 import { useTableChanges } from './changes';
 import { useTableReceipt } from './hooks';
+import { TableRequestError } from './request-state';
 
 type ReceiptState = { kind: 'idle' | 'checking' | 'unknown' } | { kind: 'error'; message: string };
 
-export function useRecordMutation(api: TableApi, saved: () => void) {
+/** `explain` turns a rejected field into a message that names the field and the reason. */
+export function useRecordMutation(
+  api: TableApi,
+  saved: () => void,
+  explain?: (fieldId: string, input: RecordMutation) => string,
+) {
   const changes = useTableChanges();
   const receiptRead = useTableReceipt(api);
   const write = useTableWrite(async (input: RecordMutation) => {
@@ -19,6 +25,8 @@ export function useRecordMutation(api: TableApi, saved: () => void) {
       return result;
     } catch (error) {
       changes.denied(error, []);
+      if (error instanceof TableRequestError && error.fieldId && explain)
+        throw new TableRequestError(error.status, error.code, explain(error.fieldId, input), error.fieldId);
       throw error;
     }
   }, saved);

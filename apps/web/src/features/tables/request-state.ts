@@ -8,10 +8,13 @@ export type ReadState<T> =
 export class TableRequestError extends Error {
   readonly status: number;
   readonly code: string;
-  constructor(status: number, code: string, message: string) {
+  /** The field a rejected write names, when the server identifies one. */
+  readonly fieldId: string | undefined;
+  constructor(status: number, code: string, message: string, fieldId?: string) {
     super(message);
     this.status = status;
     this.code = code;
+    this.fieldId = fieldId;
   }
 }
 

@@ -1,7 +1,7 @@
 import { ZodError, email } from 'zod';
 import { fieldSchema, TableValidationError, validateValue } from '@tulipfarm/tables/definition';
 import { workspaceMemberFields } from '@tulipfarm/tables/workspace-members';
-import type { TableDefinition, TableField, TableValues } from './review-contracts';
+import type { TableDefinition, TableField, TableValue, TableValues } from './review-contracts';
 
 export function fieldHint(field: TableField): string {
   switch (field.kind) {
@@ -24,6 +24,54 @@ export function fieldHint(field: TableField): string {
     case 'file':
       return field.cardinality === 'one' ? 'Attach one available file.' : 'Attach available files.';
   }
+}
+
+const kindNames: Record<TableField['kind'], string> = {
+  text: 'text',
+  numeric: 'a number',
+  boolean: 'yes or no',
+  date: 'a date',
+  timestamp: 'a date and time',
+  'single-select': 'one option',
+  'multi-select': 'a list of options',
+  relationship: 'linked rows',
+  file: 'files',
+};
+
+/** Explains why the current field rejects a value, or returns null when the value fits. */
+export function fieldValueIssue(field: TableField, value: TableValue | undefined): string | null {
+  const saved = value ?? null;
+  try {
+    validateValue(fieldSchema.parse(field), saved);
+    return null;
+  } catch (error) {
+    if (!(error instanceof ZodError || error instanceof TableValidationError)) throw error;
+  }
+  if (saved !== null && saved.kind !== field.kind)
+    return `${field.label} holds ${kindNames[field.kind]} now, but this value is ${kindNames[saved.kind]}.`;
+  if (saved === null) return `${field.label} is required now, but this value is empty.`;
+  return `This ${field.label} value doesn't fit the field now. ${fieldHint(field)}`;
+}
+
+/** Lists each value the current fields would reject if these historical values were restored. */
+export function restoreIssues(definition: TableDefinition, values: TableValues): { fieldId: string; reason: string }[] {
+  const issues = Object.keys(values)
+    .filter(id => !definition.fields.some(field => field.id === id))
+    .map(fieldId => ({ fieldId, reason: 'A field in these values was removed, so its old value has nowhere to go.' }));
+  for (const field of definition.fields) {
+    const reason = fieldValueIssue(field, values[field.id]);
+    if (reason) issues.push({ fieldId: field.id, reason });
+  }
+  return issues;
+}
+
+/** Names the field a confirmed write rejected and why, so the person knows what to change. */
+export function rejectedFieldMessage(definition: TableDefinition, fieldId: string, value: TableValue | undefined) {
+  const field = definition.fields.find(item => item.id === fieldId);
+  const reason = field
+    ? (fieldValueIssue(field, value) ?? `This ${field.label} value doesn't fit the field. ${fieldHint(field)}`)
+    : 'A field in these values was removed.';
+  return `Not saved. ${reason} Nothing was changed.`;
 }
 
 export function changedValues(values: TableValues, initial: TableValues): TableValues {

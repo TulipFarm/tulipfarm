@@ -266,7 +266,15 @@ export function tableApi(workspaceId: string) {
                         : [403, 404].includes(response.status)
                           ? 'This table or a referenced file is missing, or your permission changed. A workspace admin can review your access.'
                           : 'The table request could not be confirmed. Check the current rows before trying again.';
-      throw new TableRequestError(response.status, code, memberMessages[code] ?? message);
+      const fieldId =
+        code === 'invalid-table-values' &&
+        typeof value === 'object' &&
+        value !== null &&
+        'fieldId' in value &&
+        typeof value.fieldId === 'string'
+          ? value.fieldId
+          : undefined;
+      throw new TableRequestError(response.status, code, memberMessages[code] ?? message, fieldId);
     }
     return value;
   }
