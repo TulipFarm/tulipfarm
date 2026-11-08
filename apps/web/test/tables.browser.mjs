@@ -685,6 +685,51 @@ try {
     else return route.fulfill({ status: 404, json: { error: 'unavailable' } });
     return route.fulfill({ json });
   });
+  // At phone width the header actions collapse into the ⋯ menu instead of covering the table name.
+  await page.goto(`${origin}/acme/tables/${tableId}`);
+  const headerViews = page.getByRole('tablist', { name: 'Views', exact: true });
+  await page.setViewportSize({ width: 375, height: 812 });
+  for (const view of ['Table', 'Board']) {
+    await headerViews.getByRole('tab', { name: view, exact: true }).click();
+    const header = page.locator('header[aria-label="Workspace header"]');
+    await header.getByRole('heading', { name: 'Support tickets', exact: true }).waitFor();
+    assert.equal(await header.getByRole('link', { name: 'Change fields in chat' }).count(), 0);
+    const layout = await page.evaluate(() => {
+      const header = document.querySelector('header[aria-label="Workspace header"]');
+      const title = header.querySelector('[data-slot="page-title"]').getBoundingClientRect();
+      const heading = header.querySelector('[data-slot="page-title"]');
+      const overlaps = [...header.querySelectorAll('button, a, [title]')]
+        .filter(element => !heading.contains(element) && !element.closest('[data-slot="page-breadcrumb"]'))
+        .map(element => ({
+          name: element.textContent || element.getAttribute('aria-label'),
+          box: element.getBoundingClientRect(),
+        }))
+        .filter(({ box }) => box.width > 0 && box.left < title.right && box.right > title.left)
+        .map(({ name }) => name);
+      return {
+        title: { left: title.left, right: title.right, width: title.width },
+        fits: heading.scrollWidth <= heading.clientWidth,
+        ellipsis: getComputedStyle(heading).textOverflow === 'ellipsis',
+        overlaps,
+        pageScroll: document.documentElement.scrollWidth > innerWidth,
+      };
+    });
+    console.log(view, JSON.stringify(layout));
+    assert.ok(layout.title.width >= 40, `${view}: the table name has room in the header`);
+    assert.ok(layout.fits || layout.ellipsis, `${view}: the table name is whole or ends in an ellipsis`);
+    assert.deepEqual(layout.overlaps, [], `${view}: no header control covers the table name`);
+    assert.equal(layout.pageScroll, false, `${view}: no horizontal page scroll`);
+    if (process.env.TABLE_UI_SCREENSHOTS)
+      await page.screenshot({ path: `${process.env.TABLE_UI_SCREENSHOTS}/table-header-375-${view.toLowerCase()}.png` });
+  }
+  await page.getByRole('button', { name: 'More table options', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Change fields in chat', exact: true }).waitFor();
+  await page.keyboard.press('Escape');
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.getByRole('link', { name: 'Change fields in chat' }).waitFor();
+  await page.getByRole('button', { name: 'More table options', exact: true }).click();
+  assert.equal(await page.getByRole('menuitem', { name: 'Change fields in chat', exact: true }).count(), 0);
+  await page.keyboard.press('Escape');
   await page.goto(`${origin}/acme/chat/${chatId}`);
   const card = page.getByRole('region', { name: 'Table change proposal' });
   await card.getByText('Could not load tables', { exact: true }).waitFor();

@@ -47,7 +47,7 @@ import {
 import { RecordMutationFeedback, useRecordMutation } from './record-mutation';
 import { RecordHistory } from './record-history';
 import { fileIdsOf, ReferenceRetry, TableValueView, useFileNames, type TableWorkspace } from './references';
-import { TableMore, UnarchiveTable } from './table-more';
+import { TableMore, UnarchiveTable, useWideTableHeader } from './table-more';
 import {
   tableApi,
   type TableListSort,
@@ -304,6 +304,7 @@ function TableDetailView({
   const api = useMemo(() => tableApi(workspace.id), [workspace.id]);
   const read = useTableDetail(api, tableId);
   const busy = read.state.kind !== 'ready' || !!read.state.error || read.state.refreshing;
+  const wideHeader = useWideTableHeader();
   return (
     <TableRead
       state={read.state}
@@ -326,7 +327,7 @@ function TableDetailView({
             }}
             actions={
               <>
-                {!state.archived && (
+                {!state.archived && wideHeader && (
                   <Button
                     variant="outline"
                     size="sm"
@@ -342,7 +343,13 @@ function TableDetailView({
                     Change fields in chat
                   </Button>
                 )}
-                <TableMore state={state} api={api} workspace={workspace} disabled={busy} />
+                <TableMore
+                  state={state}
+                  api={api}
+                  workspace={workspace}
+                  disabled={busy}
+                  changeFields={!state.archived && !wideHeader}
+                />
               </>
             }
           />
