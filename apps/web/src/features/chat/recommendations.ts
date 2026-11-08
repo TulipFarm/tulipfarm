@@ -5,6 +5,7 @@ import { apiOrigin } from '@/lib/auth';
 import { jsonResponse, readJson } from '@/lib/http';
 import { freshness, useFeatureRead } from '@/lib/query';
 import { useFeatureContext } from '@/lib/query/provider';
+import { onReconnect, useOffline } from '@/lib/online';
 import { onWindowReturn } from '@/lib/window-return';
 import { createRecommendationStream } from './recommendation-stream';
 
@@ -150,6 +151,16 @@ export function useRecommendations(workspaceId: string) {
       }),
     [stream],
   );
+  const offline = useOffline();
+  const refresh = read.refresh;
+  useEffect(
+    () =>
+      onReconnect(() => {
+        stream.retry();
+        void refresh();
+      }),
+    [stream, refresh],
+  );
   const state = read.state;
   const items =
     state.kind === 'ready' && live === 'open' && state.data.items.length ? state.data.items : fallbackRecommendations;
@@ -167,14 +178,17 @@ export function useRecommendations(workspaceId: string) {
   };
   return {
     items,
-    message: failed
-      ? 'Saved recommendations could not be loaded.'
-      : live === 'unavailable'
-        ? 'Live updates are not available. Reload the saved list to reconnect.'
-        : live === 'connecting'
-          ? 'Connecting to recommendation updates.'
-          : messages[status],
-    error: failed || live === 'unavailable',
+    message:
+      offline && (failed || live !== 'open')
+        ? "You're offline. Recommendations will update when you're back online."
+        : failed
+          ? 'Saved recommendations could not be loaded.'
+          : live === 'unavailable'
+            ? "Recommendations aren't updating. Check your connection, then try again."
+            : live === 'connecting'
+              ? 'Connecting to recommendation updates.'
+              : messages[status],
+    error: !offline && (failed || live === 'unavailable'),
     retry: () => {
       stream.retry();
       void read.refresh();

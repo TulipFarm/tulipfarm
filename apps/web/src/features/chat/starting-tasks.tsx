@@ -171,7 +171,7 @@ export function StartingTasks({ onChoose, disabled }: { onChoose: (prompt: strin
             </Alert>
             <div>
               <Button variant="outline" size="sm" disabled={refreshing} aria-busy={refreshing} onClick={retry}>
-                {refreshing ? 'Loading saved list...' : 'Reload saved list'}
+                {refreshing ? 'Trying again…' : 'Try again'}
               </Button>
             </div>
           </div>

@@ -287,7 +287,7 @@ try {
       );
       recommendations = { status: 503, json: { error: 'recommendations-unavailable' } };
       await emit('changed', 6);
-      const reload = page.getByRole('button', { name: 'Reload saved list' });
+      const reload = page.getByRole('button', { name: 'Try again', exact: true });
       await reload.waitFor();
       assert.equal(
         await page.getByText('Saved recommendations could not be loaded.').count(),

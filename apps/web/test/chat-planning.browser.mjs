@@ -186,8 +186,8 @@ test(
       await page.getByRole('menuitemradio', { name: /^Plan/ }).click();
       await page.getByRole('textbox', { name: 'Message' }).fill('Check access before making the plan.');
       await page.getByRole('button', { name: 'Send message' }).click();
-      await page.getByRole('button', { name: 'Retry same operation' }).click();
-      await page.getByRole('button', { name: 'Retry same operation' }).waitFor({ state: 'detached' });
+      await page.getByRole('button', { name: 'Try again', exact: true }).click();
+      await page.getByRole('button', { name: 'Try again', exact: true }).waitFor({ state: 'detached' });
       assert.equal(sends.length, 2);
       assert.deepEqual(sends[0], sends[1], 'failed sends retain the exact request and mode');
       assert.equal(sends[0].mode, 'plan');

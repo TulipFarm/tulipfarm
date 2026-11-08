@@ -79,15 +79,13 @@ export function CommandFeedback({
     <div className="space-y-2">
       <Alert variant="destructive">
         <AlertDescription>
-          {state.kind === 'uncertain'
-            ? 'We could not confirm whether this was saved. Your exact submission is kept in this tab. Retry the same operation to confirm it without duplicating it.'
-            : state.message}
+          {state.kind === 'uncertain' ? uncertainCopy(state.command.kind === 'send', state.offline) : state.message}
         </AlertDescription>
       </Alert>
       <div className="flex flex-wrap gap-2">
         {state.kind === 'uncertain' ? (
           <Button variant="outline" onClick={() => void write.submit(state.command)}>
-            Retry same operation
+            Try again
           </Button>
         ) : (
           <>
@@ -110,4 +108,15 @@ export function CommandFeedback({
       </div>
     </div>
   );
+}
+
+// Replaying the same command never applies it twice, so trying again is always safe.
+function uncertainCopy(message: boolean, offline: boolean) {
+  if (offline)
+    return message
+      ? "You're offline, so your message hasn't been sent. It's kept here and will send when you're back online."
+      : "You're offline, so your change hasn't been saved. Try again when you're back online.";
+  return message
+    ? "We couldn't confirm your message was sent. Check your connection, then try again. Trying again won't send it twice."
+    : "We couldn't confirm your change was saved. Check your connection, then try again. Trying again won't repeat the change.";
 }

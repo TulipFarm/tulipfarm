@@ -250,8 +250,8 @@ test(
         .getByText('Workspace credits are unavailable. Work will continue when credits are available.')
         .waitFor();
       await status.getByRole('button', { name: 'Resume Knowledge update' }).click();
-      await status.getByRole('button', { name: 'Retry same operation' }).waitFor();
-      await status.getByRole('button', { name: 'Retry same operation' }).click();
+      await status.getByRole('button', { name: 'Try again', exact: true }).waitFor();
+      await status.getByRole('button', { name: 'Try again', exact: true }).click();
       await status.getByText('The recap is queued. It will run in the background using workspace credits.').waitFor();
       assert.equal(commands.length, 2);
       assert.equal(commands[0].commandId, commands[1].commandId, 'an uncertain resume keeps its command identity');
