@@ -58,6 +58,108 @@ if (import.meta.env.DEV && /^\/agent-builder-mock(?:\/|$)/.test(window.location.
       storageKey,
       JSON.stringify({ drafts: [...setups.values()], commands: [...setupCommands.values()] }),
     );
+  // A chat whose setup draft opens the builder in the canvas: /agent-builder-mock/chat/<chatId>
+  const chatId = '67676767-6767-4676-8676-676767676767';
+  const chatDraftId = '78787878-7878-4787-8787-787878787878';
+  const chatAgentId = '89898989-8989-4898-8898-898989898989';
+  const createdAt = '2026-10-12T10:00:00Z';
+  const chat = {
+    id: chatId,
+    title: 'Pull request notifier',
+    titleRevision: 1,
+    titleManual: false,
+    archived: false,
+    activityAt: createdAt,
+    createdAt,
+    projectId: null,
+  };
+  const chatDraft = {
+    id: chatDraftId,
+    digest: 'd'.repeat(64),
+    status: 'pending',
+    outcome: null,
+    proposal: {
+      kind: 'agent',
+      targetId: chatAgentId,
+      input: {
+        expectedSoulRevision: revision,
+        expectedSavedRevision: null,
+        expectedPolicyVersion: 0,
+        expectedActivationIds: [],
+        expectedWorkflowRevision: null,
+        expectedWorkflowGeneration: null,
+        owningTeamId: peopleTeam.id,
+        definition: {
+          name: 'Pull request notifier',
+          instructions:
+            'When a pull request opens, summarise what changed and who should review it. Every Monday, post a digest of open pull requests. Never merge or approve anything.',
+          tools: [],
+          responseRule: 'tag',
+        },
+        setup: {
+          policy: { grants: [{ teamId: peopleTeam.id, permissions: ['read', 'invoke'] }], personGrants: [] },
+          enrollment: [peopleTeam.id],
+          scope: [],
+          limits: [],
+          taskLimits: { toolCalls: 25, activeMilliseconds: 60000, credits: 20 },
+          slackSender: 'app',
+          slackChannels: [],
+          prompt: 'Summarise the pull request activity for the team.',
+          runLimits: { toolCalls: 10, activeMilliseconds: 60000, credits: 10 },
+          triggers: [
+            {
+              id: '9a9a9a9a-9a9a-49a9-89a9-9a9a9a9a9a9a',
+              trigger: { kind: 'cron', expression: '0 9 * * 1', timezone: 'Asia/Kolkata' },
+            },
+            { id: 'abababab-abab-4bab-8bab-abababababab', trigger: { kind: 'event', name: 'pull_request_opened' } },
+          ],
+        },
+      },
+    },
+  };
+  const chatMessages = {
+    messages: [
+      {
+        id: 'bcbcbcbc-bcbc-4cbc-8cbc-bcbcbcbcbcbc',
+        sequence: 1,
+        author: 'human',
+        createdAt,
+        parts: [
+          {
+            kind: 'text',
+            text: 'Create an agent that summarises new pull requests and posts a digest every Monday at 9am.',
+          },
+        ],
+        turn: { id: 'cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd', status: 'completed', generation: 0 },
+        tools: [
+          {
+            id: chatDraftId,
+            tool: 'agents.draft',
+            status: 'completed',
+            activity: null,
+            presentation: { label: 'Preparing agent instructions for review', brand: null },
+            web: null,
+          },
+        ],
+      },
+      {
+        id: 'dededede-dede-4ede-8ede-dededededede',
+        sequence: 2,
+        author: 'assistant',
+        createdAt,
+        parts: [
+          {
+            kind: 'text',
+            text: 'I drafted **Pull request notifier**. Review it in the builder on the right, then save or activate it.\n\n*Local demo: seeded data only. No live model calls, Slack messages or workflow runs.*',
+          },
+        ],
+        turn: null,
+        tools: [],
+      },
+    ],
+    nextBefore: null,
+    hasGitHubProposals: false,
+  };
   window.fetch = async (input, init) => {
     const url = new URL(input instanceof Request ? input.url : String(input), window.location.origin);
     if (!url.pathname.startsWith('/v1/')) return originalFetch(input, init);
@@ -72,6 +174,12 @@ if (import.meta.env.DEV && /^\/agent-builder-mock(?:\/|$)/.test(window.location.
         });
       if (path === '/v1/workspaces') return Response.json([workspace]);
       if (path === '/v1/workspaces/agent-builder-mock') return Response.json(workspace);
+      if (path.endsWith(`/drafts/${chatDraftId}`)) return Response.json(chatDraft);
+      if (path.endsWith(`/conversations/${chatId}/messages`)) return Response.json(chatMessages);
+      if (path.endsWith(`/conversations/${chatId}/plans`)) return Response.json({ plans: [] });
+      if (path.endsWith('/system-package-installations')) return Response.json({ installations: [], nextCursor: null });
+      if (path.endsWith(`/conversations/${chatId}`)) return Response.json(chat);
+      if (path.endsWith('/conversations')) return Response.json({ chats: [chat], nextCursor: null });
       if (path.endsWith('/governance/me'))
         return Response.json({
           membershipId: id,
@@ -121,6 +229,8 @@ if (import.meta.env.DEV && /^\/agent-builder-mock(?:\/|$)/.test(window.location.
           dispatchEnabled: true,
         });
       if (path.endsWith('/workspace-mcp/agent-permission-choices')) return Response.json([]);
+      if (path.endsWith('/workspace-mcp/integrations')) return Response.json({ integrations: [] });
+      if (path.endsWith('/workspace-mcp/actions')) return Response.json({ actions: [], nextCursor: null });
       if (path.endsWith('/slack/destinations')) return Response.json({ destinations: [] });
       if (path.endsWith('/discover'))
         return Response.json({

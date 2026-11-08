@@ -34,6 +34,7 @@ export function AgentBuilderLayout({
   onPreviewOpenChange,
   disabled,
   onSubmit,
+  compact = false,
 }: {
   step: BuilderStep;
   onStep: (step: BuilderStep) => void;
@@ -46,21 +47,24 @@ export function AgentBuilderLayout({
   onPreviewOpenChange: (open: boolean) => void;
   disabled: boolean;
   onSubmit: () => 'invalid' | void;
+  /** Narrow host such as the chat canvas: always show step tabs, and leave the summary to the Review step. */
+  compact?: boolean | undefined;
 }) {
-  const wide = useSyncExternalStore(
+  const wideWindow = useSyncExternalStore(
     subscribeWidth,
     () => window.matchMedia(wideQuery).matches,
     () => false,
   );
+  const wide = wideWindow && !compact;
   const choose = (value: unknown) => {
     const next = builderSteps.find(item => item.id === value);
     if (next) onStep(next.id);
   };
   return (
-    <div className="grid min-w-0 items-start gap-6 xl:flex">
-      <div className="min-w-0 xl:flex-3">
+    <div className={compact ? 'grid min-w-0 gap-6' : 'grid min-w-0 items-start gap-6 xl:flex'}>
+      <div className={compact ? 'min-w-0' : 'min-w-0 xl:flex-3'}>
         <Tabs value={step} onValueChange={choose}>
-          <div className="hidden min-w-0 pb-3 sm:block">
+          <div className={compact ? 'min-w-0 overflow-x-auto pb-3' : 'hidden min-w-0 pb-3 sm:block'}>
             <TabsList variant="steps" aria-label="Agent setup sections">
               {builderSteps.map((item, index) => (
                 <TabsTrigger key={item.id} value={item.id}>
@@ -79,7 +83,7 @@ export function AgentBuilderLayout({
               ))}
             </TabsList>
           </div>
-          <div className="flex min-w-0 items-center gap-2 pb-3 sm:hidden">
+          <div className={compact ? 'hidden' : 'flex min-w-0 items-center gap-2 pb-3 sm:hidden'}>
             <div className="min-w-0 flex-1">
               <Select value={step} onValueChange={choose}>
                 <SelectTrigger width="full" aria-label="Setup section">
@@ -95,7 +99,7 @@ export function AgentBuilderLayout({
               </Select>
             </div>
           </div>
-          {!wide && (
+          {!wide && !compact && (
             <Sheet open={previewOpen} onOpenChange={onPreviewOpenChange}>
               <div className="mb-3">
                 <SheetTrigger render={<Button variant="outline" />}>

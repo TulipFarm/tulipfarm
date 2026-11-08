@@ -59,6 +59,7 @@ export function AgentBuilder({
   concealed,
   refresh,
   onPersisted,
+  compact,
 }: {
   api: ReturnType<typeof agentApi>;
   workspaceId: string;
@@ -71,6 +72,7 @@ export function AgentBuilder({
   concealed: boolean;
   refresh: () => Promise<void>;
   onPersisted: () => void;
+  compact?: boolean | undefined;
 }) {
   const [draft, setDraft] = useState(() => builderDraft(initial));
   const [base, setBase] = useState(initial);
@@ -435,6 +437,7 @@ export function AgentBuilder({
             panels={panels}
             disabled={locked}
             onSubmit={submit}
+            compact={compact}
             previewOpen={previewOpen}
             onPreviewOpenChange={setPreviewOpen}
             preview={
