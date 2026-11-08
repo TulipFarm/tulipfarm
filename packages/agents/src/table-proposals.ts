@@ -3,6 +3,7 @@ import { generationProposalData } from '@tulipfarm/tables/store';
 import { readableTableFiles, requireTableSources } from './table-sources.ts';
 import { createTableImports, type TableImportOptions } from '@tulipfarm/tables/imports';
 import { TableProposalError, TableProposalValidationError } from '@tulipfarm/tables/proposal-contracts';
+import { z } from 'zod';
 
 const archiveBlocked = {
   'table-linked':
@@ -10,6 +11,22 @@ const archiveBlocked = {
   'workflow-active':
     'No proposal was created: an enabled workflow uses this table, so it cannot be archived. Tell the person to archive or turn off the workflows that use it first; this is not a permission denial.',
 } as const;
+
+const planKinds = z.object({
+  plans: z.array(z.object({ kind: z.string(), expectedRevision: z.string().nullable().optional() })),
+});
+const structureOnly =
+  'This review creates only the structure of the new table: it holds no rows, so approving it imports nothing. If the person asked to import a file or add rows, say plainly that the rows are not in this review. Tell them that after they approve the table, you can import the file into it as a separate review, or add the rows.';
+
+/** A note for a proposal that creates a table but brings no rows, so chat never calls it an import. */
+export function structureOnlyNote(value: unknown) {
+  const parsed = planKinds.safeParse(value);
+  if (!parsed.success) return {};
+  const input = parsed.data;
+  const createsTable = input.plans.some(plan => plan.kind === 'schema' && plan.expectedRevision === null);
+  const bringsRows = input.plans.some(plan => plan.kind === 'records' || plan.kind === 'import');
+  return createsTable && !bringsRows ? { rowsIncluded: false as const, instruction: structureOnly } : {};
+}
 
 export function tableProposalOptions(
   runtime: TableProposalOptions['runtime'],
@@ -33,7 +50,8 @@ export function createChatTableProposals(
     ...service,
     async propose(...args: Parameters<typeof service.propose>) {
       try {
-        return await service.propose(...args);
+        const result = await service.propose(...args);
+        return 'status' in result ? { ...result, ...structureOnlyNote(args[4]) } : result;
       } catch (error) {
         if (error instanceof TableProposalError && (error.code === 'table-linked' || error.code === 'workflow-active'))
           return { error: error.code, instruction: archiveBlocked[error.code] };

@@ -84,6 +84,7 @@ const datesAndText = bullets('Dates, time zones, and exact text', [
 
 const reportingOutcomes = bullets('Reporting outcomes', [
   'Say that work is complete only when a result shows that it is complete.',
+  'Report a review card, a proposal or proposal version, an approval, a denial, or saved data only when a tool result of this turn shows it. If you did not call the tool, do not say that it ran.',
   'Give each item its correct state: pending, completed, blocked, or failed.',
   'If you do not know the result of a write, check its status before you try again. Do not do the same write two times.',
   'At the end, tell the user what is not complete and what the next step is.',
