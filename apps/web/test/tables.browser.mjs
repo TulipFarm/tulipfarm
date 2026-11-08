@@ -223,6 +223,12 @@ const schemaEntry = {
   appliedAt: workspace.createdAt,
   definition,
   definitionWithheld: null,
+  changes: [
+    'Renamed Notes to Remarks',
+    'Start: text to timestamp',
+    ...Array.from({ length: 10 }, (_, i) => `Added F${i}`),
+  ],
+  approval: { name: 'Ada Admin', formerMember: true, approvedAt: workspace.createdAt },
   receipt: { status: 'completed', executionId, revision: 'a'.repeat(40) },
 };
 let savedDefinition = schemaEntry,
@@ -1079,6 +1085,16 @@ try {
   await page.getByText('The latest saved definition is active.', { exact: true }).waitFor();
   const schemas = page.getByRole('region', { name: 'Schema history', exact: true });
   await schemas.getByText('Migration completed', { exact: true }).waitFor();
+  const changes = schemas.getByRole('list', { name: 'What changed', exact: true });
+  assert.deepEqual((await changes.getByRole('listitem').allTextContents()).slice(0, 2), [
+    'Renamed Notes to Remarks',
+    'Start: text to timestamp',
+  ]);
+  assert.equal(await changes.getByRole('listitem').count(), 10);
+  await schemas.getByRole('button', { name: 'and 2 more changes', exact: true }).click();
+  assert.equal(await changes.getByRole('listitem').count(), 12);
+  await schemas.getByText(/^Ada Admin \(former member\), /).waitFor();
+  assert.equal(await schemas.getByText(executionId).isVisible(), false, 'The execution UUID is a secondary detail');
   schemaStatus = 503;
   await schemas.getByRole('button', { name: 'Check schema history', exact: true }).click();
   await schemas.getByRole('button', { name: 'Retry refresh', exact: true }).waitFor();
@@ -1405,13 +1421,17 @@ try {
     receipt: null,
     definition: null,
     definitionWithheld: 'source-access',
+    changes: null,
   };
   await tableChange();
   await page.getByText(/A field change is still applying/).waitFor();
   await openPanel('Schema history');
   await page.getByText(/latest saved definition is not active/).waitFor();
   await page.getByRole('button', { name: 'Latest saved fields', exact: true }).click();
-  await page.getByText(/The person who approved the change can review it in their originating chat/).waitFor();
+  await page
+    .getByRole('region', { name: 'Definition status', exact: true })
+    .getByText(/The person who approved the change can review it in their originating chat/)
+    .waitFor();
   await schemas.getByRole('button', { name: 'Check schema history', exact: true }).click();
   await schemas.getByText('Migrating rows', { exact: true }).waitFor();
   await schemas.getByText(/come from a source you can’t access/).waitFor();

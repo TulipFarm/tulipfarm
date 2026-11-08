@@ -15,6 +15,7 @@ import {
   executionCompatibility,
 } from '../../../tables/dist/execution.js';
 import { createTableCleanup } from '../../../tables/dist/cleanup.js';
+import { createTableSchemaHistory } from '../../../../apps/api/src/table-schema-history.ts';
 import { generationProposalData, pruneHistoryValues } from '../../../tables/dist/store.js';
 import { createTableService } from '../../../tables/dist/service.js';
 import { AccessDenied } from '@tulipfarm/access';
@@ -463,6 +464,27 @@ test(
     assert.equal(await finish(online), 'completed');
     const live = await service.list(ws.id, ws.userId, { tableId: table, revision: '5'.repeat(40) });
     assert.equal(live.filter(row => ids.includes(row.id) && row.values[notes].value === 'after').length, 8);
+    const schemaHistory = createTableSchemaHistory({ runtime, ...access, identity: db.platform });
+    const newest = await schemaHistory.history(ws.id, ws.userId, table, { limit: 2 });
+    assert.deepEqual(
+      newest.entries.map(entry => entry.changes),
+      [['Renamed Title to Live rename'], ['Recomputed values of Title']],
+      'Schema history lists the newest change first and says what each change did',
+    );
+    for (const entry of newest.entries) {
+      assert.deepEqual(entry.approval && { name: entry.approval.name, formerMember: entry.approval.formerMember }, {
+        name: 'Test',
+        formerMember: false,
+      });
+      assert.ok(entry.approval.approvedAt <= entry.appliedAt);
+    }
+    assert.ok(newest.entries[0].createdAt > newest.entries[1].createdAt);
+    const older = await schemaHistory.history(ws.id, ws.userId, table, { limit: 50, after: newest.nextCursor });
+    assert.deepEqual(older.entries.at(-1).changes, [
+      'Created table Tickets',
+      'Added Title (text)',
+      'Added Notes (text)',
+    ]);
     const continuous = await approve({
       kind: 'schema',
       tableId: table,

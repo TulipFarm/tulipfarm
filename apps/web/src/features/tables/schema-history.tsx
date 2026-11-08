@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Button } from '@tulipfarm/sprout/button';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
 import { Disclosure } from '@/components/disclosure';
@@ -15,29 +16,53 @@ const phaseLabels = {
   blocked: 'Migration blocked',
 };
 
+const summaryLimit = 10;
+
+function ChangeSummary({ entry }: { entry: SchemaHistoryEntry }) {
+  const [expanded, setExpanded] = useState(false);
+  if (!entry.changes)
+    return entry.definitionWithheld ? null : <p className="text-sm">A summary of this change is not available.</p>;
+  const shown = expanded ? entry.changes : entry.changes.slice(0, summaryLimit);
+  const more = entry.changes.length - shown.length;
+  return (
+    <div className="space-y-1 text-sm">
+      {entry.phase === 'blocked' && <p>Nothing was applied. The proposed change was:</p>}
+      <ul aria-label="What changed" className="list-disc space-y-1 pl-5">
+        {shown.map((line, index) => (
+          <li key={index} className="break-words">
+            {line}
+          </li>
+        ))}
+      </ul>
+      {more > 0 && (
+        <Button variant="link" onClick={() => setExpanded(true)}>
+          and {more} more {more === 1 ? 'change' : 'changes'}
+        </Button>
+      )}
+    </div>
+  );
+}
+
 function ExecutionDetails({ entry }: { entry: SchemaHistoryEntry }) {
   return (
     <div className="space-y-2 text-sm">
-      <p>{phaseLabels[entry.phase]}</p>
       <dl className="space-y-1">
         <div>
-          <dt className="inline">Started: </dt>
-          <dd className="inline">{new Date(entry.createdAt).toLocaleString()}</dd>
-        </div>
-        <div>
-          <dt className="inline">Saved: </dt>
-          <dd className="inline">{entry.savedAt ? new Date(entry.savedAt).toLocaleString() : 'Not saved yet'}</dd>
+          <dt className="inline">Approved by: </dt>
+          <dd className="inline">
+            {entry.approval
+              ? `${entry.approval.name}${entry.approval.formerMember ? ' (former member)' : ''}, ${new Date(entry.approval.approvedAt).toLocaleString()}`
+              : 'No approval recorded'}
+          </dd>
         </div>
         <div>
           <dt className="inline">Applied: </dt>
           <dd className="inline">{entry.appliedAt ? new Date(entry.appliedAt).toLocaleString() : 'Not applied'}</dd>
         </div>
-        {entry.revision && (
-          <div className="break-all">
-            <dt className="inline">Revision: </dt>
-            <dd className="inline font-mono text-xs">{entry.revision}</dd>
-          </div>
-        )}
+        <div>
+          <dt className="inline">Status: </dt>
+          <dd className="inline">{phaseLabels[entry.phase]}</dd>
+        </div>
       </dl>
       {entry.receipt?.status === 'failed' && (
         <p role="alert">
@@ -70,6 +95,31 @@ function WithheldDefinition({ entry }: { entry: SchemaHistoryEntry }) {
   );
 }
 
+function ExecutionReference({ entry }: { entry: SchemaHistoryEntry }) {
+  return (
+    <dl className="space-y-1 text-sm">
+      <div>
+        <dt className="inline">Started: </dt>
+        <dd className="inline">{new Date(entry.createdAt).toLocaleString()}</dd>
+      </div>
+      <div>
+        <dt className="inline">Saved: </dt>
+        <dd className="inline">{entry.savedAt ? new Date(entry.savedAt).toLocaleString() : 'Not saved yet'}</dd>
+      </div>
+      {entry.revision && (
+        <div className="break-all">
+          <dt className="inline">Revision: </dt>
+          <dd className="inline select-all font-mono text-xs">{entry.revision}</dd>
+        </div>
+      )}
+      <div className="break-all">
+        <dt className="inline">Execution: </dt>
+        <dd className="inline select-all font-mono text-xs">{entry.id}</dd>
+      </div>
+    </dl>
+  );
+}
+
 export function DefinitionStatus({ state }: { state: DefinitionState }) {
   return (
     <section aria-label="Definition status" className="space-y-4">
@@ -95,6 +145,7 @@ export function DefinitionStatus({ state }: { state: DefinitionState }) {
       {state.saved && (
         <Disclosure title="Latest saved fields">
           <ExecutionDetails entry={state.saved} />
+          <ExecutionReference entry={state.saved} />
           {state.saved.definition ? (
             <DefinitionView definition={state.saved.definition} title="Saved definition" />
           ) : (
@@ -118,9 +169,7 @@ export function SchemaHistory({ tableId, api }: { tableId: string; api: TableApi
           Check schema history
         </Button>
       </div>
-      <p className="text-sm text-muted-foreground">
-        Executions are paged by identifier. Use their dates to compare when changes happened.
-      </p>
+      <p className="text-sm text-muted-foreground">Newest changes first, by when they started.</p>
       <TableRead state={read.state} refresh={read.refresh}>
         {data => (
           <>
@@ -134,15 +183,15 @@ export function SchemaHistory({ tableId, api }: { tableId: string; api: TableApi
               <ol className="space-y-4">
                 {data.entries.map(entry => (
                   <li key={entry.id} className="space-y-3 border-t border-border pt-4">
-                    <p className="break-all font-mono text-xs">Execution {entry.id}</p>
+                    <ChangeSummary entry={entry} />
                     <ExecutionDetails entry={entry} />
-                    {entry.definition ? (
-                      <Disclosure title={`Fields for revision ${entry.revision?.slice(0, 12) ?? 'not yet saved'}`}>
-                        <DefinitionView definition={entry.definition} title="Historical definition" />
-                      </Disclosure>
-                    ) : (
-                      <WithheldDefinition entry={entry} />
-                    )}
+                    {!entry.definition && <WithheldDefinition entry={entry} />}
+                    <Disclosure title="Change details">
+                      <ExecutionReference entry={entry} />
+                      {entry.definition && (
+                        <DefinitionView definition={entry.definition} title="Fields after this change" />
+                      )}
+                    </Disclosure>
                   </li>
                 ))}
               </ol>

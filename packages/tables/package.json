@@ -88,6 +88,10 @@
     "./maintenance": {
       "types": "./dist/maintenance.d.ts",
       "default": "./dist/maintenance.js"
+    },
+    "./schema-summary": {
+      "types": "./dist/schema-summary.d.ts",
+      "default": "./dist/schema-summary.js"
     }
   },
   "scripts": {
