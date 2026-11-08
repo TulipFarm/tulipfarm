@@ -33,6 +33,8 @@ const labels = {
   'table.row.delete': 'Delete rows',
 };
 type PersonGrant = { membershipId: string; target: GrantInput['target']; granted: boolean };
+// Quick self-grants refresh table authority once, after clicks have stopped for this long.
+const ownChangeDelay = 1500;
 
 export function PersonGrants({
   workspaceId,
@@ -49,8 +51,9 @@ export function PersonGrants({
   const [feedback, setFeedback] = useState('');
   const read = useTablePersonGrants(workspaceId);
   const changes = useTableChanges();
-  // Applying your own authority change reloads workspace access, so it waits until queued grants are saved.
+  // Applying your own authority change reloads the table data it protects, so it waits until queued grants are saved.
   const ownChanged = useRef(false);
+  const [ownRefreshing, setOwnRefreshing] = useState(false);
   const write = useTableWrite(
     async (input: PersonGrant) => {
       const own = changes.own(input.membershipId);
@@ -87,7 +90,8 @@ export function PersonGrants({
   const grantQueue = useGrantQueue({
     saved,
     save: entry => write.submit({ membershipId: entry.holder, target: entry.target, granted: entry.granted }),
-    wait: busy || write.state.kind === 'sending' || (read.state.kind === 'ready' && read.state.refreshing),
+    wait:
+      busy || ownRefreshing || write.state.kind === 'sending' || (read.state.kind === 'ready' && read.state.refreshing),
     stale: unavailable,
     settled: result =>
       setFeedback(
@@ -97,10 +101,16 @@ export function PersonGrants({
   const applyOwnChange = useEffectEvent(() => {
     if (!ownChanged.current) return;
     ownChanged.current = false;
-    void changes.ownGrants().then(() => window.dispatchEvent(new Event('tulipfarm:workspace-access-changed')));
+    setOwnRefreshing(true);
+    void changes
+      .ownGrants()
+      .then(() => window.dispatchEvent(new Event('tulipfarm:workspace-access-changed')))
+      .finally(() => setOwnRefreshing(false));
   });
   useEffect(() => {
-    if (!grantQueue.pending) applyOwnChange();
+    if (grantQueue.pending) return;
+    const timer = setTimeout(applyOwnChange, ownChangeDelay);
+    return () => clearTimeout(timer);
   }, [grantQueue.pending]);
   useEffect(() => () => applyOwnChange(), []);
   const locked = unavailable || grantQueue.pending;
