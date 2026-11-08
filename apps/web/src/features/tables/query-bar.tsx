@@ -276,6 +276,9 @@ function SearchMenu({
   const searchable = definition.fields.some(field => field.kind === 'text');
   const tab = mode === 'text' && !searchable ? 'rsql' : (mode ?? (searchable ? 'text' : 'rsql'));
   const [open, setOpen] = useState(false);
+  // Tabs and the popover unmount their panels, so the unapplied RSQL draft lives here until a new query is applied.
+  const [rsql, setRsql] = useState({ applied: view.where, text: view.where });
+  if (rsql.applied !== view.where) setRsql({ applied: view.where, text: view.where });
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger render={<Button variant={view.search ? 'secondary' : 'outline'} size="sm" disabled={disabled} />}>
@@ -336,6 +339,8 @@ function SearchMenu({
                 references={references}
                 apply={apply}
                 disabled={disabled}
+                text={rsql.applied === view.where ? rsql.text : view.where}
+                setText={text => setRsql({ applied: view.where, text })}
               />
             </div>
           </TabsContent>
@@ -366,8 +371,16 @@ function TextSearch({ view, apply }: Pick<Props, 'view' | 'apply'>) {
   );
 }
 
-function RsqlSearch({ api, table, view, references, apply, disabled }: Props) {
-  const [text, setText] = useState(view.where);
+function RsqlSearch({
+  api,
+  table,
+  view,
+  references,
+  apply,
+  disabled,
+  text,
+  setText,
+}: Props & { text: string; setText: (text: string) => void }) {
   const [issues, setIssues] = useState<QueryIssue[]>([]);
   const [note, setNote] = useState('');
   const [checking, setChecking] = useState(false);
