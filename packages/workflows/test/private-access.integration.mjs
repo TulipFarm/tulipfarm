@@ -504,52 +504,58 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
   },
 );
 
-test('a table names only the enabled workflows that use it and that the person can read', { timeout: 120000 }, async () => {
-  const db = await fixture();
-  let runtime;
-  try {
-    await db.platform.query(`SET search_path TO app; DROP TABLE IF EXISTS app.accounts;
+test(
+  'a table names only the enabled workflows that use it and that the person can read',
+  { timeout: 120000 },
+  async () => {
+    const db = await fixture();
+    let runtime;
+    try {
+      await db.platform.query(`SET search_path TO app; DROP TABLE IF EXISTS app.accounts;
 ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', import.meta.url), 'utf8')}`);
-    const w = await db.create(await workspaceTableMigrations());
-    const creator = { userId: randomUUID(), membershipId: randomUUID() };
-    const other = { userId: randomUUID(), membershipId: randomUUID() };
-    for (const person of [creator, other])
-      await db.platform.query(
-        `INSERT INTO ${qualified(w.names.schema, 'tf_memberships')} (id,user_id,role) VALUES ($1,$2,'member')`,
-        [person.membershipId, person.userId],
-      );
-    runtime = createWorkspaceRuntime({
-      replicaCount: 1,
-      reservedConnections: 2,
-      databaseConnectionBudget: 20,
-      resolveCredential: async id => ({ workspaceId: id, generation: 1, connectionString: db.login(w) }),
-    });
-    const service = createWorkflows(runtime);
-    const tableId = randomUUID();
-    const workflow = async (name, enabled, value = tableId) => {
-      const id = randomUUID(),
-        revision = randomUUID();
-      await service.save(w.id, creator.userId, id, {
-        revision,
-        expectedRevision: null,
-        definition: {
-          version: 1,
-          name,
-          trigger: { kind: 'manual' },
-          steps: [{ id: 'table', kind: 'transform', fields: { table: { kind: 'literal', value } } }],
-        },
+      const w = await db.create(await workspaceTableMigrations());
+      const creator = { userId: randomUUID(), membershipId: randomUUID() };
+      const other = { userId: randomUUID(), membershipId: randomUUID() };
+      for (const person of [creator, other])
+        await db.platform.query(
+          `INSERT INTO ${qualified(w.names.schema, 'tf_memberships')} (id,user_id,role) VALUES ($1,$2,'member')`,
+          [person.membershipId, person.userId],
+        );
+      runtime = createWorkspaceRuntime({
+        replicaCount: 1,
+        reservedConnections: 2,
+        databaseConnectionBudget: 20,
+        resolveCredential: async id => ({ workspaceId: id, generation: 1, connectionString: db.login(w) }),
       });
-      await activate(service, w.id, creator.userId, id, revision, enabled);
-      return id;
-    };
-    const enabled = await workflow('Weekly summary', true);
-    await workflow('Paused import', false);
-    await workflow('Other table', true, randomUUID());
-    assert.deepEqual(await service.usingTable(w.id, creator.userId, tableId), [{ id: enabled, name: 'Weekly summary' }]);
-    assert.deepEqual(await service.usingTable(w.id, other.userId, tableId), [], 'a private workflow stays unnamed');
-    assert.deepEqual(await service.usingTable(w.id, w.userId, tableId), []);
-  } finally {
-    await runtime?.close();
-    await db.close();
-  }
-});
+      const service = createWorkflows(runtime);
+      const tableId = randomUUID();
+      const workflow = async (name, enabled, value = tableId) => {
+        const id = randomUUID(),
+          revision = randomUUID();
+        await service.save(w.id, creator.userId, id, {
+          revision,
+          expectedRevision: null,
+          definition: {
+            version: 1,
+            name,
+            trigger: { kind: 'manual' },
+            steps: [{ id: 'table', kind: 'transform', fields: { table: { kind: 'literal', value } } }],
+          },
+        });
+        await activate(service, w.id, creator.userId, id, revision, enabled);
+        return id;
+      };
+      const enabled = await workflow('Weekly summary', true);
+      await workflow('Paused import', false);
+      await workflow('Other table', true, randomUUID());
+      assert.deepEqual(await service.usingTable(w.id, creator.userId, tableId), [
+        { id: enabled, name: 'Weekly summary' },
+      ]);
+      assert.deepEqual(await service.usingTable(w.id, other.userId, tableId), [], 'a private workflow stays unnamed');
+      assert.deepEqual(await service.usingTable(w.id, w.userId, tableId), []);
+    } finally {
+      await runtime?.close();
+      await db.close();
+    }
+  },
+);
