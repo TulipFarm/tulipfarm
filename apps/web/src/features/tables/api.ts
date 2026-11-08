@@ -381,6 +381,19 @@ export function tableApi(workspaceId: string) {
     archiveStatus(tableId: string, requestId: string, signal: AbortSignal, kind: ArchiveKind = 'archive') {
       return archiveRequest(kind, tableId, requestId, signal);
     },
+    /** Enabled workflows using the table that this person can read; empty when none or the lookup fails. */
+    async workflowsUsing(tableId: string, signal: AbortSignal) {
+      try {
+        const response = await jsonResponse(
+          `${apiOrigin}/v1/workspaces/${encodeURIComponent(workspaceId)}/workflows/using-table/${encodeURIComponent(tableId)}`,
+          { method: 'GET', signal, cache: 'no-store' },
+        );
+        if (!response.ok) return [];
+        return z.array(z.object({ id: z.uuid(), name: z.string() })).parse(await readJson(response, true));
+      } catch {
+        return [];
+      }
+    },
     async active(id: string, signal: AbortSignal): Promise<TableDefinition> {
       const state = await detail(id, signal);
       if (!state.applied)

@@ -119,6 +119,8 @@ export type MeteredReplyOptions = {
   compactor?: ConversationCompactor | undefined;
   /** Reads this chat's files for `files.read` when the turn used the images reader. */
   chatFiles?: Omit<ChatFiles, 'imageInput'> | undefined;
+  /** Reads a workspace's web address so replies can link to its workflows. */
+  workspaceSlug?: ((workspaceId: string) => Promise<string | undefined>) | undefined;
 };
 /** A paused family's replacement may not read images that the pinned family would have. */
 function withoutImages(messages: Parameters<ConversationReply>[0]['messages']) {
@@ -154,9 +156,11 @@ export function meteredReply(
     inventory,
     compactor,
     chatFiles,
+    workspaceSlug,
   }: MeteredReplyOptions = {},
 ): ConversationReply {
   const secretServices = secretsServices(runtime);
+  const webOrigin = URL.canParse(process.env.WEB_ORIGIN ?? '') ? process.env.WEB_ORIGIN : undefined;
   return async ({
     model,
     messages,
@@ -330,6 +334,16 @@ export function meteredReply(
           : undefined,
       apiApprovals: Boolean(requester) && !externalContext,
       apiPrivateHosts: requester && !externalContext && !project ? secretServices.secrets.privateHosts : undefined,
+      // The app opens its own path; Slack needs the full web address.
+      workflowLink: workspaceSlug
+        ? async (workspaceId, workflowId) => {
+            const slug = await workspaceSlug(workspaceId);
+            if (!slug) return undefined;
+            const path = `/${encodeURIComponent(slug)}/workflows/${encodeURIComponent(workflowId)}`;
+            if (!externalContext) return path;
+            return webOrigin ? new URL(path, webOrigin).href : undefined;
+          }
+        : undefined,
       images:
         outputs?.read && chatFiles
           ? {
@@ -511,6 +525,7 @@ export function createConversationActivities(
   skillExecution?: SkillExecutionFactory,
   wakePlan?: PlanWake,
   wakeTask?: TaskWake,
+  workspaceSlug?: (workspaceId: string) => Promise<string | undefined>,
 ) {
   const runtime = withFileSources(withKnowledgeSourceAuthorization(withGitHubSourceAuthorization(storage)));
   const slack = slackActionsFromEnvironment()?.(runtime);
@@ -548,6 +563,7 @@ export function createConversationActivities(
             inventory,
             compactor: effectiveCompactor,
             chatFiles: turnFiles ? { files, google: googleFiles, turnFiles } : undefined,
+            workspaceSlug,
           }),
         undefined,
         slack?.resumeConversation,

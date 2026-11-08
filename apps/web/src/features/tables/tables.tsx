@@ -20,7 +20,7 @@ import {
 import { PageHeader } from '@tulipfarm/sprout/page-header';
 import { SearchField } from '@tulipfarm/sprout/search-field';
 import { RecordsSample, TablesSample, StatePanel } from '@tulipfarm/sprout/state-panel';
-import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
+import { Alert, AlertDescription, AlertTitle } from '@tulipfarm/sprout/alert';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -275,6 +275,8 @@ export function TableList({
   );
 }
 
+const readOnly = { create: false, update: false, delete: false };
+
 export function TableDetail({
   workspace,
   tableId,
@@ -355,6 +357,17 @@ function TableDetailView({
               </>
             }
           />
+          {state.archived && (
+            <Alert>
+              <AlertTitle>This table is archived</AlertTitle>
+              <AlertDescription>
+                {state.canRestore
+                  ? "Its rows are kept but can't be changed. Unarchive it to use it again."
+                  : "Its rows are kept but can't be changed. Someone who manages its fields can unarchive it."}
+              </AlertDescription>
+              <UnarchiveTable state={state} api={api} workspaceSlug={workspaceSlug} disabled={busy} />
+            </Alert>
+          )}
           {state.saved && state.applied && state.saved.revision !== state.applied.revision && (
             <Alert>
               <AlertDescription>
@@ -363,27 +376,15 @@ function TableDetailView({
               </AlertDescription>
             </Alert>
           )}
-          {state.archived ? (
-            <StatePanel
-              kind="empty"
-              icon={Database}
-              title="This table is archived"
-              description={
-                state.canRestore
-                  ? "Its fields and records are kept, but records can't be viewed or changed while the table is archived. Unarchive it to use it again."
-                  : "Its fields and records are kept, but records can't be viewed or changed while the table is archived. Someone who manages its fields can unarchive it."
-              }
-            >
-              <UnarchiveTable state={state} api={api} workspaceSlug={workspaceSlug} disabled={busy} />
-            </StatePanel>
-          ) : state.applied ? (
+          {state.applied ? (
             <Records
               key={`${workspace.id}/${state.id}`}
               workspace={workspace}
               tableId={state.id}
               systemKind={state.systemKind}
               applied={state.applied}
-              permissions={state.rowPermissions}
+              permissions={state.archived ? readOnly : state.rowPermissions}
+              archived={state.archived}
               api={api}
               disabled={busy}
               refreshTable={read.refresh}
@@ -426,6 +427,7 @@ export function Records({
   changeSearch,
   initialAfter,
   pageSize = 50,
+  archived = false,
 }: {
   workspace: TableWorkspace;
   tableId: string;
@@ -439,6 +441,7 @@ export function Records({
   changeSearch: ChangeRowsSearch;
   initialAfter?: string | undefined;
   pageSize?: number;
+  archived?: boolean;
 }) {
   const [limit, setLimit] = useState(pageSize);
   const [exporting, setExporting] = useState(false);
@@ -880,6 +883,14 @@ export function Records({
             Clear filters
           </Button>
         </StatePanel>
+      ) : archived ? (
+        <StatePanel
+          kind="empty"
+          heading="h3"
+          icon={Database}
+          title="No rows"
+          description={`${table.definition.label} has no rows.`}
+        />
       ) : (
         <StatePanel
           kind="empty"

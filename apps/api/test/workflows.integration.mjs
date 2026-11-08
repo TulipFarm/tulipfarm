@@ -9,6 +9,7 @@ import { createWorkspaceRuntime } from '@tulipfarm/workspace-storage/runtime';
 import { createWorkflows } from '@tulipfarm/workflows';
 import { registerWorkflows } from '../src/workflows.ts';
 import { protectBusinessRequests } from '../src/business.ts';
+import { activate } from '../../../packages/workflows/test/commands.fixture.mjs';
 
 test(
   'HTTP authoring, history, manual execution, bearer webhook and scheduled reconciliation use real restricted storage',
@@ -119,6 +120,26 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
         (await app.inject({ method: 'POST', url: `${base}/${id}/activation`, headers, payload: enable })).statusCode,
         200,
       );
+      // A table names the enabled workflows that use it.
+      const tableId = randomUUID(),
+        user = randomUUID(),
+        userRevision = randomUUID();
+      await service.save(w.id, w.userId, user, {
+        revision: userRevision,
+        expectedRevision: null,
+        definition: {
+          version: 1,
+          name: 'Uses a table',
+          triggers: [],
+          steps: [{ id: 'table', kind: 'transform', fields: { table: { kind: 'literal', value: tableId } } }],
+        },
+      });
+      await activate(service, w.id, w.userId, user, userRevision, true);
+      assert.equal((await app.inject({ method: 'GET', url: `${base}/using-table/${tableId}` })).statusCode, 401);
+      assert.equal((await app.inject({ method: 'GET', url: `${base}/using-table/x`, headers })).statusCode, 400);
+      const using = await app.inject({ method: 'GET', url: `${base}/using-table/${tableId}`, headers });
+      assert.equal(using.statusCode, 200, using.body);
+      assert.deepEqual(using.json(), [{ id: user, name: 'Uses a table' }]);
       const firstKey = { commandId: randomUUID(), expectedGeneration: 3, mode: 'bearer', graceSeconds: 0 };
       const issued = await app.inject({ method: 'PUT', url: `${base}/${id}/webhook-key`, headers, payload: firstKey });
       assert.equal(issued.statusCode, 200, issued.body);

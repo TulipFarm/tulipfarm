@@ -219,6 +219,23 @@ export function registerWorkflows(
       },
       request => service.githubRepositories(workspace.parse(request.params).workspaceId, user(request)),
     );
+    const tableParams = workspace.extend({ tableId: idSchema });
+    routes.get(
+      `${base}/using-table/:tableId`,
+      {
+        logLevel: 'silent',
+        schema: schema(
+          'workflowsUsingTableV1',
+          'List enabled readable workflows whose active revision uses a table',
+          tableParams,
+          z.array(z.object({ id: idSchema, name: z.string() })),
+        ),
+      },
+      request => {
+        const { workspaceId, tableId } = tableParams.parse(request.params);
+        return service.usingTable(workspaceId, user(request), tableId);
+      },
+    );
     const saved = z.object({ saved: z.boolean() });
     const integration = workspace.extend({ integrationId: idSchema });
     routes.get(

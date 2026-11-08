@@ -2,7 +2,11 @@ import { createTableProposals, type TableProposalOptions } from '@tulipfarm/tabl
 import { generationProposalData } from '@tulipfarm/tables/store';
 import { readableTableFiles, requireTableSources } from './table-sources.ts';
 import { createTableImports, TableImportError, type TableImportOptions } from '@tulipfarm/tables/imports';
-import { TableProposalError, TableProposalValidationError } from '@tulipfarm/tables/proposal-contracts';
+import {
+  proposeTableSchema,
+  TableProposalError,
+  TableProposalValidationError,
+} from '@tulipfarm/tables/proposal-contracts';
 import { z } from 'zod';
 
 const archiveBlocked = {
@@ -77,9 +81,35 @@ export function tableProposalOptions(
   };
 }
 
+type BlockingWorkflow = { id: string; name: string; url?: string };
+type WorkflowsUsing = (tableId: string) => Promise<BlockingWorkflow[]>;
+
+/** What chat is told when an archive is blocked: the readable workflows that block it, or the generic reason. */
+export async function blockedArchive(
+  code: 'table-linked' | 'workflow-active',
+  value: unknown,
+  workflowsUsing?: WorkflowsUsing,
+) {
+  const input = proposeTableSchema.safeParse(value);
+  const found = new Map<string, BlockingWorkflow>();
+  if (code === 'workflow-active' && workflowsUsing && input.success)
+    for (const plan of input.data.plans)
+      if (plan.kind === 'archive')
+        for (const workflow of await workflowsUsing(plan.tableId).catch(() => [])) found.set(workflow.id, workflow);
+  return found.size
+    ? {
+        error: code,
+        workflows: [...found.values()],
+        instruction: `No proposal was created. The table cannot be archived because active workflows the person can see use it. Name and link each workflow in the "workflows" field and tell the person to disable or archive it, then try again. Other active workflows the person cannot see may also use the table; do not guess about them. This is not a permission denial.`,
+      }
+    : { error: code, instruction: archiveBlocked[code] };
+}
+
 export function createChatTableProposals(
   runtime: TableProposalOptions['runtime'],
   objects?: Pick<TableImportOptions, 'attachments' | 'snapshots'>,
+  /** Enabled workflows using a table that the person can read; unreadable ones must never be returned. */
+  workflowsUsing?: WorkflowsUsing,
 ) {
   const service = createTableProposals(tableProposalOptions(runtime, objects));
   return {
@@ -93,7 +123,7 @@ export function createChatTableProposals(
           : { ...result, ...structureOnlyNote(args[4]) };
       } catch (error) {
         if (error instanceof TableProposalError && (error.code === 'table-linked' || error.code === 'workflow-active'))
-          return { error: error.code, instruction: archiveBlocked[error.code] };
+          return blockedArchive(error.code, args[4], workflowsUsing);
         if (
           (error instanceof TableProposalError && error.code === 'import-reference-unknown') ||
           (error instanceof TableImportError && error.code === 'snapshot-unavailable')

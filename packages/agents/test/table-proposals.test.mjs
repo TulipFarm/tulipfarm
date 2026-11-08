@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { missingTransformNote, structureOnlyNote } from '../src/table-proposals.ts';
+import { randomUUID } from 'node:crypto';
+import { blockedArchive, missingTransformNote, structureOnlyNote } from '../src/table-proposals.ts';
 
 const revision = 'a'.repeat(40);
 
@@ -58,4 +59,18 @@ test('rows that fail an attached conversion carry no missing-transform note', ()
     [blocked([amount, 'invalid-output']), { plans: [{ kind: 'import', tableId }] }],
   ])
     assert.deepEqual(missingTransformNote(report, input), {}, JSON.stringify({ report, input }));
+});
+
+test('a blocked archive names the readable workflows and otherwise keeps the generic reason', async () => {
+  const tableId = randomUUID();
+  const input = { plans: [{ kind: 'archive', tableId, dependsOn: [], expectedRevision: revision }] };
+  const workflow = { id: randomUUID(), name: 'Weekly summary', url: '/acme/workflows/w' };
+  const named = await blockedArchive('workflow-active', input, async id => (id === tableId ? [workflow] : []));
+  assert.deepEqual(named.workflows, [workflow]);
+  assert.match(named.instruction, /Name and link each workflow/);
+  for (const workflowsUsing of [undefined, async () => [], async () => Promise.reject(new Error('unavailable'))]) {
+    const generic = await blockedArchive('workflow-active', input, workflowsUsing);
+    assert.deepEqual(Object.keys(generic), ['error', 'instruction']);
+    assert.match(generic.instruction, /an enabled workflow uses this table/);
+  }
 });

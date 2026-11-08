@@ -110,10 +110,19 @@ export function currentGeneration(row: unknown): Generation {
 }
 
 export async function activeGeneration(tx: GenerationTransaction, tableId: string): Promise<Generation> {
+  return currentTableGeneration(tx, tableId, false);
+}
+
+/** The table's current fields, archived or not. Only reads may use it: an archived table's rows can't change. */
+export async function readableGeneration(tx: GenerationTransaction, tableId: string): Promise<Generation> {
+  return currentTableGeneration(tx, tableId, true);
+}
+
+async function currentTableGeneration(tx: GenerationTransaction, tableId: string, archived: boolean) {
   const row = (
     await tx.client.query(
-      `SELECT g.*,c.owning_team_id FROM ${table(tx, 'tf_table_generations')} g JOIN ${table(tx, 'tf_table_catalog')} c ON c.id=g.table_id WHERE g.table_id=$1 AND g.state='active' AND c.archived_at IS NULL`,
-      [tableIdSchema.parse(tableId)],
+      `SELECT g.*,c.owning_team_id FROM ${table(tx, 'tf_table_generations')} g JOIN ${table(tx, 'tf_table_catalog')} c ON c.id=g.table_id WHERE g.table_id=$1 AND g.state='active' AND ($2 OR c.archived_at IS NULL)`,
+      [tableIdSchema.parse(tableId), archived],
     )
   ).rows[0];
   if (!row) throw new GenerationError('not-active');

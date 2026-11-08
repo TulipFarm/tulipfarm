@@ -2072,6 +2072,14 @@ test(
     const revision = async () =>
       (await db.platform.query(`SELECT applied_revision FROM ${s}.tf_table_catalog WHERE id=$1`, [archived])).rows[0]
         .applied_revision;
+    const service = createTableService(runtime, { readableFiles: async () => new Set() }, executionCompatibility);
+    const kept = await service.mutate(ws.id, ws.userId, {
+      kind: 'create',
+      tableId: archived,
+      revision: await revision(),
+      recordId: randomUUID(),
+      values: {},
+    });
     const archive = async () =>
       submit([{ kind: 'archive', tableId: archived, expectedRevision: await revision(), dependsOn: [] }]);
     const workflow = randomUUID(),
@@ -2107,6 +2115,24 @@ test(
       (await db.platform.query(`SELECT archived_at FROM ${s}.tf_table_catalog WHERE id=$1`, [archived])).rows[0]
         .archived_at,
     );
+    // An archived table's rows stay readable, but no row can change.
+    const readRevision = await revision();
+    assert.equal(
+      (await service.read(ws.id, ws.userId, { tableId: archived, revision: readRevision, recordId: kept.id })).id,
+      kept.id,
+    );
+    assert.deepEqual(
+      (await service.list(ws.id, ws.userId, { tableId: archived, revision: readRevision })).map(row => row.id),
+      [kept.id],
+    );
+    assert.equal((await service.capabilities(ws.id, ws.userId, { tableId: archived })).revision, readRevision);
+    for (const change of [
+      { kind: 'create', recordId: randomUUID(), values: {} },
+      { kind: 'update', recordId: kept.id, expectedToken: kept.token, values: {} },
+    ])
+      await assert.rejects(service.mutate(ws.id, ws.userId, { ...change, tableId: archived, revision: readRevision }), {
+        code: 'not-active',
+      });
 
     // A person can archive from the table page with no chat behind it; the same workflow check still applies.
     const paged = await approve();

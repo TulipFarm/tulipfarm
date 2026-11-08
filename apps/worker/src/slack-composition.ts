@@ -136,7 +136,7 @@ export async function createSlackPromptComposition(
         channels,
         compactor,
         rowLink,
-        reply: (guard, slack) => meteredReply(runtime, { externalContext: guard, slack, compactor }),
+        reply: (guard, slack) => meteredReply(runtime, { externalContext: guard, slack, compactor, workspaceSlug }),
       })
     : undefined;
   const replies = createConversationExecutor(runtime);
