@@ -191,6 +191,14 @@ export function createTableSchemaHistory(
     },
     state(workspaceId: string, userId: string, tableId: string) {
       return authorized(workspaceId, userId, tableId, async (tx, actor) => {
+        // A new table has executions before its catalog row; an address with neither is not a table.
+        const exists = !!(
+          await tx.client.query(
+            `SELECT 1 FROM "${tx.schema}".tf_table_catalog WHERE id=$1 UNION ALL SELECT 1 FROM "${tx.schema}".tf_table_executions WHERE table_id=$1 LIMIT 1`,
+            [tableId],
+          )
+        ).rowCount;
+        if (!exists) throw new AccessDenied();
         const saved = (await entries(tx, actor, tableId, { limit: 1, latest: true }))[0] ?? null;
         const applied = z
           .object({ revision: z.string(), definition: definitionSchema, activated_at: z.date().nullable() })

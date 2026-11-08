@@ -20,11 +20,14 @@ export function TableRead<T>({
   state,
   refresh,
   loading,
+  notFound,
   children,
 }: {
   state: ReadState<T>;
   refresh: () => Promise<void>;
   loading?: ReactNode;
+  /** Replaces the generic unavailable panel when the read is refused for a reason other than sign-in. */
+  notFound?: ReactNode;
   children: (data: T) => ReactNode;
 }) {
   const destination = useLocation({ select: location => location.href });
@@ -47,28 +50,32 @@ export function TableRead<T>({
           </div>
         )
       }
-      unavailable={status => (
-        <StatePanel
-          kind="unavailable"
-          title={status === 401 ? 'Sign in to continue' : 'Table unavailable'}
-          description={
-            status === 401
-              ? 'Your session has expired. Sign in again to access this workspace.'
-              : 'This table is missing or you no longer have access. A workspace admin can manage permissions.'
-          }
-        >
-          <Button
-            variant="outline"
-            nativeButton={false}
-            render={status === 401 ? <Link to="/login" search={{ redirect: destination }} /> : <Link to="/" />}
+      unavailable={status =>
+        status !== 401 && notFound ? (
+          notFound
+        ) : (
+          <StatePanel
+            kind="unavailable"
+            title={status === 401 ? 'Sign in to continue' : 'Table unavailable'}
+            description={
+              status === 401
+                ? 'Your session has expired. Sign in again to access this workspace.'
+                : 'This table is missing or you no longer have access. A workspace admin can manage permissions.'
+            }
           >
-            {status === 401 ? 'Sign in' : 'Back to workspaces'}
-          </Button>
-          <Button variant="ghost" onClick={() => void refresh()}>
-            Check access again
-          </Button>
-        </StatePanel>
-      )}
+            <Button
+              variant="outline"
+              nativeButton={false}
+              render={status === 401 ? <Link to="/login" search={{ redirect: destination }} /> : <Link to="/" />}
+            >
+              {status === 401 ? 'Sign in' : 'Back to workspaces'}
+            </Button>
+            <Button variant="ghost" onClick={() => void refresh()}>
+              Check access again
+            </Button>
+          </StatePanel>
+        )
+      }
       refreshError={message => (
         <div className="space-y-2">
           <ReadError message={`${message} The last loaded data is still shown.`}>
@@ -94,6 +101,30 @@ export type KeepsEdits = (current: BlockedLocation, next: BlockedLocation) => bo
 export const samePage: KeepsEdits = (current, next) => current.pathname === next.pathname;
 // A page whose views stay mounted across URL changes declares it once for every nested edit blocker.
 export const KeepsEditsContext = createContext<KeepsEdits | undefined>(undefined);
+
+/** An unknown, malformed or inaccessible table address. Offers only the way back to the table list. */
+export function TableNotFound({ workspaceSlug, refresh }: { workspaceSlug: string; refresh?: () => Promise<void> }) {
+  return (
+    <StatePanel
+      kind="unavailable"
+      title="Table not found"
+      description="This table doesn't exist, or you no longer have access to it. Check the link, or ask a workspace admin for access."
+    >
+      <Button
+        variant="outline"
+        nativeButton={false}
+        render={<Link to="/$workspaceSlug/tables" params={{ workspaceSlug }} />}
+      >
+        Back to Tables
+      </Button>
+      {refresh && (
+        <Button variant="ghost" onClick={() => void refresh()}>
+          Check access again
+        </Button>
+      )}
+    </StatePanel>
+  );
+}
 
 export function UnsavedChanges({
   dirty,

@@ -1006,6 +1006,24 @@ try {
     { method: 'PUT', body: { expectedRevision: 'e'.repeat(40) } },
     { method: 'GET', body: null },
   ]);
+  // An address that names no table, or is not a table id at all, is not found rather than pending or offline.
+  await page.goto(`${origin}/acme/tables/${randomUUID()}`);
+  const tableNotFound = page.getByText('Table not found', { exact: true });
+  await tableNotFound.waitFor();
+  assert.equal(await page.getByText('No active definition yet').count(), 0);
+  assert.equal(await page.getByRole('link', { name: 'Change fields in chat' }).count(), 0);
+  assert.equal(await page.getByRole('button', { name: 'More table options', exact: true }).count(), 0);
+  await page.goto(`${origin}/acme/tables/not-a-uuid`);
+  await tableNotFound.waitFor();
+  assert.equal(
+    await page.getByText('Check your connection').count(),
+    0,
+    'A malformed address is not a connection error',
+  );
+  assert.equal(await page.getByRole('link', { name: 'Change fields in chat' }).count(), 0);
+  assert.ok(!tableReads.some(read => read.includes('/tables/not-a-uuid')), 'A malformed address sends no table read');
+  await page.getByRole('link', { name: 'Back to Tables', exact: true }).click();
+  await page.waitForURL(url => url.pathname === '/acme/tables');
   await page.goto(`${origin}/acme/tables`);
   await tablesFirst('Support tickets');
   assert.deepEqual(listRequests.at(-1), { search: null, archived: false, sort: 'name', direction: 'asc' });
@@ -1523,7 +1541,7 @@ try {
   detailStatus = 404;
   await tableChange();
   await page.getByRole('region', { name: 'Definition status', exact: true }).waitFor({ state: 'detached' });
-  await page.getByText('Table unavailable', { exact: true }).waitFor();
+  await page.getByText('Table not found', { exact: true }).waitFor();
   assert.equal(await page.getByRole('region', { name: 'Definition status', exact: true }).count(), 0);
   assert.equal(await page.getByRole('cell', { name: 'Historical subject', exact: true }).count(), 0);
   detailStatus = 200;

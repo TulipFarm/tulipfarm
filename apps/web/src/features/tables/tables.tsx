@@ -1,4 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { z } from 'zod';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { Add } from 'reicon-react/icons/Add';
 import { Database } from 'reicon-react/icons/Database';
@@ -32,7 +33,7 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableSortHead } from '@/components/data-grid';
 import { RecordList } from '@tulipfarm/sprout/record-list';
 import { useCursorPages } from '@/lib/use-cursor-pages';
-import { TableRead } from './feedback';
+import { TableNotFound, TableRead } from './feedback';
 import {
   useLinkedRows,
   useTableList,
@@ -282,12 +283,32 @@ export function TableDetail({
   search: TableRowsSearch;
   changeSearch: ChangeRowsSearch;
 }) {
+  // A malformed address can never name a table, so it gets the not-found panel without a request.
+  if (!z.uuid().safeParse(tableId).success) return <TableNotFound workspaceSlug={workspace.slug} />;
+  return <TableDetailView workspace={workspace} tableId={tableId} search={search} changeSearch={changeSearch} />;
+}
+
+function TableDetailView({
+  workspace,
+  tableId,
+  search,
+  changeSearch,
+}: {
+  workspace: TableWorkspace;
+  tableId: string;
+  search: TableRowsSearch;
+  changeSearch: ChangeRowsSearch;
+}) {
   const workspaceSlug = workspace.slug;
   const api = useMemo(() => tableApi(workspace.id), [workspace.id]);
   const read = useTableDetail(api, tableId);
   const busy = read.state.kind !== 'ready' || !!read.state.error || read.state.refreshing;
   return (
-    <TableRead state={read.state} refresh={read.refresh}>
+    <TableRead
+      state={read.state}
+      refresh={read.refresh}
+      notFound={<TableNotFound workspaceSlug={workspaceSlug} refresh={read.refresh} />}
+    >
       {state => (
         <div className="space-y-6">
           <PageHeader
