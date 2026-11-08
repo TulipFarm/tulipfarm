@@ -68,7 +68,13 @@ test(
       );
       return { callId: id, summary: 'Read the live prerequisite.' };
     }
-    const good = await receipt(chat, 1, { available: true, channel: 'C_SYNTHETIC' });
+    // Chat steps carry the memory their turn loaded; the member's own memory is evidence they may cite.
+    const good = await receipt(chat, 1, { available: true, channel: 'C_SYNTHETIC' }, 'slack.resolve', [
+      { kind: 'personal-memory', membershipId: w.membershipId },
+    ]);
+    const othersMemory = await receipt(chat, 5, { available: true }, 'slack.resolve', [
+      { kind: 'personal-memory', membershipId: randomUUID() },
+    ]);
     const denied = await receipt(chat, 2, { error: 'access-denied' });
     const draft = await receipt(chat, 3, { status: 'completed' }, 'agents.draft');
     const foreign = await receipt(other, 1, { available: true });
@@ -128,6 +134,10 @@ test(
     }
     await assert.rejects(
       plans.update(w.id, w.userId, created.id, randomUUID(), { expectedVersion: 0, planning: checked(stale) }),
+      AccessDenied,
+    );
+    await assert.rejects(
+      plans.update(w.id, w.userId, created.id, randomUUID(), { expectedVersion: 0, planning: checked(othersMemory) }),
       AccessDenied,
     );
     await assert.rejects(

@@ -86,6 +86,7 @@ export async function requirePlanEvidence(
     throw new PlanGraphError('planning-evidence');
   }
   const sources = receipts.flatMap(receipt => [...receipt.sources, ...receipt.output!.sources]);
-  await requireDraftSources(tx, actor, sources);
+  // Every chat step records the memory its turn loaded, so the member's own memory must not block their evidence.
+  await requireDraftSources(tx, actor, sources, undefined, undefined, false, true);
   return sources;
 }
