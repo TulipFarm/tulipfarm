@@ -357,7 +357,7 @@ export function BoardView({
           </>
         )}
       </div>
-      {move.state.kind !== 'sending' && <RecordMutationFeedback mutation={move} refresh={async () => move.check()} />}
+      {move.state.kind !== 'sending' && <RecordMutationFeedback mutation={move} />}
       <Board
         label={`Board by ${singleSelect.label}`}
         columns={boardColumns}

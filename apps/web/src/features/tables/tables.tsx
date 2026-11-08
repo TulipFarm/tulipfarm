@@ -482,6 +482,7 @@ export function Records({
     if (read.state.kind === 'unavailable') setSelection(null);
   }, [read.state.kind]);
   const [notice, setNotice] = useState('');
+  const [addedRow, setAddedRow] = useState<string | null>(null);
   const [returnFocus, setReturnFocus] = useState(0);
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
@@ -494,11 +495,13 @@ export function Records({
   };
   const select = (next: RowSelection) => {
     setNotice('');
+    setAddedRow(null);
     setSelection(next);
   };
-  const finish = (message = '') => {
+  const finish = (message = '', added: string | null = null) => {
     setSelection(null);
     setNotice(message);
+    setAddedRow(added);
     setReturnFocus(count => count + 1);
   };
   const apply = (next: TableView) => {
@@ -539,11 +542,18 @@ export function Records({
     </Button>
   );
   const headerAdd = permissions.create && read.state.kind === 'ready' && !firstUse;
-  const sortLabel = view.sort
-    .map(item => table.definition.fields.find(field => field.id === item.fieldId)?.label)
-    .filter(Boolean)
-    .join(', ');
-  const added = `Row added. Rows are ${sortLabel ? `sorted by ${sortLabel}` : 'listed by ID'}${filtered ? ' and filtered, so it may appear on another page or not match the current filters.' : ', so it may appear on another page.'}`;
+  // Say where a new row is only once the refreshed rows show it isn't on screen.
+  const addedHidden =
+    addedRow !== null &&
+    result?.mode === 'rows' &&
+    read.state.kind === 'ready' &&
+    !read.state.refreshing &&
+    !result.records.some(record => record.id === addedRow);
+  const addedWhere = addedHidden
+    ? filtered
+      ? ' It doesn’t match the current filters, or it’s on another page.'
+      : ' It’s on another page.'
+    : '';
   const columns = view.select
     ? table.definition.fields.filter(field => view.select!.includes(field.id))
     : table.definition.fields;
@@ -572,7 +582,7 @@ export function Records({
         workspace={workspace}
         disabled={locked || !permissions.create}
         close={() => finish()}
-        saved={() => finish(added)}
+        saved={recordId => finish('Row added.', recordId)}
         refresh={refresh}
       />
     ) : selection.kind === 'edit' ? (
@@ -950,6 +960,7 @@ export function Records({
         {notice && (
           <p role="status" className="text-sm">
             {notice}
+            {addedWhere}
           </p>
         )}
         <div
@@ -1482,7 +1493,7 @@ function RecordDelete({
           The row leaves active rows. Its values stay recoverable for 30 days from Deleted rows in the ⋯ menu. A row
           that other rows still link to cannot be deleted.
         </AlertDialogDescription>
-        <RecordMutationFeedback mutation={write} refresh={refresh} />
+        <RecordMutationFeedback mutation={write} />
         {write.state.kind === 'rejected' && write.state.message.startsWith('Linked deletion is blocked.') && (
           <p className="text-sm underline">
             <Link

@@ -81,7 +81,10 @@ export function registerTableChanges(
       status,
       validation.json(
         status === 409
-          ? z.union([blockedTableProposalSchema, z.object({ error: z.string() })])
+          ? z.union([
+              blockedTableProposalSchema,
+              z.object({ error: z.string(), fieldIds: z.array(z.string()).optional() }),
+            ])
           : status === 400
             ? z.union([queryErrorSchema, z.object({ error: z.string(), fieldId: z.string().optional() })])
             : z.object({ error: z.string() }),
@@ -98,7 +101,10 @@ export function registerTableChanges(
       if (error instanceof TableProposalValidationError) return reply.code(409).send(error.validation);
       if (error instanceof TableProposalError)
         return reply.code(error.code === 'proposal-storage-unavailable' ? 503 : 409).send({ error: error.code });
-      if (error instanceof GenerationError) return reply.code(409).send({ error: error.code });
+      if (error instanceof GenerationError)
+        return reply
+          .code(409)
+          .send({ error: error.code, ...(error.fieldIds === undefined ? {} : { fieldIds: error.fieldIds }) });
       if (error instanceof WorkspaceMemberError) return reply.code(error.status).send({ error: error.code });
       if (error instanceof TableQueryError)
         return reply.code(400).send({ error: 'invalid-query', issues: error.issues });

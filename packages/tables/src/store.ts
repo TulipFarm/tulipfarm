@@ -58,9 +58,12 @@ type GenerationErrorCode =
   | 'recovery-expired';
 export class GenerationError extends Error {
   readonly code: GenerationErrorCode;
-  constructor(code: GenerationErrorCode) {
+  /** The unique key's fields when a write collides with another row's values. */
+  readonly fieldIds: string[] | undefined;
+  constructor(code: GenerationErrorCode, fieldIds?: string[]) {
     super(code);
     this.code = code;
+    this.fieldIds = fieldIds;
   }
 }
 const table = (tx: GenerationTransaction, name: string) => qualified(tx.schema, name);
@@ -442,7 +445,14 @@ function uniqueValues(generation: Generation, values: TableValues) {
       throw new GenerationError('invalid-generation');
     });
     const serialized = JSON.stringify(value);
-    return [{ keyId: key.id, value: serialized, digest: createHash('sha256').update(serialized).digest('hex') }];
+    return [
+      {
+        keyId: key.id,
+        fieldIds: key.fieldIds,
+        value: serialized,
+        digest: createHash('sha256').update(serialized).digest('hex'),
+      },
+    ];
   });
 }
 
@@ -482,7 +492,7 @@ async function replaceUniqueValues(
         `SELECT 1 FROM ${relation} WHERE generation_id=$1 AND key_id=$2 AND digest=$3 AND value=$4::jsonb AND row_id<>$5 LIMIT 1`,
         [generation.id, key.keyId, key.digest, key.value, recordId],
       );
-      if (duplicate.rowCount) throw new GenerationError('duplicate-key');
+      if (duplicate.rowCount) throw new GenerationError('duplicate-key', [...key.fieldIds]);
     }
     await tx.client.query(`INSERT INTO ${relation}(generation_id,key_id,row_id,digest,value) VALUES($1,$2,$3,$4,$5)`, [
       generation.id,

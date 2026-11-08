@@ -10,11 +10,14 @@ export class TableRequestError extends Error {
   readonly code: string;
   /** The field a rejected write names, when the server identifies one. */
   readonly fieldId: string | undefined;
-  constructor(status: number, code: string, message: string, fieldId?: string) {
+  /** The unique key's fields when a write collides with another row. */
+  readonly fieldIds: string[] | undefined;
+  constructor(status: number, code: string, message: string, fieldId?: string, fieldIds?: string[]) {
     super(message);
     this.status = status;
     this.code = code;
     this.fieldId = fieldId;
+    this.fieldIds = fieldIds;
   }
 }
 
@@ -37,7 +40,8 @@ export type WriteState<T> =
   | { kind: 'idle' }
   | { kind: 'sending'; input: T }
   | { kind: 'uncertain'; input: T; message: string }
-  | { kind: 'rejected'; message: string }
+  /** `conflict` names a unique key another row already uses, with the refused input, so the screen can point to that row. */
+  | { kind: 'rejected'; message: string; conflict?: { fieldIds: string[]; input: T } }
   | { kind: 'accepted' };
 
 export function confirmedRejection(error: unknown): string | null {
@@ -51,7 +55,10 @@ export function confirmedRejection(error: unknown): string | null {
 
 export function failedWrite<T>(input: T, error: unknown): WriteState<T> {
   const rejection = confirmedRejection(error);
-  if (rejection !== null) return { kind: 'rejected', message: rejection };
+  if (rejection !== null)
+    return error instanceof TableRequestError && error.code === 'duplicate-key' && error.fieldIds?.length
+      ? { kind: 'rejected', message: rejection, conflict: { fieldIds: error.fieldIds, input } }
+      : { kind: 'rejected', message: rejection };
   return {
     kind: 'uncertain',
     input,

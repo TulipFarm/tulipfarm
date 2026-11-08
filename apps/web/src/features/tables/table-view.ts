@@ -16,7 +16,8 @@ import {
 } from '@tulipfarm/tables/query';
 import type { TableDefinition as CoreDefinition } from '@tulipfarm/tables/definition';
 import type { TableDefinition } from './api';
-import type { legacyOps, TableRowsSearch } from './table-search.ts';
+import { linkQueryCharacters, type legacyOps, type TableRowsSearch } from './table-search.ts';
+import type { TableValue } from './review-contracts';
 export {
   linkQueryCharacters,
   tableListSearchSchema,
@@ -79,6 +80,43 @@ function legacyWhere(search: TableRowsSearch, definition: Definition) {
       definition,
       validateWhere(definition, { kind: 'rule', fieldId: field.id, op, values: valueless ? [] : [search.value ?? ''] }),
     );
+  } catch {
+    return '';
+  }
+}
+
+/** RSQL that finds the row holding these unique-key values, or '' when a value can't be written as a filter. */
+export function uniqueKeyWhere(
+  definition: Definition,
+  fieldIds: string[],
+  values: Record<string, TableValue | null | undefined>,
+): string {
+  const literal = (value: TableValue | null | undefined) => {
+    switch (value?.kind) {
+      case 'text':
+      case 'numeric':
+      case 'date':
+      case 'timestamp':
+        return value.value;
+      case 'boolean':
+        return String(value.value);
+      case 'single-select':
+        return value.optionId;
+      case 'relationship':
+        return value.recordIds[0];
+      default:
+        return undefined;
+    }
+  };
+  const rules: QueryRule[] = [];
+  for (const fieldId of fieldIds) {
+    const value = literal(values[fieldId]);
+    if (value === undefined) return '';
+    rules.push({ kind: 'rule', fieldId: fieldId as QueryRule['fieldId'], op: 'eq', values: [value] });
+  }
+  try {
+    const where = printRsql(definition, validateWhere(definition, { kind: 'all', nodes: rules }));
+    return where.length <= linkQueryCharacters ? where : '';
   } catch {
     return '';
   }

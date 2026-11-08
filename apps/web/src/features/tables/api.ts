@@ -274,7 +274,7 @@ export function tableApi(workspaceId: string) {
                 : code === 'recovery-expired'
                   ? 'These historical values are no longer recoverable. Close history and load it again to review any remaining retained values.'
                   : code === 'duplicate-key'
-                    ? 'These values conflict with an existing unique row. Review the current rows before trying again.'
+                    ? 'Another row already has these values in a field that must be unique. Change them, then save again.'
                     : code === 'linked-record'
                       ? 'A linked row is unavailable or still referenced. Review the relationship and your access.'
                       : response.status === 400
@@ -290,7 +290,16 @@ export function tableApi(workspaceId: string) {
         typeof value.fieldId === 'string'
           ? value.fieldId
           : undefined;
-      throw new TableRequestError(response.status, code, memberMessages[code] ?? message, fieldId);
+      const fieldIds =
+        code === 'duplicate-key' &&
+        typeof value === 'object' &&
+        value !== null &&
+        'fieldIds' in value &&
+        Array.isArray(value.fieldIds) &&
+        value.fieldIds.every(id => typeof id === 'string')
+          ? (value.fieldIds as string[])
+          : undefined;
+      throw new TableRequestError(response.status, code, memberMessages[code] ?? message, fieldId, fieldIds);
     }
     return value;
   }
