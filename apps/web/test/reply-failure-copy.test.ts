@@ -6,6 +6,7 @@ import {
   proposalKeptNote,
   replyFailure,
   replyRetrying,
+  retryHelps,
   retryLabel,
   unknownStop,
 } from '../src/features/chat/reply-failure-copy.ts';
@@ -69,6 +70,14 @@ test('a failed reply with completed tool calls offers Continue', () => {
   assert.equal(retryLabel('transient-failure', true, false), 'Continue');
   assert.equal(retryLabel('transient-failure', false, false), 'Retry reply');
   assert.equal(retryLabel('context-limit', true, true), 'Compact and retry');
+});
+
+test('a reply the provider would reject again offers no retry and says to reword it', () => {
+  for (const code of ['model-refusal', 'model-invalid-request']) assert.equal(retryHelps(code), false, code);
+  for (const code of ['model-unavailable', 'model-timeout', 'transient-failure', null, undefined])
+    assert.equal(retryHelps(code), true, String(code));
+  assert.match(replyFailure('model-refusal')!, /Reword your message and send it again\.$/);
+  assert.doesNotMatch(replyFailure('model-refusal')!, /another model|retry/i);
 });
 
 test('a queued reply after a model failure says it is retrying instead of spinning silently', () => {

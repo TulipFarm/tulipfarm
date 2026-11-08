@@ -22,7 +22,8 @@ const replyFailures: Record<string, string> = {
   'model-unavailable': `The model provider is unavailable right now. Retry the reply shortly. ${switchModel}`,
   'model-timeout': `The model took too long to respond. Retry the reply. ${switchModel}`,
   'model-transport': 'TulipFarm could not reach the model provider. Retry the reply shortly.',
-  'model-refusal': 'The model declined this request. Revise the request or cancel the reply.',
+  'model-refusal':
+    "The model declined this request, or its provider's safety filter blocked it. Reword your message and send it again.",
   'model-invalid-request': `The model provider rejected this request. ${switchModel}`,
   'model-context-overflow':
     'This conversation exceeds the model context limit. Start a new chat with a shorter request.',
@@ -63,6 +64,14 @@ export function proposalKeptNote(tools: readonly { tableProposal?: true | undefi
   return tools.some(tool => tool.tableProposal)
     ? 'Reply text missing. The table change proposal from this reply is still valid.'
     : null;
+}
+
+// Retrying sends the same request to the same model, so these failures would only repeat.
+const repeatsOnRetry = new Set(['model-refusal', 'model-invalid-request']);
+
+/** Whether retrying a failed reply can succeed, so a request certain to fail again offers no retry. */
+export function retryHelps(code: string | null | undefined): boolean {
+  return !code || !repeatsOnRetry.has(code);
 }
 
 /** A failed reply with completed tool calls continues from them; otherwise it is retried from the start. */

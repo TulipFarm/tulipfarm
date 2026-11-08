@@ -274,6 +274,22 @@ const errorSchema = z.union([
   z
     .object({ error: z.string(), code: z.union([z.string(), z.number()]).optional() })
     .transform(({ error, code }) => ({ error: { code, message: error, type: undefined, status: undefined } })),
+  // Azure Foundry rejects a prompt its content filter blocks with a completion whose choice carries the error.
+  z
+    .object({
+      choices: z
+        .array(
+          z.object({
+            content_filter_results: z.object({
+              error: z.object({ code: z.union([z.string(), z.number()]).optional(), message: z.string().optional() }),
+            }),
+          }),
+        )
+        .min(1),
+    })
+    .transform(({ choices }) => ({
+      error: { ...choices[0]!.content_filter_results.error, type: undefined, status: undefined },
+    })),
 ]);
 
 function failure(
