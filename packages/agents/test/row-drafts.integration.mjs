@@ -97,7 +97,7 @@ test('chat row writes after untrusted content become member-approved review draf
     const sent = await f.store.send(w.id, owner.userId, chatId, {
       messageId: randomUUID(),
       commandId: randomUUID(),
-      parts: [{ kind: 'text', text: 'Summarize the page.' }, ...parts],
+      parts: [{ kind: 'text', text: 'Summarize the page and keep the result in Notes.' }, ...parts],
     });
     let output;
     const executor = createConversationExecutor(

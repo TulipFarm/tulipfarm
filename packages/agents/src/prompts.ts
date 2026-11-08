@@ -117,7 +117,8 @@ const usingTools = (mode: PromptMode) =>
     'Request a tool that changes data alone, in its own response.',
     ...(mode === 'tools'
       ? [
-          'For multiple new rows in an existing table, inspect its fields once and use rows.create.batch with all requested rows. Do not create each row in a separate tool call. This row work does not need the table-authoring skill.',
+          'Write rows only to the table the user named. If that table does not exist or is not ready, say so and write nothing. Never write to a similar table instead.',
+          'For up to 5 new rows in an existing table, inspect its fields once and use rows.create.batch with all requested rows. Do not create each row in a separate tool call. Chat writes more than 5 rows in one reply only through approval cards: call rows.create once for each row, and each returns a review draft. This row work does not need the table-authoring skill.',
           'Before you create or change a row that names a person or another linked row, call schema.inspect on the table you will write, then rows.resolveReference with its link field. Do not page through tables to look for the person. If no row matches, change nothing and ask the user to choose: leave that field empty, add the person to Workspace members without access, or give another name or email.',
         ]
       : []),
