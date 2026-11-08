@@ -123,7 +123,9 @@ try {
   await page.goto(`${origin}/acme/tables/${tableId}`);
   await page.getByText('This table is archived', { exact: true }).waitFor();
   await page
-    .getByText("Its rows are kept but can't be changed. To restore it, ask in chat.", { exact: true })
+    .getByText("Its rows are kept but can't be changed. Someone who manages its fields can unarchive it.", {
+      exact: true,
+    })
     .waitFor();
   await page.getByText('Support tickets has no rows.', { exact: true }).waitFor();
   assert.equal(await page.getByText('No rows yet', { exact: true }).count(), 0);
