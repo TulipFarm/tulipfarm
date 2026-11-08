@@ -223,7 +223,9 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         expectedRevision: null,
         definition: { ...definition, trigger: { kind: 'interval', minutes: 1 } },
       });
-      await assert.rejects(activate(service, w.id, creator.userId, scheduled, scheduledRevision, true), AccessDenied);
+      await assert.rejects(activate(service, w.id, creator.userId, scheduled, scheduledRevision, true), {
+        message: 'sponsorship-required',
+      });
       await service.share(w.id, creator.userId, scheduled, {
         principal: { kind: 'person', id: requester.membershipId },
         permissions: ['invoke'],
@@ -236,7 +238,9 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         sponsorMembershipId: requester.membershipId,
         historyAudience: [requester.membershipId],
       });
-      await assert.rejects(activate(service, w.id, creator.userId, scheduled, scheduledRevision, true), AccessDenied);
+      await assert.rejects(activate(service, w.id, creator.userId, scheduled, scheduledRevision, true), {
+        message: 'sponsorship-required',
+      });
       await assert.rejects(
         service.acceptSponsorship(w.id, creator.userId, scheduled, { expectedGeneration: 2 }),
         AccessDenied,

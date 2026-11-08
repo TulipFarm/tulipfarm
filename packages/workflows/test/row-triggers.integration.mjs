@@ -667,7 +667,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     await service.save(w.id, w.userId, durable, {
       revision: replacement,
       expectedRevision: durableRevision,
-      definition: definition({ kind: 'row', tableId, event: 'created' }),
+      definition: { ...definition({ kind: 'row', tableId, event: 'created' }), name: 'Lead follow-up v2' },
     });
     await service.sponsorship(w.id, w.userId, durable, {
       sponsorMembershipId: w.membershipId,

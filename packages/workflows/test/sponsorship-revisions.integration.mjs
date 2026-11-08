@@ -139,7 +139,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       };
       await assert.rejects(
         service.activate(w.id, manager.userId, id, activation),
-        AccessDenied,
+        { message: 'sponsorship-required' },
         'the replacement cannot run before fresh consent',
       );
       const freshConsent = { expectedGeneration: saved.generation };
@@ -153,6 +153,14 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       const replay = await service.save(w.id, manager.userId, id, replacement);
       assert.equal(replay.generation, accepted.generation);
       assert.equal(replay.sponsorshipAccepted, true, 'save replay preserves accepted consent');
+      const unchanged = await service.save(w.id, manager.userId, id, {
+        revision: randomUUID(),
+        expectedRevision: replacementRevision,
+        definition: workflowDefinition('replacement'),
+      });
+      assert.equal(unchanged.revision, replacementRevision, 'saving an identical definition keeps the revision');
+      assert.equal(unchanged.generation, accepted.generation);
+      assert.equal(unchanged.sponsorshipAccepted, true, 'saving an identical definition keeps consent');
       await service.activate(w.id, manager.userId, id, { ...activation, expectedGeneration: accepted.generation });
       await db.platform.query(
         `UPDATE ${table('tf_workflows')} SET next_run_at=clock_timestamp()-interval '1 minute' WHERE id=$1`,

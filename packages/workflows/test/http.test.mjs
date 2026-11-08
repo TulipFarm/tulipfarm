@@ -88,3 +88,48 @@ for (const failure of ['timeout', 'connection', 'dns'])
       syncBuiltinESMExports();
     }
   });
+
+test('outbound HTTP connects only to checked DNS answers and sends a default user agent', async t => {
+  const answers = [
+    { address: '8.8.8.8', family: 4 },
+    { address: '2001:4860:4860::8888', family: 6 },
+  ];
+  const calls = [];
+  t.mock.method(dns, 'lookup', async hostname =>
+    hostname === 'mixed.test' ? [...answers, { address: '10.0.0.1', family: 4 }] : answers,
+  );
+  t.mock.method(https, 'request', (_url, options) => {
+    calls.push(options);
+    return new Writable({
+      final(done) {
+        done(Object.assign(new Error('connect https://public.test'), { code: 'ECONNREFUSED' }));
+      },
+    });
+  });
+  syncBuiltinESMExports();
+  try {
+    await assert.rejects(
+      requestHttp({ method: 'GET', url: 'https://mixed.test', headers: {} }),
+      error => error instanceof HttpStepError && error.code === 'egress-denied',
+    );
+    assert.equal(calls.length, 0);
+    for (const headers of [{}, { 'User-Agent': 'step/2' }, { 'USER-AGENT': 'step/3' }])
+      await assert.rejects(
+        requestHttp({ method: 'GET', url: 'https://public.test', headers }),
+        error => error instanceof HttpStepError && error.code === 'request-failed' && error.reason === 'ECONNREFUSED',
+      );
+    assert.deepEqual(
+      calls.map(options => options.headers),
+      [{ 'user-agent': 'TulipFarm-Workflows/1' }, { 'User-Agent': 'step/2' }, { 'USER-AGENT': 'step/3' }],
+    );
+    const resolve = (options, hostname) =>
+      new Promise((done, fail) =>
+        calls[0].lookup(hostname, options, (error, ...result) => (error ? fail(error) : done(result))),
+      );
+    assert.deepEqual(await resolve({ all: true }, '127.0.0.1.nip.io'), [answers]);
+    assert.deepEqual(await resolve({}, '127.0.0.1.nip.io'), ['8.8.8.8', 4]);
+  } finally {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+  }
+});

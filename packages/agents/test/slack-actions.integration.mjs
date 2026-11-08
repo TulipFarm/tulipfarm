@@ -1941,3 +1941,49 @@ test('a chat turn that fails after a Slack send retries from the send receipt an
     await f.close();
   }
 });
+
+test('re-adding a removed Slack destination reactivates it, and an active duplicate still conflicts', async () => {
+  const f = await outboundFixture();
+  try {
+    await f.db.platform.query(
+      `INSERT INTO ${f.table('tf_slack_installation_managers')} (installation_id,membership_id) VALUES ($1,$2)`,
+      [f.installationId, f.alice.membershipId],
+    );
+    const configure = (id, expectedVersion, enabled) =>
+      f.service.configureDestination(f.workspace.id, f.alice.userId, {
+        id,
+        channel: 'CHR',
+        name: 'HR again',
+        expectedVersion,
+        teamId: f.teamId,
+        enabled,
+      });
+    const version = (
+      await f.db.platform.query(`SELECT version FROM ${f.table('tf_slack_destinations')} WHERE id=$1`, [
+        f.destinationId,
+      ])
+    ).rows[0].version;
+    const removed = await configure(f.destinationId, version, false);
+    const grants = () =>
+      f.db.platform.query(
+        `SELECT team_id,permission FROM ${f.table('tf_grants')} WHERE asset_id=$1 ORDER BY permission`,
+        [f.destinationId],
+      );
+    assert.equal((await grants()).rowCount, 0);
+    const restored = await configure(randomUUID(), 0, true);
+    assert.deepEqual(restored, { id: f.destinationId, version: removed.version + 1 });
+    assert.equal(
+      (await f.db.platform.query(`SELECT enabled FROM ${f.table('tf_slack_destinations')} WHERE channel='CHR'`)).rows
+        .map(row => row.enabled)
+        .join(),
+      'true',
+    );
+    assert.deepEqual(
+      (await grants()).rows.map(row => [row.team_id, row.permission]),
+      ['slack.message.send', 'slack.reaction.add', 'slack.thread.reply'].map(permission => [f.teamId, permission]),
+    );
+    await assert.rejects(configure(randomUUID(), 0, true), /slack-decision-conflict/);
+  } finally {
+    await f.close();
+  }
+});

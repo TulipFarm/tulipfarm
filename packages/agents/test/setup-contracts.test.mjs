@@ -101,6 +101,11 @@ test('trigger workflow names say when the agent runs', () => {
     ['Every hour', 'Every 2 hours', 'Every day', 'Every 2 days', 'Every 90 minutes'],
   );
   assert.equal(agentTriggerLabel({ kind: 'manual' }), 'Run by hand');
+  assert.equal(
+    agentTriggerLabel({ kind: 'once', at: '2026-11-06T15:30:00Z', timezone: 'Asia/Kolkata' }),
+    'Once on 6 Nov 2026 at 21:00 (Asia/Kolkata)',
+  );
+  assert.equal(agentTriggerLabel({ kind: 'once', at: '2026-11-06T15:30:00Z' }), 'Once on 6 Nov 2026 at 15:30 (UTC)');
 });
 
 test('the review digest freezes setup, versions and identity, not transport request identity', () => {
