@@ -172,6 +172,7 @@ export function meteredReply(
     earlierMessages = false,
     chatFiles: chatFilesOffered = false,
     retainedSources = [],
+    previewSources,
     describedHandles = [],
     project,
     compactionPolicy,
@@ -261,7 +262,9 @@ export function meteredReply(
         : []),
       ...(routeCapabilities(validatedRoute).imageInput ? messages : withoutImages(messages)),
     ]);
-    const publisher = observeChatDetailSync('publisher-open', () => createReplyTextPublisher(runtime, fence));
+    const publisher = observeChatDetailSync('publisher-open', () =>
+      createReplyTextPublisher(runtime, fence, undefined, undefined, previewSources),
+    );
     // Previews reach every project member before the saved answer's audience check, so project chats show only the saved answer.
     const answerText = project
       ? undefined

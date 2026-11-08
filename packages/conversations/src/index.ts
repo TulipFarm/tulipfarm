@@ -38,6 +38,7 @@ import {
 } from '@tulipfarm/workspace-storage/runtime';
 import { AttachmentError } from './attachments.ts';
 import { interruptToolReceipts } from './tool-receipts.ts';
+import { keepStoppedReply } from './stopped-replies.ts';
 import { notifyConversationChange } from './event-publisher.ts';
 import {
   requireConversationMcpSources,
@@ -644,13 +645,14 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
     return human(workspaceId, userId, async (tx, actor) => {
       const chat = await owned(tx, actor, chatId);
       await requireConversationMcpSources(tx, actor, chatId);
-      const rows = z.array(messageSchema.extend({ createdAt: z.date() })).parse(
+      const rows = z.array(messageSchema.extend({ createdAt: z.date(), stoppedTurnId: uuidSchema.nullable() })).parse(
         (
           await tx.client.query(
             `SELECT m.id, m.sequence, m.author_kind AS author, m.created_at AS "createdAt",
         (SELECT jsonb_agg(CASE p.kind WHEN 'text' THEN jsonb_strip_nulls(jsonb_build_object('kind', p.kind, 'text', p.text, 'content', p.rich_content)) WHEN 'attachment' THEN jsonb_build_object('kind', p.kind, 'attachmentId', to_jsonb(p)->>'attachment_id') WHEN 'file' THEN jsonb_build_object('kind', p.kind, 'fileId', to_jsonb(p)->>'file_id') WHEN 'google-file' THEN jsonb_build_object('kind', p.kind, 'fileId', to_jsonb(p)->'google_file'->>'fileId', 'name', to_jsonb(p)->'google_file'->>'name', 'mimeType', to_jsonb(p)->'google_file'->>'mimeType') WHEN 'request' THEN jsonb_build_object('kind', p.kind, 'requestId', to_jsonb(p)->>'request_id') WHEN 'response' THEN jsonb_build_object('kind', p.kind, 'responseId', to_jsonb(p)->>'response_id') WHEN 'layout' THEN jsonb_build_object('kind', p.kind, 'text', p.text, 'layout', to_jsonb(p)->'layout') WHEN 'skill' THEN ${skillReference} WHEN 'skill-use' THEN ${skillReference} ${compactionParts(tx)} ELSE jsonb_build_object('kind', p.kind, 'approvalId', to_jsonb(p)->>'approval_id') END ORDER BY p.ordinal) FROM ${table(tx, 'tf_conversation_parts')} p WHERE p.message_id = m.id) AS parts,
         CASE WHEN t.id IS NULL THEN NULL ELSE jsonb_strip_nulls(jsonb_build_object('id', t.id, 'status', t.status, 'generation', t.generation, 'epoch', t.attempt_epoch, 'errorCode', t.error_code, 'mode', CASE WHEN (to_jsonb(t)->>'planning_mode')::boolean THEN 'plan' END, 'stats', ${turnStats})) END AS turn
         ${tx.commonVersion >= followUpsVersion ? `,(SELECT jsonb_build_object('id', f.id, 'instruction', f.instruction, 'requestedAt', to_char(f.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')) FROM ${table(tx, 'tf_follow_ups')} f WHERE f.fired_message_id = m.id) AS "followUp"` : ''}
+        ,(SELECT st.id FROM ${table(tx, 'tf_conversation_results')} r JOIN ${table(tx, 'tf_conversation_turns')} st ON st.id = r.turn_id WHERE r.message_id = m.id AND st.status = 'cancelled' AND m.author_kind = 'assistant') AS "stoppedTurnId"
         FROM ${table(tx, 'tf_conversation_messages')} m LEFT JOIN ${table(tx, 'tf_conversation_turns')} t ON t.source_message_id = m.id
         WHERE m.conversation_id = $1 AND ($2::integer IS NULL OR m.sequence < $2) ORDER BY m.sequence DESC LIMIT 51`,
             [chatId, input.before ?? null],
@@ -660,7 +662,11 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
       const messages = rows
         .slice(0, 50)
         .reverse()
-        .map(row => ({ ...row, createdAt: row.createdAt.toISOString() }));
+        .map(({ stoppedTurnId, ...row }) => ({
+          ...row,
+          createdAt: row.createdAt.toISOString(),
+          ...(stoppedTurnId ? { stoppedTurnId } : {}),
+        }));
       const calendar = await calendarResultsForHistory(
         tx,
         actor,
@@ -1085,12 +1091,17 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
       command(tx, actor, chatId, input.commandId, operation, { turnId, ...input }, controlResultSchema, async () => {
         await owned(tx, actor, chatId, true, 'turn');
         const turn = z
-          .object({ status: turnStatusSchema, generation: z.number().int(), error_code: z.string().nullable() })
+          .object({
+            status: turnStatusSchema,
+            generation: z.number().int(),
+            attempt_epoch: z.number().int(),
+            error_code: z.string().nullable(),
+          })
           .optional()
           .parse(
             (
               await tx.client.query(
-                `SELECT status, generation, error_code FROM ${table(tx, 'tf_conversation_turns')} WHERE id = $1 AND conversation_id = $2 FOR UPDATE`,
+                `SELECT status, generation, attempt_epoch, error_code FROM ${table(tx, 'tf_conversation_turns')} WHERE id = $1 AND conversation_id = $2 FOR UPDATE`,
                 [turnId, chatId],
               )
             ).rows[0],
@@ -1112,6 +1123,9 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
           );
         }
         const generation = turn.generation + 1;
+        // Text a stopped reply had already streamed stays in the chat as a partial reply.
+        if (operation === 'cancel' && turn.status === 'processing')
+          await keepStoppedReply(tx, chatId, { id: turnId, generation: turn.generation, epoch: turn.attempt_epoch });
         await tx.client.query(
           `UPDATE ${table(tx, 'tf_conversation_turns')} SET status = $2, generation = $3, attempt_epoch = attempt_epoch + 1, attempts = CASE WHEN $2 = 'queued' THEN 0 ELSE attempts END, lease_until = NULL, retry_at = NULL, error_code = NULL WHERE id = $1`,
           [turnId, status, generation],

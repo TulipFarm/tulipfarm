@@ -11,9 +11,13 @@ import type { ConversationRuntime, ReplyFence } from './runtime.ts';
 import { commonCompatibility, qualified } from '@tulipfarm/workspace-storage/runtime';
 import { avatarSnapshotSchema, type AvatarSnapshot } from './avatar.ts';
 import { log } from '@tulipfarm/observability';
+import type { SourceDependency } from '@tulipfarm/access';
 
 type TextNotification = Extract<ConversationNotification, { kind: 'text' }>;
 type Address = { workspaceId: string; conversationId: string };
+
+/** First common version whose turns keep the streamed preview, so a stopped reply keeps its partial text. */
+export const stoppedReplyVersion = 47;
 
 /** PostgreSQL rejects NOTIFY payloads of 8000 bytes or more; this leaves headroom. */
 export const notificationPayloadLimit = 7000;
@@ -90,13 +94,15 @@ export type ReplyTextPublisher = {
 /**
  * Publishes preview text for one reply attempt. At most one publication is in flight, and publications start at least
  * `interval` milliseconds apart, so bursts of updates coalesce into the latest text. Streaming is a preview: failures are
- * swallowed and never reach the reply.
+ * swallowed and never reach the reply. Each publication also saves the text on the turn with `sources`, the sources the
+ * model could read, so stopping the reply keeps exactly the text members saw.
  */
 export function createReplyTextPublisher(
   runtime: ConversationRuntime,
   fence: ReplyFence,
   interval = 200,
   closeTimeout = 2000,
+  sources: () => readonly SourceDependency[] = () => [],
 ): ReplyTextPublisher {
   const address = { workspaceId: fence.workspaceId, conversationId: fence.conversationId };
   let latest: { step: number; text: string } | null = null;
@@ -166,6 +172,12 @@ export function createReplyTextPublisher(
           WHERE id=$1 AND conversation_id=$2 AND generation=$3 AND attempt_epoch=$4 AND status='processing'
             AND lease_until>clock_timestamp() AND timing_started_at IS NOT NULL AND timing_first_text_at IS NULL`,
             [fence.turnId, fence.conversationId, fence.generation, fence.epoch],
+          );
+        if (tx.commonVersion >= stoppedReplyVersion)
+          await tx.client.query(
+            `UPDATE ${qualified(tx.schema, 'tf_conversation_turns')} SET streamed=jsonb_build_object('generation',$3::integer,'epoch',$4::integer,'text',$5::text,'sources',$6::jsonb)
+          WHERE id=$1 AND conversation_id=$2 AND generation=$3 AND attempt_epoch=$4 AND status='processing'`,
+            [fence.turnId, fence.conversationId, fence.generation, fence.epoch, text, JSON.stringify(sources())],
           );
         for (const payload of payloads)
           await tx.client.query('SELECT pg_notify($1, $2)', [conversationEventChannel, JSON.stringify(payload)]);

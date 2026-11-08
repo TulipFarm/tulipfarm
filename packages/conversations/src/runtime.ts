@@ -32,7 +32,8 @@ import {
   timeZoneSchema,
 } from './contracts.ts';
 import { interruptToolReceipts } from './tool-receipts.ts';
-import { notifyConversationChange, notifyConversationTool } from './event-publisher.ts';
+import { notifyConversationChange, notifyConversationTool, stoppedReplyVersion } from './event-publisher.ts';
+import { replyParts } from './stopped-replies.ts';
 import {
   conversationResult,
   conversationResultSchema,
@@ -265,6 +266,8 @@ export type ConversationReply = (input: {
   /** The images reader read this turn's files, so the model may call `files.read`. */
   chatFiles?: boolean;
   retainedSources?: SourceDependency[];
+  /** The sources streamed text may draw on besides tool results, read when the text is saved for a stop. */
+  previewSources?: () => SourceDependency[];
   describedHandles?: string[];
   project?: ProjectContext;
   /**
@@ -302,24 +305,6 @@ function replyLayout(answer: AnswerLayout, text: string, messageId: string): Lay
   if (text !== answer.input.summary) return null;
   const checked = layoutFromReply(answer.input, messageId);
   return checked.ok ? checked.layout : textLayout(text, messageId, { notice: 'layout-failed' });
-}
-
-function replyParts(text: string) {
-  const parts: string[] = [];
-  let part = '';
-  let bytes = 0;
-  for (const character of text) {
-    const size = Buffer.byteLength(character);
-    if (bytes + size > 65536) {
-      parts.push(part);
-      part = '';
-      bytes = 0;
-    }
-    part += character;
-    bytes += size;
-  }
-  if (part) parts.push(part);
-  return parts;
 }
 
 export type ExternalConversationContext = (
@@ -1427,6 +1412,8 @@ export function createConversationExecutor(
       ), exchanges AS (
         SELECT source_message_id AS message_id, accepted_sequence, stopped FROM prior
         UNION ALL SELECT response_message_id, accepted_sequence, false FROM prior WHERE response_message_id IS NOT NULL
+        UNION ALL SELECT r.message_id, t.accepted_sequence, false FROM prior t
+          JOIN ${table(tx, 'tf_conversation_results')} r ON r.turn_id = t.id AND r.conversation_id = $1 WHERE t.stopped
         UNION ALL SELECT p.message_id, t.accepted_sequence, false FROM prior t
           JOIN ${table(tx, 'tf_internal_conversations')} i ON i.origin_turn_id = t.id AND i.origin_conversation_id = $1
           JOIN ${table(tx, 'tf_internal_publications')} p ON p.internal_id = i.id AND p.conversation_id = $1
@@ -2561,6 +2548,7 @@ export function createConversationExecutor(
             earlierMessages: refersToEarlierMessages(prepared),
             ...(images ? { chatFiles: true } : {}),
             retainedSources: mergeSources(inheritedSources),
+            previewSources: () => mergeSources([...inheritedSources, ...fileSources]),
             describedHandles,
             ...(source.project ? { project: source.project } : {}),
             ...(source.compactionPolicy ? { compactionPolicy: source.compactionPolicy } : {}),
@@ -2668,7 +2656,7 @@ export function createConversationExecutor(
         );
         // A completed turn has no error; its code only notes which fallback model answered.
         await tx.client.query(
-          `UPDATE ${table(tx, 'tf_conversation_turns')} SET status = 'completed', response_message_id = $2, lease_until = NULL, retry_at = NULL, error_code = $3 WHERE id = $1`,
+          `UPDATE ${table(tx, 'tf_conversation_turns')} SET status = 'completed', response_message_id = $2, lease_until = NULL, retry_at = NULL, error_code = $3${tx.commonVersion >= stoppedReplyVersion ? ', streamed = NULL' : ''} WHERE id = $1`,
           [fence.turnId, messageId, fallback ? `${modelFallbackCodePrefix}${fallback}` : null],
         );
         await interruptToolReceipts(tx, fence.turnId, 'failed');

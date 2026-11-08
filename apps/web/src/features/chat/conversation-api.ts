@@ -141,6 +141,7 @@ const messageSchema = z.object({
     .default([]),
   calendarResults: z.array(calendarHistoryResultSchema).default([]),
   followUp: firedFollowUpSchema.nullable().optional(),
+  stoppedTurnId: z.uuid().optional(),
 });
 const historySchema = z.object({
   messages: z.array(messageSchema),
