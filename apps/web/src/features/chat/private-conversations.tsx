@@ -22,7 +22,6 @@ import { createPortal } from 'react-dom';
 import { newChatSearch, workspaceChatRoute, workspaceRoute } from '@/router';
 import { publicPackageInstallPrompt } from '@/features/packages/public-catalog';
 import { ArrowDown } from 'reicon-react/icons/ArrowDown';
-import { Danger } from 'reicon-react/icons/Danger';
 import { Folder } from 'reicon-react/icons/Folder';
 import { ChevronDown } from 'reicon-react/icons/ChevronDown';
 import { Sparkle } from 'reicon-react/icons/Sparkle';
@@ -48,7 +47,7 @@ import {
 } from '@tulipfarm/sprout/dropdown-menu';
 import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from '@tulipfarm/sprout/popover';
 import { Label } from '@tulipfarm/sprout/label';
-import { Message, MessageBubble, MessageContent, MessageFooter } from '@tulipfarm/sprout/message';
+import { Message, MessageBubble, MessageContent } from '@tulipfarm/sprout/message';
 import { useSidebar } from '@tulipfarm/sprout/sidebar';
 import { GitHubChatResponse } from './github-download';
 import { MessageActions, type MessageActionsStats } from '@tulipfarm/sprout/message-actions';
@@ -117,15 +116,8 @@ import { IntegrationLinks } from './integration-links';
 import { UpcomingMeetings, showAllMeetingsPrompt } from './upcoming-meetings';
 import { CompactionStatus, SentCompact } from './compaction';
 import { ChatMaintenance } from './maintenance';
-import { compactCommand, compactCommandError, compactsOnRetry, contextFailure } from './compaction-copy';
-import {
-  fallbackNote,
-  proposalKeptNote,
-  replyFailure,
-  replyRetrying,
-  retryHelps,
-  retryLabel,
-} from './reply-failure-copy';
+import { compactCommand, compactCommandError } from './compaction-copy';
+import { ReplyFooter, turnLabels } from './reply-footer';
 import { replyStats } from './reply-stats';
 import { MoveToProjectDialog, ProjectScopeSelect, useWorkspaceProjects } from '@/features/projects/project-scope';
 import { Bud, BudWelcome, budState } from './bud';
@@ -1581,16 +1573,6 @@ function ConversationDetail({
 
 const nearLatest = (element: HTMLElement) => element.scrollHeight - element.scrollTop - element.clientHeight < 80;
 
-const turnLabels = {
-  queued: 'Reply queued',
-  processing: 'Reply in progress',
-  waiting: 'Waiting for you',
-  reconciling: 'Reply checking an earlier action',
-  failed: 'Reply failed',
-  completed: 'Reply completed',
-  cancelled: 'You stopped this reply',
-  blocked: 'Reply blocked',
-};
 function GooglePrivateOnly({
   disabled,
   draft,
@@ -1737,12 +1719,6 @@ function ConversationEntry({
     message.parts.flatMap(part => (part.kind === 'google-file' ? [[part.fileId, part] as const] : [])),
   );
   const skill = message.parts.find(part => part.kind === 'skill');
-  const retrying = message.turn ? replyRetrying(message.turn.status, message.turn.errorCode) : null;
-  const answeredBy = message.turn ? fallbackNote(message.turn.status, message.turn.errorCode) : null;
-  const proposalKept = message.turn?.status === 'failed' ? proposalKeptNote(message.tools) : null;
-  const quiet =
-    !message.turn ||
-    (['queued', 'processing', 'completed', 'cancelled'].includes(message.turn.status) && !retrying && !answeredBy);
   const entry = useRef<HTMLDivElement>(null);
   return (
     <div className="space-y-3">
@@ -1872,70 +1848,14 @@ function ConversationEntry({
               entry={entry}
             />
           )}
-          {message.turn && !quiet && (
-            <MessageFooter>
-              <div className="space-y-2">
-                {answeredBy && <p className="text-xs text-muted-foreground">{answeredBy}</p>}
-                {retrying && (
-                  <p role="status" className="text-xs text-muted-foreground">
-                    {retrying}
-                  </p>
-                )}
-                {!quiet &&
-                  !answeredBy &&
-                  !retrying &&
-                  (message.turn.status === 'failed' && proposalKept ? (
-                    <p role="status" className="text-sm text-muted-foreground">
-                      {proposalKept}
-                    </p>
-                  ) : message.turn.status === 'failed' ? (
-                    <p role="status" className="flex items-center gap-1.5 text-sm text-destructive">
-                      <Danger size={14} aria-hidden="true" />
-                      {turnLabels.failed}
-                    </p>
-                  ) : (
-                    <p role="status" className="text-xs text-muted-foreground">
-                      {turnLabels[message.turn.status]}
-                    </p>
-                  ))}
-                <div className="flex flex-wrap gap-2">
-                  {message.turn.errorCode === 'credits-exhausted' && (
-                    <p role="alert">
-                      Not enough available workspace credits for this reply. Ask a workspace admin to check credits.
-                    </p>
-                  )}
-                  {message.turn.errorCode === 'plan-budget' && (
-                    <p role="alert">The plan reached its budget. Review the plan before adding budget and resuming.</p>
-                  )}
-                  {message.turn.status === 'failed' && contextFailure(message.turn.errorCode) && (
-                    <p role="alert">{contextFailure(message.turn.errorCode)}</p>
-                  )}
-                  {message.turn.status === 'failed' &&
-                    !contextFailure(message.turn.errorCode) &&
-                    replyFailure(message.turn.errorCode) && <p role="alert">{replyFailure(message.turn.errorCode)}</p>}
-                  {message.turn.status === 'failed' && message.turn.errorCode === 'skill-unavailable' && (
-                    <p role="alert">
-                      {skill ? `“${skill.name}”` : 'The skill'} is no longer available, so this reply didn’t run. Ask a
-                      workspace admin to enable it, then retry, or send a new message without it.
-                    </p>
-                  )}
-                  {message.turn.status === 'failed' && retryHelps(message.turn.errorCode) && (
-                    <Button size="sm" variant="outline" disabled={disabled} onClick={() => control('retry')}>
-                      {retryLabel(
-                        message.turn.errorCode,
-                        message.tools.some(tool => tool.status === 'completed'),
-                        compactsOnRetry(message.turn.errorCode),
-                      )}
-                    </Button>
-                  )}
-                  {message.turn.status === 'failed' && (
-                    <Button size="sm" variant="outline" disabled={disabled} onClick={() => control('cancel')}>
-                      Cancel reply
-                    </Button>
-                  )}
-                </div>
-              </div>
-            </MessageFooter>
+          {message.turn && (
+            <ReplyFooter
+              turn={message.turn}
+              tools={message.tools}
+              skillName={skill?.name}
+              disabled={disabled}
+              control={control}
+            />
           )}
         </MessageContent>
       </Message>
