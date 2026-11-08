@@ -880,6 +880,29 @@ export function createWorkflows(
       );
     });
   }
+  /** Enabled workflows whose active revision mentions the table, limited to ones the person can read. */
+  async function usingTable(workspaceId: string, user: string, tableId: string) {
+    tableId = idSchema.parse(tableId);
+    return transaction(
+      workspaceId,
+      async tx => {
+        const actor = await workflowMember(tx, user);
+        return z.array(z.object({ id: idSchema, name: z.string() })).parse(
+          (
+            await tx.client.query(
+              `SELECT w.id,c.definition->>'name' AS name FROM ${table(tx, 'tf_workflows')} w
+           JOIN ${table(tx, 'tf_workflow_revisions')} a ON a.workflow_id=w.id AND a.id=w.active_revision
+           JOIN ${table(tx, 'tf_workflow_revisions')} c ON c.workflow_id=w.id AND c.id=w.revision
+           WHERE w.enabled AND strpos(a.definition::text, $2) > 0 AND ${readableWorkflow(tx, 'w', '$1')}
+           ORDER BY c.definition->>'name',w.id LIMIT 5`,
+              [actor.membershipId, tableId],
+            )
+          ).rows,
+        );
+      },
+      'read',
+    );
+  }
   async function save(
     workspaceId: string,
     user: string,
@@ -3498,6 +3521,7 @@ export function createWorkflows(
     calendar,
     followCalendar,
     recent,
+    usingTable,
     recordSourceLabels,
     rowSourceLabels,
     checkTableSteps,

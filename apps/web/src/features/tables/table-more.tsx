@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { useNavigate } from '@tanstack/react-router';
+import { Link, useNavigate } from '@tanstack/react-router';
 import { MoreH } from 'reicon-react/icons/MoreH';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import {
@@ -138,7 +138,7 @@ export function TableMore({
                   definition: applied.definition,
                   systemKind: state.systemKind,
                 }}
-                permissions={state.rowPermissions}
+                permissions={state.archived ? { create: false, update: false, delete: false } : state.rowPermissions}
                 api={api}
                 workspace={workspace}
                 disabled={disabled}
@@ -270,17 +270,24 @@ function ArchiveTable({
   const [pending, setPending] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
   const text = copy[kind];
+  const [blockers, setBlockers] = useState<{ id: string; name: string }[]>([]);
   const stop = useRef<AbortController | null>(null);
   useEffect(() => {
     const controller = new AbortController();
     stop.current = controller;
     return () => controller.abort();
   }, []);
+  // Only workflows this person can read are named; otherwise the generic message stays.
+  const showBlockers = async (signal: AbortSignal) => {
+    const workflows = await api.workflowsUsing(tableId, AbortSignal.any([signal, AbortSignal.timeout(15_000)]));
+    if (!signal.aborted) setBlockers(workflows);
+  };
   const archive = async () => {
     const signal = stop.current?.signal;
     if (pending || !signal) return;
     setPending(true);
     setFailure(null);
+    setBlockers([]);
     const requestId = crypto.randomUUID();
     try {
       let status = await api.archive(tableId, requestId, revision, kind);
@@ -310,9 +317,12 @@ function ArchiveTable({
         return;
       }
       const receipt = status.plans[0]?.receipt;
-      if (!signal.aborted)
-        setFailure(archiveMessage(receipt?.status === 'failed' ? receipt.code : status.status, 409, kind));
+      const code = receipt?.status === 'failed' ? receipt.code : status.status;
+      if (code === 'workflow-active') await showBlockers(signal);
+      if (!signal.aborted) setFailure(archiveMessage(code, 409, kind));
     } catch (error) {
+      if (signal.aborted) return;
+      if (error instanceof TableRequestError && error.code === 'workflow-active') await showBlockers(signal);
       if (signal.aborted) return;
       setFailure(
         error instanceof TableRequestError ? error.message : archiveMessage('table-operation-failed', 0, kind),
@@ -335,7 +345,38 @@ function ArchiveTable({
         <AlertDialogDescription>{text.description}</AlertDialogDescription>
         {failure && (
           <Alert variant="destructive">
-            <AlertDescription>{failure}</AlertDescription>
+            <AlertDescription>
+              {blockers.length ? (
+                <>
+                  <p>
+                    {blockers.length === 1
+                      ? 'This active workflow uses this table. Disable or archive it, then try again.'
+                      : 'These active workflows use this table. Disable or archive them, then try again.'}
+                  </p>
+                  <ul aria-label="Workflows that use this table" className="mt-1 grid gap-1">
+                    {blockers.map(workflow => (
+                      <li key={workflow.id}>
+                        <Button
+                          variant="link"
+                          size="sm"
+                          nativeButton={false}
+                          render={
+                            <Link
+                              to="/$workspaceSlug/workflows/$workflowId"
+                              params={{ workspaceSlug, workflowId: workflow.id }}
+                            />
+                          }
+                        >
+                          {workflow.name}
+                        </Button>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              ) : (
+                failure
+              )}
+            </AlertDescription>
           </Alert>
         )}
         <AlertDialogFooter>

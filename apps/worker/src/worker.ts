@@ -264,6 +264,7 @@ async function run() {
           chatObjects ? createSkillExecutionFactory(chatObjects, skillClient) : undefined,
           planDispatch?.wake,
           (workspaceId, taskId) => taskDispatch?.wake(workspaceId, taskId) ?? Promise.resolve(),
+          async workspaceId => (await coreResources.flagContext({ workspaceId })).workspace?.slug,
         )
       : undefined;
     const gmail = coreResources ? createGoogleHeartbeatActivities(coreResources.runtime) : undefined;

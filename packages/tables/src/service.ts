@@ -179,7 +179,7 @@ export function createTableService(
     return authorized(workspaceId, principal, async (tx, actor) => {
       await permit(tx, actor, request.tableId, 'table.row.read');
       await store.lockCatalogs(tx, [request.tableId]);
-      const generation = await store.activeGeneration(tx, request.tableId);
+      const generation = await store.readableGeneration(tx, request.tableId);
       if (generation.revision !== request.revision) throw new store.GenerationError('stale-generation');
       const record = await store.readRecord(tx, generation, request.recordId);
       if (!record) return null;
@@ -205,7 +205,7 @@ export function createTableService(
     return authorized(workspaceId, principal, async (tx, actor) => {
       await permit(tx, actor, request.tableId, 'table.row.read');
       await store.lockCatalogs(tx, [request.tableId]);
-      const generation = await store.activeGeneration(tx, request.tableId);
+      const generation = await store.readableGeneration(tx, request.tableId);
       if (generation.revision !== request.revision) throw new store.GenerationError('stale-generation');
       const records = await store.readRecords(tx, generation, {
         after: request.after ?? null,
@@ -357,7 +357,7 @@ export function createTableService(
     return authorized(workspaceId, principal, async (tx, actor) => {
       await permit(tx, actor, request.tableId, 'table.row.read');
       await store.lockCatalogs(tx, [request.tableId]);
-      const generation = await store.activeGeneration(tx, request.tableId);
+      const generation = await store.readableGeneration(tx, request.tableId);
       if (generation.revision !== request.revision) throw new store.GenerationError('stale-generation');
       const { query } = request,
         parameters: unknown[] = [];
@@ -737,10 +737,11 @@ export function createTableService(
       return { tables, nextCursor: visible.length > offset + query.limit ? String(offset + query.limit) : null };
     });
   }
-  async function activeFor(tx: TableTransaction, actor: Actor, tableId: string, revision?: string) {
+  // Reads also reach an archived table's rows; `active` is for choosing rows to link, which an archived table can't offer.
+  async function activeFor(tx: TableTransaction, actor: Actor, tableId: string, revision?: string, active = false) {
     await permit(tx, actor, tableId, 'table.row.read');
     await store.lockCatalogs(tx, [tableId]);
-    const generation = await store.activeGeneration(tx, tableId);
+    const generation = await (active ? store.activeGeneration : store.readableGeneration)(tx, tableId);
     if (revision !== undefined && generation.revision !== revision) throw new store.GenerationError('stale-generation');
     return generation;
   }
@@ -758,7 +759,7 @@ export function createTableService(
     const field = source.definition.fields.find(item => item.id === fieldId);
     if (field?.kind !== 'relationship')
       throw new TableQueryError([{ code: 'unknown-field', message: 'Choose a link field from this table.' }]);
-    const target = await activeFor(tx, actor, field.targetTableId);
+    const target = await activeFor(tx, actor, field.targetTableId, undefined, true);
     const named = nameField(target.definition),
       parameters: unknown[] = [];
     const physical = (id: string) => `"f_${id.replaceAll('-', '')}"`;

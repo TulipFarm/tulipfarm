@@ -69,6 +69,12 @@ function DownloadLink({ path, children }: { path: string; children: ReactNode })
   );
 }
 
+function workflowPath(href: string, workspaceSlug: string) {
+  const prefix = `/${encodeURIComponent(workspaceSlug)}/workflows/`;
+  const id = href.startsWith(prefix) ? href.slice(prefix.length) : '';
+  return /^[0-9a-f-]{36}$/.test(id) ? id : null;
+}
+
 export function GitHubChatResponse({
   workspaceId,
   chatId,
@@ -91,6 +97,13 @@ export function GitHubChatResponse({
         if (href === githubReconnectHref && workspaceSlug)
           return (
             <Link to="/$workspaceSlug/integrations" params={{ workspaceSlug }} hash="github-accounts">
+              {label}
+            </Link>
+          );
+        const workflowId = workspaceSlug && workflowPath(href, workspaceSlug);
+        if (workflowId)
+          return (
+            <Link to="/$workspaceSlug/workflows/$workflowId" params={{ workspaceSlug, workflowId }}>
               {label}
             </Link>
           );

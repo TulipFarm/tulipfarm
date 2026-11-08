@@ -948,6 +948,8 @@ export type ChatToolsOptions = {
   apiApprovals?: boolean | undefined;
   /** The operator's private hosts `api.request` may reach here; only in a member's own chat in the app. */
   apiPrivateHosts?: SendApiCallOptions['privateHosts'];
+  /** Builds the link to a workflow for this chat; without it, workflows are named without links. */
+  workflowLink?: ((workspaceId: string, workflowId: string) => Promise<string | undefined>) | undefined;
 };
 /** What a chat turn or plan specialist generates images with. The model is the one pinned when the work was admitted. */
 export type ChatImages = {
@@ -1028,6 +1030,7 @@ export function createChatTools(
     apiSecrets,
     apiApprovals,
     apiPrivateHosts,
+    workflowLink,
   }: ChatToolsOptions = {},
 ) {
   const resources = createAgentRecordTools(runtime);
@@ -1212,7 +1215,14 @@ export function createChatTools(
               : {}),
           };
         }
-        return createChatTableProposals(runtime, objects).propose(workspaceId, actor, callId, context.origin, input);
+        return createChatTableProposals(runtime, objects, async tableId =>
+          Promise.all(
+            (await createWorkflows(runtime).usingTable(workspaceId, actor.userId, tableId)).map(async workflow => {
+              const url = await workflowLink?.(workspaceId, workflow.id).catch(() => undefined);
+              return url ? { ...workflow, url } : workflow;
+            }),
+          ),
+        ).propose(workspaceId, actor, callId, context.origin, input);
       }
       case 'slack.resolve':
         if (!slack)

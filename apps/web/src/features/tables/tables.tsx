@@ -20,7 +20,7 @@ import {
 import { PageHeader } from '@tulipfarm/sprout/page-header';
 import { SearchField } from '@tulipfarm/sprout/search-field';
 import { RecordsSample, TablesSample, StatePanel } from '@tulipfarm/sprout/state-panel';
-import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
+import { Alert, AlertDescription, AlertTitle } from '@tulipfarm/sprout/alert';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -275,6 +275,8 @@ export function TableList({
   );
 }
 
+const readOnly = { create: false, update: false, delete: false };
+
 export function TableDetail({
   workspace,
   tableId,
@@ -355,6 +357,12 @@ function TableDetailView({
               </>
             }
           />
+          {state.archived && (
+            <Alert>
+              <AlertTitle>This table is archived</AlertTitle>
+              <AlertDescription>Its rows are kept but can't be changed. To restore it, ask in chat.</AlertDescription>
+            </Alert>
+          )}
           {state.saved && state.applied && state.saved.revision !== state.applied.revision && (
             <Alert>
               <AlertDescription>
@@ -383,7 +391,8 @@ function TableDetailView({
               tableId={state.id}
               systemKind={state.systemKind}
               applied={state.applied}
-              permissions={state.rowPermissions}
+              permissions={state.archived ? readOnly : state.rowPermissions}
+              archived={state.archived}
               api={api}
               disabled={busy}
               refreshTable={read.refresh}
@@ -426,6 +435,7 @@ export function Records({
   changeSearch,
   initialAfter,
   pageSize = 50,
+  archived = false,
 }: {
   workspace: TableWorkspace;
   tableId: string;
@@ -439,6 +449,7 @@ export function Records({
   changeSearch: ChangeRowsSearch;
   initialAfter?: string | undefined;
   pageSize?: number;
+  archived?: boolean;
 }) {
   const [limit, setLimit] = useState(pageSize);
   const [exporting, setExporting] = useState(false);
@@ -880,6 +891,14 @@ export function Records({
             Clear filters
           </Button>
         </StatePanel>
+      ) : archived ? (
+        <StatePanel
+          kind="empty"
+          heading="h3"
+          icon={Database}
+          title="No rows"
+          description={`${table.definition.label} has no rows.`}
+        />
       ) : (
         <StatePanel
           kind="empty"
