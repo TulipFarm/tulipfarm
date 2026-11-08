@@ -77,15 +77,20 @@ const defaultExpression = z.strictObject({
     return expressionNodeSchema;
   },
 });
-const convertExpression = z.strictObject({
-  op: z.literal('convert'),
-  get input(): ExpressionSchema {
-    return expressionNodeSchema;
-  },
-  to: z.enum(['text', 'numeric', 'boolean', 'date', 'timestamp']),
-  timezone: z.literal('UTC'),
-  onError: z.enum(['error', 'null']),
-});
+const convertExpression = z
+  .strictObject({
+    op: z.literal('convert'),
+    get input(): ExpressionSchema {
+      return expressionNodeSchema;
+    },
+    to: z.enum(['text', 'numeric', 'boolean', 'date', 'timestamp']),
+    timezone: z.literal('UTC'),
+    onError: z.enum(['error', 'null']),
+  })
+  .meta({
+    description:
+      'Converts a value to another field kind, following fixed rules. To text: text, numeric, boolean, date and timestamp values; options and references need map. To numeric: numeric values, decimal text such as "100.50" or "-7.25", and booleans as "1" or "0". To boolean: booleans, the exact text "true" or "false", and numeric 0 or 1. To date: date text or the UTC date of a timestamp. A date converted to a timestamp becomes midnight UTC. Null stays null. Locale-specific dates and exponent notation such as "1e3" fail with conversion-failed; onError "null" turns failures into null instead.',
+  });
 const mapExpression = z.strictObject({
   op: z.literal('map'),
   get input(): ExpressionSchema {
@@ -126,8 +131,9 @@ const expressionNodeSchema: ExpressionSchema = z.discriminatedUnion('op', [
 ]);
 
 export const expressionSchema = boundedInputSchema.pipe(expressionNodeSchema);
-export const transformsSchema = boundedInputSchema.pipe(
-  z.strictObject({
+/** The transform structure without the raw-input bounds, so JSON Schema shows models its expressions. */
+export const transformOutputsSchema = z
+  .strictObject({
     outputs: z
       .array(z.strictObject({ fieldId: fieldIdSchema, expression: expressionNodeSchema }))
       .max(transformLimits.outputs)
@@ -135,8 +141,12 @@ export const transformsSchema = boundedInputSchema.pipe(
         outputs => new Set(outputs.map(output => output.fieldId)).size === outputs.length,
         'Duplicate output field',
       ),
-  }),
-);
+  })
+  .meta({
+    description:
+      'Computes new values for every existing row during a schema change; each output reads the original row. A field without an output keeps its current value unchanged, so when an existing field changes kind, add an output for it, usually {"fieldId":F,"expression":{"op":"convert","input":{"op":"field","fieldId":F},"to":"numeric","timezone":"UTC","onError":"error"}}. Use {"outputs":[]} for a new table or when no existing value changes.',
+  });
+export const transformsSchema = boundedInputSchema.pipe(transformOutputsSchema);
 export type TransformExpression = z.infer<typeof expressionSchema>;
 export type Transforms = z.infer<typeof transformsSchema>;
 export const transformErrorSchema = z.strictObject({

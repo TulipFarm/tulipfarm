@@ -46,6 +46,16 @@ Existing tables:
 - Use the applied table revision as `expectedRevision`, not `currentSoulRevision`.
 - Specify only the schema changes, transformations, or record effects that the person asked for.
 
+Changing a field's kind:
+
+- A field without a transform output keeps its current value, so changing an existing field's `kind` without one blocks every row that has a value.
+- Keep the field's `id`, set its new `kind` and properties in `target`, and add one output to `transforms.outputs` that converts the existing value:
+  `{"fieldId":F,"expression":{"op":"convert","input":{"op":"field","fieldId":F},"to":"numeric","timezone":"UTC","onError":"error"}}`.
+  Wrap the input in `{"op":"trim","input":...}` when text may have surrounding spaces.
+- `convert` targets `text`, `numeric`, `boolean`, `date` and `timestamp`. Text to numeric accepts decimal text such as `100.50` or `-7.25`; exponent notation such as `1e3`, other words, and locale-specific dates fail. Options and references need `map`. `proposalInputSchema` lists every rule.
+- Use `onError:"error"` so values that cannot convert are reported for the person to fix. Use `onError:"null"` only when the person asks to clear them.
+- Never tell the person a conversion between these kinds is unsupported. If a proposal is blocked, report the rows that could not convert.
+
 Archive and restore:
 
 - To archive, propose `{kind:"archive",tableId,expectedRevision,dependsOn:[]}`. It stays a review until approved. It is blocked while another table links to the table, or while an active workflow or agent schedule uses it.

@@ -30,6 +30,40 @@ export function structureOnlyNote(value: unknown) {
   return createsTable && !bringsRows ? { rowsIncluded: false as const, instruction: structureOnly } : {};
 }
 
+const keptValues =
+  'These fields have no transform output, so each row kept its current value, which does not fit the field’s new definition. If a field changed kind, its existing values need a convert transform: add {"fieldId":F,"expression":{"op":"convert","input":{"op":"field","fieldId":F},"to":KIND,"timezone":"UTC","onError":"error"}} to transforms.outputs and propose again, so that only values that truly cannot convert are blocked. convert supports text, numeric, boolean, date and timestamp targets under the rules in proposalInputSchema; never tell the person that conversion is unsupported.';
+const blockedRecords = z.object({
+  tableId: z.string(),
+  records: z.array(z.object({ fieldId: z.string().nullable(), code: z.string() })),
+});
+const schemaOutputs = z.object({
+  plans: z.array(
+    z.object({
+      kind: z.string(),
+      tableId: z.string(),
+      transforms: z.object({ outputs: z.array(z.object({ fieldId: z.string() })) }).optional(),
+    }),
+  ),
+});
+
+/** A note for a blocked schema change whose invalid fields had no transform output, so chat adds the conversion. */
+export function missingTransformNote(report: unknown, input: unknown) {
+  const blocked = blockedRecords.safeParse(report);
+  const parsed = schemaOutputs.safeParse(input);
+  if (!blocked.success || !parsed.success) return {};
+  const plan = parsed.data.plans.find(plan => plan.kind === 'schema' && plan.tableId === blocked.data.tableId);
+  if (!plan?.transforms) return {};
+  const outputs = new Set(plan.transforms.outputs.map(output => output.fieldId));
+  const fieldIds = [
+    ...new Set(
+      blocked.data.records.flatMap(record =>
+        record.code === 'invalid-output' && record.fieldId && !outputs.has(record.fieldId) ? [record.fieldId] : [],
+      ),
+    ),
+  ];
+  return fieldIds.length ? { fieldsWithoutTransform: fieldIds, transformInstruction: keptValues } : {};
+}
+
 export function tableProposalOptions(
   runtime: TableProposalOptions['runtime'],
   objects?: Pick<TableImportOptions, 'attachments' | 'snapshots'>,
@@ -53,7 +87,10 @@ export function createChatTableProposals(
     async propose(...args: Parameters<typeof service.propose>) {
       try {
         const result = await service.propose(...args);
-        return 'status' in result ? { ...result, ...structureOnlyNote(args[4]) } : result;
+        if (!('status' in result)) return result;
+        return result.status === 'blocked'
+          ? { ...result, ...missingTransformNote(result, args[4]) }
+          : { ...result, ...structureOnlyNote(args[4]) };
       } catch (error) {
         if (error instanceof TableProposalError && (error.code === 'table-linked' || error.code === 'workflow-active'))
           return { error: error.code, instruction: archiveBlocked[error.code] };
@@ -63,7 +100,7 @@ export function createChatTableProposals(
         )
           return { error: 'import-not-prepared', instruction: importNotPrepared };
         if (!(error instanceof TableProposalValidationError)) throw error;
-        return error.validation;
+        return { ...error.validation, ...missingTransformNote(error.validation, args[4]) };
       }
     },
   };
