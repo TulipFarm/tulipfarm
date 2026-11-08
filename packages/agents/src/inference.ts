@@ -2915,9 +2915,10 @@ export async function inferWithTools(
       );
       continue;
     }
-    // A plain-text answer is sent back once with a required layout call. A second one is kept as text, laid out as a
-    // plain answer where the surface needs a layout (Slack), so it is never posted bare.
-    if (renderer && !rendered && !selected.calls.length && !finalizing && !layoutAsked && selected.text.trim()) {
+    // On a surface that needs a layout (Slack), a plain-text answer is sent back once with a required layout call. A
+    // second one is laid out as a plain answer, so it is never posted bare. Elsewhere a plain-text answer is final as
+    // streamed: asking again would hold the finished reply on screen while the model writes it a second time.
+    if (renderer?.wrap && !rendered && !selected.calls.length && !finalizing && !layoutAsked && selected.text.trim()) {
       layoutAsked = true;
       forceRender = true;
       items.push(

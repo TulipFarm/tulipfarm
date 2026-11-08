@@ -122,7 +122,7 @@ test('the design option rejects only canvas design problems, and invalid layouts
   assert.match(parseReplyRender({ ...wall, title: '' }).error, /^Invalid layout: /);
 });
 
-const layoutTurn = async (t, format, replies, { route = nativeRoutes[format], layout = true } = {}) => {
+const layoutTurn = async (t, format, replies, { route = nativeRoutes[format], layout = true, progress } = {}) => {
   const requests = [];
   t.mock.method(globalThis, 'fetch', async (_url, options) => {
     const body = JSON.parse(options.body);
@@ -138,7 +138,7 @@ const layoutTurn = async (t, format, replies, { route = nativeRoutes[format], la
     undefined,
     false,
     null,
-    { layout },
+    { layout, ...(progress ? { progress } : {}) },
   );
   return { result, requests };
 };
@@ -157,15 +157,31 @@ for (const format of formats) {
   });
 }
 
-test('a plain-text answer gets one required request for a layout; on the web a second one is kept as text', async t => {
-  const corrected = await layoutTurn(t, 'anthropic', [{ text: 'Use Valkey.' }, render(chatReply)]);
-  assert.deepEqual(corrected.result, { text: chatReply.summary, layout: chatReply });
-  assert.match(lastText('anthropic', corrected.requests[1]), /calling reply_render/);
-  t.mock.restoreAll();
+const slack = { slack: { interactive: true } };
+const slackReply = {
+  placement: 'chat',
+  title: 'Hello',
+  summary: 'Warm greeting and offer to help with one question',
+  blocks: [{ type: 'section', text: { type: 'mrkdwn', text: 'Hello! What can I help you with today?' } }],
+};
+const slackRender = { calls: [{ name: 'slack_render', input: slackReply }] };
 
-  const kept = await layoutTurn(t, 'anthropic', [{ text: 'Use Valkey.' }, { text: 'Valkey, really.' }]);
-  assert.deepEqual(kept.result, { text: 'Valkey, really.' });
-  assert.equal(kept.requests.length, 2);
+test('on the web a plain-text answer is final as streamed, with no second request for a layout', async t => {
+  const statuses = [];
+  const { result, requests } = await layoutTurn(t, 'anthropic', [{ text: 'Use Valkey.\n\n1. Fast\n2. Open' }], {
+    progress: update => statuses.push(update.status),
+  });
+  assert.deepEqual(result, { text: 'Use Valkey.\n\n1. Fast\n2. Open' });
+  assert.equal(requests.length, 1);
+  assert.equal(statuses.at(-1), 'done');
+  assert.ok(!statuses.includes('finishing'));
+});
+
+test('Slack: a plain-text answer gets one required request for a layout', async t => {
+  const { result, requests } = await layoutTurn(t, 'anthropic', [{ text: 'Hello!' }, slackRender], { layout: slack });
+  assert.equal(result.text, slackReply.summary);
+  assert.deepEqual(result.layout.slack.blocks, slackReply.blocks);
+  assert.match(lastText('anthropic', requests[1]), /calling slack_render/);
 });
 
 const requiredChoice = {
@@ -183,33 +199,29 @@ const forcedChoice = name => ({
 const autoChoice = { anthropic: { type: 'auto' }, azure: 'auto', responses: 'auto', google: { mode: 'AUTO' } };
 
 for (const format of formats)
-  test(`${format}: the layout request after a plain-text answer requires the layout tool`, async t => {
+  test(`${format}: the Slack layout request after a plain-text answer requires the layout tool`, async t => {
     const route = { ...nativeRoutes[format], capabilities: { toolChoice: 'forced' } };
-    const { requests } = await layoutTurn(t, format, [{ text: 'Use Valkey.' }, render(chatReply)], { route });
+    const { requests } = await layoutTurn(t, format, [{ text: 'Hello!' }, slackRender], { route, layout: slack });
     assert.deepEqual(requiredChoice[format](requests[0]), autoChoice[format]);
-    assert.deepEqual(requiredChoice[format](requests[1]), forcedChoice('reply_render')[format]);
+    assert.deepEqual(requiredChoice[format](requests[1]), forcedChoice('slack_render')[format]);
   });
 
 test('a route that accepts only an automatic tool choice is asked for the layout in the message alone', async t => {
   const route = { ...nativeRoutes.azure, capabilities: { toolChoice: 'auto' } };
-  const { result, requests } = await layoutTurn(t, 'azure', [{ text: 'Use Valkey.' }, render(chatReply)], { route });
-  assert.deepEqual(result, { text: chatReply.summary, layout: chatReply });
+  const { result, requests } = await layoutTurn(t, 'azure', [{ text: 'Hello!' }, slackRender], {
+    route,
+    layout: slack,
+  });
+  assert.deepEqual(result.layout.slack.blocks, slackReply.blocks);
   assert.equal(requests[1].tool_choice, 'auto');
-  assert.match(lastText('azure', requests[1]), /calling reply_render/);
+  assert.match(lastText('azure', requests[1]), /calling slack_render/);
   t.mock.restoreAll();
 
   // Claude Sonnet, Opus and Fable are catalogued with an automatic tool choice.
-  const claude = await layoutTurn(t, 'anthropic', [{ text: 'Use Valkey.' }, render(chatReply)]);
+  const claude = await layoutTurn(t, 'anthropic', [{ text: 'Hello!' }, slackRender], { layout: slack });
   assert.deepEqual(claude.requests[1].tool_choice, { type: 'auto' });
 });
 
-const slack = { slack: { interactive: true } };
-const slackReply = {
-  placement: 'chat',
-  title: 'Hello',
-  summary: 'Warm greeting and offer to help with one question',
-  blocks: [{ type: 'section', text: { type: 'mrkdwn', text: 'Hello! What can I help you with today?' } }],
-};
 const writtenCall = `call slack_render with placement is chat title is Hello summary is Warm greeting and offer to help with one question. blocks is ${JSON.stringify(slackReply.blocks)}`;
 
 test('Slack: a slack_render call written as prose is read back as the layout, never posted as text', async t => {
@@ -250,9 +262,9 @@ test('Slack: plain text after the required layout request is laid out as the ans
 });
 
 test('chat completions resend a plain-text answer without an empty tool_calls list', async t => {
-  const { requests } = await layoutTurn(t, 'azure', [{ text: 'Use Valkey.' }, render(chatReply)]);
+  const { requests } = await layoutTurn(t, 'azure', [{ text: 'Hello!' }, slackRender], { layout: slack });
   const answer = requests[1].messages.find(message => message.role === 'assistant');
-  assert.deepEqual(answer, { role: 'assistant', content: 'Use Valkey.' });
+  assert.deepEqual(answer, { role: 'assistant', content: 'Hello!' });
 });
 
 test('after three invalid layouts the reply is saved as its summary with a layout-failed mark', async t => {
