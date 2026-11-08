@@ -30,7 +30,7 @@ const canvasVisuals = new Set([
 export const replyRenderTool: NativeTool = {
   name: replyRenderToolName,
   description:
-    'Give your final answer as a layout of approved components. Call it alone, once all other work is done. It ends your reply.',
+    'Give your final answer as a layout of approved components, when it needs more than Markdown text. Call it alone, once all other work is done. It ends your reply.',
   parameters: z.toJSONSchema(replyRenderInputSchema, { io: 'input', unrepresentable: 'any' }) as Record<
     string,
     unknown
@@ -40,7 +40,8 @@ export const replyRenderTool: NativeTool = {
 /** The generative-UI rules. The text is fixed, so provider prompt caches still hit. */
 export const generativeUiPrompt = [
   '# Answer format',
-  `- Give every final answer by calling ${replyRenderToolName}, alone, after all other work. Do not also write the answer as text.`,
+  '- Write an answer that is only text, such as prose, a list, steps or code, as Markdown text without any tool call. The reader sees it while you write it.',
+  `- When the answer needs other components, such as metrics, tables, charts, cards or callouts, or belongs in Canvas, give it by calling ${replyRenderToolName}, alone, after all other work. Do not also write that answer as text.`,
   '- `summary` is one or two plain sentences that answer the question. `title` names the reply in a few words.',
   '- `placement` is "chat" for a short answer or a compact visual: at most about one screen, at most two charts, and small tables. A single fact is one Text component, optionally with a Metric.',
   '- `placement` is "canvas" when the user asks for a report, document, dashboard or detailed view, or the content is longer: several sections, more than two charts or large tables.',
