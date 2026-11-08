@@ -577,6 +577,7 @@ try {
                   token: record.token,
                   deletedAt: workspace.createdAt,
                   recoverableUntil: history[0].recoverable_until,
+                  lastValues: history[0].before_values,
                 },
               ]
             : [],
@@ -1474,7 +1475,9 @@ try {
   const tombstoneToken = record.token;
   const deletedPanel = page.getByRole('region', { name: 'Deleted rows', exact: true });
   await openPanel('Deleted rows');
-  await deletedPanel.getByRole('button', { name: `Review deleted row ${recordId.slice(0, 8)}`, exact: true }).waitFor();
+  await deletedPanel
+    .getByRole('button', { name: 'Review deleted row “Restored deleted subject”', exact: true })
+    .waitFor();
   deletedStatus = 503;
   await deletedPanel.getByRole('button', { name: 'Refresh deleted rows', exact: true }).click();
   await deletedPanel.getByRole('button', { name: 'Retry refresh', exact: true }).click();
@@ -1489,7 +1492,9 @@ try {
   deletedSecondPage = false;
   historyStatus = 404;
   await tableChange([['tables', 'detail', tableId, 'record-history']]);
-  await deletedPanel.getByRole('button', { name: `Review deleted row ${recordId.slice(0, 8)}`, exact: true }).click();
+  await deletedPanel
+    .getByRole('button', { name: 'Review deleted row “Restored deleted subject”', exact: true })
+    .click();
   await historyPanel.getByText('Table unavailable', { exact: true }).waitFor();
   assert.equal(await historyPanel.getByText('Restored deleted subject', { exact: true }).count(), 0);
   assert.equal(await historyPanel.getByRole('button', { name: 'Restore reviewed values', exact: true }).count(), 0);

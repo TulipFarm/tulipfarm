@@ -4,6 +4,7 @@ import { StatePanel } from '@tulipfarm/sprout/state-panel';
 import { Table } from '@tulipfarm/sprout/table';
 import { useCursorPages } from '@/lib/use-cursor-pages';
 import { TableRead } from './feedback';
+import { rowTitle } from './definition-view';
 import { RecordHistory } from './record-history';
 import { useTableDeletedRows } from './hooks';
 import type { DeletedRecord, RowPermissions, TableDefinition, TableApi } from './api';
@@ -23,6 +24,8 @@ export function DeletedRecords({
   disabled: boolean;
 }) {
   const pages = useCursorPages();
+  const title = (record: DeletedRecord) =>
+    rowTitle(table.definition, { id: record.id, values: record.lastValues ?? {} }, table.systemKind);
   const read = useTableDeletedRows(api, table.id, pages.after);
   const [selection, setSelection] = useState<DeletedRecord | null>(null);
   const [message, setMessage] = useState('');
@@ -74,7 +77,7 @@ export function DeletedRecords({
                   {
                     key: 'id',
                     header: 'Row',
-                    cell: record => <span className="break-all font-mono text-xs">{record.id}</span>,
+                    cell: record => <span className="break-words">{title(record)}</span>,
                   },
                   { key: 'deletedAt', header: 'Deleted', cell: record => new Date(record.deletedAt).toLocaleString() },
                   {
@@ -97,7 +100,7 @@ export function DeletedRecords({
                           setSelection(record);
                         }}
                       >
-                        Review deleted row {record.id.slice(0, 8)}
+                        Review deleted row “{title(record)}”
                       </Button>
                     ),
                   },

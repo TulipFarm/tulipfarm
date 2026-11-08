@@ -161,9 +161,7 @@ export async function proveTableBrowser(input) {
     await openPanel('Deleted rows');
     const recovery = page.getByRole('region', { name: 'Deleted rows', exact: true });
     await recovery.getByRole('button', { name: 'Refresh deleted rows', exact: true }).click();
-    await recovery
-      .getByRole('button', { name: `Review deleted row ${input.recordId.slice(0, 8)}`, exact: true })
-      .click();
+    await recovery.getByRole('button', { name: 'Review deleted row “Browser saved value”', exact: true }).click();
     await history
       .locator(`#record-history-${deletedEntry.id}`)
       .getByRole('button', { name: 'Review values before delete', exact: true })
