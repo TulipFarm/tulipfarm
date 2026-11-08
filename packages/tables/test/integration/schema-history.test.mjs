@@ -121,4 +121,19 @@ test('schema history shows published definitions to every table reader and says 
   assert.equal(owner.get(running).definition.fields[0].label, 'Running');
   assert.equal(owner.get(running).definitionWithheld, null);
   assert.equal(owner.get(blocked).definition.fields[0].label, 'Blocked');
+
+  assert.notEqual((await history.state(w.id, actor.userId, definition.id)).applied, null);
+  const pending = randomUUID();
+  await db.platform.query(
+    `INSERT INTO ${s}.tf_table_executions(proposal_id,table_id,id,publication_id,phase) VALUES($1,$2,$3,$4,'publishing')`,
+    [(await propose('Pending')).id, pending, randomUUID(), randomUUID()],
+  );
+  const firstRun = await history.state(w.id, actor.userId, pending);
+  assert.equal(firstRun.applied, null, 'A table still being created exists without an applied definition');
+  assert.equal(firstRun.archived, false);
+  await assert.rejects(
+    history.state(w.id, actor.userId, randomUUID()),
+    error => error.constructor.name === 'AccessDenied',
+    'An address that names no table is not found, even for the workspace owner',
+  );
 });
