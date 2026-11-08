@@ -78,6 +78,8 @@ export type ExecutionAccess = {
     conversationId: string | null,
   ): Promise<void>;
   requireFiles?: FileAccess;
+  // Binds host checks for retained sources, such as knowledge documents, to an admission transaction.
+  bindSourceAuthorization?: <X extends TableTransaction>(tx: X, requester: HumanActor) => X;
   requireImportReference?: (
     tx: TableTransaction,
     actor: HumanActor,
@@ -112,7 +114,8 @@ async function load(tx: TableTransaction, proposalId: string) {
   return row.manifest;
 }
 
-async function admit(tx: TableTransaction, manifest: ProposalManifest, plan: ReviewedPlan, access: ExecutionAccess) {
+async function admit(held: TableTransaction, manifest: ProposalManifest, plan: ReviewedPlan, access: ExecutionAccess) {
+  const tx = access.bindSourceAuthorization?.(held, manifest.requester) ?? held;
   await requireNoMcpDerived(tx, [...manifest.sources, ...plan.importSources]);
   await currentMember(tx, manifest.requester);
   if (

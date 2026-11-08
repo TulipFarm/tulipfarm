@@ -14,7 +14,7 @@ import { z } from 'zod';
 import { workspaceTableMigrations } from '@tulipfarm/workspaces/table-migrations';
 import { createInvitationExpirySweep } from '@tulipfarm/workspaces/invitation-expiry';
 import { createTableExecution } from '@tulipfarm/tables/execution';
-import { requireTableSources, requireTableFiles, requireTableImportReference } from '@tulipfarm/agents/table-sources';
+import { tableExecutionAccess } from './table-access.ts';
 import { createTableCleanupMaintenance } from './table-cleanup.ts';
 
 // Bare package names in TULIPFARM_EXTENSIONS resolve from this app.
@@ -52,13 +52,8 @@ async function run() {
   const expiryTimer = setInterval(expire, 60_000);
   expiryTimer.unref();
   expire();
-  const access = {
-    requireSources: requireTableSources,
-    requireFiles: requireTableFiles,
-    requireImportReference: requireTableImportReference,
-  };
   const advanceTableProposal = createTableExecution({
-    ...access,
+    ...tableExecutionAccess,
     resolveMigrationCredential: async workspaceId => (await resolve(workspaceId)).connectionString,
   });
   let connection: NativeConnection | undefined;

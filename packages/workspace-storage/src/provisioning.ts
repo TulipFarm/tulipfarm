@@ -339,6 +339,10 @@ export async function verifyWorkspaceIsolation(client: SqlClient, workspaceId: s
             OR (p.proname = 'tf_table_file_allowed' AND pg_get_function_identity_arguments(p.oid) = 'member_id uuid, actor_user text, file_id uuid')
             OR (p.proname = 'tf_table_attachment_allowed' AND pg_get_function_identity_arguments(p.oid) = 'member_id uuid, actor_user text, chat_id uuid, attachment_id uuid, content_digest text')
             OR (p.proname = 'tf_table_import_result_allowed' AND pg_get_function_identity_arguments(p.oid) = 'member_id uuid, actor_user text, chat_id uuid, result_id uuid')))
+        AND NOT (n.nspname = $2 AND p.proowner = n.nspowner AND p.proname = 'tf_table_knowledge_sources'
+          AND p.prorettype = 'pg_catalog.jsonb'::regtype AND NOT p.proretset
+          AND p.proconfig = ARRAY['search_path=pg_catalog']
+          AND pg_get_function_identity_arguments(p.oid) = 'member_id uuid, actor_user text, source jsonb')
         AND NOT ($1 = $3 AND n.nspname = 'app' AND p.proname = 'invitation_delivery'
           AND pg_get_function_identity_arguments(p.oid) = 'workspace uuid, invitation uuid, action text, envelope jsonb, expiry timestamp with time zone'
           AND p.proowner = (SELECT nspowner FROM pg_namespace WHERE nspname = 'app'))

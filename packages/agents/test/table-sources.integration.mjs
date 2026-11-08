@@ -5,12 +5,23 @@ import { test } from 'node:test';
 import { fixture, connect, denied } from '../../workspace-storage/test/integration/fixture.mjs';
 import { workspaceTableMigrations } from '@tulipfarm/workspaces/table-migrations';
 import {
+  bindTableKnowledgeSources,
   requireTableSources,
   requireTableFiles,
   requireTableImportAttachment,
   requireTableImportReference,
 } from '../src/table-sources.ts';
 import { createTableImports } from '@tulipfarm/tables/imports';
+import { createTableProposals, createTableProposalDecisions } from '@tulipfarm/tables/proposals';
+import { createTableExecution, createTablePublication } from '@tulipfarm/tables/execution';
+import { generationProposalData } from '@tulipfarm/tables/store';
+import { createFiles } from '@tulipfarm/files';
+import {
+  createKnowledgeAgentTools,
+  createLocalKnowledge,
+  withKnowledgeSourceAuthorization,
+} from '@tulipfarm/knowledge';
+import { conversationFixture } from '../../conversations/test/fixture.mjs';
 
 test('table execution source bridge exposes authority, not conversations, file metadata, or provider credentials', async t => {
   const db = await fixture();
@@ -257,3 +268,199 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
   await db.platform.query(`UPDATE ${s}.tf_memberships SET removed_at=now() WHERE id=$1`, [ws.membershipId]);
   await assert.rejects(requireTableSources(tx, actor, [{ kind: 'private-conversation', conversationId: chat }]));
 });
+
+test(
+  'approved table changes apply with the knowledge documents their requester can still read',
+  { timeout: 120000 },
+  async t => {
+    const f = await conversationFixture();
+    t.after(() => f.close());
+    const w = f.workspace,
+      s = `"${w.names.schema}"`,
+      team = randomUUID(),
+      other = randomUUID(),
+      otherUser = `user-${randomUUID()}`,
+      actor = { kind: 'human', userId: w.userId, membershipId: w.membershipId };
+    await f.db.platform.query(`INSERT INTO ${s}.tf_teams(id,name) VALUES($1,'Support')`, [team]);
+    await f.db.platform.query(`INSERT INTO ${s}.tf_memberships(id,user_id,role) VALUES($1,$2,'admin')`, [
+      other,
+      otherUser,
+    ]);
+    await f.db.platform.query(`UPDATE ${s}.tf_soul_head SET revision=$1`, ['a'.repeat(40)]);
+    const runtime = withKnowledgeSourceAuthorization(f.runtime);
+    const objects = new Map(),
+      files = createFiles(f.runtime, {
+        putIfAbsent: async (key, body) => {
+          if (!objects.has(key)) objects.set(key, Buffer.from(body));
+        },
+        read: async key => Buffer.from(objects.get(key)),
+      });
+    const local = createLocalKnowledge({ runtime: f.runtime, files });
+    const chatAccess = { requireSources: requireTableSources };
+    const proposals = createTableProposals({ runtime, ...chatAccess, data: generationProposalData });
+    const decisions = createTableProposalDecisions({
+      runtime,
+      ...chatAccess,
+      data: generationProposalData,
+      resolveConfirmationCredential: async () => f.db.login(w, 'confirmation'),
+    });
+    // The access the storage and authoring workers pass to execution and publication.
+    const workerAccess = {
+      requireSources: requireTableSources,
+      requireFiles: requireTableFiles,
+      requireImportReference: requireTableImportReference,
+      bindSourceAuthorization: bindTableKnowledgeSources,
+    };
+    const advance = createTableExecution({
+      ...workerAccess,
+      resolveMigrationCredential: async () => f.db.login(w, 'migration'),
+    });
+    let commits = 0;
+    const publish = createTablePublication({
+      runtime: f.runtime,
+      ...workerAccess,
+      prepareRevision: async input => ({
+        commit: (++commits).toString(16).padStart(40, '1'),
+        parentCommit: input.expectedParentCommit,
+        bundle: { key: `test/${input.commandId}`, sha256: 'b'.repeat(64) },
+        projection: { definition: input.definition },
+      }),
+    });
+    const chat = randomUUID(),
+      message = randomUUID(),
+      turn = randomUUID();
+    await f.db.platform.query(
+      `INSERT INTO ${s}.tf_conversations(id,owner_user_id,owner_membership_id) VALUES($1,$2,$3)`,
+      [chat, w.userId, w.membershipId],
+    );
+    await f.db.platform.query(
+      `INSERT INTO ${s}.tf_conversation_messages(id,conversation_id,sequence,author_kind,membership_id) VALUES($1,$2,1,'human',$3)`,
+      [message, chat, w.membershipId],
+    );
+    await f.db.platform.query(
+      `INSERT INTO ${s}.tf_conversation_turns(id,conversation_id,source_message_id,accepted_sequence) VALUES($1,$2,$3,1)`,
+      [turn, chat, message],
+    );
+    const note = async title => {
+      const saved = await local.save(w.id, w.userId, {
+        commandId: randomUUID(),
+        documentId: randomUUID(),
+        expectedRevisionId: null,
+        title,
+        input: { kind: 'note', text: 'Contacts: Ada, Grace.' },
+      });
+      for (const work of await local.due(w.id)) await local.process(work);
+      const publication = (
+        await f.db.platform.query(`SELECT id FROM ${s}.tf_knowledge_publications WHERE document_id=$1`, [
+          saved.documentId,
+        ])
+      ).rows[0].id;
+      const read = await createKnowledgeAgentTools({ runtime, search: undefined }).read(
+        w.id,
+        actor,
+        `${publication}:0`,
+      );
+      assert.deepEqual(
+        read.sources.map(source => source.kind),
+        ['knowledge-document'],
+      );
+      return { ...saved, sources: read.sources };
+    };
+    const approved = async (label, sources) => {
+      const id = randomUUID();
+      const proposal = await proposals.propose(
+        w.id,
+        actor,
+        randomUUID(),
+        { conversationId: chat, turnId: turn, sources },
+        {
+          plans: [
+            {
+              kind: 'schema',
+              tableId: id,
+              dependsOn: [],
+              expectedRevision: null,
+              target: {
+                formatVersion: 2,
+                id,
+                owningTeamId: team,
+                label,
+                fields: [{ id: randomUUID(), label: 'Name', kind: 'text', required: false, maxLength: 200 }],
+                uniqueKeys: [],
+              },
+              transforms: { outputs: [] },
+            },
+          ],
+        },
+      );
+      await decisions.decide(w.id, w.userId, chat, proposal.id, {
+        digest: proposal.digest,
+        commandId: randomUUID(),
+        decision: 'approve',
+      });
+      return proposal;
+    };
+    const finish = async proposal => {
+      for (let i = 0; i < 100; i++) {
+        const status = await advance(w.id, proposal.id);
+        if (status === 'publish') await publish(w.id, proposal.id);
+        else if (status !== 'more' && status !== 'wait') return status;
+      }
+      assert.fail('execution did not converge');
+    };
+    const receipt = async proposal =>
+      (await proposals.status(w.id, w.userId, chat, proposal.id)).plans?.[0]?.receipt?.code ?? null;
+    const citing = async (doc, membershipId) =>
+      f.db.platform.query(`UPDATE ${s}.tf_knowledge_revisions SET sources=$2 WHERE id=$1`, [
+        doc.revisionId,
+        JSON.stringify([{ kind: 'personal-memory', membershipId }]),
+      ]);
+
+    await t.test('a readable note applies', async () => {
+      const proposal = await approved('Contacts', (await note('Supplier contacts')).sources);
+      assert.equal(await finish(proposal), 'completed');
+    });
+
+    await t.test('a note removed after approval is denied', async () => {
+      const doc = await note('Old contacts');
+      const proposal = await approved('Old contacts', doc.sources);
+      await local.remove(w.id, w.userId, {
+        commandId: randomUUID(),
+        documentId: doc.documentId,
+        expectedRevisionId: doc.revisionId,
+      });
+      assert.equal(await finish(proposal), 'blocked');
+      assert.equal(await receipt(proposal), 'access-denied');
+    });
+
+    await t.test('another member, even an admin, cannot use someone’s note', async () => {
+      const [source] = (await note('Private contacts')).sources;
+      const check = async (membershipId, userId) =>
+        (
+          await f.db.platform.query(`SELECT ${s}.tf_table_knowledge_sources($1,$2,$3) AS sources`, [
+            membershipId,
+            userId,
+            source,
+          ])
+        ).rows[0].sources;
+      assert.deepEqual(await check(w.membershipId, w.userId), []);
+      assert.equal(await check(other, otherUser), null);
+      assert.equal(await check(w.membershipId, otherUser), null);
+    });
+
+    await t.test('a note derived from the requester’s own memory applies', async () => {
+      const doc = await note('My contacts');
+      const proposal = await approved('My contacts', doc.sources);
+      await citing(doc, w.membershipId);
+      assert.equal(await finish(proposal), 'completed');
+    });
+
+    await t.test('a note derived from another member’s memory is denied', async () => {
+      const doc = await note('Their contacts');
+      const proposal = await approved('Their contacts', doc.sources);
+      await citing(doc, other);
+      assert.equal(await finish(proposal), 'blocked');
+      assert.equal(await receipt(proposal), 'access-denied');
+    });
+  },
+);
