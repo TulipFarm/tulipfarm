@@ -19,7 +19,14 @@ const list = (item: string, max: number) =>
 /** Links keep the applied filter as canonical RSQL. Longer filters stay usable but are refused for links rather than truncated. */
 export const linkQueryCharacters = 4000;
 export const legacyOps = ['eq', 'ne', 'lt', 'lte', 'gt', 'gte', 'is-null', 'not-null'] as const;
-export const tableListSearchSchema = z.object({ q: typed(255) });
+export const tableListSorts = ['name', '-name', 'records', '-records', 'changed', '-changed'] as const;
+export type TableListOrder = (typeof tableListSorts)[number];
+/** Name A–Z is the default order, so it is left out of links. */
+export const tableListSearchSchema = z.object({
+  q: typed(255),
+  archived: z.literal(true).optional().catch(undefined),
+  sort: z.enum(tableListSorts).exclude(['name']).optional().catch(undefined),
+});
 export type TableListSearch = z.infer<typeof tableListSearchSchema>;
 export const tableRowsSearchSchema = z.object({
   row: z.uuid().optional().catch(undefined),

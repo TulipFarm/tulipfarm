@@ -39,6 +39,7 @@ export const definitionStateSchema = z.object({
     .object({ revision: z.string(), definition: definitionSchema, appliedAt: z.iso.datetime().nullable() })
     .nullable(),
   rowPermissions: z.object({ create: z.boolean(), update: z.boolean(), delete: z.boolean() }),
+  archived: z.boolean(),
   canArchive: z.boolean(),
 });
 
@@ -146,16 +147,17 @@ export function createTableSchemaHistory(options: TableProposalOptions) {
           delete: await canAccessTable(tx, actor, tableId, 'table.row.delete'),
         };
         const memberTableId = (await workspaceMembersTable(tx))?.coreDefinition.id;
+        const archived = !!(
+          await tx.client.query(
+            `SELECT 1 FROM "${tx.schema}".tf_table_catalog WHERE id=$1 AND archived_at IS NOT NULL`,
+            [tableId],
+          )
+        ).rowCount;
         const canArchive =
           applied !== null &&
           tableId !== memberTableId &&
           tx.commonVersion >= pageArchiveVersion &&
-          !(
-            await tx.client.query(
-              `SELECT 1 FROM "${tx.schema}".tf_table_catalog WHERE id=$1 AND archived_at IS NOT NULL`,
-              [tableId],
-            )
-          ).rowCount &&
+          !archived &&
           (await canAccessTable(tx, actor, tableId, 'table.schema.manage'));
         return {
           id: tableId,
@@ -169,6 +171,7 @@ export function createTableSchemaHistory(options: TableProposalOptions) {
               }
             : null,
           rowPermissions,
+          archived,
           canArchive,
         };
       });

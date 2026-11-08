@@ -53,6 +53,7 @@ const definitionStateSchema = z.object({
   rowPermissions: z
     .object({ create: z.boolean(), update: z.boolean(), delete: z.boolean() })
     .default({ create: false, update: false, delete: false }),
+  archived: z.boolean().default(false),
   canArchive: z.boolean().default(false),
 });
 export type ArchiveStatus = z.infer<typeof proposalStatusSchema>;

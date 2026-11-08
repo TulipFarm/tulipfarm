@@ -55,6 +55,7 @@ const fileFieldId = randomUUID(),
   missingCustomerId = randomUUID();
 const linkId = randomUUID(),
   customerId = randomUUID(),
+  archivedTableId = randomUUID(),
   customerRecordId = randomUUID(),
   customerNameId = randomUUID(),
   tagsId = randomUUID(),
@@ -157,6 +158,7 @@ const view = {
   },
 };
 const listSearches = [],
+  listRequests = [],
   writes = [],
   effectRequests = [],
   recordWrites = [],
@@ -441,19 +443,36 @@ try {
       if (listStatus !== 200) return route.fulfill({ status: listStatus, json: { error: 'proposal-unavailable' } });
       const search = url.searchParams.get('search')?.toLowerCase();
       if (search) listSearches.push(search);
+      const archived = url.searchParams.get('archived') === 'true',
+        sort = url.searchParams.get('sort'),
+        direction = url.searchParams.get('direction');
+      listRequests.push({ search: search ?? null, archived, sort, direction });
+      const tables = archived
+        ? [
+            {
+              id: archivedTableId,
+              revision: 'e'.repeat(40),
+              definition: { ...customerDefinition, id: archivedTableId, label: 'Old invoices' },
+              appliedAt: null,
+              recordCount: '40',
+            },
+          ]
+        : [
+            { id: tableId, revision: 'a'.repeat(40), definition, appliedAt: null, recordCount: '3' },
+            {
+              id: customerId,
+              revision: 'c'.repeat(40),
+              definition: customerDefinition,
+              appliedAt: null,
+              recordCount: '12',
+            },
+          ];
+      if (sort === 'records') tables.sort((a, b) => Number(a.recordCount) - Number(b.recordCount));
+      if (direction === 'desc') tables.reverse();
       json = {
         tables: emptyList
           ? []
-          : [
-              { id: tableId, revision: 'a'.repeat(40), definition, appliedAt: null, recordCount: '3' },
-              {
-                id: customerId,
-                revision: 'c'.repeat(40),
-                definition: customerDefinition,
-                appliedAt: null,
-                recordCount: '12',
-              },
-            ].filter(table => !search || table.definition.label.toLowerCase().includes(search)),
+          : tables.filter(table => !search || table.definition.label.toLowerCase().includes(search)),
         nextCursor: null,
       };
     } else if (path.includes(`/tables/${tableId}/archive/`)) {
@@ -899,6 +918,34 @@ try {
   await page.getByText('Support tickets', { exact: true }).waitFor();
   assert.equal(new URL(page.url()).searchParams.has('q'), false);
   assert.equal(await page.getByLabel('Search tables', { exact: true }).inputValue(), '');
+  const tablesFirst = name =>
+    page.waitForFunction(
+      first => document.querySelector('ul[aria-label^="Tables,"] > li')?.getAttribute('aria-label') === first,
+      name,
+    );
+  const sortTables = page.getByRole('combobox', { name: 'Sort tables', exact: true });
+  await sortTables.click();
+  await page.getByRole('option', { name: 'Most records', exact: true }).click();
+  await page.waitForURL(url => url.searchParams.get('sort') === '-records');
+  await tablesFirst('Customers');
+  assert.deepEqual(listRequests.at(-1), { search: null, archived: false, sort: 'records', direction: 'desc' });
+  await page.getByRole('button', { name: 'Archived', exact: true }).click();
+  await page.waitForURL(
+    url => url.searchParams.get('archived') === 'true' && url.searchParams.get('sort') === '-records',
+  );
+  await page.getByText('Old invoices', { exact: true }).waitFor();
+  assert.equal(await page.getByText('Support tickets', { exact: true }).count(), 0, 'Archived hides active tables');
+  assert.deepEqual(listRequests.at(-1), { search: null, archived: true, sort: 'records', direction: 'desc' });
+  await page.getByLabel('Search tables', { exact: true }).fill('missing');
+  await page.getByText('No archived tables match “missing”', { exact: true }).waitFor();
+  assert.deepEqual(listRequests.at(-1), { search: 'missing', archived: true, sort: 'records', direction: 'desc' });
+  await page.reload();
+  await page.getByText('No archived tables match “missing”', { exact: true }).waitFor();
+  assert.equal(await page.getByRole('button', { name: 'Archived', exact: true }).getAttribute('aria-pressed'), 'true');
+  assert.equal(await sortTables.textContent(), 'Most records', 'Reload keeps the sort');
+  await page.goto(`${origin}/acme/tables`);
+  await tablesFirst('Support tickets');
+  assert.deepEqual(listRequests.at(-1), { search: null, archived: false, sort: 'name', direction: 'asc' });
   listStatus = 503;
   const beforeFocus = tableReads.length;
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));

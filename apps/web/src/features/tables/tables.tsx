@@ -55,6 +55,9 @@ import {
   type TableApi,
 } from './api';
 import { rowTotal, useUrlDraft } from './row-query';
+import type { TableListOrder, TableListSearch } from './table-search';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@tulipfarm/sprout/select';
+import { ToggleGroup, ToggleGroupItem } from '@tulipfarm/sprout/toggle-group';
 import { rowLabel } from './definition-view';
 import { workspaceMemberFields } from '@tulipfarm/tables/workspace-members';
 import {
@@ -86,6 +89,18 @@ const noControlShadow = { '--sprout-shadow-control': 'none' } as CSSProperties;
 
 const byName: TableListSort = { by: 'name', direction: 'asc' };
 const recordCountLabel = (count: string) => (/^\d+$/.test(count) ? Number(count).toLocaleString('en-US') : count);
+const listOrders: ReadonlyArray<{ value: TableListOrder; label: string }> = [
+  { value: 'name', label: 'Name A–Z' },
+  { value: '-name', label: 'Name Z–A' },
+  { value: '-records', label: 'Most records' },
+  { value: 'records', label: 'Fewest records' },
+  { value: '-changed', label: 'Recently changed' },
+  { value: 'changed', label: 'Least recently changed' },
+];
+const listSort = (order: TableListOrder): TableListSort => ({
+  by: order.replace(/^-/, '') as TableListSort['by'],
+  direction: order.startsWith('-') ? 'desc' : 'asc',
+});
 
 export function TableList({
   workspaceId,
@@ -95,27 +110,66 @@ export function TableList({
 }: {
   workspaceId: string;
   workspaceSlug: string;
-  search: string;
-  changeSearch: (search: string) => void;
+  search: TableListSearch;
+  changeSearch: (next: Partial<TableListSearch>) => void;
 }) {
   const api = useMemo(() => tableApi(workspaceId), [workspaceId]);
-  const query = search.trim();
-  const pages = useCursorPages(query);
-  const [draft, setDraft] = useUrlDraft(search, changeSearch);
-  const read = useTableList(api, pages.after, query || undefined, byName);
+  const query = (search.q ?? '').trim();
+  const archived = search.archived === true;
+  const order: TableListOrder = search.sort ?? 'name';
+  const sort = order === 'name' ? byName : listSort(order);
+  const pages = useCursorPages(JSON.stringify([query, archived, order]));
+  const [draft, setDraft] = useUrlDraft(search.q ?? '', q => changeSearch({ q: q || undefined }));
+  const read = useTableList(api, pages.after, query || undefined, sort, archived);
   const open = useNavigate();
+  const shelf = archived ? 'archived' : 'active';
   return (
     <section className="space-y-6">
       <PageHeader title="Tables" />
-      <div className="flex items-center justify-between gap-3">
-        <SearchField
-          id="table-search"
-          label="Search tables"
-          value={draft}
-          maxLength={255}
-          onChange={setDraft}
-          placeholder="Search tables"
-        />
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+          <SearchField
+            id="table-search"
+            label="Search tables"
+            value={draft}
+            maxLength={255}
+            onChange={setDraft}
+            placeholder="Search tables"
+          />
+          <ToggleGroup
+            aria-label="Show tables"
+            variant="outline"
+            size="sm"
+            spacing={0}
+            value={[shelf]}
+            onValueChange={value => {
+              const next = value[0];
+              if ((next === 'active' || next === 'archived') && next !== shelf)
+                changeSearch({ archived: next === 'archived' || undefined });
+            }}
+          >
+            <ToggleGroupItem value="active">Active</ToggleGroupItem>
+            <ToggleGroupItem value="archived">Archived</ToggleGroupItem>
+          </ToggleGroup>
+          <Select
+            value={order}
+            onValueChange={value => {
+              const next = listOrders.find(item => item.value === value)?.value;
+              if (next) changeSearch({ sort: next === 'name' ? undefined : next });
+            }}
+          >
+            <SelectTrigger size="sm" aria-label="Sort tables">
+              <SelectValue>{listOrders.find(item => item.value === order)?.label}</SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {listOrders.map(item => (
+                <SelectItem key={item.value} value={item.value}>
+                  {item.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
         <Button
           nativeButton={false}
           render={<Link to="/$workspaceSlug" params={{ workspaceSlug }} search={{ intent: 'create-table' }} />}
@@ -132,7 +186,7 @@ export function TableList({
                 <StatePanel
                   kind="empty"
                   icon={Database}
-                  title="No readable active tables on this page"
+                  title={`No readable ${shelf} tables on this page`}
                   description="Return to the previous page to see your tables."
                 >
                   <Button variant="outline" onClick={pages.previous}>
@@ -143,11 +197,22 @@ export function TableList({
                 <StatePanel
                   kind="empty"
                   icon={Database}
-                  title={`No tables match “${query}”`}
+                  title={`No ${archived ? 'archived ' : ''}tables match “${query}”`}
                   description="Search checks table names across this workspace. Try another name or clear the search."
                 >
-                  <Button variant="outline" onClick={() => changeSearch('')}>
+                  <Button variant="outline" onClick={() => changeSearch({ q: undefined })}>
                     Clear search
+                  </Button>
+                </StatePanel>
+              ) : archived ? (
+                <StatePanel
+                  kind="empty"
+                  icon={Database}
+                  title="No archived tables"
+                  description="Tables you archive appear here. Their fields and records are kept."
+                >
+                  <Button variant="outline" onClick={() => changeSearch({ archived: undefined })}>
+                    Show active tables
                   </Button>
                 </StatePanel>
               ) : (
@@ -227,23 +292,34 @@ export function TableDetail({
         <div className="space-y-6">
           <PageHeader
             title={state.applied?.definition.label ?? state.saved?.definition?.label ?? 'Table'}
-            parent={{ label: 'Tables', link: <Link to="/$workspaceSlug/tables" params={{ workspaceSlug }} /> }}
+            parent={{
+              label: 'Tables',
+              link: (
+                <Link
+                  to="/$workspaceSlug/tables"
+                  params={{ workspaceSlug }}
+                  search={state.archived ? { archived: true } : {}}
+                />
+              ),
+            }}
             actions={
               <>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  nativeButton={false}
-                  render={
-                    <Link
-                      to="/$workspaceSlug"
-                      params={{ workspaceSlug }}
-                      search={{ intent: 'edit-table', tableId: state.id }}
-                    />
-                  }
-                >
-                  Change fields in chat
-                </Button>
+                {!state.archived && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    nativeButton={false}
+                    render={
+                      <Link
+                        to="/$workspaceSlug"
+                        params={{ workspaceSlug }}
+                        search={{ intent: 'edit-table', tableId: state.id }}
+                      />
+                    }
+                  >
+                    Change fields in chat
+                  </Button>
+                )}
                 <TableMore state={state} api={api} workspace={workspace} disabled={busy} />
               </>
             }
@@ -256,7 +332,14 @@ export function TableDetail({
               </AlertDescription>
             </Alert>
           )}
-          {state.applied ? (
+          {state.archived ? (
+            <StatePanel
+              kind="empty"
+              icon={Database}
+              title="This table is archived"
+              description="Its fields and records are kept, but records can't be viewed or changed while the table is archived."
+            />
+          ) : state.applied ? (
             <Records
               key={`${workspace.id}/${state.id}`}
               workspace={workspace}
