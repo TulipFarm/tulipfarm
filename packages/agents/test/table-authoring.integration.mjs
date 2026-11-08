@@ -112,6 +112,9 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     const output = (await tools.invokeWithSources(context, { tool: 'tables.propose', input: JSON.stringify(input) }))
       .result;
     assert.equal(output.status, 'pending');
+    // A new table's review holds only its structure, so chat must not call it an import.
+    assert.equal(output.rowsIncluded, false);
+    assert.match(output.instruction, /holds no rows, so approving it imports nothing/);
     const review = await createChatTableProposals(runtime).read(ws.id, actor, conversationId, output.id);
     assert.equal(review.manifest.plans[0].effectCount, 0);
     assert.deepEqual(review.manifest.plans[0].after, input.plans[0].target);

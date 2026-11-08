@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { completionCheckEvidence, inferWithTools } from '../src/inference.ts';
+import { claimsActionOutcome, completionCheckEvidence, inferWithTools } from '../src/inference.ts';
 import { completionEvaluation, evaluationMessages } from './completion-evaluation-fixture.mjs';
 import {
   formats,
@@ -385,6 +385,52 @@ test('a reply that only updated Bud skips the completion check', async t => {
   assert.equal(requests.length, 2);
   assert.ok(!requests.some(isCompletionRequest));
   assert.deepEqual(outcomes, ['skipped_no_tools']);
+});
+
+test('a reply that reports an action outcome is checked even without a tool call', () => {
+  for (const text of [
+    'A review card is ready for you to approve the new orders table with the specified fields and CSV import.',
+    'The semicolon CSV import was denied.',
+    '8 rows created in the migrate table.',
+    'I created 8 rows.',
+    'I’ve proposed version 3 of the table.',
+    'Your changes are ready for your review.',
+  ])
+    assert.equal(claimsActionOutcome(text), true, text);
+  for (const text of ['Hello. How can I help?', 'You are welcome.', 'A row is one item in a table.'])
+    assert.equal(claimsActionOutcome(text), false, text);
+});
+
+test('a tool-free reply that claims rows were created is checked and sent back to do the work', async t => {
+  const outcomes = checkOutcomes(t);
+  const replies = [
+    nativeReply('azure', { text: '8 rows created.' }),
+    selectReply('azure', verdict('continue')),
+    nativeReply('azure', { calls: [use('tables.definitions')] }),
+    nativeReply('azure', { text: 'No table named migrate exists, so I added no rows.' }),
+    selectReply('azure', verdict('blocked')),
+  ];
+  const requests = [],
+    executed = [];
+  t.mock.method(globalThis, 'fetch', async (_url, init) => {
+    requests.push(JSON.parse(init.body));
+    return Response.json(replies.shift());
+  });
+  const result = await inferWithTools(
+    nativeRoutes.azure,
+    [{ role: 'user', text: 'Add 8 rows to the migrate table.' }],
+    async call => {
+      executed.push(call.tool);
+      return { tables: [] };
+    },
+  );
+  assert.equal(result.text, 'No table named migrate exists, so I added no rows.');
+  assert.deepEqual(executed, ['tables.definitions']);
+  assert.equal(replies.length, 0);
+  const evidence = JSON.parse(requests[1].messages.at(-1).content);
+  assert.equal(evidence.candidate, '8 rows created.');
+  assert.match(requests[1].messages[0].content, /new review card, proposal or proposal version, approval, denial/);
+  assert.deepEqual(outcomes, ['continue', 'done']);
 });
 
 test('a reply with a real tool call still runs the check, and continue starts another round', async t => {

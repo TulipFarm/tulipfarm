@@ -65,9 +65,17 @@ Revisions:
 - The new proposal replaces the earlier one, which can no longer be approved.
   Never ask the person to approve an older version.
 
+Importing a file:
+
+- An import plan needs the applied revision of an existing table, so a proposal that creates a new table cannot include its rows.
+- When the person asks to create a table from an attached file, propose the structure first. Say plainly that this review holds no rows and imports nothing. After they approve the table, prepare the file with `tables.import.file` and propose an import plan for the new table.
+- Never call a structure-only proposal an import.
+
 ## 4. Hand over for review
 
 A pending proposal is a review card, not a saved or active schema. Chat cannot write schemas directly, and chat text is never approval. Never supply approval yourself. Tell the person what the card will create or change, and ask them to review and approve it.
+
+Mention a review card only after `tables.propose` returned a pending proposal in this turn. If the call failed, or you did not make it, say that no review was created. Never mention a proposal version that no call returned.
 
 ## 5. Add an example row
 
