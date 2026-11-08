@@ -245,7 +245,7 @@ export function MemberProfilePanel({
               {notice}
             </p>
           )}
-          <RecordMutationFeedback mutation={write} refresh={reload} />
+          <RecordMutationFeedback mutation={write} />
         </div>
       </SheetContent>
     </Sheet>

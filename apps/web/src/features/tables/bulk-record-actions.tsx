@@ -231,7 +231,6 @@ export function BulkRecordDelete({
               disabled={blocked}
               done={() => setDeleted(count => count + 1)}
               busy={setSending}
-              refresh={refresh}
             />
           )}
           <AlertDialogFooter>
@@ -256,14 +255,12 @@ function BulkDeleteStep({
   disabled,
   done,
   busy,
-  refresh,
 }: {
   input: RecordMutation;
   api: TableApi;
   disabled: boolean;
   done: () => void;
   busy: (value: boolean) => void;
-  refresh: () => Promise<void>;
 }) {
   const mutation = useRecordMutation(api, done);
   const started = useRef(false);
@@ -291,7 +288,7 @@ function BulkDeleteStep({
       {mutation.state.kind === 'rejected' && (
         <p className="text-sm">Deletion stopped. No further rows will be deleted.</p>
       )}
-      <RecordMutationFeedback mutation={mutation} refresh={refresh} />
+      <RecordMutationFeedback mutation={mutation} />
     </div>
   );
 }

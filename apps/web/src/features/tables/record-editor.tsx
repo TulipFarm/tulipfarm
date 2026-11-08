@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from '@tanstack/react-router';
 import { Button } from '@tulipfarm/sprout/button';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { Form, FormFooter } from '@tulipfarm/sprout/form';
@@ -18,11 +19,12 @@ import { RecordMutationFeedback, useRecordMutation } from './record-mutation';
 import {
   changedValues,
   compatibleRowValues,
-  rejectedFieldMessage,
+  rejectionMessage,
   rowFieldsChanged,
   validateRowDraft,
 } from './record-validation';
 import { rowLabel } from './definition-view';
+import { queryDefinition, uniqueKeyWhere } from './table-view';
 import { useWorkspaceMembers } from './hooks';
 import { MemberPhoto } from './member-profile';
 import { workspaceMemberAccess, workspaceMemberFields } from '@tulipfarm/tables/workspace-members';
@@ -48,7 +50,8 @@ export function RecordEditor({
   repair?: WorkspaceMemberState;
   disabled: boolean;
   close: () => void;
-  saved: () => void;
+  /** Receives the saved row's ID. */
+  saved: (recordId: string) => void;
   refresh: () => Promise<void>;
 }) {
   const isMember = table.systemKind === 'workspace-members';
@@ -69,10 +72,20 @@ export function RecordEditor({
   const [reviewRevision, setReviewRevision] = useState<string | null>(null);
   const [validated, setValidated] = useState(false);
   const [confirmClose, setConfirmClose] = useState(false);
-  const write = useRecordMutation(api, saved, fieldId =>
-    rejectedFieldMessage(table.definition, fieldId, values[fieldId]),
+  const write = useRecordMutation(
+    api,
+    () => saved(recordId),
+    rejection => rejectionMessage(table.definition, rejection, values),
   );
   const uncertain = write.state.kind === 'uncertain';
+  // A new tab keeps this draft open while the person compares it with the row that has the same unique values.
+  const conflictWhere =
+    write.state.kind === 'rejected' && write.state.conflict && 'values' in write.state.conflict.input
+      ? uniqueKeyWhere(queryDefinition(table.definition), write.state.conflict.fieldIds, {
+          ...initial,
+          ...write.state.conflict.input.values,
+        })
+      : '';
   const sending = write.state.kind === 'sending';
   const locked = disabled || sending || uncertain;
   const fieldsChanged = rowFieldsChanged(reviewedDefinition, table.definition);
@@ -248,7 +261,21 @@ export function RecordEditor({
                         : { kind: 'ready' },
                   }}
                 >
-                  <RecordMutationFeedback mutation={write} refresh={refresh} />
+                  <RecordMutationFeedback mutation={write}>
+                    {conflictWhere && (
+                      <p className="text-sm underline">
+                        <Link
+                          to="/$workspaceSlug/tables/$tableId"
+                          params={{ workspaceSlug: workspace.slug, tableId: table.id }}
+                          search={{ where: conflictWhere }}
+                          target="_blank"
+                          rel="noopener"
+                        >
+                          Open the existing row<span className="sr-only"> in a new tab</span>
+                        </Link>
+                      </p>
+                    )}
+                  </RecordMutationFeedback>
                   {disabled && !sending && !uncertain && (
                     <Button variant="outline" onClick={() => void refresh()}>
                       Reload table

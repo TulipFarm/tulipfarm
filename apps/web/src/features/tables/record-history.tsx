@@ -16,7 +16,7 @@ import { rowTitle } from './definition-view';
 import { TableRead, UnsavedChanges } from './feedback';
 import { useLinkedRows, useTableRowHistory, useWorkspaceMembers } from './hooks';
 import { RecordMutationFeedback, useRecordMutation } from './record-mutation';
-import { rejectedFieldMessage, restoreIssues } from './record-validation';
+import { rejectionMessage, restoreIssues } from './record-validation';
 import type { DeletedRecord, RecordHistoryEntry, RowPermissions, TableDataRow, TableDefinition, TableApi } from './api';
 
 const actorSchema = z.discriminatedUnion('kind', [
@@ -64,8 +64,8 @@ export function RecordHistory({
       ? selection.entry.before_values
       : selection.entry.values
     : null;
-  const mutation = useRecordMutation(api, saved, fieldId =>
-    rejectedFieldMessage(table.definition, fieldId, (restoredValues ?? values ?? {})[fieldId]),
+  const mutation = useRecordMutation(api, saved, rejection =>
+    rejectionMessage(table.definition, rejection, restoredValues ?? values ?? {}),
   );
   const locked =
     disabled || mutation.locked || read.state.kind !== 'ready' || !!read.state.error || read.state.refreshing;
@@ -409,7 +409,7 @@ export function RecordHistory({
           )}
         </section>
       )}
-      <RecordMutationFeedback mutation={mutation} refresh={refresh} />
+      <RecordMutationFeedback mutation={mutation} />
     </section>
   );
 }

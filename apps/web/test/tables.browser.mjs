@@ -1449,7 +1449,7 @@ try {
   await historyPanel.getByText(/This row is deleted/).waitFor();
   for (const [code, message] of [
     ['recovery-expired', /These historical values are no longer recoverable/],
-    ['duplicate-key', /conflict with an existing unique row/],
+    ['duplicate-key', /Another row already has these values/],
     ['proposal-unavailable', /This table or a referenced file is missing/],
   ]) {
     restoreError = code;

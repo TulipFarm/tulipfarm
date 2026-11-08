@@ -38,6 +38,30 @@ const kindNames: Record<TableField['kind'], string> = {
   file: 'files',
 };
 
+/** Asks for a missing required value the way the field takes it: typed, chosen or attached. */
+function requiredMessage(field: TableField): string {
+  const label = field.label.toLowerCase();
+  switch (field.kind) {
+    case 'text':
+    case 'numeric':
+      return `Enter ${label}.`;
+    case 'boolean':
+      return `Choose Yes or No for ${label}.`;
+    case 'date':
+      return `Choose a date for ${label}.`;
+    case 'timestamp':
+      return `Choose a date and time for ${label}.`;
+    case 'single-select':
+      return `Choose an option for ${label}.`;
+    case 'multi-select':
+      return `Choose at least one option for ${label}.`;
+    case 'relationship':
+      return `Choose a linked row for ${label}.`;
+    case 'file':
+      return `Attach a file for ${label}.`;
+  }
+}
+
 /** Explains why the current field rejects a value, or returns null when the value fits. */
 export function fieldValueIssue(field: TableField, value: TableValue | undefined): string | null {
   const saved = value ?? null;
@@ -72,6 +96,27 @@ export function rejectedFieldMessage(definition: TableDefinition, fieldId: strin
     ? (fieldValueIssue(field, value) ?? `This ${field.label} value doesn't fit the field. ${fieldHint(field)}`)
     : 'A field in these values was removed.';
   return `Not saved. ${reason} Nothing was changed.`;
+}
+
+/** Names the fields of a unique key that another row already uses. */
+export function uniqueConflictMessage(definition: TableDefinition, fieldIds: string[]): string | undefined {
+  const labels = fieldIds.flatMap(id => definition.fields.find(field => field.id === id)?.label ?? []);
+  if (!labels.length || labels.length !== fieldIds.length) return undefined;
+  if (labels.length === 1) return `Not saved. Another row already has this ${labels[0]}.`;
+  const list = `${labels.slice(0, -1).join(', ')} and ${labels.at(-1)}`;
+  return `Not saved. Another row already has this combination of ${list}.`;
+}
+
+/** Explains a confirmed rejection that names fields, or returns undefined to keep the general message. */
+export function rejectionMessage(
+  definition: TableDefinition,
+  rejection: { code: string; fieldId?: string | undefined; fieldIds?: string[] | undefined },
+  values: TableValues,
+): string | undefined {
+  if (rejection.code === 'duplicate-key' && rejection.fieldIds?.length)
+    return uniqueConflictMessage(definition, rejection.fieldIds);
+  if (rejection.fieldId) return rejectedFieldMessage(definition, rejection.fieldId, values[rejection.fieldId]);
+  return undefined;
 }
 
 export function changedValues(values: TableValues, initial: TableValues): TableValues {
@@ -130,7 +175,7 @@ export function validateRowDraft(
         (value.kind === 'file' && !value.fileIds.length);
       errors[field.id] =
         field.required && empty
-          ? `Enter ${field.label.toLowerCase()}.`
+          ? requiredMessage(field)
           : field.kind === 'numeric'
             ? `Enter a decimal number. ${fieldHint(field)}`
             : field.kind === 'text'

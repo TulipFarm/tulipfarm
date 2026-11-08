@@ -5,11 +5,14 @@ import {
   changedValues,
   compatibleRowValues,
   rejectedFieldMessage,
+  rejectionMessage,
   restoreIssues,
   rowFieldsChanged,
   validateRowDraft,
 } from '../src/features/tables/record-validation.ts';
 import { reviewedPlanSchema } from '../src/features/tables/review-contracts.ts';
+import { uniqueKeyWhere } from '../src/features/tables/table-view.ts';
+import { failedWrite, TableRequestError } from '../src/features/tables/request-state.ts';
 import type { TableDefinition, TableField, TableValue } from '../src/features/tables/review-contracts.ts';
 import {
   workspaceMembersDefinition,
@@ -262,4 +265,52 @@ test('restoring values from before a type change names each field the current fi
     'Not saved. Start holds a date and time now, but this value is text. Nothing was changed.',
   );
   assert.match(rejectedFieldMessage(table, owner.id, { kind: 'text', value: 'Cher' }), /^Not saved\. .*Owner/);
+});
+
+test('a missing required value asks for a choice when the field is chosen, not typed', () => {
+  const active: TableField = { ...base, label: 'Active', kind: 'boolean', required: true };
+  const code: TableField = { ...base, id: randomUUID(), label: 'Code', kind: 'text', maxLength: 20, required: true };
+  const status: TableField = { ...select, id: randomUUID(), label: 'Status', required: true };
+  const table = { ...definition(active), fields: [active, code, status] };
+  assert.deepEqual(validateRowDraft(table, {}), {
+    [id]: 'Choose Yes or No for active.',
+    [code.id]: 'Enter code.',
+    [status.id]: 'Choose an option for status.',
+  });
+});
+
+test('a unique conflict names the clashing fields and points to the row that has them', () => {
+  const name: TableField = { ...base, label: 'Name', kind: 'text', maxLength: 80 };
+  const region: TableField = { ...select, id: randomUUID(), label: 'Region' };
+  const table = { ...definition(name), fields: [name, region] };
+  const values = {
+    [id]: { kind: 'text', value: 'Acme "West"' },
+    [region.id]: { kind: 'single-select', optionId: option },
+  } satisfies Record<string, TableValue>;
+  assert.equal(
+    rejectionMessage(table, { code: 'duplicate-key', fieldIds: [id] }, values),
+    'Not saved. Another row already has this Name.',
+  );
+  assert.equal(
+    rejectionMessage(table, { code: 'duplicate-key', fieldIds: [id, region.id] }, values),
+    'Not saved. Another row already has this combination of Name and Region.',
+  );
+  assert.equal(
+    rejectionMessage(table, { code: 'duplicate-key', fieldIds: [randomUUID()] }, values),
+    undefined,
+    'A field this screen does not know keeps the general message',
+  );
+  const where = uniqueKeyWhere(table, [id, region.id], values);
+  assert.match(where, /Acme/);
+  assert.match(where, /Region/i);
+  assert.equal(uniqueKeyWhere(table, [id], {}), '', 'No link without the refused values');
+
+  const input = { values };
+  const rejected = failedWrite(input, new TableRequestError(409, 'duplicate-key', 'Taken', undefined, [id]));
+  assert.deepEqual(rejected, { kind: 'rejected', message: 'Taken', conflict: { fieldIds: [id], input } });
+  assert.equal(
+    failedWrite(input, new TypeError('offline')).kind,
+    'uncertain',
+    'Only unconfirmed outcomes are uncertain',
+  );
 });

@@ -443,7 +443,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       },
       { id: numericField, kind: 'numeric', label: 'Amount', required: false, precision: 3, scale: 0 },
     ],
-    uniqueKeys: [],
+    uniqueKeys: [{ id: randomUUID(), fieldIds: [numericField], nulls: 'distinct' }],
   };
   const validationMigration = await connect(db.login(workspace, 'migration'));
   try {
@@ -504,6 +504,28 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       status: 'unknown',
     });
   }
+  const duplicate = await app.inject({
+    method: 'POST',
+    url: `${validationBase}/rows`,
+    headers,
+    payload: {
+      requestId: randomUUID(),
+      kind: 'create',
+      tableId: validationTable,
+      revision: validationRevision,
+      recordId: randomUUID(),
+      values: {
+        [multiField]: { kind: 'multi-select', optionIds: [option] },
+        [numericField]: { kind: 'numeric', value: '999' },
+      },
+    },
+  });
+  assert.equal(duplicate.statusCode, 409, duplicate.body);
+  assert.deepEqual(
+    duplicate.json(),
+    { error: 'duplicate-key', fieldIds: [numericField] },
+    'A unique conflict names the key fields',
+  );
   const validationRecords = await app.inject({ url: `${validationBase}/rows?revision=${validationRevision}`, headers });
   assert.equal(validationRecords.statusCode, 200, validationRecords.body);
   assert.deepEqual(validationRecords.json()[0].values, {

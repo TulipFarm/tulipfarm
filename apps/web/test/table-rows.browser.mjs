@@ -749,6 +749,11 @@ try {
     0,
     'A confirmed rejection offers no blind retry',
   );
+  assert.equal(
+    await dialog.getByRole('button', { name: 'Check status again', exact: true }).count(),
+    0,
+    'A definite refusal is not presented as an unknown outcome',
+  );
   await dialog.getByRole('link', { name: 'View incoming linked rows', exact: true }).click();
   await dialog.waitFor({ state: 'detached' });
   await page.getByRole('region', { name: 'Incoming linked rows', exact: true }).waitFor();

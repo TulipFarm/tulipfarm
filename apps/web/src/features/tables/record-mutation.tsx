@@ -1,7 +1,6 @@
-import { useRef, useState } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 import { Button } from '@tulipfarm/sprout/button';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
-import { WriteFeedback } from './feedback';
 import { useTableWrite } from './use-table-write';
 import type { RecordMutation, TableApi } from './api';
 import { useTableChanges } from './changes';
@@ -10,11 +9,11 @@ import { TableRequestError } from './request-state';
 
 type ReceiptState = { kind: 'idle' | 'checking' | 'unknown' } | { kind: 'error'; message: string };
 
-/** `explain` turns a rejected field into a message that names the field and the reason. */
+/** `explain` turns a rejection that names fields into a message with those fields' labels, or returns undefined. */
 export function useRecordMutation(
   api: TableApi,
   saved: () => void,
-  explain?: (fieldId: string, input: RecordMutation) => string,
+  explain?: (error: TableRequestError, input: RecordMutation) => string | undefined,
 ) {
   const changes = useTableChanges();
   const receiptRead = useTableReceipt(api);
@@ -25,8 +24,9 @@ export function useRecordMutation(
       return result;
     } catch (error) {
       changes.denied(error, []);
-      if (error instanceof TableRequestError && error.fieldId && explain)
-        throw new TableRequestError(error.status, error.code, explain(error.fieldId, input), error.fieldId);
+      const message = error instanceof TableRequestError ? explain?.(error, input) : undefined;
+      if (error instanceof TableRequestError && message !== undefined)
+        throw new TableRequestError(error.status, error.code, message, error.fieldId, error.fieldIds);
       throw error;
     }
   }, saved);
@@ -66,15 +66,30 @@ export function useRecordMutation(
   };
 }
 
+/** A rejection is definite, so it explains what to change and never offers to check status; `children` adds next steps. */
 export function RecordMutationFeedback({
   mutation,
-  refresh,
+  children,
 }: {
   mutation: ReturnType<typeof useRecordMutation>;
-  refresh: () => Promise<void>;
+  children?: ReactNode;
 }) {
-  if (mutation.state.kind !== 'uncertain')
-    return <WriteFeedback state={mutation.state} checkStatus={() => void refresh()} />;
+  if (mutation.state.kind === 'rejected')
+    return (
+      <div className="space-y-3">
+        <Alert variant="destructive">
+          <AlertDescription>{mutation.state.message}</AlertDescription>
+        </Alert>
+        {children}
+      </div>
+    );
+  if (mutation.state.kind === 'sending')
+    return (
+      <p role="status" className="text-sm text-muted-foreground">
+        Submitting your operation…
+      </p>
+    );
+  if (mutation.state.kind !== 'uncertain') return null;
   return (
     <div className="space-y-3">
       <Alert variant="destructive">
