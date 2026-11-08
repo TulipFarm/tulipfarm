@@ -116,6 +116,7 @@ import {
   type CompactionError,
   type CompactionRecord,
   type ContextMeasure,
+  stoppedRequest,
   type ContextMessage,
   type ConversationCompactor,
   type EffectiveCompactionPolicy,
@@ -289,6 +290,7 @@ const historySchema = z.array(
     acceptedSequence: z.number().int(),
   }),
 );
+const priorHistorySchema = z.array(historySchema.element.extend({ stopped: z.boolean() }));
 
 type AnswerLayout = { input: ReplyRenderInput } | { failed: string } | undefined;
 
@@ -1413,36 +1415,39 @@ export function createConversationExecutor(
           }
           const messages: z.infer<typeof historySchema> = chat.standalone
             ? []
-            : historySchema
+            : priorHistorySchema
                 .parse(
                   (
                     await tx.client.query(
                       `WITH prior AS (
-        SELECT id, source_message_id, response_message_id, accepted_sequence FROM ${table(tx, 'tf_conversation_turns')}
+        SELECT id, source_message_id, response_message_id, accepted_sequence, status = 'cancelled' AS stopped FROM ${table(tx, 'tf_conversation_turns')}
         WHERE conversation_id = $1 AND accepted_sequence < (SELECT accepted_sequence FROM ${table(tx, 'tf_conversation_turns')} WHERE id = $2)
         AND accepted_sequence>=COALESCE((SELECT context_start FROM ${table(tx, 'tf_github_chat_selection')} WHERE conversation_id=$1),1)
         AND NOT EXISTS (SELECT 1 FROM ${table(tx, 'tf_conversation_parts')} c WHERE c.conversation_id=$1 AND c.message_id=source_message_id AND c.kind='compact') AND accepted_sequence>$3
       ), exchanges AS (
-        SELECT source_message_id AS message_id, accepted_sequence FROM prior
-        UNION ALL SELECT response_message_id, accepted_sequence FROM prior WHERE response_message_id IS NOT NULL
-        UNION ALL SELECT p.message_id, t.accepted_sequence FROM prior t
+        SELECT source_message_id AS message_id, accepted_sequence, stopped FROM prior
+        UNION ALL SELECT response_message_id, accepted_sequence, false FROM prior WHERE response_message_id IS NOT NULL
+        UNION ALL SELECT p.message_id, t.accepted_sequence, false FROM prior t
           JOIN ${table(tx, 'tf_internal_conversations')} i ON i.origin_turn_id = t.id AND i.origin_conversation_id = $1
           JOIN ${table(tx, 'tf_internal_publications')} p ON p.internal_id = i.id AND p.conversation_id = $1
-        UNION SELECT p.message_id, t.accepted_sequence FROM prior t
+        UNION SELECT p.message_id, t.accepted_sequence, false FROM prior t
           JOIN ${table(tx, 'tf_conversation_requests')} r ON r.turn_id = t.id AND r.conversation_id = $1
           LEFT JOIN ${table(tx, 'tf_conversation_responses')} a ON a.request_id = r.id AND a.conversation_id = $1
           JOIN ${table(tx, 'tf_conversation_parts')} p ON p.conversation_id = $1 AND (p.request_id = r.id OR p.response_id = a.id)
-        UNION SELECT p.message_id, t.accepted_sequence FROM prior t
+        UNION SELECT p.message_id, t.accepted_sequence, false FROM prior t
           JOIN ${table(tx, 'tf_conversation_approval_requests')} r ON r.turn_id = t.id AND r.conversation_id = $1
           JOIN ${table(tx, 'tf_conversation_parts')} p ON p.conversation_id = $1 AND p.approval_id = r.id
       ) SELECT m.id, CASE m.author_kind WHEN 'human' THEN 'user' ELSE 'assistant' END AS role, e.accepted_sequence AS "acceptedSequence",
-        COALESCE(string_agg(p.text, '' ORDER BY p.ordinal) FILTER (WHERE p.kind IN ('text', 'layout')), '') AS text
+        COALESCE(string_agg(p.text, '' ORDER BY p.ordinal) FILTER (WHERE p.kind IN ('text', 'layout')), '') AS text, bool_or(e.stopped) AS stopped
         FROM exchanges e JOIN ${table(tx, 'tf_conversation_messages')} m ON m.id = e.message_id AND m.conversation_id = $1
         LEFT JOIN ${table(tx, 'tf_conversation_parts')} p ON p.message_id = m.id
         GROUP BY m.id, e.accepted_sequence ORDER BY e.accepted_sequence DESC, m.sequence DESC LIMIT ${compaction ? 2000 : 39}`,
                       [fence.conversationId, fence.turnId, compaction?.summary?.coveredThrough ?? 0],
                     )
                   ).rows,
+                )
+                .map(({ stopped, ...message }) =>
+                  stopped ? { ...message, text: stoppedRequest(message.text) } : message,
                 )
                 .reverse();
           messages.push(currentMessage);

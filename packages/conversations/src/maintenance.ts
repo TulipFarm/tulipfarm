@@ -22,6 +22,7 @@ import {
   insertStatusMessage,
   replaceWorkingSummary,
   summarize,
+  stoppedRequest,
   workingSummarySchema,
   type ConversationCompactor,
   type ContextMessage,
@@ -384,6 +385,7 @@ export function createConversationMaintenance(runtime: ConversationRuntime) {
               acceptedSequence: z.number().int(),
               sequence: z.number().int(),
               text: z.string(),
+              stopped: z.boolean(),
             }),
           )
           .parse(
@@ -396,7 +398,8 @@ export function createConversationMaintenance(runtime: ConversationRuntime) {
               WHEN 'response' THEN (SELECT 'Answer: '||answer::text FROM ${table(tx, 'tf_conversation_responses')} WHERE id=p.response_id)
               WHEN 'approval' THEN (SELECT 'Approval request: '||prompt FROM ${table(tx, 'tf_conversation_approval_requests')} WHERE id=p.approval_id)
               WHEN 'approval-resolution' THEN (SELECT 'Approval decision: '||resolution FROM ${table(tx, 'tf_conversation_approval_resolutions')} WHERE request_id=p.approval_id)
-              END,E'\n' ORDER BY p.ordinal) FROM ${table(tx, 'tf_conversation_parts')} p WHERE p.message_id=m.id),'') AS text
+              END,E'\n' ORDER BY p.ordinal) FROM ${table(tx, 'tf_conversation_parts')} p WHERE p.message_id=m.id),'') AS text,
+            (t.status='cancelled' AND t.source_message_id=m.id) AS stopped
             FROM ${table(tx, 'tf_conversation_messages')} m JOIN ${table(tx, 'tf_conversation_turns')} t ON t.source_message_id=m.id OR t.response_message_id=m.id
               OR t.id=(SELECT r.turn_id FROM ${table(tx, 'tf_conversation_parts')} p
                 LEFT JOIN ${table(tx, 'tf_conversation_responses')} a ON a.id=p.response_id
@@ -409,7 +412,8 @@ export function createConversationMaintenance(runtime: ConversationRuntime) {
                 [work.conversationId],
               )
             ).rows,
-          );
+          )
+          .map(({ stopped, ...message }) => (stopped ? { ...message, text: stoppedRequest(message.text) } : message));
         if (!messages.some(message => message.text.trim())) throw new Error('maintenance-empty');
         const results = (
           await tx.client.query(
