@@ -285,7 +285,9 @@ try {
   await page.getByLabel('Message', { exact: true }).press('Enter');
   assert.equal(writes.length, 0, 'Whitespace-only messages do not create a chat');
   await page.getByLabel('Message', { exact: true }).fill('x'.repeat(65537));
-  await page.getByText('Keep this message under 64 KiB of text.', { exact: true }).waitFor();
+  await page
+    .getByText('This message is 65,537 characters. Keep it under 65,536 characters.', { exact: true })
+    .waitFor();
   assert.equal(await page.getByRole('button', { name: 'Send message', exact: true }).isDisabled(), true);
   await page.getByLabel('Message', { exact: true }).fill('Hello 🌱');
   await page.getByRole('link', { name: 'Chats', exact: true }).click();

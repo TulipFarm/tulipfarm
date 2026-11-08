@@ -20,6 +20,7 @@ import { maintenanceViewSchema } from '@tulipfarm/conversations/maintenance-cont
 import { firedFollowUpSchema, followUpViewSchema } from '@tulipfarm/agents/follow-up-contracts';
 import { subagentResultSchema } from '@tulipfarm/conversations/events';
 import { apiOrigin } from '@/lib/auth';
+import { textLengthError } from './text-limit';
 import { jsonResponse, readJson, responseError, writesAllowed } from '@/lib/http';
 import { TableRequestError } from '@/features/tables/request-state';
 import {
@@ -232,7 +233,7 @@ function unsupportedText(text: string) {
 export function textError(text: string) {
   if (!text.trim()) return null;
   if (unsupportedText(text)) return 'Remove unsupported characters before sending.';
-  return new TextEncoder().encode(text).length > 65536 ? 'Keep this message under 64 KiB of text.' : null;
+  return textLengthError(text);
 }
 
 export function titleError(title: string) {
