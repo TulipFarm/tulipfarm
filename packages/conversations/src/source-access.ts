@@ -7,6 +7,7 @@ import {
   requireProtectedSource,
   requireMcpPrivateConversation,
   requirePersonalGitHubSource,
+  requireWorkflowDefinitionSources,
   type AuthorizationTransaction,
   type ConversationSourcePrefetch,
   type HumanActor,
@@ -168,7 +169,7 @@ export async function requireWorkflowSources(tx: AuthorizationTransaction, actor
     .parse(sources)
     .filter(source => source.kind === 'workflow-definition' || source.kind === 'workflow-provider');
   if (!workflows.length) return;
-  for (const source of await protectedSourceClosure(tx, workflows)) await requireProtectedSource(tx, actor, source);
+  await requireWorkflowDefinitionSources(tx, actor, workflows);
 }
 
 /**

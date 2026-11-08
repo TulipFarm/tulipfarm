@@ -304,6 +304,12 @@ export function AuthoringDraftCard({ api, chatId, id }: { api: ConversationApi; 
   const definition = proposal.input.definition;
   const workflow: WorkflowProposal | null =
     proposal.kind === 'workflow' || proposal.kind === 'workflow-activation' ? proposal : null;
+  // The draft names the table of its first row trigger, as the server resolves only that one.
+  const rowTrigger = workflow?.input.definition.triggers.find(trigger => trigger.kind === 'row');
+  const tableNames =
+    rowTrigger?.kind === 'row' && draft.workflowRowSource
+      ? new Map([[rowTrigger.tableId, draft.workflowRowSource.table]])
+      : undefined;
   const noun = workflow ? 'workflow' : proposal.kind === 'agent' ? 'agent' : 'skill';
   const brands = proposal.kind === 'agent' ? toolBrands(proposal.input.definition.tools) : [];
   // Only a new agent starts off. Saving over an existing agent leaves its on or off state and active revision as they were.
@@ -407,7 +413,7 @@ export function AuthoringDraftCard({ api, chatId, id }: { api: ConversationApi; 
         <div className="space-y-3">
           <p className="text-sm">{workflowChange(workflow)}</p>
           <p className="text-sm">
-            {triggersLine(workflow.input.definition.triggers)}. {workflow.input.definition.steps.length}{' '}
+            {triggersLine(workflow.input.definition.triggers, tableNames)}. {workflow.input.definition.steps.length}{' '}
             {workflow.input.definition.steps.length === 1 ? 'step' : 'steps'}.{' '}
             {draft.workflowNextRunAt
               ? `Next run ${formatRun(draft.workflowNextRunAt, workflow.input.definition.triggers)}.`

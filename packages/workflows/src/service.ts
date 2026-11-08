@@ -2,8 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import {
   AccessDenied,
-  protectedSourceClosure,
-  requireProtectedSource,
+  requireWorkflowDefinitionSources,
   type AuthorizationTransaction,
   type HumanActor,
 } from '@tulipfarm/access';
@@ -1637,8 +1636,7 @@ export function createWorkflows(
     workflowId: string,
     revision: string,
   ) {
-    for (const source of await protectedSourceClosure(tx, [{ kind: 'workflow-definition', workflowId, revision }]))
-      await requireProtectedSource(tx, actor, source);
+    await requireWorkflowDefinitionSources(tx, actor, [{ kind: 'workflow-definition', workflowId, revision }]);
   }
   async function definition(workspaceId: string, user: string, id: string, value: unknown = {}) {
     const query = definitionQuerySchema.parse(value);

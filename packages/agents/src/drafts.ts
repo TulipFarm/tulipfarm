@@ -242,12 +242,9 @@ export function createAuthoringDrafts(
       ).rowCount !== 0
     );
   }
-  // One chat owns one new workflow: a later create draft replaces the earlier one, or edits it once saved.
+  // A later create draft replaces an earlier unsaved one in the same chat. Once that one is saved, a create draft makes another workflow.
   async function chatWorkflow(
     tx: AgentTransaction,
-    bound: AgentStorage,
-    workspaceId: string,
-    actor: HumanActor,
     conversationId: string,
     proposal: Extract<WorkflowProposal, { kind: 'workflow' }>,
   ): Promise<AuthoringProposal> {
@@ -263,11 +260,8 @@ export function createAuthoringDrafts(
           )
         ).rows[0],
       );
-    if (!earlier) return proposal;
-    const current = await createWorkflowDrafts(bound, workspaceId).find(actor, earlier.target);
-    if (current)
-      return { ...proposal, targetId: current.id, input: { ...proposal.input, expectedRevision: current.revision } };
-    return earlier.decided ? proposal : { ...proposal, targetId: earlier.target };
+    if (!earlier || earlier.decided) return proposal;
+    return { ...proposal, targetId: earlier.target };
   }
   async function stale(
     tx: AgentTransaction,
@@ -494,10 +488,7 @@ export function createAuthoringDrafts(
     return transaction(workspaceId, actor, parsed.kind.startsWith('workflow'), async (tx, _actor, bound) => {
       await owned(tx, actor, origin.conversationId);
       if (parsed.kind === 'memory') await requireMemoryChat(tx, actor, origin.conversationId);
-      const proposal =
-        parsed.kind === 'workflow'
-          ? await chatWorkflow(tx, bound, workspaceId, actor, origin.conversationId, parsed)
-          : parsed;
+      const proposal = parsed.kind === 'workflow' ? await chatWorkflow(tx, origin.conversationId, parsed) : parsed;
       const digest = createHash('sha256').update(canonicalJson(proposal)).digest('hex');
       await requireNoMcpDerived(tx, [
         { kind: 'private-conversation', conversationId: origin.conversationId },

@@ -14,6 +14,8 @@ When the request also needs tables, agents, or integration checks, use Planning 
 
 Use `workspaceInventory.workflows` in the system reminder first when supplied. It contains readable workflow IDs, names, revisions, and enabled/active state: metadata, not full definitions. Do not call `workflows.list` just to repeat that inventory or before creating a new workflow.
 
+When the person asks for a new workflow, omit `workflowId` and `revision` so the draft creates one, even if an existing workflow looks similar or was saved earlier in this chat. Edit an existing workflow only when the person clearly asks to change that workflow; if it is unclear, ask which they want.
+
 Call `workflows.list` when the inventory is absent, needed trigger or step summary details are missing, or a stale response requires a fresh revision. Its result is also a summary, not a full definition. Before editing, call `workflows.read` with the workflow ID and preserve every unrelated setting and step from that full definition. Pass its `workflowId` and exact `revision` to `workflows.draft`. To only enable or disable a workflow, pass `workflowId` and `activate` without a definition. To remove workflows, call `workflows.archive` with each `workflowId` and exact `revision` (up to 20 on one card). To bring archived workflows back, call `workflows.list` with `archived: true`, then `workflows.restore` with each `workflowId` and exact `revision`; restored workflows stay disabled until activated with `workflows.draft`. Human review and current permission checks still apply.
 
 ## 2. Read the reference you need
