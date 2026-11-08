@@ -64,7 +64,8 @@ export const tableKeys = {
   deleted: (id: string, after: Cursor) => [...tableKeys.detail(id), 'deleted', { after: after ?? null }] as const,
   receipt: (id: string, requestId: string) => [...tableKeys.detail(id), 'requests', requestId] as const,
   picker: ['tables', 'picker'] as const,
-  grants: ['tables', 'person-grants'] as const,
+  // Admin data, not table data: it stays visible while a table authority change conceals ['tables'].
+  grants: ['governance', 'person-grants'] as const,
   proposals: ['tables', 'proposals'] as const,
   proposal: ({ chatId, proposalId }: ProposalIdentity) => ['tables', 'proposals', chatId, proposalId] as const,
   proposalView: (identity: ProposalIdentity) => [...tableKeys.proposal(identity), 'view'] as const,

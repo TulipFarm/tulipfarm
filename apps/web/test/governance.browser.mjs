@@ -335,12 +335,23 @@ try {
     listsBeforeNavigation + 1,
     'warm navigation rechecks workspace admission with one list read',
   );
+  // Saving and saved messages must not move the grant checkboxes.
+  await page.getByRole('checkbox', { name: 'Update rows', exact: true }).evaluate(element => {
+    window.grantPositions = [];
+    const record = () => {
+      window.grantPositions.push(element.getBoundingClientRect().top);
+      if (!window.stopGrantPositions) requestAnimationFrame(record);
+    };
+    record();
+  });
   await page.getByRole('checkbox', { name: 'Create rows', exact: true }).click();
   await page.locator('[role="checkbox"][aria-checked="true"]').waitFor();
   assert.equal(await page.getByRole('checkbox', { name: 'Read rows', exact: true }).isChecked(), false);
   assert.equal(await page.getByRole('checkbox', { name: 'Manage schema', exact: true }).isChecked(), false);
   await page.getByRole('checkbox', { name: 'Read rows', exact: true }).click();
   await page.getByRole('status').filter({ hasText: 'Read rows for Invoices granted to Operations.' }).waitFor();
+  const grantPositions = await page.evaluate(() => ((window.stopGrantPositions = true), window.grantPositions));
+  assert.deepEqual([...new Set(grantPositions)], [grantPositions[0]], 'team grant checkboxes stayed in place');
   assert.equal(await page.locator('[role="checkbox"][aria-checked="true"]').count(), 2);
   assert.equal(snapshot.grants.length, 2);
   // Clicking a waiting change again cancels it before anything is sent.
