@@ -2,20 +2,15 @@ import { createWorkspaceTableAuthoring } from '@tulipfarm/workspaces/table-autho
 import { withGitHubSourceAuthorization } from '@tulipfarm/github/source-runtime';
 import { createAgentAuthoring } from '@tulipfarm/agents/authoring';
 import { createTablePublication } from '@tulipfarm/tables/execution';
-import { requireTableSources, requireTableFiles, requireTableImportReference } from '@tulipfarm/agents/table-sources';
 import { retryError } from '@tulipfarm/observability';
+import { tableExecutionAccess } from './table-access.ts';
 
 export function createTableAuthoringComposition() {
   const tables = createWorkspaceTableAuthoring();
   const runtime = withGitHubSourceAuthorization(tables.runtime);
   const agents = createAgentAuthoring(runtime).withWriter(tables.prepareAgentRevision);
-  const access = {
-    requireSources: requireTableSources,
-    requireFiles: requireTableFiles,
-    requireImportReference: requireTableImportReference,
-  };
   const publishTableProposal = createTablePublication({
-    ...access,
+    ...tableExecutionAccess,
     runtime,
     prepareRevision: tables.prepareTableDefinition,
   });

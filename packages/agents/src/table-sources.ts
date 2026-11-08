@@ -2,7 +2,9 @@ import { z } from 'zod';
 import {
   AccessDenied,
   lockAuthorization,
+  protectedSourceClosure,
   requireNoMcpDerived,
+  sourceDependenciesSchema,
   type Actor,
   type HumanActor,
   type SourceDependency,
@@ -45,6 +47,45 @@ export async function requireTableSources(
     // The requester reviews the exact change before it is saved, so their own personal memory may inform it.
     else await requireDraftSources(tx, actor, [source], new Set(), undefined, false, true, undefined, allowed);
   }
+}
+
+type KnowledgeDocumentSource = Extract<SourceDependency, { kind: 'knowledge-document' }>;
+
+// Table execution and publication recheck sources in transactions that cannot read knowledge tables, so a definer
+// function applies the knowledge gate for the requester and returns each cited document's own sources.
+export function bindTableKnowledgeSources<X extends AgentTransaction & { workspaceId: string }>(
+  tx: X,
+  requester: HumanActor,
+): X {
+  const sources = async (source: KnowledgeDocumentSource) => {
+    if (source.workspaceId !== tx.workspaceId) throw new AccessDenied();
+    const row = (
+      await tx.client.query(`SELECT ${relation(tx, 'tf_table_knowledge_sources')}($1,$2,$3) AS sources`, [
+        requester.membershipId,
+        requester.userId,
+        source,
+      ])
+    ).rows[0];
+    const readable = z.object({ sources: sourceDependenciesSchema.nullable() }).parse(row).sources;
+    if (!readable) throw new AccessDenied();
+    return readable;
+  };
+  const bound: X = {
+    ...tx,
+    knowledgeSourceDependencies: sources,
+    async requireKnowledgeSource(actor, source, context) {
+      if (context.runId || actor.membershipId !== requester.membershipId || actor.userId !== requester.userId)
+        throw new AccessDenied();
+      // Expanding the closure checks every cited document in it; the rest are checked as table sources.
+      const closure = await protectedSourceClosure(bound, await sources(source));
+      await requireTableSources(
+        bound,
+        actor,
+        closure.filter(item => item.kind !== 'knowledge-document'),
+      );
+    },
+  };
+  return bound;
 }
 
 /** Returns the ids among `fileIds` the human can open now, checked in one query. */
