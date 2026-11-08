@@ -27,6 +27,8 @@ import { CalendarReadCanvas } from './calendar-canvas';
 import { Calendar } from 'reicon-react/icons/Calendar';
 import { GoogleProposalReview } from '@/features/google/proposals';
 import { WorkflowCanvas } from './workflow-canvas';
+import { AgentDraftCanvas } from './agent-draft-canvas';
+import { Users } from 'reicon-react/icons/Users';
 import { BranchDown } from 'reicon-react/icons/BranchDown';
 import { workspaceRoute } from '@/router';
 import { GoogleFileCanvas } from '@/features/google/file-canvas';
@@ -48,6 +50,7 @@ const icons: Record<CanvasContent['kind'], ComponentType<{ size?: number }>> = {
   'google-action': FileText,
   'google-file': FileText,
   workflow: BranchDown,
+  'agent-draft': Users,
   records: Database,
   'record-changes': Database,
   table: Database,
@@ -195,6 +198,8 @@ export function CanvasItemView({
       );
     case 'workflow':
       return <WorkflowCanvas workspaceId={content.workspaceId} reference={content.reference} />;
+    case 'agent-draft':
+      return <AgentDraftCanvas workspaceId={content.workspaceId} chatId={content.chatId} draftId={content.draftId} />;
     case 'records':
       return <RecordsCanvas reference={content.reference} />;
     case 'record-changes':

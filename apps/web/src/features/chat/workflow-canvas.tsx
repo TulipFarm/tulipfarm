@@ -15,10 +15,11 @@ import { conversationApi, type ConversationMessage } from './conversation-api';
 import { succeeded } from './live-tools';
 import { useAuthoringDraft } from './queries';
 import { useCanvas, type CanvasItem } from './canvas-state';
+import { agentDraftCanvasItem } from './agent-draft-canvas';
 import { workspaceRoute } from '@/router';
 
-// Opens a workflow draft made while this chat is open; drafts already in the chat when it loads stay closed.
-export function NewWorkflowDrafts({
+// Opens a workflow or agent draft made while this chat is open; drafts already in the chat when it loads stay closed.
+export function NewChatDrafts({
   workspaceId,
   chatId,
   tools,
@@ -31,7 +32,10 @@ export function NewWorkflowDrafts({
 }) {
   const canvas = useCanvas();
   const observed = useRef<{ chatId: string; ids: Set<string> } | null>(null);
-  const ids = tools.filter(tool => tool.tool === 'workflows.draft' && succeeded(tool)).map(tool => tool.id);
+  const drafts = tools.filter(
+    tool => (tool.tool === 'workflows.draft' || tool.tool === 'agents.draft') && succeeded(tool),
+  );
+  const ids = drafts.map(tool => tool.id);
   const key = ids.join(',');
   useEffect(() => {
     const previous = observed.current;
@@ -39,15 +43,21 @@ export function NewWorkflowDrafts({
       observed.current = { chatId, ids: new Set(ids) };
       return;
     }
-    const added = ids.filter(id => !previous.ids.has(id)).at(-1);
+    const added = drafts.filter(tool => !previous.ids.has(tool.id)).at(-1);
     for (const id of ids) previous.ids.add(id);
     if (
       added &&
       foreground &&
-      (!canvas.activeId || canvas.activeId.startsWith(`workflow:draft:${chatId}:`)) &&
+      (!canvas.activeId ||
+        canvas.activeId.startsWith(`workflow:draft:${chatId}:`) ||
+        canvas.activeId.startsWith(`agent:draft:${chatId}:`)) &&
       window.matchMedia('(min-width: 768px)').matches
     )
-      canvas.show(workflowCanvasItem(workspaceId, { kind: 'draft', chatId, draftId: added }));
+      canvas.show(
+        added.tool === 'agents.draft'
+          ? agentDraftCanvasItem(workspaceId, chatId, added.id)
+          : workflowCanvasItem(workspaceId, { kind: 'draft', chatId, draftId: added.id }),
+      );
   }, [key, chatId, workspaceId, foreground, canvas.activeId, canvas.show]);
   return null;
 }
