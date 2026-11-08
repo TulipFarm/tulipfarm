@@ -56,6 +56,18 @@ test('lightweight route schemas retain the same view schema and query-engine lim
   assert.equal(routeSearchSchema, tableRowsSearchSchema);
   assert.equal(queryLimits, engineLimits);
   assert.deepEqual(tableListSearchSchema.parse({ q: false, extra: 'ignored' }), { q: 'false' });
+  assert.deepEqual(tableListSearchSchema.parse({ archived: true, sort: '-records' }), {
+    archived: true,
+    sort: '-records',
+  });
+  for (const search of [
+    { archived: 'yes', sort: 'name' },
+    { archived: false, sort: 'size' },
+  ]) {
+    const parsed = tableListSearchSchema.parse(search);
+    assert.equal(parsed.archived, undefined);
+    assert.equal(parsed.sort, undefined);
+  }
   assert.equal(parse({ value: 5 }).value, '5');
   assert.equal(parse({ where: 'x'.repeat(linkQueryCharacters) }).where?.length, linkQueryCharacters);
   assert.equal(parse({ where: 'x'.repeat(linkQueryCharacters + 1) }).where, undefined);

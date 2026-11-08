@@ -28,11 +28,16 @@ export type ProposalIdentity = { chatId: string; proposalId: string };
 export const tableKeys = {
   all: ['tables'] as const,
   lists: ['tables', 'list'] as const,
-  list: (after: Cursor, search?: string, sort?: TableListSort) =>
+  list: (after: Cursor, search?: string, sort?: TableListSort, archived = false) =>
     [
       'tables',
       'list',
-      { after: after ?? null, search: search ?? null, sort: sort ? `${sort.by}:${sort.direction}` : null },
+      {
+        after: after ?? null,
+        search: search ?? null,
+        sort: sort ? `${sort.by}:${sort.direction}` : null,
+        archived,
+      },
     ] as const,
   detail: (id: string) => ['tables', 'detail', id] as const,
   definition: (id: string) => [...tableKeys.detail(id), 'definition'] as const,
@@ -106,9 +111,9 @@ export const tableQueries = {
       }
     },
   }),
-  list: (api: TableApi, after?: string, search?: string, sort?: TableListSort) => ({
-    key: tableKeys.list(after, search, sort),
-    load: (signal: AbortSignal) => api.list(after, signal, search, false, sort),
+  list: (api: TableApi, after?: string, search?: string, sort?: TableListSort, archived = false) => ({
+    key: tableKeys.list(after, search, sort, archived),
+    load: (signal: AbortSignal) => api.list(after, signal, search, archived, sort),
   }),
   detail: (api: TableApi, id: string) => ({
     key: tableKeys.definition(id),

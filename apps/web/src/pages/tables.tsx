@@ -9,7 +9,7 @@ import { TableDetail, TableList } from '@/features/tables/tables';
 
 export function TablesPage() {
   const { workspace } = workspaceRoute.useRouteContext();
-  const { q } = tablesRoute.useSearch();
+  const search = tablesRoute.useSearch();
   const navigate = tablesRoute.useNavigate();
   return (
     <PageContent>
@@ -17,8 +17,8 @@ export function TablesPage() {
         key={workspace.id}
         workspaceId={workspace.id}
         workspaceSlug={workspace.slug}
-        search={q ?? ''}
-        changeSearch={next => void navigate({ search: { q: next || undefined }, replace: true })}
+        search={search}
+        changeSearch={next => void navigate({ search: current => ({ ...current, ...next }), replace: true })}
       />
     </PageContent>
   );

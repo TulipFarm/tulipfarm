@@ -19,8 +19,8 @@ function useTableQuery<T>(options: FeatureReadOptions<T>) {
   return useFeatureRead(options);
 }
 
-export function useTableList(api: TableApi, after?: string, search?: string, sort?: TableListSort) {
-  return useTableQuery(tableQueries.list(api, after, search, sort));
+export function useTableList(api: TableApi, after?: string, search?: string, sort?: TableListSort, archived = false) {
+  return useTableQuery(tableQueries.list(api, after, search, sort, archived));
 }
 export function useTableNames(api: TableApi, enabled = true) {
   const read = useTableQuery({ ...tableQueries.picker(api), enabled });
