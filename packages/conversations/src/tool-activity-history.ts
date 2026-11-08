@@ -166,6 +166,16 @@ async function tableProposalActivity(tx: AuthorizationTransaction, id: string): 
 }
 
 type StoredToolRow = { id: string; tool: string; status: string; output?: unknown };
+// Expected answers that prepare no review: the reply explains each one, so the step itself did not fail.
+const proposalOutcomes = new Map(
+  Object.entries({
+    'invalid-arguments': 'Corrected and resubmitted.',
+    'workflow-active': 'Not archived: active workflows use this table.',
+    'table-linked': 'Not archived: another table links to this table.',
+    'invalid-transform': 'No review prepared: some current values don’t fit the new fields.',
+    'import-not-prepared': 'No review prepared yet: the file must be read first.',
+  }),
+);
 /** `proposal` marks a `tables.propose` call that saved a proposal, so its review card stays valid even if the reply failed. */
 export type StoredToolActivity = { status: z.infer<typeof activityStatusSchema>; detail?: string; proposal?: true };
 
@@ -177,9 +187,9 @@ export async function storedToolActivity(
   if (row.status === 'completed' && row.tool === 'tables.propose') {
     const result = z.object({ result: z.unknown() }).safeParse(row.output);
     const output = result.success ? result.data.result : row.output;
-    // No proposal exists; the assistant is told to correct its input and propose again.
-    if (z.object({ error: z.literal('invalid-arguments') }).safeParse(output).success)
-      return { status: 'completed', detail: 'Corrected and resubmitted.' };
+    const outcome = z.object({ error: z.string() }).safeParse(output);
+    const detail = outcome.success ? proposalOutcomes.get(outcome.data.error) : undefined;
+    if (detail) return { status: 'completed', detail };
     const proposal = z.object({ id: z.uuid(), status: z.literal('pending') }).safeParse(output);
     const activity = proposal.success ? await tableProposalActivity(tx, proposal.data.id) : null;
     if (activity) return { ...activity, proposal: true };

@@ -71,7 +71,7 @@ const rowPermissions: [RegExp, string][] = [
 /** Names the permission a denied step needs and where to get it; the server never says which check failed. */
 export function deniedDetail(tool: string) {
   if (tool === 'tables.propose' || tool.startsWith('tables.import.'))
-    return `Access denied. Preparing this review needs Manage schema for field changes, or Create rows and Update rows for row changes and imports, on the table. ${tableAccessStep}`;
+    return `Access denied. Preparing this review needs Create tables for the owning team to add a table, Manage schema on the table for field changes, or Create rows and Update rows on the table for row changes and imports. ${tableAccessStep}`;
   const rows = rowPermissions.find(([pattern]) => pattern.test(tool))?.[1];
   if (rows) return `Access denied. This step needs ${rows} on the table. ${tableAccessStep}`;
   if (/^(tables|schema)\./.test(tool)) return `Access denied. This step needs access to the table. ${tableAccessStep}`;

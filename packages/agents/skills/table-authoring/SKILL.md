@@ -19,7 +19,7 @@ Ask only about choices that change the shape, such as the status values or who o
 ## 2. Discover what already exists
 
 1. Use `workspaceInventory.tables` when supplied; call `tables.definitions` for absent or stale inventory or missing details. Read a candidate schema with `schema.inspect` before deciding to reuse it. Use `rows.page` when you need to see rows. A similar table may already exist; do not create a duplicate or change it outside the person's intent.
-2. For a new table, call `schema.context` without `tableId`. Choose the owning team the person asked for from `creation.eligibleOwningTeams`. `creation.allowed` tells you whether any destination is eligible. When it is false, no team can own a new table for this person yet. Say so plainly, show the fields you would propose, and stop. Do not ask the person for a team name or ID, because you cannot use a team that discovery did not return.
+2. For a new table, call `schema.context` without `tableId`. Choose the owning team the person asked for from `creation.eligibleOwningTeams`. If they named none, use the only eligible team; when several are eligible, ask which of the named ones should own the table before proposing. `creation.allowed` tells you whether any destination is eligible. When it is false, no team can own a new table for this person yet. Say so plainly, show the fields you would propose, and stop. Do not ask the person for a team name or ID, because you cannot use a team that discovery did not return.
 3. `capabilities` describes only `capabilityTableId`. A false `manageSchema` with no selected table does not deny creation.
 
 ## 3. Build the proposal

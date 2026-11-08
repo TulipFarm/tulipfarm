@@ -42,7 +42,8 @@ export async function requireTableSources(
       ].includes(source.kind)
     )
       await allowed(source);
-    else await requireDraftSources(tx, actor, [source], new Set(), undefined, false, false, undefined, allowed);
+    // The requester reviews the exact change before it is saved, so their own personal memory may inform it.
+    else await requireDraftSources(tx, actor, [source], new Set(), undefined, false, true, undefined, allowed);
   }
 }
 
