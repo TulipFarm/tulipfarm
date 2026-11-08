@@ -81,6 +81,7 @@ import {
   type DraftRule,
   boardFields,
   recentLayouts,
+  tabLayouts,
   storedOpenLayouts,
   storeOpenLayouts,
   timelineFields,
@@ -142,21 +143,23 @@ function unavailable(definition: Definition, id: Layout) {
   return undefined;
 }
 
-/** The open view tabs, kept per table. A linked view that was closed opens again so the link works. */
-/** The open tabs, most recently used first. Using a view moves it to the front and drops the oldest past the limit. */
+/**
+ * The open view tabs, kept per table. A linked view that was closed opens again so the link works.
+ * Recency only decides which view drops out past the limit; tabs always show in the fixed layout order.
+ */
 function useOpenLayouts(tableId: string, layout: Layout) {
   const [stored, setStored] = useState(() => storedOpenLayouts(tableId));
-  const open = recentLayouts(layout, stored);
+  const recent = recentLayouts(layout, stored);
   useEffect(() => {
-    if (open.join() === stored.join()) return;
-    setStored(open);
-    storeOpenLayouts(tableId, open);
+    if (recent.join() === stored.join()) return;
+    setStored(recent);
+    storeOpenLayouts(tableId, recent);
   });
   const save = (next: Layout[]) => {
     setStored(next);
     storeOpenLayouts(tableId, next);
   };
-  return { open, save };
+  return { open: tabLayouts(recent), recent, save };
 }
 
 /** Layout, search, column, summary, and export controls, then the applied filters as chips. Every applied change is written to the URL. */
@@ -198,9 +201,9 @@ export function QueryBar({
           if (next && !disabled) changeLayout(next.id);
         }}
         onClose={id => {
-          const index = views.open.indexOf(id as Layout);
-          if (index < 0 || views.open.length < 2 || disabled) return;
-          const next = views.open.filter(item => item !== id);
+          const index = views.recent.indexOf(id as Layout);
+          if (index < 0 || views.recent.length < 2 || disabled) return;
+          const next = views.recent.filter(item => item !== id);
           views.save(next);
           if (id === layout) changeLayout(next[0] ?? 'table');
         }}
