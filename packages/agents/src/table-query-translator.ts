@@ -891,7 +891,8 @@ export function createTableQueryTranslations(options: {
         );
       return found;
     }).catch(unavailable);
-    if (!receipt) throw new TableQueryTranslationError('table-unavailable');
+    // The table is readable, so a missing receipt means this person never started the search, and nothing was charged.
+    if (!receipt) throw new TableQueryTranslationError('translation-not-found');
     return receiptView(receipt);
   }
 

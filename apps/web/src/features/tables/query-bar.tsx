@@ -1639,6 +1639,7 @@ type AiState =
   | { kind: 'idle' }
   | { kind: 'building'; requestId: string }
   | { kind: 'lost'; requestId: string; message: string }
+  | { kind: 'missed'; message: string }
   | { kind: 'clarification'; message: string; choices: { label: string; prompt: string }[] }
   | { kind: 'unsupported'; message: string }
   | { kind: 'failed'; message: string }
@@ -1701,8 +1702,10 @@ function AskAi({
       settle(requestId, await work(next.signal));
     } catch (error) {
       if (next.signal.aborted || current.current !== requestId) return;
-      if (error instanceof TableRequestError) setState({ kind: 'failed', message: error.message });
-      else setState({ kind: 'lost', requestId, message: 'The integration dropped before the search came back.' });
+      if (error instanceof TableRequestError && error.code === 'translation-not-found')
+        setState({ kind: 'missed', message: error.message });
+      else if (error instanceof TableRequestError) setState({ kind: 'failed', message: error.message });
+      else setState({ kind: 'lost', requestId, message: 'The connection dropped before the search came back.' });
     }
   };
   const build = (text = prompt) => {
@@ -1799,6 +1802,16 @@ function AskAi({
         <Alert variant="destructive">
           <AlertDescription>{state.message}</AlertDescription>
         </Alert>
+      )}
+      {state.kind === 'missed' && (
+        <div className="space-y-2">
+          <Alert variant="destructive">
+            <AlertDescription>{state.message}</AlertDescription>
+          </Alert>
+          <Button variant="outline" size="sm" disabled={disabled || !prompt.trim()} onClick={() => build()}>
+            Build search again
+          </Button>
+        </div>
       )}
       {state.kind === 'lost' && (
         <div className="space-y-2">

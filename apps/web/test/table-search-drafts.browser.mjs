@@ -65,6 +65,8 @@ try {
   const errors = [];
   page.on('pageerror', error => errors.push(String(error)));
   const validations = [];
+  const translation = { connected: true, status: { status: 404, json: { error: 'translation-not-found' } } };
+  const translations = [];
   await page.route('**/v1/**', async route => {
     const request = route.request(),
       path = new URL(request.url()).pathname;
@@ -115,7 +117,13 @@ try {
               },
             },
       );
-    } else if (path.endsWith(`/tables/${tableId}/schema-history`)) json = { entries: [], nextCursor: null };
+    } else if (path.endsWith(`/tables/${tableId}/query/translate`)) {
+      const body = request.postDataJSON();
+      translations.push(body.requestId);
+      if (!translation.connected) return route.abort('internetdisconnected');
+      json = { requestId: body.requestId, status: 'unsupported', message: 'AI search can’t sort by colour.' };
+    } else if (path.includes(`/tables/${tableId}/query/translations/`)) return route.fulfill(translation.status);
+    else if (path.endsWith(`/tables/${tableId}/schema-history`)) json = { entries: [], nextCursor: null };
     else if (path.endsWith(`/tables/${tableId}/deleted-rows`)) json = { records: [], nextCursor: null };
     else return route.fulfill({ status: 404, json: { error: 'unavailable' } });
     return route.fulfill({ json });
@@ -162,8 +170,42 @@ try {
   await tab('RSQL').click();
   assert.equal(await rsql.inputValue(), nextWhere, 'After applying, RSQL shows the applied query');
 
+  await tab('Ask AI').click();
+  await page.getByRole('textbox', { name: /^Describe the rows you want/ }).fill('paid orders');
+  translation.connected = false;
+  await page.getByRole('button', { name: 'Build search', exact: true }).click();
+  const dropped = page.getByText('The connection dropped before the search came back.', { exact: false });
+  assert.doesNotMatch(await dropped.innerText(), /integration/i, 'A dropped connection is not called an integration');
+  translation.connected = true;
+  await page.getByRole('button', { name: 'Check result', exact: true }).click();
+  await page.getByText('The search didn’t go through, so no AI credit was used. Build it again.').waitFor();
+  assert.equal(
+    await page.getByText('This table is missing or your permission changed', { exact: false }).count(),
+    0,
+    'A search that never arrived is not a lost table',
+  );
+  await page.getByRole('button', { name: 'Build search again', exact: true }).click();
+  await page.getByText('AI search can’t sort by colour.', { exact: false }).waitFor();
+  assert.equal(translations.length, 2, 'Build search again starts one new search');
+  assert.notEqual(translations[0], translations[1], 'The new search has its own request ID');
+
+  translation.connected = false;
+  translation.status = { status: 404, json: { error: 'table-unavailable' } };
+  await page.getByRole('button', { name: 'Build search', exact: true }).click();
+  await page.getByRole('button', { name: 'Check result', exact: true }).click();
+  await page
+    .getByText('This table is missing or your permission changed. A workspace admin can review your access.')
+    .waitFor();
+  assert.equal(
+    await page.getByRole('button', { name: 'Build search again', exact: true }).count(),
+    0,
+    'Lost access still reads as lost access',
+  );
+
   assert.deepEqual(errors, []);
-  console.log('Table search draft proof passed. Unapplied RSQL survives tab switches and reopening Search.');
+  console.log(
+    'Table search draft proof passed. Unapplied RSQL survives tab switches and reopening Search, and Ask AI recovers truthfully after a dropped connection.',
+  );
 } finally {
   await browser?.close();
   server.kill('SIGTERM');
