@@ -1,4 +1,4 @@
-import { teamLabel } from './team-labels';
+import { teamLabel } from './team-labels.ts';
 
 type Table = { id: string; name: string; owningTeamId: string };
 

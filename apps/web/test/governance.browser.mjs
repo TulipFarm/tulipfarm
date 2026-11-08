@@ -62,6 +62,7 @@ try {
   let writeFails = false;
   let dropCommittedWrite = false;
   let writes = 0;
+  let heldWrite;
   const teamAttempts = [];
   let heldRead;
   let heldInvitationRead;
@@ -189,6 +190,12 @@ try {
       await setTimeout(readDelay);
     } else {
       writes++;
+      if (heldWrite) {
+        const held = heldWrite;
+        heldWrite = null;
+        held.started.resolve();
+        await held.release.promise;
+      }
       await setTimeout(150);
       const body = request.postDataJSON();
       if (/\/teams\/[^/]+$/.test(path)) teamAttempts.push({ id: path.split('/').at(-1), name: body.name });
@@ -333,8 +340,50 @@ try {
   assert.equal(await page.getByRole('checkbox', { name: 'Read rows', exact: true }).isChecked(), false);
   assert.equal(await page.getByRole('checkbox', { name: 'Manage schema', exact: true }).isChecked(), false);
   await page.getByRole('checkbox', { name: 'Read rows', exact: true }).click();
-  await page.waitForFunction(() => document.querySelectorAll('[role="checkbox"][aria-checked="true"]').length === 2);
+  await page.getByRole('status').filter({ hasText: 'Read rows for Invoices granted to Operations.' }).waitFor();
+  assert.equal(await page.locator('[role="checkbox"][aria-checked="true"]').count(), 2);
   assert.equal(snapshot.grants.length, 2);
+  // Clicking a waiting change again cancels it before anything is sent.
+  const slowUpdate = { started: Promise.withResolvers(), release: Promise.withResolvers() };
+  heldWrite = slowUpdate;
+  await page.getByRole('checkbox', { name: 'Update rows', exact: true }).click();
+  await slowUpdate.started.promise;
+  await page.getByRole('status').filter({ hasText: 'Saving update rows for Invoices…' }).waitFor();
+  await page.getByRole('checkbox', { name: 'Delete rows', exact: true }).click();
+  await page.getByRole('status').filter({ hasText: '1 more change waiting.' }).waitFor();
+  await page.getByRole('checkbox', { name: 'Delete rows', exact: true }).click();
+  assert.equal(await page.getByRole('checkbox', { name: 'Delete rows', exact: true }).isChecked(), false);
+  slowUpdate.release.resolve();
+  await page.getByRole('status').filter({ hasText: 'Update rows for Invoices granted to Operations.' }).waitFor();
+  assert.deepEqual(
+    snapshot.grants.map(grant => grant.target.permission),
+    ['table.row.create', 'table.row.read', 'table.row.update'],
+  );
+  // A failed save drops the changes waiting behind it, says how many, and shows the saved permissions again.
+  writeFails = true;
+  const writesBeforeFailure = writes;
+  const failedDelete = { started: Promise.withResolvers(), release: Promise.withResolvers() };
+  heldWrite = failedDelete;
+  await page.getByRole('checkbox', { name: 'Delete rows', exact: true }).click();
+  await failedDelete.started.promise;
+  await page.getByRole('checkbox', { name: 'Manage schema', exact: true }).click();
+  await page
+    .getByRole('status')
+    .filter({ hasText: 'Saving delete rows for Invoices… 1 more change waiting.' })
+    .waitFor();
+  assert.equal(await page.getByRole('checkbox', { name: 'Manage schema', exact: true }).isChecked(), true);
+  failedDelete.release.resolve();
+  await page
+    .getByRole('status')
+    .filter({
+      hasText:
+        'Delete rows for Invoices was not confirmed. 1 other change was not saved. Reload access to check the saved permissions before changing it again.',
+    })
+    .waitFor();
+  assert.equal(writes, writesBeforeFailure + 1);
+  assert.equal(await page.getByRole('checkbox', { name: 'Delete rows', exact: true }).isChecked(), false);
+  assert.equal(await page.getByRole('checkbox', { name: 'Manage schema', exact: true }).isChecked(), false);
+  writeFails = false;
   await page.setViewportSize({ width: 375, height: 812 });
   await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
@@ -493,7 +542,7 @@ try {
   assert.equal(redemptions, 4);
   assert.deepEqual(errors, []);
   process.stdout.write(
-    'Governance browser checks passed. Read recovery, aborted refresh reset, immutable uncertain team retries and reconciliation, duplicate writes, explicit grants, mobile dark mode, keyboard, access loss, invitation pagination/retry, stale read cancellation, confirmed revoke retained after refresh failure, create/revoke/join, signed-out invitation sign-in.\n',
+    'Governance browser checks passed. Read recovery, aborted refresh reset, immutable uncertain team retries and reconciliation, duplicate writes, explicit grants, queued grant cancellation and failure, mobile dark mode, keyboard, access loss, invitation pagination/retry, stale read cancellation, confirmed revoke retained after refresh failure, create/revoke/join, signed-out invitation sign-in.\n',
   );
 } catch (e) {
   const p = browser?.contexts()[0]?.pages()[0];
