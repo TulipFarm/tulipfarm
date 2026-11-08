@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
+import { useNavigate } from '@tanstack/react-router';
 import { Button } from '@tulipfarm/sprout/button';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
 import { Disclosure } from '@/components/disclosure';
@@ -6,6 +7,7 @@ import { useCursorPages } from '@/lib/use-cursor-pages';
 import { DefinitionView } from './definition-view';
 import { TableRead } from './feedback';
 import { useTableSchemaHistory } from './hooks';
+import { TableRequestError } from './request-state';
 import { memberMessages, type DefinitionState, type SchemaHistoryEntry, type TableApi } from './api';
 
 const phaseLabels = {
@@ -157,7 +159,72 @@ export function DefinitionStatus({ state }: { state: DefinitionState }) {
   );
 }
 
-export function SchemaHistory({ tableId, api }: { tableId: string; api: TableApi }) {
+function RevertChange({
+  entry,
+  tableId,
+  api,
+  workspaceSlug,
+}: {
+  entry: SchemaHistoryEntry;
+  tableId: string;
+  api: TableApi;
+  workspaceSlug: string;
+}) {
+  const navigate = useNavigate();
+  // One chat per attempt, so a retry after a lost response opens the same chat instead of another.
+  const chatId = useRef<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  if (entry.revert === 'later-changes')
+    return (
+      <p className="text-sm text-muted-foreground">
+        To revert this change, revert the later changes first, newest first. Or ask in chat for a new proposal.
+      </p>
+    );
+  if (entry.revert !== 'available') return null;
+  return (
+    <div className="space-y-2">
+      <Button
+        variant="outline"
+        disabled={busy}
+        aria-busy={busy}
+        onClick={async () => {
+          setBusy(true);
+          setError(null);
+          chatId.current ??= crypto.randomUUID();
+          try {
+            const opened = await api.proposeRevert(tableId, entry.id, chatId.current);
+            await navigate({ to: '/$workspaceSlug/chat/$chatId', params: { workspaceSlug, chatId: opened.chatId } });
+          } catch (failure) {
+            setError(
+              failure instanceof TableRequestError ? failure.message : 'The revert could not be prepared. Try again.',
+            );
+            if (failure instanceof TableRequestError && failure.status < 500) chatId.current = null;
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        Propose revert
+      </Button>
+      <p className="text-sm text-muted-foreground">
+        Opens a chat with a proposal that returns the table to the fields it had before this change. Nothing changes
+        until you approve it.
+      </p>
+      {error && <p role="alert">{error}</p>}
+    </div>
+  );
+}
+
+export function SchemaHistory({
+  tableId,
+  api,
+  workspaceSlug,
+}: {
+  tableId: string;
+  api: TableApi;
+  workspaceSlug: string;
+}) {
   const pages = useCursorPages();
   const read = useTableSchemaHistory(api, tableId, pages.after);
   const busy = read.state.kind === 'loading' || (read.state.kind === 'ready' && read.state.refreshing);
@@ -182,7 +249,15 @@ export function SchemaHistory({ tableId, api }: { tableId: string; api: TableApi
             ) : (
               <ol className="space-y-4">
                 {data.entries.map(entry => (
-                  <li key={entry.id} className="space-y-3 border-t border-border pt-4">
+                  <li key={entry.id} id={`schema-change-${entry.id}`} className="space-y-3 border-t border-border pt-4">
+                    {entry.reverts && (
+                      <p className="text-sm font-medium">
+                        Reverted{' '}
+                        <a className="break-all underline" href={`#schema-change-${entry.reverts}`}>
+                          execution {entry.reverts.slice(0, 8)}
+                        </a>
+                      </p>
+                    )}
                     <ChangeSummary entry={entry} />
                     <ExecutionDetails entry={entry} />
                     {!entry.definition && <WithheldDefinition entry={entry} />}
@@ -192,6 +267,7 @@ export function SchemaHistory({ tableId, api }: { tableId: string; api: TableApi
                         <DefinitionView definition={entry.definition} title="Fields after this change" />
                       )}
                     </Disclosure>
+                    <RevertChange entry={entry} tableId={tableId} api={api} workspaceSlug={workspaceSlug} />
                   </li>
                 ))}
               </ol>

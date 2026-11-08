@@ -59,6 +59,7 @@ import {
 } from './table-record-requests.ts';
 import { TableError } from '@tulipfarm/tables/service-contracts';
 import { createTableSchemaHistory, definitionStateSchema, schemaHistorySchema } from './table-schema-history.ts';
+import { createTableSchemaRevert, SchemaRevertError, schemaRevertResultSchema } from './table-schema-revert.ts';
 
 export function registerTableChanges(
   app: FastifyInstance,
@@ -126,6 +127,7 @@ export function registerTableChanges(
     };
   }
   const schemaHistory = createTableSchemaHistory(dependencies);
+  const schemaRevert = createTableSchemaRevert(dependencies);
   const params = z.object({ workspaceId: z.uuid(), chatId: z.uuid(), proposalId: z.uuid() });
   const validation = routeValidation({
     missing: 'Missing table proposal validator',
@@ -160,6 +162,7 @@ export function registerTableChanges(
         return reply
           .code(409)
           .send({ error: error.code, ...(error.fieldIds === undefined ? {} : { fieldIds: error.fieldIds }) });
+      if (error instanceof SchemaRevertError) return reply.code(409).send({ error: error.code });
       if (error instanceof WorkspaceMemberError) return reply.code(error.status).send({ error: error.code });
       if (error instanceof TableQueryError)
         return reply.code(400).send({ error: 'invalid-query', issues: error.issues });
@@ -408,6 +411,23 @@ export function registerTableChanges(
           limit: query.limit,
           ...(query.after ? { after: query.after } : {}),
         });
+      },
+    );
+    const revertParams = recordParams.extend({ executionId: z.uuid() });
+    routes.post(
+      `${tableBase}/:tableId/schema-history/:executionId/revert`,
+      {
+        schema: {
+          operationId: 'proposeTableSchemaRevert',
+          params: validation.json(revertParams),
+          body: validation.json(schemaRevertResultSchema),
+          response: response(schemaRevertResultSchema),
+        },
+      },
+      request => {
+        const p = revertParams.parse(request.params);
+        const body = schemaRevertResultSchema.parse(request.body);
+        return schemaRevert.propose(p.workspaceId, user(request), p.tableId, p.executionId, body.chatId);
       },
     );
     routes.get(

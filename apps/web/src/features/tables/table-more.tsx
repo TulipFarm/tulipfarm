@@ -147,7 +147,7 @@ export function TableMore({
             {panel === 'schema' && (
               <>
                 <DefinitionStatus state={state} />
-                <SchemaHistory tableId={state.id} api={api} />
+                <SchemaHistory tableId={state.id} api={api} workspaceSlug={workspace.slug} />
               </>
             )}
           </div>

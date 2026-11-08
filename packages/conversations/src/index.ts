@@ -257,7 +257,7 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
         `SELECT ${chatColumns}, project_id AS "projectId", next_message_sequence AS "nextSequence",
       (owner_user_id = $2 AND owner_membership_id = $3) AS owner,
       ${pinnedColumn(tx, '$3')},
-      (SELECT t.responder FROM ${table(tx, 'tf_conversation_turns')} t WHERE t.conversation_id = c.id AND t.responder <> 'package-install-v1'
+      (SELECT t.responder FROM ${table(tx, 'tf_conversation_turns')} t WHERE t.conversation_id = c.id AND t.responder NOT IN ('package-install-v1','schema-revert-v1')
         ORDER BY t.accepted_sequence DESC LIMIT 1) AS model
       FROM ${table(tx, 'tf_conversations')} c WHERE id = $1 AND kind = 'private' AND deleted_at IS NULL ${write ? 'FOR UPDATE' : ''}`,
         [chatId, actor.userId, actor.membershipId],

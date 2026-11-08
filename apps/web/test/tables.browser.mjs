@@ -213,7 +213,8 @@ const history = [
     values: record.values,
   },
 ];
-const executionId = randomUUID();
+const executionId = randomUUID(),
+  revertedExecutionId = randomUUID();
 const schemaEntry = {
   id: executionId,
   revision: 'a'.repeat(40),
@@ -244,7 +245,10 @@ const archiveRequests = [],
 let archivedTableArchived = true,
   archivedTableCanRestore = false;
 let schemaSecondPage = false,
-  deletedSecondPage = false;
+  deletedSecondPage = false,
+  schemaEntries = null,
+  revertStatus = 200;
+const revertRequests = [];
 const schemaCursors = [],
   deletedCursors = [];
 let historyStatus = 200,
@@ -542,11 +546,23 @@ try {
         applied: { revision: 'c'.repeat(40), definition: customerDefinition, appliedAt: null },
         rowPermissions: { create: false, update: false, delete: false },
       };
-    else if (path.endsWith(`/tables/${tableId}/schema-history`)) {
+    else if (path.endsWith(`/tables/${tableId}/schema-history/${revertedExecutionId}/revert`)) {
+      assert.equal(request.method(), 'POST');
+      revertRequests.push(request.postDataJSON().chatId);
+      if (revertStatus !== 200)
+        return route.fulfill({
+          status: revertStatus,
+          json: { error: revertStatus === 409 ? 'revert-unavailable' : 'unavailable' },
+        });
+      json = { chatId };
+    } else if (path.endsWith(`/tables/${tableId}/schema-history`)) {
       if (schemaStatus !== 200) return route.fulfill({ status: schemaStatus, json: { error: 'proposal-unavailable' } });
       const after = url.searchParams.get('after');
       schemaCursors.push(after);
-      json = { entries: after ? [] : [savedDefinition], nextCursor: schemaSecondPage && !after ? executionId : null };
+      json = {
+        entries: after ? [] : (schemaEntries ?? [savedDefinition]),
+        nextCursor: schemaSecondPage && !after ? executionId : null,
+      };
     } else if (path.endsWith(`/tables/${tableId}/deleted-rows`)) {
       if (deletedStatus !== 200)
         return route.fulfill({ status: deletedStatus, json: { error: 'proposal-unavailable' } });
@@ -1170,7 +1186,41 @@ try {
   assert.equal(schemaCursors.at(-1), executionId);
   await schemas.getByRole('button', { name: 'Previous schema history', exact: true }).click();
   schemaSecondPage = false;
-  await closePanel();
+  // Only the latest completed change offers a revert; older ones explain the order, and a revert links to its original.
+  schemaEntries = [
+    { ...schemaEntry, id: revertedExecutionId, revert: 'available', reverts: executionId },
+    { ...schemaEntry, revert: 'later-changes' },
+  ];
+  await schemas.getByRole('button', { name: 'Check schema history', exact: true }).click();
+  await schemas
+    .getByText(
+      'To revert this change, revert the later changes first, newest first. Or ask in chat for a new proposal.',
+      {
+        exact: true,
+      },
+    )
+    .waitFor();
+  assert.equal(
+    await schemas.getByRole('link', { name: `execution ${executionId.slice(0, 8)}`, exact: true }).getAttribute('href'),
+    `#schema-change-${executionId}`,
+  );
+  assert.equal(await schemas.getByRole('button', { name: 'Propose revert', exact: true }).count(), 1);
+  revertStatus = 503;
+  await schemas.getByRole('button', { name: 'Propose revert', exact: true }).click();
+  await schemas
+    .getByText('The revert could not be prepared. Check your connection and try again.', {
+      exact: true,
+    })
+    .waitFor();
+  revertStatus = 200;
+  await schemas.getByRole('button', { name: 'Propose revert', exact: true }).click();
+  await page.waitForURL(`${origin}/acme/chat/${chatId}`);
+  assert.equal(revertRequests.length, 2);
+  assert.equal(revertRequests[0], revertRequests[1], 'A retry reuses the same chat');
+  schemaEntries = null;
+  await page.goto(`${origin}/acme/tables`);
+  await page.getByText('Support tickets', { exact: true }).click();
+  await page.getByRole('heading', { name: 'Support tickets', exact: true }).waitFor();
   // A refused archive keeps the table open and says what blocks it.
   await page.getByRole('button', { name: 'More table options', exact: true }).click();
   await page.getByRole('menuitem', { name: 'Archive table', exact: true }).click();

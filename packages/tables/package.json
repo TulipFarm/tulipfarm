@@ -73,6 +73,10 @@
       "types": "./dist/transforms.d.ts",
       "default": "./dist/transforms.js"
     },
+    "./schema-revert": {
+      "types": "./dist/schema-revert.d.ts",
+      "default": "./dist/schema-revert.js"
+    },
     "./task-admission": {
       "types": "./dist/task-admission.d.ts",
       "default": "./dist/task-admission.js"
