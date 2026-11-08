@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from '@tanstack/react-router';
 import { BranchDown } from 'reicon-react/icons/BranchDown';
 import { RefreshCwIcon } from 'lucide-react';
@@ -30,6 +30,8 @@ import { Disclosure } from '@/components/disclosure';
 import { workspaceRoute, workspaceWorkflowsRoute } from '@/router';
 import { apiOrigin } from '@/lib/auth';
 import { UnsavedChanges, samePage } from '@/features/tables/feedback';
+import { tableApi } from '@/features/tables/api';
+import { useTableNames } from '@/features/tables/hooks';
 import { workflowRequest as request, WorkflowRequestError as RequestError } from '@/features/workflows/api';
 import type { WorkflowLink } from '@/features/workflows/page-search';
 import { useWorkflowEditingSession } from '@/features/workflows/editing-session';
@@ -315,6 +317,13 @@ function WorkflowPage({
   const shelfWorkflows = shelf === 'archived' ? archivedWorkflows : workflows;
   const matches = (workflow: Workflow) => workflow.definition.name.toLowerCase().includes(search.trim().toLowerCase());
   const shownWorkflows = shelfWorkflows?.filter(matches);
+  const tables = useMemo(() => tableApi(workspaceId), [workspaceId]);
+  const tableNames = useTableNames(
+    tables,
+    [...(shownWorkflows ?? []), ...(selected ? [selected] : [])].some(
+      workflow => liveTrigger(workflow).kind === 'row' || workflow.definition.trigger.kind === 'row',
+    ),
+  );
   const detail = view !== 'list' ? selected : null;
   const listHref = `/${encodeURIComponent(workspaceSlug)}/workflows`;
   const unavailable = denied || read.state.kind === 'unavailable';
@@ -472,6 +481,7 @@ function WorkflowPage({
                         state={workflowState(workflow)}
                         href={`${listHref}/${encodeURIComponent(workflow.id)}`}
                         disabled={blocked}
+                        tableNames={tableNames}
                         onOpen={() => choose(workflow)}
                       />
                     </li>
@@ -543,9 +553,9 @@ function WorkflowPage({
                     </p>
                     <p className="text-sm text-muted-foreground">
                       {[
-                        `${pendingChanges(selected) ? 'Live: ' : ''}${triggerLine(liveTrigger(selected))}`,
+                        `${pendingChanges(selected) ? 'Live: ' : ''}${triggerLine(liveTrigger(selected), tableNames)}`,
                         workflowState(selected).detail,
-                        pendingSchedule(selected) && `Saved: ${pendingSchedule(selected)}`,
+                        pendingSchedule(selected, tableNames) && `Saved: ${pendingSchedule(selected, tableNames)}`,
                       ]
                         .filter(Boolean)
                         .join(' · ')}
@@ -1258,10 +1268,10 @@ function disabledExplanation(workflow: Workflow) {
 }
 const pendingChanges = (workflow: Workflow) =>
   workflow.enabled && !!workflow.activeRevision && workflow.activeRevision !== workflow.revision;
-function pendingSchedule(workflow: Workflow) {
+function pendingSchedule(workflow: Workflow, tableNames: ReadonlyMap<string, string>) {
   if (!pendingChanges(workflow) || !workflow.activeTrigger) return undefined;
-  const saved = triggerLine(workflow.definition.trigger);
-  return saved === triggerLine(workflow.activeTrigger) ? undefined : saved;
+  const saved = triggerLine(workflow.definition.trigger, tableNames);
+  return saved === triggerLine(workflow.activeTrigger, tableNames) ? undefined : saved;
 }
 function Count({ value }: { value: number | undefined }) {
   return <span className="min-w-4 text-muted-foreground tabular-nums">{value ?? ''}</span>;

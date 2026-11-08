@@ -15,12 +15,26 @@ import { agentApi } from './api';
 import { agentReads } from './queries';
 import { AgentRead } from './feedback';
 import { useSharingCandidates } from './sharing';
+import { tableApi } from '@/features/tables/api';
+import { useTableNames } from '@/features/tables/hooks';
 import { ScopeSummary } from './reference-names';
 import { toolLabels } from './labels';
 import { changingTools } from './tool-picker';
 
-export function setupTriggerLabel(trigger: AgentSetup['triggers'][number]['trigger']) {
-  return trigger.kind === 'github' ? describeGitHubTrigger(trigger) : triggerLine(trigger);
+export function setupTriggerLabel(
+  trigger: AgentSetup['triggers'][number]['trigger'],
+  tableNames?: ReadonlyMap<string, string>,
+) {
+  return trigger.kind === 'github' ? describeGitHubTrigger(trigger) : triggerLine(trigger, tableNames);
+}
+
+/** Names of the tables that row triggers watch, loaded only when a trigger needs one. */
+export function useTriggerTableNames(workspaceId: string, triggers: readonly AgentSetup['triggers'][number][]) {
+  const tables = useMemo(() => tableApi(workspaceId), [workspaceId]);
+  return useTableNames(
+    tables,
+    triggers.some(item => item.trigger.kind === 'row'),
+  );
 }
 
 export function AgentSetupReview({
@@ -36,6 +50,7 @@ export function AgentSetupReview({
   const context = useFeatureRead(agentReads.context(api));
   const candidates = useSharingCandidates(workspaceId);
   const catalog = useModelCatalog(workspaceId);
+  const tableNames = useTriggerTableNames(workspaceId, setup.triggers);
   const family =
     catalog.state.kind === 'ready'
       ? catalog.state.data.families.find(item => item.id === setup.definition.modelFamilyId)
@@ -64,7 +79,7 @@ export function AgentSetupReview({
         channelNames={setup.slackChannels
           .filter(item => !item.detach)
           .map(item => channelNames[item.channel] ?? item.channel)}
-        triggerLabels={setup.triggers.map(item => setupTriggerLabel(item.trigger))}
+        triggerLabels={setup.triggers.map(item => setupTriggerLabel(item.trigger, tableNames))}
       />
       {!!setup.definition.skills?.length && (
         <section aria-label="Reviewed skills" className="grid gap-2">
@@ -159,7 +174,7 @@ export function AgentSetupReview({
               <div key={item.id} className="flex gap-3">
                 <TriggerIcon trigger={item.trigger} />
                 <div className="grid min-w-0 gap-1">
-                  <p className="font-medium">{setupTriggerLabel(item.trigger)}</p>
+                  <p className="font-medium">{setupTriggerLabel(item.trigger, tableNames)}</p>
                   <p className="whitespace-pre-wrap wrap-anywhere">{item.prompt}</p>
                   <p className="text-muted-foreground">
                     {limits.toolCalls} tool calls, {limits.activeMilliseconds / 1000} active seconds, {limits.credits}{' '}

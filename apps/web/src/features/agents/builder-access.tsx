@@ -183,6 +183,10 @@ export function BuilderAccess({
   );
 }
 
+/** A table picked in the data scope but not yet added with "Add table access". */
+export type PendingTable = { assetId: string; permissions: RecordPermission[] };
+export const noPendingTable: PendingTable = { assetId: '', permissions: ['table.row.read'] };
+
 /** Business tables and other assets an agent may use, as offered in the builder's "What data it can use" step. */
 export function AgentDataScope({
   workspaceId,
@@ -192,6 +196,8 @@ export function AgentDataScope({
   disabled,
   onAdd,
   onRemove,
+  pending: controlled,
+  onPendingChange,
 }: {
   workspaceId: string;
   teams: AgentContext['teams'];
@@ -200,9 +206,15 @@ export function AgentDataScope({
   disabled: boolean;
   onAdd: (assetId: string, permissions: Policy['limits'][number]['permissions']) => void;
   onRemove: (assetId: string) => void;
+  /** Lets the parent save a picked table without "Add table access". */
+  pending?: PendingTable;
+  onPendingChange?: (pending: PendingTable) => void;
 }) {
-  const [table, setTable] = useState('');
-  const [tablePermissions, setTablePermissions] = useState<RecordPermission[]>(['table.row.read']);
+  const [local, setLocal] = useState(noPendingTable);
+  const pending = controlled ?? local;
+  const setPending = onPendingChange ?? setLocal;
+  const table = pending.assetId;
+  const tablePermissions = pending.permissions;
   return (
     <>
       <TablePicker
@@ -213,7 +225,7 @@ export function AgentDataScope({
         required={false}
         value={table}
         disabled={disabled}
-        onChange={setTable}
+        onChange={assetId => setPending({ ...pending, assetId })}
       />
       {table && (
         <>
@@ -223,7 +235,7 @@ export function AgentDataScope({
             legend="Table access"
             options={tableChoices}
             value={tablePermissions}
-            onValueChange={setTablePermissions}
+            onValueChange={permissions => setPending({ ...pending, permissions })}
           />
           <div>
             <Button
@@ -231,8 +243,7 @@ export function AgentDataScope({
               disabled={disabled}
               onClick={() => {
                 onAdd(table, tablePermissions);
-                setTable('');
-                setTablePermissions(['table.row.read']);
+                setPending(noPendingTable);
               }}
             >
               <Plus aria-hidden="true" />
@@ -241,7 +252,7 @@ export function AgentDataScope({
           </div>
         </>
       )}
-      {!value.length && (
+      {!value.length && !table && (
         <p className="text-sm text-muted-foreground">No business tables or outgoing Slack destinations allowed.</p>
       )}
       {value.length > 0 && (

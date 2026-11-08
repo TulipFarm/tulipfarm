@@ -262,11 +262,16 @@ export function useConversationInteraction(
 export const draftPending = (draft: Awaited<ReturnType<ConversationApi['draft']>>) =>
   draft.status === 'pending' || draft.status === 'preparing';
 
+// Saving a setup with triggers can take minutes: every 2 s for a minute, then every 5 s for five more.
+const draftBackoff = (checks: number) => (checks < 30 ? 2000 : 5000);
+
 export function useAuthoringDraft(api: ConversationApi, chatId: string, id: string, enabled = true) {
   const read = useFeatureRead({
     key: conversationKeys.draft(chatId, id),
     load: signal => api.draft(chatId, id, signal),
     pollWhile: draftPending,
+    interval: draftBackoff,
+    maxChecks: 90,
     enabled,
   });
   const changes = useConversationChanges();

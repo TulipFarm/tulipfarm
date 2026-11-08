@@ -43,14 +43,15 @@ export const authorizeMcpSelection: NonNullable<WorkspaceMcpOptions['authorizeSe
   }
   let agentId: string;
   let definition;
+  let live = true;
   if (subject.kind === 'task') {
     const task = z
-      .object({ agent_id: z.uuid(), definition: agentDefinitionSchema })
+      .object({ agent_id: z.uuid(), definition: agentDefinitionSchema, live: z.boolean() })
       .optional()
       .parse(
         (
           await tx.client.query(
-            `SELECT t.agent_id,d.definition FROM ${relation(tx, 'tf_agent_tasks')} t JOIN ${relation(tx, 'tf_agent_definitions')} d ON d.agent_id=t.agent_id AND d.revision=t.definition_revision JOIN ${relation(tx, 'tf_agent_activations')} a ON a.id=t.activation_id WHERE t.id=$1 AND t.owner_user_id=$2 AND t.owner_membership_id=$3 AND a.revoked_at IS NULL`,
+            `SELECT t.agent_id,d.definition,a.revoked_at IS NULL AS live FROM ${relation(tx, 'tf_agent_tasks')} t JOIN ${relation(tx, 'tf_agent_definitions')} d ON d.agent_id=t.agent_id AND d.revision=t.definition_revision JOIN ${relation(tx, 'tf_agent_activations')} a ON a.id=t.activation_id WHERE t.id=$1 AND t.owner_user_id=$2 AND t.owner_membership_id=$3`,
             [subject.id, actor.userId, actor.membershipId],
           )
         ).rows[0],
@@ -58,6 +59,7 @@ export const authorizeMcpSelection: NonNullable<WorkspaceMcpOptions['authorizeSe
     if (!task) throw new AccessDenied();
     agentId = task.agent_id;
     definition = task.definition;
+    live = task.live;
   } else {
     agentId = subject.agentId;
     const definitions = z
@@ -65,16 +67,18 @@ export const authorizeMcpSelection: NonNullable<WorkspaceMcpOptions['authorizeSe
       .parse(
         (
           await tx.client.query(
-            `SELECT d.definition FROM ${relation(tx, 'tf_agent_activations')} a JOIN ${relation(tx, 'tf_agents')} g ON g.id=a.agent_id JOIN ${relation(tx, 'tf_agent_definitions')} d ON d.agent_id=a.agent_id AND d.revision=a.definition_revision WHERE a.agent_id=$1 AND a.revoked_at IS NULL AND g.enabled AND g.deleted_at IS NULL ORDER BY a.activated_at DESC NULLS LAST,a.id DESC LIMIT 2`,
+            `SELECT d.definition FROM ${relation(tx, 'tf_agent_activations')} a JOIN ${relation(tx, 'tf_agents')} g ON g.id=a.agent_id JOIN ${relation(tx, 'tf_agent_definitions')} d ON d.agent_id=a.agent_id AND d.revision=a.definition_revision WHERE a.agent_id=$1 AND a.revoked_at IS NULL AND g.enabled AND g.deleted_at IS NULL ORDER BY a.activated_at DESC NULLS LAST,a.id DESC LIMIT 1`,
             [agentId],
           )
         ).rows,
       );
-    if (definitions.length !== 1 || !definitions[0]) throw new AccessDenied();
+    // A new task runs under the newest activation unless it pins one; claiming checks the task's own activation.
+    if (!definitions[0]) throw new AccessDenied();
     definition = definitions[0].definition;
   }
   await requireTaskInvocation(tx, actor, agentId);
-  const slots = (definition.mcp ?? []).map(slot => ({
+  // A task whose activation was revoked stays readable but can no longer bind MCP integrations.
+  const slots = (live ? (definition.mcp ?? []) : []).map(slot => ({
     slotId: slot.id,
     serverIdentity: slot.serverIdentity,
     tools: slot.tools,

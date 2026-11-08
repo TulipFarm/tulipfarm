@@ -28,7 +28,7 @@ import { BuilderTestChat, useBuilderTestChat } from './builder-test-chat';
 import { AgentRead } from './feedback';
 import { agentDraftErrors } from './draft';
 import { useAgentChanges } from './queries';
-import { AgentSetupReview, setupTriggerLabel } from './setup-review';
+import { AgentSetupReview, setupTriggerLabel, useTriggerTableNames } from './setup-review';
 import type { agentApi, AgentContext } from './api';
 
 type Operation = {
@@ -90,6 +90,7 @@ export function AgentBuilder({
   const submitIntent = useRef<'save' | null>(null);
   const changed = useAgentChanges();
   const catalog = useModelCatalog(workspaceId);
+  const tableNames = useTriggerTableNames(workspaceId, draft.triggers);
   const chat = useBuilderTestChat(workspaceId, builderDefinition(draft), draft.source);
   const write = useTableWrite(
     async (operation: Operation) => {
@@ -172,7 +173,7 @@ export function AgentBuilder({
       skills={draft.definition.skills ?? []}
       tools={draft.definition.tools}
       channelNames={draft.channels.filter(channel => !channel.detach).map(channel => channel.name)}
-      triggerLabels={draft.triggers.map(item => setupTriggerLabel(item.trigger))}
+      triggerLabels={draft.triggers.map(item => setupTriggerLabel(item.trigger, tableNames))}
       onEdit={chooseStep}
     />
   );
@@ -358,6 +359,7 @@ export function AgentBuilder({
         />
         <BuilderTriggers
           slug={slug}
+          tableNames={tableNames}
           value={draft.triggers}
           onChange={triggers => update({ triggers })}
           disabled={locked}

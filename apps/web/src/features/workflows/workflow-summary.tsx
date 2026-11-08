@@ -17,7 +17,7 @@ import { Status, type StatusState } from '@tulipfarm/sprout/status';
 import type { Definition, DisabledReason, workflowSchema } from '@tulipfarm/workflows/contracts';
 import type { z } from 'zod';
 import { cronSummary, ordinaryCron } from './calendar-schedule';
-import { triggerTitles, workflowDuration } from './diagram-model';
+import { rowTriggerLine, triggerTitles, workflowDuration } from './diagram-model';
 
 type Workflow = z.infer<typeof workflowSchema>;
 type Trigger = Definition['trigger'];
@@ -40,7 +40,8 @@ const triggerIcons: Record<Trigger['kind'], LucideIcon> = {
 export const liveTrigger = (workflow: Workflow) =>
   workflow.enabled ? (workflow.activeTrigger ?? workflow.definition.trigger) : workflow.definition.trigger;
 
-export function triggerLine(trigger: Trigger) {
+export function triggerLine(trigger: Trigger, tableNames?: ReadonlyMap<string, string>) {
+  if (trigger.kind === 'row') return rowTriggerLine(trigger, tableNames?.get(trigger.tableId));
   if (trigger.kind === 'interval') return `Every ${workflowDuration(trigger.minutes * 60)}`;
   if (trigger.kind === 'cron' && ordinaryCron(trigger.expression)) return cronSummary(trigger).replace(/\.$/, '');
   return triggerTitles[trigger.kind];
@@ -63,12 +64,14 @@ export function WorkflowRow({
   state,
   href,
   disabled,
+  tableNames,
   onOpen,
 }: {
   workflow: Workflow;
   state: WorkflowState;
   href: string;
   disabled: boolean;
+  tableNames?: ReadonlyMap<string, string>;
   onOpen: () => void;
 }) {
   const id = useId();
@@ -91,7 +94,7 @@ export function WorkflowRow({
         <span className="min-w-0 flex-1">
           <span className="block truncate font-medium text-foreground">{workflow.definition.name}</span>
           <span id={`${id}-trigger`} className="block truncate text-sm text-muted-foreground">
-            {triggerLine(trigger)}
+            {triggerLine(trigger, tableNames)}
           </span>
         </span>
         <span id={`${id}-status`} className="sm:w-56 sm:shrink-0">

@@ -138,6 +138,7 @@ let actions = [],
   catalogStatus = 200,
   catalogDelay = 0,
   actionStatus = 200,
+  taskSelectionStatus = 200,
   actionDelay = 0,
   setupMode = 'saved';
 const writes = [],
@@ -290,6 +291,7 @@ try {
           json = { saved: true };
         } else json = detail;
       } else if (suffix.startsWith('/selections/')) {
+        if (suffix.startsWith('/selections/task/')) status = taskSelectionStatus;
         let value = selections.get(suffix);
         if (!value) {
           value = structuredClone(selection);
@@ -777,6 +779,19 @@ try {
       `text-only start sends no MCP receipt when dispatch is ${dispatchEnabled ? 'enabled' : 'disabled'}`,
     );
   }
+  // A task stays readable when the server refuses its MCP selection, for example after its activation was revoked.
+  taskSelectionStatus = 403;
+  const refused = page.waitForResponse(
+    response => response.url().includes(`/selections/task/${taskId}`) && response.status() === 403,
+  );
+  await go(`/agent-tasks/${taskId}`);
+  await refused;
+  const title = page.getByRole('heading', { name: 'Inspect private task', exact: true });
+  await title.waitFor();
+  await setTimeout(300);
+  assert.equal(await page.getByRole('heading', { name: 'Private task access changed' }).count(), 0);
+  assert.equal(await title.count(), 1);
+  taskSelectionStatus = 200;
   await go('/workflows');
   await page.getByRole('heading', { name: 'Workflows', exact: true }).waitFor();
   assert.equal(await page.getByRole('region', { name: 'MCP integration selection' }).count(), 0);

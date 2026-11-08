@@ -91,7 +91,6 @@ export function TaskComposer({
   const [sources, setSources] = useState<ContextSource[]>([]);
   const files = useTaskDraftFiles(mode.kind === 'reply' ? mode.task.id : null);
   const [activationId, setActivationId] = useState('latest');
-  const [scopeKey, setScopeKey] = useState('');
   const activations = mode.kind === 'start' ? mode.detail.activations : [];
   const tables = useMemo(() => tableApi(workspaceId), [workspaceId]);
   const tableNames = useTableNames(
@@ -99,21 +98,8 @@ export function TaskComposer({
     activations.some(item => item.scope.length > 0),
   );
   const activation = activations.find(item => item.id === activationId);
-  const scopes = new Map(
-    activations.map(item => {
-      const scope = item.scope
-        .map(entry => ({ assetId: entry.assetId, permissions: [...entry.permissions].sort() }))
-        .sort((a, b) => a.assetId.localeCompare(b.assetId));
-      return [JSON.stringify(scope), scope];
-    }),
-  );
-  const choosingScope = activationId === 'latest' && scopes.size > 1;
-  const scope =
-    activationId === 'latest'
-      ? scopes.size === 1
-        ? scopes.values().next().value
-        : scopes.get(scopeKey)
-      : activation?.scope;
+  // Activations arrive newest first, and the server runs an unpinned task under the newest one.
+  const scope = activationId === 'latest' ? activations[0]?.scope : activation?.scope;
   const [limits, setLimits] = useState(() => limitDraft(mode.kind === 'start' ? defaultTaskLimits : mode.task.limits));
   const [savedLimits, setSavedLimits] = useState(limits);
   const [limitsOpen, setLimitsOpen] = useState<boolean>();
@@ -126,7 +112,6 @@ export function TaskComposer({
       files.clear();
       setSavedLimits(limits);
       setActivationId('latest');
-      setScopeKey('');
       accepted(receipt.id);
     },
   );
@@ -136,7 +121,6 @@ export function TaskComposer({
     sources.length > 0 ||
     files.items.length > 0 ||
     activationId !== 'latest' ||
-    !!scopeKey ||
     JSON.stringify(limits) !== JSON.stringify(savedLimits) ||
     busy;
   const paused = mode.kind === 'reply' && ['paused', 'failed'].includes(mode.task.status);
@@ -172,17 +156,11 @@ export function TaskComposer({
     if (mcp.kind === 'unresolved')
       return { kind: 'blocked', reason: 'Save your MCP integration selection, or check it again, before starting.' };
     if (scope) return { kind: 'ready' };
-    return choosingScope
-      ? {
-          kind: 'blocked',
-          reason: 'Choose a task data scope first.',
-          fix: { kind: 'jump', label: 'Go to Task data scope', target: 'task-scope' },
-        }
-      : {
-          kind: 'blocked',
-          reason: 'Choose activated instructions first.',
-          fix: { kind: 'jump', label: 'Go to Activated instructions', target: 'task-activation' },
-        };
+    return {
+      kind: 'blocked',
+      reason: 'Choose activated instructions first.',
+      fix: { kind: 'jump', label: 'Go to Activated instructions', target: 'task-activation' },
+    };
   }
   const action = submitState();
   function submit() {
@@ -284,29 +262,6 @@ export function TaskComposer({
                 </SelectContent>
               </Select>
             </Field>
-            {choosingScope && (
-              <Field
-                id="task-scope"
-                label="Task data scope"
-                required
-                helper="These versions use different data. Choose one for this task."
-              >
-                <Select value={scopeKey} onValueChange={value => setScopeKey(value ?? '')}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Choose a task data scope">
-                      {scopeKey && scopes.has(scopeKey) ? scopeText(scopes.get(scopeKey)!, tableNames) : undefined}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    {[...scopes].map(([key, value]) => (
-                      <SelectItem key={key} value={key}>
-                        {scopeText(value, tableNames)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
-            )}
             {scope && (
               <p className="break-words text-sm text-muted-foreground">
                 Data this task may use: {scopeText(scope, tableNames)}.
@@ -338,7 +293,7 @@ export function TaskComposer({
           exclude={mode.kind === 'reply' ? mode.task.id : undefined}
           room={20 - files.items.length}
         />
-        {mode.kind === 'start' && (
+        {mode.kind === 'start' && activations.length > 0 && (
           <McpPrivateContext
             key={activationId}
             workspaceId={workspaceId}

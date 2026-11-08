@@ -70,6 +70,12 @@ export const triggerTitles: Record<Trigger['kind'], string> = {
   row: 'When a row changes',
 };
 
+export function rowTriggerLine(trigger: Extract<Trigger, { kind: 'row' }>, table: string | undefined) {
+  if (trigger.event === 'created') return table ? `When a row is added to ${table}` : 'When a row is added';
+  if (trigger.event === 'deleted') return table ? `When a row is deleted from ${table}` : 'When a row is deleted';
+  return table ? `When a row in ${table} changes` : triggerTitles.row;
+}
+
 export function workflowDuration(seconds: number) {
   const parts: string[] = [];
   for (const [unit, size] of [
@@ -135,9 +141,8 @@ function triggerText(trigger: Trigger, labels: WorkflowLabels) {
     case 'cron':
       return `${trigger.expression} / ${trigger.timezone}`;
     case 'record':
-      return labels.tables?.[trigger.tableId] ?? 'Table name unavailable';
     case 'row':
-      return `${labels.tables?.[trigger.tableId] ?? 'Table name unavailable'} / ${trigger.event}`;
+      return labels.tables?.[trigger.tableId] ?? 'Table name unavailable';
   }
 }
 
@@ -270,7 +275,11 @@ export function workflowGraph(
     {
       id: '$trigger',
       kind: 'trigger',
-      title: labels.trigger?.title ?? triggerTitles[definition.trigger.kind],
+      title:
+        labels.trigger?.title ??
+        (trigger.kind === 'row'
+          ? rowTriggerLine(trigger, labels.tables?.[trigger.tableId])
+          : triggerTitles[trigger.kind]),
       summary: labels.trigger?.summary ?? triggerText(definition.trigger, labels),
       actor: `Runs as ${labels.actor}`,
       ordinal: 0,
@@ -283,7 +292,13 @@ export function workflowGraph(
   const details: WorkflowGraph['details'] = {
     $trigger: {
       facts: [
-        { label: 'Starts', value: triggerText(definition.trigger, labels) },
+        {
+          label: 'Starts',
+          value:
+            trigger.kind === 'row'
+              ? rowTriggerLine(trigger, labels.tables?.[trigger.tableId])
+              : triggerText(trigger, labels),
+        },
         { label: 'Runs as', value: labels.actor },
         ...triggerFacts(trigger, labels),
       ],

@@ -81,7 +81,7 @@ export async function latestActivationJourney({
     revision,
     scope,
   });
-  assert.equal((await saved.detail(w.id, owner.user.id, agentId)).activations[0].id, oldActivation);
+  assert.equal((await saved.detail(w.id, owner.user.id, agentId)).activations[0].id, newer.activationId);
   activationProofSkills.set('Activation proof concurrent latest', newerSkills);
   await page.getByLabel('What should this agent do?').fill('Activation proof concurrent latest');
   let lost, receipt;
@@ -199,9 +199,7 @@ export async function latestActivationJourney({
   await saved.activate(w.id, other.user.id, agentId, { revision: nextRevision, scope: [] });
   await page.goto(agentUrl);
   await page.getByLabel('What should this agent do?').fill('Activation proof chosen scope');
-  assert.equal(await page.getByRole('button', { name: 'Start task', exact: true }).isEnabled(), false);
-  await page.getByRole('combobox', { name: 'Task data scope', exact: true }).click();
-  await page.getByRole('option', { name: 'No table access', exact: true }).click();
+  assert.equal(await page.getByRole('combobox', { name: 'Task data scope', exact: true }).count(), 0);
   activationProofSkills.set('Activation proof chosen scope', definition.skills);
   const scopeResponse = page.waitForResponse(
     response => response.url() === startUrl && response.request().method() === 'POST',
@@ -219,8 +217,6 @@ export async function latestActivationJourney({
   await db.platform.query(`UPDATE ${table('tf_agent_activations')} SET activated_at=NULL WHERE agent_id=$1`, [agentId]);
   await page.goto(agentUrl);
   await page.getByLabel('What should this agent do?').fill('Activation proof ambiguous history');
-  await page.getByRole('combobox', { name: 'Task data scope', exact: true }).click();
-  await page.getByRole('option', { name: 'No table access', exact: true }).click();
   const rejected = page.waitForResponse(
     response => response.url() === startUrl && response.request().method() === 'POST',
   );
@@ -266,6 +262,6 @@ export async function latestActivationJourney({
   await page.emulateMedia({ colorScheme: 'light' });
   await page.screenshot({ path: `${screenshotPrefix}-latest-desktop.png`, fullPage: true });
   console.log(
-    'PASS latest activation browser: concurrent activation after form load, exact omitted-ID lost-response replay after newer activation, retained follow-up pins, new-task pins, explicit historical override, distinct scope choice, unordered historical ambiguity and recovery.',
+    'PASS latest activation browser: concurrent activation after form load, exact omitted-ID lost-response replay after newer activation, retained follow-up pins, new-task pins, explicit historical override, newest activation scope, unordered historical ambiguity and recovery.',
   );
 }

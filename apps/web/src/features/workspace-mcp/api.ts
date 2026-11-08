@@ -34,7 +34,7 @@ export type PrepareMcpChat = (signal: AbortSignal, create: (requestId: string) =
 export function mcpApi(workspaceId: string, accessLost: (status: number) => void = () => {}) {
   const base = `${apiOrigin}/v1/workspaces/${encodeURIComponent(workspaceId)}/workspace-mcp`;
   const part = encodeURIComponent;
-  async function request(path: string, method = 'GET', body?: unknown, signal?: AbortSignal) {
+  async function request(path: string, method = 'GET', body?: unknown, signal?: AbortSignal, reportLoss = true) {
     const response = await jsonResponse(`${base}${path}`, {
       method,
       body,
@@ -45,7 +45,7 @@ export function mcpApi(workspaceId: string, accessLost: (status: number) => void
     const value = await readJson(response, !response.ok);
     signal?.throwIfAborted();
     if (!response.ok) {
-      if ([401, 403, 404].includes(response.status)) accessLost(response.status);
+      if (response.status === 401 || (reportLoss && [403, 404].includes(response.status))) accessLost(response.status);
       const error = z
         .object({ error: z.string(), fieldErrors: z.record(z.string(), z.string()).optional() })
         .safeParse(value).data;
@@ -67,6 +67,9 @@ export function mcpApi(workspaceId: string, accessLost: (status: number) => void
     return value;
   }
   const selectionPath = (origin: SelectionOrigin) => `/selections/${origin.kind}/${part(origin.id)}`;
+  // A task's own reads report loss of the task. Its MCP selection can be refused while the task stays readable,
+  // for example after the agent's activations change, so that refusal only affects the selection.
+  const reportsLoss = (origin: SelectionOrigin) => origin.kind === 'chat';
   return {
     capabilities: async (signal: AbortSignal) =>
       capabilitiesSchema.parse(await request('/capabilities', 'GET', undefined, signal)),
@@ -115,6 +118,7 @@ export function mcpApi(workspaceId: string, accessLost: (status: number) => void
           'GET',
           undefined,
           signal,
+          reportsLoss(origin),
         ),
       );
     },
@@ -123,10 +127,13 @@ export function mcpApi(workspaceId: string, accessLost: (status: number) => void
       input: { requestId: string; expectedVersion: number; bindings: Selection['bindings'] },
     ) =>
       selectionSchema.parse(
-        await request(selectionPath(origin), 'PUT', {
-          ...input,
-          ...(origin.agentId ? { agentId: origin.agentId } : {}),
-        }),
+        await request(
+          selectionPath(origin),
+          'PUT',
+          { ...input, ...(origin.agentId ? { agentId: origin.agentId } : {}) },
+          undefined,
+          reportsLoss(origin),
+        ),
       ),
     permissions: async (id: string, signal: AbortSignal) =>
       agentPermissionsSchema.parse(await request(`/agents/${part(id)}/permissions`, 'GET', undefined, signal)),

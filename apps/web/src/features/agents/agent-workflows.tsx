@@ -1,9 +1,12 @@
+import { useMemo } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { Button } from '@tulipfarm/sprout/button';
 import { FormSection } from '@tulipfarm/sprout/form';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
+import { tableApi } from '@/features/tables/api';
+import { useTableNames } from '@/features/tables/hooks';
 import { useWorkflows } from '@/features/workflows/queries';
-import { WorkflowRow, workflowState } from '@/features/workflows/workflow-summary';
+import { liveTrigger, WorkflowRow, workflowState } from '@/features/workflows/workflow-summary';
 
 /** The workflows created for this agent, which are how it starts on a schedule or from an event. */
 export function AgentTriggerWorkflows({
@@ -19,6 +22,11 @@ export function AgentTriggerWorkflows({
   const read = useWorkflows(workspaceId);
   const state = read.state;
   const workflows = state.kind === 'ready' ? state.data.filter(workflow => workflow.agentId === agentId) : [];
+  const tables = useMemo(() => tableApi(workspaceId), [workspaceId]);
+  const tableNames = useTableNames(
+    tables,
+    workflows.some(workflow => liveTrigger(workflow).kind === 'row'),
+  );
   const open = (workflowId: string) =>
     void navigate({ to: '/$workspaceSlug/workflows/$workflowId', params: { workspaceSlug: slug, workflowId } });
   return (
@@ -55,6 +63,7 @@ export function AgentTriggerWorkflows({
                 state={workflowState(workflow)}
                 href={`/${encodeURIComponent(slug)}/workflows/${encodeURIComponent(workflow.id)}`}
                 disabled={false}
+                tableNames={tableNames}
                 onOpen={() => open(workflow.id)}
               />
             </li>
