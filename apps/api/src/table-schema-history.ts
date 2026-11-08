@@ -17,6 +17,7 @@ import {
 } from '@tulipfarm/tables/proposal-contracts';
 import { pageArchiveVersion, pageRestoreVersion, type TableProposalOptions } from '@tulipfarm/tables/proposals';
 import { summarizeSchemaChange } from '@tulipfarm/tables/schema-summary';
+import { schemaRevertLinks } from './table-schema-revert.ts';
 
 const phaseSchema = z.enum(['publishing', 'copying', 'reconciling', 'completed', 'blocked']);
 /** Why an entry's definition is not shown. Null when the definition is shown. */
@@ -34,6 +35,10 @@ export const schemaHistoryEntrySchema = z.object({
   changes: z.array(z.string()).nullable(),
   approval: z.object({ name: z.string(), formerMember: z.boolean(), approvedAt: z.iso.datetime() }).nullable(),
   receipt: executionReceiptSchema.nullable(),
+  /** Whether the person can propose reverting this change now, or must first revert later changes. */
+  revert: z.enum(['available', 'later-changes']).nullable(),
+  /** The earlier change this change reverted. */
+  reverts: z.uuid().nullable(),
 });
 export const schemaHistorySchema = z.object({
   entries: z.array(schemaHistoryEntrySchema),
@@ -185,7 +190,10 @@ export function createTableSchemaHistory(
     history(workspaceId: string, userId: string, tableId: string, query: { after?: string; limit: number }) {
       return authorized(workspaceId, userId, tableId, async (tx, actor) => {
         const rows = await entries(tx, actor, tableId, { ...query, limit: query.limit + 1 });
-        const page = rows.slice(0, query.limit);
+        const links = await schemaRevertLinks(tx, actor, tableId);
+        const page = rows
+          .slice(0, query.limit)
+          .map(entry => ({ ...entry, revert: links.revert(entry.id), reverts: links.reverts(entry.id) }));
         return { entries: page, nextCursor: rows.length > query.limit ? (page.at(-1)?.id ?? null) : null };
       });
     },
@@ -199,7 +207,10 @@ export function createTableSchemaHistory(
           )
         ).rowCount;
         if (!exists) throw new AccessDenied();
-        const saved = (await entries(tx, actor, tableId, { limit: 1, latest: true }))[0] ?? null;
+        const latest = (await entries(tx, actor, tableId, { limit: 1, latest: true }))[0];
+        const links = latest && (await schemaRevertLinks(tx, actor, tableId));
+        const saved =
+          latest && links ? { ...latest, revert: links.revert(latest.id), reverts: links.reverts(latest.id) } : null;
         const applied = z
           .object({ revision: z.string(), definition: definitionSchema, activated_at: z.date().nullable() })
           .nullable()

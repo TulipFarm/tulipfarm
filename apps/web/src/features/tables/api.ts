@@ -47,6 +47,8 @@ const schemaHistoryEntrySchema = z.object({
     .nullable()
     .default(null),
   receipt: executionReceiptSchema.nullable(),
+  revert: z.enum(['available', 'later-changes']).nullable().default(null),
+  reverts: z.uuid().nullable().default(null),
 });
 const schemaHistorySchema = z.object({ entries: z.array(schemaHistoryEntrySchema), nextCursor: z.uuid().nullable() });
 const definitionStateSchema = z.object({
@@ -401,6 +403,27 @@ export function tableApi(workspaceId: string) {
           signal,
         ),
       );
+    },
+    /** Opens a private chat with a reviewed revert of the table's latest schema change. Retrying with the same chat id reuses it. */
+    async proposeRevert(tableId: string, executionId: string, chatId: string) {
+      const response = await jsonResponse(
+        `${base}/${encodeURIComponent(tableId)}/schema-history/${encodeURIComponent(executionId)}/revert`,
+        { method: 'POST', body: { chatId }, signal: AbortSignal.timeout(60_000), cache: 'no-store' },
+      );
+      const value = await readJson(response, true);
+      if (!response.ok) {
+        const code = responseError(value, 'table-operation-failed');
+        throw new TableRequestError(
+          response.status,
+          code,
+          code === 'revert-unavailable'
+            ? 'This change can no longer be reverted. Check schema history again to see the latest change.'
+            : [403, 404].includes(response.status)
+              ? 'This table is missing or your permission changed. A workspace admin can review your access.'
+              : 'The revert could not be prepared. Check your connection and try again.',
+        );
+      }
+      return z.object({ chatId: z.uuid() }).parse(value);
     },
     async deletedRecords(id: string, after: string | undefined, signal: AbortSignal) {
       return deletedRecordsSchema.parse(

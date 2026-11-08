@@ -320,6 +320,24 @@ function evaluateNode(expression: TransformExpression, values: TableValues): Tab
   }
 }
 
+/** The value one expression produces for a row, or the evaluation error code. */
+export function evaluateExpression(
+  expression: TransformExpression,
+  values: TableValues,
+): { ok: true; value: TableValue } | { ok: false; code: TransformError['code'] } {
+  try {
+    return { ok: true, value: evaluate(expression, values) };
+  } catch (error) {
+    if (!(error instanceof EvaluationError)) throw error;
+    return { ok: false, code: error.code };
+  }
+}
+
+/** Values with the same key match the same map case. */
+export function mappedValueKey(value: TableValue) {
+  return valueKey(value);
+}
+
 // Every output reads the same source snapshot. Output order never creates dependencies.
 // Unassigned fields carry through only when present in the target definition.
 export function evaluateTransforms(input: { transforms: unknown; values: unknown; target: unknown }): TransformResult {
