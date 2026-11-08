@@ -470,9 +470,9 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
     },
   });
   assert.equal(createdValidationRecord.statusCode, 200, createdValidationRecord.body);
-  for (const invalid of [
-    { requestId: randomUUID(), values: { [multiField]: { kind: 'multi-select', optionIds: [] } } },
-    { requestId: randomUUID(), values: { [numericField]: { kind: 'numeric', value: '1000' } } },
+  for (const [fieldId, invalid] of [
+    [multiField, { requestId: randomUUID(), values: { [multiField]: { kind: 'multi-select', optionIds: [] } } }],
+    [numericField, { requestId: randomUUID(), values: { [numericField]: { kind: 'numeric', value: '1000' } } }],
   ]) {
     const rejected = await app.inject({
       method: 'POST',
@@ -488,7 +488,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       },
     });
     assert.equal(rejected.statusCode, 400, rejected.body);
-    assert.equal(rejected.json().error, 'invalid-table-values');
+    assert.deepEqual(rejected.json(), { error: 'invalid-table-values', fieldId }, 'A rejection names its field');
     assert.deepEqual((await app.inject({ url: `${validationBase}/requests/${invalid.requestId}`, headers })).json(), {
       status: 'unknown',
     });

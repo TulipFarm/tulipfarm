@@ -15,7 +15,13 @@ import {
 import { UnsavedChanges } from './feedback';
 import { FieldInput } from './field-input';
 import { RecordMutationFeedback, useRecordMutation } from './record-mutation';
-import { changedValues, compatibleRowValues, rowFieldsChanged, validateRowDraft } from './record-validation';
+import {
+  changedValues,
+  compatibleRowValues,
+  rejectedFieldMessage,
+  rowFieldsChanged,
+  validateRowDraft,
+} from './record-validation';
 import { rowLabel } from './definition-view';
 import { useWorkspaceMembers } from './hooks';
 import { MemberPhoto } from './member-profile';
@@ -63,7 +69,9 @@ export function RecordEditor({
   const [reviewRevision, setReviewRevision] = useState<string | null>(null);
   const [validated, setValidated] = useState(false);
   const [confirmClose, setConfirmClose] = useState(false);
-  const write = useRecordMutation(api, saved);
+  const write = useRecordMutation(api, saved, fieldId =>
+    rejectedFieldMessage(table.definition, fieldId, values[fieldId]),
+  );
   const uncertain = write.state.kind === 'uncertain';
   const sending = write.state.kind === 'sending';
   const locked = disabled || sending || uncertain;

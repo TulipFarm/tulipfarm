@@ -4,6 +4,8 @@ import { test } from 'node:test';
 import {
   changedValues,
   compatibleRowValues,
+  rejectedFieldMessage,
+  restoreIssues,
   rowFieldsChanged,
   validateRowDraft,
 } from '../src/features/tables/record-validation.ts';
@@ -229,4 +231,35 @@ test('table reviews accept archive and restore plans, so chat can show those car
       }).input.kind,
       kind,
     );
+});
+
+test('restoring values from before a type change names each field the current fields reject and why', () => {
+  const start: TableField = { ...base, label: 'Start', kind: 'timestamp', timezone: 'UTC' };
+  const owner: TableField = { ...base, id: randomUUID(), label: 'Owner', kind: 'text', maxLength: 80, required: true };
+  const table = { ...definition(start), fields: [start, owner] };
+  const removed = randomUUID();
+  assert.deepEqual(
+    restoreIssues(table, {
+      [id]: { kind: 'text', value: '2026-07-07' },
+      [removed]: { kind: 'text', value: 'Gone' },
+    }),
+    [
+      { fieldId: removed, reason: 'A field in these values was removed, so its old value has nowhere to go.' },
+      { fieldId: id, reason: 'Start holds a date and time now, but this value is text.' },
+      { fieldId: owner.id, reason: 'Owner is required now, but this value is empty.' },
+    ],
+  );
+  assert.deepEqual(
+    restoreIssues(table, {
+      [id]: { kind: 'timestamp', value: '2026-07-07T00:00:00.000Z' },
+      [owner.id]: { kind: 'text', value: 'Cher' },
+    }),
+    [],
+    'Values that fit the current fields can be restored',
+  );
+  assert.equal(
+    rejectedFieldMessage(table, id, { kind: 'text', value: '2026-07-07' }),
+    'Not saved. Start holds a date and time now, but this value is text. Nothing was changed.',
+  );
+  assert.match(rejectedFieldMessage(table, owner.id, { kind: 'text', value: 'Cher' }), /^Not saved\. .*Owner/);
 });

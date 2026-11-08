@@ -80,7 +80,7 @@ export function registerTableChanges(
         status === 409
           ? z.union([blockedTableProposalSchema, z.object({ error: z.string() })])
           : status === 400
-            ? z.union([queryErrorSchema, z.object({ error: z.string() })])
+            ? z.union([queryErrorSchema, z.object({ error: z.string(), fieldId: z.string().optional() })])
             : z.object({ error: z.string() }),
       ),
     ]),
@@ -99,7 +99,10 @@ export function registerTableChanges(
       if (error instanceof WorkspaceMemberError) return reply.code(error.status).send({ error: error.code });
       if (error instanceof TableQueryError)
         return reply.code(400).send({ error: 'invalid-query', issues: error.issues });
-      if (error instanceof TableValidationError) return reply.code(400).send({ error: 'invalid-table-values' });
+      if (error instanceof TableValidationError)
+        return reply
+          .code(400)
+          .send({ error: 'invalid-table-values', ...(error.fieldId === undefined ? {} : { fieldId: error.fieldId }) });
       if (error instanceof TableError) return reply.code(error.status).send({ error: error.code });
       if (error instanceof z.ZodError || (typeof error === 'object' && error !== null && 'validation' in error))
         return reply.code(400).send({ error: 'invalid-request' });
