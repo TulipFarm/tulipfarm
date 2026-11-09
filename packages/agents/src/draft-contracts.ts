@@ -3,7 +3,7 @@ import { savePersonalMemorySchema } from '@tulipfarm/conversations/personal-memo
 import { uuidSchema } from '@tulipfarm/access/contracts';
 import { saveAgentSchema, agentCommandStatusSchema } from './saved-contracts.ts';
 import { saveWorkspaceSkillSchema, workspaceSkillReceiptSchema } from './workspace-skill-contracts.ts';
-import { agentDefinitionSchema, taskMutationSchema } from './contracts.ts';
+import { agentDefinitionSchema, createRecordBatchSchema, taskMutationSchema } from './contracts.ts';
 import { agentRecordValueSchema } from './record-contracts.ts';
 import { fileNameSchema, moveFingerprintSchema, shareFingerprintSchema } from '@tulipfarm/files/contracts';
 import { authoredDefinitionSchema, definitionSchema } from '@tulipfarm/workflows/contracts';
@@ -138,6 +138,20 @@ const fileShareDraftInput = z.strictObject({
   /** The share is refused if the item's sharing changed since this preview. */
   fingerprint: shareFingerprintSchema,
 });
+/** The most rows one chat reply may write without an approval card. */
+export const directChatRowLimit = 5;
+/** Why a trusted chat row write still needs approval: see chat-row-guard.ts. */
+export const rowReviewReasonSchema = z.enum(['table-change-pending', 'table-not-named', 'too-many-rows']);
+/**
+ * Rows the same reply had already written directly before this card was made. They stay written; the card holds
+ * only the rest. `rows` lists the ones added to the card's table, `count` every row the reply changed.
+ */
+export const rowsAlreadyWrittenSchema = z.strictObject({
+  count: z.int().min(1).max(directChatRowLimit),
+  rows: z
+    .array(z.strictObject({ recordId: uuidSchema, values: createRecordBatchSchema.shape.rows.element.shape.values }))
+    .max(directChatRowLimit),
+});
 export const authoringProposalSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('agent'), targetId: uuidSchema, input: agentDraftInputSchema }),
   z.strictObject({
@@ -171,7 +185,13 @@ export const authoringProposalSchema = z.discriminatedUnion('kind', [
   /** targetId is the Knowledge document: a new ID when adding. */
   z.strictObject({ kind: z.literal('knowledge'), targetId: uuidSchema, input: knowledgeDraftInput }),
   z.strictObject({ kind: z.literal('memory'), input: memoryDraftInput }),
-  z.strictObject({ kind: z.literal('row'), input: taskMutationSchema }),
+  z.strictObject({
+    kind: z.literal('row'),
+    input: z.discriminatedUnion('tool', [...taskMutationSchema.options, createRecordBatchSchema]),
+    /** Why chat could not write directly. Absent on drafts made because the chat used untrusted content. */
+    reason: rowReviewReasonSchema.optional(),
+    written: rowsAlreadyWrittenSchema.optional(),
+  }),
 ]);
 export const draftDecisionSchema = z.strictObject({
   commandId: uuidSchema,
@@ -205,7 +225,13 @@ export const draftOutcomeSchema = z.discriminatedUnion('kind', [
     nextRunAt: z.string().nullable(),
     activation: workflowActivationOutcomeSchema,
   }),
-  z.object({ kind: z.literal('row'), operation: z.enum(['create', 'update', 'delete']), recordId: z.uuid() }),
+  z.object({
+    kind: z.literal('row'),
+    operation: z.enum(['create', 'update', 'delete']),
+    recordId: z.uuid(),
+    /** Every row an approved batch created; recordId is the first. */
+    recordIds: z.array(z.uuid()).optional(),
+  }),
   z.object({ kind: z.literal('workflow-archive'), workflowIds: z.array(z.uuid()) }),
   z.object({ kind: z.literal('workflow-restore'), workflowIds: z.array(z.uuid()) }),
   z.object({ kind: z.literal('agent-archive'), agentIds: z.array(z.uuid()) }),

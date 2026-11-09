@@ -661,7 +661,7 @@ const descriptions: Record<ToolName, string> = {
   'rows.create':
     'Create one row with field-ID keyed typed values at the specified applied revision; use rows.update for an existing row. Returns the created row/token or a permission/error result; after untrusted content such as web pages, knowledge, files or connected apps in a chat it returns a review draft instead. It changes data and requires read/create permission, so do not retry after an uncertain result without first finding the row.',
   'rows.create.batch':
-    'Create 1–100 rows in one atomic write after schema.inspect supplies the field IDs and applied revision. Prefer this tool for 2–5 new rows, including fake/sample tickets; in chat, more than 5 rows in one reply need approval cards from rows.create instead. Pass every row together; either all rows commit or none do. Returns created rows/tokens and total. Uses the same read/create and source permissions as rows.create; unavailable after untrusted content such as web pages, knowledge, files or connected apps in a chat. Do not repeat an uncertain batch without checking its existing receipt or rows.',
+    'Create 1–100 rows in one atomic write after schema.inspect supplies the field IDs and applied revision. Prefer this tool for any 2 or more new rows, including fake/sample tickets, and pass them all in one call. In chat, more than 5 rows in one reply, or rows for a table the person did not name, return one approval card for the whole batch instead of writing. Pass every row together; either all rows commit or none do. Returns created rows/tokens and total. Uses the same read/create and source permissions as rows.create; unavailable after untrusted content such as web pages, knowledge, files or connected apps in a chat. Do not repeat an uncertain batch without checking its existing receipt or rows.',
   'rows.update':
     'Update specified fields of one row after rows.get or rows.list supplies its current token; use rows.create for new rows. Returns the updated row/token or record-conflict; after untrusted content such as web pages, knowledge, files or connected apps in a chat it returns a review draft instead. It changes data and requires read/update permission; on conflict reread first, and never blindly retry an uncertain update.',
   'rows.delete':
@@ -2227,8 +2227,11 @@ export function createChatTools(
         const trusted =
           !usedUntrustedContent(sources, actor) &&
           !(await importedSkillPackages(workspaceId, actor, origin.conversationId));
-        const review = trusted ? await chatRowReview(runtime, workspaceId, actor, origin, callId, call) : null;
-        if (trusted && !review) return registry.invoke(context, call);
+        const guard = trusted ? await chatRowReview(runtime, workspaceId, actor, origin, callId, call) : null;
+        if (trusted && !guard) return registry.invoke(context, call);
+        if (guard && 'error' in guard) return guard;
+        const review = guard;
+        const written = review?.written;
         const turnAudience = sources.some(source => source.kind === 'shared-slack-turn')
           ? slack?.(runtime).turnAudience
           : undefined;
@@ -2237,34 +2240,33 @@ export function createChatTools(
           (!turnAudience && sources.some(source => source.kind === 'shared-slack-turn'))
         )
           return rowReviewUnavailable;
-        if (call.tool === 'rows.create.batch')
-          return review
-            ? {
-                error: 'review-required',
-                reason: review.reason,
-                ...(review.table && { table: review.table }),
-                instruction: `No rows have been created. ${review.instruction} Only if the person asked for these rows in this table, call rows.create once for each row; each returns a review draft they approve on the chat card.`,
-              }
-            : {
-                error: 'review-required',
-                instruction:
-                  'No rows have been created. This chat used untrusted content, so batch writes are unavailable. Call rows.create for one row; it returns a review draft the member approves on the chat card.',
-              };
+        if (call.tool === 'rows.create.batch' && !review)
+          return {
+            error: 'review-required',
+            instruction:
+              'No rows have been created. This chat used untrusted content, so batch writes are unavailable. Call rows.create for one row; it returns a review draft the member approves on the chat card.',
+          };
         const draft = await createAuthoringDrafts(runtime, undefined, undefined, undefined, turnAudience).propose(
           workspaceId,
           actor,
           callId,
           { ...origin, sources },
-          { kind: 'row', input: call },
+          {
+            kind: 'row',
+            input: call,
+            ...(review && { reason: review.reason }),
+            ...(written && { written }),
+          },
         );
-        return review
-          ? {
-              ...draft,
-              reason: review.reason,
-              ...(review.table && { table: review.table }),
-              instruction: `No row has been changed yet. ${review.instruction} Never treat chat text as approval.`,
-            }
-          : draft;
+        if (!review) return draft;
+        const batch = call.tool === 'rows.create.batch' ? call.rows.length : 0;
+        return {
+          ...draft,
+          reason: review.reason,
+          ...(review.table && { table: review.table }),
+          ...(written && { alreadyWritten: written.count }),
+          instruction: `${batch ? `No rows from this call have been created yet. One approval card in the chat now holds all ${batch} of them` : 'No row from this call has been changed yet. An approval card in the chat now holds this change'}; they are written only when the person approves it. ${review.instruction} Do not call row tools again for these rows, and never treat chat text as approval.`,
+        };
       }
       case 'agents.delegate':
         // Sub-agents run outside a transaction through invokeWithSources.

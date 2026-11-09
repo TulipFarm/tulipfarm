@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
 import { createConversationExecutor } from '@tulipfarm/conversations/runtime';
 import { createChatTools, frameworkCallSchema } from '@tulipfarm/agents/tools';
+import { createAuthoringDrafts } from '@tulipfarm/agents/drafts';
 import { conversationFixture } from '../../../packages/conversations/test/fixture.mjs';
 import { createTableWithRows, tableDefinition, textField } from '../../../packages/tables/test/fixture.mjs';
 import { respondToConversation } from '../src/conversation-responder.ts';
@@ -110,6 +111,7 @@ test('chat writes at most five requested rows directly to a named table and send
       ).rows[0].count,
     );
   const results = () => toolResults(requests.findLast(body => !isCompletionRequest(body))).map(String);
+  const outputs = () => results().map(text => JSON.parse(text.slice(text.indexOf('{'))));
   const names = (prefix, size) => Array.from({ length: size }, (_, index) => `${prefix} ${index + 1}`);
 
   await t.test('rows meant for a table that is not ready go to review, not straight into a similar table', async () => {
@@ -125,11 +127,11 @@ test('chat writes at most five requested rows directly to a named table and send
     );
     assert.equal(await count(), 0);
     assert.equal(await drafts(chatId), 1);
-    const [batchResult] = toolResults(requests.at(-2)).map(String);
-    assert.match(batchResult, /"error":"review-required"/);
-    assert.match(batchResult, /"reason":"table-not-named"/);
-    assert.match(batchResult, /never named the table \\"stock-schema-mig\\"/);
-    assert.match(results().at(-1), /"draftId".*"reason":"table-not-named"/);
+    const [card, again] = outputs().slice(-2);
+    assert.equal(card.reason, 'table-not-named');
+    assert.equal(card.rows, 2);
+    assert.match(card.instruction, /never named the table "stock-schema-mig"/);
+    assert.equal(again.error, 'approval-pending');
   });
 
   await t.test('a field change request cannot add or fix rows without approval', async () => {
@@ -146,8 +148,10 @@ test('chat writes at most five requested rows directly to a named table and send
     );
     assert.equal(await count(), 0);
     assert.equal(await drafts(chatId), 1);
-    assert.match(String(toolResults(requests.at(-2)).at(-1)), /"reason":"table-change-pending"/);
-    assert.match(results().at(-1), /"draftId".*"reason":"table-change-pending"/);
+    const [card, again] = outputs().slice(-2);
+    assert.ok(card.draftId);
+    assert.equal(card.reason, 'table-change-pending');
+    assert.equal(again.error, 'approval-pending');
   });
 
   await t.test('up to five rows are written directly to the table the person named', async () => {
@@ -161,18 +165,72 @@ test('chat writes at most five requested rows directly to a named table and send
     assert.equal(await drafts(chatId), 0);
   });
 
-  await t.test('more than five rows in one reply need approval, even across several writes', async () => {
+  await t.test('more than five rows wait on one approval card for the whole batch', async () => {
     replies = [
-      anthropicTools([batch(names('Veg', 6))]),
+      anthropicTools([batch(names('Veg', 9))]),
       anthropicTools([one('Veg 1')]),
-      anthropicText('Approve each row on its card.'),
+      anthropicText('One card holds the nine rows.'),
     ];
     const big = await chat();
-    assert.equal(await executor.process(await send(big, 'Add six vegetables to stock-schema-mig.')), 'completed');
+    assert.equal(await executor.process(await send(big, 'Add nine vegetables to stock-schema-mig.')), 'completed');
     assert.equal(await count(), 5);
     assert.equal(await drafts(big), 1);
-    assert.match(String(toolResults(requests.at(-2)).at(-1)), /"reason":"too-many-rows"/);
+    const [card, again] = outputs().slice(-2);
+    assert.equal(card.reason, 'too-many-rows');
+    assert.equal(card.rows, 9);
+    assert.equal(card.alreadyWritten, undefined);
+    assert.equal(again.error, 'approval-pending');
+    assert.equal(again.waitingDraftId, card.draftId);
 
+    // The next reply cannot write the same rows one at a time while the card waits, and the chat points to it.
+    replies = [anthropicTools([one('Veg 1')]), anthropicText('Approve the card first.')];
+    assert.equal(await executor.process(await send(big, 'Just add them to stock-schema-mig now.')), 'completed');
+    assert.equal(await count(), 5);
+    assert.equal(await drafts(big), 1);
+    assert.equal(outputs().at(-1).error, 'approval-pending');
+    // The card shows with the reply that made it; the next reply points to it once instead of writing.
+    const [first, next] = (await f.store.history(w.id, w.userId, big)).messages
+      .map(message => message.tools ?? [])
+      .filter(tools => tools.length);
+    assert.equal(first.find(tool => tool.tool === 'rows.create.batch').rowDraftId, card.draftId);
+    assert.deepEqual(
+      first.flatMap(tool => tool.waitingRowDraft ?? []),
+      [],
+    );
+    assert.deepEqual(
+      next.flatMap(tool => tool.waitingRowDraft ?? []),
+      [{ id: card.draftId, table: 'stock-schema-mig' }],
+    );
+
+    const approved = await createAuthoringDrafts(f.runtime).decide(w.id, w.userId, big, card.draftId, {
+      commandId: randomUUID(),
+      digest: card.digest,
+      decision: 'save',
+    });
+    assert.equal(approved.recordIds.length, 9);
+    assert.equal(await count(), 14);
+  });
+
+  await t.test('a reply cannot split a large request into single-row writes', async () => {
+    replies = [
+      anthropicTools([one('Herb 1')]),
+      anthropicTools([one('Herb 2')]),
+      anthropicTools([batch(names('Herb', 7).slice(1))]),
+      anthropicText('Added one row; one card holds the other six.'),
+    ];
+    const chatId = await chat();
+    assert.equal(await executor.process(await send(chatId, 'Add seven herbs to stock-schema-mig.')), 'completed');
+    assert.equal(await count(), 15);
+    assert.equal(await drafts(chatId), 1);
+    const [first, second, third] = outputs().slice(-3);
+    assert.ok(first.id);
+    assert.equal(second.error, 'batch-required');
+    assert.equal(third.reason, 'too-many-rows');
+    assert.equal(third.rows, 6);
+    assert.equal(third.alreadyWritten, 1);
+  });
+
+  await t.test('rows over the limit across several writes in one reply go to one card', async () => {
     replies = [
       anthropicTools([batch(names('Nut', 3))]),
       anthropicTools([batch(names('Seed', 3))]),
@@ -180,7 +238,22 @@ test('chat writes at most five requested rows directly to a named table and send
     ];
     const split = await chat();
     assert.equal(await executor.process(await send(split, 'Add nuts and seeds to stock-schema-mig.')), 'completed');
-    assert.equal(await count(), 8);
-    assert.match(results().at(-1), /"reason":"too-many-rows"/);
+    assert.equal(await count(), 18);
+    assert.equal(await drafts(split), 1);
+    const card = outputs().at(-1);
+    assert.equal(card.reason, 'too-many-rows');
+    assert.equal(card.alreadyWritten, 3);
+    assert.match(card.instruction, /already wrote 3 rows directly, which stay written/);
+    // The card names the rows already added, so the person knows which rows it does not hold.
+    const view = await createAuthoringDrafts(f.runtime).read(w.id, w.userId, split, card.draftId);
+    assert.equal(view.proposal.written.count, 3);
+    assert.deepEqual(
+      view.proposal.written.rows.map(row => row.values[item.id].value),
+      names('Nut', 3),
+    );
+    assert.deepEqual(
+      view.proposal.input.rows.map(row => row.values[item.id].value),
+      names('Seed', 3),
+    );
   });
 });

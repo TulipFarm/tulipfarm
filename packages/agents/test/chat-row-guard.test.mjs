@@ -24,8 +24,43 @@ test('earlier direct writes in a reply count their rows, and any review keeps th
       written('rows.create', { error: 'record-invalid' }),
       { tool: 'rows.create', call: {}, output: null, drafted: false },
     ]),
-    { rows: 4, reviewing: false },
+    { rows: 4, reviewing: false, singleCreate: false, created: [] },
   );
+  assert.equal(earlierRowWrites([written('rows.create', { id: 'e' })]).singleCreate, true);
   assert.equal(earlierRowWrites([written('rows.create.batch', { error: 'review-required' })]).reviewing, true);
   assert.equal(earlierRowWrites([{ ...written('rows.create', { draftId: 'x' }), drafted: true }]).reviewing, true);
+});
+
+test('earlier direct creates in the same table keep the values they sent, so the card can name them', () => {
+  const table = '11111111-1111-4111-8111-111111111111',
+    other = '22222222-2222-4222-8222-222222222222',
+    field = '33333333-3333-4333-8333-333333333333';
+  const value = name => ({ [field]: { kind: 'text', value: name } });
+  const write = (tool, tableId, call, result) => ({
+    tool,
+    call: { tool, tableId, ...call },
+    output: { result },
+    drafted: false,
+  });
+  const earlier = earlierRowWrites(
+    [
+      write(
+        'rows.create.batch',
+        table,
+        { rows: [{ values: value('Pear') }, { values: value('Plum') }] },
+        {
+          records: [{ id: 'p1' }, { id: 'p2' }],
+        },
+      ),
+      write('rows.create', table, { values: value('Lime') }, { id: 'l1' }),
+      write('rows.create', other, { values: value('Elsewhere') }, { id: 'o1' }),
+    ],
+    table,
+  );
+  assert.equal(earlier.rows, 4);
+  assert.deepEqual(earlier.created, [
+    { recordId: 'p1', values: value('Pear') },
+    { recordId: 'p2', values: value('Plum') },
+    { recordId: 'l1', values: value('Lime') },
+  ]);
 });

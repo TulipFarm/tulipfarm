@@ -357,6 +357,8 @@ export const toolReceiptSchema = z.object({
   tableProposal: z.literal(true).optional(),
   integration: integrationCardSchema.optional(),
   rowDraftId: uuidSchema.optional(),
+  /** The undecided row card this row write was refused behind. */
+  waitingRowDraft: z.object({ id: uuidSchema, table: z.string().max(256).optional() }).optional(),
   rowView: rowViewSchema.optional(),
   rowChange: rowChangeSchema.optional(),
   workflows: z.array(workflowReferenceSchema).optional(),

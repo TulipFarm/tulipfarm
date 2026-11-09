@@ -22,7 +22,11 @@ const shownDrafts = 3,
   shownFields = 10;
 const verbs = { create: 'Add', update: 'Update', delete: 'Delete' } as const;
 const operation = ({ input }: RowProposal) =>
-  input.tool === 'rows.create' ? 'create' : input.tool === 'rows.update' ? 'update' : 'delete';
+  input.tool === 'rows.create' || input.tool === 'rows.create.batch'
+    ? 'create'
+    : input.tool === 'rows.update'
+      ? 'update'
+      : 'delete';
 const clip = (text: string, length: number) => (text.length > length ? `${text.slice(0, length - 1)}…` : text);
 
 /** Each button press of one draft repeats the same command, so a second press replays the first decision. */
@@ -96,20 +100,47 @@ export async function slackRowDraftCards(
       } catch (error) {
         if (!(error instanceof GenerationError)) throw error;
       }
-    const values = Object.entries(input.tool === 'rows.delete' ? {} : input.values);
-    const fields = values.slice(0, shownFields).map(([fieldId, value]) => {
+    const cell = (fieldId: string, value: unknown) => {
       const field = table.fields.find(item => item.id === fieldId);
-      return {
-        type: 'plain_text' as const,
-        text: `${clip(field?.label ?? fieldId, 100)}\n${clip(formatValue(value, field?.options ?? []), 500)}`,
-      };
-    });
+      return { label: field?.label ?? fieldId, value: formatValue(value, field?.options ?? []) };
+    };
+    const values =
+      input.tool === 'rows.create.batch'
+        ? input.rows
+        : Object.entries(input.tool === 'rows.delete' ? {} : input.values);
+    const fields =
+      input.tool === 'rows.create.batch'
+        ? input.rows.slice(0, shownFields).map(({ values: row }, index) => ({
+            type: 'plain_text' as const,
+            text: clip(
+              `Row ${index + 1}\n${Object.entries(row)
+                .map(([fieldId, value]) => {
+                  const shown = cell(fieldId, value);
+                  return `${shown.label}: ${shown.value}`;
+                })
+                .join(', ')}`,
+              500,
+            ),
+          }))
+        : Object.entries(input.tool === 'rows.delete' ? {} : input.values)
+            .slice(0, shownFields)
+            .map(([fieldId, value]) => {
+              const shown = cell(fieldId, value);
+              return { type: 'plain_text' as const, text: `${clip(shown.label, 100)}\n${clip(shown.value, 500)}` };
+            });
+    const count = input.tool === 'rows.create.batch' ? input.rows.length : 1;
     const value = JSON.stringify({ workspaceId, chatId: conversationId, draftId: draft.id, digest: draft.digest });
     blocks.push(
       { type: 'divider' },
       {
         type: 'section',
-        text: { type: 'plain_text', text: clip(`Review row change: ${verbs[kind]} a row in ${table.label}`, 3000) },
+        text: {
+          type: 'plain_text',
+          text: clip(
+            `Review row change: ${verbs[kind]} ${count === 1 ? 'a row' : `${count} rows`} in ${table.label}`,
+            3000,
+          ),
+        },
       },
       ...(fields.length ? [{ type: 'section' as const, fields }] : []),
       {
@@ -118,9 +149,20 @@ export async function slackRowDraftCards(
           {
             type: 'plain_text',
             text: [
-              input.tool === 'rows.create' ? 'Adds a new row.' : `${verbs[kind]}s row ${input.recordId}.`,
-              values.length > shownFields ? `${values.length - shownFields} more fields are set.` : '',
-              'This chat used content from outside your tables, so the change waits for approval by the person who asked. Approving makes this exact change with their table access.',
+              input.tool === 'rows.create'
+                ? 'Adds a new row.'
+                : input.tool === 'rows.create.batch'
+                  ? `Adds ${count} new rows together.`
+                  : `${verbs[kind]}s row ${input.recordId}.`,
+              values.length > shownFields
+                ? `${values.length - shownFields} more ${input.tool === 'rows.create.batch' ? 'rows are' : 'fields are'} set.`
+                : '',
+              proposal.written
+                ? `${proposal.written.count === 1 ? '1 row was' : `${proposal.written.count} rows were`} already added in this reply and stay in the table; this card holds only the rest.`
+                : '',
+              proposal.reason
+                ? 'Chat writes only a few rows directly into a table you named, so this change waits for approval by the person who asked. Approving makes this exact change with their table access.'
+                : 'This chat used content from outside your tables, so the change waits for approval by the person who asked. Approving makes this exact change with their table access.',
             ]
               .filter(Boolean)
               .join(' '),

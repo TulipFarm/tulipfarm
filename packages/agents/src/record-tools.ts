@@ -145,6 +145,13 @@ const agentView = (record: {
     ...(record.unavailableFileIds ? { unavailableFileIds: record.unavailableFileIds } : {}),
   });
 
+/** The row IDs a rows.create.batch call writes, fixed by its call ID so a repeated call finds its own rows. */
+export function batchRecordIds(callId: string, count: number) {
+  return Array.from({ length: count }, (_, index) => {
+    const hash = createHash('sha256').update(`rows.create.batch:${callId}:${index}`).digest('hex');
+    return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-5${hash.slice(13, 16)}-8${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
+  });
+}
 export function createAgentRecordTools(runtime: AgentStorage, taskCapability?: object) {
   async function run<T>(
     workspaceId: string,
@@ -714,11 +721,8 @@ export function createAgentRecordTools(runtime: AgentStorage, taskCapability?: o
           ).rows[0]?.maintenance
         )
           throw new TableError('table-maintenance', 503);
-        const rows = batch.rows.map(({ values }, index) => {
-          const hash = createHash('sha256').update(`rows.create.batch:${callId}:${index}`).digest('hex');
-          const recordId = `${hash.slice(0, 8)}-${hash.slice(8, 12)}-5${hash.slice(13, 16)}-8${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
-          return { recordId, values };
-        });
+        const ids = batchRecordIds(callId, batch.rows.length);
+        const rows = batch.rows.map(({ values }, index) => ({ recordId: ids[index]!, values }));
         await tableService(tx).createBatch(workspaceId, principal, {
           tableId: batch.tableId,
           revision: batch.expectedAppliedRevision,

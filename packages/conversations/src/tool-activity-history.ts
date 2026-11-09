@@ -221,27 +221,42 @@ const rowReviewOutput = z.object({
   draftId: z.string().optional(),
   reason: z.string().optional(),
   table: z.string().optional(),
+  alreadyWritten: z.int().positive().optional(),
+  waitingDraftId: z.uuid().optional(),
 });
+const rowReviewResult = (tool: string, output: unknown) => {
+  if (!rowWriteTools.has(tool)) return undefined;
+  const wrapped = z.object({ result: z.unknown() }).safeParse(output);
+  return rowReviewOutput.safeParse(wrapped.success ? wrapped.data.result : output).data;
+};
+
+/** The undecided row card a chat row write was refused behind, so the reply can point to it. */
+export function waitingRowDraft(tool: string, output: unknown) {
+  const result = rowReviewResult(tool, output);
+  return result?.error === 'approval-pending' && result.waitingDraftId
+    ? { id: result.waitingDraftId, ...(result.table && { table: result.table.slice(0, 256) }) }
+    : undefined;
+}
 
 /**
  * Why a chat row write was held for approval instead of written, so Tool activity names the rule rather than a
  * generic failure. Undefined for writes that ran or failed for another reason.
  */
 export function rowReviewDetail(tool: string, output: unknown) {
-  if (!rowWriteTools.has(tool)) return undefined;
-  const wrapped = z.object({ result: z.unknown() }).safeParse(output);
-  const parsed = rowReviewOutput.safeParse(wrapped.success ? wrapped.data.result : output);
-  if (!parsed.success) return undefined;
-  const { error, draftId, reason, table } = parsed.data;
+  const parsed = rowReviewResult(tool, output);
+  if (!parsed) return undefined;
+  const { error, draftId, reason, table, alreadyWritten } = parsed;
   const why = reason ? rowReviewReasons[reason]?.(table) : undefined;
   if (error === 'review-unavailable')
     return 'Not written: this chat used content that can’t be shown for review, so it can’t change rows. Make the change in the table.';
   if (error === 'review-required')
     return `Not written. ${why ?? 'This chat used outside content, so each row change needs your approval on a chat card.'}`;
   if (error === 'approval-pending')
-    return `Not written: a row change${table ? ` to ${table.slice(0, 80)}` : ''} in this chat is still waiting for your approval. Approve or reject that card first.`;
+    return `Not written: a row change${table ? ` to ${table.slice(0, 80)}` : ''} in this chat is still waiting for your approval. Approve or dismiss that card first.`;
   if (error === 'batch-required')
     return 'Not written: several new rows in one reply go together in one change, so they can be approved together.';
+  if (draftId && why && alreadyWritten)
+    return `Not written yet. This reply already added ${alreadyWritten} ${alreadyWritten === 1 ? 'row' : 'rows'} directly, and those stay. ${why}`;
   if (draftId && why) return `Not written yet. ${why}`;
   return undefined;
 }

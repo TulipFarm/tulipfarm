@@ -9,8 +9,15 @@ import type { DraftView, RowProposal } from '@tulipfarm/agents/draft-contracts';
 
 type Values = NonNullable<DraftView['rowCurrent']>;
 const verbs = { create: 'Add', update: 'Update', delete: 'Delete' } as const;
+const reasons = {
+  'too-many-rows': 'Chat adds up to 5 rows on its own. Larger changes wait for your approval.',
+  'table-not-named': 'You didn’t name this table in the chat, so the change waits for your approval.',
+  'table-change-pending': 'Chat prepared a table change in the same reply, so this row change waits for your approval.',
+} as const;
+/** The element a reply that was held behind this card scrolls to. */
+export const rowDraftElementId = (id: string) => `row-draft-${id}`;
 const operation = ({ input }: RowProposal) =>
-  input.tool === 'rows.create'
+  input.tool === 'rows.create' || input.tool === 'rows.create.batch'
     ? ('create' as const)
     : input.tool === 'rows.update'
       ? ('update' as const)
@@ -42,8 +49,10 @@ export function RowDraftCard({
   const kind = operation(proposal);
   const table = draft.rowTable;
   const tableName = table?.name ?? 'a table you cannot see';
-  const { input } = proposal;
-  const proposed: Values = input.tool === 'rows.delete' ? {} : input.values;
+  const { input, written } = proposal;
+  const batch = input.tool === 'rows.create.batch' ? input.rows.map(row => row.values) : null;
+  const count = batch?.length ?? 1;
+  const proposed: Values = input.tool === 'rows.delete' || input.tool === 'rows.create.batch' ? {} : input.values;
   const fields = (values: Values) =>
     Object.keys(values).map(fieldId => ({
       fieldId,
@@ -54,9 +63,11 @@ export function RowDraftCard({
   const shown = kind === 'delete' ? fields(draft.rowCurrent ?? {}) : fields(proposed);
   return (
     <ReviewCard
+      id={rowDraftElementId(id)}
+      tabIndex={-1}
       label="Review row change"
       icon={<Database size={16} />}
-      title={`${verbs[kind]} a row in ${tableName}`}
+      title={`${verbs[kind]} ${count === 1 ? 'a row' : `${count} rows`} in ${tableName}`}
       badge={badges[draft.status]}
       settled={draft.status === 'saved' || draft.status === 'dismissed' || draft.status === 'failed'}
       actions={
@@ -68,7 +79,7 @@ export function RowDraftCard({
               aria-busy={sending}
               onClick={() => decide('save')}
             >
-              {kind === 'delete' ? 'Approve deletion' : 'Approve change'}
+              {kind === 'delete' ? 'Approve deletion' : count === 1 ? 'Approve change' : `Approve ${count} rows`}
             </Button>
             <Button variant="ghost" disabled={locked} onClick={() => decide('dismiss')}>
               Dismiss
@@ -94,15 +105,30 @@ export function RowDraftCard({
               </div>
             )}
             {draft.status === 'failed' && (
-              <p role="status">The row could not be changed. Ask chat for a fresh draft.</p>
-            )}
-            {draft.status === 'preparing' && <p role="status">Your approval is recorded. The row is being changed.</p>}
-            {draft.status === 'saved' && (
               <p role="status">
-                {kind === 'create' ? 'Row added.' : kind === 'update' ? 'Row updated.' : 'Row deleted.'}
+                {count === 1 ? 'The row could not be changed.' : 'The rows could not be added.'} Ask chat for a fresh
+                draft.
               </p>
             )}
-            {draft.status === 'dismissed' && <p role="status">Draft dismissed. No row was changed.</p>}
+            {draft.status === 'preparing' && (
+              <p role="status">
+                Your approval is recorded. {count === 1 ? 'The row is being changed.' : 'The rows are being added.'}
+              </p>
+            )}
+            {draft.status === 'saved' && (
+              <p role="status">
+                {count > 1
+                  ? `${count} rows added.`
+                  : kind === 'create'
+                    ? 'Row added.'
+                    : kind === 'update'
+                      ? 'Row updated.'
+                      : 'Row deleted.'}
+              </p>
+            )}
+            {draft.status === 'dismissed' && (
+              <p role="status">Draft dismissed. {count === 1 ? 'No row was changed.' : 'No rows were added.'}</p>
+            )}
           </div>
           {feedback}
         </>
@@ -110,15 +136,58 @@ export function RowDraftCard({
     >
       <ReviewRows>
         <ReviewRow label="Change">
-          {kind === 'create'
-            ? 'Adds a new row'
-            : kind === 'update'
-              ? 'Updates an existing row'
-              : 'Deletes an existing row'}
+          {count > 1
+            ? `Adds ${count} new rows together`
+            : kind === 'create'
+              ? 'Adds a new row'
+              : kind === 'update'
+                ? 'Updates an existing row'
+                : 'Deletes an existing row'}
         </ReviewRow>
         <ReviewRow label="Table">{tableName}</ReviewRow>
       </ReviewRows>
-      {shown.length > 0 ? (
+      {written && (
+        <section aria-label="Rows already added" className="grid gap-2 text-sm">
+          <p role="note">
+            {written.count === 1 ? '1 row was' : `${written.count} rows were`} already added in this reply and stay in
+            the table. This card holds only the other {count === 1 ? 'row' : `${count} rows`}, which need your approval.
+          </p>
+          {written.rows.length > 0 && (
+            <ol aria-label="Already added" className="grid gap-2">
+              {written.rows.map((row, index) => (
+                <li key={row.recordId}>
+                  <ReviewRows>
+                    <ReviewRow label={`Already added ${index + 1}`}>
+                      <span className="break-words">
+                        {fields(row.values)
+                          .map(({ fieldId, label }) => `${label}: ${format(row.values, fieldId)}`)
+                          .join(' · ') || 'No field values set.'}
+                      </span>
+                    </ReviewRow>
+                  </ReviewRows>
+                </li>
+              ))}
+            </ol>
+          )}
+        </section>
+      )}
+      {batch ? (
+        <ol aria-label="Rows to add" className="grid gap-2">
+          {batch.map((values, index) => (
+            <li key={index}>
+              <ReviewRows>
+                <ReviewRow label={`Row ${index + 1}`}>
+                  <span className="break-words">
+                    {fields(values)
+                      .map(({ fieldId, label }) => `${label}: ${format(values, fieldId)}`)
+                      .join(' · ') || 'No field values set.'}
+                  </span>
+                </ReviewRow>
+              </ReviewRows>
+            </li>
+          ))}
+        </ol>
+      ) : shown.length > 0 ? (
         <ReviewRows>
           {shown.map(({ fieldId, label }) => (
             <ReviewRow key={fieldId} label={label}>
@@ -139,13 +208,17 @@ export function RowDraftCard({
         </p>
       )}
       <p className="text-xs text-muted-foreground">
-        This chat used content from outside your tables, such as web pages, knowledge, files or connected apps, so the
-        change waits for your approval. Approving makes this exact change with your table access.
+        {proposal.reason
+          ? reasons[proposal.reason]
+          : 'This chat used content from outside your tables, such as web pages, knowledge, files or connected apps, so the change waits for your approval.'}{' '}
+        Approving makes this exact change with your table access.
       </p>
       <Disclosure title="Technical details">
         <dl aria-label="Technical details" className="grid gap-2 text-xs text-muted-foreground">
           <TechnicalDetail term="Table ID">{input.tableId}</TechnicalDetail>
-          {input.tool !== 'rows.create' && <TechnicalDetail term="Row ID">{input.recordId}</TechnicalDetail>}
+          {(input.tool === 'rows.update' || input.tool === 'rows.delete') && (
+            <TechnicalDetail term="Row ID">{input.recordId}</TechnicalDetail>
+          )}
           <TechnicalDetail term="Applied revision">{input.expectedAppliedRevision}</TechnicalDetail>
           <TechnicalDetail term="Draft ID">{id}</TechnicalDetail>
           <TechnicalDetail term="SHA-256">{draft.digest}</TechnicalDetail>
