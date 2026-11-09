@@ -75,6 +75,11 @@ const codes = new Set<string>([
   'invalid-query',
   'approval-required',
   'review-required',
+  // Chat row guard refusals and table import results the model gets back instead of a write.
+  'approval-pending',
+  'batch-required',
+  'import-file-failed',
+  'table-not-found',
   'proposal-conflict',
   'stale-proposal',
   'task-read-unsupported',

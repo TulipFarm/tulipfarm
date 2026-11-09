@@ -42,6 +42,12 @@ test('every model-<reason> message maps to a bounded class instead of a generic 
   assert.equal(modelErrorClass('PRIVATE model-quota'), undefined);
 });
 
+test('chat row refusals and import results keep their own error code', () => {
+  for (const code of ['approval-pending', 'batch-required', 'import-file-failed', 'table-not-found'])
+    assert.equal(telemetryErrorCode(code), code);
+  assert.equal(telemetryErrorCode('not-a-reviewed-code'), undefined);
+});
+
 test('only failures another model can fix are eligible for fallback', () => {
   assert.deepEqual(
     [...fallbackEligibleClasses].sort(),
