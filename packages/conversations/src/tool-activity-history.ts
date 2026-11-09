@@ -209,6 +209,43 @@ export function deniedProposalDetail(call: unknown) {
     return `Access denied. This change needs Read rows plus Create rows, Update rows or Delete rows on the table, depending on the change. ${askTableAccess} them to you or your team in Table access, then ask again.`;
   return undefined;
 }
+const rowWriteTools = new Set(['rows.create', 'rows.create.batch', 'rows.update', 'rows.delete']);
+const rowReviewReasons: Record<string, (table?: string) => string> = {
+  'too-many-rows': () => 'Changes to more than 5 rows in one request need your approval on a chat card.',
+  'table-not-named': table =>
+    `Rows are written directly only to a table you named${table ? `, and you didn’t name ${table.slice(0, 80)}` : ''}. This change needs your approval on a chat card.`,
+  'table-change-pending': () => 'This reply prepared a table change, so row changes need your approval on a chat card.',
+};
+const rowReviewOutput = z.object({
+  error: z.string().optional(),
+  draftId: z.string().optional(),
+  reason: z.string().optional(),
+  table: z.string().optional(),
+});
+
+/**
+ * Why a chat row write was held for approval instead of written, so Tool activity names the rule rather than a
+ * generic failure. Undefined for writes that ran or failed for another reason.
+ */
+export function rowReviewDetail(tool: string, output: unknown) {
+  if (!rowWriteTools.has(tool)) return undefined;
+  const wrapped = z.object({ result: z.unknown() }).safeParse(output);
+  const parsed = rowReviewOutput.safeParse(wrapped.success ? wrapped.data.result : output);
+  if (!parsed.success) return undefined;
+  const { error, draftId, reason, table } = parsed.data;
+  const why = reason ? rowReviewReasons[reason]?.(table) : undefined;
+  if (error === 'review-unavailable')
+    return 'Not written: this chat used content that can’t be shown for review, so it can’t change rows. Make the change in the table.';
+  if (error === 'review-required')
+    return `Not written. ${why ?? 'This chat used outside content, so each row change needs your approval on a chat card.'}`;
+  if (error === 'approval-pending')
+    return `Not written: a row change${table ? ` to ${table.slice(0, 80)}` : ''} in this chat is still waiting for your approval. Approve or reject that card first.`;
+  if (error === 'batch-required')
+    return 'Not written: several new rows in one reply go together in one change, so they can be approved together.';
+  if (draftId && why) return `Not written yet. ${why}`;
+  return undefined;
+}
+
 /**
  * `proposal` marks a `tables.propose` call that saved a proposal, so its review card stays valid even if the reply failed.
  * `workflows` are the active workflows that blocked an archive, as the requester could read them when it ran.
@@ -259,7 +296,9 @@ export async function storedToolActivity(
       .safeParse(result.success ? result.data.result : row.output);
     if (failure.success) return { status: 'failed', detail: failure.data.reason.slice(0, 400) };
   }
-  return { status: await savedToolStatus(tx, row) };
+  const status = await savedToolStatus(tx, row);
+  const detail = row.status === 'completed' ? rowReviewDetail(row.tool, row.output) : undefined;
+  return detail ? { status, detail } : { status };
 }
 
 /** Whether chat called `tables.propose` again later in the same reply, after this call's invalid arguments. */

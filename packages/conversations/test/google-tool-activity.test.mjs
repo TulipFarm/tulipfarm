@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { googleToolActivity } from '../src/google-tool-activity.ts';
-import { deniedProposalDetail, storedToolActivity } from '../src/tool-activity-history.ts';
+import { deniedProposalDetail, rowReviewDetail, storedToolActivity } from '../src/tool-activity-history.ts';
 import { apiCallProblem, apiCallReceipt, toolPresentation } from '../src/tool-activity.ts';
 
 test('Google activity describes the actual action without including private arguments', () => {
@@ -147,4 +147,31 @@ test('an archive blocked by an active workflow keeps the workflows it named so t
     detail: 'Not archived: an active workflow uses this table.',
   });
   assert.equal((await activity({ result: { error: 'table-linked', workflows: [workflow] } })).workflows, undefined);
+});
+
+test('a chat row write held for approval names the rule in Tool activity', () => {
+  const batch = { result: { error: 'review-required', reason: 'too-many-rows', table: 'Contacts' }, sources: [] };
+  assert.match(
+    rowReviewDetail('rows.create.batch', batch),
+    /^Not written\. .*more than 5 rows.*approval on a chat card/,
+  );
+  assert.match(
+    rowReviewDetail('rows.create', {
+      draftId: 'd',
+      status: 'review-required',
+      reason: 'table-not-named',
+      table: 'Orders',
+    }),
+    /^Not written yet\. .*didn’t name Orders.*approval/,
+  );
+  assert.match(rowReviewDetail('rows.create.batch', { error: 'review-required' }), /outside content/);
+  assert.match(rowReviewDetail('rows.update', { error: 'review-unavailable' }), /can’t change rows/);
+  assert.match(
+    rowReviewDetail('rows.create', { error: 'approval-pending', table: 'Contacts' }),
+    /to Contacts .*still waiting for your approval/,
+  );
+  assert.match(rowReviewDetail('rows.create', { error: 'batch-required' }), /^Not written: several new rows/);
+  assert.equal(rowReviewDetail('rows.create', { record: { id: 'r' } }), undefined);
+  assert.equal(rowReviewDetail('rows.create', { draftId: 'd', status: 'review-required' }), undefined);
+  assert.equal(rowReviewDetail('tables.propose', { error: 'review-required', reason: 'too-many-rows' }), undefined);
 });
