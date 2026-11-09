@@ -638,7 +638,7 @@ test('publication resume rechecks removed membership after Soul accepted the def
   assert.deepEqual((await f.state()).workflows, []);
 });
 
-test('chat full setup approves the same coordinator; historical drafts stay save-only', async t => {
+test('chat full setup approves the same coordinator or continues in the builder; historical drafts stay save-only', async t => {
   const f = await environment(t),
     chats = createConversations(f.runtime),
     drafts = createAuthoringDrafts(f.runtime);
@@ -708,6 +708,33 @@ test('chat full setup approves the same coordinator; historical drafts stay save
   const replayed = await drafts.decide(f.w.id, f.user, chatId, full.draftId, decision);
   assert.equal(replayed.setupReceipt.commandId, outcome.setupReceipt.commandId);
   assert.equal(replayed.setupReceipt.status, 'active');
+
+  // Continuing a chat setup in the builder settles the chat draft and follows the builder's saves.
+  const handed = await propose(true);
+  const proceed = () => ({ commandId: randomUUID(), digest: handed.digest, decision: 'continue' });
+  await assert.rejects(drafts.decide(f.w.id, f.user, chatId, handed.draftId, proceed()), /setup-draft-not-found/);
+  const saved = await setup.saveDraft(f.w.id, f.user, handed.agentId, await f.input());
+  assert.deepEqual(await drafts.decide(f.w.id, f.user, chatId, handed.draftId, proceed()), {
+    kind: 'builder',
+    agentId: handed.agentId,
+  });
+  assert.equal((await drafts.decide(f.w.id, f.user, chatId, handed.draftId, proceed())).kind, 'builder');
+  assert.equal((await drafts.read(f.w.id, f.user, chatId, handed.draftId)).status, 'continued');
+  await assert.rejects(
+    drafts.decide(f.w.id, f.user, chatId, handed.draftId, {
+      ...decision,
+      commandId: randomUUID(),
+      digest: handed.digest,
+    }),
+    /idempotency-conflict/,
+  );
+  const command = await setup.publish(f.w.id, f.user, handed.agentId, f.decision(saved, 'save'));
+  await f.accept(setup, command);
+  assert.equal((await setup.advance(f.w.id, f.user, command.commandId)).status, 'saved');
+  const followed = await drafts.read(f.w.id, f.user, chatId, handed.draftId);
+  assert.equal(followed.status, 'saved');
+  assert.equal(followed.outcome.kind, 'builder');
+  assert.equal(followed.outcome.setupReceipt.commandId, command.commandId);
 });
 
 async function activeAgent(f, triggers = [], prompt = 'Check the queue.') {

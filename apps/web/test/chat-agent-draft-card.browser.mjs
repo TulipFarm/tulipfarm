@@ -255,7 +255,7 @@ test(
 );
 
 test(
-  'a chat setup draft opens the agent builder in the canvas, and saving there is not a chat approval',
+  'a chat setup draft opens the agent builder in the canvas, and saving there continues the draft in the builder',
   { timeout: 120000 },
   async () => {
     const fixture = agentBuilderFixture();
@@ -270,7 +270,8 @@ test(
         triggerId = randomUUID();
       const decisions = [],
         errors = [];
-      let deny = false;
+      let deny = false,
+        continued = false;
       page.on('pageerror', error => errors.push(error.message));
       const setup = {
         policy: { grants: [{ teamId: fixture.team.id, permissions: ['read', 'invoke'] }], personGrants: [] },
@@ -330,10 +331,21 @@ test(
           method = request.method(),
           body = request.postDataJSON();
         if (path.endsWith(`/drafts/${draftId}`))
-          return route.fulfill(deny ? { status: 403, json: { error: 'access-denied' } } : { json: view });
+          return route.fulfill(
+            deny
+              ? { status: 403, json: { error: 'access-denied' } }
+              : {
+                  json: continued
+                    ? { ...view, status: 'continued', outcome: { kind: 'builder', agentId: targetId } }
+                    : view,
+                },
+          );
         if (path.endsWith(`/drafts/${draftId}/decision`)) {
           decisions.push(body);
-          return route.fulfill({ status: 409, json: { error: 'unexpected-chat-decision' } });
+          if (body.decision !== 'continue')
+            return route.fulfill({ status: 409, json: { error: 'unexpected-chat-decision' } });
+          continued = true;
+          return route.fulfill({ json: { kind: 'builder', agentId: targetId } });
         }
         if (path.endsWith(`/conversations/${chatId}/messages`))
           return route.fulfill({
@@ -388,7 +400,24 @@ test(
       assert.deepEqual(saved.slackChannels, setup.slackChannels);
       assert.deepEqual(saved.triggers, setup.triggers);
       assert.equal(saved.prompt, setup.prompt);
-      assert.equal(decisions.length, 0, 'saving in the builder is not chat approval');
+      assert.deepEqual(
+        decisions.map(decision => decision.decision),
+        ['continue'],
+        'saving in the builder continues the chat draft instead of approving it',
+      );
+      await page.reload();
+      await page.getByText('Continued in the agent builder', { exact: true }).waitFor();
+      await page.getByRole('button', { name: 'Edit agent', exact: true }).click();
+      await canvas
+        .getByRole('form', { name: 'Agent setup', exact: true })
+        .getByLabel('Agent name', { exact: true })
+        .waitFor();
+      assert.equal(
+        await canvas.getByRole('textbox', { name: 'Instructions', exact: true }).inputValue(),
+        view.proposal.input.definition.instructions,
+        'reopening resumes the setup saved in the builder',
+      );
+      assert.equal(decisions.length, 1, 'reopening does not decide the chat draft again');
       deny = true;
       await page.goto(
         `${server.origin}/${workspace.slug}/agents/new?setupAgentId=${targetId}&chatId=${chatId}&draftId=${draftId}`,

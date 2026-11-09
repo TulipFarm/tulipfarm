@@ -176,7 +176,8 @@ export const authoringProposalSchema = z.discriminatedUnion('kind', [
 export const draftDecisionSchema = z.strictObject({
   commandId: uuidSchema,
   digest: z.string().regex(/^[a-f0-9]{64}$/),
-  decision: z.enum(['save', 'activate', 'dismiss']),
+  /** `continue` records that the requester saved this agent setup draft in the agent builder instead. */
+  decision: z.enum(['save', 'activate', 'dismiss', 'continue']),
   consent: agentSetupConsentSchema.optional(),
 });
 export const workflowActivationOutcomeSchema = z.enum([
@@ -193,6 +194,8 @@ export const draftOutcomeSchema = z.discriminatedUnion('kind', [
     receipt: agentCommandStatusSchema,
     setupReceipt: agentSetupReceiptSchema.optional(),
   }),
+  /** Continued in the agent builder; `setupReceipt` is its latest save or activation since then. */
+  z.object({ kind: z.literal('builder'), agentId: z.uuid(), setupReceipt: agentSetupReceiptSchema.optional() }),
   z.object({ kind: z.literal('skill'), receipt: workspaceSkillReceiptSchema }),
   z.object({
     kind: z.literal('workflow'),
@@ -256,7 +259,7 @@ export const draftViewSchema = z.object({
   id: z.uuid(),
   digest: draftDecisionSchema.shape.digest,
   proposal: authoringProposalSchema,
-  status: z.enum(['pending', 'stale', 'preparing', 'saved', 'failed', 'dismissed']),
+  status: z.enum(['pending', 'stale', 'preparing', 'saved', 'failed', 'dismissed', 'continued']),
   outcome: draftOutcomeSchema.nullable(),
   /** An undecided workflow draft that a later draft in the same chat replaced. Its status is `stale`. */
   replaced: z.boolean().default(false),

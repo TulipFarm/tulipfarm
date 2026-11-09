@@ -59,6 +59,7 @@ export function AgentBuilder({
   concealed,
   refresh,
   onPersisted,
+  onSettled,
   compact,
 }: {
   api: ReturnType<typeof agentApi>;
@@ -72,6 +73,8 @@ export function AgentBuilder({
   concealed: boolean;
   refresh: () => Promise<void>;
   onPersisted: () => void;
+  /** Called when a save or activation from this builder has finished. */
+  onSettled?: (() => void) | undefined;
   compact?: boolean | undefined;
 }) {
   const [draft, setDraft] = useState(() => builderDraft(initial));
@@ -132,6 +135,13 @@ export function AgentBuilder({
       void changed(id);
     }
   }, [receipt, draft, changed, id]);
+  const settled = useRef<string | null>(null);
+  useEffect(() => {
+    if ((receipt?.status === 'saved' || receipt?.status === 'active') && settled.current !== receipt.commandId) {
+      settled.current = receipt.commandId;
+      onSettled?.();
+    }
+  }, [receipt, onSettled]);
   const sending = write.state.kind === 'sending' || (!!commandId && (!receipt || receipt.status === 'preparing'));
   const uncertain =
     write.state.kind === 'uncertain' ||

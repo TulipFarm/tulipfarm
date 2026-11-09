@@ -101,6 +101,7 @@ export function MemoryDraftCard({
         dismissed: { label: 'Forgotten', variant: 'secondary' },
         stale: { label: 'Can’t undo', variant: 'warning' },
         failed: { label: 'Not restored', variant: 'destructive' },
+        continued: { label: 'Continued in builder', variant: 'secondary' },
       } as const)
     : ({
         pending: { label: 'Needs approval', variant: 'warning' },
@@ -109,6 +110,7 @@ export function MemoryDraftCard({
         dismissed: { label: 'Dismissed', variant: 'secondary' },
         stale: { label: 'Out of date', variant: 'warning' },
         failed: { label: 'Not saved', variant: 'destructive' },
+        continued: { label: 'Continued in builder', variant: 'secondary' },
       } as const);
   return (
     <ReviewCard
