@@ -388,15 +388,19 @@ export function createWorkflows(
     await authorizeSources(tx, definition, membershipId);
     const step = definition.steps.find(step => step.id === stepId);
     if (step?.kind !== 'slack-message') throw new AccessDenied();
-    const authored = (value: typeof step.text): boolean => {
-      if (value.kind === 'literal' || value.kind === 'template' || value.kind === 'trigger') return true;
-      if (value.kind === 'input') return false;
+    // Fixed text was shown on the reviewed draft; text a step writes at run time was not.
+    const origin = (value: typeof step.text): 'input' | 'reviewed' | 'generated' => {
+      const combined = (values: ('input' | 'reviewed' | 'generated')[]) =>
+        values.includes('generated') ? 'generated' : values.includes('reviewed') ? 'reviewed' : 'input';
+      if (value.kind === 'template') return combined(['reviewed', ...Object.values(value.values).map(origin)]);
+      if (value.kind === 'literal' || value.kind === 'trigger') return 'reviewed';
+      if (value.kind === 'input') return 'input';
       const source = definition.steps.find(step => step.id === value.step);
       if (!source) throw new AccessDenied();
-      if (source.kind === 'transform') return Object.values(source.fields).some(authored);
-      return source.kind === 'code' || source.kind === 'agent' || source.kind === 'http';
+      if (source.kind === 'transform') return combined(Object.values(source.fields).map(origin));
+      return source.kind === 'code' || source.kind === 'agent' || source.kind === 'http' ? 'generated' : 'input';
     };
-    return { authoredText: authored(step.text) };
+    return { text: origin(step.text) };
   }
   // Waiting runs sleep on one durable timer; a committed change that ends or resumes the wait wakes them.
   async function wakeAfter<T>(

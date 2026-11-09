@@ -266,12 +266,7 @@ export function createSlackActions(options: Options) {
   async function sources(tx: AgentTransaction, workspaceId: string, actor: HumanActor, runId: string, callId: string) {
     const workflow = await workflowOrigin(tx, runId, callId);
     if (workflow) {
-      const { authoredText } = await workflows.slackSources(
-        tx as Transaction,
-        runId,
-        workflow.step_id,
-        actor.membershipId,
-      );
+      const { text } = await workflows.slackSources(tx as Transaction, runId, workflow.step_id, actor.membershipId);
       const drafts = await tx.client.query(
         `SELECT d.sources,d.conversation_id,d.turn_id FROM ${relation(tx, 'tf_chat_authoring_drafts')} d JOIN ${relation(tx, 'tf_chat_authoring_decisions')} c ON c.draft_id=d.id WHERE c.outcome->>'kind'='workflow' AND c.outcome->>'workflowId'=$1 AND c.outcome->>'revision'=$2`,
         [workflow.workflow_id, workflow.revision],
@@ -279,19 +274,27 @@ export function createSlackActions(options: Options) {
       for (const draft of drafts.rows) {
         let dependencies = sourceDependenciesSchema.parse(draft.sources);
         await requireNoMcpDerived(tx, dependencies);
-        if (authoredText) {
-          const prior = (
-            await tx.client.query(
-              `SELECT 1 FROM ${relation(tx, 'tf_conversation_turns')} WHERE conversation_id=$1 AND accepted_sequence<(SELECT accepted_sequence FROM ${relation(tx, 'tf_conversation_turns')} WHERE id=$2)`,
-              [draft.conversation_id, draft.turn_id],
-            )
-          ).rowCount;
-          if (!prior || (await standaloneTurn(tx, draft.conversation_id, draft.turn_id)))
-            dependencies = dependencies.filter(
-              source => source.kind !== 'private-conversation' || source.conversationId !== draft.conversation_id,
-            );
-          await requireDraftSources(tx, actor, dependencies, new Set(), undefined, true);
+        if (text === 'input') continue;
+        const ownChat = (source: (typeof dependencies)[number]) =>
+          source.kind === 'private-conversation' && source.conversationId === draft.conversation_id;
+        // The owner approved this exact text on the draft card, so its sources need current access, not public scope.
+        if (text === 'reviewed') {
+          await requireDraftSources(
+            tx,
+            actor,
+            dependencies.filter(source => !ownChat(source)),
+          );
+          continue;
         }
+        const prior = (
+          await tx.client.query(
+            `SELECT 1 FROM ${relation(tx, 'tf_conversation_turns')} WHERE conversation_id=$1 AND accepted_sequence<(SELECT accepted_sequence FROM ${relation(tx, 'tf_conversation_turns')} WHERE id=$2)`,
+            [draft.conversation_id, draft.turn_id],
+          )
+        ).rowCount;
+        if (!prior || (await standaloneTurn(tx, draft.conversation_id, draft.turn_id)))
+          dependencies = dependencies.filter(source => !ownChat(source));
+        await requireDraftSources(tx, actor, dependencies, new Set(), undefined, true);
       }
       return;
     }
