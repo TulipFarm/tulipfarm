@@ -3069,6 +3069,8 @@ export function toolObservation(value: unknown, tool?: ToolName): ToolObservatio
   return {
     outcome,
     errorCode:
+      // An import failure carries why in `code`: a problem in the person's file, or storage that didn't respond.
+      (result.error === 'import-file-failed' && typeof result.code === 'string' ? result.code : undefined) ??
       envelope.error ??
       result.error ??
       result.code ??

@@ -269,6 +269,14 @@ test('tool outcomes include returned failures and waiting without using payload 
     errorCode: 'failed',
   });
   assert.deepEqual(toolObservation({ code: 'access-denied' }), { outcome: 'success', errorCode: 'access-denied' });
+  assert.deepEqual(
+    toolObservation({ error: 'import-file-failed', code: 'invalid-value', reason: 'PRIVATE' }, 'tables.import.file'),
+    { outcome: 'result_error', errorCode: 'invalid-value' },
+  );
+  assert.deepEqual(toolObservation({ error: 'approval-pending', table: 'PRIVATE' }, 'rows.create.batch'), {
+    outcome: 'result_error',
+    errorCode: 'approval-pending',
+  });
   for (const value of [
     { error: 'PRIVATE ERROR' },
     { data: { status: 'failed', result: 'PRIVATE RESULT' } },
