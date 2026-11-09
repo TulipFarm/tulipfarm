@@ -66,6 +66,10 @@ One version identifies all apps and images of a release.
 
 ### Fixed
 
+- A reply from an Azure model no longer fails when Azure briefly answers a
+  deployment it serves with a plain-text 404 (`route_not_found`). The call is
+  now retried and may fall back like any other temporary outage. A deployment
+  that does not exist (`DeploymentNotFound`) still fails at once.
 - A chat reply may again say that a card from earlier in the chat is still
   waiting for approval. The card-claim check now counts the person's undecided
   cards in the chat on the server and only stops a reply that says it made a

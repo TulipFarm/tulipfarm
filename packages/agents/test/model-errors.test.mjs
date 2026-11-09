@@ -138,6 +138,17 @@ const cases = [
   ],
   ['API version', 'azure', 404, azure('404', 'Resource not found'), {}, 'configuration', 'not_found'],
   [
+    'Azure plain-text route not found',
+    'azure',
+    404,
+    'The specified endpoint does not exist. Please check the url and try again.',
+    { 'content-type': 'text/plain', 'ms-azureml-model-error-reason': 'route_not_found' },
+    'unavailable',
+    'server_error',
+  ],
+  ['Azure 404 without body', 'azure', 404, null, {}, 'unavailable', 'server_error'],
+  ['OpenAI 404 without body', 'openai', 404, null, {}, 'configuration', 'not_found'],
+  [
     'overloaded',
     'anthropic',
     529,
