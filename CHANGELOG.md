@@ -97,7 +97,10 @@ One version identifies all apps and images of a release.
   card, and a model could then add the rows one at a time. While a row card for
   a table waits, chat can't write to that table or open another card for it,
   and adding rows one by one in a reply is refused after the first, so splitting
-  a large request no longer gets past the limit.
+  a large request no longer gets past the limit. A reply held behind a waiting
+  card says so and links to that card. When a reply has already added up to 5
+  rows and then asks for more, the added rows stay and the card lists them
+  separately from the rows it holds.
 - The blocked schema change report in chat now wraps each row's problem and
   fix text inside the card instead of running past its edge, and on narrow
   screens shows each invalid row as a stacked card of row, field, value and

@@ -171,6 +171,10 @@ test('a chat row write held for approval names the rule in Tool activity', () =>
     /to Contacts .*still waiting for your approval/,
   );
   assert.match(rowReviewDetail('rows.create', { error: 'batch-required' }), /^Not written: several new rows/);
+  assert.match(
+    rowReviewDetail('rows.create.batch', { draftId: 'd', reason: 'too-many-rows', alreadyWritten: 3 }),
+    /^Not written yet\. This reply already added 3 rows directly, and those stay\. .*more than 5 rows/,
+  );
   assert.equal(rowReviewDetail('rows.create', { record: { id: 'r' } }), undefined);
   assert.equal(rowReviewDetail('rows.create', { draftId: 'd', status: 'review-required' }), undefined);
   assert.equal(rowReviewDetail('tables.propose', { error: 'review-required', reason: 'too-many-rows' }), undefined);

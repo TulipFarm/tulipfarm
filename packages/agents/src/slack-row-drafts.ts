@@ -157,6 +157,9 @@ export async function slackRowDraftCards(
               values.length > shownFields
                 ? `${values.length - shownFields} more ${input.tool === 'rows.create.batch' ? 'rows are' : 'fields are'} set.`
                 : '',
+              proposal.written
+                ? `${proposal.written.count === 1 ? '1 row was' : `${proposal.written.count} rows were`} already added in this reply and stay in the table; this card holds only the rest.`
+                : '',
               proposal.reason
                 ? 'Chat writes only a few rows directly into a table you named, so this change waits for approval by the person who asked. Approving makes this exact change with their table access.'
                 : 'This chat used content from outside your tables, so the change waits for approval by the person who asked. Approving makes this exact change with their table access.',

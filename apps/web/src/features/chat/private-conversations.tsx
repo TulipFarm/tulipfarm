@@ -97,6 +97,7 @@ import {
 } from '@/features/packages/chat-packages';
 import { InteractionCard } from './interaction-card';
 import { AuthoringDraftCard } from './authoring-draft-card';
+import { WaitingRowDraft } from './waiting-row-draft';
 import { AgentDraftLink } from './agent-draft-canvas';
 import { FollowUpCard } from './follow-up-card';
 import { Welcome } from './welcome';
@@ -1959,6 +1960,15 @@ function ConversationTools({
             <AuthoringDraftCard key={tool.id} api={api} chatId={chatId} id={tool.id} />
           ),
         )}
+      {[
+        ...new Map(
+          message.tools
+            .flatMap(tool => (tool.waitingRowDraft ? [tool.waitingRowDraft] : []))
+            .map(draft => [draft.id, draft]),
+        ).values(),
+      ].map(draft => (
+        <WaitingRowDraft key={`waiting:${draft.id}`} api={api} chatId={chatId} draft={draft} />
+      ))}
       {message.tools
         .filter(tool => tool.status === 'completed' && tool.integration)
         .map(tool => (

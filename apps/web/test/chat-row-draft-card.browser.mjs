@@ -99,6 +99,13 @@ test('row review drafts show the exact change and act only on the member decisio
           'too-many-rows',
         ),
       };
+      drafts[batchDraft].proposal.written = {
+        count: 2,
+        rows: ['A', 'B'].map((name, index) => ({
+          recordId: `5a5a5a5a-5a5a-4a5a-8a5a-5a5a5a5a5a5${index}`,
+          values: { [noteField]: { kind: 'text', value: `Order ${name}` } },
+        })),
+      };
       const decisions = [];
       const context = await browser.newContext({
         viewport: mobile ? { width: 390, height: 844 } : { width: 1440, height: 1000 },
@@ -145,6 +152,22 @@ test('row review drafts show the exact change and act only on the member decisio
           parts: [{ kind: 'text', text: 'Review the row changes.' }],
           turn: null,
           tools: [],
+          calendarResults: [],
+        },
+        {
+          id: '19191919-1919-4919-8919-191919191919',
+          sequence: 3,
+          author: 'human',
+          createdAt: '2026-10-11T10:00:03.000Z',
+          parts: [{ kind: 'text', text: 'Just add them one at a time.' }],
+          turn: { id: '89898989-8989-4989-8989-898989898989', status: 'completed', generation: 0 },
+          tools: [
+            {
+              ...tool('1a1a1a1a-1a1a-4a1a-8a1a-1a1a1a1a1a1a', 'rows.create'),
+              rowDraftId: undefined,
+              waitingRowDraft: { id: batchDraft, table: 'Support tickets' },
+            },
+          ],
           calendarResults: [],
         },
       ];
@@ -255,6 +278,34 @@ test('row review drafts show the exact change and act only on the member decisio
             { exact: true },
           )
           .waitFor();
+        await batch
+          .getByText(
+            '2 rows were already added in this reply and stay in the table. This card holds only the other 6 rows, which need your approval.',
+            { exact: true },
+          )
+          .waitFor();
+        await batch.getByRole('list', { name: 'Already added' }).getByText('Note: Order B', { exact: true }).waitFor();
+        assert.equal(await batch.getByRole('list', { name: 'Rows to add' }).getByText('Note: Order B').count(), 0);
+        if (shots)
+          await batch.screenshot({
+            path: `${shots}/batch-card-pending-${mobile ? 'mobile-dark' : 'desktop-light'}.png`,
+          });
+
+        // A later reply that was held behind the card says so and takes the member to it.
+        const waiting = page.getByRole('region', { name: 'Row change waiting for approval' });
+        await waiting
+          .getByText(
+            'Nothing new was added. A row change to Support tickets is waiting for your approval on an earlier card in this chat. Approve or dismiss it first.',
+            { exact: true },
+          )
+          .waitFor();
+        await waiting.getByRole('button', { name: 'Go to waiting card' }).click();
+        await page.waitForFunction(id => document.activeElement?.id === `row-draft-${id}`, batchDraft);
+        if (shots)
+          await page.screenshot({
+            path: `${shots}/row-draft-waiting-${mobile ? 'mobile-dark' : 'desktop-light'}.png`,
+            fullPage: true,
+          });
         assert.deepEqual(decisions, [], 'nothing is decided before the member acts');
 
         await batch.getByRole('button', { name: 'Approve 6 rows' }).click();

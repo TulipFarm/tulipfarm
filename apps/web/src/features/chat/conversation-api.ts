@@ -134,6 +134,7 @@ const messageSchema = z.object({
         tableProposal: z.literal(true).optional(),
         integration: integrationCardSchema.optional(),
         rowDraftId: z.uuid().optional(),
+        waitingRowDraft: z.object({ id: z.uuid(), table: z.string().optional() }).optional(),
         rowView: rowViewSchema.optional(),
         rowChange: rowChangeSchema.optional(),
         workflows: z.array(workflowReferenceSchema).optional(),

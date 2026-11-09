@@ -138,8 +138,20 @@ const fileShareDraftInput = z.strictObject({
   /** The share is refused if the item's sharing changed since this preview. */
   fingerprint: shareFingerprintSchema,
 });
+/** The most rows one chat reply may write without an approval card. */
+export const directChatRowLimit = 5;
 /** Why a trusted chat row write still needs approval: see chat-row-guard.ts. */
 export const rowReviewReasonSchema = z.enum(['table-change-pending', 'table-not-named', 'too-many-rows']);
+/**
+ * Rows the same reply had already written directly before this card was made. They stay written; the card holds
+ * only the rest. `rows` lists the ones added to the card's table, `count` every row the reply changed.
+ */
+export const rowsAlreadyWrittenSchema = z.strictObject({
+  count: z.int().min(1).max(directChatRowLimit),
+  rows: z
+    .array(z.strictObject({ recordId: uuidSchema, values: createRecordBatchSchema.shape.rows.element.shape.values }))
+    .max(directChatRowLimit),
+});
 export const authoringProposalSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('agent'), targetId: uuidSchema, input: agentDraftInputSchema }),
   z.strictObject({
@@ -178,6 +190,7 @@ export const authoringProposalSchema = z.discriminatedUnion('kind', [
     input: z.discriminatedUnion('tool', [...taskMutationSchema.options, createRecordBatchSchema]),
     /** Why chat could not write directly. Absent on drafts made because the chat used untrusted content. */
     reason: rowReviewReasonSchema.optional(),
+    written: rowsAlreadyWrittenSchema.optional(),
   }),
 ]);
 export const draftDecisionSchema = z.strictObject({

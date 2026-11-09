@@ -14,6 +14,8 @@ const reasons = {
   'table-not-named': 'You didn’t name this table in the chat, so the change waits for your approval.',
   'table-change-pending': 'Chat prepared a table change in the same reply, so this row change waits for your approval.',
 } as const;
+/** The element a reply that was held behind this card scrolls to. */
+export const rowDraftElementId = (id: string) => `row-draft-${id}`;
 const operation = ({ input }: RowProposal) =>
   input.tool === 'rows.create' || input.tool === 'rows.create.batch'
     ? ('create' as const)
@@ -47,7 +49,7 @@ export function RowDraftCard({
   const kind = operation(proposal);
   const table = draft.rowTable;
   const tableName = table?.name ?? 'a table you cannot see';
-  const { input } = proposal;
+  const { input, written } = proposal;
   const batch = input.tool === 'rows.create.batch' ? input.rows.map(row => row.values) : null;
   const count = batch?.length ?? 1;
   const proposed: Values = input.tool === 'rows.delete' || input.tool === 'rows.create.batch' ? {} : input.values;
@@ -61,6 +63,8 @@ export function RowDraftCard({
   const shown = kind === 'delete' ? fields(draft.rowCurrent ?? {}) : fields(proposed);
   return (
     <ReviewCard
+      id={rowDraftElementId(id)}
+      tabIndex={-1}
       label="Review row change"
       icon={<Database size={16} />}
       title={`${verbs[kind]} ${count === 1 ? 'a row' : `${count} rows`} in ${tableName}`}
@@ -142,6 +146,31 @@ export function RowDraftCard({
         </ReviewRow>
         <ReviewRow label="Table">{tableName}</ReviewRow>
       </ReviewRows>
+      {written && (
+        <section aria-label="Rows already added" className="grid gap-2 text-sm">
+          <p role="note">
+            {written.count === 1 ? '1 row was' : `${written.count} rows were`} already added in this reply and stay in
+            the table. This card holds only the other {count === 1 ? 'row' : `${count} rows`}, which need your approval.
+          </p>
+          {written.rows.length > 0 && (
+            <ol aria-label="Already added" className="grid gap-2">
+              {written.rows.map((row, index) => (
+                <li key={row.recordId}>
+                  <ReviewRows>
+                    <ReviewRow label={`Already added ${index + 1}`}>
+                      <span className="break-words">
+                        {fields(row.values)
+                          .map(({ fieldId, label }) => `${label}: ${format(row.values, fieldId)}`)
+                          .join(' · ') || 'No field values set.'}
+                      </span>
+                    </ReviewRow>
+                  </ReviewRows>
+                </li>
+              ))}
+            </ol>
+          )}
+        </section>
+      )}
       {batch ? (
         <ol aria-label="Rows to add" className="grid gap-2">
           {batch.map((values, index) => (
