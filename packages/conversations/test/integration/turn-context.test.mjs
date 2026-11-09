@@ -499,3 +499,66 @@ test('a later turn learns the current outcome of table proposals from earlier tu
     await f.close();
   }
 });
+
+const unreadableSources = (membershipId, conversationId) => ({
+  'google-integration': {
+    kind: 'google-integration',
+    integrationId: randomUUID(),
+    accountId: 'disconnected-account',
+    membershipId,
+    generation: 1,
+    scopes: ['https://www.googleapis.com/auth/gmail.readonly'],
+    requiredScopes: ['https://www.googleapis.com/auth/gmail.readonly'],
+  },
+  'github-personal': {
+    kind: 'github-personal',
+    accountId: randomUUID(),
+    membershipId,
+    generation: 1,
+    selectionVersion: 1,
+    conversationId,
+    proof: {
+      operation: { kind: 'repository.read', owner: 'octocat', repo: 'private' },
+      transport: 'rest',
+      digest: 'a'.repeat(64),
+    },
+  },
+  'mcp-integration': { kind: 'mcp-integration', integrationId: randomUUID(), authorizationEpoch: 1 },
+});
+
+for (const kind of ['google-integration', 'github-personal', 'mcp-integration'])
+  test(`an earlier answer from a ${kind} source the requester can no longer read leaves context without stopping replies`, async () => {
+    const f = await conversationFixture();
+    try {
+      const chat = await chatFixture(f);
+      const calls = [];
+      const executor = createConversationExecutor(f.runtime, async ({ messages }) => {
+        calls.push(messages.filter(message => message.text));
+        return `${messages.at(-1).text} answer`;
+      });
+      const a = await chat.send('A');
+      assert.equal(await executor.process(chat.work(a)), 'completed');
+      await f.db.platform.query(
+        `UPDATE ${f.table('tf_conversation_results')} SET sources = sources || $2::jsonb WHERE turn_id=$1`,
+        [a.turnId, JSON.stringify([unreadableSources(f.workspace.membershipId, chat.conversationId)[kind]])],
+      );
+      const b = await chat.send('B');
+      assert.equal(await executor.process(chat.work(b)), 'completed');
+      const c = await chat.send('C');
+      assert.equal(await executor.process(chat.work(c)), 'completed');
+      assert.deepEqual(calls.slice(1), [
+        [
+          { role: 'user', text: 'A' },
+          { role: 'user', text: 'B' },
+        ],
+        [
+          { role: 'user', text: 'A' },
+          { role: 'user', text: 'B' },
+          { role: 'assistant', text: 'B answer' },
+          { role: 'user', text: 'C' },
+        ],
+      ]);
+    } finally {
+      await f.close();
+    }
+  });

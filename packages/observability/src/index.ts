@@ -2041,7 +2041,13 @@ function chatDetailAttributes(state: ChatMeasurement): Attributes {
 
 const chatDetailLogMs = 1000;
 
-function finishChatDetail(phase: ChatDetailPhase, state: ChatMeasurement, start: number, outcome: string) {
+function finishChatDetail(
+  phase: ChatDetailPhase,
+  state: ChatMeasurement,
+  start: number,
+  outcome: string,
+  details?: ReturnType<typeof errorAttributes>,
+) {
   const seconds = (performance.now() - start) / 1000;
   chatInstruments().detail.record(seconds, { ...dimensions, phase, purpose: state.purpose, outcome });
   // A reply runs many phases; the histogram and span cover routine ones, so only slow or failed phases are logged.
@@ -2049,9 +2055,17 @@ function finishChatDetail(phase: ChatDetailPhase, state: ChatMeasurement, start:
   log('info', 'activity', 'call_completed', {
     operation: `chat.detail.${phase}`,
     ...chatDetailAttributes(state),
+    ...details,
     outcome,
     duration_ms: seconds * 1000,
   });
+}
+
+function failChatDetail(span: Span, error: unknown) {
+  const details = errorAttributes(error);
+  span.setAttributes(details);
+  span.setStatus({ code: SpanStatusCode.ERROR });
+  return details;
 }
 
 // The sampler ignores attributes, so they are only built for spans that will be recorded.
@@ -2071,15 +2085,16 @@ async function runChatDetail<T>(
 ): Promise<T> {
   const start = performance.now();
   let outcome = 'success';
+  let details: ReturnType<typeof errorAttributes> | undefined;
   try {
     return await inChatReplyCategory(chatReplyCategory(phase), call);
   } catch (error) {
     outcome = 'error';
-    span.setStatus({ code: SpanStatusCode.ERROR });
+    details = failChatDetail(span, error);
     throw error;
   } finally {
     span.setAttribute('outcome', outcome);
-    finishChatDetail(phase, state, start, outcome);
+    finishChatDetail(phase, state, start, outcome, details);
     span.end();
   }
 }
@@ -2092,11 +2107,12 @@ function runChatDetailSync<T>(phase: ChatDetailPhase, state: ChatMeasurement, sp
     state.reply.active[category]++;
   }
   let outcome = 'success';
+  let details: ReturnType<typeof errorAttributes> | undefined;
   try {
     return call();
   } catch (error) {
     outcome = 'error';
-    span.setStatus({ code: SpanStatusCode.ERROR });
+    details = failChatDetail(span, error);
     throw error;
   } finally {
     if (category) {
@@ -2104,7 +2120,7 @@ function runChatDetailSync<T>(phase: ChatDetailPhase, state: ChatMeasurement, sp
       state.reply.active[category]--;
     }
     span.setAttribute('outcome', outcome);
-    finishChatDetail(phase, state, start, outcome);
+    finishChatDetail(phase, state, start, outcome, details);
     span.end();
   }
 }

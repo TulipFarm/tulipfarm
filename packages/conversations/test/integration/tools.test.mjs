@@ -6,7 +6,7 @@ import { createChatTools } from '../../../agents/src/tools.ts';
 import { conversationFixture } from '../fixture.mjs';
 
 for (const interruption of ['cancel', 'reclaim', 'membership'])
-  test(`external receipts terminalize on ${interruption} and stale completion cannot overwrite them`, async () => {
+  test(`external receipts terminalize on ${interruption} and stale completion cannot overwrite them`, async t => {
     const f = await conversationFixture();
     let release;
     const gate = new Promise(resolve => {
@@ -56,6 +56,12 @@ for (const interruption of ['cancel', 'reclaim', 'membership'])
           `UPDATE ${f.table('tf_conversation_turns')} SET lease_until = clock_timestamp() - interval '1 second' WHERE id = $1`,
           [sent.turnId],
         );
+        const lines = [];
+        const write = process.stdout.write.bind(process.stdout);
+        t.mock.method(process.stdout, 'write', (line, ...rest) => {
+          if (String(line).includes('"conversation.reply"')) lines.push(JSON.parse(line));
+          return write(line, ...rest);
+        });
         const reclaimed = await executor.claim(ids);
         assert.equal(reclaimed.epoch, 2);
         assert.deepEqual(await statuses(), [
@@ -72,6 +78,12 @@ for (const interruption of ['cancel', 'reclaim', 'membership'])
           ).rows[0].error_code,
           'reply-interrupted',
         );
+        // A reply that stops without throwing still logs its cause and stage.
+        assert.deepEqual(
+          lines.map(line => [line['error.type'], line['error.code'], line['error.stage']]),
+          [['ReplyStopped', 'reply-interrupted', 'context']],
+        );
+        t.mock.restoreAll();
       }
       if (interruption === 'membership') {
         await f.db.platform.query(`UPDATE ${f.table('tf_memberships')} SET removed_at = now() WHERE id = $1`, [

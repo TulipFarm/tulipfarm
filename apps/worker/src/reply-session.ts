@@ -21,7 +21,7 @@ import {
   requireGitHubSources,
   requireGoogleSources,
   requireKnowledgeSources,
-  requireMcpSources,
+  requireReplyMcpSources,
   requireResultSources,
 } from '@tulipfarm/conversations/source-access';
 import { turnRequester } from '@tulipfarm/conversations/turn-requester';
@@ -36,7 +36,7 @@ import {
   recoverReplyHolds,
   settleReplyCredits,
 } from '@tulipfarm/workspace-storage/credits';
-import { commonCompatibility, qualified } from '@tulipfarm/workspace-storage/runtime';
+import { commonCompatibility, qualified, StorageUnavailableError } from '@tulipfarm/workspace-storage/runtime';
 import type { ConversationModel } from './conversation-model.ts';
 import type { ConversationInventory } from './conversation-inventory.ts';
 import { keepReplyLease } from './reply-lease.ts';
@@ -135,8 +135,9 @@ export async function beginReplySession(input: {
 
   const local = (tx: Tx): ConversationRuntime => ({
     transaction: async (workspaceId, range, operation) => {
-      if (workspaceId !== fence.workspaceId || tx.commonVersion < range.minimum || tx.commonVersion > range.maximum)
-        throw new AccessDenied();
+      if (workspaceId !== fence.workspaceId) throw new AccessDenied();
+      if (tx.commonVersion < range.minimum || tx.commonVersion > range.maximum)
+        throw new StorageUnavailableError('incompatible_version');
       return operation(tx);
     },
   });
@@ -213,7 +214,7 @@ export async function beginReplySession(input: {
     await requireGitHubSources(tx, human, merged);
     await requireGoogleSources(tx, human, merged);
     await requireKnowledgeSources(tx, human, merged);
-    await requireMcpSources(tx, human, fence.conversationId, merged);
+    await requireReplyMcpSources(tx, human, fence.conversationId, merged);
     if (slackActor) await requireResultSources(tx, slackActor, fence.conversationId, merged);
     await externalContext?.(tx, fence, merged);
     return canonicalJson(merged);
