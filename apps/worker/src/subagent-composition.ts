@@ -31,6 +31,8 @@ export type SubagentDelegationOptions = {
   runtime: Runtime;
   /** Helpers use the chat's own model, so their calls are charged to the reply. */
   route: InferenceRoute;
+  /** Answers a helper's model calls that `route` fails, as it answers the reply's. */
+  fallback?: InferenceRoute | undefined;
   /** The catalog family of `route`, shown on helper cards. */
   family: string;
   /** The reply's meter that also reports each call's credits. */
@@ -179,7 +181,12 @@ export function createSubagentDelegation(options: SubagentDelegationOptions): Su
       attempt => meter({ ...attempt, step: base + attempt.step }),
       subagentLimits.helperToolCalls,
       undefined,
-      { signal: live.signal, onActivity: live.progress.step, onText: live.progress.text },
+      {
+        signal: live.signal,
+        onActivity: live.progress.step,
+        onText: live.progress.text,
+        fallback: options.fallback ? { route: options.fallback } : undefined,
+      },
     );
     return result.text;
   }

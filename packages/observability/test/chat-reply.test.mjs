@@ -18,6 +18,7 @@ import {
   observeChatDetail,
   observeChatTool,
   observeInference,
+  recordModelFallback,
   telemetryIdentity,
   trace,
   withChatMeasurements,
@@ -377,4 +378,23 @@ test('first_text is labelled with the reply model that streamed first, not a tit
   for (const segment of ['total', 'queue', 'model', 'tools', 'db', 'overhead'])
     assert.equal(segments[segment].attributes['gen_ai.request.model'], undefined);
   assert.equal(summaries[0]['gen_ai.request.model'], 'grok-4.3');
+});
+
+test('a reply the fallback answered labels its durations and names both models in its summary', async t => {
+  const { collect } = harness(t);
+  await withChatMeasurements(async () => {
+    await withChatModelRequest('reply', async () =>
+      recordModelFallback(
+        'used',
+        { provider: 'azure', model: 'Kimi-K2.6', errorClass: 'rate_limited' },
+        { provider: 'azure', model: 'grok-4.3' },
+      ),
+    );
+    noteChatReplyFinal(chatReplyFinal(timing()));
+  }, 'turn-model');
+  const { points, summaries } = await collect();
+  for (const point of points) assert.equal(point.attributes.model_fallback, 'used');
+  assert.equal(summaries[0].model_fallback, 'used');
+  assert.equal(summaries[0]['gen_ai.request.model'], 'Kimi-K2.6');
+  assert.equal(summaries[0]['fallback.model'], 'grok-4.3');
 });

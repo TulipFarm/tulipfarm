@@ -396,9 +396,10 @@ test('chat reply streaming and polling fallback in Chromium', { timeout: 180000 
       async ({ page, history, complete, open }) => {
         complete('Hello from the fallback model.');
         history[0].turn.errorCode = 'model-fallback:kimi';
+        history[0].turn.stats = { model: 'deepseek-pro', firstTextMs: 900, durationMs: 1800 };
         await open();
         await page.getByText('Hello from the fallback model.', { exact: true }).waitFor();
-        await page.getByText('Answered by kimi because the chat model was unavailable.', { exact: true }).waitFor();
+        await page.getByText('Answered by Kimi because DeepSeek Pro was unavailable.', { exact: true }).waitFor();
         assert.equal(await page.getByRole('alert').count(), 0);
         await screenshot(page, 'fallback-model-reply');
       },

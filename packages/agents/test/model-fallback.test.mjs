@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { inferWithTools } from '../dist/inference.js';
+import { inferSpecialist, inferWithTools } from '../dist/inference.js';
 import { completionReply, isCompletionRequest, nativeReply, nativeRoutes } from './native-fixture.mjs';
 
 const messages = [{ role: 'user', text: 'PRIVATE PROMPT hey' }];
@@ -178,6 +178,50 @@ test('a fallback that also fails surfaces the chat model failure and is counted 
   assert.deepEqual(failures.map(record => record['error.code']).sort(), ['quota_exceeded', 'server_error']);
 });
 
+test('an unusable first response answers on the fallback without retrying the chat model', async t => {
+  const records = logs(t);
+  const { calls } = harness(t, {
+    azure: () => Response.json(nativeReply('azure', { text: '{"tool":"tables.list","input":{}}' })),
+    anthropic: () => Response.json(nativeReply('anthropic', { text: 'Hello from the fallback' })),
+  });
+  const answer = await inferWithTools(primary, messages, noTools, undefined, false, null, { fallback });
+  assert.deepEqual(answer, { text: 'Hello from the fallback', fallback: 'claude-fallback' });
+  assert.equal(calls.filter(call => call === 'azure').length, 1);
+  const [decision] = fallbackLogs(records);
+  assert.equal(decision.model_fallback, 'used');
+  assert.equal(decision['error.type'], 'invalid_response');
+});
+
+test('a rate limit moves to the fallback at once unless its Retry-After is short', async t => {
+  logs(t);
+  const run = async retryAfter => {
+    let limited = false;
+    const { calls } = harness(t, {
+      azure: () => {
+        if (limited) return Response.json(nativeReply('azure', { text: 'Hello from the chat model' }));
+        limited = true;
+        return new Response(JSON.stringify({ error: { code: 'RateLimitReached', message: 'Rate limit reached' } }), {
+          status: 429,
+          headers: retryAfter === null ? {} : { 'retry-after': retryAfter },
+        });
+      },
+      anthropic: () => Response.json(nativeReply('anthropic', { text: 'Hello from the fallback' })),
+    });
+    const answer = await inferWithTools(primary, messages, noTools, undefined, false, null, { fallback });
+    t.mock.restoreAll();
+    logs(t);
+    return { answer, calls };
+  };
+  for (const retryAfter of [null, '60']) {
+    const { answer, calls } = await run(retryAfter);
+    assert.deepEqual(answer, { text: 'Hello from the fallback', fallback: 'claude-fallback' });
+    assert.equal(calls.filter(call => call === 'azure').length, 1);
+  }
+  const { answer, calls } = await run('0.05');
+  assert.deepEqual(answer, { text: 'Hello from the chat model' });
+  assert.deepEqual(calls, ['azure', 'azure']);
+});
+
 test('a rejected response logs why it was rejected and the finish reason, without its content', async t => {
   const records = logs(t);
   const { meter } = harness(t, {
@@ -193,4 +237,53 @@ test('a rejected response logs why it was rejected and the finish reason, withou
     assert.equal(record['response.finish_reason'], 'tool_calls');
   }
   assert.ok(!JSON.stringify(records).includes('PRIVATE PROMPT'), 'no prompt or response content is logged');
+});
+
+const rateLimited = retryAfter => () =>
+  new Response(JSON.stringify({ error: { code: 'RateLimitReached', message: 'Rate limit reached.' } }), {
+    status: 429,
+    headers: retryAfter === null ? {} : { 'retry-after': retryAfter },
+  });
+const runHelper = (meter, fallbackRoute) =>
+  inferSpecialist(primary, 'system', 'Task: find it', ['web.search'], noTools, meter, 4, undefined, {
+    fallback: fallbackRoute ? { route: fallbackRoute } : undefined,
+  });
+
+test('a sub-agent moves to the fallback after a rate limit, under its own credit step, and reports it', async t => {
+  const records = logs(t);
+  const { calls, metered, meter } = harness(t, {
+    azure: rateLimited('30'),
+    anthropic: () => Response.json(nativeReply('anthropic', { text: 'Found it' })),
+  });
+  assert.deepEqual(await runHelper(meter, fallbackRoute), { text: 'Found it', calls: 0 });
+  assert.deepEqual(calls, ['azure', 'anthropic']);
+  assert.deepEqual(
+    metered.map(record => [record.provider, record.step]),
+    [
+      ['azure', 0],
+      ['anthropic', 1],
+    ],
+  );
+  const [decision] = fallbackLogs(records);
+  assert.equal(decision.model_fallback, 'used');
+  assert.equal(decision['error.type'], 'rate_limited');
+  assert.equal(decision['gen_ai.request.model'], primary.model);
+  assert.equal(decision['fallback.model'], fallbackRoute.model);
+});
+
+test('a sub-agent retries a short Retry-After on its own model, and without a fallback reports not_configured', async t => {
+  const records = logs(t);
+  let limited = 1;
+  const { calls, meter } = harness(t, {
+    azure: () => (limited-- > 0 ? rateLimited('0.05')() : Response.json(nativeReply('azure', { text: 'Kimi again' }))),
+    anthropic: () => assert.fail('The fallback is not needed'),
+  });
+  assert.equal((await runHelper(meter, fallbackRoute)).text, 'Kimi again');
+  assert.deepEqual(calls, ['azure', 'azure']);
+  assert.equal(fallbackLogs(records).length, 0);
+
+  calls.length = 0;
+  const unconfigured = harness(t, { azure: rateLimited(null), anthropic: () => assert.fail('No fallback') });
+  await assert.rejects(runHelper(unconfigured.meter, undefined), /rate/);
+  assert.equal(fallbackLogs(records).at(-1).model_fallback, 'not_configured');
 });

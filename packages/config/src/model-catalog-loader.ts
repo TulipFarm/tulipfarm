@@ -136,6 +136,11 @@ export type ServedModelCatalog = {
   model(id: string): ServedModel | undefined;
   /** The served model with `role`, or null when none has it. */
   role(role: ModelCatalogRole): ServedModel | null;
+  /**
+   * The models that may answer for model `id` when its call fails, in the order to try them: its `fallback`, that
+   * model's `fallback` and so on, then the model with the `fallback` role. Only served, unpaused models other than `id`.
+   */
+  fallbacks(id: string): readonly ServedModel[];
   /** Served image models, in catalog order. */
   readonly imageModels: readonly ServedImageModel[];
   imageModel(id: string): ServedImageModel | undefined;
@@ -293,6 +298,19 @@ export function loadModelCatalog(env: Env = process.env): ServedModelCatalog {
     defaultModel,
     model: (id: string) => served.find(model => model.id === id),
     role: (role: ModelCatalogRole) => served.find(model => model.roles.includes(role)) ?? null,
+    fallbacks: (id: string) => {
+      const chain: string[] = [];
+      const declared = (from: string) => catalog.models.find(model => model.id === from)?.fallback ?? null;
+      for (let next = declared(id); next !== null && !chain.includes(next); next = declared(next)) chain.push(next);
+      const role = served.find(model => model.roles.includes('fallback'));
+      if (role) chain.push(role.id);
+      return Object.freeze(
+        [...new Set(chain)]
+          .filter(candidate => candidate !== id)
+          .map(candidate => served.find(model => model.id === candidate))
+          .filter((model): model is ServedModel => model !== undefined && !model.paused),
+      );
+    },
     imageModels: Object.freeze(servedImages),
     imageModel: (id: string) => servedImages.find(image => image.id === id),
     defaultImageModel: servedImages.find(image => image.default) ?? null,

@@ -1118,6 +1118,7 @@ function ConversationDetail({
                                 latest={index === history.messages.length - 1}
                                 rowViews={rowViewsForMessage(history.messages, message)}
                                 stats={replyStats(history.messages, index, modelFamilies)}
+                                modelName={id => modelFamilies.find(family => family.id === id)?.displayName ?? id}
                                 disabled={locked}
                                 packageContext={{
                                   packages,
@@ -1696,6 +1697,7 @@ function ConversationEntry({
   retryHandoff,
   control,
   stats,
+  modelName,
 }: {
   api: ConversationApi;
   chatId: string;
@@ -1708,6 +1710,7 @@ function ConversationEntry({
   retryHandoff: (compactionId: string) => void;
   control: (kind: 'retry' | 'cancel') => void;
   stats?: MessageActionsStats | undefined;
+  modelName: (id: string) => string;
 }) {
   const { workspace } = workspaceRoute.useRouteContext();
   const text = message.parts
@@ -1859,6 +1862,7 @@ function ConversationEntry({
               skillName={skill?.name}
               disabled={disabled}
               control={control}
+              modelName={modelName}
             />
           )}
         </MessageContent>

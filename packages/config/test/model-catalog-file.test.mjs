@@ -67,6 +67,25 @@ test('a model behind a workspace feature flag is neither the default nor a role 
   rejects(catalog([model(), flagged({ featureFlag: 'not-a-flag' })]), /^models\.1\.featureFlag:/);
 });
 
+test('a fallback names another unflagged chat model, and fallbacks never loop', () => {
+  const peer = (id, overrides = {}) => model({ id, default: false, ...overrides });
+  assert.deepEqual(
+    problems(catalog([model({ fallback: 'kimi' }), peer('kimi', { fallback: 'grok' }), peer('grok')])),
+    [],
+  );
+  assert.equal(modelCatalogFileSchema.parse(catalog([model()])).models[0].fallback, null);
+  rejects(catalog([model({ fallback: 'claude-sonnet' })]), /^models\.0\.fallback: A model cannot be its own fallback/);
+  rejects(catalog([model({ fallback: 'missing' })]), /^models\.0\.fallback: No entry in models has id "missing"/);
+  rejects(
+    catalog([model({ fallback: 'gpt-sol' }), peer('gpt-sol', { featureFlag: 'openai-models' })]),
+    /^models\.0\.fallback: The fallback model cannot be behind a feature flag/,
+  );
+  rejects(
+    catalog([model({ fallback: 'kimi' }), peer('kimi', { fallback: 'grok' }), peer('grok', { fallback: 'kimi' })]),
+    /^models\.1\.fallback: Fallbacks form a cycle: kimi -> grok -> kimi/,
+  );
+});
+
 test('ids are unique and each role is on one model', () => {
   rejects(catalog([model(), model({ default: false })]), /^models\.1\.id: Duplicate model id/);
   rejects(catalog([model({ roles: ['title', 'title'] })]), /^models\.0\.roles\.1: Duplicate role/);

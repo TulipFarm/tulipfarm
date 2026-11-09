@@ -118,6 +118,7 @@ function buildModelEnvironment(catalog: ServedModelCatalog, credentials: readonl
         budgetPicoUsd: () => runBudgetPicoUsd,
         defaultFamily: () => defaultFamily,
         paused,
+        fallbacks: familyId => catalog.fallbacks(familyId).map(model => model.id),
         imageInput: resolution => {
           const route = inference(resolution);
           return route && routeCapabilities(route).imageInput ? modelImageLimits(route.provider, route.model) : null;

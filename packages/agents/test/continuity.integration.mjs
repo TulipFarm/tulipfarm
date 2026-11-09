@@ -839,6 +839,39 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
           assert.equal((await attempts(next)).length, 1);
         },
       );
+      await t.test(
+        'with no workspace rule the catalog fallback answers, at once when the reply is unusable',
+        async () => {
+          await owner.query(`DELETE FROM ${table('tf_model_fallback_rules')}`);
+          const run = async primary => {
+            const called = [];
+            const chat = createAgentChat(runtime, {
+              ...config(async resolution => {
+                called.push(resolution.familyId);
+                return resolution.familyId === 'gpt-astra' ? answer : primary;
+              }),
+              fallbacks: familyId => (familyId === 'claude-opus' ? ['claude-opus', 'gpt-astra'] : []),
+            });
+            const id = await submit(chat);
+            await exhaust(chat, id);
+            assert.equal((await chat.read(workspaceId, ownerUserId, agentId, id)).text, 'Synthetic answer');
+            return called;
+          };
+          assert.deepEqual(await run(unavailable), ['claude-opus', 'claude-opus', 'gpt-astra']);
+          assert.deepEqual(await run({ ...unavailable, reason: 'invalid-decision' }), ['claude-opus', 'gpt-astra']);
+          await rule(null);
+          const called = [];
+          const chat = createAgentChat(runtime, {
+            ...config(async resolution => {
+              called.push(resolution.familyId);
+              return unavailable;
+            }),
+            fallbacks: () => ['gpt-astra'],
+          });
+          await exhaust(chat, await submit(chat));
+          assert.deepEqual(called, ['claude-opus', 'claude-opus']);
+        },
+      );
       await t.test('a paused family runs on its fallback rule target, or keeps itself without one', async () => {
         const called = [];
         const chat = createAgentChat(
@@ -1033,33 +1066,42 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         );
         assert.equal((await attempts(id)).length, 1);
       });
-      await t.test('nonavailability failures never switch models and zero budget makes no outbound call', async () => {
-        await owner.query(`UPDATE ${table('tf_credit_account')} SET available=1000000000000000`);
-        await rule('gpt-astra');
-        for (const reason of ['authentication', 'quota', 'refusal', 'invalid-decision', 'context-overflow']) {
-          let count = 0;
-          const chat = createAgentChat(
-            runtime,
-            config(async () => {
-              count++;
-              return { ...unavailable, reason };
+      await t.test(
+        'only failures another model can fix switch models, and zero budget makes no outbound call',
+        async () => {
+          await owner.query(`UPDATE ${table('tf_credit_account')} SET available=1000000000000000`);
+          await rule('gpt-astra');
+          for (const [reason, models] of [
+            ['authentication', ['claude-opus-5-5', 'gpt-6-astra']],
+            ['quota', ['claude-opus-5-5', 'gpt-6-astra']],
+            ['invalid-decision', ['claude-opus-5-5', 'gpt-6-astra']],
+            ['refusal', ['claude-opus-5-5']],
+            ['context-overflow', ['claude-opus-5-5']],
+          ]) {
+            const called = [];
+            const chat = createAgentChat(
+              runtime,
+              config(async resolution => {
+                called.push(resolution.modelId);
+                return { ...unavailable, reason };
+              }),
+            );
+            const id = await submit(chat);
+            await exhaust(chat, id);
+            assert.deepEqual(called, models, reason);
+          }
+          const chat = createAgentChat(runtime, {
+            ...config(async () => {
+              assert.fail('budget allowed a request');
             }),
-          );
+            budgetPicoUsd: () => '0',
+          });
           const id = await submit(chat);
           await exhaust(chat, id);
-          assert.equal(count, 1);
-        }
-        const chat = createAgentChat(runtime, {
-          ...config(async () => {
-            assert.fail('budget allowed a request');
-          }),
-          budgetPicoUsd: () => '0',
-        });
-        const id = await submit(chat);
-        await exhaust(chat, id);
-        assert.equal((await attempts(id)).length, 0);
-        assert.equal((await chat.read(workspaceId, ownerUserId, agentId, id)).model.failure, 'budget');
-      });
+          assert.equal((await attempts(id)).length, 0);
+          assert.equal((await chat.read(workspaceId, ownerUserId, agentId, id)).model.failure, 'budget');
+        },
+      );
       await t.test('deadline and live authority fences prevent results and retries', async () => {
         const chat = createAgentChat(
           runtime,
@@ -1151,6 +1193,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         await work;
       });
       await t.test('Retry-After persists across restart and an oversized hint ends within the deadline', async () => {
+        await rule(null);
         let calls = 0;
         const settings = config(async () => {
           calls++;
@@ -1186,6 +1229,26 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
           ).generation,
           1,
         );
+        await rule('gpt-astra');
+      });
+      await t.test('a rate limit moves to the fallback at once unless its Retry-After is short', async () => {
+        const run = async retryAfterMs => {
+          const called = [];
+          const chat = createAgentChat(
+            runtime,
+            config(async resolution => {
+              called.push(resolution.familyId);
+              return called.length === 1 ? { ...unavailable, reason: 'rate-limit', retryAfterMs } : answer;
+            }),
+          );
+          const id = await submit(chat);
+          await exhaust(chat, id);
+          assert.equal((await chat.read(workspaceId, ownerUserId, agentId, id)).text, 'Synthetic answer');
+          return called;
+        };
+        assert.deepEqual(await run(null), ['claude-opus', 'gpt-astra']);
+        assert.deepEqual(await run(30000), ['claude-opus', 'gpt-astra']);
+        assert.deepEqual(await run(500), ['claude-opus', 'claude-opus']);
       });
       await t.test(
         'attribution callback failure preserves terminal refusal rather than enabling fallback',

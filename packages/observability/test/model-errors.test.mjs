@@ -59,9 +59,18 @@ test('chat row refusals and import results keep their own error code', () => {
 test('only failures another model can fix are eligible for fallback', () => {
   assert.deepEqual(
     [...fallbackEligibleClasses].sort(),
-    ['auth', 'network', 'not_found', 'quota_exceeded', 'rate_limited', 'server_error', 'timeout'].sort(),
+    [
+      'auth',
+      'invalid_response',
+      'network',
+      'not_found',
+      'quota_exceeded',
+      'rate_limited',
+      'server_error',
+      'timeout',
+    ].sort(),
   );
-  for (const blocked of ['content_filtered', 'context_too_long', 'bad_request', 'invalid_response', 'cancelled'])
+  for (const blocked of ['content_filtered', 'context_too_long', 'bad_request', 'cancelled'])
     assert.equal(fallbackEligibleClasses.has(blocked), false);
 });
 

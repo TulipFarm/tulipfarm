@@ -114,7 +114,9 @@ export {
   modelFallbackOutcomes,
   modelUsageOutcomes,
   modelUsageUnknownReasons,
+  rateLimitWaitMs,
   responseRejections,
+  retryRateLimitedModel,
   sanitizeProviderMessage,
   usageShape,
   type ModelCallDiagnostics,
@@ -1648,6 +1650,8 @@ type ChatReplyClock = {
   /** Route model of the first reply request that streamed output, else of the first reply request; labels `first_text`. */
   model?: string | undefined;
   requested?: string | undefined;
+  /** Route models of the chat call that failed and of the fallback that then answered the reply. */
+  fallback?: { from: string; to: string } | undefined;
 };
 type ChatDatabase = { transactions: number; milliseconds: number };
 type ChatMeasurement = {
@@ -1751,6 +1755,7 @@ function finishChatReply(clock: ChatReplyClock) {
   });
   const fields: Attributes = {};
   const model = clock.model ?? clock.requested ?? 'unknown';
+  const fallback = clock.fallback;
   for (const segment of chatReplySegments) {
     const value = values[segment];
     if (value === undefined) continue;
@@ -1761,6 +1766,7 @@ function finishChatReply(clock: ChatReplyClock) {
       outcome,
       tools,
       ...(segment === 'first_text' ? { 'gen_ai.request.model': model } : {}),
+      ...(fallback ? { model_fallback: 'used' } : {}),
     });
     fields[`chat.reply.${segment}_seconds`] = value;
   }
@@ -1769,7 +1775,8 @@ function finishChatReply(clock: ChatReplyClock) {
     outcome,
     'chat.reply.tools': tools,
     'chat.reply.attempts': attempts,
-    'gen_ai.request.model': model,
+    'gen_ai.request.model': fallback?.from ?? model,
+    ...(fallback ? { model_fallback: 'used', 'fallback.model': fallback.to } : {}),
     ...fields,
   });
   if (status === 'failed') recordChatReplyStopped(clock.final.errorCode, clock.final.runtime ?? 'chat', clock.cause);
@@ -2761,7 +2768,11 @@ export function recordModelFallback(
     'gen_ai.request.model': primary.model,
     ...(telemetryErrorCode(primary.errorClass) ? { 'error.type': primary.errorClass } : {}),
     model_fallback: outcome,
+    ...(fallback ? { 'fallback.provider': fallback.provider, 'fallback.model': fallback.model } : {}),
   };
+  const measured = chatMeasurement.getStore();
+  if (outcome === 'used' && fallback && measured?.purpose === 'reply')
+    measured.reply.fallback = { from: primary.model, to: fallback.model };
   try {
     metrics
       .getMeter(scope)
@@ -2773,7 +2784,6 @@ export function recordModelFallback(
   log(outcome === 'used' ? 'warn' : outcome === 'failed' ? 'error' : 'info', 'inference', 'call_completed', {
     operation: 'chat.model-fallback',
     ...labels,
-    ...(fallback ? { 'fallback.provider': fallback.provider, 'fallback.model': fallback.model } : {}),
   });
 }
 

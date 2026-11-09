@@ -30,15 +30,17 @@ export function ReplyFooter({
   skillName,
   disabled,
   control,
+  modelName,
 }: {
   turn: NonNullable<ConversationMessage['turn']>;
   tools: ConversationMessage['tools'];
   skillName?: string | undefined;
   disabled: boolean;
   control: (kind: 'retry' | 'cancel') => void;
+  modelName?: ((id: string) => string) | undefined;
 }) {
   const retrying = replyRetrying(turn.status, turn.errorCode);
-  const answeredBy = fallbackNote(turn.status, turn.errorCode);
+  const answeredBy = fallbackNote(turn.status, turn.errorCode, turn.stats?.model, modelName);
   const proposalKept = turn.status === 'failed' ? proposalKeptNote(tools) : null;
   const quiet = ['queued', 'processing', 'completed', 'cancelled'].includes(turn.status) && !retrying && !answeredBy;
   if (quiet) return null;

@@ -50,7 +50,10 @@ export function modelErrorClass(message: unknown): ModelErrorClass | undefined {
   return Object.hasOwn(modelFailureClasses, reason) ? modelFailureClasses[reason as ModelFailureReason] : undefined;
 }
 
-/** Classes a different model can plausibly answer. Content, context and request-shape failures would fail there too. */
+/**
+ * Classes a different model can plausibly answer, including a response this model wrote but the runtime cannot use.
+ * Content, context and request-shape failures would fail there too.
+ */
 export const fallbackEligibleClasses: ReadonlySet<ModelErrorClass> = new Set([
   'not_found',
   'auth',
@@ -59,6 +62,7 @@ export const fallbackEligibleClasses: ReadonlySet<ModelErrorClass> = new Set([
   'server_error',
   'timeout',
   'network',
+  'invalid_response',
 ]);
 
 export const modelFallbackOutcomes = Object.freeze(['used', 'not_configured', 'not_eligible', 'failed'] as const);
@@ -185,7 +189,18 @@ export type ModelCallDiagnostics = {
   rejection?: ResponseRejection | undefined;
   /** The provider's finish reason on a rejected response, when it is a short identifier. Logs only. */
   finishReason?: string | undefined;
+  /** How long the provider asked the caller to wait before retrying, when it said. */
+  retryAfterMs?: number | undefined;
 };
+
+/** The longest wait a rate-limited model is given before the call moves to its fallback model instead. */
+export const rateLimitWaitMs = 2_000;
+/**
+ * Whether a rate-limited call waits out the provider's retry-after and tries the same model once more: only when the
+ * provider asks for a short wait. A longer wait, or none stated, switches to the fallback model at once.
+ */
+export const retryRateLimitedModel = (retryAfterMs: number | null | undefined) =>
+  retryAfterMs !== null && retryAfterMs !== undefined && retryAfterMs <= rateLimitWaitMs;
 
 /**
  * A failed model call. The message stays `model-<reason>` so stored turn codes and callers are unchanged, and
@@ -221,6 +236,7 @@ export class ModelCallError extends Error {
       ...(safeProviderCode(diagnostics.finishReason)
         ? { finishReason: safeProviderCode(diagnostics.finishReason) }
         : {}),
+      ...(diagnostics.retryAfterMs === undefined ? {} : { retryAfterMs: diagnostics.retryAfterMs }),
     };
     const message = sanitizeProviderMessage(diagnostics.providerMessage, diagnostics.request);
     if (message) this.modelDiagnostics.providerMessage = message;

@@ -227,6 +227,28 @@ const imageModel = (id, extra = {}) => ({
   ...extra,
 });
 
+test('a model falls back along its served, unpaused fallback chain and then to the fallback role', () => {
+  const served = loadModelCatalog({
+    ...anthropic,
+    MODEL_CATALOG_FILE: file(
+      catalog(
+        [
+          model('main', { default: true, roles: ['fallback'] }),
+          model('kimi', { fallback: 'paused' }),
+          model('paused', { paused: true, fallback: 'unserved' }),
+          model('unserved', { routes: [{ provider: 'azure', model: 'unserved-1' }], fallback: 'grok' }),
+          model('grok'),
+        ],
+        { missingKeys: 'skip' },
+      ),
+    ),
+  });
+  const ids = id => served.fallbacks(id).map(item => item.id);
+  assert.deepEqual(ids('kimi'), ['grok', 'main']);
+  assert.deepEqual(ids('grok'), ['main']);
+  assert.deepEqual(ids('main'), [], 'the role model has no fallback of its own');
+});
+
 test('image models are served from their first keyed route, and the default is never replaced', () => {
   const env = {
     ...anthropic,

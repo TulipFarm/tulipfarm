@@ -24,7 +24,14 @@ import { relation, type AgentTransaction } from './store.ts';
 import type { ModelRouteHealth } from './model-health.ts';
 import { modelAvailability } from './model-availability.ts';
 import { pinRunImageModels } from './image-generation.ts';
-import { isFeatureEnabled } from '@tulipfarm/observability';
+import {
+  fallbackEligibleClasses,
+  isFeatureEnabled,
+  modelFailureClasses,
+  recordModelFallback,
+  retryRateLimitedModel,
+  type ModelErrorClass,
+} from '@tulipfarm/observability';
 import type { ServedModelCatalog } from '@tulipfarm/config';
 import { CreditsExhausted, requireCredits, reserveCredits, settleCredits } from '@tulipfarm/workspace-storage/credits';
 import { knowledgeTaskSpend } from '@tulipfarm/workspace-storage/knowledge-credits';
@@ -52,6 +59,11 @@ export type ModelContinuity = {
   defaultFamily?: (workspaceId: string, agentId: string, definitionRevision: string) => string | undefined;
   /** True for a family the operator paused: closed to new agents and chats, still served for existing ones. */
   paused?: (familyId: string) => boolean;
+  /**
+   * The catalog's fallback chain for a family, in the order to try: used when the workspace has never set a fallback
+   * rule for it. Without it, only workspace rules name a fallback.
+   */
+  fallbacks?: (familyId: string) => readonly string[];
   /** What an image costs a resolution that reads images, or null when it does not; absent, no route reads images. */
   imageInput?: (resolution: ResolvedModel) => { imageInputTokens: number; maxImageBytes: number } | null;
   /** The served catalog that admission pins a run's image models from; without it, runs are admitted unpinned. */
@@ -66,6 +78,8 @@ const bindingSchema = z.object({
   policyRevision: z.number().int().nonnegative(),
   primaryLastDisabledRevision: z.number().int().nonnegative().default(0),
   fallbackLastDisabledRevision: z.number().int().nonnegative().default(0),
+  /** Whether the fallback came from the workspace rule or, with no rule, the catalog's fallback chain. */
+  fallbackSource: z.enum(['workspace', 'catalog']).default('workspace'),
 });
 const generationSchema = z.object({
   run_id: z.uuid(),
@@ -88,12 +102,33 @@ const attemptSchema = z.object({
   status: z.enum(['running', 'succeeded', 'failed', 'abandoned']),
   lease_until: z.date(),
   started_at: z.date(),
-  outcome: z.object({ kind: z.string(), reason: z.string().optional() }).nullable(),
+  outcome: z
+    .object({ kind: z.string(), reason: z.string().optional(), retryAfterMs: z.number().nullable().optional() })
+    .nullable(),
 });
 export type Generation = z.infer<typeof generationSchema>;
 export type Attempt = z.infer<typeof attemptSchema>;
 export type MeteredUsage = Omit<UsageRecord, 'workspaceId' | 'at'>;
 const transient = new Set(['rate-limit', 'overload', 'unavailable', 'timeout', 'transport', 'abandoned']);
+const errorClass = (reason: string | undefined): ModelErrorClass =>
+  reason === 'abandoned'
+    ? 'timeout'
+    : reason !== undefined && Object.hasOwn(modelFailureClasses, reason)
+      ? modelFailureClasses[reason as keyof typeof modelFailureClasses]
+      : 'unknown';
+const fallbackEligible = (reason: string | undefined) => fallbackEligibleClasses.has(errorClass(reason));
+/**
+ * A failure of the primary model that goes to the fallback straight away: one retrying this model cannot fix, or a rate
+ * limit that asks for more than a short wait. Other transient failures are first retried once on the same model.
+ */
+const switchNow = (reason: string | undefined, retryAfterMs: number | null | undefined) =>
+  reason === 'rate-limit'
+    ? !retryRateLimitedModel(retryAfterMs)
+    : !transient.has(reason ?? '') && fallbackEligible(reason);
+const telemetryRoute = (resolution: ResolvedModel) => ({
+  provider: resolution.route.provider,
+  model: resolution.route.deployment,
+});
 
 async function rule(tx: AgentTransaction, source: string) {
   const row = (
@@ -163,9 +198,9 @@ export async function admitGeneration(
       primaryAvailability = replacementAvailability;
     }
   }
-  const fallbackAvailability =
+  let fallbackAvailability =
     primary.familyId === requested ? availability.find(row => row.familyId === policy.target_family_id) : undefined;
-  const fallback = fallbackAvailability?.enabled ? resolve(fallbackAvailability.familyId) : null;
+  let fallback = fallbackAvailability?.enabled ? resolve(fallbackAvailability.familyId) : null;
   if (
     fallback &&
     (fallback.familyId !== policy.target_family_id ||
@@ -173,6 +208,23 @@ export async function admitGeneration(
       !(await config.allowed(workspaceId, fallback)))
   )
     throw new AgentError('model-route-unavailable', 503);
+  // A workspace that never set a rule for the family uses the first available model of the catalog's fallback chain.
+  const catalogFallback = policy.revision === 0 && primary.familyId === requested;
+  if (catalogFallback)
+    for (const familyId of config.fallbacks?.(requested) ?? []) {
+      const row = availability.find(item => item.familyId === familyId);
+      if (!row?.enabled || familyId === primary.familyId || config.paused?.(familyId)) continue;
+      let candidate: ResolvedModel | null;
+      try {
+        candidate = resolve(familyId);
+      } catch {
+        candidate = null;
+      }
+      if (candidate?.familyId !== familyId || !(await config.allowed(workspaceId, candidate))) continue;
+      fallback = candidate;
+      fallbackAvailability = row;
+      break;
+    }
   await tx.client.query(
     `INSERT INTO ${relation(tx, 'tf_model_generations')} (run_id,generation,binding,budget_pico_usd) VALUES ($1,$2,$3,$4)`,
     [
@@ -186,6 +238,7 @@ export async function admitGeneration(
         policyRevision: policy.revision,
         primaryLastDisabledRevision: primaryAvailability.lastDisabledRevision,
         fallbackLastDisabledRevision: fallbackAvailability?.lastDisabledRevision ?? 0,
+        fallbackSource: catalogFallback ? 'catalog' : 'workspace',
       },
       amount.parse(await config.budgetPicoUsd(workspaceId)),
     ],
@@ -259,7 +312,11 @@ export async function permitted(
   if (!(await config.allowed(workspaceId, resolution))) return false;
   if (role === 'primary') return true;
   const current = await rule(tx, generation.binding.primary.familyId);
-  return current.revision === generation.binding.policyRevision && current.target_family_id === resolution.familyId;
+  if (current.revision !== generation.binding.policyRevision) return false;
+  // A catalog fallback stays valid until the workspace sets a rule of its own for the family.
+  return generation.binding.fallbackSource === 'catalog'
+    ? generation.binding.fallback?.familyId === resolution.familyId
+    : current.target_family_id === resolution.familyId;
 }
 
 function reservation(resolution: ResolvedModel, date: string, trustedBundle: ModelBundle, inputTokens: number): string {
@@ -344,14 +401,19 @@ export async function claimAttempt(
     return null;
   }
   if (generation.next_at > now) return null;
-  if (previous && !transient.has(previous.outcome?.reason ?? '')) {
+  // A failure another model can fix, but retrying this one cannot, goes to the fallback straight away.
+  const skip =
+    previous?.role === 'primary' &&
+    switchNow(previous.outcome?.reason, previous.outcome?.retryAfterMs) &&
+    generation.binding.fallback !== null;
+  if (previous && !transient.has(previous.outcome?.reason ?? '') && !skip) {
     await failGeneration(tx, generation, previous.outcome?.reason ?? 'invalid-outcome');
     return null;
   }
   const ordinal = attempts.length + 1;
-  const role = ordinal <= 2 ? 'primary' : 'fallback';
+  const role = skip || ordinal === 3 ? 'fallback' : 'primary';
   const resolution = role === 'primary' ? generation.binding.primary : generation.binding.fallback;
-  if (ordinal > 3 || !resolution) {
+  if (ordinal > 3 || previous?.role === 'fallback' || !resolution) {
     await failGeneration(tx, generation, 'attempts-exhausted');
     return null;
   }
@@ -533,7 +595,9 @@ export async function settleAttempt(
       result.kind === 'success' ? 'succeeded' : 'failed',
       {
         kind: result.kind,
-        ...(result.kind === 'failure' ? { reason: result.reason, status: result.status } : {}),
+        ...(result.kind === 'failure'
+          ? { reason: result.reason, status: result.status, retryAfterMs: result.retryAfterMs }
+          : {}),
         actualModel: result.actualModel,
         requestId: result.requestId,
         ...(definitiveCharge !== null ? { chargedPicoUsd: definitiveCharge } : {}),
@@ -550,10 +614,16 @@ export async function settleAttempt(
     await failGeneration(tx, generation, 'model-identity-mismatch');
     return false;
   }
-  if (result.kind === 'failure' && transient.has(result.reason)) {
-    const delay = Math.max(result.retryAfterMs ?? 0, 100 + Math.floor(Math.random() * 250));
+  await noteFallback(tx, generation, attempt, result);
+  const skip =
+    result.kind === 'failure' &&
+    attempt.role === 'primary' &&
+    switchNow(result.reason, result.retryAfterMs) &&
+    generation.binding.fallback !== null;
+  if (result.kind === 'failure' && (transient.has(result.reason) || skip)) {
+    const delay = skip ? 0 : Math.max(result.retryAfterMs ?? 0, 100 + Math.floor(Math.random() * 250));
     const now = z.date().parse((await tx.client.query('SELECT clock_timestamp() AS now')).rows[0].now);
-    if (attempt.ordinal === 3 || (attempt.ordinal === 2 && !generation.binding.fallback)) {
+    if (attempt.role === 'fallback' || (attempt.ordinal === 2 && !generation.binding.fallback)) {
       await failGeneration(tx, generation, 'attempts-exhausted');
       return true;
     }
@@ -571,6 +641,40 @@ export async function settleAttempt(
     );
   } else if (result.kind === 'failure') await failGeneration(tx, generation, result.reason);
   return true;
+}
+
+/**
+ * Records what the fallback did for a run's model call, with the chat reply's `model_fallback` outcomes: `used` or
+ * `failed` when a fallback attempt settles, `not_configured` or `not_eligible` when a primary failure ends the run.
+ */
+async function noteFallback(tx: AgentTransaction, generation: Generation, attempt: Attempt, result: InferenceResult) {
+  const { binding } = generation;
+  if (attempt.role === 'fallback') {
+    const failed = z
+      .object({ outcome: z.object({ reason: z.string().optional() }).nullable() })
+      .optional()
+      .parse(
+        (
+          await tx.client.query(
+            `SELECT outcome FROM ${relation(tx, 'tf_model_attempts')} WHERE run_id=$1 AND generation=$2 AND ordinal=$3`,
+            [generation.run_id, generation.generation, attempt.ordinal - 1],
+          )
+        ).rows[0],
+      );
+    recordModelFallback(
+      result.kind === 'success' ? 'used' : 'failed',
+      { ...telemetryRoute(binding.primary), errorClass: errorClass(failed?.outcome?.reason) },
+      telemetryRoute(attempt.resolution),
+    );
+    return;
+  }
+  if (result.kind === 'success' || result.reason === 'cancelled') return;
+  const primary = { ...telemetryRoute(binding.primary), errorClass: errorClass(result.reason) };
+  if (!binding.fallback) {
+    // A transient failure of the first attempt is retried on the same model before the run gives up.
+    if (!transient.has(result.reason) || attempt.ordinal >= 2) recordModelFallback('not_configured', primary);
+  } else if (!transient.has(result.reason) && !fallbackEligible(result.reason))
+    recordModelFallback('not_eligible', primary, telemetryRoute(binding.fallback));
 }
 
 export async function recordWinner(tx: AgentTransaction, generation: Generation, attempt: Attempt) {
