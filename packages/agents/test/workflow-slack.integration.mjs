@@ -464,7 +464,7 @@ test('native Slack workflow action prepared under per-send approval keeps it and
   assert.equal(f.effects.length, 1);
 });
 
-test('native Slack workflow does not export private history through authored literal text', async t => {
+test('native Slack workflow sends reviewed literal text drafted from earlier private chat turns', async t => {
   const f = await outboundFixture();
   t.after(() => f.close());
   const w = f.workspace,
@@ -485,7 +485,7 @@ test('native Slack workflow does not export private history through authored lit
   const next = await send('Make a Slack workflow using that private context.');
   const definition = {
     version: 1,
-    name: 'Private literal guard',
+    name: 'Reviewed literal',
     triggers: [],
     steps: [
       {
@@ -515,9 +515,9 @@ test('native Slack workflow does not export private history through authored lit
   });
   const service = createWorkflows(f.runtime, { slackActions: f.service });
   const { runId } = await service.start(w.id, w.userId, saved.workflowId, { requestId: randomUUID(), input: {} });
-  assert.equal((await service.advance({ workspaceId: w.id, runId })).kind, 'done');
-  assert.equal((await service.history(w.id, w.userId, saved.workflowId)).runs[0].error, 'slack-action-revoked');
-  assert.equal(f.effects.length, 0);
+  while ((await service.advance({ workspaceId: w.id, runId })).kind !== 'done');
+  assert.equal((await service.history(w.id, w.userId, saved.workflowId)).runs[0].status, 'completed');
+  assert.equal(f.effects.length, 1);
 });
 
 test('native Slack workflow step saved to post as the TulipFarm app sends with the bot token', async t => {
