@@ -34,6 +34,7 @@ import { useApprovalDockEntry } from './approval-dock';
 import { conversationKeys } from './queries';
 import { useFeatureChanges } from '@/lib/query/use-feature-read';
 import type {
+  ImportAdjustment,
   ImportProgress,
   ProposalCommand,
   ProposalView,
@@ -41,6 +42,38 @@ import type {
   TableDefinition,
   TableProposalOutcome,
 } from '@/features/tables/review-contracts';
+
+const separatorNames: Record<string, string> = {
+  ',': 'commas (,)',
+  ';': 'semicolons (;)',
+  '\t': 'tabs',
+  '|': 'vertical bars (|)',
+};
+const conversionNames = {
+  text: 'text',
+  numeric: 'a number',
+  boolean: 'yes or no',
+  date: 'a date',
+  timestamp: 'a date and time',
+};
+const separator = (value: string) => separatorNames[value] ?? `"${value}"`;
+
+export function importAdjustmentText(adjustment: ImportAdjustment) {
+  switch (adjustment.kind) {
+    case 'delimiter':
+      return `Read the file using ${separator(adjustment.used)} instead of ${separator(adjustment.requested)}.`;
+    case 'sheet':
+      return adjustment.only
+        ? `Used "${adjustment.used}", the only sheet in the file.`
+        : `Used the sheet "${adjustment.used}" for "${adjustment.requested}".`;
+    case 'column':
+      return `Matched "${adjustment.requested}" to the column "${adjustment.used}".`;
+    case 'conversion-dropped':
+      return `Didn't convert "${adjustment.column}" to ${conversionNames[adjustment.conversion]} because the file has no column with that name.`;
+    case 'conversion-changed':
+      return `Kept "${adjustment.column}" as ${conversionNames[adjustment.used]} instead of ${conversionNames[adjustment.requested]} because some values${adjustment.example ? `, like "${adjustment.example}",` : ''} don't fit.`;
+  }
+}
 
 const statusLabels = {
   pending: 'Awaiting your review',
@@ -612,6 +645,17 @@ function ValidTableProposalCard({ workspaceId, chatId, id, userId, membershipId,
                       </div>
                     </Disclosure>
                   )}
+                  {plan.input.kind === 'import' && plan.importAdjustments?.length ? (
+                    <section className="space-y-1 text-sm">
+                      <p className="font-medium">Adjusted to fit your file</p>
+                      <ul className="list-disc space-y-1 pl-5">
+                        {plan.importAdjustments.map(adjustment => {
+                          const text = importAdjustmentText(adjustment);
+                          return <li key={text}>{text}</li>;
+                        })}
+                      </ul>
+                    </section>
+                  ) : null}
                   {plan.input.kind === 'import' && (
                     <Disclosure title={`Import mapping · ${plan.after.label}`}>
                       <section className="space-y-3">

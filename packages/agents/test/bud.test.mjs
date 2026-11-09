@@ -103,13 +103,11 @@ test('expression-only loops are bounded and do not execute business actions', as
       nativeReply('anthropic', { calls: [{ name: 'bud_state', input: { name: 'Bud', state: 'Waving' } }] }),
     );
   });
-  await assert.rejects(
-    inferWithTools(nativeRoutes.anthropic, [], () => assert.fail(), undefined, false, null, {
-      avatar: { update() {} },
-    }),
-    /model-invalid-decision/,
-  );
-  assert.equal(requests, 9);
+  const reply = await inferWithTools(nativeRoutes.anthropic, [], () => assert.fail(), undefined, false, null, {
+    avatar: { update() {} },
+  });
+  assert.match(reply.text, /^I stopped after three tries/);
+  assert.equal(requests, 10);
 });
 
 test('Bud metadata does not bypass completion checks or idle before a rejected answer is corrected', async t => {

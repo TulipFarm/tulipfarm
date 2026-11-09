@@ -43,7 +43,8 @@ import { createToolRegistry } from './registry.ts';
 import { createAgentAuthoring } from './authoring.ts';
 import { createSavedAgentService } from './saved-service.ts';
 import { requireAgentPermission, savedAgentCompatibility, withHuman } from './saved-policy.ts';
-import { repairImportPlans } from './import-plan-repair.ts';
+import { deferNewTablePlans, repairImportPlans, tableNameKey } from './import-plan-repair.ts';
+import { repairProposalShape } from './proposal-repair.ts';
 import { agentDefinitionSchema } from './contracts.ts';
 import { AgentError, soulRevisionSchema } from './saved-contracts.ts';
 import { createAuthoringDrafts } from './drafts.ts';
@@ -109,6 +110,7 @@ import { executionCompatibility } from '@tulipfarm/tables/execution';
 import {
   createTableImports,
   fileImportSelectionSchema,
+  lenientFileImportSelection,
   TableImportError,
   tableImportFailure,
   type TableImportOptions,
@@ -210,7 +212,7 @@ export const frameworkCallSchema = z.discriminatedUnion('tool', [
       .string()
       .max(16384)
       .describe(
-        `JSON-encoded file selection, such as ${JSON.stringify(importSelectionExample)}. CSV needs delimiter (",", ";", "\\t" or "|"); XLSX needs sheet (the tab name) instead. conversions maps a column name to text, numeric, boolean, date or timestamp; match each mapped field's type.`,
+        `JSON-encoded file selection, such as ${JSON.stringify(importSelectionExample)}. CSV needs delimiter (",", ";", "\\t" or "|"); XLSX needs sheet (the tab name) instead. conversions is optional and maps a column name to text, numeric, boolean, date or timestamp only; omit columns for select, status, link and other fields, which stay text and are matched to the field when the import is proposed.`,
       ),
   }),
   z.strictObject({
@@ -1241,11 +1243,11 @@ export function createChatTools(
         const origin = context.origin;
         let selection: unknown;
         try {
-          selection = JSON.parse(call.selection);
+          selection = lenientJson(call.selection);
         } catch (error) {
           if (!(error instanceof SyntaxError)) throw error;
         }
-        const parsed = fileImportSelectionSchema.safeParse(selection);
+        const parsed = fileImportSelectionSchema.safeParse(lenientFileImportSelection(selection));
         if (!parsed.success)
           return {
             ...tableImportFailure(new TableImportError('invalid-selection')),
@@ -1285,15 +1287,25 @@ export function createChatTools(
               };
             reference = await prepare(match.attachmentId, match.contentDigest);
           }
-          const columns = await runtime
+          const prepared = await runtime
             .transaction(workspaceId, executionCompatibility, async tx => {
               const snapshot = await imports.readSnapshot(tx as never, actor, origin, reference);
-              return [...new Set(snapshot.rows.flatMap(row => Object.keys(row)))];
+              return {
+                columns: [...new Set(snapshot.rows.flatMap(row => Object.keys(row)))],
+                adjustments: snapshot.adjustments ?? [],
+              };
             })
             .catch(() => undefined);
           return {
             ...reference,
-            ...(columns ? { columns } : {}),
+            ...(prepared ? { columns: prepared.columns } : {}),
+            ...(prepared?.adjustments.length
+              ? {
+                  adjustments: prepared.adjustments,
+                  adjustmentNote:
+                    'The selection was adjusted to fit the file as listed in adjustments. The import review card lists these changes; mention them briefly when you present the import.',
+                }
+              : {}),
             nextStep: `The file is prepared; do not call tables.import.file again for it in this reply. To import into an existing table, call tables.propose with {"plans":[{"kind":"import","tableId":"<table id>","dependsOn":[],"expectedRevision":"<the table's current revision>","reference":${JSON.stringify(reference)},"matchFieldIds":["<field id of its unique key>"],"mappings":[{"sourceColumn":"<file column>","fieldId":"<field id>"}]}]}, using IDs from tables.definitions or schema.inspect.`,
           };
         } catch (error) {
@@ -1307,34 +1319,48 @@ export function createChatTools(
       case 'tables.propose': {
         if (!context.origin) throw new AccessDenied();
         const origin = context.origin;
+        const listTables = async (search?: string) => {
+          const tables = [];
+          let after: string | undefined;
+          for (let page = 0; page < 10; page++) {
+            const listed = await tableService.definitions(workspaceId, actor, {
+              limit: 100,
+              ...(search ? { search } : {}),
+              ...(after ? { after } : {}),
+            });
+            tables.push(...listed.tables);
+            if (!listed.nextCursor) break;
+            after = listed.nextCursor;
+          }
+          return tables;
+        };
+        let readable: Promise<Awaited<ReturnType<typeof listTables>>> | undefined;
+        const allTables = () => (readable ??= listTables());
+        const findTable = async (hint: { id?: string; name?: string }) => {
+          if (hint.id) return (await allTables()).find(item => item.id === hint.id);
+          const name = hint.name?.trim().toLowerCase();
+          if (!name) return undefined;
+          const exact = (await listTables(hint.name)).find(item => item.definition.label.trim().toLowerCase() === name);
+          if (exact) return exact;
+          // Models often write “Contacts table” or “contact” for a table labelled “Contacts”.
+          const key = tableNameKey(name);
+          const loose = (await allTables()).filter(item => tableNameKey(item.definition.label) === key);
+          return loose.length === 1 ? loose[0] : undefined;
+        };
         let input, raw: unknown;
+        let deferred: ReturnType<typeof deferNewTablePlans>['deferred'] = [];
         try {
-          raw = lenientJson(call.input);
+          ({ input: raw, deferred } = deferNewTablePlans(
+            await repairProposalShape(lenientJson(call.input), findTable),
+          ));
           input = proposeTableSchema.parse(raw);
         } catch (error) {
           if (!(error instanceof SyntaxError) && !(error instanceof z.ZodError)) throw error;
           const repair =
             error instanceof z.ZodError
               ? await repairImportPlans(raw, {
-                  table: async hint => {
-                    let after: string | undefined;
-                    for (let page = 0; page < 10; page++) {
-                      const listed = await tableService.definitions(workspaceId, actor, {
-                        limit: 100,
-                        ...(hint.name ? { search: hint.name } : {}),
-                        ...(after ? { after } : {}),
-                      });
-                      const found = listed.tables.find(item =>
-                        hint.id
-                          ? item.id === hint.id
-                          : item.definition.label.trim().toLowerCase() === hint.name?.toLowerCase(),
-                      );
-                      if (found) return found;
-                      if (!listed.nextCursor) return undefined;
-                      after = listed.nextCursor;
-                    }
-                    return undefined;
-                  },
+                  table: findTable,
+                  tables: allTables,
                   columns: async reference =>
                     imports &&
                     runtime.transaction(workspaceId, executionCompatibility, async tx => {
@@ -1345,6 +1371,12 @@ export function createChatTools(
               : undefined;
           const repaired = repair?.repaired ? proposeTableSchema.safeParse(repair.input) : undefined;
           if (repaired?.success) input = repaired.data;
+          else if (repair?.missingTable)
+            return {
+              error: 'import-table-not-found',
+              instruction: `No proposal was created. This is not a permission denial. ${repair.missingTable.requested ? `No readable table is named "${repair.missingTable.requested}", and` : 'The import plan names no table, and'} no table holds most of the file's columns. If one of tables is the right one, call tables.propose again with its id as tableId. If the data needs a new table, propose a schema plan for it first, then propose the import after the person approves the table. If you cannot tell, ask the person which table to import into.`,
+              tables: repair.missingTable.tables,
+            };
           else {
             const issues =
               (repaired?.error ?? error) instanceof z.ZodError ? (repaired?.error ?? (error as z.ZodError)).issues : [];
@@ -1378,7 +1410,7 @@ export function createChatTools(
             };
           }
         }
-        return createChatTableProposals(runtime, objects, async tableId =>
+        const proposed = await createChatTableProposals(runtime, objects, async tableId =>
           Promise.all(
             (await createWorkflows(runtime).usingTable(workspaceId, actor.userId, tableId)).map(async workflow => {
               const url = await workflowLink?.(workspaceId, workflow.id).catch(() => undefined);
@@ -1386,6 +1418,13 @@ export function createChatTools(
             }),
           ),
         ).propose(workspaceId, actor, callId, context.origin, input);
+        if (!deferred.length || !proposed || typeof proposed !== 'object' || 'error' in proposed) return proposed;
+        return {
+          ...proposed,
+          deferredPlans: deferred,
+          deferredInstruction:
+            'The records and import plans listed in deferredPlans target a table this proposal creates, so they were left out: a new table cannot be filled until the person approves it. Tell the person, and propose those rows or that import after the table is approved.',
+        };
       }
       case 'slack.resolve':
         if (!slack)

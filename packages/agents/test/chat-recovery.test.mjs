@@ -175,7 +175,7 @@ test('a text tool request after the budget ends the reply gracefully with one wa
   );
 });
 
-test('each rejected tool request is logged with its reason, tool and attempt before the reply fails', async t => {
+test('each rejected tool request is logged, and after three the reply ends in plain text', async t => {
   const lines = [];
   const write = process.stdout.write.bind(process.stdout);
   t.mock.method(process.stdout, 'write', (line, ...rest) => {
@@ -191,13 +191,19 @@ test('each rejected tool request is logged with its reason, tool and attempt bef
         use('rows.create', { tableId, expectedAppliedRevision: 'b'.repeat(40), values: {} }),
       ],
     }),
+    nativeReply('anthropic', { text: 'I could not add the ticket.' }),
   ];
-  t.mock.method(globalThis, 'fetch', async () => Response.json(replies.shift()));
-  await assert.rejects(
-    inferWithTools(route, [{ role: 'user', text: 'Add a ticket.' }], () => assert.fail('Rejected calls never run')),
-    /model-invalid-decision/,
+  const requests = [];
+  t.mock.method(globalThis, 'fetch', async (_url, options) => {
+    requests.push(JSON.parse(options.body));
+    return Response.json(replies.shift());
+  });
+  const reply = await inferWithTools(route, [{ role: 'user', text: 'Add a ticket.' }], () =>
+    assert.fail('Rejected calls never run'),
   );
   t.mock.restoreAll();
+  assert.equal(reply.text, 'I could not add the ticket.');
+  assert.match(JSON.stringify(requests.at(-1).messages.at(-1)), /rejected three times/);
   assert.deepEqual(
     lines.map(line => [line.level, line.category, line['error.type'], line.tool, line.attempt]),
     [

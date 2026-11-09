@@ -57,6 +57,25 @@ test('chat row refusals and import results keep their own error code', () => {
   assert.equal(telemetryErrorCode('not-a-reviewed-code'), undefined);
 });
 
+test('every result tables.propose returns instead of a review keeps its own error code', () => {
+  for (const code of [
+    'import-mapping-invalid',
+    'import-values-invalid',
+    'import-not-prepared',
+    'import-table-not-found',
+    'table-linked',
+    'workflow-active',
+    'invalid-transform',
+    'invalid-import',
+    'proposal-too-large',
+    'proposal-stale',
+    'proposal-storage-unavailable',
+    'table-title-immutable',
+    'table-name-unavailable',
+  ])
+    assert.equal(telemetryErrorCode(code), code);
+});
+
 test('only failures another model can fix are eligible for fallback', () => {
   assert.deepEqual(
     [...fallbackEligibleClasses].sort(),

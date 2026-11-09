@@ -3,7 +3,14 @@ import { createHash } from 'node:crypto';
 import { deflateRawSync } from 'node:zlib';
 import { test } from 'node:test';
 import ExcelJS from 'exceljs';
-import { parseImportFile, TableImportError, tableImportFailure } from '../../tables/dist/imports.js';
+import {
+  fileImportSelectionSchema,
+  fitFileImportSelection,
+  lenientFileImportSelection,
+  parseImportFile,
+  TableImportError,
+  tableImportFailure,
+} from '../../tables/dist/imports.js';
 
 const csv = { format: 'csv', delimiter: ',', header: { kind: 'row', row: 1 }, conversions: {}, empty: 'null' };
 const xlsx = {
@@ -244,4 +251,69 @@ test('ZIP expansion limit is checked before XLSX decoding', async () => {
   end.writeUInt32LE(central.length + name.length, 12);
   end.writeUInt32LE(local.length + name.length + compressed.length, 16);
   await rejects(parseImportFile(Buffer.concat([local, name, compressed, central, name, end]), xlsx), 'byte-limit');
+});
+
+test('a loose file selection from chat becomes a valid one', () => {
+  for (const [loose, expected] of [
+    [
+      { format: '.TSV', hasHeader: true, conversions: [{ column: 'Total', type: 'number' }], empty: 'empty_string' },
+      { format: 'csv', delimiter: '\t', header: true, conversions: { Total: 'numeric' }, empty: 'text' },
+    ],
+    [
+      { sheetName: 'Orders', headerRow: '2', conversions: { Placed: 'datetime' }, note: 'x' },
+      { format: 'xlsx', sheet: 'Orders', header: 2, conversions: { Placed: 'timestamp' } },
+    ],
+    [
+      { format: 'csv', separator: 'semicolon', empty: null },
+      { format: 'csv', delimiter: ';', empty: 'null' },
+    ],
+  ]) {
+    const selection = lenientFileImportSelection(loose);
+    assert.deepEqual(selection, expected);
+    assert.ok(fileImportSelectionSchema.safeParse(selection).success, JSON.stringify(selection));
+  }
+});
+
+test('a selection is fitted to the file, and every change is listed as an adjustment', async () => {
+  const file = bytes('Order ID;Total;Placed\nA-1;12.5;2026-01-02T10:00:00Z\nA-2;n/a;2026-01-03T10:00:00Z\n');
+  const { selection, adjustments } = await fitFileImportSelection(file, {
+    ...csv,
+    conversions: { 'order  id': 'numeric', Total: 'numeric', Placed: 'date', Missing: 'boolean' },
+  });
+  assert.equal(selection.delimiter, ';');
+  assert.deepEqual(selection.conversions, { 'Order ID': 'text', Total: 'text', Placed: 'timestamp' });
+  assert.deepEqual(adjustments, [
+    { kind: 'delimiter', requested: ',', used: ';' },
+    { kind: 'column', requested: 'order  id', used: 'Order ID' },
+    { kind: 'conversion-dropped', column: 'Missing', conversion: 'boolean' },
+    { kind: 'conversion-changed', column: 'Order ID', requested: 'numeric', used: 'text', example: 'A-1' },
+    {
+      kind: 'conversion-changed',
+      column: 'Placed',
+      requested: 'date',
+      used: 'timestamp',
+      example: '2026-01-02T10:00:00Z',
+    },
+    { kind: 'conversion-changed', column: 'Total', requested: 'numeric', used: 'text', example: 'n/a' },
+  ]);
+  assert.equal((await parseImportFile(file, selection)).length, 2);
+});
+
+test('a sheet named in another case, or the only sheet, is used and listed', async () => {
+  const file = await workbook([['count'], [1]]);
+  for (const [sheet, only] of [
+    ['tickets', false],
+    ['Sheet1', true],
+  ])
+    assert.deepEqual((await fitFileImportSelection(file, { ...xlsx, sheet, conversions: {} })).adjustments, [
+      { kind: 'sheet', requested: sheet, used: 'Tickets', only },
+    ]);
+});
+
+test('a selection that already fits the file is unchanged', async () => {
+  const file = bytes('a,b\n1,2\n');
+  assert.deepEqual(await fitFileImportSelection(file, { ...csv, conversions: { a: 'numeric' } }), {
+    selection: { ...csv, conversions: { a: 'numeric' } },
+    adjustments: [],
+  });
 });

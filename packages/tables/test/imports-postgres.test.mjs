@@ -141,6 +141,15 @@ test(
         sources: [{ kind: 'private-conversation', conversationId: origin.conversationId }],
         rows: [{ id: { kind: 'text', value: '001' }, title: { kind: 'text', value: 'Private ticket' } }],
       });
+      // A file prepared before adjustments were stored holds the bare selection and still reads.
+      const [preparedKey] = [...objects.keys()].filter(key => key.endsWith('.length')).map(key => key.slice(0, -7));
+      const prepared = objects.get(preparedKey);
+      const legacy = Buffer.from(JSON.stringify(JSON.parse(prepared.toString()).selection));
+      objects.set(preparedKey, legacy);
+      objects.set(`${preparedKey}.length`, Buffer.from(String(legacy.length).padStart(8, '0')));
+      assert.equal((await adapter.readSnapshot(tx, actor, origin, reference)).rows.length, 1);
+      objects.set(preparedKey, prepared);
+      objects.set(`${preparedKey}.length`, Buffer.from(String(prepared.length).padStart(8, '0')));
       await assert.rejects(
         adapter.prepareFile(runtime, tx.workspaceId, actor, origin, reference, { ...selection, empty: 'text' }),
         /snapshot-conflict/,

@@ -19,6 +19,8 @@ export type ImportPlanRepair = {
   table: (hint: { id?: string; name?: string }) => Promise<RepairTable | undefined>;
   /** The column names of a file or result prepared in this chat. */
   columns: (reference: RepairReference) => Promise<string[] | undefined>;
+  /** Readable tables, used when the plan names no table that can be found. */
+  tables?: () => Promise<RepairTable[]>;
 };
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -44,13 +46,77 @@ function isImportPlan(plan: Loose) {
 }
 
 function tableHints(plan: Loose) {
-  const table = object(plan.table) ?? object(plan.target);
+  const table = object(plan.table) ?? object(plan.target) ?? object(plan.targetTable) ?? object(plan.destination);
   const hints: { id?: string; name?: string }[] = [];
-  for (const value of [plan.tableId, table?.id, table?.tableId, plan.table, plan.target].map(text))
+  for (const value of [
+    plan.tableId,
+    plan.table_id,
+    plan.targetTableId,
+    table?.id,
+    table?.tableId,
+    plan.table,
+    plan.target,
+    plan.targetTable,
+    plan.destination,
+    plan.into,
+  ].map(text))
     if (value) hints.push(uuid.test(value) ? { id: value } : { name: value });
-  for (const value of [plan.tableName, plan.tableLabel, table?.name, table?.label].map(text))
+  for (const value of [plan.tableName, plan.table_name, plan.tableLabel, table?.name, table?.label].map(text))
     if (value) hints.push({ name: value });
   return hints;
+}
+
+/** A table name reduced for loose comparison: case, punctuation, a trailing “table” and a plural “s” are ignored. */
+export function tableNameKey(value: string) {
+  return slug(value)
+    .replace(/_?tables?$/, '')
+    .replace(/(?<=\p{L}{2})s$/u, '');
+}
+
+/** The one table that holds most of the file's columns, when at least half of them match its field labels. */
+function coveringTable(tables: RepairTable[], columns: string[] | undefined) {
+  if (!columns?.length) return undefined;
+  const wanted = new Set(columns.map(slug));
+  const scored = tables
+    .map(table => ({ table, score: table.definition.fields.filter(field => wanted.has(slug(field.label))).length }))
+    .filter(item => item.score * 2 >= wanted.size && item.score > 0)
+    .sort((a, b) => b.score - a.score);
+  return scored.length === 1 || (scored.length > 1 && scored[0]!.score > scored[1]!.score)
+    ? scored[0]!.table
+    : undefined;
+}
+
+export type DeferredPlan = { kind: string; table: string };
+
+/**
+ * Records and import plans cannot target a table that the same proposal creates: the table has no revision until the
+ * person approves it. Such plans are taken out so the table can be reviewed now and filled in a later proposal.
+ */
+export function deferNewTablePlans(raw: unknown): { input: unknown; deferred: DeferredPlan[] } {
+  const top = object(raw);
+  if (!top || !Array.isArray(top.plans)) return { input: raw, deferred: [] };
+  const created = new Map<string, string>();
+  for (const item of top.plans) {
+    const plan = object(item);
+    if (plan?.kind !== 'schema' || plan.expectedRevision !== null) continue;
+    const target = object(plan.target);
+    const label = text(target?.label) ?? text(plan.label) ?? 'the new table';
+    for (const value of [plan.tableId, target?.id].map(text)) if (value) created.set(value, label);
+    if (text(target?.label)) created.set(`name:${tableNameKey(text(target?.label)!)}`, label);
+  }
+  if (!created.size) return { input: raw, deferred: [] };
+  const deferred: DeferredPlan[] = [];
+  const plans = top.plans.filter(item => {
+    const plan = object(item);
+    if (!plan || !['records', 'import'].includes(String(plan.kind))) return true;
+    const table = tableHints(plan)
+      .map(hint => (hint.id ? created.get(hint.id) : created.get(`name:${tableNameKey(hint.name!)}`)))
+      .find(Boolean);
+    if (table) deferred.push({ kind: String(plan.kind), table });
+    return !table;
+  });
+  if (!deferred.length) return { input: raw, deferred };
+  return { input: { ...top, plans }, deferred };
 }
 
 function reference(plan: Loose): RepairReference | undefined {
@@ -154,6 +220,8 @@ export type RepairOutcome = {
   template?: Loose;
   fields?: Loose[];
   fileColumns?: string[];
+  /** Set when an import plan names no readable table and none holds the file's columns. */
+  missingTable?: { requested?: string; tables: { id: string; label: string }[] };
 };
 
 /** Rewrites loose import plans in a tables.propose payload into the strict contract when their meaning is clear. */
@@ -164,6 +232,7 @@ export async function repairImportPlans(raw: unknown, repair: ImportPlanRepair):
   if (!plans.some(plan => object(plan) && isImportPlan(object(plan)!))) return { input: raw, repaired: false };
   let label = text(top.label);
   let template: Loose | undefined, fields: Loose[] | undefined, fileColumns: string[] | undefined;
+  let missingTable: RepairOutcome['missingTable'];
   const repaired = [];
   for (const item of plans) {
     const plan = object(item);
@@ -175,13 +244,24 @@ export async function repairImportPlans(raw: unknown, repair: ImportPlanRepair):
     let table: RepairTable | undefined;
     for (const hint of tableHints(plan)) if ((table = await repair.table(hint))) break;
     const source = reference(plan);
+    let cached: Promise<string[] | undefined> | undefined;
+    const columns = () =>
+      (cached ??= source ? repair.columns(source).catch(() => undefined) : Promise.resolve(undefined));
+    if (!table && repair.tables) {
+      const readable = await repair.tables().catch(() => []);
+      table = coveringTable(readable, await columns());
+      if (!table) {
+        const hint = tableHints(plan)[0];
+        missingTable ??= {
+          ...(hint ? { requested: (hint.name ?? hint.id)!.slice(0, 120) } : {}),
+          tables: readable.slice(0, 50).map(item => ({ id: item.id, label: item.definition.label })),
+        };
+      }
+    }
     if (!table) {
       repaired.push(item);
       continue;
     }
-    let cached: Promise<string[] | undefined> | undefined;
-    const columns = () =>
-      (cached ??= source ? repair.columns(source).catch(() => undefined) : Promise.resolve(undefined));
     const given = first(
       plan.expectedRevision,
       plan.revision,
@@ -218,5 +298,6 @@ export async function repairImportPlans(raw: unknown, repair: ImportPlanRepair):
     repaired: true,
     ...(template && fields ? { template, fields } : {}),
     ...(fileColumns ? { fileColumns } : {}),
+    ...(missingTable ? { missingTable } : {}),
   };
 }

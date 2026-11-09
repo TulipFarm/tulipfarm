@@ -13,10 +13,42 @@ export const importReferenceSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('file'), attachmentId: z.uuid(), contentDigest: digestSchema }),
   z.strictObject({ kind: z.literal('integration'), resultId: z.uuid(), contentDigest: digestSchema }),
 ]);
+const importColumnSchema = z.string().min(1).max(120);
+const importConversionSchema = z.enum(['text', 'numeric', 'boolean', 'date', 'timestamp']);
+/** A change made to a chat's file selection so it fits the file, shown on the import review. */
+export const importAdjustmentSchema = z.discriminatedUnion('kind', [
+  z.strictObject({
+    kind: z.literal('delimiter'),
+    requested: z.enum([',', ';', '\t', '|']),
+    used: z.enum([',', ';', '\t', '|']),
+  }),
+  z.strictObject({
+    kind: z.literal('sheet'),
+    requested: z.string().min(1).max(31),
+    used: z.string().min(1).max(31),
+    only: z.boolean(),
+  }),
+  z.strictObject({ kind: z.literal('column'), requested: importColumnSchema, used: importColumnSchema }),
+  z.strictObject({
+    kind: z.literal('conversion-dropped'),
+    column: importColumnSchema,
+    conversion: importConversionSchema,
+  }),
+  z.strictObject({
+    kind: z.literal('conversion-changed'),
+    column: importColumnSchema,
+    requested: importConversionSchema,
+    used: importConversionSchema,
+    example: z.string().max(40),
+  }),
+]);
+export type ImportAdjustment = z.infer<typeof importAdjustmentSchema>;
+export const importAdjustmentsSchema = z.array(importAdjustmentSchema).max(64);
 export const importSnapshotSchema = z.strictObject({
   contentDigest: digestSchema,
   sources: sourceDependenciesSchema,
   rows: z.array(z.record(z.string().min(1).max(120), valueSchema)).max(100000),
+  adjustments: importAdjustmentsSchema.optional(),
 });
 export const tableProposalMessages = {
   planOrder: 'Plans must have unique table identities and depend only on earlier plans',
@@ -122,6 +154,8 @@ export const reviewedPlanSchema = z.strictObject({
   effectsDigest: digestSchema,
   freshnessDigest: digestSchema,
   importMatchesDigest: digestSchema.optional(),
+  /** How the chat's file selection was changed to fit the file, listed on the import review. */
+  importAdjustments: importAdjustmentsSchema.min(1).optional(),
   audience: audienceSchema.nullable(),
   importSources: sourceDependenciesSchema,
 });

@@ -144,8 +144,29 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       assert.equal(result.error, 'invalid-arguments');
       assert.match(result.instruction, /not a permission denial/);
     }
+    // A made-up id for a new field is replaced with a fresh UUID, so the proposal is created.
+    const newTable = randomUUID();
+    const madeUp = structuredClone(input);
+    madeUp.plans[0].tableId = newTable;
+    madeUp.plans[0].target.id = newTable;
+    madeUp.plans[0].target.fields[0].id = 'vendor-name-field';
+    madeUp.plans[0].target.uniqueKeys = [{ id: 'by-vendor', fieldIds: ['vendor-name-field'], nulls: 'distinct' }];
+    const repaired = (
+      await tools.invokeWithSources(
+        { ...context, callId: randomUUID() },
+        { tool: 'tables.propose', input: JSON.stringify(madeUp) },
+      )
+    ).result;
+    assert.equal(repaired.status, 'pending');
+    const saved = (await db.platform.query(`SELECT manifest FROM ${s}.tf_table_proposals WHERE id=$1`, [repaired.id]))
+      .rows[0].manifest.plans[0].after;
+    assert.match(saved.fields[0].id, /^[0-9a-f-]{36}$/);
+    assert.deepEqual(saved.uniqueKeys[0].fieldIds, [saved.fields[0].id]);
+    await db.platform.query(`DELETE FROM ${s}.tf_table_proposal_capture WHERE proposal_id=$1`, [repaired.id]);
+    await db.platform.query(`DELETE FROM ${s}.tf_table_proposals WHERE id=$1`, [repaired.id]);
+    // A reference to an id that no field has cannot be repaired; the error offers fresh UUIDs.
     const malformed = structuredClone(input);
-    malformed.plans[0].target.fields[0].id = 'vendor-name-field';
+    malformed.plans[0].target.uniqueKeys = [{ id: randomUUID(), fieldIds: ['vendor-name-field'], nulls: 'distinct' }];
     const result = (
       await tools.invokeWithSources(
         { ...context, callId: randomUUID() },
