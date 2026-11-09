@@ -119,6 +119,7 @@ const messageSchema = z.object({
         status: z.enum(['running', 'completed', 'blocked', 'failed']),
         activityStatus: activityStatusSchema.optional(),
         activityDetail: z.string().max(300).optional(),
+        blockingWorkflows: z.array(z.object({ id: z.uuid(), name: z.string() })).optional(),
         activity: z.string().nullable().optional(),
         narration: z.string().nullable().optional(),
         presentation: toolPresentationSchema.optional(),

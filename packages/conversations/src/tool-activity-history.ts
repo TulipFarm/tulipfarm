@@ -209,8 +209,18 @@ export function deniedProposalDetail(call: unknown) {
     return `Access denied. This change needs Read rows plus Create rows, Update rows or Delete rows on the table, depending on the change. ${askTableAccess} them to you or your team in Table access, then ask again.`;
   return undefined;
 }
-/** `proposal` marks a `tables.propose` call that saved a proposal, so its review card stays valid even if the reply failed. */
-export type StoredToolActivity = { status: z.infer<typeof activityStatusSchema>; detail?: string; proposal?: true };
+/**
+ * `proposal` marks a `tables.propose` call that saved a proposal, so its review card stays valid even if the reply failed.
+ * `workflows` are the active workflows that blocked an archive, as the requester could read them when it ran.
+ */
+export type StoredToolActivity = {
+  status: z.infer<typeof activityStatusSchema>;
+  detail?: string;
+  proposal?: true;
+  workflows?: BlockingWorkflow[];
+};
+type BlockingWorkflow = z.infer<typeof blockingWorkflowsSchema>[number];
+const blockingWorkflowsSchema = z.array(z.object({ id: z.uuid(), name: z.string().min(1).max(256) })).max(5);
 
 /** The step's current status, and a note when its saved result alone would mislead. */
 export async function storedToolActivity(
@@ -225,7 +235,9 @@ export async function storedToolActivity(
   if (row.status === 'completed' && row.tool === 'tables.propose') {
     const result = z.object({ result: z.unknown() }).safeParse(row.output);
     const output = result.success ? result.data.result : row.output;
-    const outcome = z.object({ error: z.string(), reason: z.string().min(1).optional() }).safeParse(output);
+    const outcome = z
+      .object({ error: z.string(), reason: z.string().min(1).optional(), workflows: z.unknown().optional() })
+      .safeParse(output);
     const error = outcome.success ? outcome.data.error : undefined;
     const detail =
       error === 'invalid-arguments' && !(await resubmitted(tx, row.id))
@@ -233,7 +245,9 @@ export async function storedToolActivity(
         : error && importPlanOutcomes.has(error) && outcome.data?.reason
           ? outcome.data.reason.slice(0, 400)
           : error && proposalOutcomes.get(error);
-    if (detail) return { status: 'completed', detail };
+    const workflows =
+      error === 'workflow-active' ? blockingWorkflowsSchema.safeParse(outcome.data?.workflows).data : undefined;
+    if (detail) return { status: 'completed', detail, ...(workflows?.length ? { workflows } : {}) };
     const proposal = z.object({ id: z.uuid(), status: z.literal('pending') }).safeParse(output);
     const activity = proposal.success ? await tableProposalActivity(tx, proposal.data.id) : null;
     if (activity) return { ...activity, proposal: true };

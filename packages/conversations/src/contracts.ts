@@ -334,6 +334,11 @@ export const toolReceiptSchema = z.object({
   activityStatus: activityStatusSchema.optional(),
   /** Why the step ended as it did, when its status alone would mislead. */
   activityDetail: z.string().max(300).optional(),
+  /** Active workflows that blocked a table archive and that the viewer can still read, so the step can link them. */
+  blockingWorkflows: z
+    .array(z.object({ id: uuidSchema, name: z.string().max(256) }))
+    .max(5)
+    .optional(),
   activity: z.string().nullable().default(null),
   /** What the model wrote before this call; null when none was saved or it must stay hidden. */
   narration: z.string().nullable().default(null),

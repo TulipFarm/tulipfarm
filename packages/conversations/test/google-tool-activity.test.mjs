@@ -128,3 +128,23 @@ test('a denied table proposal never tells a workspace admin to ask a workspace a
   assert.doesNotMatch(String(admin.detail), /ask a workspace admin/i);
   assert.match(String(admin.detail), /already have every table permission/);
 });
+
+test('an archive blocked by an active workflow keeps the workflows it named so the step can link them', async () => {
+  const workflow = { id: '7f0c7a52-2f4b-4c39-9d1e-6a1f6b0c2d3e', name: 'QA retest 6 flow' };
+  const tx = { client: { query: () => assert.fail('no query needed') } };
+  const activity = output =>
+    storedToolActivity(tx, { id: crypto.randomUUID(), tool: 'tables.propose', status: 'completed', output });
+  assert.deepEqual(
+    await activity({ result: { error: 'workflow-active', workflows: [{ ...workflow, url: '/acme/x' }] } }),
+    {
+      status: 'completed',
+      detail: 'Not archived: an active workflow uses this table.',
+      workflows: [workflow],
+    },
+  );
+  assert.deepEqual(await activity({ result: { error: 'workflow-active' } }), {
+    status: 'completed',
+    detail: 'Not archived: an active workflow uses this table.',
+  });
+  assert.equal((await activity({ result: { error: 'table-linked', workflows: [workflow] } })).workflows, undefined);
+});

@@ -55,6 +55,7 @@ import { LayoutReply } from './layout-reply';
 import { ToolActivity } from '@tulipfarm/sprout/tool-activity';
 import { SubagentFanout } from './subagent-fanout';
 import { toolActivityItems, visibleActivityTools } from './tool-labels';
+import { StepNarration } from './step-details';
 import { newestTools, reconcileLiveTools, succeeded, unclaimedToolTurns } from './live-tools';
 import { useCurrentReply, type OutgoingMessage } from './current-reply';
 import { useSmoothText } from './smooth-text';
@@ -1295,7 +1296,7 @@ function ConversationDetail({
                       ) : (
                         thinking && (
                           <li aria-busy="true" className="space-y-2">
-                            {narration && <p className="text-sm text-muted-foreground">{narration}</p>}
+                            {narration && <StepNarration text={narration} />}
                             {slowTurn && (
                               <div className="flex flex-wrap items-center gap-3">
                                 <p role="status" className="text-sm text-muted-foreground">
