@@ -43,6 +43,7 @@ import { createToolRegistry } from './registry.ts';
 import { createAgentAuthoring } from './authoring.ts';
 import { createSavedAgentService } from './saved-service.ts';
 import { requireAgentPermission, savedAgentCompatibility, withHuman } from './saved-policy.ts';
+import { repairImportPlans } from './import-plan-repair.ts';
 import { agentDefinitionSchema } from './contracts.ts';
 import { AgentError, soulRevisionSchema } from './saved-contracts.ts';
 import { createAuthoringDrafts } from './drafts.ts';
@@ -1077,6 +1078,50 @@ export function createChatTools(
     );
     return { ...context, origin: { ...context.origin, sources } };
   }
+  /** JSON.parse, tolerating a few stray closing brackets at the end that models sometimes emit. */
+  const lenientJson = (text: string): unknown => {
+    try {
+      return JSON.parse(text);
+    } catch (error) {
+      if (!(error instanceof SyntaxError)) throw error;
+      const trimmed = text.trimEnd();
+      for (let cut = 1; cut <= 4 && /[\]}]$/.test(trimmed.slice(0, trimmed.length - cut + 1)); cut++) {
+        try {
+          return JSON.parse(trimmed.slice(0, trimmed.length - cut));
+        } catch {}
+      }
+      throw error;
+    }
+  };
+  /** The files attached to this chat by the requester, with the digests that tables.import.file needs. */
+  const chatAttachments = (
+    workspaceId: string,
+    actor: HumanActor,
+    origin: { conversationId: string; sources: Parameters<typeof requireTableSources>[2] },
+  ) =>
+    withHuman(runtime, workspaceId, actor, 'read', async tx => {
+      await requireTableSources(tx, actor, [
+        { kind: 'private-conversation', conversationId: origin.conversationId },
+        ...origin.sources,
+      ]);
+      const rows = await tx.client.query(
+        `SELECT a.id AS "attachmentId",a.filename,a.media_type AS "mediaType",a.size,a.sha256 AS "contentDigest" FROM ${relation(tx, 'tf_conversation_attachments')} a WHERE a.conversation_id=$1 AND a.membership_id=$2 AND a.state='bound' AND EXISTS(SELECT 1 FROM ${relation(tx, 'tf_conversation_parts')} p WHERE p.attachment_id=a.id AND p.message_id=a.message_id AND p.conversation_id=a.conversation_id) ORDER BY a.id LIMIT 100`,
+        [origin.conversationId, actor.membershipId],
+      );
+      return {
+        attachments: z
+          .array(
+            z.object({
+              attachmentId: z.uuid(),
+              filename: z.string(),
+              mediaType: z.string(),
+              size: z.int(),
+              contentDigest: z.string(),
+            }),
+          )
+          .parse(rows.rows),
+      };
+    });
   async function invoke(
     context: {
       workspaceId: string;
@@ -1189,30 +1234,7 @@ export function createChatTools(
         });
       case 'tables.import.attachments': {
         if (!context.origin) throw new AccessDenied();
-        const origin = context.origin;
-        return withHuman(runtime, workspaceId, actor, 'read', async tx => {
-          await requireTableSources(tx, actor, [
-            { kind: 'private-conversation', conversationId: origin.conversationId },
-            ...origin.sources,
-          ]);
-          const rows = await tx.client.query(
-            `SELECT a.id AS "attachmentId",a.filename,a.media_type AS "mediaType",a.size,a.sha256 AS "contentDigest" FROM ${relation(tx, 'tf_conversation_attachments')} a WHERE a.conversation_id=$1 AND a.membership_id=$2 AND a.state='bound' AND EXISTS(SELECT 1 FROM ${relation(tx, 'tf_conversation_parts')} p WHERE p.attachment_id=a.id AND p.message_id=a.message_id AND p.conversation_id=a.conversation_id) ORDER BY a.id LIMIT 100`,
-            [origin.conversationId, actor.membershipId],
-          );
-          return {
-            attachments: z
-              .array(
-                z.object({
-                  attachmentId: z.uuid(),
-                  filename: z.string(),
-                  mediaType: z.string(),
-                  size: z.int(),
-                  contentDigest: z.string(),
-                }),
-              )
-              .parse(rows.rows),
-          };
-        });
+        return chatAttachments(workspaceId, actor, context.origin);
       }
       case 'tables.import.file': {
         if (!context.origin || !imports) throw new AccessDenied();
@@ -1232,15 +1254,48 @@ export function createChatTools(
               .map(({ path, code, message }) => ({ path, code, message: message.slice(0, 200) })),
             example: importSelectionExample,
           };
-        try {
-          return await imports.prepareFile(
+        const prepare = (attachmentId: string, contentDigest: string) =>
+          imports.prepareFile(
             runtime,
             workspaceId,
             actor,
             origin,
-            { kind: 'file', attachmentId: call.attachmentId, contentDigest: call.contentDigest },
+            { kind: 'file', attachmentId, contentDigest },
             parsed.data,
           );
+        try {
+          let reference;
+          try {
+            if (!z.uuid().safeParse(call.attachmentId).success || !/^[0-9a-f]{64}$/.test(call.contentDigest))
+              throw new TableImportError('attachment-unknown');
+            reference = await prepare(call.attachmentId, call.contentDigest);
+          } catch (error) {
+            if (!(error instanceof TableImportError) || error.code !== 'attachment-unknown') throw error;
+            // Models see the file but often guess its id or digest; resolve it from this chat's own attachments.
+            const { attachments } = await chatAttachments(workspaceId, actor, origin);
+            const match =
+              attachments.find(item => item.attachmentId === call.attachmentId) ??
+              (attachments.length === 1 ? attachments[0] : undefined);
+            if (!match)
+              return {
+                ...tableImportFailure(error),
+                attachments,
+                instruction:
+                  'The file is attached to this chat. Call tables.import.file again with the attachmentId and contentDigest of the right file from attachments. Do not ask the person to attach it again and do not invent IDs or digests.',
+              };
+            reference = await prepare(match.attachmentId, match.contentDigest);
+          }
+          const columns = await runtime
+            .transaction(workspaceId, executionCompatibility, async tx => {
+              const snapshot = await imports.readSnapshot(tx as never, actor, origin, reference);
+              return [...new Set(snapshot.rows.flatMap(row => Object.keys(row)))];
+            })
+            .catch(() => undefined);
+          return {
+            ...reference,
+            ...(columns ? { columns } : {}),
+            nextStep: `The file is prepared; do not call tables.import.file again for it in this reply. To import into an existing table, call tables.propose with {"plans":[{"kind":"import","tableId":"<table id>","dependsOn":[],"expectedRevision":"<the table's current revision>","reference":${JSON.stringify(reference)},"matchFieldIds":["<field id of its unique key>"],"mappings":[{"sourceColumn":"<file column>","fieldId":"<field id>"}]}]}, using IDs from tables.definitions or schema.inspect.`,
+          };
         } catch (error) {
           if (!(error instanceof TableImportError)) throw error;
           return {
@@ -1251,29 +1306,77 @@ export function createChatTools(
       }
       case 'tables.propose': {
         if (!context.origin) throw new AccessDenied();
-        let input;
+        const origin = context.origin;
+        let input, raw: unknown;
         try {
-          input = proposeTableSchema.parse(JSON.parse(call.input));
+          raw = lenientJson(call.input);
+          input = proposeTableSchema.parse(raw);
         } catch (error) {
           if (!(error instanceof SyntaxError) && !(error instanceof z.ZodError)) throw error;
-          return {
-            error: 'invalid-arguments',
-            issues:
-              error instanceof z.ZodError
-                ? error.issues
-                    .slice(0, 20)
-                    .map(({ path, code, message }) => ({ path, code, message: message.slice(0, 200) }))
+          const repair =
+            error instanceof z.ZodError
+              ? await repairImportPlans(raw, {
+                  table: async hint => {
+                    let after: string | undefined;
+                    for (let page = 0; page < 10; page++) {
+                      const listed = await tableService.definitions(workspaceId, actor, {
+                        limit: 100,
+                        ...(hint.name ? { search: hint.name } : {}),
+                        ...(after ? { after } : {}),
+                      });
+                      const found = listed.tables.find(item =>
+                        hint.id
+                          ? item.id === hint.id
+                          : item.definition.label.trim().toLowerCase() === hint.name?.toLowerCase(),
+                      );
+                      if (found) return found;
+                      if (!listed.nextCursor) return undefined;
+                      after = listed.nextCursor;
+                    }
+                    return undefined;
+                  },
+                  columns: async reference =>
+                    imports &&
+                    runtime.transaction(workspaceId, executionCompatibility, async tx => {
+                      const snapshot = await imports.readSnapshot(tx as never, actor, origin, reference);
+                      return [...new Set(snapshot.rows.flatMap(row => Object.keys(row)))];
+                    }),
+                })
+              : undefined;
+          const repaired = repair?.repaired ? proposeTableSchema.safeParse(repair.input) : undefined;
+          if (repaired?.success) input = repaired.data;
+          else {
+            const issues =
+              (repaired?.error ?? error) instanceof z.ZodError ? (repaired?.error ?? (error as z.ZodError)).issues : [];
+            const schemaIdIssue =
+              issues.some(issue => issue.code === 'invalid_format') &&
+              !repair?.template &&
+              !/"kind"\s*:\s*"import"/.test(call.input);
+            return {
+              error: 'invalid-arguments',
+              issues: issues.length
+                ? issues.slice(0, 20).map(({ path, code, message }) => ({ path, code, message: message.slice(0, 200) }))
                 : [{ path: [], code: 'invalid-json', message: 'Input is not valid JSON' }],
-            instruction:
-              'No proposal was created. This is not a permission denial. Read skills.read(table-authoring) for proposalInputSchema, correct the JSON payload at the reported paths, and submit a new proposal for review.',
-            ...(error instanceof z.ZodError && error.issues.some(issue => issue.code === 'invalid_format')
-              ? {
-                  newIds: freshIds(),
-                  idInstruction:
-                    'Replace each invalid id with an unused UUID from newIds, using the same replacement everywhere that id is referenced. Never invent UUIDs.',
-                }
-              : {}),
-          };
+              instruction: repair?.template
+                ? 'No proposal was created. This is not a permission denial. Call tables.propose again now with {"plans":[importPlan]}, where importPlan is the filled importPlan below with every <placeholder> replaced: fieldId values must be ids from fields, and sourceColumn values must be column names from fileColumns. Keep tableId, expectedRevision and reference exactly as given. Do not call schema.inspect or tables.import.file again for this.'
+                : 'No proposal was created. This is not a permission denial. Read skills.read(table-authoring) for proposalInputSchema, correct the JSON payload at the reported paths, and submit a new proposal for review. Use only table and field IDs returned by tables.definitions or schema.inspect; never invent them.',
+              ...(repair?.template
+                ? {
+                    importPlan: repair.template,
+                    fields: repair.fields,
+                    ...(repair.fileColumns ? { fileColumns: repair.fileColumns } : {}),
+                  }
+                : {}),
+              // Fresh IDs only help a schema plan that creates tables or fields; an import must use existing IDs.
+              ...(schemaIdIssue
+                ? {
+                    newIds: freshIds(),
+                    idInstruction:
+                      'Replace each invalid id of a new table, field, option or key with an unused UUID from newIds, using the same replacement everywhere that id is referenced. Existing tables and fields keep their IDs from tables.definitions. Never invent UUIDs.',
+                  }
+                : {}),
+            };
+          }
         }
         return createChatTableProposals(runtime, objects, async tableId =>
           Promise.all(
@@ -2135,7 +2238,12 @@ export function createChatTools(
         return listSkills(telemetryRuntime === 'chat' && context.origin ? 'chat' : 'agent');
       case 'skills.read': {
         if (z.uuid().safeParse(call.skillId).success) {
-          if (call.resource) throw new AccessDenied();
+          if (call.resource)
+            return {
+              error: 'skill-resource-unavailable',
+              instruction:
+                'Workspace skills have no resources. This is not a permission denial. Call skills.read again with only skillId and revision.',
+            };
           const procedure = (
             await createWorkspaceSkills(runtime).resolve(workspaceId, actor, [
               { id: call.skillId, revision: call.revision ?? '' },
@@ -2151,7 +2259,7 @@ export function createChatTools(
           call.resource,
           telemetryRuntime === 'chat' && context.origin ? 'chat' : 'agent',
         );
-        return call.skillId === 'table-authoring' && skill
+        return call.skillId === 'table-authoring' && skill && !('error' in skill)
           ? {
               ...skill,
               proposalInputSchema: tableProposalInputSchema,
@@ -2816,8 +2924,22 @@ export function createChatTools(
       result = await invoke(context, call);
     } catch (error) {
       const failure = rowWriteTools.has(call.tool) ? rowWriteFailure(error) : null;
-      if (!failure) throw error;
-      return { result: failure, sources: [] };
+      if (failure) return { result: failure, sources: [] };
+      if (error instanceof TableError && error.code === 'table-not-found' && 'tableId' in call) {
+        const listed = await tableService
+          .definitions(context.workspaceId, context.actor, { limit: 50 })
+          .catch(() => ({ tables: [] }));
+        return {
+          result: {
+            error: 'table-not-found',
+            instruction:
+              'No table has this ID. This is not a permission problem. Use a tableId from tables below or from tables.definitions, never an invented or newly generated ID, and call the tool again. If the person named a table that is not listed, ask them which table they mean.',
+            tables: listed.tables.map(item => ({ id: item.id, label: item.definition.label, revision: item.revision })),
+          },
+          sources: [],
+        };
+      }
+      throw error;
     }
     if (context.origin && call.tool === 'tables.definitions')
       result = await chatTableDefinitions(

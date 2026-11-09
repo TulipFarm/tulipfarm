@@ -67,7 +67,7 @@ type ImportFailureCode = TableImportError['code'];
 /** Who can fix a failure: the assistant by correcting its selection, the person by fixing the file, or nobody now. */
 const importFailures: Record<
   ImportFailureCode,
-  { reason: string; fix: 'reference' | 'selection' | 'value' | 'file' | 'retry' }
+  { reason: string; fix: 'reference' | 'selection' | 'value' | 'file' | 'retry' | 'prepared' }
 > = {
   'attachment-unknown': {
     reason: 'The file reference doesn’t match a file attached to this chat.',
@@ -98,7 +98,10 @@ const importFailures: Record<
   'column-limit': { reason: 'The file has more than 64 columns.', fix: 'file' },
   'digest-mismatch': { reason: 'The file changed after it was listed.', fix: 'selection' },
   'snapshot-unavailable': { reason: 'The prepared file couldn’t be saved.', fix: 'retry' },
-  'snapshot-conflict': { reason: 'The prepared file couldn’t be saved.', fix: 'retry' },
+  'snapshot-conflict': {
+    reason: 'This file was already prepared in this reply with other settings, and that preparation stands.',
+    fix: 'prepared',
+  },
   'import-unavailable': { reason: 'The file couldn’t be prepared because storage didn’t respond.', fix: 'retry' },
 };
 const personSteps = {
@@ -107,6 +110,7 @@ const personSteps = {
   value: 'Correct the value in the file and attach it again.',
   file: 'Fix the file, attach it again and ask again.',
   retry: 'Try again in a moment.',
+  prepared: 'The assistant can continue with the file as first prepared.',
 };
 const assistantSteps = {
   reference:
@@ -118,6 +122,8 @@ const assistantSteps = {
   file: 'The file itself must change. Tell the person the reason and ask them to fix and reattach it; do not retry with the same file.',
   retry:
     'Call tables.import.file once more in this reply; if it fails again, tell the person preparation failed and to try later.',
+  prepared:
+    'Do not call tables.import.file again for this file in this reply, and do not schedule a retry. Continue now: call tables.propose with this same attachmentId and contentDigest as the import reference.',
 };
 
 function failureWhere(location: ImportFailureLocation) {
@@ -142,7 +148,10 @@ export function tableImportFailure(error: TableImportError) {
     code: error.code,
     reason: `${reason.replace(/\.$/, '')}${where}. ${personSteps[fix]}`,
     ...(error.location ? { location: error.location } : {}),
-    instruction: `No file was prepared and no review was created. This is not a permission denial, and tables.import.file is available. ${assistantSteps[fix]} Tell the person this reason, with its data row and file row as given, not a guessed one.`,
+    instruction:
+      fix === 'prepared'
+        ? `The file is already prepared from an earlier call in this reply; no review was created yet. This is not a permission denial. ${assistantSteps[fix]}`
+        : `No file was prepared and no review was created. This is not a permission denial, and tables.import.file is available. ${assistantSteps[fix]} Tell the person this reason, with its data row and file row as given, not a guessed one.`,
   };
 }
 // Stored keys and the tf_table_import_objects object_key CHECK use this prefix.

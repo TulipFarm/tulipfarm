@@ -2404,6 +2404,26 @@ export function createConversationExecutor(
                 ? { 'error.issues': error.issues.map(issue => `${issue.path.join('.')}:${issue.code}`) }
                 : {}),
             });
+          // An Admin holds every workspace permission, so a denial for one is a TulipFarm fault, never a missing grant.
+          const admin =
+            !planningFailure && !(error instanceof SourceAuthorizationUnavailable)
+              ? await transaction(
+                  fence.workspaceId,
+                  async tx =>
+                    (await currentMember(tx, await turnRequester(tx, fence.conversationId, fence.turnId))).role ===
+                    'admin',
+                ).catch(() => false)
+              : false;
+          // One signal per Admin denial, apart from the per-tool call_failed record, so it can alert on its own.
+          if (admin && error instanceof AccessDenied)
+            log('error', 'activity', 'call_failed', {
+              operation: 'chat.admin-access-denied',
+              tool: name,
+              runtime: 'chat',
+              outcome: 'blocked',
+              'error.code': 'admin-access-denied',
+              'error.type': errorType(error),
+            });
           const output = {
             result: planningFailure
               ? { error: planningFailure.code, instruction: planningFailure.instruction }
@@ -2416,9 +2436,13 @@ export function createConversationExecutor(
                 : {
                     error: error instanceof AccessDenied ? 'access-denied' : 'tool-failed',
                     instruction:
-                      error instanceof AccessDenied
-                        ? 'The request was denied. Do not claim success or bypass the denial. The error does not identify which access check failed, so do not say a missing role or permission caused it, and do not tell the requester to ask a workspace admin; the step under your reply explains what they can do.'
-                        : `The tool failed for an unconfirmed reason. This is not evidence of a permission denial. Do not claim success or tell the requester they lack permissions. Tell the requester this step failed, and do not state or guess anything it would have returned.${failureFallbacks[name] ? ` ${failureFallbacks[name]}` : ''} Check arguments and available status before a new request.`,
+                      admin && error instanceof AccessDenied
+                        ? 'A TulipFarm check failed unexpectedly. The requester is a workspace Admin and holds every permission, so this is a problem on our side, not missing access. Tell them plainly that this step failed because of a problem in TulipFarm and that nothing changed. Do not mention access, permissions, roles or admins, and do not repeat the call in this reply.'
+                        : admin
+                          ? `The tool failed for an unconfirmed reason. This is not a permission denial: the requester is a workspace Admin and holds every permission. Do not claim success, and never say or imply that they lack access, a permission or a role. Tell the requester this step failed, and do not state or guess anything it would have returned.${failureFallbacks[name] ? ` ${failureFallbacks[name]}` : ''} Check arguments and available status before a new request.`
+                          : error instanceof AccessDenied
+                            ? 'The request was denied. Do not claim success or bypass the denial. The error does not identify which access check failed, so do not say a missing role or permission caused it, and do not tell the requester to ask a workspace admin; the step under your reply explains what they can do.'
+                            : `The tool failed for an unconfirmed reason. This is not evidence of a permission denial. Do not claim success or tell the requester they lack permissions. Tell the requester this step failed, and do not state or guess anything it would have returned.${failureFallbacks[name] ? ` ${failureFallbacks[name]}` : ''} Check arguments and available status before a new request.`,
                   },
             sources: mergeSources([...inheritedSources, ...currentSources]),
           };

@@ -8,6 +8,8 @@ const repeatableTools = new Set<string>([
   'agents.context',
   'agents.status',
   'slack.resolve',
+  // Preparing the same file with the same settings stores the same bytes, so a repeat returns the same reference.
+  'tables.import.file',
   'workflows.list',
   'workflows.read',
   'workflows.providers',
