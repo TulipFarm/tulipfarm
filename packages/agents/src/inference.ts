@@ -1820,6 +1820,19 @@ Use continue when the reply merely promises, narrates, or plans work that remain
 Judge the content and the work, not the presentation: never use continue only because the reply lacks a layout, render tool, buttons, form, chart or table, or because a presentation tool failed; the reply is laid out separately.
 Do not demand tools for ordinary answers, questions, or refusals. Do not mistake a clarification answer for action approval. Explain the evidence gap in one short sentence, at most 240 characters.`;
 
+const outcomeVerb = String.raw`(?:denied|refused|rejected|approved|created|added|imported|saved|updated|deleted|archived|restored|sent|posted|scheduled|proposed|applied)`;
+const writeVerb = String.raw`(?:created|added|imported|saved|updated|deleted|archived|restored)`;
+// Adverbs such as "now", "just" or "successfully" may sit between an auxiliary verb and the outcome.
+const adverbs = String.raw`(?: (?:now|just|already|also|all|both|each|\w+ly))*`;
+const countWord = String.raw`(?:[1-9][\d,]*|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|a few|several|many|some)`;
+const recordNoun = String.raw`(?:new )?(?:rows?|records?|items?|entries|entry|fields?|columns?)`;
+const auxiliaryClaim = (verb: string) =>
+  String.raw`\b(?:is|are|was|were|has|have|got)${adverbs}(?: been${adverbs})? ${verb}\b`;
+const countClaims = [
+  String.raw`\b${countWord} ${recordNoun} (?:\w+ )?${writeVerb}\b`,
+  String.raw`\b${writeVerb} (?:${countWord}|an?|the|all|both|your|those|these) ${recordNoun}`,
+  String.raw`^(?:successfully |just )?${writeVerb}\b(?! by\b)`,
+];
 const outcomeClaim = new RegExp(
   [
     String.raw`\b(?:review|approval) card\b`,
@@ -1828,19 +1841,64 @@ const outcomeClaim = new RegExp(
     String.raw`\bfor your (?:review|approval)\b`,
     String.raw`\bversion \d+\b`,
     String.raw`\baccess denied\b`,
-    String.raw`\b(?:is|are|was|were|has been|have been|got) (?:denied|refused|rejected|approved|created|added|imported|saved|updated|deleted|archived|restored|sent|posted|scheduled|proposed|applied)\b`,
-    String.raw`\b(?:i|we)(?:'|’)?(?:ve| have)? (?:created|added|imported|saved|updated|deleted|archived|restored|sent|posted|scheduled|proposed|prepared|applied)\b`,
-    String.raw`\b\d[\d,]* (?:new )?(?:rows?|records?|items?|entries) (?:\w+ )?(?:created|added|imported|saved|updated|deleted)\b`,
-    String.raw`\b(?:created|added|imported|saved|updated|deleted) \d[\d,]* (?:new )?(?:rows?|records?|items?|entries)\b`,
+    auxiliaryClaim(outcomeVerb),
+    String.raw`\b(?:i|we)(?:'|’)?(?:ve| have)?${adverbs} (?:created|added|imported|saved|updated|deleted|archived|restored|sent|posted|scheduled|proposed|prepared|applied)\b`,
+    ...countClaims,
   ].join('|'),
   'i',
 );
+const writeClaim = new RegExp(
+  [
+    auxiliaryClaim(writeVerb),
+    String.raw`\b(?:i|we)(?:'|’)?(?:ve| have)?${adverbs} ${writeVerb}\b`,
+    ...countClaims,
+  ].join('|'),
+  'i',
+);
+const dataNoun = /\b(?:rows?|records?|entries|entry|items?|fields?|columns?|tables?|values?|data|files?)\b/i;
+const earlierOutcome =
+  /\b(?:earlier|previous(?:ly)?|before|already|last (?:reply|message|turn)|(?:after|when|once) you (?:approved|confirmed|accepted))\b/i;
+// "No rows have been added" negates before the claim; "I added no rows" right after it.
+const negatedClaim = (clause: string, claim: RegExpExecArray) =>
+  claimNegated.test(clause.slice(0, claim.index + claim[0].length)) ||
+  /^\s+(?:no|none|nothing|zero|0)\b/i.test(clause.slice(claim.index + claim[0].length));
+const unverifiedOutcome = {
+  status: 'continue' as const,
+  reason:
+    'The reply reports an outcome, but no tool call in this reply produced it and it could not be checked. Do the work with a tool, or say plainly what was and was not done.',
+};
 /**
  * Whether a reply reports an action outcome, such as a review card, a denial or created rows. Such a reply is checked
- * even when it used no work tool, so it cannot report work that no tool call did.
+ * even when it used no work tool, so it cannot report work that no tool call did. A clause that negates the outcome
+ * before naming it, such as "No rows have been added yet", reports none.
  */
 export function claimsActionOutcome(text: string) {
-  return outcomeClaim.test(text);
+  return clauses(text.split(/(?<=[.!?])\s+|\n+/)).some(clause => {
+    const claim = outcomeClaim.exec(clause);
+    return !!claim && !negatedClaim(clause, claim);
+  });
+}
+
+/**
+ * Why a reply that says it wrote data must do more work: no tool call in this reply wrote anything. Decided without
+ * the completion model, which has accepted such replies. A reply may still restate an earlier change as earlier.
+ */
+export function unbackedWriteClaim(candidate: string, wrote: boolean) {
+  if (wrote) return undefined;
+  const claim = clauses(
+    candidate
+      .split(/(?<=[.!?])\s+|\n+/)
+      .filter(sentence => !sentence.trim().endsWith('?') && !earlierOutcome.test(sentence)),
+  ).find(clause => {
+    const match = writeClaim.exec(clause);
+    return !!match && dataNoun.test(clause) && !cardClaim.test(clause) && !negatedClaim(clause, match);
+  });
+  return claim
+    ? {
+        status: 'continue' as const,
+        reason: `The reply says data was written ("${claim.slice(0, 60)}"), but no tool call in this reply wrote any. Make the change with a tool, point to a waiting card, or say plainly that nothing was written.`,
+      }
+    : undefined;
 }
 
 const importReviewClaim = new RegExp(
@@ -1938,6 +1996,19 @@ const madeCard = (result: ToolResult) =>
       !/^(?:tables|rows|schema|files|web|knowledge)_/.test(result.name)));
 // A row write refused because an earlier card for that table is still undecided: that card exists, so naming it is true.
 const pendingCard = (result: ToolResult) => /^[^{]*\{"error":"approval-pending"/.test(result.output);
+/** Whether a tool call in this reply succeeded at something other than reading. */
+const wroteInReply = (items: readonly LoopItem[]) =>
+  items.some(
+    item =>
+      item.kind === 'results' &&
+      item.results.some(
+        result =>
+          !result.error &&
+          !/^[^{]*\{"error":/.test(result.output) &&
+          isWorkTool(result.name) &&
+          !readOnlyNativeTools.has(result.name),
+      ),
+  );
 
 // A clause that says this reply just made a card, as opposed to pointing at one that already waits.
 const newCardClaim =
@@ -3172,8 +3243,14 @@ export async function inferWithTools(
         tools?.waitingCards && (importUnbacked || cardClaimed) ? await tools.waitingCards() : 0,
       );
       const unbacked = importUnbacked ?? unbackedCardClaim(candidate, items, waiting);
+      // A resumed turn's earlier receipts are in its history, not in this reply's items.
+      const writeUnbacked =
+        tools?.priorCalls || tools?.priorToolCalls?.length
+          ? undefined
+          : unbackedWriteClaim(candidate, wroteInReply(items));
       if (
         !unbacked &&
+        !writeUnbacked &&
         !workToolUsed &&
         !finalizing &&
         (pointsToWaitingCard(candidate, waiting) ||
@@ -3182,7 +3259,7 @@ export async function inferWithTools(
         recordChatCompletionCheck('skipped_no_tools');
         return accept();
       }
-      let checked: z.infer<typeof completionCheckSchema>['decision'] | undefined = unbacked;
+      let checked: z.infer<typeof completionCheckSchema>['decision'] | undefined = unbacked ?? writeUnbacked;
       if (!checked) {
         report('finishing');
         try {
@@ -3237,16 +3314,21 @@ export async function inferWithTools(
           });
         } catch (error) {
           recordChatCompletionCheck('error');
+          if (!(error instanceof ModelCallError) || signal?.aborted) {
+            preview('');
+            throw error;
+          }
           // A check model that fails must not discard a finished answer; admission, authorization and cancellation still end the turn.
-          if (error instanceof ModelCallError && !signal?.aborted) return accept();
-          preview('');
-          throw error;
+          // An answer that reports an outcome no tool in this reply produced is never sent unchecked.
+          if (workToolUsed || !claimsActionOutcome(candidate)) return accept();
+          checked = unverifiedOutcome;
         }
       }
-      recordChatCompletionCheck(
-        checked.status === 'continue' ? 'continue' : 'done',
-        checked.status === 'continue' ? checked.reason : undefined,
-      );
+      if (checked !== unverifiedOutcome)
+        recordChatCompletionCheck(
+          checked.status === 'continue' ? 'continue' : 'done',
+          checked.status === 'continue' ? checked.reason : undefined,
+        );
       if (checked.status !== 'continue') return accept();
       preview('');
       if (finalizing) return finish(unbacked ? `${stoppingReply} ${noCardReply(waiting)}` : stoppingReply);
