@@ -4,6 +4,7 @@ import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { BookOpen } from 'reicon-react/icons/BookOpen';
 import { Users } from 'reicon-react/icons/Users';
 import { BranchDown } from 'reicon-react/icons/BranchDown';
+import { CheckCircle } from 'reicon-react/icons/CheckCircle';
 import { BrandStack, type Brand } from '@tulipfarm/sprout/brand-icon';
 import { ReviewCard, ReviewRow, ReviewRows } from '@tulipfarm/sprout/review-card';
 import { Button } from '@tulipfarm/sprout/button';
@@ -325,6 +326,11 @@ export function AuthoringDraftCard({
   const brands = proposal.kind === 'agent' ? toolBrands(proposal.input.definition.tools) : [];
   // Only a new agent starts off. Saving over an existing agent leaves its on or off state and active revision as they were.
   const updating = proposal.kind === 'agent' && proposal.input.expectedSavedRevision !== null;
+  const activeWorkflow =
+    !!workflow &&
+    draft.status === 'saved' &&
+    draft.outcome?.kind === 'workflow' &&
+    draft.outcome.activation === 'activated';
   return (
     <ReviewCard
       label={`Review ${noun} draft`}
@@ -332,7 +338,7 @@ export function AuthoringDraftCard({
         workflow ? <BranchDown size={16} /> : proposal.kind === 'agent' ? <Users size={16} /> : <BookOpen size={16} />
       }
       title={definition.name}
-      badge={badges[draft.status]}
+      badge={activeWorkflow ? { label: 'Active', variant: 'success' } : badges[draft.status]}
       settled={draft.status === 'saved' || draft.status === 'dismissed' || draft.status === 'failed'}
       actions={
         draft.status === 'pending' ? (
@@ -374,7 +380,18 @@ export function AuthoringDraftCard({
                 Your review is recorded. The definition is being saved. You can leave this chat and return later.
               </p>
             )}
-            {draft.status === 'saved' && (
+            {draft.status === 'saved' && activeWorkflow && draft.outcome?.kind === 'workflow' && workflow && (
+              <div role="status" className="flex items-start gap-2">
+                <span aria-hidden="true" className="mt-0.5 shrink-0 text-success">
+                  <CheckCircle size={18} />
+                </span>
+                <div>
+                  <p className="font-medium">Saved and active</p>
+                  <p className="text-muted-foreground">{workflowResult(draft.outcome, workflow)}</p>
+                </div>
+              </div>
+            )}
+            {draft.status === 'saved' && !activeWorkflow && (
               <p role="status">
                 {workflow && draft.outcome?.kind === 'workflow'
                   ? workflowResult(draft.outcome, workflow)
@@ -436,11 +453,13 @@ export function AuthoringDraftCard({
             </p>
           )}
           <div className="flex flex-wrap gap-2">
-            <WorkflowCanvasButton
-              workspaceId={workspace.id}
-              reference={{ kind: 'draft', chatId, draftId: id }}
-              name="View workflow draft"
-            />
+            {draft.outcome?.kind !== 'workflow' && (
+              <WorkflowCanvasButton
+                workspaceId={workspace.id}
+                reference={{ kind: 'draft', chatId, draftId: id }}
+                name="View workflow draft"
+              />
+            )}
             {draft.outcome?.kind === 'workflow' && (
               <WorkflowCanvasButton
                 workspaceId={workspace.id}
@@ -450,6 +469,7 @@ export function AuthoringDraftCard({
                   revision: draft.outcome.revision,
                 }}
                 name="View saved workflow"
+                status={activeWorkflow ? 'Active' : 'Saved · Not active'}
               />
             )}
           </div>

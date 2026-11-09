@@ -746,6 +746,8 @@ test(
             0,
             'a settled card offers no second approval',
           );
+          await created.getByText('Saved and active', { exact: true }).waitFor();
+          await created.getByText('Active', { exact: true }).first().waitFor();
           await slack.getByRole('button', { name: 'Save and activate' }).click();
           await slack.getByText(/Workflow active/).waitFor();
           assert.equal(decisions[2].id, slackDraft);
@@ -760,6 +762,11 @@ test(
             .getByRole('region', { name: 'Workflow: View saved workflow', exact: true })
             .getByRole('button', { name: 'View workflow', exact: true })
             .click();
+          assert.equal(
+            await created.getByRole('region', { name: 'Workflow: View workflow draft', exact: true }).count(),
+            0,
+            'a saved card offers only the saved workflow',
+          );
           await createdViewer.getByText('Saved and active revision', { exact: true }).waitFor();
           await assertConfiguration(createdViewer, 0, definition.triggers);
           assert.ok(definitionReads.length > 0);

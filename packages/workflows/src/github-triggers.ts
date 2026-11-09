@@ -237,6 +237,7 @@ export function githubWorkflowPayload(event: GitHubTriggerEvent, body: Json) {
     event,
     action: text(body.action, 64),
     repository: text(object(body.repository).full_name, 140),
+    repositoryPrivate: flag(object(body.repository).private),
     sender: text(object(body.sender).login, 64),
     senderUrl: text(object(body.sender).html_url),
   };

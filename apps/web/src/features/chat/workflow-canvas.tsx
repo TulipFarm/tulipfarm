@@ -138,6 +138,15 @@ function WorkflowDraftCanvas({
             />
           );
         const proposal = draft.proposal;
+        const active =
+          draft.status === 'saved' && draft.outcome?.kind === 'workflow' && draft.outcome.activation === 'activated';
+        const canvasNotice =
+          notice ??
+          (active
+            ? 'This workflow is saved and active. It runs when its trigger fires.'
+            : draft.status === 'pending'
+              ? 'Review the diagram here. Saving and activation remain in the chat review card.'
+              : null);
         return (
           <NamedWorkflowViewer
             workspaceId={workspaceId}
@@ -145,15 +154,19 @@ function WorkflowDraftCanvas({
             view={{
               key: `draft:${chatId}:${draftId}:${draft.digest}`,
               definition: proposal.input.definition,
-              source: 'Draft',
-              revisionLabel: draft.status === 'pending' ? 'Awaiting your review' : `Draft ${draft.status}`,
+              source: active ? 'Active' : draft.status === 'saved' ? 'Saved' : 'Draft',
+              revisionLabel: active
+                ? 'Saved and active'
+                : draft.status === 'pending'
+                  ? 'Awaiting your review'
+                  : `Draft ${draft.status}`,
               labels: {
                 actor:
                   proposal.kind === 'workflow' && proposal.input.expectedRevision === null && proposal.input.activate
                     ? `${user.name} after approval`
                     : 'the person assigned when activated or started',
               },
-              notice: notice ?? 'Review the diagram here. Saving and activation remain in the chat review card.',
+              ...(canvasNotice ? { notice: canvasNotice } : {}),
             }}
             onRefresh={() => void read.refresh()}
             onEdit={
@@ -174,10 +187,12 @@ export function WorkflowCanvasButton({
   workspaceId,
   reference,
   name = 'View workflow',
+  status,
 }: {
   workspaceId: string;
   reference: WorkflowReference;
   name?: string;
+  status?: string;
 }) {
   const { show } = useCanvas();
   const item = workflowCanvasItem(workspaceId, reference);
@@ -189,11 +204,12 @@ export function WorkflowCanvasButton({
         apps={[]}
         icon={<BranchDown size={18} />}
         status={
-          reference.kind === 'definition'
+          status ??
+          (reference.kind === 'definition'
             ? 'Saved definition · Not a completed run'
             : reference.kind === 'draft'
               ? 'Draft · Not saved yet'
-              : 'Run details available'
+              : 'Run details available')
         }
         action={{ label: reference.kind === 'run' ? 'View run' : 'View workflow', onClick: () => show(item) }}
       />

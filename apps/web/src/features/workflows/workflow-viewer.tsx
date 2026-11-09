@@ -126,7 +126,9 @@ export function WorkflowViewer({
               {view.run?.note ??
                 (view.source === 'Draft'
                   ? 'Review this draft before saving.'
-                  : 'Definition only. A saved workflow does not confirm a run or delivery.')}
+                  : view.source === 'Active'
+                    ? 'Active. Each matching trigger event starts a run.'
+                    : 'Definition only. A saved workflow does not confirm a run or delivery.')}
             </p>
           </div>
           {actions}
