@@ -43,11 +43,12 @@ const timing = overrides => ({
 });
 
 const exporter = new InMemoryMetricExporter(AggregationTemporality.DELTA);
+const spans = new InMemorySpanExporter();
 const reader = new PeriodicExportingMetricReader({ exporter, exportIntervalMillis: 60000 });
 const sdk = new NodeSDK({
   resource: telemetryIdentity({ app: 'worker', version: '2026.10.22.7', commit: 'c'.repeat(40) }, true),
   autoDetectResources: false,
-  spanProcessors: [new SimpleSpanProcessor(new InMemorySpanExporter())],
+  spanProcessors: [new SimpleSpanProcessor(spans)],
   metricReader: reader,
   logRecordProcessors: [new SimpleLogRecordProcessor({ exporter: new InMemoryLogRecordExporter() })],
 });
@@ -267,6 +268,34 @@ test('a failed reply logs one chat.reply-stopped event with only its bounded rea
   assert.equal(stopped[1].runtime, 'chat');
   assert.equal(stopped[1]['error.code'], undefined);
   assert.doesNotMatch(JSON.stringify(stopped), /PRIVATE|turn-stopped/);
+  await reader.forceFlush();
+  exporter.reset();
+});
+
+test('a failed detail phase records the error type on its span and log', async t => {
+  const failed = [];
+  const write = process.stdout.write;
+  t.mock.method(process.stdout, 'write', (line, ...rest) => {
+    if (typeof line !== 'string' || !line.startsWith('{"level"')) return write.call(process.stdout, line, ...rest);
+    if (line.includes('chat.detail.inventory')) failed.push(JSON.parse(line));
+    return true;
+  });
+  spans.reset();
+  await assert.rejects(
+    withChatMeasurements(() =>
+      observeChatDetail('inventory', async () => {
+        throw new TypeError('private detail');
+      }),
+    ),
+    TypeError,
+  );
+  assert.deepEqual(
+    failed.map(line => [line.outcome, line['error.type']]),
+    [['error', 'TypeError']],
+  );
+  const span = spans.getFinishedSpans().find(item => item.name === 'chat.detail.inventory');
+  assert.equal(span?.attributes['error.type'], 'TypeError');
+  assert.doesNotMatch(JSON.stringify(failed), /private detail/);
   await reader.forceFlush();
   exporter.reset();
 });

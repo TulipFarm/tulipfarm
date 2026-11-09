@@ -51,8 +51,7 @@ import {
   requireWorkflowSources,
   requireResultSources,
   requireSlackTurn,
-  requireMcpSources,
-  requireConversationMcpSources,
+  requireReplyMcpSources,
 } from './source-access.ts';
 import {
   bindFileSources,
@@ -651,11 +650,7 @@ export function createConversationExecutor(
     }
   }
 
-  async function root(
-    tx: RuntimeTransaction,
-    work: ReplyWork,
-    sourceCheck: 'conversation' | 'approved-batch' = 'conversation',
-  ) {
+  async function root(tx: RuntimeTransaction, work: ReplyWork) {
     const { conversationId, turnId } = work;
     const chat = rootConversationSchema.parse(
       (
@@ -687,7 +682,6 @@ export function createConversationExecutor(
       if (chat.project_id) await requireProjectAccess(tx, requester, chat.project_id);
       else if (requester.userId !== chat.owner_user_id || requester.membershipId !== chat.owner_membership_id)
         throw new AccessDenied();
-      await requireConversationMcpSources(tx, requester, conversationId);
       const external = Boolean(
         (
           await tx.client.query(`SELECT 1 FROM ${table(tx, 'tf_slack_default_turns')} WHERE conversation_id=$1`, [
@@ -699,13 +693,6 @@ export function createConversationExecutor(
       const context = external && externalContext ? await externalContext(tx, work) : null;
       const slack = await requireSlackTurn(tx, requester, conversationId, turnId);
       const standalone = await standaloneTurn(tx, conversationId, turnId);
-      if (sourceCheck === 'conversation' && !standalone) {
-        const retained = await tx.client.query(
-          `SELECT r.sources FROM ${table(tx, 'tf_conversation_results')} r JOIN ${table(tx, 'tf_conversation_turns')} t ON t.id=r.turn_id WHERE r.conversation_id=$1 AND t.accepted_sequence>=COALESCE((SELECT context_start FROM ${table(tx, 'tf_github_chat_selection')} WHERE conversation_id=$1),1) AND t.accepted_sequence<(SELECT accepted_sequence FROM ${table(tx, 'tf_conversation_turns')} WHERE id=$2)`,
-          [conversationId, turnId],
-        );
-        for (const row of retained.rows) await requireGitHubSources(tx, requester, row.sources);
-      }
       if (slack && !standalone) {
         const prior = await tx.client.query(
           `SELECT r.sources FROM ${table(tx, 'tf_conversation_results')} r JOIN ${table(tx, 'tf_conversation_turns')} t ON t.id=r.turn_id WHERE r.conversation_id=$1 AND t.accepted_sequence<(SELECT accepted_sequence FROM ${table(tx, 'tf_conversation_turns')} WHERE id=$2)`,
@@ -1381,6 +1368,7 @@ export function createConversationExecutor(
                 await requireResultSources(tx, chat.requester, fence.conversationId, compaction.summary.sources);
               await requireGitHubSources(tx, chat.requester, compaction.summary.sources);
               await requireGoogleSources(tx, chat.requester, compaction.summary.sources);
+              await requireReplyMcpSources(tx, chat.requester, fence.conversationId, compaction.summary.sources);
               await requireKnowledgeSources(tx, chat.requester, compaction.summary.sources);
               await requireWorkflowSources(tx, chat.requester, compaction.summary.sources);
               await requireGoogleFileSources(tx, chat.requester, compaction.summary.sources);
@@ -1713,6 +1701,7 @@ export function createConversationExecutor(
             try {
               await requireGitHubSources(tx, chat.requester, row.sources);
               await requireGoogleSources(tx, chat.requester, row.sources);
+              await requireReplyMcpSources(tx, chat.requester, fence.conversationId, row.sources);
               await requireKnowledgeSources(tx, chat.requester, row.sources);
               await requireWorkflowSources(tx, chat.requester, row.sources);
               await requireGoogleFileSources(tx, chat.requester, row.sources);
@@ -1742,7 +1731,7 @@ export function createConversationExecutor(
           await requireGoogleSources(tx, chat.requester, inherited);
           await requireKnowledgeSources(tx, chat.requester, inherited);
           await requireGoogleFileSources(tx, chat.requester, inherited);
-          if (durable) await requireMcpSources(tx, chat.requester, fence.conversationId, inherited);
+          if (durable) await requireReplyMcpSources(tx, chat.requester, fence.conversationId, inherited);
           // The reply's start read includes preference memory, so its rounds need no transaction of their own.
           const personalMemory =
             chat.project_id || chat.slack || chat.context || compaction?.command
@@ -1955,7 +1944,7 @@ export function createConversationExecutor(
             await requireKnowledgeSources(tx, chat.requester, inheritedSources);
             await requireGoogleFileSources(tx, chat.requester, inheritedSources);
             await requireFileSources(tx, chat.requester, fileSources);
-            await requireMcpSources(tx, chat.requester, fence.conversationId, inheritedSources);
+            await requireReplyMcpSources(tx, chat.requester, fence.conversationId, inheritedSources);
             const memory = await readPersonalMemory(tx, chat.requester);
             if (memory.content)
               inheritedSources.push({ kind: 'personal-memory', membershipId: chat.requester.membershipId });
@@ -2014,7 +2003,10 @@ export function createConversationExecutor(
             await requireKnowledgeSources(tx, chat.requester, [...inheritedSources, ...currentSources]);
             await requireGoogleFileSources(tx, chat.requester, inheritedSources);
             await requireFileSources(tx, chat.requester, fileSources);
-            await requireMcpSources(tx, chat.requester, fence.conversationId, [...inheritedSources, ...currentSources]);
+            await requireReplyMcpSources(tx, chat.requester, fence.conversationId, [
+              ...inheritedSources,
+              ...currentSources,
+            ]);
             if (chat.context && externalContext) await externalContext(tx, fence, currentSources);
             if (!sequenceReserved) {
               sequence = Number(
@@ -2252,11 +2244,7 @@ export function createConversationExecutor(
                   runtime.transaction(workspace, range, async current => {
                     if (workspace !== fence.workspaceId) throw new AccessDenied();
                     await lockAuthorization(current);
-                    const chat = await root(
-                      current,
-                      fence,
-                      name === 'github.personal.execute' ? 'approved-batch' : 'conversation',
-                    );
+                    const chat = await root(current, fence);
                     if (!chat) throw new AccessDenied();
                     await renewConversationReplyLease(current, fence, leaseMs);
                     if (chat.slack)
@@ -2267,7 +2255,7 @@ export function createConversationExecutor(
                     await requireGoogleSources(current, chat.requester, [...inheritedSources, ...currentSources]);
                     await requireKnowledgeSources(current, chat.requester, [...inheritedSources, ...currentSources]);
                     await requireGoogleFileSources(current, chat.requester, [...inheritedSources, ...fileSources]);
-                    await requireMcpSources(current, chat.requester, fence.conversationId, [
+                    await requireReplyMcpSources(current, chat.requester, fence.conversationId, [
                       ...inheritedSources,
                       ...currentSources,
                     ]);
@@ -2653,7 +2641,7 @@ export function createConversationExecutor(
         await requireKnowledgeSources(tx, chat.requester, [...source.inherited, ...sources]);
         await requireGoogleFileSources(tx, chat.requester, source.inherited);
         await requireFileSources(tx, chat.requester, fileSources);
-        await requireMcpSources(tx, chat.requester, fence.conversationId, [...source.inherited, ...sources]);
+        await requireReplyMcpSources(tx, chat.requester, fence.conversationId, [...source.inherited, ...sources]);
         if (chat.context && externalContext) await externalContext(tx, fence, sources);
         if (chat.project_id && !replied) sources = [];
         if (chat.project_id && replied && source.project)
@@ -2878,7 +2866,7 @@ export function createConversationExecutor(
                         turn.status !== 'waiting'
                       )
                         throw new AccessDenied();
-                      await requireMcpSources(tx, actor, work.conversationId, [
+                      await requireReplyMcpSources(tx, actor, work.conversationId, [
                         ...pending.sources,
                         ...response.sources,
                       ]);

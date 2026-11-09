@@ -54,7 +54,7 @@ async function derived(f, read = operation) {
 
 for (const status of [401, 403, 404, 503, 'network', 'changed-search'])
   test(
-    `retained GitHub ${status} fails closed before inference, history, draft read and save`,
+    `retained GitHub ${status} leaves the answer out of inference, history, draft read and save`,
     { timeout: 30000 },
     async t => {
       const f = await githubChatFixture();
@@ -79,18 +79,10 @@ for (const status of [401, 403, 404, 503, 'network', 'changed-search'])
           ? Response.json({ items: [] })
           : Response.json({ message: 'Access revoked' }, { status });
       });
-      f.decide([], 'Must not reach the model');
-      const denied = await f.send(d.chatId, 'Summarize without rereading.');
-      assert.equal(denied.status, 'idle');
-      assert.equal(
-        (
-          await f.db.platform.query(`SELECT status FROM ${f.table('tf_conversation_turns')} WHERE id=$1`, [
-            denied.turnId,
-          ])
-        ).rows[0].status,
-        'blocked',
-      );
-      assert.equal(f.modelRequests.length, before);
+      f.decide([], 'Answer without the earlier reply');
+      assert.equal((await f.send(d.chatId, 'Summarize without rereading.')).status, 'completed');
+      assert.equal(f.modelRequests.length, before + 1);
+      assert.equal(JSON.stringify(f.modelRequests.at(-1)).includes(privateText), false);
       assert.ok(f.providerCalls.length > calls);
       assert.equal(
         JSON.stringify(await f.store.history(f.one.id, f.member.userId, d.chatId)).includes(privateText),
@@ -112,7 +104,7 @@ for (const status of [401, 403, 404, 503, 'network', 'changed-search'])
   );
 
 test(
-  'retained search with pinned targets survives provider metadata changes but not lost target access',
+  'retained search with pinned targets survives provider metadata changes and leaves context on lost target access',
   { timeout: 30000 },
   async t => {
     const f = await githubChatFixture();
@@ -150,13 +142,9 @@ test(
     assert.equal((await f.send(chatId, 'Summarize the repositories again.')).status, 'completed');
     assert.equal(JSON.stringify(await f.store.history(f.one.id, f.member.userId, chatId)).includes(privateText), true);
     targetStatus = 404;
-    f.decide([], 'Must not reach the model');
-    const denied = await f.send(chatId, 'Summarize after access loss.');
-    assert.equal(
-      (await f.db.platform.query(`SELECT status FROM ${f.table('tf_conversation_turns')} WHERE id=$1`, [denied.turnId]))
-        .rows[0].status,
-      'blocked',
-    );
+    f.decide([], 'Answer without the earlier reply');
+    assert.equal((await f.send(chatId, 'Summarize after access loss.')).status, 'completed');
+    assert.equal(JSON.stringify(f.modelRequests.at(-1)).includes(privateText), false);
     assert.equal(JSON.stringify(await f.store.history(f.one.id, f.member.userId, chatId)).includes(privateText), false);
   },
 );
@@ -167,7 +155,7 @@ for (const [operation, change] of [
   [{ kind: 'pull.read', owner: 'private-org', repo: 'restricted', number: 7 }, 'head'],
 ]) {
   test(
-    `retained ${operation.kind} survives a busy repository changing ${change} but not lost repository access`,
+    `retained ${operation.kind} survives a busy repository changing ${change} and leaves context on lost access`,
     { timeout: 30000 },
     async t => {
       const f = await githubChatFixture();
@@ -199,16 +187,9 @@ for (const [operation, change] of [
         true,
       );
       status = 404;
-      f.decide([], 'Must not reach the model');
-      const denied = await f.send(chatId, 'Summarize after access loss.');
-      assert.equal(
-        (
-          await f.db.platform.query(`SELECT status FROM ${f.table('tf_conversation_turns')} WHERE id=$1`, [
-            denied.turnId,
-          ])
-        ).rows[0].status,
-        'blocked',
-      );
+      f.decide([], 'Answer without the earlier reply');
+      assert.equal((await f.send(chatId, 'Summarize after access loss.')).status, 'completed');
+      assert.equal(JSON.stringify(f.modelRequests.at(-1)).includes(privateText), false);
       assert.equal(
         JSON.stringify(await f.store.history(f.one.id, f.member.userId, chatId)).includes(privateText),
         false,

@@ -21,7 +21,7 @@ import {
   requireGitHubSources,
   requireGoogleSources,
   requireKnowledgeSources,
-  requireMcpSources,
+  requireReplyMcpSources,
   requireResultSources,
 } from '@tulipfarm/conversations/source-access';
 import { turnRequester } from '@tulipfarm/conversations/turn-requester';
@@ -214,7 +214,7 @@ export async function beginReplySession(input: {
     await requireGitHubSources(tx, human, merged);
     await requireGoogleSources(tx, human, merged);
     await requireKnowledgeSources(tx, human, merged);
-    await requireMcpSources(tx, human, fence.conversationId, merged);
+    await requireReplyMcpSources(tx, human, fence.conversationId, merged);
     if (slackActor) await requireResultSources(tx, slackActor, fence.conversationId, merged);
     await externalContext?.(tx, fence, merged);
     return canonicalJson(merged);
@@ -314,7 +314,7 @@ export async function beginReplySession(input: {
   const leaseStartedAt = Date.now();
   const started = await runtime.transaction(fence.workspaceId, commonCompatibility, async tx => {
     await lockAuthorization(tx, readsInventory ? 'write' : 'read');
-    const slackActor = await requireCurrentConversationSources(tx, fence.conversationId, fence.turnId, 'in-context');
+    const slackActor = await requireCurrentConversationSources(tx, fence.conversationId, fence.turnId);
     await renewConversationReplyLease(tx, fence);
     requester =
       input.slack || input.mcp || input.outputs || input.requester
@@ -492,12 +492,7 @@ export async function beginReplySession(input: {
           const refreshInventory =
             input.inventory && tools.some(tool => inventoryTools.some(prefix => tool.startsWith(prefix)));
           await lockAuthorization(tx, refreshInventory ? 'write' : 'read');
-          const slackActor = await requireCurrentConversationSources(
-            tx,
-            fence.conversationId,
-            fence.turnId,
-            'in-context',
-          );
+          const slackActor = await requireCurrentConversationSources(tx, fence.conversationId, fence.turnId);
           await renewConversationReplyLease(tx, fence);
           const read = refreshInventory ? await readInventory(tx, slackActor) : undefined;
           const mcp = tools.some(tool => tool.startsWith('mcp.')) ? await readCatalog(tx) : undefined;
@@ -530,12 +525,7 @@ export async function beginReplySession(input: {
       if (keyOf(all) === authorizedKey) return;
       const result = await runtime.transaction(fence.workspaceId, commonCompatibility, async tx => {
         await lockAuthorization(tx);
-        const slackActor = await requireCurrentConversationSources(
-          tx,
-          fence.conversationId,
-          fence.turnId,
-          'in-context',
-        );
+        const slackActor = await requireCurrentConversationSources(tx, fence.conversationId, fence.turnId);
         const authorized = await authorize(tx, slackActor, all, inventorySources);
         const recorded = await recordModelSources(
           tx,

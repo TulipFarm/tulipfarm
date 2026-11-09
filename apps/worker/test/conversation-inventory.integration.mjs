@@ -290,3 +290,37 @@ test(
     await assert.rejects(readWorkspaceInventory(f.runtime, w.id, actor), AccessDenied);
   },
 );
+
+test('inventory leaves out only an agent whose skill the requester can no longer read', { timeout: 55000 }, async t => {
+  const f = await conversationFixture();
+  t.after(() => f.close());
+  const w = f.workspace;
+  const actor = { kind: 'human', userId: w.userId, membershipId: w.membershipId };
+  const skills = createWorkspaceSkills(f.runtime);
+  const skillId = randomUUID();
+  const saved = await skills.save(w.id, actor, skillId, {
+    requestId: randomUUID(),
+    expectedVersion: 0,
+    definition: { name: 'Ticket procedure', description: 'Handle a ticket.', instructions: 'Steps.' },
+  });
+  const reviewed = await skills.review(w.id, actor.userId, skillId, {
+    requestId: randomUUID(),
+    expectedVersion: 1,
+    revision: saved.savedRevision,
+  });
+  const withSkill = await savedTaskAgent(f.db, w, f.runtime, actor.userId, actor.membershipId, [
+    { id: skillId, revision: reviewed.revision ?? saved.savedRevision },
+  ]);
+  const plain = await savedTaskAgent(f.db, w, f.runtime, actor.userId, actor.membershipId);
+  const before = (await readWorkspaceInventory(f.runtime, w.id, actor)).inventory;
+  assert.deepEqual(before.agents.map(agent => agent.id).sort(), [withSkill.agentId, plain.agentId].sort());
+
+  await skills.setEnabled(w.id, actor.userId, skillId, { requestId: randomUUID(), expectedVersion: 2, enabled: false });
+  const after = await readWorkspaceInventory(f.runtime, w.id, actor);
+  assert.deepEqual(
+    after.inventory.agents.map(agent => agent.id),
+    [plain.agentId],
+  );
+  assert.deepEqual(after.inventory.skills, []);
+  assert.ok(!after.sources.some(source => source.kind === 'agent-definition' && source.agentId === withSkill.agentId));
+});
