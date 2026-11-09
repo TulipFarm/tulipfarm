@@ -642,7 +642,7 @@ ${await readFile(new URL('../../../../apps/database/migrations/0001_baseline.sql
           detail: 'No review prepared: the request wasn’t valid.',
         });
         const valuesReason =
-          'No review prepared: 1 value in the file doesn’t fit the table. Row 3, column "State": "Pending" isn’t an option of Status (Open, Shipped).';
+          'No review prepared: 1 value in the file doesn’t fit the table. Data row 3, column "State": "Pending" isn’t an option of Status (Open, Shipped). Data rows count from the first row after the header.';
         assert.deepEqual(await detail({ error: 'import-values-invalid', reason: valuesReason, problems: [] }), {
           status: 'completed',
           detail: valuesReason,

@@ -30,20 +30,21 @@ const problemText: Record<ImportProblem['code'], (problem: ImportProblem) => str
   'key-not-unique': p =>
     `${fieldName(p)} isn’t a unique key of the table, so rows can’t be matched by it. Match by one of its unique keys${list(p.expected)}.`,
   'key-unmapped': p => `No file column is mapped to the match field ${fieldName(p)}.`,
-  'missing-key': p => `Row ${p.row}: ${fieldName(p)} is empty, so the row can’t be matched.`,
+  'missing-key': p => `Data row ${p.row}: ${fieldName(p)} is empty, so the row can’t be matched.`,
   'duplicate-key': p =>
-    `Row ${p.row}: ${fieldName(p)} ${quoted(p.value)} repeats a match value already used in ${p.expected?.[0] ?? 'an earlier row'}.`,
+    `Data row ${p.row}: ${fieldName(p)} ${quoted(p.value)} repeats a match value already used in ${p.expected?.[0] ?? 'an earlier data row'}.`,
   'existing-duplicate-key': p => `Several existing rows share the same ${fieldName(p)}, so the file can’t be matched.`,
   'unmapped-value': p =>
-    `Row ${p.row}, column "${p.column}": ${quoted(p.value)} isn’t an option of ${fieldName(p)}${choices(p.expected)}.`,
+    `Data row ${p.row}, column "${p.column}": ${quoted(p.value)} isn’t an option of ${fieldName(p)}${choices(p.expected)}.`,
   'conversion-failed': p =>
-    `Row ${p.row}, column "${p.column}": ${quoted(p.value)} isn’t a valid ${fieldName(p)} value.`,
+    `Data row ${p.row}, column "${p.column}": ${quoted(p.value)} isn’t a valid ${fieldName(p)} value.`,
   'type-mismatch': p =>
     `column "${p.column}" can’t fill ${fieldName(p)}: file values can’t be imported into a link or file field.`,
-  'missing-field': p => `Row ${p.row}: ${fieldName(p)} is required but empty.`,
+  'missing-field': p => `Data row ${p.row}: ${fieldName(p)} is required but empty.`,
   'invalid-output': p =>
-    `Row ${p.row}, column "${p.column}": ${quoted(p.value)} doesn’t fit ${fieldName(p)}, for example it is too long or has too many digits.`,
+    `Data row ${p.row}, column "${p.column}": ${quoted(p.value)} doesn’t fit ${fieldName(p)}, for example it is too long or has too many digits.`,
 };
+const rowConvention = 'Data rows count from the first row after the header.';
 const mappingCodes = new Set<ImportProblem['code']>([
   'unknown-column',
   'unknown-field',
@@ -51,7 +52,7 @@ const mappingCodes = new Set<ImportProblem['code']>([
   'key-unmapped',
 ]);
 const importValuesInstruction =
-  'No proposal was created and nothing changed. This is not a permission denial, and the file was read. Tell the person, in your own words, every row, column, value and field listed in "problems", and the next step: correct those values in the file and attach it again, or ask you to add the missing options to the field first. When a value is an option label written differently, a mapping to another column may be the fix; otherwise never drop, change or guess values to make the import pass.';
+  'No proposal was created and nothing changed. This is not a permission denial, and the file was read. Tell the person, in your own words, every row, column, value and field listed in "problems", numbering rows as data rows the way "reason" does, and the next step: correct those values in the file and attach it again, or ask you to add the missing options to the field first. When a value is an option label written differently, a mapping to another column may be the fix; otherwise never drop, change or guess values to make the import pass.';
 const importMappingInstruction =
   'No proposal was created and nothing changed. This is not a permission denial: the import plan does not fit the file or the table. Fix the plan using "problems" (use only the listed file columns, field IDs from the table schema, and matchFieldIds equal to one unique key), then propose again in this reply. If the table has no unique key that the file can fill, tell the person.';
 
@@ -66,7 +67,9 @@ export function importPlanResult(error: TableImportPlanError) {
       : error.total === 1
         ? '1 value in the file doesn’t fit the table.'
         : `${error.total} values in the file don’t fit the table.`
-  } ${listed.join(' ')}${more > 0 ? ` And ${more} more.` : ''}`;
+  } ${listed.join(' ')}${more > 0 ? ` And ${more} more.` : ''}${
+    error.problems.some(problem => problem.row !== null) ? ` ${rowConvention}` : ''
+  }`;
   return {
     error: mapping ? ('import-mapping-invalid' as const) : ('import-values-invalid' as const),
     reason,

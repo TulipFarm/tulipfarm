@@ -542,7 +542,7 @@ export function importEffects(
     const match = key(mapped);
     const first = seen.get(match);
     if (first !== undefined) {
-      at(ids[0]!, 'duplicate-key', row[columnOf(ids[0]!) ?? ''] ?? null, [`row ${first}`]);
+      at(ids[0]!, 'duplicate-key', row[columnOf(ids[0]!) ?? ''] ?? null, [`data row ${first}`]);
       continue;
     }
     seen.set(match, index + 1);

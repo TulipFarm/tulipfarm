@@ -94,7 +94,7 @@ test('an import whose values don’t fit names the rows, field, value and next s
   assert.equal(result.truncated, true);
   assert.equal(
     result.reason,
-    'No review prepared: 8 values in the file don’t fit the table. Row 2, column "State": "Pending" isn’t an option of Status (Open, Done). Row 7, column "State": "Waiting" isn’t an option of Status (Open, Done). Row 9, column "State": "Hold" isn’t an option of Status (Open, Done). And 5 more.',
+    'No review prepared: 8 values in the file don’t fit the table. Data row 2, column "State": "Pending" isn’t an option of Status (Open, Done). Data row 7, column "State": "Waiting" isn’t an option of Status (Open, Done). Data row 9, column "State": "Hold" isn’t an option of Status (Open, Done). And 5 more. Data rows count from the first row after the header.',
   );
   assert.match(result.instruction, /not a permission denial/);
   assert.match(result.instruction, /never drop, change or guess values/);

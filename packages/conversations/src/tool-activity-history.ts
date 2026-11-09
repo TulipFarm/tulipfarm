@@ -239,7 +239,7 @@ export async function storedToolActivity(
     const failure = z
       .object({ error: z.literal('import-file-failed'), reason: z.string().min(1) })
       .safeParse(result.success ? result.data.result : row.output);
-    if (failure.success) return { status: 'failed', detail: failure.data.reason.slice(0, 200) };
+    if (failure.success) return { status: 'failed', detail: failure.data.reason.slice(0, 400) };
   }
   return { status: await savedToolStatus(tx, row) };
 }
