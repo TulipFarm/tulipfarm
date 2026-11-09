@@ -551,6 +551,57 @@ test('blocked conversion previews report bounded exact identities without saving
   assert.deepEqual(await authoring(), { ...originalAuthoring, proposals: 1, effects: count });
 });
 
+test('converting text to a scale-2 number drops trailing zeros and blocks only values that need rounding', async t => {
+  const f = await setup(t);
+  const rows = {};
+  for (const amount of ['5.000', '42.000', '100.500', '7.25', '7.255'])
+    rows[amount] = (await f.create({ [f.key]: text(amount), [f.title]: text(amount) })).id;
+  const plan = {
+    kind: 'schema',
+    tableId: f.definition.id,
+    expectedRevision: f.revision,
+    dependsOn: [],
+    target: {
+      ...f.definition,
+      fields: f.definition.fields.map(field =>
+        field.id === f.title
+          ? { id: f.title, label: 'Amount', kind: 'numeric', required: false, precision: 12, scale: 2 }
+          : field,
+      ),
+    },
+    transforms: {
+      outputs: [
+        {
+          fieldId: f.title,
+          expression: {
+            op: 'convert',
+            input: { op: 'field', fieldId: f.title },
+            to: 'numeric',
+            timezone: 'UTC',
+            onError: 'error',
+          },
+        },
+      ],
+    },
+  };
+  await assert.rejects(f.propose(plan), error => {
+    assert.ok(error instanceof TableProposalValidationError);
+    assert.equal(error.validation.total, 1);
+    assert.deepEqual(error.validation.records, [{ recordId: rows['7.255'], fieldId: f.title, code: 'invalid-output' }]);
+    return true;
+  });
+  await f.update(rows['7.255'], { [f.title]: text('7.25') });
+  const proposal = await f.propose(plan);
+  const effects = (
+    await f.db.platform.query(`SELECT effect FROM ${f.s}.tf_table_proposal_effects WHERE proposal_id=$1`, [proposal.id])
+  ).rows;
+  const converted = Object.fromEntries(effects.map(({ effect }) => [effect.recordId, effect.after?.[f.title]?.value]));
+  assert.equal(converted[rows['5.000']], '5.00');
+  assert.equal(converted[rows['42.000']], '42.00');
+  assert.equal(converted[rows['100.500']], '100.50');
+  assert.equal(converted[rows['7.25']], '7.25');
+});
+
 test('chat capture wrapper retains no-effect import matches and missing capture fails closed', async t => {
   const f = await setup(t);
   const row = await f.create({ [f.key]: text('key'), [f.title]: text('same') });
