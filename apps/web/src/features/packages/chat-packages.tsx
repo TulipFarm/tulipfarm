@@ -135,6 +135,8 @@ export function ChatPackages({
       state={read.state}
       errorTitle="Could not load packages for this chat"
       retry={retry}
+      thing="packages"
+      refresh={() => void read.refresh()}
       loading={
         offer ? (
           <div role="status" aria-label="Loading package">

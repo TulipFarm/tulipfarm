@@ -14,7 +14,7 @@ import {
   type PlanDocumentRenderResult,
 } from '@tulipfarm/plan-documents';
 import { retryError } from '@tulipfarm/observability';
-import { StorageUnavailableError } from '@tulipfarm/workspace-storage/runtime';
+import { workspaceSchemaPending } from '@tulipfarm/workspace-storage/runtime';
 import type { WorkspaceRuntime } from '@tulipfarm/workspaces/storage';
 
 type Objects = {
@@ -52,8 +52,7 @@ export function createPlanDocumentDispatcher(failure: (workspaceId: string, plan
   };
 }
 
-const unmigrated = (error: unknown) =>
-  error instanceof StorageUnavailableError && error.code === 'incompatible_version';
+const unmigrated = (error: unknown) => workspaceSchemaPending(error);
 
 export function createPlanDocumentComposition(options: {
   runtime: WorkspaceRuntime;

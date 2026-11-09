@@ -695,6 +695,29 @@ test('retry policy is bounded and excludes permissions and invalid payloads', ()
   assert.equal(retryDelay(0, { status: 429, retryAfter: '9999' }), 30_000);
 });
 
+test('a workspace taking an update is retried every 5 seconds for about 5 minutes behind a calm state', () => {
+  const updating = { status: 503, code: 'workspace-updating' };
+  assert.equal(retryRead(59, updating), true);
+  assert.equal(retryRead(60, updating), false);
+  assert.equal(retryDelay(3, updating), 5000);
+  assert.equal(retryRead(2, { status: 503, code: 'unavailable' }), false);
+
+  const retrying = { data: undefined, error: null, failureReason: updating, isFetching: true };
+  assert.deepEqual(readState(retrying), {
+    kind: 'error',
+    message: 'TulipFarm is still updating your workspace. Try again in a few minutes.',
+    updating: 'retrying',
+  });
+  assert.equal(readState({ ...retrying, error: updating, isFetching: false }).updating, 'stopped');
+  // Data already on screen stays there quietly while the update finishes.
+  assert.deepEqual(readState({ ...retrying, data: ['plan'] }), {
+    kind: 'ready',
+    data: ['plan'],
+    refreshing: true,
+    error: null,
+  });
+});
+
 test('real QueryClient performs at most two transient retries and zero authority retries', async () => {
   const runtime = createFeatureClient(identity);
   let calls = 0;

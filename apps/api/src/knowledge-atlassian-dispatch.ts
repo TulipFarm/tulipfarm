@@ -3,7 +3,7 @@ import type { Pool } from 'pg';
 import { WorkflowExecutionAlreadyStartedError } from '@temporalio/client';
 import type { AtlassianKnowledge } from '@tulipfarm/knowledge';
 import { atlassianKnowledgeWorkSchema, type AtlassianKnowledgeWork } from '@tulipfarm/knowledge/atlassian-contracts';
-import { StorageUnavailableError } from '@tulipfarm/workspace-storage/runtime';
+import { workspaceSchemaPending } from '@tulipfarm/workspace-storage/runtime';
 import { recordDispatchSkip } from '@tulipfarm/observability';
 import { backgroundSweep, readyWorkspaces, sweepIntervals } from './background-sweep.ts';
 import type { createTemporalClient } from './temporal.ts';
@@ -49,8 +49,7 @@ export function registerAtlassianKnowledgeDispatch(
             await startAtlassianKnowledgeWorkflow(dependencies.temporal, work);
           }
         } catch (error) {
-          if (error instanceof StorageUnavailableError && error.code === 'incompatible_version')
-            recordDispatchSkip('atlassian');
+          if (workspaceSchemaPending(error)) recordDispatchSkip('atlassian', error.code);
           else app.log.error({ workspaceId: row.workspace_id }, 'Atlassian Knowledge dispatch will retry');
         }
         after = row.workspace_id;

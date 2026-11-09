@@ -16,6 +16,7 @@ import type { createGitHubBatches } from '@tulipfarm/github/batches';
 import type { createGitHubBatchDecision } from '@tulipfarm/github/batch-approval';
 import { authConfig, type registerAuth } from './auth.ts';
 import { routeValidation } from './route-validation.ts';
+import { workspaceUpdatingError } from './security.ts';
 
 export function registerGitHubTasks(
   app: FastifyInstance,
@@ -60,6 +61,7 @@ export function registerGitHubTasks(
         return reply.code(401).send({ error: 'sign-in-required' });
     });
     routes.setErrorHandler((failure, _request, reply) => {
+      if (workspaceUpdatingError(failure, reply)) return;
       if (failure instanceof AccessDenied) return reply.code(404).send({ error: 'task-unavailable' });
       if (
         failure instanceof GitHubReadError ||

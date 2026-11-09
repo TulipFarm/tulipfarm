@@ -24,7 +24,7 @@ import { recordUsage } from '@tulipfarm/extensions';
 import { mergeSources, type SourceDependency } from '@tulipfarm/conversations/results';
 import { errorAttributes, log, retryError } from '@tulipfarm/observability';
 import { CreditsExhausted, reserveCredits, settleCredits } from '@tulipfarm/workspace-storage/credits';
-import { commonCompatibility, qualified, StorageUnavailableError } from '@tulipfarm/workspace-storage/runtime';
+import { commonCompatibility, qualified, workspaceSchemaPending } from '@tulipfarm/workspace-storage/runtime';
 import type { WorkspaceRuntime } from '@tulipfarm/workspaces/storage';
 import { conversationFamilyPaused, conversationModel, roleModel } from './conversation-model.ts';
 import { createPlanRecoveryBackoff } from './plan-recovery-backoff.ts';
@@ -479,7 +479,7 @@ export function createPlanComposition(options: {
             page = await plans.due(workspaceId, after);
           } catch (error) {
             // A workspace without the plan migrations yet has no plan to recover; later sweeps find it once migrated.
-            if (error instanceof StorageUnavailableError && error.code === 'incompatible_version') return null;
+            if (workspaceSchemaPending(error)) return null;
             throw error;
           }
           for (const plan of page) if (backoff.due(plan)) await options.wakePlan(workspaceId, plan.id);

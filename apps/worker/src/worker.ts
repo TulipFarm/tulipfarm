@@ -60,6 +60,7 @@ import { createMemberProfileComposition } from './member-profile-composition.ts'
 import { createSocialPublisherComposition } from './social-publisher-composition.ts';
 import { createSecretsSweep } from './secrets-sweep.ts';
 import { workerRole, workerTelemetryService } from './worker-role.ts';
+import { workspaceSchemaPending } from '@tulipfarm/workspace-storage/runtime';
 
 const role = workerRole();
 const service = workerTelemetryService(role);
@@ -148,6 +149,7 @@ async function run() {
             if (status === 'converted' || status === 'work-pending')
               Runtime.instance().logger.info('Table name conversion', { workspaceId, status });
           } catch (error) {
+            if (workspaceSchemaPending(error)) continue;
             Runtime.instance().logger.error('Table name conversion failed', { workspaceId, ...errorAttributes(error) });
             failures.push(error);
           }

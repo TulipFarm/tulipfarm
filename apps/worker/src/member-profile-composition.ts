@@ -1,5 +1,6 @@
 import { createBackgroundJob } from '@tulipfarm/observability';
 import { createMemberProfileProjection } from '@tulipfarm/workspaces/member-profiles';
+import { workspaceSchemaPending } from '@tulipfarm/workspace-storage/runtime';
 
 export function createMemberProfileComposition(options: Parameters<typeof createMemberProfileProjection>[0]) {
   const projection = createMemberProfileProjection(options);
@@ -15,7 +16,7 @@ export function createMemberProfileComposition(options: Parameters<typeof create
       try {
         await projection.project(workspaceId);
       } catch (error) {
-        failures.push(error);
+        if (!workspaceSchemaPending(error)) failures.push(error);
       }
       after = workspaceId;
     }

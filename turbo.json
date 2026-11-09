@@ -155,6 +155,11 @@
     "test": {
       "dependsOn": ["build"],
       "outputs": []
+    },
+    "test:behind-workspace": {
+      "dependsOn": ["^build"],
+      "cache": false,
+      "passThroughEnv": ["TEST_ADMIN_DATABASE_URL"]
     }
   }
 }

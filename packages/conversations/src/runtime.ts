@@ -20,9 +20,9 @@ import {
 import { requireCredits, CreditsExhausted, CreditAttemptAlreadyDispatched } from '@tulipfarm/workspace-storage/credits';
 import {
   qualified,
-  StorageUnavailableError,
   type createWorkspaceRuntime,
   commonCompatibility,
+  workspaceSchemaPending,
 } from '@tulipfarm/workspace-storage/runtime';
 import {
   chatToolCallLimit,
@@ -3137,7 +3137,7 @@ export function createConversationExecutor(
     try {
       return await runtime.transaction(workspaceId, commonCompatibility, read);
     } catch (error) {
-      if (error instanceof StorageUnavailableError && error.code === 'incompatible_version') return [];
+      if (workspaceSchemaPending(error)) return [];
       throw error;
     }
   }

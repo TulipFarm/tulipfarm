@@ -1,4 +1,5 @@
 import type { SecretsRuntime } from '@tulipfarm/secrets';
+import { workspaceSchemaPending } from '@tulipfarm/workspace-storage/runtime';
 import { secretsServices } from './secrets-composition.ts';
 
 const PAGES_PER_RUN = 20;
@@ -27,6 +28,8 @@ export function createSecretsSweep(
         try {
           await requests.sweep(workspaceId);
         } catch (error) {
+          // A workspace still waiting for this release's migrations is swept on a later run.
+          if (workspaceSchemaPending(error)) continue;
           log(workspaceId, error);
           failures.push(error);
         }

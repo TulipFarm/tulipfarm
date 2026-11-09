@@ -3,6 +3,7 @@ import { Pool } from 'pg';
 import { z } from 'zod';
 import {
   inBackgroundJob,
+  log,
   observeChatDetail,
   observeChatTransaction,
   observeWorkspaceAdmission,
@@ -73,9 +74,10 @@ export class StorageUnavailableError extends Error {
     | 'pool_capacity'
     | 'stale_credential'
     | 'incompatible_version'
+    | 'updating'
     | 'disabled';
-  constructor(code: StorageUnavailableError['code']) {
-    super(`Workspace storage unavailable (${code})`);
+  constructor(code: StorageUnavailableError['code'], options?: ErrorOptions) {
+    super(`Workspace storage unavailable (${code})`, options);
     this.code = code;
     this.name = 'StorageUnavailableError';
   }
@@ -107,10 +109,25 @@ const transientMessages = new Set([
   'Connection terminated due to connection timeout',
 ]);
 
+// Undefined table, column, object and function: what new code meets in a schema that lacks a newer common migration.
+const missingSchemaCodes = new Set(['42P01', '42703', '42704', '42883']);
+
+/**
+ * Whether a workspace cannot serve this work yet, either because its schema is outside the release's window or
+ * because it is still waiting for the release's common migrations. Background work skips the workspace until then.
+ */
+export function workspaceSchemaPending(
+  error: unknown,
+): error is StorageUnavailableError & { code: 'incompatible_version' | 'updating' } {
+  return (
+    error instanceof StorageUnavailableError && (error.code === 'incompatible_version' || error.code === 'updating')
+  );
+}
+
 /** Whether a storage failure is transient, so the same work can succeed on a later attempt. */
 export function transientStorageError(error: unknown): boolean {
   if (error instanceof StorageUnavailableError)
-    return ['queue_full', 'wait_timeout', 'pool_capacity', 'stale_credential'].includes(error.code);
+    return ['queue_full', 'wait_timeout', 'pool_capacity', 'stale_credential', 'updating'].includes(error.code);
   if (typeof error !== 'object' || error === null) return false;
   const { code, message } = error as { code?: unknown; message?: unknown };
   return (
@@ -211,6 +228,15 @@ const compatibilitySchema = z
   .refine(({ minimum, maximum }) => maximum >= minimum);
 const identitySchema = z.object({ session_user: z.string(), current_user: z.string() });
 const versionSchema = z.object({ version: z.number().int() });
+const missingSchemaObject = (error: unknown): error is Error & { code: string } =>
+  error instanceof Error && 'code' in error && typeof error.code === 'string' && missingSchemaCodes.has(error.code);
+
+/** The missing TulipFarm table, or the table of a missing column. Customer tables (g_<id>) and other objects are not named. */
+function missingTableName(error: Error) {
+  const name = (/of relation "([^"]+)"/.exec(error.message) ?? /^relation "([^"]+)"/.exec(error.message))?.[1];
+  const table = name?.split('.').at(-1) ?? '';
+  return /^tf_[a-z0-9_]{1,60}$/.test(table) ? table : /^g_[0-9a-f]{32}$/.test(table) ? 'custom' : 'other';
+}
 
 export async function fenceWorkspaceAccess(client: SqlClient, workspaceId: string, exclusive = false) {
   const installed = await client.query(
@@ -585,9 +611,27 @@ export function createWorkspaceRuntime(
                 if (version < versions.minimum || version > versions.maximum)
                   throw new StorageUnavailableError('incompatible_version');
                 deadline.check();
-                return observeChatDetail('storage-operation', () =>
-                  operation({ client: connection, schema: names.schema, workspaceId, commonVersion: version }),
-                );
+                try {
+                  return await observeChatDetail('storage-operation', () =>
+                    operation({ client: connection, schema: names.schema, workspaceId, commonVersion: version }),
+                  );
+                } catch (error) {
+                  // A release starts its code before the common migrations reach every workspace. Until they do,
+                  // a table or column the release added is missing here: report a retryable update instead.
+                  if (missingSchemaObject(error)) {
+                    if (version < commonCompatibility.maximum)
+                      throw new StorageUnavailableError('updating', { cause: error });
+                    // An up-to-date workspace should have every object the code uses, so this one alerts.
+                    log('error', 'dependency', 'call_failed', {
+                      operation: 'workspace.schema-missing',
+                      outcome: 'error',
+                      'error.type': error.code,
+                      table: missingTableName(error),
+                      'workspace.version': version,
+                    });
+                  }
+                  throw error;
+                }
               },
               { statementTimeoutMs: config.statementTimeoutMs },
             ),

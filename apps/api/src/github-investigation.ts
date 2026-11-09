@@ -8,6 +8,7 @@ import { GitHubReadError } from '@tulipfarm/github/read-contracts';
 import { GitHubAccountError } from '@tulipfarm/github';
 import { authConfig, type registerAuth } from './auth.ts';
 import { routeValidation } from './route-validation.ts';
+import { workspaceUpdatingError } from './security.ts';
 
 export function registerGitHubInvestigation(
   app: FastifyInstance,
@@ -40,6 +41,7 @@ export function registerGitHubInvestigation(
       sessions.set(request, session.user.id);
     });
     routes.setErrorHandler<FastifyError>((error, _request, reply) => {
+      if (workspaceUpdatingError(error, reply)) return;
       if (error instanceof AccessDenied) return reply.code(404).send({ error: 'investigation-unavailable' });
       if (error instanceof GitHubReadError || error instanceof GitHubAccountError)
         return reply.code(409).send({ error: error.code });
