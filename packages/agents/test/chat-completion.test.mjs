@@ -148,16 +148,66 @@ for (const format of formats)
     }
   });
 
-test('repeated plans fail closed after two corrections and never run tools', async t => {
+test('repeated plans end with a stated blocker after two corrections and never run tools', async t => {
+  const outcomes = checkOutcomes(t);
   let requests = 0;
   t.mock.method(globalThis, 'fetch', async () =>
     Response.json(++requests % 2 ? nativeReply('azure', { text: promise }) : selectReply('azure', verdict('continue'))),
   );
-  await assert.rejects(
-    inferWithTools(nativeRoutes.azure, messages, () => assert.fail(), undefined, false, null, resumed),
-    /model-incomplete-response/,
+  const result = await inferWithTools(
+    nativeRoutes.azure,
+    messages,
+    () => assert.fail(),
+    undefined,
+    false,
+    null,
+    resumed,
+  );
+  // A promise of more work is never sent as the answer.
+  assert.equal(
+    result.text,
+    'I stopped before finishing this request. Check Tool activity for what ran, then ask me to continue.',
   );
   assert.equal(requests, 6);
+  assert.deepEqual(outcomes, ['continue', 'continue', 'continue', 'exhausted']);
+});
+
+test('a grounded answer the check keeps rejecting is sent with a note that the request may be unfinished', async t => {
+  const blocker = 'The import was rejected because the signup values are not valid dates.';
+  let requests = 0;
+  t.mock.method(globalThis, 'fetch', async () =>
+    Response.json(
+      ++requests === 1
+        ? nativeReply('azure', { calls: [use('tables.definitions')] })
+        : requests % 2 === 0
+          ? nativeReply('azure', { text: blocker })
+          : selectReply('azure', verdict('continue')),
+    ),
+  );
+  const result = await inferWithTools(nativeRoutes.azure, [{ role: 'user', text: 'Import the leads.' }], async () => ({
+    tables: [],
+  }));
+  assert.equal(
+    result.text,
+    `${blocker}\n\nI stopped here, so this request may not be finished. Check Tool activity for what ran, then ask me to continue.`,
+  );
+  assert.equal(requests, 7);
+});
+
+test('a reply that ran no tool and keeps claiming a write ends without pointing to Tool activity', async t => {
+  const outcomes = checkOutcomes(t);
+  const requests = [];
+  t.mock.method(globalThis, 'fetch', async (_url, init) => {
+    requests.push(JSON.parse(init.body));
+    return Response.json(nativeReply('azure', { text: 'I added the 3 leads to the Leads table.' }));
+  });
+  const result = await inferWithTools(nativeRoutes.azure, [{ role: 'user', text: 'Add the leads.' }], () =>
+    assert.fail(),
+  );
+  assert.equal(result.text, "I stopped before finishing this request. Ask me to continue when you're ready.");
+  assert.equal(requests.length, 3);
+  assert.ok(!requests.some(isCompletionRequest));
+  assert.deepEqual(outcomes, ['continue', 'continue', 'continue', 'exhausted']);
 });
 
 test('an exhausted work budget does not request more work after a rejected plan', async t => {
@@ -534,7 +584,7 @@ test('a reply that keeps claiming a card no tool made ends with a plain account 
   assert.equal(replies.length, 0);
   assert.ok(!requests.some(isCompletionRequest));
   assert.match(JSON.stringify(requests[1].messages), /no tool call in this reply created one/);
-  assert.deepEqual(outcomes, ['continue', 'continue', 'continue']);
+  assert.deepEqual(outcomes, ['continue', 'continue', 'continue', 'exhausted']);
 });
 
 test('an unbacked import review is sent back until a proposal exists, and the new card ends the reply unchecked', async t => {
@@ -650,7 +700,7 @@ test('a reply with a real tool call still runs the check, and continue starts an
   assert.deepEqual(outcomes, ['continue', 'done']);
 });
 
-test('continue results after real tool work still fail closed after two corrections', async t => {
+test('continue results after real tool work end the reply instead of failing after two corrections', async t => {
   const outcomes = checkOutcomes(t);
   let requests = 0;
   t.mock.method(globalThis, 'fetch', async () =>
@@ -662,12 +712,15 @@ test('continue results after real tool work still fail closed after two correcti
           : selectReply('azure', verdict('continue')),
     ),
   );
-  await assert.rejects(
-    inferWithTools(nativeRoutes.azure, [{ role: 'user', text: 'Set it up.' }], async () => ({ tables: [] })),
-    /model-incomplete-response/,
+  const result = await inferWithTools(nativeRoutes.azure, [{ role: 'user', text: 'Set it up.' }], async () => ({
+    tables: [],
+  }));
+  assert.equal(
+    result.text,
+    'I stopped before finishing this request. Check Tool activity for what ran, then ask me to continue.',
   );
   assert.equal(requests, 7);
-  assert.deepEqual(outcomes, ['continue', 'continue', 'continue']);
+  assert.deepEqual(outcomes, ['continue', 'continue', 'continue', 'exhausted']);
 });
 
 test('completion evidence retains all requests, clarifications, inputs and receipts without provider replay', () => {
@@ -1128,7 +1181,7 @@ test('with a card still waiting, pointing to it ends the reply and a repeated ne
     waiting,
   );
   assert.equal(more.text, noCardReply(1));
-  assert.deepEqual(outcomes, ['skipped_no_tools', 'continue', 'continue', 'continue']);
+  assert.deepEqual(outcomes, ['skipped_no_tools', 'continue', 'continue', 'continue', 'exhausted']);
 });
 
 test('a reply never asks the person for a table ID, and asks about a table only after looking tables up', () => {
@@ -1167,5 +1220,5 @@ test('asking which table, after a lookup, ends the reply once corrections run ou
   );
   assert.equal(result.text, question);
   assert.equal(replies.length, 0);
-  assert.deepEqual(outcomes, ['continue', 'continue', 'continue']);
+  assert.deepEqual(outcomes, ['continue', 'continue', 'continue', 'exhausted']);
 });
