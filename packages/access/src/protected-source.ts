@@ -340,7 +340,8 @@ export async function requireProtectedSource(
     case 'workflow-definition':
     case 'workflow-provider':
       if (runId || publicOnly) throw new AccessDenied();
-      await requireWorkflowSource(tx, actor, source);
+      if (tx.requireWorkflowSource) await tx.requireWorkflowSource(actor, source);
+      else await requireWorkflowSource(tx, actor, source);
       break;
     case 'workspace-skill':
       await requireSkillGrant(tx, actor, source.skillId, 'read');

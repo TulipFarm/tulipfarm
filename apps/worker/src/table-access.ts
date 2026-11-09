@@ -1,6 +1,6 @@
 import type { ExecutionAccess } from '@tulipfarm/tables/execution';
 import {
-  bindTableKnowledgeSources,
+  bindTableSourceAuthorization,
   requireTableSources,
   requireTableFiles,
   requireTableImportReference,
@@ -11,5 +11,5 @@ export const tableExecutionAccess = {
   requireSources: requireTableSources,
   requireFiles: requireTableFiles,
   requireImportReference: requireTableImportReference,
-  bindSourceAuthorization: bindTableKnowledgeSources,
+  bindSourceAuthorization: bindTableSourceAuthorization,
 } satisfies ExecutionAccess;
