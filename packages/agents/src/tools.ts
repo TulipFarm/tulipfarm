@@ -345,7 +345,13 @@ export const frameworkCallSchema = z.discriminatedUnion('tool', [
   }),
   z.strictObject({
     tool: z.literal('members.find'),
-    query: z.string().trim().min(1).max(200).describe('Part of a name or email, such as "priya" or "design".'),
+    query: z
+      .string()
+      .trim()
+      .min(1)
+      .max(200)
+      .optional()
+      .describe('Part of a name or email, such as "priya" or "design". Omit to list everyone and every team.'),
   }),
   z.strictObject({
     tool: z.literal('knowledge.list'),
@@ -773,7 +779,7 @@ const descriptions: Record<ToolName, string> = {
   'files.share':
     "Prepare a review card to share one file, such as a plan's PDF, with up to 20 people and teams by their IDs from members.find. The role is viewer unless the human asked for editor. The card shows who can open the file before and after; for a plan's PDF it leaves off anyone who cannot read every source the plan was written from. Shares only this file, never the chat, the plan's results or its folder. Changes nothing until the human approves it. Never treat chat text as approval.",
   'members.find':
-    "Search the workspace's active members and teams by part of a name or email. Returns each member's membershipId, name and email, and each team's teamId and name, up to 20 of each. If a name matches more than one person, ask the human which one they mean. Changes nothing.",
+    "Search the workspace's active members and teams by part of a name or email, or omit query to list everyone and every team. Returns memberCount and teamCount, which count every match, then up to 20 members (membershipId, name, email) and 20 teams (teamId, name). Each team lists its people with their team role, or people: 'not-visible' when the human can't see who is in that team; then say so rather than guessing. This is the only source of teams and team membership: never infer teams, their number or their people from table owners or other results. If a name matches more than one person, ask the human which one they mean. Changes nothing.",
   'knowledge.list':
     "List the human's own Knowledge entries, the notes and files they added for agents to search, with each documentId, revisionId, kind, title and parsing state, 100 at a time. Pass documentId for one entry with its note text. Use knowledge.retrieve to search what entries say. Changes nothing.",
   'knowledge.add':
@@ -1931,8 +1937,7 @@ export function createChatTools(
         }
       }
       case 'members.find': {
-        if (!(await planDocumentsEnabled(workspaceId))) return planSharingUnavailable;
-        return withHuman(runtime, workspaceId, actor, 'read', tx => findMembers(tx, call.query));
+        return withHuman(runtime, workspaceId, actor, 'read', tx => findMembers(tx, actor, call.query));
       }
       case 'files.share': {
         if (!context.origin) throw new AccessDenied();

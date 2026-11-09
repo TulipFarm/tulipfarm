@@ -177,6 +177,88 @@ test('chat finds, renames, moves, trashes and restores files only after the huma
   assert.equal(JSON.stringify(unseen).includes('Hidden'), false, 'an item the human cannot see is never named');
 });
 
+test('chat lists every team with its people, without plan documents, and hides people the asker cannot see', async t => {
+  const flagsOff = process.env.FEATURE_FLAGS_OFF;
+  process.env.FEATURE_FLAGS_OFF = 'plan-documents';
+  t.after(() =>
+    flagsOff === undefined ? delete process.env.FEATURE_FLAGS_OFF : (process.env.FEATURE_FLAGS_OFF = flagsOff),
+  );
+  const { db, w, tool, table } = await setup(t);
+  const [{ id: mine }] = (
+    await db.platform.query(`SELECT id FROM ${table('tf_memberships')} WHERE user_id=$1`, [w.userId])
+  ).rows;
+  const [ana, ben, gone] = [randomUUID(), randomUUID(), randomUUID()];
+  for (const [id, user] of [
+    [ana, 'ana'],
+    [ben, 'ben'],
+    [gone, 'gone'],
+  ])
+    await db.platform.query(`INSERT INTO ${table('tf_memberships')} (id,user_id,role) VALUES ($1,$2,'member')`, [
+      id,
+      user,
+    ]);
+  await db.platform.query(`UPDATE ${table('tf_memberships')} SET removed_at=now() WHERE id=$1`, [gone]);
+  const [{ id: admins }] = (await db.platform.query(`SELECT id FROM ${table('tf_teams')} WHERE name='_admin'`)).rows;
+  const [ops, sales] = [randomUUID(), randomUUID()];
+  for (const [id, name] of [
+    [ops, 'Ops'],
+    [sales, 'Sales'],
+  ])
+    await db.platform.query(`INSERT INTO ${table('tf_teams')} (id,name) VALUES ($1,$2)`, [id, name]);
+  for (const [team, member, role] of [
+    [ops, mine, 'manager'],
+    [ops, ana, 'member'],
+    [ops, gone, 'member'],
+    [sales, ben, 'member'],
+  ])
+    await db.platform.query(`INSERT INTO ${table('tf_member_teams')} (team_id,membership_id,role) VALUES ($1,$2,$3)`, [
+      team,
+      member,
+      role,
+    ]);
+  const people = result =>
+    Object.fromEntries(
+      result.teams.map(team => [
+        team.name,
+        Array.isArray(team.people) ? team.people.map(person => [person.membershipId, person.role]) : team.people,
+      ]),
+    );
+
+  const asAdmin = await tool({ tool: 'members.find' });
+  assert.equal(asAdmin.error, undefined, 'the lookup does not depend on plan documents');
+  assert.deepEqual([asAdmin.memberCount, asAdmin.teamCount, asAdmin.truncated], [3, 3, false]);
+  const adminView = people(asAdmin);
+  assert.deepEqual(
+    [adminView.Ops, adminView.Sales],
+    [
+      [
+        [mine, 'manager'],
+        [ana, 'member'],
+      ],
+      [[ben, 'member']],
+    ],
+  );
+  assert.ok(Array.isArray(adminView['Workspace admins']), 'the admins team shows under its display name');
+  assert.deepEqual(
+    (await tool({ tool: 'members.find', query: 'workspace admins' })).teams.map(team => team.teamId),
+    [admins],
+  );
+
+  await db.platform.query(`UPDATE ${table('tf_memberships')} SET role='member' WHERE id=$1`, [mine]);
+  const memberView = people(await tool({ tool: 'members.find' }));
+  assert.deepEqual(
+    [memberView.Ops, memberView.Sales],
+    [
+      [
+        [mine, 'manager'],
+        [ana, 'member'],
+      ],
+      'not-visible',
+    ],
+    'a member sees who is in their own teams only',
+  );
+});
+
 test('chat finds members and teams, and shares a file only through a reviewed card that is still current', async t => {
   const { db, w, runtime, chatId, drafts, tool, approve, table } = await setup(t);
   const { files, upload } = library(runtime, w);

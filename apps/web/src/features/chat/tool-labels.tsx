@@ -57,9 +57,14 @@ export function toolLabel(tool: Tool) {
   return tool.api && 'httpStatus' in tool.api ? `${label} · ${tool.api.httpStatus}` : label;
 }
 
-const problems = {
-  failed: 'Failed or interrupted. Check current rows before sending a new request.',
-};
+/** What a failed or interrupted step means for the requester; only table steps can have left rows half changed. */
+export function failedDetail(tool: string) {
+  if (tool === 'members.find')
+    return 'Couldn’t look up people and teams. Nothing changed. See them on the Members and Teams pages, or ask again.';
+  if (/^(tables|rows|schema)\./.test(tool))
+    return 'Failed or interrupted. Check current rows before sending a new request.';
+  return 'Failed or interrupted. Check whether anything changed before you ask again.';
+}
 
 /** Who is reading the chat; only workspace admins hold every table permission. */
 export type Viewer = { admin?: boolean };
@@ -167,7 +172,7 @@ function toolActivityItem(tool: Tool, viewer: Viewer): ToolActivityItem {
           : status === 'blocked'
             ? deniedDetail(tool.tool, viewer)
             : status === 'failed'
-              ? problems.failed
+              ? failedDetail(tool.tool)
               : status === 'unknown'
                 ? 'The outcome is unconfirmed. Check the action status before requesting it again.'
                 : status === 'waiting'

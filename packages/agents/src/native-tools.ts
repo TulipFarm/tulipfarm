@@ -117,6 +117,8 @@ const coreChatTools = new Set(
     'knowledge.retrieve',
     'knowledge.search',
     'knowledge.read',
+    // Teams and who is in them come only from here; without it the model guesses them from table owners.
+    'members.find',
     'web.search',
     'web.fetch',
     'api.request',

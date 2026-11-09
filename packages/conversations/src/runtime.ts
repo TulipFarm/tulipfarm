@@ -180,6 +180,10 @@ async function staged<T>(stage: ReplyStage, action: () => Promise<T>): Promise<T
   }
 }
 const table = (tx: AuthorizationTransaction, name: string) => qualified(tx.schema, name);
+// Where the requester can see for themselves what a failed read would have returned.
+const failureFallbacks: Readonly<Record<string, string>> = {
+  'members.find': 'Point them to the Members and Teams pages instead.',
+};
 const rootConversationSchema = z
   .object({
     owner_user_id: z.string(),
@@ -2398,7 +2402,7 @@ export function createConversationExecutor(
                     instruction:
                       error instanceof AccessDenied
                         ? 'The request was denied. Do not claim success or bypass the denial. The error does not identify which access check failed, so do not say a missing role or permission caused it, and do not tell the requester to ask a workspace admin; the step under your reply explains what they can do.'
-                        : 'The tool failed for an unconfirmed reason. This is not evidence of a permission denial. Do not claim success or tell the requester they lack permissions. Check arguments and available status before a new request.',
+                        : `The tool failed for an unconfirmed reason. This is not evidence of a permission denial. Do not claim success or tell the requester they lack permissions. Tell the requester this step failed, and do not state or guess anything it would have returned.${failureFallbacks[name] ? ` ${failureFallbacks[name]}` : ''} Check arguments and available status before a new request.`,
                   },
             sources: mergeSources([...inheritedSources, ...currentSources]),
           };

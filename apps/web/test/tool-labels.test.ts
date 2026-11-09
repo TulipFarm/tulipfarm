@@ -148,6 +148,20 @@ test('grouped knowledge keeps truthful states and does not imply a Slides file e
   assert.equal(cancelled.label, 'Knowledge retrieval cancelled');
 });
 
+test('a failed step says what to check, and only table steps mention rows', () => {
+  const [lookup, rows, other] = toolActivityItems([
+    tool({ tool: 'members.find', status: 'failed' }),
+    tool({ tool: 'rows.update', status: 'failed' }),
+    tool({ tool: 'agents.draft', status: 'failed' }),
+  ]);
+  assert.equal(
+    lookup?.detail,
+    'Couldn’t look up people and teams. Nothing changed. See them on the Members and Teams pages, or ask again.',
+  );
+  assert.match(String(rows?.detail), /rows/);
+  assert.equal(other?.detail, 'Failed or interrupted. Check whether anything changed before you ask again.');
+});
+
 test('a server-provided activity detail explains a step that ended without its own result', () => {
   const [item] = toolActivityItems([
     tool({ tool: 'tables.propose', activityStatus: 'completed', activityDetail: 'Corrected and resubmitted.' }),

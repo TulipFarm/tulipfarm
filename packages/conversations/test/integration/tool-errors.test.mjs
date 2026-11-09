@@ -23,7 +23,13 @@ test('generic tool failures do not instruct the model to infer missing permissio
       });
       assert.equal(generic.result.error, 'tool-failed');
       assert.match(generic.result.instruction, /not evidence of a permission denial/);
+      assert.match(generic.result.instruction, /do not state or guess anything it would have returned/);
       assert.doesNotMatch(JSON.stringify(generic), /private diagnostic/);
+      const lookup = await executeTool('members.find', false, async () => {
+        throw new Error('private diagnostic');
+      });
+      assert.match(lookup.result.instruction, /do not state or guess anything it would have returned/);
+      assert.match(lookup.result.instruction, /Members and Teams pages/);
       const denied = await executeTool('tables.propose', false, async () => {
         throw new AccessDenied();
       });
@@ -38,7 +44,7 @@ test('generic tool failures do not instruct the model to infer missing permissio
     const history = await f.store.history(w.id, w.userId, chatId);
     assert.deepEqual(
       history.messages[0].tools.map(tool => tool.status),
-      ['failed', 'blocked'],
+      ['failed', 'failed', 'blocked'],
     );
   } finally {
     await f.close();
