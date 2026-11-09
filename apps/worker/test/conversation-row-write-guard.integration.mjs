@@ -57,8 +57,10 @@ test('chat writes at most five requested rows directly to a named table and send
     model: 'fixture',
     apiKey: 'synthetic',
   };
-  const reply = input =>
-    respondToConversation(
+  let waitingCards;
+  const reply = input => {
+    waitingCards = input.waitingCards;
+    return respondToConversation(
       route,
       input.messages,
       (call, sources, activity) =>
@@ -76,6 +78,7 @@ test('chat writes at most five requested rows directly to a named table and send
       null,
       { priorCalls: input.priorCalls, sources: () => [] },
     );
+  };
   const executor = createConversationExecutor(f.runtime, reply, undefined, undefined, () =>
     assert.fail('No MCP action'),
   );
@@ -188,6 +191,8 @@ test('chat writes at most five requested rows directly to a named table and send
     assert.equal(await count(), 5);
     assert.equal(await drafts(big), 1);
     assert.equal(outputs().at(-1).error, 'approval-pending');
+    // The server counts the card that still waits, so the reply may point to it.
+    assert.equal(await waitingCards(), 1);
     // The card shows with the reply that made it; the next reply points to it once instead of writing.
     const [first, next] = (await f.store.history(w.id, w.userId, big)).messages
       .map(message => message.tools ?? [])
@@ -208,6 +213,7 @@ test('chat writes at most five requested rows directly to a named table and send
       decision: 'save',
     });
     assert.equal(approved.recordIds.length, 9);
+    assert.equal(await waitingCards(), 0);
     assert.equal(await count(), 14);
   });
 
