@@ -277,12 +277,16 @@ export function createSlackActions(options: Options) {
         if (text === 'input') continue;
         const ownChat = (source: (typeof dependencies)[number]) =>
           source.kind === 'private-conversation' && source.conversationId === draft.conversation_id;
-        // The owner approved this exact text on the draft card, so its sources need current access, not public scope.
+        // The owner approved this exact text on the draft card, so its sources, including their own memory, need current access, not public scope.
         if (text === 'reviewed') {
           await requireDraftSources(
             tx,
             actor,
             dependencies.filter(source => !ownChat(source)),
+            new Set(),
+            undefined,
+            false,
+            true,
           );
           continue;
         }
