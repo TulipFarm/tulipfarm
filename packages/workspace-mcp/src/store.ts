@@ -16,6 +16,8 @@ import {
   actionRowSchema,
   mcpCredentialSchema,
   mcpOriginSchema,
+  type McpSecretCredential,
+  type McpSecretUsers,
   mcpSourcesSchema,
   workspaceMcpCompatibility,
   type WorkspaceMcpOptions,
@@ -139,6 +141,57 @@ export function createStore(options: WorkspaceMcpOptions) {
       throw new McpError('credential-unavailable');
     }
   }
+  async function secretUsers(tx: AuthorizationTransaction, row: IntegrationRow): Promise<McpSecretUsers> {
+    if (row.ownership === 'personal') return { membershipIds: [row.owner_membership_id!], teamIds: [] };
+    const ids = async (query: string) =>
+      z
+        .array(z.object({ id: z.uuid() }))
+        .parse((await tx.client.query(query, [row.id])).rows)
+        .map(({ id }) => id);
+    return {
+      membershipIds: await ids(
+        `SELECT g.membership_id AS id FROM ${table(tx, 'member_grants')} g JOIN ${qualified(tx.schema, 'tf_memberships')} m ON m.id=g.membership_id WHERE g.integration_id=$1 AND m.removed_at IS NULL`,
+      ),
+      teamIds: await ids(`SELECT team_id AS id FROM ${table(tx, 'team_grants')} WHERE integration_id=$1`),
+    };
+  }
+  /** Checks, without decrypting, that everyone who can use the integration may send these secrets to its endpoint. */
+  async function checkSecrets(tx: AuthorizationTransaction, row: IntegrationRow, credential: McpSecretCredential) {
+    if (!options.secrets) throw new McpError('disabled');
+    try {
+      return await options.secrets.bind(tx, { credential, endpoint: row.endpoint, users: await secretUsers(tx, row) });
+    } catch {
+      throw new McpError('secret-denied');
+    }
+  }
+  /** Why the saved secrets an integration sends cannot be used now, or null. Reads the secret list, not the credential. */
+  async function secretProblem(tx: AuthorizationTransaction, row: IntegrationRow) {
+    if (!row.credential || (row.auth_method !== 'secret-bearer' && row.auth_method !== 'secret-headers')) return null;
+    const ids = z
+      .array(z.object({ secret_id: z.uuid() }))
+      .parse(
+        (
+          await tx.client.query(
+            `SELECT secret_id FROM ${table(tx, 'integration_secrets')} WHERE integration_id=$1 ORDER BY secret_id`,
+            [row.id],
+          )
+        ).rows,
+      )
+      .map(({ secret_id }) => secret_id);
+    try {
+      if (!ids.length) throw new McpError('secret-denied');
+      await checkSecrets(
+        tx,
+        row,
+        row.auth_method === 'secret-bearer'
+          ? { kind: 'secret-bearer', secretId: ids[0]! }
+          : { kind: 'secret-headers', secretIds: ids },
+      );
+      return null;
+    } catch {
+      return 'A saved secret this integration sends is no longer available to everyone who uses it, or no longer names its endpoint.';
+    }
+  }
   async function barrier(tx: AuthorizationTransaction, integrationId: string) {
     return Boolean(
       (
@@ -180,6 +233,8 @@ export function createStore(options: WorkspaceMcpOptions) {
         row.auth_method === 'oauth' &&
         !!row.credential_expires_at &&
         row.credential_expires_at.getTime() <= Date.now() + 60_000,
+      discovery: row.discovery,
+      statusReason: row.status_reason ?? (await secretProblem(tx, row)),
       blocked: await barrier(tx, row.id),
       barrierActionId: barrierRow?.action_id ?? null,
       capabilities: await capabilities(tx, actor, row),
@@ -309,6 +364,7 @@ export function createStore(options: WorkspaceMcpOptions) {
     permit,
     active,
     credential,
+    checkSecrets,
     cipher,
     barrier,
     metadata,

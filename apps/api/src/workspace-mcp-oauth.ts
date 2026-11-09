@@ -9,7 +9,7 @@ import {
 } from '@tulipfarm/workspace-mcp-transport';
 import { McpHttpError, mcpCallbackSchema, mcpHttpId } from './workspace-mcp-http.ts';
 import type { mcpAuthenticationSchema } from './workspace-mcp-contracts.ts';
-import type { workspaceMcpDiscovery } from './workspace-mcp-discovery.ts';
+import type { workspaceMcpDiscovery } from '@tulipfarm/workspace-mcp';
 
 const bindingSchema = z.strictObject({
   resource: z.url(),

@@ -6,6 +6,7 @@ import {
   authHint,
   containsSecret,
   destinationAllows,
+  mcpCredentialFrom,
   normalizeDestinations,
   parseValue,
   placementFits,
@@ -233,4 +234,43 @@ test('variable names come from the name and kind, and accept lowercase input', (
   assert.equal(variableNameSchema.parse(' stripe_key '), 'STRIPE_KEY');
   for (const bad of ['', '1KEY', '_KEY', 'STRIPE-KEY', 'A'.repeat(65)])
     assert.equal(variableNameSchema.safeParse(bad).success, false, bad);
+});
+
+test('MCP credentials combine saved secret placements and refuse ones an MCP request cannot carry', () => {
+  const headers = { kind: 'secret-headers', secretIds: [] };
+  assert.deepEqual(
+    mcpCredentialFrom(headers, [
+      { placement: { kind: 'basic' }, value: { username: 'ana', password: 'pw' } },
+      { placement: { kind: 'header', name: 'X-Project' }, value: { value: '42' } },
+      { placement: { kind: 'cookie', name: 'session' }, value: { value: 'a b' } },
+    ]),
+    {
+      kind: 'headers',
+      headers: { authorization: `Basic ${Buffer.from('ana:pw').toString('base64')}`, 'x-project': '42' },
+      cookie: 'session=a%20b',
+    },
+  );
+  assert.deepEqual(
+    mcpCredentialFrom({ kind: 'secret-bearer', secretId: '' }, [
+      { placement: { kind: 'bearer' }, value: { value: 't' } },
+    ]),
+    {
+      kind: 'bearer',
+      token: 't',
+    },
+  );
+  for (const parts of [
+    [{ placement: { kind: 'query', name: 'key' } }],
+    [{ placement: { kind: 'body', path: 'key' } }],
+    [{ placement: { kind: 'bearer' } }, { placement: { kind: 'basic' } }],
+    [{ placement: { kind: 'cookie', name: 's' } }, { placement: { kind: 'cookie', name: 's' } }],
+    [{ placement: { kind: 'header', name: 'Host' } }],
+  ])
+    assert.throws(() => mcpCredentialFrom(headers, parts), { code: 'placement-unsupported' });
+  assert.throws(
+    () => mcpCredentialFrom({ kind: 'secret-bearer', secretId: '' }, [{ placement: { kind: 'header', name: 'X' } }]),
+    {
+      code: 'placement-unsupported',
+    },
+  );
 });

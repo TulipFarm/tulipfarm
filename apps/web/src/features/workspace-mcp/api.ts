@@ -71,6 +71,7 @@ export function mcpApi(workspaceId: string, accessLost: (status: number) => void
   // for example after the agent's activations change, so that refusal only affects the selection.
   const reportsLoss = (origin: SelectionOrigin) => origin.kind === 'chat';
   return {
+    workspaceId,
     capabilities: async (signal: AbortSignal) =>
       capabilitiesSchema.parse(await request('/capabilities', 'GET', undefined, signal)),
     catalog: async (search: string, cursor: string, signal: AbortSignal) =>

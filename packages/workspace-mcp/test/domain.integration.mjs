@@ -1301,3 +1301,148 @@ test('a stale draft selection returns its version for explicit reselection witho
     await f.close();
   }
 });
+
+test('saved secrets bind for every user, resolve only at send, pin proposal versions and surface revocation', async () => {
+  const f = await mcpFixture();
+  try {
+    const value = 'synthetic-saved-mcp-secret';
+    const good = randomUUID(),
+      denied = randomUUID();
+    const saved = new Map([[good, { version: 1, policyVersion: 1, usable: true }]]);
+    for (const [index, id] of [good, denied].entries())
+      await f.db.platform.query(
+        `INSERT INTO ${f.table('tf_secrets')} (id,owner_membership_id,name,variable_name,kind,placement,placement_source,lifetime,credential,status)
+         VALUES ($1,$2,'Saved',$3,'api-key','{"kind":"bearer"}','member','saved','{}','active')`,
+        [id, f.members[0].membershipId, `SAVED_${index}_KEY`],
+      );
+    const binds = [],
+      uses = [];
+    const versions = ids =>
+      ids.map(secretId => {
+        const secret = saved.get(secretId);
+        if (!secret?.usable) throw new Error(`secret ${secretId} denied`);
+        return { secretId, version: secret.version, policyVersion: secret.policyVersion };
+      });
+    const service = f.make({
+      secrets: {
+        async bind(_tx, { credential, endpoint, users }) {
+          binds.push({ endpoint, users });
+          return versions(credential.secretIds);
+        },
+        async resolve(_tx, { credential, expected }) {
+          const current = versions(credential.secretIds);
+          if (expected && JSON.stringify(expected) !== JSON.stringify(current)) throw new Error('secret changed');
+          return {
+            credential: { kind: 'headers', headers: { authorization: `Bearer ${value}` } },
+            secrets: current,
+            values: [value],
+          };
+        },
+        async recordUse(_tx, input) {
+          uses.push(input);
+        },
+      },
+    });
+    const create = secretIds =>
+      service.create(f.one.id, f.members[0], {
+        name: 'Saved secret MCP',
+        endpoint: 'https://mcp.example.com/tools',
+        ownership: 'personal',
+        credential: { kind: 'secret-headers', secretIds },
+      });
+    await assert.rejects(create([good, denied]), /secret-denied/);
+    await assert.rejects(
+      f.service.create(f.one.id, f.members[0], {
+        name: 'No port',
+        endpoint: 'https://mcp.example.com/tools',
+        ownership: 'personal',
+        credential: { kind: 'secret-headers', secretIds: [good] },
+      }),
+      /disabled/,
+    );
+    const integration = await create([good]);
+    assert.deepEqual(binds.at(-1), {
+      endpoint: 'https://mcp.example.com/tools',
+      users: { membershipIds: [f.members[0].membershipId], teamIds: [] },
+    });
+    const joined = async () =>
+      (
+        await f.db.platform.query(`SELECT secret_id FROM ${f.table('integration_secrets')} WHERE integration_id=$1`, [
+          integration.id,
+        ])
+      ).rows.map(row => row.secret_id);
+    assert.deepEqual(await joined(), [good]);
+    const sent = [];
+    f.setDiscover(async input => {
+      sent.push(input.credential);
+      return { tools: f.getTools() };
+    });
+    const discovered = await service.discover(f.one.id, f.members[0], integration.id);
+    assert.deepEqual(sent, [{ kind: 'headers', headers: { authorization: `Bearer ${value}` } }]);
+    const stored = (
+      await f.db.platform.query(`SELECT credential FROM ${f.table('integrations')} WHERE id=$1`, [integration.id])
+    ).rows[0];
+    assert.ok(!JSON.stringify(stored).includes(value));
+    await service.reviewTools(
+      f.one.id,
+      f.members[0],
+      integration.id,
+      discovered.map(tool => ({
+        name: tool.name,
+        revision: tool.discovered_revision,
+        enabled: true,
+        standingException: true,
+      })),
+    );
+    const propose = async () => {
+      const origin = await f.select(integration);
+      const handle = (await service.catalog(f.one.id, f.members[0], origin)).tools.find(
+        tool => tool.tool.name === 'write',
+      ).handle;
+      const action = await service.propose(f.one.id, f.members[0], {
+        id: randomUUID(),
+        origin,
+        handle,
+        arguments: { text: 'private input' },
+      });
+      await f.approve(action);
+      return action;
+    };
+    const first = await propose();
+    assert.deepEqual(
+      (await f.db.platform.query(`SELECT secrets FROM ${f.table('actions')} WHERE id=$1`, [first.id])).rows[0].secrets,
+      [{ secretId: good, version: 1, policyVersion: 1 }],
+    );
+    assert.equal((await service.dispatch(f.one.id, first.id)).status, 'succeeded');
+    assert.deepEqual(f.calls.at(-1).credential, { kind: 'headers', headers: { authorization: `Bearer ${value}` } });
+    assert.deepEqual(uses, [
+      {
+        secretIds: [good],
+        membershipId: f.members[0].membershipId,
+        endpoint: 'https://mcp.example.com/tools',
+        tool: 'mcp:write',
+      },
+    ]);
+
+    const reflected = await propose();
+    f.setCall(async () => ({ content: [{ type: 'text', text: `echo ${value}` }] }));
+    assert.equal((await service.dispatch(f.one.id, reflected.id)).status, 'outcome-unknown');
+    assert.equal((await service.action(f.one.id, f.members[0], reflected.id)).receipt.result, null);
+    await service.reconcile(f.one.id, f.members[0], reflected.id, { observation: 'not-performed', notes: 'Checked' });
+    f.setCall(async () => ({ content: [{ type: 'text', text: 'provider result' }] }));
+
+    const rotated = await propose();
+    saved.get(good).version = 2;
+    const calls = f.calls.length;
+    await assert.rejects(service.dispatch(f.one.id, rotated.id), /credential-unavailable/);
+    assert.equal(f.calls.length, calls);
+
+    assert.equal((await service.status(f.one.id, f.members[0], integration.id)).statusReason, null);
+    saved.get(good).usable = false;
+    assert.match((await service.status(f.one.id, f.members[0], integration.id)).statusReason, /no longer available/);
+    await service.setLifecycle(f.one.id, f.members[0], integration.id, 'disconnected');
+    assert.deepEqual(await joined(), []);
+  } finally {
+    await f.close();
+  }
+});

@@ -11,7 +11,10 @@ import {
   type SecretKind,
   type SecretOrigin,
   type SecretValue,
+  valueParts,
 } from './contracts.ts';
+import { normalizeEndpoint } from '@tulipfarm/workspace-mcp-transport';
+import { mcpCredentialFrom, mcpSecretIds, type McpSecretCredential, type McpSecretVersion } from './mcp.ts';
 import { redactUrl } from './placement.ts';
 import type { SecretRequests } from './requests.ts';
 import { table, type Secrets, type SecretTransaction } from './service.ts';
@@ -170,5 +173,66 @@ export function heldSecrets(
           origin: holder.origin,
         }),
       ),
+  };
+}
+
+/**
+ * Decrypts the saved secrets an MCP connection names, for one member's discovery or tool call, inside the caller's
+ * claim transaction. Each secret must still name the exact endpoint. With `expected`, a secret replaced or re-shared
+ * since then fails, so an approval never sends a value the member did not approve with (P26).
+ */
+export function mcpSecretSends(secrets: Secrets) {
+  return {
+    async resolve(
+      tx: SecretTransaction,
+      input: {
+        workspaceId: string;
+        membershipId: string;
+        credential: McpSecretCredential;
+        endpoint: string;
+        expected?: McpSecretVersion[];
+      },
+    ) {
+      const endpoint = normalizeEndpoint(input.endpoint);
+      const ids = mcpSecretIds(input.credential);
+      if (
+        input.expected &&
+        (input.expected.length !== ids.length || input.expected.some(({ secretId }) => !ids.includes(secretId)))
+      )
+        throw new SecretError('conflict');
+      const parts = [];
+      for (const secretId of ids) {
+        const expected = input.expected?.find(version => version.secretId === secretId);
+        const resolved = await resolveForSend(secrets, tx, {
+          workspaceId: input.workspaceId,
+          membershipId: input.membershipId,
+          secret: { kind: 'secret', secretId },
+          url: endpoint,
+          ...(expected ? { expected } : {}),
+        });
+        if (
+          !resolved.destinations.some(destination => destination.kind === 'endpoint' && destination.value === endpoint)
+        )
+          throw new SecretError('destination-denied');
+        parts.push(resolved);
+      }
+      return {
+        credential: mcpCredentialFrom(input.credential, parts),
+        secrets: parts.map(({ secretId, version, policyVersion }) => ({ secretId, version, policyVersion })),
+        values: parts.flatMap(part => valueParts(part.value)),
+      };
+    },
+    async recordUse(
+      tx: SecretTransaction,
+      input: { secretIds: string[]; membershipId: string; endpoint: string; tool: string },
+    ) {
+      for (const secretId of input.secretIds)
+        await recordUse(secrets, tx, {
+          secretId,
+          membershipId: input.membershipId,
+          tool: input.tool,
+          url: input.endpoint,
+        });
+    },
   };
 }

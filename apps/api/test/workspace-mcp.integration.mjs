@@ -13,7 +13,7 @@ import { authConfig } from '../src/auth.ts';
 import { registerConversations } from '../src/conversations.ts';
 import { createConversations } from '@tulipfarm/conversations';
 import { mcpProtocolFixture } from './workspace-mcp-protocol-fixture.mjs';
-import { mcpDiscoveryRequestId } from '../src/workspace-mcp-discovery.ts';
+import { mcpDiscoveryRequestId, workspaceMcpDiscovery } from '@tulipfarm/workspace-mcp';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
@@ -699,6 +699,121 @@ test('workspace MCP HTTP uses real restricted domain storage and never dispatche
         await disabled.close();
       }
     });
+  } finally {
+    await app.close();
+    permissions.close();
+    await f.close();
+  }
+});
+
+test('saved-secret setup only binds in the API and hands discovery to the worker', async () => {
+  const usable = new Set();
+  const secrets = {
+    async bind(_tx, { credential }) {
+      if (!credential.secretIds.every(id => usable.has(id))) throw new Error('denied');
+      return credential.secretIds.map(secretId => ({ secretId, version: 1, policyVersion: 1 }));
+    },
+  };
+  const f = await apiMcpFixture({ secrets });
+  const worker = f.make({
+    secrets: {
+      ...secrets,
+      resolve: async (_tx, { credential }) => ({
+        credential: { kind: 'headers', headers: { authorization: 'Bearer synthetic-saved-secret' } },
+        secrets: credential.secretIds.map(secretId => ({ secretId, version: 1, policyVersion: 1 })),
+        values: ['synthetic-saved-secret'],
+      }),
+    },
+  });
+  const queued = [];
+  let start = async input => {
+    queued.push(input);
+    await workspaceMcpDiscovery(f.runtime, worker).discover(input.workspaceId, input.userId, input.integrationId, {
+      requestId: input.requestId,
+      expectedVersion: input.expectedVersion,
+    });
+  };
+  const app = Fastify();
+  const member = f.members[0];
+  const auth = {
+    api: { getSession: async () => ({ user: { id: member.userId }, session: { id: `session-${member.userId}` } }) },
+  };
+  const catalog = workspaceMcpCatalog(createRegistryCatalog({ fetcher: async () => new Response('[]') }));
+  const permissions = workspaceMcpPermissions(f.runtime, f.service);
+  const api = queueDiscovery =>
+    createWorkspaceMcpApi({ ...f.options, service: f.service, catalog, permissions, queueDiscovery });
+  let service = api(input => start(input));
+  const current = Object.fromEntries(
+    Object.keys(service)
+      .filter(key => typeof service[key] === 'function')
+      .map(key => [key, (...args) => service[key](...args)]),
+  );
+  await app.register(async routes => registerWorkspaceMcp(routes, auth, { ...service, ...current }), {
+    prefix: '/v1',
+  });
+  const base = `/v1/workspaces/${f.one.id}/workspace-mcp/integrations`;
+  const post = (url, payload) =>
+    app.inject({ method: 'POST', url, payload, headers: { origin: authConfig().webOrigin, cookie: 'member' } });
+  try {
+    const secretIds = [randomUUID()];
+    for (const id of secretIds)
+      await f.db.platform.query(
+        `INSERT INTO ${f.table('tf_secrets')} (id,owner_membership_id,name,variable_name,kind,placement,placement_source,lifetime,credential,status)
+         VALUES ($1,$2,'Saved','SAVED_KEY','api-key','{"kind":"bearer"}','member','saved','{}','active')`,
+        [id, member.membershipId],
+      );
+    const payload = {
+      name: 'Saved secret MCP',
+      ownership: 'personal',
+      endpoint: 'https://mcp.example.com/tools',
+      auth: { kind: 'secrets', secretIds },
+    };
+    const denied = await post(base, { ...payload, requestId: randomUUID() });
+    assert.equal(denied.statusCode, 400, denied.body);
+    assert.equal(denied.json().error, 'mcp-secret-denied');
+
+    usable.add(secretIds[0]);
+    const requestId = randomUUID();
+    const created = await post(base, { ...payload, requestId });
+    assert.equal(created.statusCode, 200, created.body);
+    const integration = created.json().integration;
+    assert.equal(integration.authMethod, 'secret-headers');
+    assert.deepEqual(queued, [
+      {
+        workspaceId: f.one.id,
+        userId: member.userId,
+        integrationId: integration.id,
+        requestId: mcpDiscoveryRequestId(requestId),
+        expectedVersion: 1,
+      },
+    ]);
+    const status = () => f.service.status(f.one.id, member, integration.id);
+    assert.equal((await status()).discovery, null);
+    assert.deepEqual((await f.service.tools(f.one.id, member, integration.id)).map(tool => tool.name).sort(), [
+      'read',
+      'write',
+    ]);
+
+    const { version } = await status();
+    start = async () => {
+      throw new Error('temporal unavailable');
+    };
+    const failed = await post(`${base}/${integration.id}/discover`, {
+      requestId: randomUUID(),
+      expectedVersion: version,
+    });
+    assert.equal(failed.statusCode, 503, failed.body);
+    assert.equal(failed.json().error, 'mcp-discovery-failed');
+    assert.equal((await status()).discovery, 'failed');
+    assert.equal((await status()).statusReason, 'Tool discovery could not start. Try again.');
+
+    service = api(undefined);
+    const unconfigured = await post(`${base}/${integration.id}/discover`, {
+      requestId: randomUUID(),
+      expectedVersion: version,
+    });
+    assert.equal(unconfigured.statusCode, 503, unconfigured.body);
+    assert.equal(unconfigured.json().error, 'mcp-credential-unavailable');
   } finally {
     await app.close();
     permissions.close();

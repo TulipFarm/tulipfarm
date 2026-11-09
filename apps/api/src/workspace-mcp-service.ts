@@ -16,7 +16,7 @@ import {
 } from '@tulipfarm/workspace-mcp';
 import { authenticationHeaders, normalizeEndpoint } from '@tulipfarm/workspace-mcp-transport';
 import { createWorkspaceMcpOAuth } from './workspace-mcp-oauth.ts';
-import { mcpDiscoveryRequestId, workspaceMcpDiscovery } from './workspace-mcp-discovery.ts';
+import { mcpDiscoveryRequestId, workspaceMcpDiscovery } from '@tulipfarm/workspace-mcp';
 import { McpHttpError } from './workspace-mcp-http.ts';
 import type { workspaceMcpPermissions } from './workspace-mcp-permissions.ts';
 import { workspaceMcpActions } from './workspace-mcp-actions.ts';
@@ -43,6 +43,14 @@ type Options = {
   permissions: Pick<ReturnType<typeof workspaceMcpPermissions>, 'permissions' | 'setPermissions' | 'permissionChoices'>;
   authorizeSelection: NonNullable<WorkspaceMcpOptions['authorizeSelection']>;
   authorizeSources: WorkspaceMcpOptions['authorizeSources'];
+  /** Starts discovery in the worker, which alone may decrypt saved secrets. */
+  queueDiscovery?: (input: {
+    workspaceId: string;
+    userId: string;
+    integrationId: string;
+    requestId: string;
+    expectedVersion: number;
+  }) => Promise<void>;
 };
 type Metadata = Awaited<ReturnType<WorkspaceMcpService['status']>>;
 
@@ -73,15 +81,19 @@ export function createWorkspaceMcpApi(options: Options) {
       version: row.version,
       authorizationEpoch: row.authorizationEpoch,
       status:
-        row.lifecycle === 'active'
-          ? 'review-required'
-          : row.lifecycle === 'authorizing'
-            ? 'oauth-pending'
-            : row.lifecycle === 'reconnect-required'
-              ? 'error'
-              : row.lifecycle === 'deleted'
-                ? 'disconnected'
-                : row.lifecycle,
+        row.lifecycle === 'active' && row.discovery === 'queued'
+          ? 'discovering'
+          : row.lifecycle === 'active' && (row.discovery === 'failed' || row.statusReason)
+            ? 'error'
+            : row.lifecycle === 'active'
+              ? 'review-required'
+              : row.lifecycle === 'authorizing'
+                ? 'oauth-pending'
+                : row.lifecycle === 'reconnect-required'
+                  ? 'error'
+                  : row.lifecycle === 'deleted'
+                    ? 'disconnected'
+                    : row.lifecycle,
       canManage: row.capabilities.manage,
       canUse: row.capabilities.use,
       barrier: row.barrierActionId ? { actionId: row.barrierActionId } : null,
@@ -89,7 +101,7 @@ export function createWorkspaceMcpApi(options: Options) {
         ? 'An unresolved action pauses this integration.'
         : row.lifecycle === 'reconnect-required'
           ? 'Reconnect and review this integration.'
-          : null,
+          : row.statusReason,
       ...(row.lifecycle === 'reconnect-required' && row.authMethod === 'oauth'
         ? { reauthorizationRequired: true }
         : {}),
@@ -97,7 +109,7 @@ export function createWorkspaceMcpApi(options: Options) {
   }
   async function readyIntegration(workspaceId: string, userId: string, row: Metadata) {
     const metadata = integration(row);
-    if (row.lifecycle === 'active') {
+    if (row.lifecycle === 'active' && metadata.status === 'review-required') {
       if (!(await discovery.validated(workspaceId, userId, row))) {
         metadata.status = 'setup';
         metadata.statusReason = 'Credentials are saved. Discover tools to validate this integration.';
@@ -205,6 +217,22 @@ export function createWorkspaceMcpApi(options: Options) {
   function admitted() {
     if (!options.admissionEnabled) throw new McpHttpError('mcp-admission-disabled', 503);
   }
+  async function queue(workspaceId: string, userId: string, integrationId: string, requestId: string) {
+    if (!options.queueDiscovery) throw new McpHttpError('mcp-credential-unavailable', 503);
+    const expectedVersion = await service.queueDiscovery(workspaceId, userId, integrationId);
+    try {
+      await options.queueDiscovery({ workspaceId, userId, integrationId, requestId, expectedVersion });
+    } catch {
+      await service.failDiscovery(
+        workspaceId,
+        integrationId,
+        expectedVersion,
+        'Tool discovery could not start. Try again.',
+      );
+      throw new McpHttpError('mcp-discovery-failed', 503);
+    }
+  }
+  const usesSecrets = (row: Metadata) => row.authMethod === 'secret-bearer' || row.authMethod === 'secret-headers';
   return {
     oauth,
     claimTaskSelection: service.claimTaskSelection,
@@ -257,13 +285,15 @@ export function createWorkspaceMcpApi(options: Options) {
                 kind: 'headers' as const,
                 headers: Object.fromEntries(auth.headers.map(header => [header.name, header.value])),
               }
-            : auth;
+            : auth.kind === 'secrets'
+              ? { kind: 'secret-headers' as const, secretIds: auth.secretIds }
+              : auth;
       if (
         auth.kind === 'headers' &&
         new Set(auth.headers.map(header => header.name.toLowerCase())).size !== auth.headers.length
       )
         throw new McpHttpError('invalid-request', 400);
-      authenticationHeaders(credential);
+      if (credential.kind !== 'secret-headers') authenticationHeaders(credential);
       let row;
       if (id) {
         const current = await service.status(workspaceId, userId, id);
@@ -291,6 +321,10 @@ export function createWorkspaceMcpApi(options: Options) {
         if (result.kind === 'registration-required') metadata.status = 'registration-required';
         return { ...result, integration: metadata };
       }
+      if (auth.kind === 'secrets') {
+        await queue(workspaceId, userId, row.id, mcpDiscoveryRequestId(input.requestId));
+        return { kind: 'saved' as const, integration: integration(await service.status(workspaceId, userId, row.id)) };
+      }
       await discovery.discover(workspaceId, userId, row.id, {
         requestId: mcpDiscoveryRequestId(input.requestId),
         expectedVersion: row.version,
@@ -302,6 +336,11 @@ export function createWorkspaceMcpApi(options: Options) {
     },
     async discover(workspaceId: string, userId: string, id: string, input: z.infer<typeof mcpMutationSchema>) {
       const before = await service.status(workspaceId, userId, id);
+      if (usesSecrets(before)) {
+        if (before.version !== input.expectedVersion) throw new McpHttpError('mcp-conflict', 409);
+        await queue(workspaceId, userId, id, input.requestId);
+        return detail(workspaceId, userId, id);
+      }
       const refreshed = await oauth.refresh(workspaceId, userId, id);
       if (refreshed.version !== before.version) throw new McpHttpError('mcp-conflict', 409);
       await discovery.discover(workspaceId, userId, id, input);

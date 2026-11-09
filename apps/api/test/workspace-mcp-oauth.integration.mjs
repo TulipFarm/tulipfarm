@@ -5,7 +5,7 @@ import { mcpFixture } from '../../../packages/workspace-mcp/test/fixture.mjs';
 import { createOAuthOperations, MCP_OAUTH_CLIENT_ID, MCP_OAUTH_REDIRECT_URI } from '@tulipfarm/workspace-mcp-transport';
 import { createWorkspaceMcpOAuth } from '../src/workspace-mcp-oauth.ts';
 import { mcpProtocolFixture } from './workspace-mcp-protocol-fixture.mjs';
-import { workspaceMcpDiscovery } from '../src/workspace-mcp-discovery.ts';
+import { workspaceMcpDiscovery } from '@tulipfarm/workspace-mcp';
 
 test('OAuth composition consumes restricted PostgreSQL session state once before code exchange', async t => {
   const f = await mcpFixture();

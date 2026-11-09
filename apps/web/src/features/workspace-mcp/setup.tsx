@@ -3,7 +3,10 @@ import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { Button } from '@tulipfarm/sprout/button';
 import { Input } from '@tulipfarm/sprout/input';
 import { Label } from '@tulipfarm/sprout/label';
+import { Checkbox } from '@tulipfarm/sprout/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@tulipfarm/sprout/select';
+import { useSecrets } from '@/features/secrets/queries';
+import { placementPhrase } from '@/features/secrets/contracts';
 import { UnsavedChanges } from '@/features/tables/feedback';
 import type { McpApi } from './api';
 import {
@@ -40,9 +43,25 @@ export function McpSetup({
   const [name, setName] = useState(integration?.name ?? entry?.name ?? '');
   const [endpoint, setEndpoint] = useState(integration?.endpoint ?? entry?.endpoint ?? '');
   const [ownership, setOwnership] = useState<'personal' | 'shared'>(integration?.ownership ?? 'personal');
-  const [auth, setAuth] = useState(
-    integration?.authMethod ?? (entry?.authentication === 'unknown' ? '' : (entry?.authentication ?? '')),
+  const [auth, setAuth] = useState<string>(
+    integration?.authMethod === 'secret-bearer' || integration?.authMethod === 'secret-headers'
+      ? 'secrets'
+      : (integration?.authMethod ?? (entry?.authentication === 'unknown' ? '' : (entry?.authentication ?? ''))),
   );
+  const [secretIds, setSecretIds] = useState<string[]>([]);
+  const savedSecrets = useSecrets(api.workspaceId, auth === 'secrets');
+  const usableSecrets =
+    savedSecrets.state.kind === 'ready'
+      ? savedSecrets.state.data.filter(
+          secret =>
+            secret.status === 'active' &&
+            secret.placement.kind !== 'query' &&
+            secret.placement.kind !== 'body' &&
+            secret.destinations.some(
+              destination => destination.kind === 'endpoint' && sameEndpoint(destination.value, endpoint),
+            ),
+        )
+      : [];
   const [token, setToken] = useState('');
   const [headers, setHeaders] = useState([{ name: '', value: '' }]);
   const [clientId, setClientId] = useState('');
@@ -87,18 +106,20 @@ export function McpSetup({
           ? { kind: auth, token }
           : auth === 'headers'
             ? { kind: auth, headers }
-            : {
-                kind: auth,
-                ...(clientId
-                  ? {
-                      client: {
-                        clientId,
-                        authMethod: clientAuthMethod,
-                        ...(clientAuthMethod !== 'none' && clientSecret ? { clientSecret } : {}),
-                      },
-                    }
-                  : {}),
-              },
+            : auth === 'secrets'
+              ? { kind: auth, secretIds: secretIds.filter(id => usableSecrets.some(secret => secret.id === id)) }
+              : {
+                  kind: auth,
+                  ...(clientId
+                    ? {
+                        client: {
+                          clientId,
+                          authMethod: clientAuthMethod,
+                          ...(clientAuthMethod !== 'none' && clientSecret ? { clientSecret } : {}),
+                        },
+                      }
+                    : {}),
+                },
     );
     if (auth === 'oauth' && clientId && clientAuthMethod !== 'none' && !clientSecret)
       fields.auth = 'Enter the client secret for the selected registered authentication method.';
@@ -250,6 +271,7 @@ export function McpSetup({
                 <SelectItem value="none">No authentication</SelectItem>
                 <SelectItem value="bearer">Bearer token</SelectItem>
                 <SelectItem value="headers">Secret headers / API key</SelectItem>
+                <SelectItem value="secrets">Saved secrets</SelectItem>
                 <SelectItem value="oauth">OAuth</SelectItem>
               </SelectContent>
             </Select>
@@ -258,6 +280,39 @@ export function McpSetup({
             </p>
             {error('auth')}
           </div>
+          {auth === 'secrets' && (
+            <fieldset className="space-y-2" aria-describedby={`${prefix}-secrets-help`}>
+              <legend className="text-sm font-medium">Saved secrets to send</legend>
+              {savedSecrets.state.kind === 'ready' ? (
+                usableSecrets.length ? (
+                  usableSecrets.map(secret => (
+                    <div key={secret.id} className="flex items-center gap-2">
+                      <Checkbox
+                        id={`${prefix}-secret-${secret.id}`}
+                        checked={secretIds.includes(secret.id)}
+                        onCheckedChange={checked =>
+                          setSecretIds(ids => (checked ? [...ids, secret.id] : ids.filter(id => id !== secret.id)))
+                        }
+                      />
+                      <Label htmlFor={`${prefix}-secret-${secret.id}`}>
+                        {secret.name}{' '}
+                        <span className="text-muted-foreground">sent {placementPhrase(secret.placement)}</span>
+                      </Label>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-sm">No saved secret can be sent to this endpoint yet.</p>
+                )
+              ) : (
+                <p className="text-sm text-muted-foreground">Loading saved secrets…</p>
+              )}
+              <p id={`${prefix}-secrets-help`} className="text-sm text-muted-foreground">
+                Only active secrets whose destination is exactly this endpoint are listed. Add one in Settings, Secrets.
+                Tool discovery runs in the background and may take a minute.
+                {ownership === 'shared' && ' Everyone you grant this integration must also be able to use each secret.'}
+              </p>
+            </fieldset>
+          )}
           {auth === 'bearer' && (
             <div className="space-y-2">
               <Label htmlFor={`${prefix}-token`}>Bearer token</Label>
@@ -434,4 +489,14 @@ export function McpSetup({
       </Button>
     </section>
   );
+}
+
+function sameEndpoint(a: string, b: string) {
+  try {
+    const left = new URL(a);
+    const right = new URL(b.trim());
+    return left.origin === right.origin && left.pathname.replace(/\/$/, '') === right.pathname.replace(/\/$/, '');
+  } catch {
+    return false;
+  }
 }
