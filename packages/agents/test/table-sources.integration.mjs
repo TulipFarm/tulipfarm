@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import { fixture, connect, denied } from '../../workspace-storage/test/integration/fixture.mjs';
 import { workspaceTableMigrations } from '@tulipfarm/workspaces/table-migrations';
 import {
-  bindTableKnowledgeSources,
+  bindTableSourceAuthorization,
   requireTableSources,
   requireTableFiles,
   requireTableImportAttachment,
@@ -270,7 +270,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
 });
 
 test(
-  'approved table changes apply with the knowledge documents their requester can still read',
+  'approved table changes apply with the knowledge documents and workflows their requester can still read',
   { timeout: 120000 },
   async t => {
     const f = await conversationFixture();
@@ -309,7 +309,7 @@ test(
       requireSources: requireTableSources,
       requireFiles: requireTableFiles,
       requireImportReference: requireTableImportReference,
-      bindSourceAuthorization: bindTableKnowledgeSources,
+      bindSourceAuthorization: bindTableSourceAuthorization,
     };
     const advance = createTableExecution({
       ...workerAccess,
@@ -398,7 +398,7 @@ test(
         commandId: randomUUID(),
         decision: 'approve',
       });
-      return proposal;
+      return { ...proposal, tableId: id };
     };
     const finish = async proposal => {
       for (let i = 0; i < 100; i++) {
@@ -461,6 +461,59 @@ test(
       await citing(doc, other);
       assert.equal(await finish(proposal), 'blocked');
       assert.equal(await receipt(proposal), 'access-denied');
+    });
+
+    const workflow = async (tableId, membershipId) => {
+      const workflowId = randomUUID(),
+        revision = randomUUID();
+      await f.db.platform.query('BEGIN');
+      await f.db.platform.query(`INSERT INTO ${s}.tf_workflows(id,revision) VALUES($1,$2)`, [workflowId, revision]);
+      await f.db.platform.query(
+        `INSERT INTO ${s}.tf_workflow_revisions(workflow_id,id,definition,author_membership_id) VALUES($1,$2,$3,$4)`,
+        [
+          workflowId,
+          revision,
+          { version: 1, name: 'Order flow', triggers: [{ id: 'row', kind: 'row', tableId }], steps: [] },
+          w.membershipId,
+        ],
+      );
+      await f.db.platform.query('COMMIT');
+      await f.db.platform.query(
+        `INSERT INTO ${s}.tf_workflow_grants(workflow_id,membership_id,permission) VALUES($1,$2,'read')`,
+        [workflowId, membershipId],
+      );
+      return { kind: 'workflow-definition', workflowId, revision };
+    };
+    const orders = await approved('Orders', []);
+    assert.equal(await finish(orders), 'completed');
+    const ordersTable = orders.tableId;
+
+    await t.test('a workflow the requester read applies', async () => {
+      const proposal = await approved('Order notes', [await workflow(ordersTable, w.membershipId)]);
+      assert.equal(await finish(proposal), 'completed');
+    });
+
+    await t.test('a workflow the requester can no longer read is denied', async () => {
+      const source = await workflow(ordersTable, w.membershipId);
+      const proposal = await approved('Order archive', [source]);
+      await f.db.platform.query(`DELETE FROM ${s}.tf_workflow_grants WHERE workflow_id=$1`, [source.workflowId]);
+      assert.equal(await finish(proposal), 'blocked');
+      assert.equal(await receipt(proposal), 'access-denied');
+    });
+
+    await t.test('another member’s workflow is denied', async () => {
+      const source = await workflow(ordersTable, other);
+      const check = async (membershipId, userId) =>
+        (
+          await f.db.platform.query(`SELECT ${s}.tf_table_workflow_source($1,$2,$3) AS targets`, [
+            membershipId,
+            userId,
+            source,
+          ])
+        ).rows[0].targets;
+      assert.deepEqual(await check(other, otherUser), { tableIds: [ordersTable] });
+      assert.equal(await check(w.membershipId, w.userId), null);
+      assert.equal(await check(other, w.userId), null);
     });
   },
 );

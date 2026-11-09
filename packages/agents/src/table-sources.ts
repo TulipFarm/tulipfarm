@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import {
   AccessDenied,
+  canAccessTable,
   lockAuthorization,
   protectedSourceClosure,
   requireNoMcpDerived,
@@ -88,9 +89,10 @@ export async function currentTableSources(
 
 type KnowledgeDocumentSource = Extract<SourceDependency, { kind: 'knowledge-document' }>;
 
-// Table execution and publication recheck sources in transactions that cannot read knowledge tables, so a definer
-// function applies the knowledge gate for the requester and returns each cited document's own sources.
-export function bindTableKnowledgeSources<X extends AgentTransaction & { workspaceId: string }>(
+// Table execution and publication recheck sources in transactions that cannot read knowledge or workflow tables, so
+// definer functions apply those gates for the requester: each cited document's own sources and each cited workflow's
+// tables come back to be checked here.
+export function bindTableSourceAuthorization<X extends AgentTransaction & { workspaceId: string }>(
   tx: X,
   requester: HumanActor,
 ): X {
@@ -120,6 +122,20 @@ export function bindTableKnowledgeSources<X extends AgentTransaction & { workspa
         actor,
         closure.filter(item => item.kind !== 'knowledge-document'),
       );
+    },
+    async requireWorkflowSource(actor, source) {
+      if (actor.membershipId !== requester.membershipId || actor.userId !== requester.userId) throw new AccessDenied();
+      const row = (
+        await tx.client.query(`SELECT ${relation(tx, 'tf_table_workflow_source')}($1,$2,$3) AS targets`, [
+          requester.membershipId,
+          requester.userId,
+          source,
+        ])
+      ).rows[0];
+      const targets = z.object({ targets: z.object({ tableIds: z.array(z.uuid()) }).nullable() }).parse(row).targets;
+      if (!targets) throw new AccessDenied();
+      for (const tableId of targets.tableIds)
+        if (!(await canAccessTable(bound, actor, tableId, 'table.row.read'))) throw new AccessDenied();
     },
   };
   return bound;

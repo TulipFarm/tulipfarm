@@ -43,6 +43,10 @@ export type AuthorizationTransaction = {
     actor: HumanActor,
     reference: { fileId: string; item?: boolean; cited?: boolean },
   ) => Promise<void>;
+  requireWorkflowSource?: (
+    actor: HumanActor,
+    source: Extract<SourceDependency, { kind: 'workflow-definition' | 'workflow-provider' }>,
+  ) => Promise<void>;
   knowledgeSourceDependencies?: (
     source: Extract<SourceDependency, { kind: 'knowledge-document' }>,
   ) => Promise<SourceDependency[]>;
