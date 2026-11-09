@@ -683,6 +683,9 @@ export function httpFailure(
   if (has('content_filter', 'content_policy_violation')) return 'refusal';
   if (has('context_length_exceeded', 'model_context_window_exceeded', 'request_too_large')) return 'context-overflow';
   if (status === 403) return 'permission';
+  // Azure answers a deployment it serves with an occasional plain-text 404 (route_not_found) that a retry gets past.
+  // A deployment that does not exist answers with a JSON DeploymentNotFound error instead.
+  if (provider === 'azure' && status === 404 && !error.success) return 'unavailable';
   // A missing deployment or model, whatever status the provider sends with it.
   if (
     [301, 302, 303, 307, 308, 404].includes(status) ||
