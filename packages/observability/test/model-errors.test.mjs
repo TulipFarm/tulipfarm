@@ -43,7 +43,14 @@ test('every model-<reason> message maps to a bounded class instead of a generic 
 });
 
 test('chat row refusals and import results keep their own error code', () => {
-  for (const code of ['approval-pending', 'batch-required', 'import-file-failed', 'table-not-found'])
+  for (const code of [
+    'approval-pending',
+    'batch-required',
+    'import-file-failed',
+    'table-not-found',
+    'invalid-value',
+    'import-unavailable',
+  ])
     assert.equal(telemetryErrorCode(code), code);
   assert.equal(telemetryErrorCode('not-a-reviewed-code'), undefined);
 });
