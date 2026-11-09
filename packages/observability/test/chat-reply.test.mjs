@@ -219,6 +219,10 @@ test('stopped reply reasons are bounded and prefer the stored code over the atte
   assert.equal(chatStopReason('model-context-overflow'), 'context');
   assert.equal(chatStopReason('model-timeout'), 'provider-timeout');
   assert.equal(chatStopReason('model-rate-limited'), 'provider-error');
+  // The completion check rejecting every answer is not a provider fault.
+  assert.equal(chatStopReason('model-incomplete-response'), 'completion-check');
+  assert.equal(chatStopReason('attempts-exhausted', 'model-incomplete-response'), 'completion-check');
+  assert.equal(chatStopReason('model-invalid-response'), 'provider-error');
   assert.equal(chatStopReason('attempts-exhausted', '40P01'), 'database');
   assert.equal(chatStopReason('transient-failure', 'pool_capacity'), 'database');
   assert.equal(chatStopReason(null, 'conversation-context-overflow'), 'context');

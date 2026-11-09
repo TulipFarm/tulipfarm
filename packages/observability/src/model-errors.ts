@@ -14,6 +14,8 @@ export const modelErrorClasses = Object.freeze([
   'network',
   'server_error',
   'invalid_response',
+  // The completion check rejected every answer; no model call failed.
+  'incomplete_response',
   'cancelled',
   'unknown',
 ] as const);
@@ -33,7 +35,7 @@ export const modelFailureClasses = Object.freeze({
   'invalid-request': 'bad_request',
   'invalid-decision': 'invalid_response',
   'invalid-response': 'invalid_response',
-  'incomplete-response': 'invalid_response',
+  'incomplete-response': 'incomplete_response',
   'output-limit': 'invalid_response',
   cancelled: 'cancelled',
   timeout: 'timeout',

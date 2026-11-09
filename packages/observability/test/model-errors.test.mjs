@@ -34,6 +34,7 @@ test('every model-<reason> message maps to a bounded class instead of a generic 
   }
   assert.equal(telemetryErrorCode('model-quota'), 'quota_exceeded');
   assert.equal(telemetryErrorCode('model-configuration'), 'not_found');
+  assert.equal(telemetryErrorCode('model-incomplete-response'), 'incomplete_response');
   assert.equal(errorType(new Error('model-rate-limit')), 'rate_limited');
   assert.equal(errorType(new Error('model-timeout')), 'timeout');
   // Existing codes keep their meaning.

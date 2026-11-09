@@ -1810,6 +1810,11 @@ const layoutFailedReply = 'The answer could not be laid out. Ask again to see it
 const toolLimitReply = 'The tool limit was reached. Review the completed actions before asking me to continue.';
 const toolLoopReply =
   'I stopped because repeated tool requests were not making progress. Writes with existing receipts were not repeated. Review the completed actions and any unfinished work before continuing.';
+const unfinishedNote =
+  'I stopped here, so this request may not be finished. Check Tool activity for what ran, then ask me to continue.';
+const unfinishedReply =
+  'I stopped before finishing this request. Check Tool activity for what ran, then ask me to continue.';
+const unfinishedNoToolsReply = "I stopped before finishing this request. Ask me to continue when you're ready.";
 const writeAlone =
   'Not run. Request a tool that changes data alone, in its own response. Read-only tools can run together.';
 const chatSystemBlocks = (projectInstructions?: string) =>
@@ -3469,11 +3474,19 @@ export async function inferWithTools(
       preview('');
       if (finalizing) return finish(unbacked ? `${stoppingReply} ${noCardReply(waiting)}` : stoppingReply);
       if (completionCorrections++ >= 2) {
+        // Corrections are spent, so the reply ends with an answer rather than failing after its tools ran.
+        recordChatCompletionCheck('exhausted');
         // A reply that keeps naming a card it did not make ends by pointing at the card that does wait, if any.
         if (unbacked || (cardClaimed && waiting && !cardInReply(items))) return finish(noCardReply(waiting), true);
         // Asking the person which table, after looking tables up, writes nothing and is a safe place to stop.
         if (idAsked || (asksAboutTable(candidate) && lookedUpTable(items))) return accept();
-        throw new Error('model-incomplete-response');
+        // The last answer is kept only when it neither promises work nor reports an outcome no tool produced.
+        const answer = candidate.trim();
+        const grounded =
+          answer && !writeUnbacked && !promisesWork(answer) && (workToolUsed || !claimsActionOutcome(answer));
+        // Tool activity is only shown once a tool ran in this turn.
+        if (!calls) return finish(grounded ? `${answer}\n\n${unfinishedNoToolsReply}` : unfinishedNoToolsReply, true);
+        return finish(grounded ? `${answer}\n\n${unfinishedNote}` : unfinishedReply, true);
       }
       items.push(
         { kind: 'turn', turn: { role: 'assistant', text: candidate } },

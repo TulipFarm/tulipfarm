@@ -1786,6 +1786,7 @@ export const chatStopReasons = [
   'context',
   'provider-timeout',
   'provider-error',
+  'completion-check',
   'database',
   'credits',
   'other',
@@ -1816,6 +1817,7 @@ function stopReasonOf(code: string): ChatStopReason | undefined {
     return 'context';
   if (code === 'model-timeout' || code === 'model-transport' || code === 'timeout' || code === 'network')
     return 'provider-timeout';
+  if (code === 'model-incomplete-response' || code === 'incomplete_response') return 'completion-check';
   if (
     code.startsWith('model-') ||
     code.startsWith('conversation-model-') ||
@@ -2171,8 +2173,11 @@ export function recordChatRequestSizes(sizes: Partial<Record<(typeof chatRequest
   log('info', 'inference', 'call_completed', { operation: 'chat.request-size', ...attributes });
 }
 
-export type ChatCompletionCheckOutcome = 'skipped_no_tools' | 'done' | 'continue' | 'error';
-/** One completion-check outcome of a chat reply. A reply records `skipped_no_tools` once, or each check it ran. */
+export type ChatCompletionCheckOutcome = 'skipped_no_tools' | 'done' | 'continue' | 'error' | 'exhausted';
+/**
+ * One completion-check outcome of a chat reply. A reply records `skipped_no_tools` once, or each check it ran, and
+ * `exhausted` when the check still wanted more work after the last correction and the reply ended with its blocker.
+ */
 export function recordChatCompletionCheck(outcome: ChatCompletionCheckOutcome, reason?: string) {
   metrics
     .getMeter(scope)
