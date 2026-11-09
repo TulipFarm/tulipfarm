@@ -137,5 +137,7 @@ jobs:
             pnpm-${{ runner.os }}-${{ runner.arch }}-
       - name: Install repository dependencies
         run: pnpm install --frozen-lockfile --store-dir "$HOME/.pnpm-store"
+      - name: Create the local database roles
+        run: psql "$TEST_ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -f infra/postgres/init.sql
       - name: Run chats and jobs against a workspace behind the release
         run: pnpm run test:behind-workspace
