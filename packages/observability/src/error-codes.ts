@@ -80,6 +80,12 @@ const codes = new Set<string>([
   'batch-required',
   'import-file-failed',
   'table-not-found',
+  // Corrections the model or person can make, returned instead of a change.
+  'no-change',
+  'invalid-name',
+  'invalid-move',
+  'subject-not-found',
+  'file-not-found',
   // Table import failure codes (TableImportError in @tulipfarm/tables/imports).
   'attachment-unknown',
   'invalid-selection',

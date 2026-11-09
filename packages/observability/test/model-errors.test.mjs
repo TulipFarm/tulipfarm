@@ -50,6 +50,7 @@ test('chat row refusals and import results keep their own error code', () => {
     'table-not-found',
     'invalid-value',
     'import-unavailable',
+    'no-change',
   ])
     assert.equal(telemetryErrorCode(code), code);
   assert.equal(telemetryErrorCode('not-a-reviewed-code'), undefined);
