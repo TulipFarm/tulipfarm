@@ -179,6 +179,9 @@ const proposalOutcomes = new Map(
 // Import plans that don't fit the file or table explain every problem in their own `reason`.
 const importPlanOutcomes = new Set(['import-values-invalid', 'import-mapping-invalid']);
 const askTableAccess = 'Ask a workspace admin to grant';
+// Admins hold every table permission, so a denial means something the step used changed, never a missing grant.
+export const adminTableDenial =
+  'Access denied. As a workspace admin you already have every table permission, so a table or file this step used changed or isn’t available to this chat. Ask again to retry.';
 const proposalPlans = z.object({
   plans: z.array(z.object({ kind: z.string(), expectedRevision: z.string().nullable().optional() })).min(1),
 });
@@ -213,9 +216,10 @@ export type StoredToolActivity = { status: z.infer<typeof activityStatusSchema>;
 export async function storedToolActivity(
   tx: AuthorizationTransaction,
   row: StoredToolRow,
+  viewer: { admin?: boolean } = {},
 ): Promise<StoredToolActivity> {
   if (row.status === 'blocked' && row.tool === 'tables.propose') {
-    const detail = deniedProposalDetail(row.call);
+    const detail = viewer.admin ? adminTableDenial : deniedProposalDetail(row.call);
     if (detail) return { status: 'blocked', detail };
   }
   if (row.status === 'completed' && row.tool === 'tables.propose') {

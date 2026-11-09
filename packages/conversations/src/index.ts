@@ -22,6 +22,7 @@ import { recordFileUse } from '@tulipfarm/files';
 import { observeChatDetail, trackEvent } from '@tulipfarm/observability';
 import {
   AccessDenied,
+  currentMember,
   lockAuthorization,
   prefetchConversationSources,
   resolveHuman,
@@ -743,6 +744,11 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
         if (turn) turn.push(row);
         else toolsByTurn.set(row.turn_id, [row]);
       }
+      const viewer = {
+        admin:
+          toolRows.some(row => row.status === 'blocked' && row.tool === 'tables.propose') &&
+          (await currentMember(tx, actor)).role === 'admin',
+      };
       const apiCallIds = toolRows.filter(row => row.tool === 'api.request').map(row => row.id);
       const digestedApiCalls = new Set(
         !hidden.size && tx.commonVersion >= 34 && apiCallIds.length
@@ -797,7 +803,7 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
                 rowChange,
                 workflows,
                 subagents,
-                ...(await storedToolActivity(tx, hidden.size ? { ...row, call: undefined } : row).then(
+                ...(await storedToolActivity(tx, hidden.size ? { ...row, call: undefined } : row, viewer).then(
                   ({ status, detail, proposal }) => ({
                     activityStatus: status,
                     ...(detail ? { activityDetail: detail } : {}),

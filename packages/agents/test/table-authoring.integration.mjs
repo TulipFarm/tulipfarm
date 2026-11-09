@@ -271,4 +271,46 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     assert.equal(output.status, 'pending');
     assert.equal(await count('tf_table_proposals'), 2);
   });
+  await t.test('a schema change to a table listed earlier in the chat does not deny later imports', async () => {
+    const listed = randomUUID();
+    await db.platform.query(
+      `INSERT INTO ${s}.tf_table_catalog(id,owning_team_id,physical_table,display_name,target_revision,applied_revision) VALUES($1,$2,'listed_earlier','Listed','r2','r2')`,
+      [listed, team],
+    );
+    // Earlier turns listed and read the table at revision r1; it has since been migrated to r2.
+    const stale = sources => ({ ...context, callId: randomUUID(), origin: { ...context.origin, sources } });
+    const earlier = [
+      { kind: 'table-rows', tableId: listed, revision: 'r1' },
+      { kind: 'table-schema', tableId: listed, revision: 'r1' },
+    ];
+    assert.deepEqual((await tools.invokeWithSources(stale(earlier), { tool: 'tables.import.attachments' })).result, {
+      attachments: [],
+    });
+    const newTable = randomUUID();
+    const output = (
+      await tools.invokeWithSources(stale(earlier), {
+        tool: 'tables.propose',
+        input: JSON.stringify({
+          plans: [{ ...input.plans[0], tableId: newTable, target: { ...input.plans[0].target, id: newTable } }],
+        }),
+      })
+    ).result;
+    assert.equal(output.status, 'pending');
+    const saved = (await db.platform.query(`SELECT manifest FROM ${s}.tf_table_proposals WHERE id=$1`, [output.id]))
+      .rows[0].manifest.sources;
+    assert.deepEqual(
+      saved.filter(source => source.tableId === listed),
+      [
+        { kind: 'table-rows', tableId: listed, revision: 'r2' },
+        { kind: 'table-schema', tableId: listed, revision: 'r2' },
+      ],
+    );
+    // A table that no longer exists is still a denial.
+    await assert.rejects(
+      tools.invokeWithSources(stale([{ kind: 'table-rows', tableId: randomUUID(), revision: 'r1' }]), {
+        tool: 'tables.import.attachments',
+      }),
+      AccessDenied,
+    );
+  });
 });

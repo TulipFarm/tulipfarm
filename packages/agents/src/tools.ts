@@ -111,7 +111,7 @@ import {
   tableImportFailure,
   type TableImportOptions,
 } from '@tulipfarm/tables/imports';
-import { humanReadableTableFiles, requireTableSources } from './table-sources.ts';
+import { currentTableSources, humanReadableTableFiles, requireTableSources } from './table-sources.ts';
 import { isMcpTool, isMcpCall, type McpModelCatalog } from './mcp-contracts.ts';
 import { createFileCallSchema, createFileOutput, type FileOutputStore } from '@tulipfarm/conversations/file-outputs';
 import type { FileContent, FileSource, GoogleFileReader } from '@tulipfarm/conversations/file-references';
@@ -1056,6 +1056,15 @@ export function createChatTools(
   const plans = createAgentPlans(runtime);
   const authoring = createAgentAuthoring(runtime);
   const followUps = createFollowUps(runtime);
+  async function withCurrentTableSources<
+    T extends { workspaceId: string; actor: HumanActor; origin?: { sources: readonly SourceDependency[] } },
+  >(context: T): Promise<T> {
+    if (!context.origin) return context;
+    const sources = await withHuman(runtime, context.workspaceId, context.actor, 'read', tx =>
+      currentTableSources(tx, context.origin!.sources),
+    );
+    return { ...context, origin: { ...context.origin, sources } };
+  }
   async function invoke(
     context: {
       workspaceId: string;
@@ -1077,6 +1086,7 @@ export function createChatTools(
       await withHuman(runtime, workspaceId, actor, 'read', tx =>
         requireInvestigationToolBoundary(tx, context.origin!, call.tool),
       );
+    if (tableImportTools.has(call.tool)) context = await withCurrentTableSources(context);
     switch (call.tool) {
       case 'github.investigation.account':
       case 'github.investigation.repositories':
@@ -2752,12 +2762,13 @@ export function createChatTools(
       if (!imports || !context.origin) throw new AccessDenied();
       const { importSelection, ...readCall } = call;
       const sources: Awaited<ReturnType<typeof providerSources>> = [];
+      const { origin } = await withCurrentTableSources(context);
       const reference = await imports.captureIntegration(
         runtime,
         {
           workspaceId: context.workspaceId,
           actor: context.actor,
-          origin: context.origin,
+          origin: origin!,
           resultId: context.callId,
           tool: call.tool,
         },
@@ -3016,6 +3027,7 @@ const rowReviewUnavailable = {
 };
 
 const rowWriteTools = new Set(['rows.create', 'rows.create.batch', 'rows.update', 'rows.delete']);
+const tableImportTools = new Set(['tables.import.attachments', 'tables.import.file', 'tables.propose']);
 const memberErrorInstructions: Record<z.infer<typeof workspaceMemberErrorCodeSchema>, string> = {
   'member-table-protected': 'The Workspace members table schema is fixed and cannot be changed.',
   'member-field-protected': `${workspaceMembersInstruction} Members linked to an account or with a pending invitation cannot be deleted.`,

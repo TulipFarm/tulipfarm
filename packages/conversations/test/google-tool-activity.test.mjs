@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { googleToolActivity } from '../src/google-tool-activity.ts';
-import { deniedProposalDetail } from '../src/tool-activity-history.ts';
+import { deniedProposalDetail, storedToolActivity } from '../src/tool-activity-history.ts';
 import { apiCallProblem, apiCallReceipt, toolPresentation } from '../src/tool-activity.ts';
 
 test('Google activity describes the actual action without including private arguments', () => {
@@ -116,4 +116,15 @@ test('a denied table proposal names the permissions for the kind of change it as
   assert.equal(denied([]), undefined);
   assert.equal(deniedProposalDetail({ tool: 'tables.propose', input: 'not json' }), undefined);
   assert.equal(deniedProposalDetail(undefined), undefined);
+});
+
+test('a denied table proposal never tells a workspace admin to ask a workspace admin', async () => {
+  const call = { tool: 'tables.propose', input: JSON.stringify({ plans: [{ kind: 'import' }] }) };
+  const row = { id: crypto.randomUUID(), tool: 'tables.propose', status: 'blocked', call };
+  const member = await storedToolActivity(undefined, row);
+  assert.match(String(member.detail), /Ask a workspace admin/);
+  const admin = await storedToolActivity(undefined, row, { admin: true });
+  assert.equal(admin.status, 'blocked');
+  assert.doesNotMatch(String(admin.detail), /ask a workspace admin/i);
+  assert.match(String(admin.detail), /already have every table permission/);
 });
