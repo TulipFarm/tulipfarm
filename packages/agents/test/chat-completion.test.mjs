@@ -537,13 +537,12 @@ test('a reply that keeps claiming a card no tool made ends with a plain account 
   assert.deepEqual(outcomes, ['continue', 'continue', 'continue']);
 });
 
-test('an unbacked import review is sent back without the completion model until a proposal exists', async t => {
+test('an unbacked import review is sent back until a proposal exists, and the new card ends the reply unchecked', async t => {
   const outcomes = checkOutcomes(t);
   const replies = [
     nativeReply('azure', { text: 'Here is the import review. Do you confirm this import?' }),
     nativeReply('azure', { calls: [use('tables.propose', { input: '{"plans":[]}' })] }),
     nativeReply('azure', { text: 'The import review card is ready below.' }),
-    selectReply('azure', verdict('waiting')),
   ];
   const requests = [],
     executed = [];
@@ -563,10 +562,11 @@ test('an unbacked import review is sent back without the completion model until 
   assert.deepEqual(executed, ['tables.propose']);
   assert.deepEqual(
     requests.map(request => isCompletionRequest(request)),
-    [false, false, false, true],
+    [false, false, false],
   );
   assert.match(JSON.stringify(requests[1].messages), /no tables\.propose call in this reply returned a pending review/);
   assert.deepEqual(outcomes, ['continue', 'done']);
+  assert.equal(replies.length, 0);
 });
 
 test('a tool-free reply that claims rows were created is sent back to do the work', async t => {

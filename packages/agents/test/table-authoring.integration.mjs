@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import { fixture } from '../../workspace-storage/test/integration/fixture.mjs';
@@ -305,6 +305,16 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         { kind: 'table-schema', tableId: listed, revision: 'r2' },
       ],
     );
+    // A row tool on a table that is not a typed table returns the readable tables, not an error that reads as a denial.
+    const missing = (
+      await tools.invokeWithSources(
+        { ...context, callId: randomUUID() },
+        { tool: 'rows.get', tableId: listed, expectedAppliedRevision: 'r2', recordId: randomUUID() },
+      )
+    ).result;
+    assert.equal(missing.error, 'table-not-found');
+    assert.match(missing.instruction, /not a permission problem/);
+    assert.ok(Array.isArray(missing.tables));
     // A table that no longer exists is still a denial.
     await assert.rejects(
       tools.invokeWithSources(stale([{ kind: 'table-rows', tableId: randomUUID(), revision: 'r1' }]), {
@@ -312,5 +322,85 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       }),
       AccessDenied,
     );
+  });
+  await t.test(
+    'a guessed attachment ID or digest prepares the chat’s only file, and asks with the list otherwise',
+    async () => {
+      const objects = new Map();
+      const store = {
+        putIfAbsent: async (key, bytes) => {
+          if (!objects.has(key)) objects.set(key, Buffer.from(bytes));
+        },
+        read: async (key, length) => {
+          const bytes = objects.get(key);
+          if (!bytes || bytes.length !== length) throw new Error('private-storage-value');
+          return Buffer.from(bytes);
+        },
+      };
+      const files = createChatTools(runtime, { objects: { attachments: store, snapshots: store } });
+      const attach = async (ordinal, csv) => {
+        const id = randomUUID(),
+          key = randomUUID(),
+          bytes = Buffer.from(csv),
+          digest = createHash('sha256').update(bytes).digest('hex');
+        objects.set(`${ws.id}/${key}`, bytes);
+        await db.platform.query(
+          `INSERT INTO ${s}.tf_conversation_attachments(id,conversation_id,membership_id,object_key,filename,media_type,size,sha256,state,message_id) VALUES($1,$2,$3,$4,'orders.csv','text/csv',$5,$6,'bound',$7)`,
+          [id, conversationId, actor.membershipId, key, bytes.length, digest, message],
+        );
+        await db.platform.query(
+          `INSERT INTO ${s}.tf_conversation_parts(conversation_id,message_id,ordinal,kind,attachment_id) VALUES($1,$2,$3,'attachment',$4)`,
+          [conversationId, message, ordinal, id],
+        );
+        return { attachmentId: id, contentDigest: digest };
+      };
+      const only = await attach(0, 'Order ID,Customer\nRV-1,Hooli\n');
+      const call = (attachmentId, contentDigest) =>
+        files.invokeWithSources(
+          { ...context, callId: randomUUID() },
+          {
+            tool: 'tables.import.file',
+            attachmentId,
+            contentDigest,
+            selection: JSON.stringify({
+              format: 'csv',
+              delimiter: ',',
+              header: { kind: 'row', row: 1 },
+              conversions: {},
+              empty: 'null',
+            }),
+          },
+        );
+      // Models see the file but not its digest, and often send the empty file's digest or a made-up ID.
+      const guessed = (await call(randomUUID(), createHash('sha256').update('').digest('hex'))).result;
+      assert.deepEqual(
+        { kind: guessed.kind, attachmentId: guessed.attachmentId, contentDigest: guessed.contentDigest },
+        { kind: 'file', ...only },
+      );
+      assert.deepEqual(guessed.columns, ['Order ID', 'Customer']);
+      const malformed = (await call('orders.csv', 'unknown')).result;
+      assert.equal(malformed.attachmentId, only.attachmentId);
+      const other = await attach(1, 'Order ID\nRV-2\n');
+      const ambiguous = (await call(randomUUID(), only.contentDigest)).result;
+      assert.equal(ambiguous.code, 'attachment-unknown');
+      assert.deepEqual(
+        ambiguous.attachments.map(item => item.attachmentId).sort(),
+        [only.attachmentId, other.attachmentId].sort(),
+      );
+      assert.match(ambiguous.instruction, /Do not ask the person to attach it again/);
+      // The right ID with a guessed digest still finds its file.
+      assert.equal((await call(other.attachmentId, 'f'.repeat(64))).result.attachmentId, other.attachmentId);
+    },
+  );
+  await t.test('a proposal with stray closing brackets after its JSON is read as the JSON before them', async () => {
+    const newTable = randomUUID();
+    const plans = [{ ...input.plans[0], tableId: newTable, target: { ...input.plans[0].target, id: newTable } }];
+    const output = (
+      await tools.invokeWithSources(
+        { ...context, callId: randomUUID() },
+        { tool: 'tables.propose', input: `${JSON.stringify({ plans })}]}` },
+      )
+    ).result;
+    assert.equal(output.status, 'pending');
   });
 });

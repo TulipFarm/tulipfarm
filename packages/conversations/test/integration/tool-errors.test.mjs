@@ -17,6 +17,8 @@ test('generic tool failures do not instruct the model to infer missing permissio
       messageId: randomUUID(),
       parts: [{ kind: 'text', text: 'Prepare a resource proposal' }],
     });
+    // A member's failures; an Admin's are covered below.
+    await f.db.platform.query(`UPDATE ${f.table('tf_memberships')} SET role='member' WHERE id=$1`, [w.membershipId]);
     const executor = createConversationExecutor(f.runtime, async ({ executeTool }) => {
       const generic = await executeTool('tables.propose', false, async () => {
         throw new Error('private diagnostic');
@@ -45,6 +47,51 @@ test('generic tool failures do not instruct the model to infer missing permissio
     assert.deepEqual(
       history.messages[0].tools.map(tool => tool.status),
       ['failed', 'failed', 'blocked'],
+    );
+  } finally {
+    await f.close();
+  }
+});
+
+test('an Admin is never told a failed tool lacked access, and a denial for one is logged as a TulipFarm fault', async t => {
+  const f = await conversationFixture();
+  try {
+    const w = f.workspace,
+      chatId = randomUUID();
+    await f.store.create(w.id, w.userId, { chatId, commandId: randomUUID() });
+    const sent = await f.store.send(w.id, w.userId, chatId, {
+      commandId: randomUUID(),
+      messageId: randomUUID(),
+      parts: [{ kind: 'text', text: 'Import the attached file' }],
+    });
+    const lines = [];
+    const write = process.stdout.write.bind(process.stdout);
+    t.mock.method(process.stdout, 'write', (line, ...rest) => {
+      if (String(line).includes('"chat.admin-access-denied"')) lines.push(JSON.parse(line));
+      return write(line, ...rest);
+    });
+    const executor = createConversationExecutor(f.runtime, async ({ executeTool }) => {
+      const denied = await executeTool('tables.propose', false, async () => {
+        throw new AccessDenied();
+      });
+      assert.equal(denied.result.error, 'access-denied');
+      assert.match(denied.result.instruction, /problem on our side, not missing access/);
+      assert.match(denied.result.instruction, /Do not mention access, permissions, roles or admins/);
+      assert.doesNotMatch(denied.result.instruction, /request was denied|ask a workspace admin/);
+      const failed = await executeTool('tables.propose', false, async () => {
+        throw new Error('private diagnostic');
+      });
+      assert.match(failed.result.instruction, /never say or imply that they lack access/);
+      return 'This step failed because of a problem in TulipFarm.';
+    });
+    assert.equal(
+      await executor.process({ workspaceId: w.id, conversationId: chatId, turnId: sent.turnId, generation: 0 }),
+      'completed',
+    );
+    t.mock.restoreAll();
+    assert.deepEqual(
+      lines.map(line => [line.tool, line['error.code'], line.level]),
+      [['tables.propose', 'admin-access-denied', 'error']],
     );
   } finally {
     await f.close();

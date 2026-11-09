@@ -54,7 +54,12 @@ export function readSkill(id: string, _revision?: string, resource?: string, con
   if (id === 'planning' && context !== 'chat') return undefined;
   const skill = skills.find(skill => skill.id === id);
   const resources = resourcesById.get(skill?.id as z.infer<typeof skillIdSchema>) ?? {};
-  if (resource !== undefined && !(resource in resources)) throw new Error('skill-resource-unavailable');
+  if (resource !== undefined && !(resource in resources))
+    return {
+      error: 'skill-resource-unavailable' as const,
+      instruction: `This skill has no resource "${resource.slice(0, 120)}". This is not a permission denial. Call skills.read again with one of the listed paths as resource, or without resource to read the skill itself.`,
+      resources: Object.keys(resources),
+    };
   if (!skill || Object.keys(resources).length === 0) return skill;
   return {
     ...skill,
