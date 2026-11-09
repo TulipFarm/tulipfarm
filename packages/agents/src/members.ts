@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { activeGeneration, GenerationError, readRecords, workspaceMembersTable } from '@tulipfarm/tables/store';
 import { workspaceMemberFields } from '@tulipfarm/tables/workspace-members';
+import { currentMember, type HumanActor } from '@tulipfarm/access';
 import { relation, type AgentTransaction } from './store.ts';
 
 export type MemberSummary = { membershipId: string; userId: string; name: string; email: string | null };
@@ -71,19 +72,66 @@ export async function workspaceTeams(tx: AgentTransaction, teamIds?: readonly st
 }
 
 const limit = 20;
+const rosterLimit = 50;
+// The workspace admins team is stored under an internal name; the app shows it as "Workspace admins".
+const teamName = (name: string) => (name === '_admin' ? 'Workspace admins' : name);
 
-/** Active members and teams whose name or email contains the query, ignoring case. Only IDs, names and emails. */
-export async function findMembers(tx: AgentTransaction, query: string) {
-  const needle = query.trim().toLocaleLowerCase();
+type Roster = { membershipId: string; name: string; role: 'member' | 'manager' };
+
+/**
+ * Active members and teams whose name or email contains the query, ignoring case, or everyone when there is no query.
+ * Only IDs, names and emails. A team lists who is in it only when the asker could see that in Settings: a workspace
+ * admin sees every team's people, anyone else only the teams they belong to. Counts are of every match, so the agent
+ * never has to guess how many there are.
+ */
+export async function findMembers(tx: AgentTransaction, actor: HumanActor, query?: string) {
+  const needle = query?.trim().toLocaleLowerCase() ?? '';
   const matches = (...values: (string | null)[]) =>
-    values.some(value => value !== null && value.toLocaleLowerCase().includes(needle));
-  const members = (await activeMembers(tx)).filter(member => matches(member.name, member.email));
-  const teams = (await workspaceTeams(tx)).filter(team => matches(team.name));
+    !needle || values.some(value => value !== null && value.toLocaleLowerCase().includes(needle));
+  const everyone = await activeMembers(tx);
+  const members = everyone.filter(member => matches(member.name, member.email));
+  const teams = (await workspaceTeams(tx)).filter(team => matches(team.name, teamName(team.name)));
+  const admin = (await currentMember(tx, actor)).role === 'admin';
+  const enrollments = z
+    .array(z.object({ team_id: z.uuid(), membership_id: z.uuid(), role: z.enum(['member', 'manager']) }))
+    .parse(
+      (
+        await tx.client.query(
+          `SELECT mt.team_id,mt.membership_id,mt.role FROM ${relation(tx, 'tf_member_teams')} mt
+          JOIN ${relation(tx, 'tf_memberships')} m ON m.id=mt.membership_id AND m.removed_at IS NULL
+          WHERE mt.team_id=ANY($1::uuid[]) ORDER BY m.created_at,m.id`,
+          [teams.slice(0, limit).map(team => team.teamId)],
+        )
+      ).rows,
+    );
+  const names = new Map(everyone.map(member => [member.membershipId, member.name]));
+  const rosters = new Map<string, Roster[]>();
+  for (const row of enrollments) {
+    const roster = rosters.get(row.team_id) ?? [];
+    roster.push({ membershipId: row.membership_id, name: names.get(row.membership_id) ?? unnamed, role: row.role });
+    rosters.set(row.team_id, roster);
+  }
   return {
+    memberCount: members.length,
     members: members
       .slice(0, limit)
       .map(member => ({ membershipId: member.membershipId, name: member.name, email: member.email })),
-    teams: teams.slice(0, limit),
+    teamCount: teams.length,
+    teams: teams.slice(0, limit).map(team => {
+      const roster = rosters.get(team.teamId) ?? [];
+      const visible = admin || roster.some(person => person.membershipId === actor.membershipId);
+      return {
+        teamId: team.teamId,
+        name: teamName(team.name),
+        ...(visible
+          ? {
+              peopleCount: roster.length,
+              people: roster.slice(0, rosterLimit),
+              ...(roster.length > rosterLimit ? { peopleTruncated: true } : {}),
+            }
+          : { people: 'not-visible' as const }),
+      };
+    }),
     truncated: members.length > limit || teams.length > limit,
   };
 }

@@ -37,6 +37,11 @@ test('present_choice is always offered with validated distinct options and no ap
   );
   assert.match(toolDescription('present.choice'), /never permission/);
 });
+test('the people and teams lookup is always offered and can list everyone', () => {
+  const catalog = nativeChatTools(undefined, false, new Set());
+  assert.ok(catalog.tools.some(tool => tool.name === 'members_find'));
+  assert.ok(chatCallSchema.safeParse({ tool: 'members.find' }).success);
+});
 const discovery = createMcpCatalog(
   Array.from({ length: 35 }, (_, i) => ({ ...entry, name: `ticket_${i}`, handle: `opaque_selected_handle_${i}` })),
 );

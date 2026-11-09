@@ -257,7 +257,7 @@ test('chat readiness and relevant GitHub approvals', async t => {
               .getByRole('button', { name: 'Tool activity · 2 tools · Some work failed', exact: true })
               .click();
             await activity
-              .getByText('Failed or interrupted. Check current rows before sending a new request.', { exact: true })
+              .getByText('Failed or interrupted. Check whether anything changed before you ask again.', { exact: true })
               .waitFor();
             f.state.tools[1].status = 'blocked';
             await notifyChange(f.page, workspace.id, 'ada', 'chat', id);
