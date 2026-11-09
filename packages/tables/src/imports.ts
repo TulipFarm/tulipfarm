@@ -46,12 +46,23 @@ export class TableImportError extends Error {
       | 'unsupported-cell'
       | 'invalid-value'
       | 'import-unavailable',
-    /** Where a row or value failed: the 1-based file row and the header column, never the cell value. */
-    readonly location?: { row: number; column?: string },
+    /**
+     * Where a row or value failed: the 1-based data row (counting from the first row after the header, as
+     * import reviews do), the 1-based row of the file or sheet, the header column and, for a value, a
+     * shortened copy of it.
+     */
+    readonly location?: ImportFailureLocation,
   ) {
     super(code);
   }
 }
+export type ImportFailureLocation = {
+  row: number;
+  sourceRow?: number;
+  source?: 'file' | 'sheet' | 'source';
+  column?: string;
+  value?: string;
+};
 type ImportFailureCode = TableImportError['code'];
 /** Who can fix a failure: the assistant by correcting its selection, the person by fixing the file, or nobody now. */
 const importFailures: Record<
@@ -109,21 +120,29 @@ const assistantSteps = {
     'Call tables.import.file once more in this reply; if it fails again, tell the person preparation failed and to try later.',
 };
 
+function failureWhere(location: ImportFailureLocation) {
+  const { row, sourceRow, source = 'file', column, value } = location;
+  return [
+    `data row ${row}${sourceRow !== undefined && sourceRow !== row ? ` (row ${sourceRow} of the ${source})` : ''}`,
+    ...(column ? [`column "${column.slice(0, 40)}"`] : []),
+    ...(value !== undefined ? [`value "${value}"`] : []),
+  ].join(', ');
+}
+
 /**
  * A tool result for a failed file preparation: the reason with the person's next step, which
- * activity shows as the step detail, and the assistant's own next step. It never contains cell values.
+ * activity shows as the step detail, and the assistant's own next step. Rows are numbered as data
+ * rows, like import review problems, and a failing value is quoted in shortened form.
  */
 export function tableImportFailure(error: TableImportError) {
   const { reason, fix } = importFailures[error.code];
-  const where = error.location
-    ? ` (row ${error.location.row}${error.location.column ? `, column "${error.location.column.slice(0, 40)}"` : ''})`
-    : '';
+  const where = error.location ? `: ${failureWhere(error.location)}` : '';
   return {
     error: 'import-file-failed' as const,
     code: error.code,
     reason: `${reason.replace(/\.$/, '')}${where}. ${personSteps[fix]}`,
     ...(error.location ? { location: error.location } : {}),
-    instruction: `No file was prepared and no review was created. This is not a permission denial, and tables.import.file is available. ${assistantSteps[fix]} Tell the person this reason, not a guessed one.`,
+    instruction: `No file was prepared and no review was created. This is not a permission denial, and tables.import.file is available. ${assistantSteps[fix]} Tell the person this reason, with its data row and file row as given, not a guessed one.`,
   };
 }
 // Stored keys and the tf_table_import_objects object_key CHECK use this prefix.
@@ -261,7 +280,15 @@ function value(cell: Scalar, kind: z.infer<typeof conversionSchema>, empty: 'nul
     }
   }
 }
-function collector(selection: Pick<FileImportSelection, 'header' | 'conversions' | 'empty'>) {
+function shownValue(cell: Scalar) {
+  const text =
+    cell instanceof Date ? (Number.isFinite(cell.valueOf()) ? cell.toISOString() : 'Invalid Date') : String(cell);
+  return text.length > 40 ? `${text.slice(0, 39)}…` : text;
+}
+function collector(
+  selection: Pick<FileImportSelection, 'header' | 'conversions' | 'empty'>,
+  source: NonNullable<ImportFailureLocation['source']>,
+) {
   let names = selection.header.kind === 'provided' ? headers(selection.header.names) : null;
   const rows: ImportSnapshot['rows'] = [];
   let ordinal = 0;
@@ -276,7 +303,7 @@ function collector(selection: Pick<FileImportSelection, 'header' | 'conversions'
       }
       if (rows.length >= importLimits.rows) throw new TableImportError('row-limit');
       if (cells.length > names.length || (!spreadsheet && cells.length !== names.length))
-        throw new TableImportError('malformed-row', { row: ordinal });
+        throw new TableImportError('malformed-row', { row: rows.length + 1, sourceRow: ordinal, source });
       rows.push(
         Object.fromEntries(
           names.map((name, index) => {
@@ -291,7 +318,13 @@ function collector(selection: Pick<FileImportSelection, 'header' | 'conversions'
               ];
             } catch (error) {
               if (error instanceof TableImportError)
-                throw new TableImportError(error.code, { row: ordinal, column: name });
+                throw new TableImportError(error.code, {
+                  row: rows.length + 1,
+                  sourceRow: ordinal,
+                  source,
+                  column: name,
+                  ...(error.code === 'invalid-value' ? { value: shownValue(cells[index] ?? null) } : {}),
+                });
               throw error;
             }
           }),
@@ -375,7 +408,7 @@ async function checkArchive(bytes: Uint8Array) {
 export async function parseImportFile(bytes: Uint8Array, input: unknown): Promise<ImportSnapshot['rows']> {
   const selection = validated(fileImportSelectionSchema, input, 'invalid-selection');
   if (!bytes.byteLength || bytes.byteLength > importLimits.bytes) throw new TableImportError('byte-limit');
-  const output = collector(selection);
+  const output = collector(selection, selection.format === 'csv' ? 'file' : 'sheet');
   try {
     if (selection.format === 'csv') {
       const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
@@ -434,6 +467,7 @@ function integrationRows(result: unknown, selection: IntegrationSelection) {
     selection.format === 'matrix'
       ? selection
       : { ...selection, header: { kind: 'provided', names: selection.columns } },
+    'source',
   );
   const scalar = z.union([z.string(), z.number().finite(), z.boolean(), z.null()]);
   for (const entry of entries) {

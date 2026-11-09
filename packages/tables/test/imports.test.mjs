@@ -77,26 +77,60 @@ test('a file selection defaults to a first-row header, no conversions and empty 
   assert.deepEqual(await parseImportFile(file, { format: 'csv', delimiter: ';', header: 1 }), expected);
 });
 
-test('a failed preparation names the reason, the row and column, and both next steps without the value', async () => {
-  const error = await parseImportFile(bytes('Order ID,Amount\nA-1,12.50\nA-2,private-secret\n'), {
-    ...csv,
+test('a failed preparation names the data row, file row, column and value, and both next steps', async () => {
+  const file = bytes(
+    'Order ID;Customer;Status;Amount;Order date\nA-1;Stark;Paid;99.99;2026-11-06\nA-2;Wayne;New;abc;2026-11-07\n',
+  );
+  const error = await parseImportFile(file, {
+    format: 'csv',
+    delimiter: ';',
     conversions: { Amount: 'numeric' },
   }).catch(error => error);
   assert.ok(error instanceof TableImportError);
   assert.equal(error.code, 'invalid-value');
-  assert.deepEqual(error.location, { row: 3, column: 'Amount' });
+  assert.deepEqual(error.location, { row: 2, sourceRow: 3, source: 'file', column: 'Amount', value: 'abc' });
   const failure = tableImportFailure(error);
   assert.equal(failure.error, 'import-file-failed');
   assert.equal(
     failure.reason,
-    'A value doesn’t fit its column’s conversion (row 3, column "Amount"). Correct the value in the file and attach it again.',
+    'A value doesn’t fit its column’s conversion: data row 2 (row 3 of the file), column "Amount", value "abc". Correct the value in the file and attach it again.',
   );
   assert.match(failure.instruction, /not a permission denial, and tables\.import\.file is available/);
-  assert.doesNotMatch(JSON.stringify(failure), /private-secret/);
   for (const code of ['invalid-selection', 'malformed-file', 'import-unavailable']) {
     const { reason } = tableImportFailure(new TableImportError(code));
     assert.ok(reason.length <= 200 && /\. (Ask again|Fix the file|Try again)/.test(reason), reason);
   }
+});
+
+test('preparation numbers data rows after a later header row and names the sheet row', async () => {
+  const sheet = await workbook([
+    ['Orders export'],
+    ['id', 'date'],
+    ['001', new Date('2026-10-01T00:00:00Z')],
+    ['002', 'next tuesday, after the long weekend has ended'],
+  ]);
+  const error = await parseImportFile(sheet, {
+    ...xlsx,
+    header: 2,
+    conversions: { date: 'date' },
+  }).catch(error => error);
+  assert.deepEqual(error.location, {
+    row: 2,
+    sourceRow: 4,
+    source: 'sheet',
+    column: 'date',
+    value: 'next tuesday, after the long weekend ha…',
+  });
+  assert.match(
+    tableImportFailure(error).reason,
+    /: data row 2 \(row 4 of the sheet\), column "date", value "next tuesday/,
+  );
+  const width = await parseImportFile(bytes('a,b\n1,2\n3\n'), csv).catch(error => error);
+  assert.deepEqual(width.location, { row: 2, sourceRow: 3, source: 'file' });
+  assert.match(
+    tableImportFailure(width).reason,
+    /^A row has a different number of cells than the header: data row 2 \(row 3 of the file\)\./,
+  );
 });
 
 test('real XLSX selects exact sheet, preserves blanks and requires explicit native date conversion', async () => {
