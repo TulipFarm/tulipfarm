@@ -344,13 +344,13 @@ export function normalizeLiteral(
     case 'numeric': {
       if (!decimalSchema.safeParse(raw).success) return invalid(`"${raw}" is not a number for ${field.label}.`);
       try {
-        validateValue(field, { kind: 'numeric', value: raw });
+        const value = validateValue(field, { kind: 'numeric', value: raw });
+        return value?.kind === 'numeric' ? value.value : raw;
       } catch {
         return invalid(
           `${field.label} allows ${field.precision - field.scale} whole digits and ${field.scale} decimal places.`,
         );
       }
-      return raw;
     }
     case 'date':
       return dateSchema.safeParse(raw).success

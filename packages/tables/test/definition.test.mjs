@@ -72,6 +72,24 @@ test('decimal, date, timestamp and required values have exact constraints', () =
   const small = fieldSchema.parse({ ...base, kind: 'numeric', precision: 3, scale: 2 });
   assert.deepEqual(validateValue(small, { kind: 'numeric', value: '9.99' }), { kind: 'numeric', value: '9.99' });
   assert.throws(() => validateValue(small, { kind: 'numeric', value: '10.00' }));
+});
+
+test('decimals drop zeros beyond the scale but never round a non-zero digit', () => {
+  const money = fieldSchema.parse({ ...base, kind: 'numeric', precision: 5, scale: 2 });
+  for (const [input, stored] of [
+    ['5.000', '5.00'],
+    ['42.000', '42.00'],
+    ['100.500', '100.50'],
+    ['-0.1000000000', '-0.10'],
+    ['7.25', '7.25'],
+    ['5', '5'],
+  ])
+    assert.deepEqual(validateValue(money, { kind: 'numeric', value: input }), { kind: 'numeric', value: stored });
+  for (const value of ['7.255', '0.001', '1.005', '1000.000', '1000'])
+    assert.throws(() => validateValue(money, { kind: 'numeric', value }), { name: 'TableValidationError' });
+  const whole = fieldSchema.parse({ ...base, kind: 'numeric', precision: 3, scale: 0 });
+  assert.deepEqual(validateValue(whole, { kind: 'numeric', value: '12.000' }), { kind: 'numeric', value: '12' });
+  assert.throws(() => validateValue(whole, { kind: 'numeric', value: '12.5' }));
   assert.deepEqual(valueSchema.parse({ kind: 'date', value: '2024-02-29' }), { kind: 'date', value: '2024-02-29' });
   for (const value of ['2023-02-29', '2024-02-30', '0000-01-01'])
     assert.equal(valueSchema.safeParse({ kind: 'date', value }).success, false);

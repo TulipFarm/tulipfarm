@@ -98,6 +98,26 @@ test('converts exact decimals, booleans, dates and timezone-aware timestamps', (
   });
   for (const text of ['1e2', ' 1 ', 'NaN', '0.12345678901'])
     assert.equal(run(convert('numeric'), value(text)).error.code, 'conversion-failed');
+  const money = field(b, 'numeric', { precision: 12, scale: 2 });
+  for (const [text, stored] of [
+    ['5.000', '5.00'],
+    ['42.000', '42.00'],
+    ['100.500', '100.50'],
+  ])
+    assert.deepEqual(run(convert('numeric'), value(text), money), {
+      ok: true,
+      values: { [b]: { kind: 'numeric', value: stored } },
+    });
+  assert.deepEqual(run(convert('numeric'), { kind: 'numeric', value: '3.1000' }, money), {
+    ok: true,
+    values: { [b]: { kind: 'numeric', value: '3.10' } },
+  });
+  for (const text of ['7.255', '0.001', '1.005'])
+    assert.equal(run(convert('numeric'), value(text), money).error.code, 'invalid-output');
+  assert.equal(
+    run(convert('numeric'), value('12345.000'), field(b, 'numeric', { precision: 6, scale: 2 })).error.code,
+    'invalid-output',
+  );
   for (const text of ['yes', 'TRUE', '1'])
     assert.equal(run(convert('boolean'), value(text)).error.code, 'conversion-failed');
   assert.equal(run(convert('timestamp'), value('2026-10-01T01:00:00')).error.code, 'conversion-failed');

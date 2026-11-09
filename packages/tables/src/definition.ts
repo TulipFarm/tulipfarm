@@ -409,8 +409,13 @@ export function validateValue(field: TableField, input: unknown): TableValue {
   if (field.kind === 'numeric' && value.kind === 'numeric') {
     const [integer = '', fraction = ''] = value.value.replace(/^-/, '').split('.');
     const integerDigits = integer === '0' ? 0 : integer.length;
-    if (integerDigits > field.precision - field.scale || fraction.length > field.scale)
+    // Zeros beyond the scale are dropped; any other excess digit would need rounding and is refused.
+    if (integerDigits > field.precision - field.scale || /[1-9]/.test(fraction.slice(field.scale)))
       throw new TableValidationError('Decimal exceeds field precision or scale');
+    if (fraction.length > field.scale) {
+      const [whole = ''] = value.value.split('.');
+      return { kind: 'numeric', value: field.scale ? `${whole}.${fraction.slice(0, field.scale)}` : whole };
+    }
   }
   if (
     (field.kind === 'single-select' || field.kind === 'multi-select') &&
