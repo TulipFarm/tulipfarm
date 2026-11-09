@@ -98,6 +98,7 @@ import { proposeTableSchema, tableProposalRules } from '@tulipfarm/tables/propos
 import { tableProposalJsonSchema } from '@tulipfarm/tables/proposal-json-schema';
 import { createChatTableProposals } from './table-proposals.ts';
 import { chatRowReview } from './chat-row-guard.ts';
+import { chatTableDefinitions, guessedChatTable } from './chat-table-lookup.ts';
 import { createTableService } from '@tulipfarm/tables/service';
 import { TableError } from '@tulipfarm/tables/service-contracts';
 import { TableValidationError } from '@tulipfarm/tables/definition';
@@ -211,7 +212,12 @@ export const frameworkCallSchema = z.discriminatedUnion('tool', [
         `JSON-encoded file selection, such as ${JSON.stringify(importSelectionExample)}. CSV needs delimiter (",", ";", "\\t" or "|"); XLSX needs sheet (the tab name) instead. conversions maps a column name to text, numeric, boolean, date or timestamp; match each mapped field's type.`,
       ),
   }),
-  z.strictObject({ tool: z.literal('tables.definitions'), archived: z.boolean().default(false), ...page }),
+  z.strictObject({
+    tool: z.literal('tables.definitions'),
+    archived: z.boolean().default(false),
+    name: z.string().trim().min(1).max(200).optional(),
+    ...page,
+  }),
   z.strictObject({
     tool: z.literal('rows.page'),
     tableId: z.uuid(),
@@ -616,7 +622,7 @@ const descriptions: Record<ToolName, string> = {
   'tables.import.file':
     'Prepare one selected CSV/XLSX attachment for human review, not a direct import. Supply its current digest plus format, header/conversions, and delimiter or sheet; returns an immutable reference and writes nothing. Call it in the same reply as the tables.propose import plan that uses the reference. A new preparation is safe, but use the returned reference rather than assuming import success. Select-field columns stay text; the import matches their values to option labels. A failure returns import-file-failed with the reason to report and a next step.',
   'tables.definitions':
-    'List accessible active tables, or archived tables only when archived is true. Returns a permission-filtered catalog ordered by table ID (limit 1–100, default 25; continue with after) with applied revisions and field IDs, not rows. Use tables.list when an agent needs schemas it may operate on.',
+    'List accessible active tables, or archived tables only when archived is true. Returns a permission-filtered catalog ordered by table ID (limit 1–100, default 25; continue with after) with applied revisions and field IDs, not rows. To find a table the person named, pass part of its name as name; never guess a table ID or ask the person for one. Use tables.list when an agent needs schemas it may operate on.',
   'rows.page':
     'Read typed rows from one active table revision when a compact page is sufficient. Returns rows ordered by ID, at most 1–100 (default 25), and a cursor; pass after for the next page. Results omit inaccessible rows and do not search or sort—use rows.list for the applied-revision query interface. To find a person or linked row by name, use rows.resolveReference instead of paging.',
   'tables.propose':
@@ -647,11 +653,11 @@ const descriptions: Record<ToolName, string> = {
   'google.execute':
     'Execute exactly the unchanged Google proposal that its owner approved; use google.propose to prepare a different write. Returns the durable execution state and cannot approve or alter payloads. It changes Google data, so never retry an executing or outcome-unknown proposal; read google.status instead.',
   'tables.list':
-    'List accessible tables with their applied schemas for whoever may operate on them; use tables.definitions for schema-authoring catalog entries. Returns a permission-filtered page ordered by table ID (limit 1–100, default 25; continue with after), total, and nextCursor—not rows or archived tables. A saved agent can use only the tables in its data access. If a needed table is missing, tell the user it isn’t in this agent’s data access and that someone who manages the agent can add it under Execution › What data it can use.',
+    'List accessible tables with their applied schemas for whoever may operate on them; use tables.definitions for schema-authoring catalog entries. To find a table the person named, pass its name as name; never guess a table ID or ask the person for one. Returns a permission-filtered page ordered by table ID (limit 1–100, default 25; continue with after), total, and nextCursor—not rows or archived tables. A saved agent can use only the tables in its data access. If a needed table is missing, tell the user it isn’t in this agent’s data access and that someone who manages the agent can add it under Execution › What data it can use.',
   'schema.context':
     'Read table-authoring context before proposing a schema: eligible owning teams, existing tables, capabilities for an optional existing table, and newIds, fresh UUIDs to use for new tables, fields and options. Omit tableId for a new table; tableFound false means the id is not an existing table you can see. Results do not create anything; null capabilityTableId is not a denial. Read skills.read(table-authoring) for payload rules rather than inferring them from this context.',
   'schema.inspect':
-    'Inspect one table’s saved and applied schema revisions, fields, and migration state, plus its query capabilities: each field’s id, RSQL selector, operators, sort and group support, and link target. Call it before rows.list or rows.summarize. Returns schema and status, not row data and not a change.',
+    'Inspect one table’s saved and applied schema revisions, fields, and migration state, plus its query capabilities: each field’s id, RSQL selector, operators, sort and group support, and link target. Call it before rows.list or rows.summarize. Take the tableId from tables.list (pass name for a table the person named), never a guess. Returns schema and status, not row data and not a change.',
   'schema.status':
     'Check one table’s publication and migration status before using an applied revision. Returns status only, not schema fields or rows; saved does not mean applied. It is read-only and not a substitute for schema.inspect when the definition is needed.',
   'rows.list':
@@ -1171,6 +1177,7 @@ export function createChatTools(
         return tableService.definitions(workspaceId, actor, {
           limit: call.limit,
           archived: call.archived,
+          ...(call.name ? { search: call.name } : {}),
           ...(call.after ? { after: call.after } : {}),
         });
       case 'rows.page':
@@ -1344,7 +1351,7 @@ export function createChatTools(
       case 'google.execute':
         return invokeGoogleTool(runtime, google, context, call, outputs?.files);
       case 'tables.list':
-        return resources.list(workspaceId, actor, { after: call.after, limit: call.limit });
+        return resources.list(workspaceId, actor, { after: call.after, limit: call.limit, name: call.name });
       case 'schema.context':
         return { ...(await resources.authoringContext(workspaceId, actor, call.tableId)), newIds: freshIds() };
       case 'rows.get':
@@ -2789,6 +2796,18 @@ export function createChatTools(
       return { result: { reference }, sources };
     }
     if (call.tool.startsWith('atlassian.') && !atlassian) return { result: await invoke(context, call), sources: [] };
+    if (context.origin && tableIdTools.has(call.tool) && 'tableId' in call && typeof call.tableId === 'string') {
+      const guessed = await guessedChatTable(
+        runtime,
+        resources,
+        context.workspaceId,
+        context.actor,
+        context.origin,
+        call.tableId,
+        rowWriteTools.has(call.tool),
+      );
+      if (guessed) return guessed;
+    }
     let sources = await withHuman(runtime, context.workspaceId, context.actor, 'read', tx =>
       providerSources(tx, context.actor, call),
     );
@@ -2800,6 +2819,25 @@ export function createChatTools(
       if (!failure) throw error;
       return { result: failure, sources: [] };
     }
+    if (context.origin && call.tool === 'tables.definitions')
+      result = await chatTableDefinitions(
+        runtime,
+        resources,
+        context.workspaceId,
+        context.actor,
+        call.name,
+        z
+          .object({
+            tables: z.array(
+              z.looseObject({
+                id: z.string(),
+                definition: z.looseObject({ label: z.string(), owningTeamId: z.string() }),
+              }),
+            ),
+          })
+          .loose()
+          .parse(result),
+      );
     if (
       call.tool.startsWith('google.') &&
       z.object({ provider: z.literal('google-workspace'), error: z.string() }).safeParse(result).success
@@ -3034,6 +3072,16 @@ const rowReviewUnavailable = {
 };
 
 const rowWriteTools = new Set(['rows.create', 'rows.create.batch', 'rows.update', 'rows.delete']);
+const tableIdTools = new Set([
+  ...rowWriteTools,
+  'schema.inspect',
+  'schema.status',
+  'rows.list',
+  'rows.summarize',
+  'rows.resolveReference',
+  'rows.reverse',
+  'rows.get',
+]);
 const tableImportTools = new Set(['tables.import.attachments', 'tables.import.file', 'tables.propose']);
 const memberErrorInstructions: Record<z.infer<typeof workspaceMemberErrorCodeSchema>, string> = {
   'member-table-protected': 'The Workspace members table schema is fixed and cannot be changed.',

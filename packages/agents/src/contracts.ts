@@ -189,6 +189,7 @@ export const toolCallSchema = z.discriminatedUnion('tool', [
     tool: z.literal('tables.list'),
     after: z.uuid().optional(),
     limit: z.number().int().min(1).max(100).default(25),
+    name: z.string().trim().min(1).max(200).optional(),
   }),
   z.strictObject({
     tool: z.literal('rows.get'),

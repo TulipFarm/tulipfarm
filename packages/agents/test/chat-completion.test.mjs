@@ -6,9 +6,11 @@ import {
   completionCheckEvidence,
   inferWithTools,
   noCardReply,
+  tableIdQuestion,
   unbackedCardClaim,
   unbackedImportClaim,
   unbackedWriteClaim,
+  uncheckedTableQuestion,
 } from '../src/inference.ts';
 import { completionEvaluation, evaluationMessages } from './completion-evaluation-fixture.mjs';
 import {
@@ -1127,4 +1129,43 @@ test('with a card still waiting, pointing to it ends the reply and a repeated ne
   );
   assert.equal(more.text, noCardReply(1));
   assert.deepEqual(outcomes, ['skipped_no_tools', 'continue', 'continue', 'continue']);
+});
+
+test('a reply never asks the person for a table ID, and asks about a table only after looking tables up', () => {
+  for (const text of [
+    'Could you share the table ID for Pantry Stock?',
+    'I could not find that table. Please provide the table ID.',
+    'What is the ID of the table you want?',
+  ])
+    assert.equal(tableIdQuestion(text)?.status, 'continue', text);
+  for (const text of ['I added 3 rows to the Pantry Stock table.', 'Which ID should the new row use?'])
+    assert.equal(tableIdQuestion(text), undefined, text);
+  const lookedUp = [
+    { kind: 'results', results: [{ id: 'c', name: 'tables_definitions', output: '{}', error: false }] },
+  ];
+  const question = 'Do you want me to use Pantry Stock as the table name?';
+  assert.equal(uncheckedTableQuestion(question, [])?.status, 'continue');
+  assert.equal(uncheckedTableQuestion(question, lookedUp), undefined);
+  assert.equal(uncheckedTableQuestion('I added 3 rows to the Pantry Stock table.', []), undefined);
+});
+
+test('asking which table, after a lookup, ends the reply once corrections run out', async t => {
+  const outcomes = checkOutcomes(t);
+  const question = 'Two tables are called Pantry Stock, one in Ops and one in Sales. Which table do you mean?';
+  const replies = [
+    nativeReply('azure', { calls: [use('tables.definitions')] }),
+    ...Array.from({ length: 3 }, () => [
+      nativeReply('azure', { text: question }),
+      selectReply('azure', verdict('continue')),
+    ]).flat(),
+  ];
+  t.mock.method(globalThis, 'fetch', async () => Response.json(replies.shift()));
+  const result = await inferWithTools(
+    nativeRoutes.azure,
+    [{ role: 'user', text: 'Add 3 rows to Pantry Stock.' }],
+    async () => ({ tables: [] }),
+  );
+  assert.equal(result.text, question);
+  assert.equal(replies.length, 0);
+  assert.deepEqual(outcomes, ['continue', 'continue', 'continue']);
 });
