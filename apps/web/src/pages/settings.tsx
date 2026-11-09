@@ -22,7 +22,7 @@ import { useSettingsReceipt } from '@/features/settings/receipt-queries';
 import { CommandFeedback } from '@/features/settings/command-feedback';
 import { changeGovernance, governanceError, GovernanceRequestError } from '@/lib/governance';
 import { forgetWorkspace } from '@/lib/last-workspace';
-import { TeamConfirmation } from './team-administration';
+import { TeamConfirmation } from '@/features/access/team-fields';
 import { AvatarImagePicker } from '@/features/avatar/image-picker';
 import { EntityAvatar } from '@tulipfarm/sprout/avatar';
 import { useFlag } from '@/lib/feature-flags';

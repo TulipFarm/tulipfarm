@@ -2,6 +2,7 @@ import {
   collaborationDirectorySchema,
   governanceSnapshotSchema,
   governanceSuccessSchema,
+  memberAccessSchema,
   ownMembershipSchema,
 } from '@tulipfarm/workspaces/governance-contracts';
 import { apiOrigin } from './auth';
@@ -41,6 +42,16 @@ export async function loadCollaborationDirectory(workspaceId: string, signal: Ab
 export async function loadGovernance(workspaceId: string, signal: AbortSignal) {
   return governanceSnapshotSchema.parse(await governanceRequest(governancePath(workspaceId), 'GET', undefined, signal));
 }
+export async function loadMemberAccess(workspaceId: string, membershipId: string, signal: AbortSignal) {
+  return memberAccessSchema.parse(
+    await governanceRequest(
+      `${governancePath(workspaceId)}/members/${encodeURIComponent(membershipId)}/access`,
+      'GET',
+      undefined,
+      signal,
+    ),
+  );
+}
 export async function changeGovernance(workspaceId: string, path: string, method: string, body?: unknown) {
   return governanceSuccessSchema.parse(await governanceRequest(`${governancePath(workspaceId)}${path}`, method, body));
 }
@@ -73,6 +84,8 @@ export function governanceError(error: unknown) {
     if (error.code === 'teams-unavailable')
       return 'Team creation and deletion are not available in this workspace yet.';
     if (error.code === 'invitations-unavailable') return 'Invitation storage is not available in this workspace yet.';
+    if (error.code === 'person-grants-unavailable')
+      return 'Direct policies aren’t available in this workspace yet. Give access through a team instead.';
     if (error.status === 401) return 'Your session expired. Sign in again to continue.';
     if (error.status === 404) return 'This operation is unavailable. Your access may have changed.';
     if (error.status === 400) return 'Check the form values and try again.';
