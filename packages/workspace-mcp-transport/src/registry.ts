@@ -79,6 +79,79 @@ export type RegistrySnapshot = {
   completedPages: number;
 };
 
+/** The Streamable HTTP endpoints one registry record lists, without deleted servers or unusable URLs. */
+function remoteEntries(record: z.infer<typeof serverSchema>): RegistryEntry[] {
+  const official = record._meta['io.modelcontextprotocol.registry/official'];
+  if (official.status === 'deleted') return [];
+  const entries: RegistryEntry[] = [];
+  for (const [index, remote] of (record.server.remotes ?? []).entries()) {
+    if (remote.type !== 'streamable-http') continue;
+    const template = /\{[^{}]+\}/.test(remote.url);
+    try {
+      normalizeEndpoint(template ? remote.url.replace(/\{[^{}]+\}/g, 'template') : remote.url);
+    } catch {
+      continue;
+    }
+    entries.push({
+      id: `${record.server.name}@${record.server.version}:${index}`,
+      name: record.server.name,
+      version: record.server.version,
+      title: record.server.title ?? record.server.name,
+      description: record.server.description,
+      endpoint: remote.url,
+      status: official.status,
+      compatibility: template ? 'template-required' : 'unverified',
+      authentication: remote.headers?.some(header => header.isRequired) ? 'headers-required' : 'unknown',
+    });
+  }
+  return entries;
+}
+
+/** One bounded request to the registry's own name search, for a chat turn that cannot wait for a full catalog sync. */
+export async function searchRegistry(
+  query: string,
+  { fetcher = publicHttpsFetch, signal }: { fetcher?: typeof fetch; signal?: AbortSignal } = {},
+): Promise<RegistryEntry[]> {
+  const url = new URL('https://registry.modelcontextprotocol.io/v0.1/servers');
+  url.searchParams.set('search', query.trim().slice(0, 100));
+  url.searchParams.set('version', 'latest');
+  url.searchParams.set('limit', '30');
+  const response = await fetcher(url, {
+    signal: AbortSignal.any([AbortSignal.timeout(15000), ...(signal ? [signal] : [])]),
+    redirect: 'error',
+    headers: { accept: 'application/json' },
+  });
+  if (!response.ok) {
+    await response.body?.cancel();
+    throw new McpNetworkError('catalog-http');
+  }
+  if (!/^application\/json(?:\s*;|$)/i.test(response.headers.get('content-type') ?? '') || !response.body) {
+    await response.body?.cancel();
+    throw new McpNetworkError('catalog-response');
+  }
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let bytes = 0;
+  try {
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      bytes += chunk.value.length;
+      if (bytes > maximumPageBytes) throw new McpNetworkError('catalog-byte-limit');
+      chunks.push(chunk.value);
+    }
+  } finally {
+    await reader.cancel().catch(() => undefined);
+  }
+  let page: z.infer<typeof pageSchema>;
+  try {
+    page = pageSchema.parse(boundedJson(JSON.parse(Buffer.concat(chunks).toString('utf8')), maximumPageBytes));
+  } catch {
+    throw new McpNetworkError('catalog-invalid-schema');
+  }
+  return page.servers.flatMap(remoteEntries);
+}
+
 export function createRegistryCatalog({
   fetcher = publicHttpsFetch,
   now = () => new Date(),
@@ -205,7 +278,6 @@ export function createRegistryCatalog({
         const next = current.next;
         phase = 'catalog-page';
         for (const record of page.servers) {
-          const official = record._meta['io.modelcontextprotocol.registry/official'];
           const previousVersion = current.versions.get(record.server.name);
           if (previousVersion !== undefined && previousVersion !== record.server.version) {
             throw new McpNetworkError('catalog-invalid-schema');
@@ -221,31 +293,11 @@ export function createRegistryCatalog({
             current.nextBytes -= Buffer.byteLength(JSON.stringify(previous)) + (next.size > 1 ? 1 : 0);
             next.delete(id);
           }
-          if (official.status === 'deleted') continue;
-          for (const [index, remote] of (record.server.remotes ?? []).entries()) {
-            if (remote.type !== 'streamable-http') continue;
-            const template = /\{[^{}]+\}/.test(remote.url);
-            try {
-              normalizeEndpoint(template ? remote.url.replace(/\{[^{}]+\}/g, 'template') : remote.url);
-            } catch {
-              continue;
-            }
-            const id = `${prefix}${index}`;
-            const entry: RegistryEntry = {
-              id,
-              name: record.server.name,
-              version: record.server.version,
-              title: record.server.title ?? record.server.name,
-              description: record.server.description,
-              endpoint: remote.url,
-              status: official.status,
-              compatibility: template ? 'template-required' : 'unverified',
-              authentication: remote.headers?.some(header => header.isRequired) ? 'headers-required' : 'unknown',
-            };
+          for (const entry of remoteEntries(record)) {
             if (next.size >= maximumEntries) throw new McpNetworkError('catalog-entry-limit');
             const bytes = Buffer.byteLength(JSON.stringify(entry)) + (next.size ? 1 : 0);
             if (current.nextBytes + bytes > maximumSnapshotBytes) throw new McpNetworkError('catalog-byte-limit');
-            next.set(id, Object.freeze(entry));
+            next.set(entry.id, Object.freeze(entry));
             current.nextBytes += bytes;
           }
         }

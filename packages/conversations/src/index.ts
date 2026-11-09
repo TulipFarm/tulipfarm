@@ -157,6 +157,12 @@ function integrationCard(row: { tool: string; status: string; output?: unknown }
       result: z.union([
         z.object({ status: z.literal('connect-card'), app: z.string() }),
         z.object({ status: z.literal('review-required'), connection: z.object({ connectionId: z.string() }) }),
+        z.object({
+          status: z.literal('mcp-connect-card'),
+          name: z.string(),
+          endpoint: z.string(),
+          authentication: z.string(),
+        }),
       ]),
     })
     .safeParse(row.output);
@@ -166,7 +172,14 @@ function integrationCard(row: { tool: string; status: string; output?: unknown }
       ? { action: 'connect', app: output.data.result.app }
       : row.tool === 'integrations.disconnect' && 'connection' in output.data.result
         ? { action: 'disconnect', connectionId: output.data.result.connection.connectionId }
-        : null,
+        : row.tool === 'integrations.mcp.connect' && output.data.result.status === 'mcp-connect-card'
+          ? {
+              action: 'mcp',
+              name: output.data.result.name,
+              endpoint: output.data.result.endpoint,
+              authentication: output.data.result.authentication,
+            }
+          : null,
   );
   return card.success ? { integration: card.data } : {};
 }

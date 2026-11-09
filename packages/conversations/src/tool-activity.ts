@@ -94,6 +94,8 @@ export const toolActivityLabels = {
   'integrations.list': 'Checking your connected accounts',
   'integrations.connect': 'Preparing a card to connect an app',
   'integrations.disconnect': 'Preparing a card to disconnect an account',
+  'integrations.mcp.search': 'Searching the MCP registry',
+  'integrations.mcp.connect': 'Preparing a card to connect an MCP server',
   'web.fetch': 'Reading a web page',
   'api.request': 'Calling an API',
   'packages.inspect': 'Inspecting a system package',

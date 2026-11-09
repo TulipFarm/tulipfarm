@@ -102,6 +102,12 @@ export type ImageReceipt = z.infer<typeof imageReceiptSchema>[number];
 const integrationCardSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('connect'), app: z.string() }),
   z.object({ action: z.literal('disconnect'), connectionId: z.string() }),
+  z.object({
+    action: z.literal('mcp'),
+    name: z.string(),
+    endpoint: z.string(),
+    authentication: z.enum(['oauth', 'secrets', 'none']),
+  }),
 ]);
 export type IntegrationCardView = z.infer<typeof integrationCardSchema>;
 const messageSchema = z.object({

@@ -7,6 +7,7 @@ import {
   createOAuthOperations,
   createRegistryCatalog,
   resolveRegistryEndpoint,
+  searchRegistry,
   MCP_OAUTH_REDIRECT_URI,
   MCP_OAUTH_CLIENT_ID,
 } from '../dist/index.js';
@@ -1096,4 +1097,44 @@ test('Registry replaces all endpoints when the same latest record repeats across
     complete.entries.map(entry => entry.id),
     ['org/latest@1:0'],
   );
+});
+
+test('Registry search asks the registry once and keeps only usable remote endpoints', async () => {
+  const meta = status => ({
+    'io.modelcontextprotocol.registry/official': { status, updatedAt: '2026-10-01T00:00:00Z', isLatest: true },
+  });
+  const server = (name, status, remotes) => ({
+    server: { name, version: '1.0.0', description: `${name} server`, remotes },
+    _meta: meta(status),
+  });
+  const urls = [];
+  const found = await searchRegistry('  posthog  ', {
+    fetcher: async url => {
+      urls.push(String(url));
+      return Response.json({
+        servers: [
+          server('io.github.PostHog/mcp', 'active', [
+            { type: 'streamable-http', url: 'https://mcp.posthog.com/mcp' },
+            { type: 'sse', url: 'https://mcp.posthog.com/sse' },
+          ]),
+          server('example/local', 'active', [{ type: 'streamable-http', url: 'http://127.0.0.1/mcp' }]),
+          server('example/gone', 'deleted', [{ type: 'streamable-http', url: 'https://gone.example.com/mcp' }]),
+        ],
+        metadata: {},
+      });
+    },
+  });
+  assert.deepEqual(urls, [
+    'https://registry.modelcontextprotocol.io/v0.1/servers?search=posthog&version=latest&limit=30',
+  ]);
+  assert.deepEqual(
+    found.map(entry => [entry.name, entry.endpoint, entry.status]),
+    [['io.github.PostHog/mcp', 'https://mcp.posthog.com/mcp', 'active']],
+  );
+  await assert.rejects(searchRegistry('posthog', { fetcher: async () => new Response('busy', { status: 503 }) }), {
+    code: 'catalog-http',
+  });
+  await assert.rejects(searchRegistry('posthog', { fetcher: async () => Response.json({ servers: 'nope' }) }), {
+    code: 'catalog-invalid-schema',
+  });
 });

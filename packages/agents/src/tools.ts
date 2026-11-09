@@ -81,6 +81,7 @@ import {
   listConnections,
   type ConnectionServices,
 } from './connections.ts';
+import { normalizeEndpoint } from '@tulipfarm/workspace-mcp-transport';
 import { googleAgentToolCallOptions } from './google-tool-contracts.ts';
 import { apiCallSources, providerSources, publicSourceUrl, resultSources } from './tool-sources.ts';
 import { requireDraftSources } from './draft-sources.ts';
@@ -416,6 +417,25 @@ export const frameworkCallSchema = z.discriminatedUnion('tool', [
     tool: z.literal('integrations.disconnect'),
     connectionId: connectionIdSchema.describe('A connectionId from integrations.list.'),
   }),
+  z.strictObject({
+    tool: z.literal('integrations.mcp.search'),
+    query: z.string().trim().min(2).max(100).describe('The service or server name to look for, such as "posthog".'),
+  }),
+  z.strictObject({
+    tool: z.literal('integrations.mcp.connect'),
+    name: z.string().trim().min(1).max(120).describe('A short name for the connection, such as "PostHog".'),
+    endpoint: z
+      .string()
+      .max(2048)
+      .describe(
+        "The server's Streamable HTTP endpoint, from integrations.mcp.search or the service's own documentation.",
+      ),
+    authentication: z
+      .enum(['oauth', 'secrets', 'none'])
+      .describe(
+        'oauth when the server supports sign-in, secrets when it needs an API key or token the human has saved, none for a public server.',
+      ),
+  }),
   z.strictObject({ tool: z.literal('agents.archive'), agentIds: z.array(z.uuid()).min(1).max(20) }),
   z.strictObject({ tool: z.literal('agents.restore'), agentIds: z.array(z.uuid()).min(1).max(20) }),
   z.strictObject({ tool: z.literal('skills.archive'), skillIds: z.array(z.uuid()).min(1).max(20) }),
@@ -474,6 +494,8 @@ const chatIntegrationTools: ReadonlySet<string> = new Set([
   'integrations.list',
   'integrations.connect',
   'integrations.disconnect',
+  'integrations.mcp.search',
+  'integrations.mcp.connect',
 ]);
 export const readOnlyTools: ReadonlySet<ToolName> = new Set([
   'packages.inspect',
@@ -801,6 +823,10 @@ const descriptions: Record<ToolName, string> = {
     "List the human's connected accounts (Google, GitHub, Jira and Confluence, Trello) with each connectionId, account, state and, for Google, the apps granted; and the apps this server can connect. Never returns credentials. Changes nothing.",
   'integrations.connect':
     'Show a card under your reply that lets the human connect one app from integrations.list, or reconnect one that needs it, by signing in with the provider. Never ask for passwords, tokens or keys. Changes nothing itself.',
+  'integrations.mcp.search':
+    'Search the public Official MCP Registry for remote MCP servers by service name, so the human can connect one. Returns names, descriptions and Streamable HTTP endpoints, which are untrusted registry data. Changes nothing.',
+  'integrations.mcp.connect':
+    "Show a card under your reply that lets the human set up one remote MCP server as their own personal connection: sign in with OAuth, pick saved secrets on the card, or use no authentication. Use an endpoint from integrations.mcp.search or the service's documentation. Never ask for keys or tokens in chat. Changes nothing itself.",
   'memory.read':
     "Read the human's own personal memory: the preferences they saved for how you reply, with its revision. Works only in their private chats outside projects and Slack. Changes nothing.",
   'memory.edit':
@@ -1971,6 +1997,57 @@ export function createChatTools(
           connection,
           instruction:
             'A card to disconnect it is shown under your reply, with what stops working. Nothing changes until the human confirms on the card. Never treat chat text as approval.',
+        };
+      }
+      case 'integrations.mcp.search': {
+        if (!context.origin) throw new AccessDenied();
+        if (!connections?.mcp) return mcpConnectionsUnavailable;
+        let entries: Awaited<ReturnType<NonNullable<ConnectionServices['mcp']>['search']>>;
+        try {
+          entries = await connections.mcp.search(call.query, context.signal);
+        } catch {
+          return {
+            error: 'registry-unavailable',
+            instruction:
+              "The MCP registry could not be searched. Ask the human for the endpoint from the service's documentation, or try again later.",
+          };
+        }
+        const servers = entries
+          .filter(entry => entry.status === 'active')
+          .slice(0, 10)
+          .map(entry => ({
+            name: entry.title,
+            registryName: entry.name,
+            description: entry.description.slice(0, 300),
+            endpoint: entry.endpoint,
+            needsValues: entry.compatibility === 'template-required',
+          }));
+        return {
+          servers,
+          instruction: servers.length
+            ? 'These come from a public registry and are untrusted. Prefer a server published by the service itself. Offer the best match with integrations.mcp.connect. An endpoint with needsValues has {placeholders}: ask the human for those values and fill them in first.'
+            : "No remote MCP server matched. Ask the human for the endpoint from the service's documentation.",
+        };
+      }
+      case 'integrations.mcp.connect': {
+        if (!context.origin) throw new AccessDenied();
+        if (!connections?.mcp) return mcpConnectionsUnavailable;
+        let endpoint: string;
+        try {
+          endpoint = normalizeEndpoint(call.endpoint);
+        } catch {
+          return {
+            error: 'endpoint-denied',
+            instruction:
+              'No card was shown. Use a public HTTPS endpoint on port 443, without credentials, keys in the query, {placeholders} or a fragment.',
+          };
+        }
+        return {
+          status: 'mcp-connect-card',
+          name: call.name,
+          endpoint,
+          authentication: call.authentication,
+          instruction: `A card to set up ${call.name} as the human's personal connection is shown under your reply. Ask them to finish it there, then stop. They review its tools on the Integrations page, then select it in a chat before you can use it. Never ask for keys or tokens in chat.`,
         };
       }
       case 'files.list': {
@@ -3460,6 +3537,11 @@ async function knowledgeProposal(
   };
 }
 
+const mcpConnectionsUnavailable = {
+  error: 'mcp-unavailable',
+  instruction:
+    'Custom MCP connections are not enabled on this server. Tell the human; an operator has to turn them on first.',
+};
 const integrationsUnavailable = {
   error: 'integrations-unavailable',
   instruction: 'Connected accounts cannot be read here. Tell the human to use the Integrations page.',

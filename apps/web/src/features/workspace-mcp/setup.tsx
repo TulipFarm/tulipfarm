@@ -24,6 +24,7 @@ export function McpSetup({
   api,
   capabilities,
   entry,
+  proposal,
   integration,
   close,
   saved,
@@ -31,6 +32,8 @@ export function McpSetup({
   api: McpApi;
   capabilities: Capabilities;
   entry?: CatalogEntry | undefined;
+  /** A chat's suggestion. It sets up a personal integration only. */
+  proposal?: { name: string; endpoint: string; authentication: 'oauth' | 'secrets' | 'none' } | undefined;
   integration?: Integration;
   close: () => void;
   saved: (id: string) => void;
@@ -40,13 +43,15 @@ export function McpSetup({
   useEffect(() => {
     heading.current?.focus();
   }, []);
-  const [name, setName] = useState(integration?.name ?? entry?.name ?? '');
-  const [endpoint, setEndpoint] = useState(integration?.endpoint ?? entry?.endpoint ?? '');
+  const [name, setName] = useState(integration?.name ?? entry?.name ?? proposal?.name ?? '');
+  const [endpoint, setEndpoint] = useState(integration?.endpoint ?? entry?.endpoint ?? proposal?.endpoint ?? '');
   const [ownership, setOwnership] = useState<'personal' | 'shared'>(integration?.ownership ?? 'personal');
   const [auth, setAuth] = useState<string>(
     integration?.authMethod === 'secret-bearer' || integration?.authMethod === 'secret-headers'
       ? 'secrets'
-      : (integration?.authMethod ?? (entry?.authentication === 'unknown' ? '' : (entry?.authentication ?? ''))),
+      : (integration?.authMethod ??
+          proposal?.authentication ??
+          (entry?.authentication === 'unknown' ? '' : (entry?.authentication ?? ''))),
   );
   const [secretIds, setSecretIds] = useState<string[]>([]);
   const savedSecrets = useSecrets(api.workspaceId, auth === 'secrets');
@@ -226,7 +231,8 @@ export function McpSetup({
             <Label htmlFor={`${prefix}-ownership`}>Integration ownership</Label>
             <Select
               value={ownership}
-              disabled={!!integration}
+              items={ownershipLabels}
+              disabled={!!integration || !!proposal}
               onValueChange={value => {
                 if (value === 'personal' || value === 'shared') setOwnership(value);
               }}
@@ -235,8 +241,8 @@ export function McpSetup({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="personal">Personal, private to you</SelectItem>
-                {capabilities.canManageShared && <SelectItem value="shared">Shared workspace integration</SelectItem>}
+                <SelectItem value="personal">{ownershipLabels.personal}</SelectItem>
+                {capabilities.canManageShared && <SelectItem value="shared">{ownershipLabels.shared}</SelectItem>}
               </SelectContent>
             </Select>
           </div>
@@ -253,6 +259,7 @@ export function McpSetup({
             <Label htmlFor={`${prefix}-auth`}>Authentication</Label>
             <Select
               value={auth}
+              items={authLabels}
               onValueChange={value => {
                 setAuth(value ?? '');
                 setToken('');
@@ -268,11 +275,11 @@ export function McpSetup({
                 <SelectValue placeholder="Choose the provider's method" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="none">No authentication</SelectItem>
-                <SelectItem value="bearer">Bearer token</SelectItem>
-                <SelectItem value="headers">Secret headers / API key</SelectItem>
-                <SelectItem value="secrets">Saved secrets</SelectItem>
-                <SelectItem value="oauth">OAuth</SelectItem>
+                {Object.entries(authLabels).map(([value, label]) => (
+                  <SelectItem key={value} value={value}>
+                    {label}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
             <p id={`${prefix}-auth-help`} className="text-sm text-muted-foreground">
@@ -491,7 +498,16 @@ export function McpSetup({
   );
 }
 
-function sameEndpoint(a: string, b: string) {
+const ownershipLabels = { personal: 'Personal, private to you', shared: 'Shared workspace integration' };
+const authLabels = {
+  none: 'No authentication',
+  bearer: 'Bearer token',
+  headers: 'Secret headers / API key',
+  secrets: 'Saved secrets',
+  oauth: 'OAuth',
+};
+
+export function sameEndpoint(a: string, b: string) {
   try {
     const left = new URL(a);
     const right = new URL(b.trim());

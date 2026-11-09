@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { RegistryEntry } from '@tulipfarm/workspace-mcp-transport';
 import { googleAppScopes, type GoogleApp, type GoogleStatus } from '@tulipfarm/google-workspace/public-contracts';
 
 type Provider = 'google' | 'github' | 'atlassian' | 'trello';
@@ -31,6 +32,8 @@ export type ConnectionId = z.infer<typeof connectionIdSchema>;
 type AccountState = 'authorizing' | 'active' | 'refreshing' | 'reconnect-required' | 'disconnected';
 /** The account reads chat lists connections with. Each acts for the person and returns no credentials. */
 export type ConnectionServices = {
+  /** Present only when custom MCP connections are enabled. Searches the public MCP registry. */
+  mcp?: { search(query: string, signal?: AbortSignal): Promise<RegistryEntry[]> } | undefined;
   google?:
     | { availability(): { configured: boolean }; status(workspaceId: string, userId: string): Promise<GoogleStatus> }
     | undefined;
