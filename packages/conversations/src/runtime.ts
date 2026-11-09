@@ -77,6 +77,7 @@ import {
 } from './skill-invocations.ts';
 import { isCalendarReadCall } from '@tulipfarm/google-workspace/calendar-events';
 import {
+  errorAttributes,
   errorType,
   log,
   activeTrace,
@@ -508,7 +509,9 @@ async function changed(tx: AuthorizationTransaction, work: ReplyWork, settled = 
   if (settled) await noteReplyTiming(tx, work.turnId);
 }
 
-async function failTurn(tx: AuthorizationTransaction, work: ReplyWork, code: string) {
+/** Ends a turn without an answer. Logged like a thrown reply failure, so every stopped reply has a matching error. */
+async function failTurn(tx: AuthorizationTransaction, work: ReplyWork, code: string, stage: ReplyStage = 'context') {
+  logStoppedTurn(code, stage);
   await tx.client.query(
     `UPDATE ${table(tx, 'tf_conversation_turns')} SET status='failed',lease_until=NULL,retry_at=NULL,error_code=$2 WHERE id=$1`,
     [work.turnId, code],
@@ -517,6 +520,16 @@ async function failTurn(tx: AuthorizationTransaction, work: ReplyWork, code: str
   await changed(tx, work, true);
 }
 const skillUnavailable = (tx: AuthorizationTransaction, work: ReplyWork) => failTurn(tx, work, 'skill-unavailable');
+function logStoppedTurn(code: string, stage: ReplyStage) {
+  const known = telemetryErrorCode(code);
+  log('error', 'activity', 'call_failed', {
+    operation: 'conversation.reply',
+    'error.type': 'ReplyStopped',
+    'error.code': known ?? 'unclassified',
+    'error.stage': stage,
+  });
+  noteChatReplyCause(known);
+}
 
 export type ConversationPlanning = {
   allowsResearch(name: string, call: unknown): boolean;
@@ -1185,7 +1198,7 @@ export function createConversationExecutor(
       );
       if (target === 'stale') return 'stale';
       if (!target) {
-        await guarded(fence, tx => failTurn(tx, fence, 'compaction-not-found'));
+        await guarded(fence, tx => failTurn(tx, fence, 'compaction-not-found', 'compaction'));
         return 'stale';
       }
       const parsed = target.summary ? workingSummarySchema.safeParse(target.summary) : null;
@@ -1366,6 +1379,8 @@ export function createConversationExecutor(
             try {
               if (chat.project_id)
                 await requireResultSources(tx, chat.requester, fence.conversationId, compaction.summary.sources);
+              await requireGitHubSources(tx, chat.requester, compaction.summary.sources);
+              await requireGoogleSources(tx, chat.requester, compaction.summary.sources);
               await requireKnowledgeSources(tx, chat.requester, compaction.summary.sources);
               await requireWorkflowSources(tx, chat.requester, compaction.summary.sources);
               await requireGoogleFileSources(tx, chat.requester, compaction.summary.sources);
@@ -1519,6 +1534,7 @@ export function createConversationExecutor(
                 );
               } catch (error) {
                 if (!(error instanceof RequiredProjectContextTooLarge)) throw error;
+                logStoppedTurn('project-context-too-large', 'context');
                 await tx.client.query(
                   `UPDATE ${table(tx, 'tf_conversation_turns')} SET status='failed',lease_until=NULL,retry_at=NULL,error_code='project-context-too-large' WHERE id=$1`,
                   [fence.turnId],
@@ -1692,8 +1708,11 @@ export function createConversationExecutor(
                 if (hidden) hidden.text = '';
                 continue;
               }
-            // A prior answer whose cited knowledge is no longer eligible leaves model context.
+            // A prior answer whose sources the requester can no longer read, such as a disconnected Google account,
+            // leaves model context.
             try {
+              await requireGitHubSources(tx, chat.requester, row.sources);
+              await requireGoogleSources(tx, chat.requester, row.sources);
               await requireKnowledgeSources(tx, chat.requester, row.sources);
               await requireWorkflowSources(tx, chat.requester, row.sources);
               await requireGoogleFileSources(tx, chat.requester, row.sources);
@@ -3070,10 +3089,12 @@ export function createConversationExecutor(
               telemetryErrorCode(
                 typeof error === 'object' && error !== null && 'code' in error ? error.code : undefined,
               ) ?? (error instanceof Error ? modelErrorClass(error.message) : undefined);
+            const origin = errorAttributes(error)['error.origin'];
             log('error', 'activity', 'call_failed', {
               operation: 'conversation.reply',
               'error.type': errorType(error),
               ...(code ? { 'error.code': code } : {}),
+              ...(origin ? { 'error.origin': origin } : {}),
               'error.stage':
                 (typeof error === 'object' && error !== null ? failedStages.get(error) : undefined) ?? stage,
               ...(error instanceof z.ZodError

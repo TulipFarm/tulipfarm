@@ -36,7 +36,7 @@ import {
   recoverReplyHolds,
   settleReplyCredits,
 } from '@tulipfarm/workspace-storage/credits';
-import { commonCompatibility, qualified } from '@tulipfarm/workspace-storage/runtime';
+import { commonCompatibility, qualified, StorageUnavailableError } from '@tulipfarm/workspace-storage/runtime';
 import type { ConversationModel } from './conversation-model.ts';
 import type { ConversationInventory } from './conversation-inventory.ts';
 import { keepReplyLease } from './reply-lease.ts';
@@ -135,8 +135,9 @@ export async function beginReplySession(input: {
 
   const local = (tx: Tx): ConversationRuntime => ({
     transaction: async (workspaceId, range, operation) => {
-      if (workspaceId !== fence.workspaceId || tx.commonVersion < range.minimum || tx.commonVersion > range.maximum)
-        throw new AccessDenied();
+      if (workspaceId !== fence.workspaceId) throw new AccessDenied();
+      if (tx.commonVersion < range.minimum || tx.commonVersion > range.maximum)
+        throw new StorageUnavailableError('incompatible_version');
       return operation(tx);
     },
   });
@@ -313,7 +314,7 @@ export async function beginReplySession(input: {
   const leaseStartedAt = Date.now();
   const started = await runtime.transaction(fence.workspaceId, commonCompatibility, async tx => {
     await lockAuthorization(tx, readsInventory ? 'write' : 'read');
-    const slackActor = await requireCurrentConversationSources(tx, fence.conversationId, fence.turnId);
+    const slackActor = await requireCurrentConversationSources(tx, fence.conversationId, fence.turnId, 'in-context');
     await renewConversationReplyLease(tx, fence);
     requester =
       input.slack || input.mcp || input.outputs || input.requester
@@ -491,7 +492,12 @@ export async function beginReplySession(input: {
           const refreshInventory =
             input.inventory && tools.some(tool => inventoryTools.some(prefix => tool.startsWith(prefix)));
           await lockAuthorization(tx, refreshInventory ? 'write' : 'read');
-          const slackActor = await requireCurrentConversationSources(tx, fence.conversationId, fence.turnId);
+          const slackActor = await requireCurrentConversationSources(
+            tx,
+            fence.conversationId,
+            fence.turnId,
+            'in-context',
+          );
           await renewConversationReplyLease(tx, fence);
           const read = refreshInventory ? await readInventory(tx, slackActor) : undefined;
           const mcp = tools.some(tool => tool.startsWith('mcp.')) ? await readCatalog(tx) : undefined;
@@ -524,7 +530,12 @@ export async function beginReplySession(input: {
       if (keyOf(all) === authorizedKey) return;
       const result = await runtime.transaction(fence.workspaceId, commonCompatibility, async tx => {
         await lockAuthorization(tx);
-        const slackActor = await requireCurrentConversationSources(tx, fence.conversationId, fence.turnId);
+        const slackActor = await requireCurrentConversationSources(
+          tx,
+          fence.conversationId,
+          fence.turnId,
+          'in-context',
+        );
         const authorized = await authorize(tx, slackActor, all, inventorySources);
         const recorded = await recordModelSources(
           tx,

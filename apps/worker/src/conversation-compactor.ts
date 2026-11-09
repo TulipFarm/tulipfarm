@@ -126,7 +126,7 @@ export function conversationCompactor(
                   await lockAuthorization(tx);
                   if (maintenance) await requireMaintenanceFence(tx, maintenance);
                   else if ('turnId' in fence) {
-                    await requireCurrentConversationSources(tx, fence.conversationId, fence.turnId);
+                    await requireCurrentConversationSources(tx, fence.conversationId, fence.turnId, 'in-context');
                     await renewConversationReplyLease(tx, fence);
                   }
                 });

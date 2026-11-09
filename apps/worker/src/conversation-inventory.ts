@@ -1,6 +1,6 @@
 import { AccessDenied, lockAuthorization } from '@tulipfarm/access';
 import { readWorkspaceInventory } from '@tulipfarm/agents/tools';
-import { commonCompatibility, qualified } from '@tulipfarm/workspace-storage/runtime';
+import { commonCompatibility, qualified, StorageUnavailableError } from '@tulipfarm/workspace-storage/runtime';
 import { requireCurrentConversationSources } from '@tulipfarm/conversations/source-access';
 import { turnRequester } from '@tulipfarm/conversations/turn-requester';
 import {
@@ -12,7 +12,7 @@ import {
 export function readConversationInventory(runtime: ConversationRuntime, fence: ReplyFence) {
   return runtime.transaction(fence.workspaceId, commonCompatibility, async tx => {
     await lockAuthorization(tx, 'write');
-    const slack = await requireCurrentConversationSources(tx, fence.conversationId, fence.turnId);
+    const slack = await requireCurrentConversationSources(tx, fence.conversationId, fence.turnId, 'in-context');
     await renewConversationReplyLease(tx, fence);
     const chat = (
       await tx.client.query(
@@ -25,8 +25,9 @@ export function readConversationInventory(runtime: ConversationRuntime, fence: R
     const actor = await turnRequester(tx, fence.conversationId, fence.turnId);
     const local: ConversationRuntime = {
       transaction: async (workspaceId, range, operation) => {
-        if (workspaceId !== fence.workspaceId || tx.commonVersion < range.minimum || tx.commonVersion > range.maximum)
-          throw new AccessDenied();
+        if (workspaceId !== fence.workspaceId) throw new AccessDenied();
+        if (tx.commonVersion < range.minimum || tx.commonVersion > range.maximum)
+          throw new StorageUnavailableError('incompatible_version');
         return operation(tx);
       },
     };

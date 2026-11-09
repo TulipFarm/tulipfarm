@@ -224,27 +224,30 @@ export async function requireConversationMcpSources(
   await requireMcpSources(tx, actor, conversationId, [{ kind: 'private-conversation', conversationId }], prefetch);
 }
 
+/**
+ * `priorAnswers: 'in-context'` is for a reply's own checks. Its context already leaves out each earlier answer whose
+ * Google sources the requester can no longer read, and the reply rechecks the sources it keeps before every model call.
+ */
 export async function requireCurrentConversationSources(
   tx: AuthorizationTransaction,
   conversationId: string,
   turnId: string,
+  priorAnswers: 'all' | 'in-context' = 'all',
 ) {
   const actor = await turnRequester(tx, conversationId, turnId);
   await currentMember(tx, actor);
   await requireConversationMcpSources(tx, actor, conversationId);
   // A standalone follow-up holds no earlier turn of its chat, so only that turn's own sources apply.
   const standalone = await standaloneTurn(tx, conversationId, turnId);
-  const googleResults = await tx.client.query(
-    `SELECT r.sources FROM ${qualified(tx.schema, 'tf_conversation_results')} r JOIN ${qualified(tx.schema, 'tf_conversation_turns')} t ON t.id=r.turn_id WHERE r.conversation_id=$1 AND t.accepted_sequence>=COALESCE((SELECT context_start FROM ${qualified(tx.schema, 'tf_github_chat_selection')} WHERE conversation_id=$1),1) AND t.accepted_sequence<(SELECT accepted_sequence FROM ${qualified(tx.schema, 'tf_conversation_turns')} WHERE id=$2)`,
-    [conversationId, turnId],
-  );
-  if (!standalone) for (const row of googleResults.rows) await requireGoogleSources(tx, actor, row.sources);
   if (!standalone) {
     const retained = await tx.client.query(
       `SELECT r.sources FROM ${qualified(tx.schema, 'tf_conversation_results')} r JOIN ${qualified(tx.schema, 'tf_conversation_turns')} t ON t.id=r.turn_id WHERE r.conversation_id=$1 AND t.accepted_sequence>=COALESCE((SELECT context_start FROM ${qualified(tx.schema, 'tf_github_chat_selection')} WHERE conversation_id=$1),1) AND t.accepted_sequence<(SELECT accepted_sequence FROM ${qualified(tx.schema, 'tf_conversation_turns')} WHERE id=$2)`,
       [conversationId, turnId],
     );
-    for (const row of retained.rows) await requireGitHubSources(tx, actor, row.sources);
+    for (const row of retained.rows) {
+      if (priorAnswers === 'all') await requireGoogleSources(tx, actor, row.sources);
+      await requireGitHubSources(tx, actor, row.sources);
+    }
   }
   if (await requireSlackTurn(tx, actor, conversationId, turnId)) {
     const rows = await tx.client.query(
