@@ -1,5 +1,14 @@
 import assert from 'node:assert/strict';
 import { after, test } from 'node:test';
+import { createElement, type ReactNode } from 'react';
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRoute,
+  createRouter,
+  RouterProvider,
+} from '@tanstack/react-router';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { createServer } from 'vite';
 import type * as ToolLabels from '../src/features/chat/tool-labels.tsx';
 
@@ -189,4 +198,33 @@ test('a denied step that a later call of the same tool gets past no longer marks
   );
   assert.match(String(items[1]?.detail), /An earlier attempt was denied/);
   assert.equal(toolActivityItems([retry, denied]).at(-1)?.status, 'blocked');
+});
+
+test('a step renders model Markdown safely and links the workflows that blocked an archive', async () => {
+  const workflowId = '7f0c7a52-2f4b-4c39-9d1e-6a1f6b0c2d3e';
+  const [item] = toolActivityItems([
+    tool({
+      tool: 'tables.propose',
+      activityDetail: 'Not archived: an active workflow uses this table.',
+      blockingWorkflows: [{ id: workflowId, name: 'QA retest 6 flow' }],
+      narration: 'The active workflow **"QA retest 6 flow"** uses it. <img src=x onerror=alert(1)>',
+    }),
+  ]);
+  assert.equal(item?.detail, 'Not archived: an active workflow uses this table.');
+  const root = createRootRoute();
+  const page = createRoute({
+    getParentRoute: () => root,
+    path: '$workspaceSlug',
+    component: () => item?.details as ReactNode,
+  });
+  const router = createRouter({
+    routeTree: root.addChildren([page]),
+    history: createMemoryHistory({ initialEntries: ['/acme'] }),
+    isServer: true,
+  });
+  await router.load();
+  const html = renderToStaticMarkup(createElement(RouterProvider, { router }));
+  assert.match(html, /<strong>&quot;QA retest 6 flow&quot;<\/strong>/);
+  assert.doesNotMatch(html, /\*\*|<img|onerror/);
+  assert.match(html, new RegExp(`<a [^>]*href="/acme/workflows/${workflowId}"[^>]*>QA retest 6 flow</a>`));
 });

@@ -1090,6 +1090,18 @@
   }
 }
 
+/* What the model wrote before a tool step keeps the step's compact, muted text while showing its Markdown. */
+@layer components {
+  [data-step-narration] .sprout-message-response {
+    color: inherit;
+    font-size: inherit;
+    line-height: inherit;
+  }
+  [data-step-narration] .sprout-message-response > * + * {
+    margin-top: 0.5rem;
+  }
+}
+
 /* An active mode tints the composer and its chip, as Sprout's ChatInput does. */
 @layer components {
   .sprout-input-group[data-mode='plan'] {

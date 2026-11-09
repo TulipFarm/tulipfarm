@@ -69,7 +69,8 @@ function DownloadLink({ path, children }: { path: string; children: ReactNode })
   );
 }
 
-function workflowPath(href: string, workspaceSlug: string) {
+/** The workflow id of an in-app workflow page path in this workspace, or null. */
+export function workflowPath(href: string, workspaceSlug: string) {
   const prefix = `/${encodeURIComponent(workspaceSlug)}/workflows/`;
   const id = href.startsWith(prefix) ? href.slice(prefix.length) : '';
   return /^[0-9a-f-]{36}$/.test(id) ? id : null;

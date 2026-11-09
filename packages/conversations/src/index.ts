@@ -15,7 +15,7 @@ import { storedToolActivity, storedToolPresentation } from './tool-activity-hist
 import { publicWebReceiptForHistory } from './public-web-history.ts';
 import { knowledgeActivityForHistory } from './knowledge-activity-history.ts';
 import { rowChangeForReceipt, rowViewForReceipt } from './row-view.ts';
-import { workflowReferences } from './workflow-receipts.ts';
+import { readableWorkflows, workflowReferences } from './workflow-receipts.ts';
 import { sourceDependenciesSchema } from './results.ts';
 import { requireCredits, CreditsExhausted } from '@tulipfarm/workspace-storage/credits';
 import { recordFileUse } from '@tulipfarm/files';
@@ -804,11 +804,15 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
                 workflows,
                 subagents,
                 ...(await storedToolActivity(tx, hidden.size ? { ...row, call: undefined } : row, viewer).then(
-                  ({ status, detail, proposal }) => ({
-                    activityStatus: status,
-                    ...(detail ? { activityDetail: detail } : {}),
-                    ...(proposal ? { tableProposal: true } : {}),
-                  }),
+                  async ({ status, detail, proposal, workflows }) => {
+                    const blockingWorkflows = hidden.size ? [] : await readableWorkflows(tx, actor, workflows);
+                    return {
+                      activityStatus: status,
+                      ...(detail ? { activityDetail: detail } : {}),
+                      ...(proposal ? { tableProposal: true } : {}),
+                      ...(blockingWorkflows.length ? { blockingWorkflows } : {}),
+                    };
+                  },
                 )),
                 narration: hidden.size ? null : (row.narration ?? null),
                 presentation: hidden.size

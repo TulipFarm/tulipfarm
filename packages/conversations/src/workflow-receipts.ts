@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { AccessDenied, type AuthorizationTransaction, type HumanActor } from '@tulipfarm/access';
+import { AccessDenied, hasWorkflowGrant, type AuthorizationTransaction, type HumanActor } from '@tulipfarm/access';
 import { requireWorkflowSources } from './source-access.ts';
 import { workflowReferenceSchema } from './contracts.ts';
 
@@ -41,4 +41,16 @@ export async function workflowReferences(
     }
   }
   return allowed;
+}
+
+/** The workflows a saved tool result named that the viewer can read now; the rest stay unnamed. */
+export async function readableWorkflows(
+  tx: AuthorizationTransaction,
+  actor: HumanActor,
+  workflows: readonly { id: string; name: string }[] | undefined,
+) {
+  const readable: { id: string; name: string }[] = [];
+  for (const workflow of workflows ?? [])
+    if (await hasWorkflowGrant(tx, actor.membershipId, workflow.id, 'read')) readable.push(workflow);
+  return readable;
 }
