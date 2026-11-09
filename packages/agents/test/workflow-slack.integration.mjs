@@ -12,6 +12,7 @@ import { createAuthoringDrafts } from '../src/drafts.ts';
 import { createConversationExecutor } from '../../conversations/src/runtime.ts';
 import { createChatTools } from '../src/tools.ts';
 import { createSlackActions } from '../src/slack-actions.ts';
+import { createPersonalMemoryService } from '../../conversations/src/personal-memory.ts';
 import { outboundFixture } from './slack-actions.integration.mjs';
 
 test('native Slack workflow: Tickets chat draft, row event, direct send, restart and exact sent receipt', async t => {
@@ -464,11 +465,15 @@ test('native Slack workflow action prepared under per-send approval keeps it and
   assert.equal(f.effects.length, 1);
 });
 
-test('native Slack workflow sends reviewed literal text drafted from earlier private chat turns', async t => {
+test('native Slack workflow sends reviewed literal text drafted from earlier private chat turns and personal memory', async t => {
   const f = await outboundFixture();
   t.after(() => f.close());
   const w = f.workspace,
     chatId = randomUUID();
+  await createPersonalMemoryService(f.runtime).save(w.id, w.userId, {
+    content: 'Prefer short notes.',
+    expectedRevision: 0,
+  });
   await f.store.create(w.id, w.userId, { chatId, commandId: randomUUID() });
   const send = text =>
     f.store.send(w.id, w.userId, chatId, {
@@ -497,7 +502,8 @@ test('native Slack workflow sends reviewed literal text drafted from earlier pri
     ],
   };
   let proposed;
-  const executor = createConversationExecutor(f.runtime, async ({ executeTool }) => {
+  const executor = createConversationExecutor(f.runtime, async ({ executeTool, readPersonalMemory }) => {
+    assert.notEqual((await readPersonalMemory()).content, '');
     proposed = await executeTool('workflows.draft', false, context =>
       createChatTools(context.runtime).invoke(context, {
         tool: 'workflows.draft',
