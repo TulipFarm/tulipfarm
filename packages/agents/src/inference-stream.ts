@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { withoutReasoningMarkup } from './reasoning-markup.ts';
 
 export type StreamFormat = 'anthropic' | 'chat-completions' | 'responses' | 'gemini';
 /** `body` has the provider's non-streaming response shape; `error` is a `{ error }` envelope from an in-stream error event. */
@@ -284,7 +285,7 @@ function chatAssembler(): Assembler {
     },
     visible() {
       if (calls.size) return '';
-      return content ?? undefined;
+      return content === null ? undefined : withoutReasoningMarkup(content, true);
     },
     result() {
       if (broken) return { body: null, error };

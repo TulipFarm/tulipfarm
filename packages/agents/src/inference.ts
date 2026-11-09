@@ -61,6 +61,7 @@ import { isMcpCall, mcpExecutionResultSchema, type McpModelCatalog } from './mcp
 import { validateMcpCall } from './mcp-catalog.ts';
 import { readModelResponse, streamRequestFields, streamUrl, type StreamFormat } from './inference-stream.ts';
 import { containsToolEnvelope, toolTextPreview, writesLayoutCall } from './tool-text.ts';
+import { withoutReasoningMarkup } from './reasoning-markup.ts';
 import {
   bindCalendarText,
   calendarTextCheckPrompt,
@@ -848,7 +849,7 @@ function decision(
         return { kind: 'failure', reason: 'refusal' };
       if (choice.finish_reason === 'length') return { kind: 'failure', reason: 'output-limit' };
       if (capabilities.toolChoice === 'auto' && choice.finish_reason === 'stop' && !choice.message.tool_calls?.length)
-        return answer(choice.message.content ?? '');
+        return answer(withoutReasoningMarkup(choice.message.content ?? ''));
       const call = choice.message.tool_calls?.[0];
       if (
         !['tool_calls', 'stop'].includes(choice.finish_reason) ||
@@ -1523,7 +1524,7 @@ function nativeStep(route: CapableRoute, body: unknown): NativeStep {
         if (!input.ok) return invalid('tool-arguments');
         calls.push({ id: call.id, name: call.function.name, input: input.value, providerId: true });
       }
-      return step(choice.message.content ?? '', calls, null);
+      return step(withoutReasoningMarkup(choice.message.content ?? ''), calls, null);
     }
     case 'google': {
       const feedback = googlePromptFeedbackSchema.safeParse(body);
@@ -2244,7 +2245,7 @@ function contentAnswer(route: CapableRoute, body: unknown): ContentInferenceResu
       const choice = parsed.success ? parsed.data.choices[0] : undefined;
       if (!choice) return undefined;
       if (choice.message.refusal || choice.finish_reason === 'content_filter') return { kind: 'refused' };
-      const text = choice.message.content ?? '';
+      const text = withoutReasoningMarkup(choice.message.content ?? '');
       if (choice.finish_reason === 'length') return { kind: 'truncated', text };
       return choice.finish_reason === 'stop' ? { kind: 'answer', text } : undefined;
     }
