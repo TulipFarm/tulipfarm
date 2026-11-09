@@ -4,6 +4,7 @@ import { once } from 'node:events';
 import { test } from 'node:test';
 import { inferWithTools } from '../dist/inference.js';
 import { serverSentEvents } from '../dist/inference-stream.js';
+import { withoutReasoningMarkup } from '../dist/reasoning-markup.js';
 import { selectReply } from './native-fixture.mjs';
 
 const encoder = new TextEncoder();
@@ -455,6 +456,100 @@ test('Azure chat completions assemble tool call deltas, and blank streamed text'
     content: 'Untrusted tool result for web.fetch: {"text":"page"}',
   });
   assert.equal(requests.length, 2);
+});
+
+test('reasoning tags a chat-completions model leaks never reach streamed text, step narration or the answer', async t => {
+  const base = { id: 'chatcmpl-1', object: 'chat.completion.chunk', model: 'Kimi-K2.6' };
+  const lines = chunks =>
+    [...chunks.map(chunk => `data: ${JSON.stringify(chunk)}\n\n`), 'data: [DONE]\n\n'].map(line =>
+      encoder.encode(line),
+    );
+  const content = fragments =>
+    fragments.map(fragment => ({
+      ...base,
+      choices: [{ index: 0, delta: { content: fragment }, finish_reason: null }],
+    }));
+  const finish = reason => [{ ...base, choices: [{ index: 0, delta: {}, finish_reason: reason }] }];
+  provider(t, [
+    () =>
+      streamed(
+        lines([
+          ...content(['Send a new `tables.propose` call with the updated plan.<', '/thi', 'nk>']),
+          {
+            ...base,
+            choices: [
+              {
+                index: 0,
+                delta: {
+                  tool_calls: [
+                    {
+                      index: 0,
+                      id: 'call_1',
+                      type: 'function',
+                      function: { name: 'web_fetch', arguments: fetchArguments },
+                    },
+                  ],
+                },
+                finish_reason: null,
+              },
+            ],
+          },
+          ...finish('tool_calls'),
+        ]),
+      ),
+    () =>
+      streamed(lines([...content(['<thi', 'nk>Hidden reasoning', '</think>\n\nDone', ' now.']), ...finish('stop')])),
+  ]);
+  const { updates, answerText } = recorder();
+  const narrations = [];
+  const result = await inferWithTools(
+    routes.azure,
+    [{ role: 'user', text: 'Hi' }],
+    async (_call, _activity, narration) => {
+      narrations.push(narration);
+      return { text: 'page' };
+    },
+    undefined,
+    false,
+    null,
+    { answerText },
+  );
+  assert.deepEqual(result, { text: 'Done now.' });
+  assert.deepEqual(narrations, ['Send a new `tables.propose` call with the updated plan.']);
+  assert.equal(
+    updates.some(update => /think|Hidden|<$/.test(update.text)),
+    false,
+    JSON.stringify(updates),
+  );
+  assert.deepEqual(updates.at(-1), { step: 1, text: 'Done now.' });
+});
+
+test('reasoning markup removal keeps the only text a model wrote and leaves ordinary angle brackets alone', () => {
+  assert.equal(withoutReasoningMarkup('Next I will propose the import.</think>'), 'Next I will propose the import.');
+  assert.equal(withoutReasoningMarkup('<think>Only reasoning'), 'Only reasoning');
+  assert.equal(withoutReasoningMarkup('<think>Still reasoning', true), '');
+  assert.equal(withoutReasoningMarkup('Use a < b and <thead> rows.'), 'Use a < b and <thead> rows.');
+  assert.equal(withoutReasoningMarkup('<thinking>Plan</thinking>Answer'), 'Answer');
+});
+
+test('reasoning markup is removed from a non-streamed chat-completions answer', async t => {
+  provider(t, [
+    () =>
+      Response.json({
+        model: 'Kimi-K2.6',
+        choices: [
+          {
+            index: 0,
+            finish_reason: 'stop',
+            message: { role: 'assistant', content: 'Weighing the options.</think>Paris is the capital of France.' },
+          },
+        ],
+      }),
+  ]);
+  const result = await inferWithTools(routes.azure, [{ role: 'user', text: 'Hi' }], () =>
+    assert.fail('No tool expected'),
+  );
+  assert.deepEqual(result, { text: 'Paris is the capital of France.' });
 });
 
 test('the Responses API streams output text deltas and uses the completed response', async t => {

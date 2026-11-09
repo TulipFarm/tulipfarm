@@ -11,6 +11,7 @@ import {
   type InferenceUsage,
 } from './inference.ts';
 import { agentAuthoringLimits, AgentAuthoringError } from './authoring-assistance-contracts.ts';
+import { withoutReasoningMarkup } from './reasoning-markup.ts';
 
 type Message = { role: 'user' | 'assistant'; content: string };
 type Route = z.output<typeof inferenceRouteSchema>;
@@ -227,7 +228,7 @@ function text(route: Route, body: unknown): string {
   if (choice.message.refusal || choice.finish_reason === 'content_filter')
     throw new AgentAuthoringError('provider-refused');
   if (choice.finish_reason !== 'stop') throw new AgentAuthoringError('provider-interrupted');
-  return z.string().parse(choice.message.content);
+  return withoutReasoningMarkup(z.string().parse(choice.message.content));
 }
 
 export function validateAgentAuthoringText(value: unknown, maximum: number): string {
