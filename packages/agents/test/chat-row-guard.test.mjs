@@ -24,8 +24,9 @@ test('earlier direct writes in a reply count their rows, and any review keeps th
       written('rows.create', { error: 'record-invalid' }),
       { tool: 'rows.create', call: {}, output: null, drafted: false },
     ]),
-    { rows: 4, reviewing: false },
+    { rows: 4, reviewing: false, singleCreate: false },
   );
+  assert.equal(earlierRowWrites([written('rows.create', { id: 'e' })]).singleCreate, true);
   assert.equal(earlierRowWrites([written('rows.create.batch', { error: 'review-required' })]).reviewing, true);
   assert.equal(earlierRowWrites([{ ...written('rows.create', { draftId: 'x' }), drafted: true }]).reviewing, true);
 });

@@ -91,6 +91,13 @@ One version identifies all apps and images of a release.
   chat card. Rows meant for a table that isn't ready yet no longer land in a
   similarly named one, and values that block a field conversion are reported
   for the person to fix instead of being worked around with new rows.
+- A chat request to add more than 5 rows, or rows for a table nobody named,
+  now shows one approval card for the whole batch, with every row listed, and
+  nothing is written until it is approved. Before, the batch failed with no
+  card, and a model could then add the rows one at a time. While a row card for
+  a table waits, chat can't write to that table or open another card for it,
+  and adding rows one by one in a reply is refused after the first, so splitting
+  a large request no longer gets past the limit.
 - The blocked schema change report in chat now wraps each row's problem and
   fix text inside the card instead of running past its edge, and on narrow
   screens shows each invalid row as a stacked card of row, field, value and
