@@ -66,6 +66,14 @@ One version identifies all apps and images of a release.
 
 ### Fixed
 
+- A chat reply no longer says an approval or review card is ready, pending or
+  about to appear unless a tool call in that reply made one. The server checks
+  the reply against its own table and row results and sends it back to do the
+  work or say plainly that no card exists; a reply that keeps claiming one ends
+  with a plain account instead. Tool activity for a row write held for
+  approval now names the rule, such as the 5-row limit, instead of a generic
+  failure.
+
 - Row changes in a table change review are now headed by the row's title, the
   way the table names it, instead of by the value being changed, such as
   "Update 5.000".

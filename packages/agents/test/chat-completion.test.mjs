@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { claimsActionOutcome, completionCheckEvidence, inferWithTools, unbackedImportClaim } from '../src/inference.ts';
+import {
+  cardClaims,
+  claimsActionOutcome,
+  completionCheckEvidence,
+  inferWithTools,
+  noCardReply,
+  unbackedCardClaim,
+  unbackedImportClaim,
+} from '../src/inference.ts';
 import { completionEvaluation, evaluationMessages } from './completion-evaluation-fixture.mjs';
 import {
   formats,
@@ -428,6 +436,66 @@ test('an import presented for review needs a pending proposal receipt from this 
     'Which file should I import?',
   ])
     assert.equal(unbackedImportClaim(text, []), undefined, text);
+});
+
+test('a reply that presents an approval or review card needs a tool result in this reply that made one', () => {
+  const results = (name, output, error = false) => [
+    { kind: 'results', results: [{ id: 'c', name, output: `Untrusted tool result for x: ${output}`, error }] },
+  ];
+  const draft = results('rows_create', '{"draftId":"d","status":"review-required","operation":"create"}');
+  const proposal = results('tables_propose', '{"id":"p","status":"pending"}');
+  const written = results('rows_create', '{"record":{"id":"r","values":{}}}');
+  const held = results('rows_create_batch', '{"error":"review-required","reason":"too-many-rows"}');
+  const undecided = results('rows_create', '{"error":"approval-pending","table":"Contacts"}');
+  for (const text of [
+    'I have prepared the first row but have no approval yet. Please approve the pending row creation card, then tell me to continue.',
+    'I have prepared the first row for approval. The chat card for qa-rv5-m1 should now appear above this message.',
+    'Please approve the card in the interface to add the rows.',
+    'Five approval cards are ready.',
+    'Your import is ready for review. Open the import review to approve it.',
+    'The rows are waiting for your approval.',
+    'I cannot create any rows until you approve the pending review card.',
+  ]) {
+    assert.ok(cardClaims(text).length, text);
+    for (const items of [[], written, held]) assert.equal(unbackedCardClaim(text, items)?.status, 'continue', text);
+    assert.equal(unbackedCardClaim(text, draft), undefined, text);
+    assert.equal(unbackedCardClaim(text, proposal), undefined, text);
+    assert.equal(unbackedCardClaim(text, undecided), undefined, text);
+  }
+  for (const text of [
+    'No approval card was created because the batch exceeded the 5-row limit.',
+    'I couldn’t create an approval card for these rows.',
+    'Should I prepare an approval card for the 9 rows?',
+    'The card I prepared earlier is still waiting above.',
+    '3 rows added in Contacts.',
+    'A card in Kanban view shows one row.',
+  ])
+    assert.deepEqual(cardClaims(text), [], text);
+});
+
+test('a reply that keeps claiming a card no tool made ends with a plain account instead', async t => {
+  const outcomes = checkOutcomes(t);
+  const claim = 'The approval card for the 9 rows should now appear above this message.';
+  const replies = [
+    nativeReply('azure', { text: claim }),
+    nativeReply('azure', { text: claim }),
+    nativeReply('azure', { text: 'Please approve the pending row creation card.' }),
+  ];
+  const requests = [];
+  t.mock.method(globalThis, 'fetch', async (_url, init) => {
+    requests.push(JSON.parse(init.body));
+    return Response.json(replies.shift());
+  });
+  const result = await inferWithTools(
+    nativeRoutes.azure,
+    [{ role: 'user', text: 'Create the approval card for all 9 rows.' }],
+    () => assert.fail('No tool expected'),
+  );
+  assert.equal(result.text, noCardReply);
+  assert.equal(replies.length, 0);
+  assert.ok(!requests.some(isCompletionRequest));
+  assert.match(JSON.stringify(requests[1].messages), /no tool call in this reply created one/);
+  assert.deepEqual(outcomes, ['continue', 'continue', 'continue']);
 });
 
 test('an unbacked import review is sent back without the completion model until a proposal exists', async t => {

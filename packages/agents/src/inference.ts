@@ -1871,6 +1871,76 @@ export function unbackedImportClaim(candidate: string, items: readonly LoopItem[
       };
 }
 
+const cardClaim = new RegExp(
+  [
+    String.raw`\b(?:approval|review|import|confirmation|pending|proposal|chat|change|draft|row|creation)s? cards?\b`,
+    String.raw`\bcards? (?:is|are|was|were|should|will|has|have|appears?|shows?|below|above|in the chat)\b`,
+    String.raw`\b(?:ready|sent|submitted) (?:for|to) (?:your |human )?(?:review|approv\w*)\b`,
+    String.raw`\b(?:awaiting|waiting for|needs?|pending) (?:your )?approval\b`,
+    String.raw`\bfor your (?:review|approval)\b`,
+    String.raw`\b(?:open|see|check) the (?:import |row |table )?review\b`,
+    String.raw`\bimport review\b`,
+    String.raw`\bapprove (?:it|them|this|these|the \w+(?: \w+)?) (?:on|in|from|using|via|below|above)\b`,
+  ].join('|'),
+  'i',
+);
+const claimNegated =
+  /\b(?:no|not|never|nothing|none|cannot|unable|without|instead of)\b|n['’]t\b|\b(?:can|could|would|did|was|is|are|were|has|have|will)not\b/i;
+const earlierCard = /\b(?:earlier|previous(?:ly)?|last (?:reply|message|turn)|before this)\b/i;
+
+/** Clauses of a reply that present a review or approval card as ready, pending or about to appear. */
+export function cardClaims(text: string) {
+  return text
+    .split(/(?<=[.!?])\s+|\n+/)
+    .filter(sentence => !sentence.trim().endsWith('?') && !earlierCard.test(sentence))
+    .flatMap(sentence => sentence.split(/[;:,–—]|\s(?:but|and|so|then|while|because|until|unless|once)\s/i))
+    .map(clause => clause.trim())
+    .filter(clause => cardClaim.test(clause) && !claimNegated.test(clause));
+}
+
+const cardReceipt = /"draftId":"|"status":"(?:pending|waiting|review-required|awaiting-approval|waiting-approval)"/;
+const readOnlyNativeTools = new Set([...readOnlyTools].map(nativeToolName));
+/**
+ * Whether a tool result may have made something the person reviews in chat. Table and row tools must show a row draft
+ * or a pending change. Other actions, such as Google or MCP proposals, have their own receipts and are left to the
+ * completion check.
+ */
+const madeCard = (result: ToolResult) =>
+  !result.error &&
+  !/^[^{]*\{"error":/.test(result.output) &&
+  (cardReceipt.test(result.output) ||
+    (isWorkTool(result.name) &&
+      !readOnlyNativeTools.has(result.name) &&
+      !/^(?:tables|rows|schema|files|web|knowledge)_/.test(result.name)));
+// A row write refused because an earlier card for that table is still undecided: that card exists, so naming it is true.
+const pendingCard = (result: ToolResult) => /^[^{]*\{"error":"approval-pending"/.test(result.output);
+
+/**
+ * Why a reply that says a review or approval card is ready, pending or about to appear must do more work: no tool call
+ * in this reply made one, so the person would look for a card that does not exist. Decided without the completion
+ * model, which has accepted such replies after failed or direct writes.
+ */
+export function unbackedCardClaim(candidate: string, items: readonly LoopItem[]) {
+  const claims = cardClaims(candidate);
+  if (!claims.length) return undefined;
+  if (
+    items.some(item => item.kind === 'results' && item.results.some(result => madeCard(result) || pendingCard(result)))
+  )
+    return undefined;
+  return {
+    status: 'continue' as const,
+    reason:
+      `The reply says a review or approval card exists ("${claims[0]!.slice(0, 80)}"), but no tool call in this reply created one. Make the change with a tool that returns a review, or say plainly that no card was created and why.`.slice(
+        0,
+        240,
+      ),
+  };
+}
+
+/** The reply when chat keeps presenting a card that no tool call made. */
+export const noCardReply =
+  'No approval or review card was created in this reply, so nothing here is waiting for your approval. Check Tool activity for what ran, then ask again.';
+
 type EvidenceEntry =
   | { kind: 'turn'; turn: ChatTextTurn }
   | { kind: 'model'; text: string; calls: { id: string; name: string; input: unknown }[] }
@@ -3046,7 +3116,7 @@ export async function inferWithTools(
       if (rendered) preview(rendered.input.summary);
       // The check catches unfinished tool work. A first-try answer that used no work tool has nothing to catch,
       // unless it reports an outcome that only a tool call could have produced.
-      const unbacked = unbackedImportClaim(candidate, items);
+      const unbacked = unbackedImportClaim(candidate, items) ?? unbackedCardClaim(candidate, items);
       if (
         !unbacked &&
         !workToolUsed &&
@@ -3124,8 +3194,11 @@ export async function inferWithTools(
       );
       if (checked.status !== 'continue') return accept();
       preview('');
-      if (finalizing) return finish(stoppingReply);
-      if (completionCorrections++ >= 2) throw new Error('model-incomplete-response');
+      if (finalizing) return finish(unbacked ? `${stoppingReply} ${noCardReply}` : stoppingReply);
+      if (completionCorrections++ >= 2) {
+        if (unbacked) return finish(noCardReply, true);
+        throw new Error('model-incomplete-response');
+      }
       items.push(
         { kind: 'turn', turn: { role: 'assistant', text: candidate } },
         {
