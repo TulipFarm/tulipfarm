@@ -49,6 +49,43 @@ export async function requireTableSources(
   }
 }
 
+/**
+ * Moves each table source a chat carries to that table's current revision. A chat pins every table it has listed
+ * or read, and any later schema change to one of those tables would otherwise fail the exact-revision check of a
+ * new import or proposal. Access is still checked against the current table when the sources are required.
+ */
+export async function currentTableSources(
+  tx: AgentTransaction,
+  sources: readonly SourceDependency[],
+): Promise<SourceDependency[]> {
+  const ids = [
+    ...new Set(
+      sources.flatMap(source =>
+        source.kind === 'table-rows' || source.kind === 'table-schema' ? [source.tableId] : [],
+      ),
+    ),
+  ];
+  if (!ids.length) return [...sources];
+  const rows = z
+    .array(z.object({ id: z.uuid(), applied: z.string().nullable(), target: z.string() }))
+    .parse(
+      (
+        await tx.client.query(
+          `SELECT id,applied_revision AS applied,target_revision AS target FROM ${relation(tx, 'tf_table_catalog')} WHERE id=ANY($1::uuid[])`,
+          [ids],
+        )
+      ).rows,
+    );
+  const current = new Map(rows.map(row => [row.id, row]));
+  const refreshed = sources.map((source): SourceDependency => {
+    if (source.kind !== 'table-rows' && source.kind !== 'table-schema') return source;
+    const table = current.get(source.tableId);
+    const revision = source.kind === 'table-schema' ? table?.target : table?.applied;
+    return revision ? { ...source, revision } : source;
+  });
+  return [...new Map(refreshed.map(source => [JSON.stringify(source), source])).values()];
+}
+
 type KnowledgeDocumentSource = Extract<SourceDependency, { kind: 'knowledge-document' }>;
 
 // Table execution and publication recheck sources in transactions that cannot read knowledge tables, so a definer

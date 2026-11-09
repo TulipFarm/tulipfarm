@@ -160,6 +160,21 @@ test('a denied step names the table permission it needs and where to ask for it'
   assert.doesNotMatch(String(propose?.detail), /review your permissions/);
 });
 
+test('a workspace admin is never told to ask a workspace admin for access', () => {
+  const steps = ['tables.import.attachments', 'tables.import.file', 'tables.propose', 'rows.update', 'agents.propose'];
+  const items = toolActivityItems(
+    steps.map(name => tool({ tool: name, status: 'blocked' })),
+    { admin: true },
+  );
+  assert.equal(items.length, steps.length);
+  for (const item of items) {
+    assert.match(String(item.detail), /^Access denied\./);
+    assert.doesNotMatch(String(item.detail), /ask a workspace admin/i);
+    assert.match(String(item.detail), /Ask again to retry\./);
+  }
+  assert.match(String(items[0]?.detail), /already have every table permission/);
+});
+
 test('a denied step that a later call of the same tool gets past no longer marks the reply as denied', () => {
   const denied = tool({ tool: 'tables.propose', status: 'blocked' });
   const other = tool({ tool: 'rows.update', status: 'blocked' });

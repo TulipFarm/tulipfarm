@@ -2397,7 +2397,7 @@ export function createConversationExecutor(
                     error: error instanceof AccessDenied ? 'access-denied' : 'tool-failed',
                     instruction:
                       error instanceof AccessDenied
-                        ? 'The request was denied. Do not claim success or bypass the denial. The error does not identify which access check failed.'
+                        ? 'The request was denied. Do not claim success or bypass the denial. The error does not identify which access check failed, so do not say a missing role or permission caused it, and do not tell the requester to ask a workspace admin; the step under your reply explains what they can do.'
                         : 'The tool failed for an unconfirmed reason. This is not evidence of a permission denial. Do not claim success or tell the requester they lack permissions. Check arguments and available status before a new request.',
                   },
             sources: mergeSources([...inheritedSources, ...currentSources]),

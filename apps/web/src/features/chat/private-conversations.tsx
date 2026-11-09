@@ -411,7 +411,8 @@ function ConversationDetail({
   compact?: boolean;
 }) {
   const questionPending = usePendingQuestion();
-  const { workspace } = workspaceRoute.useRouteContext();
+  const { workspace, membership } = workspaceRoute.useRouteContext();
+  const admin = membership?.role === 'admin';
   const [moving, setMoving] = useState(false);
   const projects = useWorkspaceProjects(workspace.id);
   const navigate = useNavigate();
@@ -1140,7 +1141,7 @@ function ConversationDetail({
                               <ToolActivity
                                 key="activity"
                                 variant="transcript"
-                                items={toolActivityItems(message.tools)}
+                                items={toolActivityItems(message.tools, { admin })}
                                 active={thinking && !!turn && message.turn?.id === turn.id}
                                 activityLabel={message.turn?.id === turn?.id ? activityLabel : undefined}
                                 onToggle={() => {
@@ -1239,7 +1240,7 @@ function ConversationDetail({
                             <ToolActivity
                               key="activity"
                               variant="transcript"
-                              items={toolActivityItems(incoming.tools)}
+                              items={toolActivityItems(incoming.tools, { admin })}
                               active={thinking}
                               activityLabel={activityLabel}
                               onToggle={() => {

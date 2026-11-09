@@ -60,6 +60,9 @@ const problems = {
   failed: 'Failed or interrupted. Check current rows before sending a new request.',
 };
 
+/** Who is reading the chat; only workspace admins hold every table permission. */
+export type Viewer = { admin?: boolean };
+
 const tableAccessStep = 'Ask a workspace admin to grant it to you or your team in Table access, then ask again.';
 const rowPermissions: [RegExp, string][] = [
   [/^rows\.create/, 'Create rows'],
@@ -68,20 +71,27 @@ const rowPermissions: [RegExp, string][] = [
   [/^rows\./, 'Read rows'],
 ];
 
+// Admins hold every table permission, so a denial means something the step used changed, never a missing grant.
+const adminTableDenial =
+  'Access denied. As a workspace admin you already have every table permission, so a table or file this step used changed or isn’t available to this chat. Ask again to retry.';
+
 /** Names the permission a denied step needs and where to get it; the server never says which check failed. */
-export function deniedDetail(tool: string) {
+export function deniedDetail(tool: string, { admin = false }: Viewer = {}) {
+  if (admin && /^(tables|schema|rows)\./.test(tool)) return adminTableDenial;
+  if (tool === 'files.read')
+    return 'Access denied. You can’t open this file. Ask its owner to share it with you, then ask again.';
+  if (admin)
+    return 'Access denied. Something this step used changed or isn’t available to this chat, such as a file, table or connected account. Ask again to retry.';
   if (tool === 'tables.propose' || tool.startsWith('tables.import.'))
     return `Access denied. This change needs a table permission you don’t have, such as Create tables for the owning team, or Manage schema, Read rows, Create rows, Update rows or Delete rows on the table. ${tableAccessStep}`;
   const rows = rowPermissions.find(([pattern]) => pattern.test(tool))?.[1];
   if (rows) return `Access denied. This step needs ${rows} on the table. ${tableAccessStep}`;
   if (/^(tables|schema)\./.test(tool)) return `Access denied. This step needs access to the table. ${tableAccessStep}`;
-  if (tool === 'files.read')
-    return 'Access denied. You can’t open this file. Ask its owner to share it with you, then ask again.';
   return 'Access denied. Your role doesn’t allow this step. Ask a workspace admin to give you the access it needs, or ask someone who has it to do it.';
 }
 
-function webDetail(tool: Tool) {
-  if (tool.status === 'blocked') return deniedDetail(tool.tool);
+function webDetail(tool: Tool, viewer: Viewer) {
+  if (tool.status === 'blocked') return deniedDetail(tool.tool, viewer);
   const widened = tool.web?.widened ? ' Search widened from 24 hours to seven days.' : '';
   if (tool.status === 'failed' || tool.web?.status === 'failed')
     return `Public web retrieval failed. Retry or paste the text.${widened}`;
@@ -104,9 +114,9 @@ const recovered = new Set(['completed', 'waiting']);
  * A denied step that a later call of the same tool in this reply got past is folded into that call,
  * so the reply no longer reads as denied.
  */
-export function toolActivityItems(tools: Tool[]): ToolActivityItem[] {
+export function toolActivityItems(tools: Tool[], viewer: Viewer = {}): ToolActivityItem[] {
   const visible = visibleActivityTools(tools);
-  const items = visible.map(toolActivityItem);
+  const items = visible.map(tool => toolActivityItem(tool, viewer));
   const retried = new Set<number>();
   const denied = new Set<number>();
   items.forEach((item, index) => {
@@ -132,7 +142,7 @@ export function toolActivityItems(tools: Tool[]): ToolActivityItem[] {
   );
 }
 
-function toolActivityItem(tool: Tool): ToolActivityItem {
+function toolActivityItem(tool: Tool, viewer: Viewer): ToolActivityItem {
   if (tool.tool === 'knowledge.retrieve') return knowledgeToolActivityItem(tool, toolVisual(tool.tool));
   const label = toolLabel(tool);
   const brand = tool.presentation ? tool.presentation.brand : brandOf(tool.tool, label);
@@ -150,11 +160,11 @@ function toolActivityItem(tool: Tool): ToolActivityItem {
     detail: tool.activityDetail
       ? tool.activityDetail
       : tool.tool.startsWith('web.')
-        ? webDetail(tool)
+        ? webDetail(tool, viewer)
         : tool.tool === 'api.request' && status === 'failed'
           ? apiCallProblem(tool.api && 'error' in tool.api ? tool.api.error : undefined)
           : status === 'blocked'
-            ? deniedDetail(tool.tool)
+            ? deniedDetail(tool.tool, viewer)
             : status === 'failed'
               ? problems.failed
               : status === 'unknown'
