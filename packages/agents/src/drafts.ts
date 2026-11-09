@@ -652,6 +652,25 @@ export function createAuthoringDrafts(
       };
     });
   }
+  /** The latest builder save or activation of a continued chat draft's agent, made after the chat drafted it. */
+  async function builderReceipt(
+    tx: AgentTransaction,
+    actor: HumanActor,
+    bound: AgentStorage,
+    workspaceId: string,
+    id: string,
+    agentId: string,
+  ) {
+    const command = (
+      await tx.client.query(
+        `SELECT c.id FROM ${relation(tx, 'tf_agent_setup_commands')} c JOIN ${relation(tx, 'tf_chat_authoring_drafts')} d ON d.id=$3 WHERE c.agent_id=$1 AND c.membership_id=$2 AND c.created_at>=d.created_at ORDER BY c.created_at DESC,c.id DESC LIMIT 1`,
+        [agentId, actor.membershipId, id],
+      )
+    ).rows[0];
+    return command
+      ? createAgentSetup(bound, eligible, setupOptions).readCommand(workspaceId, actor, uuidSchema.parse(command.id))
+      : undefined;
+  }
   async function read(workspaceId: string, user: string, chatId: string, id: string) {
     chatId = uuidSchema.parse(chatId);
     id = uuidSchema.parse(id);
@@ -681,7 +700,12 @@ export function createAuthoringDrafts(
               }
             : {}),
         };
-      const setupStatus = outcome?.kind === 'agent' ? outcome.setupReceipt?.status : undefined;
+      if (outcome?.kind === 'builder') {
+        const setupReceipt = await builderReceipt(tx, actor, bound, workspaceId, id, outcome.agentId);
+        outcome = { kind: 'builder', agentId: outcome.agentId, ...(setupReceipt ? { setupReceipt } : {}) };
+      }
+      const setupStatus =
+        outcome?.kind === 'agent' || outcome?.kind === 'builder' ? outcome.setupReceipt?.status : undefined;
       const status = setupStatus
         ? setupStatus === 'active' || setupStatus === 'saved'
           ? 'saved'
@@ -696,26 +720,28 @@ export function createAuthoringDrafts(
             : 'pending'
           : outcome.kind === 'dismissed'
             ? 'dismissed'
-            : outcome.kind === 'skill' ||
-                outcome.kind === 'workflow' ||
-                outcome.kind === 'workflow-archive' ||
-                outcome.kind === 'workflow-restore' ||
-                outcome.kind === 'agent-archive' ||
-                outcome.kind === 'agent-restore' ||
-                outcome.kind === 'skill-archive' ||
-                outcome.kind === 'skill-restore' ||
-                outcome.kind === 'project' ||
-                outcome.kind === 'files' ||
-                outcome.kind === 'file-share' ||
-                outcome.kind === 'knowledge' ||
-                outcome.kind === 'memory' ||
-                outcome.kind === 'row'
-              ? 'saved'
-              : outcome.receipt.status === 'accepted'
+            : outcome.kind === 'builder'
+              ? 'continued'
+              : outcome.kind === 'skill' ||
+                  outcome.kind === 'workflow' ||
+                  outcome.kind === 'workflow-archive' ||
+                  outcome.kind === 'workflow-restore' ||
+                  outcome.kind === 'agent-archive' ||
+                  outcome.kind === 'agent-restore' ||
+                  outcome.kind === 'skill-archive' ||
+                  outcome.kind === 'skill-restore' ||
+                  outcome.kind === 'project' ||
+                  outcome.kind === 'files' ||
+                  outcome.kind === 'file-share' ||
+                  outcome.kind === 'knowledge' ||
+                  outcome.kind === 'memory' ||
+                  outcome.kind === 'row'
                 ? 'saved'
-                : outcome.receipt.status === 'conflict'
-                  ? 'stale'
-                  : outcome.receipt.status;
+                : outcome.receipt.status === 'accepted'
+                  ? 'saved'
+                  : outcome.receipt.status === 'conflict'
+                    ? 'stale'
+                    : outcome.receipt.status;
       const replaced =
         status === 'stale' && !outcome && isWorkflow(row.proposal)
           ? await superseded(tx, id, row.proposal.targetId)
@@ -758,7 +784,10 @@ export function createAuthoringDrafts(
     const decided = await transaction(workspaceId, user, true, async (tx, actor, bound) => {
       const row = await load(tx, workspaceId, actor, chatId, id);
       if (row.digest !== input.digest) throw new AgentError('draft-conflict');
-      if (input.decision === 'activate' && (row.proposal.kind !== 'agent' || !row.proposal.input.setup))
+      if (
+        (input.decision === 'activate' || input.decision === 'continue') &&
+        (row.proposal.kind !== 'agent' || !row.proposal.input.setup)
+      )
         throw new AgentError('setup-review-required', 400);
       if (input.decision !== 'dismiss') await writable(tx, actor, row.proposal, bound, workspaceId);
       const previous = (
@@ -768,6 +797,9 @@ export function createAuthoringDrafts(
         )
       ).rows[0];
       if (previous) {
+        const earlier = draftOutcomeSchema.parse(previous.outcome);
+        // Every save in the builder reports the handoff again; the first one decided it.
+        if (input.decision === 'continue' && previous.draft_id === id && earlier.kind === 'builder') return earlier;
         if (previous.draft_id !== id || canonicalJson(previous.input) !== canonicalJson(input))
           throw new AgentError('idempotency-conflict');
         const outcome = draftOutcomeSchema.parse(previous.outcome);
@@ -792,7 +824,15 @@ export function createAuthoringDrafts(
           : outcome;
       }
       let outcome: z.infer<typeof draftOutcomeSchema> = { kind: 'dismissed' };
-      if (input.decision !== 'dismiss') {
+      if (input.decision === 'continue' && row.proposal.kind === 'agent') {
+        // Only a builder save by this requester after the chat drafted the setup continues it.
+        const continued = await tx.client.query(
+          `SELECT 1 FROM ${relation(tx, 'tf_agent_setup_drafts')} s JOIN ${relation(tx, 'tf_chat_authoring_drafts')} d ON d.id=$3 WHERE s.agent_id=$1 AND s.membership_id=$2 AND s.created_at>=d.created_at LIMIT 1`,
+          [row.proposal.targetId, actor.membershipId, id],
+        );
+        if (!continued.rowCount) throw new AgentError('setup-draft-not-found', 404);
+        outcome = { kind: 'builder', agentId: row.proposal.targetId };
+      } else if (input.decision !== 'dismiss') {
         if (row.proposal.kind === 'skill') throw new AgentError('draft-stale');
         await requireNoMcpDerived(tx, row.sources);
         if (await stale(tx, row.proposal, actor, bound, workspaceId, id)) throw new AgentError('draft-stale');

@@ -9,6 +9,7 @@ import {
   improveAgentInstructionsSchema,
   previewAgentChatSchema,
 } from '@tulipfarm/agents/authoring-assistance-contracts';
+import { draftDecisionSchema } from '@tulipfarm/agents/draft-contracts';
 import { catalogFixture } from '@/features/models/catalog-fixture';
 
 if (import.meta.env.DEV && /^\/agent-builder-mock(?:\/|$)/.test(window.location.pathname)) {
@@ -49,14 +50,19 @@ if (import.meta.env.DEV && /^\/agent-builder-mock(?:\/|$)/.test(window.location.
   const storageKey = 'tulipfarm:agent-builder-mock:v1';
   const stored = sessionStorage.getItem(storageKey);
   const state = z
-    .object({ drafts: z.array(agentSetupDraftSchema), commands: z.array(agentSetupReceiptSchema) })
+    .object({
+      drafts: z.array(agentSetupDraftSchema),
+      commands: z.array(agentSetupReceiptSchema),
+      continued: z.boolean().default(false),
+    })
     .parse(stored ? JSON.parse(stored) : { drafts: [], commands: [] });
+  let continued = state.continued;
   const setups = new Map(state.drafts.map(draft => [draft.agentId, draft]));
   const setupCommands = new Map(state.commands.map(command => [command.commandId, command]));
   const persist = () =>
     sessionStorage.setItem(
       storageKey,
-      JSON.stringify({ drafts: [...setups.values()], commands: [...setupCommands.values()] }),
+      JSON.stringify({ drafts: [...setups.values()], commands: [...setupCommands.values()], continued }),
     );
   // A chat whose setup draft opens the builder in the canvas: /agent-builder-mock/chat/<chatId>
   const chatId = '67676767-6767-4676-8676-676767676767';
@@ -174,7 +180,15 @@ if (import.meta.env.DEV && /^\/agent-builder-mock(?:\/|$)/.test(window.location.
         });
       if (path === '/v1/workspaces') return Response.json([workspace]);
       if (path === '/v1/workspaces/agent-builder-mock') return Response.json(workspace);
-      if (path.endsWith(`/drafts/${chatDraftId}`)) return Response.json(chatDraft);
+      if (path.endsWith(`/drafts/${chatDraftId}`)) {
+        if (!continued) return Response.json(chatDraft);
+        const setupReceipt = [...setupCommands.values()].filter(command => command.agentId === chatAgentId).at(-1);
+        return Response.json({
+          ...chatDraft,
+          status: setupReceipt ? 'saved' : 'continued',
+          outcome: { kind: 'builder', agentId: chatAgentId, ...(setupReceipt ? { setupReceipt } : {}) },
+        });
+      }
       if (path.endsWith(`/conversations/${chatId}/messages`)) return Response.json(chatMessages);
       if (path.endsWith(`/conversations/${chatId}/plans`)) return Response.json({ plans: [] });
       if (path.endsWith('/system-package-installations')) return Response.json({ installations: [], nextCursor: null });
@@ -287,6 +301,14 @@ if (import.meta.env.DEV && /^\/agent-builder-mock(?:\/|$)/.test(window.location.
           management: null,
           canReview: false,
         });
+    }
+    if (method === 'PUT' && path.endsWith(`/drafts/${chatDraftId}/decision`)) {
+      const input = draftDecisionSchema.parse(JSON.parse(String(init?.body)));
+      if (input.decision !== 'continue' || !setups.has(chatAgentId))
+        return Response.json({ error: 'setup-draft-not-found' }, { status: 404 });
+      continued = true;
+      persist();
+      return Response.json({ kind: 'builder', agentId: chatAgentId });
     }
     if (method === 'PUT' && path.endsWith('/setup-draft')) {
       const input = saveAgentSetupDraftSchema.parse(JSON.parse(String(init?.body)));

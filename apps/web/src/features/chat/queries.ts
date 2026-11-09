@@ -71,6 +71,7 @@ export function useConversationChanges() {
       progress: () => change({ keys: [conversationKeys.lists(), creditKeys.balance()] }),
       interaction: (chatId: string) =>
         change({ keys: [conversationKeys.detail(chatId), conversationKeys.lists(), creditKeys.balance()] }),
+      draft: (chatId: string, id: string) => change({ keys: [conversationKeys.draft(chatId, id)] }),
       savedDraft: (chatId: string, kind: AuthoringProposal['kind'] | 'row') =>
         change({
           keys: [

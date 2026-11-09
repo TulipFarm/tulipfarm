@@ -125,6 +125,7 @@ export function LifecycleDraftCard({
     dismissed: { label: 'Dismissed', variant: 'secondary' },
     stale: { label: 'Out of date', variant: 'warning' },
     failed: { label: `Not ${text.done}`, variant: 'destructive' },
+    continued: { label: 'Continued in builder', variant: 'secondary' },
   } as const;
   return (
     <ReviewCard

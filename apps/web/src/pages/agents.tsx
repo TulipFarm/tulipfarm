@@ -39,7 +39,7 @@ import { agentStatus, agentTabs, visibleTabs, type AgentTab, type ExecutionCheck
 import { Badge } from '@tulipfarm/sprout/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@tulipfarm/sprout/tabs';
 import { AgentBuilder } from '@/features/agents/builder';
-import { useBuilderInitial } from '@/features/agents/builder-initial';
+import { continueChatDraft, useBuilderInitial } from '@/features/agents/builder-initial';
 import { useFeatureRead } from '@/lib/query';
 import { failedWrite, TableRequestError, type WriteState } from '@/features/tables/request-state';
 
@@ -365,6 +365,7 @@ function NewAgentBuilder({
       concealed={read.state.kind !== 'ready' || (loadingDraft && initial.state.kind !== 'ready')}
       refresh={read.refresh}
       onPersisted={() => {
+        if (handoff) void continueChatDraft(workspace.id, handoff).catch(() => {});
         void navigate({
           to: '/$workspaceSlug/agents/new',
           params: { workspaceSlug: workspace.slug },

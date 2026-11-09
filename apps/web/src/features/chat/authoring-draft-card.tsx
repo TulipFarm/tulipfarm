@@ -649,6 +649,7 @@ const badges = {
   dismissed: { label: 'Dismissed', variant: 'secondary' },
   stale: { label: 'Out of date', variant: 'warning' },
   failed: { label: 'Not saved', variant: 'destructive' },
+  continued: { label: 'Continued in builder', variant: 'secondary' },
 } as const;
 
 const toolBrandNames: [string, Brand, string][] = [

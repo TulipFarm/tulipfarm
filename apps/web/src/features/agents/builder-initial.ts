@@ -51,3 +51,21 @@ export function useBuilderInitial(
     },
   });
 }
+
+/** Records that the requester continued an undecided chat setup draft in the builder, so the chat stops offering it for review. */
+export async function continueChatDraft(workspaceId: string, handoff: { chatId: string; draftId: string }) {
+  const chat = conversationApi(workspaceId, () => {});
+  const view = await chat.draft(handoff.chatId, handoff.draftId, AbortSignal.timeout(15000));
+  if (view.outcome) return;
+  await chat.command(
+    {
+      kind: 'draft-decision',
+      chatId: handoff.chatId,
+      draftId: handoff.draftId,
+      commandId: crypto.randomUUID(),
+      digest: view.digest,
+      decision: 'continue',
+    },
+    AbortSignal.timeout(15000),
+  );
+}

@@ -172,4 +172,5 @@ const badges = {
   dismissed: { label: 'Dismissed', variant: 'secondary' },
   stale: { label: 'Out of date', variant: 'warning' },
   failed: { label: 'Not applied', variant: 'destructive' },
+  continued: { label: 'Continued in builder', variant: 'secondary' },
 } as const;
