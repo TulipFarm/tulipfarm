@@ -452,6 +452,8 @@ test('HTTP, nested work and inference export counts, seconds, status and correla
     const privateError = startHttp('POST', '/v1/private');
     privateError.finish(500, false, 'internal-error', new Error('timeout exceeded when trying to connect'));
     for (const status of ['started', 'paused', 'failed', 'completed']) recordTaskTransition(status);
+    recordTaskTransition('failed', { code: 'authority-revoked', taskId: 'task-1', error: new Error('denied') });
+    recordTaskTransition('failed', { code: 'PRIVATE CODE', taskId: 'task-2' });
     const aborted = startHttp('GET', 'unmatched');
     aborted.finish(499, true, 'internal-error', storageFailure);
     const chatSnapshot = {
@@ -789,12 +791,18 @@ test('HTTP, nested work and inference export counts, seconds, status and correla
     assert.equal(http.attributes['error.code'], undefined);
     const transitions = data.find(metric => metric.descriptor.name === 'cloud_agent_task_transitions');
     assert.deepEqual(
-      transitions.dataPoints.map(point => [point.attributes.status, point.attributes.runtime, point.value]),
+      transitions.dataPoints.map(point => [
+        point.attributes.status,
+        point.attributes.runtime,
+        point.attributes.failure_code,
+        point.value,
+      ]),
       [
-        ['started', 'task', 1],
-        ['paused', 'task', 1],
-        ['failed', 'task', 1],
-        ['completed', 'task', 1],
+        ['started', 'task', undefined, 1],
+        ['paused', 'task', undefined, 1],
+        ['failed', 'task', 'unknown', 2],
+        ['completed', 'task', undefined, 1],
+        ['failed', 'task', 'authority-revoked', 1],
       ],
     );
     const httpCount = data.find(metric => metric.descriptor.name === 'cloud_http_requests');

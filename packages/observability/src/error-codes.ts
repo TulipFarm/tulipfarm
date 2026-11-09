@@ -340,6 +340,13 @@ const reasons: Record<string, string> = {
   'compaction-invalid-summary': 'The compaction model returned an invalid summary',
   'compaction-ineffective': 'Compaction would not reduce the chat context',
   'compaction-unmeasured': 'Chat context size could not be measured for compaction',
+  // Why a task's model step was refused.
+  'tool-not-admitted': 'The model chose a tool the task does not offer',
+  'invalid-tool-call': 'The model chose an invalid tool call',
+  'mcp-origin-denied': 'The model chose an MCP tool the task cannot use',
+  'parallel-write': 'The model chose parallel writes',
+  'task-has-unfinished-proposal': 'The model answered while an approved batch was still running',
+  'invalid-decision': 'The model step could not be read as a tool call or a reply',
 };
 for (const code of Object.keys(reasons)) codes.add(code);
 for (const code of modelErrorClasses) codes.add(code);

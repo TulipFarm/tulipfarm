@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { taskPauseReasonSchema, taskSummarySchema } from '@tulipfarm/agents/task-contracts';
+import { taskFailureReasonSchema, taskPauseReasonSchema, taskSummarySchema } from '@tulipfarm/agents/task-contracts';
 import { taskNextStep, taskStatusLabel } from '../src/features/tasks/status.ts';
 
 const id = '11111111-1111-4111-8111-111111111111';
@@ -57,4 +57,16 @@ test('non-paused status ignores stale reasons and approval remains separate', ()
   assert.equal(taskStatusLabel({ ...task, status: 'pending', pauseReason: 'user' }), 'Working');
   assert.equal(taskStatusLabel({ ...task, status: 'waiting-approval', pauseReason: null }), 'Needs your review');
   assert.match(taskNextStep({ ...task, status: 'waiting-approval' }), /unapproved batch/);
+});
+
+test('failed tasks explain their recorded reason and fall back to neutral guidance', () => {
+  const failed = { ...task, status: 'failed' as const, pauseReason: null };
+  const labels = new Set(
+    taskFailureReasonSchema.options.map(failureReason => taskStatusLabel({ ...failed, failureReason })),
+  );
+  assert.equal(labels.size, taskFailureReasonSchema.options.length);
+  assert.equal(taskStatusLabel({ ...failed, failureReason: 'authority-revoked' }), 'Stopped because access changed');
+  assert.match(taskNextStep({ ...failed, failureReason: 'internal' }), /on our side/);
+  assert.equal(taskStatusLabel({ ...failed, failureReason: null }), 'Stopped');
+  assert.equal(taskStatusLabel({ ...task, status: 'pending', failureReason: 'internal' }), 'Working');
 });

@@ -110,10 +110,15 @@ export const taskPauseReasonSchema = z.enum([
   'file',
   'plan',
   'approval',
+  'decision',
 ]);
 export type TaskPauseReason = z.infer<typeof taskPauseReasonSchema>;
+/** Why a task failed: an access check refused it, or an unexpected error stopped it. */
+export const taskFailureReasonSchema = z.enum(['authority-revoked', 'internal']);
+export type TaskFailureReason = z.infer<typeof taskFailureReasonSchema>;
 export const taskSummarySchema = taskReceiptSchema.extend({
   pauseReason: taskPauseReasonSchema.nullish(),
+  failureReason: taskFailureReasonSchema.nullish(),
   agentId: uuidSchema,
   activationId: uuidSchema,
   definitionRevision: definitionRevisionSchema,

@@ -1,14 +1,15 @@
 import { emitHook } from '@tulipfarm/extensions';
-import { log, recordTaskTransition, trackEvent } from '@tulipfarm/observability';
+import { recordTaskTransition, trackEvent, type TaskFailure } from '@tulipfarm/observability';
 import { afterCommit, workspaceIdFromSchema } from '@tulipfarm/workspace-storage/runtime';
 import type { AgentStorage, AgentTransaction } from './store.ts';
+import type { TaskFailureReason } from './task-contracts.ts';
 
 type Transition = Parameters<typeof recordTaskTransition>[0];
-type Recorded = { status: Transition; completed?: () => void };
+type Recorded = { status: Transition; failure?: TaskFailure; completed?: () => void };
 const pending = new WeakMap<AgentTransaction['client'], Recorded[]>();
 
-function record({ status, completed }: Recorded) {
-  recordTaskTransition(status);
+function record({ status, failure, completed }: Recorded) {
+  recordTaskTransition(status, failure);
   try {
     completed?.();
   } catch {
@@ -29,21 +30,48 @@ function completion(tx: AgentTransaction, status: Transition, taskId: string | u
   };
 }
 
-/** Records a task status change; a terminal one also emits `task.completed` once the change commits. */
-export function taskTransition(tx: AgentTransaction, status: Terminal, rowCount: number | null, taskId: string): void;
+/**
+ * Records a task status change; a terminal one also emits `task.completed` once the change commits. A failure names
+ * why the task failed.
+ */
+export function taskTransition(
+  tx: AgentTransaction,
+  status: 'failed',
+  rowCount: number | null,
+  taskId: string,
+  failure: TaskFailure,
+): void;
+export function taskTransition(
+  tx: AgentTransaction,
+  status: 'completed',
+  rowCount: number | null,
+  taskId: string,
+): void;
 export function taskTransition(
   tx: AgentTransaction,
   status: Exclude<Transition, Terminal>,
   rowCount: number | null,
 ): void;
-export function taskTransition(tx: AgentTransaction, status: Transition, rowCount: number | null, taskId: string): void;
-export function taskTransition(tx: AgentTransaction, status: Transition, rowCount: number | null, taskId?: string) {
+export function taskTransition(
+  tx: AgentTransaction,
+  status: Transition,
+  rowCount: number | null,
+  taskId: string,
+  failure?: TaskFailure,
+): void;
+export function taskTransition(
+  tx: AgentTransaction,
+  status: Transition,
+  rowCount: number | null,
+  taskId?: string,
+  failure?: TaskFailure,
+) {
   if (!rowCount) return;
   const completed = completion(tx, status, taskId);
   const transitions = pending.get(tx.client);
-  if (transitions) transitions.push({ status, ...(completed ? { completed } : {}) });
+  if (transitions) transitions.push({ status, ...(failure ? { failure } : {}), ...(completed ? { completed } : {}) });
   else {
-    recordTaskTransition(status);
+    recordTaskTransition(status, failure);
     if (completed) afterCommit(tx.client, completed);
   }
 }
@@ -89,12 +117,8 @@ export async function taskAccessCheck<T>(check: string, call: () => Promise<T>):
   }
 }
 
-/** Logs a task failed by an access denial, naming the check without any of the task's content. */
-export function taskAccessDenied(taskId: string, error: unknown) {
-  log('warn', 'task', 'call_failed', {
-    operation: 'task.access',
-    'error.type': 'AccessDenied',
-    'error.code': (error instanceof Error && denials.get(error)) || 'unnamed',
-    'task.id': taskId,
-  });
+/** Why a task failed with `code`; an access refusal also names the check that refused it, never the task's content. */
+export function taskFailure(taskId: string, code: TaskFailureReason, error: unknown): TaskFailure {
+  const check = error instanceof Error ? denials.get(error) : undefined;
+  return { code, taskId, error, ...(code === 'authority-revoked' ? { check: check ?? 'unnamed' } : {}) };
 }

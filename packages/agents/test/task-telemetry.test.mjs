@@ -386,8 +386,8 @@ test('task telemetry reports actual transitions without private data or replay d
             { owner_user_id: 'PRIVATE OWNER', owner_membership_id: membershipId, delegation_tools: null },
           ]);
         if (sql.startsWith('SELECT status FROM')) return result([{ status }]);
-        if (sql.includes('SET status=$2')) {
-          assert.match(sql, /status IS DISTINCT FROM \$2/);
+        if (sql.includes("SET status='failed'")) {
+          assert.match(sql, /status IN \('pending','waiting-approval'\)/);
           if (status !== 'pending') return result();
           status = 'failed';
           return { rows: [], rowCount: 1 };
@@ -413,8 +413,14 @@ test('task telemetry reports actual transitions without private data or replay d
     assert.ok(metric);
     for (const point of metric.dataPoints) {
       assert.equal(point.attributes.runtime, 'task');
-      assert.equal(point.value, events.filter(event => event.status === point.attributes.status).length);
+      assert.equal(
+        point.value,
+        events.filter(
+          event => event.status === point.attributes.status && event.failure_code === point.attributes.failure_code,
+        ).length,
+      );
     }
+    assert.ok(metric.dataPoints.some(point => point.attributes.failure_code === 'authority-revoked'));
     assert.doesNotMatch(JSON.stringify({ events, metric }), /PRIVATE|telemetry_fixture/);
     assert.deepEqual([...new Set(events.map(event => event.status))].sort(), [
       'completed',
