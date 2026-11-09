@@ -29,6 +29,7 @@ function installInviteMembersMock() {
     name,
     email: `${name.toLowerCase().replace(' ', '.')}@example.test`,
     image: null,
+    role: 'member' as const,
   }));
   const data: GovernanceSnapshot = {
     actorMembershipId: id,
@@ -42,6 +43,8 @@ function installInviteMembersMock() {
     grants: [],
     tableTeamIds: [],
     adminTeamId: null,
+    teamNames: [],
+    personGrants: [],
   };
   const receipts = new Map<
     string,

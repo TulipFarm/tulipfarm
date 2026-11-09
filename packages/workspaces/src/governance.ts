@@ -49,6 +49,15 @@ import {
   resendInvitationSchema,
   teamInputSchema,
   teamUpdateSchema,
+  invitationChoicesSchema,
+  invitationTeamEnrollmentSchema,
+  memberAccessSchema,
+  policyChangeSchema,
+  policyInputSchema,
+  skippedChoicesSchema,
+  type InvitationChoices,
+  type PolicyPermission,
+  type PolicyScope,
 } from './governance-contracts.ts';
 
 type Runtime = Pick<ReturnType<typeof createWorkspaceRuntime>, 'transaction'>;
@@ -66,7 +75,29 @@ const invitationRowSchema = z.object({
   copy_material: z.unknown(),
   predecessor_id: z.uuid().nullable(),
   workspace_member_id: z.uuid().nullable().default(null),
+  created_at: z.date().optional(),
+  role: z.enum(['admin', 'member']).default('member'),
+  assignments: z.unknown().optional(),
+  skipped: z.unknown().optional(),
 });
+const storedTeamSchema = z.object({ id: z.uuid(), role: z.enum(['member', 'manager']), name: z.string() });
+const storedPolicySchema = z.object({
+  scope: z.object({ kind: z.enum(['table', 'collection']), id: z.uuid() }),
+  permissions: z.array(z.string()),
+  name: z.string(),
+});
+const assignmentsSchema = z
+  .object({ teams: z.array(storedTeamSchema).default([]), policies: z.array(storedPolicySchema).default([]) })
+  .catch({ teams: [], policies: [] });
+type Assignments = z.infer<typeof assignmentsSchema>;
+const tablePermissions = [
+  'table.schema.manage',
+  'table.row.create',
+  'table.row.read',
+  'table.row.update',
+  'table.row.delete',
+] as const;
+const policyPermissions = ['table.create', ...tablePermissions];
 const success = { ok: true } as const;
 
 export class GovernanceConflict extends Error {
@@ -369,54 +400,73 @@ export function createGovernanceService(dependencies: {
             description: z.string(),
             membership_ids: z.array(z.uuid()),
             manager_ids: z.array(z.uuid()),
+            policy_count: z.coerce.number(),
           }),
         )
         .parse(
           (
             await transaction.client.query(
               `SELECT t.id, t.name, t.description,
-        array_agg(mt.membership_id ORDER BY mt.membership_id) AS membership_ids,
-        COALESCE(array_agg(mt.membership_id ORDER BY mt.membership_id) FILTER (WHERE mt.role = 'manager'), '{}'::uuid[]) AS manager_ids
-        FROM ${table(transaction, 'tf_teams')} t JOIN ${table(transaction, 'tf_member_teams')} mt ON mt.team_id = t.id
-        JOIN ${table(transaction, 'tf_memberships')} m ON m.id = mt.membership_id AND m.removed_at IS NULL
-        WHERE ${notInternal('t')} AND EXISTS (SELECT 1 FROM ${table(transaction, 'tf_member_teams')} own WHERE own.team_id = t.id AND own.membership_id = $1)
+        COALESCE(array_agg(mt.membership_id ORDER BY mt.membership_id) FILTER (WHERE m.id IS NOT NULL), '{}'::uuid[]) AS membership_ids,
+        COALESCE(array_agg(mt.membership_id ORDER BY mt.membership_id) FILTER (WHERE m.id IS NOT NULL AND mt.role = 'manager'), '{}'::uuid[]) AS manager_ids,
+        (SELECT count(DISTINCT g.asset_id) FROM ${table(transaction, 'tf_grants')} g WHERE g.team_id = t.id AND g.permission = ANY($3::text[])
+          AND NOT EXISTS (SELECT 1 FROM ${table(transaction, 'tf_table_catalog')} c WHERE c.id = g.asset_id AND c.archived_at IS NOT NULL)) AS policy_count
+        FROM ${table(transaction, 'tf_teams')} t LEFT JOIN ${table(transaction, 'tf_member_teams')} mt ON mt.team_id = t.id
+        LEFT JOIN ${table(transaction, 'tf_memberships')} m ON m.id = mt.membership_id AND m.removed_at IS NULL
+        WHERE ${notInternal('t')} AND ($2::boolean OR EXISTS (SELECT 1 FROM ${table(transaction, 'tf_member_teams')} own WHERE own.team_id = t.id AND own.membership_id = $1))
         GROUP BY t.id ORDER BY t.name, t.id`,
-              [actor.membershipId],
+              [actor.membershipId, admin, policyPermissions],
             )
           ).rows,
         );
+      // Members see their own teams' grants read-only; admins see every grant.
+      const grants = z.array(z.object({ team_id: z.uuid(), asset_id: z.uuid(), permission: z.string() })).parse(
+        (
+          await transaction.client.query(
+            `SELECT g.team_id, g.asset_id, g.permission FROM ${table(transaction, 'tf_grants')} g WHERE g.permission = ANY($1::text[])
+        AND NOT EXISTS (SELECT 1 FROM ${table(transaction, 'tf_table_catalog')} c WHERE c.id = g.asset_id AND c.archived_at IS NOT NULL)
+        AND ($2::boolean OR EXISTS (SELECT 1 FROM ${table(transaction, 'tf_member_teams')} own WHERE own.team_id = g.team_id AND own.membership_id = $3))
+        ORDER BY g.team_id, g.asset_id, g.permission`,
+            [policyPermissions, admin, actor.membershipId],
+          )
+        ).rows,
+      );
+      const visibleTables = grants.filter(grant => grant.permission !== 'table.create').map(grant => grant.asset_id);
       const resources = z
         .array(z.object({ id: z.uuid(), display_name: z.string(), owning_team_id: z.uuid() }))
         .parse(
-          admin
-            ? (
-                await transaction.client.query(
-                  `SELECT id, display_name, owning_team_id FROM ${table(transaction, 'tf_table_catalog')} WHERE archived_at IS NULL ORDER BY display_name, id`,
-                )
-              ).rows
-            : [],
+          (
+            await transaction.client.query(
+              `SELECT id, display_name, owning_team_id FROM ${table(transaction, 'tf_table_catalog')} WHERE archived_at IS NULL AND ($1::boolean OR id = ANY($2::uuid[])) ORDER BY display_name, id`,
+              [admin, visibleTables],
+            )
+          ).rows,
         );
-      const grants = z.array(z.object({ team_id: z.uuid(), asset_id: z.uuid(), permission: z.string() })).parse(
-        admin
-          ? (
-              await transaction.client.query(
-                `SELECT g.team_id, g.asset_id, g.permission FROM ${table(transaction, 'tf_grants')} g WHERE g.permission = ANY($1::text[])
-        AND NOT EXISTS (SELECT 1 FROM ${table(transaction, 'tf_table_catalog')} c WHERE c.id = g.asset_id AND c.archived_at IS NOT NULL)
-        ORDER BY g.team_id, g.asset_id, g.permission`,
-                [
-                  [
-                    'table.create',
-                    'table.schema.manage',
-                    'table.row.create',
-                    'table.row.read',
-                    'table.row.update',
-                    'table.row.delete',
-                  ],
-                ],
-              )
-            ).rows
-          : [],
-      );
+      const namedTeams = [
+        ...teams.map(team => team.id),
+        ...grants.filter(grant => grant.permission === 'table.create').map(grant => grant.asset_id),
+      ];
+      const teamNames = z
+        .array(z.object({ id: z.uuid(), name: z.string() }))
+        .parse(
+          (
+            await transaction.client.query(
+              `SELECT t.id, t.name FROM ${table(transaction, 'tf_teams')} t WHERE ${notInternal('t')} AND ($1::boolean OR t.id = ANY($2::uuid[])) ORDER BY t.name, t.id`,
+              [admin, namedTeams],
+            )
+          ).rows,
+        );
+      const personGrants =
+        admin && (await tablePersonGrantsInstalled(transaction))
+          ? z.array(z.object({ membership_id: z.uuid(), asset_id: z.uuid(), permission: z.string() })).parse(
+              (
+                await transaction.client.query(`SELECT g.* FROM ${table(transaction, 'tf_table_person_grants')} g
+        JOIN ${table(transaction, 'tf_memberships')} m ON m.id = g.membership_id AND m.removed_at IS NULL
+        WHERE NOT EXISTS (SELECT 1 FROM ${table(transaction, 'tf_table_catalog')} c WHERE c.id = g.asset_id AND c.archived_at IS NOT NULL)
+        ORDER BY g.membership_id, g.asset_id, g.permission`)
+              ).rows,
+            )
+          : [];
       const tableTeams = z
         .array(z.object({ id: z.uuid(), name: z.string() }))
         .parse(
@@ -452,8 +502,18 @@ export function createGovernanceService(dependencies: {
           description: team.description,
           membershipIds: team.membership_ids,
           managerIds: team.manager_ids,
-          canManage: team.manager_ids.includes(actor.membershipId),
+          canManage: admin || team.manager_ids.includes(actor.membershipId),
           canLeave: !team.manager_ids.includes(actor.membershipId) || team.manager_ids.length > 1,
+          policyCount: team.policy_count,
+        })),
+        teamNames,
+        personGrants: personGrants.map(grant => ({
+          membershipId: grant.membership_id,
+          target: {
+            kind: grant.permission === 'table.create' ? 'collection' : 'table',
+            id: grant.asset_id,
+            permission: grant.permission,
+          },
         })),
         tables: resources.map(resource => ({
           id: resource.id,
@@ -474,11 +534,11 @@ export function createGovernanceService(dependencies: {
 
   async function directory(transaction: Transaction) {
     const members = z
-      .array(z.object({ id: z.uuid(), user_id: z.string() }))
+      .array(memberRowSchema)
       .parse(
         (
           await transaction.client.query(
-            `SELECT id, user_id FROM ${table(transaction, 'tf_memberships')} WHERE removed_at IS NULL ORDER BY id`,
+            `SELECT id, user_id, role FROM ${table(transaction, 'tf_memberships')} WHERE removed_at IS NULL ORDER BY id`,
           )
         ).rows,
       );
@@ -496,7 +556,7 @@ export function createGovernanceService(dependencies: {
       members: members.map(member => {
         const profile = byId.get(member.user_id);
         if (!profile) throw new Error('Member identity unavailable');
-        return { id: member.id, name: profile.name, email: profile.email, image: profile.image };
+        return { id: member.id, name: profile.name, email: profile.email, image: profile.image, role: member.role };
       }),
     });
   }
@@ -570,10 +630,16 @@ export function createGovernanceService(dependencies: {
     });
   }
 
+  // A workspace admin manages every team without being its manager; anyone else must manage the team.
+  async function requireTeamAdministration(transaction: Transaction, actor: HumanActor, teamId: string) {
+    if ((await currentMember(transaction, actor)).role === 'admin') await teamExists(transaction, teamId);
+    else await requireTeamManager(transaction, actor, teamId);
+  }
+
   async function renameTeam(workspaceId: string, userId: string, teamId: string, input: unknown) {
     const { name, description, expected } = teamUpdateSchema.parse(input);
     return withHuman(workspaceId, userId, 'write', false, async (transaction, actor) => {
-      await requireTeamManager(transaction, actor, teamId);
+      await requireTeamAdministration(transaction, actor, teamId);
       const updated = await transaction.client.query(
         `UPDATE ${table(transaction, 'tf_teams')} SET name = $2, description = $3 WHERE id = $1 AND name = $4 AND description = $5 RETURNING id`,
         [teamId, name, description, expected.name, expected.description],
@@ -593,7 +659,7 @@ export function createGovernanceService(dependencies: {
 
   async function deleteTeam(workspaceId: string, userId: string, teamId: string) {
     return withHuman(workspaceId, userId, 'write', false, async (transaction, actor) => {
-      await requireTeamManager(transaction, actor, teamId);
+      await requireTeamAdministration(transaction, actor, teamId);
       const affected = await teamMembers(transaction, teamId);
       const owned = (
         await transaction.client.query(
@@ -681,7 +747,7 @@ export function createGovernanceService(dependencies: {
   ) {
     const { enrolled } = enrollmentInputSchema.parse(input);
     return withHuman(workspaceId, userId, 'write', false, async (transaction, actor) => {
-      await requireTeamManager(transaction, actor, teamId);
+      await requireTeamAdministration(transaction, actor, teamId);
       await activeMember(transaction, membershipId);
       if (!enrolled) {
         await protectFinalTeamManager(transaction, membershipId, teamId);
@@ -711,7 +777,7 @@ export function createGovernanceService(dependencies: {
   ) {
     const { role } = teamRoleInputSchema.parse(input);
     return withHuman(workspaceId, userId, 'write', false, async (transaction, actor) => {
-      await requireTeamManager(transaction, actor, teamId);
+      await requireTeamAdministration(transaction, actor, teamId);
       await activeMember(transaction, membershipId);
       const previous = (
         await transaction.client.query(
@@ -847,6 +913,220 @@ export function createGovernanceService(dependencies: {
     });
   }
 
+  // A policy scope must exist; removing grants from an archived table stays possible.
+  async function scopeName(transaction: Transaction, scope: PolicyScope, allowArchived = false) {
+    const row = (
+      scope.kind === 'collection'
+        ? await transaction.client.query(
+            `SELECT name FROM ${table(transaction, 'tf_teams')} t WHERE t.id = $1 AND ${notInternal('t')}`,
+            [scope.id],
+          )
+        : await transaction.client.query(
+            `SELECT display_name AS name FROM ${table(transaction, 'tf_table_catalog')} WHERE id = $1 AND (archived_at IS NULL OR $2::boolean)`,
+            [scope.id, allowArchived],
+          )
+    ).rows[0];
+    return z.object({ name: z.string() }).optional().parse(row)?.name;
+  }
+
+  /** Sets exactly the permissions one team or person holds on one scope, and reports what changed. */
+  async function setPolicy(workspaceId: string, userId: string, input: unknown) {
+    const { subject, scope, permissions } = policyInputSchema.parse(input);
+    return withHuman(workspaceId, userId, 'write', true, async (transaction, actor) => {
+      if (subject.kind === 'team') await grantTeamExists(transaction, subject.id);
+      else {
+        if (!(await tablePersonGrantsInstalled(transaction))) throw new GovernanceConflict('person-grants-unavailable');
+        await activeMember(transaction, subject.id);
+      }
+      if ((await scopeName(transaction, scope, permissions.length === 0)) === undefined) throw new AccessDenied();
+      const grants =
+        subject.kind === 'team'
+          ? { relation: table(transaction, 'tf_grants'), column: 'team_id' }
+          : { relation: table(transaction, 'tf_table_person_grants'), column: 'membership_id' };
+      const current = z
+        .array(z.object({ permission: z.string() }))
+        .parse(
+          (
+            await transaction.client.query(
+              `SELECT permission FROM ${grants.relation} WHERE ${grants.column} = $1 AND asset_id = $2 AND permission = ANY($3::text[])`,
+              [subject.id, scope.id, policyPermissions],
+            )
+          ).rows,
+        )
+        .map(row => row.permission as PolicyPermission);
+      const added = permissions.filter(permission => !current.includes(permission));
+      const removed = current.filter(permission => !permissions.includes(permission));
+      if (added.length)
+        await transaction.client.query(
+          `INSERT INTO ${grants.relation} (${grants.column}, asset_id, permission) SELECT $1, $2, unnest($3::text[]) ON CONFLICT DO NOTHING`,
+          [subject.id, scope.id, added],
+        );
+      if (removed.length)
+        await transaction.client.query(
+          `DELETE FROM ${grants.relation} WHERE ${grants.column} = $1 AND asset_id = $2 AND permission = ANY($3::text[])`,
+          [subject.id, scope.id, removed],
+        );
+      const prefix = subject.kind === 'team' ? '' : 'person.';
+      for (const permission of added) await audit(transaction, actor, `${prefix}grant.${permission}`, scope.id);
+      for (const permission of removed) await audit(transaction, actor, `${prefix}revoke.${permission}`, scope.id);
+      if (added.length || removed.length)
+        await recommendationChange(
+          transaction,
+          scope.id,
+          subject.kind === 'team' ? await teamMembers(transaction, subject.id) : [subject.id],
+          true,
+        );
+      return policyChangeSchema.parse({ added, removed });
+    });
+  }
+
+  /** One member's role, teams and effective table access with where each part comes from. Admins, or the member. */
+  async function memberAccess(workspaceId: string, userId: string, membershipId: string) {
+    z.uuid().parse(membershipId);
+    return withHuman(workspaceId, userId, 'read', false, async (transaction, actor) => {
+      const viewer = await currentMember(transaction, actor);
+      const admin = viewer.role === 'admin';
+      if (!admin && membershipId !== actor.membershipId) throw new AccessDenied();
+      const member = await activeMember(transaction, membershipId);
+      const profile = z
+        .object({ id: z.string(), name: z.string(), email: z.email(), image: z.string().nullable() })
+        .optional()
+        .parse(
+          (
+            await dependencies.identity.query('SELECT id, name, email, image FROM app.users WHERE id = $1', [
+              member.user_id,
+            ])
+          ).rows[0],
+        );
+      if (!profile) throw new Error('Member identity unavailable');
+      const teams = z
+        .array(
+          z.object({
+            id: z.uuid(),
+            name: z.string(),
+            role: z.enum(['member', 'manager']),
+            viewer_role: z.string().nullable(),
+          }),
+        )
+        .parse(
+          (
+            await transaction.client.query(
+              `SELECT t.id, t.name, mt.role, own.role AS viewer_role FROM ${table(transaction, 'tf_member_teams')} mt
+          JOIN ${table(transaction, 'tf_teams')} t ON t.id = mt.team_id
+          LEFT JOIN ${table(transaction, 'tf_member_teams')} own ON own.team_id = t.id AND own.membership_id = $2
+          WHERE mt.membership_id = $1 AND ${notInternal('t')} ORDER BY t.name, t.id`,
+              [membershipId, actor.membershipId],
+            )
+          ).rows,
+        );
+      const scopes = `CASE WHEN g.permission = 'table.create' THEN 'collection' ELSE 'table' END AS kind,
+        COALESCE(c.display_name, dt.name) AS scope_name`;
+      const scopeJoins = (
+        alias: string,
+      ) => `LEFT JOIN ${table(transaction, 'tf_table_catalog')} c ON c.id = ${alias}.asset_id AND ${alias}.permission <> 'table.create'
+        LEFT JOIN ${table(transaction, 'tf_teams')} dt ON dt.id = ${alias}.asset_id AND ${alias}.permission = 'table.create'`;
+      const visible = `g.permission = ANY($2::text[]) AND (c.id IS NOT NULL AND c.archived_at IS NULL OR dt.id IS NOT NULL)`;
+      const grantRow = z.object({
+        asset_id: z.uuid(),
+        permission: z.string(),
+        kind: z.enum(['table', 'collection']),
+        scope_name: z.string(),
+      });
+      const teamGrants = z.array(grantRow.extend({ team_id: z.uuid(), team_name: z.string() })).parse(
+        (
+          await transaction.client.query(
+            `SELECT g.team_id, t.name AS team_name, g.asset_id, g.permission, ${scopes}
+          FROM ${table(transaction, 'tf_grants')} g JOIN ${table(transaction, 'tf_member_teams')} mt ON mt.team_id = g.team_id AND mt.membership_id = $1
+          JOIN ${table(transaction, 'tf_teams')} t ON t.id = g.team_id ${scopeJoins('g')}
+          WHERE ${visible} ORDER BY t.name, scope_name, g.asset_id`,
+            [membershipId, policyPermissions],
+          )
+        ).rows,
+      );
+      const directGrants = (await tablePersonGrantsInstalled(transaction))
+        ? z.array(grantRow).parse(
+            (
+              await transaction.client.query(
+                `SELECT g.asset_id, g.permission, ${scopes} FROM ${table(transaction, 'tf_table_person_grants')} g ${scopeJoins('g')}
+            WHERE g.membership_id = $1 AND ${visible} ORDER BY scope_name, g.asset_id`,
+                [membershipId, policyPermissions],
+              )
+            ).rows,
+          )
+        : [];
+      type Policy = z.infer<typeof memberAccessSchema>['policies'][number];
+      const policies = new Map<string, Policy>();
+      const add = (key: string, policy: Omit<Policy, 'permissions'>, permission: string) => {
+        const existing = policies.get(key) ?? { ...policy, permissions: [] };
+        existing.permissions.push(permission as PolicyPermission);
+        policies.set(key, existing);
+      };
+      if (member.role === 'admin')
+        policies.set('admin', {
+          scope: { kind: 'all' },
+          permissions: [...policyPermissions] as PolicyPermission[],
+          source: { kind: 'admin' },
+        });
+      for (const grant of teamGrants) {
+        const scope = { kind: grant.kind, id: grant.asset_id, name: grant.scope_name };
+        if (grant.team_name === '_admin')
+          add(`admin:${grant.asset_id}:${grant.kind}`, { scope, source: { kind: 'admin' } }, grant.permission);
+        else
+          add(
+            `team:${grant.team_id}:${grant.asset_id}:${grant.kind}`,
+            { scope, source: { kind: 'team', teamId: grant.team_id, teamName: grant.team_name } },
+            grant.permission,
+          );
+      }
+      for (const grant of directGrants)
+        add(
+          `direct:${grant.asset_id}:${grant.kind}`,
+          { scope: { kind: grant.kind, id: grant.asset_id, name: grant.scope_name }, source: { kind: 'direct' } },
+          grant.permission,
+        );
+      const skipped = admin
+        ? (
+            await transaction.client.query(
+              `SELECT skipped FROM ${table(transaction, 'tf_invitations')} WHERE consumed_membership_id = $1 ORDER BY created_at DESC LIMIT 1`,
+              [membershipId],
+            )
+          ).rows[0]?.skipped
+        : null;
+      const parsedSkipped = skipped ? skippedChoicesSchema.parse(skipped) : null;
+      const self = membershipId === actor.membershipId;
+      const otherAdmin =
+        member.role === 'admin'
+          ? Boolean(
+              (
+                await transaction.client.query(
+                  `SELECT id FROM ${table(transaction, 'tf_memberships')} WHERE role = 'admin' AND removed_at IS NULL AND id <> $1 LIMIT 1`,
+                  [membershipId],
+                )
+              ).rowCount,
+            )
+          : true;
+      return memberAccessSchema.parse({
+        member: { id: member.id, name: profile.name, email: profile.email, image: profile.image, role: member.role },
+        self,
+        canManage: admin,
+        finalAdmin: !otherAdmin,
+        canLeave:
+          self &&
+          otherAdmin &&
+          !(await isFinalTeamManager(transaction, membershipId)) &&
+          !(await departureNeedsManagerHandoff(transaction, { kind: 'member', membershipId })),
+        teams: teams.map(team => ({
+          id: team.id,
+          name: team.name,
+          role: team.role,
+          canManage: admin || team.viewer_role === 'manager',
+        })),
+        policies: [...policies.values()],
+        skipped: parsedSkipped && (parsedSkipped.teams.length || parsedSkipped.policies.length) ? parsedSkipped : null,
+      });
+    });
+  }
+
   const invitation = (row: z.infer<typeof invitationRowSchema>) =>
     invitationSchema.parse({
       id: row.id,
@@ -856,7 +1136,49 @@ export function createGovernanceService(dependencies: {
       status: row.consumed_membership_id ? 'consumed' : row.revoked_at ? 'revoked' : row.expired ? 'expired' : 'active',
       canCopy: Boolean(row.copy_material) && !row.revoked_at && !row.consumed_membership_id && !row.expired,
       workspaceMemberId: row.workspace_member_id,
+      createdAt: row.created_at?.toISOString(),
+      revokedAt: row.revoked_at ? new Date(row.revoked_at).toISOString() : null,
+      role: row.role,
+      ...assignmentsSchema.parse(row.assignments ?? {}),
+      skipped: row.skipped ? skippedChoicesSchema.parse(row.skipped) : null,
     });
+
+  // Invitation choices arrived with migration 51; older workspace schemas accept only plain invitations.
+  async function invitationChoicesInstalled(transaction: Transaction) {
+    return Boolean(
+      (
+        await transaction.client.query(
+          `SELECT 1 FROM pg_attribute WHERE attrelid = to_regclass($1) AND attname = 'assignments' AND NOT attisdropped`,
+          [table(transaction, 'tf_invitations')],
+        )
+      ).rowCount,
+    );
+  }
+
+  /** Checks every chosen team and scope exists now and records its name, so a later skip can still name it. */
+  async function resolveChoices(transaction: Transaction, choices: InvitationChoices, dropMissing = false) {
+    const plain = choices.role === 'member' && !choices.teams.length && !choices.policies.length;
+    if (!(await invitationChoicesInstalled(transaction))) {
+      if (plain) return null;
+      throw new GovernanceConflict('invitations-unavailable');
+    }
+    if (choices.policies.length && !(await tablePersonGrantsInstalled(transaction)))
+      throw new GovernanceConflict('person-grants-unavailable');
+    const assignments: Assignments = { teams: [], policies: [] };
+    for (const team of choices.teams) {
+      const name = await scopeName(transaction, { kind: 'collection', id: team.id });
+      if (name === undefined && dropMissing) continue;
+      if (name === undefined) throw new AccessDenied();
+      assignments.teams.push({ id: team.id, role: team.role, name });
+    }
+    for (const policy of choices.policies) {
+      const name = await scopeName(transaction, policy.scope);
+      if (name === undefined && dropMissing) continue;
+      if (name === undefined) throw new AccessDenied();
+      assignments.policies.push({ scope: policy.scope, permissions: policy.permissions, name });
+    }
+    return { role: choices.role, assignments };
+  }
   const hashToken = (token: string) => createHash('sha256').update(token).digest('hex');
 
   async function accountsForEmail(email: string) {
@@ -932,20 +1254,112 @@ export function createGovernanceService(dependencies: {
             )
           ).rows[0],
         );
-      if (pending) {
-        if (pending.workspace_member_id !== workspaceMemberId) throw new WorkspaceMemberError('member-link-conflict');
-        await recordInvitationOperation(
-          transaction,
-          parsed.requestId,
-          parsed.email,
-          null,
-          'pending',
-          pending.id,
-          workspaceMemberId,
-        );
-        return invitationResult(transaction, pending, 'pending');
-      }
-      return issueInvitation(transaction, actor, parsed.email, parsed.requestId, null, workspaceMemberId);
+      if (pending && pending.workspace_member_id !== workspaceMemberId)
+        throw new WorkspaceMemberError('member-link-conflict');
+      const choices = await resolveChoices(
+        transaction,
+        invitationChoicesSchema.parse({ role: parsed.role, teams: parsed.teams, policies: parsed.policies }),
+      );
+      if (!pending)
+        return issueInvitation(transaction, actor, parsed.email, parsed.requestId, null, workspaceMemberId, choices);
+      // Inviting someone again replaces their pending invite with these choices and a fresh link.
+      await transaction.client.query(
+        `UPDATE ${table(transaction, 'tf_invitations')} SET revoked_at = clock_timestamp(), copy_material = NULL WHERE id = $1`,
+        [pending.id],
+      );
+      await cancelDelivery(transaction, pending.id);
+      const replaced = await issueInvitation(
+        transaction,
+        actor,
+        parsed.email,
+        parsed.requestId,
+        pending.id,
+        workspaceMemberId,
+        choices,
+      );
+      return { ...replaced, outcome: 'updated' as const };
+    });
+  }
+
+  type ResolvedChoices = Awaited<ReturnType<typeof resolveChoices>>;
+
+  async function openInvitation(transaction: Transaction, invitationId: string) {
+    const row = invitationRowSchema
+      .optional()
+      .parse(
+        (
+          await transaction.client.query(
+            `SELECT *, expires_at <= clock_timestamp() AS expired FROM ${table(transaction, 'tf_invitations')} WHERE id = $1 FOR UPDATE`,
+            [invitationId],
+          )
+        ).rows[0],
+      );
+    if (!row || row.kind !== 'email' || row.revoked_at || row.consumed_membership_id) throw new AccessDenied();
+    if (!(await invitationChoicesInstalled(transaction))) throw new GovernanceConflict('invitations-unavailable');
+    return row;
+  }
+
+  async function saveChoices(
+    transaction: Transaction,
+    actor: HumanActor,
+    id: string,
+    choices: NonNullable<ResolvedChoices>,
+  ) {
+    const row = invitationRowSchema.parse(
+      (
+        await transaction.client.query(
+          `UPDATE ${table(transaction, 'tf_invitations')} SET role = $2, assignments = $3 WHERE id = $1
+        RETURNING *, expires_at <= clock_timestamp() AS expired`,
+          [id, choices.role, JSON.stringify(choices.assignments)],
+        )
+      ).rows[0],
+    );
+    await audit(transaction, actor, 'invitation.choices', id);
+    return { ...invitation(row), delivery: await deliveryStatus(transaction, transaction.workspaceId, id) };
+  }
+
+  /** Replaces the role, teams and policies a pending or expired invitation applies on accept. Admins only. */
+  async function setInvitationChoices(workspaceId: string, userId: string, invitationId: string, input: unknown) {
+    invitationId = z.uuid().parse(invitationId).toLowerCase();
+    const parsed = invitationChoicesSchema.parse(input);
+    return withHuman(workspaceId, userId, 'write', true, async (transaction, actor) => {
+      await openInvitation(transaction, invitationId);
+      const choices = await resolveChoices(transaction, parsed);
+      if (!choices) throw new GovernanceConflict('invitations-unavailable');
+      return saveChoices(transaction, actor, invitationId, choices);
+    });
+  }
+
+  /** Adds a pending invitee to one team, or takes them off it, without changing their other choices. Admins only. */
+  async function setInvitationTeam(
+    workspaceId: string,
+    userId: string,
+    teamId: string,
+    invitationId: string,
+    input: unknown,
+  ) {
+    teamId = z.uuid().parse(teamId).toLowerCase();
+    invitationId = z.uuid().parse(invitationId).toLowerCase();
+    const { enrolled, role } = invitationTeamEnrollmentSchema.parse(input);
+    return withHuman(workspaceId, userId, 'write', true, async (transaction, actor) => {
+      const row = await openInvitation(transaction, invitationId);
+      await teamExists(transaction, teamId);
+      const assignments = assignmentsSchema.parse(row.assignments ?? {});
+      const teams = assignments.teams.filter(team => team.id !== teamId);
+      // Choices made earlier may name a team or table that has gone since; drop those rather than refuse.
+      const choices = await resolveChoices(
+        transaction,
+        {
+          role: row.role,
+          teams: [...teams.map(({ id, role }) => ({ id, role })), ...(enrolled ? [{ id: teamId, role }] : [])],
+          policies: assignments.policies.map(({ scope, permissions }) => ({
+            scope,
+            permissions: permissions as PolicyPermission[],
+          })),
+        },
+        true,
+      );
+      return saveChoices(transaction, actor, invitationId, choices!);
     });
   }
 
@@ -967,7 +1381,7 @@ export function createGovernanceService(dependencies: {
   async function invitationResult(
     transaction: Transaction,
     row: z.infer<typeof invitationRowSchema>,
-    outcome: 'created' | 'pending',
+    outcome: 'created' | 'pending' | 'updated',
   ) {
     return {
       outcome,
@@ -1015,8 +1429,10 @@ export function createGovernanceService(dependencies: {
         ).rows[0],
       );
     if (!receipt) return null;
+    // A new invite to an address with a pending one replaces it, so its receipt names that predecessor.
+    const replaced = 'email' in expected && receipt.predecessor_id !== null;
     if (
-      receipt.predecessor_id !== expected.predecessorId ||
+      (!replaced && receipt.predecessor_id !== expected.predecessorId) ||
       receipt.workspace_member_id !== expected.workspaceMemberId ||
       ('email' in expected && receipt.email !== expected.email)
     )
@@ -1030,7 +1446,7 @@ export function createGovernanceService(dependencies: {
         )
       ).rows[0],
     );
-    return invitationResult(transaction, row, receipt.outcome);
+    return invitationResult(transaction, row, replaced ? 'updated' : receipt.outcome);
   }
 
   async function issueInvitation(
@@ -1040,6 +1456,7 @@ export function createGovernanceService(dependencies: {
     requestId: string,
     predecessorId: string | null,
     workspaceMemberId: string | null,
+    choices: ResolvedChoices,
   ) {
     if (!dependencies.emailDelivery) throw new GovernanceConflict('invitations-unavailable');
     const workspaceId = transaction.workspaceId;
@@ -1050,7 +1467,7 @@ export function createGovernanceService(dependencies: {
     const row = invitationRowSchema.parse(
       (
         await transaction.client.query(
-          `INSERT INTO ${table(transaction, 'tf_invitations')} (id, issuer_membership_id, kind, email, token_hash, request_id, predecessor_id, copy_material${workspaceMemberId ? ', workspace_member_id' : ''}) VALUES ($1, $2, 'email', $3, $4, $5, $6, $7${workspaceMemberId ? ',$8' : ''}) RETURNING *, false AS expired`,
+          `INSERT INTO ${table(transaction, 'tf_invitations')} (id, issuer_membership_id, kind, email, token_hash, request_id, predecessor_id, copy_material${workspaceMemberId ? ', workspace_member_id' : ''}${choices ? ', role, assignments' : ''}) VALUES ($1, $2, 'email', $3, $4, $5, $6, $7${workspaceMemberId ? ',$8' : ''}${choices ? (workspaceMemberId ? ',$9,$10' : ',$8,$9') : ''}) RETURNING *, false AS expired`,
           [
             id,
             actor.membershipId,
@@ -1060,6 +1477,7 @@ export function createGovernanceService(dependencies: {
             predecessorId,
             material,
             ...(workspaceMemberId ? [workspaceMemberId] : []),
+            ...(choices ? [choices.role, JSON.stringify(choices.assignments)] : []),
           ],
         )
       ).rows[0],
@@ -1154,7 +1572,10 @@ export function createGovernanceService(dependencies: {
         [invitationId],
       );
       await cancelDelivery(transaction, invitationId);
-      return issueInvitation(transaction, actor, previous.email, requestId, invitationId, workspaceMemberId);
+      const carried = (await invitationChoicesInstalled(transaction))
+        ? { role: previous.role, assignments: assignmentsSchema.parse(previous.assignments ?? {}) }
+        : null;
+      return issueInvitation(transaction, actor, previous.email, requestId, invitationId, workspaceMemberId, carried);
     });
   }
 
@@ -1179,7 +1600,7 @@ export function createGovernanceService(dependencies: {
   }
 
   async function listInvitations(workspaceId: string, userId: string, input: unknown = {}) {
-    const { after, search = '' } = invitationListQuerySchema.parse(input);
+    const { after, search = '', open } = invitationListQuerySchema.parse(input);
     return withHuman(workspaceId, userId, 'read', true, async transaction => {
       const status = dependencies.emailDelivery
         ? "CASE WHEN kind = 'email' THEN app.invitation_delivery($3, id, 'status') ELSE NULL END"
@@ -1196,7 +1617,15 @@ export function createGovernanceService(dependencies: {
             SELECT created_at, id FROM ${table(transaction, 'tf_invitations')} WHERE id = $1
           )
         ) invitations
-        WHERE $2 = '' OR strpos(lower(concat_ws(' ', COALESCE(email, 'Retired unrestricted link'), validity, COALESCE(delivery, 'not tracked'))), $2) > 0
+        WHERE ($2 = '' OR strpos(lower(concat_ws(' ', COALESCE(email, 'Retired unrestricted link'), validity, COALESCE(delivery, 'not tracked'))), $2) > 0)
+          ${
+            open === 'true'
+              ? `AND validity IN ('active', 'expired') AND kind = 'email' AND NOT EXISTS (
+            SELECT 1 FROM ${table(transaction, 'tf_invitations')} newer WHERE newer.email IS NOT NULL
+              AND ${canonicalEmailSql('newer.email')} = ${canonicalEmailSql('invitations.email')}
+              AND (newer.created_at, newer.id) > (invitations.created_at, invitations.id))`
+              : ''
+          }
         ORDER BY created_at DESC, id DESC LIMIT 101
       `,
         dependencies.emailDelivery ? [after ?? null, search, workspaceId] : [after ?? null, search],
@@ -1343,6 +1772,58 @@ export function createGovernanceService(dependencies: {
     }
   }
 
+  /**
+   * Gives a new member the role, teams and table policies chosen on their invitation. Anything deleted or archived
+   * since is skipped and recorded on the invitation, so admins can see what did not apply.
+   */
+  async function applyChoices(
+    transaction: Transaction,
+    row: z.infer<typeof invitationRowSchema>,
+    membershipId: string,
+  ) {
+    const assignments = assignmentsSchema.parse(row.assignments ?? {});
+    if (row.role === 'admin') {
+      await transaction.client.query(
+        `UPDATE ${table(transaction, 'tf_memberships')} SET role = 'admin' WHERE id = $1`,
+        [membershipId],
+      );
+      await transaction.client.query(
+        `INSERT INTO ${table(transaction, 'tf_member_teams')} (membership_id, team_id) SELECT $1, id FROM ${table(transaction, 'tf_teams')} WHERE name = '_admin' ON CONFLICT DO NOTHING`,
+        [membershipId],
+      );
+    }
+    const skipped: z.infer<typeof skippedChoicesSchema> = { teams: [], policies: [] };
+    for (const team of assignments.teams) {
+      if ((await scopeName(transaction, { kind: 'collection', id: team.id })) === undefined) {
+        skipped.teams.push({ id: team.id, name: team.name });
+        continue;
+      }
+      await transaction.client.query(
+        `INSERT INTO ${table(transaction, 'tf_member_teams')} (membership_id, team_id, role) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+        [membershipId, team.id, team.role],
+      );
+    }
+    const personGrants = assignments.policies.length > 0 && (await tablePersonGrantsInstalled(transaction));
+    for (const policy of assignments.policies) {
+      const permissions = policy.permissions.filter(permission => policyPermissions.includes(permission));
+      if (!personGrants || (await scopeName(transaction, policy.scope)) === undefined || !permissions.length) {
+        skipped.policies.push({ scope: policy.scope, name: policy.name });
+        continue;
+      }
+      await transaction.client.query(
+        `INSERT INTO ${table(transaction, 'tf_table_person_grants')} (membership_id, asset_id, permission) SELECT $1, $2, unnest($3::text[]) ON CONFLICT DO NOTHING`,
+        [membershipId, policy.scope.id, permissions],
+      );
+    }
+    if (skipped.teams.length || skipped.policies.length)
+      await transaction.client.query(`UPDATE ${table(transaction, 'tf_invitations')} SET skipped = $2 WHERE id = $1`, [
+        row.id,
+        JSON.stringify(skipped),
+      ]);
+    if (row.role === 'admin' || assignments.teams.length || assignments.policies.length)
+      await recommendationChange(transaction, membershipId, [membershipId], true);
+  }
+
   async function admitInvitation(
     transaction: Transaction,
     workspaceId: string,
@@ -1398,6 +1879,8 @@ export function createGovernanceService(dependencies: {
         `INSERT INTO ${table(transaction, 'tf_memberships')} (id, user_id, role) VALUES ($1, $2, 'member')`,
         [membershipId, userId],
       );
+    if (!existing && (await invitationChoicesInstalled(transaction)))
+      await applyChoices(transaction, row, membershipId);
     if (registration && row.workspace_member_id) {
       const profile = memberProfileSchema.parse({
         id: identity.id,
@@ -1438,6 +1921,8 @@ export function createGovernanceService(dependencies: {
     setGrant,
     listPersonGrants,
     setPersonGrant,
+    setPolicy,
+    memberAccess,
     transferTable,
     collaborationDirectory: (workspaceId: string, userId: string) =>
       withHuman(workspaceId, userId, 'read', false, directory),
@@ -1447,6 +1932,8 @@ export function createGovernanceService(dependencies: {
     redeemInvitation,
     resendInvitation,
     copyInvitation,
+    setInvitationChoices,
+    setInvitationTeam,
     removeMember: (workspaceId: string, userId: string, membershipId: string) =>
       withHuman(workspaceId, userId, 'write', true, (transaction, actor) => remove(transaction, actor, membershipId)),
     leave: (workspaceId: string, userId: string) =>

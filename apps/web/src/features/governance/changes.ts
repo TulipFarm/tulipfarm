@@ -13,6 +13,9 @@ export function useGovernanceChanges() {
   const { runtime, scope } = useFeatureContext();
   const { change } = useFeatureChanges();
   const workspaces = useWorkspaceChanges();
+  // Changes made in one tick share a refetch batch. Queuing other features' keys after this tick's batch has
+  // dispatched gives them their own, so a slow provider read such as Slack status never holds a save open.
+  const elsewhere = (input: Parameters<typeof change>[0]) => queueMicrotask(() => void change(input));
   return {
     saved: async (path: string, method: string, body?: unknown) => {
       if (method === 'PUT' && /^\/teams\/[^/]+\/name$/.test(path)) {
@@ -40,12 +43,14 @@ export function useGovernanceChanges() {
           );
         }
       }
-      if (path === '/grants' || path.endsWith('/owner')) {
+      if (path === '/grants' || path === '/policies' || path.endsWith('/owner')) {
         // Table grants can narrow protected reads, but the admin snapshot stays visible while it refreshes.
-        await Promise.all([
-          change({ kind: 'conceal', keys: [governanceKeys.tableAuthority, ...governanceTableDependents] }),
-          change({ kind: 'change', keys: [governanceKeys.administration] }),
+        const governance = Promise.all([
+          change({ kind: 'conceal', keys: [governanceKeys.tableAuthority] }),
+          change({ kind: 'change', keys: [governanceKeys.administration, governanceKeys.memberAccess] }),
         ]);
+        elsewhere({ kind: 'conceal', keys: governanceTableDependents });
+        await governance;
         return;
       }
       const authority =
@@ -54,21 +59,26 @@ export function useGovernanceChanges() {
         path.includes('/members/') ||
         path.endsWith('/leave') ||
         method === 'DELETE';
-      await Promise.all([
+      const governance = Promise.all([
         authority ? workspaces.changed() : Promise.resolve(),
         change({
           kind: authority ? 'conceal' : 'change',
           keys: authority
-            ? [governanceKeys.all, ...governanceDependents]
+            ? [governanceKeys.all]
             : [
                 governanceKeys.membership,
                 governanceKeys.administration,
-                ['settings'],
-                ['tables', 'authoring-context'],
-                ['agents'],
+                governanceKeys.memberAccess,
+                governanceKeys.invitations,
               ],
         }),
       ]);
+      elsewhere(
+        authority
+          ? { kind: 'conceal', keys: governanceDependents.filter(key => key[0] !== 'governance') }
+          : { kind: 'change', keys: [['settings'], ['tables', 'authoring-context'], ['agents']] },
+      );
+      await governance;
     },
     accessLost: () => {
       return change({ kind: 'conceal', keys: [governanceKeys.all, ...governanceDependents] });

@@ -38,13 +38,12 @@ try {
     tableId = 'aaaaaaaa-1111-4111-8111-111111111111',
     namesakeId = 'bbbbbbbb-2222-4222-8222-222222222222';
   const directory = [
-    { id: actorId, name: 'Ada', email: 'ada@example.com', image: null },
-    { id: otherId, name: 'Ben', email: 'ben@example.com', image: null },
+    { id: actorId, name: 'Ada', email: 'ada@example.com', image: null, role: 'member' },
+    { id: otherId, name: 'Ben', email: 'ben@example.com', image: null, role: 'member' },
   ];
   let admin = false,
     failed = false,
     delay = 0,
-    heldGrant,
     writes = 0;
   const teams = [];
   const grants = [];
@@ -98,26 +97,20 @@ try {
                 ]
               : [],
             grants: admin ? grants : [],
+            teamNames: [],
+            personGrants: [],
           };
     } else if (path.endsWith('/person-grants') && request.method() === 'GET') json = { grants: [] };
     else if (path.endsWith('/credits')) json = { balance: '0', spent: '0', reserved: '0' };
     else if (request.method() !== 'GET' && path.includes('/governance/')) {
       writes++;
-      if (heldGrant && path.endsWith('/grants')) {
-        const held = heldGrant;
-        heldGrant = null;
-        held.started.resolve();
-        await held.release.promise;
-      }
       await setTimeout(100);
       const body = request.postDataJSON();
       const parts = path.split('/');
       const teamIndex = parts.indexOf('teams');
       const teamId = teamIndex < 0 ? null : parts[teamIndex + 1];
       const team = teams.find(t => t.id === teamId);
-      if (path.endsWith('/grants')) {
-        grants.push({ teamId: body.teamId, target: body.target });
-      } else if (path.endsWith('/role')) {
+      if (path.endsWith('/role')) {
         const id = parts.at(-2);
         team.managerIds =
           body.role === 'manager' ? [...new Set([...team.managerIds, id])] : team.managerIds.filter(m => m !== id);
@@ -153,31 +146,41 @@ try {
     });
   });
   const refresh = () => workspaceChange(page, workspace.id, 'ada', [['governance', 'administration']]);
+  const tab = name => page.getByRole('tab', { name, exact: true }).click();
   failed = true;
   await page.goto(`${origin}/team-proof/teams`);
-  await page.getByRole('heading', { name: 'Could not load workspace access' }).waitFor();
+  await page.getByRole('heading', { name: 'Couldn’t load workspace access' }).waitFor();
   assert.equal(await page.getByRole('heading', { name: 'No teams yet' }).count(), 0);
   failed = false;
   delay = 250;
-  await page.getByRole('button', { name: 'Retry loading' }).click();
+  await page.getByRole('button', { name: 'Try again' }).click();
   await page.getByRole('heading', { name: 'No teams yet' }).waitFor();
-  await page.getByRole('button', { name: 'New team', exact: true }).click();
+  await page.getByRole('button', { name: 'Create a team', exact: true }).click();
   await page.getByLabel('New team name').fill('Private operations');
   await page.getByRole('button', { name: 'Create team', exact: true }).dblclick();
-  await page.getByRole('heading', { name: 'Private operations details', exact: true }).waitFor();
-  assert.equal(writes, 1);
+  await page.getByRole('heading', { name: 'Private operations', exact: true }).waitFor();
+  assert.equal(writes, 1, 'a double click creates one team');
+  await tab('Settings');
+  await page.getByText('You’re the only manager. Make someone else a manager before you leave.').waitFor();
   assert.equal(await page.getByRole('button', { name: 'Leave team', exact: true }).isDisabled(), true);
-  await page.getByRole('checkbox', { name: 'Ben (ben@example.com)' }).check();
-  await page.getByRole('button', { name: 'Add selected members (1)' }).click();
-  await page.getByRole('heading', { name: 'Team members (2)' }).waitFor();
-  await page.getByLabel('Team role for Ben').click();
+  await tab('Members');
+  await page.getByRole('button', { name: 'Add members', exact: true }).click();
+  const adding = page.getByRole('dialog', { name: 'Add members to Private operations' });
+  await adding.getByRole('checkbox', { name: 'Ben' }).check();
+  await adding.getByRole('button', { name: 'Add to team', exact: true }).click();
+  await adding.waitFor({ state: 'hidden' });
+  const roster = page.getByRole('table', { name: 'Members of Private operations' });
+  await roster.getByText('ben@example.com', { exact: true }).waitFor();
+  await page.getByLabel('Team role for Ben in Private operations').click();
   await page.getByRole('option', { name: 'Manager', exact: true }).click();
+  await page.getByText('Ben is now a manager of Private operations.', { exact: true }).waitFor();
+  await tab('Settings');
   await page.waitForFunction(() =>
     [...document.querySelectorAll('button')].some(b => b.textContent === 'Leave team' && !b.disabled),
   );
   await page.getByLabel('Team name', { exact: true }).fill('Renamed operations');
-  await page.getByRole('button', { name: 'Save team details' }).click();
-  await page.getByRole('heading', { name: 'Renamed operations details', exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('heading', { name: 'Renamed operations', exact: true }).waitFor();
   failed = true;
   await refresh();
   await page.getByRole('button', { name: 'Reload access' }).waitFor();
@@ -185,89 +188,52 @@ try {
   failed = false;
   await page.getByRole('button', { name: 'Reload access' }).click();
   await page.getByRole('button', { name: 'Reload access' }).waitFor({ state: 'hidden' });
-  await page.getByLabel('Team role for Ada').click();
+  await tab('Members');
+  await page.getByLabel('Team role for Ada in Renamed operations').click();
   await page.getByRole('option', { name: 'Member', exact: true }).click();
-  await page.getByRole('button', { name: 'Save team details' }).waitFor({ state: 'hidden' });
-  assert.equal(await page.getByLabel('Search workspace members').count(), 0);
-  assert.equal(await page.getByRole('button', { name: 'Delete team' }).count(), 0);
-  await page.getByRole('heading', { name: 'Team members (2)' }).waitFor();
+  await page.getByRole('button', { name: 'Add members', exact: true }).waitFor({ state: 'hidden' });
+  assert.equal(await page.getByLabel('Team role for Ben in Renamed operations').count(), 0, 'members see roles only');
+  await tab('Settings');
+  assert.equal(await page.getByLabel('Team name', { exact: true }).count(), 0);
+  assert.equal(await page.getByRole('button', { name: 'Delete Renamed operations' }).count(), 0);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   await page.getByRole('button', { name: 'Leave team', exact: true }).click();
-  await page.getByRole('button', { name: 'Confirm leave team' }).click();
-  await page.getByRole('heading', { name: 'No teams yet' }).waitFor();
+  await page
+    .getByRole('dialog', { name: 'Leave Renamed operations?' })
+    .getByRole('button', { name: 'Leave team' })
+    .click();
+  await page.getByRole('heading', { name: 'You can’t view this team' }).waitFor();
   await page.goto(`${origin}/team-proof/members`);
-  await page.getByRole('heading', { name: 'Workspace directory' }).waitFor();
   await page.getByText('ben@example.com', { exact: true }).waitFor();
+  await page.setViewportSize({ width: 1280, height: 900 });
+
   admin = true;
+  grants.push({ teamId: hiddenTeam, target: { kind: 'table', id: tableId, permission: 'table.row.read' } });
   await page.goto(`${origin}/team-proof/grants`);
-  await page.getByLabel('Team receiving access').click();
-  await page.getByRole('option', { name: `Team ${hiddenTeam}`, exact: true }).click();
-  const invoices = `Invoices · Team ${hiddenTeam} · aaaaaaaa`,
+  const invoices = `Invoices · Team ${hiddenTeam.slice(0, 8)} · aaaaaaaa`,
     namesake = 'invoices · Workspace admins · bbbbbbbb';
   await page.getByRole('heading', { name: invoices, exact: true }).waitFor();
   await page.getByRole('heading', { name: namesake, exact: true }).waitFor();
-  const invoicePermissions = page.getByRole('group', { name: `Permissions for ${invoices}`, exact: true });
-  const namesakePermissions = page.getByRole('group', { name: `Permissions for ${namesake}`, exact: true });
-  await invoicePermissions.getByRole('checkbox', { name: 'Read rows', exact: true }).click();
-  for (let n = 0; grants.length === 0; n++) {
-    assert.ok(n < 100);
-    await setTimeout(50);
-  }
-  await page.getByLabel('Team receiving access').waitFor();
-  await page.getByLabel('Team receiving access').click();
-  await page.getByRole('option', { name: `Team ${hiddenTeam}`, exact: true }).click();
-  await page.waitForFunction(() => document.querySelector('[role="checkbox"][aria-checked="true"]'));
-  assert.equal(grants[0].teamId, hiddenTeam);
+  assert.equal(
+    await page.getByLabel(`Owning team for ${invoices}`, { exact: true }).innerText(),
+    'A team you can’t see',
+  );
+  assert.equal(await page.getByLabel(`Owning team for ${namesake}`, { exact: true }).innerText(), 'Workspace admins');
+  await page
+    .getByRole('table', { name: `Who can use ${invoices}` })
+    .getByText('A team you can’t see')
+    .waitFor();
+  await page
+    .getByRole('article', { name: namesake, exact: true })
+    .getByText('Only admins can use this table.', { exact: true })
+    .waitFor();
   assert.equal(await page.getByText('Private operations', { exact: true }).count(), 0);
   assert.equal(await page.getByText('Renamed operations', { exact: true }).count(), 0);
-  assert.equal(
-    await page
-      .getByRole('article', { name: invoices, exact: true })
-      .getByLabel('Owning team', { exact: true })
-      .innerText(),
-    `Team ${hiddenTeam}`,
-  );
-  // A click on another table while a grant saves waits its turn instead of being dropped.
-  const slowGrant = { started: Promise.withResolvers(), release: Promise.withResolvers() };
-  heldGrant = slowGrant;
-  await invoicePermissions.getByRole('checkbox', { name: 'Create rows', exact: true }).click();
-  await slowGrant.started.promise;
-  await page
-    .getByRole('status')
-    .filter({ hasText: `Saving create rows for ${invoices}…` })
-    .waitFor();
-  await namesakePermissions.getByRole('checkbox', { name: 'Read rows', exact: true }).click();
-  assert.equal(await namesakePermissions.getByRole('checkbox', { name: 'Read rows', exact: true }).isChecked(), true);
-  await page
-    .getByRole('status')
-    .filter({ hasText: `Saving create rows for ${invoices}… 1 more change waiting.` })
-    .waitFor();
-  slowGrant.release.resolve();
-  await page
-    .getByRole('status')
-    .filter({ hasText: `Read rows for ${namesake} granted to Team ${hiddenTeam}.` })
-    .waitFor();
-  assert.deepEqual(
-    grants.slice(1).map(grant => [grant.target.id, grant.target.permission]),
-    [
-      [tableId, 'table.row.create'],
-      [namesakeId, 'table.row.read'],
-    ],
-  );
-  await page.getByLabel('Team receiving access').click();
-  await page.getByRole('option', { name: 'Workspace admins', exact: true }).click();
-  await invoicePermissions.getByRole('checkbox', { name: 'Create rows', exact: true }).click();
-  for (let n = 0; grants.length < 4; n++) {
-    assert.ok(n < 100);
-    await setTimeout(50);
-  }
-  assert.equal(grants[3].teamId, adminTeam);
-  assert.equal(await page.getByText('Create tables owned by Workspace admins').count(), 0);
   assert.deepEqual(errors, []);
   process.stdout.write(
-    'Verified ordinary creator and manager controls, handoff, read-only team membership, directory, opaque and workspace-admin table grants, duplicate table names, queued grant saves, loading/error recovery and mobile layout.\n',
+    'Verified ordinary creator and manager controls, handoff, read-only team membership, directory, opaque and workspace-admin table owners, duplicate table names, loading/error recovery and mobile layout.\n',
   );
 } finally {
   await browser?.close();

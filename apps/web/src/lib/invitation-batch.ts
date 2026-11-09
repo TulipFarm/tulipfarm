@@ -3,7 +3,7 @@ import { invitationInputSchema } from '@tulipfarm/workspaces/governance-contract
 
 export type InvitationReceipt =
   | { outcome: 'already-member' }
-  | { outcome: 'created' | 'pending'; invitationId: string };
+  | { outcome: 'created' | 'pending' | 'updated'; invitationId: string };
 /**
  * `memberRequestId` and `memberRecordId` make the workspace member row that is
  * created for a new email idempotent, so a retry never adds a second row.

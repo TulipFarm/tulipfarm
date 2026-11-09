@@ -19,7 +19,13 @@ import {
   invitationLinkSchema,
   invitationListQuerySchema,
   invitationListSchema,
+  invitationChoicesSchema,
+  invitationSchema,
+  invitationTeamEnrollmentSchema,
   joinedWorkspaceSchema,
+  memberAccessSchema,
+  policyChangeSchema,
+  policyInputSchema,
   resendInvitationSchema,
   leaveTeamInputSchema,
   memberRoleInputSchema,
@@ -200,6 +206,19 @@ export function registerGovernance(
     routes.put(`${base}/grants`, { schema: schema('setTableGrantV1', workspaceParams, grantInputSchema) }, request =>
       service.setGrant(workspaceParams.parse(request.params).workspaceId, user(request), request.body),
     );
+    routes.put(
+      `${base}/policies`,
+      { schema: schema('setAccessPolicyV1', workspaceParams, policyInputSchema, policyChangeSchema) },
+      request => service.setPolicy(workspaceParams.parse(request.params).workspaceId, user(request), request.body),
+    );
+    routes.get(
+      `${base}/members/:membershipId/access`,
+      { schema: schema('getMemberAccessV1', memberParams, undefined, memberAccessSchema) },
+      request => {
+        const { workspaceId, membershipId } = memberParams.parse(request.params);
+        return service.memberAccess(workspaceId, user(request), membershipId);
+      },
+    );
     routes.get(
       `${base}/person-grants`,
       { schema: schema('listTablePersonGrantsV1', workspaceParams, undefined, personGrantListSchema) },
@@ -271,6 +290,32 @@ export function registerGovernance(
       request => {
         const { workspaceId, invitationId } = invitationParams.parse(request.params);
         return service.resendInvitation(workspaceId, user(request), invitationId, request.body);
+      },
+    );
+    routes.put(
+      `${base}/invitations/:invitationId/choices`,
+      {
+        schema: schema('setGovernanceInvitationChoicesV1', invitationParams, invitationChoicesSchema, invitationSchema),
+      },
+      request => {
+        const { workspaceId, invitationId } = invitationParams.parse(request.params);
+        return service.setInvitationChoices(workspaceId, user(request), invitationId, request.body);
+      },
+    );
+    const invitationTeamParams = teamParams.extend({ invitationId: z.uuid() });
+    routes.put(
+      `${base}/teams/:teamId/invitations/:invitationId`,
+      {
+        schema: schema(
+          'setTeamInvitationEnrollmentV1',
+          invitationTeamParams,
+          invitationTeamEnrollmentSchema,
+          invitationSchema,
+        ),
+      },
+      request => {
+        const { workspaceId, teamId, invitationId } = invitationTeamParams.parse(request.params);
+        return service.setInvitationTeam(workspaceId, user(request), teamId, invitationId, request.body);
       },
     );
     routes.post(

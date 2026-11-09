@@ -18,6 +18,7 @@ export const governanceKeys = {
   membership: ['governance', 'membership'] as const,
   administration: ['governance', 'administration'] as const,
   invitations: ['governance', 'invitations'] as const,
+  memberAccess: ['governance', 'member-access'] as const,
   authority: ['governance', 'authority'] as const,
   tableAuthority: ['governance', 'table-authority'] as const,
 };
@@ -38,6 +39,7 @@ export const governanceDependents = [
   ['settings'],
   governanceKeys.administration,
   governanceKeys.invitations,
+  governanceKeys.memberAccess,
 ];
 export const governanceTableDependents = governanceDependents.filter(
   key => key[0] !== 'governance' && key[0] !== 'settings',

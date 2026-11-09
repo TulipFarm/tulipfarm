@@ -11,11 +11,22 @@ export type Invitation = ReturnType<typeof invitationSchema.parse>;
 type Page = ReturnType<typeof invitationListSchema.parse>;
 const listKey = [...governanceKeys.invitations, 'list'] as const;
 
-export function useInvitations(workspaceId: string, authorized: boolean, onAccessLost: () => void, search = '') {
+export function useInvitations(
+  workspaceId: string,
+  authorized: boolean,
+  onAccessLost: () => void,
+  search = '',
+  open = false,
+) {
   const { runtime, scope, current } = useFeatureContext();
   useSyncExternalStore(runtime.subscribeAuthority, runtime.authoritySnapshot, runtime.authoritySnapshot);
   const normalizedSearch = search.trim().toLowerCase();
-  const key = featureKey(scope, normalizedSearch ? [...listKey, { search: normalizedSearch }] : listKey);
+  const key = featureKey(
+    scope,
+    normalizedSearch || open
+      ? [...listKey, { ...(normalizedSearch && { search: normalizedSearch }), ...(open && { open }) }]
+      : listKey,
+  );
   const query = useInfiniteQuery({
     queryKey: key,
     enabled: authorized && current(),
@@ -27,6 +38,7 @@ export function useInvitations(workspaceId: string, authorized: boolean, onAcces
       const deadline = requestSignal(signal);
       const params = new URLSearchParams();
       if (normalizedSearch) params.set('search', normalizedSearch);
+      if (open) params.set('open', 'true');
       if (pageParam) params.set('after', pageParam);
       const page = invitationListSchema.parse(
         await governanceRequest(

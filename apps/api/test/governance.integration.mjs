@@ -214,12 +214,19 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
         requestId: randomUUID(),
         workspaceMemberId: original.invitation.workspaceMemberId,
       };
-      assert.equal((await ok(admin, 'POST', '/invitations', observation)).outcome, 'pending');
-      await ok(admin, 'POST', `/invitations/${original.invitation.id}/revoke`);
+      const replaced = await ok(admin, 'POST', '/invitations', observation);
+      assert.equal(replaced.outcome, 'updated');
+      assert.notEqual(replaced.invitation.id, original.invitation.id);
+      assert.equal(
+        (await http(stranger, 'POST', '/v1/invitations/redeem', { token: original.token })).statusCode,
+        404,
+        'Inviting again retires the old link',
+      );
+      await ok(admin, 'POST', `/invitations/${replaced.invitation.id}/revoke`);
       const before = (await f.platform.query(`SELECT count(*) FROM "${a.names.schema}".tf_invitations`)).rows[0];
       const retry = await ok(admin, 'POST', '/invitations', { ...observation, email: stranger.email });
-      assert.equal(retry.outcome, 'pending');
-      assert.equal(retry.invitation.id, original.invitation.id);
+      assert.equal(retry.outcome, 'updated');
+      assert.equal(retry.invitation.id, replaced.invitation.id);
       assert.equal(retry.invitation.status, 'revoked');
       assert.deepEqual(
         (await f.platform.query(`SELECT count(*) FROM "${a.names.schema}".tf_invitations`)).rows[0],
@@ -229,13 +236,18 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
         (await http(admin, 'POST', '/invitations', { ...observation, email: member.email })).statusCode,
         409,
       );
+      // A re-invite already replaced the original, so a resend with its request ID returns that replacement.
       assert.equal(
         (
-          await http(admin, 'POST', `/invitations/${original.invitation.id}/resend`, {
+          await ok(admin, 'POST', `/invitations/${original.invitation.id}/resend`, {
             requestId: observation.requestId,
           })
-        ).statusCode,
-        409,
+        ).invitation.id,
+        replaced.invitation.id,
+      );
+      assert.deepEqual(
+        (await f.platform.query(`SELECT count(*) FROM "${a.names.schema}".tf_invitations`)).rows[0],
+        before,
       );
       const fresh = await invite(stranger.email);
       const joined = await ok(stranger, 'POST', '/v1/invitations/redeem', { token: fresh.token });
@@ -270,6 +282,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       const local = `g${randomUUID().replaceAll('-', '').slice(0, 12)}`;
       const created = await invite(`${local}+team@gmail.com`);
       assert.equal(created.outcome, 'created');
+      let latest = created;
       for (const alias of [`${local}@gmail.com`, `${local.slice(0, 1)}.${local.slice(1)}@googlemail.com`]) {
         const repeated = await ok(admin, 'POST', '/invitations', {
           kind: 'email',
@@ -277,20 +290,18 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
           requestId: randomUUID(),
           workspaceMemberId: created.invitation.workspaceMemberId,
         });
-        assert.equal(repeated.outcome, 'pending', alias);
-        assert.equal(repeated.invitation.id, created.invitation.id);
-        assert.equal(
-          repeated.invitation.email,
-          `${local}+team@gmail.com`,
-          'The typed address stays the delivery address',
-        );
+        assert.equal(repeated.outcome, 'updated', alias);
+        assert.notEqual(repeated.invitation.id, latest.invitation.id);
+        assert.equal(repeated.invitation.email, alias, 'The newly typed address becomes the delivery address');
+        latest = repeated;
       }
+      const { url: latestUrl } = await ok(admin, 'GET', `/invitations/${latest.invitation.id}/link`);
       const plain = await invite(`${local}@company.example`);
       const plus = await invite(`${local}+1@company.example`);
       assert.equal(plus.outcome, 'created', 'Plus addressing is not an alias outside Gmail');
       assert.notEqual(plus.invitation.id, plain.invitation.id);
       const person = await signIn('Gmail person', `${local}@gmail.com`);
-      await ok(person, 'POST', '/v1/invitations/redeem', { token: created.token });
+      await ok(person, 'POST', '/v1/invitations/redeem', { token: new URL(latestUrl).searchParams.get('token') });
       assert.deepEqual(
         await ok(admin, 'POST', '/invitations', {
           kind: 'email',
@@ -381,14 +392,6 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
     }
     {
       const original = await invite(stranger.email);
-      const pending = await ok(admin, 'POST', '/invitations', {
-        kind: 'email',
-        email: `  ${stranger.email.toUpperCase()}  `,
-        requestId: randomUUID(),
-        workspaceMemberId: original.invitation.workspaceMemberId,
-      });
-      assert.equal(pending.outcome, 'pending');
-      assert.equal(pending.invitation.id, original.invitation.id);
       const operation = { requestId: randomUUID() };
       const replacements = await Promise.all(
         [1, 2].map(() => ok(admin, 'POST', `/invitations/${original.invitation.id}/resend`, operation)),
@@ -510,7 +513,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
     for (const input of [
       { kind: 'share' },
       { kind: 'email', email: member.email, requestId: randomUUID(), teamId: randomUUID() },
-      { kind: 'email', email: member.email, requestId: randomUUID(), role: 'admin' },
+      { kind: 'email', email: member.email, requestId: randomUUID(), role: 'owner' },
     ])
       assert.equal((await http(admin, 'POST', '/invitations', input)).statusCode, 400);
     const link = await invite(member.email, `/v1/workspaces/${a.id.toUpperCase()}/governance/invitations`);
@@ -616,6 +619,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
           managerIds: [a.membershipId],
           canManage: true,
           canLeave: false,
+          policyCount: 0,
         },
       );
       assert.deepEqual(
@@ -684,13 +688,13 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
     assert.deepEqual((await ok(admin, 'GET')).grants, []);
     const privateTeam = randomUUID();
     await ok(member, 'PUT', `/teams/${privateTeam}`, { name: 'Private collaboration' });
+    // Admins see and manage every team, including ones they do not belong to.
+    assert.deepEqual((await ok(admin, 'GET')).teams.find(team => team.id === privateTeam)?.membershipIds, [memberId]);
+    await ok(admin, 'PUT', `/teams/${privateTeam}/members/${managerId}`, { enrolled: true });
+    await ok(admin, 'PUT', `/teams/${privateTeam}/members/${managerId}`, { enrolled: false });
     assert.equal(
-      (await ok(admin, 'GET')).teams.some(team => team.id === privateTeam),
+      (await ok(manager, 'GET')).teams.some(team => team.id === privateTeam),
       false,
-    );
-    assert.equal(
-      (await http(admin, 'PUT', `/teams/${privateTeam}/members/${a.membershipId}`, { enrolled: true })).statusCode,
-      404,
     );
     await ok(member, 'DELETE', `/teams/${privateTeam}`);
     await ok(admin, 'PUT', `/teams/${teamId}/members/${memberId}`, { enrolled: true });
@@ -959,6 +963,130 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
     assert.equal(await permission(member, 'table.row.read'), false);
     await personGrant('table.row.read');
     assert.equal(await permission(member, 'table.row.read'), true);
+    {
+      const policyTeam = randomUUID();
+      await ok(admin, 'PUT', `/teams/${policyTeam}`, { name: 'Policy readers' });
+      await ok(admin, 'PUT', `/teams/${policyTeam}/members/${memberId}`, { enrolled: true });
+      const policy = permissions => ({
+        subject: { kind: 'team', id: policyTeam },
+        scope: { kind: 'table', id: tableId },
+        permissions,
+      });
+      assert.equal(await permission(member, 'table.row.delete'), false);
+      const set = await ok(admin, 'PUT', '/policies', policy(['table.row.read', 'table.row.delete']));
+      assert.deepEqual(
+        { added: set.added.sort(), removed: set.removed },
+        {
+          added: ['table.row.delete', 'table.row.read'],
+          removed: [],
+        },
+      );
+      assert.equal(await permission(member, 'table.row.delete'), true);
+      assert.deepEqual(await ok(admin, 'PUT', '/policies', policy(['table.row.read'])), {
+        added: [],
+        removed: ['table.row.delete'],
+      });
+      assert.equal(await permission(member, 'table.row.delete'), false);
+      assert.equal(
+        (await http(admin, 'PUT', '/policies', { ...policy(['table.create']) })).statusCode,
+        400,
+        'Create tables applies only to a team scope',
+      );
+      // A team manager who is not an admin cannot change any policy, even for their own team.
+      const ownTeam = randomUUID();
+      await ok(member, 'PUT', `/teams/${ownTeam}`, { name: 'Member led' });
+      for (const subject of [
+        { kind: 'team', id: ownTeam },
+        { kind: 'member', id: memberId },
+      ])
+        assert.equal(
+          (
+            await http(member, 'PUT', '/policies', {
+              subject,
+              scope: { kind: 'table', id: tableId },
+              permissions: ['table.row.read'],
+            })
+          ).statusCode,
+          404,
+        );
+      const own = await ok(member, 'GET', `/members/${memberId}/access`);
+      assert.equal(own.self, true);
+      assert.equal(own.skipped, null);
+      assert.ok(
+        own.policies.some(
+          item =>
+            item.source.kind === 'team' &&
+            item.source.teamId === policyTeam &&
+            item.scope.id === tableId &&
+            item.permissions.includes('table.row.read'),
+        ),
+      );
+      assert.equal((await http(member, 'GET', `/members/${managerId}/access`)).statusCode, 404);
+      assert.equal((await ok(admin, 'GET', `/members/${memberId}/access`)).self, false);
+      await ok(admin, 'PUT', '/policies', policy([]));
+      await ok(member, 'DELETE', `/teams/${ownTeam}`);
+      await ok(admin, 'DELETE', `/teams/${policyTeam}`);
+    }
+    {
+      const joinTeam = randomUUID();
+      const goneTeam = randomUUID();
+      await ok(admin, 'PUT', `/teams/${joinTeam}`, { name: 'Joiners' });
+      await ok(admin, 'PUT', `/teams/${goneTeam}`, { name: 'Gone before accept' });
+      const invitee = await signIn('Choice invitee');
+      const workspaceMemberId = (
+        await createWorkspaceMember({
+          runtime,
+          workspace: a,
+          profile: { name: invitee.email, contactEmail: invitee.email },
+        })
+      ).id;
+      const send = choices =>
+        ok(admin, 'POST', '/invitations', {
+          kind: 'email',
+          email: invitee.email,
+          requestId: randomUUID(),
+          workspaceMemberId,
+          ...choices,
+        });
+      const first = await send({ teams: [{ id: goneTeam }] });
+      assert.equal(first.outcome, 'created');
+      const read = { scope: { kind: 'table', id: tableId }, permissions: ['table.row.read'] };
+      const replaced = await send({ role: 'member', teams: [{ id: joinTeam, role: 'manager' }], policies: [read] });
+      assert.equal(replaced.outcome, 'updated');
+      assert.deepEqual(
+        replaced.invitation.teams.map(team => [team.id, team.role]),
+        [[joinTeam, 'manager']],
+        'Inviting again keeps only the new choices',
+      );
+      const invitationId = replaced.invitation.id;
+      assert.equal((await http(member, 'PUT', `/invitations/${invitationId}/choices`, { teams: [] })).statusCode, 404);
+      assert.equal(
+        (await http(member, 'PUT', `/teams/${joinTeam}/invitations/${invitationId}`, { enrolled: false })).statusCode,
+        404,
+      );
+      const enrolled = await ok(admin, 'PUT', `/teams/${goneTeam}/invitations/${invitationId}`, { enrolled: true });
+      assert.deepEqual(enrolled.teams.map(team => team.id).sort(), [joinTeam, goneTeam].sort());
+      await ok(admin, 'DELETE', `/teams/${goneTeam}`);
+      const { url } = await ok(admin, 'GET', `/invitations/${invitationId}/link`);
+      const joined = await ok(invitee, 'POST', '/v1/invitations/redeem', {
+        token: new URL(url).searchParams.get('token'),
+      });
+      const access = await ok(admin, 'GET', `/members/${joined.membershipId}/access`);
+      assert.deepEqual(
+        access.teams.map(team => [team.id, team.role]),
+        [[joinTeam, 'manager']],
+      );
+      assert.ok(
+        access.policies.some(
+          item =>
+            item.source.kind === 'direct' && item.scope.id === tableId && item.permissions.includes('table.row.read'),
+        ),
+      );
+      assert.deepEqual(access.skipped.teams, [{ id: goneTeam, name: 'Gone before accept' }]);
+      assert.equal((await ok(invitee, 'GET', `/members/${joined.membershipId}/access`)).skipped, null);
+      await ok(admin, 'DELETE', `/members/${joined.membershipId}`);
+      await ok(admin, 'DELETE', `/teams/${joinTeam}`);
+    }
     const beforeRemoval = { kind: 'human', userId: member.id, membershipId: memberId };
     await ok(admin, 'DELETE', `/members/${memberId}`);
     assert.equal((await http(member, 'GET', '/me')).statusCode, 404);

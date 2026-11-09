@@ -109,6 +109,10 @@ const WorkspaceHomePage = lazyRouteComponent(() => import('@/pages/workspace-hom
 const WorkspaceChatsPage = lazyRouteComponent(() => import('@/pages/workspace-chats'), 'WorkspaceChatsPage');
 const TeamsPage = lazyRouteComponent(() => import('@/pages/governance'), 'TeamsPage');
 const GrantsPage = lazyRouteComponent(() => import('@/pages/governance'), 'GrantsPage');
+const InviteMembersPage = lazyRouteComponent(() => import('@/pages/governance'), 'InviteMembersPage');
+const MembersSettingsPage = lazyRouteComponent(() => import('@/pages/governance'), 'MembersSettingsPage');
+const MemberDetailPage = lazyRouteComponent(() => import('@/pages/governance'), 'MemberDetailPage');
+const TeamDetailPage = lazyRouteComponent(() => import('@/pages/governance'), 'TeamDetailPage');
 const TablesPage = lazyRouteComponent(() => import('@/pages/tables'), 'TablesPage');
 const TableDetailPage = lazyRouteComponent(() => import('@/pages/tables'), 'TableDetailPage');
 const NewTablePage = lazyRouteComponent(() => import('@/pages/tables'), 'NewTablePage');
@@ -1372,7 +1376,27 @@ const workspaceMembersRoute = createRoute({
   path: 'members',
   component: MembersPage,
 });
+const workspaceInviteMembersRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  path: 'members/invite',
+  component: InviteMembersPage,
+});
+const workspaceMembersSettingsRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  path: 'members/settings',
+  component: MembersSettingsPage,
+});
+const workspaceMemberRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  path: 'members/$membershipId',
+  component: MemberDetailPage,
+});
 const workspaceTeamsRoute = createRoute({ getParentRoute: () => workspaceRoute, path: 'teams', component: TeamsPage });
+const workspaceTeamRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  path: 'teams/$teamId',
+  component: TeamDetailPage,
+});
 const workspaceGrantsRoute = createRoute({
   getParentRoute: () => workspaceRoute,
   path: 'grants',
@@ -1474,7 +1498,11 @@ export const router = createRouter({
       workspaceModelsRoute,
       workspaceUsageRoute,
       workspaceMembersRoute,
+      workspaceInviteMembersRoute,
+      workspaceMembersSettingsRoute,
+      workspaceMemberRoute,
       workspaceTeamsRoute,
+      workspaceTeamRoute,
       workspaceGrantsRoute,
       knowledgeRoute,
       integrationsRoute,
