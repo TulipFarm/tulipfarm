@@ -1164,6 +1164,8 @@ test('an agent accepts native text and rejects malformed native arguments', asyn
   body = nativeReply('anthropic', { calls: [useCall(tool.call, tool.text)] });
   body.content[0].input = '{"tableId":';
   assert.equal((await inferDecision(route, input)).reason, 'invalid-decision');
+  body = nativeReply('anthropic', { text: '{"tool":"tables.list","input":{}}' });
+  assert.equal((await inferDecision(route, input)).reason, 'invalid-decision', 'a tool request written as text');
 });
 
 test('Azure tool schemas preserve literal values as enums for Foundry model compatibility', async t => {

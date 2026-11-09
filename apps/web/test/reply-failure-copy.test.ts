@@ -94,6 +94,15 @@ test('a completed reply answered by the fallback names the model that answered',
     fallbackNote('completed', 'model-fallback:kimi'),
     'Answered by kimi because the chat model was unavailable.',
   );
+  const name = (id: string) => ({ kimi: 'Kimi', 'grok-fast': 'Grok Fast' })[id] ?? id;
+  assert.equal(
+    fallbackNote('completed', 'model-fallback:grok-fast', 'kimi', name),
+    'Answered by Grok Fast because Kimi was unavailable.',
+  );
+  assert.equal(
+    fallbackNote('completed', 'model-fallback:grok-fast', 'grok-fast', name),
+    'Answered by Grok Fast because the chat model was unavailable.',
+  );
   assert.equal(fallbackNote('completed', 'model-fallback:'), null);
   assert.equal(fallbackNote('failed', 'model-fallback:kimi'), null);
   assert.equal(fallbackNote('completed', null), null);

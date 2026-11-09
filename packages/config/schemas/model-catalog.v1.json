@@ -195,6 +195,19 @@
               ]
             }
           },
+          "fallback": {
+            "default": null,
+            "description": "Id of another model in `models` that answers once when a chat on this model is rate-limited, gets an invalid response, or finds the model unavailable. Null uses the model with the \"fallback\" role.",
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]{0,99}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "limits": {
             "type": "object",
             "properties": {

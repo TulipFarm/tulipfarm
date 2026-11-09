@@ -197,16 +197,36 @@ catalog`. `loadModelCatalog(env)` returns the served catalog and
   failure is counted as an `error` check outcome. Reasoning follows the model's
   `reasoningEffort` or `reasoningOffForTools` capability; qualify a model's
   decisions and output budget before assigning it this role.
-- **Fallback.** The `fallback` role is off unless a model has it. Then a chat
-  model call that fails before producing any output, with a failure another
-  model can fix (`not_found`, `auth`, `quota_exceeded`, `rate_limited`,
-  `server_error`, `timeout` or `network`), retries once on that model. It never
-  retries after streamed output or on `content_filtered`, `context_too_long` or
-  `bad_request`, and a paused fallback model or the chat's own model is not
-  used. The reply notes and bills the model that answered; the chat keeps its
-  selected model. Each decision is counted as `gen_ai_model_fallback` with a
-  bounded `model_fallback` outcome (`used`, `not_configured`, `not_eligible`,
-  `failed`).
+- **Fallback.** A chat model's `fallback` names another model in `models`
+  that answers its failed calls; models without one use the model with the
+  `fallback` role, and without either the fallback is off. The target cannot
+  be the model itself, an image model or behind a feature flag, and following
+  `fallback` from model to model must not loop. A paused or unserved fallback
+  passes to the next model in its own `fallback` chain, and then to the role's
+  model, so give the last model in each chain a fallback through the role.
+  A model call that fails before the turn produced any output, with a failure
+  another model can fix (`not_found`, `auth`, `quota_exceeded`,
+  `rate_limited`, `server_error`, `timeout` or `network`), or whose first
+  response cannot be used (empty, malformed, or tool requests written as text:
+  `invalid_response`), runs once on the fallback. Only that one model is
+  tried; its own `fallback` is not. It never retries after streamed output or
+  on `content_filtered`, `context_too_long` or `bad_request`. A rate limit
+  whose `Retry-After` is at most 2 seconds is retried once on the same model
+  first; a longer or missing `Retry-After` goes to the fallback at once. In
+  chats the chat's own model is otherwise not retried, the reply notes and
+  bills the model that answered, and the chat keeps its selected model. A chat
+  sub-agent uses the chat's fallback the same way, for the rest of its task. Agent
+  chats and task runs first retry an outage or timeout once on their own model
+  and go straight to the fallback for any other failure the fallback can fix; a
+  workspace fallback rule for the model, including one that turns the
+  fallback off, replaces the catalog's. Each decision is counted as
+  `gen_ai_model_fallback` and logged as `chat.model-fallback` with a bounded
+  `model_fallback` outcome (`used`, `not_configured`, `not_eligible`,
+  `failed`), labelled with the failed model (`gen_ai.request.model`) and the
+  fallback (`fallback.provider`, `fallback.model`). A chat reply a fallback
+  answered adds `model_fallback="used"` to `cloud_chat_reply_duration`, and its
+  `chat.reply.summary` log names the chat's model as `gen_ai.request.model`
+  and the one that answered as `fallback.model`.
 - **Usage.** Chat-completions usage is read from any streamed chunk, including a
   final usage-only chunk, and tolerates null or missing detail objects and
   `total_tokens`. When `total_tokens` is reported, it decides whether reasoning

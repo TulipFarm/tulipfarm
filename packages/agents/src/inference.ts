@@ -1,3 +1,4 @@
+import { setTimeout as sleep } from 'node:timers/promises';
 import { z } from 'zod';
 import {
   estimateInputTokens,
@@ -15,11 +16,13 @@ import {
   fallbackEligibleClasses,
   log,
   ModelCallError,
+  type ModelErrorClass,
   type ResponseRejection,
   modelCallDiagnostics,
   observeInference,
   observeChatDetail,
   recordModelFallback,
+  retryRateLimitedModel,
   observeChatDetailSync,
   recordChatCompletionCheck,
   recordChatContextCompaction,
@@ -645,8 +648,10 @@ export function modelHttpError(
   request?: string,
 ) {
   const detail = providerErrorDetail(body);
-  return new ModelCallError(httpFailure(response.status, body, provider, headerRetryAfterMs(response.headers)), {
+  const retryAfterMs = headerRetryAfterMs(response.headers);
+  return new ModelCallError(httpFailure(response.status, body, provider, retryAfterMs), {
     status: response.status,
+    retryAfterMs: retryAfterMs ?? undefined,
     providerCode: detail.code,
     providerMessage: detail.message,
     outputStarted,
@@ -1017,6 +1022,7 @@ export async function inferDecision(
             return observeChatDetailSync<InferenceResult>('decision-parse', () => {
               const selected = nativeStep(config.data, body);
               if (selected.kind === 'failure') return failure(selected.reason, status, attribution);
+              if (unusableStep(selected)) return failure('invalid-decision', status, attribution);
               try {
                 return {
                   kind: 'success',
@@ -1361,6 +1367,10 @@ type ToolRejection =
 type NativeStep =
   | { kind: 'step'; text: string; calls: NativeCall[]; raw: unknown }
   | { kind: 'failure'; reason: InferenceFailure; rejection?: ResponseRejection };
+
+/** A successful response the reply loop cannot use: malformed or empty, or tool requests written as text. */
+const unusableStep = (step: NativeStep) =>
+  step.kind === 'failure' ? step.reason === 'invalid-decision' : containsToolEnvelope(step.text);
 
 // Without Bud, bud_state is never offered. A request for it alone is dropped so avatar state cannot cost a round:
 // any text is the answer, and an otherwise empty reply is malformed.
@@ -2728,46 +2738,89 @@ export async function inferWithTools(
   };
   /**
    * Runs a reply step on the chat route and, when it fails before the turn produced any output with a failure another model
-   * can fix, once more on the configured fallback, which then answers the rest of the turn. The chat model's failure is
-   * rethrown when no fallback answers, so the turn reports what happened to the model the person chose.
+   * can fix, once more on the configured fallback, which then answers the rest of the turn. A step `invalid` marks as an
+   * unreadable response counts as such a failure. The chat model's failure is rethrown (or its invalid step returned) when
+   * no fallback answers, so the turn reports what happened to the model the person chose.
    */
-  async function withFallback<T>(call: (target: typeof config) => Promise<T>): Promise<T> {
+  async function withFallback<T>(
+    call: (target: typeof config) => Promise<T>,
+    invalid?: (value: T) => boolean,
+  ): Promise<T> {
+    let first: { error: unknown } | { value: T };
+    let diagnostics:
+      | { errorClass: ModelErrorClass; outputStarted: boolean; retryAfterMs?: number | undefined }
+      | undefined;
     try {
-      return await call(config);
+      const value = await call(config);
+      if (answeredBy !== undefined || outputProduced || !invalid?.(value)) return value;
+      first = { value };
+      diagnostics = { errorClass: 'invalid_response', outputStarted: false };
     } catch (error) {
-      const diagnostics = modelCallDiagnostics(error);
+      first = { error };
+      diagnostics = modelCallDiagnostics(error);
       if (!diagnostics) throw error;
-      const primary = { provider: config.provider, model: config.model, errorClass: diagnostics.errorClass };
-      if (!tools?.fallback) {
-        recordModelFallback('not_configured', primary);
-        throw error;
-      }
-      const fallback = inferenceRouteSchema.parse(tools.fallback.route);
-      const target = { provider: fallback.provider, model: fallback.model };
-      if (
-        answeredBy !== undefined ||
-        outputProduced ||
-        diagnostics.outputStarted ||
-        !fallbackEligibleClasses.has(diagnostics.errorClass) ||
-        (fallback.provider === config.provider && fallback.model === config.model) ||
-        (turnImages(loopTurns(items)).length > 0 && !routeCapabilities(fallback).imageInput)
-      ) {
-        recordModelFallback('not_eligible', primary, target);
-        throw error;
-      }
-      let result: T;
-      try {
-        result = await call(fallback);
-      } catch (second) {
-        recordModelFallback('failed', primary, target);
-        // Credit and admission failures of the retry are the turn's real outcome; another model failure is secondary.
-        throw modelCallDiagnostics(second) ? error : second;
-      }
-      config = fallback;
-      answeredBy = tools.fallback.label;
-      recordModelFallback('used', primary, target);
-      return result;
     }
+    // A rate limit that asks for only a short wait is retried once on the same model; any other goes to the fallback now.
+    if (
+      tools?.fallback &&
+      diagnostics.errorClass === 'rate_limited' &&
+      !diagnostics.outputStarted &&
+      !outputProduced &&
+      answeredBy === undefined &&
+      retryRateLimitedModel(diagnostics.retryAfterMs)
+    ) {
+      await sleep(diagnostics.retryAfterMs ?? 0, undefined, signal ? { signal } : undefined);
+      try {
+        const value = await call(config);
+        if (outputProduced || !invalid?.(value)) return value;
+        first = { value };
+        diagnostics = { errorClass: 'invalid_response', outputStarted: false };
+      } catch (error) {
+        const retried = modelCallDiagnostics(error);
+        if (!retried) throw error;
+        first = { error };
+        diagnostics = retried;
+      }
+    }
+    const giveUp = () => {
+      if ('error' in first) throw first.error;
+      return first.value;
+    };
+    const primary = { provider: config.provider, model: config.model, errorClass: diagnostics.errorClass };
+    if (!tools?.fallback) {
+      recordModelFallback('not_configured', primary);
+      return giveUp();
+    }
+    const fallback = inferenceRouteSchema.parse(tools.fallback.route);
+    const target = { provider: fallback.provider, model: fallback.model };
+    if (
+      answeredBy !== undefined ||
+      outputProduced ||
+      diagnostics.outputStarted ||
+      !fallbackEligibleClasses.has(diagnostics.errorClass) ||
+      (fallback.provider === config.provider && fallback.model === config.model) ||
+      (turnImages(loopTurns(items)).length > 0 && !routeCapabilities(fallback).imageInput)
+    ) {
+      recordModelFallback('not_eligible', primary, target);
+      return giveUp();
+    }
+    let result: T;
+    try {
+      result = await call(fallback);
+    } catch (second) {
+      recordModelFallback('failed', primary, target);
+      // Credit and admission failures of the retry are the turn's real outcome; another model failure is secondary.
+      if (modelCallDiagnostics(second)) return giveUp();
+      throw second;
+    }
+    if (invalid?.(result)) {
+      recordModelFallback('failed', primary, target);
+      return giveUp();
+    }
+    config = fallback;
+    answeredBy = tools.fallback.label;
+    recordModelFallback('used', primary, target);
+    return result;
   }
   /** Returns the model's rejected tool request with a correction. The third correction in a reply ends it. */
   const reject = (results: ToolResult[], reason: ToolRejection, tools: readonly string[]) => {
@@ -3098,7 +3151,7 @@ export async function inferWithTools(
                   : undefined;
             },
           );
-        });
+        }, unusableStep);
       };
       /**
        * A provider that rejects the round as too long, or stops it at its context window, does not end the reply: the
@@ -3711,11 +3764,19 @@ export async function inferSpecialist(
   meter: ToolModelMeter,
   maxCalls: number,
   resume?: { nextStep: number; spentCalls: number; receipts: readonly { call: FrameworkCall; result: unknown }[] },
-  /** A chat sub-agent stops on `signal`, and reports each activity and interim text so it can return partial output. */
-  live?: { signal?: AbortSignal; onActivity?: (activity: string) => void; onText?: (text: string) => void },
+  /**
+   * A chat sub-agent stops on `signal`, and reports each activity and interim text so it can return partial output. Its
+   * `fallback` answers the model calls of the chat model that fail, as in the chat reply, for the rest of the task.
+   */
+  live?: {
+    signal?: AbortSignal;
+    onActivity?: (activity: string) => void;
+    onText?: (text: string) => void;
+    fallback?: { route: InferenceRoute } | undefined;
+  },
 ): Promise<{ text: string; calls: number }> {
   allowed = withKnowledgeRetrieveGrant(allowed);
-  const config = inferenceRouteSchema.parse(route);
+  let config = inferenceRouteSchema.parse(route);
   if (!allowed.length || allowed.some(tool => !readOnlyTools.has(tool) && tool !== 'images.generate'))
     throw new Error('specialist-tools-not-read-only');
   const names = new Set(allowed.map(nativeToolName));
@@ -3745,54 +3806,106 @@ export async function inferSpecialist(
   const correct = () => {
     if (corrections++ >= 2) throw new ModelCallError('invalid-decision', { outputStarted: false });
   };
+  let fallbackUsed = false;
+  // A retried or fallback call holds credits under its own step, after the steps before it.
+  let extraRequests = 0;
   for (let step = resume?.nextStep ?? 0; step <= maxCalls + 3; step++) {
     live?.signal?.throwIfAborted();
-    const selected = await withChatModelRequest('reply', async () => {
-      const wire = observeChatDetailSync('serialize', () => nativeRequest(config, [system], items, catalog.tools));
-      const serialized = serializeChatRequest(wire.body);
-      const measure = measureRequest(config, serialized, wire.turns);
-      const onUsage = await observeChatDetail('reserve', () =>
-        meter({
-          step,
-          ...measure,
-          maxOutputTokens: config.maxOutputTokens,
-          provider: config.provider,
-          model: config.model,
-        }),
-      );
-      return observeInference({ provider: config.provider, model: config.model, operation: 'chat' }, async report => {
-        const { response, json } = await observeProviderResponse(
-          async () => {
-            const response = await providerFetch(wire.url, {
-              method: 'POST',
-              headers: wire.headers,
-              body: serialized,
-              redirect: 'manual',
-              signal: live?.signal
-                ? AbortSignal.any([AbortSignal.timeout(config.timeoutMs), live.signal])
-                : AbortSignal.timeout(config.timeoutMs),
-            }).catch(async (error: unknown) => {
-              await observeChatDetail('settle', () => onUsage({ kind: 'unknown' }, { rejected: true })).catch(
-                () => undefined,
-              );
-              throw error;
-            });
-            const json: unknown = await response.json().catch(() => null);
-            return { response, json };
-          },
-          result => !result.response.ok || result.json === null,
+    const request = (config: z.infer<typeof inferenceRouteSchema>) =>
+      withChatModelRequest('reply', async () => {
+        const wire = observeChatDetailSync('serialize', () => nativeRequest(config, [system], items, catalog.tools));
+        const serialized = serializeChatRequest(wire.body);
+        const measure = measureRequest(config, serialized, wire.turns);
+        const onUsage = await observeChatDetail('reserve', () =>
+          meter({
+            step: step + extraRequests,
+            ...measure,
+            maxOutputTokens: config.maxOutputTokens,
+            provider: config.provider,
+            model: config.model,
+          }),
         );
-        const value = observeChatDetailSync('response-parse', () => usage(config, json));
-        reportUsage(report, value, json);
-        const billed = billedUsage(response.ok, value, measure, { body: json, events: 0 });
-        await observeChatDetail('settle', () => onUsage(billed, { rejected: billed.kind !== 'known' }));
-        if (!response.ok) throw modelHttpError(response, json, config.provider, false, serialized);
-        const step = observeChatDetailSync('decision-parse', () => nativeStep(config, json));
-        if (step.kind === 'failure')
-          report.error(new ModelCallError(step.reason, { status: response.status, outputStarted: false }));
-        return step;
+        return observeInference({ provider: config.provider, model: config.model, operation: 'chat' }, async report => {
+          const { response, json } = await observeProviderResponse(
+            async () => {
+              const response = await providerFetch(wire.url, {
+                method: 'POST',
+                headers: wire.headers,
+                body: serialized,
+                redirect: 'manual',
+                signal: live?.signal
+                  ? AbortSignal.any([AbortSignal.timeout(config.timeoutMs), live.signal])
+                  : AbortSignal.timeout(config.timeoutMs),
+              }).catch(async (error: unknown) => {
+                await observeChatDetail('settle', () => onUsage({ kind: 'unknown' }, { rejected: true })).catch(
+                  () => undefined,
+                );
+                throw error;
+              });
+              const json: unknown = await response.json().catch(() => null);
+              return { response, json };
+            },
+            result => !result.response.ok || result.json === null,
+          );
+          const value = observeChatDetailSync('response-parse', () => usage(config, json));
+          reportUsage(report, value, json);
+          const billed = billedUsage(response.ok, value, measure, { body: json, events: 0 });
+          await observeChatDetail('settle', () => onUsage(billed, { rejected: billed.kind !== 'known' }));
+          if (!response.ok) throw modelHttpError(response, json, config.provider, false, serialized);
+          const step = observeChatDetailSync('decision-parse', () => nativeStep(config, json));
+          if (step.kind === 'failure')
+            report.error(new ModelCallError(step.reason, { status: response.status, outputStarted: false }));
+          return step;
+        });
       });
-    });
+    let selected: Awaited<ReturnType<typeof request>> | undefined;
+    try {
+      selected = await request(config);
+    } catch (error) {
+      let failure = error;
+      let diagnostics = modelCallDiagnostics(error);
+      if (!diagnostics || fallbackUsed) throw error;
+      const fallback = live?.fallback && inferenceRouteSchema.parse(live.fallback.route);
+      // A rate limit that asks for only a short wait is retried once on the same model; any other goes to the fallback now.
+      if (fallback && diagnostics.errorClass === 'rate_limited' && retryRateLimitedModel(diagnostics.retryAfterMs)) {
+        await sleep(diagnostics.retryAfterMs ?? 0, undefined, live?.signal ? { signal: live.signal } : undefined);
+        extraRequests++;
+        try {
+          selected = await request(config);
+        } catch (retried) {
+          diagnostics = modelCallDiagnostics(retried);
+          if (!diagnostics) throw retried;
+          failure = retried;
+        }
+      }
+      if (!selected) {
+        const primary = { provider: config.provider, model: config.model, errorClass: diagnostics.errorClass };
+        if (!fallback) {
+          recordModelFallback('not_configured', primary);
+          throw failure;
+        }
+        const target = { provider: fallback.provider, model: fallback.model };
+        if (
+          !fallbackEligibleClasses.has(diagnostics.errorClass) ||
+          (fallback.provider === config.provider && fallback.model === config.model)
+        ) {
+          recordModelFallback('not_eligible', primary, target);
+          throw failure;
+        }
+        extraRequests++;
+        try {
+          selected = await request(fallback);
+        } catch (second) {
+          recordModelFallback('failed', primary, target);
+          // Credit and admission failures of the fallback are the task's real outcome; another model failure is secondary.
+          if (modelCallDiagnostics(second)) throw failure;
+          throw second;
+        }
+        config = fallback;
+        fallbackUsed = true;
+        recordModelFallback('used', primary, target);
+      }
+    }
     if (selected.kind === 'failure') {
       if (selected.reason !== 'invalid-decision') throw new ModelCallError(selected.reason, { outputStarted: false });
       correct();

@@ -104,6 +104,19 @@ test('the chat fallback is off without a fallback-role model and never the chat 
   assert.equal(chatFallbackModel('claude-haiku', env), undefined);
 });
 
+test("a chat model's own fallback comes before the fallback-role model", () => {
+  const catalog = JSON.parse(claudeCatalog({ 'claude-haiku': ['fallback'] }));
+  catalog.models.push({
+    ...catalogModels.find(model => model.id === 'claude-opus'),
+    roles: [],
+    featureFlag: null,
+    fallback: 'claude-sonnet',
+  });
+  const env = { ...shipped, MODEL_CATALOG: JSON.stringify(catalog) };
+  assert.equal(chatFallbackModel('claude-opus', env).price.familyId, 'claude-sonnet');
+  assert.equal(chatFallbackModel('claude-sonnet', env).price.familyId, 'claude-haiku');
+});
+
 test('a skipped completion-check role keeps the active chat model instead of selecting the default', () => {
   const catalog = JSON.parse(claudeCatalog({}));
   catalog.missingKeys = 'skip';

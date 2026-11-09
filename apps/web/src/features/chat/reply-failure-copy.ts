@@ -89,11 +89,18 @@ export function replyRetrying(status: string, code: string | null | undefined): 
   return null;
 }
 
-/** A completed reply answered by the configured fallback model names that model. */
-export function fallbackNote(status: string, code: string | null | undefined): string | null {
+/** A completed reply answered by the configured fallback model names that model and the chat model it replaced. */
+export function fallbackNote(
+  status: string,
+  code: string | null | undefined,
+  chatModel?: string,
+  name: (id: string) => string = id => id,
+): string | null {
   if (status !== 'completed' || !code?.startsWith(modelFallbackPrefix)) return null;
   const family = code.slice(modelFallbackPrefix.length);
-  return family ? `Answered by ${family} because the chat model was unavailable.` : null;
+  if (!family) return null;
+  const replaced = chatModel && chatModel !== family ? name(chatModel) : 'the chat model';
+  return `Answered by ${name(family)} because ${replaced} was unavailable.`;
 }
 
 /** The model family that wrote a reply: the configured fallback when it answered, else the chat model. */

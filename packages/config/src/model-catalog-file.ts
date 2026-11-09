@@ -171,6 +171,12 @@ const modelSchema = z
       .describe(
         `Background features this model runs: ${modelCatalogRoles.join(', ')}. Each role on at most one model.`,
       ),
+    fallback: modelFamilyIdSchema
+      .nullable()
+      .default(null)
+      .describe(
+        'Id of another model in `models` that answers once when a chat on this model is rate-limited, gets an invalid response, or finds the model unavailable. Null uses the model with the "fallback" role.',
+      ),
     limits: z.strictObject({
       maxInputTokens: tokenLimit,
       maxOutputTokens: tokenLimit,
@@ -331,6 +337,47 @@ function rateProblems(rates: readonly z.infer<typeof rateSchema>[]): Issue[] {
 const providerType = (catalog: CatalogShape, key: string) =>
   catalog.providers[key]?.type ?? builtInProviders.find(name => name === key);
 
+/** A model's `fallback` names another chat model, offered to every workspace, and following them never loops. */
+function fallbackProblems(catalog: CatalogShape): Issue[] {
+  const issues: Issue[] = [];
+  const models = new Map(catalog.models.map(model => [model.id, model]));
+  for (const [index, model] of catalog.models.entries()) {
+    if (model.fallback === null) continue;
+    const path = ['models', index, 'fallback'];
+    const target = models.get(model.fallback);
+    if (model.fallback === model.id) issues.push({ path, message: 'A model cannot be its own fallback' });
+    else if (!target)
+      issues.push({
+        path,
+        message: catalog.imageModels.some(image => image.id === model.fallback)
+          ? `"${model.fallback}" is an image model; the fallback must be a model in models`
+          : `No entry in models has id "${model.fallback}"`,
+      });
+    else if (target.featureFlag) issues.push({ path, message: 'The fallback model cannot be behind a feature flag' });
+  }
+  const reported = new Set<string>();
+  for (const start of catalog.models) {
+    const chain: string[] = [];
+    for (let id: string | null = start.id; id !== null && models.has(id); id = models.get(id)!.fallback) {
+      const loop = chain.indexOf(id);
+      if (loop === -1) {
+        chain.push(id);
+        continue;
+      }
+      const cycle = chain.slice(loop);
+      if (cycle.length > 1 && !cycle.some(member => reported.has(member))) {
+        for (const member of cycle) reported.add(member);
+        issues.push({
+          path: ['models', catalog.models.findIndex(model => model.id === cycle[0]), 'fallback'],
+          message: `Fallbacks form a cycle: ${[...cycle, cycle[0]].join(' -> ')}`,
+        });
+      }
+      break;
+    }
+  }
+  return issues;
+}
+
 /** Rules across entries that JSON Schema cannot state. */
 function catalogProblems(catalog: CatalogShape): Issue[] {
   const issues: Issue[] = [];
@@ -403,6 +450,7 @@ function catalogProblems(catalog: CatalogShape): Issue[] {
     if (model.imageModel !== null && !catalog.imageModels.some(image => image.id === model.imageModel))
       issues.push({ path: at('imageModel'), message: `No entry in imageModels has id "${model.imageModel}"` });
   }
+  issues.push(...fallbackProblems(catalog));
   for (const [index, image] of catalog.imageModels.entries()) {
     const at = (...path: (string | number)[]) => ['imageModels', index, ...path];
     if (seen.has(image.id)) issues.push({ path: at('id'), message: `Duplicate model id "${image.id}"` });
