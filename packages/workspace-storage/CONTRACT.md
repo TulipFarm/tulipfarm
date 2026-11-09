@@ -94,6 +94,11 @@ The otherwise inert `lock_version` column supplies PostgreSQL's UPDATE privilege
 
 The runtime router requires an inclusive minimum/maximum common version for each transaction.
 An incompatible workspace fails before the domain callback runs.
+Services start on new code before rollout applies its common migrations, so new code meets workspaces one or more common versions behind.
+Code that uses an object from a newer common migration gates on the callback's `commonVersion` and falls back, for example by returning no rows.
+If a workspace below the code's maximum version still reports a missing table, column, type, or function, the runtime throws the retryable `updating` error.
+Callers treat `updating` like `incompatible_version` (`workspaceSchemaPending`): the API answers 503 `workspace-updating` with `Retry-After`, and background sweeps skip the workspace until rollout finishes.
+An up-to-date workspace keeps the original error and logs a `call_failed` line with `operation="workspace.schema-missing"`, `error.type` (the Postgres code), `table` (a `tf_` name, `custom` or `other`) and `workspace.version`, because every object the code uses should exist there.
 The common version is the number of installed, ordered checksum receipts.
 Common SQL templates use `{{schema}}` for a quoted schema name and a fixed `pg_catalog` search path.
 Role tokens `{{runtime}}`, `{{migration}}`, `{{confirmation}}`, and `{{customOwner}}` expand to quoted generated role names for explicit grants in forward migrations.

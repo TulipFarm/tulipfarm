@@ -42,6 +42,13 @@ test('disabled workspace errors are concealed across business routes without con
     const response = await app.inject(`/workspaces/${id}/${path}`);
     assert.equal(response.statusCode, 503, `${path}: ${response.body}`);
   }
+  code = 'updating';
+  for (const path of ['governance/me', 'agents', 'model-catalog', 'conversations', 'integrations', 'settings']) {
+    const response = await app.inject(`/workspaces/${id}/${path}`);
+    assert.equal(response.statusCode, 503, `${path}: ${response.body}`);
+    assert.deepEqual(response.json(), { error: 'workspace-updating' }, path);
+    assert.equal(response.headers['retry-after'], '5', path);
+  }
 });
 
 function fixture() {

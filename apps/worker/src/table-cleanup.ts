@@ -8,7 +8,7 @@ import {
   sweepTableQueryTranslations,
   tableQueryTranslationCompatibility,
 } from '@tulipfarm/agents/table-query-translator';
-import { StorageUnavailableError } from '@tulipfarm/workspace-storage/runtime';
+import { workspaceSchemaPending } from '@tulipfarm/workspace-storage/runtime';
 import { errorAttributes, log, withErrorStage } from '@tulipfarm/observability';
 
 export function createTableCleanupMaintenance(
@@ -47,7 +47,7 @@ export function createTableCleanupMaintenance(
         try {
           await cleanup(workspaceId);
         } catch (error) {
-          failures.push(error);
+          if (!workspaceSchemaPending(error)) failures.push(error);
         }
         after = workspaceId;
       }
@@ -96,7 +96,7 @@ export function createObjectCleanupSweep(
         try {
           await cleanup(row.workspace_id);
         } catch (error) {
-          failures.push(error);
+          if (!workspaceSchemaPending(error)) failures.push(error);
         }
         after = row.workspace_id;
       }
@@ -128,7 +128,7 @@ export function createTableSearchSweep(
       try {
         await runtime.transaction(workspaceId, tableQueryTranslationCompatibility, sweepTableQueryTranslations);
       } catch (error) {
-        if (!(error instanceof StorageUnavailableError && error.code === 'incompatible_version')) failed = true;
+        if (!workspaceSchemaPending(error)) failed = true;
       }
       after = workspaceId;
     }

@@ -21,6 +21,7 @@ import { createWorkspace, WorkspaceConflict, WorkspaceNotFound } from '@tulipfar
 import type { WorkspaceStore } from '@tulipfarm/workspaces/storage';
 import { authConfig, type registerAuth } from './auth.ts';
 import { createTurnstileVerifier, turnstileConfig } from './turnstile.ts';
+import { workspaceUpdatingError } from './security.ts';
 
 const json = (schema: z.ZodType) => z.toJSONSchema(schema, { target: 'openapi-3.0' });
 const errorSchema = json(z.object({ error: z.string() }));
@@ -53,6 +54,7 @@ export function registerOnboarding(
       reply.header('Cache-Control', 'no-store');
     });
     routes.setErrorHandler((error, _request, reply) => {
+      if (workspaceUpdatingError(error, reply)) return;
       if (error instanceof OnboardingUnavailable || error instanceof WorkspaceNotFound)
         return reply.code(404).send({ error: error.message });
       if (error instanceof OnboardingConflict || error instanceof WorkspaceConflict)

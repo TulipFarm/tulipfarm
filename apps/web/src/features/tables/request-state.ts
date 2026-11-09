@@ -2,7 +2,11 @@ export type ReadState<T> =
   | { kind: 'loading' }
   | { kind: 'ready'; data: T; refreshing: boolean; error: string | null }
   /** `busy` marks a capacity refusal (HTTP 429): the request was fine and can succeed shortly. */
-  | { kind: 'error'; message: string; busy?: true }
+  /**
+   * `updating` marks a workspace still taking a release's update: the read succeeds by itself once it finishes.
+   * `retrying` while automatic retries continue, `stopped` once they have run out.
+   */
+  | { kind: 'error'; message: string; busy?: true; updating?: 'retrying' | 'stopped' }
   | { kind: 'unavailable'; status: number };
 
 export class TableRequestError extends Error {

@@ -28,6 +28,8 @@ export function currentReply({ messages, outgoing, command, stream }: ReplyInput
     (command.kind === 'sending' && command.command.kind === 'send' && command.command.messageId === outgoing?.id) ||
     (command.kind === 'accepted' && command.operation === 'send');
   const pending = outgoing && sending && !messages?.some(message => message.id === outgoing.id) ? outgoing : null;
+  // A message queued while the workspace updates shows as sent, labelled, without a reply indicator.
+  const waiting = !!pending && command.kind === 'sending' && !!command.waiting;
   const replying = messages
     ?.filter(message => message.turn && ['queued', 'processing'].includes(message.turn.status))
     .at(-1);
@@ -65,7 +67,8 @@ export function currentReply({ messages, outgoing, command, stream }: ReplyInput
     /** The composer hides its submitted draft until the send settles, even after saved history shows the message. */
     draftSent: !!pending || (command.kind === 'sending' && command.command.kind === 'send'),
     turn,
-    thinking: (!!pending || !!replying) && !delivered,
+    thinking: ((!!pending && !waiting) || !!replying) && !delivered,
+    waiting,
     since: replying?.createdAt ?? pending?.at,
     narration,
     answerText,

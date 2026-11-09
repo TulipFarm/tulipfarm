@@ -95,3 +95,47 @@ jobs:
         env:
           TASK: ${{ matrix.task }}
         run: pnpm run "$TASK"
+
+  # A release starts its code before workspace-rollout applies its common migrations to every workspace. This runs
+  # chats and background jobs against a workspace one migration short, so a missing table (42P01) fails the build.
+  behind-workspace:
+    name: behind-workspace
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.2-pg18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: local-postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 3s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      TEST_ADMIN_DATABASE_URL: postgres://postgres:local-postgres@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .node-version
+      - name: Install pnpm
+        run: npm install --global pnpm@11.5.3
+      - name: Cache pnpm store
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.pnpm-store
+          key: pnpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pnpm-lock.yaml', '.node-version') }}
+          restore-keys: |
+            pnpm-${{ runner.os }}-${{ runner.arch }}-
+      - name: Install repository dependencies
+        run: pnpm install --frozen-lockfile --store-dir "$HOME/.pnpm-store"
+      - name: Run chats and jobs against a workspace behind the release
+        run: pnpm run test:behind-workspace

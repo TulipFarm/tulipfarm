@@ -10,6 +10,7 @@ import type { Platform } from '@tulipfarm/social/contracts';
 import { createPlatformApps, operatorPlatformApps } from '@tulipfarm/social/platform-apps';
 import { createSocialPublisher, type MediaUrlSigner } from '@tulipfarm/social/publisher';
 import { hasGrant } from '@tulipfarm/workflows/authorization';
+import { workspaceSchemaPending } from '@tulipfarm/workspace-storage/runtime';
 
 export type SocialPublisherOptions = {
   runtime: SocialRuntime;
@@ -99,7 +100,7 @@ export function createSocialPublisherComposition(options: SocialPublisherOptions
         try {
           if (await enabled(workspaceId)) await each(workspaceId);
         } catch (error) {
-          failures.push(error);
+          if (!workspaceSchemaPending(error)) failures.push(error);
         }
       }
       if (page.length < pageSize) break;

@@ -19,6 +19,7 @@ import {
 } from '@tulipfarm/sprout/alert-dialog';
 import { Badge } from '@tulipfarm/sprout/badge';
 import { Button } from '@tulipfarm/sprout/button';
+import { WorkspaceUpdatingPanel } from '@/components/read-feedback';
 import { ResultCard } from '@tulipfarm/sprout/result-card';
 import { CanvasSection } from '@tulipfarm/sprout/canvas';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@tulipfarm/sprout/collapsible';
@@ -668,6 +669,14 @@ export function ChatPlans({
       <div role="status" aria-label="Loading plans" className="mt-4">
         <Skeleton />
       </div>
+    );
+  if (read.state.kind === 'error' && read.state.updating)
+    return (
+      <WorkspaceUpdatingPanel
+        thing="plans"
+        retrying={read.state.updating === 'retrying'}
+        refresh={() => void refresh()}
+      />
     );
   if (read.state.kind === 'error')
     return (

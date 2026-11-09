@@ -19,6 +19,7 @@ import type { createGitHubReads } from '@tulipfarm/github/reads';
 import { GitHubReadError, selectAccountSchema, selectionSchema } from '@tulipfarm/github/read-contracts';
 import { botGrantInputSchema, botGrantListSchema } from '@tulipfarm/github/batch-contracts';
 import type { createGitHubBotGrants } from '@tulipfarm/github/bot';
+import { workspaceUpdatingError } from './security.ts';
 
 const errorSchema = {
   type: 'object',
@@ -72,6 +73,7 @@ export function registerGitHubAccounts(
       if (!accounts) return reply.code(503).send({ error: 'account-disabled' });
     });
     routes.setErrorHandler<FastifyError>((error, _request, reply) => {
+      if (workspaceUpdatingError(error, reply)) return;
       if (error instanceof GitHubReadError) return reply.code(409).send({ error: error.code });
       if (error instanceof AccessDenied) return reply.code(404).send({ error: 'account-not-found' });
       if (error.statusCode === 400 || error.validation || error instanceof z.ZodError)

@@ -6,7 +6,7 @@ import type { ConversationRuntime } from '@tulipfarm/conversations/runtime';
 import type { createTemporalClient } from './temporal.ts';
 import type { createAttachments } from '@tulipfarm/conversations/attachments';
 import { createConversationRequests } from '@tulipfarm/conversations/requests';
-import { StorageUnavailableError } from '@tulipfarm/workspace-storage/runtime';
+import { workspaceSchemaPending } from '@tulipfarm/workspace-storage/runtime';
 import { registerChatLatency } from './chat-latency.ts';
 import { createConversationMaintenance } from '@tulipfarm/conversations/maintenance';
 import { errorAttributes, log } from '@tulipfarm/observability';
@@ -114,20 +114,19 @@ export function registerConversationDispatch(
       try {
         await requests.expire(row.workspace_id);
       } catch (error) {
-        if (!(error instanceof StorageUnavailableError && error.code === 'incompatible_version'))
+        if (!workspaceSchemaPending(error))
           app.log.error({ workspaceId: row.workspace_id }, 'Request expiry will retry');
       }
       try {
         await dependencies.expireApprovals?.(row.workspace_id);
       } catch (error) {
-        if (!(error instanceof StorageUnavailableError && error.code === 'incompatible_version'))
+        if (!workspaceSchemaPending(error))
           app.log.error({ workspaceId: row.workspace_id }, 'Approval expiry will retry');
       }
       try {
         await dependencies.fireFollowUps?.(row.workspace_id);
       } catch (error) {
-        if (!(error instanceof StorageUnavailableError && error.code === 'incompatible_version'))
-          app.log.error({ workspaceId: row.workspace_id }, 'Follow-ups will retry');
+        if (!workspaceSchemaPending(error)) app.log.error({ workspaceId: row.workspace_id }, 'Follow-ups will retry');
       }
       try {
         await replies.dispatch(row.workspace_id);
@@ -154,7 +153,7 @@ export function registerConversationDispatch(
           stopped,
         );
       } catch (error) {
-        if (!(error instanceof StorageUnavailableError && error.code === 'incompatible_version'))
+        if (!workspaceSchemaPending(error))
           app.log.error({ workspaceId: row.workspace_id }, 'Conversation maintenance will retry');
       }
       try {

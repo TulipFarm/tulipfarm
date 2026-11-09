@@ -67,6 +67,14 @@ export function CommandFeedback({
 }) {
   const state = write.state;
   if (state.kind === 'idle') return null;
+  if (state.kind === 'sending' && state.waiting)
+    return (
+      <p role="status" className="text-sm text-muted-foreground">
+        {state.command.kind === 'send'
+          ? 'TulipFarm is updating your workspace. Your message will send automatically when the update finishes.'
+          : 'TulipFarm is updating your workspace. Your change will save automatically when the update finishes.'}
+      </p>
+    );
   if (state.kind === 'sending')
     return quietCommands.has(state.command.kind) ? null : <p role="status">Saving your change…</p>;
   if (state.kind === 'accepted')
@@ -79,7 +87,9 @@ export function CommandFeedback({
     <div className="space-y-2">
       <Alert variant="destructive">
         <AlertDescription>
-          {state.kind === 'uncertain' ? uncertainCopy(state.command.kind === 'send', state.offline) : state.message}
+          {state.kind === 'uncertain'
+            ? uncertainCopy(state.command.kind === 'send', state.offline, state.updating)
+            : state.message}
         </AlertDescription>
       </Alert>
       <div className="flex flex-wrap gap-2">
@@ -111,7 +121,11 @@ export function CommandFeedback({
 }
 
 // Replaying the same command never applies it twice, so trying again is always safe.
-function uncertainCopy(message: boolean, offline: boolean) {
+function uncertainCopy(message: boolean, offline: boolean, updating = false) {
+  if (updating)
+    return message
+      ? "Your workspace is still updating, so your message hasn't been sent. Try again in a few minutes. Trying again won't send it twice."
+      : "Your workspace is still updating, so your change hasn't been saved. Try again in a few minutes. Trying again won't repeat the change.";
   if (offline)
     return message
       ? "You're offline, so your message hasn't been sent. It's kept here and will send when you're back online."

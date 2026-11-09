@@ -1,15 +1,20 @@
 import { useEffect, useRef, useState } from 'react';
 import { TableRequestError } from '@/features/tables/request-state';
 import { browserOffline, onReconnect } from '@/lib/online';
+import { updatingRetries, updatingRetryMs, workspaceUpdating } from '@/lib/query/policy';
 import type { ChatEdit } from './chat-edits';
 import { useChatOptimism, useConversationChanges } from './queries';
 import type { Chat, ConversationApi, ConversationCommand } from './conversation-api';
 
 export type CommandState =
   | { kind: 'idle' }
-  | { kind: 'sending'; command: ConversationCommand }
-  /** `offline` means the browser had no network, so the command can wait for the connection to return. */
-  | { kind: 'uncertain'; command: ConversationCommand; offline: boolean }
+  /** `waiting` means the workspace is taking a release's update, and the command sends by itself once it finishes. */
+  | { kind: 'sending'; command: ConversationCommand; waiting?: boolean }
+  /**
+   * `offline` means the browser had no network, so the command can wait for the connection to return.
+   * `updating` means the workspace was still updating when automatic retries ran out.
+   */
+  | { kind: 'uncertain'; command: ConversationCommand; offline: boolean; updating?: boolean }
   | { kind: 'rejected'; message: string; status: number }
   | { kind: 'accepted'; operation: ConversationCommand['kind'] };
 
@@ -38,7 +43,17 @@ export function useConversationCommand(api: ConversationApi, accepted: (command:
     const edit = chat && chatEdit(command);
     const undo = edit ? await optimism(chat, edit) : null;
     try {
-      await api.command(command, AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]));
+      // The command ID makes each retry safe: the server applies the command once.
+      for (let attempt = 1; ; attempt++) {
+        try {
+          await api.command(command, AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]));
+          break;
+        } catch (error) {
+          if (!workspaceUpdating(error) || attempt >= updatingRetries || controller.signal.aborted) throw error;
+          if (mounted.current) setState({ kind: 'sending', command, waiting: true });
+          await new Promise(resolve => setTimeout(resolve, updatingRetryMs));
+        }
+      }
       await changes.command(command);
       if (mounted.current && !controller.signal.aborted) {
         setState({ kind: 'accepted', operation: command.kind });
@@ -57,7 +72,7 @@ export function useConversationCommand(api: ConversationApi, accepted: (command:
             error.status < 500 &&
             ![408, 429].includes(error.status)
             ? { kind: 'rejected', message: error.message, status: error.status }
-            : { kind: 'uncertain', command, offline: browserOffline() },
+            : { kind: 'uncertain', command, offline: browserOffline(), updating: workspaceUpdating(error) },
         );
     } finally {
       if (active.current === controller) active.current = null;

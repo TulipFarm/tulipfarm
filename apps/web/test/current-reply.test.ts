@@ -112,6 +112,17 @@ test('the screen interface keeps the outgoing message until acceptance appears i
   assert.equal(reply({ messages: undefined, outgoing, command: accepted }).pending, outgoing);
 });
 
+test('a message queued while the workspace updates stays on screen without a reply indicator', () => {
+  const waiting = reply({ messages: [], outgoing, command: { ...sending, waiting: true } });
+  assert.equal(waiting.pending, outgoing);
+  assert.equal(waiting.waiting, true);
+  assert.equal(waiting.thinking, false);
+  assert.equal(waiting.draftSent, true);
+  const sent = reply({ messages: [], outgoing, command: sending });
+  assert.equal(sent.waiting, false);
+  assert.equal(sent.thinking, true);
+});
+
 test('the composer keeps a sent draft hidden when saved history arrives before the send settles', () => {
   const saved = message({ id: outgoing.id });
   // History refreshes first while list and credit refreshes still hold the command in sending.

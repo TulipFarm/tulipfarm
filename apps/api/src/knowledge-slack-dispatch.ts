@@ -3,7 +3,7 @@ import type { Pool } from 'pg';
 import { WorkflowExecutionAlreadyStartedError } from '@temporalio/client';
 import type { SlackKnowledge } from '@tulipfarm/knowledge';
 import { slackKnowledgeWorkSchema, type SlackKnowledgeWork } from '@tulipfarm/knowledge/slack-contracts';
-import { StorageUnavailableError } from '@tulipfarm/workspace-storage/runtime';
+import { workspaceSchemaPending } from '@tulipfarm/workspace-storage/runtime';
 import { recordDispatchSkip } from '@tulipfarm/observability';
 import { backgroundSweep, readyWorkspaces, sweepIntervals } from './background-sweep.ts';
 import type { createTemporalClient } from './temporal.ts';
@@ -49,8 +49,7 @@ export function registerSlackKnowledgeDispatch(
             await startSlackKnowledgeWorkflow(dependencies.temporal, work);
           }
         } catch (error) {
-          if (error instanceof StorageUnavailableError && error.code === 'incompatible_version')
-            recordDispatchSkip('slack');
+          if (workspaceSchemaPending(error)) recordDispatchSkip('slack', error.code);
           else app.log.error({ workspaceId: row.workspace_id }, 'Slack Knowledge dispatch will retry');
         }
         after = row.workspace_id;

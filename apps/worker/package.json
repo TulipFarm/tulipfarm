@@ -9,6 +9,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --test --test-concurrency=1 test/*.test.mjs",
     "test:integration": "node --test test/workspace.integration.mjs",
+    "test:behind-workspace": "node --test test/behind-workspace.integration.mjs",
     "test:telemetry": "node --test test/telemetry.integration.mjs",
     "test:composition": "node --test test/storage-composition.integration.mjs",
     "test:agents": "node --test test/agent-composition.integration.mjs",

@@ -29,6 +29,7 @@ import {
 import { SocialError } from '@tulipfarm/social/credentials';
 import { authConfig, type registerAuth } from './auth.ts';
 import { routeValidation } from './route-validation.ts';
+import { workspaceUpdatingError } from './security.ts';
 
 const errorSchema = {
   type: 'object',
@@ -169,6 +170,7 @@ export function registerSocialAccounts(
       if (!accounts) return reply.code(503).send({ error: 'account-unavailable' });
     });
     routes.setErrorHandler<FastifyError>((error, request, reply) => {
+      if (workspaceUpdatingError(error, reply)) return;
       if (error instanceof AccessDenied)
         return reply.code(404).send({
           error: request.routeOptions.url?.includes('/social/channels')

@@ -29,7 +29,21 @@ export function securityServerOptions(): FastifyServerOptions {
   };
 }
 
+/** Seconds a client waits before retrying a request that met a workspace still taking this release's migrations. */
+export const workspaceUpdatingRetrySeconds = 5;
+
+/**
+ * Answers a request that met a workspace still taking this release's common migrations with a retryable 503.
+ * The update usually finishes within minutes, so the client retries after Retry-After instead of failing.
+ */
+export function workspaceUpdatingError(error: unknown, reply: FastifyReply): boolean {
+  if (!(error instanceof StorageUnavailableError && error.code === 'updating')) return false;
+  reply.code(503).header('Retry-After', workspaceUpdatingRetrySeconds).send({ error: 'workspace-updating' });
+  return true;
+}
+
 export function requestBoundaryError(error: unknown, reply: FastifyReply): boolean {
+  if (workspaceUpdatingError(error, reply)) return true;
   if (error instanceof StorageUnavailableError && error.code === 'disabled') {
     reply.code(404).send({ error: 'not-found' });
     return true;

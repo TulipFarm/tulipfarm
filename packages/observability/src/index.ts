@@ -274,6 +274,8 @@ const logOnlyAttributes = new Set([
   'layout.reason',
   'error.site',
   'task.id',
+  'table',
+  'workspace.version',
 ]);
 // Where an error was thrown: up to eight "function@file:line" frames from TulipFarm's own code, innermost first.
 const errorSitePattern = /^[\w$.<>-]{1,80}@[\w.-]{1,80}:\d{1,6}( < [\w$.<>-]{1,80}@[\w.-]{1,80}:\d{1,6}){0,7}$/;
@@ -316,6 +318,9 @@ function safeAttribute(key: string, value: unknown, logLine = false): boolean {
     // Why a reply layout was rejected: the validator's rule, with quoted values removed.
     if (key === 'layout.reason') return typeof value === 'string' && value.length > 0 && value.length <= 240;
     if (key === 'error.site') return typeof value === 'string' && errorSitePattern.test(value);
+    // A TulipFarm table's fixed name; customer tables are logged only as "custom".
+    if (key === 'table') return typeof value === 'string' && /^(tf_[a-z0-9_]{1,60}|custom|other)$/.test(value);
+    if (key === 'workspace.version') return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
     return typeof value === 'string' && value.length > 0 && value.length <= providerMessageLimit;
   }
   if (!spanAttributes.has(key)) return false;
@@ -1565,7 +1570,7 @@ export type DispatchSkipper = 'github' | 'slack' | 'google' | 'atlassian' | 'emb
  */
 export function recordDispatchSkip(
   dispatcher: DispatchSkipper,
-  reason: 'incompatible_version' = 'incompatible_version',
+  reason: 'incompatible_version' | 'updating' = 'incompatible_version',
 ) {
   metrics
     .getMeter(scope)
@@ -1801,6 +1806,7 @@ const databaseStopCodes = new Set([
   'pool_capacity',
   'stale_credential',
   'incompatible_version',
+  'updating',
   'runtime_unavailable',
 ]);
 

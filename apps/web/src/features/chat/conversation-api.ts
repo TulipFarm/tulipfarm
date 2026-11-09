@@ -352,6 +352,12 @@ export function conversationApi(workspaceId: string, denied: (status: number) =>
           code,
           'The workflow limit is reached. Delete or reuse a workflow on the Workflows page, then ask chat for a fresh draft.',
         );
+      if (code === 'workspace-updating')
+        throw new TableRequestError(
+          response.status,
+          code,
+          "TulipFarm is updating your workspace, so your change wasn't saved. Try again in a few minutes. Your draft is kept.",
+        );
       if (code.startsWith('model-'))
         throw new TableRequestError(
           response.status,

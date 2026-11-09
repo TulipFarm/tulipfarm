@@ -8,7 +8,7 @@ import {
   type GitHubKnowledgeChanges,
   type GitHubKnowledgeWork,
 } from '@tulipfarm/knowledge/github-contracts';
-import { StorageUnavailableError } from '@tulipfarm/workspace-storage/runtime';
+import { workspaceSchemaPending } from '@tulipfarm/workspace-storage/runtime';
 import { createKnowledgeSyncMetrics, recordDispatchSkip } from '@tulipfarm/observability';
 import { backgroundSweep, readyWorkspaces, sweepIntervals } from './background-sweep.ts';
 import type { createTemporalClient } from './temporal.ts';
@@ -78,8 +78,7 @@ export function registerGitHubKnowledgeDispatch(
           }
         } catch (error) {
           scanFailed = true;
-          if (error instanceof StorageUnavailableError && error.code === 'incompatible_version')
-            recordDispatchSkip('github');
+          if (workspaceSchemaPending(error)) recordDispatchSkip('github', error.code);
           else app.log.error({ workspaceId: row.workspace_id }, 'GitHub Knowledge dispatch will retry');
         }
         after = row.workspace_id;

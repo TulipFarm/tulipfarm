@@ -18,6 +18,7 @@ import {
 import type { createAtlassianApproval } from '@tulipfarm/atlassian/operation-approval';
 import { authConfig, type registerAuth } from './auth.ts';
 import { routeValidation } from './route-validation.ts';
+import { workspaceUpdatingError } from './security.ts';
 
 const errorSchema = {
   type: 'object',
@@ -75,6 +76,7 @@ export function registerAtlassianOperations(
       if (!operations) return reply.code(503).send({ error: 'operation-disabled' });
     });
     routes.setErrorHandler<FastifyError>((error, _request, reply) => {
+      if (workspaceUpdatingError(error, reply)) return;
       if (error instanceof AccessDenied) return reply.code(404).send({ error: 'operation-not-found' });
       if (error.statusCode === 400 || error.validation || error instanceof z.ZodError)
         return reply.code(400).send({ error: 'invalid-request' });

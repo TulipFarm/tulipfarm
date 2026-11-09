@@ -837,13 +837,24 @@ function ConversationDetail({
         </Popover>
       )
     : undefined;
-  const { pending, draftSent, turn, thinking, narration, answerText, activity, status, stalledTurn, slowTurn } =
-    useCurrentReply({
-      messages: data?.messages,
-      outgoing,
-      command: write.state,
-      stream,
-    });
+  const {
+    pending,
+    waiting,
+    draftSent,
+    turn,
+    thinking,
+    narration,
+    answerText,
+    activity,
+    status,
+    stalledTurn,
+    slowTurn,
+  } = useCurrentReply({
+    messages: data?.messages,
+    outgoing,
+    command: write.state,
+    stream,
+  });
   const currentTool = activityTools.find(tool => (tool.activityStatus ?? tool.status) === 'running');
   const activityLabel =
     currentTool && !status
@@ -1234,6 +1245,9 @@ function ConversationDetail({
                                     }
                                   />
                                 </MessageBubble>
+                                {waiting && (
+                                  <p className="self-end text-xs text-muted-foreground">Sending when ready</p>
+                                )}
                               </MessageContent>
                             </Message>
                           </li>
@@ -1266,7 +1280,7 @@ function ConversationDetail({
                           </li>
                         )),
                       ]}
-                      {pending && !turn && !incomingTurns.length && (
+                      {pending && !waiting && !turn && !incomingTurns.length && (
                         <li>
                           <ToolActivity
                             variant="transcript"

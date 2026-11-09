@@ -66,6 +66,16 @@ One version identifies all apps and images of a release.
 
 ### Fixed
 
+- Chats and background jobs no longer fail with a missing table or column
+  (`42P01`) in the few minutes after a release while a workspace still waits
+  for the release's workspace migrations. The API answers 503
+  `workspace-updating` with `Retry-After: 5`, and background sweeps skip the
+  workspace until it is updated. The web app retries reads for about 5
+  minutes behind an "Updating your workspace" panel, and a message sent
+  meanwhile shows "Sending when ready" and sends by itself once the update
+  finishes. In an up-to-date workspace a missing table is still an error and
+  logs `workspace.schema-missing`. CI runs chats and jobs against a workspace
+  one migration behind (`pnpm run test:behind-workspace`).
 - A reply from an Azure model no longer fails when Azure briefly answers a
   deployment it serves with a plain-text 404 (`route_not_found`). The call is
   now retried and may fall back like any other temporary outage. A deployment

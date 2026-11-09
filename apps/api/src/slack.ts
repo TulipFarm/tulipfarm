@@ -21,6 +21,7 @@ import {
 } from '@tulipfarm/agents/slack-channels';
 import { SlackSignatureError, verifySlackRequest } from './slack-request.ts';
 import { authConfig, type registerAuth } from './auth.ts';
+import { workspaceUpdatingError } from './security.ts';
 
 export type SlackDependencies = {
   config: SlackConfiguration;
@@ -60,6 +61,7 @@ export function registerSlack(
       reply.header('Cache-Control', 'no-store');
     });
     routes.setErrorHandler<FastifyError>((error, _request, reply) => {
+      if (workspaceUpdatingError(error, reply)) return;
       if (error instanceof AccessDenied) return reply.code(404).send({ error: 'slack-not-found' });
       if (error.validation || error instanceof z.ZodError) return reply.code(400).send({ error: 'invalid-request' });
       if (error.message === 'slack-grants-conflict') return reply.code(409).send({ error: 'slack-grants-conflict' });

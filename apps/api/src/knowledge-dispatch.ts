@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import type { Pool } from 'pg';
 import { WorkflowExecutionAlreadyStartedError } from '@temporalio/client';
 import { knowledgeWorkSchema, type createLocalKnowledge, type KnowledgeWork } from '@tulipfarm/knowledge';
-import { StorageUnavailableError } from '@tulipfarm/workspace-storage/runtime';
+import { workspaceSchemaPending } from '@tulipfarm/workspace-storage/runtime';
 import { recordDispatchSkip } from '@tulipfarm/observability';
 import { backgroundSweep, readyWorkspaces, sweepIntervals } from './background-sweep.ts';
 import type { createTemporalClient } from './temporal.ts';
@@ -60,8 +60,7 @@ export function registerKnowledgeDispatch(
             stopped,
           );
         } catch (error) {
-          if (error instanceof StorageUnavailableError && error.code === 'incompatible_version')
-            recordDispatchSkip('knowledge');
+          if (workspaceSchemaPending(error)) recordDispatchSkip('knowledge', error.code);
           else app.log.error({ workspaceId: row.workspace_id }, 'Knowledge dispatch will retry');
         }
         after = row.workspace_id;
