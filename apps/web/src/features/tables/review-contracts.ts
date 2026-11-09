@@ -103,8 +103,23 @@ const planSchema = z.discriminatedUnion('kind', [
   z.object({ ...planBase, kind: z.literal('archive'), expectedRevision: z.string() }),
   z.object({ ...planBase, kind: z.literal('restore'), expectedRevision: z.string() }),
 ]);
+const conversionSchema = z.enum(['text', 'numeric', 'boolean', 'date', 'timestamp']);
+const importAdjustmentSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('delimiter'), requested: z.string(), used: z.string() }),
+  z.object({ kind: z.literal('sheet'), requested: z.string(), used: z.string(), only: z.boolean() }),
+  z.object({ kind: z.literal('column'), requested: z.string(), used: z.string() }),
+  z.object({ kind: z.literal('conversion-dropped'), column: z.string(), conversion: conversionSchema }),
+  z.object({
+    kind: z.literal('conversion-changed'),
+    column: z.string(),
+    requested: conversionSchema,
+    used: conversionSchema,
+    example: z.string(),
+  }),
+]);
 export const reviewedPlanSchema = z.object({
   input: planSchema,
+  importAdjustments: z.array(importAdjustmentSchema).optional().catch(undefined),
   before: tableDefinitionSchema.nullable(),
   after: tableDefinitionSchema,
   effectCount: z.number().int().nonnegative(),
@@ -212,6 +227,7 @@ export type TableField = z.infer<typeof tableFieldSchema>;
 export type TableValue = z.infer<typeof tableValueSchema>;
 export type TableValues = z.infer<typeof tableValuesSchema>;
 export type ReviewedPlan = z.infer<typeof reviewedPlanSchema>;
+export type ImportAdjustment = z.infer<typeof importAdjustmentSchema>;
 export type ProposalView = z.infer<typeof proposalViewSchema>;
 export type ImportProgress = z.infer<typeof importProgressSchema>;
 export type ProposalCommand = { commandId: string; digest: string } & (

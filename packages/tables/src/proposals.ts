@@ -18,7 +18,7 @@ import { requireFixedTableTitle } from './identities.ts';
 import { valueSchema, type TableDefinition } from './definition.ts';
 import { effectiveProposalSources } from './proposal-sources.ts';
 import { requireNoMcpDerived } from '@tulipfarm/access';
-import { blockedTableProposalSchema, redactedManifestSchema } from './proposal-contracts.ts';
+import { blockedTableProposalSchema, redactedManifestSchema, type ImportAdjustment } from './proposal-contracts.ts';
 import { table, type TableRuntime, type TableTransaction } from './service-store.ts';
 import {
   addedFileIds,
@@ -443,6 +443,7 @@ function operations(options: TableProposalOptions) {
     const observed: ProposalRecord[] = [];
     const matches: ImportMatch[] = [];
     let importSources: SourceDependency[] = [];
+    let importAdjustments: ImportAdjustment[] = [];
     if (plan.kind === 'schema' && source) {
       let cursor: string | null = null;
       let count = 0;
@@ -498,6 +499,7 @@ function operations(options: TableProposalOptions) {
       )
         throw new TableProposalError('invalid-import');
       importSources = snapshot.sources;
+      importAdjustments = snapshot.adjustments ?? [];
       await options.requireSources(tx, actor, importSources);
       const records = [];
       let cursor: string | null = null;
@@ -545,6 +547,7 @@ function operations(options: TableProposalOptions) {
       effectsDigest: tableProposalDigest(changes),
       freshnessDigest: tableProposalDigest(freshness),
       ...(plan.kind === 'import' ? { importMatchesDigest: tableProposalDigest(matches) } : {}),
+      ...(importAdjustments.length ? { importAdjustments } : {}),
       audience: plan.kind === 'import' ? await destinationAudience(tx, plan.tableId) : null,
       importSources,
     });

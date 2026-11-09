@@ -486,19 +486,17 @@ for (const format of formats)
     ];
     const wire = await boundary(t, (_req, res) => res.end(JSON.stringify(nativeReply(format, { calls }))));
     const steps = [];
-    await assert.rejects(
-      inferWithTools(
-        chatRoutes[format],
-        [{ role: 'user', text: 'Read and save' }],
-        () => assert.fail('A mixed batch dispatched'),
-        async ({ step }) => {
-          steps.push(step);
-          return async () => {};
-        },
-      ),
-      { message: 'model-invalid-decision' },
+    const reply = await inferWithTools(
+      chatRoutes[format],
+      [{ role: 'user', text: 'Read and save' }],
+      () => assert.fail('A mixed batch dispatched'),
+      async ({ step }) => {
+        steps.push(step);
+        return async () => {};
+      },
     );
-    assert.deepEqual(steps, [0, 1, 2]);
+    assert.match(reply.text, /^I stopped after three tries because I couldn't make a valid change/);
+    assert.deepEqual(steps, [0, 1, 2, 3]);
     const results = toolResults(format, wire.received[1].body);
     assert.deepEqual(
       results.map(result => result.output),
@@ -523,9 +521,9 @@ test('invalid calls run nothing, and a batch beyond the remaining call budget st
     ],
   };
   const wire = await boundary(t, (_req, res) => res.end(JSON.stringify(nativeReply('anthropic', selected))));
-  await assert.rejects(
-    inferWithTools(routes.anthropic, [], () => assert.fail('Invalid batch dispatched')),
-    /model-invalid-decision/,
+  assert.match(
+    (await inferWithTools(routes.anthropic, [], () => assert.fail('Invalid batch dispatched'))).text,
+    /^I stopped after three tries/,
   );
   const [valid, unknown, invalid] = toolResults('anthropic', wire.received[1].body);
   assert.equal(

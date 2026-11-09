@@ -2,6 +2,7 @@ import { createTableProposals, type TableProposalOptions } from '@tulipfarm/tabl
 import { generationProposalData } from '@tulipfarm/tables/store';
 import { readableTableFiles, requireTableSources } from './table-sources.ts';
 import { createTableImports, TableImportError, type TableImportOptions } from '@tulipfarm/tables/imports';
+import { TableValidationError } from '@tulipfarm/tables/definition';
 import {
   proposeTableSchema,
   TableImportPlanError,
@@ -16,6 +17,24 @@ const archiveBlocked = {
     'No proposal was created: another active table links to this table, so it cannot be archived. Tell the person which table must stop linking to it first; this is not a permission denial.',
   'workflow-active':
     'No proposal was created: an enabled workflow uses this table, so it cannot be archived. Tell the person to archive or turn off the workflows that use it first; this is not a permission denial.',
+} as const;
+/** Proposal failures the model can correct or retry, returned with the next step instead of thrown. */
+const proposalFailures = {
+  'invalid-values':
+    'A row value does not fit its field: a link or file field that holds one item needs exactly one ID or null, and a required field needs a value. Fix the value using the schema from schema.inspect and propose again.',
+  'invalid-import':
+    'The prepared file no longer matches the import reference. Call tables.import.file again in this reply and copy the reference it returns into the plan unchanged.',
+  'proposal-too-large': 'The proposal has more than 100,000 rows. Split it into smaller proposals.',
+  'table-title-immutable':
+    'A table title cannot change after it is created. Keep the title from tables.definitions and propose the other changes.',
+  'table-name-unavailable':
+    'A table this proposal links to has no permanent name yet. Tell the person, and do not retry in this reply.',
+  'proposal-stale':
+    'The table, or a row it links to, changed since it was read. Call schema.inspect again, then propose against its current revision and rows.',
+  'proposal-conflict':
+    'The table changed while the proposal was prepared. Call schema.inspect again and propose against its current revision.',
+  'proposal-storage-unavailable':
+    'The proposal could not be saved. Call tables.propose once more in this reply; if it fails again, tell the person to try later.',
 } as const;
 const importNotPrepared =
   'No proposal was created. This is not a permission denial: the import plan does not name a source prepared in this reply. Call tables.import.attachments, then tables.import.file for the chosen attachment in this same reply, and copy the attachmentId and contentDigest it returns into the plan unchanged. For an integration import, use the resultId of a completed read in this chat. Never invent or reuse references from earlier replies.';
@@ -192,6 +211,22 @@ export function createChatTableProposals(
         )
           return { error: 'import-not-prepared', instruction: importNotPrepared };
         if (error instanceof TableImportPlanError) return importPlanResult(error);
+        if (error instanceof TableValidationError)
+          return {
+            error: 'invalid-values' as const,
+            message: error.message,
+            ...(error.fieldId ? { fieldId: error.fieldId } : {}),
+            instruction: `No proposal was created and nothing changed. This is not a permission denial. ${proposalFailures['invalid-values']}`,
+          };
+        if (
+          error instanceof TableProposalError &&
+          error.code in proposalFailures &&
+          !(error instanceof TableProposalValidationError)
+        )
+          return {
+            error: error.code,
+            instruction: `No proposal was created and nothing changed. This is not a permission denial. ${proposalFailures[error.code as keyof typeof proposalFailures]}`,
+          };
         if (!(error instanceof TableProposalValidationError)) throw error;
         return { ...error.validation, ...missingTransformNote(error.validation, args[4]) };
       }

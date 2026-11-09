@@ -17,6 +17,7 @@ import type { AttachmentBytes } from '@tulipfarm/conversations/attachments';
 import { mergeSources } from '@tulipfarm/conversations/results';
 import { createFiles } from '@tulipfarm/files';
 import { canonicalJson } from './canonical.ts';
+import { importAdjustmentsSchema, type ImportAdjustment } from './proposal-contracts.ts';
 import { table, type TableRuntime, type TableTransaction } from './service-store.ts';
 import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 
@@ -195,6 +196,114 @@ export const fileImportSelectionSchema = z.discriminatedUnion('format', [
   z.strictObject({ format: z.literal('xlsx'), sheet: z.string().min(1).max(31), ...fileTabular }),
 ]);
 export type FileImportSelection = z.infer<typeof fileImportSelectionSchema>;
+// A prepared file stores its fitted selection with the adjustments made; files prepared before then store the bare selection.
+const preparedFileSchema = z.union([
+  z.strictObject({ selection: fileImportSelectionSchema, adjustments: importAdjustmentsSchema }),
+  fileImportSelectionSchema.transform(selection => ({ selection, adjustments: [] as ImportAdjustment[] })),
+]);
+
+type Conversion = z.infer<typeof conversionSchema>;
+const conversionAliases: Record<string, Conversion> = {
+  number: 'numeric',
+  integer: 'numeric',
+  int: 'numeric',
+  decimal: 'numeric',
+  float: 'numeric',
+  double: 'numeric',
+  currency: 'numeric',
+  money: 'numeric',
+  percent: 'numeric',
+  percentage: 'numeric',
+  bool: 'boolean',
+  checkbox: 'boolean',
+  datetime: 'timestamp',
+  'date-time': 'timestamp',
+  date_time: 'timestamp',
+  time: 'timestamp',
+};
+const delimiterAliases: Record<string, string> = {
+  comma: ',',
+  semicolon: ';',
+  tab: '\t',
+  '\\t': '\t',
+  tsv: '\t',
+  pipe: '|',
+};
+const selectionKeys = new Set(['format', 'delimiter', 'sheet', 'header', 'conversions', 'empty']);
+
+/**
+ * A conversion written as a field kind or a synonym. Field kinds without a conversion of their own, such as
+ * single-select, multi-select, status or url, stay text: import plans match and convert text to the field's kind.
+ */
+function conversion(value: unknown): Conversion {
+  const kind =
+    value && typeof value === 'object'
+      ? ((value as Record<string, unknown>).kind ?? (value as Record<string, unknown>).type)
+      : value;
+  if (typeof kind !== 'string') return 'text';
+  const key = kind.trim().toLowerCase();
+  const parsed = conversionSchema.safeParse(key);
+  return parsed.success ? parsed.data : (conversionAliases[key] ?? 'text');
+}
+
+/**
+ * Rewrites a chat model's loose file selection into the strict contract where its meaning is clear: a field kind
+ * or synonym as a conversion, a named delimiter, header and sheet under common other names, and keys the
+ * selection has no use for. A selection that is still invalid after this fails as `invalid-selection`.
+ */
+export function lenientFileImportSelection(input: unknown): unknown {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return input;
+  const loose = input as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(loose)) if (selectionKeys.has(key)) out[key] = value;
+  out.sheet ??= loose.sheetName ?? loose.sheet_name ?? loose.worksheet ?? loose.tab;
+  out.delimiter ??= loose.separator ?? loose.sep ?? loose.delimeter;
+  if (out.header === undefined) {
+    const row = loose.headerRow ?? loose.header_row;
+    const has = loose.hasHeader ?? loose.has_header ?? loose.headers;
+    if (typeof row === 'number' || (typeof row === 'string' && /^\d+$/.test(row))) out.header = Number(row);
+    else if (has === true) out.header = true;
+  }
+  if (typeof out.format === 'string') out.format = out.format.trim().toLowerCase().replace(/^\./, '');
+  if (out.format === 'excel' || out.format === 'xls') out.format = 'xlsx';
+  if (out.format === 'tsv') {
+    out.format = 'csv';
+    out.delimiter ??= '\t';
+  }
+  if (out.format === undefined) out.format = out.sheet !== undefined ? 'xlsx' : 'csv';
+  if (out.format === 'csv') {
+    delete out.sheet;
+    if (typeof out.delimiter === 'string')
+      out.delimiter = delimiterAliases[out.delimiter.trim().toLowerCase()] ?? out.delimiter;
+    out.delimiter ??= ',';
+  } else if (out.format === 'xlsx') delete out.delimiter;
+  if (out.sheet === undefined) delete out.sheet;
+  if (out.delimiter === undefined) delete out.delimiter;
+  if (typeof out.header === 'string' && /^\d+$/.test(out.header)) out.header = Number(out.header);
+  if (typeof out.empty === 'string') {
+    const empty = out.empty.trim().toLowerCase();
+    out.empty = ['text', 'string', 'empty-string', 'empty_string', 'keep'].includes(empty) ? 'text' : 'null';
+  } else if (out.empty === null) out.empty = 'null';
+  else if (out.empty !== undefined && typeof out.empty !== 'string') delete out.empty;
+  const conversions = out.conversions;
+  if (Array.isArray(conversions))
+    out.conversions = Object.fromEntries(
+      conversions.flatMap(item => {
+        if (!item || typeof item !== 'object') return [];
+        const entry = item as Record<string, unknown>;
+        const column = entry.column ?? entry.name ?? entry.sourceColumn ?? entry.header;
+        return typeof column === 'string'
+          ? [[column, conversion(entry.conversion ?? entry.to ?? entry.kind ?? entry.type)]]
+          : [];
+      }),
+    );
+  else if (conversions && typeof conversions === 'object')
+    out.conversions = Object.fromEntries(
+      Object.entries(conversions).map(([column, value]) => [column, conversion(value)]),
+    );
+  else if (conversions === null) delete out.conversions;
+  return out;
+}
 export const integrationImportSelectionSchema = z.discriminatedUnion('format', [
   z.strictObject({ format: z.literal('matrix'), path: z.array(z.string().min(1).max(120)).max(12), ...tabular }),
   z.strictObject({
@@ -218,6 +327,7 @@ export type ImportSnapshot = {
   contentDigest: string;
   sources: SourceDependency[];
   rows: Record<string, ImportValue>[];
+  adjustments?: ImportAdjustment[];
 };
 
 function validated<T>(schema: z.ZodType<T>, value: unknown, code: TableImportError['code']): T {
@@ -412,6 +522,106 @@ async function checkArchive(bytes: Uint8Array) {
       },
     );
   });
+}
+
+const csvDelimiters = [',', ';', '\t', '|'] as const;
+function unquotedCount(line: string, delimiter: string) {
+  let count = 0;
+  let quoted = false;
+  for (const character of line)
+    if (character === '"') quoted = !quoted;
+    else if (!quoted && character === delimiter) count++;
+  return count;
+}
+const columnKey = (name: string) => name.trim().replace(/\s+/g, ' ').toLowerCase();
+
+/**
+ * Fits a chat model's valid selection to the attached file before it is prepared: the delimiter the header row
+ * uses, a sheet named in another case or the only sheet, conversions keyed by a header in another case or
+ * spacing (others are dropped, so the column stays text), and a conversion that a column's values don't fit
+ * replaced by text, or a timestamp for spreadsheet dates. Import plans still convert text to each field's kind.
+ * Each change is returned as an adjustment, so the import review can list it.
+ */
+export async function fitFileImportSelection(
+  bytes: Uint8Array,
+  input: FileImportSelection,
+): Promise<{ selection: FileImportSelection; adjustments: ImportAdjustment[] }> {
+  let selection: FileImportSelection = { ...input, conversions: { ...input.conversions } };
+  const adjustments: ImportAdjustment[] = [];
+  if (selection.format === 'csv') {
+    const head = new TextDecoder().decode(bytes.subarray(0, 64 * 1024)).replace(/^\uFEFF/, '');
+    const line = head.split(/\r?\n/, 1)[0] ?? '';
+    if (!unquotedCount(line, selection.delimiter)) {
+      const [best] = csvDelimiters
+        .map(delimiter => ({ delimiter, count: unquotedCount(line, delimiter) }))
+        .sort((a, b) => b.count - a.count);
+      if (best?.count) {
+        adjustments.push({ kind: 'delimiter', requested: selection.delimiter, used: best.delimiter });
+        selection = { ...selection, delimiter: best.delimiter };
+      }
+    }
+  } else if (bytes.byteLength && bytes.byteLength <= importLimits.bytes) {
+    const workbook = new ExcelJS.Workbook();
+    const names = await checkArchive(bytes)
+      .then(() => workbook.xlsx.read(Readable.from([Buffer.from(bytes)])))
+      .then(() => workbook.worksheets.map(sheet => sheet.name))
+      .catch(() => null);
+    const wanted = selection.sheet;
+    if (names && !names.includes(wanted)) {
+      const matched = names.find(name => columnKey(name) === columnKey(wanted));
+      const sheet = matched ?? (names.length === 1 ? names[0] : undefined);
+      if (sheet) {
+        adjustments.push({ kind: 'sheet', requested: wanted, used: sheet, only: !matched });
+        selection = { ...selection, sheet };
+      }
+    }
+  }
+  if (Object.keys(selection.conversions).length) {
+    const rows = await parseImportFile(bytes, { ...selection, conversions: {} }).catch(error => {
+      if (error instanceof TableImportError) return null;
+      throw error;
+    });
+    if (!rows) return { selection, adjustments };
+    const columns = new Map(Object.keys(rows[0] ?? {}).map(name => [columnKey(name), name]));
+    const conversions: Record<string, Conversion> = {};
+    for (const [name, kind] of Object.entries(selection.conversions)) {
+      const column = columns.get(columnKey(name));
+      if (!column) adjustments.push({ kind: 'conversion-dropped', column: name.slice(0, 120), conversion: kind });
+      else if (!(column in conversions)) {
+        if (column !== name) adjustments.push({ kind: 'column', requested: name.slice(0, 120), used: column });
+        conversions[column] = kind;
+      }
+    }
+    selection = { ...selection, conversions };
+  }
+  const tried = new Map<string, Set<Conversion>>();
+  const changed = new Map<string, Extract<ImportAdjustment, { kind: 'conversion-changed' }>>();
+  for (;;) {
+    try {
+      await parseImportFile(bytes, selection);
+      adjustments.push(...[...changed.values()].filter(change => change.requested !== change.used));
+      return { selection, adjustments };
+    } catch (error) {
+      const column = error instanceof TableImportError ? error.location?.column : undefined;
+      if (!(error instanceof TableImportError) || error.code !== 'invalid-value' || column === undefined) throw error;
+      const current = selection.conversions[column] ?? 'text';
+      const kinds = tried.get(column) ?? new Set<Conversion>();
+      kinds.add(current);
+      tried.set(column, kinds);
+      const next: Conversion =
+        /^\d{4}-\d{2}-\d{2}T/.test(error.location?.value ?? '') && !kinds.has('timestamp') ? 'timestamp' : 'text';
+      if (kinds.has(next)) throw error;
+      const example = (error.location?.value ?? '').slice(0, 40);
+      changed.set(column, {
+        kind: 'conversion-changed',
+        column: column.slice(0, 120),
+        requested: changed.get(column)?.requested ?? current,
+        used: next,
+        example: changed.get(column)?.example ?? example,
+      });
+      selection = { ...selection, conversions: { ...selection.conversions, [column]: next } };
+    }
+  }
 }
 
 export async function parseImportFile(bytes: Uint8Array, input: unknown): Promise<ImportSnapshot['rows']> {
@@ -652,8 +862,7 @@ export function createTableImports(options: TableImportOptions) {
           const bytes = await options.attachments.read(`${tx.workspaceId}/${stored.object_key}`, stored.size);
           if (bytes.byteLength !== stored.size || sha(bytes) !== reference.contentDigest)
             throw new TableImportError('digest-mismatch');
-          await parseImportFile(bytes, selection);
-          await save(fileKey(tx, actor, origin, reference), selection);
+          await save(fileKey(tx, actor, origin, reference), await fitFileImportSelection(bytes, selection));
           return reference;
         });
       }),
@@ -731,8 +940,8 @@ export function createTableImports(options: TableImportOptions) {
         );
         if (reference.kind === 'file') {
           const stored = await attachment(tx, actor, origin, reference);
-          const selection = validated(
-            fileImportSelectionSchema,
+          const { selection, adjustments } = validated(
+            preparedFileSchema,
             JSON.parse(
               new TextDecoder('utf-8', { fatal: true }).decode(await readBytes(fileKey(tx, actor, origin, reference))),
             ),
@@ -745,6 +954,7 @@ export function createTableImports(options: TableImportOptions) {
             contentDigest: reference.contentDigest,
             sources: [{ kind: 'private-conversation', conversationId: origin.conversationId }],
             rows: await parseImportFile(bytes, selection),
+            ...(adjustments.length ? { adjustments } : {}),
           };
         }
         const call = await receipt(tx, origin, reference.resultId, null, 'completed');

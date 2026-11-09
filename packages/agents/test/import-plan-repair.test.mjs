@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
 import { proposeTableSchema } from '@tulipfarm/tables/proposal-contracts';
-import { repairImportPlans } from '../src/import-plan-repair.ts';
+import { deferNewTablePlans, repairImportPlans } from '../src/import-plan-repair.ts';
 
 const tableId = randomUUID(),
   orderId = randomUUID(),
@@ -114,4 +114,59 @@ test('a plan for an unknown table and a schema-only payload are left for the str
   assert.equal(outcome.template, undefined);
   const schema = { plans: [{ kind: 'schema', tableId }] };
   assert.deepEqual(await repairImportPlans(schema, repair), { input: schema, repaired: false });
+});
+
+const other = {
+  id: randomUUID(),
+  revision: 'f'.repeat(40),
+  definition: { label: 'Customers', fields: [{ id: randomUUID(), label: 'Customer' }], uniqueKeys: [] },
+};
+
+test('an import naming no readable table goes into the one table that holds the file’s columns', async () => {
+  const outcome = await repairImportPlans(
+    { plans: [{ kind: 'import', tableId: 'Sales', reference, mappings: 'by name' }] },
+    { ...repair, tables: async () => [other, table] },
+  );
+  const plan = proposeTableSchema.parse(outcome.input).plans[0];
+  assert.equal(plan.tableId, tableId);
+  assert.equal(plan.mappings.length, 3);
+});
+
+test('an import whose table cannot be found or inferred lists the readable tables instead', async () => {
+  const outcome = await repairImportPlans(
+    { plans: [{ kind: 'import', tableId: 'Sales', reference }] },
+    { ...repair, columns: async () => ['SKU', 'Warehouse'], tables: async () => [other, table] },
+  );
+  assert.deepEqual(outcome.missingTable, {
+    requested: 'Sales',
+    tables: [
+      { id: other.id, label: 'Customers' },
+      { id: tableId, label: 'Orders' },
+    ],
+  });
+});
+
+test('rows and imports for a table the same proposal creates are deferred, by id or by name', () => {
+  const created = randomUUID();
+  const schema = {
+    kind: 'schema',
+    tableId: created,
+    dependsOn: [],
+    expectedRevision: null,
+    target: { id: created, label: 'Leads', fields: [] },
+  };
+  const { input, deferred } = deferNewTablePlans({
+    label: 'Leads',
+    plans: [
+      schema,
+      { kind: 'records', tableId: created, changes: [] },
+      { kind: 'import', tableName: 'leads table', reference },
+      { kind: 'records', tableId, changes: [] },
+    ],
+  });
+  assert.deepEqual(input.plans, [schema, { kind: 'records', tableId, changes: [] }]);
+  assert.deepEqual(deferred, [
+    { kind: 'records', table: 'Leads' },
+    { kind: 'import', table: 'Leads' },
+  ]);
 });

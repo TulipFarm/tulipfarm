@@ -1811,6 +1811,8 @@ const notRun =
   'Not run because another call in the same response was invalid. Request it again if it is still necessary.';
 const layoutFailedReply = 'The answer could not be laid out. Ask again to see it.';
 const toolLimitReply = 'The tool limit was reached. Review the completed actions before asking me to continue.';
+const toolRejectedReply =
+  "I stopped after three tries because I couldn't make a valid change, so nothing more was changed. Check anything I already finished in this reply, then ask again and name the table or fields if you can.";
 const toolLoopReply =
   'I stopped because repeated tool requests were not making progress. Writes with existing receipts were not repeated. Review the completed actions and any unfinished work before continuing.';
 const unfinishedNote =
@@ -2625,6 +2627,8 @@ export async function inferWithTools(
     .parse(tools?.priorCalls ?? 0);
   const guard = createChatToolGuard(tools?.priorToolCalls);
   let corrections = 0;
+  // Three rejected tool requests end tool use for the reply; the model then answers in plain text.
+  let rejectionsSpent = false;
   let completionCorrections = 0;
   // Whether any answer in this reply named a card that no tool call in it made.
   let cardClaimed = false;
@@ -2704,7 +2708,7 @@ export async function inferWithTools(
   const updateAvatar = () => tools?.avatar?.update({ step: Math.max(0, requestStep - 1), avatar });
   if (tools?.avatar) tools.avatar.update({ step: 0, avatar });
   // Reaching the budget ends the turn with a reply. It is expected, so it logs one warning rather than a failed reply.
-  const toolBudgetSpent = (reason: 'tool-limit' | 'tool-loop') => {
+  const toolBudgetSpent = (reason: 'tool-limit' | 'tool-loop' | 'tool-rejections') => {
     if (budgetSpent) return;
     budgetSpent = true;
     log('warn', 'activity', 'call_failed', { operation: 'chat.tool-budget', 'error.type': reason });
@@ -2830,7 +2834,10 @@ export async function inferWithTools(
     recordModelFallback('used', primary, target);
     return result;
   }
-  /** Returns the model's rejected tool request with a correction. The third correction in a reply ends it. */
+  /**
+   * Returns the model's rejected tool request with a correction. After the third correction in a reply the model
+   * gets no more tools and states in plain text what it could not do, so the reply still ends with an answer.
+   */
   const reject = (results: ToolResult[], reason: ToolRejection, tools: readonly string[]) => {
     log('warn', 'activity', 'call_failed', {
       operation: 'chat.tool-rejected',
@@ -2838,7 +2845,7 @@ export async function inferWithTools(
       tool: [...new Set(tools)].sort().join(','),
       attempt: corrections + 1,
     });
-    if (corrections++ >= 2) throw new ModelCallError('invalid-decision', { outputStarted: outputProduced });
+    if (corrections++ >= 2) rejectionsSpent = true;
     items.push({ kind: 'results', results });
   };
   let previousCatalog: string | undefined;
@@ -3039,8 +3046,8 @@ export async function inferWithTools(
     });
   };
   for (let step = 0; ; step++) {
-    const finalizing = calls >= chatToolCallLimit || guard.stalled;
-    const stoppingReply = guard.stalled ? toolLoopReply : toolLimitReply;
+    const finalizing = calls >= chatToolCallLimit || guard.stalled || rejectionsSpent;
+    const stoppingReply = rejectionsSpent ? toolRejectedReply : guard.stalled ? toolLoopReply : toolLimitReply;
     const { selected, mcp, answerStep, activeCatalog } = await withChatModelRequest('reply', async () => {
       const mcp = await observeChatDetail('round-prepare', async () => {
         await tools?.beforeRound?.();
@@ -3087,13 +3094,13 @@ export async function inferWithTools(
         return mcp;
       });
       if (!reminder || !catalog) throw new Error('model-context-unavailable');
-      if (finalizing) toolBudgetSpent(guard.stalled ? 'tool-loop' : 'tool-limit');
+      if (finalizing) toolBudgetSpent(rejectionsSpent ? 'tool-rejections' : guard.stalled ? 'tool-loop' : 'tool-limit');
       if (finalizing)
         items.push({
           kind: 'turn',
           turn: {
             role: 'user',
-            text: `${guard.stalled ? 'Repeated tool requests made no progress for three rounds.' : `The ${chatToolCallLimit}-call work budget for this turn has ended.`} Do not call tools. Give a short plain-text summary using only completed results. State any remaining or unconfirmed work and why you stopped. Never claim the whole request succeeded unless the results prove it.`,
+            text: `${rejectionsSpent ? 'Your tool requests were rejected three times because their arguments were invalid.' : guard.stalled ? 'Repeated tool requests made no progress for three rounds.' : `The ${chatToolCallLimit}-call work budget for this turn has ended.`} Do not call tools. Give a short plain-text summary using only completed results. State any remaining or unconfirmed work and why you stopped. Never claim the whole request succeeded unless the results prove it.`,
           },
         });
       if (limits) {
@@ -3203,6 +3210,7 @@ export async function inferWithTools(
       };
     });
     if (selected.kind === 'failure') {
+      if (finalizing && selected.reason === 'invalid-decision') return finish(stoppingReply);
       if (selected.reason !== 'invalid-decision' || corrections++ >= 2)
         throw new ModelCallError(selected.reason, { outputStarted: outputProduced });
       items.push({
