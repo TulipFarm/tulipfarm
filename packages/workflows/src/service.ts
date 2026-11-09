@@ -1727,24 +1727,37 @@ export function createWorkflows(
       });
     });
   }
+  const actionableSkips = ['github-repository-not-connected'];
   async function history(workspaceId: string, user: string, id: string, value: unknown = {}) {
     const query = runHistoryQuerySchema.parse(value);
     const [beforeAt, beforeId] = query.before?.split('~') ?? [];
     return transaction(workspaceId, async tx => {
       const actor = await workflowMember(tx, user);
       await requireGrant(tx, actor.membershipId, id, 'read');
-      const runs = async (statuses: readonly string[], limit: number | null) =>
+      const runs = async (statuses: readonly string[], limit: number | null, skips: readonly string[] = []) =>
         (
           await tx.client.query(
-            `WITH visible AS (SELECT r.* FROM ${table(tx, 'tf_workflow_runs')} r WHERE workflow_id=$1 AND ((sponsorship_id IS NULL AND membership_id=$2 AND (request_key LIKE 'manual:%' OR request_key LIKE 'event:%')) OR EXISTS (SELECT 1 FROM ${table(tx, 'tf_workflow_run_audience')} a WHERE a.run_id=r.id AND a.membership_id=$2))) SELECT id,workflow_id AS "workflowId",revision,status,split_part(request_key,':',1) AS source,input,created_at::text AS "createdAt",${utcInstant('scheduled_for')} AS "scheduledFor",${utcInstant('started_at')} AS "startedAt",${utcInstant('finished_at')} AS "finishedAt",error,trigger_id AS "triggerId",fired_trigger_ids AS "firedTriggerIds",to_char(created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') || '~' || id AS cursor FROM visible WHERE status=ANY($3::text[]) AND ($4::timestamptz IS NULL OR (created_at,id)<($4::timestamptz,$5::uuid)) AND ($7::text IS NULL OR $7=ANY(fired_trigger_ids)) ORDER BY created_at DESC,id DESC LIMIT $6`,
-            [id, actor.membershipId, statuses, beforeAt ?? null, beforeId ?? null, limit, query.triggerId ?? null],
+            `WITH visible AS (SELECT r.* FROM ${table(tx, 'tf_workflow_runs')} r WHERE workflow_id=$1 AND ((sponsorship_id IS NULL AND membership_id=$2 AND (request_key LIKE 'manual:%' OR request_key LIKE 'event:%')) OR EXISTS (SELECT 1 FROM ${table(tx, 'tf_workflow_run_audience')} a WHERE a.run_id=r.id AND a.membership_id=$2))) SELECT id,workflow_id AS "workflowId",revision,status,split_part(request_key,':',1) AS source,input,created_at::text AS "createdAt",${utcInstant('scheduled_for')} AS "scheduledFor",${utcInstant('started_at')} AS "startedAt",${utcInstant('finished_at')} AS "finishedAt",error,trigger_id AS "triggerId",fired_trigger_ids AS "firedTriggerIds",to_char(created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') || '~' || id AS cursor FROM visible WHERE (status=ANY($3::text[]) OR (status='skipped' AND error=ANY($8::text[]))) AND ($4::timestamptz IS NULL OR (created_at,id)<($4::timestamptz,$5::uuid)) AND ($7::text IS NULL OR $7=ANY(fired_trigger_ids)) ORDER BY created_at DESC,id DESC LIMIT $6`,
+            [
+              id,
+              actor.membershipId,
+              statuses,
+              beforeAt ?? null,
+              beforeId ?? null,
+              limit,
+              query.triggerId ?? null,
+              skips,
+            ],
           )
         ).rows;
       const finished = statusSchema.options.filter(
         status => !unfinishedStatuses.some(live => live === status) && status !== 'skipped',
       );
       const pinned = query.status || query.before ? [] : await runs(unfinishedStatuses, null);
-      const page = await runs(query.status ? [query.status] : finished, runHistoryPageSize + 1);
+      // Routine skips such as schedule overlaps stay behind the skipped filter; skips the user must act on show by default.
+      const page = query.status
+        ? await runs([query.status], runHistoryPageSize + 1)
+        : await runs(finished, runHistoryPageSize + 1, actionableSkips);
       const nextCursor =
         page.length > runHistoryPageSize ? runHistoryCursorSchema.parse(page[runHistoryPageSize - 1].cursor) : null;
       const result = [];
@@ -2638,10 +2651,18 @@ export function createWorkflows(
         .parse(event.github_repository_id ?? null);
       const sponsor =
         trigger.kind === 'github' ? (await workflowSponsor(tx, workflowId, revision)).sponsor_membership_id : null;
+      // An account trigger also covers the account's public repositories, which need no Knowledge connection of their own.
+      const publicInAccount =
+        trigger.kind === 'github' &&
+        !Array.isArray(trigger.repositories) &&
+        typeof payload === 'object' &&
+        payload !== null &&
+        !Array.isArray(payload) &&
+        payload.repositoryPrivate === false;
       if (
         trigger.kind === 'github' &&
         sponsor !== null &&
-        !(repositoryId === null
+        !(repositoryId === null || publicInAccount
           ? await githubTriggerConnected(tx, trigger, sponsor)
           : await githubRepositoryConnected(tx, repositoryId, sponsor))
       ) {

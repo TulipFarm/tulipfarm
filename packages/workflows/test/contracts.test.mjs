@@ -683,13 +683,14 @@ test('a GitHub star run carries the sender profile and the repository star count
   const body = {
     action: 'created',
     starred_at: '2026-11-07T11:00:00Z',
-    repository: { id: 42, full_name: 'acme/app', stargazers_count: 12 },
+    repository: { id: 42, full_name: 'acme/app', stargazers_count: 12, private: false },
     sender: { login: 'octocat', html_url: 'https://github.com/octocat' },
   };
   assert.deepEqual(githubWorkflowPayload('star', body), {
     event: 'star',
     action: 'created',
     repository: 'acme/app',
+    repositoryPrivate: false,
     sender: 'octocat',
     senderUrl: 'https://github.com/octocat',
     starredAt: '2026-11-07T11:00:00Z',

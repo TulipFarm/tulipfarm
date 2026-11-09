@@ -148,3 +148,95 @@ ${await migration('0009_github_workflow_trigger_subscriptions.sql')}`);
     }
   },
 );
+
+test(
+  "an account trigger runs on the account's public repositories and shows skipped private ones in history",
+  { timeout: 120000 },
+  async () => {
+    const db = await fixture();
+    let runtime;
+    try {
+      await db.platform.query(`SET search_path TO app; DROP TABLE IF EXISTS app.accounts;
+${await migration('0001_baseline.sql')}
+${await migration('0008_github_workflow_subscriptions.sql')}
+${await migration('0009_github_workflow_trigger_subscriptions.sql')}`);
+      const w = await db.create(await workspaceTableMigrations());
+      const table = name => qualified(w.names.schema, name);
+      runtime = createWorkspaceRuntime({
+        replicaCount: 1,
+        reservedConnections: 2,
+        databaseConnectionBudget: 20,
+        resolveCredential: async id => ({ workspaceId: id, generation: 1, connectionString: db.login(w) }),
+      });
+      const pool = {
+        query: (...args) => db.platform.query(...args),
+        connect: async () => ({ query: (...args) => db.platform.query(...args), release() {} }),
+      };
+      const service = createWorkflows(runtime, { githubSubscriptions: createGitHubSubscriptions(pool) });
+      const fanOut = createGitHubWorkflowFanOut(db.platform, runtime);
+      const source = randomUUID();
+      await db.platform.query(
+        `INSERT INTO ${table('tf_knowledge_sources')} (id,provider,account_namespace,selection,owner_membership_id) VALUES ($1,'github','acme','repos',$2)`,
+        [source, w.membershipId],
+      );
+      await db.platform.query(
+        `INSERT INTO ${table('tf_knowledge_github_sources')} (source_id,binding,selection,title,fingerprint,cursor) VALUES ($1,'{}','{}','Acme','f','{}')`,
+        [source],
+      );
+      await db.platform.query(`INSERT INTO ${table('tf_knowledge_github_members')} VALUES ($1,$2)`, [
+        source,
+        w.membershipId,
+      ]);
+      await db.platform.query(
+        `INSERT INTO ${table('tf_knowledge_github_repositories')} (source_id,repository_id,full_name,visibility,title,owner_id) VALUES ($1,'42','acme/app','public','App','9')`,
+        [source],
+      );
+      const id = randomUUID(),
+        revision = randomUUID();
+      await service.save(w.id, w.userId, id, {
+        revision,
+        expectedRevision: null,
+        definition: {
+          version: 1,
+          name: 'Account stars',
+          triggers: [
+            {
+              id: 'github',
+              kind: 'github',
+              repositories: { organizationId: '9', includeFuture: true },
+              events: [{ event: 'star', actions: ['created'] }],
+            },
+          ],
+          steps: [{ id: 'copy', kind: 'transform', fields: { login: { kind: 'input', path: ['sender'] } } }],
+        },
+      });
+      await service.sponsorship(w.id, w.userId, id, {
+        sponsorMembershipId: w.membershipId,
+        historyAudience: [w.membershipId],
+      });
+      await activate(service, w.id, w.userId, id, revision, true);
+      const star = (deliveryId, repository, login) =>
+        fanOut({
+          event: 'star',
+          deliveryId,
+          body: { action: 'created', repository: { ...repository, owner: { id: 9 } }, sender: { login } },
+        });
+      await star('d-public', { id: 7, full_name: 'acme/site', private: false }, 'public-fan');
+      await star('d-private', { id: 8, full_name: 'acme/secret', private: true }, 'private-fan');
+      await service.due(w.id);
+      const runs = (await service.history(w.id, w.userId, id)).runs;
+      assert.deepEqual(
+        runs.map(run => [run.input.sender, run.status === 'skipped']).sort(),
+        [
+          ['private-fan', true],
+          ['public-fan', false],
+        ],
+        'an unconnected public repository of the account runs; a private one is skipped and listed by default',
+      );
+      assert.equal(runs.find(run => run.status === 'skipped').input.repositoryPrivate, true);
+    } finally {
+      await runtime?.close();
+      await db.close();
+    }
+  },
+);
