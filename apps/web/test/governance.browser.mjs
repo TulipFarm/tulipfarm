@@ -34,7 +34,10 @@ try {
   const errors = [];
   page.on('pageerror', error => errors.push(String(error)));
   const workspaceId = '11111111-1111-4111-8111-111111111111';
-  const memberTables = createMemberTablesMock(workspaceId, null, [{ name: 'Ada', contactEmail: 'ada@example.com' }]);
+  const memberTables = createMemberTablesMock(workspaceId, null, [
+    { name: 'Ada', contactEmail: 'ada@example.com' },
+    { name: 'Ivy', contactEmail: 'ivy@example.com' },
+  ]);
   const memberId = '22222222-2222-4222-8222-222222222222';
   const tableId = '33333333-3333-4333-8333-333333333333';
   const workspace = {
@@ -48,7 +51,7 @@ try {
   const snapshot = {
     actorMembershipId: memberId,
     members: [{ id: memberId, userId: 'ada', name: 'Ada', email: 'ada@example.com', role: 'admin' }],
-    directory: [{ id: memberId, name: 'Ada', email: 'ada@example.com', image: null }],
+    directory: [{ id: memberId, name: 'Ada', email: 'ada@example.com', image: null, role: 'admin' }],
     tableTeamIds: [],
     teams: [],
     tables: [{ id: tableId, name: 'Invoices', owningTeamId: memberId }],
@@ -150,7 +153,7 @@ try {
         id: memberId,
         workspaceMemberId: command.workspaceMemberId,
         kind: 'email',
-        email: 'ada@example.com',
+        email: command.email,
         expiresAt: '2026-10-04T00:00:00.000Z',
         status: 'active',
         canCopy: true,
@@ -207,6 +210,21 @@ try {
         });
         return;
       }
+      if (path.endsWith('/policies')) {
+        const same = grant => grant.teamId === body.subject.id && grant.target.id === body.scope.id;
+        const held = snapshot.grants.filter(same).map(grant => grant.target.permission);
+        snapshot.grants = [
+          ...snapshot.grants.filter(grant => !same(grant)),
+          ...body.permissions.map(permission => ({
+            teamId: body.subject.id,
+            target: { kind: 'table', id: body.scope.id, permission },
+          })),
+        ];
+        json = {
+          added: body.permissions.filter(permission => !held.includes(permission)),
+          removed: held.filter(permission => !body.permissions.includes(permission)),
+        };
+      }
       if (/\/teams\/[^/]+$/.test(path)) {
         const id = path.split('/').at(-1);
         const existing = snapshot.teams.find(team => team.id === id);
@@ -226,7 +244,6 @@ try {
           snapshot.tableTeamIds.push(id);
         }
       }
-      if (path.endsWith('/grants')) snapshot.grants.push({ teamId: body.teamId, target: body.target });
       if (dropCommittedWrite) {
         dropCommittedWrite = false;
         await route.abort('failed');
@@ -240,234 +257,197 @@ try {
       headers: { 'access-control-allow-origin': origin, 'access-control-allow-credentials': 'true' },
     });
   });
+  const status = page.getByRole('status').filter({ hasNotText: 'Loading' }).first();
+  const dialog = page.getByRole('dialog');
+  const confirm = page.getByRole('alertdialog');
+  const teamName = dialog.getByLabel('New team name');
+  const createTeam = dialog.getByRole('button', { name: 'Create team', exact: true });
   await page.goto(`${origin}/acme/teams`);
-  await page.getByRole('heading', { name: 'Could not load workspace access' }).waitFor();
+  await page.getByRole('heading', { name: 'Couldn’t load workspace access' }).waitFor();
   assert.equal(await page.getByRole('heading', { name: 'No teams yet' }).count(), 0);
-  await page.getByRole('button', { name: 'Retry loading' }).click();
-  await page.getByRole('heading', { name: 'Could not load workspace access' }).waitFor({ state: 'hidden' });
-  await page.getByRole('heading', { name: 'Could not load workspace access' }).waitFor();
+  await page.getByRole('button', { name: 'Try again', exact: true }).click();
+  await page.getByRole('heading', { name: 'Couldn’t load workspace access' }).waitFor({ state: 'hidden' });
+  await page.getByRole('heading', { name: 'Couldn’t load workspace access' }).waitFor();
   readStatus = 200;
   readDelay = 400;
-  await page.getByRole('button', { name: 'Retry loading' }).click();
+  await page.getByRole('button', { name: 'Try again', exact: true }).click();
   await page.getByRole('heading', { name: 'No teams yet' }).waitFor();
-  await page.getByRole('button', { name: 'New team', exact: true }).click();
-  await page.getByLabel('New team name').fill('Operations');
+  await page.getByRole('button', { name: 'Create a team', exact: true }).first().click();
+  await teamName.fill('Operations');
   workspaceReadStatus = 503;
   const focusRead = page.waitForResponse(response => new URL(response.url()).pathname === '/v1/workspaces/acme');
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
   assert.equal((await focusRead).status(), 503);
-  assert.equal(await page.getByLabel('New team name').inputValue(), 'Operations');
+  assert.equal(await teamName.inputValue(), 'Operations');
   workspaceReadStatus = 200;
   const beforeFocus = governanceReads;
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
   await setTimeout(200);
   assert.equal(governanceReads, beforeFocus, 'focus does not refresh governance');
+  // Access that may be out of date blocks new changes until it reloads, and keeps the draft.
   readStatus = 503;
   await refreshGovernance();
-  await page.getByRole('alert', { includeHidden: true }).first().waitFor();
-  assert.equal(await page.getByLabel('New team name').inputValue(), 'Operations');
-  assert.equal(await page.getByRole('button', { name: 'Create team', exact: true }).isDisabled(), true);
+  await page.getByText('Access shown here may be out of date.', { exact: false }).waitFor();
+  assert.equal(await teamName.inputValue(), 'Operations');
+  assert.equal(await createTeam.isDisabled(), true);
   readStatus = 200;
+  readDelay = 0;
   await refreshGovernance();
   await page.waitForFunction(() =>
-    [...document.querySelectorAll('button')].some(button => button.textContent === 'Create team' && !button.disabled),
+    [...document.querySelectorAll('[role="dialog"] button')].some(
+      button => button.textContent === 'Create team' && !button.disabled,
+    ),
   );
+  // An unconfirmed create keeps the dialog and retries with the same id, so it never makes two teams.
   writeFails = true;
   const failedTeamWrite = page.waitForResponse(
     response =>
       response.request().method() === 'PUT' &&
       new RegExp(`^/v1/workspaces/${workspaceId}/governance/teams/[0-9a-f-]+$`).test(new URL(response.url()).pathname),
   );
-  await page.getByRole('button', { name: 'Create team', exact: true }).dblclick();
+  await createTeam.dblclick();
   assert.equal((await failedTeamWrite).status(), 503);
-  await page.getByRole('button', { name: 'Retry creating team', exact: true }).waitFor();
+  await page.getByText('Reload to check current access.', { exact: false }).waitFor();
   assert.equal(teamAttempts.length, 1, JSON.stringify(teamAttempts));
-  assert.equal(await page.getByLabel('New team name').inputValue(), 'Operations');
+  assert.equal(await teamName.inputValue(), 'Operations');
   writeFails = false;
-  readStatus = 200;
-  readDelay = 0;
-  await refreshGovernance();
-  await page.getByRole('heading', { name: 'No teams yet', includeHidden: true }).waitFor();
-  assert.equal(await page.getByLabel('New team name').isDisabled(), true);
-  await page.getByRole('button', { name: 'Retry creating team', exact: true }).click();
-  await page.getByRole('button', { name: 'View Operations details', exact: true }).waitFor();
+  await createTeam.click();
+  await page.getByRole('heading', { name: 'Operations', exact: true }).waitFor();
+  await status.getByText('Created the team Operations. You’re its manager.', { exact: true }).waitFor();
   assert.equal(snapshot.teams.length, 1);
-  await page.getByRole('button', { name: 'New team', exact: true }).click();
-  assert.equal(await page.getByLabel('New team name').inputValue(), '');
   assert.deepEqual(teamAttempts[1], teamAttempts[0]);
+  const operations = snapshot.teams[0];
+
+  await page.getByRole('link', { name: 'Teams', exact: true }).first().click();
+  await page.getByRole('button', { name: 'Create a team', exact: true }).click();
+  assert.equal(await teamName.inputValue(), '', 'a new dialog starts empty');
   const slowRefresh = { started: Promise.withResolvers(), release: Promise.withResolvers() };
   heldRead = slowRefresh;
-  await page.getByLabel('New team name').fill('Uncertain Operations');
+  await teamName.fill('Uncertain Operations');
   await refreshGovernance();
   await slowRefresh.started.promise;
-  assert.equal(await page.getByRole('button', { name: 'Create team', exact: true }).isDisabled(), true);
+  assert.equal(await createTeam.isDisabled(), true);
   const writesBeforeRefresh = writes;
-  await page.getByRole('button', { name: 'Create team', exact: true }).evaluate(button => button.click());
-  assert.equal(writes, writesBeforeRefresh);
+  await createTeam.evaluate(button => button.click());
+  assert.equal(writes, writesBeforeRefresh, 'no change is sent while access reloads');
   slowRefresh.release.resolve();
   await page.waitForFunction(() =>
-    [...document.querySelectorAll('button')].some(button => button.textContent === 'Create team' && !button.disabled),
+    [...document.querySelectorAll('[role="dialog"] button')].some(
+      button => button.textContent === 'Create team' && !button.disabled,
+    ),
   );
   dropCommittedWrite = true;
-  await page.getByRole('button', { name: 'Create team', exact: true }).click();
-  await page.getByRole('button', { name: 'Retry creating team', exact: true }).waitFor();
-  assert.equal(await page.getByLabel('New team name').isDisabled(), true);
+  await createTeam.click();
+  await page.getByText('Reload to check current access.', { exact: false }).waitFor();
   const uncertainAttempt = teamAttempts.at(-1);
   assert.equal(uncertainAttempt.name, 'Uncertain Operations');
-  await refreshGovernance();
-  await page.getByRole('button', { name: 'View Uncertain Operations details', exact: true }).waitFor();
-  await page.getByRole('button', { name: 'New team', exact: true }).click();
-  await page.getByLabel('New team name').fill('Finance');
-  await page.getByRole('button', { name: 'Create team', exact: true }).click();
-  await page.getByRole('button', { name: 'View Finance details', exact: true }).waitFor();
-  assert.notEqual(teamAttempts.at(-1).id, uncertainAttempt.id);
+  await createTeam.click();
+  await page.getByRole('heading', { name: 'Uncertain Operations', exact: true }).waitFor();
+  assert.equal(teamAttempts.at(-1).id, uncertainAttempt.id);
   assert.equal(snapshot.teams.filter(team => team.id === uncertainAttempt.id).length, 1);
+  await page.getByRole('link', { name: 'Teams', exact: true }).first().click();
+  await page.getByRole('button', { name: 'Create a team', exact: true }).click();
+  await teamName.fill('Finance');
+  await createTeam.click();
+  await page.getByRole('heading', { name: 'Finance', exact: true }).waitFor();
+  assert.notEqual(teamAttempts.at(-1).id, uncertainAttempt.id);
   assert.equal(
     teamAttempts.filter(attempt => attempt.id === uncertainAttempt.id && attempt.name !== uncertainAttempt.name).length,
     0,
   );
+
+  // A team's access policies: one dialog per table, saved once.
   const listsBeforeNavigation = workspaceLists;
-  await page.getByRole('link', { name: 'Table access', exact: true }).click();
-  await page.getByRole('combobox', { name: 'Team receiving access', exact: true }).click();
-  await page.getByRole('option', { name: snapshot.teams[0].name, exact: true }).click();
-  assert.equal(
-    workspaceLists,
-    listsBeforeNavigation + 1,
-    'warm navigation rechecks workspace admission with one list read',
-  );
-  // Saving and saved messages must not move the grant checkboxes.
-  await page.getByRole('checkbox', { name: 'Update rows', exact: true }).evaluate(element => {
-    window.grantPositions = [];
-    const record = () => {
-      window.grantPositions.push(element.getBoundingClientRect().top);
-      if (!window.stopGrantPositions) requestAnimationFrame(record);
-    };
-    record();
-  });
-  await page.getByRole('checkbox', { name: 'Create rows', exact: true }).click();
-  await page.locator('[role="checkbox"][aria-checked="true"]').waitFor();
-  assert.equal(await page.getByRole('checkbox', { name: 'Read rows', exact: true }).isChecked(), false);
-  assert.equal(await page.getByRole('checkbox', { name: 'Manage schema', exact: true }).isChecked(), false);
-  await page.getByRole('checkbox', { name: 'Read rows', exact: true }).click();
-  await page.getByRole('status').filter({ hasText: 'Read rows for Invoices granted to Operations.' }).waitFor();
-  const grantPositions = await page.evaluate(() => ((window.stopGrantPositions = true), window.grantPositions));
-  assert.deepEqual([...new Set(grantPositions)], [grantPositions[0]], 'team grant checkboxes stayed in place');
-  assert.equal(await page.locator('[role="checkbox"][aria-checked="true"]').count(), 2);
-  assert.equal(snapshot.grants.length, 2);
-  // Clicking a waiting change again cancels it before anything is sent.
-  const slowUpdate = { started: Promise.withResolvers(), release: Promise.withResolvers() };
-  heldWrite = slowUpdate;
-  await page.getByRole('checkbox', { name: 'Update rows', exact: true }).click();
-  await slowUpdate.started.promise;
-  await page.getByRole('status').filter({ hasText: 'Saving update rows for Invoices…' }).waitFor();
-  await page.getByRole('checkbox', { name: 'Delete rows', exact: true }).click();
-  await page.getByRole('status').filter({ hasText: '1 more change waiting.' }).waitFor();
-  await page.getByRole('checkbox', { name: 'Delete rows', exact: true }).click();
-  assert.equal(await page.getByRole('checkbox', { name: 'Delete rows', exact: true }).isChecked(), false);
-  slowUpdate.release.resolve();
-  await page.getByRole('status').filter({ hasText: 'Update rows for Invoices granted to Operations.' }).waitFor();
+  await page.goto(`${origin}/acme/teams/${operations.id}`);
+  await page.getByRole('heading', { name: 'Operations', exact: true }).waitFor();
+  await page.getByRole('tab', { name: 'Access policies', exact: true }).click();
+  await page.getByRole('heading', { name: 'Operations has no access yet' }).waitFor();
+  await page.getByRole('button', { name: 'Create a policy', exact: true }).first().click();
+  await dialog.getByRole('heading', { name: 'Add a policy for Operations' }).waitFor();
+  await dialog.getByRole('combobox', { name: 'Applies to' }).click();
+  await page.getByRole('option', { name: 'Invoices', exact: true }).click();
+  assert.equal(await dialog.getByRole('checkbox', { name: 'Read rows', exact: true }).isChecked(), true);
+  assert.equal(await dialog.getByRole('checkbox', { name: 'Manage schema', exact: true }).isChecked(), false);
+  await dialog.getByRole('checkbox', { name: 'Create rows', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Add policy', exact: true }).click();
+  await dialog.waitFor({ state: 'hidden' });
+  await status.getByText('Operations can now read and create rows in Invoices.', { exact: true }).waitFor();
   assert.deepEqual(
     snapshot.grants.map(grant => grant.target.permission),
-    ['table.row.create', 'table.row.read', 'table.row.update'],
+    ['table.row.read', 'table.row.create'],
   );
-  // A failed save drops the changes waiting behind it, says how many, and shows the saved permissions again.
+  assert.ok(workspaceLists >= listsBeforeNavigation);
+  const policies = page.getByRole('table', { name: 'Access policies for Operations' });
+  await policies.getByText('Invoices', { exact: true }).waitFor();
+  // A save that isn't confirmed keeps the dialog open with the choices, and changes nothing.
   writeFails = true;
-  const writesBeforeFailure = writes;
-  const failedDelete = { started: Promise.withResolvers(), release: Promise.withResolvers() };
-  heldWrite = failedDelete;
-  await page.getByRole('checkbox', { name: 'Delete rows', exact: true }).click();
-  await failedDelete.started.promise;
-  await page.getByRole('checkbox', { name: 'Manage schema', exact: true }).click();
-  await page
-    .getByRole('status')
-    .filter({ hasText: 'Saving delete rows for Invoices… 1 more change waiting.' })
-    .waitFor();
-  assert.equal(await page.getByRole('checkbox', { name: 'Manage schema', exact: true }).isChecked(), true);
-  failedDelete.release.resolve();
-  await page
-    .getByRole('status')
-    .filter({
-      hasText:
-        'Delete rows for Invoices was not confirmed. 1 other change was not saved. Reload access to check the saved permissions before changing it again.',
-    })
-    .waitFor();
-  assert.equal(writes, writesBeforeFailure + 1);
-  assert.equal(await page.getByRole('checkbox', { name: 'Delete rows', exact: true }).isChecked(), false);
-  assert.equal(await page.getByRole('checkbox', { name: 'Manage schema', exact: true }).isChecked(), false);
+  await page.getByRole('button', { name: 'Actions for the policy on Invoices for Operations', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Edit the policy on Invoices for Operations', exact: true }).click();
+  await dialog.getByRole('heading', { name: 'Edit policy for Operations' }).waitFor();
+  await dialog.getByRole('checkbox', { name: 'Delete rows', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Save policy', exact: true }).click();
+  await dialog.getByText('We couldn’t confirm the change.', { exact: false }).waitFor();
+  assert.equal(await dialog.getByRole('checkbox', { name: 'Delete rows', exact: true }).isChecked(), true);
+  assert.equal(snapshot.grants.length, 2);
   writeFails = false;
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await dialog.waitFor({ state: 'hidden' });
   await page.setViewportSize({ width: 375, height: 812 });
   await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
   await page.keyboard.press('Tab');
   assert.equal(await page.evaluate(() => document.activeElement !== document.body), true);
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.emulateMedia({ colorScheme: 'light' });
   readStatus = 404;
   await refreshGovernance();
-  await page.getByRole('heading', { name: 'Administration unavailable' }).waitFor();
-  assert.equal(await page.getByRole('checkbox', { name: 'Create rows', exact: true }).count(), 0);
+  await page.getByRole('heading', { name: 'You can’t view this page' }).waitFor();
+  assert.equal(await page.getByRole('button', { name: 'Create a policy', exact: true }).count(), 0);
   readStatus = 200;
-  await page.goto(`${origin}/acme/members`);
-  await page.getByRole('tab', { name: 'Invitations', exact: true }).click();
-  await page.getByRole('heading', { name: 'No invitations yet' }).waitFor();
-  await page.getByRole('button', { name: 'Invite members', exact: true }).last().click();
-  await page.getByRole('combobox', { name: 'Email addresses', exact: true }).fill('ada@example.com,');
-  await page.getByRole('button', { name: 'Send invitations', exact: true }).click();
-  await page.getByText('1 invitation sent.', { exact: true }).waitFor();
-  await page.getByRole('button', { name: 'Close', exact: true }).click();
-  await page.getByRole('dialog').waitFor({ state: 'hidden' });
-  await page.getByRole('button', { name: 'Copy link', exact: true }).click();
-  assert.equal(
-    await page.getByLabel('Invitation link', { exact: true }).inputValue(),
-    `${origin}/invite?token=${invitationToken}`,
-  );
+
+  // Invites are rows in the Members table, with their actions in the row's menu.
+  await page.goto(`${origin}/acme/members/invite`);
+  await page.getByRole('combobox', { name: 'Email addresses', exact: true }).fill('ivy@example.com,');
+  await page.getByRole('button', { name: 'Invite', exact: true }).click();
+  await page.waitForURL(`${origin}/acme/members`);
+  await status.getByText('Invited ivy@example.com as Member.', { exact: false }).waitFor();
+  const table = page.getByRole('table', { name: 'Workspace members' });
+  await table.getByText('ivy@example.com', { exact: true }).waitFor();
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin });
+  const actions = page.getByRole('button', { name: 'Actions for ivy@example.com', exact: true });
+  await actions.click();
+  await page.getByRole('menuitem', { name: 'Copy invite link for ivy@example.com', exact: true }).click();
+  await status.getByText('Copied the invite link for ivy@example.com.', { exact: true }).waitFor();
+  assert.equal(await page.evaluate(() => navigator.clipboard.readText()), `${origin}/invite?token=${invitationToken}`);
+  // The resend is confirmed even when the list can't refresh: the old invite is replaced in place.
   invitationReadFails = true;
-  await page.getByRole('button', { name: 'Resend', exact: true }).click();
-  await page.getByRole('button', { name: 'Confirm resend', exact: true }).click();
-  await page.getByRole('alert', { includeHidden: true }).first().waitFor();
-  const oldInvitation = page.getByRole('listitem').filter({ has: page.getByText(/revoked\. Expires/) });
-  assert.equal(await oldInvitation.getByRole('button', { name: 'Copy link', exact: true }).count(), 0);
-  assert.equal(await oldInvitation.getByRole('button', { name: 'Resend', exact: true }).count(), 0);
-  assert.equal(await oldInvitation.getByRole('button', { name: 'Revoke link', exact: true }).isDisabled(), true);
-  assert.equal(await page.getByRole('button', { name: 'Copy link', exact: true }).count(), 1);
+  await actions.click();
+  await page.getByRole('menuitem', { name: 'Resend invite to ivy@example.com', exact: true }).click();
+  await confirm.getByRole('button', { name: 'Resend invite', exact: true }).click();
+  await confirm.waitFor({ state: 'hidden' });
+  await status.getByText('Resending the invite to ivy@example.com. Their old link no longer works.').waitFor();
+  assert.equal(await table.getByText('ivy@example.com', { exact: true }).count(), 1);
   invitationReadFails = false;
-  await page.getByRole('button', { name: 'Copy link', exact: true }).click();
-  await page
-    .getByRole('listitem')
-    .filter({ has: page.getByText(/active\. Expires/) })
-    .getByRole('button', { name: 'Revoke link', exact: true })
-    .click();
-  await page.getByRole('button', { name: 'Confirm revoke', exact: true }).click();
-  await page.getByText('Invitation revoked. The link no longer works.', { exact: true }).waitFor();
-  assert.equal(await page.getByText('Link copied.', { exact: true }).count(), 0);
-  assert.equal(await page.getByLabel('Invitation link', { exact: true }).count(), 0);
+  await workspaceChange(page, workspaceId, 'ada', [['governance', 'invitations']]);
+  // A read that started before a revoke can't bring the revoked invite back.
   const stale = {
     started: Promise.withResolvers(),
     release: Promise.withResolvers(),
     finished: Promise.withResolvers(),
   };
-  invitations = [
-    { id: memberId, kind: 'email', email: 'ada@example.com', expiresAt: '2026-10-04T00:00:00.000Z', status: 'active' },
-  ];
   heldInvitationRead = stale;
-  await page.goto(`${origin}/acme/members`);
-  await page.getByRole('tab', { name: 'Invitations', exact: true }).click();
+  await workspaceChange(page, workspaceId, 'ada', [['governance', 'invitations']]);
   await stale.started.promise;
-  await page
-    .getByRole('region', { name: 'Invitations', exact: true })
-    .getByRole('button', { name: 'Invite members', exact: true })
-    .click();
-  await page.getByRole('button', { name: 'Close', exact: true }).click();
-  await page.getByRole('dialog').waitFor({ state: 'hidden' });
-  stale.release.resolve();
-  await stale.finished.promise;
-  await page.getByText(/active\. Expires/).waitFor();
-  await page.getByRole('button', { name: 'Revoke link', exact: true }).click();
-  await page.getByRole('button', { name: 'Confirm revoke', exact: true }).click();
-  await page.getByText(/revoked\. Expires/).waitFor();
+  await actions.click();
+  await page.getByRole('menuitem', { name: 'Revoke invite for ivy@example.com', exact: true }).click();
+  await confirm.getByRole('button', { name: 'Revoke invite', exact: true }).click();
+  await confirm.waitFor({ state: 'hidden' });
+  await table.getByText('ivy@example.com', { exact: true }).waitFor({ state: 'hidden' });
   stale.release.resolve();
   await stale.finished.promise;
   await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-  assert.equal(await page.getByText(/active\. Expires/).count(), 0);
-  assert.equal(await page.getByRole('button', { name: 'Revoke link', exact: true }).isDisabled(), true);
+  assert.equal(await table.getByText('ivy@example.com', { exact: true }).count(), 0);
+  // More than one page of open invites.
   invitations = Array.from({ length: 101 }, (_, index) => ({
     id: randomUUID(),
     kind: 'email',
@@ -476,39 +456,20 @@ try {
     status: 'active',
   }));
   await page.reload();
-  await page.getByRole('tab', { name: 'Invitations', exact: true }).click();
-  await page.getByRole('button', { name: 'Load older invitations', exact: true }).waitFor();
-  assert.equal(await page.getByText('invite-100@example.com', { exact: true }).count(), 0);
-  invitationReadFails = true;
-  await page.getByRole('button', { name: 'Load older invitations', exact: true }).click();
-  // Failed reads retry before reporting (src/lib/query/policy.ts:15), so wait for this list's own error rather than any alert already on the page.
-  await page.getByRole('alert').filter({ hasText: 'Could not refresh invitations.' }).waitFor();
-  assert.equal(await page.getByText('invite-0@example.com', { exact: true }).count(), 1);
-  invitationReadFails = false;
-  await page.getByRole('button', { name: 'Load older invitations', exact: true }).click();
-  const olderRow = page
-    .getByRole('listitem')
-    .filter({ has: page.getByText('invite-100@example.com', { exact: true }) });
-  await olderRow.waitFor();
-  invitationReadFails = true;
-  await olderRow.getByRole('button', { name: 'Revoke link', exact: true }).click();
-  await olderRow.getByRole('button', { name: 'Confirm revoke', exact: true }).click();
-  await page.getByRole('alert', { includeHidden: true }).first().waitFor();
-  assert.equal(await olderRow.getByRole('button', { name: 'Revoke link', exact: true }).isDisabled(), true);
-  invitationReadFails = false;
-  await workspaceChange(page, workspaceId, 'ada', [['governance', 'invitations']]);
-  await olderRow.getByText(/revoked\. Expires/).waitFor();
-  assert.equal(await page.getByRole('button', { name: 'Revoke link', exact: true }).count(), 101);
+  await page.getByRole('button', { name: 'Show more invites', exact: true }).waitFor();
+  assert.equal(await table.getByText('invite-100@example.com', { exact: true }).count(), 0);
+  await page.getByRole('button', { name: 'Show more invites', exact: true }).click();
+  await table.getByText('invite-100@example.com', { exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Show more invites', exact: true }).waitFor({ state: 'hidden' });
   ownReadStatus = 503;
   invitationReadStatus = 404;
   await workspaceChange(page, workspaceId, 'ada', [['governance', 'invitations']]);
-  await page.getByRole('heading', { name: 'Could not load workspace access' }).waitFor();
-  assert.equal(await page.getByRole('heading', { name: 'Invitations', exact: true }).count(), 0);
-  assert.equal(await page.getByRole('button', { name: 'Make member', exact: true }).count(), 0);
+  await page.getByRole('heading', { name: 'Couldn’t load workspace access' }).waitFor({ timeout: 60_000 });
+  assert.equal(await page.getByRole('table', { name: 'Workspace members' }).count(), 0);
   ownReadStatus = 200;
   invitationReadStatus = 200;
-  await page.getByRole('button', { name: 'Retry loading' }).click();
-  await page.getByRole('heading', { name: 'Invitations', exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Try again', exact: true }).click();
+  await table.waitFor();
   await page.goto(`${origin}/invite#${invitationToken}`);
   await page.waitForURL(`${origin}/acme`);
   assert.equal(redemptions, 1);
@@ -553,7 +514,7 @@ try {
   assert.equal(redemptions, 4);
   assert.deepEqual(errors, []);
   process.stdout.write(
-    'Governance browser checks passed. Read recovery, aborted refresh reset, immutable uncertain team retries and reconciliation, duplicate writes, explicit grants, queued grant cancellation and failure, mobile dark mode, keyboard, access loss, invitation pagination/retry, stale read cancellation, confirmed revoke retained after refresh failure, create/revoke/join, signed-out invitation sign-in.\n',
+    'Governance browser checks passed. Read recovery, stale access blocking changes, immutable uncertain team retries, duplicate writes, team policies and unconfirmed policy saves, mobile dark mode, keyboard, access loss, invite rows with copy, resend and revoke, stale read cancellation, invite pagination, create/revoke/join, signed-out invitation sign-in.\n',
   );
 } catch (e) {
   const p = browser?.contexts()[0]?.pages()[0];

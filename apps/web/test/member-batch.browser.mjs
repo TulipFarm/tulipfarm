@@ -50,7 +50,7 @@ try {
   const memberTables = createMemberTablesMock(
     workspaceId,
     null,
-    ['first', 'lost', 'bob', 'pending', 'limited', 'denied', 'stopped', 'never'].map(name => ({
+    ['first', 'lost', 'joined', 'pending', 'renew', 'limited', 'denied', 'stopped', 'never'].map(name => ({
       name,
       contactEmail: `${name}@example.com`,
     })),
@@ -64,8 +64,8 @@ try {
       { id: bobId, userId: 'bob', name: 'Bob', email: 'bob@example.com', role: 'member' },
     ],
     directory: [
-      { id: actorId, name: 'Ada', email: 'ada@example.com', image: null },
-      { id: bobId, name: 'Bob', email: 'bob@example.com', image: null },
+      { id: actorId, name: 'Ada', email: 'ada@example.com', image: null, role: 'admin' },
+      { id: bobId, name: 'Bob', email: 'bob@example.com', image: null, role: 'member' },
     ],
     teams: [
       {
@@ -99,7 +99,20 @@ try {
   let peak = 0;
   const attempts = [];
   const receipts = new Map();
-  let items = [];
+  const invitation = (email, status = 'active') => ({
+    id: randomUUID(),
+    workspaceMemberId: randomUUID(),
+    kind: 'email',
+    email,
+    expiresAt: '2026-10-04T00:00:00.000Z',
+    status,
+    canCopy: status === 'active',
+    delivery: 'pending',
+    role: 'member',
+    teams: [],
+    policies: [],
+  });
+  let items = [invitation('renew@example.com')];
   let dropAccess = false;
   let membershipWrites = 0;
   let loseResend = true;
@@ -147,10 +160,12 @@ try {
     } else if (path.endsWith('/governance')) json = snapshot;
     else if (path.endsWith('/invitations') && request.method() === 'GET') {
       status = listFails ? 503 : 200; // The API filters invitations before pagination since cloud b68e3b61 (#899), src/features/governance/invitations.ts:29.
-      const search = new URL(request.url()).searchParams.get('search');
+      const params = new URL(request.url()).searchParams;
+      // The Members table asks only for open invites: the ones people haven't accepted or had revoked.
+      assert.equal(params.get('open'), 'true');
       json = listFails
         ? { error: 'unavailable' }
-        : { items: search ? items.filter(item => item.email.includes(search)) : items, nextCursor: null };
+        : { items: items.filter(item => item.status === 'active' || item.status === 'expired'), nextCursor: null };
     } else if (path.endsWith('/invitations') && request.method() === 'POST') {
       const command = request.postDataJSON();
       attempts.push(command);
@@ -169,21 +184,21 @@ try {
       } else {
         if (!receipts.has(command.requestId)) {
           assert.ok(command.workspaceMemberId);
-          const item = {
-            id: randomUUID(),
-            workspaceMemberId: command.workspaceMemberId,
-            kind: 'email',
-            email: command.email,
-            expiresAt: '2026-10-04T00:00:00.000Z',
-            status: 'active',
-            canCopy: true,
-            delivery: 'pending',
-          };
+          assert.deepEqual(
+            { role: command.role, teams: command.teams, policies: command.policies },
+            { role: 'member', teams: [], policies: [] },
+          );
+          const item = { ...invitation(command.email), workspaceMemberId: command.workspaceMemberId };
+          const previous = items.find(item => item.email === command.email && item.status === 'active');
           const result =
-            command.email === 'bob@example.com'
+            command.email === 'joined@example.com'
               ? { outcome: 'already-member' }
-              : { outcome: command.email === 'pending@example.com' ? 'pending' : 'created', invitation: item };
+              : {
+                  outcome: command.email === 'pending@example.com' ? 'pending' : previous ? 'updated' : 'created',
+                  invitation: item,
+                };
           receipts.set(command.requestId, result);
+          if (previous) Object.assign(previous, { status: 'revoked', canCopy: false });
           if (result.invitation) items.push(item);
         }
         json = receipts.get(command.requestId);
@@ -224,9 +239,11 @@ try {
       json = { url: `${origin}/invite?token=${workspaceId}.${'a'.repeat(43)}` };
     } else {
       membershipWrites++;
-      const member = snapshot.members.find(member => path.includes(member.id));
-      if (path.endsWith('/role')) member.role = request.postDataJSON().role;
-      else snapshot.members = snapshot.members.filter(member => !path.endsWith(member.id));
+      for (const list of ['members', 'directory']) {
+        const member = snapshot[list].find(member => path.includes(member.id));
+        if (path.endsWith('/role')) member.role = request.postDataJSON().role;
+        else snapshot[list] = snapshot[list].filter(member => !path.endsWith(member.id));
+      }
       json = { ok: true };
     }
     await route.fulfill({
@@ -235,101 +252,103 @@ try {
       headers: { 'access-control-allow-origin': origin, 'access-control-allow-credentials': 'true' },
     });
   });
+  const status = page.getByRole('status').filter({ hasNotText: 'Loading' }).first();
+  const actions = name => page.getByRole('button', { name: `Actions for ${name}`, exact: true });
+  const confirm = page.getByRole('alertdialog');
   await page.goto(`${origin}/acme/members`);
-  await page.getByLabel('Search members').fill('Operations');
-  assert.equal(await page.getByText('bob@example.com', { exact: true }).count(), 1);
+  const search = page.getByLabel('Search by name or email');
+  await search.fill('absent');
+  await page.getByRole('heading', { name: 'No one matches that search' }).waitFor();
+  await search.fill('bob');
+  await page.getByText('bob@example.com', { exact: true }).waitFor();
   assert.equal(await page.getByText('ada@example.com', { exact: true }).count(), 0);
-  await page.getByLabel('Search members').fill('absent');
-  await page.getByRole('heading', { name: 'No members match' }).waitFor();
-  // The empty state's Clear search button, not the search field's icon button of the same name.
-  await page.getByRole('button', { name: 'Clear search' }).filter({ hasText: 'Clear search' }).click();
-  assert.equal(await page.getByRole('button', { name: 'Make member', exact: true }).isDisabled(), true);
-  await page.getByRole('button', { name: 'Make admin', exact: true }).click();
+  await search.fill('');
+  // Only admin: Ada's own role can't be dropped, and the table says why.
+  await page.getByText('Only admin', { exact: true }).waitFor();
+  await actions('Bob').click();
+  await page.getByRole('menuitem', { name: 'Make Bob an admin', exact: true }).click();
+  await confirm.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await confirm.waitFor({ state: 'hidden' });
   assert.equal(membershipWrites, 0);
-  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
-  await page.getByRole('button', { name: 'Make admin', exact: true }).click();
-  await page.getByRole('button', { name: 'Confirm role change' }).click();
-  await page.getByRole('dialog').waitFor({ state: 'hidden' });
+  await actions('Bob').click();
+  await page.getByRole('menuitem', { name: 'Make Bob an admin', exact: true }).click();
+  await confirm.getByRole('button', { name: 'Make admin', exact: true }).click();
+  await confirm.waitFor({ state: 'hidden' });
   assert.equal(snapshot.members[1].role, 'admin');
-  await page.getByRole('button', { name: 'Remove access for Bob', exact: true }).click();
-  await page.getByRole('button', { name: 'Confirm removal' }).click();
-  await page.getByRole('dialog').waitFor({ state: 'hidden' });
+  await actions('Bob').click();
+  await page.getByRole('menuitem', { name: 'Remove Bob from workspace', exact: true }).click();
+  await confirm.getByText('including Operations', { exact: false }).waitFor();
+  await confirm.getByRole('button', { name: 'Remove from workspace', exact: true }).click();
+  await confirm.waitFor({ state: 'hidden' });
   assert.equal(snapshot.members.length, 1);
-  await page.getByRole('button', { name: 'Invite members', exact: true }).click();
-  const dialog = page.getByRole('dialog');
-  const input = dialog.getByRole('combobox', { name: 'Email addresses', exact: true });
-  const chips = dialog.locator('[data-slot="combobox-chip"]');
-  const fillEmails = async value => {
-    await input.focus();
-    while ((await chips.count()) > 0) await page.keyboard.press('Backspace');
-    await input.fill(value);
-  };
-  await fillEmails('FIRST@example.com, first@example.com, invalid');
-  await page.getByRole('button', { name: 'Send invitations', exact: true }).click();
-  await page.getByText('Check invalid. It is not a valid email address.').waitFor();
+  // The pending invite is a row of its own, with its expiry.
+  await page.getByText('renew@example.com', { exact: true }).waitFor();
+  await page.getByText('Pending', { exact: true }).waitFor();
+
+  await page.getByRole('link', { name: 'Invite members', exact: true }).click();
+  const form = page.getByRole('form', { name: 'Invite members' });
+  const input = form.getByRole('combobox', { name: 'Email addresses', exact: true });
+  const chips = form.locator('[data-slot="combobox-chip"]');
+  const chipTexts = async () => (await chips.allInnerTexts()).map(text => text.split(',')[0].trim());
+  await input.waitFor();
+  await input.fill('FIRST@example.com, first@example.com, invalid');
+  await form.getByText('invalid isn’t a valid email address.', { exact: true }).waitFor();
+  await form.getByText('Already in the list: first@example.com.', { exact: true }).waitFor();
   assert.equal(attempts.length, 0);
-  assert.equal(await dialog.getByRole('combobox', { name: 'Workspace member', exact: true }).count(), 0);
-  assert.deepEqual(await chips.allInnerTexts(), ['first@example.com']);
+  assert.deepEqual(await chipTexts(), ['first@example.com']);
   await input.fill('');
-  await fillEmails(
-    'FIRST@example.com, first@example.com, lost@example.com, bob@example.com, pending@example.com, limited@example.com,',
-  );
-  await page.getByText('Already added: first@example.com.', { exact: true }).waitFor();
-  await page.getByRole('button', { name: 'Send invitations', exact: true }).dblclick();
-  await page.getByRole('button', { name: 'Send invitations', exact: true }).waitFor();
-  assert.equal(attempts.length, 5);
+  await input.fill('ada@example.com,');
+  await form.getByText('Already a member: ada@example.com. They won’t be invited.', { exact: true }).waitFor();
+  await input.fill('renew@example.com,');
+  await form.getByText('Already invited: renew@example.com.', { exact: false }).waitFor();
+  await input.fill('lost@example.com, joined@example.com, pending@example.com, limited@example.com,');
+  await form.getByText('6 people will join as Member.', { exact: true }).waitFor();
+  await form.getByRole('button', { name: 'Invite 6 people', exact: true }).dblclick();
+  const failures = form.getByRole('alert').filter({ hasText: 'Couldn’t invite' });
+  await failures.waitFor();
+  assert.equal(attempts.filter(command => command.email === 'ada@example.com').length, 0, 'members are skipped');
+  assert.equal(new Set(attempts.map(command => command.requestId)).size, attempts.length, 'no double submit');
+  assert.equal(attempts.length, 6);
   assert.equal(peak, 2);
-  const results = dialog.getByRole('region', { name: 'Invitation results' });
-  assert.equal(
-    await results.getByRole('status').innerText(),
-    '1 invitation sent. 1 person was already invited. 1 person is already a member.',
-  );
-  assert.deepEqual(await results.getByRole('alert').allInnerTexts(), [
-    '1 not sent: not confirmed, retrying is safe.',
-    '1 not sent: hourly limit reached, try again later.',
+  await status.getByText('Invited first@example.com and pending@example.com as Member.', { exact: false }).waitFor();
+  await status
+    .getByText('Replaced the pending invite for renew@example.com. They’ll join as Member.', { exact: false })
+    .waitFor();
+  await status.getByText('joined@example.com is already a member.', { exact: false }).waitFor();
+  assert.deepEqual(await failures.getByRole('listitem').allInnerTexts(), [
+    'lost@example.com: we couldn’t confirm the invite. Trying again won’t create a duplicate',
+    'limited@example.com: the hourly invite limit was reached; try again later',
   ]);
-  assert.deepEqual(await chips.allInnerTexts(), ['lost@example.com', 'limited@example.com']);
-  await page.getByRole('button', { name: 'Retry invitation for lost@example.com', exact: true }).click();
-  await results.getByText('2 invitations sent.', { exact: false }).waitFor();
-  assert.deepEqual(
-    attempts.filter(item => item.email === 'lost@example.com')[0],
-    attempts.filter(item => item.email === 'lost@example.com')[1],
-  );
-  await page.keyboard.press('Escape');
-  await dialog.waitFor({ state: 'hidden' });
-  await page.waitForFunction(() => document.activeElement?.textContent === 'Invite members');
-  assert.equal(
-    await page
-      .getByRole('button', { name: 'Invite members', exact: true })
-      .evaluate(button => button === document.activeElement),
-    true,
-  );
-  await page.getByRole('button', { name: 'Invite members', exact: true }).click();
-  assert.equal(await chips.count(), 0, 'closing starts a fresh draft');
-  assert.equal(await results.count(), 0, 'closing clears results');
-  await page.keyboard.press('Escape');
-  await dialog.waitFor({ state: 'hidden' });
-  await page.getByRole('tab', { name: 'Invitations', exact: true }).click();
+  assert.deepEqual(await chipTexts(), ['ada@example.com', 'lost@example.com', 'limited@example.com']);
+  await form.getByRole('button', { name: 'Invite 2 people', exact: true }).click();
+  await failures.getByText('limited@example.com', { exact: false }).waitFor();
+  await page.waitForFunction(() => !document.body.innerText.includes('lost@example.com: '));
+  const lost = attempts.filter(item => item.email === 'lost@example.com');
+  assert.equal(lost.length, 2);
+  assert.deepEqual(lost[0], lost[1], 'a retry repeats the same request so it cannot duplicate');
+  if (process.env.BATCH_SCREENSHOT_DIR)
+    await page.screenshot({ path: `${process.env.BATCH_SCREENSHOT_DIR}/members-invite-page.png`, fullPage: true });
+  await form.getByRole('link', { name: 'Cancel', exact: true }).click();
+
+  const table = page.getByRole('table', { name: 'Workspace members' });
+  await table.getByText('lost@example.com', { exact: true }).waitFor();
+  assert.equal(await table.getByText('renew@example.com', { exact: true }).count(), 1, 'a replaced invite is one row');
   listFails = true;
   await invitationsChanged();
-  await page.getByRole('alert').waitFor();
-  assert.equal(await page.getByText('first@example.com', { exact: true }).count(), 1);
+  await page.getByText('Pending invites couldn’t load.', { exact: false }).waitFor();
   listFails = false;
-  await invitationsChanged();
-  await page.getByLabel('Search invitations').fill('absent');
-  await page.getByRole('heading', { name: 'No invitations match' }).waitFor();
-  // The empty state's Clear search button, not the search field's icon button of the same name.
-  await page.getByRole('button', { name: 'Clear search' }).filter({ hasText: 'Clear search' }).click();
+  await page.getByRole('button', { name: 'Try again', exact: true }).click();
+  await page.getByText('Pending invites couldn’t load.', { exact: false }).waitFor({ state: 'hidden' });
   await page.evaluate(() => {
     Object.defineProperty(navigator, 'clipboard', {
       value: { writeText: () => Promise.reject(new Error('denied')) },
       configurable: true,
     });
   });
-  const row = page.getByRole('listitem').filter({ has: page.getByText('first@example.com', { exact: true }) });
-  await row.getByRole('button', { name: 'Copy link', exact: true }).click();
-  await row.getByText('Clipboard unavailable.', { exact: false }).waitFor();
-  assert.ok((await row.getByLabel('Invitation link').inputValue()).includes('/invite?token='));
+  await actions('first@example.com').click();
+  await page.getByRole('menuitem', { name: 'Copy invite link for first@example.com', exact: true }).click();
+  await status.getByText('Couldn’t copy the link. Invite link for first@example.com:', { exact: false }).waitFor();
+  assert.ok((await status.innerText()).includes('/invite?token='));
   for (const theme of ['light', 'dark']) {
     await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
@@ -339,62 +358,41 @@ try {
         fullPage: true,
       });
   }
-  await page.getByRole('button', { name: 'Invite members', exact: true }).click();
-  if (process.env.BATCH_SCREENSHOT_DIR)
-    await page.screenshot({ path: `${process.env.BATCH_SCREENSHOT_DIR}/members-batch-dialog.png`, fullPage: true });
-  await page.keyboard.press('Escape');
-  await dialog.waitFor({ state: 'hidden' });
-  const invitationRow = email => page.getByRole('listitem').filter({ has: page.getByText(email, { exact: true }) });
-  await invitationRow('lost@example.com').getByRole('button', { name: 'Resend', exact: true }).click();
-  await invitationRow('lost@example.com').getByRole('button', { name: 'Confirm resend', exact: true }).click();
-  await invitationRow('lost@example.com').getByRole('alert').waitFor();
-  await invitationsChanged();
-  await invitationRow('lost@example.com').getByRole('button', { name: 'Retry resend', exact: true }).click();
-  await invitationRow('lost@example.com').getByRole('button', { name: 'Confirm resend', exact: true }).click();
-  await invitationRow('lost@example.com').getByRole('button', { name: 'Copy link', exact: true }).first().waitFor();
+  await actions('lost@example.com').click();
+  await page.getByRole('menuitem', { name: 'Resend invite to lost@example.com', exact: true }).click();
+  await confirm.getByRole('button', { name: 'Resend invite', exact: true }).click();
+  await confirm.getByText('We couldn’t confirm this change.', { exact: false }).waitFor();
+  await confirm.getByRole('button', { name: 'Resend invite', exact: true }).click();
+  await confirm.waitFor({ state: 'hidden' });
+  await status.getByText('Resending the invite to lost@example.com. Their old link no longer works.').waitFor();
   assert.deepEqual(resendAttempts[1], resendAttempts[0]);
   assert.equal(items.filter(item => item.email === 'lost@example.com').length, 2);
-  await row.getByRole('button', { name: 'Revoke link', exact: true }).click();
-  await row.getByRole('button', { name: 'Confirm revoke', exact: true }).click();
-  await row.getByText(/revoked\. Expires/).waitFor();
-  assert.equal(await row.getByRole('button', { name: 'Copy link', exact: true }).count(), 0);
-  assert.equal(await row.getByRole('button', { name: 'Resend', exact: true }).count(), 0);
-  assert.equal(await row.getByRole('button', { name: 'Revoke link', exact: true }).isDisabled(), true);
+  assert.equal(await table.getByText('lost@example.com', { exact: true }).count(), 1);
+  await actions('first@example.com').click();
+  await page.getByRole('menuitem', { name: 'Revoke invite for first@example.com', exact: true }).click();
+  await confirm.getByRole('button', { name: 'Revoke invite', exact: true }).click();
+  await confirm.waitFor({ state: 'hidden' });
+  await status.getByText('Revoked the invite for first@example.com. Their link no longer works.').waitFor();
+  await table.getByText('first@example.com', { exact: true }).waitFor({ state: 'hidden' });
   const pendingInvitation = items.find(item => item.email === 'pending@example.com');
   pendingInvitation.status = 'consumed';
   pendingInvitation.canCopy = false;
   await invitationsChanged();
-  await page.getByText(/consumed\. Expires/).waitFor();
-  assert.equal(
-    await invitationRow('pending@example.com').getByRole('button', { name: 'Copy link', exact: true }).count(),
-    0,
-  );
-  assert.equal(
-    await invitationRow('pending@example.com').getByRole('button', { name: 'Resend', exact: true }).count(),
-    0,
-  );
-  await page.getByRole('button', { name: 'Invite members', exact: true }).click();
-  await fillEmails('denied@example.com, stopped@example.com, never@example.com,');
+  await table.getByText('pending@example.com', { exact: true }).waitFor({ state: 'hidden' });
+
+  await page.getByRole('link', { name: 'Invite members', exact: true }).click();
+  await input.fill('denied@example.com, stopped@example.com, never@example.com,');
   dropAccess = true;
-  await page.getByRole('button', { name: 'Send invitations', exact: true }).click();
-  await page.getByText('Admin access is unavailable.', { exact: false }).waitFor();
-  await results.getByText('3 not sent: admin access was lost.', { exact: true }).waitFor();
-  assert.equal(await page.getByLabel('Search members').count(), 0);
-  assert.equal(await page.getByLabel('Search invitations').count(), 0);
-  assert.equal(await dialog.getByRole('button', { name: 'Copy link', exact: true }).count(), 0);
-  assert.deepEqual(await chips.allInnerTexts(), ['denied@example.com', 'stopped@example.com', 'never@example.com']);
-  assert.equal(attempts.filter(command => command.email === 'never@example.com').length, 0);
-  await page.keyboard.press('Escape');
-  await dialog.waitFor({ state: 'hidden' });
+  await form.getByRole('button', { name: 'Invite 3 people', exact: true }).click();
   // Reads retry 5xx before showing an error (cloud src/lib/query/policy.ts:15); recover only after the error is shown.
-  await page.getByRole('button', { name: 'Retry loading' }).waitFor();
+  await page.getByRole('button', { name: 'Try again', exact: true }).waitFor({ timeout: 60_000 });
+  assert.equal(attempts.filter(command => command.email === 'never@example.com').length, 0);
   ownFails = false;
-  await page.getByRole('button', { name: 'Retry loading' }).click();
-  await page.getByRole('heading', { name: 'My membership' }).waitFor();
-  assert.equal(await page.getByRole('tab', { name: 'Invitations', exact: true }).count(), 0);
+  await page.getByRole('button', { name: 'Try again', exact: true }).click();
+  await page.getByText('Only admins can invite people to this workspace.', { exact: true }).waitFor();
   assert.deepEqual(errors, []);
   process.stdout.write(
-    'Member batch browser checks passed. Search, final admin, confirmations, parsing, partial outcomes, stable retry, bounded concurrency, clipboard recovery, dialog focus, narrow themes, and access-loss draft retention.\n',
+    'Member batch browser checks passed. Search, final admin, confirmations, parsing, member and re-invite flags, partial outcomes, stable retry, bounded concurrency, invite rows, clipboard recovery, narrow themes and access loss.\n',
   );
 } finally {
   await browser?.close();
