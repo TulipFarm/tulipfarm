@@ -3,28 +3,11 @@ import { withHuman } from './saved-policy.ts';
 import { relation, type AgentStorage } from './store.ts';
 import { directChatRowLimit, rowsAlreadyWrittenSchema, type rowReviewReasonSchema } from './draft-contracts.ts';
 import type { z } from 'zod';
+import { namesTable } from './chat-table-lookup.ts';
 
 type RowReviewReason = z.infer<typeof rowReviewReasonSchema>;
 type RowsAlreadyWritten = z.infer<typeof rowsAlreadyWrittenSchema>;
-export { directChatRowLimit };
-
-const words = (text: string) =>
-  text
-    .normalize('NFKC')
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}]+/gu, ' ')
-    .trim();
-
-/** Whether a table title appears in the chat, ignoring case, punctuation and a plural "s". */
-export function namesTable(texts: readonly string[], label: string) {
-  const name = words(label);
-  if (!name) return false;
-  const names = name.endsWith('s') && name.length > 1 ? [name, name.slice(0, -1).trimEnd()] : [name];
-  return texts.some(text => {
-    const padded = ` ${words(text)} `;
-    return names.some(candidate => padded.includes(` ${candidate} `) || padded.includes(` ${candidate}s `));
-  });
-}
+export { directChatRowLimit, namesTable };
 
 type EarlierWrite = { tool: string; call: unknown; output: unknown; drafted: boolean };
 const record = (value: unknown): Record<string, unknown> =>

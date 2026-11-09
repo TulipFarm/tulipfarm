@@ -38,6 +38,7 @@ import {
   agentStaleRevisionSchema,
 } from './record-contracts.ts';
 import { readableTableFiles } from './table-sources.ts';
+import { matchesTableName } from './chat-table-lookup.ts';
 import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import { createRecordBatchSchema } from './contracts.ts';
 import { visiblePage } from './visible-page.ts';
@@ -447,9 +448,21 @@ export function createAgentRecordTools(runtime: AgentStorage, taskCapability?: o
     async list(
       workspaceId: string,
       actor: Actor,
-      input: { after?: string | undefined; limit?: number | undefined } = {},
+      input: {
+        after?: string | undefined;
+        limit?: number | undefined;
+        name?: string | undefined;
+        ids?: readonly string[] | undefined;
+      } = {},
     ) {
-      const query = z.object({ after: z.uuid().optional(), limit: z.int().min(1).max(100).default(25) }).parse(input);
+      const query = z
+        .object({
+          after: z.uuid().optional(),
+          limit: z.int().min(1).max(100).default(25),
+          name: z.string().trim().min(1).max(200).optional(),
+          ids: z.array(z.uuid()).optional(),
+        })
+        .parse(input);
       return runtime.transaction(workspaceId, commonCompatibility, async tx => {
         await lockAuthorization(tx);
         await resolveActor(tx, actor);
@@ -477,7 +490,8 @@ export function createAgentRecordTools(runtime: AgentStorage, taskCapability?: o
                 )
                 .map(item => item.assetId);
         const visible = [];
-        for (const id of [...new Set(ids)].sort()) {
+        const only = query.ids && new Set(query.ids);
+        for (const id of [...new Set(ids)].filter(id => !only || only.has(id)).sort()) {
           if (
             !(
               await tx.client.query(
@@ -495,11 +509,12 @@ export function createAgentRecordTools(runtime: AgentStorage, taskCapability?: o
               throw error;
           }
         }
-        const page = visible.filter(item => !query.after || item.id > query.after);
+        const named = query.name ? visible.filter(item => matchesTableName(query.name!, item.name)) : visible;
+        const page = named.filter(item => !query.after || item.id > query.after);
         const tables = page.slice(0, query.limit);
         return {
           tables,
-          total: visible.length,
+          total: named.length,
           nextCursor: page.length > query.limit ? (tables.at(-1)?.id ?? null) : null,
         };
       });

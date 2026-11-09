@@ -2056,6 +2056,48 @@ export function noCardReply(waiting = 0) {
   return `No new approval card was created in this reply. ${waiting === 1 ? 'A card' : `${waiting} cards`} from earlier in this chat ${waiting === 1 ? 'is' : 'are'} still waiting for your approval: approve or dismiss ${waiting === 1 ? 'it' : 'them'} there first.`;
 }
 
+const idWord = /\b(?:IDs?|Ids?)\b|\b(?:table|row) ids?\b|\bidentifiers?\b/;
+const asksPerson = /\?\s*$|\b(?:provide|share|give|send|tell|paste|enter|supply|need)\b/i;
+/**
+ * Why a reply that asks the person for a table ID must do more work: people know tables by name, and chat can find
+ * one by name. Decided without the completion model, which accepts such a question as a necessary clarification.
+ */
+export function tableIdQuestion(candidate: string) {
+  if (!/\btables?\b/i.test(candidate)) return undefined;
+  const asked = candidate
+    .split(/(?<=[.!?])\s+|\n+/)
+    .some(sentence => idWord.test(sentence) && asksPerson.test(sentence.trim()));
+  return asked
+    ? {
+        status: 'continue' as const,
+        reason:
+          'The reply asks the person for a table ID, but people know tables by name. Find the table with tables.definitions, passing the name they used as name, and continue. If none matches, say so and suggest close names; ask which table only by name or team.',
+      }
+    : undefined;
+}
+
+const asksAboutTable = (candidate: string) =>
+  candidate
+    .split(/(?<=[.!?])\s+|\n+/)
+    .some(sentence => /\btables?\b/i.test(sentence) && /\?\s*$/.test(sentence.trim()));
+const lookedUpTable = (items: readonly LoopItem[]) =>
+  items.some(item => item.kind === 'results' && item.results.some(result => tableLookupTools.has(result.name)));
+const tableLookupTools = new Set(
+  ['tables.definitions', 'tables.list', 'schema.inspect', 'schema.context'].map(nativeToolName),
+);
+/**
+ * Why a reply that asks the person about a table must do more work: no tool in this reply looked any table up, so the
+ * question may be about a table chat could have found by the name the person used.
+ */
+export function uncheckedTableQuestion(candidate: string, items: readonly LoopItem[]) {
+  if (!asksAboutTable(candidate) || lookedUpTable(items)) return undefined;
+  return {
+    status: 'continue' as const,
+    reason:
+      'The reply asks the person about a table without looking any table up. Find it with tables.definitions, passing the name they used as name, then continue or ask only what the result leaves open.',
+  };
+}
+
 type EvidenceEntry =
   | { kind: 'turn'; turn: ChatTextTurn }
   | { kind: 'model'; text: string; calls: { id: string; name: string; input: unknown }[] }
@@ -3248,9 +3290,14 @@ export async function inferWithTools(
         tools?.priorCalls || tools?.priorToolCalls?.length
           ? undefined
           : unbackedWriteClaim(candidate, wroteInReply(items));
+      const idAsked =
+        unbacked || writeUnbacked
+          ? undefined
+          : (tableIdQuestion(candidate) ?? uncheckedTableQuestion(candidate, items));
       if (
         !unbacked &&
         !writeUnbacked &&
+        !idAsked &&
         !workToolUsed &&
         !finalizing &&
         (pointsToWaitingCard(candidate, waiting) ||
@@ -3259,7 +3306,7 @@ export async function inferWithTools(
         recordChatCompletionCheck('skipped_no_tools');
         return accept();
       }
-      let checked: z.infer<typeof completionCheckSchema>['decision'] | undefined = unbacked ?? writeUnbacked;
+      let checked: z.infer<typeof completionCheckSchema>['decision'] | undefined = unbacked ?? writeUnbacked ?? idAsked;
       if (!checked) {
         report('finishing');
         try {
@@ -3335,6 +3382,8 @@ export async function inferWithTools(
       if (completionCorrections++ >= 2) {
         // A reply that keeps naming a card it did not make ends by pointing at the card that does wait, if any.
         if (unbacked || (cardClaimed && waiting && !cardInReply(items))) return finish(noCardReply(waiting), true);
+        // Asking the person which table, after looking tables up, writes nothing and is a safe place to stop.
+        if (idAsked || (asksAboutTable(candidate) && lookedUpTable(items))) return accept();
         throw new Error('model-incomplete-response');
       }
       items.push(
