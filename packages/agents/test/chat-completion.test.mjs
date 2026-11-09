@@ -8,6 +8,7 @@ import {
   noCardReply,
   unbackedCardClaim,
   unbackedImportClaim,
+  unbackedWriteClaim,
 } from '../src/inference.ts';
 import { completionEvaluation, evaluationMessages } from './completion-evaluation-fixture.mjs';
 import {
@@ -403,10 +404,48 @@ test('a reply that reports an action outcome is checked even without a tool call
     'I created 8 rows.',
     'I’ve proposed version 3 of the table.',
     'Your changes are ready for your review.',
+    'One row is now added to the Market Forest Stock table.',
+    'Lime 10 and Lemon 5 were successfully created.',
+    'Two rows have now been added.',
+    'Added one row.',
+    'Created two records.',
+    'Added Lime 10 to the table.',
   ])
     assert.equal(claimsActionOutcome(text), true, text);
-  for (const text of ['Hello. How can I help?', 'You are welcome.', 'A row is one item in a table.'])
+  for (const text of [
+    'Hello. How can I help?',
+    'You are welcome.',
+    'A row is one item in a table.',
+    'No rows have been added yet.',
+    'None of the rows were added.',
+    'Nothing was imported.',
+    '0 rows added.',
+    'Created by Dhruv, this table tracks stock.',
+  ])
     assert.equal(claimsActionOutcome(text), false, text);
+});
+
+test('a write claim with no write in this reply is sent back without the completion model', () => {
+  for (const text of [
+    'One row is now added to the Market Forest Stock table.',
+    'Added one row.',
+    'Two rows were successfully created in the table.',
+    'Done — 3 entries saved.',
+  ]) {
+    assert.equal(unbackedWriteClaim(text, false)?.status, 'continue', text);
+    assert.ok(unbackedWriteClaim(text, false).reason.length <= 240, text);
+    assert.equal(unbackedWriteClaim(text, true), undefined, text);
+  }
+  for (const text of [
+    'No rows have been added yet.',
+    'No table named migrate exists, so I added no rows.',
+    'The 9 rows were added earlier, when you approved the card.',
+    'The rows were added after you approved the card.',
+    'Should I add the row to the table?',
+    'Once you approve the card, the row will be added.',
+    'The approval card was created for 9 rows.',
+  ])
+    assert.equal(unbackedWriteClaim(text, false), undefined, text);
 });
 
 test('an import presented for review needs a pending proposal receipt from this reply', () => {
@@ -528,11 +567,10 @@ test('an unbacked import review is sent back without the completion model until 
   assert.deepEqual(outcomes, ['continue', 'done']);
 });
 
-test('a tool-free reply that claims rows were created is checked and sent back to do the work', async t => {
+test('a tool-free reply that claims rows were created is sent back to do the work', async t => {
   const outcomes = checkOutcomes(t);
   const replies = [
     nativeReply('azure', { text: '8 rows created.' }),
-    selectReply('azure', verdict('continue')),
     nativeReply('azure', { calls: [use('tables.definitions')] }),
     nativeReply('azure', { text: 'No table named migrate exists, so I added no rows.' }),
     selectReply('azure', verdict('blocked')),
@@ -554,10 +592,31 @@ test('a tool-free reply that claims rows were created is checked and sent back t
   assert.equal(result.text, 'No table named migrate exists, so I added no rows.');
   assert.deepEqual(executed, ['tables.definitions']);
   assert.equal(replies.length, 0);
-  const evidence = JSON.parse(requests[1].messages.at(-1).content);
-  assert.equal(evidence.candidate, '8 rows created.');
-  assert.match(requests[1].messages[0].content, /new review card, proposal or proposal version, approval, denial/);
+  assert.deepEqual(requests.map(isCompletionRequest), [false, false, false, true]);
+  assert.match(JSON.stringify(requests[1].messages), /no tool call in this reply wrote any/);
   assert.deepEqual(outcomes, ['continue', 'done']);
+});
+
+test('a reply that claims an outcome is not delivered when its check fails', async t => {
+  const outcomes = checkOutcomes(t);
+  const replies = [
+    nativeReply('azure', { text: 'The semicolon CSV import was denied.' }),
+    selectReply('azure', null),
+    nativeReply('azure', { text: 'I have not imported or denied anything yet. Which file should I import?' }),
+    selectReply('azure', verdict('waiting')),
+  ];
+  const requests = [];
+  t.mock.method(globalThis, 'fetch', async (_url, init) => {
+    requests.push(JSON.parse(init.body));
+    return Response.json(replies.shift());
+  });
+  const result = await inferWithTools(nativeRoutes.azure, [{ role: 'user', text: 'Import the semicolon CSV.' }], () =>
+    assert.fail('No tool expected'),
+  );
+  assert.equal(result.text, 'I have not imported or denied anything yet. Which file should I import?');
+  assert.equal(replies.length, 0);
+  assert.match(JSON.stringify(requests[2].messages), /could not be checked/);
+  assert.deepEqual(outcomes, ['error', 'done']);
 });
 
 test('a reply with a real tool call still runs the check, and continue starts another round', async t => {
