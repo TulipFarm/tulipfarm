@@ -265,6 +265,8 @@ export type ConversationReply = (input: {
   earlierMessages?: boolean;
   /** The images reader read this turn's files, so the model may call `files.read`. */
   chatFiles?: boolean;
+  /** Counts the requester's undecided review and approval cards in this chat, so a reply may point to one. */
+  waitingCards?: () => Promise<number>;
   retainedSources?: SourceDependency[];
   /** The sources streamed text may draw on besides tool results, read when the text is saved for a stop. */
   previewSources?: () => SourceDependency[];
@@ -1895,6 +1897,20 @@ export function createConversationExecutor(
         }
         return source.personalMemory;
       };
+      // Cards from earlier replies that still wait for the requester. Chat drafts, such as row cards, are read fresh;
+      // table and Google proposals keep their status from the start of the reply.
+      const earlierProposals =
+        source.tableProposals.filter(proposal => proposal.status === 'pending').length +
+        source.openGoogleProposals.filter(proposal => !proposal.approved).length;
+      const waitingCards = () =>
+        transaction(fence.workspaceId, async tx => {
+          const drafts = await tx.client.query<{ count: number }>(
+            `SELECT count(*)::int AS count FROM ${table(tx, 'tf_chat_authoring_drafts')} d WHERE d.conversation_id=$1 AND d.membership_id=$2 AND d.user_id=$3
+              AND NOT EXISTS (SELECT 1 FROM ${table(tx, 'tf_chat_authoring_decisions')} c WHERE c.draft_id=d.id)`,
+            [fence.conversationId, source.requester.membershipId, source.requester.userId],
+          );
+          return (drafts.rows[0]?.count ?? 0) + earlierProposals;
+        });
       const currentPersonalMemory = () =>
         staged('memory', () =>
           transaction(fence.workspaceId, async tx => {
@@ -2547,6 +2563,7 @@ export function createConversationExecutor(
             priorToolCalls: source.executionSteps.map(step => step.call),
             earlierMessages: refersToEarlierMessages(prepared),
             ...(images ? { chatFiles: true } : {}),
+            waitingCards,
             retainedSources: mergeSources(inheritedSources),
             previewSources: () => mergeSources([...inheritedSources, ...fileSources]),
             describedHandles,

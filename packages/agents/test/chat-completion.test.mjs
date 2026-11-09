@@ -446,7 +446,6 @@ test('a reply that presents an approval or review card needs a tool result in th
   const proposal = results('tables_propose', '{"id":"p","status":"pending"}');
   const written = results('rows_create', '{"record":{"id":"r","values":{}}}');
   const held = results('rows_create_batch', '{"error":"review-required","reason":"too-many-rows"}');
-  const undecided = results('rows_create', '{"error":"approval-pending","table":"Contacts"}');
   for (const text of [
     'I have prepared the first row but have no approval yet. Please approve the pending row creation card, then tell me to continue.',
     'I have prepared the first row for approval. The chat card for qa-rv5-m1 should now appear above this message.',
@@ -460,7 +459,6 @@ test('a reply that presents an approval or review card needs a tool result in th
     for (const items of [[], written, held]) assert.equal(unbackedCardClaim(text, items)?.status, 'continue', text);
     assert.equal(unbackedCardClaim(text, draft), undefined, text);
     assert.equal(unbackedCardClaim(text, proposal), undefined, text);
-    assert.equal(unbackedCardClaim(text, undecided), undefined, text);
   }
   for (const text of [
     'No approval card was created because the batch exceeded the 5-row limit.',
@@ -491,7 +489,7 @@ test('a reply that keeps claiming a card no tool made ends with a plain account 
     [{ role: 'user', text: 'Create the approval card for all 9 rows.' }],
     () => assert.fail('No tool expected'),
   );
-  assert.equal(result.text, noCardReply);
+  assert.equal(result.text, noCardReply());
   assert.equal(replies.length, 0);
   assert.ok(!requests.some(isCompletionRequest));
   assert.match(JSON.stringify(requests[1].messages), /no tool call in this reply created one/);
@@ -997,4 +995,77 @@ test('the completion check request stays within its model window however long th
   );
   assert.equal(result.text, 'Done.');
   assert.ok(Math.ceil(checked / 4) < window * 0.9, `${Math.ceil(checked / 4)} estimated tokens`);
+});
+
+test('while an earlier card still waits, a reply may point to it but not claim it made a new one', () => {
+  const undecided = [
+    {
+      kind: 'results',
+      results: [
+        {
+          id: 'c',
+          name: 'rows_create',
+          output: 'Untrusted tool result for x: {"error":"approval-pending"}',
+          error: false,
+        },
+      ],
+    },
+  ];
+  for (const text of [
+    'The review card is still waiting for your approval.',
+    'Yes. The review card for the 9 rows is ready. Approve it to write the rows.',
+    'A row change for Contacts is already waiting for approval on a card. Approve or dismiss that card first.',
+  ]) {
+    assert.equal(unbackedCardClaim(text, [])?.status, 'continue', text);
+    assert.equal(unbackedCardClaim(text, [], 1), undefined, text);
+    assert.equal(unbackedCardClaim(text, undecided), undefined, text);
+  }
+  for (const text of [
+    'I prepared a new review card for the Lime row.',
+    'A review card for the Lime 10 row now waits in the chat.',
+    'The approval card for Lime should now appear above this message.',
+  ]) {
+    assert.equal(unbackedCardClaim(text, [], 1)?.status, 'continue', text);
+    assert.equal(unbackedCardClaim(text, undecided)?.status, 'continue', text);
+  }
+  for (const waiting of [1, 2]) {
+    assert.doesNotMatch(noCardReply(waiting), /nothing/i);
+    assert.match(noCardReply(waiting), /still waiting for your approval/);
+  }
+});
+
+test('with a card still waiting, pointing to it ends the reply and a repeated new-card claim points to it', async t => {
+  const outcomes = checkOutcomes(t);
+  const replies = [nativeReply('azure', { text: 'The review card is still waiting for your approval.' })];
+  const requests = [];
+  t.mock.method(globalThis, 'fetch', async (_url, init) => {
+    requests.push(JSON.parse(init.body));
+    return Response.json(replies.shift());
+  });
+  const waiting = { waitingCards: async () => 1 };
+  const ready = await inferWithTools(
+    nativeRoutes.azure,
+    [{ role: 'user', text: 'Is it ready?' }],
+    () => assert.fail('No tool expected'),
+    undefined,
+    false,
+    null,
+    waiting,
+  );
+  assert.equal(ready.text, 'The review card is still waiting for your approval.');
+  assert.ok(!requests.some(isCompletionRequest));
+
+  const claim = 'I prepared a new review card for the Lime row.';
+  replies.push(...[1, 2, 3].map(() => nativeReply('azure', { text: claim })));
+  const more = await inferWithTools(
+    nativeRoutes.azure,
+    [{ role: 'user', text: 'Add one more row: Lime 10.' }],
+    () => assert.fail('No tool expected'),
+    undefined,
+    false,
+    null,
+    waiting,
+  );
+  assert.equal(more.text, noCardReply(1));
+  assert.deepEqual(outcomes, ['skipped_no_tools', 'continue', 'continue', 'continue']);
 });

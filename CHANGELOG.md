@@ -66,6 +66,11 @@ One version identifies all apps and images of a release.
 
 ### Fixed
 
+- A chat reply may again say that a card from earlier in the chat is still
+  waiting for approval. The card-claim check now counts the person's undecided
+  cards in the chat on the server and only stops a reply that says it made a
+  new card when none was made. When it does, the reply points to the card that
+  is still waiting instead of saying nothing is waiting.
 - A chat reply no longer says an approval or review card is ready, pending or
   about to appear unless a tool call in that reply made one. The server checks
   the reply against its own table and row results and sends it back to do the
