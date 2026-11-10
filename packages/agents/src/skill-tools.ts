@@ -50,7 +50,7 @@ export function createSkillTools(runtime: AgentStorage, bytes?: Pick<FileBytes, 
     instruction:
       view.status === 'installed'
         ? 'The exact package was installed by the human. Use the saved receipts; do not prepare it again.'
-        : 'Open this existing package review for its current state and warnings. AI review uses normal Credits. Only the human can install and enable it; chat text is not approval.',
+        : 'The skill review card is open. Its safety review may still be running. Tell the person to review this card when it is ready; do not say that no card was created. Only the human can install and enable it; chat text is not approval.',
   });
   async function draft(
     workspaceId: string,

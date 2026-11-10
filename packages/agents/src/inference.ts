@@ -2139,7 +2139,7 @@ export function reviewCardReceipt(name: string, value: unknown): CardReceipt | u
     return metadata(undefined, receipt.status);
   if (
     skillImportReviewTools.has(name) &&
-    receipt.status === 'ready' &&
+    (receipt.status === 'ready' || receipt.status === 'pending-review') &&
     typeof receipt.importId === 'string' &&
     receipt.importId
   )
@@ -3485,6 +3485,18 @@ export async function inferWithTools(
             result.reviewPending = pending.has(`${result.reviewCard.kind}:${result.reviewCard.id}`);
     return pending.size ? [...new Set(pending.values())].join('\n\n') : undefined;
   };
+  const skillReviewReply = () => {
+    const draft = items
+      .flatMap(item => (item.kind === 'results' ? item.results : []))
+      .reverse()
+      .find(result => result.name === nativeToolName('skills.draft') && madeCard(result));
+    const status = draft && cardResult(draft)?.status;
+    return status === 'ready'
+      ? "I've drafted the skill, and it's ready for your review. Check the card, then select **Install and enable**."
+      : status === 'pending-review'
+        ? "I've drafted the skill. When its safety review finishes, select **Install and enable** on the card."
+        : undefined;
+  };
   let toolRounds = 0;
   let decisionAt = { step: 0, round: 1 };
   const report = (status: ReplyStatus, tool?: string) => {
@@ -3513,7 +3525,7 @@ export async function inferWithTools(
     checked = false,
     layout?: { layout: ReplyRenderInput } | { layoutFailed: true },
   ) => {
-    const reviewReply = await tableReviewReply();
+    const reviewReply = (await tableReviewReply()) ?? skillReviewReply();
     return completeReply(reviewReply ?? text, checked || Boolean(reviewReply), reviewReply ? undefined : layout);
   };
   const updateAvatar = () => tools?.avatar?.update({ step: Math.max(0, requestStep - 1), avatar });
@@ -4328,7 +4340,7 @@ export async function inferWithTools(
         continue;
       }
       if (rendered) preview(rendered.input.summary);
-      const reviewReply = await tableReviewReply();
+      const reviewReply = (await tableReviewReply()) ?? skillReviewReply();
       if (reviewReply) {
         preview(reviewReply);
         recordChatCompletionCheck('done', 'readable review card receipt');

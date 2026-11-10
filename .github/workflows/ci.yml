@@ -96,6 +96,55 @@ jobs:
           TASK: ${{ matrix.task }}
         run: pnpm run "$TASK"
 
+  skill-authoring:
+    name: skill-authoring
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.2-pg18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: local-postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 3s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      TEST_ADMIN_DATABASE_URL: postgres://postgres:local-postgres@127.0.0.1:5432/postgres
+      XAI_API_KEY: synthetic-not-secret
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .node-version
+      - name: Install pnpm
+        run: npm install --global pnpm@11.5.3
+      - name: Cache pnpm store
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ~/.pnpm-store
+          key: pnpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pnpm-lock.yaml', '.node-version') }}
+          restore-keys: |
+            pnpm-${{ runner.os }}-${{ runner.arch }}-
+      - name: Install repository dependencies
+        run: pnpm install --frozen-lockfile --store-dir "$HOME/.pnpm-store"
+      - name: Create the local database roles
+        run: psql "$TEST_ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -f infra/postgres/init.sql
+      - name: Build skill authoring dependencies
+        run: pnpm --filter @tulipfarm/agents... build
+      - name: Check skill package authoring and recovery
+        run: |
+          pnpm --filter @tulipfarm/agents exec node --test --test-concurrency=1 test/skill-imports.integration.mjs
+          pnpm --filter @tulipfarm/conversations exec node --test --test-concurrency=1 --test-name-pattern='skill failures name|skill reads retry' test/integration/tool-errors.test.mjs
+
   # A release starts its code before workspace-rollout applies its common migrations to every workspace. This runs
   # chats and background jobs against a workspace one migration short, so a missing table (42P01) fails the build.
   behind-workspace:

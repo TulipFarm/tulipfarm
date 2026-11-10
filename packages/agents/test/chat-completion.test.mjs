@@ -1223,6 +1223,7 @@ test('every pending review-card family has an explicit receipt and excludes comp
     ['skills.import.status', { importId: 'import', status: 'ready' }],
     ['skills.import.select', { importId: 'import', status: 'ready' }],
     ['skills.draft', { importId: 'import', status: 'ready' }],
+    ['skills.draft', { importId: 'import', status: 'pending-review' }],
   ];
   const items = (tool, output) => [
     {

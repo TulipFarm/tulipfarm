@@ -208,8 +208,15 @@ const skillFailureReasons: Readonly<Record<string, string>> = {
   'import-expired': 'The skill review expired. Prepare a new review.',
 };
 function skillFailure(name: string, error: unknown) {
-  if (!name.startsWith('skills.') || error instanceof AccessDenied || error instanceof SourceAuthorizationUnavailable)
-    return null;
+  if (!name.startsWith('skills.') || error instanceof SourceAuthorizationUnavailable) return null;
+  if (error instanceof AccessDenied)
+    return name === 'skills.draft'
+      ? {
+          error: 'access-denied',
+          instruction:
+            'Tell the person: "I couldn\'t draft this skill because it uses a source that skills can\'t include. Try again, or select **Create manually** on the Skills page." Do not reveal which source caused the refusal or repeat the call in this reply.',
+        }
+      : null;
   const known = z.object({ name: z.literal('SkillPackageError'), code: z.string() }).safeParse(error);
   const code =
     error instanceof StorageUnavailableError

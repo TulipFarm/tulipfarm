@@ -10,6 +10,136 @@ import { createWorkspaceSkills } from '../src/workspace-skills.ts';
 import { buildSkillPackage } from '../src/skill-packages.ts';
 import { createSkillTools } from '../src/skill-tools.ts';
 import { createChatTools } from '../src/tools.ts';
+import { AccessDenied } from '@tulipfarm/access';
+import { createConversations } from '../../conversations/src/index.ts';
+import { createConversationExecutor } from '../../conversations/src/runtime.ts';
+import { createPersonalMemoryService } from '../../conversations/src/personal-memory.ts';
+import { memorySkillBytes, reviewSkillDraft, skillDraftImports } from './skill-draft-fixture.mjs';
+
+test('a chat can review and install its own memory-derived procedure without sharing its draft', async () => {
+  const db = await fixture();
+  let runtime;
+  try {
+    const w = await db.create(await workspaceTableMigrations());
+    runtime = createWorkspaceRuntime({
+      replicaCount: 1,
+      reservedConnections: 2,
+      databaseConnectionBudget: 20,
+      resolveCredential: async () => ({ workspaceId: w.id, generation: 1, connectionString: db.login(w) }),
+    });
+    const table = name => qualified(w.names.schema, name);
+    const actor = { kind: 'human', membershipId: w.membershipId, userId: w.userId };
+    const other = { kind: 'human', membershipId: randomUUID(), userId: randomUUID() };
+    await db.platform.query(`INSERT INTO ${table('tf_memberships')} (id,user_id,role) VALUES ($1,$2,'admin')`, [
+      other.membershipId,
+      other.userId,
+    ]);
+    const memory = createPersonalMemoryService(runtime);
+    const savedMemory = await memory.save(w.id, w.userId, {
+      content: 'Use a short weekly summary.',
+      expectedRevision: 0,
+    });
+    const bytes = memorySkillBytes();
+    const tools = createChatTools(runtime, { objects: { snapshots: bytes } });
+    const imports = skillDraftImports(runtime, bytes);
+    const objects = createSkillObjects(runtime, bytes);
+    const chats = createConversations(runtime);
+    const chatId = randomUUID();
+    await chats.create(w.id, w.userId, { chatId, commandId: randomUUID() });
+    const sent = await chats.send(w.id, w.userId, chatId, {
+      commandId: randomUUID(),
+      messageId: randomUUID(),
+      model: 'grok-fast',
+      parts: [{ kind: 'text', text: 'Create a weekly summary skill that lists completed work and next actions.' }],
+    });
+    const call = {
+      tool: 'skills.draft',
+      skillId: 'new',
+      input: {
+        expectedVersion: 0,
+        definition: {
+          name: 'Weekly summary',
+          description: 'Summarize weekly work.',
+          instructions: 'List completed work and next actions.',
+        },
+      },
+    };
+    let draft;
+    const executor = createConversationExecutor(runtime, async input => {
+      assert.equal((await input.readPersonalMemory()).content, 'Use a short weekly summary.');
+      draft = await input.executeTool('skills.draft', false, context =>
+        createChatTools(context.runtime, { objects: { snapshots: bytes } }).invokeWithSources(context, call),
+      );
+      assert.equal(draft.result.status, 'pending-review');
+      return { text: 'Review the proposed weekly summary skill.', sources: [] };
+    });
+    assert.equal(
+      await executor.process({ workspaceId: w.id, conversationId: chatId, turnId: sent.turnId, generation: 0 }),
+      'completed',
+    );
+    const id = draft.result.importId;
+    const view = await imports.read(w.id, actor, id);
+    assert.equal(view.candidates[0].definition.name, 'weekly-summary');
+    assert.equal(
+      view.candidates[0].definition.package.manifest.metadata.description,
+      call.input.definition.description,
+    );
+    const prepared = await objects.readPrepared(w.id, actor, id);
+    assert.match(Buffer.from(prepared.files[0].bytes).toString(), /name: "weekly-summary"/);
+    for (const name of ['tf_skill_imports', 'tf_skill_packages']) {
+      const { sources } = (await db.platform.query(`SELECT sources FROM ${table(name)} WHERE id=$1`, [id])).rows[0];
+      assert.ok(
+        sources.some(source => source.kind === 'personal-memory' && source.membershipId === actor.membershipId),
+      );
+    }
+    await assert.rejects(imports.read(w.id, other, id), AccessDenied);
+    await assert.rejects(objects.readPrepared(w.id, other, id), AccessDenied);
+    await assert.rejects(
+      tools.invoke(
+        {
+          workspaceId: w.id,
+          actor,
+          callId: randomUUID(),
+          origin: {
+            conversationId: chatId,
+            turnId: sent.turnId,
+            sources: [{ kind: 'personal-memory', membershipId: other.membershipId }],
+          },
+        },
+        call,
+      ),
+      AccessDenied,
+    );
+    const decision = await reviewSkillDraft(imports, w.id, actor, id);
+    await assert.rejects(imports.approve(w.id, other.userId, id, decision), AccessDenied);
+    const [receipt] = await imports.approve(w.id, w.userId, id, decision);
+    assert.equal(receipt.enabled, true);
+    assert.equal(receipt.activeRevision, receipt.savedRevision);
+    assert.equal((await imports.read(w.id, actor, id)).status, 'installed');
+    assert.deepEqual(await imports.approve(w.id, w.userId, id, decision), [receipt]);
+    await memory.delete(w.id, w.userId, { expectedRevision: savedMemory.revision });
+    await db.platform.query(`UPDATE ${table('tf_memberships')} SET role='member' WHERE id=$1`, [other.membershipId]);
+    await db.platform.query(
+      `INSERT INTO ${table('tf_skill_person_grants')} (skill_id,membership_id,permission) SELECT $1,$2,unnest(ARRAY['read','use'])`,
+      [receipt.id, other.membershipId],
+    );
+    const loaded = await tools.invoke(
+      { workspaceId: w.id, actor: other, callId: randomUUID() },
+      { tool: 'skills.load', skillId: receipt.id, revision: receipt.activeRevision },
+    );
+    assert.equal(loaded.loaded, true);
+    assert.equal(loaded.instructions, call.input.definition.instructions);
+    assert.ok(
+      (await createWorkspaceSkills(runtime).list(w.id, other, { view: 'reviewed' })).workspace.some(
+        skill => skill.id === receipt.id && skill.status === 'enabled',
+      ),
+    );
+    await assert.rejects(imports.read(w.id, other, id), AccessDenied);
+  } finally {
+    await runtime?.close();
+    await db.close();
+  }
+});
 
 test('imports preserve exact bytes, review only selected skills, and atomically install once', async () => {
   const db = await fixture();
