@@ -35,19 +35,21 @@ function TargetList({
   selected,
   toggle,
   label,
+  accountId,
 }: {
   api: AtlassianKnowledgeApi;
   cloudId: string;
   kind: DiscoverKind;
   within: string | null;
   label: string;
+  accountId?: string | undefined;
   selected: AtlassianTargetChoice[];
   toggle: (item: AtlassianTargetChoice, checked: boolean) => void;
 }) {
   const [cursors, setCursors] = useState<(string | null)[]>([null]);
   const cursor = cursors.at(-1) ?? null;
   const discovery = useFeatureRead({
-    key: [...atlassianSourceKeys, 'discover', cloudId, kind, within, cursor],
+    key: [...atlassianSourceKeys, 'discover', accountId ?? null, cloudId, kind, within, cursor],
     staleTime: 0,
     load: signal =>
       api.discover(cloudId, kind, within, cursor, signal).then(
@@ -136,11 +138,13 @@ function TargetList({
 export function AtlassianSelectionForm({
   api,
   product,
+  accountId,
   onSaved,
   onClose,
 }: {
   api: AtlassianKnowledgeApi;
   product: AtlassianProduct;
+  accountId?: string;
   onSaved: (source: AtlassianSource) => Promise<void>;
   onClose: () => void;
 }) {
@@ -155,7 +159,7 @@ export function AtlassianSelectionForm({
   const [attempted, setAttempted] = useState(false);
   const scope = useFeatureScope();
   const sites = useFeatureRead({
-    key: [...atlassianSourceKeys, 'sites'],
+    key: [...atlassianSourceKeys, 'sites', accountId ?? null],
     staleTime: 0,
     load: signal =>
       api.sites(signal).then(
@@ -169,7 +173,7 @@ export function AtlassianSelectionForm({
   });
   const site = cloudId ?? (sites.state.kind === 'ready' ? (sites.state.data.items[0]?.cloudId ?? null) : null);
   const spaces = useFeatureRead({
-    key: [...atlassianSourceKeys, 'discover', site, 'spaces', null, null],
+    key: [...atlassianSourceKeys, 'discover', accountId ?? null, site, 'spaces', null, null],
     staleTime: 0,
     enabled: product === 'confluence' && mode === 'pages' && !!site,
     load: signal => (site ? api.discover(site, 'spaces', null, null, signal) : Promise.reject(new Error('site'))),
@@ -223,6 +227,7 @@ export function AtlassianSelectionForm({
           if (command.locked || !selection?.success || !audienceReady) return;
           void command.send({
             commandId: crypto.randomUUID(),
+            ...(accountId ? { accountId } : {}),
             selection: selection.data,
             memberIds: shared ? memberIds : [],
           });
@@ -295,6 +300,7 @@ export function AtlassianSelectionForm({
                   {site && product === 'jira' && (
                     <TargetList
                       api={api}
+                      accountId={accountId}
                       cloudId={site}
                       kind="projects"
                       within={null}
@@ -306,6 +312,7 @@ export function AtlassianSelectionForm({
                   {site && product === 'confluence' && mode === 'spaces' && (
                     <TargetList
                       api={api}
+                      accountId={accountId}
                       cloudId={site}
                       kind="spaces"
                       within={null}
@@ -339,6 +346,7 @@ export function AtlassianSelectionForm({
                           {space && (
                             <TargetList
                               api={api}
+                              accountId={accountId}
                               cloudId={site}
                               kind="pages"
                               within={space}

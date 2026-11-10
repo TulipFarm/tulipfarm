@@ -62,7 +62,7 @@ export type SlackSource = z.infer<typeof sourceSchema>;
 export type SlackSelection = z.infer<typeof slackCorpusSelectionSchema>;
 export type SlackKind = z.infer<typeof slackCorpusKindSchema>;
 export type SlackConversationChoice = z.infer<typeof conversationSchema>;
-export type ConfigureSlack = { commandId: string; selection: SlackSelection; memberIds: string[] };
+export type ConfigureSlack = { commandId: string; selection: SlackSelection; memberIds: string[]; accountId?: string };
 export type ManageSlack = { commandId: string; action: 'pause' | 'resume' | 'retry' | 'remove' };
 export { slackCorpusSelectionSchema, slackCorpusKindSchema };
 

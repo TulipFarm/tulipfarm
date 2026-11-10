@@ -12,6 +12,8 @@ export async function googleProviderFixture() {
     text: 'orchid supplier confidential terms',
     omitted: false,
     mailDate: '2026-01-15',
+    extraFile: false,
+    extraMail: false,
   };
   const root = {
     id: 'root',
@@ -71,17 +73,30 @@ export async function googleProviderFixture() {
     if (state.denyReader && request.headers.authorization === 'Bearer reader-token')
       return json({ error: 'forbidden' }, 403);
     if (url.pathname === '/drive/v3/files/root') return json(root);
-    if (url.pathname === '/drive/v3/files/one') {
+    if (url.pathname === '/drive/v3/files/one' || (state.extraFile && url.pathname === '/drive/v3/files/two')) {
       if (url.searchParams.get('alt') === 'media') {
         response.writeHead(200, { 'content-type': 'text/plain' });
         return response.end(state.text);
       }
-      return json(file());
+      return json(
+        url.pathname.endsWith('/two')
+          ? { ...file(), id: 'two', name: 'Outside folder.txt', parents: ['outside'] }
+          : file(),
+      );
     }
     if (url.pathname === '/drive/v3/files') {
       if (state.listFailure) return json({ error: { errors: [{ reason: 'rateLimitExceeded' }] } }, 429);
       return json({
-        files: url.searchParams.get('q')?.includes("mimeType = '") ? [root] : state.omitted ? [] : [file()],
+        files: url.searchParams.get('q')?.includes("mimeType = '")
+          ? [root]
+          : state.omitted
+            ? []
+            : [
+                file(),
+                ...(state.extraFile && !url.searchParams.get('q')?.includes('in parents')
+                  ? [{ ...file(), id: 'two', name: 'Outside folder.txt', parents: ['outside'] }]
+                  : []),
+              ],
       });
     }
     if (url.pathname === '/drive/v3/drives') return json({ drives: [{ id: 'shared', name: 'Shared library' }] });
@@ -89,13 +104,22 @@ export async function googleProviderFixture() {
       return json({ emailAddress: 'fixture@example.test', historyId: '1' });
     if (url.pathname === '/gmail/v1/users/me/labels') return json({ labels: [{ id: 'INBOX', name: 'Inbox' }] });
     if (url.pathname === '/gmail/v1/users/me/labels/INBOX') return json({ id: 'INBOX', name: 'Inbox' });
-    if (url.pathname === '/gmail/v1/users/me/messages') return json({ messages: [{ id: 'mailone' }] });
-    if (url.pathname === '/gmail/v1/users/me/messages/mailone') {
+    if (url.pathname === '/gmail/v1/users/me/messages')
+      return json({
+        messages: [
+          { id: 'mailone' },
+          ...(state.extraMail && !url.searchParams.has('labelIds') ? [{ id: 'mailtwo' }] : []),
+        ],
+      });
+    if (
+      url.pathname === '/gmail/v1/users/me/messages/mailone' ||
+      (state.extraMail && url.pathname === '/gmail/v1/users/me/messages/mailtwo')
+    ) {
       const text = 'orchid mailbox delivery terms';
       return json({
-        id: 'mailone',
+        id: url.pathname.endsWith('/mailtwo') ? 'mailtwo' : 'mailone',
         threadId: 'threadone',
-        labelIds: ['INBOX'],
+        labelIds: url.pathname.endsWith('/mailtwo') ? ['OTHER'] : ['INBOX'],
         historyId: '1',
         internalDate: String(Date.parse(state.mailDate)),
         payload: {

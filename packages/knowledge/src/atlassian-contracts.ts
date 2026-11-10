@@ -172,6 +172,7 @@ export const atlassianKnowledgeWorkSchema = z.strictObject({
   generation: z.number().int().positive(),
 });
 export const atlassianKnowledgeDiscoverSchema = z.strictObject({
+  account: z.uuid().optional(),
   cloudId: z.uuid(),
   kind: z.enum(['spaces', 'pages', 'projects']),
   within: atlassianNumericIdSchema.optional(),

@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { assertDefaultSourceEnabled } from './default-source-policy.ts';
 import { performance } from 'node:perf_hooks';
 import { setTimeout as wait } from 'node:timers/promises';
 import type { EngineClock } from './rolling.ts';
@@ -547,6 +548,7 @@ export function createGitHubKnowledge({
       throw new GitHubCorpusError('invalid-selection');
     return memberTransaction(workspaceId, userId, async (tx, human) => {
       if (human.membershipId !== actor.membershipId) throw new AccessDenied();
+      await assertDefaultSourceEnabled(tx, input.commandId);
       if ((await tx.client.query(`SELECT 1 FROM ${table(tx, 'sources')} WHERE id=$1`, [input.commandId])).rowCount) {
         const prior = await manager(tx, human, input.commandId);
         if (prior.fingerprint !== fingerprint || prior.state === 'removed') throw new KnowledgeError('conflict');

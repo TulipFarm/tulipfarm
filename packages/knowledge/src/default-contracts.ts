@@ -29,7 +29,9 @@ export const defaultKnowledgeWorkSchema = z.strictObject({
   generation: z.number().int().positive(),
 });
 export type DefaultKnowledgeWork = z.infer<typeof defaultKnowledgeWorkSchema>;
-export const defaultKnowledgeManageSchema = z.strictObject({ action: z.enum(['opt-out', 'resume', 'retry']) });
+export const defaultKnowledgeManageSchema = z.strictObject({
+  action: z.enum(['opt-out', 'resume', 'retry', 'narrow']),
+});
 export const defaultKnowledgeCountsSchema = z.strictObject({
   total: z.number().int(),
   ready: z.number().int(),

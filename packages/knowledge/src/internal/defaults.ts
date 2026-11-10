@@ -440,6 +440,7 @@ export function createDefaultKnowledge({
   function atlassian(product: 'jira' | 'confluence', kind: 'projects' | 'spaces'): Adapter {
     return {
       groupSize: defaultKnowledgeLimits.groups.atlassian,
+      perAccount: true,
       async discover(ws, i, page) {
         const engine = required(engines.atlassian);
         const cursor = atlassianCursorSchema.parse(page ? JSON.parse(page) : { site: 0, page: null });
@@ -994,7 +995,45 @@ export function createDefaultKnowledge({
       }
     }
   }
-  /** Opt-out stops future automatic discovery only. Existing sources keep their own pause/remove controls and retention. */
+  async function changeSources(tx: Tx, i: Intent, action: 'opt-out' | 'resume' | 'narrow') {
+    const state = action === 'narrow' ? 'removed' : action === 'opt-out' ? 'paused' : 'active';
+    const prior =
+      action === 'narrow' ? ['active', 'paused', 'disconnected'] : [action === 'resume' ? 'paused' : 'active'];
+    const changed = await tx.client.query(
+      `UPDATE ${table(tx, 'sources')} s SET state=$3,access_epoch=access_epoch+CASE WHEN $3='removed' THEN 1 ELSE 0 END,
+      removed_at=CASE WHEN $3='removed' THEN clock_timestamp() ELSE removed_at END,
+      retain_until=CASE WHEN $3='removed' THEN clock_timestamp()+interval '30 days' ELSE retain_until END
+      WHERE s.owner_membership_id=$2 AND s.state=ANY($4::text[])
+      AND EXISTS (SELECT 1 FROM ${table(tx, 'default_sources')} d WHERE d.intent_id=$1 AND d.source_id=s.id) RETURNING s.id`,
+      [i.id, i.membership_id, state, prior],
+    );
+    const ids = changed.rows.map((row: { id: string }) => row.id);
+    if (ids.length) {
+      await tx.client.query(
+        `UPDATE ${table(tx, `${recovery[i.product].kind}_sources`)} SET generation=generation+1,lease_token=NULL,lease_until=NULL,
+        next_attempt_at=clock_timestamp(),sync_state=CASE WHEN sync_state='syncing' THEN 'queued' ELSE sync_state END WHERE source_id=ANY($1::uuid[])`,
+        [ids],
+      );
+      if (action === 'narrow') {
+        await tx.client.query(
+          `UPDATE ${table(tx, 'documents')} SET tombstoned_at=clock_timestamp(),retain_until=clock_timestamp()+interval '30 days',
+          lexical_publication_id=NULL,vector_publication_id=NULL WHERE source_id=ANY($1::uuid[])`,
+          [ids],
+        );
+        await tx.client.query(
+          `DELETE FROM ${table(tx, 'access_proofs')} WHERE document_id IN (SELECT id FROM ${table(tx, 'documents')} WHERE source_id=ANY($1::uuid[]))`,
+          [ids],
+        );
+      }
+    }
+    if (action === 'narrow')
+      await tx.client.query(
+        `UPDATE ${table(tx, 'default_sources')} SET state='failed',failure='excluded' WHERE intent_id=$1 AND state='planned'`,
+        [i.id],
+      );
+  }
+
+  /** Account controls affect only sources created by this intent, never the owner's hand-picked sources. */
   async function manage(workspaceId: string, userId: string, intentId: string, value: unknown) {
     denyMcpEgress();
     const input = defaultKnowledgeManageSchema.parse(value);
@@ -1006,11 +1045,12 @@ export function createDefaultKnowledge({
     };
     const planned = await memberTransaction(workspaceId, userId, async (tx, actor) => {
       const i = await owned(tx, actor);
-      if (input.action === 'opt-out') {
+      if (input.action === 'opt-out' || input.action === 'narrow') {
         await tx.client.query(
           `UPDATE ${table(tx, 'default_intents')} SET state='opted-out',generation=generation+1,lease_token=NULL,lease_until=NULL WHERE id=$1`,
           [i.id],
         );
+        await changeSources(tx, i, input.action);
         return null;
       }
       if (input.action !== 'resume' && i.state !== 'active') throw new KnowledgeError('conflict');
@@ -1018,6 +1058,7 @@ export function createDefaultKnowledge({
         `UPDATE ${table(tx, 'default_intents')} SET state='active',generation=generation+1,lease_token=NULL,lease_until=NULL,next_attempt_at=$2,attempts=0,sync_state=CASE WHEN sync_state='failed' THEN 'queued' ELSE sync_state END WHERE id=$1`,
         [i.id, now()],
       );
+      if (input.action === 'resume') await changeSources(tx, i, 'resume');
       return { kind: recovery[i.product].kind, generation: i.generation + 1, sources: await recoverable(tx, i) };
     });
     // Each source then runs its provider's own Retry, which rebinds it to the account's current authorization and restores its scopes.

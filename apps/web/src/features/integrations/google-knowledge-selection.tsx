@@ -35,11 +35,13 @@ const kindLabels: Record<GoogleKind, string> = {
 export function GoogleSelectionForm({
   api,
   kinds,
+  accountId,
   onSaved,
   onClose,
 }: {
   api: GoogleKnowledgeApi;
   kinds: readonly GoogleKind[];
+  accountId?: string;
   onSaved: (source: GoogleSource) => Promise<void>;
   onClose: () => void;
 }) {
@@ -55,11 +57,17 @@ export function GoogleSelectionForm({
   const cursor = cursors.at(-1) ?? null;
   const scope = useFeatureScope();
   const discovery = useFeatureRead({
-    key: [...googleSourceKeys, 'discover', kind, cursor],
+    key: [...googleSourceKeys, 'discover', accountId ?? null, kind, cursor],
     staleTime: 0,
     load: signal =>
       api.discover(kind, cursor, signal).then(
-        data => ({ ...data, blocked: null }),
+        data => ({
+          ...data,
+          blocked:
+            accountId && data.binding.accountId !== accountId
+              ? 'This Google account changed. Reconnect the original account before choosing content.'
+              : null,
+        }),
         (error: unknown) => {
           const message = error instanceof GoogleKnowledgeError ? googleErrorMessages[error.code] : undefined;
           if (message) return { binding: null, items: [], nextCursor: null, blocked: message };
@@ -108,7 +116,7 @@ export function GoogleSelectionForm({
       <p className="text-sm text-muted-foreground">
         {kind === 'gmail'
           ? 'Choose a label or your whole mailbox within a date range. Gmail stays private to you.'
-          : `Choose My Drive to index all your files, or one folder or shared drive. ${automatic ? 'New Drive integrations also import automatically; see Automatic Knowledge.' : 'Connecting Google does not import anything until you save a source.'}`}
+          : `Choose My Drive, one folder, or a shared drive. ${accountId ? 'Only this selection will be indexed for this account.' : automatic ? 'This adds a source; it does not narrow Automatic Knowledge.' : 'Connecting Google does not import anything until you save a source.'}`}
       </p>
       <form
         noValidate
@@ -119,6 +127,7 @@ export function GoogleSelectionForm({
           if (command.locked || !selection.success || !audienceReady || !discoveryReady) return;
           void command.send({
             commandId: crypto.randomUUID(),
+            ...(accountId ? { accountId } : {}),
             selection: selection.data,
             memberIds: kind === 'gmail' || !shared ? [] : memberIds,
           });

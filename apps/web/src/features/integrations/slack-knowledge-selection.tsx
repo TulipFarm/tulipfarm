@@ -30,10 +30,12 @@ const isoDate = (time: number) => new Date(time).toISOString().slice(0, 10);
 
 export function SlackSelectionForm({
   api,
+  accountId,
   onSaved,
   onClose,
 }: {
   api: SlackKnowledgeApi;
+  accountId?: string;
   onSaved: (source: SlackSource) => Promise<void>;
   onClose: () => void;
 }) {
@@ -49,11 +51,17 @@ export function SlackSelectionForm({
   const cursor = cursors.at(-1) ?? null;
   const scope = useFeatureScope();
   const discovery = useFeatureRead({
-    key: [...slackSourceKeys, 'discover', kind, cursor],
+    key: [...slackSourceKeys, 'discover', accountId ?? null, kind, cursor],
     staleTime: 0,
     load: signal =>
       api.discover(kind, cursor, signal).then(
-        data => ({ ...data, blocked: null }),
+        data => ({
+          ...data,
+          blocked:
+            accountId && `${data.binding.teamId}:${data.binding.slackUserId}` !== accountId
+              ? 'This Slack account changed. Link the original account before choosing content.'
+              : null,
+        }),
         (error: unknown) => {
           const message = error instanceof SlackKnowledgeError ? slackErrorMessages[error.code] : undefined;
           if (message) return { binding: null, items: [], nextCursor: null, blocked: message };
@@ -107,9 +115,11 @@ export function SlackSelectionForm({
       <h4 className="text-base font-medium">Select Slack conversations</h4>
       <p className="text-sm text-muted-foreground">
         Choose up to 50 conversations you belong to.{' '}
-        {automatic
-          ? 'Automatic Knowledge covers channels you’ve joined; add direct or group messages here.'
-          : 'Linking Slack does not import your whole workspace.'}{' '}
+        {accountId
+          ? 'Only your selected conversations will be indexed for this account.'
+          : automatic
+            ? 'Automatic Knowledge covers channels you’ve joined; add direct or group messages here.'
+            : 'Linking Slack does not import your whole workspace.'}{' '}
         Only messages after the chosen date are imported, one thread per document.
       </p>
       <form
@@ -121,6 +131,7 @@ export function SlackSelectionForm({
           if (command.locked || !selection.success || dateInvalid || !audienceReady || !discoveryReady) return;
           void command.send({
             commandId: crypto.randomUUID(),
+            ...(accountId ? { accountId } : {}),
             selection: selection.data,
             memberIds: kind === 'personal' || !shared ? [] : memberIds,
           });

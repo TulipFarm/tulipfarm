@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { assertDefaultSourceEnabled } from './default-source-policy.ts';
 import { effectiveSelection, type EngineClock } from './rolling.ts';
 import { systemClock } from '../host-ports.ts';
 import { z } from 'zod';
@@ -312,6 +313,7 @@ export function createAtlassianKnowledge({
       throw new AtlassianCorpusError('invalid-selection');
     return memberTransaction(workspaceId, userId, async (tx, human) => {
       if (human.membershipId !== actor.membershipId) throw new AccessDenied();
+      await assertDefaultSourceEnabled(tx, input.commandId);
       const again = await prior(tx, human);
       if (again) return again;
       const linked = await tx.client.query(
