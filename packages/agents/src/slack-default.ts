@@ -36,7 +36,7 @@ import {
   SlackAdmissionDenied,
   slackAdmissionReason,
 } from './slack-rejections.ts';
-import { requireDraftSources } from './draft-sources.ts';
+import { requireOwnDefinitionSources } from './draft-sources.ts';
 import { createAuthoringDrafts } from './drafts.ts';
 import { AgentError } from './saved-contracts.ts';
 import { slackRowChangeCards, type SlackRowLink } from './slack-row-changes.ts';
@@ -196,7 +196,8 @@ export function createSlackDefault(
     for (const dependency of dependencies)
       if (dependency.kind === 'shared-slack-turn' && !ownSource(dependency))
         await channels.delivery.sources(tx, work.workspaceId, actor, dependency.eventId);
-    await requireDraftSources(
+    // A saved workflow or skill read in this thread may carry only the requester's own memory.
+    await requireOwnDefinitionSources(
       tx,
       actor,
       dependencies.filter(dependency => !ownSource(dependency) && dependency.kind !== 'shared-slack-turn'),

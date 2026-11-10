@@ -19,6 +19,7 @@ import {
 import {
   AccessDenied,
   denyMcpEgress,
+  PersonalMemoryDenied,
   requireProtectedSource,
   type AuthorizationTransaction,
   type HumanActor,
@@ -84,7 +85,7 @@ import {
 import { normalizeEndpoint } from '@tulipfarm/workspace-mcp-transport';
 import { googleAgentToolCallOptions } from './google-tool-contracts.ts';
 import { apiCallSources, providerSources, publicSourceUrl, resultSources } from './tool-sources.ts';
-import { requireDraftSources } from './draft-sources.ts';
+import { requireDraftSources, requireOwnDefinitionSources } from './draft-sources.ts';
 import { personalDefinitionSources } from './personal-definition-sources.ts';
 import type { SlackActionsFactory } from './slack-actions.ts';
 import { slackResolveSchema, slackThreadReactionSchema, SlackChannelAccessError } from '@tulipfarm/slack';
@@ -3077,6 +3078,9 @@ export function createChatTools(
     } catch (error) {
       const failure = rowWriteTools.has(call.tool) ? rowWriteFailure(error) : null;
       if (failure) return { result: failure, sources: [] };
+      // The definition's own provenance check refuses a member who is not the memory's owner before any result exists.
+      if (error instanceof PersonalMemoryDenied && /^(workflows|skills)\./.test(call.tool))
+        return { result: privateMemoryDefinition, sources: [] };
       if (error instanceof TableError && error.code === 'table-not-found' && 'tableId' in call) {
         const listed = await tableService
           .definitions(context.workspaceId, context.actor, { limit: 50 })
@@ -3148,7 +3152,14 @@ export function createChatTools(
       const ownMemory = !!context.origin?.sources.some(
         source => source.kind === 'personal-memory' && source.membershipId === context.actor.membershipId,
       );
-      await requireDraftSources(tx, context.actor, sources, undefined, undefined, false, ownMemory);
+      try {
+        // A Slack thread never reads memory, so only the member whose memory a saved workflow or skill carries may read it there.
+        if (telemetryRuntime === 'slack') await requireOwnDefinitionSources(tx, context.actor, sources, ownMemory);
+        else await requireDraftSources(tx, context.actor, sources, undefined, undefined, false, ownMemory);
+      } catch (error) {
+        if (!(error instanceof PersonalMemoryDenied)) throw error;
+        return { result: privateMemoryDefinition, sources: [] };
+      }
       return { result, sources };
     });
   }
@@ -3298,6 +3309,12 @@ const githubSourceRecovery: Record<GitHubSourceDenied['code'], string> = {
 const workflowChanged = {
   error: 'draft-stale',
   instruction: 'The workflow changed or already exists. Call workflows.list and draft against its current revision.',
+};
+// The result is withheld whole, so the refusal names no owner and quotes nothing from the definition.
+const privateMemoryDefinition = {
+  error: 'private-to-author',
+  instruction:
+    'Nothing was read. This workflow or skill was saved from a chat that used its author’s private memory, so only its author can read it. Do not retry. Tell the person it is private to whoever saved it and that only that person can open it.',
 };
 const planErrorInstructions: Record<AgentPlanError['code'], string> = {
   'idempotency-conflict': 'Nothing changed. Make a new call with the intended input.',

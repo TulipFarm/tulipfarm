@@ -45,6 +45,38 @@ export async function requireDraftSources(
   }
 }
 
+/** A saved workflow or skill. One saved from a chat that read personal memory keeps that memory as a source. */
+const savedDefinitionSource = (source: SourceDependency) =>
+  source.kind === 'workflow-definition' || source.kind === 'workspace-skill';
+
+/**
+ * Checks sources like requireDraftSources, but a saved workflow or skill may also carry the actor's own personal memory:
+ * only the member whose memory a definition was saved with may read it. Another member's memory is refused with
+ * PersonalMemoryDenied. `ownMemory` still governs memory reached through any other source, and a public-only check
+ * never accepts personal memory.
+ */
+export async function requireOwnDefinitionSources(
+  tx: AgentTransaction,
+  actor: HumanActor,
+  sources: readonly SourceDependency[],
+  ownMemory = false,
+  publicOnly = false,
+) {
+  const visited = new Set<string>();
+  const definitions = sources.filter(savedDefinitionSource);
+  await requireDraftSources(
+    tx,
+    actor,
+    sources.filter(source => !savedDefinitionSource(source)),
+    visited,
+    undefined,
+    publicOnly,
+    ownMemory,
+  );
+  if (definitions.length)
+    await requireDraftSources(tx, actor, definitions, visited, undefined, publicOnly, !publicOnly);
+}
+
 export async function requireTaskDefinitionSources(
   tx: AgentTransaction,
   owner: HumanActor,

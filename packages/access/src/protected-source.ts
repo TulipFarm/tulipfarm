@@ -5,6 +5,7 @@ import {
   canAccessAsset,
   canAccessTable,
   currentMember,
+  PersonalMemoryDenied,
   requirePersonalGitHubSource,
   type AuthorizationTransaction,
   type HumanActor,
@@ -118,7 +119,7 @@ export async function requirePersonalMemorySource(
   actor: HumanActor,
   source: Extract<SourceDependency, { kind: 'personal-memory' }>,
 ) {
-  if (source.membershipId !== actor.membershipId) throw new AccessDenied();
+  if (source.membershipId !== actor.membershipId) throw new PersonalMemoryDenied();
   await currentMember(tx, actor);
 }
 
@@ -424,7 +425,10 @@ export async function requireWorkflowDefinitionSources(
   actor: HumanActor,
   sources: readonly SourceDependency[],
 ) {
-  for (const source of await protectedSourceClosure(tx, sources))
+  const closure = await protectedSourceClosure(tx, sources);
+  // Memory first, so a definition derived from someone else's memory is refused as such rather than by whichever
+  // other source of the same chat happens to be checked first.
+  for (const source of closure)
     if (source.kind === 'personal-memory') await requirePersonalMemorySource(tx, actor, source);
-    else await requireProtectedSource(tx, actor, source);
+  for (const source of closure) if (source.kind !== 'personal-memory') await requireProtectedSource(tx, actor, source);
 }

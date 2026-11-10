@@ -363,6 +363,8 @@ const types = new Set([
   'AbortError',
   'TimeoutError',
   'AccessDenied',
+  'PersonalMemoryDenied',
+  'ExternalActionWaiting',
   'StorageUnavailableError',
   'McpNetworkError',
   'ZodError',

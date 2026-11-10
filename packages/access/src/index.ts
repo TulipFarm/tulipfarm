@@ -65,6 +65,8 @@ export class AccessDenied extends Error {
 }
 
 export class SourceAuthorizationUnavailable extends AccessDenied {}
+/** Refuses another member's personal memory, so callers can say why instead of reporting a missing resource. */
+export class PersonalMemoryDenied extends AccessDenied {}
 
 function table(transaction: AuthorizationTransaction, name: string) {
   return `${escapeIdentifier(transaction.schema)}.${escapeIdentifier(name)}`;
