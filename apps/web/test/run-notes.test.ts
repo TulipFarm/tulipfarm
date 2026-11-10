@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { runNote, stepNote } from '../src/features/workflows/run-notes.ts';
+import { runNote, stepNote, stepStatusLabel } from '../src/features/workflows/run-notes.ts';
 
 const input = {
   tableId: '7c0b8c7e-4f0e-4e3b-9a52-0d3f1f2b6a11',
@@ -156,4 +156,12 @@ test('condition steps say whether the condition held and which steps ran or were
     stepNote({ matched: true, ran: ['send_notice', 'tag_row', 'email'], skipped: ['hold_order'] }),
     'Condition met, so it ran send notice, tag row and email, and skipped hold order.',
   );
+});
+
+test('a step still waiting when its run ended is labelled by how the run ended', () => {
+  assert.equal(stepStatusLabel('waiting', 'waiting'), 'Waiting');
+  assert.equal(stepStatusLabel('failed', 'waiting'), 'Failed');
+  assert.equal(stepStatusLabel('cancelled', 'waiting'), 'Cancelled');
+  assert.equal(stepStatusLabel('blocked', 'waiting'), 'Stopped');
+  assert.equal(stepStatusLabel('failed', 'completed'), 'Completed');
 });

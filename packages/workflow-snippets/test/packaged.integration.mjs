@@ -13,6 +13,7 @@ test(
   { timeout: 60000, skip: !process.env.SNIPPET_BROKER_TEST_IMAGE },
   async () => {
     const directory = await mkdtemp(join(tmpdir(), 'packaged-broker-')),
+      packages = await mkdtemp(join(tmpdir(), 'packaged-broker-skills-')),
       name = `snippet-broker-proof-${randomUUID()}`;
     const token = randomBytes(32).toString('hex');
     await writeFile(join(directory, 'token'), token, { mode: 0o600 });
@@ -32,6 +33,11 @@ test(
         '/var/run/docker.sock:/var/run/docker.sock',
         '-v',
         `${directory}:/data`,
+        // The host daemon resolves skill bind mounts, so the package directory has the same path on both sides.
+        '-v',
+        `${packages}:${packages}`,
+        '-e',
+        `TMPDIR=${packages}`,
         '-e',
         'NODE_ENV=development',
         '-e',
@@ -90,6 +96,7 @@ test(
     } finally {
       docker(['rm', '-f', name]);
       await rm(directory, { recursive: true, force: true });
+      await rm(packages, { recursive: true, force: true });
     }
   },
 );

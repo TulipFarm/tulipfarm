@@ -17,10 +17,7 @@ test(
   'Temporal drives isolated JS and Python with retry, worker restart and authority fencing',
   { timeout: 120000 },
   async () => {
-    assert.ok(
-      process.env.SNIPPET_TEST_IMAGE,
-      'Set SNIPPET_TEST_IMAGE to the local snippet image ID. See docs/verification.md',
-    );
+    assert.ok(process.env.SNIPPET_TEST_IMAGE, 'Set SNIPPET_TEST_IMAGE to the digest-pinned local snippet image');
     const db = await fixture(),
       runner = createSnippetRunner({ image: process.env.SNIPPET_TEST_IMAGE, runtime: 'runc', allowLocalRunc: true });
     let runtime, native, connection, worker, running;

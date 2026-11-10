@@ -49,7 +49,7 @@ import {
 import { WorkflowDefinition, WorkflowRun } from '@/features/workflows/workflow-detail';
 import { WorkflowSlackAction } from '@/features/workflows/slack-step';
 import { AgentStepStatus } from '@/features/workflows/agent-step-status';
-import { runErrorNote, runNote, stepNote } from '@/features/workflows/run-notes';
+import { runErrorNote, runIsLive, runNote, stepNote, stepStatusLabel } from '@/features/workflows/run-notes';
 import { webhookTriggers } from '@/features/workflows/webhook-status';
 import { TriggerList } from '@/features/workflows/trigger-list';
 import {
@@ -1026,7 +1026,7 @@ function WorkflowPage({
                               </p>
                             )}
                             {run.steps
-                              .filter(step => step.status === 'waiting')
+                              .filter(step => step.status === 'waiting' && runIsLive(run.status))
                               .map(step => (
                                 <div key={step.stepId} className="space-y-3 rounded-lg bg-muted/50 p-3">
                                   <AgentStepStatus output={step.output} />
@@ -1062,8 +1062,7 @@ function WorkflowPage({
                                 {run.steps.map(step => (
                                   <li key={step.stepId}>
                                     <p>
-                                      {step.stepId.replaceAll('_', ' ')} /{' '}
-                                      {step.status === 'completed' ? 'Completed' : 'Waiting'}
+                                      {step.stepId.replaceAll('_', ' ')} / {stepStatusLabel(run.status, step.status)}
                                     </p>
                                     {stepNote(step.output) && <p>{stepNote(step.output)}</p>}
                                     <pre className="max-h-64 overflow-auto text-xs">
