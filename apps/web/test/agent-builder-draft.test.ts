@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import { toolNameSchema } from '@tulipfarm/agents/contracts';
 import { builderDraft, parseBuilder } from '../src/features/agents/builder-draft.ts';
 import { tableAccessEnrollment } from '@tulipfarm/agents/setup-contracts';
+import { agentContextSchema } from '@tulipfarm/agents/saved-contracts';
 
 const member = randomUUID(),
   agent = randomUUID();
@@ -30,6 +31,17 @@ test('table selection adds the fewest granting teams and keeps explicit enrollme
   assert.deepEqual(tableAccessEnrollment(teams, entry, [unrelated]), [unrelated, both]);
   assert.deepEqual(tableAccessEnrollment(teams, entry, [reader, editor]), [reader, editor]);
   assert.deepEqual(tableAccessEnrollment([], entry, []), [], 'never invent a granting team');
+  const context = agentContextSchema.parse({
+    currentSoulRevision: 'a'.repeat(40),
+    teams: [
+      {
+        id: both,
+        name: 'Operations',
+        tableScope: [...Array.from({ length: 100 }, () => ({ ...entry, assetId: randomUUID() })), entry],
+      },
+    ],
+  });
+  assert.deepEqual(tableAccessEnrollment(context.teams, entry, []), [both], 'available tables are not selected scope');
 });
 
 test('builder enforces exact manual text, skill and action bounds on the owning stage', () => {
