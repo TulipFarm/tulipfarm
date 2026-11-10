@@ -67,6 +67,7 @@ export function CommandFeedback({
 }) {
   const state = write.state;
   if (state.kind === 'idle') return null;
+  if (state.kind === 'checking') return <p role="status">Checking whether your message was sent…</p>;
   if (state.kind === 'sending' && state.waiting)
     return (
       <p role="status" className="text-sm text-muted-foreground">
@@ -94,15 +95,21 @@ export function CommandFeedback({
       </Alert>
       <div className="flex flex-wrap gap-2">
         {state.kind === 'uncertain' ? (
-          <Button variant="outline" onClick={() => void write.submit(state.command)}>
-            Try again
-          </Button>
+          state.command.kind === 'send' && !state.offline && !state.updating ? (
+            <Button variant="outline" onClick={() => void write.recover()}>
+              Check message status
+            </Button>
+          ) : (
+            <Button variant="outline" onClick={() => void write.submit(state.command)}>
+              Try again
+            </Button>
+          )
         ) : (
           <>
-            <Button variant="outline" onClick={refresh}>
+            <Button variant="outline" onClick={state.command?.kind === 'send' ? () => void write.recover() : refresh}>
               Refresh before editing
             </Button>
-            {refreshed && (
+            {refreshed && state.command?.kind !== 'send' && (
               <Button
                 variant="outline"
                 onClick={() => {

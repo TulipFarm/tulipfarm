@@ -25,9 +25,13 @@ type ReplyInput = {
 export function currentReply({ messages, outgoing, command, stream }: ReplyInput) {
   // Only the send that created this message shows it; retries and other commands reuse saved turns.
   const sending =
-    (command.kind === 'sending' && command.command.kind === 'send' && command.command.messageId === outgoing?.id) ||
+    (['sending', 'checking', 'uncertain'].includes(command.kind) &&
+      'command' in command &&
+      command.command.kind === 'send' &&
+      command.command.messageId === outgoing?.id) ||
     (command.kind === 'accepted' && command.operation === 'send');
   const pending = outgoing && sending && !messages?.some(message => message.id === outgoing.id) ? outgoing : null;
+  const unconfirmed = command.kind === 'checking' || command.kind === 'uncertain';
   // A message queued while the workspace updates shows as sent, labelled, without a reply indicator.
   const waiting = !!pending && command.kind === 'sending' && !!command.waiting;
   const first = messages?.find(
@@ -36,7 +40,7 @@ export function currentReply({ messages, outgoing, command, stream }: ReplyInput
   const replying = first?.turn && ['queued', 'processing'].includes(first.turn.status) ? first : undefined;
   const queuedMessages =
     messages?.filter(message => message.turn?.status === 'queued' && first && message.sequence > first.sequence) ?? [];
-  const pendingQueued = !!pending && !!first;
+  const pendingQueued = !!pending && !!first && !unconfirmed;
   const queueLabel =
     first?.turn && ['waiting', 'reconciling'].includes(first.turn.status)
       ? 'Waiting for your answer above. This message will be answered next.'
@@ -73,13 +77,14 @@ export function currentReply({ messages, outgoing, command, stream }: ReplyInput
   return {
     pending,
     /** The composer hides its submitted draft until the send settles, even after saved history shows the message. */
-    draftSent: !!pending || (command.kind === 'sending' && command.command.kind === 'send'),
+    draftSent: (!!pending && !unconfirmed) || (command.kind === 'sending' && command.command.kind === 'send'),
     turn,
-    thinking: ((!!pending && !waiting && !pendingQueued) || !!replying) && !delivered,
+    thinking: ((!!pending && !waiting && !pendingQueued && !unconfirmed) || !!replying) && !delivered,
     waiting,
     pendingQueued,
     queuedMessages,
     queueLabel,
+    unconfirmed,
     since: replying?.createdAt ?? pending?.at,
     narration,
     answerText,
