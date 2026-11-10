@@ -3,6 +3,7 @@ import {
   conditionOutputSchema,
   foundRowsSchema,
   rowChangeSchema,
+  unfinishedStatuses,
   withheldOutputSchema,
   type runSchema,
 } from '@tulipfarm/workflows/contracts';
@@ -128,4 +129,15 @@ export function stepNote(output: unknown) {
   const { rows, more } = found.data;
   if (!rows.length) return 'Found no matching rows.';
   return `Found ${count(rows.length, 'row')}${more ? ' and left out further matches' : ''}: ${rows.map(row => shortId(row.recordId)).join(', ')}.`;
+}
+
+type RunStatus = z.infer<typeof runSchema>['status'];
+
+export const runIsLive = (status: RunStatus) => unfinishedStatuses.some(live => live === status);
+
+// Steps only record waiting or completed; a step still waiting when its run ended stopped there.
+export function stepStatusLabel(runStatus: RunStatus, stepStatus: 'waiting' | 'completed') {
+  if (stepStatus === 'completed') return 'Completed';
+  if (runIsLive(runStatus)) return 'Waiting';
+  return runStatus === 'failed' ? 'Failed' : runStatus === 'cancelled' ? 'Cancelled' : 'Stopped';
 }
