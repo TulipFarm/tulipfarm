@@ -474,7 +474,12 @@ async function requireProfile(destination: string) {
   const session = await loadSession();
   if (!session) {
     void forgetSession();
-    throw redirect({ to: '/login', search: { redirect: destination }, replace: true });
+    const error = new URL(destination, 'http://localhost').searchParams.get('error');
+    throw redirect({
+      to: '/login',
+      search: { redirect: safeAuthRedirect(destination), ...(error !== null && { error }) },
+      replace: true,
+    });
   }
   rememberSession({ userId: session.user.id, sessionId: session.session.id });
   if (!session.user.name.trim())
@@ -597,8 +602,8 @@ async function defaultWorkspaceDestination(destination: string) {
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/',
-  beforeLoad: async () => {
-    const destination = await defaultWorkspaceDestination('/');
+  beforeLoad: async ({ location }) => {
+    const destination = await defaultWorkspaceDestination(location.href);
     throw redirect({ href: pendingInvitationDestination() ?? destination, replace: true });
   },
 });
@@ -681,7 +686,10 @@ const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/login',
   component: LoginPage,
-  validateSearch: authSearch,
+  validateSearch: search => ({
+    ...authSearch(search),
+    ...(typeof search.error === 'string' && { error: search.error }),
+  }),
   beforeLoad: redirectAuthenticated,
 });
 const registerRoute = createRoute({

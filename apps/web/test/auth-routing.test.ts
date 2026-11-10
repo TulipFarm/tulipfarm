@@ -388,6 +388,40 @@ test('unsafe and authentication-loop redirects resolve to home', () => {
   assert.equal(safeAuthRedirect('/create-workspace'), '/create-workspace');
 });
 
+test('failed sign-in routes keep the error outside the validated return destination', async () => {
+  session = null;
+  for (const path of ['/', '/acme/tables?view=mine#rows']) {
+    const failed = new URL(path, 'https://app.tulipfarm.ai');
+    failed.searchParams.set('error', 'INVALID_TOKEN');
+    const login = await destination(failed.pathname + failed.search + failed.hash);
+    assert.equal(login.pathname, '/login');
+    assert.equal(login.searchParams.get('error'), 'INVALID_TOKEN');
+    assert.equal(login.searchParams.get('redirect'), path);
+    const router = await load(login.pathname + login.search);
+    assert.equal(router.state.matches.at(-1)?.search.error, 'INVALID_TOKEN');
+  }
+});
+
+test('sign-in callbacks remove old errors while keeping valid paths, queries and fragments', () => {
+  const origin = 'https://app.tulipfarm.ai';
+  const invitation = `/invite?token=${acme.id}.${'a'.repeat(43)}`;
+  for (const path of ['/', '/acme/tables?view=mine#rows', invitation]) {
+    const failed = new URL(path, origin);
+    failed.searchParams.append('error', 'INVALID_TOKEN');
+    failed.searchParams.append('error', 'sign_in_failed');
+    const input = failed.pathname + failed.search + failed.hash;
+    assert.equal(safeAuthRedirect(input), path);
+    const callbacks = authCallbackURLs(input, origin);
+    assert.equal(callbacks.callbackURL, origin + path);
+    assert.equal(callbacks.newUserCallbackURL, origin + path);
+    assert.equal(new URL(callbacks.errorCallbackURL).searchParams.get('redirect'), path);
+    assert.equal(magicLinkDestination(origin + input, origin), path);
+  }
+  for (const path of ['//example.com?error=INVALID_TOKEN', '/login?error=INVALID_TOKEN', '/%5cexample.com?error=x'])
+    assert.equal(safeAuthRedirect(path), '/');
+  assert.equal(safeAuthRedirect(invitation + '&extra=value&error=INVALID_TOKEN'), '/');
+});
+
 const setupId = '44444444-4444-4444-8444-444444444444';
 const setup = `/workspace-setups/${setupId}`;
 const recovery = '/account/workspace-recovery';

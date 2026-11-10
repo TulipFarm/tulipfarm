@@ -366,9 +366,11 @@ export function AuthForm({
     const code = new URLSearchParams(window.location.search).get('error');
     return code === 'ACCOUNT_EXISTS'
       ? accountExistsMessage
-      : code !== null
-        ? 'Sign-in did not finish. Please try again.'
-        : '';
+      : code === 'INVALID_TOKEN'
+        ? 'This sign-in link did not work. It may have expired or already been used. Request a new link.'
+        : code !== null
+          ? 'Sign-in did not finish. Please try again.'
+          : '';
   });
   const destination = safeAuthRedirect(redirect ?? new URLSearchParams(window.location.search).get('redirect'));
   async function callbacks() {
