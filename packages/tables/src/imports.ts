@@ -608,8 +608,49 @@ async function csvHeaders(
 }
 
 /**
- * Resolves omitted format, sheet and header choices from the file and destination fields; explicit sheet and
- * header choices remain authoritative. Fits the delimiter, conversions keyed by a header in another case or
+ * Models often give the first data row as the header row. When an earlier row reads as a header and names more
+ * of the selection's conversion columns, or the requested row cannot be a header at all, that row is used instead.
+ */
+async function headerRowFit(bytes: Uint8Array, selection: FileImportSelection) {
+  if (selection.header.kind !== 'row' || selection.header.row < 2) return null;
+  const requestedRow = selection.header.row;
+  const lines: Scalar[][] = [];
+  try {
+    await fileCells(bytes, selection, cells => {
+      lines.push(cells);
+      return lines.length <= requestedRow;
+    });
+  } catch (error) {
+    if (error instanceof TableImportError) return null;
+    throw error;
+  }
+  const wanted = Object.keys(selection.conversions).map(columnKey);
+  // A header row holds unique non-blank text names, and the row after it has no more cells than it.
+  const score = (row: number) => {
+    const cells = lines[row - 1];
+    const next = lines[row];
+    if (!cells || !next || cells.some(cell => typeof cell !== 'string')) return null;
+    const names = cells.map(cell => columnKey(String(cell)));
+    if (names.some(name => !name) || new Set(names).size !== names.length || next.length > names.length) return null;
+    return wanted.filter(name => names.includes(name)).length;
+  };
+  const requested = score(requestedRow);
+  let best: { row: number; score: number } | null = null;
+  for (let row = 1; row < Math.min(requestedRow, 6); row++) {
+    const found = score(row);
+    if (found !== null && (requested === null || found > requested) && (!best || found > best.score))
+      best = { row, score: found };
+  }
+  if (!best) return null;
+  return {
+    adjustment: { kind: 'header' as const, requested: requestedRow, used: best.row },
+    selection: { ...selection, header: { kind: 'row' as const, row: best.row } },
+  };
+}
+
+/**
+ * Resolves omitted format, sheet and header choices from the file and destination fields; an explicit sheet
+ * remains authoritative, and an explicit header row only moves to an earlier row that reads as the header. Fits the delimiter, conversions keyed by a header in another case or
  * spacing (others are dropped, so the column stays text), and a conversion that a column's values don't fit
  * replaced by text, or a timestamp for spreadsheet dates. Import plans still convert text to each field's kind.
  * Each change is returned as an adjustment, so the import review can list it.
@@ -714,6 +755,11 @@ export async function fitFileImportSelection(
       'invalid-selection',
     );
   }
+  const headed = requested.header?.kind === 'row' ? await headerRowFit(bytes, selection) : null;
+  if (headed) {
+    adjustments.push(headed.adjustment);
+    selection = headed.selection;
+  }
   if (Object.keys(selection.conversions).length) {
     const rows = await parseImportFile(bytes, { ...selection, conversions: {} }).catch(error => {
       if (error instanceof TableImportError) return null;
@@ -764,8 +810,23 @@ export async function fitFileImportSelection(
 
 export async function parseImportFile(bytes: Uint8Array, input: unknown): Promise<ImportSnapshot['rows']> {
   const selection = validated(fileImportSelectionSchema, input, 'invalid-selection');
-  if (!bytes.byteLength || bytes.byteLength > importLimits.bytes) throw new TableImportError('byte-limit');
   const output = collector(selection, selection.format === 'csv' ? 'file' : 'sheet');
+  await fileCells(bytes, selection, cells => output.add(cells, selection.format === 'xlsx'));
+  try {
+    return output.finish();
+  } catch (error) {
+    if (error instanceof TableImportError) throw error;
+    throw new TableImportError('malformed-file');
+  }
+}
+
+/** Reads the file's rows of cells in order until visit returns false. */
+async function fileCells(
+  bytes: Uint8Array,
+  selection: FileImportSelection,
+  visit: (cells: Scalar[]) => boolean | void,
+) {
+  if (!bytes.byteLength || bytes.byteLength > importLimits.bytes) throw new TableImportError('byte-limit');
   try {
     if (selection.format === 'csv') {
       const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
@@ -776,7 +837,11 @@ export async function parseImportFile(bytes: Uint8Array, input: unknown): Promis
         max_record_size: 1024 * 1024,
       });
       Readable.from([text]).pipe(parser);
-      for await (const row of parser) output.add(validated(csvRowSchema, row, 'column-limit'));
+      for await (const row of parser)
+        if (visit(validated(csvRowSchema, row, 'column-limit')) === false) {
+          parser.destroy();
+          return;
+        }
     } else {
       await checkArchive(bytes);
       const workbook = new ExcelJS.Workbook();
@@ -795,10 +860,9 @@ export async function parseImportFile(bytes: Uint8Array, input: unknown): Promis
             throw new TableImportError('unsupported-cell');
           cells.push(raw ?? null);
         }
-        output.add(cells, true);
+        if (visit(cells) === false) return;
       }
     }
-    return output.finish();
   } catch (error) {
     if (error instanceof TableImportError) throw error;
     throw new TableImportError('malformed-file');

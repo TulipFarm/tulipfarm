@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { test } from 'node:test';
 import { execFile } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { S3Client } from '@aws-sdk/client-s3';
@@ -58,7 +59,7 @@ test('private attachment adapter uses signed create-only byte IO with bounded in
     });
     const key = request.url.split('?')[0];
     if (request.method === 'PUT') {
-      if (objects.has(key)) {
+      if (request.headers['if-none-match'] === '*' && objects.has(key)) {
         response
           .writeHead(412, { 'content-type': 'application/xml' })
           .end('<Error><Code>PreconditionFailed</Code></Error>');
@@ -114,6 +115,23 @@ test('private attachment adapter uses signed create-only byte IO with bounded in
       () => chatObjectStore({ CHAT_R2_BUCKET: 'private-fixture' }),
       /Invalid private chat object configuration/,
     );
+    const signal = new AbortController().signal;
+    const prefix = `execution/v1/${randomUUID()}/${randomUUID()}/${randomUUID()}`;
+    await store.putIfAbsent(`${prefix}/0`, Buffer.from('execution bytes'), signal);
+    await store.retireExecutionChunk(`${prefix}/0`, signal);
+    await store.retireExecutionChunk(`${prefix}/1`, signal);
+    await store.putIfAbsent(`${prefix}/0`, Buffer.from('late bytes'), signal);
+    await store.putIfAbsent(`${prefix}/1`, Buffer.from('late bytes'), signal);
+    assert.equal((await store.read(`${prefix}/0`, 0, signal)).length, 0);
+    assert.equal((await store.read(`${prefix}/1`, 0, signal)).length, 0);
+    await assert.rejects(store.read(`${prefix}/0`, 10, signal), /size-mismatch/);
+    assert.equal(requests.filter(item => item.method === 'PUT' && !item.conditional).length, 2);
+    assert.equal(requests.filter(item => item.method === 'DELETE').length, 1);
+    const count = requests.length;
+    await assert.rejects(store.retireExecutionChunk('opaque/key', signal));
+    await assert.rejects(store.retireExecutionChunk(`${prefix}/../attachments`, signal));
+    await assert.rejects(store.retireExecutionChunk(`${prefix}/2`, AbortSignal.abort()), { name: 'AbortError' });
+    assert.equal(requests.length, count);
   } finally {
     store.close();
     server.closeAllConnections();

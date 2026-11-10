@@ -68,6 +68,41 @@ export async function protectedSourceClosure(
   return sourceClosure(tx, sources, true, prefetch, drafts);
 }
 
+/** Moves each table-rows and table-schema source to its table's current revision. */
+export async function currentTableRevisions(
+  tx: AuthorizationTransaction,
+  sources: readonly SourceDependency[],
+): Promise<SourceDependency[]> {
+  const ids = [
+    ...new Set(
+      sources.flatMap(source =>
+        source.kind === 'table-rows' || source.kind === 'table-schema' ? [source.tableId] : [],
+      ),
+    ),
+  ];
+  if (!ids.length) return [...sources];
+  const current = new Map(
+    z
+      .array(z.object({ id: uuidSchema, applied: z.string().nullable(), target: z.string() }))
+      .parse(
+        (
+          await tx.client.query(
+            `SELECT id,applied_revision AS applied,target_revision AS target FROM ${table(tx, 'tf_table_catalog')} WHERE id=ANY($1::uuid[])`,
+            [ids],
+          )
+        ).rows,
+      )
+      .map(row => [row.id, row]),
+  );
+  const refreshed = sources.map((source): SourceDependency => {
+    if (source.kind !== 'table-rows' && source.kind !== 'table-schema') return source;
+    const row = current.get(source.tableId);
+    const revision = source.kind === 'table-schema' ? row?.target : row?.applied;
+    return revision ? { ...source, revision } : source;
+  });
+  return [...new Map(refreshed.map(source => [JSON.stringify(source), source])).values()];
+}
+
 async function tableInstalled(tx: AuthorizationTransaction, installed: Map<string, boolean>, name: string) {
   if (!installed.has(name))
     installed.set(

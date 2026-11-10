@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import {
   apiCallReceiptSchema,
+  executionReceiptSchema,
   toolPresentationSchema,
   activityStatusSchema,
   workflowReferenceSchema,
@@ -352,6 +353,8 @@ export const toolReceiptSchema = z.object({
   web: publicWebReceiptSchema.nullable().default(null),
   /** The HTTP status or error code of an `api.request` call. */
   api: apiCallReceiptSchema.nullable().optional(),
+  /** The code and output of an `execution.run` call. */
+  execution: executionReceiptSchema.nullable().optional(),
   knowledge: knowledgeActivitySchema.nullable().optional(),
   fileId: uuidSchema.optional(),
   fileIds: z.array(uuidSchema).max(64).optional(),

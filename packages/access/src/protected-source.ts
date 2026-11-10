@@ -10,7 +10,7 @@ import {
   type AuthorizationTransaction,
   type HumanActor,
 } from './index.ts';
-import { protectedSourceClosure } from './mcp-provenance.ts';
+import { currentTableRevisions, protectedSourceClosure } from './mcp-provenance.ts';
 import { requireMcpSource, requireMcpTaskRun, requirePrivateTaskSource } from './mcp-source.ts';
 import type { SourceDependency } from './source-dependencies.ts';
 import { requireAgentGrant, requireSkillGrant } from './agent-permissions.ts';
@@ -121,6 +121,46 @@ export async function requirePersonalMemorySource(
 ) {
   if (source.membershipId !== actor.membershipId) throw new PersonalMemoryDenied();
   await currentMember(tx, actor);
+}
+
+/** Whether the actor can read a table source's table now, at any revision. Other sources count as readable. */
+export async function tableSourceReadable(tx: AuthorizationTransaction, actor: HumanActor, source: SourceDependency) {
+  if (source.kind !== 'table' && source.kind !== 'table-rows' && source.kind !== 'table-schema') return true;
+  const catalog = `${escapeIdentifier(tx.schema)}.${escapeIdentifier('tf_table_catalog')}`;
+  if (!(await tx.client.query(`SELECT 1 FROM ${catalog} WHERE id=$1`, [source.tableId])).rowCount) return false;
+  return (
+    (await canAccessTable(tx, actor, source.tableId, 'table.row.read')) ||
+    (source.kind === 'table-schema' && (await canAccessTable(tx, actor, source.tableId, 'table.schema.manage')))
+  );
+}
+
+/**
+ * The sources a chat review card depends on, as of now. A chat pins the revision of every table it listed or read, and
+ * a later change to one of those tables must not lock the person out of the card, so tables move to their current
+ * revision. A card also depends on its whole chat. The chat leaves an earlier answer that used a table the requester
+ * can no longer read out of model context, so a table that only the chat's history reached, and that the requester
+ * can't read, is left out.
+ */
+export async function chatReviewClosure(
+  tx: AuthorizationTransaction,
+  actor: HumanActor,
+  sources: readonly SourceDependency[],
+): Promise<SourceDependency[]> {
+  const direct = new Set(
+    (
+      await currentTableRevisions(
+        tx,
+        await protectedSourceClosure(
+          tx,
+          sources.filter(source => source.kind !== 'private-conversation'),
+        ),
+      )
+    ).map(source => JSON.stringify(source)),
+  );
+  const closure: SourceDependency[] = [];
+  for (const source of await currentTableRevisions(tx, await protectedSourceClosure(tx, sources)))
+    if (direct.has(JSON.stringify(source)) || (await tableSourceReadable(tx, actor, source))) closure.push(source);
+  return closure;
 }
 
 export async function requireProtectedSource(

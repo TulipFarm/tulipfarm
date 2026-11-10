@@ -107,6 +107,7 @@ const conversionSchema = z.enum(['text', 'numeric', 'boolean', 'date', 'timestam
 const importAdjustmentSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('delimiter'), requested: z.string(), used: z.string() }),
   z.object({ kind: z.literal('sheet'), requested: z.string(), used: z.string(), only: z.boolean() }),
+  z.object({ kind: z.literal('header'), requested: z.number(), used: z.number() }),
   z.object({ kind: z.literal('column'), requested: z.string(), used: z.string() }),
   z.object({ kind: z.literal('conversion-dropped'), column: z.string(), conversion: conversionSchema }),
   z.object({

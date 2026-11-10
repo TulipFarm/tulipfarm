@@ -66,6 +66,8 @@ export function importAdjustmentText(adjustment: ImportAdjustment) {
       return adjustment.only
         ? `Used "${adjustment.used}", the only sheet in the file.`
         : `Used the sheet "${adjustment.used}" for "${adjustment.requested}".`;
+    case 'header':
+      return `Used row ${adjustment.used} as the header row instead of row ${adjustment.requested}.`;
     case 'column':
       return `Matched "${adjustment.requested}" to the column "${adjustment.used}".`;
     case 'conversion-dropped':

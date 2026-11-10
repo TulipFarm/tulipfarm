@@ -578,6 +578,9 @@ importers:
       '@tulipfarm/email':
         specifier: workspace:*
         version: link:../../packages/email
+      '@tulipfarm/execution-contract':
+        specifier: workspace:*
+        version: link:../../packages/execution-contract
       '@tulipfarm/extensions':
         specifier: workspace:*
         version: link:../../packages/extensions
@@ -703,6 +706,9 @@ importers:
       '@tulipfarm/conversations':
         specifier: workspace:*
         version: link:../conversations
+      '@tulipfarm/execution-contract':
+        specifier: workspace:*
+        version: link:../execution-contract
       '@tulipfarm/extensions':
         specifier: workspace:*
         version: link:../extensions
@@ -887,6 +893,9 @@ importers:
 
   packages/config:
     dependencies:
+      '@tulipfarm/execution-contract':
+        specifier: workspace:*
+        version: link:../execution-contract
       zod:
         specifier: 4.6.6
         version: 4.6.6
@@ -918,6 +927,12 @@ importers:
       '@tulipfarm/content-budget':
         specifier: workspace:*
         version: link:../content-budget
+      '@tulipfarm/execution':
+        specifier: workspace:*
+        version: link:../execution
+      '@tulipfarm/execution-contract':
+        specifier: workspace:*
+        version: link:../execution-contract
       '@tulipfarm/files':
         specifier: workspace:*
         version: link:../files
@@ -1005,7 +1020,43 @@ importers:
         specifier: 19.3.0
         version: 19.3.0(@types/react@19.3.0)
 
+  packages/execution:
+    dependencies:
+      '@tulipfarm/execution-contract':
+        specifier: workspace:*
+        version: link:../execution-contract
+      '@tulipfarm/workspace-storage':
+        specifier: workspace:*
+        version: link:../workspace-storage
+      zod:
+        specifier: 4.6.6
+        version: 4.6.6
+    devDependencies:
+      '@tulipfarm/typescript-config':
+        specifier: workspace:*
+        version: link:../typescript-config
+      '@types/node':
+        specifier: 26.6.3
+        version: 26.6.3
+
+  packages/execution-contract:
+    dependencies:
+      zod:
+        specifier: 4.6.6
+        version: 4.6.6
+    devDependencies:
+      '@tulipfarm/typescript-config':
+        specifier: workspace:*
+        version: link:../typescript-config
+      '@types/node':
+        specifier: 26.6.3
+        version: 26.6.3
+
   packages/extensions:
+    dependencies:
+      '@tulipfarm/execution-contract':
+        specifier: workspace:*
+        version: link:../execution-contract
     devDependencies:
       '@tulipfarm/typescript-config':
         specifier: workspace:*

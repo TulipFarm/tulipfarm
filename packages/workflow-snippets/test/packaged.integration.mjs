@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout } from 'node:timers/promises';
 import { test } from 'node:test';
-import { createSnippetClient } from '../src/client.ts';
+import { createSkillClient } from '../src/client.ts';
 
 test(
   'packaged broker serves actual isolated execution and production refuses local runtime overrides',
@@ -42,18 +42,30 @@ test(
         `SNIPPET_IMAGE=${process.env.SNIPPET_TEST_IMAGE}`,
         '-e',
         'SNIPPET_BROKER_TOKEN_FILE=/data/token',
+        '-e',
+        'SKILL_SCRIPTS_ENABLED=true',
         process.env.SNIPPET_BROKER_TEST_IMAGE,
       ]);
       const port = JSON.parse(docker(['inspect', name]))[0].NetworkSettings.Ports['8090/tcp'][0].HostPort;
-      const client = createSnippetClient({ url: `http://127.0.0.1:${port}`, token, allowLocalHttp: true });
+      const client = createSkillClient({ url: `http://127.0.0.1:${port}`, token, allowLocalHttp: true });
+      const script = 'print(41 + 1, end="")';
       const job = {
+        kind: 'skill',
+        version: 1,
         workspaceId: randomUUID(),
-        runId: randomUUID(),
-        revision: randomUUID(),
-        stepId: 'python',
+        invocationId: randomUUID(),
+        packageDigest: 'a'.repeat(64),
         language: 'python',
-        source: 'return input + 1',
-        input: 41,
+        entrypoint: 'main.py',
+        args: [],
+        input: null,
+        files: [
+          {
+            path: 'main.py',
+            content: Buffer.from(script).toString('base64'),
+            digest: createHash('sha256').update(script).digest('hex'),
+          },
+        ],
       };
       let result;
       for (let i = 0; i < 100; i++) {
@@ -63,7 +75,7 @@ test(
         } catch {}
         await setTimeout(100);
       }
-      assert.deepEqual(result, { kind: 'completed', output: 42 });
+      assert.deepEqual(result, { kind: 'completed', exitCode: 0, stdout: '42', stderr: '', files: [] });
       const guard = `import {createSnippetRunner} from '@tulipfarm/workflow-snippets'; import assert from 'node:assert/strict'; assert.throws(()=>createSnippetRunner({image:'local@sha256:${'a'.repeat(64)}',runtime:'runc',allowLocalRunc:true}),/unavailable/); assert.throws(()=>createSnippetRunner({image:'sha256:${'a'.repeat(64)}'}),/unavailable/);`;
       docker([
         'run',

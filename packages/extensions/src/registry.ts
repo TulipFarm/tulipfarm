@@ -1,3 +1,9 @@
+import {
+  executionBackendValid,
+  executionProfileSupported,
+  type ExecutionBackend,
+  type ExecutionConfiguration,
+} from '@tulipfarm/execution-contract';
 import type {
   AnalyticsEvent,
   AnalyticsGroup,
@@ -42,6 +48,7 @@ type State = {
   creditPricing?: Registered<CreditPricing>;
   flagProvider?: Registered<FlagProvider>;
   socialPlatformApps?: Registered<SocialPlatformApps>;
+  executionBackend?: Registered<ExecutionBackend>;
   usageSinks: Registered<UsageSink>[];
   analytics: Registered<ProductAnalytics>[];
   errorReporters: Registered<ErrorReporter>[];
@@ -105,7 +112,10 @@ export async function registerExtension(extension: ServerExtension, context: Ext
     migrations: [],
   };
   const wrap = <T>(value: T): Registered<T> => ({ extension: extension.name, value });
-  const single = (slot: 'creditGate' | 'creditPricing' | 'flagProvider' | 'socialPlatformApps', label: string) => {
+  const single = (
+    slot: 'creditGate' | 'creditPricing' | 'flagProvider' | 'socialPlatformApps' | 'executionBackend',
+    label: string,
+  ) => {
     const owner = current[slot]?.extension ?? staged[slot]?.extension;
     if (owner)
       throw new ExtensionRegistrationError(
@@ -123,6 +133,12 @@ export async function registerExtension(extension: ServerExtension, context: Ext
       call(...args);
     };
   const registrar: ExtensionRegistrar = {
+    executionBackend: guard(backend => {
+      single('executionBackend', 'execution backend');
+      if (!executionBackendValid(backend))
+        throw new ExtensionRegistrationError(`Extension "${extension.name}" supplied an invalid execution backend`);
+      staged.executionBackend = wrap(backend);
+    }),
     creditGate: guard(gate => {
       single('creditGate', 'credit gate');
       staged.creditGate = wrap(gate);
@@ -182,6 +198,7 @@ export async function registerExtension(extension: ServerExtension, context: Ext
   if (staged.creditPricing) current.creditPricing = staged.creditPricing;
   if (staged.flagProvider) current.flagProvider = staged.flagProvider;
   if (staged.socialPlatformApps) current.socialPlatformApps = staged.socialPlatformApps;
+  if (staged.executionBackend) current.executionBackend = staged.executionBackend;
   current.usageSinks.push(...staged.usageSinks);
   current.analytics.push(...staged.analytics);
   current.errorReporters.push(...staged.errorReporters);
@@ -216,6 +233,32 @@ export function flagProvider(): FlagProvider | undefined {
 /** The hosted social platform apps, or undefined when operator settings supply them. */
 export function socialPlatformApps(): SocialPlatformApps | undefined {
   return state().socialPlatformApps?.value;
+}
+
+export function executionBackend(): ExecutionBackend | undefined {
+  return state().executionBackend?.value;
+}
+
+/** Selection is explicit; a registered extension cannot enable execution by itself. */
+export function configuredExecutionBackend(
+  configuration: ExecutionConfiguration,
+  local: Partial<Record<'local' | 'docker', ExecutionBackend>> = {},
+): ExecutionBackend | undefined {
+  if (configuration.mode === 'off') return undefined;
+  const backend = configuration.mode === 'extension' ? executionBackend() : local[configuration.mode];
+  if (!backend || !executionBackendValid(backend))
+    throw new ExtensionRegistrationError('Configured execution backend is unavailable');
+  const { capabilities } = backend.descriptor;
+  if (
+    !capabilities.hardDeadlines ||
+    !capabilities.reconnect ||
+    capabilities.network !== configuration.policy.network ||
+    (configuration.mode === 'local' ? capabilities.isolation !== 'direct' : capabilities.isolation === 'direct')
+  )
+    throw new ExtensionRegistrationError('Configured execution backend cannot enforce the execution policy');
+  if (!configuration.policy.profiles.every(profile => executionProfileSupported(profile, backend.descriptor)))
+    throw new ExtensionRegistrationError('Configured execution backend does not support the requested profiles');
+  return backend;
 }
 
 /** Extension migrations in load order, each tagged with its owning extension. */
@@ -286,10 +329,11 @@ export async function emitHook<E extends HookEvent>(event: E, payload: HookEvent
 function lifecycleTargets() {
   const current = state();
   return [
-    ...new Set<ProductAnalytics | ErrorReporter | FlagProvider>([
+    ...new Set<ProductAnalytics | ErrorReporter | FlagProvider | ExecutionBackend>([
       ...current.analytics.map(entry => entry.value),
       ...current.errorReporters.map(entry => entry.value),
       ...(current.flagProvider ? [current.flagProvider.value] : []),
+      ...(current.executionBackend ? [current.executionBackend.value] : []),
     ]),
   ];
 }
@@ -298,7 +342,7 @@ export async function flushExtensions() {
   await Promise.allSettled(lifecycleTargets().map(target => ('flush' in target ? target.flush?.() : undefined)));
 }
 
-/** Shuts down every analytics, error, and flag client once; later calls wait for the first. */
+/** Shuts down registered clients once; later calls wait for the first. */
 export function shutdownExtensions() {
   const current = state();
   current.shutdown ??= Promise.allSettled(lifecycleTargets().map(target => target.shutdown?.())).then(() => undefined);

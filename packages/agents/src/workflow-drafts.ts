@@ -167,7 +167,7 @@ export function workflowDefinitionProblem(
     return {
       error: 'code-steps-unavailable',
       instruction:
-        'No isolated code runner is configured, so JavaScript and Python steps cannot run. Draft the workflow without code steps, and tell the human why.',
+        'No execution backend is configured, so code steps cannot run. Draft the workflow without code steps, and tell the human why.',
     };
   if (
     definition.steps.some(

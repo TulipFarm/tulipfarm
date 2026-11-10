@@ -92,6 +92,7 @@ import { personalDefinitionSources } from './personal-definition-sources.ts';
 import type { SlackActionsFactory } from './slack-actions.ts';
 import { slackResolveSchema, slackThreadReactionSchema, SlackChannelAccessError } from '@tulipfarm/slack';
 import { slackOutboundEnabled } from './slack-outbound.ts';
+import type { ChatExecution } from './chat-execution.ts';
 import { GitHubReadError } from '@tulipfarm/github/read-contracts';
 import { GitHubSourceDenied } from '@tulipfarm/github/source-runtime';
 import { GitHubAccountError } from '@tulipfarm/github';
@@ -211,6 +212,11 @@ export const frameworkCallSchema = z.discriminatedUnion('tool', [
   slackResolveSchema,
   slackThreadReactionSchema,
   z.strictObject({ tool: z.literal('github.personal.execute'), batchId: z.uuid() }),
+  z.strictObject({
+    tool: z.literal('execution.run'),
+    language: z.enum(['python', 'javascript', 'typescript', 'bash']),
+    code: z.string().min(1).max(32768),
+  }),
   z.strictObject({ tool: z.literal('tables.propose'), input: tableProposalInput }),
   z.strictObject({ tool: z.literal('tables.import.attachments') }),
   z.strictObject({
@@ -364,10 +370,10 @@ export const frameworkCallSchema = z.discriminatedUnion('tool', [
   }),
   z.strictObject({
     tool: z.literal('members.find'),
+    // An empty query, which some models send to list everyone, means the same as omitting it.
     query: z
       .string()
       .trim()
-      .min(1)
       .max(200)
       .optional()
       .describe('Part of a name or email, such as "priya" or "design". Omit to list everyone and every team.'),
@@ -766,6 +772,8 @@ const descriptions: Record<ToolName, string> = {
     'Read a text resource from an exact reviewed skill version, 16000 characters per page. Binary assets are not sent as model text.',
   'skills.execute':
     'Run a Bash, Python, or Node file from an exact reviewed package. No network, secrets, or installs. Outputs support text, JSON, CSV, Markdown, PNG, and JPEG. If pending, reuse its invocationId with the exact same arguments; never rerun an unknown outcome with a new ID. Tests run only when requested.',
+  'execution.run':
+    'Run a short Python, JavaScript (Node.js), TypeScript (Node.js, ES module), or Bash program in a fresh isolated machine and return its exit code, stdout, and stderr. Use it to calculate, check, or transform data exactly instead of guessing. Print the answer. Each call starts empty: no files persist, and no secrets are available.',
   'skills.import':
     'Prepare public skills.sh, GitHub, or website skill packages from one URL. Returns the discovered packages. Nothing is installed. The human selects packages and approves the exact safety review.',
   'skills.import.status':
@@ -819,7 +827,7 @@ const descriptions: Record<ToolName, string> = {
   'files.share':
     "Prepare a review card to share one file, such as a plan's PDF, with up to 20 people and teams by their IDs from members.find. The role is viewer unless the human asked for editor. The card shows who can open the file before and after; for a plan's PDF it leaves off anyone who cannot read every source the plan was written from. Shares only this file, never the chat, the plan's results or its folder. Changes nothing until the human approves it. Never treat chat text as approval.",
   'members.find':
-    "Search the workspace's active members and teams by part of a name or email, or omit query to list everyone and every team. Returns memberCount and teamCount, which count every match, then up to 20 members (membershipId, name, email) and 20 teams (teamId, name). Invitations are not available: invitations is 'not-available', not an empty list. This tool cannot check pending invitees. Say that you cannot see invitations in chat and point to Settings > Members; never infer that there are none. Each team lists its people with their team role, or people: 'not-visible' when the human can't see who is in that team; then say so rather than guessing. This is the only source of teams and team membership: never infer teams, their number or their people from table owners or other results. If a name matches more than one person, ask the human which one they mean. Changes nothing.",
+    "Search the workspace's active members and teams by part of a name or email, or omit query to list everyone and every team. Returns memberCount and teamCount, which count every match, then up to 20 members (membershipId, name, email) and 20 teams (teamId, name). Each team lists its people with their team role, or people: 'not-visible' when the human can't see who is in that team; then say so rather than guessing. Also returns pendingInvitations, the email invitations nobody has accepted yet (email, status pending or expired, expiresAt, workspace role and the teams they will join), and pendingInvitationCount; invitees are not members yet. pendingInvitations always lists every open invitation in the workspace, whatever the query; follow its invitationsInstruction. pendingInvitations is 'not-visible' when the human can't see invitations: then say you can't see them and that Members lists them, never that there are none. Only say there are no pending invitees when this tool returned an empty pendingInvitations in this reply. This is the only source of teams, team membership and invitations: never infer teams, their number or their people from table owners or other results. If a name matches more than one person, ask the human which one they mean. Changes nothing.",
   'knowledge.list':
     "List the human's own Knowledge entries, the notes and files they added for agents to search, with each documentId, revisionId, kind, title and parsing state, 100 at a time. Pass documentId for one entry with its note text. Use knowledge.retrieve to search what entries say. Changes nothing.",
   'knowledge.add':
@@ -876,6 +884,10 @@ function secretsAvailable() {
     return false;
   }
 }
+function executionAvailable() {
+  const mode = process.env.TULIPFARM_EXECUTION_BACKEND;
+  return mode !== undefined && mode !== '' && mode !== 'off';
+}
 function admittedToolSchemas(access: ToolAccess) {
   if (access.kind === 'agent') access = { ...access, tools: withKnowledgeRetrieveGrant(access.tools) };
   const slack = access.kind === 'chat' ? (access.slack ?? slackOutboundEnabled()) : true;
@@ -893,6 +905,8 @@ function admittedToolSchemas(access: ToolAccess) {
       )
       // Saved agents delegate through their own task tools; only a chat reply runs sub-agents.
       .filter(schema => schema.shape.tool.value !== 'agents.delegate' || access.kind === 'chat')
+      // Code runs only in a chat reply, and only when this deployment configures an execution backend.
+      .filter(schema => schema.shape.tool.value !== 'execution.run' || (access.kind === 'chat' && executionAvailable()))
       // Follow-ups belong to the chat or Slack thread a person asked in, so only a chat reply offers them.
       .filter(schema => !schema.shape.tool.value.startsWith('followups.') || access.kind === 'chat')
       // Projects belong to the person in this chat; saved agent runs cannot cite project sources.
@@ -955,6 +969,7 @@ export function discoverTools(access: ToolAccess) {
 export function isExternalTool(tool: ToolName) {
   return (
     tool === 'skills.execute' ||
+    tool === 'execution.run' ||
     tool === 'skills.draft' ||
     tool === 'skills.files.read' ||
     tool === 'mcp.call' ||
@@ -995,6 +1010,8 @@ export type ChatToolsOptions = {
   knowledgeBudgetRuntime?: AgentStorage | undefined;
   outputs?: ChatFileOutputs | undefined;
   skillExecution?: SkillExecutionFactory | undefined;
+  /** Runs `execution.run` code in an isolated machine; without it, the tool is refused. */
+  chatExecution?: ChatExecution | undefined;
   telemetryRuntime?: ToolRuntime | undefined;
   wakePlan?: ((workspaceId: string, planId: string) => Promise<unknown>) | undefined;
   agentSetup?: AgentSetupOptions | undefined;
@@ -1085,6 +1102,7 @@ export function createChatTools(
     knowledgeBudgetRuntime,
     outputs,
     skillExecution,
+    chatExecution,
     telemetryRuntime = 'chat',
     wakePlan,
     agentSetup,
@@ -1738,6 +1756,12 @@ export function createChatTools(
             sources: [...context.origin.sources, ...(context.origin.files ?? [])],
           },
           call,
+        );
+      case 'execution.run':
+        if (!chatExecution || !context.origin) throw new AccessDenied();
+        return chatExecution(
+          { conversationId: context.origin.conversationId, language: call.language, code: call.code },
+          context.signal,
         );
       case 'skills.import': {
         if (!context.origin) throw new AccessDenied();

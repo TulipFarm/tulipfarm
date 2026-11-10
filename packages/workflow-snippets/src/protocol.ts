@@ -44,7 +44,7 @@ export const jobSchema = z
     runId: id,
     revision: id,
     stepId: z.string().regex(/^[a-z][a-z0-9_]{0,47}$/),
-    language: z.enum(['javascript', 'python']),
+    language: z.enum(['javascript', 'typescript', 'python', 'bash']),
     source: sourceSchema,
     input: snippetPayloadSchema,
   })

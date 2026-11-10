@@ -464,6 +464,8 @@ export function createAuthoringDrafts(
     sources: z.infer<typeof sourcesSchema>,
   ) {
     const audience = proposal.kind === 'row' ? slackTurnAudience : undefined;
+    // A later change to a table the chat listed or read must not lock the person out of a draft. A draft checks its
+    // own target for staleness separately.
     await requireDraftSources(
       bindFileSources(tx),
       actor,
@@ -473,6 +475,8 @@ export function createAuthoringDrafts(
       false,
       true,
       audience && (eventId => audience(tx, workspaceId, actor, eventId)),
+      undefined,
+      true,
     );
   }
   async function load(tx: AgentTransaction, workspaceId: string, actor: HumanActor, chatId: string, id: string) {

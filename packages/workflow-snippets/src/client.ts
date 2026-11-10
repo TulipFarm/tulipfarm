@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { jobSchema, resultSchema, type SnippetClient } from './protocol.ts';
 import { maxSkillJobBytes, skillJobSchema, skillResultSchema, type SkillClient } from './skill-protocol.ts';
 
 type BrokerOptions = { url: string; token: string; allowLocalHttp?: boolean };
@@ -60,17 +59,6 @@ function brokerTransport(options: BrokerOptions) {
   };
 }
 
-export function createSnippetClient(options: BrokerOptions): SnippetClient {
-  const send = brokerTransport(options);
-  return {
-    async submit(job) {
-      const parsed = jobSchema.safeParse(job);
-      if (!parsed.success) return { kind: 'failed', error: 'invalid-input' };
-      return resultSchema.parse(await send('/v1/jobs', parsed.data, 65536));
-    },
-  };
-}
-
 export function createSkillClient(options: BrokerOptions): SkillClient {
   const send = brokerTransport(options);
   return {
@@ -124,16 +112,6 @@ export function configuredSkillClient(env: NodeJS.ProcessEnv = process.env): Ski
   if (env.SKILL_SCRIPTS_ENABLED !== 'true') return undefined;
   if (!env.SNIPPET_BROKER_URL || !env.SNIPPET_BROKER_TOKEN) throw new Error('incomplete-skill-broker-configuration');
   return createSkillClient({
-    url: env.SNIPPET_BROKER_URL,
-    token: env.SNIPPET_BROKER_TOKEN,
-    allowLocalHttp: env.SNIPPET_ALLOW_LOCAL_HTTP === 'true',
-  });
-}
-
-export function configuredSnippetClient(env: NodeJS.ProcessEnv = process.env): SnippetClient | undefined {
-  if (!env.SNIPPET_BROKER_URL && !env.SNIPPET_BROKER_TOKEN) return undefined;
-  if (!env.SNIPPET_BROKER_URL || !env.SNIPPET_BROKER_TOKEN) throw new Error('incomplete-snippet-broker-configuration');
-  return createSnippetClient({
     url: env.SNIPPET_BROKER_URL,
     token: env.SNIPPET_BROKER_TOKEN,
     allowLocalHttp: env.SNIPPET_ALLOW_LOCAL_HTTP === 'true',

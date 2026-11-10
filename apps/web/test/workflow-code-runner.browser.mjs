@@ -20,7 +20,7 @@ const Fastify = requireApi('fastify'),
 const { chromium } = await import(
   process.env.PLAYWRIGHT_MODULE ? pathToFileURL(process.env.PLAYWRIGHT_MODULE).href : 'playwright'
 );
-const unavailable = 'Code steps cannot run until an isolated code runner is configured.';
+const unavailable = 'Code steps cannot run until an execution backend is configured.';
 
 test(
   'Code saves require a runner and Chromium explains activation failure with read-only recovery',
