@@ -22,6 +22,7 @@ import {
   recordChatDiscovery,
   recordChatDispatch,
   recordDispatchSkip,
+  recordAgentSetup,
   recordChatCompletionCheck,
   errorType,
   log,
@@ -1432,4 +1433,50 @@ test('a service name override replaces tulipfarm-<app> and must stay a bounded t
     'tulipfarm-knowledge-worker',
   );
   assert.throws(() => telemetryIdentity(build, true, 'knowledge'), /service name/);
+});
+
+test('agent setup outcomes count status and error codes without ids or messages', async t => {
+  const lines = [];
+  t.mock.method(process.stdout, 'write', line => {
+    lines.push(JSON.parse(line));
+    return true;
+  });
+  const exporter = new InMemoryMetricExporter(AggregationTemporality.CUMULATIVE);
+  const reader = new PeriodicExportingMetricReader({ exporter, exportIntervalMillis: 60000 });
+  metrics.disable();
+  assert.ok(metrics.setGlobalMeterProvider(new MeterProvider({ readers: [reader] })));
+  t.after(() => metrics.disable());
+  const failure = new TypeError('PRIVATE MESSAGE for agent 11111111-1111-4111-8111-111111111111');
+  recordAgentSetup('active', null);
+  recordAgentSetup('blocked', 'setup-type-error', failure);
+  recordAgentSetup('blocked', 'PRIVATE CODE 11111111-1111-4111-8111-111111111111');
+  recordAgentSetup('PRIVATE STATUS', 'definition-failed');
+  // The test runner also writes to stdout while the metrics flush.
+  t.mock.restoreAll();
+  await reader.forceFlush();
+  const points = exporter
+    .getMetrics()
+    .flatMap(resource => resource.scopeMetrics.flatMap(scope => scope.metrics))
+    .filter(metric => metric.descriptor.name === 'cloud_agent_setups')
+    .flatMap(metric => metric.dataPoints)
+    .map(point => [point.attributes.status, point.attributes.error_code, point.value]);
+  assert.deepEqual(points, [
+    ['active', 'none', 1],
+    ['blocked', 'setup-type-error', 1],
+    ['blocked', 'unclassified', 1],
+    ['unknown', 'definition-failed', 1],
+  ]);
+  const setups = lines.filter(line => line.operation === 'agents.setup');
+  assert.deepEqual(
+    setups.map(line => [line.level, line.event, line.status, line['error.code']]),
+    [
+      ['info', 'call_completed', 'active', undefined],
+      ['warn', 'call_failed', 'blocked', 'setup-type-error'],
+      ['warn', 'call_failed', 'blocked', 'unclassified'],
+      ['warn', 'call_failed', 'unknown', 'definition-failed'],
+    ],
+  );
+  assert.equal(setups[1]['error.type'], 'TypeError');
+  assert.match(setups[1]['error.site'], /@telemetry\.test:\d+/);
+  assert.doesNotMatch(JSON.stringify([setups, points]), /PRIVATE|11111111-/);
 });

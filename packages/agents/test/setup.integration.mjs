@@ -405,6 +405,43 @@ test('an inactive creation with explicitly changed policy does not restore creat
   assert.deepEqual((await f.state()).activations, []);
 });
 
+test('a stopped setup keeps the original error class or code, never its message', async t => {
+  const f = await environment(t);
+  let failure;
+  const service = createAgentSetup(f.runtime, undefined, {
+    attachSlack: async () => {
+      throw failure;
+    },
+  });
+  const draft = await service.saveDraft(
+    f.w.id,
+    f.user,
+    f.agentId,
+    await f.input({
+      setup: {
+        ...f.setup(),
+        slackChannels: [{ channel: 'C123', expectedVersion: 0, replaceAgentId: null }],
+        prompt: 'Check once per hour.',
+        triggers: [{ id: randomUUID(), trigger: { kind: 'interval', minutes: 60 } }],
+      },
+    }),
+  );
+  const command = await service.publish(f.w.id, f.user, f.agentId, f.decision(draft));
+  await f.accept(service, command);
+  for (const [error, code] of [
+    [new TypeError('Cannot read private value of agent C123'), 'setup-type-error'],
+    [Object.assign(new Error('deadlock detected on private relation'), { code: '40P01' }), 'setup-40p01'],
+    [new Error('slack-membership-required'), 'slack-membership-required'],
+    [new Error('A private sentence with no code'), 'setup-operation-unavailable'],
+  ]) {
+    failure = error;
+    const result = await service.advance(f.w.id, f.user, command.commandId);
+    assert.equal(result.status, 'blocked');
+    assert.equal(result.error, code);
+    assert.deepEqual(await service.readCommand(f.w.id, f.user, command.commandId), result);
+  }
+});
+
 test('post-Soul setup failures roll back every DB effect and resume with stable IDs', async t => {
   const f = await environment(t);
   let blocked = true;
