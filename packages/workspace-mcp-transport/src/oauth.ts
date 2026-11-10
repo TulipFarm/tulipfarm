@@ -19,10 +19,12 @@ export const MCP_OAUTH_CLIENT_METADATA = Object.freeze({
   token_endpoint_auth_method: 'none',
 });
 
+// Real servers advertise hundreds of scopes; PostHog lists more than 150.
+const maxScopes = 512;
 const tableSchema = z.object({
   resource: z.string(),
   authorization_servers: z.array(z.string()).min(1).max(8),
-  scopes_supported: z.array(z.string().max(256)).max(128).optional(),
+  scopes_supported: z.array(z.string().max(256)).max(maxScopes).optional(),
 });
 const issuerSchema = z.object({
   issuer: z.string(),
@@ -291,7 +293,7 @@ export function createOAuthOperations({
       if (url.searchParams.has(key)) throw new McpNetworkError('oauth-binding-denied');
     }
     const scopes = input.scope ?? binding.scopes;
-    if (scopes.some(scope => !/^[\x21\x23-\x5b\x5d-\x7e]{1,256}$/.test(scope)) || scopes.length > 128)
+    if (scopes.some(scope => !/^[\x21\x23-\x5b\x5d-\x7e]{1,256}$/.test(scope)) || scopes.length > maxScopes)
       throw new McpNetworkError('oauth-binding-denied');
     for (const [key, value] of Object.entries({
       client_id: input.client.clientId,

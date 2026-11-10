@@ -158,6 +158,24 @@ test('real HTTP OAuth discovers resource and issuer then binds PKCE, explicit cl
   assert.equal(sent.get('client_id'), client.clientId);
 });
 
+test('OAuth accepts a resource that advertises more than a hundred scopes and refuses an unbounded list', async t => {
+  const many = Array.from({ length: 157 }, (_, i) => `scope:${i}`);
+  let advertised = many;
+  const f = await httpFixture(t, (req, res) => {
+    if (req.url.pathname.includes('oauth-protected-resource'))
+      json(res, { resource, authorization_servers: [issuer], scopes_supported: advertised });
+    else if (req.url.pathname.includes('oauth-authorization-server')) json(res, metadata);
+    else json(res, {}, 404);
+  });
+  const operations = createOAuthOperations({ fetcher: f.fetcher });
+  const discovered = await operations.discoverOAuth({ endpoint: resource });
+  assert.deepEqual(discovered.scopes, many);
+  const authorization = operations.createOAuthAuthorization({ binding: discovered, client, state: 's'.repeat(43) });
+  assert.equal(new URL(authorization.authorizationUrl).searchParams.get('scope'), many.join(' '));
+  advertised = Array.from({ length: 513 }, (_, i) => `scope:${i}`);
+  await assert.rejects(operations.discoverOAuth({ endpoint: resource }), { code: 'oauth-binding-denied' });
+});
+
 test('resource mismatch, issuer mix-up, missing PKCE and ambiguous issuer prevent authorization', async t => {
   for (const mode of ['resource', 'issuer', 'pkce', 'ambiguous'])
     await t.test(mode, async t => {

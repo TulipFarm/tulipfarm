@@ -131,7 +131,7 @@ export const mcpCredentialSchema = z.discriminatedUnion('kind', [
     clientId: z.string().min(1).max(2048),
     clientSecret: z.string().min(1).max(16384).optional(),
     authMethod: z.enum(['none', 'client_secret_basic', 'client_secret_post']),
-    scopes: z.array(z.string().max(256)).max(100),
+    scopes: z.array(z.string().max(256)).max(512),
     accountId: z.string().max(512).nullable(),
   }),
   z.strictObject({ kind: z.literal('secret-bearer'), secretId: z.uuid() }),
