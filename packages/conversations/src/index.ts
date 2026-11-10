@@ -16,7 +16,7 @@ import { publicWebReceiptForHistory } from './public-web-history.ts';
 import { knowledgeActivityForHistory } from './knowledge-activity-history.ts';
 import { rowChangeForReceipt, rowViewForReceipt } from './row-view.ts';
 import { readableWorkflows, workflowReferences } from './workflow-receipts.ts';
-import { citedKnowledgeSources, sourceDependenciesSchema } from './results.ts';
+import { sourceDependenciesSchema } from './results.ts';
 import { requireCredits, CreditsExhausted } from '@tulipfarm/workspace-storage/credits';
 import { recordFileUse } from '@tulipfarm/files';
 import { observeChatDetail, trackEvent } from '@tulipfarm/observability';
@@ -26,7 +26,6 @@ import {
   currentMember,
   lockAuthorization,
   prefetchConversationSources,
-  protectedSourceClosure,
   resolveHuman,
   uuidSchema,
   type HumanActor,
@@ -702,61 +701,6 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
         ).rows.map(row => [row.message_id, row.sources]),
       );
       const hidden = new Set<string>();
-      const legacy = messages.filter(message => {
-        const sources = sourceDependenciesSchema.parse(results.get(message.id) ?? []);
-        return (
-          chat.owner &&
-          !chat.projectId &&
-          sources.some(source => source.kind === 'knowledge-document') &&
-          sources.some(
-            source => source.kind === 'private-conversation' && source.conversationId === chatId && !source.snapshot,
-          ) &&
-          !sources.some(source => source.kind === 'unknown' || source.kind === 'unavailable')
-        );
-      });
-      if (legacy.length) {
-        const sharedOrSummarized = await tx.client.query(
-          `SELECT 1 WHERE EXISTS (SELECT 1 FROM ${table(tx, 'tf_slack_dm_roots')} WHERE conversation_id=$1)
-           OR EXISTS (SELECT 1 FROM ${table(tx, 'tf_slack_default_turns')} WHERE conversation_id=$1)
-           OR EXISTS (SELECT 1 FROM ${table(tx, 'tf_conversation_handoffs')} WHERE conversation_id=$1
-             AND sources @> '[{"kind":"knowledge-document"}]'::jsonb)`,
-          [chatId],
-        );
-        if (!sharedOrSummarized.rowCount) {
-          const outputs = (
-            await tx.client.query(
-              `SELECT r.message_id,s.output->'sources' AS sources FROM ${table(tx, 'tf_conversation_results')} r
-             JOIN ${table(tx, 'tf_conversation_execution_steps')} s ON s.turn_id=r.turn_id
-             WHERE r.message_id=ANY($1::uuid[])`,
-              [legacy.map(message => message.id)],
-            )
-          ).rows;
-          for (const message of legacy) {
-            const own = outputs.filter(row => row.message_id === message.id);
-            // Older replies without complete tool attribution keep their original, conservative withholding.
-            if (!own.length || own.some(row => !sourceDependenciesSchema.safeParse(row.sources).success)) continue;
-            const consumed = own.flatMap(row => sourceDependenciesSchema.parse(row.sources));
-            if (consumed.some(source => source.kind === 'unknown' || source.kind === 'unavailable')) continue;
-            const retained = sourceDependenciesSchema.parse(results.get(message.id));
-            const cited = citedKnowledgeSources(
-              message.parts.map(part => ('text' in part ? part.text : '')).join('\n'),
-              retained,
-            );
-            let dependencies;
-            try {
-              dependencies = await protectedSourceClosure(tx, [...consumed, ...cited]);
-            } catch (error) {
-              if (!(error instanceof AccessDenied)) throw error;
-              continue;
-            }
-            const used = new Set(dependencies.map(source => JSON.stringify(source)));
-            results.set(
-              message.id,
-              retained.filter(source => source.kind !== 'knowledge-document' || used.has(JSON.stringify(source))),
-            );
-          }
-        }
-      }
       async function conceal(
         text: string | ((error: AccessDenied) => string),
         hide: boolean,

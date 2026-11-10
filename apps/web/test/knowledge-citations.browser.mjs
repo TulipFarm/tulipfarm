@@ -150,8 +150,17 @@ test(
               json = {
                 messages: [
                   {
-                    id,
+                    id: '88888888-8888-4888-8888-888888888888',
                     sequence: 1,
+                    author: 'assistant',
+                    createdAt: workspace.createdAt,
+                    parts: [{ kind: 'text', text: 'Good morning. This reply predates the Knowledge source.' }],
+                    turn: null,
+                    tools: [],
+                  },
+                  {
+                    id,
+                    sequence: 2,
                     author: 'human',
                     createdAt: workspace.createdAt,
                     parts: [{ kind: 'text', text: 'When do we pay suppliers?' }],
@@ -163,7 +172,7 @@ test(
                   },
                   {
                     id: answerId,
-                    sequence: 2,
+                    sequence: 3,
                     author: 'assistant',
                     createdAt: workspace.createdAt,
                     parts: [
@@ -179,7 +188,7 @@ test(
                   },
                   {
                     id: revokedId,
-                    sequence: 3,
+                    sequence: 4,
                     author: 'assistant',
                     createdAt: workspace.createdAt,
                     parts: [{ kind: 'text', text: recovery }],
@@ -187,17 +196,22 @@ test(
                     tools: [],
                   },
                   {
-                    id: '88888888-8888-4888-8888-888888888888',
-                    sequence: 4,
+                    id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+                    sequence: 5,
                     author: 'assistant',
                     createdAt: workspace.createdAt,
-                    parts: [{ kind: 'text', text: 'Good morning. This reply uses no Knowledge.' }],
+                    parts: [
+                      {
+                        kind: 'text',
+                        text: state.removed ? removedReply : 'Suppliers are paid within 30 days.',
+                      },
+                    ],
                     turn: null,
                     tools: [],
                   },
                   {
                     id: '99999999-9999-4999-8999-999999999999',
-                    sequence: 5,
+                    sequence: 6,
                     author: 'human',
                     createdAt: workspace.createdAt,
                     parts: [{ kind: 'text', text: 'Remove the old supplier note.' }],
@@ -281,8 +295,12 @@ test(
                 .getByRole('region', { name: 'Knowledge removed' })
                 .getByText('Removed', { exact: true })
                 .waitFor();
-              await page.getByText(removedReply, { exact: true }).waitFor();
-              await page.getByText('Good morning. This reply uses no Knowledge.', { exact: true }).waitFor();
+              await page.getByText(removedReply, { exact: true }).first().waitFor();
+              assert.equal(await page.getByText(removedReply, { exact: true }).count(), 2);
+              assert.equal(await page.getByText('Suppliers are paid within 30 days.', { exact: true }).count(), 0);
+              await page
+                .getByText('Good morning. This reply predates the Knowledge source.', { exact: true })
+                .waitFor();
               assert.equal(await page.getByRole('button', { name: 'Source: Supplier policy', exact: true }).count(), 0);
               if (!reload) await page.reload();
             }

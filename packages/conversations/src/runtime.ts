@@ -37,7 +37,6 @@ import { replyParts } from './stopped-replies.ts';
 import {
   conversationResult,
   conversationResultSchema,
-  citedKnowledgeSources,
   mergeSources,
   reviewCardReference,
   type ConversationResult,
@@ -1710,7 +1709,6 @@ export function createConversationExecutor(
                   )
                   .reverse();
           const ownerOnly = !chat.project_id && !chat.slack && !chat.context;
-          const priorKnowledge: SourceDependency[] = [];
           const inherited: SourceDependency[] =
             chat.context?.kind === 'channel'
               ? chat.context.sources
@@ -1759,16 +1757,15 @@ export function createConversationExecutor(
               if (hidden) hidden.text = '';
               continue;
             }
+            // Earlier assistant text exposes its sources even when the new reply has no citation.
             for (const dependency of row.sources)
-              if (ownerOnly && dependency.kind === 'knowledge-document') priorKnowledge.push(dependency);
-              else
-                inherited.push(
-                  ownerOnly &&
-                    dependency.kind === 'private-conversation' &&
-                    dependency.conversationId === fence.conversationId
-                    ? { ...dependency, snapshot: true }
-                    : dependency,
-                );
+              inherited.push(
+                ownerOnly &&
+                  dependency.kind === 'private-conversation' &&
+                  dependency.conversationId === fence.conversationId
+                  ? { ...dependency, snapshot: true }
+                  : dependency,
+              );
           }
           if (rows.length !== assistants.length && !chat.project_id) inherited.push({ kind: 'unknown' });
           if (chat.slack) {
@@ -1814,7 +1811,6 @@ export function createConversationExecutor(
             openGoogleProposals,
             tableProposals,
             inherited,
-            priorKnowledge,
             invoked,
             durable,
             executionSteps,
@@ -2030,10 +2026,7 @@ export function createConversationExecutor(
               name === 'web.search' ||
               name === 'api.request' ||
               name === 'files.create'));
-        const currentSources = mergeSources([
-          ...conversationResultSchema.shape.sources.parse(dependencies),
-          ...citedKnowledgeSources(JSON.stringify(call ?? {}), source.priorKnowledge),
-        ]);
+        const currentSources = conversationResultSchema.shape.sources.parse(dependencies);
         if (++calls > chatToolCallLimit || !conversationToolNameAllowed(name))
           throw Object.assign(new Error('conversation-tool-unavailable'), { code: 'tool-unavailable' });
         const callId = randomUUID();
@@ -2740,7 +2733,6 @@ export function createConversationExecutor(
       answerLayout = answer.layout ? { input: answer.layout } : answer.layoutFailed ? { failed: text } : undefined;
       fallback = answer.fallback;
       sources = answer.sources;
-      sources = mergeSources([...sources, ...citedKnowledgeSources(text, source.priorKnowledge)]);
       replied = true;
     }
     let titleRevision: number | undefined;

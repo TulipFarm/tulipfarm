@@ -64,10 +64,3 @@ export function mergeSources(sources: readonly SourceDependency[]): SourceDepend
   const unique = [...new Map(sources.map(source => [JSON.stringify(source), source])).values()];
   return unique.length <= 1000 ? unique : [{ kind: 'unknown' }];
 }
-
-export function citedKnowledgeSources(text: string, sources: readonly SourceDependency[]) {
-  const publications = new Set(
-    [...text.matchAll(/#knowledge-citation=([0-9a-f-]{36}):\d+/gi)].map(match => match[1]!.toLowerCase()),
-  );
-  return sources.filter(source => source.kind === 'knowledge-document' && publications.has(source.publicationId));
-}

@@ -42,7 +42,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       parts: [{ kind: 'text', text: 'Update my Knowledge.' }],
     });
     let output;
-    const executor = createConversationExecutor(runtime, async ({ executeTool }) => {
+    const executor = createConversationExecutor(runtime, async ({ executeTool, messages }) => {
       if (call)
         output = (
           await executeTool(
@@ -53,7 +53,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
             call,
           )
         ).result;
-      return { text, sources };
+      return { text: typeof text === 'function' ? text(messages) : text, sources };
     });
     await executor.process({ workspaceId: w.id, conversationId: chatId, turnId: sent.turnId, generation: 0 });
     return output;
@@ -180,6 +180,8 @@ for (const change of ['remove note', 'replace note', 'remove file']) {
   test(`${change} preserves unrelated replies and owner-only Knowledge receipts`, async t => {
     const { w, db, runtime, chats, chatId, drafts, tool, reply, approve, files } = await setup(t);
     const text = 'Private source passage: Starter costs $10.';
+    const unrelatedText = 'Good morning. This reply predates the Knowledge source.';
+    await reply(unrelatedText);
     let fileId;
     if (change === 'remove file') {
       fileId = randomUUID();
@@ -237,19 +239,25 @@ for (const change of ['remove note', 'replace note', 'remove file']) {
       },
       [source],
     );
-    // Reusing an earlier citation must retain that exact revision without another tool call.
+    // Both cited and uncited reuse expose the model to the earlier source.
     await reply(`See [Pricing](#knowledge-citation=${publicationId}:0).`);
-    const unrelatedText = 'Good morning. This reply uses no Knowledge.';
-    await reply(unrelatedText, change === 'remove note' ? { tool: 'knowledge.list' } : undefined);
+    const copyFromContext = messages => {
+      const prior = messages.find(message => message.role === 'assistant' && message.text?.includes(text));
+      assert.ok(prior, 'the real executor includes the confidential earlier reply in the model prompt');
+      return prior.text.slice(0, text.length);
+    };
+    await reply(copyFromContext);
+    const legacyText = `Legacy uncited copy: ${text}`;
     const opaqueText = 'An older reply with no recorded tool attribution.';
     let legacySources;
     if (change === 'remove note') {
+      await reply(messages => `Legacy uncited copy: ${copyFromContext(messages)}`, { tool: 'knowledge.list' });
       await reply(opaqueText);
       const old = (
         await db.platform.query(
           `SELECT r.message_id,r.sources FROM "${w.names.schema}".tf_conversation_results r
          JOIN "${w.names.schema}".tf_conversation_parts p ON p.message_id=r.message_id WHERE p.text=$1`,
-          [unrelatedText],
+          [legacyText],
         )
       ).rows[0];
       legacySources = old.sources.map(dependency =>
@@ -257,7 +265,7 @@ for (const change of ['remove note', 'replace note', 'remove file']) {
           ? { kind: 'private-conversation', conversationId: chatId }
           : dependency,
       );
-      legacySources.push(source);
+      if (!legacySources.some(dependency => dependency.kind === 'knowledge-document')) legacySources.push(source);
       await db.platform.query(`UPDATE "${w.names.schema}".tf_conversation_results SET sources=$2 WHERE message_id=$1`, [
         old.message_id,
         JSON.stringify(legacySources),
@@ -309,7 +317,7 @@ for (const change of ['remove note', 'replace note', 'remove file']) {
       assert.ok(!texts.includes(citedText));
       assert.ok(!texts.includes(`See [Pricing](#knowledge-citation=${publicationId}:0).`));
       const unavailable = texts.filter(value => value.includes('removed or replaced by you'));
-      assert.equal(unavailable.length, change === 'remove note' ? 3 : 2);
+      assert.ok(unavailable.length >= 2);
       assert.ok(!texts.includes(opaqueText), 'unattributed legacy dependencies stay withheld');
       assert.doesNotMatch(unavailable.join(''), /access changed|access to it ended|Some work failed/);
     }
@@ -322,11 +330,40 @@ for (const change of ['remove note', 'replace note', 'remove file']) {
         await db.platform.query(
           `SELECT r.sources FROM "${w.names.schema}".tf_conversation_results r
          JOIN "${w.names.schema}".tf_conversation_parts p ON p.message_id=r.message_id WHERE p.text=$1`,
-          [unrelatedText],
+          [legacyText],
         )
       ).rows[0];
-      assert.deepEqual(stored.sources, legacySources, 'legacy attribution is projected without rewriting stored data');
+      assert.deepEqual(stored.sources, legacySources, 'legacy reads do not rewrite stored dependencies');
     }
+    await t.test('uncited text copied from prior model context is withheld after source removal', async () => {
+      const { message_id: messageId } = (
+        await db.platform.query(`SELECT message_id FROM "${w.names.schema}".tf_conversation_parts WHERE text=$1`, [
+          text,
+        ])
+      ).rows[0];
+      for (let reload = 0; reload < 2; reload++) {
+        const history = await createConversations(runtime).history(w.id, w.userId, chatId);
+        const withheld = history.messages.find(message => message.id === messageId);
+        assert.ok(withheld);
+        assert.match(JSON.stringify(withheld.parts), /removed or replaced by you/);
+        assert.doesNotMatch(JSON.stringify(withheld.parts), /Private source passage|access changed|Some work failed/);
+      }
+    });
+    if (legacySources)
+      await t.test('legacy context exposure is not cleared by an unrelated Knowledge list output', async () => {
+        const { message_id: messageId } = (
+          await db.platform.query(`SELECT message_id FROM "${w.names.schema}".tf_conversation_parts WHERE text=$1`, [
+            legacyText,
+          ])
+        ).rows[0];
+        for (let reload = 0; reload < 2; reload++) {
+          const history = await createConversations(runtime).history(w.id, w.userId, chatId);
+          const withheld = history.messages.find(message => message.id === messageId);
+          assert.ok(withheld);
+          assert.match(JSON.stringify(withheld.parts), /removed or replaced by you/);
+          assert.doesNotMatch(JSON.stringify(withheld.parts), /Private source passage|access changed|Some work failed/);
+        }
+      });
     await assert.rejects(drafts.read(w.id, w.userId, chatId, dependent.draftId), AccessDenied);
     await reply('A fresh reply after the source changed.');
     assert.ok(
