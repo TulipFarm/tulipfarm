@@ -49,6 +49,8 @@ const rejections: Partial<Record<string, string>> = {
   'agent-table-access-unavailable':
     'A selected table is not available through your selected teams. In What data it can use, choose a team you belong to that grants the selected table access. Your input is retained.',
   'activation-version-conflict': 'A newer version was saved. Review it before activating.',
+  'activation-selection-required':
+    "Saved, but not activated. Some active versions have different access and TulipFarm can't tell which one is newest. In Execution, revoke the versions you no longer want, then activate again.",
   'trigger-sponsor-consent-required':
     'Sponsor the triggers that run on their own before activating. Your input is retained.',
   'setup-draft-outdated': 'This setup was saved before triggers were combined. Save it again before activating.',

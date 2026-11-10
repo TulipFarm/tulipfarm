@@ -38,6 +38,7 @@ function fixture() {
       definitionRevision: 'b'.repeat(64),
       capabilities: ['read', 'edit', 'invoke', 'manage'],
       activations: [{ id: randomUUID(), revision: 'b'.repeat(64), scope }],
+      replacedActivations: [],
     },
     policy: {
       version: 1,
@@ -56,6 +57,7 @@ function fixture() {
     saveStatus: 'accepted',
     queued: false,
     loseActivation: false,
+    activationError: null,
     newerBeforeActivation: false,
     accepted: false,
   };
@@ -140,23 +142,29 @@ test('existing-agent instructions save and activation in the real app', { timeou
           assert.equal(input.revision, state.detail.definitionRevision);
           assert.deepEqual(input.expectedActivationIds.sort(), state.detail.activations.map(item => item.id).sort());
           assert.equal(input.expectedSavedRevision, state.detail.savedRevision);
-          state.detail.activations = state.detail.activations.map((activation, index) => ({
-            ...activation,
-            id: index === 0 ? input.requestId : randomUUID(),
-            revision: input.revision,
-          }));
-          if (state.loseActivation) {
-            state.loseActivation = false;
-            await route.abort('failed');
-            return;
+          if (state.activationError) {
+            status = 409;
+            json = { error: state.activationError };
+          } else {
+            state.detail.activations = state.detail.activations.map((activation, index) => ({
+              ...activation,
+              id: index === 0 ? input.requestId : randomUUID(),
+              revision: input.revision,
+            }));
+            if (state.loseActivation) {
+              state.loseActivation = false;
+              await route.abort('failed');
+              return;
+            }
+            json = { activationId: input.requestId };
           }
-          json = { activationId: input.requestId };
         } else if (method === 'DELETE' && path.includes(`/agents/${id}/activations/`)) {
           const activationId = path.split('/').at(-1);
           state.writes.push({ kind: 'revoke', activationId });
           state.detail.replacedActivations = state.detail.replacedActivations.filter(
             activation => activation.id !== activationId,
           );
+          state.detail.activations = state.detail.activations.filter(activation => activation.id !== activationId);
           json = { saved: true };
         } else if (path.endsWith('/auth/get-session'))
           json = {
@@ -327,6 +335,39 @@ test('existing-agent instructions save and activation in the real app', { timeou
       await replaced.locator('..').getByRole('button', { name: 'Revoke activation', exact: true }).click();
       await page.getByText('Activation revoked.', { exact: true }).waitFor();
       assert.equal(state.writes.at(-1).activationId, replacedId);
+    });
+
+    await t.test('ambiguous access stays inactive until the manager resolves activations in Execution', async () => {
+      const state = fixture();
+      state.detail.activations.push({ id: randomUUID(), revision: state.detail.definitionRevision, scope: [] });
+      state.activationError = 'activation-selection-required';
+      const originals = structuredClone(state.detail.activations);
+      const { page } = await open(state);
+      await instructions(page).fill('Instructions that need an access choice.');
+      await save(page).click();
+      await page
+        .getByText(
+          "Saved, but not activated. Some active versions have different access and TulipFarm can't tell which one is newest. In Execution, revoke the versions you no longer want, then activate again.",
+          { exact: true },
+        )
+        .waitFor();
+      assert.deepEqual(state.detail.activations, originals);
+      assert.equal(await live(page).count(), 0);
+      assert.equal(await instructions(page).inputValue(), 'Instructions that need an access choice.');
+      if (process.env.AGENT_REVISION_SCREENSHOT) {
+        await page.getByRole('alert').last().scrollIntoViewIfNeeded();
+        await page.screenshot({ path: '/tmp/agent-revision-ambiguous.png' });
+      }
+      await page.getByRole('tab', { name: 'Execution', exact: true }).click();
+      await page.getByRole('button', { name: 'Revoke activation', exact: true }).last().click();
+      await page.getByText('Activation revoked.', { exact: true }).waitFor();
+      state.activationError = null;
+      await page.getByRole('tab', { name: 'Instructions', exact: true }).click();
+      await page.getByRole('button', { name: 'Activate saved instructions', exact: true }).click();
+      await page.getByRole('alertdialog').getByRole('button', { name: 'Activate this version', exact: true }).click();
+      await live(page).waitFor();
+      assert.equal(state.writes.filter(write => write.kind === 'save').length, 1);
+      assert.equal(state.detail.activations.length, 1);
     });
 
     await t.test('an inactive saved version is reviewed even when only its instructions change', async () => {

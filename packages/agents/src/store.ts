@@ -248,12 +248,16 @@ export function createAgentStore(storage: AgentStorage, externalGuard?: External
         throw new AgentError('activation-version-conflict');
       const active = (
         await transaction.client.query(
-          `SELECT id,scope FROM ${relation(transaction, 'tf_agent_activations')}
+          `SELECT id,scope,(dense_rank() OVER (ORDER BY activated_at DESC NULLS LAST))::text AS activation_rank FROM ${relation(transaction, 'tf_agent_activations')}
           WHERE agent_id=$1 AND revoked_at IS NULL AND superseded_by_activation_id IS NULL
           ORDER BY activated_at DESC NULLS LAST,id DESC`,
           [value.agentId],
         )
       ).rows;
+      const defaultScopes = new Set(
+        active.filter(row => row.activation_rank === '1').map(row => canonicalJson(row.scope)),
+      );
+      if (defaultScopes.size > 1) throw new AgentError('activation-selection-required');
       if (previous) {
         const replaced = (
           await transaction.client.query(

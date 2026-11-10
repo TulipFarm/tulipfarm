@@ -192,6 +192,73 @@ test('replacement preserves each activation scope and a workflow pin stays narro
   );
 });
 
+test('replacement refuses different scopes tied at the newest activation time without changing state', async t => {
+  const f = await environment(t);
+  await seedExecution(f.db, f.w, f.agent.agentId, [f.agent.teamId], f.scope);
+  const latest = await f.agent.activate();
+  const store = createAgentStore(f.runtime);
+  const actor = { kind: 'human', userId: f.w.userId, membershipId: f.w.membershipId };
+  const policy = async () =>
+    (
+      await f.db.platform.query(`SELECT saved_revision,policy_version FROM ${f.table('tf_agents')} WHERE id=$1`, [
+        f.agent.agentId,
+      ])
+    ).rows[0];
+  const snapshot = async () => ({
+    activations: (
+      await f.db.platform.query(
+        `SELECT row_to_json(a)::text AS value FROM ${f.table('tf_agent_activations')} a WHERE agent_id=$1 ORDER BY id`,
+        [f.agent.agentId],
+      )
+    ).rows,
+    audit: (await f.db.platform.query(`SELECT count(*) FROM ${f.table('tf_audit_events')}`)).rows[0].count,
+  });
+  const current = async () =>
+    (
+      await f.db.platform.query(
+        `SELECT id,scope FROM ${f.table('tf_agent_activations')} WHERE agent_id=$1 AND revoked_at IS NULL AND superseded_by_activation_id IS NULL ORDER BY activated_at DESC NULLS LAST,id DESC`,
+        [f.agent.agentId],
+      )
+    ).rows;
+  for (const activatedAt of [null, '2026-01-01T00:00:00Z']) {
+    await f.db.platform.query(`UPDATE ${f.table('tf_agent_activations')} SET activated_at=$2 WHERE agent_id=$1`, [
+      f.agent.agentId,
+      activatedAt,
+    ]);
+    const active = await current(),
+      expected = await policy(),
+      before = await snapshot();
+    for (let index = 0; index < 12; index++) {
+      await assert.rejects(
+        store.replaceActivation(f.w.id, actor, {
+          agentId: f.agent.agentId,
+          requestId: randomUUID(),
+          revision: latest.revision,
+          scope: active[0].scope,
+          expectedSavedRevision: expected.saved_revision,
+          expectedPolicyVersion: expected.policy_version,
+          expectedActivationIds: active.map(activation => activation.id),
+        }),
+        error => error.status === 409 && error.code === 'activation-selection-required',
+      );
+      assert.deepEqual(await snapshot(), before);
+    }
+  }
+  const newest = await f.agent.activate();
+  const active = await current(),
+    expected = await policy();
+  await store.replaceActivation(f.w.id, actor, {
+    agentId: f.agent.agentId,
+    requestId: randomUUID(),
+    revision: newest.revision,
+    scope: active[0].scope,
+    expectedSavedRevision: expected.saved_revision,
+    expectedPolicyVersion: expected.policy_version,
+    expectedActivationIds: active.map(activation => activation.id),
+  });
+  assert.equal((await current()).length, 3, 'different scopes tied below a unique default do not block replacement');
+});
+
 test('default manual and workflow tasks list and read the same table as their run form', async t => {
   const f = await environment(t);
   await seedExecution(f.db, f.w, f.agent.agentId, [f.agent.teamId], f.scope);
