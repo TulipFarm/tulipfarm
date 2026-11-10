@@ -20,7 +20,9 @@ test('chat table approvals recheck workspace skill access under storage roles', 
   });
   await loadPlatformBaseline(db.platform);
   const stream = await workspaceTableMigrations();
-  const ws = await db.create(stream.slice(0, -1));
+  const upgrade = stream.findIndex(item => item.name === '0058_table_skill_source_access.sql');
+  assert.ok(upgrade > 0);
+  const ws = await db.create(stream.slice(0, upgrade));
   const s = `"${ws.names.schema}"`;
   runtime = createWorkspaceRuntime({
     resolveCredential: async () => ({ workspaceId: ws.id, generation: 1, connectionString: db.login(ws) }),
@@ -147,11 +149,11 @@ test('chat table approvals recheck workspace skill access under storage roles', 
         .rows[0].applied_revision,
     );
   }
-  async function expectDenied(proposal) {
+  async function expectBlocked(proposal, code = 'access-denied') {
     assert.equal(await finish(proposal), 'blocked');
     const status = await proposals.status(ws.id, actor.userId, conversationId, proposal.id);
     assert.equal(status.status, 'failed');
-    assert.equal(status.plans[0].receipt.code, 'access-denied');
+    assert.equal(status.plans[0].receipt.code, code);
     assert.equal(
       (await db.platform.query(`SELECT 1 FROM ${s}.tf_table_catalog WHERE id=$1`, [proposal.tableId])).rowCount,
       0,
@@ -191,8 +193,35 @@ test('chat table approvals recheck workspace skill access under storage roles', 
     const proposal = await propose([skill]);
     await db.platform.query(`DELETE FROM ${s}.tf_skill_person_grants WHERE skill_id=$1`, [skillId]);
     try {
-      await expectDenied(proposal);
+      await expectBlocked(proposal);
     } finally {
+      await db.platform.query(
+        `INSERT INTO ${s}.tf_skill_person_grants(skill_id,membership_id,permission) VALUES($1,$2,'read')`,
+        [skillId, actor.membershipId],
+      );
+    }
+  });
+  await t.test('team skill read access is honored and its revocation blocks execution', async () => {
+    await db.platform.query(`DELETE FROM ${s}.tf_skill_person_grants WHERE skill_id=$1`, [skillId]);
+    await db.platform.query(`INSERT INTO ${s}.tf_member_teams(membership_id,team_id) VALUES($1,$2)`, [
+      actor.membershipId,
+      team,
+    ]);
+    await db.platform.query(`INSERT INTO ${s}.tf_skill_team_grants(skill_id,team_id,permission) VALUES($1,$2,'read')`, [
+      skillId,
+      team,
+    ]);
+    try {
+      await expectCreated(await propose([skill]));
+      const proposal = await propose([skill]);
+      await db.platform.query(`DELETE FROM ${s}.tf_skill_team_grants WHERE skill_id=$1`, [skillId]);
+      await expectBlocked(proposal);
+    } finally {
+      await db.platform.query(`DELETE FROM ${s}.tf_skill_team_grants WHERE skill_id=$1`, [skillId]);
+      await db.platform.query(`DELETE FROM ${s}.tf_member_teams WHERE membership_id=$1 AND team_id=$2`, [
+        actor.membershipId,
+        team,
+      ]);
       await db.platform.query(
         `INSERT INTO ${s}.tf_skill_person_grants(skill_id,membership_id,permission) VALUES($1,$2,'read')`,
         [skillId, actor.membershipId],
@@ -203,17 +232,27 @@ test('chat table approvals recheck workspace skill access under storage roles', 
     const proposal = await propose([skill]);
     await db.platform.query(`UPDATE ${s}.tf_workspace_skills SET enabled=false WHERE id=$1`, [skillId]);
     try {
-      await expectDenied(proposal);
+      await expectBlocked(proposal);
     } finally {
       await db.platform.query(`UPDATE ${s}.tf_workspace_skills SET enabled=true WHERE id=$1`, [skillId]);
     }
   });
-  await t.test('a database permission refusal is logged and reported as access-denied', async () => {
+  await t.test('missing storage-role skill grants remain an infrastructure fault', async () => {
     const proposal = await propose([skill]);
     const grant = `SELECT(id,enabled) ON ${s}.tf_workspace_skills`;
     await db.platform.query(`REVOKE ${grant} FROM "${ws.names.migration}","${ws.names.customOwner}"`);
     try {
-      await expectDenied(proposal);
+      await expectBlocked(proposal, 'storage-fault');
+    } finally {
+      await db.platform.query(`GRANT ${grant} TO "${ws.names.migration}","${ws.names.customOwner}"`);
+    }
+  });
+  await t.test('missing internal provenance grants remain an infrastructure fault', async () => {
+    const proposal = await propose([{ kind: 'private-conversation', conversationId }]);
+    const grant = `SELECT(turn_id,sources) ON ${s}.tf_conversation_model_sources`;
+    await db.platform.query(`REVOKE ${grant} FROM "${ws.names.migration}","${ws.names.customOwner}"`);
+    try {
+      await expectBlocked(proposal, 'storage-fault');
     } finally {
       await db.platform.query(`GRANT ${grant} TO "${ws.names.migration}","${ws.names.customOwner}"`);
     }
