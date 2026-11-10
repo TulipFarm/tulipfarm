@@ -1,5 +1,15 @@
 ALTER TABLE {{schema}}.tf_table_executions ADD COLUMN creation_access_granted_at timestamptz;
 
+-- Generation owners must not be able to erase the history that prevents a second grant.
+CREATE TABLE {{schema}}.tf_table_creation_access_receipts (
+  table_id uuid PRIMARY KEY,
+  created_at timestamptz NOT NULL DEFAULT clock_timestamp()
+);
+REVOKE ALL ON {{schema}}.tf_table_creation_access_receipts
+  FROM PUBLIC,{{runtime}},{{migration}},{{customOwner}},{{confirmation}};
+INSERT INTO {{schema}}.tf_table_creation_access_receipts(table_id)
+  SELECT id FROM {{schema}}.tf_table_catalog;
+
 CREATE FUNCTION {{schema}}.tf_table_creation_access(execution_id uuid)
 RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
 DECLARE
@@ -8,10 +18,6 @@ DECLARE
     'table.row.read', 'table.row.create', 'table.row.update', 'table.row.delete', 'table.schema.manage'
   ];
 BEGIN
-  -- The receipt survives policy revocation: replaying an execution must not restore access.
-  IF EXISTS(SELECT 1 FROM {{schema}}.tf_table_executions
-    WHERE id=execution_id AND creation_access_granted_at IS NOT NULL) THEN RETURN; END IF;
-
   SELECT e.table_id, c.owning_team_id, p.membership_id INTO creation
   FROM {{schema}}.tf_table_executions e
   JOIN {{schema}}.tf_table_proposals p ON p.id=e.proposal_id
@@ -34,6 +40,10 @@ BEGIN
     AND p.manifest->'requester'->>'userId'=p.user_id
     AND NOT EXISTS(SELECT 1 FROM {{schema}}.tf_table_generations prior
       WHERE prior.table_id=e.table_id AND prior.id<>g.id AND prior.activated_at IS NOT NULL);
+  IF NOT FOUND THEN RAISE EXCEPTION 'Table creation access is unavailable' USING ERRCODE='42501'; END IF;
+
+  INSERT INTO {{schema}}.tf_table_creation_access_receipts(table_id)
+    VALUES(creation.table_id) ON CONFLICT DO NOTHING;
   IF NOT FOUND THEN RAISE EXCEPTION 'Table creation access is unavailable' USING ERRCODE='42501'; END IF;
 
   INSERT INTO {{schema}}.tf_grants(team_id,asset_id,permission)

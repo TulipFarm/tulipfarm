@@ -28,7 +28,6 @@ test('new tables get revocable editor policies for their creator and owning team
   const workspace = await db.create(db.baseline.slice(0, -1)),
     s = `"${workspace.names.schema}"`,
     team = randomUUID();
-  await inTransaction(db.platform, client => applyCommonMigrations(client, workspace.id, db.baseline));
   runtime = createWorkspaceRuntime({
     resolveCredential: async () => ({
       workspaceId: workspace.id,
@@ -151,8 +150,27 @@ test('new tables get revocable editor policies for their creator and owning team
       decision: 'approve',
       digest: proposal.digest,
     });
+  const legacyDefinition = tableDefinition({ owningTeamId: team, label: 'Earlier records' }),
+    legacyProposal = await propose(legacyDefinition);
+  await approve(legacyProposal);
+  await finish(legacyProposal);
+  assert.equal((await proposals.status(workspace.id, creator.userId, chat, legacyProposal.id)).status, 'completed');
+  assert.equal(await permitted(creator, legacyDefinition.id), false);
   const proposal = await propose(definition);
   await approve(proposal);
+  await inTransaction(db.platform, client => applyCommonMigrations(client, workspace.id, db.baseline));
+  assert.deepEqual(
+    (
+      await db.platform.query(
+        `SELECT table_id FROM ${s}.tf_table_creation_access_receipts WHERE table_id=ANY($1::uuid[]) ORDER BY table_id`,
+        [[existing.tableId, legacyDefinition.id]],
+      )
+    ).rows.map(row => row.table_id),
+    [existing.tableId, legacyDefinition.id].sort(),
+  );
+  await finish(legacyProposal);
+  assert.equal((await proposals.status(workspace.id, creator.userId, chat, legacyProposal.id)).status, 'completed');
+  assert.equal(await permitted(creator, legacyDefinition.id), false);
   assert.equal(await permitted(creator, definition.id), false);
   assert.equal(await advance(workspace.id, proposal.id), 'publish');
   const pendingJob = (
@@ -248,6 +266,16 @@ test('new tables get revocable editor policies for their creator and owning team
   const activation = await connect(db.login(workspace, 'migration'));
   try {
     await activation.query(`SET ROLE "${workspace.names.customOwner}"`);
+    for (const sql of [
+      `INSERT INTO ${s}.tf_table_creation_access_receipts(table_id) VALUES($1)`,
+      `UPDATE ${s}.tf_table_creation_access_receipts SET created_at=clock_timestamp() WHERE table_id=$1`,
+      `DELETE FROM ${s}.tf_table_creation_access_receipts WHERE table_id=$1`,
+    ])
+      await assert.rejects(activation.query(sql, [definition.id]), error => error.code === '42501');
+    await assert.rejects(
+      activation.query(`TRUNCATE ${s}.tf_table_creation_access_receipts`),
+      error => error.code === '42501',
+    );
     await assert.rejects(activation.query(call, [randomUUID()]), error => error.code === '42501');
     await assert.rejects(
       activation.query(`INSERT INTO ${s}.tf_grants(team_id,asset_id,permission) VALUES($1,$2,'table.row.read')`, [
@@ -268,7 +296,32 @@ test('new tables get revocable editor policies for their creator and owning team
         granted: false,
       });
     }
-    await activation.query(call, [job.id]);
+    const legacyJob = (
+      await db.platform.query(`SELECT id FROM ${s}.tf_table_executions WHERE proposal_id=$1`, [legacyProposal.id])
+    ).rows[0];
+    for (const [executionId, tableId] of [
+      [job.id, definition.id],
+      [legacyJob.id, legacyDefinition.id],
+    ]) {
+      await activation.query('BEGIN');
+      try {
+        await activation.query(
+          `UPDATE ${s}.tf_table_executions SET creation_access_granted_at=NULL,phase='reconciling' WHERE id=$1`,
+          [executionId],
+        );
+        await activation.query(
+          `UPDATE ${s}.tf_table_generations SET activated_at=activated_at
+            WHERE id=(SELECT target_generation FROM ${s}.tf_table_executions WHERE id=$1)`,
+          [executionId],
+        );
+        await activation.query(`UPDATE ${s}.tf_table_catalog SET physical_table=physical_table WHERE id=$1`, [tableId]);
+        await assert.rejects(activation.query(call, [executionId]), error => error.code === '42501');
+      } finally {
+        await activation.query('ROLLBACK');
+      }
+      assert.equal(await permitted(creator, tableId), false);
+      assert.equal(await permitted(teammate, tableId), false);
+    }
     await finish(proposal);
     assert.equal(await permitted(creator, definition.id), false, 'Retries must not restore revoked policies');
     assert.equal(await permitted(teammate, definition.id), false);
