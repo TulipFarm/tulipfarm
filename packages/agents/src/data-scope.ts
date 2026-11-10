@@ -69,6 +69,7 @@ export async function effectiveAgentScope(
   activation: Scope,
   invocation: Scope = activation,
 ): Promise<Scope> {
+  if (!invocation.length) return [];
   const limits = scopeSchema.parse(
     (await tx.client.query(`SELECT scope FROM ${relation(tx, 'tf_agent_limits')} WHERE agent_id=$1`, [agentId])).rows[0]
       ?.scope ?? [],
