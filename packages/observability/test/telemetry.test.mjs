@@ -1169,6 +1169,10 @@ test('error type keeps only short code messages', () => {
     }
   }
   assert.equal(errorType(new AccessDenied()), 'AccessDenied');
+  class PersonalMemoryDenied extends AccessDenied {}
+  assert.equal(errorType(new PersonalMemoryDenied()), 'PersonalMemoryDenied');
+  class ExternalActionWaiting extends Error {}
+  assert.equal(errorType(new ExternalActionWaiting()), 'ExternalActionWaiting', 'a paused tool is not a failure type');
 });
 
 test('error codes accept reviewed values, not arbitrary short strings', () => {

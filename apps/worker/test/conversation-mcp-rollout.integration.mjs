@@ -3,10 +3,18 @@ import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
 import { AccessDenied } from '@tulipfarm/access';
 import { createProjects } from '@tulipfarm/conversations/projects';
+import { createPersonalMemoryService } from '@tulipfarm/conversations/personal-memory';
+import { createConversationRequests } from '@tulipfarm/conversations/requests';
 import { conversationFixture } from '../../../packages/conversations/test/fixture.mjs';
 import { createConversationActivities } from '../dist/conversation-activities.js';
 import { workspaceMcpFactory } from '../dist/workspace-mcp-composition.js';
-import { completionReply, isCompletionRequest, anthropicText, isTitleRequest } from './native-chat-fixture.mjs';
+import {
+  completionReply,
+  isCompletionRequest,
+  anthropicText,
+  anthropicTools,
+  isTitleRequest,
+} from './native-chat-fixture.mjs';
 import { useModelCatalog } from './model-catalog-fixture.mjs';
 
 const mcp = (enabled = false) =>
@@ -175,4 +183,104 @@ test('project non-owners and legacy Slack DMs cannot execute custom MCP calls', 
   } finally {
     await f.close();
   }
+});
+
+/** Answers each model request from `responses` in order; title and completion checks are answered separately. */
+function scripted(t, responses) {
+  const previous = process.env.ANTHROPIC_API_KEY;
+  process.env.ANTHROPIC_API_KEY = 'synthetic-test-key';
+  t.after(() => {
+    if (previous === undefined) delete process.env.ANTHROPIC_API_KEY;
+    else process.env.ANTHROPIC_API_KEY = previous;
+  });
+  t.after(useModelCatalog());
+  const requests = [];
+  t.mock.method(globalThis, 'fetch', async (_url, init) => {
+    const body = JSON.parse(init.body);
+    if (isTitleRequest(body)) return Response.json(anthropicText('Choice'));
+    if (isCompletionRequest(body)) return Response.json(completionReply('anthropic'));
+    requests.push(body);
+    assert.ok(responses.length, 'no unexpected model request');
+    return Response.json(responses.shift());
+  });
+  return requests;
+}
+
+test('a private chat reply that paused on a choice after reading personal memory resumes with MCP enabled', async t => {
+  const f = await conversationFixture();
+  t.after(() => f.close());
+  const w = f.workspace;
+  const responses = [
+    anthropicTools([
+      {
+        tool: 'present.choice',
+        prompt: 'Which format?',
+        choices: [
+          { id: 'short', label: 'Short' },
+          { id: 'long', label: 'Long' },
+        ],
+      },
+    ]),
+  ];
+  const requests = scripted(t, responses);
+  await createPersonalMemoryService(f.runtime).save(w.id, w.userId, {
+    content: 'Prefer short notes.',
+    expectedRevision: 0,
+  });
+  const chat = await ownedChat(f);
+  const work = { workspaceId: w.id, conversationId: chat.chatId, turnId: chat.turnId, generation: 0 };
+  const activities = createConversationActivities(f.runtime, undefined, undefined, mcp(true));
+  await activities.processConversationReply(work);
+  const history = await f.store.history(w.id, w.userId, chat.chatId);
+  assert.equal(history.messages[0].turn.status, 'waiting');
+  assert.match(JSON.stringify(requests[0]), /Prefer short notes/, 'the first attempt read personal memory');
+  assert.equal(
+    (
+      await f.db.platform.query(
+        `SELECT count(*)::int AS n FROM ${f.table('tf_conversation_execution_steps')} WHERE turn_id=$1 AND sources @> $2::jsonb`,
+        [chat.turnId, JSON.stringify([{ kind: 'personal-memory', membershipId: w.membershipId }])],
+      )
+    ).rows[0].n,
+    1,
+    'the paused step retains the requester memory',
+  );
+  const requestId = history.messages.flatMap(message => message.parts).find(part => part.kind === 'request').requestId;
+  await createConversationRequests(f.runtime).answer(w.id, w.userId, chat.chatId, requestId, randomUUID(), {
+    commandId: randomUUID(),
+    expectedRevision: 1,
+    answer: { kind: 'choices', choiceIds: ['short'] },
+  });
+  responses.push(anthropicText('Here is the short version.'));
+  assert.equal(await activities.processConversationReply({ ...work, generation: 1 }), 'completed');
+  const resumed = await f.store.history(w.id, w.userId, chat.chatId);
+  assert.equal(resumed.messages[0].turn.status, 'completed');
+  assert.equal(resumed.messages.at(-1).parts[0].text, 'Here is the short version.');
+  assert.equal(responses.length, 0);
+});
+
+test('a refused MCP catalog at reply start leaves the reply without MCP tools instead of failing it', async t => {
+  const f = await conversationFixture();
+  t.after(() => f.close());
+  const requests = scripted(t, [anthropicText('Your chat is working.')]);
+  const enabled = mcp(true);
+  const refusing = runtime => ({
+    ...enabled(runtime),
+    catalog: async () => {
+      throw new AccessDenied();
+    },
+  });
+  const chat = await ownedChat(f);
+  const work = { workspaceId: f.workspace.id, conversationId: chat.chatId, turnId: chat.turnId, generation: 0 };
+  assert.equal(
+    await createConversationActivities(f.runtime, undefined, undefined, refusing).processConversationReply(work),
+    'completed',
+  );
+  const history = await f.store.history(f.workspace.id, chat.actor.userId, chat.chatId);
+  assert.equal(history.messages[1].parts[0].text, 'Your chat is working.');
+  assert.equal(requests.length, 1);
+  assert.equal(
+    requests[0].tools.some(tool => tool.name.startsWith('mcp_')),
+    false,
+    'a refused catalog offers no MCP tools',
+  );
 });

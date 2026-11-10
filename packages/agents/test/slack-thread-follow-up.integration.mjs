@@ -6,6 +6,10 @@ import { createSlackInbox, slackCredentialCipher } from '../../slack/src/index.t
 import { createSlackChannelAgents } from '../src/slack-channels.ts';
 import { createSlackDefault } from '../src/slack-default.ts';
 import { createChatTools } from '../src/tools.ts';
+import { createAuthoringDrafts } from '../src/drafts.ts';
+import { createWorkflows } from '@tulipfarm/workflows';
+import { createPersonalMemoryService } from '../../conversations/src/personal-memory.ts';
+import { createConversationExecutor } from '../../conversations/src/runtime.ts';
 import { createTableWithRows, tableDefinition, textField } from '../../tables/test/fixture.mjs';
 import { AccessDenied } from '@tulipfarm/access';
 
@@ -347,6 +351,114 @@ test('dismissing a Slack row draft changes nothing', async () => {
         .rowCount,
       0,
     );
+  } finally {
+    await f.close();
+  }
+});
+
+/** Saves a workflow from a private chat that read the workspace user's personal memory. */
+async function memoryDerivedWorkflow(f) {
+  const { workspace: w, store, runtime } = f;
+  await createPersonalMemoryService(runtime).save(w.id, w.userId, {
+    content: 'I start work at 9.',
+    expectedRevision: 0,
+  });
+  const chatId = randomUUID();
+  await store.create(w.id, w.userId, { chatId, commandId: randomUUID() });
+  const sent = await store.send(w.id, w.userId, chatId, {
+    commandId: randomUUID(),
+    messageId: randomUUID(),
+    parts: [{ kind: 'text', text: 'Draft a weekday review workflow.' }],
+  });
+  const call = {
+    tool: 'workflows.draft',
+    activate: false,
+    definition: JSON.stringify({
+      version: 1,
+      name: 'Review open tickets',
+      triggers: [{ id: 'cron', kind: 'cron', expression: '0 9 * * 1-5', timezone: 'America/New_York' }],
+      steps: [{ id: 'review', kind: 'human', prompt: 'Review open tickets.', timeoutSeconds: 86400 }],
+    }),
+  };
+  let draft;
+  const executor = createConversationExecutor(runtime, async input => {
+    await input.readPersonalMemory();
+    draft = (
+      await input.executeTool(
+        call.tool,
+        false,
+        context => createChatTools(context.runtime).invokeWithSources(context, call),
+        [],
+        call,
+      )
+    ).result;
+    return { text: 'Review the workflow card.', sources: [] };
+  });
+  assert.equal(
+    await executor.process({ workspaceId: w.id, conversationId: chatId, turnId: sent.turnId, generation: 0 }),
+    'completed',
+  );
+  const saved = await createAuthoringDrafts(runtime).decide(w.id, w.userId, chatId, draft.draftId, {
+    commandId: randomUUID(),
+    digest: draft.digest,
+    decision: 'save',
+  });
+  return saved.workflowId;
+}
+
+test('in a Slack thread only the author reads a workflow saved from their private memory', async () => {
+  let workflowId;
+  const reads = [];
+  const { f, defaults, messages, posts, send, rejections } = await threadFixture({
+    reply:
+      (_guard, slack) =>
+      async ({ executeTool }) => {
+        const call = { tool: 'workflows.read', workflowId };
+        const read = await executeTool(
+          call.tool,
+          false,
+          context =>
+            createChatTools(context.runtime, { slack, telemetryRuntime: 'slack' }).invokeWithSources(context, call),
+          [],
+          call,
+        );
+        reads.push(read.result);
+        return { text: `Workflow: ${read.result.definition?.name}`, sources: read.sources };
+      },
+  });
+  try {
+    workflowId = await memoryDerivedWorkflow(f);
+    await send(messages[0]);
+    messages.shift();
+    const [first] = await defaults.due(f.workspace.id);
+    assert.equal(await defaults.process(first), 'sent', 'the author reads their own workflow in the thread');
+    assert.equal(reads[0].workflowId, workflowId);
+    assert.equal(posts[0].text, 'Workflow: Review open tickets');
+
+    await send({ thread_ts: '1.000001', text: '<@UBOT> read it again' });
+    const [follow] = await defaults.due(f.workspace.id);
+    assert.ok(follow, "the author's follow-up passes the thread's earlier-answer check");
+    assert.deepEqual(await rejections(), []);
+    assert.equal(await defaults.process(follow), 'sent');
+    assert.equal(reads[1].workflowId, workflowId);
+    assert.equal(posts[1].text, 'Workflow: Review open tickets');
+
+    const other = { kind: 'human', userId: randomUUID(), membershipId: randomUUID() };
+    await f.db.platform.query(`INSERT INTO ${f.table('tf_memberships')} (id,user_id,role) VALUES ($1,$2,'member')`, [
+      other.membershipId,
+      other.userId,
+    ]);
+    await createWorkflows(f.runtime).share(f.workspace.id, f.workspace.userId, workflowId, {
+      principal: { kind: 'person', id: other.membershipId },
+      permissions: ['read'],
+    });
+    const refused = await createChatTools(f.runtime, { telemetryRuntime: 'slack' }).invokeWithSources(
+      { workspaceId: f.workspace.id, actor: other, callId: randomUUID() },
+      { tool: 'workflows.read', workflowId },
+    );
+    assert.equal(refused.result.error, 'private-to-author', 'a shared member gets a clear refusal, not an error');
+    assert.equal(refused.result.definition, undefined, 'nothing from the workflow is returned');
+    assert.deepEqual(refused.sources, []);
   } finally {
     await f.close();
   }
