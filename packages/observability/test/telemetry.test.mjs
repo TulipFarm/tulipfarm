@@ -342,6 +342,24 @@ test('failed background jobs go to the error reporters; successful runs do not',
   assert.deepEqual(reported, [asyncFailure, syncFailure]);
 });
 
+test('background jobs that lose a lock wait are skipped rather than reported; mixed failures are still faults', async t => {
+  t.after(resetExtensions);
+  const reported = [];
+  await registerExtension(
+    { name: 'fixture', register: slots => slots.errorReporter({ captureException: error => reported.push(error) }) },
+    { app: 'worker', env: {} },
+  );
+  const job = createBackgroundJob('member-profile-projection', 60);
+  t.after(() => job.close());
+  const lockWait = Object.assign(new Error('canceling statement due to lock timeout'), { code: '55P03' });
+  const wrapped = new Error('projection failed', { cause: new AggregateError([lockWait, { code: '40P01' }]) });
+  for (const failure of [lockWait, wrapped]) await assert.rejects(job.run(async () => Promise.reject(failure)));
+  assert.deepEqual(reported, []);
+  const fault = new AggregateError([lockWait, new TypeError('broken')]);
+  await assert.rejects(job.run(async () => Promise.reject(fault)));
+  assert.deepEqual(reported, [fault]);
+});
+
 test('HTTP, nested work and inference export counts, seconds, status and correlated private spans', async t => {
   const spans = new InMemorySpanExporter();
   const metricExporter = new InMemoryMetricExporter(AggregationTemporality.CUMULATIVE);

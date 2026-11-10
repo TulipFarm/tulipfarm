@@ -124,6 +124,13 @@ export function createSlackDefault(
       await lockAuthorization(tx, 'write');
       return operation(tx);
     });
+  // Polling runs every few seconds for every workspace, so it only shares the authorization lock; admission and
+  // delivery still take it exclusively.
+  const poll = <T>(workspaceId: string, operation: (tx: Transaction) => Promise<T>) =>
+    runtime.transaction(workspaceId, commonCompatibility, async tx => {
+      await lockAuthorization(tx, 'read');
+      return operation(tx);
+    });
   // Only a failed model or tool run is announced; access and delivery blocks stay silent so they reveal nothing.
   type Blocked = { reason: string; target?: Awaited<ReturnType<typeof mentionTarget>> };
   const announceBlocked = async (workspaceId: string, eventId: string, blocked: Blocked) => {
@@ -484,7 +491,7 @@ export function createSlackDefault(
     });
   }
   async function due(workspaceId: string) {
-    const pending = await transaction(workspaceId, async tx =>
+    const pending = await poll(workspaceId, async tx =>
       z.array(z.object({ id: z.uuid() })).parse(
         (
           await tx.client
@@ -530,7 +537,7 @@ export function createSlackDefault(
           );
         }
       }
-    return transaction(workspaceId, async tx => {
+    return poll(workspaceId, async tx => {
       await tx.client.query(
         `UPDATE ${table(tx, 'tf_slack_default_turns')} SET state='unknown' WHERE state='sending' AND next_attempt_at<=clock_timestamp()`,
       );

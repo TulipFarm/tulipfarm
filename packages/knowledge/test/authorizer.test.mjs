@@ -58,28 +58,30 @@ const denied = async (authorizer, check, input, type = AccessDenied) => {
 };
 
 test('admission keeps lock, resolve, member ordering and exact principal binding', async () => {
-  const { tx, calls, done } = fixture([[{ id: 1 }], [member], [member]]);
+  const { tx, calls, done } = fixture([[], [{ id: 1 }], [], [member], [member]]);
   assert.deepEqual(requireAccess(await admitKnowledgePrincipal(tx, 'user', 'write')), actor);
-  assert.match(calls[0].sql, /FOR UPDATE$/);
-  assert.match(calls[1].sql, /WHERE user_id = \$1/);
-  assert.match(calls[2].sql, /WHERE id = \$1 AND user_id = \$2/);
+  assert.equal(calls[0].sql, 'SAVEPOINT tf_authorization_lock');
+  assert.match(calls[1].sql, /FOR UPDATE OF authorization_lock$/);
+  assert.equal(calls[2].sql, 'RELEASE SAVEPOINT tf_authorization_lock');
+  assert.match(calls[3].sql, /WHERE user_id = \$1/);
+  assert.match(calls[4].sql, /WHERE id = \$1 AND user_id = \$2/);
   assert.deepEqual(
     calls.map(call => call.values),
-    [undefined, ['user'], [id, 'user']],
+    [undefined, ['ws_test'], undefined, ['user'], [id, 'user']],
   );
   done();
   const supplied = fixture([[{ id: 1 }], [member]]);
   assert.deepEqual(requireAccess(await admitKnowledgePrincipal(supplied.tx, actor, 'read')), actor);
-  assert.match(supplied.calls[0].sql, /FOR SHARE$/);
+  assert.match(supplied.calls[0].sql, /FOR SHARE OF authorization_lock$/);
   assert.equal(supplied.calls.length, 2);
   supplied.done();
 });
 
 test('lock-only and resolved-member operations do not add or omit checks', async () => {
-  const { tx, calls, done } = fixture([[{ id: 1 }], [member], [member]]);
+  const { tx, calls, done } = fixture([[], [{ id: 1 }], [], [member], [member]]);
   requireAccess(await lockKnowledgeAuthorization(tx, 'write'));
   assert.deepEqual(requireAccess(await resolveKnowledgeMember(tx, 'user')), actor);
-  assert.equal(calls.length, 3);
+  assert.equal(calls.length, 5);
   done();
 });
 

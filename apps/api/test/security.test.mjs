@@ -51,6 +51,32 @@ test('disabled workspace errors are concealed across business routes without con
   }
 });
 
+test('lock waits and deadlocks ask the client to retry; other storage faults stay server errors', async t => {
+  const id = '22222222-2222-4222-8222-222222222222';
+  const auth = { api: { getSession: async () => ({ user: { id } }) } };
+  let failure;
+  const app = Fastify();
+  t.after(() => app.close());
+  registerGovernance(app, {
+    auth,
+    runtime: {
+      transaction: async () => {
+        throw failure;
+      },
+    },
+    identity: {},
+  });
+  for (const code of ['55P03', '40P01']) {
+    failure = Object.assign(new Error('canceling statement due to lock timeout'), { code });
+    const response = await app.inject(`/workspaces/${id}/governance/me`);
+    assert.equal(response.statusCode, 503, `${code}: ${response.body}`);
+    assert.equal(response.headers['retry-after'], '1');
+    assert.deepEqual(response.json(), { error: 'temporarily-unavailable' });
+  }
+  failure = Object.assign(new Error('relation does not exist'), { code: '42P01' });
+  assert.equal((await app.inject(`/workspaces/${id}/governance/me`)).statusCode, 500);
+});
+
 function fixture() {
   const app = Fastify(securityServerOptions());
   registerSecurity(app, 'http://localhost:5173');

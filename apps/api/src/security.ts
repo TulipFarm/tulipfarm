@@ -3,7 +3,7 @@ import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
 import type { FastifyInstance, FastifyReply, FastifyServerOptions } from 'fastify';
 import { z } from 'zod';
-import { StorageUnavailableError } from '@tulipfarm/workspace-storage/runtime';
+import { StorageUnavailableError, transientStorageError } from '@tulipfarm/workspace-storage/runtime';
 import { publicGuideOrigins } from './public-guide-config.ts';
 
 export function securityServerOptions(): FastifyServerOptions {
@@ -46,6 +46,12 @@ export function requestBoundaryError(error: unknown, reply: FastifyReply): boole
   if (workspaceUpdatingError(error, reply)) return true;
   if (error instanceof StorageUnavailableError && error.code === 'disabled') {
     reply.code(404).send({ error: 'not-found' });
+    return true;
+  }
+  // A lock wait, serialization conflict or dropped connection clears up on retry; each route keeps its own answer
+  // for a full or closed workspace queue.
+  if (!(error instanceof StorageUnavailableError) && transientStorageError(error)) {
+    reply.code(503).header('Retry-After', '1').send({ error: 'temporarily-unavailable' });
     return true;
   }
   if (typeof error !== 'object' || error === null || !('statusCode' in error)) return false;

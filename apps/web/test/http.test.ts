@@ -111,6 +111,34 @@ test('writes and non-transient read failures are not retried', async () => {
   );
 });
 
+test('reads and writes are sent again after brief storage contention, up to three times', async () => {
+  const contended = (response: import('node:http').ServerResponse) => {
+    response.writeHead(503, { 'Content-Type': 'application/json', 'Retry-After': '0.05' });
+    response.end('{"error":"temporarily-unavailable"}');
+  };
+  await withServer(
+    (attempt, _request, response) => {
+      if (attempt <= 2) return contended(response);
+      response.writeHead(200, { 'Content-Type': 'application/json' });
+      response.end('{"ok":true}');
+    },
+    async (url, attempts) => {
+      const response = await jsonResponse(url, { method: 'POST', body: {}, signal: requestSignal() });
+      assert.deepEqual(await readJson(response), { ok: true });
+      assert.equal(attempts(), 3);
+    },
+  );
+  await withServer(
+    (_attempt, _request, response) => contended(response),
+    async (url, attempts) => {
+      const response = await jsonResponse(url, { method: 'PUT', body: {}, signal: requestSignal() });
+      assert.equal(response.status, 503);
+      assert.deepEqual(await readJson(response), { error: 'temporarily-unavailable' });
+      assert.equal(attempts(), 4);
+    },
+  );
+});
+
 test('leaving the page during the retry delay cancels the read', async () => {
   await withServer(
     (_attempt, _request, response) => {

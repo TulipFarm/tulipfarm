@@ -9,6 +9,7 @@ import {
   observeWorkspaceAdmission,
   observeWorkspaceConnection,
   recordWorkspaceAdmissionRejection,
+  transientStorageFailure,
 } from '@tulipfarm/observability';
 import { commonTables, qualified, workspaceIdSchema, workspaceNames } from './names.ts';
 import { inTransaction, resetClient, type SqlClient } from './transactions.ts';
@@ -83,32 +84,6 @@ export class StorageUnavailableError extends Error {
   }
 }
 
-// Conflicts, lock and statement timeouts, dropped connections and server restarts clear up when retried.
-const transientCodes = new Set([
-  '40001',
-  '40P01',
-  '55P03',
-  '57014',
-  '08000',
-  '08001',
-  '08003',
-  '08006',
-  '08007',
-  '57P01',
-  '57P02',
-  '57P03',
-  'ECONNRESET',
-  'ECONNREFUSED',
-  'ETIMEDOUT',
-  'EPIPE',
-]);
-// pg reports a failed checkout or a dropped connection without a code.
-const transientMessages = new Set([
-  'timeout exceeded when trying to connect',
-  'Connection terminated unexpectedly',
-  'Connection terminated due to connection timeout',
-]);
-
 // Undefined table, column, object and function: what new code meets in a schema that lacks a newer common migration.
 const missingSchemaCodes = new Set(['42P01', '42703', '42704', '42883']);
 
@@ -126,14 +101,7 @@ export function workspaceSchemaPending(
 
 /** Whether a storage failure is transient, so the same work can succeed on a later attempt. */
 export function transientStorageError(error: unknown): boolean {
-  if (error instanceof StorageUnavailableError)
-    return ['queue_full', 'wait_timeout', 'pool_capacity', 'stale_credential', 'updating'].includes(error.code);
-  if (typeof error !== 'object' || error === null) return false;
-  const { code, message } = error as { code?: unknown; message?: unknown };
-  return (
-    (typeof code === 'string' && transientCodes.has(code)) ||
-    (typeof message === 'string' && transientMessages.has(message))
-  );
+  return transientStorageFailure(error);
 }
 
 const callerSignals = new AsyncLocalStorage<AbortSignal>();

@@ -7,8 +7,11 @@ export function requestSignal(signal?: AbortSignal) {
 // connection the API just closed. Reads are idempotent, so one quick retry hides them from people.
 const transientStatuses = new Set([502, 503, 504]);
 const readRetryDelayMs = 300;
+// The API answers `temporarily-unavailable` when storage was briefly contended and the request changed nothing,
+// so reads and writes alike are sent again a few times after the delay it asks for.
+const contentionRetries = 3;
 
-function waitForRetry(signal: AbortSignal) {
+function waitForRetry(signal: AbortSignal, delayMs: number) {
   return new Promise<void>((resolve, reject) => {
     if (signal.aborted) return reject(signal.reason);
     const abort = () => {
@@ -18,9 +21,28 @@ function waitForRetry(signal: AbortSignal) {
     const timer = setTimeout(() => {
       signal.removeEventListener('abort', abort);
       resolve();
-    }, readRetryDelayMs);
+    }, delayMs);
     signal.addEventListener('abort', abort, { once: true });
   });
+}
+
+async function contended(response: Response) {
+  if (response.status !== 503) return false;
+  return (
+    responseError(
+      await response
+        .clone()
+        .json()
+        .catch(() => null),
+      '',
+    ) === 'temporarily-unavailable'
+  );
+}
+
+function contentionDelayMs(response: Response) {
+  const seconds = Number(response.headers.get('Retry-After'));
+  const base = Number.isFinite(seconds) && seconds > 0 ? Math.min(seconds, 5) * 1000 : 1000;
+  return base * (0.75 + Math.random() * 0.5);
 }
 
 let writeHold: Promise<void> | null = null;
@@ -65,17 +87,29 @@ export async function jsonResponse(
   if (method !== 'GET') {
     await writesAllowed();
     options.signal.throwIfAborted();
-    return send();
   }
-  try {
-    const response = await send();
-    if (!transientStatuses.has(response.status)) return response;
+  let gatewayRetried = method !== 'GET';
+  for (let contention = 0; ;) {
+    let response: Response;
+    try {
+      response = await send();
+    } catch (error) {
+      if (gatewayRetried || !(error instanceof TypeError) || options.signal.aborted) throw error;
+      gatewayRetried = true;
+      await waitForRetry(options.signal, readRetryDelayMs);
+      continue;
+    }
+    if (contention < contentionRetries && (await contended(response))) {
+      contention++;
+      await response.body?.cancel().catch(() => {});
+      await waitForRetry(options.signal, contentionDelayMs(response));
+      continue;
+    }
+    if (gatewayRetried || !transientStatuses.has(response.status)) return response;
+    gatewayRetried = true;
     await response.body?.cancel().catch(() => {});
-  } catch (error) {
-    if (!(error instanceof TypeError) || options.signal.aborted) throw error;
+    await waitForRetry(options.signal, readRetryDelayMs);
   }
-  await waitForRetry(options.signal);
-  return send();
 }
 
 export async function readJson(response: Response, tolerateInvalid = false): Promise<unknown> {

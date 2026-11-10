@@ -1,3 +1,4 @@
+import { setTimeout as delay } from 'node:timers/promises';
 import { escapeIdentifier, type Client } from 'pg';
 import { z } from 'zod';
 import {
@@ -69,11 +70,46 @@ function table(transaction: AuthorizationTransaction, name: string) {
   return `${escapeIdentifier(transaction.schema)}.${escapeIdentifier(name)}`;
 }
 
-export async function lockAuthorization(transaction: AuthorizationTransaction, mode: 'read' | 'write' = 'read') {
-  const result = await transaction.client.query(
-    `SELECT id FROM ${table(transaction, 'tf_authorization_lock')} WHERE id = 1 FOR ${mode === 'write' ? 'UPDATE' : 'SHARE'}`,
-  );
+const lockAttempts = 3;
+
+/**
+ * Takes the workspace authorization lock, shared for reads and exclusive for writes.
+ *
+ * Postgres lets a new shared row lock past a queued exclusive one, so steady reads could hold off a write forever.
+ * Every caller therefore queues on a matching advisory lock first, which Postgres grants in arrival order. A write
+ * that times out or deadlocks waiting rolls back to a savepoint taken just before the wait and tries again, so
+ * nothing else in the transaction is repeated or lost. A caller that retries its whole transaction passes
+ * `retry: false`.
+ */
+export async function lockAuthorization(
+  transaction: AuthorizationTransaction,
+  mode: 'read' | 'write' = 'read',
+  { retry = true }: { retry?: boolean } = {},
+) {
+  // The row is locked only after the join has produced it, so the queue is always joined first.
+  const take = () =>
+    transaction.client.query(
+      `SELECT authorization_lock.id FROM (SELECT ${mode === 'write' ? 'pg_advisory_xact_lock' : 'pg_advisory_xact_lock_shared'}(hashtextextended($1, 518204))) queue, ${table(transaction, 'tf_authorization_lock')} authorization_lock WHERE authorization_lock.id = 1 FOR ${mode === 'write' ? 'UPDATE' : 'SHARE'} OF authorization_lock`,
+      [transaction.schema],
+    );
+  const result = mode === 'write' && retry ? await retryLockWait(transaction, take) : await take();
   if (result.rowCount !== 1) throw new AccessDenied();
+}
+
+async function retryLockWait<T>(transaction: AuthorizationTransaction, take: () => Promise<T>) {
+  for (let attempt = 1; ; attempt++) {
+    await transaction.client.query('SAVEPOINT tf_authorization_lock');
+    try {
+      const result = await take();
+      await transaction.client.query('RELEASE SAVEPOINT tf_authorization_lock');
+      return result;
+    } catch (error) {
+      const code = (error as { code?: unknown } | null)?.code;
+      if (attempt >= lockAttempts || (code !== '55P03' && code !== '40P01')) throw error;
+      await transaction.client.query('ROLLBACK TO SAVEPOINT tf_authorization_lock');
+      await delay(50 * attempt * (0.5 + Math.random()));
+    }
+  }
 }
 
 export async function resolveHuman(transaction: AuthorizationTransaction, userId: string): Promise<HumanActor> {

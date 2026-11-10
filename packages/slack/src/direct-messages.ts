@@ -68,6 +68,14 @@ export function createSlackDirectMessages(options: {
       return operation(tx);
     });
   }
+  // Polling runs every few seconds for every workspace, so it only shares the authorization lock; admission and
+  // delivery still take it exclusively.
+  async function poll<T>(workspaceId: string, operation: (tx: Transaction) => Promise<T>) {
+    return runtime.transaction(z.uuid().parse(workspaceId), compatibility, async tx => {
+      await lockAuthorization(tx, 'read');
+      return operation(tx);
+    });
+  }
   /**
    * Admits one held message as a chat turn. With `files` set to 'defer', a message that shares files is checked but
    * not admitted, returning 'files' so its files are downloaded outside the dispatch pass. With 'failed', every
@@ -250,7 +258,7 @@ export function createSlackDirectMessages(options: {
    * for it. One message's failure is reported without holding up messages in other threads.
    */
   async function admitPending(workspaceId: string) {
-    const candidates = await transaction(workspaceId, async tx =>
+    const candidates = await poll(workspaceId, async tx =>
       z.array(z.object({ id: z.uuid(), root: z.string().nullable() })).parse(
         (
           await tx.client.query(
@@ -327,7 +335,7 @@ export function createSlackDirectMessages(options: {
     }
   }
   async function due(workspaceId: string): Promise<SlackPromptWork[]> {
-    return transaction(workspaceId, async tx => {
+    return poll(workspaceId, async tx => {
       const rows = z
         .array(z.object({ event_id: z.uuid() }))
         .parse(

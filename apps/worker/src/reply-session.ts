@@ -309,11 +309,10 @@ export async function beginReplySession(input: {
   }
 
   const preread = input.inventory && input.inventoryRead ? await input.inventoryRead.catch(() => null) : null;
-  // Listing the inventory takes the workspace write lock, so the start transaction takes it first only when it reads it.
   const readsInventory = input.inventory && preread === null;
   const leaseStartedAt = Date.now();
   const started = await runtime.transaction(fence.workspaceId, commonCompatibility, async tx => {
-    await lockAuthorization(tx, readsInventory ? 'write' : 'read');
+    await lockAuthorization(tx, 'read');
     const slackActor = await requireCurrentConversationSources(tx, fence.conversationId, fence.turnId);
     await renewConversationReplyLease(tx, fence);
     requester =
@@ -491,7 +490,7 @@ export async function beginReplySession(input: {
         runtime.transaction(fence.workspaceId, commonCompatibility, async tx => {
           const refreshInventory =
             input.inventory && tools.some(tool => inventoryTools.some(prefix => tool.startsWith(prefix)));
-          await lockAuthorization(tx, refreshInventory ? 'write' : 'read');
+          await lockAuthorization(tx, 'read');
           const slackActor = await requireCurrentConversationSources(tx, fence.conversationId, fence.turnId);
           await renewConversationReplyLease(tx, fence);
           const read = refreshInventory ? await readInventory(tx, slackActor) : undefined;

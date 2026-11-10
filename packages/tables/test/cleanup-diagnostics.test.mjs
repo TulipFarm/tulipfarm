@@ -290,7 +290,7 @@ test('cleanup diagnostics leave successful work and transaction limits unchanged
     2,
   );
   assert.equal(
-    db.statements.filter(sql => sql.includes('"tf_authorization_lock"') && sql.endsWith('FOR UPDATE')).length,
+    db.statements.filter(sql => sql.includes('"tf_authorization_lock"') && sql.includes('FOR UPDATE')).length,
     2,
   );
   assert.equal(db.statements.filter(sql => sql.startsWith('DROP TABLE IF EXISTS')).length, 1);

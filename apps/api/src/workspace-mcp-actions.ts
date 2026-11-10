@@ -49,7 +49,7 @@ export function workspaceMcpActions(options: {
     operation: (tx: AuthorizationTransaction, actor: HumanActor) => Promise<T>,
   ) {
     return runtime.transaction(workspaceId, workspaceMcpCompatibility, async tx => {
-      await lockAuthorization(tx, 'write');
+      await lockAuthorization(tx, 'read');
       const actor = await resolveHuman(tx, userId);
       await currentMember(tx, actor);
       return operation(tx, actor);
