@@ -197,7 +197,6 @@ export function createAgentStore(storage: AgentStorage, externalGuard?: External
             [value.agentId, value.slackSender],
           );
       }
-
       await transaction.client.query(`DELETE FROM ${relation(transaction, 'tf_agent_teams')} WHERE agent_id = $1`, [
         value.agentId,
       ]);

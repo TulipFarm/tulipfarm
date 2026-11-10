@@ -45,6 +45,7 @@ test('activation replacement swaps new admissions without changing running tasks
       ...(activationId ? { activationId } : {}),
     });
   const running = await start(agent.activationId);
+  const continuing = await start(agent.activationId);
   const run = await createTaskApprovals(runtime).bindRun(w.id, user, running.id, { generation: 0 });
   const saved = await agent.activate();
   const before = async () =>
@@ -149,6 +150,17 @@ test('activation replacement swaps new admissions without changing running tasks
   await t.test(
     'revocation still stops original running authority and does not fall back to superseded versions',
     async () => {
+      await store.revokeActivation(w.id, manager, { agentId: agent.agentId, activationId: replacement });
+      await assert.rejects(start(), AccessDenied);
+      await assert.rejects(start(saved.activationId), AccessDenied);
+      await tasks.pause(w.id, user, continuing.id, { expectedGeneration: 0 });
+      await tasks.continueTask(w.id, user, continuing.id, {
+        requestId: randomUUID(),
+        expectedGeneration: 0,
+        expectedSequence: 0,
+        text: 'Keep using the original instructions.',
+      });
+      assert.equal((await tasks.read(w.id, user, continuing.id)).activationId, agent.activationId);
       await store.revokeActivation(w.id, manager, { agentId: agent.agentId, activationId: agent.activationId });
       await assert.rejects(
         store.queueCall(w.id, reader, {
@@ -159,9 +171,6 @@ test('activation replacement swaps new admissions without changing running tasks
         }),
         AccessDenied,
       );
-      await store.revokeActivation(w.id, manager, { agentId: agent.agentId, activationId: replacement });
-      await assert.rejects(start(), AccessDenied);
-      await assert.rejects(start(saved.activationId), AccessDenied);
     },
   );
 });
