@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Link } from '@tanstack/react-router';
 import { Plus, X } from 'lucide-react';
 import { Button } from '@tulipfarm/sprout/button';
@@ -13,6 +13,8 @@ import { McpDraftPermissions } from '@/features/workspace-mcp/draft-permissions'
 import type { PermissionSlot } from '@/features/workspace-mcp/contracts';
 import { parseLimits, taskLimitFields, type LimitDraft } from '@/features/tasks/limits';
 import { AgentToolPicker, type ToolName } from './tool-picker';
+import { BuilderTablePicker } from './builder-table-picker';
+import { updateBuilderLimits } from './builder-draft';
 import { DefinitionSharing } from './sharing';
 import { ScopeSummary } from './reference-names';
 import { useAgentSlackApi, useAgentSlackDestinations } from './slack-queries';
@@ -50,17 +52,19 @@ export function BuilderAccess({
   disabled,
   showErrors,
   previous,
+  tableSuggestion,
 }: {
   workspaceId: string;
   slug: string;
   teams: AgentContext['teams'];
   tools: ToolName[];
-  onTools: (tools: ToolName[]) => void;
+  onTools: (tools: ToolName[], manuallyPicked?: readonly ToolName[]) => void;
   value: BuilderAccessDraft;
   onChange: (change: Partial<BuilderAccessDraft>) => void;
   disabled: boolean;
   showErrors: boolean;
   previous?: AgentSetup | undefined;
+  tableSuggestion?: ReactNode;
 }) {
   const [limitsOpen, setLimitsOpen] = useState(false);
   const parsedLimits = parseLimits(value.taskLimits, { kind: 'start' });
@@ -108,19 +112,13 @@ export function BuilderAccess({
         title="What data it can use"
         description="These limits bound its access. They never grant access that a caller or the agent's teams do not have."
       >
-        <AgentDataScope
+        <BuilderTableScope
           workspaceId={workspaceId}
           teams={teams}
-          id="builder-read-table"
           value={value.limits}
           disabled={disabled}
-          onAdd={addScope}
-          onRemove={assetId =>
-            onChange({
-              limits: value.limits.filter(item => item.assetId !== assetId),
-              scope: value.scope.filter(item => item.assetId !== assetId),
-            })
-          }
+          onChange={limits => onChange(updateBuilderLimits(value, limits, teams))}
+          suggestion={tableSuggestion}
         />
         {tools.some(tool => tool.startsWith('slack.')) && (
           <OutgoingDestinations workspaceId={workspaceId} slug={slug} disabled={disabled} add={addScope} />
@@ -207,6 +205,65 @@ export function BuilderAccess({
           />
         </div>
       </Disclosure>
+    </>
+  );
+}
+
+function BuilderTableScope({
+  workspaceId,
+  teams,
+  value,
+  onChange,
+  disabled,
+  suggestion,
+}: {
+  workspaceId: string;
+  teams: AgentContext['teams'];
+  value: Policy['limits'];
+  onChange: (limits: Policy['limits']) => void;
+  disabled: boolean;
+  suggestion?: ReactNode;
+}) {
+  const tables = value.filter(entry => entry.permissions.some(permission => permission.startsWith('table.')));
+  return (
+    <>
+      <BuilderTablePicker
+        workspaceId={workspaceId}
+        teams={teams}
+        value={tables.map(entry => entry.assetId)}
+        disabled={disabled}
+        onChange={ids =>
+          onChange([
+            ...value.filter(entry => !tables.includes(entry)),
+            ...ids.map(
+              assetId =>
+                tables.find(entry => entry.assetId === assetId) ?? {
+                  assetId,
+                  permissions: ['table.row.read' as const],
+                },
+            ),
+          ])
+        }
+      />
+      {suggestion}
+      {tables.map(entry => (
+        <div key={entry.assetId} className="grid gap-2">
+          <p className="text-sm">
+            <ScopeSummary workspaceId={workspaceId} scope={[entry]} />
+          </p>
+          <ChoiceGroup
+            type="checkbox"
+            optional
+            legend="Table access"
+            disabled={disabled}
+            options={tableChoices}
+            value={entry.permissions}
+            onValueChange={permissions =>
+              onChange(value.map(item => (item.assetId === entry.assetId ? { ...item, permissions } : item)))
+            }
+          />
+        </div>
+      ))}
     </>
   );
 }

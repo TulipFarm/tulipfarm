@@ -23,6 +23,7 @@ export function agentBuilderFixture() {
   };
   businessTable.definition.id = businessTable.id;
   team.tableScope = [{ assetId: businessTable.id, permissions: ['table.row.read'] }];
+  const tables = [businessTable];
   const skill = {
     id: randomUUID(),
     name: 'Employee handbook answers',
@@ -66,6 +67,7 @@ export function agentBuilderFixture() {
     const url = new URL(inputUrl, 'http://localhost'),
       path = url.pathname;
     requests.push({ method, path, body });
+    if (path.endsWith('/agents') && method === 'GET') return answer({ agents: [], count: 0, nextCursor: null });
     if (path.endsWith('/agents/authoring-context'))
       return answer({
         currentSoulRevision: soul,
@@ -81,7 +83,7 @@ export function agentBuilderFixture() {
       });
     if (path.endsWith('/agents/sharing-candidates'))
       return answer({ membershipId: membership.membershipId, teams: [team], people: [] });
-    if (path.endsWith('/tables')) return answer({ tables: [businessTable], nextCursor: null });
+    if (path.endsWith('/tables')) return answer({ tables, nextCursor: null });
     if (path.endsWith('/workspace-mcp/agent-permission-choices')) return answer([]);
     if (path.endsWith('/skills')) {
       const installed = imports.respond(method, inputUrl, body).json.workspace;
@@ -180,6 +182,20 @@ export function agentBuilderFixture() {
       }
       return receipt ? answer(receipt) : answer({ error: 'setup-command-not-found' }, 404);
     }
+    const policyAgent = path.split('/').at(-2);
+    if (path.endsWith('/policy') && setups.has(policyAgent)) {
+      const setup = setups.get(policyAgent).setup;
+      return answer({
+        version: 1,
+        enabled: true,
+        grants: setup.policy.grants,
+        personGrants: setup.policy.personGrants,
+        enrollment: setup.enrollment,
+        limits: setup.limits,
+        taskLimits: setup.taskLimits,
+        slackSender: setup.slackSender,
+      });
+    }
     const agentId = path.split('/').at(-1),
       draft = setups.get(agentId);
     if (draft && method === 'GET')
@@ -191,7 +207,9 @@ export function agentBuilderFixture() {
         savedRevision: soul,
         definitionRevision: 'b'.repeat(64),
         capabilities: ['read', 'edit', 'manage', 'invoke'],
-        activations: [],
+        activations: [...receipts.values()]
+          .filter(receipt => receipt.agentId === agentId && receipt.status === 'active')
+          .map(receipt => ({ id: receipt.activationId, revision: 'b'.repeat(64), scope: draft.setup.scope })),
         admin: false,
       });
     return imports.respond(method, inputUrl, body);
@@ -201,6 +219,7 @@ export function agentBuilderFixture() {
     session,
     team,
     businessTable,
+    tables,
     skill,
     membership,
     imports,

@@ -8,8 +8,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@tulipfarm/sprout/tabs
 
 export const builderSteps = [
   { id: 'basics', label: 'Basics' },
-  { id: 'skills', label: 'Skills' },
   { id: 'access', label: 'Access' },
+  { id: 'skills', label: 'Skills' },
   { id: 'triggers', label: 'Triggers' },
   { id: 'review', label: 'Review' },
 ] as const;
@@ -56,6 +56,7 @@ export function AgentBuilderLayout({
     () => false,
   );
   const wide = wideWindow && !compact;
+  const showPreview = step !== 'review';
   const choose = (value: unknown) => {
     const next = builderSteps.find(item => item.id === value);
     if (next) onStep(next.id);
@@ -99,7 +100,7 @@ export function AgentBuilderLayout({
               </Select>
             </div>
           </div>
-          {!wide && !compact && (
+          {showPreview && !wide && !compact && (
             <Sheet open={previewOpen} onOpenChange={onPreviewOpenChange}>
               <div className="mb-3">
                 <SheetTrigger render={<Button variant="outline" />}>
@@ -128,7 +129,7 @@ export function AgentBuilderLayout({
           </Form>
         </Tabs>
       </div>
-      {wide && (
+      {showPreview && wide && (
         <aside aria-label="Agent view" className="sticky top-4 min-w-0 xl:flex-2">
           {preview}
         </aside>

@@ -48,9 +48,7 @@ test('table access selects a granting team and shows an editable access source',
   await form.getByLabel('Agent name', { exact: true }).fill('Customer reader');
   await form.getByRole('textbox', { name: 'Instructions', exact: true }).fill('Count the customer rows.');
   await step('Access');
-  await form.getByRole('combobox', { name: 'Business table', exact: true }).click();
-  await page.getByRole('option', { name: /^Customers/ }).click();
-  await form.getByRole('button', { name: 'Add table access', exact: true }).click();
+  await form.getByRole('checkbox', { name: 'Customers', exact: true }).check();
   await form.getByText('Uses access from People Ops.', { exact: true }).waitFor();
   await form.getByRole('button', { name: 'Change teams used for access', exact: true }).click();
   const enrollment = form.getByRole('group', { name: 'Teams whose permissions the agent may use', exact: true });
@@ -79,9 +77,7 @@ test('table access blocks a plain member with the manager needed before activati
   await form.getByLabel('Agent name', { exact: true }).fill('Customer reader');
   await form.getByRole('textbox', { name: 'Instructions', exact: true }).fill('Count the customer rows.');
   await step('Access');
-  await form.getByRole('combobox', { name: 'Business table', exact: true }).click();
-  await page.getByRole('option', { name: /^Customers/ }).click();
-  await form.getByRole('button', { name: 'Add table access', exact: true }).click();
+  await form.getByRole('checkbox', { name: 'Customers', exact: true }).check();
   await form
     .getByRole('alert')
     .getByText('You need a manager of People Ops to give this agent access.', { exact: true })
@@ -201,7 +197,7 @@ test(
       await step('Review');
       await form.getByRole('region', { name: 'Reviewed triggers' }).getByText(prompt, { exact: true }).waitFor();
       await form.getByRole('button', { name: 'Create and activate', exact: true }).click();
-      await page.getByRole('heading', { name: 'Agent created and activated.', exact: true }).waitFor();
+      await page.getByRole('region', { name: 'Run agent now', exact: true }).waitFor();
       assert.equal(fixture.publications.size, 2);
       const activation = [...fixture.publications.values()].find(item => item.body.decision === 'activate');
       assert.equal(activation.body.consent.sponsor, true);
@@ -234,7 +230,7 @@ test('blocked activation keeps the reviewed draft and retries the same setup', {
   assert.equal(await page.getByRole('heading', { name: 'Agent created and activated.', exact: true }).count(), 0);
   assert.equal(fixture.publications.size, 1);
   await form.getByRole('button', { name: 'Retry setup', exact: true }).click();
-  await page.getByRole('heading', { name: 'Agent created and activated.', exact: true }).waitFor();
+  await page.getByRole('region', { name: 'Run agent now', exact: true }).waitFor();
   assert.equal(fixture.publications.size, 1);
   assert.equal(fixture.requests.filter(request => request.path.endsWith('/retry')).length, 1);
 });
