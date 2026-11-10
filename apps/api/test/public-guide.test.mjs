@@ -147,6 +147,60 @@ test('session minting needs a hostname/action-bound challenge; off switch denies
   assert.equal(off.calls.session + off.calls.turn, 0);
 });
 
+test('guide response contracts preserve the exact JSON bodies returned by the handlers', async t => {
+  for (const available of [false, true]) {
+    const signupResults = {
+      email: { status: 'email-sent' },
+      google: { status: 'redirect', url: 'http://localhost:5173/v1/public/guide/google?token=fixture&next=%22' },
+    };
+    const overrides = {
+      tokens: { ...tokens, visitor: () => 'fixture-browser-token' },
+      siteKey: available ? 'public-key' : null,
+      model: available ? async () => ({ signup: false }) : null,
+      googleAvailable: available,
+      signup: async input => signupResults[input.method],
+    };
+    const { app, post } = fixture(t, overrides);
+    const previous = fixture(t, overrides);
+    previous.app.addHook('onRoute', route => {
+      if (route.schema?.response) delete route.schema.response['200'];
+    });
+    const options = await app.inject({ url: '/v1/public/guide/options', headers: { origin } });
+    const previousOptions = await previous.app.inject({ url: '/v1/public/guide/options', headers: { origin } });
+    assert.equal(options.body, previousOptions.body);
+    assert.equal(
+      options.body,
+      JSON.stringify({
+        enabled: true,
+        modelAvailable: available,
+        turnstileSiteKey: available ? 'public-key' : null,
+        appOrigin: 'http://localhost:5173',
+        googleAvailable: available,
+        messageCharacters: guideLimits.messageCharacters,
+      }),
+    );
+    const session = await post('session', { challengeToken: 'valid' }, { origin });
+    const previousSession = await previous.post('session', { challengeToken: 'valid' }, { origin });
+    assert.equal(session.statusCode, 200);
+    assert.equal(session.body, previousSession.body);
+    assert.equal(session.body, JSON.stringify({ token: 'fixture-browser-token', expiresIn: 86_400 }));
+    for (const method of available ? ['email', 'google'] : ['email']) {
+      const input = {
+        method,
+        token: 'a'.repeat(64),
+        challengeToken: 'valid',
+        details: { accountType: 'business', name: 'Demo business', slug: 'demo-business' },
+        ...(method === 'email' ? { name: 'Demo user', email: 'demo@example.com' } : {}),
+      };
+      const signup = await post('signup', input);
+      const previousSignup = await previous.post('signup', input);
+      assert.equal(signup.statusCode, 200);
+      assert.equal(signup.body, previousSignup.body);
+      assert.equal(signup.body, JSON.stringify(signupResults[method]));
+    }
+  }
+});
+
 test('answers stream ordered events, signed continuation, and a bounded safe signup action', async t => {
   const { post, calls } = fixture(t);
   const response = await post('messages', { message: 'How do I sign up?' });

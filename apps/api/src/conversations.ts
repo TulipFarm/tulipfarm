@@ -716,7 +716,15 @@ export function registerConversations(
           summary: 'Stream partial reply text and change signals as server-sent events',
           tags: ['Conversations'],
           params: json(chatParams),
-          response: { 401: errorSchema, 404: errorSchema, 503: errorSchema },
+          response: {
+            200: {
+              description: 'Live conversation events',
+              content: { 'text/event-stream': { schema: { type: 'string' } } },
+            },
+            401: errorSchema,
+            404: errorSchema,
+            503: errorSchema,
+          },
         },
       },
       async (request, reply) => {
