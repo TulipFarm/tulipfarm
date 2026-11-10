@@ -27,7 +27,7 @@ export function matchesTableName(filter: string, label: string) {
   return namesTable([label], filter) || namesTable([filter], label);
 }
 
-type VisibleTable = { id: string; name: string; owningTeamId: string; savedRevision: string };
+type VisibleTable = { id: string; name: string; owningTeamId: string; savedRevision: string; maintenance: boolean };
 type Records = Pick<ReturnType<typeof createAgentRecordTools>, 'list'>;
 
 const listedTable = (table: VisibleTable, teams: ReadonlyMap<string, string>) => ({
@@ -187,7 +187,9 @@ export async function chatTableDefinitions<T extends Definitions>(
  * return the one table they named, ask which one when several share that name, or say none matches and suggest
  * close names. People never know table IDs, so the result forbids asking for one. A write to a real table is
  * also held when the person's latest message names a title several tables share without naming the team of the
- * chosen one, or names other tables but not the chosen one. Returns null when the call can go ahead.
+ * chosen one, or names other tables but not the chosen one. Import reviews set requireNamed so neither an unnamed
+ * destination nor a table named only in an earlier message can override the current request.
+ * Returns null when the call can go ahead.
  */
 export async function guessedChatTable(
   runtime: AgentStorage,
@@ -197,6 +199,7 @@ export async function guessedChatTable(
   origin: { conversationId: string },
   tableId: string,
   write: boolean,
+  requireNamed = false,
 ) {
   const found = await withHuman(runtime, workspaceId, actor, 'read', async tx =>
     Boolean(
@@ -245,13 +248,25 @@ export async function guessedChatTable(
     tables.map(table => ({ kind: 'table-schema' as const, tableId: table.id, revision: table.savedRevision }));
   const named = (texts: readonly string[]) => mostSpecific(visible.filter(table => namesTable(texts, table.name)));
   const target = found ? visible.find(table => table.id === tableId) : undefined;
-  if (found && !target) return null;
+  const latestNamed = named(latest);
+  if (found && !target && !requireNamed) return null;
   // A write to a table the person did not name goes ahead, on its review card, unless they named other tables.
-  if (target && !namesTable(latest, target.name) && !named(latest).length) return null;
-  if (target && namesTable(latest, target.name)) {
+  if (!requireNamed && target && !namesTable(latest, target.name) && !latestNamed.length) return null;
+  if (target && (requireNamed ? latestNamed.some(table => table.id === target.id) : namesTable(latest, target.name))) {
     const sameName = visible.filter(table => tableWords(table.name) === tableWords(target.name));
     const team = teams.get(target.owningTeamId);
-    if (sameName.length < 2 || (team && namesTable(latest, team))) return null;
+    if (sameName.length < 2 || (team && namesTable(latest, team))) {
+      if (requireNamed && target.maintenance)
+        return {
+          result: {
+            error: 'table-not-ready',
+            tables: [listedTable(target, teams)],
+            instruction: `No proposal was created: "${target.name}" is not ready. Tell the person and do not import into another table.`,
+          },
+          sources: sources([target]),
+        };
+      return null;
+    }
     return {
       result: {
         error: 'table-ambiguous',
@@ -261,7 +276,7 @@ export async function guessedChatTable(
       sources: sources(sameName),
     };
   }
-  const matches = named(latest).length ? named(latest) : named(messages.map(message => message.text));
+  const matches = requireNamed || latestNamed.length ? latestNamed : named(messages.map(message => message.text));
   const names = [...new Set(matches.map(table => tableWords(table.name)))];
   const prefix = target
     ? `Nothing was written: the person did not name "${target.name}", the table you used. Never ask the person for a table ID.`
