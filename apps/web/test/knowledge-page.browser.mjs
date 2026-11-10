@@ -152,6 +152,7 @@ test('the Knowledge page lists every automatic source and manages it in Chromium
         capabilities: { manageGovernance: false, canLeave: true },
       };
     else if (path === `${base}/knowledge/defaults`) json = { enabled: true, items };
+    else if (path === `${base}/knowledge/documents`) json = { items: [], nextCursor: null };
     else if (path.startsWith(`${base}/knowledge/defaults/`) && path.endsWith('/manage')) {
       const id = path.split('/defaults/')[1].split('/')[0],
         { action } = request.postDataJSON();
