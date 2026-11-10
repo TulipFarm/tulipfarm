@@ -1260,14 +1260,7 @@ export const systemPackageRoute = createRoute({
 const newSkillRoute = createRoute({
   getParentRoute: () => workspaceRoute,
   path: 'skills/new',
-  beforeLoad: ({ params }) => {
-    throw redirect({
-      to: '/$workspaceSlug',
-      params: { workspaceSlug: params.workspaceSlug },
-      search: { intent: 'create-skill' },
-      replace: true,
-    });
-  },
+  component: lazyRouteComponent(() => import('@/features/skills/create-form'), 'CreateSkillPage'),
 });
 const importSkillRoute = createRoute({
   getParentRoute: () => workspaceRoute,

@@ -18,7 +18,7 @@ Two references help. Read them with `skills.read` and `resource` when you reach 
 
 Identify when the skill should trigger, its inputs, expected output, edge cases, and how the person will judge success. Reuse known context from the conversation.
 
-Draft first; do not interview. When a detail is missing, choose a common default, such as yesterday, today, and blockers for standup notes, and name each default so the person can change it on review. Ask before drafting only when a missing answer would change what the skill is for, and then ask at most two questions.
+Draft first; do not interview. When a detail is missing, choose a common default, such as yesterday, today, and blockers for standup notes, and name each default so the person can change it on review. Ask before drafting only when a missing answer would change what the skill is for, and then ask at most one question. A paragraph describing a procedure is enough to draft; do not ask for confirmation before preparing its review.
 
 Call `skills.workspace` before creating a skill, so you do not create a duplicate. For an edit, use `skills.workspace.read` and its exact `management.version`. Do not change a different skill with a similar name.
 
@@ -46,7 +46,11 @@ Scripts may use fixed Bash, Python, or Node only. They have no network, workspac
 
 ## 4. Call skills.draft
 
-New skill:
+For a plain procedure, prefer `definition`; the platform builds its valid `SKILL.md`:
+
+`skillId:"new"`, `input:{expectedVersion:0,definition:{name:"Weekly summary",description:"Summarize weekly work when asked.",instructions:"List completed work, open questions, and next actions."}}`
+
+For a package with supporting files:
 
 `skillId:"new"`, `input.expectedVersion:0`, and `input.files:[{path:"SKILL.md",content:"---\nname: example-skill\ndescription: When and why to use this task\n---\nSteps...",encoding:"utf8"}]`
 

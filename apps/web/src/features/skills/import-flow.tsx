@@ -15,7 +15,7 @@ import { useFeatureRead } from '@/lib/query';
 import { useTableWrite } from '@/features/tables/use-table-write';
 import { WriteFeedback } from '@/features/tables/feedback';
 import { useSkillChanges } from './queries';
-import { skillImportApi, importErrors } from './import-api';
+import { skillImportApi, importErrors, skillDraftErrors, skillSourceLabel } from './import-api';
 import { PackageFiles } from './package-files';
 
 type ImportNavigation = {
@@ -199,7 +199,7 @@ export function SkillImportPanel({
 
 function ImportReview({
   view,
-  api,
+  api: readApi,
   refresh,
   delayed,
   onOpen,
@@ -212,6 +212,8 @@ function ImportReview({
   delayed: boolean;
 } & ImportNavigation) {
   const { workspace } = workspaceRoute.useRouteContext();
+  const draft = view.input.kind === 'draft';
+  const api = useMemo(() => (draft ? skillImportApi(workspace.id, true) : readApi), [draft, workspace.id, readApi]);
   const changed = useSkillChanges();
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
@@ -269,7 +271,15 @@ function ImportReview({
   );
   const blocked = findings.some(finding => finding.severity === 'blocked');
   const high = findings.some(finding => finding.severity === 'high');
-  const restart = onRestart ? (
+  const restart = draft ? (
+    <Button
+      variant="outline"
+      nativeButton={false}
+      render={<Link to="/$workspaceSlug/skills/new" params={{ workspaceSlug: workspace.slug }} />}
+    >
+      Review skill
+    </Button>
+  ) : onRestart ? (
     <Button variant="outline" onClick={onRestart}>
       Start a new import
     </Button>
@@ -285,7 +295,7 @@ function ImportReview({
   return (
     <section className="min-w-0 space-y-6">
       <h2 ref={heading} tabIndex={-1} className="text-base font-medium">
-        {view.input.kind === 'draft' ? 'Created in chat' : 'From a public source'}
+        {view.input.kind === 'draft' ? 'Proposed skill' : 'From a public source'}
       </h2>
       {view.input.url && <p className="break-all text-sm text-muted-foreground">{view.input.url}</p>}
       {pending && (
@@ -353,7 +363,7 @@ function ImportReview({
               <h3 className="break-words text-lg font-medium">{candidate.definition.name}</h3>
               <p>{candidate.definition.package?.manifest.metadata.description}</p>
               <p className="break-all text-sm text-muted-foreground">
-                {candidate.source.canonicalUrl === 'chat' ? 'Created in chat' : candidate.source.canonicalUrl}
+                {skillSourceLabel(candidate.source.canonicalUrl)}
               </p>
               {candidate.report && (
                 <>
@@ -447,7 +457,12 @@ function ImportReview({
               busy
                 ? { kind: 'busy' }
                 : blocked
-                  ? { kind: 'blocked', reason: 'Resolve the blocked findings in a new package before installing.' }
+                  ? {
+                      kind: 'blocked',
+                      reason: draft
+                        ? 'Fix the flagged issues in the skill, then review it again.'
+                        : 'Resolve the blocked findings in a new package before installing.',
+                    }
                   : high && !acknowledgeWarnings
                     ? { kind: 'blocked', reason: 'Read and acknowledge the high-risk warnings first.' }
                     : view.input.target && view.input.kind === 'url' && !replaceLocalChanges
@@ -583,7 +598,10 @@ function ImportReview({
           }
           description={
             view.error
-              ? (importErrors[view.error] ?? 'Preparation stopped. Check the source and try a new import.')
+              ? ((draft ? skillDraftErrors : importErrors)[view.error] ??
+                (draft
+                  ? 'Preparation stopped. Review the skill again to try once more.'
+                  : 'Preparation stopped. Check the source and try a new import.'))
               : 'No skill was installed from this review.'
           }
         >

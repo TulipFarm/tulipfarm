@@ -1,5 +1,6 @@
 import { loadModelCatalog } from '@tulipfarm/config';
 import { randomUUID } from 'node:crypto';
+import { setTimeout as delay } from 'node:timers/promises';
 import { closeUnavailableDraft, recordConversationActivity } from './activity.ts';
 import { createConversationRequests } from './requests.ts';
 import { presentChoiceSchema } from './request-contracts.ts';
@@ -23,6 +24,8 @@ import {
   type createWorkspaceRuntime,
   commonCompatibility,
   workspaceSchemaPending,
+  StorageUnavailableError,
+  transientStorageError,
 } from '@tulipfarm/workspace-storage/runtime';
 import {
   chatToolCallLimit,
@@ -195,6 +198,38 @@ const table = (tx: AuthorizationTransaction, name: string) => qualified(tx.schem
 const failureFallbacks: Readonly<Record<string, string>> = {
   'members.find': 'Point them to the Members and Teams pages instead.',
 };
+const skillFailureReasons: Readonly<Record<string, string>> = {
+  'invalid-package':
+    'The skill draft is missing or has an invalid name, description, or instructions. Fix the draft and prepare the review again. If a detail is missing, ask the person for it.',
+  'package-unavailable': 'The skill draft is no longer available. Prepare it again.',
+  'package-limit':
+    'The skill is too large, or too many skill reviews are waiting. Suggest shortening the skill, or cancelling reviews the person no longer needs.',
+  'import-conflict': 'The skill or review changed. Read its current version before preparing another review.',
+  'import-expired': 'The skill review expired. Prepare a new review.',
+};
+function skillFailure(name: string, error: unknown) {
+  if (!name.startsWith('skills.') || error instanceof AccessDenied || error instanceof SourceAuthorizationUnavailable)
+    return null;
+  const known = z.object({ name: z.literal('SkillPackageError'), code: z.string() }).safeParse(error);
+  const code =
+    error instanceof StorageUnavailableError
+      ? 'skill-storage-unavailable'
+      : error instanceof z.ZodError
+        ? 'invalid-arguments'
+        : known.success && Object.hasOwn(skillFailureReasons, known.data.code)
+          ? known.data.code
+          : 'tool-failed';
+  const reason =
+    code === 'skill-storage-unavailable'
+      ? "Skills can't be saved or read right now. Suggest trying again in a few minutes."
+      : code === 'invalid-arguments'
+        ? 'The skill request has invalid fields. For a built-in guide use its listed skillId without a revision; for a workspace skill copy the exact revision from skills.workspace. Correct the call and retry. Mention the problem to the person only if the retry fails.'
+        : (skillFailureReasons[code] ?? 'TulipFarm could not prepare or read the skill.');
+  return {
+    error: code,
+    instruction: `${reason} Tell the person in one or two plain sentences what failed and what they can do next: try again, or use Create manually on the Skills page. Do not say a skill was saved or enabled. Do not guess about permissions. Do not mention error codes, file names, field names, or tool names such as SKILL.md, skillId, or skills.workspace.`,
+  };
+}
 const rootConversationSchema = z
   .object({
     owner_user_id: z.string(),
@@ -2128,7 +2163,7 @@ export function createConversationExecutor(
         let sequence = calls;
         let sequenceReserved = false;
         async function guarded<T>(action: (tx: RuntimeTransaction, context: ConversationToolContext) => Promise<T>) {
-          return transaction(fence.workspaceId, async tx => {
+          const execute = async (tx: RuntimeTransaction) => {
             const chat = await root(tx, fence);
             const turn = await head(tx, fence.conversationId);
             if (
@@ -2204,7 +2239,16 @@ export function createConversationExecutor(
               [fence.turnId, leaseMs],
             );
             return result;
-          });
+          };
+          const attempt = () => transaction(fence.workspaceId, execute);
+          for (let retries = 0; ; retries++) {
+            try {
+              return await attempt();
+            } catch (error) {
+              if (name !== 'skills.read' || retries >= 2 || !transientStorageError(error)) throw error;
+              await delay(100 * (retries + 1));
+            }
+          }
         }
         async function receipt(
           tx: AuthorizationTransaction & { commonVersion: number },
@@ -2627,23 +2671,24 @@ export function createConversationExecutor(
           const output = {
             result: planningFailure
               ? { error: planningFailure.code, instruction: planningFailure.instruction }
-              : error instanceof SourceAuthorizationUnavailable
-                ? {
-                    error: 'source-unavailable',
-                    instruction:
-                      'A source this request depends on could not be verified right now, for example GitHub rate-limited or was unavailable, so the request was refused. This is not a permission denial. Tell the human the source is temporarily unavailable and do not repeat the call in this reply.',
-                  }
-                : {
-                    error: error instanceof AccessDenied ? 'access-denied' : 'tool-failed',
-                    instruction:
-                      admin && error instanceof AccessDenied
-                        ? 'A TulipFarm check failed unexpectedly. The requester is a workspace Admin and holds every permission, so this is a problem on our side, not missing access. Tell them plainly that this step failed because of a problem in TulipFarm and that nothing changed. Do not mention access, permissions, roles or admins, and do not repeat the call in this reply.'
-                        : admin
-                          ? `The tool failed for an unconfirmed reason. This is not a permission denial: the requester is a workspace Admin and holds every permission. Do not claim success, and never say or imply that they lack access, a permission or a role. Tell the requester this step failed, and do not state or guess anything it would have returned.${failureFallbacks[name] ? ` ${failureFallbacks[name]}` : ''} Check arguments and available status before a new request.`
-                          : error instanceof AccessDenied
-                            ? 'The request was denied. Do not claim success or bypass the denial. The error does not identify which access check failed, so do not say a missing role or permission caused it, and do not tell the requester to ask a workspace admin; the step under your reply explains what they can do.'
-                            : `The tool failed for an unconfirmed reason. This is not evidence of a permission denial. Do not claim success or tell the requester they lack permissions. Tell the requester this step failed, and do not state or guess anything it would have returned.${failureFallbacks[name] ? ` ${failureFallbacks[name]}` : ''} Check arguments and available status before a new request.`,
-                  },
+              : (skillFailure(name, error) ??
+                (error instanceof SourceAuthorizationUnavailable
+                  ? {
+                      error: 'source-unavailable',
+                      instruction:
+                        'A source this request depends on could not be verified right now, for example GitHub rate-limited or was unavailable, so the request was refused. This is not a permission denial. Tell the human the source is temporarily unavailable and do not repeat the call in this reply.',
+                    }
+                  : {
+                      error: error instanceof AccessDenied ? 'access-denied' : 'tool-failed',
+                      instruction:
+                        admin && error instanceof AccessDenied
+                          ? 'A TulipFarm check failed unexpectedly. The requester is a workspace Admin and holds every permission, so this is a problem on our side, not missing access. Tell them plainly that this step failed because of a problem in TulipFarm and that nothing changed. Do not mention access, permissions, roles or admins, and do not repeat the call in this reply.'
+                          : admin
+                            ? `The tool failed for an unconfirmed reason. This is not a permission denial: the requester is a workspace Admin and holds every permission. Do not claim success, and never say or imply that they lack access, a permission or a role. Tell the requester this step failed, and do not state or guess anything it would have returned.${failureFallbacks[name] ? ` ${failureFallbacks[name]}` : ''} Check arguments and available status before a new request.`
+                            : error instanceof AccessDenied
+                              ? 'The request was denied. Do not claim success or bypass the denial. The error does not identify which access check failed, so do not say a missing role or permission caused it, and do not tell the requester to ask a workspace admin; the step under your reply explains what they can do.'
+                              : `The tool failed for an unconfirmed reason. This is not evidence of a permission denial. Do not claim success or tell the requester they lack permissions. Tell the requester this step failed, and do not state or guess anything it would have returned.${failureFallbacks[name] ? ` ${failureFallbacks[name]}` : ''} Check arguments and available status before a new request.`,
+                    })),
             sources: mergeSources([...inheritedSources, ...currentSources]),
           };
           if (captureOutput && recorded) await staged('tool-recovery', () => guarded(tx => saveOutput(tx, output)));

@@ -92,6 +92,23 @@ export function skillImportFixture() {
     const match = new RegExp(`^${base}/skill-imports/([^/]+)(.*)$`).exec(path);
     if (match) {
       const [, id, rest] = match;
+      if (method === 'PUT' && rest === '/draft') {
+        imports.set(id, {
+          id,
+          input: { kind: 'draft', packageDigest: built.definition.package.digest },
+          status: 'ready',
+          candidates: [
+            { ...candidate, source: { ...candidate.source, submittedUrl: 'manual', canonicalUrl: 'manual' }, report },
+          ],
+          selected: [candidate.id],
+          links: [],
+          digest: 'b'.repeat(64),
+          error: null,
+          expiresAt: '2099-01-01T00:00:00.000Z',
+          receipts: [],
+        });
+        return answer(imports.get(id));
+      }
       if (method === 'PUT' && !rest && !imports.has(id))
         imports.set(id, {
           id,

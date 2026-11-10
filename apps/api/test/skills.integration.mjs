@@ -262,6 +262,68 @@ test(
         enabled,
         'A previously completed enable command keeps its receipt',
       );
+      const manualId = randomUUID(),
+        manualPath = `${base}/skill-imports/${manualId}`;
+      const procedure = {
+        name: 'Weekly summary',
+        description: 'Summarize weekly work when asked.',
+        instructions: 'List completed work, open questions, and next actions.',
+      };
+      assert.equal((await http(null, 'PUT', `${manualPath}/draft`, procedure)).status, 401);
+      assert.equal((await http(stranger, 'PUT', `${manualPath}/draft`, procedure)).status, 404);
+      assert.equal(
+        (await http(owner, 'PUT', `${manualPath}/draft`, { ...procedure, tools: ['anything'] })).status,
+        400,
+      );
+      const prepared = await ok(owner, 'PUT', `${manualPath}/draft`, procedure);
+      assert.equal(prepared.status, 'pending-review');
+      assert.equal(prepared.candidates[0].source.canonicalUrl, 'manual');
+      assert.deepEqual(await ok(owner, 'PUT', `${manualPath}/draft`, procedure), prepared);
+      assert.equal((await http(reader, 'GET', manualPath)).status, 404);
+      assert.equal(
+        (await http(owner, 'PUT', `${manualPath}/draft`, { ...procedure, name: 'Another procedure' })).status,
+        409,
+      );
+      assert.equal(
+        (await ok(owner, 'GET', `${base}/skills`)).workspace.some(item => item.name === 'weekly-summary'),
+        false,
+      );
+      assert.equal(
+        (
+          await http(owner, 'PUT', `${manualPath}/decision`, {
+            commandId: randomUUID(),
+            digest: '0'.repeat(64),
+            selected: prepared.selected,
+            acknowledgeWarnings: true,
+          })
+        ).status,
+        409,
+      );
+      await worker.process(w.id, manualId);
+      const reviewed = await ok(owner, 'GET', manualPath);
+      assert.equal(reviewed.status, 'ready');
+      const preview = await ok(owner, 'GET', `${manualPath}/packages/${reviewed.candidates[0].id}/file?path=SKILL.md`);
+      assert.match(preview.text, /name: "weekly-summary"/);
+      assert.match(preview.text, /List completed work/);
+      const [created] = await ok(owner, 'PUT', `${manualPath}/decision`, {
+        commandId: randomUUID(),
+        digest: reviewed.digest,
+        selected: reviewed.selected,
+        acknowledgeWarnings: true,
+      });
+      assert.equal(created.enabled, true);
+      assert.equal(created.activeRevision, created.savedRevision);
+      assert.ok(
+        (await ok(owner, 'GET', `${base}/skills?view=reviewed`)).workspace.some(item => item.id === created.id),
+      );
+      assert.equal(
+        (await ok(owner, 'GET', `${base}/skills?view=reviewed`)).workspace.find(item => item.id === created.id).source,
+        'Written by you',
+      );
+      const resolved = await createWorkspaceSkills(runtime).resolve(w.id, actor, [
+        { id: created.id, revision: created.activeRevision },
+      ]);
+      assert.equal(resolved[0].name, 'weekly-summary');
     } finally {
       await app?.close();
       await runtime?.close();

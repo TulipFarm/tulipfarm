@@ -179,8 +179,6 @@ try {
       ['workflows', 'Workflows', 'New workflow', 'workflows'],
       ['agents', 'Agents', 'No agents yet'],
       ['agents/new', 'New agent', 'Instructions'],
-      // The tables index has no description; its New table action sits beside the search. 5e9daa6e #880 (pages/tables.tsx:34)
-      // made tables/new a chat handoff; 9bb986c8 #808 redirects skills/new to chat, so it has no page of its own.
       ['tables', 'Tables', 'New table'],
       ['tables/new', 'Create a table', 'Build tables in chat'],
       ['skills', 'Skills', 'Workspace skills'],
