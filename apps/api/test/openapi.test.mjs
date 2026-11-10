@@ -65,6 +65,7 @@ test('v1 documentation describes the routes and their response contracts', async
         '/.well-known/mcp-client.json',
         '/v1/account/sign-in-methods',
         '/v1/onboarding/complete',
+        '/v1/onboarding/availability',
         '/v1/onboarding/drafts',
         '/v1/onboarding/resume',
         '/v1/public/guide/options',

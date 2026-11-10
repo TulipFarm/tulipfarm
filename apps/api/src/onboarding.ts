@@ -3,12 +3,13 @@ import { createBackgroundJob } from '@tulipfarm/observability';
 import { APIError } from 'better-auth/api';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { workspaceSchema, type Workspace } from '@tulipfarm/workspaces/contracts';
+import { createWorkspaceSchema, workspaceSchema, type Workspace } from '@tulipfarm/workspaces/contracts';
 import {
   saveOnboardingSchema,
   resumeOnboardingSchema,
   completeOnboardingSchema,
   onboardingDraftSchema,
+  workspaceUrlAvailabilitySchema,
 } from '@tulipfarm/workspaces/onboarding-contracts';
 import {
   saveOnboarding,
@@ -16,6 +17,7 @@ import {
   expireOnboarding,
   OnboardingConflict,
   OnboardingUnavailable,
+  workspaceUrlAvailable,
 } from '@tulipfarm/workspaces/onboarding';
 import { createWorkspace, WorkspaceConflict, WorkspaceNotFound } from '@tulipfarm/workspaces/store';
 import type { WorkspaceStore } from '@tulipfarm/workspaces/storage';
@@ -63,6 +65,24 @@ export function registerOnboarding(
         return reply.code(error.statusCode === 503 ? 503 : 403).send({ error: error.message });
       throw error;
     });
+    const availabilityRequest = createWorkspaceSchema.pick({ slug: true });
+    routes.post(
+      '/onboarding/availability',
+      {
+        schema: {
+          operationId: 'checkOnboardingUrlV1',
+          tags: ['Onboarding'],
+          summary: 'Check whether a workspace URL is available',
+          body: json(availabilityRequest),
+          response: { 200: json(workspaceUrlAvailabilitySchema), 400: errorSchema, 429: errorSchema },
+        },
+      },
+      async (request, reply) => {
+        const input = availabilityRequest.safeParse(request.body);
+        if (!input.success) return reply.code(400).send({ error: 'Enter a valid, unreserved workspace URL.' });
+        return { available: await workspaceUrlAvailable(pool, input.data.slug) };
+      },
+    );
     routes.post(
       '/onboarding/drafts',
       {

@@ -7,6 +7,83 @@ import { createServer } from 'vite';
 import { chromium } from 'playwright';
 import { installTurnstileFixture } from './turnstile-fixture.mjs';
 
+test('signup checks URL availability before account details and permits retry', { timeout: 60000 }, async () => {
+  const server = await createServer({ server: { host: '127.0.0.1', port: 0 } });
+  await server.listen();
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    page.setDefaultTimeout(5000);
+    const checks = [];
+    const errors = [];
+    const consoleErrors = [];
+    const failures = [];
+    let unavailable = false;
+    page.on('pageerror', error => errors.push(error.message));
+    page.on('console', message => {
+      if (message.type() === 'error') consoleErrors.push(message.text());
+    });
+    page.on('requestfailed', request => failures.push(request.url()));
+    await page.route('**/v1/**', async route => {
+      const path = new URL(route.request().url()).pathname;
+      if (path === '/v1/auth/get-session') return route.fulfill({ json: null });
+      if (path === '/v1/auth/options')
+        return route.fulfill({ json: { google: false, magicLink: true, turnstileSiteKey: null } });
+      if (path === '/v1/onboarding/availability') {
+        const { slug } = route.request().postDataJSON();
+        checks.push(slug);
+        if (unavailable) return route.fulfill({ status: 503, json: { error: 'temporarily-unavailable' } });
+        return route.fulfill({ json: { available: slug !== 'taken-studio' } });
+      }
+      throw new Error(`Unexpected API request ${path}`);
+    });
+    await page.goto(`${server.resolvedUrls.local[0]}register`);
+    const name = page.getByLabel('Workspace name', { exact: true });
+    const slug = page.getByLabel('Workspace URL', { exact: true });
+    const next = page.getByRole('button', { name: 'Continue', exact: true });
+    await name.fill('Taken studio');
+    await slug.fill('login');
+    await next.click();
+    await page.getByText('This URL is reserved by TulipFarm. Choose another one.').waitFor();
+    assert.deepEqual(checks, []);
+    await slug.fill('taken-studio');
+    await next.dblclick();
+    await page.getByText('This workspace URL is already taken.').waitFor();
+    assert.equal(await page.getByRole('heading', { name: 'Create your workspace', exact: true }).count(), 1);
+    assert.equal(await slug.getAttribute('aria-invalid'), 'true');
+    const errorId = await slug.getAttribute('aria-describedby');
+    assert.ok(errorId);
+    assert.match(await page.locator(`[id="${errorId.split(' ').at(-1)}"]`).textContent(), /already taken/);
+    assert.deepEqual(checks, ['taken-studio'], 'Concurrent submits share one check');
+    if (process.env.SIGNUP_URL_SCREENSHOTS)
+      await page.screenshot({ path: `${process.env.SIGNUP_URL_SCREENSHOTS}/signup-workspace-url-after.png` });
+    assert.deepEqual(errors, []);
+    assert.deepEqual(consoleErrors, []);
+    assert.deepEqual(failures, []);
+    unavailable = true;
+    await slug.fill('retry-studio');
+    await next.click();
+    await page.getByText('Could not check this URL. Check your connection and select Continue to try again.').waitFor();
+    assert.equal(await page.getByRole('heading', { name: 'Create your workspace', exact: true }).count(), 1);
+    unavailable = false;
+    await next.click();
+    await page.getByRole('heading', { name: 'Create your account', exact: true }).waitFor();
+    await page.getByRole('button', { name: 'Edit workspace details' }).click();
+    checks.length = 0;
+    await slug.fill('changed-once');
+    await slug.fill('changed-twice');
+    await slug.fill('free-studio');
+    await page.waitForResponse(response => response.url().endsWith('/onboarding/availability'));
+    assert.deepEqual(checks, ['free-studio'], 'Typing changes are debounced');
+    await next.click();
+    await page.getByRole('heading', { name: 'Create your account', exact: true }).waitFor();
+    assert.deepEqual(errors, []);
+  } finally {
+    await browser.close();
+    await server.close();
+  }
+});
+
 test(
   'workspace-first signup resumes on another device and recovers without duplicate creation',
   { timeout: 90000 },
@@ -21,7 +98,8 @@ test(
         saves = [],
         emails = [],
         socials = [],
-        completions = [];
+        completions = [],
+        creations = [];
       const id = '11111111-1111-4111-8111-111111111111';
       const session = {
         session: { id: 'session', expiresAt: '2099-01-01T00:00:00.000Z' },
@@ -50,7 +128,14 @@ test(
             return route.fulfill({ json: { turnstileSiteKey: 'fixture-site', google: true, magicLink: true } });
           if (path === '/v1/dev/sign-in-link') return route.fulfill({ status: 404, json: {} });
           if (path === '/v1/user/visit') return route.fulfill({ json: { firstSession: false } });
+          if (path === '/v1/workspaces' && route.request().method() === 'POST') {
+            assert.equal(authenticated, true, 'URL recovery must keep the signed-in account');
+            const body = route.request().postDataJSON();
+            creations.push(body);
+            return route.fulfill({ status: 202, json: { ...workspace, name: body.name, slug: body.slug } });
+          }
           if (path === '/v1/workspaces') return route.fulfill({ json: [] });
+          if (path === '/v1/onboarding/availability') return route.fulfill({ json: { available: true } });
           if (path === `/v1/workspace-setups/${id}`)
             return route.fulfill({ json: { id, stage: 'reserved', error: null } });
           if (path === '/v1/onboarding/drafts') {
@@ -200,6 +285,18 @@ test(
         () => document.querySelector('input[name=workspace-name]')?.value === 'Sample studio',
       );
       assert.equal(await resumed.getByLabel('Workspace URL', { exact: true }).inputValue(), workspace.slug);
+      const emailCount = emails.length;
+      const socialCount = socials.length;
+      await resumed.getByLabel('Workspace URL', { exact: true }).fill('sample-studio-next');
+      await resumed.getByText('Test verification widget').waitFor();
+      await resumed.evaluate(() => window.challenge.solve());
+      await resumed.getByRole('button', { name: 'Create workspace', exact: true }).click();
+      await resumed.waitForURL(`**/workspace-setups/${id}`);
+      assert.equal(creations.length, 1);
+      assert.equal(creations[0].name, workspace.name, 'URL recovery preserves the workspace name');
+      assert.equal(creations[0].slug, 'sample-studio-next');
+      assert.equal(emails.length, emailCount, 'URL recovery does not require another sign-in');
+      assert.equal(socials.length, socialCount);
       expired = true;
       await resumed.goto(callback);
       await resumed.getByRole('heading', { name: 'Start onboarding again' }).waitFor();

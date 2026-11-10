@@ -77,7 +77,21 @@ export function WorkspaceSignupPage() {
         footer={footer}
       >
         <SignInAvailable>
-          <Form label="Workspace details" onSubmit={() => (workspace.validate() ? setStep('account') : 'invalid')}>
+          <Form
+            label="Workspace details"
+            onSubmit={() => {
+              if (!workspace.validate()) return 'invalid';
+              if (pending) return;
+              setPending(true);
+              void workspace
+                .checkAvailability()
+                .then(available => {
+                  if (available) setStep('account');
+                  else document.getElementById('onboarding-workspace-slug')?.focus();
+                })
+                .finally(() => setPending(false));
+            }}
+          >
             <div className="space-y-6">
               {returnError !== null && (
                 <Alert variant="destructive">
@@ -90,7 +104,8 @@ export function WorkspaceSignupPage() {
               )}
               {workspace.fields}
               <div className="grid">
-                <Button type="submit" size="lg">
+                <Button type="submit" size="lg" disabled={pending} aria-busy={pending}>
+                  {pending && <Spinner aria-hidden="true" />}
                   Continue
                   <ArrowRight aria-hidden="true" />
                 </Button>

@@ -20,6 +20,7 @@ const passwordIpPolicy: Policy = { name: 'password-ip', max: 10, windowMs: 60_00
 const passwordPolicy: Policy = { name: 'password-account', max: 10, windowMs: 900_000 };
 const passwordPaths = new Set(['/v1/auth/sign-in/email', '/v1/auth/sign-up/email']);
 const onboardingPolicy: Policy = { name: 'onboarding-draft', max: 20, windowMs: 3_600_000 };
+const onboardingAvailabilityPolicy: Policy = { name: 'onboarding-availability', max: 60, windowMs: 60_000 };
 const webhookWorkspacePolicy: Policy = { name: 'workflow-webhook-workspace', max: 600, windowMs: 60_000 };
 const webhookPolicy: Policy = { name: 'workflow-webhook', max: 120, windowMs: 60_000 };
 const webhookSourcePolicy: Policy = { name: 'workflow-webhook-source', max: 60, windowMs: 60_000 };
@@ -179,6 +180,9 @@ export function registerAbuseHooks(
     }
   }
   app.addHook('onRequest', async (request, reply) => {
+    if (request.routeOptions.schema?.operationId === 'checkOnboardingUrlV1') {
+      if (!(await enforce(reply, onboardingAvailabilityPolicy, normalizeIP(request.ip)))) return reply;
+    }
     if (['saveOnboardingV1', 'resumeOnboardingV1'].includes(request.routeOptions.schema?.operationId ?? '')) {
       if (!(await enforce(reply, onboardingPolicy, normalizeIP(request.ip)))) return reply;
     }

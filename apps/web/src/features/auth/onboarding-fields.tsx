@@ -1,9 +1,9 @@
-import { useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Field } from '@tulipfarm/sprout/field';
 import { Input } from '@tulipfarm/sprout/input';
 import { InputGroup, InputGroupAddon, InputGroupInput, InputGroupText } from '@tulipfarm/sprout/input-group';
 import { onboardingDetailsSchema } from '@tulipfarm/workspaces/onboarding-contracts';
-import { newOnboardingToken, saveOnboarding } from '@/lib/onboarding';
+import { newOnboardingToken, saveOnboarding, workspaceUrlAvailable } from '@/lib/onboarding';
 import { suggestWorkspaceSlug, workspaceSlugError } from '@/lib/workspace-slug';
 
 // New workspaces are always business workspaces; the signup flow does not ask.
@@ -13,8 +13,41 @@ export function useOnboardingFields(disabled: boolean) {
   const [name, setName] = useState('');
   const [customSlug, setCustomSlug] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
+  const [availabilityError, setAvailabilityError] = useState<{ slug: string; message: string } | null>(null);
+  const checking = useRef<{ slug: string; promise: Promise<boolean> } | null>(null);
+  const debounce = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const saved = useRef<{ details: string; token: string; expiresAt: number | null } | null>(null);
   const slug = customSlug ?? suggestWorkspaceSlug(name);
+  const currentSlug = useRef(slug);
+  currentSlug.current = slug;
+  const checkAvailability = useCallback((value: string) => {
+    clearTimeout(debounce.current);
+    if (checking.current?.slug === value) return checking.current.promise;
+    const promise = workspaceUrlAvailable(value)
+      .then(available => {
+        if (currentSlug.current === value)
+          setAvailabilityError(available ? null : { slug: value, message: 'This workspace URL is already taken.' });
+        return available;
+      })
+      .catch(() => {
+        if (currentSlug.current === value)
+          setAvailabilityError({
+            slug: value,
+            message: 'Could not check this URL. Check your connection and select Continue to try again.',
+          });
+        return false;
+      })
+      .finally(() => {
+        if (checking.current?.promise === promise) checking.current = null;
+      });
+    checking.current = { slug: value, promise };
+    return promise;
+  }, []);
+  useEffect(() => {
+    if (workspaceSlugError(slug)) return;
+    debounce.current = setTimeout(() => void checkAvailability(slug), 400);
+    return () => clearTimeout(debounce.current);
+  }, [slug, checkAvailability]);
   function validate() {
     setSubmitted(true);
     return onboardingDetailsSchema.safeParse({ name, slug, accountType, messages: [] }).success;
@@ -62,7 +95,10 @@ export function useOnboardingFields(disabled: boolean) {
         disabled={disabled}
         helper="You can’t change this later."
         // A URL derived from an empty name is not the visitor's mistake; the name error covers it.
-        error={submitted && (customSlug !== null || name.trim()) ? workspaceSlugError(slug) : undefined}
+        error={
+          (submitted && (customSlug !== null || name.trim()) ? workspaceSlugError(slug) : undefined) ??
+          (availabilityError?.slug === slug ? availabilityError.message : undefined)
+        }
       >
         <InputGroup size="lg">
           <InputGroupAddon>
@@ -82,5 +118,11 @@ export function useOnboardingFields(disabled: boolean) {
       </Field>
     </div>
   );
-  return { fields, prepare, validate, details: { name: name.trim(), slug } };
+  return {
+    fields,
+    prepare,
+    validate,
+    checkAvailability: () => checkAvailability(slug),
+    details: { name: name.trim(), slug },
+  };
 }
