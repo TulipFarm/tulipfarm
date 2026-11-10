@@ -103,7 +103,8 @@ export function createConversationRequests(runtime: ConversationRuntime) {
       await requireRequestSources(tx, actor, row);
       return true;
     } catch (error) {
-      if (!(error instanceof AccessDenied) && !(error instanceof SourceAuthorizationUnavailable)) throw error;
+      if (error instanceof SourceAuthorizationUnavailable) throw error;
+      if (!(error instanceof AccessDenied)) throw error;
       if (row.status === 'pending' && row.membership_id === actor.membershipId)
         await finishUnavailableReview(tx, {
           workspaceId,

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
+import { SourceAuthorizationUnavailable } from '@tulipfarm/access';
 import { createConversationExecutor } from '@tulipfarm/conversations/runtime';
 import { createConversationRequests } from '@tulipfarm/conversations/requests';
 import { createChatTools } from '@tulipfarm/agents/tools';
@@ -25,6 +26,34 @@ test('unreadable reviews never strand a private chat or remain approval gates', 
     ],
   };
   const requests = createConversationRequests(f.runtime);
+  const providerSource = {
+    kind: 'knowledge-document',
+    workspaceId: w.id,
+    sourceId: randomUUID(),
+    documentId: randomUUID(),
+    revisionId: randomUUID(),
+    publicationId: randomUUID(),
+    accessEpoch: 1,
+  };
+  let providerFailure = false;
+  const providerRuntime = {
+    transaction: (workspace, range, operation) =>
+      f.runtime.transaction(workspace, range, tx => {
+        tx.knowledgeSourceDependencies = async () => [];
+        tx.requireKnowledgeSource = async () => {
+          if (providerFailure) throw new SourceAuthorizationUnavailable();
+        };
+        return operation(tx);
+      }),
+  };
+  const unavailableDuring = async operation => {
+    providerFailure = true;
+    try {
+      return await operation().catch(error => error);
+    } finally {
+      providerFailure = false;
+    }
+  };
   const chat = async () => {
     const id = randomUUID();
     await f.store.create(w.id, w.userId, { chatId: id, commandId: randomUUID() });
@@ -39,12 +68,12 @@ test('unreadable reviews never strand a private chat or remain approval gates', 
     });
     return { workspaceId: w.id, conversationId: id, turnId: sent.turnId, generation: 0 };
   };
-  const invoke = (input, call) =>
+  const invoke = (input, call, sources = []) =>
     input.executeTool(
       call.tool,
       false,
       context => createChatTools(context.runtime).invokeWithSources(context, call),
-      [],
+      sources,
       call,
     );
   const requestId = history =>
@@ -123,6 +152,47 @@ test('unreadable reviews never strand a private chat or remain approval gates', 
       assert.equal(await executor.process(queued), 'completed');
     });
 
+  for (const action of ['read', 'answer'])
+    await t.test(`a temporary question source failure on ${action} leaves it pending and answerable`, async () => {
+      const id = await chat();
+      let asked = false;
+      const executor = createConversationExecutor(providerRuntime, async input => {
+        if (asked) return { text: 'Your answer was received.', sources: [] };
+        asked = true;
+        await invoke(input, choice, [providerSource]);
+        assert.fail('A published question must pause the reply.');
+      });
+      const work = await send(id, 'Help me choose.');
+      assert.equal(await executor.process(work), 'idle');
+      const question = (
+        await f.db.platform.query(`SELECT id FROM ${f.table('tf_conversation_requests')} WHERE turn_id=$1`, [
+          work.turnId,
+        ])
+      ).rows[0].id;
+      const service = createConversationRequests(providerRuntime);
+      const responseId = randomUUID(),
+        commandId = randomUUID();
+      const answer = () =>
+        service.answer(w.id, w.userId, id, question, responseId, {
+          commandId,
+          expectedRevision: 1,
+          answer: { kind: 'choices', choiceIds: ['one'] },
+        });
+      const error = await unavailableDuring(
+        action === 'read' ? () => service.read(w.id, w.userId, id, question) : answer,
+      );
+      assert.equal(
+        (await f.db.platform.query(`SELECT status FROM ${f.table('tf_conversation_requests')} WHERE id=$1`, [question]))
+          .rows[0].status,
+        'pending',
+      );
+      assert.equal(await state(work), 'waiting');
+      assert.ok(error instanceof SourceAuthorizationUnavailable);
+      assert.equal((await service.read(w.id, w.userId, id, question)).status, 'pending');
+      assert.equal((await answer()).status, 'answered');
+      assert.equal(await executor.process({ ...work, generation: 1 }), 'completed');
+    });
+
   const team = randomUUID();
   await f.db.platform.query(`INSERT INTO ${f.table('tf_teams')} (id,name) VALUES ($1,'Ops')`, [team]);
   const name = { ...textField('Name'), required: true };
@@ -162,16 +232,104 @@ test('unreadable reviews never strand a private chat or remain approval gates', 
     (await f.db.platform.query(`SELECT outcome FROM ${f.table('tf_chat_authoring_decisions')} WHERE draft_id=$1`, [id]))
       .rows;
 
-  for (const recovery of ['read', 'count', 'tool'])
+  await t.test('temporary failures during draft read, approval and counting leave the draft retryable', async () => {
+    const id = await chat();
+    let card, countCards;
+    const draftCall = { ...one, values: values(1000) };
+    const executor = createConversationExecutor(providerRuntime, async input => {
+      card = (await invoke(input, draftCall, [providerSource])).result;
+      countCards = input.waitingCards;
+      return { text: 'Review these rows.', sources: [] };
+    });
+    assert.equal(await executor.process(await send(id, 'Add one row to review-contacts.')), 'completed');
+    const service = createAuthoringDrafts(providerRuntime);
+    const commandId = randomUUID();
+    const save = () =>
+      service.decide(w.id, w.userId, id, card.draftId, {
+        commandId,
+        digest: card.digest,
+        decision: 'save',
+      });
+    for (const operation of [() => service.read(w.id, w.userId, id, card.draftId), save, () => countCards()]) {
+      const error = await unavailableDuring(operation);
+      assert.equal((await decisions(card.draftId)).length, 0);
+      assert.ok(error instanceof SourceAuthorizationUnavailable);
+      assert.equal((await service.read(w.id, w.userId, id, card.draftId)).status, 'pending');
+      assert.equal(await countCards(), 1);
+    }
+    assert.equal((await save()).recordId, card.draftId);
+  });
+
+  await t.test('a temporary source failure while returning a draft reference does not close it', async tt => {
+    const id = await chat();
+    let card;
+    tt.after(() => {
+      providerFailure = false;
+    });
+    const executor = createConversationExecutor(providerRuntime, async input => {
+      if (!card) {
+        card = (await invoke(input, one, [providerSource])).result;
+        return { text: 'Review these rows.', sources: [] };
+      }
+      const result = await input.executeTool(
+        'rows.create',
+        false,
+        async () => {
+          providerFailure = true;
+          return { result: card, sources: [] };
+        },
+        [],
+        one,
+      );
+      providerFailure = false;
+      assert.equal((await decisions(card.draftId)).length, 0);
+      assert.equal(result.result.error, 'source-unavailable');
+      return { text: 'A source is temporarily unavailable. Try again.', sources: [] };
+    });
+    assert.equal(await executor.process(await send(id, 'Add one row to review-contacts.')), 'completed');
+    assert.equal(await executor.process(await send(id, 'Check the review.')), 'completed');
+    assert.equal(
+      (await createAuthoringDrafts(providerRuntime).read(w.id, w.userId, id, card.draftId)).status,
+      'pending',
+    );
+  });
+
+  await t.test('a temporary source failure at final delivery retries without deciding the draft', async tt => {
+    const id = await chat();
+    let card;
+    tt.after(() => {
+      providerFailure = false;
+    });
+    const executor = createConversationExecutor(providerRuntime, async input => {
+      if (!card) {
+        card = (await invoke(input, one, [providerSource])).result;
+        providerFailure = true;
+      }
+      return { text: 'Review these rows.', sources: [] };
+    });
+    const work = await send(id, 'Add one row to review-contacts.');
+    assert.equal(await executor.process(work), 'retry');
+    providerFailure = false;
+    assert.equal((await decisions(card.draftId)).length, 0);
+    assert.equal(await state(work), 'queued');
+    assert.equal(
+      (await createAuthoringDrafts(providerRuntime).read(w.id, w.userId, id, card.draftId)).status,
+      'pending',
+    );
+  });
+
+  for (const recovery of ['read', 'decision', 'count', 'tool'])
     await t.test(`an unreadable draft is terminal on ${recovery} and no longer blocks a row write`, async () => {
       const id = await chat();
-      let draft;
+      let draft, digest;
       const executor = createConversationExecutor(f.runtime, async input => {
         if (!draft) {
-          draft = (await invoke(input, batch)).result.draftId;
+          const card = (await invoke(input, batch)).result;
+          draft = card.draftId;
+          digest = card.digest;
           return { text: 'Review the nine rows.', sources: [] };
         }
-        const row = { ...one, values: values(100 + ['read', 'count', 'tool'].indexOf(recovery)) };
+        const row = { ...one, values: values(100 + ['read', 'decision', 'count', 'tool'].indexOf(recovery)) };
         if (recovery === 'tool') assert.equal((await invoke(input, row)).result.error, 'review-unavailable');
         assert.equal(await input.waitingCards(), 0);
         const result = await invoke(input, row);
@@ -184,6 +342,10 @@ test('unreadable reviews never strand a private chat or remain approval gates', 
       await assert.rejects(authoring.read(w.id, w.userId, await chat(), draft));
       assert.equal((await decisions(draft)).length, 0);
       if (recovery === 'read') await assert.rejects(authoring.read(w.id, w.userId, id, draft));
+      if (recovery === 'decision')
+        await assert.rejects(
+          authoring.decide(w.id, w.userId, id, draft, { commandId: randomUUID(), digest, decision: 'save' }),
+        );
       assert.equal(await executor.process(await send(id, 'Add one row to review-contacts.')), 'completed');
       assert.deepEqual(
         (await decisions(draft)).map(row => row.outcome),

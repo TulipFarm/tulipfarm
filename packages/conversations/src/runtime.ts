@@ -615,7 +615,8 @@ export function createConversationExecutor(
         await requireChatReviewSources(tx, actor, draft.sources, draft.kind === 'row');
         readable++;
       } catch (error) {
-        if (!(error instanceof AccessDenied) && !(error instanceof SourceAuthorizationUnavailable)) throw error;
+        if (error instanceof SourceAuthorizationUnavailable) throw error;
+        if (!(error instanceof AccessDenied)) throw error;
         await closeUnavailableDraft(tx, { ...fence, turnId: draft.turn_id }, actor, draft.id);
       }
     return { readable, unavailable: rows.length - readable };
@@ -2392,7 +2393,8 @@ export function createConversationExecutor(
                   draft.kind === 'row',
                 );
               } catch (error) {
-                if (!(error instanceof AccessDenied) && !(error instanceof SourceAuthorizationUnavailable)) throw error;
+                if (error instanceof SourceAuthorizationUnavailable) throw error;
+                if (!(error instanceof AccessDenied)) throw error;
                 if (draft)
                   await closeUnavailableDraft(
                     tx,
