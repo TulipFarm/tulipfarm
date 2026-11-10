@@ -184,7 +184,7 @@ function Detail({ page, access, stale }: { page: AccessPage; access: MemberAcces
                   <DropdownMenuTrigger render={<Button variant="outline" disabled={busy} />}>
                     Add {access.self ? 'yourself' : name} to a team
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
+                  <DropdownMenuContent align="end" size="menu">
                     {addable.map(team => (
                       <DropdownMenuItem
                         key={team.id}
@@ -196,7 +196,9 @@ function Detail({ page, access, stale }: { page: AccessPage; access: MemberAcces
                           )
                         }
                       >
-                        Add {name} to {team.name}
+                        <span className="min-w-0 wrap-anywhere">
+                          Add {name} to {team.name}
+                        </span>
                       </DropdownMenuItem>
                     ))}
                   </DropdownMenuContent>
@@ -287,7 +289,7 @@ function Detail({ page, access, stale }: { page: AccessPage; access: MemberAcces
                     >
                       <MoreH size={16} aria-hidden="true" />
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
+                    <DropdownMenuContent align="end" size="menu">
                       <DropdownMenuItem
                         variant="destructive"
                         disabled={busy || soleManager(team)}
@@ -307,7 +309,9 @@ function Detail({ page, access, stale }: { page: AccessPage; access: MemberAcces
                           })
                         }
                       >
-                        Remove {name} from {team.name}
+                        <span className="min-w-0 wrap-anywhere">
+                          Remove {name} from {team.name}
+                        </span>
                       </DropdownMenuItem>
                       {soleManager(team) && (
                         <p className="max-w-64 px-2 py-1.5 text-xs text-muted-foreground">

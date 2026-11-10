@@ -161,10 +161,22 @@ export async function humanTableGrantPredicate(
   const team = `EXISTS (SELECT 1 FROM ${table(transaction, 'tf_member_teams')} mt
     JOIN ${table(transaction, 'tf_grants')} g ON g.team_id = mt.team_id
     WHERE mt.membership_id = ${membershipId} AND g.asset_id = ${assetId} AND g.permission = ANY(${permissions}))`;
-  const alternatives = [team];
+  // A grant on a team rather than a table covers every table that team owns, now or later.
+  const owned = `EXISTS (SELECT 1 FROM ${table(transaction, 'tf_table_catalog')} cat
+    JOIN ${table(transaction, 'tf_grants')} og ON og.asset_id = cat.owning_team_id
+    JOIN ${table(transaction, 'tf_member_teams')} omt ON omt.team_id = og.team_id
+    WHERE cat.id = ${assetId} AND omt.membership_id = ${membershipId}
+      AND og.permission <> 'table.create' AND og.permission = ANY(${permissions}))`;
+  const alternatives = [team, owned];
   if (await tablePersonGrantsInstalled(transaction))
-    alternatives.push(`EXISTS (SELECT 1 FROM ${table(transaction, 'tf_table_person_grants')} pg
-    WHERE pg.membership_id = ${membershipId} AND pg.asset_id = ${assetId} AND pg.permission = ANY(${permissions}))`);
+    alternatives.push(
+      `EXISTS (SELECT 1 FROM ${table(transaction, 'tf_table_person_grants')} pg
+    WHERE pg.membership_id = ${membershipId} AND pg.asset_id = ${assetId} AND pg.permission = ANY(${permissions}))`,
+      `EXISTS (SELECT 1 FROM ${table(transaction, 'tf_table_catalog')} pcat
+    JOIN ${table(transaction, 'tf_table_person_grants')} opg ON opg.asset_id = pcat.owning_team_id
+    WHERE pcat.id = ${assetId} AND opg.membership_id = ${membershipId}
+      AND opg.permission <> 'table.create' AND opg.permission = ANY(${permissions}))`,
+    );
   const installed = (
     await transaction.client.query('SELECT to_regclass($1) IS NOT NULL AS installed', [
       table(transaction, 'tf_system_tables'),
@@ -387,8 +399,13 @@ async function canAgentAccess(
     scope.some(entry => entry.assetId === assetId && entry.permissions.includes(permission));
   if (![authority.scope, authority.activation_scope, authority.limit_scope].every(permits)) return false;
   const target = grantTarget(permission);
+  // Table permissions may also come from a policy on every table the owning team owns.
+  const owned =
+    target.name === 'tf_grants' && permission.startsWith('table.') && permission !== 'table.create'
+      ? ` OR g.asset_id = (SELECT owning_team_id FROM ${table(transaction, 'tf_table_catalog')} WHERE id = $2)`
+      : '';
   const grant = await transaction.client.query(
-    `SELECT 1 FROM ${table(transaction, 'tf_agent_teams')} t JOIN ${table(transaction, target.name)} g ON g.team_id = t.team_id WHERE t.agent_id = $1 AND g.${target.column} = $2 AND g.permission = $3 LIMIT 1`,
+    `SELECT 1 FROM ${table(transaction, 'tf_agent_teams')} t JOIN ${table(transaction, target.name)} g ON g.team_id = t.team_id WHERE t.agent_id = $1 AND (g.${target.column} = $2${owned}) AND g.permission = $3 LIMIT 1`,
     [authority.agent_id, assetId, target.permission],
   );
   if (!grant.rowCount) return false;

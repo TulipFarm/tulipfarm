@@ -96,37 +96,64 @@ export function describeChange(
   return parts.length ? parts.join(' ') : `No change. ${subject} already had this access to ${target}.`;
 }
 
-export type PolicyScopeView = { kind: 'all' } | { kind: 'table' | 'collection'; id: string; name: string };
+export type PolicyScopeView = { kind: 'all' } | { kind: 'table' | 'collection' | 'owned'; id: string; name: string };
 export type PolicyRow = {
   key: string;
   scope: PolicyScopeView;
   permissions: PolicyPermission[];
   source: MemberAccess['policies'][number]['source'];
+  /** For a policy on every table a team owns, the tables it covers now. */
+  tables?: { id: string; name: string }[];
 };
 
 export const scopeKindLabel = (scope: PolicyScopeView) =>
-  scope.kind === 'all' ? 'Workspace' : scope.kind === 'table' ? 'Table' : 'Table creation';
+  scope.kind === 'all'
+    ? 'Workspace'
+    : scope.kind === 'table'
+      ? 'Table'
+      : scope.kind === 'owned'
+        ? 'Team’s tables'
+        : 'Table creation';
 export const scopeTarget = (scope: PolicyScopeView) =>
-  scope.kind === 'all' ? 'All tables' : scope.kind === 'table' ? scope.name : `New tables owned by ${scope.name}`;
-/** The object of a change sentence: "Orders", or "tables owned by Sales". */
-export const scopeObject = (scope: PolicyScopeView) =>
-  scope.kind === 'all' ? 'every table' : scope.kind === 'table' ? scope.name : scope.name;
+  scope.kind === 'all'
+    ? 'All tables'
+    : scope.kind === 'table'
+      ? scope.name
+      : scope.kind === 'owned'
+        ? `All tables owned by ${scope.name}`
+        : `New tables owned by ${scope.name}`;
+/** The target inside a sentence: "Orders", or "all tables owned by Sales". */
+export const scopePhrase = (scope: PolicyScopeView) =>
+  scope.kind === 'owned' ? `all tables owned by ${scope.name}` : scopeTarget(scope);
+/** The object of a change sentence: "Orders", or "all tables owned by Sales". */
+export const scopeObject = (scope: PolicyScopeView) => (scope.kind === 'all' ? 'every table' : scopePhrase(scope));
 
 export function scopeNames(data: GovernanceSnapshot) {
   const names = new Map<string, string>();
   for (const table of data.tables) names.set(`table:${table.id}`, table.name);
-  for (const team of [...data.teamNames, ...data.teams]) names.set(`collection:${team.id}`, team.name);
+  for (const team of [...data.teamNames, ...data.teams]) {
+    names.set(`collection:${team.id}`, team.name);
+    names.set(`owned:${team.id}`, team.name);
+  }
   return names;
 }
 
+const kindOrder: PolicyScopeView['kind'][] = ['all', 'table', 'owned', 'collection'];
 const sortRows = (rows: PolicyRow[]) =>
   rows
     .map(row => ({ ...row, permissions: sortPermissions(row.permissions) }))
     .sort(
       (a, b) =>
-        (a.scope.kind === 'collection' ? 1 : 0) - (b.scope.kind === 'collection' ? 1 : 0) ||
+        kindOrder.indexOf(a.scope.kind) - kindOrder.indexOf(b.scope.kind) ||
         scopeTarget(a.scope).localeCompare(scopeTarget(b.scope)),
     );
+
+/** The tables a team owns, for showing what a policy on all of them covers. */
+export const ownedTables = (data: GovernanceSnapshot, teamId: string) =>
+  data.tables
+    .filter(table => table.owningTeamId === teamId)
+    .map(({ id, name }) => ({ id, name }))
+    .sort((a, b) => a.name.localeCompare(b.name));
 
 type Grant = { target: GovernanceSnapshot['grants'][number]['target'] };
 function groupGrants(data: GovernanceSnapshot, grants: Grant[], source: PolicyRow['source']) {
@@ -136,7 +163,13 @@ function groupGrants(data: GovernanceSnapshot, grants: Grant[], source: PolicyRo
     const key = `${target.kind}:${target.id}`;
     const name = names.get(key);
     if (name === undefined) continue;
-    const row = rows.get(key) ?? { key, scope: { kind: target.kind, id: target.id, name }, permissions: [], source };
+    const row = rows.get(key) ?? {
+      key,
+      scope: { kind: target.kind, id: target.id, name },
+      permissions: [],
+      source,
+      ...(target.kind === 'owned' && { tables: ownedTables(data, target.id) }),
+    };
     row.permissions.push(target.permission);
     rows.set(key, row);
   }
@@ -165,7 +198,8 @@ export const accessPolicies = (access: MemberAccess): PolicyRow[] =>
     scope: policy.scope,
     permissions: sortPermissions(policy.permissions),
     source: policy.source,
+    ...(policy.scope.kind === 'owned' && { tables: policy.tables }),
   }));
 
 export const sourceLabel = (source: PolicyRow['source']) =>
-  source.kind === 'admin' ? 'Admin role' : source.kind === 'team' ? `Team ${source.teamName}` : 'Direct policy';
+  source.kind === 'admin' ? 'Admin role' : source.kind === 'team' ? `Team policy: ${source.teamName}` : 'Direct policy';

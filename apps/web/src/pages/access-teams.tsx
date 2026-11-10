@@ -234,13 +234,15 @@ export function TeamsList({ page }: { page: AccessPage }) {
                 >
                   <MoreH size={16} aria-hidden="true" />
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
+                <DropdownMenuContent align="end" size="menu">
                   <DropdownMenuItem
                     onClick={() =>
                       void navigate({ to: '/$workspaceSlug/teams/$teamId', params: { workspaceSlug, teamId: team.id } })
                     }
                   >
-                    {team.canManage ? `Manage ${team.name}` : `View ${team.name}`}
+                    <span className="min-w-0 wrap-anywhere">
+                      {team.canManage ? `Manage ${team.name}` : `View ${team.name}`}
+                    </span>
                   </DropdownMenuItem>
                   {team.canManage && (
                     <DropdownMenuItem
@@ -262,7 +264,7 @@ export function TeamsList({ page }: { page: AccessPage }) {
                         })
                       }
                     >
-                      Delete {team.name}
+                      <span className="min-w-0 wrap-anywhere">Delete {team.name}</span>
                     </DropdownMenuItem>
                   )}
                 </DropdownMenuContent>
@@ -495,7 +497,7 @@ function Detail({ page, team }: { page: AccessPage; team: Team }) {
                     >
                       <MoreH size={16} aria-hidden="true" />
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
+                    <DropdownMenuContent align="end" size="menu">
                       <DropdownMenuItem
                         variant="destructive"
                         disabled={busy || lastManager}
@@ -524,7 +526,9 @@ function Detail({ page, team }: { page: AccessPage; team: Team }) {
                           })
                         }
                       >
-                        Remove {row.name} from {team.name}
+                        <span className="min-w-0 wrap-anywhere">
+                          Remove {row.name} from {team.name}
+                        </span>
                       </DropdownMenuItem>
                       {lastManager && (
                         <p className="max-w-64 px-2 py-1.5 text-xs text-muted-foreground">
@@ -772,6 +776,7 @@ function AddMembers({
                   <div className="flex items-center gap-3">
                     <Checkbox
                       id={`add-member-${item.key}`}
+                      aria-describedby={item.kind === 'invite' ? `add-member-${item.key}-pending` : undefined}
                       checked={selection.includes(item.key)}
                       disabled={saving}
                       onCheckedChange={checked =>
@@ -788,7 +793,11 @@ function AddMembers({
                         <span className="text-xs text-muted-foreground wrap-anywhere">{item.email}</span>
                       )}
                     </span>
-                    {item.kind === 'invite' && <Badge variant="warning">Joins on accept</Badge>}
+                    {item.kind === 'invite' && (
+                      <span id={`add-member-${item.key}-pending`}>
+                        <Badge variant="warning">Joins on accept</Badge>
+                      </span>
+                    )}
                   </div>
                 </li>
               ))}

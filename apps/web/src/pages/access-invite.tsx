@@ -2,7 +2,11 @@ import { useEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent } 
 import { Link, useNavigate } from '@tanstack/react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { canonicalEmail } from '@tulipfarm/workspaces/canonical-email';
-import { createdInvitationSchema, type PolicyPermission } from '@tulipfarm/workspaces/governance-contracts';
+import {
+  createdInvitationSchema,
+  invitationSchema,
+  type PolicyPermission,
+} from '@tulipfarm/workspaces/governance-contracts';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { Button } from '@tulipfarm/sprout/button';
 import { Checkbox } from '@tulipfarm/sprout/checkbox';
@@ -28,7 +32,7 @@ import {
   type RecipientRow,
   type RecipientState,
 } from '@/lib/invitation-batch';
-import { governancePath, governanceRequest, GovernanceRequestError } from '@/lib/governance';
+import { governanceError, governancePath, governanceRequest, GovernanceRequestError } from '@/lib/governance';
 import { invitationMemberResolver } from '@/features/tables/invitation-member';
 import { tableKeys } from '@/features/tables/queries';
 import { TableRequestError } from '@/features/tables/request-state';
@@ -54,7 +58,8 @@ const roleDescriptions = {
 type TeamChoice = { id: string; role: 'member' | 'manager' };
 type DraftPolicy = { scope: ScopeChoice; permissions: PolicyPermission[] };
 
-export function InviteMembers({ page }: { page: AccessPage }) {
+/** Invites people, or with `invitationId` changes the choices on one pending invite while its link keeps working. */
+export function InviteMembers({ page, invitationId }: { page: AccessPage; invitationId?: string }) {
   const { workspaceId, workspaceSlug, admin, data } = page;
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -73,11 +78,34 @@ export function InviteMembers({ page }: { page: AccessPage }) {
   const [rows, setRows] = useState<RecipientRow[]>([]);
   const [sending, setSending] = useState(false);
   const pending = useRef(false);
+  const [saveError, setSaveError] = useState<string>();
+  const [loaded, setLoaded] = useState(false);
+  const target = invitationId
+    ? invitations.data?.items.find(
+        item => item.id === invitationId && item.kind === 'email' && item.status === 'active',
+      )
+    : undefined;
+  useEffect(() => {
+    if (!target || loaded) return;
+    setLoaded(true);
+    setRole(target.role);
+    setTeams(
+      target.teams
+        .filter(team => data.teams.some(live => live.id === team.id))
+        .map(team => ({ id: team.id, role: team.role })),
+    );
+    setPolicies(
+      target.policies.map(policy => ({
+        scope: { ...policy.scope, name: policy.name } as ScopeChoice,
+        permissions: policy.permissions,
+      })),
+    );
+  }, [target, loaded]);
   const operations = useRef(new Map<string, RecipientRow>());
   const alive = useRef(true);
   useEffect(() => {
     alive.current = true;
-    emailInput.current?.focus();
+    if (!invitationId) emailInput.current?.focus();
     return () => {
       alive.current = false;
     };
@@ -143,11 +171,17 @@ export function InviteMembers({ page }: { page: AccessPage }) {
       choices.map(team => `${teamNames.get(team.id) ?? 'a team'}${team.role === 'manager' ? ' (Manager)' : ''}`),
     );
   const roleLabel = role === 'admin' ? 'Admin' : 'Member';
-  const summary = sendable.length
-    ? `${plural(sendable.length, 'person', 'people')} will join as ${roleLabel}${
-        teams.length ? `, in ${teamText(teams)}` : ''
-      }${policies.length ? `, with ${plural(policies.length, 'direct policy', 'direct policies')}` : ''}.`
-    : 'Add email addresses to see who will join.';
+  const policyText = plural(policies.length, 'direct policy', 'direct policies');
+  const joining = teams.length
+    ? `${roleLabel} in ${teamText(teams)}, with ${policies.length ? policyText : 'no direct policies'}`
+    : policies.length
+      ? `${roleLabel}, with no teams and ${policyText}`
+      : roleLabel;
+  const summary = target
+    ? `${target.email} will join as ${joining}.`
+    : sendable.length
+      ? `${plural(sendable.length, 'person', 'people')} will join as ${joining}.`
+      : 'Add email addresses to see who will join.';
 
   async function send(commands: RecipientRow[]) {
     if (pending.current || !admin) return;
@@ -270,7 +304,40 @@ export function InviteMembers({ page }: { page: AccessPage }) {
     if (confirmation) page.notify(confirmation);
   }
 
+  async function saveEdit() {
+    if (pending.current || !admin || !target) return;
+    pending.current = true;
+    setSending(true);
+    setSaveError(undefined);
+    try {
+      const saved = invitationSchema.parse(
+        await governanceRequest(`${governancePath(workspaceId)}/invitations/${target.id}/choices`, 'PUT', {
+          role,
+          teams,
+          policies: policies.map(policy => ({
+            scope: { kind: policy.scope.kind, id: policy.scope.id },
+            permissions: policy.permissions,
+          })),
+        }),
+      );
+      invitations.record(saved);
+      page.flash(`Saved the invite for ${target.email}. Their link still works.`);
+      void navigate({ to: '/$workspaceSlug/members', params: { workspaceSlug } });
+    } catch (failure) {
+      if (failure instanceof GovernanceRequestError && [401, 403, 404].includes(failure.status)) {
+        void invitations.refresh();
+        setSaveError(
+          `Couldn’t save the invite for ${target.email}. It may have been accepted or revoked, it may have expired, or you may no longer be an admin.`,
+        );
+      } else setSaveError(`Couldn’t save the invite for ${target.email}. ${governanceError(failure)}`);
+    } finally {
+      pending.current = false;
+      if (alive.current) setSending(false);
+    }
+  }
+
   function submit() {
+    if (invitationId) return void saveEdit();
     if (pending.current || !admin) return;
     const draft = query.trim() ? commit(query) : { emails, invalid: [] };
     if (draft.invalid.length) return;
@@ -311,121 +378,141 @@ export function InviteMembers({ page }: { page: AccessPage }) {
         <AlertDescription>Only admins can invite people to this workspace.</AlertDescription>
       </Alert>
     );
+  if (invitationId && !target)
+    return invitations.data || invitations.error ? (
+      <Alert>
+        <AlertDescription>
+          This invite can’t be edited. It may have been accepted or revoked, or it may have expired.{' '}
+          <span className="underline underline-offset-4">
+            <Link to="/$workspaceSlug/members" params={{ workspaceSlug }}>
+              Back to members
+            </Link>
+          </span>
+        </AlertDescription>
+      </Alert>
+    ) : (
+      <div role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
+        <Spinner aria-hidden="true" />
+        Loading the invite…
+      </div>
+    );
   return (
     <form
-      aria-label="Invite members"
+      aria-label={target ? `Edit invite for ${target.email}` : 'Invite members'}
       className="flex max-w-3xl flex-col gap-8"
       onSubmit={event => {
         event.preventDefault();
         submit();
       }}
     >
-      <section className="flex min-w-0 flex-col gap-2">
-        <Label htmlFor="invitation-emails">Email addresses</Label>
-        <Combobox
-          multiple
-          items={suggestions}
-          filter={null}
-          autoHighlight
-          value={emails}
-          onValueChange={(next, details) => {
-            if (details.reason === 'escape-key') details.allowPropagation();
-            else changeEmails(next as string[]);
-          }}
-          inputValue={query}
-          onInputValueChange={(next, details) => {
-            if (details.reason === 'input-clear' && query) return;
-            if (/[,;\s]/.test(next)) commit(next);
-            else {
-              setQuery(next);
-              setError(undefined);
-            }
-          }}
-          open={suggesting && suggestions.length > 0}
-          onOpenChange={setSuggesting}
-          disabled={locked}
-        >
-          <ComboboxChips ref={anchor}>
-            <ComboboxValue>
-              {(values: string[]) =>
-                values.map(email => {
-                  const state = status.get(email);
-                  const flagged = flag(email);
-                  return (
-                    <ComboboxChip
-                      key={email}
-                      data-status={flagged === 'member' ? 'failed' : state === 'success' ? undefined : state}
-                      title={
-                        flagged === 'member'
-                          ? 'Already a member'
-                          : flagged === 'invited'
-                            ? 'Already invited. Inviting again replaces their invite.'
-                            : undefined
-                      }
-                      showRemove={!locked}
-                    >
-                      {email}
-                      {flagged && (
-                        <span className="sr-only">
-                          ,{' '}
-                          {flagged === 'member'
-                            ? 'already a member'
-                            : 'already invited, inviting again replaces their invite'}
-                        </span>
-                      )}
-                    </ComboboxChip>
-                  );
-                })
+      {target ? (
+        <section className="flex min-w-0 flex-col gap-1">
+          <h2 className="font-medium">Email address</h2>
+          <p className="wrap-anywhere">{target.email}</p>
+          <p className="text-sm text-muted-foreground">
+            To invite a different address, revoke this invite and send a new one.
+          </p>
+        </section>
+      ) : (
+        <section className="flex min-w-0 flex-col gap-2">
+          <Label htmlFor="invitation-emails">Email addresses</Label>
+          <Combobox
+            multiple
+            items={suggestions}
+            filter={null}
+            autoHighlight
+            value={emails}
+            onValueChange={(next, details) => {
+              if (details.reason === 'escape-key') details.allowPropagation();
+              else changeEmails(next as string[]);
+            }}
+            inputValue={query}
+            onInputValueChange={(next, details) => {
+              if (details.reason === 'input-clear' && query) return;
+              if (/[,;\s]/.test(next)) commit(next);
+              else {
+                setQuery(next);
+                setError(undefined);
               }
-            </ComboboxValue>
-            <ComboboxChipsInput
-              id="invitation-emails"
-              ref={emailInput}
-              type="email"
-              autoComplete="off"
-              placeholder={emails.length ? 'Add email' : 'name@company.com'}
-              aria-invalid={error ? true : undefined}
-              aria-describedby="invitation-emails-hint invitation-emails-flags"
-              onKeyDown={keyDown}
-              onPaste={paste}
-              onBlur={() => {
-                if (typed.recipients.length) commit(query);
-              }}
-            />
-          </ComboboxChips>
-          <ComboboxContent anchor={anchor}>
-            <ComboboxList>
-              {(email: string) => (
-                <ComboboxItem key={email} value={email}>
-                  Invite {email}
-                </ComboboxItem>
-              )}
-            </ComboboxList>
-          </ComboboxContent>
-        </Combobox>
-        <p
-          id="invitation-emails-hint"
-          role={error ? 'alert' : undefined}
-          className={error ? 'text-sm text-destructive' : 'text-sm text-muted-foreground'}
-        >
-          {error ?? 'Press Enter, Tab or comma after each address, or paste a list.'}
-        </p>
-        <div id="invitation-emails-flags" className="flex flex-col gap-1 text-sm text-destructive">
-          {duplicates.length > 0 && <p>Already in the list: {joinList(duplicates)}.</p>}
-          {alreadyMembers.length > 0 && (
-            <p>
-              Already {alreadyMembers.length === 1 ? 'a member' : 'members'}: {joinList(alreadyMembers)}. They won’t be
-              invited.
+            }}
+            open={suggesting && suggestions.length > 0}
+            onOpenChange={setSuggesting}
+            disabled={locked}
+          >
+            <ComboboxChips ref={anchor}>
+              <ComboboxValue>
+                {(values: string[]) =>
+                  values.map(email => {
+                    const state = status.get(email);
+                    const flagged = flag(email);
+                    return (
+                      <ComboboxChip
+                        key={email}
+                        data-status={flagged === 'member' ? 'failed' : state === 'success' ? undefined : state}
+                        title={
+                          flagged === 'member'
+                            ? 'Already a member'
+                            : flagged === 'invited'
+                              ? 'Already invited. Inviting again replaces their invite.'
+                              : undefined
+                        }
+                        showRemove={!locked}
+                      >
+                        {email}
+                      </ComboboxChip>
+                    );
+                  })
+                }
+              </ComboboxValue>
+              <ComboboxChipsInput
+                id="invitation-emails"
+                ref={emailInput}
+                type="email"
+                autoComplete="off"
+                placeholder={emails.length ? 'Add email' : 'name@company.com'}
+                aria-invalid={error ? true : undefined}
+                aria-describedby="invitation-emails-hint invitation-emails-flags invitation-emails-invited"
+                onKeyDown={keyDown}
+                onPaste={paste}
+                onBlur={() => {
+                  if (typed.recipients.length) commit(query);
+                }}
+              />
+            </ComboboxChips>
+            <ComboboxContent anchor={anchor}>
+              <ComboboxList>
+                {(email: string) => (
+                  <ComboboxItem key={email} value={email}>
+                    Invite {email}
+                  </ComboboxItem>
+                )}
+              </ComboboxList>
+            </ComboboxContent>
+          </Combobox>
+          <p
+            id="invitation-emails-hint"
+            role={error ? 'alert' : undefined}
+            className={error ? 'text-sm text-destructive' : 'text-sm text-muted-foreground'}
+          >
+            {error ?? 'Press Enter, Tab or comma after each address, or paste a list.'}
+          </p>
+          <div id="invitation-emails-flags" className="flex flex-col gap-1 text-sm text-destructive">
+            {duplicates.length > 0 && <p>Already in the list: {joinList(duplicates)}.</p>}
+            {alreadyMembers.length > 0 && (
+              <p>
+                Already {alreadyMembers.length === 1 ? 'a member' : 'members'}: {joinList(alreadyMembers)}. They won’t
+                be invited.
+              </p>
+            )}
+          </div>
+          {alreadyInvited.length > 0 && (
+            <p id="invitation-emails-invited" className="text-sm text-muted-foreground">
+              Already invited: {joinList(alreadyInvited)}. Inviting them again sends a new link with only these choices.
+              Their current link will stop working.
             </p>
           )}
-        </div>
-        {alreadyInvited.length > 0 && (
-          <p className="text-sm text-muted-foreground">
-            Already invited: {joinList(alreadyInvited)}. Inviting them again sends a new link with only these choices.
-            Their current link will stop working.
-          </p>
-        )}
-      </section>
+        </section>
+      )}
 
       <fieldset className="flex flex-col gap-3">
         <legend id="invite-role" className="mb-2 font-medium">
@@ -564,6 +651,11 @@ export function InviteMembers({ page }: { page: AccessPage }) {
         <p className="font-medium" aria-live="polite">
           {summary}
         </p>
+        {saveError && !sending && (
+          <Alert variant="destructive">
+            <AlertDescription>{saveError}</AlertDescription>
+          </Alert>
+        )}
         {failures.length > 0 && !sending && (
           <Alert variant="destructive">
             <AlertDescription>
@@ -582,10 +674,17 @@ export function InviteMembers({ page }: { page: AccessPage }) {
           </Alert>
         )}
         <div className="flex flex-wrap gap-2">
-          <Button type="submit" disabled={locked || !sendable.length} aria-busy={sending}>
-            {sending && <Spinner aria-hidden="true" />}
-            {sending ? 'Inviting…' : sendable.length > 1 ? `Invite ${sendable.length} people` : 'Invite'}
-          </Button>
+          {target ? (
+            <Button type="submit" disabled={locked} aria-busy={sending}>
+              {sending && <Spinner aria-hidden="true" />}
+              {sending ? 'Saving…' : 'Save invite'}
+            </Button>
+          ) : (
+            <Button type="submit" disabled={locked || !sendable.length} aria-busy={sending}>
+              {sending && <Spinner aria-hidden="true" />}
+              {sending ? 'Inviting…' : sendable.length > 1 ? `Invite ${sendable.length} people` : 'Invite'}
+            </Button>
+          )}
           <Button
             variant="ghost"
             disabled={sending}
@@ -602,7 +701,7 @@ export function InviteMembers({ page }: { page: AccessPage }) {
         onOpenChange={open => {
           if (!open) setEditor(null);
         }}
-        subject="the invitees"
+        subject={target?.email ?? 'the invitees'}
         choices={choices}
         initial={editor?.initial ?? null}
         existing={new Map(policies.map(policy => [key(policy.scope), policy.permissions]))}

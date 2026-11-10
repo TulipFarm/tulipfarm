@@ -1024,6 +1024,27 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       assert.equal((await http(member, 'GET', `/members/${managerId}/access`)).statusCode, 404);
       assert.equal((await ok(admin, 'GET', `/members/${memberId}/access`)).self, false);
       await ok(admin, 'PUT', '/policies', policy([]));
+      // A policy on every table a team owns follows the table's owner, for teams and members alike.
+      for (const subject of [
+        { kind: 'team', id: policyTeam },
+        { kind: 'member', id: memberId },
+      ]) {
+        const owned = permissions => ({ subject, scope: { kind: 'owned', id: managers }, permissions });
+        assert.equal(await permission(member, 'table.row.delete'), false);
+        await ok(admin, 'PUT', '/policies', owned(['table.row.delete']));
+        assert.equal(await permission(member, 'table.row.delete'), true);
+        const view = (await ok(admin, 'GET', `/members/${memberId}/access`)).policies.find(
+          item => item.scope.kind === 'owned' && item.scope.id === managers,
+        );
+        assert.ok(view.tables.some(entry => entry.id === tableId));
+        await ok(admin, 'PUT', `/tables/${tableId}/owner`, { teamId });
+        assert.equal(await permission(member, 'table.row.delete'), false);
+        await ok(admin, 'PUT', `/tables/${tableId}/owner`, { teamId: managers });
+        assert.equal(await permission(member, 'table.row.delete'), true);
+        assert.equal((await http(admin, 'PUT', '/policies', owned(['table.create']))).statusCode, 400);
+        await ok(admin, 'PUT', '/policies', owned([]));
+        assert.equal(await permission(member, 'table.row.delete'), false);
+      }
       await ok(member, 'DELETE', `/teams/${ownTeam}`);
       await ok(admin, 'DELETE', `/teams/${policyTeam}`);
     }
@@ -1067,7 +1088,24 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       const enrolled = await ok(admin, 'PUT', `/teams/${goneTeam}/invitations/${invitationId}`, { enrolled: true });
       assert.deepEqual(enrolled.teams.map(team => team.id).sort(), [joinTeam, goneTeam].sort());
       await ok(admin, 'DELETE', `/teams/${goneTeam}`);
-      const { url } = await ok(admin, 'GET', `/invitations/${invitationId}/link`);
+      const gone = [{ id: goneTeam, name: 'Gone before accept' }];
+      assert.deepEqual(
+        (await ok(admin, 'GET', '/invitations')).items.find(item => item.id === invitationId).skipped.teams,
+        gone,
+      );
+      // An expired invite can only be resent or revoked; resending carries its choices and skipped teams forward.
+      await f.platform.query(
+        `UPDATE "${a.names.schema}".tf_invitations SET expires_at = clock_timestamp() - interval '1 second' WHERE id = $1`,
+        [invitationId],
+      );
+      const stale = await http(admin, 'PUT', `/invitations/${invitationId}/choices`, { teams: [] });
+      assert.deepEqual([stale.statusCode, stale.json()], [409, { error: 'invitation-expired' }]);
+      const resent = await ok(admin, 'POST', `/invitations/${invitationId}/resend`, { requestId: randomUUID() });
+      assert.deepEqual(
+        (await ok(admin, 'GET', '/invitations')).items.find(item => item.id === resent.invitation.id).skipped.teams,
+        gone,
+      );
+      const { url } = await ok(admin, 'GET', `/invitations/${resent.invitation.id}/link`);
       const joined = await ok(invitee, 'POST', '/v1/invitations/redeem', {
         token: new URL(url).searchParams.get('token'),
       });

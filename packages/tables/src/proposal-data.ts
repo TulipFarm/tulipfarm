@@ -154,7 +154,8 @@ export async function destinationAudience(tx: TableTransaction, tableId: string)
     .parse(
       (
         await tx.client.query(
-          `SELECT team_id FROM ${table(tx, 'tf_grants')} WHERE asset_id=$1 AND permission='table.row.read' ORDER BY team_id`,
+          `SELECT DISTINCT team_id FROM ${table(tx, 'tf_grants')} WHERE permission='table.row.read'
+            AND (asset_id=$1 OR asset_id=(SELECT owning_team_id FROM ${table(tx, 'tf_table_catalog')} WHERE id=$1)) ORDER BY team_id`,
           [tableId],
         )
       ).rows,

@@ -8,6 +8,7 @@ import { Badge } from '@tulipfarm/sprout/badge';
 import { Button } from '@tulipfarm/sprout/button';
 import { Checkbox } from '@tulipfarm/sprout/checkbox';
 import { Label } from '@tulipfarm/sprout/label';
+import { Spinner } from '@tulipfarm/sprout/spinner';
 import { RadioGroup, RadioGroupItem } from '@tulipfarm/sprout/radio-group';
 import {
   Select,
@@ -51,6 +52,7 @@ import {
   presetOf,
   presets,
   scopeKindLabel,
+  scopePhrase,
   scopeTarget,
   sortPermissions,
   sourceLabel,
@@ -62,7 +64,22 @@ import {
 
 /** A scope the editor can offer, with its display name. */
 export type ScopeChoice = PolicyScope & { name: string };
-export type SaveResult = { ok: true } | { ok: false; message: string };
+/**
+ * A save either succeeded, failed, or has an unknown outcome. For an unknown outcome, `checking` resolves once
+ * the current policy has been read back, and `message` says what is happening meanwhile.
+ */
+export type SaveResult = { ok: true } | { ok: false; message: string; checking?: Promise<SaveResult> };
+
+/** Waits out an unknown outcome, showing `onChecking`'s message until the policy has been read back. */
+async function settled(result: SaveResult, onChecking: (message: string | null) => void): Promise<SaveResult> {
+  if (result.ok || !result.checking) return result;
+  onChecking(result.message);
+  try {
+    return await result.checking;
+  } finally {
+    onChecking(null);
+  }
+}
 
 export function scopeChoices(data: Pick<GovernanceSnapshot, 'tables' | 'teams' | 'teamNames'>) {
   const teams = new Map([...data.teamNames, ...data.teams].map(team => [team.id, team.name]));
@@ -72,6 +89,9 @@ export function scopeChoices(data: Pick<GovernanceSnapshot, 'tables' | 'teams' |
       .sort((a, b) => a.name.localeCompare(b.name)),
     teams: [...teams]
       .map(([id, name]) => ({ kind: 'collection' as const, id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name)),
+    owned: [...teams]
+      .map(([id, name]) => ({ kind: 'owned' as const, id, name }))
       .sort((a, b) => a.name.localeCompare(b.name)),
   };
 }
@@ -95,7 +115,7 @@ export function PolicyEditor({
   onOpenChange: (open: boolean) => void;
   /** Names who receives the access, as in "Add a policy for QA Readers". */
   subject: string;
-  choices: { tables: ScopeChoice[]; teams: ScopeChoice[] };
+  choices: { tables: ScopeChoice[]; teams: ScopeChoice[]; owned?: ScopeChoice[] };
   /** Editing keeps the scope fixed. */
   initial: { scope: ScopeChoice; permissions: PolicyPermission[] } | null;
   /** Permissions already held per scope, so picking such a scope edits that policy instead of duplicating it. */
@@ -107,13 +127,15 @@ export function PolicyEditor({
   const [preset, setPreset] = useState<Preset>('reader');
   const [pending, setPending] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
+  const [checking, setChecking] = useState<string | null>(null);
   // Saving fills in the scope's existing permissions; keep the title the person saw when they pressed save.
   const [savingTitle, setSavingTitle] = useState<string | null>(null);
-  const all = [...choices.tables, ...choices.teams];
+  const all = [...choices.tables, ...(choices.owned ?? []), ...choices.teams];
   const scope = initial?.scope ?? all.find(choice => scopeValue(choice) === scopeKey);
   useEffect(() => {
     if (!open) return;
     setFailure(null);
+    setChecking(null);
     setPending(false);
     setSavingTitle(null);
     if (initial) {
@@ -165,7 +187,8 @@ export function PolicyEditor({
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>
-            A policy gives permissions on one table, or lets {subject} create tables owned by a team.
+            A policy gives {subject} permissions on one table or on all tables owned by a team, or lets them create
+            tables owned by a team.
           </DialogDescription>
         </DialogHeader>
         <form
@@ -178,7 +201,7 @@ export function PolicyEditor({
             setPending(true);
             setSavingTitle(title);
             setFailure(null);
-            const result = await save(scope, permissions);
+            const result = await settled(await save(scope, permissions), setChecking);
             setPending(false);
             if (result.ok) onOpenChange(false);
             else {
@@ -211,6 +234,16 @@ export function PolicyEditor({
                           ))}
                         </SelectGroup>
                       )}
+                      {!!choices.owned?.length && (
+                        <SelectGroup>
+                          <SelectLabel>All tables owned by a team</SelectLabel>
+                          {choices.owned.map(choice => (
+                            <SelectItem key={scopeValue(choice)} value={scopeValue(choice)}>
+                              All tables owned by {choice.name}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      )}
                       {choices.teams.length > 0 && (
                         <SelectGroup>
                           <SelectLabel>Create tables owned by a team</SelectLabel>
@@ -239,7 +272,13 @@ export function PolicyEditor({
                   </div>
                 </div>
               )}
-              {scope?.kind === 'table' && (
+              {scope?.kind === 'owned' && (
+                <p className="text-sm text-muted-foreground">
+                  Covers every table {scope.name} owns, now and in future. If a table moves to another team, this policy
+                  no longer covers it.
+                </p>
+              )}
+              {(scope?.kind === 'table' || scope?.kind === 'owned') && (
                 <>
                   <RadioGroup
                     aria-labelledby="policy-preset-label"
@@ -289,7 +328,7 @@ export function PolicyEditor({
                                 ),
                               );
                             }}
-                            aria-label={`All ${group.label.toLowerCase()} permissions on ${scope.name}`}
+                            aria-label={`All ${group.label.toLowerCase()} permissions on ${scopePhrase(scope)}`}
                           />
                           <Label htmlFor={id}>{group.label}</Label>
                           <Badge variant="secondary">
@@ -324,19 +363,20 @@ export function PolicyEditor({
                   )}
                 </>
               )}
-              {failure && (
-                <Alert variant="destructive">
-                  <AlertDescription>{failure}</AlertDescription>
-                </Alert>
-              )}
             </div>
           </DialogBody>
+          {checking && <CheckingStatus message={checking} />}
+          {failure && (
+            <Alert variant="destructive">
+              <AlertDescription>{failure}</AlertDescription>
+            </Alert>
+          )}
           <DialogFooter>
             <Button type="button" variant="ghost" disabled={pending} onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
             <Button type="submit" disabled={pending || !scope || !permissions.length} aria-busy={pending}>
-              {pending ? 'Saving…' : editing ? 'Save policy' : 'Add policy'}
+              {checking ? 'Checking…' : pending ? 'Saving…' : editing ? 'Save policy' : 'Add policy'}
             </Button>
           </DialogFooter>
         </form>
@@ -373,12 +413,14 @@ export function PolicyTable({
   const [removing, setRemoving] = useState<PolicyRow | null>(null);
   const [pending, setPending] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
+  const [checking, setChecking] = useState<string | null>(null);
   if (!rows.length) return <>{empty}</>;
-  type Row = PolicyRow & { scopeKind: string; target: string; summary: string; grantedBy: string };
+  type Row = PolicyRow & { scopeKind: string; target: string; phrase: string; summary: string; grantedBy: string };
   const data: Row[] = rows.map(row => ({
     ...row,
     scopeKind: scopeKindLabel(row.scope),
     target: scopeTarget(row.scope),
+    phrase: scopePhrase(row.scope),
     summary: permissionSummary(row.permissions),
     grantedBy: sourceLabel(row.source),
   }));
@@ -404,9 +446,20 @@ export function PolicyTable({
             cell: row => (
               <span className="flex flex-col gap-0.5">
                 <span>{row.summary}</span>
-                {presetOf(row.permissions) !== 'custom' && row.scope.kind === 'table' && (
+                {presetOf(row.permissions) !== 'custom' && row.scope.kind !== 'collection' && (
                   <span className="text-xs text-muted-foreground">
                     {row.permissions.map(permission => permissionInfo[permission].label).join(', ')}
+                  </span>
+                )}
+                {row.tables && (
+                  <span className="text-xs text-muted-foreground">
+                    {row.tables.length
+                      ? `Covers ${joinList(
+                          row.tables.length > 3
+                            ? [...row.tables.slice(0, 2).map(table => table.name), `${row.tables.length - 2} more`]
+                            : row.tables.map(table => table.name),
+                        )}`
+                      : `${row.scope.kind === 'owned' ? row.scope.name : 'The team'} owns no tables yet`}
                   </span>
                 )}
               </span>
@@ -420,9 +473,15 @@ export function PolicyTable({
                   sort: true,
                   cell: (row: Row) =>
                     row.source.kind === 'team' ? (
-                      <span className="underline-offset-4 hover:underline">
-                        <Link to="/$workspaceSlug/teams/$teamId" params={{ workspaceSlug, teamId: row.source.teamId }}>
-                          {row.grantedBy}
+                      <span>
+                        Team policy:{' '}
+                        <Link
+                          to="/$workspaceSlug/teams/$teamId"
+                          params={{ workspaceSlug, teamId: row.source.teamId }}
+                          aria-label={`${row.source.teamName} team`}
+                          className="underline-offset-4 hover:underline"
+                        >
+                          {row.source.teamName}
                         </Link>
                       </span>
                     ) : (
@@ -440,28 +499,28 @@ export function PolicyTable({
                   <Button
                     variant="ghost"
                     size="icon-sm"
-                    aria-label={`Actions for the policy on ${row.target} for ${subject}`}
+                    aria-label={`Actions for the policy on ${row.phrase} for ${subject}`}
                   />
                 }
               >
                 <MoreH size={16} aria-hidden="true" />
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
+              <DropdownMenuContent align="end" size="menu">
                 <DropdownMenuItem
-                  aria-label={`Edit the policy on ${row.target} for ${subject}`}
+                  aria-label={`Edit the policy on ${row.phrase} for ${subject}`}
                   onClick={() => onEdit(row)}
                 >
-                  Edit policy on {row.target}
+                  <span className="min-w-0 wrap-anywhere">Edit policy on {row.phrase}</span>
                 </DropdownMenuItem>
                 <DropdownMenuItem
-                  aria-label={`Remove the policy on ${row.target} for ${subject}`}
+                  aria-label={`Remove the policy on ${row.phrase} for ${subject}`}
                   variant="destructive"
                   onClick={() => {
                     setFailure(null);
                     setRemoving(row);
                   }}
                 >
-                  Remove policy on {row.target}
+                  <span className="min-w-0 wrap-anywhere">Remove policy on {row.phrase}</span>
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -480,13 +539,14 @@ export function PolicyTable({
       >
         <AlertDialogContent>
           <AlertDialogTitle>
-            Remove the policy on {removing ? scopeTarget(removing.scope) : ''} for {subject}?
+            Remove the policy on {removing ? scopePhrase(removing.scope) : ''} for {subject}?
           </AlertDialogTitle>
           <AlertDialogDescription>
             This takes away{' '}
             {removing ? joinList(sortPermissions(removing.permissions).map(p => permissionInfo[p].label)) : ''} on{' '}
-            {removing ? scopeTarget(removing.scope) : ''} from {subject}. Access from teams and other policies stays.
+            {removing ? scopePhrase(removing.scope) : ''} from {subject}. Access from teams and other policies stays.
           </AlertDialogDescription>
+          {checking && <CheckingStatus message={checking} />}
           {failure && (
             <Alert variant="destructive">
               <AlertDescription>{failure}</AlertDescription>
@@ -501,18 +561,28 @@ export function PolicyTable({
               onClick={async () => {
                 if (!removing || pending) return;
                 setPending(true);
-                const result = await onRemove(removing);
+                setFailure(null);
+                const result = await settled(await onRemove(removing), setChecking);
                 setPending(false);
                 if (result.ok) setRemoving(null);
                 else setFailure(result.message);
               }}
             >
-              Remove policy
+              {checking ? 'Checking…' : 'Remove policy'}
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
     </>
+  );
+}
+
+function CheckingStatus({ message }: { message: string }) {
+  return (
+    <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
+      <Spinner aria-hidden="true" />
+      {message}
+    </p>
   );
 }
 

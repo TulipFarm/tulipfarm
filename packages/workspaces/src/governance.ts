@@ -82,7 +82,7 @@ const invitationRowSchema = z.object({
 });
 const storedTeamSchema = z.object({ id: z.uuid(), role: z.enum(['member', 'manager']), name: z.string() });
 const storedPolicySchema = z.object({
-  scope: z.object({ kind: z.enum(['table', 'collection']), id: z.uuid() }),
+  scope: z.object({ kind: z.enum(['table', 'collection', 'owned']), id: z.uuid() }),
   permissions: z.array(z.string()),
   name: z.string(),
 });
@@ -118,7 +118,8 @@ export class GovernanceConflict extends Error {
       | 'person-grants-unavailable'
       | 'invitations-unavailable'
       | 'invitation-request-conflict'
-      | 'invitation-account-exists',
+      | 'invitation-account-exists'
+      | 'invitation-expired',
   ) {
     super(code);
   }
@@ -189,6 +190,27 @@ export function createGovernanceService(dependencies: {
     });
   }
 
+  /** Members who hold an "every table this team owns" policy on any of these teams, through a team or directly. */
+  async function ownedPolicyHolders(transaction: Transaction, teamIds: string[]) {
+    const person = (await tablePersonGrantsInstalled(transaction))
+      ? `UNION SELECT pg.membership_id FROM ${table(transaction, 'tf_table_person_grants')} pg
+        WHERE pg.asset_id = ANY($1::uuid[]) AND pg.permission <> 'table.create'`
+      : '';
+    return z
+      .array(z.object({ membership_id: z.uuid() }))
+      .parse(
+        (
+          await transaction.client.query(
+            `SELECT mt.membership_id FROM ${table(transaction, 'tf_member_teams')} mt
+            JOIN ${table(transaction, 'tf_grants')} g ON g.team_id = mt.team_id
+            WHERE g.asset_id = ANY($1::uuid[]) AND g.permission <> 'table.create' ${person}`,
+            [teamIds],
+          )
+        ).rows,
+      )
+      .map(row => row.membership_id);
+  }
+
   async function teamMembers(transaction: Transaction, teamId: string) {
     return z
       .array(z.object({ id: z.uuid() }))
@@ -206,6 +228,11 @@ export function createGovernanceService(dependencies: {
 
   // Internal teams (names starting with _) are not user-editable and never listed.
   const notInternal = (alias: string) => `${alias}.name NOT LIKE '\\_%'`;
+  // A grant whose asset is a team means "create tables owned by" it (table.create) or "every table it owns".
+  const grantKind = (grant: { permission: string; owned: boolean }) =>
+    grant.permission === 'table.create' ? 'collection' : grant.owned ? 'owned' : 'table';
+  const ownedSql = (relation: string, alias: string) =>
+    `EXISTS (SELECT 1 FROM ${relation} ot WHERE ot.id = ${alias}.asset_id) AS owned`;
 
   async function teamExists(transaction: Transaction, id: string) {
     const result = await transaction.client.query(
@@ -420,31 +447,34 @@ export function createGovernanceService(dependencies: {
           ).rows,
         );
       // Members see their own teams' grants read-only; admins see every grant.
-      const grants = z.array(z.object({ team_id: z.uuid(), asset_id: z.uuid(), permission: z.string() })).parse(
-        (
-          await transaction.client.query(
-            `SELECT g.team_id, g.asset_id, g.permission FROM ${table(transaction, 'tf_grants')} g WHERE g.permission = ANY($1::text[])
+      const grants = z
+        .array(z.object({ team_id: z.uuid(), asset_id: z.uuid(), permission: z.string(), owned: z.boolean() }))
+        .parse(
+          (
+            await transaction.client.query(
+              `SELECT g.team_id, g.asset_id, g.permission, ${ownedSql(table(transaction, 'tf_teams'), 'g')} FROM ${table(transaction, 'tf_grants')} g WHERE g.permission = ANY($1::text[])
         AND NOT EXISTS (SELECT 1 FROM ${table(transaction, 'tf_table_catalog')} c WHERE c.id = g.asset_id AND c.archived_at IS NOT NULL)
         AND ($2::boolean OR EXISTS (SELECT 1 FROM ${table(transaction, 'tf_member_teams')} own WHERE own.team_id = g.team_id AND own.membership_id = $3))
         ORDER BY g.team_id, g.asset_id, g.permission`,
-            [policyPermissions, admin, actor.membershipId],
-          )
-        ).rows,
-      );
-      const visibleTables = grants.filter(grant => grant.permission !== 'table.create').map(grant => grant.asset_id);
+              [policyPermissions, admin, actor.membershipId],
+            )
+          ).rows,
+        );
+      const visibleTables = grants.filter(grant => grantKind(grant) === 'table').map(grant => grant.asset_id);
+      const ownedTeams = grants.filter(grant => grantKind(grant) === 'owned').map(grant => grant.asset_id);
       const resources = z
         .array(z.object({ id: z.uuid(), display_name: z.string(), owning_team_id: z.uuid() }))
         .parse(
           (
             await transaction.client.query(
-              `SELECT id, display_name, owning_team_id FROM ${table(transaction, 'tf_table_catalog')} WHERE archived_at IS NULL AND ($1::boolean OR id = ANY($2::uuid[])) ORDER BY display_name, id`,
-              [admin, visibleTables],
+              `SELECT id, display_name, owning_team_id FROM ${table(transaction, 'tf_table_catalog')} WHERE archived_at IS NULL AND ($1::boolean OR id = ANY($2::uuid[]) OR owning_team_id = ANY($3::uuid[])) ORDER BY display_name, id`,
+              [admin, visibleTables, ownedTeams],
             )
           ).rows,
         );
       const namedTeams = [
         ...teams.map(team => team.id),
-        ...grants.filter(grant => grant.permission === 'table.create').map(grant => grant.asset_id),
+        ...grants.filter(grant => grantKind(grant) !== 'table').map(grant => grant.asset_id),
       ];
       const teamNames = z
         .array(z.object({ id: z.uuid(), name: z.string() }))
@@ -458,14 +488,19 @@ export function createGovernanceService(dependencies: {
         );
       const personGrants =
         admin && (await tablePersonGrantsInstalled(transaction))
-          ? z.array(z.object({ membership_id: z.uuid(), asset_id: z.uuid(), permission: z.string() })).parse(
-              (
-                await transaction.client.query(`SELECT g.* FROM ${table(transaction, 'tf_table_person_grants')} g
+          ? z
+              .array(
+                z.object({ membership_id: z.uuid(), asset_id: z.uuid(), permission: z.string(), owned: z.boolean() }),
+              )
+              .parse(
+                (
+                  await transaction.client
+                    .query(`SELECT g.*, ${ownedSql(table(transaction, 'tf_teams'), 'g')} FROM ${table(transaction, 'tf_table_person_grants')} g
         JOIN ${table(transaction, 'tf_memberships')} m ON m.id = g.membership_id AND m.removed_at IS NULL
         WHERE NOT EXISTS (SELECT 1 FROM ${table(transaction, 'tf_table_catalog')} c WHERE c.id = g.asset_id AND c.archived_at IS NOT NULL)
         ORDER BY g.membership_id, g.asset_id, g.permission`)
-              ).rows,
-            )
+                ).rows,
+              )
           : [];
       const tableTeams = z
         .array(z.object({ id: z.uuid(), name: z.string() }))
@@ -509,11 +544,7 @@ export function createGovernanceService(dependencies: {
         teamNames,
         personGrants: personGrants.map(grant => ({
           membershipId: grant.membership_id,
-          target: {
-            kind: grant.permission === 'table.create' ? 'collection' : 'table',
-            id: grant.asset_id,
-            permission: grant.permission,
-          },
+          target: { kind: grantKind(grant), id: grant.asset_id, permission: grant.permission },
         })),
         tables: resources.map(resource => ({
           id: resource.id,
@@ -522,11 +553,7 @@ export function createGovernanceService(dependencies: {
         })),
         grants: grants.map(grant => ({
           teamId: grant.team_id,
-          target: {
-            kind: grant.permission === 'table.create' ? 'collection' : 'table',
-            id: grant.asset_id,
-            permission: grant.permission,
-          },
+          target: { kind: grantKind(grant), id: grant.asset_id, permission: grant.permission },
         })),
       });
     });
@@ -716,12 +743,12 @@ export function createGovernanceService(dependencies: {
         );
       }
       await transaction.client.query(
-        `DELETE FROM ${table(transaction, 'tf_grants')} WHERE team_id = $1 OR (asset_id = $1 AND permission = 'table.create')`,
-        [teamId],
+        `DELETE FROM ${table(transaction, 'tf_grants')} WHERE team_id = $1 OR (asset_id = $1 AND permission = ANY($2::text[]))`,
+        [teamId, policyPermissions],
       );
       if (await tablePersonGrantsInstalled(transaction))
         await transaction.client.query(
-          `DELETE FROM ${table(transaction, 'tf_table_person_grants')} WHERE asset_id = $1 AND permission = 'table.create'`,
+          `DELETE FROM ${table(transaction, 'tf_table_person_grants')} WHERE asset_id = $1`,
           [teamId],
         );
       await transaction.client.query(`DELETE FROM ${table(transaction, 'tf_member_teams')} WHERE team_id = $1`, [
@@ -817,7 +844,7 @@ export function createGovernanceService(dependencies: {
     const { teamId, target, granted } = grantInputSchema.parse(input);
     return withHuman(workspaceId, userId, 'write', true, async (transaction, actor) => {
       await grantTeamExists(transaction, teamId);
-      if (target.kind === 'collection') await teamExists(transaction, target.id);
+      if (target.kind !== 'table') await teamExists(transaction, target.id);
       else if (
         !(
           await transaction.client.query(
@@ -849,12 +876,28 @@ export function createGovernanceService(dependencies: {
       if ((await workspaceMembersTable(transaction))?.coreDefinition.id === tableId)
         throw new WorkspaceMemberError('member-table-protected');
       await teamExists(transaction, teamId);
+      const previousOwner = z
+        .object({ owning_team_id: z.uuid() })
+        .optional()
+        .parse(
+          (
+            await transaction.client.query(
+              `SELECT owning_team_id FROM ${table(transaction, 'tf_table_catalog')} WHERE id = $1`,
+              [tableId],
+            )
+          ).rows[0],
+        )?.owning_team_id;
       const result = await transaction.client.query(
         `UPDATE ${table(transaction, 'tf_table_catalog')} SET owning_team_id = $2 WHERE id = $1 RETURNING id`,
         [tableId, teamId],
       );
       if (!result.rowCount) throw new AccessDenied();
       await audit(transaction, actor, 'table.transfer', tableId);
+      // Policies on every table a team owns follow the table, so holders on either side may gain or lose it.
+      if (previousOwner && previousOwner !== teamId) {
+        const holders = await ownedPolicyHolders(transaction, [previousOwner, teamId]);
+        if (holders.length) await recommendationChange(transaction, tableId, holders, true);
+      }
       return success;
     });
   }
@@ -862,22 +905,21 @@ export function createGovernanceService(dependencies: {
   async function listPersonGrants(workspaceId: string, userId: string) {
     return withHuman(workspaceId, userId, 'read', true, async transaction => {
       if (!(await tablePersonGrantsInstalled(transaction))) throw new GovernanceConflict('person-grants-unavailable');
-      const rows = z.array(z.object({ membership_id: z.uuid(), asset_id: z.uuid(), permission: z.string() })).parse(
-        (
-          await transaction.client.query(`SELECT g.* FROM ${table(transaction, 'tf_table_person_grants')} g
+      const rows = z
+        .array(z.object({ membership_id: z.uuid(), asset_id: z.uuid(), permission: z.string(), owned: z.boolean() }))
+        .parse(
+          (
+            await transaction.client
+              .query(`SELECT g.*, ${ownedSql(table(transaction, 'tf_teams'), 'g')} FROM ${table(transaction, 'tf_table_person_grants')} g
         JOIN ${table(transaction, 'tf_memberships')} m ON m.id = g.membership_id AND m.removed_at IS NULL
         WHERE NOT EXISTS (SELECT 1 FROM ${table(transaction, 'tf_table_catalog')} c WHERE c.id = g.asset_id AND c.archived_at IS NOT NULL)
         ORDER BY g.membership_id, g.asset_id, g.permission`)
-        ).rows,
-      );
+          ).rows,
+        );
       return personGrantListSchema.parse({
         grants: rows.map(grant => ({
           membershipId: grant.membership_id,
-          target: {
-            kind: grant.permission === 'table.create' ? 'collection' : 'table',
-            id: grant.asset_id,
-            permission: grant.permission,
-          },
+          target: { kind: grantKind(grant), id: grant.asset_id, permission: grant.permission },
         })),
       });
     });
@@ -888,7 +930,7 @@ export function createGovernanceService(dependencies: {
     return withHuman(workspaceId, userId, 'write', true, async (transaction, actor) => {
       if (!(await tablePersonGrantsInstalled(transaction))) throw new GovernanceConflict('person-grants-unavailable');
       await activeMember(transaction, membershipId);
-      if (target.kind === 'collection') await teamExists(transaction, target.id);
+      if (target.kind !== 'table') await teamExists(transaction, target.id);
       else if (
         !(
           await transaction.client.query(
@@ -916,7 +958,7 @@ export function createGovernanceService(dependencies: {
   // A policy scope must exist; removing grants from an archived table stays possible.
   async function scopeName(transaction: Transaction, scope: PolicyScope, allowArchived = false) {
     const row = (
-      scope.kind === 'collection'
+      scope.kind !== 'table'
         ? await transaction.client.query(
             `SELECT name FROM ${table(transaction, 'tf_teams')} t WHERE t.id = $1 AND ${notInternal('t')}`,
             [scope.id],
@@ -949,7 +991,7 @@ export function createGovernanceService(dependencies: {
           (
             await transaction.client.query(
               `SELECT permission FROM ${grants.relation} WHERE ${grants.column} = $1 AND asset_id = $2 AND permission = ANY($3::text[])`,
-              [subject.id, scope.id, policyPermissions],
+              [subject.id, scope.id, scope.kind === 'collection' ? ['table.create'] : tablePermissions],
             )
           ).rows,
         )
@@ -1019,17 +1061,17 @@ export function createGovernanceService(dependencies: {
             )
           ).rows,
         );
-      const scopes = `CASE WHEN g.permission = 'table.create' THEN 'collection' ELSE 'table' END AS kind,
+      const scopes = `CASE WHEN g.permission = 'table.create' THEN 'collection' WHEN dt.id IS NOT NULL THEN 'owned' ELSE 'table' END AS kind,
         COALESCE(c.display_name, dt.name) AS scope_name`;
       const scopeJoins = (
         alias: string,
       ) => `LEFT JOIN ${table(transaction, 'tf_table_catalog')} c ON c.id = ${alias}.asset_id AND ${alias}.permission <> 'table.create'
-        LEFT JOIN ${table(transaction, 'tf_teams')} dt ON dt.id = ${alias}.asset_id AND ${alias}.permission = 'table.create'`;
+        LEFT JOIN ${table(transaction, 'tf_teams')} dt ON dt.id = ${alias}.asset_id`;
       const visible = `g.permission = ANY($2::text[]) AND (c.id IS NOT NULL AND c.archived_at IS NULL OR dt.id IS NOT NULL)`;
       const grantRow = z.object({
         asset_id: z.uuid(),
         permission: z.string(),
-        kind: z.enum(['table', 'collection']),
+        kind: z.enum(['table', 'collection', 'owned']),
         scope_name: z.string(),
       });
       const teamGrants = z.array(grantRow.extend({ team_id: z.uuid(), team_name: z.string() })).parse(
@@ -1056,8 +1098,8 @@ export function createGovernanceService(dependencies: {
         : [];
       type Policy = z.infer<typeof memberAccessSchema>['policies'][number];
       const policies = new Map<string, Policy>();
-      const add = (key: string, policy: Omit<Policy, 'permissions'>, permission: string) => {
-        const existing = policies.get(key) ?? { ...policy, permissions: [] };
+      const add = (key: string, policy: Omit<Policy, 'permissions' | 'tables'>, permission: string) => {
+        const existing = policies.get(key) ?? { ...policy, permissions: [], tables: [] };
         existing.permissions.push(permission as PolicyPermission);
         policies.set(key, existing);
       };
@@ -1066,6 +1108,7 @@ export function createGovernanceService(dependencies: {
           scope: { kind: 'all' },
           permissions: [...policyPermissions] as PolicyPermission[],
           source: { kind: 'admin' },
+          tables: [],
         });
       for (const grant of teamGrants) {
         const scope = { kind: grant.kind, id: grant.asset_id, name: grant.scope_name };
@@ -1084,6 +1127,25 @@ export function createGovernanceService(dependencies: {
           { scope: { kind: grant.kind, id: grant.asset_id, name: grant.scope_name }, source: { kind: 'direct' } },
           grant.permission,
         );
+      const ownedTeams = [...teamGrants, ...directGrants]
+        .filter(grant => grant.kind === 'owned')
+        .map(grant => grant.asset_id);
+      const covered = ownedTeams.length
+        ? z.array(z.object({ id: z.uuid(), name: z.string(), owning_team_id: z.uuid() })).parse(
+            (
+              await transaction.client.query(
+                `SELECT id, display_name AS name, owning_team_id FROM ${table(transaction, 'tf_table_catalog')}
+                  WHERE owning_team_id = ANY($1::uuid[]) AND archived_at IS NULL ORDER BY display_name, id`,
+                [ownedTeams],
+              )
+            ).rows,
+          )
+        : [];
+      for (const policy of policies.values())
+        if (policy.scope.kind === 'owned') {
+          const owner = policy.scope.id;
+          policy.tables = covered.filter(entry => entry.owning_team_id === owner).map(({ id, name }) => ({ id, name }));
+        }
       const skipped = admin
         ? (
             await transaction.client.query(
@@ -1154,6 +1216,57 @@ export function createGovernanceService(dependencies: {
       ).rowCount,
     );
   }
+
+  type Skipped = z.infer<typeof skippedChoicesSchema>;
+
+  /** Which of these invitation choices name a team or table that has been deleted or archived since. */
+  async function missingChoices(transaction: Transaction, assignments: Assignments[]) {
+    const teamIds = assignments.flatMap(entry => [
+      ...entry.teams.map(team => team.id),
+      ...entry.policies.filter(policy => policy.scope.kind !== 'table').map(policy => policy.scope.id),
+    ]);
+    const tableIds = assignments.flatMap(entry =>
+      entry.policies.filter(policy => policy.scope.kind === 'table').map(policy => policy.scope.id),
+    );
+    const live = new Set(
+      teamIds.length || tableIds.length
+        ? z
+            .array(z.object({ id: z.uuid() }))
+            .parse(
+              (
+                await transaction.client.query(
+                  `SELECT t.id FROM ${table(transaction, 'tf_teams')} t WHERE t.id = ANY($1::uuid[]) AND ${notInternal('t')}
+                  UNION SELECT c.id FROM ${table(transaction, 'tf_table_catalog')} c WHERE c.id = ANY($2::uuid[]) AND c.archived_at IS NULL`,
+                  [teamIds, tableIds],
+                )
+              ).rows,
+            )
+            .map(row => row.id)
+        : [],
+    );
+    return (entry: Assignments) => ({
+      kept: {
+        teams: entry.teams.filter(team => live.has(team.id)),
+        policies: entry.policies.filter(policy => live.has(policy.scope.id)),
+      },
+      skipped: {
+        teams: entry.teams.filter(team => !live.has(team.id)).map(({ id, name }) => ({ id, name })),
+        policies: entry.policies
+          .filter(policy => !live.has(policy.scope.id))
+          .map(({ scope, name }) => ({ scope, name })),
+      } satisfies Skipped,
+    });
+  }
+
+  const mergeSkipped = (...lists: (Skipped | null | undefined)[]): Skipped | null => {
+    const teams = new Map<string, Skipped['teams'][number]>();
+    const policies = new Map<string, Skipped['policies'][number]>();
+    for (const list of lists) {
+      for (const team of list?.teams ?? []) teams.set(team.id, team);
+      for (const policy of list?.policies ?? []) policies.set(`${policy.scope.kind}:${policy.scope.id}`, policy);
+    }
+    return teams.size || policies.size ? { teams: [...teams.values()], policies: [...policies.values()] } : null;
+  };
 
   /** Checks every chosen team and scope exists now and records its name, so a later skip can still name it. */
   async function resolveChoices(transaction: Transaction, choices: InvitationChoices, dropMissing = false) {
@@ -1295,6 +1408,8 @@ export function createGovernanceService(dependencies: {
         ).rows[0],
       );
     if (!row || row.kind !== 'email' || row.revoked_at || row.consumed_membership_id) throw new AccessDenied();
+    // An expired invite can only be resent or revoked; resending is what gives it a working link again.
+    if (row.expired) throw new GovernanceConflict('invitation-expired');
     if (!(await invitationChoicesInstalled(transaction))) throw new GovernanceConflict('invitations-unavailable');
     return row;
   }
@@ -1305,12 +1420,24 @@ export function createGovernanceService(dependencies: {
     id: string,
     choices: NonNullable<ResolvedChoices>,
   ) {
+    const previous = invitationRowSchema.parse(
+      (
+        await transaction.client.query(
+          `SELECT *, expires_at <= clock_timestamp() AS expired FROM ${table(transaction, 'tf_invitations')} WHERE id = $1`,
+          [id],
+        )
+      ).rows[0],
+    );
+    // Choices dropped because their team or table is gone stay on record, so admins still see they were skipped.
+    const before = assignmentsSchema.parse(previous.assignments ?? {});
+    const gone = (await missingChoices(transaction, [before]))(before).skipped;
+    const skipped = mergeSkipped(previous.skipped ? skippedChoicesSchema.parse(previous.skipped) : null, gone);
     const row = invitationRowSchema.parse(
       (
         await transaction.client.query(
-          `UPDATE ${table(transaction, 'tf_invitations')} SET role = $2, assignments = $3 WHERE id = $1
+          `UPDATE ${table(transaction, 'tf_invitations')} SET role = $2, assignments = $3, skipped = $4 WHERE id = $1
         RETURNING *, expires_at <= clock_timestamp() AS expired`,
-          [id, choices.role, JSON.stringify(choices.assignments)],
+          [id, choices.role, JSON.stringify(choices.assignments), skipped && JSON.stringify(skipped)],
         )
       ).rows[0],
     );
@@ -1318,7 +1445,7 @@ export function createGovernanceService(dependencies: {
     return { ...invitation(row), delivery: await deliveryStatus(transaction, transaction.workspaceId, id) };
   }
 
-  /** Replaces the role, teams and policies a pending or expired invitation applies on accept. Admins only. */
+  /** Replaces the role, teams and policies a pending invitation applies on accept. Admins only. */
   async function setInvitationChoices(workspaceId: string, userId: string, invitationId: string, input: unknown) {
     invitationId = z.uuid().parse(invitationId).toLowerCase();
     const parsed = invitationChoicesSchema.parse(input);
@@ -1575,7 +1702,21 @@ export function createGovernanceService(dependencies: {
       const carried = (await invitationChoicesInstalled(transaction))
         ? { role: previous.role, assignments: assignmentsSchema.parse(previous.assignments ?? {}) }
         : null;
-      return issueInvitation(transaction, actor, previous.email, requestId, invitationId, workspaceMemberId, carried);
+      const issued = await issueInvitation(
+        transaction,
+        actor,
+        previous.email,
+        requestId,
+        invitationId,
+        workspaceMemberId,
+        carried,
+      );
+      if (carried && previous.skipped)
+        await transaction.client.query(
+          `UPDATE ${table(transaction, 'tf_invitations')} SET skipped = $2 WHERE predecessor_id = $1`,
+          [invitationId, JSON.stringify(skippedChoicesSchema.parse(previous.skipped))],
+        );
+      return issued;
     });
   }
 
@@ -1633,7 +1774,24 @@ export function createGovernanceService(dependencies: {
       const rows = z
         .array(invitationRowSchema.extend({ delivery: invitationSchema.shape.delivery }))
         .parse(result.rows);
-      const items = rows.slice(0, 100).map(row => ({ ...invitation(row), delivery: row.delivery }));
+      const page = rows.slice(0, 100);
+      const pending = page.filter(row => !row.consumed_membership_id && !row.revoked_at);
+      const split = await missingChoices(
+        transaction,
+        pending.map(row => assignmentsSchema.parse(row.assignments ?? {})),
+      );
+      // A pending invite no longer offers a team or table deleted since; it lists those as skipped instead.
+      const items = page.map(row => {
+        const item = { ...invitation(row), delivery: row.delivery };
+        if (row.consumed_membership_id || row.revoked_at) return item;
+        const { kept, skipped } = split(assignmentsSchema.parse(row.assignments ?? {}));
+        return {
+          ...item,
+          teams: item.teams.filter(team => kept.teams.some(entry => entry.id === team.id)),
+          policies: item.policies.filter(policy => kept.policies.some(entry => entry.scope.id === policy.scope.id)),
+          skipped: mergeSkipped(item.skipped, skipped),
+        };
+      });
       return { items, nextCursor: rows.length > 100 ? (items.at(-1)?.id ?? null) : null };
     });
   }
@@ -1792,7 +1950,7 @@ export function createGovernanceService(dependencies: {
         [membershipId],
       );
     }
-    const skipped: z.infer<typeof skippedChoicesSchema> = { teams: [], policies: [] };
+    const skipped: Skipped = { teams: [], policies: [] };
     for (const team of assignments.teams) {
       if ((await scopeName(transaction, { kind: 'collection', id: team.id })) === undefined) {
         skipped.teams.push({ id: team.id, name: team.name });
@@ -1815,10 +1973,11 @@ export function createGovernanceService(dependencies: {
         [membershipId, policy.scope.id, permissions],
       );
     }
-    if (skipped.teams.length || skipped.policies.length)
+    const recorded = mergeSkipped(row.skipped ? skippedChoicesSchema.parse(row.skipped) : null, skipped);
+    if (recorded)
       await transaction.client.query(`UPDATE ${table(transaction, 'tf_invitations')} SET skipped = $2 WHERE id = $1`, [
         row.id,
-        JSON.stringify(skipped),
+        JSON.stringify(recorded),
       ]);
     if (row.role === 'admin' || assignments.teams.length || assignments.policies.length)
       await recommendationChange(transaction, membershipId, [membershipId], true);
