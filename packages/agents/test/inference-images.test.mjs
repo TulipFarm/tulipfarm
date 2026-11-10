@@ -309,7 +309,7 @@ test('after a provider overflow with many images, only the text is rescaled, so 
     false,
     null,
     {
-      context: { window: 100000, triggerPercent: 90, targetPercent: 80 },
+      context: { window: 100000, triggerPercent: 90, targetPercent: 85 },
       compactToolResults: async ({ round, text }) => {
         summarised.push(round);
         return JSON.stringify({
