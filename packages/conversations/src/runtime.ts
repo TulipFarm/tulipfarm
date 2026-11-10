@@ -592,11 +592,18 @@ export function createConversationExecutor(
 
   async function readableDrafts(tx: RuntimeTransaction, fence: ReplyFence, actor: HumanActor, turnId?: string) {
     const rows = z
-      .array(z.object({ id: uuidSchema, turn_id: uuidSchema, sources: conversationResultSchema.shape.sources }))
+      .array(
+        z.object({
+          id: uuidSchema,
+          turn_id: uuidSchema,
+          kind: z.string(),
+          sources: conversationResultSchema.shape.sources,
+        }),
+      )
       .parse(
         (
           await tx.client.query(
-            `SELECT d.id,d.turn_id,d.sources FROM ${table(tx, 'tf_chat_authoring_drafts')} d WHERE d.conversation_id=$1 AND d.membership_id=$2 AND d.user_id=$3
+            `SELECT d.id,d.turn_id,d.proposal->>'kind' AS kind,d.sources FROM ${table(tx, 'tf_chat_authoring_drafts')} d WHERE d.conversation_id=$1 AND d.membership_id=$2 AND d.user_id=$3
             AND ($4::uuid IS NULL OR d.turn_id=$4) AND NOT EXISTS (SELECT 1 FROM ${table(tx, 'tf_chat_authoring_decisions')} c WHERE c.draft_id=d.id)`,
             [fence.conversationId, actor.membershipId, actor.userId, turnId ?? null],
           )
@@ -605,7 +612,7 @@ export function createConversationExecutor(
     let readable = 0;
     for (const draft of rows)
       try {
-        await requireChatReviewSources(tx, actor, draft.sources);
+        await requireChatReviewSources(tx, actor, draft.sources, draft.kind === 'row');
         readable++;
       } catch (error) {
         if (!(error instanceof AccessDenied) && !(error instanceof SourceAuthorizationUnavailable)) throw error;
@@ -2372,7 +2379,7 @@ export function createConversationExecutor(
             if (draftId) {
               const draft = (
                 await tx.client.query(
-                  `SELECT id,turn_id,sources FROM ${table(tx, 'tf_chat_authoring_drafts')} WHERE id=$1 AND conversation_id=$2 AND membership_id=$3 AND user_id=$4`,
+                  `SELECT id,turn_id,proposal->>'kind' AS kind,sources FROM ${table(tx, 'tf_chat_authoring_drafts')} WHERE id=$1 AND conversation_id=$2 AND membership_id=$3 AND user_id=$4`,
                   [draftId, fence.conversationId, context.actor.membershipId, context.actor.userId],
                 )
               ).rows[0];
@@ -2382,6 +2389,7 @@ export function createConversationExecutor(
                   tx,
                   context.actor,
                   conversationResultSchema.shape.sources.parse(draft.sources),
+                  draft.kind === 'row',
                 );
               } catch (error) {
                 if (!(error instanceof AccessDenied) && !(error instanceof SourceAuthorizationUnavailable)) throw error;

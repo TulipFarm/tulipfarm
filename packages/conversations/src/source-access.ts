@@ -189,15 +189,17 @@ export async function requireRetainedToolSources(tx: AuthorizationTransaction, a
   return opaque;
 }
 
-/** Private-chat review cards may retain their owner's memory, but every other dependency must remain readable. */
+/** Slack row drafts check their thread's audience when proposed, read and decided, not through the generic source reader. */
 export async function requireChatReviewSources(
   tx: AuthorizationTransaction,
   actor: HumanActor,
   sources: readonly SourceDependency[],
+  rowDraft = false,
 ) {
   await currentMember(tx, actor);
   for (const source of await protectedSourceClosure(tx, sources))
     if (source.kind === 'personal-memory') await requirePersonalMemorySource(tx, actor, source);
+    else if (rowDraft && source.kind === 'shared-slack-turn') continue;
     else await requireProtectedSource(tx, actor, source);
 }
 

@@ -499,6 +499,7 @@ export function createAuthoringDrafts(
       await requireSources(tx, workspaceId, actor, row.proposal, row.sources);
     } catch (error) {
       if (!(error instanceof AccessDenied) && !(error instanceof SourceAuthorizationUnavailable)) throw error;
+      if (row.proposal.kind === 'row' && row.sources.some(source => source.kind === 'shared-slack-turn')) throw error;
       const origin = (
         await tx.client.query(`SELECT turn_id FROM ${relation(tx, 'tf_chat_authoring_drafts')} WHERE id=$1`, [id])
       ).rows[0];
