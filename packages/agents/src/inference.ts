@@ -2597,6 +2597,20 @@ export async function inferWithContent(
 /** The saved step text must fit the `narration` column of `tf_conversation_tool_calls`. */
 const narrationLimit = 2000;
 
+const invitationUnavailableReply =
+  "I can't see workspace invitations in chat. Open Settings > Members to see pending invitations and their teams.";
+const invitationTopic = /\b(?:invitations?|invitees?|invites?|invited)\b/i;
+const eventInvitationTopic = /\b(?:calendar|meetings?|events?)\b/i;
+const invitationLookup = (text: string) =>
+  invitationTopic.test(text) &&
+  !eventInvitationTopic.test(text) &&
+  /\b(?:who|which|list|show|find|check|count|status|how many|are there|do we have|tell me|any)\b/i.test(text) &&
+  !/\b(?:draft|write|compose|template|example|sample|how (?:do|can|to))\b/i.test(text);
+const invitationClaim = (text: string) =>
+  invitationTopic.test(text) &&
+  !eventInvitationTopic.test(text) &&
+  /\b(?:no|none|zero|0|checked|found|retrieved|looked|fetched|verified)\b/i.test(text);
+
 export async function inferWithTools(
   route: InferenceRoute,
   messages: readonly ChatTurn[],
@@ -2619,6 +2633,14 @@ export async function inferWithTools(
   // Any model output in this turn, streamed or stepped, makes a later fallback unsafe: its history is provider-native.
   let outputProduced = false;
   const items: LoopItem[] = messages.map(turn => ({ kind: 'turn', turn }));
+  // People lookup has no invitation source. Do not stream an invented answer before applying this boundary.
+  const invitationQuestion = invitationLookup(
+    [...sourceMessages]
+      .reverse()
+      .map(textTurn)
+      .find(turn => turn.role === 'user')?.text ?? '',
+  );
+  const answerText = invitationQuestion ? undefined : tools?.answerText;
   let calls = z
     .number()
     .int()
@@ -2697,10 +2719,11 @@ export async function inferWithTools(
     checked = false,
     layout?: { layout: ReplyRenderInput } | { layoutFailed: true },
   ) => {
+    const unavailableInvitations = invitationQuestion || invitationClaim(text);
     report(checked ? 'done' : 'finishing');
     return {
-      text,
-      ...layout,
+      text: unavailableInvitations ? invitationUnavailableReply : text,
+      ...(unavailableInvitations ? {} : layout),
       ...(tools?.avatar ? { avatar } : {}),
       ...(answeredBy ? { fallback: answeredBy } : {}),
     };
@@ -3152,7 +3175,7 @@ export async function inferWithTools(
                   : {}),
               };
             },
-            tools?.answerText,
+            answerText,
             target,
             (measure, usage) => {
               lastRequest = measure;
@@ -3361,7 +3384,7 @@ export async function inferWithTools(
       const candidate = rendered?.text ?? selected.text;
       const preview = (text: string) => {
         try {
-          tools?.answerText?.({ step: answerStep, text });
+          answerText?.({ step: answerStep, text });
         } catch {
           /* Progress is a preview. */
         }
@@ -3371,10 +3394,12 @@ export async function inferWithTools(
           avatar = { name: 'Bud', state: 'Idle' };
           updateAvatar();
         }
+        if (invitationQuestion || invitationClaim(candidate)) return finish(invitationUnavailableReply, true);
         return rendered
           ? finish(rendered.input.summary, true, { layout: rendered.input })
           : finish(selected.text, true);
       };
+      if (invitationQuestion || invitationClaim(candidate)) return accept();
       if (rendered) preview(rendered.input.summary);
       // The check catches unfinished tool work. A first-try answer that used no work tool has nothing to catch,
       // unless it reports an outcome that only a tool call could have produced.

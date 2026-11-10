@@ -112,6 +112,7 @@ export async function findMembers(tx: AgentTransaction, actor: HumanActor, query
     rosters.set(row.team_id, roster);
   }
   return {
+    invitations: 'not-available' as const,
     memberCount: members.length,
     members: members
       .slice(0, limit)
