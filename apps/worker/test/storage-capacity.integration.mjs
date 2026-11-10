@@ -542,7 +542,7 @@ test(
                   if ((denied.status >= 200 && denied.status < 300) || Array.isArray(denied.data)) {
                     phaseStats().unauthorizedResults++;
                     errorCount('unauthorized-result');
-                  } else if (denied.status !== 404 || denied.data.error !== 'proposal-unavailable')
+                  } else if (denied.status !== 404 || denied.data.error !== 'table-unavailable')
                     errorCount(`denial-probe-http-${denied.status}`);
                 }
               } catch {
