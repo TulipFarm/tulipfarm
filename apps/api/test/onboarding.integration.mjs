@@ -101,6 +101,18 @@ test(
     const post = (app, path, payload, headers = publicHeaders) =>
       app.inject({ method: 'POST', url: `/v1/onboarding/${path}`, headers, payload });
     const first = replica();
+    const availability = (app, slug, remoteAddress = '192.0.2.1') =>
+      app.inject({
+        method: 'POST',
+        url: '/v1/onboarding/availability',
+        headers: publicHeaders,
+        remoteAddress,
+        payload: { slug },
+      });
+    const free = await availability(first, details.slug, '192.0.2.3');
+    assert.equal(free.statusCode, 200);
+    assert.deepEqual(free.json(), { available: true });
+    assert.equal((await pool.query('SELECT * FROM app.workspaces')).rowCount, 0, 'Availability does not reserve a URL');
     assert.equal((await post(first, 'drafts', body, { origin: 'https://evil.example' })).statusCode, 403);
     assert.equal((await post(first, 'drafts', { ...body, token: 'guessable' })).statusCode, 400);
     assert.equal((await post(first, 'drafts', { ...body, details: { ...details, slug: 'login' } })).statusCode, 400);
@@ -140,6 +152,8 @@ test(
     assert.equal((await post(first, 'resume', { token })).statusCode, 401);
     assert.equal((await post(first, 'complete', { token })).statusCode, 401);
     assert.equal((await pool.query('SELECT * FROM app.workspaces')).rowCount, 0);
+    const collisionToken = randomBytes(32).toString('hex');
+    assert.equal((await post(first, 'drafts', { token: collisionToken, details })).statusCode, 200);
 
     const callback = `${process.env.WEB_ORIGIN}/onboarding#token=${token}`;
     const email = `${randomUUID()}@example.com`;
@@ -184,20 +198,34 @@ test(
     assert.equal(retry.statusCode, 202, retry.body);
     assert.equal(retry.json().id, concurrent[0].json().id);
     assert.equal((await pool.query('SELECT * FROM app.workspaces')).rowCount, 1);
+    const taken = await availability(second, details.slug);
+    assert.equal(taken.statusCode, 200);
+    assert.deepEqual(taken.json(), { available: false });
+    for (let index = 1; index < 60; index++) assert.equal((await availability(second, 'free-studio')).statusCode, 200);
+    const throttled = await availability(second, 'free-studio');
+    assert.equal(throttled.statusCode, 429);
+    assert.ok(Number(throttled.headers['retry-after']) > 0);
+    assert.equal((await availability(second, 'free-studio', '192.0.2.2')).statusCode, 200);
     assert.ok(dispatches.length > 0);
     assert.equal((await post(second, 'complete', { token }, headers)).statusCode, 429);
     await pool.query('DELETE FROM app.api_rate_limits');
-    const collisionToken = randomBytes(32).toString('hex');
-    await post(second, 'drafts', { token: collisionToken, details });
     assert.equal(
       (await post(second, 'complete', { token: collisionToken, challengeToken: 'valid' }, headers)).statusCode,
       409,
     );
+    const recovered = await second.inject({
+      method: 'POST',
+      url: '/v1/workspaces',
+      headers,
+      payload: { requestId: randomUUID(), name: details.name, slug: 'sample-business-next', challengeToken: 'valid' },
+    });
+    assert.equal(recovered.statusCode, 202, recovered.body);
+    assert.equal(recovered.json().slug, 'sample-business-next');
     await pool.query("UPDATE app.onboarding_drafts SET expires_at = now() - interval '1 second'");
     assert.equal((await post(second, 'resume', { token }, headers)).statusCode, 404);
     await expireOnboarding(pool);
     assert.equal((await pool.query('SELECT * FROM app.onboarding_drafts')).rowCount, 0);
-    assert.equal((await pool.query('SELECT * FROM app.workspaces')).rowCount, 1, 'Expiry never deletes the workspace');
+    assert.equal((await pool.query('SELECT * FROM app.workspaces')).rowCount, 2, 'Expiry never deletes the workspaces');
 
     await pool.query('DELETE FROM app.api_rate_limits');
     for (let i = 0; i < 20; i++)

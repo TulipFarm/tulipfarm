@@ -24,6 +24,11 @@ export class OnboardingConflict extends Error {
   }
 }
 
+export async function workspaceUrlAvailable(pool: Pool, slug: string) {
+  const result = await pool.query('SELECT EXISTS (SELECT 1 FROM app.workspaces WHERE slug = $1) AS taken', [slug]);
+  return !z.object({ taken: z.boolean() }).parse(result.rows[0]).taken;
+}
+
 export async function saveOnboarding(pool: Pool, token: string, details: OnboardingDetails) {
   const hash = digest(token);
   const result = await pool.query(

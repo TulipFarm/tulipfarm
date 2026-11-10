@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { createWorkspaceSchema } from './contracts.ts';
 
 export const onboardingTokenSchema = z.string().regex(/^[a-f0-9]{64}$/);
+export const workspaceUrlAvailabilitySchema = z.strictObject({ available: z.boolean() });
 export const onboardingDetailsSchema = createWorkspaceSchema
   .pick({ name: true, slug: true })
   .extend({

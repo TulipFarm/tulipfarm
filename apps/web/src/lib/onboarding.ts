@@ -1,4 +1,8 @@
-import { onboardingDraftSchema, type OnboardingDetails } from '@tulipfarm/workspaces/onboarding-contracts';
+import {
+  onboardingDraftSchema,
+  workspaceUrlAvailabilitySchema,
+  type OnboardingDetails,
+} from '@tulipfarm/workspaces/onboarding-contracts';
 import { workspaceSchema } from '@tulipfarm/workspaces/contracts';
 import { apiOrigin } from './auth';
 import { jsonResponse, readJson, responseError } from './http';
@@ -24,6 +28,9 @@ async function request(path: string, body: unknown) {
 }
 export async function saveOnboarding(token: string, details: OnboardingDetails) {
   return onboardingDraftSchema.parse(await request('drafts', { token, details }));
+}
+export async function workspaceUrlAvailable(slug: string) {
+  return workspaceUrlAvailabilitySchema.parse(await request('availability', { slug })).available;
 }
 export async function resumeOnboarding(token: string) {
   return onboardingDraftSchema.parse(await request('resume', { token }));
