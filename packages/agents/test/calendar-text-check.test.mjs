@@ -62,7 +62,7 @@ async function run(t, messages, decisions, options = {}) {
     messages,
     async call => {
       calls.push(call);
-      return { id: 'review' };
+      return { provider: 'google-workspace', untrusted: true, data: { id: 'review', decision: null, receipt: null } };
     },
     async input => {
       steps.push(input.step);

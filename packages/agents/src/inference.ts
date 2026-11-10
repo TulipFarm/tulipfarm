@@ -2130,7 +2130,7 @@ function presentsNewCard(candidate: string, items: readonly LoopItem[]) {
     cardClaims(candidate).length > 0 &&
     !promisesWork(candidate) &&
     last?.kind === 'results' &&
-    last.results.some(madeCard)
+    last.results.some(result => typeof cardResult(result)?.status === 'string')
   );
 }
 

@@ -741,7 +741,11 @@ test('Calendar proposal passes the selected description to owner review without 
       [{ role: 'user', text: 'Create an event with description "Initial QA event."' }],
       async call => {
         proposals.push(call.operation);
-        return { id: 'proposal' };
+        return {
+          provider: 'google-workspace',
+          untrusted: true,
+          data: { id: 'proposal', decision: null, receipt: null },
+        };
       },
     ),
     { text: 'The description is ready for review.' },
