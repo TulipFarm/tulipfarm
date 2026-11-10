@@ -31,7 +31,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Status, type StatusState } from '@tulipfarm/sprout/status';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@tulipfarm/sprout/tabs';
 import { ToggleGroup, ToggleGroupItem } from '@tulipfarm/sprout/toggle-group';
-import { Disclosure } from '@/components/disclosure';
 import { workspaceRoute, workspaceWorkflowsRoute } from '@/router';
 import { apiOrigin } from '@/lib/auth';
 import { UnsavedChanges, samePage } from '@/features/tables/feedback';
@@ -46,11 +45,16 @@ import {
   useRowTableNames,
   type RunStatus,
 } from '@/features/workflows/queries';
-import { WorkflowDefinition, WorkflowRun, WorkflowRunError } from '@/features/workflows/workflow-detail';
+import {
+  WorkflowDefinition,
+  WorkflowRun,
+  WorkflowRunError,
+  WorkflowRunSteps,
+} from '@/features/workflows/workflow-detail';
 import { WorkflowRunForm } from '@/features/workflows/run-form';
 import { WorkflowSlackAction } from '@/features/workflows/slack-step';
 import { AgentStepStatus } from '@/features/workflows/agent-step-status';
-import { runIsLive, runNote, stepNote, stepStatusLabel } from '@/features/workflows/run-notes';
+import { runIsLive, runNote } from '@/features/workflows/run-notes';
 import { webhookTriggers } from '@/features/workflows/webhook-status';
 import { TriggerList } from '@/features/workflows/trigger-list';
 import {
@@ -905,7 +909,9 @@ function WorkflowPage({
                         <p className="rounded-xl border border-dashed border-border p-4 text-sm text-muted-foreground">
                           {selected.archivedAt
                             ? 'No runs in your history for this workflow.'
-                            : 'No runs yet. Activate the workflow, then choose Start a run.'}
+                            : selected.enabled
+                              ? 'No runs yet. Choose Start a run.'
+                              : 'No runs yet. Activate the workflow, then choose Start a run.'}
                         </p>
                       ) : (
                         runs.map(run => (
@@ -1015,20 +1021,7 @@ function WorkflowPage({
                                   )}
                                 </div>
                               ))}
-                            <Disclosure title={`${run.steps.length} workflow steps`}>
-                              <ol className="space-y-3">
-                                {run.steps.map(step => (
-                                  <li key={step.stepId}>
-                                    <p>
-                                      {step.stepId.replaceAll('_', ' ')} / {stepStatusLabel(run.status, step.status)}
-                                    </p>
-                                    {stepNote(step.output) && <p>{stepNote(step.output)}</p>}
-                                    <pre className="max-h-64 overflow-auto text-xs">
-                                      {JSON.stringify(step.output, null, 2)}
-                                    </pre>
-                                  </li>
-                                ))}
-                              </ol>
+                            <WorkflowRunSteps workspaceId={workspaceId} workflowId={selected.id} run={run}>
                               <Button
                                 role="link"
                                 variant="link"
@@ -1046,7 +1039,7 @@ function WorkflowPage({
                               >
                                 Run {run.id}
                               </Button>
-                            </Disclosure>
+                            </WorkflowRunSteps>
                           </article>
                         ))
                       )}

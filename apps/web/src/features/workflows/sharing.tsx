@@ -46,6 +46,7 @@ export function WorkflowSharing({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
+  const [refreshWarning, setRefreshWarning] = useState('');
   const load = useCallback(async () => {
     try {
       const [candidates, grants] = await Promise.all([
@@ -57,8 +58,11 @@ export function WorkflowSharing({
         candidates: sharingCandidatesSchema.parse(candidates),
         grants: grantsSchema.parse(grants),
       });
-    } catch {
-      setState({ kind: 'error' });
+      return true;
+    } catch (failure) {
+      const accessLost = failure instanceof WorkflowRequestError && [401, 403, 404].includes(failure.status);
+      setState(previous => (previous.kind === 'ready' && !accessLost ? previous : { kind: 'error' }));
+      return false;
     }
   }, [base, path]);
   useEffect(() => {
@@ -69,11 +73,17 @@ export function WorkflowSharing({
     setBusy(true);
     setError('');
     setMessage('');
+    setRefreshWarning('');
     try {
       await workflowRequest(`${path}/${suffix}`, 'PUT', body);
-      await load();
-      await changed();
       setMessage(success);
+      try {
+        const [loaded] = await Promise.all([load(), changed()]);
+        if (!loaded)
+          setRefreshWarning('The change was saved, but the latest access could not load. Reload access to check it.');
+      } catch {
+        setRefreshWarning('The change was saved, but the latest workflow could not load. Refresh to check it.');
+      }
     } catch (failure) {
       setError(
         denied(failure)
@@ -296,8 +306,8 @@ export function WorkflowSharing({
                         'sponsorship',
                         { sponsorMembershipId: sponsor, historyAudience: audience },
                         sponsor === state.candidates.membershipId
-                          ? 'Saved. Activate the saved revision to start scheduled runs.'
-                          : 'Saved. Waiting for them to accept.',
+                          ? 'Scheduled runs saved. Activate the saved revision to start scheduled runs.'
+                          : 'Scheduled runs saved. Waiting for them to accept.',
                       )
                     }
                   >
@@ -320,6 +330,18 @@ export function WorkflowSharing({
         <p role="status" className="text-sm text-muted-foreground">
           {message}
         </p>
+      )}
+      {refreshWarning && (
+        <div role="status" className="space-y-2 text-sm text-muted-foreground">
+          <p>{refreshWarning}</p>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void load().then(loaded => loaded && setRefreshWarning(''))}
+          >
+            Reload access
+          </Button>
+        </div>
       )}
     </section>
   );
