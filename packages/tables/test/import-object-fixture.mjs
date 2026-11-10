@@ -1,4 +1,13 @@
 import assert from 'node:assert/strict';
+import ExcelJS from 'exceljs';
+
+export async function importWorkbook(rows, edit = () => {}) {
+  const book = new ExcelJS.Workbook();
+  const sheet = book.addWorksheet('Tickets');
+  rows.forEach(row => sheet.addRow(row));
+  edit(book, sheet);
+  return Buffer.from(await book.xlsx.writeBuffer());
+}
 
 export function importObjectFixture() {
   const objects = new Map();

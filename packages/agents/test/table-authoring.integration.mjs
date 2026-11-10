@@ -2,12 +2,19 @@ import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
-import { fixture } from '../../workspace-storage/test/integration/fixture.mjs';
+import { fixture, connect } from '../../workspace-storage/test/integration/fixture.mjs';
 import { createWorkspaceRuntime } from '@tulipfarm/workspace-storage/runtime';
+import { inTransaction } from '@tulipfarm/workspace-storage/provisioning';
 import { workspaceTableMigrations } from '@tulipfarm/workspaces/table-migrations';
+import { createGeneration, activateGeneration } from '@tulipfarm/tables/store';
+import { createTableService } from '@tulipfarm/tables/service';
+import { createTableExecution, executionCompatibility } from '@tulipfarm/tables/execution';
+import { createTableProposalDecisions } from '@tulipfarm/tables/proposals';
+import { importWorkbook, importObjectFixture } from '../../tables/test/import-object-fixture.mjs';
 import { createChatTools } from '../src/tools.ts';
 import { AccessDenied } from '@tulipfarm/access';
-import { createChatTableProposals } from '../src/table-proposals.ts';
+import { createChatTableProposals, tableProposalOptions } from '../src/table-proposals.ts';
+import { requireTableSources, requireTableImportReference } from '../src/table-sources.ts';
 import { tableDefinitionMessages } from '@tulipfarm/tables/definition';
 import { tableProposalRules } from '@tulipfarm/tables/proposal-contracts';
 import { tableProposalJsonSchema } from '@tulipfarm/tables/proposal-json-schema';
@@ -423,5 +430,154 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       )
     ).result;
     assert.equal(output.status, 'pending');
+  });
+  await t.test('file import tools prepare and propose CSV and XLSX without sheet or header hints', async () => {
+    const definition = {
+      formatVersion: 2,
+      id: randomUUID(),
+      owningTeamId: team,
+      label: 'Orders',
+      fields: [
+        { id: randomUUID(), label: 'Order ID', kind: 'text', required: true, maxLength: 100 },
+        { id: randomUUID(), label: 'Total', kind: 'numeric', required: false, precision: 8, scale: 2 },
+      ],
+      uniqueKeys: [],
+    };
+    definition.uniqueKeys.push({ id: randomUUID(), fieldIds: [definition.fields[0].id], nulls: 'distinct' });
+    const revision = 'b'.repeat(40);
+    let physicalTable;
+    const migration = await connect(db.login(ws, 'migration'));
+    try {
+      await inTransaction(migration, async client => {
+        await client.query(`SET LOCAL ROLE "${ws.names.customOwner}"`);
+        const tx = { client, schema: ws.names.schema };
+        const generation = await createGeneration(tx, { definition, revision });
+        physicalTable = generation.physical_table;
+        await activateGeneration(tx, { generationId: generation.id, expectedActiveGenerationId: null });
+        await client.query(
+          `UPDATE ${s}.tf_table_catalog SET applied_revision=$2,target_revision=$2,applied_definition=$3,physical_table=$4 WHERE id=$1`,
+          [definition.id, revision, definition, generation.physical_table],
+        );
+      });
+    } finally {
+      await migration.end();
+    }
+    const objects = importObjectFixture();
+    const files = createChatTools(runtime, { objects });
+    await createTableService(runtime, {}, executionCompatibility).mutate(ws.id, actor, {
+      kind: 'create',
+      tableId: definition.id,
+      revision,
+      recordId: randomUUID(),
+      values: {
+        [definition.fields[0].id]: { kind: 'text', value: 'A-1' },
+        [definition.fields[1].id]: { kind: 'numeric', value: '1' },
+      },
+    });
+    const rows = [
+      ['Order ID', 'Total'],
+      ['A-1', 12],
+      ['A-2', 15],
+      ['A-3', 18],
+    ];
+    const sheet = await importWorkbook([['Orders export'], [], ...rows], book =>
+      book.addWorksheet('Notes').addRow(['Read me']),
+    );
+    for (const [ordinal, bytes, selection] of [
+      [2, Buffer.from(rows.map(row => row.join(',')).join('\n')), {}],
+      [3, Buffer.from(rows.map(row => row.join(';')).join('\n')), {}],
+      [4, sheet, { format: 'xlsx' }],
+    ]) {
+      const attachmentId = randomUUID(),
+        key = randomUUID(),
+        contentDigest = createHash('sha256').update(bytes).digest('hex');
+      await objects.attachments.putIfAbsent(`${ws.id}/${key}`, bytes);
+      await db.platform.query(
+        `INSERT INTO ${s}.tf_conversation_attachments(id,conversation_id,membership_id,object_key,filename,media_type,size,sha256,state,message_id) VALUES($1,$2,$3,$4,'orders','application/octet-stream',$5,$6,'bound',$7)`,
+        [attachmentId, conversationId, actor.membershipId, key, bytes.length, contentDigest, message],
+      );
+      await db.platform.query(
+        `INSERT INTO ${s}.tf_conversation_parts(conversation_id,message_id,ordinal,kind,attachment_id) VALUES($1,$2,$3,'attachment',$4)`,
+        [conversationId, message, ordinal, attachmentId],
+      );
+      const prepared = (
+        await files.invokeWithSources(
+          { ...context, callId: randomUUID() },
+          {
+            tool: 'tables.import.file',
+            attachmentId,
+            contentDigest,
+            selection: JSON.stringify(selection),
+          },
+        )
+      ).result;
+      assert.equal(prepared.error, undefined, JSON.stringify(prepared));
+      assert.deepEqual(prepared.columns, ['Order ID', 'Total']);
+      const output = (
+        await files.invokeWithSources(
+          { ...context, callId: randomUUID() },
+          {
+            tool: 'tables.propose',
+            input: JSON.stringify({
+              plans: [
+                {
+                  kind: 'import',
+                  tableId: definition.id,
+                  dependsOn: [],
+                  expectedRevision: revision,
+                  reference: { kind: 'file', attachmentId, contentDigest },
+                  matchFieldIds: definition.uniqueKeys[0].fieldIds,
+                  mappings: definition.fields.map(field => ({ sourceColumn: field.label, fieldId: field.id })),
+                },
+              ],
+            }),
+          },
+        )
+      ).result;
+      assert.equal(output.status, 'pending', JSON.stringify(output));
+      const proposals = createChatTableProposals(runtime, objects);
+      const review = await proposals.read(ws.id, actor, conversationId, output.id);
+      const plan = review.manifest.plans[0];
+      assert.equal(plan.effectCount, 3);
+      assert.equal(plan.audience.administrators, true);
+      assert.deepEqual(
+        plan.input.mappings.map(mapping => mapping.sourceColumn),
+        ['Order ID', 'Total'],
+      );
+      const effects = await proposals.effects(ws.id, actor, conversationId, output.id, definition.id, { limit: 10 });
+      assert.deepEqual(effects.items.map(item => item.effect.kind).sort(), ['create', 'create', 'update']);
+      assert.equal(effects.items[0].effect.after[definition.fields[1].id].kind, 'numeric');
+      assert.equal(
+        (await db.platform.query(`SELECT count(*)::int AS count FROM ${s}."${physicalTable}"`)).rows[0].count,
+        1,
+      );
+      if (ordinal === 4) {
+        await createTableProposalDecisions({
+          ...tableProposalOptions(runtime, objects),
+          resolveConfirmationCredential: async () => db.login(ws, 'confirmation'),
+        }).decide(ws.id, actor, conversationId, output.id, {
+          digest: output.digest,
+          commandId: randomUUID(),
+          decision: 'approve',
+        });
+        const advance = createTableExecution({
+          requireSources: requireTableSources,
+          requireImportReference: requireTableImportReference,
+          resolveMigrationCredential: async () => db.login(ws, 'migration'),
+        });
+        let state;
+        for (let attempt = 0; attempt < 10; attempt++) {
+          state = await advance(ws.id, output.id);
+          if (state === 'completed' || state === 'blocked') break;
+        }
+        assert.equal(state, 'completed');
+        const status = await proposals.status(ws.id, actor, conversationId, output.id);
+        assert.deepEqual(status.plans[0].importProgress, { applied: 3, remaining: 0 });
+        assert.equal(
+          (await db.platform.query(`SELECT count(*)::int AS count FROM ${s}."${physicalTable}"`)).rows[0].count,
+          3,
+        );
+      }
+    }
   });
 });

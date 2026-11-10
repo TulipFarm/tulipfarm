@@ -110,7 +110,7 @@ import { WorkspaceMemberError, type workspaceMemberErrorCodeSchema } from '@tuli
 import { executionCompatibility } from '@tulipfarm/tables/execution';
 import {
   createTableImports,
-  fileImportSelectionSchema,
+  fileImportPreparationSchema,
   lenientFileImportSelection,
   TableImportError,
   tableImportFailure,
@@ -209,11 +209,12 @@ export const frameworkCallSchema = z.discriminatedUnion('tool', [
     tool: z.literal('tables.import.file'),
     attachmentId: z.uuid(),
     contentDigest: z.string().regex(/^[a-f0-9]{64}$/),
+    tableId: z.uuid().optional().describe('Destination table, when known, for automatic sheet and header detection.'),
     selection: z
       .string()
       .max(16384)
       .describe(
-        `JSON-encoded file selection, such as ${JSON.stringify(importSelectionExample)}. CSV needs delimiter (",", ";", "\\t" or "|"); XLSX needs sheet (the tab name) instead. conversions is optional and maps a column name to text, numeric, boolean, date or timestamp only; omit columns for select, status, link and other fields, which stay text and are matched to the field when the import is proposed.`,
+        `JSON-encoded file selection, such as ${JSON.stringify(importSelectionExample)}. Use {} to detect the format, delimiter, sheet and header from the file and destination table. Explicit sheet and header choices are kept. conversions is optional and maps a column name to text, numeric, boolean, date or timestamp only; omit columns for select, status, link and other fields, which stay text and are matched to the field when the import is proposed.`,
       ),
   }),
   z.strictObject({
@@ -645,7 +646,7 @@ const descriptions: Record<ToolName, string> = {
   'tables.import.attachments':
     'List up to 100 bound attachments from this chat when choosing a CSV or XLSX import source. Results contain IDs, names, media types, sizes, and SHA-256 digests, not file contents; ordering is by attachment ID. Use tables.import.file with one returned ID and digest.',
   'tables.import.file':
-    'Prepare one selected CSV/XLSX attachment for human review, not a direct import. Supply its current digest plus format, header/conversions, and delimiter or sheet; returns an immutable reference and writes nothing. Call it in the same reply as the tables.propose import plan that uses the reference. A new preparation is safe, but use the returned reference rather than assuming import success. Select-field columns stay text; the import matches their values to option labels. A failure returns import-file-failed with the reason to report and a next step.',
+    'Prepare one selected CSV/XLSX attachment for human review, not a direct import. Supply its current digest and selection:"{}" to detect format, delimiter, sheet and header; include the destination tableId when known. Do not guess a sheet name or header row. Explicit sheet/header choices are kept. Returns an immutable reference and writes no rows. Call it in the same reply as the tables.propose import plan that uses the reference. Select-field columns stay text; the import matches their values to option labels. A failure returns import-file-failed with the reason to report and a next step.',
   'tables.definitions':
     'List accessible active tables, or archived tables only when archived is true. Returns a permission-filtered catalog ordered by table ID (limit 1–100, default 25; continue with after) with applied revisions and field IDs, not rows. To find a table the person named, pass part of its name as name; never guess a table ID or ask the person for one. Use tables.list when an agent needs schemas it may operate on.',
   'rows.page':
@@ -1097,6 +1098,21 @@ export function createChatTools(
   const plans = createAgentPlans(runtime);
   const authoring = createAgentAuthoring(runtime);
   const followUps = createFollowUps(runtime);
+  const listTableDefinitions = async (workspaceId: string, actor: HumanActor, search?: string) => {
+    const tables = [];
+    let after: string | undefined;
+    for (let page = 0; page < 10; page++) {
+      const listed = await tableService.definitions(workspaceId, actor, {
+        limit: 100,
+        ...(search ? { search } : {}),
+        ...(after ? { after } : {}),
+      });
+      tables.push(...listed.tables);
+      if (!listed.nextCursor) break;
+      after = listed.nextCursor;
+    }
+    return tables;
+  };
   async function withCurrentTableSources<
     T extends { workspaceId: string; actor: HumanActor; origin?: { sources: readonly SourceDependency[] } },
   >(context: T): Promise<T> {
@@ -1273,7 +1289,7 @@ export function createChatTools(
         } catch (error) {
           if (!(error instanceof SyntaxError)) throw error;
         }
-        const parsed = fileImportSelectionSchema.safeParse(lenientFileImportSelection(selection));
+        const parsed = fileImportPreparationSchema.safeParse(lenientFileImportSelection(selection));
         if (!parsed.success)
           return {
             ...tableImportFailure(new TableImportError('invalid-selection')),
@@ -1282,6 +1298,9 @@ export function createChatTools(
               .map(({ path, code, message }) => ({ path, code, message: message.slice(0, 200) })),
             example: importSelectionExample,
           };
+        const fields = (await listTableDefinitions(workspaceId, actor))
+          .filter(table => !call.tableId || table.id === call.tableId)
+          .map(table => table.definition.fields.map(field => field.label));
         const prepare = (attachmentId: string, contentDigest: string) =>
           imports.prepareFile(
             runtime,
@@ -1290,6 +1309,7 @@ export function createChatTools(
             origin,
             { kind: 'file', attachmentId, contentDigest },
             parsed.data,
+            fields,
           );
         try {
           let reference;
@@ -1345,21 +1365,7 @@ export function createChatTools(
       case 'tables.propose': {
         if (!context.origin) throw new AccessDenied();
         const origin = context.origin;
-        const listTables = async (search?: string) => {
-          const tables = [];
-          let after: string | undefined;
-          for (let page = 0; page < 10; page++) {
-            const listed = await tableService.definitions(workspaceId, actor, {
-              limit: 100,
-              ...(search ? { search } : {}),
-              ...(after ? { after } : {}),
-            });
-            tables.push(...listed.tables);
-            if (!listed.nextCursor) break;
-            after = listed.nextCursor;
-          }
-          return tables;
-        };
+        const listTables = (search?: string) => listTableDefinitions(workspaceId, actor, search);
         let readable: Promise<Awaited<ReturnType<typeof listTables>>> | undefined;
         const allTables = () => (readable ??= listTables());
         const findTable = async (hint: { id?: string; name?: string }) => {

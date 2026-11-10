@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { deflateRawSync } from 'node:zlib';
 import { test } from 'node:test';
-import ExcelJS from 'exceljs';
+import { importWorkbook as workbook } from './import-object-fixture.mjs';
 import {
   fileImportSelectionSchema,
   fitFileImportSelection,
@@ -26,13 +26,6 @@ const rejects = (operation, code) =>
     operation,
     error => error instanceof TableImportError && error.code === code && error.message === code,
   );
-async function workbook(rows, edit = () => {}) {
-  const book = new ExcelJS.Workbook();
-  const sheet = book.addWorksheet('Tickets');
-  rows.forEach(row => sheet.addRow(row));
-  edit(book, sheet);
-  return Buffer.from(await book.xlsx.writeBuffer());
-}
 
 test('CSV preserves quoted delimiters, escaped quotes, BOM, multiline Unicode and leading zeros', async () => {
   assert.deepEqual(
@@ -299,15 +292,108 @@ test('a selection is fitted to the file, and every change is listed as an adjust
   assert.equal((await parseImportFile(file, selection)).length, 2);
 });
 
-test('a sheet named in another case, or the only sheet, is used and listed', async () => {
+test('a sheet named in another case is used and listed', async () => {
   const file = await workbook([['count'], [1]]);
-  for (const [sheet, only] of [
-    ['tickets', false],
-    ['Sheet1', true],
-  ])
-    assert.deepEqual((await fitFileImportSelection(file, { ...xlsx, sheet, conversions: {} })).adjustments, [
-      { kind: 'sheet', requested: sheet, used: 'Tickets', only },
-    ]);
+  assert.deepEqual((await fitFileImportSelection(file, { ...xlsx, sheet: 'tickets', conversions: {} })).adjustments, [
+    { kind: 'sheet', requested: 'tickets', used: 'Tickets', only: false },
+  ]);
+});
+
+test('preparation discovers CSV delimiters and the only XLSX sheet without format or header hints', async () => {
+  for (const delimiter of [',', ';']) {
+    const file = bytes(`ID${delimiter}Total\nA-1${delimiter}12\nA-2${delimiter}15\nA-3${delimiter}18\n`);
+    for (const input of [{}, lenientFileImportSelection({ separator: delimiter === ',' ? 'comma' : 'semicolon' })]) {
+      const { selection } = await fitFileImportSelection(file, input);
+      assert.equal(selection.format, 'csv');
+      assert.equal(selection.delimiter, delimiter);
+      assert.equal((await parseImportFile(file, selection)).length, 3);
+    }
+  }
+  const file = await workbook([
+    ['ID', 'Total'],
+    ['A-1', 12],
+    ['A-2', 15],
+    ['A-3', 18],
+  ]);
+  for (const input of [{}, { format: 'xlsx' }]) {
+    const { selection } = await fitFileImportSelection(file, input);
+    assert.equal(selection.sheet, 'Tickets');
+    assert.deepEqual(selection.header, { kind: 'row', row: 1 });
+    assert.equal((await parseImportFile(file, selection)).length, 3);
+    assert.ok(fileImportSelectionSchema.safeParse(selection).success);
+  }
+});
+
+test('preparation finds the unique sheet and later header matching the destination fields', async () => {
+  const file = await workbook(
+    [['Orders export'], [], ['Order ID', 'Total'], ['A-1', 12], ['A-2', 15], ['A-3', 18]],
+    book => book.addWorksheet('Notes').addRow(['Read me']),
+  );
+  const fields = [['Order ID', 'Total']];
+  const { selection } = await fitFileImportSelection(file, { format: 'xlsx' }, fields);
+  assert.equal(selection.sheet, 'Tickets');
+  assert.deepEqual(selection.header, { kind: 'row', row: 3 });
+  assert.equal((await parseImportFile(file, selection)).length, 3);
+  const csvFile = bytes('Orders export\n\nOrder ID;Total\nA-1;12\nA-2;15\nA-3;18\n');
+  const fitted = await fitFileImportSelection(csvFile, {}, fields);
+  assert.equal(fitted.selection.delimiter, ';');
+  assert.deepEqual(fitted.selection.header, { kind: 'row', row: 3 });
+  assert.equal((await parseImportFile(csvFile, fitted.selection)).length, 3);
+});
+
+test('ambiguous sheets name their candidates and a next step rather than guessing', async () => {
+  const file = await workbook(
+    [
+      ['ID', 'Total'],
+      ['A-1', 12],
+    ],
+    book => {
+      book.addWorksheet('Archive').addRows([
+        ['ID', 'Total'],
+        ['A-2', 15],
+      ]);
+    },
+  );
+  for (const fields of [[], [['ID', 'Total']]]) {
+    const error = await fitFileImportSelection(file, { format: 'xlsx' }, fields).catch(error => error);
+    assert.ok(error instanceof TableImportError);
+    const failure = tableImportFailure(error);
+    assert.equal(failure.code, 'ambiguous-selection');
+    assert.match(failure.reason, /Tickets.*Archive/);
+    assert.match(failure.reason, /Specify the sheet and header row/);
+    assert.match(failure.instruction, /not a permission denial/);
+  }
+  const { selection } = await fitFileImportSelection(file, { format: 'xlsx', sheet: 'Archive' }, [['ID', 'Total']]);
+  assert.equal(selection.sheet, 'Archive');
+});
+
+test('explicit sheet and header choices are authoritative during preparation', async () => {
+  const file = await workbook([
+    ['ID', 'Total'],
+    ['Order ID', 'Amount'],
+    ['A-1', 12],
+  ]);
+  const { selection } = await fitFileImportSelection(file, { format: 'xlsx', sheet: 'Tickets', header: 1 }, [
+    ['Order ID', 'Amount'],
+  ]);
+  assert.deepEqual(selection.header, { kind: 'row', row: 1 });
+  await rejects(fitFileImportSelection(file, { format: 'xlsx', sheet: 'Missing' }), 'invalid-selection');
+});
+
+test('an exact worksheet name wins when another name differs only by surrounding spaces', async () => {
+  for (const columns of [['ID'], ['ID', 'Total']]) {
+    const file = await workbook([columns, columns.map(() => 'A-1')], book =>
+      book.addWorksheet(' Tickets ').addRows([
+        ['ID', 'Total'],
+        ['A-2', '12'],
+      ]),
+    );
+    for (const sheet of ['Tickets', ' Tickets ']) {
+      const { selection } = await fitFileImportSelection(file, { format: 'xlsx', sheet, header: 1 }, [['ID', 'Total']]);
+      assert.equal(selection.sheet, sheet);
+      assert.equal((await parseImportFile(file, selection)).length, 1);
+    }
+  }
 });
 
 test('a selection that already fits the file is unchanged', async () => {
