@@ -285,6 +285,7 @@ test(
       [{ prompt: 'Two tulip posters', count: 2, preset: 'instagram-feed', quality: 'standard', name: 'Poster' }],
       'Here are your posters.',
     ]);
+    assert.ok(f.state.chat[0].tools.some(tool => tool.name === 'images_generate'));
 
     assert.deepEqual(
       f.state.images.map(request => ({ url: request.url, auth: request.headers.authorization, body: request.body })),
@@ -532,6 +533,31 @@ test('Gemini sends a generateContent call and settles at its token rates', async
   assert.equal(usage.provider_pico_usd, String(10 * 300000 + 1290 * 30000000));
 });
 
+test('a chat family without a paired image model generates with the workspace default on its first step', async t => {
+  const f = await setup(t);
+  const unpaired = JSON.parse(catalog);
+  delete unpaired.models.find(model => model.id === 'claude-haiku').imageModel;
+  unpaired.imageModels.find(model => model.id === 'gpt-image').default = true;
+  process.env.MODEL_CATALOG = JSON.stringify(unpaired);
+  f.state.draw = async () => openAiImage(await signedPng());
+  const chatId = await f.chat();
+  const { turnId, results, requests } = await f.turn(
+    chatId,
+    [[{ prompt: 'A red tulip', count: 1, name: 'Tulip' }], 'Here is your image.'],
+    'claude-haiku',
+  );
+  assert.ok(requests[0].tools.some(tool => tool.name === 'images_generate'));
+  assert.equal(results[0].images.length, 1);
+  assert.equal(results[0].images[0].state, 'saved');
+  assert.equal(results[0].images[0].file.name, 'Tulip.png');
+  const [generation] = await f.generations();
+  assert.equal(generation.image_model_id, 'gpt-image');
+  assert.equal(generation.prompt, 'A red tulip');
+  assert.equal(generation.conversation_id, chatId);
+  assert.equal(generation.origin_id, turnId);
+  assert.equal(f.state.images.length, 1);
+});
+
 test('an unavailable image model names a family that can generate, and a turned-off setting says so', async t => {
   const f = await setup(t);
   await f.db.platform.query(
@@ -543,6 +569,7 @@ test('an unavailable image model names a family that can generate, and a turned-
   assert.equal(first.results[0].error, 'image-model-unavailable');
   assert.equal(first.results[0].alternativeFamilyId, 'claude-sonnet');
   assert.match(first.results[0].instruction, /claude-sonnet model can generate images/);
+  assert.ok(first.requests[0].tools.some(tool => tool.name === 'images_generate'));
 
   await f.db.platform.query(
     `INSERT INTO ${f.table('tf_image_settings')} (generation_enabled,revision,editor_membership_id) VALUES (false,1,$1)`,
@@ -551,6 +578,7 @@ test('an unavailable image model names a family that can generate, and a turned-
   const second = await f.turn(chatId, [[{ prompt: 'A tulip' }], 'Sorry.'], 'claude-sonnet');
   assert.equal(second.results[0].error, 'image-model-unavailable');
   assert.match(second.results[0].instruction, /turned off/);
+  assert.ok(second.requests[0].tools.some(tool => tool.name === 'images_generate'));
   assert.equal(f.state.images.length, 0);
   assert.deepEqual(await f.imageUsage(), []);
 });

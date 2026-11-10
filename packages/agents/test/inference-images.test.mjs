@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { withChatMeasurements } from '@tulipfarm/observability';
 import { completionCheckEvidence, inferWithTools, ToolResultImages } from '../src/inference.ts';
+import { getSystemPrompt } from '../src/prompts.ts';
 import {
   completionReply,
   conversation,
@@ -32,6 +33,96 @@ const fetched = () =>
 const vision = format => ({ ...nativeRoutes[format], capabilities: { imageInput: true } });
 const toolOutput = 'Untrusted tool result for web.fetch: {"status":200}';
 const fetchArguments = { activity: 'Working on your request', url: 'https://example.com/a' };
+
+const generationRoutes = [
+  ...formats.map(format => [format, format, nativeRoutes[format]]),
+  ['Grok Fast on Azure', 'azure', { ...nativeRoutes.azure, model: 'grok-4.3', capabilities: { imageInput: true } }],
+  [
+    'Grok Fast on xAI',
+    'azure',
+    { provider: 'xai', endpoint: 'https://api.x.ai/', model: 'grok-4.3', apiKey: 'synthetic-key' },
+  ],
+  [
+    'Kimi on a text-only route',
+    'azure',
+    {
+      ...nativeRoutes.azure,
+      model: 'Kimi-K2.6',
+      capabilities: { imageInput: false },
+    },
+  ],
+];
+
+for (const [label, format, route] of generationRoutes)
+  test(`${label} replays a first-step image call without discovery or a provider API workaround`, async t => {
+    let rounds = 0;
+    const calls = [];
+    t.mock.method(globalThis, 'fetch', async (_url, init) => {
+      const body = JSON.parse(init.body);
+      if (isCompletionRequest(body)) return Response.json(completionReply(format));
+      rounds++;
+      if (rounds === 1) {
+        assert.match(JSON.stringify(body), /Use images\.generate for any image generation or edit request/);
+        const tools = body.tools?.[0]?.functionDeclarations ?? body.tools;
+        const names = tools.map(tool => tool.function?.name ?? tool.name);
+        assert.ok(names.includes('images_generate'), 'image generation is callable before any tool discovery');
+        return Response.json(nativeReply(format, { calls: [use('images.generate', { prompt: 'A red tulip' })] }));
+      }
+      return Response.json(nativeReply(format, { text: 'Here is your image.' }));
+    });
+    const result = await inferWithTools(
+      route,
+      [{ role: 'user', text: 'Create one image of a red tulip.' }],
+      async call => {
+        calls.push(call);
+        return { images: [{ state: 'saved', file: { name: 'Tulip.png' } }] };
+      },
+      undefined,
+      false,
+      null,
+      { chatFiles: true },
+    );
+    assert.equal(result.text, 'Here is your image.');
+    assert.deepEqual(
+      calls.map(call => call.tool),
+      ['images.generate'],
+    );
+    assert.equal(rounds, 2);
+  });
+
+test('a chat without the images feature does not execute a replayed image call', async t => {
+  let rounds = 0;
+  const calls = [];
+  t.mock.method(globalThis, 'fetch', async (_url, init) => {
+    const body = JSON.parse(init.body);
+    if (isCompletionRequest(body)) return Response.json(completionReply('azure'));
+    rounds++;
+    assert.ok(!body.tools.some(tool => tool.function?.name === 'images_generate'));
+    assert.doesNotMatch(JSON.stringify(body), /# Generating images|workspace-configured image model/);
+    return Response.json(
+      rounds === 1
+        ? nativeReply('azure', { calls: [use('images.generate', { prompt: 'A red tulip' })] })
+        : nativeReply('azure', { text: 'Image generation is unavailable.' }),
+    );
+  });
+  await inferWithTools(
+    generationRoutes.find(([label]) => label === 'Grok Fast on xAI')[2],
+    [{ role: 'user', text: 'Create one image.' }],
+    async call => calls.push(call),
+  );
+  assert.deepEqual(calls, []);
+});
+
+test('chat and saved agents use workspace images without requesting provider credentials', () => {
+  for (const mode of ['tools', 'agent']) {
+    const prompt = getSystemPrompt(mode, true);
+    assert.match(prompt, /workspace-configured image model/);
+    assert.match(prompt, /Unless the member explicitly asks to use one of their own connections/);
+    assert.match(prompt, /Never ask the member for a provider API key or account/);
+    assert.match(prompt, /image-model-unavailable.*turned off.*alternative family.*Do not retry through another tool/);
+    assert.doesNotMatch(getSystemPrompt(mode), /# Generating images|workspace-configured image model/);
+  }
+});
 
 /** The second reply round's conversation after the runtime reminder: earlier image turn, call, result, tool images. */
 const expected = {

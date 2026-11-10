@@ -55,7 +55,7 @@ import { builtinSkillTools } from './skills.ts';
 import { providerFetch } from './provider-fetch.ts';
 import {
   agentInstructionsPrompt,
-  agentToolSystemPrompt,
+  getSystemPrompt,
   projectInstructionsPrompt,
   runtimeReminder,
   systemPrompt,
@@ -431,7 +431,13 @@ function request(route: z.output<typeof inferenceRouteSchema>, input: Parameters
   const context = observeChatDetailSync('render', () => runtimeReminder({ kind: 'agent', input }));
   const wire = nativeRequest(
     route,
-    [agentToolSystemPrompt, agentInstructionsPrompt(input.definition)],
+    [
+      getSystemPrompt(
+        'agent',
+        catalog.tools.some(tool => tool.name === 'images_generate'),
+      ),
+      agentInstructionsPrompt(input.definition),
+    ],
     [
       { kind: 'turn', turn: { role: 'user', text: context } },
       { kind: 'turn', turn: { role: 'user', text: input.prompt } },
@@ -1846,8 +1852,10 @@ const unfinishedReply =
 const unfinishedNoToolsReply = "I stopped before finishing this request. Ask me to continue when you're ready.";
 const writeAlone =
   'Not run. Request a tool that changes data alone, in its own response. Read-only tools can run together.';
-const chatSystemBlocks = (projectInstructions?: string) =>
-  projectInstructions?.trim() ? [toolSystemPrompt, projectInstructionsPrompt(projectInstructions)] : [toolSystemPrompt];
+const chatSystemBlocks = (projectInstructions?: string, images = false) => {
+  const platform = images ? getSystemPrompt('tools', true) : toolSystemPrompt;
+  return projectInstructions?.trim() ? [platform, projectInstructionsPrompt(projectInstructions)] : [platform];
+};
 const completionCheckSchema = z.strictObject({
   decision: z.strictObject({
     status: z.enum(['completed', 'waiting', 'refused', 'blocked', 'continue']),
@@ -3661,7 +3669,7 @@ export async function inferWithTools(
           ...(renderer ? [renderer.tool] : []),
         ];
   const roundBlocks = () => [
-    ...chatSystemBlocks(tools?.projectInstructions),
+    ...chatSystemBlocks(tools?.projectInstructions, tools?.chatFiles),
     ...(catalog?.discovery ? [catalog.discovery] : []),
     ...(tools?.agentBuilderUrl && activeBuiltinSkills.has('agent-authoring')
       ? [
