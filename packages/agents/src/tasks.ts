@@ -24,7 +24,7 @@ import {
   requireMcpTaskRun,
   requirePrivateTaskSource,
 } from '@tulipfarm/access';
-import { relation, type AgentStorage, type AgentTransaction } from './store.ts';
+import { currentActivation, resolveActivationId, relation, type AgentStorage, type AgentTransaction } from './store.ts';
 import { resolveProcedures } from './workspace-skills.ts';
 import { requireTaskDefinitionSources } from './draft-sources.ts';
 import { bindFileSources } from '@tulipfarm/conversations/file-references';
@@ -154,12 +154,15 @@ export function createAgentTasks(
           definition: agentDefinitionSchema,
           scope: scopeSchema,
           activated_at: z.date().nullable(),
+          activation_rank: z.string(),
         }),
       )
       .parse(
         (
           await tx.client.query(
-            `SELECT a.id,a.definition_revision AS revision,d.definition,a.scope,a.activated_at FROM ${relation(tx, 'tf_agent_activations')} a JOIN ${relation(tx, 'tf_agents')} g ON g.id=a.agent_id JOIN ${relation(tx, 'tf_agent_definitions')} d ON d.agent_id=a.agent_id AND d.revision=a.definition_revision WHERE a.agent_id=$1 AND a.revoked_at IS NULL AND g.enabled AND ($2::uuid IS NULL OR a.id=$2) AND EXISTS (SELECT 1 FROM ${relation(tx, 'tf_agent_saved_revisions')} s WHERE s.agent_id=a.agent_id AND s.definition_revision=a.definition_revision) ORDER BY a.activated_at DESC NULLS LAST,a.id DESC`,
+            `SELECT a.id,a.definition_revision AS revision,d.definition,a.scope,a.activated_at,
+            (dense_rank() OVER (ORDER BY a.activated_at DESC NULLS LAST))::text AS activation_rank
+            FROM ${relation(tx, 'tf_agent_activations')} a JOIN ${relation(tx, 'tf_agents')} g ON g.id=a.agent_id JOIN ${relation(tx, 'tf_agent_definitions')} d ON d.agent_id=a.agent_id AND d.revision=a.definition_revision WHERE a.agent_id=$1 AND a.revoked_at IS NULL AND ${activationId ? 'true' : currentActivation(tx)} AND g.enabled AND ($2::uuid IS NULL OR a.id=$2) AND EXISTS (SELECT 1 FROM ${relation(tx, 'tf_agent_saved_revisions')} s WHERE s.agent_id=a.agent_id AND s.definition_revision=a.definition_revision) ORDER BY a.activated_at DESC NULLS LAST,a.id DESC`,
             [agentId, activationId ?? null],
           )
         ).rows,
@@ -178,7 +181,7 @@ export function createAgentTasks(
     if (
       !activationId &&
       candidates.length > 1 &&
-      (!selected.activated_at || candidates[1]?.activated_at?.getTime() === selected.activated_at.getTime())
+      (!selected.activated_at || candidates[1]?.activation_rank === selected.activation_rank)
     )
       throw new AgentTaskError('activation-selection-required');
     return selected;
@@ -346,7 +349,7 @@ export function createAgentTasks(
   }
   async function admit(tx: AgentTransaction, actor: HumanActor, agentId: string, activationId?: string) {
     await requireCapacity(tx, actor);
-    return eligible(tx, actor, agentId, activationId);
+    return eligible(tx, actor, agentId, activationId ? await resolveActivationId(tx, activationId) : undefined);
   }
   async function clampLimits(tx: AgentTransaction, agentId: string, limits: TaskLimits) {
     const configured = taskLimitsSchema.parse(
@@ -682,7 +685,8 @@ export function createAgentTasks(
       if (command.receipt) return command.receipt;
       if (task.generation !== input.expectedGeneration) throw new AgentTaskError('generation-conflict');
       if (task.status !== 'completed') throw new AgentTaskError('task-not-completed');
-      await admit(tx, actor, task.agentId, task.activationId);
+      await requireCapacity(tx, actor);
+      await eligible(tx, actor, task.agentId, task.activationId);
       const limits = await clampLimits(tx, task.agentId, task.limits);
       const last = z
         .number()

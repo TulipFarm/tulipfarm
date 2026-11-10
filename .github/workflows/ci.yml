@@ -153,3 +153,5 @@ jobs:
         run: |
           pnpm --filter @tulipfarm/agents exec node --test --test-concurrency=1 test/task-data-scope.integration.mjs
           pnpm --filter @tulipfarm/agents exec node --test --test-name-pattern='table enrollment' test/setup.integration.mjs
+      - name: Check activation replacement and running-task authority
+        run: pnpm --filter @tulipfarm/agents exec node --test --test-concurrency=1 test/activation-replacement.integration.mjs

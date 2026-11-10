@@ -21,7 +21,7 @@ import { AgentError } from './saved-contracts.ts';
 import { requireAgentPermission } from './saved-policy.ts';
 import { requireHumanRun } from './internal-privacy.ts';
 import { requireChatInvocation, requireExternalRun, type ExternalRunGuard } from './external-run.ts';
-import { relation, type AgentTransaction } from './store.ts';
+import { relation, resolveActivationId, type AgentTransaction } from './store.ts';
 import { resolveRunProcedures } from './workspace-skills.ts';
 import { requireGoogleAgentOwner, type GoogleOperationsFactory } from './google-tools.ts';
 import type { SlackActionsFactory } from './slack-actions.ts';
@@ -177,7 +177,8 @@ export function createAgentChat(
           row.membership_id !== actor.membershipId ||
           row.user_id !== actor.userId ||
           row.agent_id !== agentId ||
-          row.activation_id !== input.activationId ||
+          (row.activation_id !== input.activationId &&
+            row.activation_id !== (await resolveActivationId(tx, input.activationId))) ||
           row.prompt !== input.prompt ||
           canonicalJson(row.scope) !== canonicalJson(input.scope)
         )
@@ -197,10 +198,11 @@ export function createAgentChat(
           ).rows[0]?.count,
         );
       if (count >= 100) throw new AgentError('chat-hourly-limit', 400);
+      const activationId = await resolveActivationId(tx, input.activationId);
       const activation = (
         await tx.client.query(
           `SELECT a.definition_revision FROM ${relation(tx, 'tf_agent_activations')} a JOIN ${relation(tx, 'tf_agents')} g ON g.id=a.agent_id WHERE a.id=$1 AND a.agent_id=$2 AND a.revoked_at IS NULL AND g.enabled`,
-          [input.activationId, agentId],
+          [activationId, agentId],
         )
       ).rows[0];
       if (!activation) throw new AccessDenied();
@@ -208,15 +210,7 @@ export function createAgentChat(
       const selected = await definition(tx, { agent_id: agentId, definition_revision: revision });
       await tx.client.query(
         `INSERT INTO ${relation(tx, 'tf_agent_runs')} (id,agent_id,activation_id,definition_revision,kind,user_id,membership_id,scope) VALUES ($1,$2,$3,$4,'delegated',$5,$6,$7)`,
-        [
-          input.id,
-          agentId,
-          input.activationId,
-          revision,
-          actor.userId,
-          actor.membershipId,
-          JSON.stringify(input.scope),
-        ],
+        [input.id, agentId, activationId, revision, actor.userId, actor.membershipId, JSON.stringify(input.scope)],
       );
       if (externalGuard?.record) {
         await externalGuard.record(tx, workspaceId, actor, agentId, input.id);

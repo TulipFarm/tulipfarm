@@ -10,6 +10,7 @@ import {
   agentPolicyDetailSchema,
   agentListSchema,
   type saveAgentSchema,
+  type replaceAgentActivationSchema,
 } from '@tulipfarm/agents/saved-contracts';
 import { apiOrigin } from '@/lib/auth';
 import { teamLabel } from '@/features/governance/team-labels';
@@ -47,6 +48,9 @@ const rejections: Partial<Record<string, string>> = {
     'You need a manager of the selected team to give this agent access. Ask a team manager to enroll it. Your input is retained.',
   'agent-table-access-unavailable':
     'A selected table is not available through your selected teams. In What data it can use, choose a team you belong to that grants the selected table access. Your input is retained.',
+  'activation-version-conflict': 'A newer version was saved. Review it before activating.',
+  'activation-selection-required':
+    "Saved, but not activated. Some active versions have different access and TulipFarm can't tell which one is newest. In Execution, revoke the versions you no longer want, then activate again.",
   'trigger-sponsor-consent-required':
     'Sponsor the triggers that run on their own before activating. Your input is retained.',
   'setup-draft-outdated': 'This setup was saved before triggers were combined. Save it again before activating.',
@@ -179,6 +183,8 @@ export function agentApi(workspaceId: string) {
       id: string,
       input: { requestId: string; revision: string; scope: AgentDetail['activations'][number]['scope'] },
     ) => z.object({ activationId: z.uuid() }).parse(await request(`/${id}/activations`, 'POST', input)),
+    replaceActivation: async (id: string, input: z.infer<typeof replaceAgentActivationSchema>) =>
+      z.object({ activationId: z.uuid() }).parse(await request(`/${id}/activations/replace`, 'POST', input)),
     chatAvailability: async (id: string, signal: AbortSignal) =>
       z.object({ configured: z.boolean() }).parse(await request(`/${id}/chat`, 'GET', undefined, signal)),
     chat: async (id: string, input: z.infer<typeof chatInputSchema>) =>

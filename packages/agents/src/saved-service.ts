@@ -20,11 +20,12 @@ import {
   agentDataScopeSchema,
   agentPolicySchema,
   agentProjectionSchema,
+  replaceAgentActivationSchema,
   savedAgentSchema,
 } from './saved-contracts.ts';
 import { requireAgentPermission, withHuman } from './saved-policy.ts';
 export { requireAgentPermission } from './saved-policy.ts';
-import { createAgentStore, relation, type AgentStorage, type AgentTransaction } from './store.ts';
+import { createAgentStore, currentActivation, relation, type AgentStorage, type AgentTransaction } from './store.ts';
 import { visiblePage } from './visible-page.ts';
 import { definitionRecommendationAudience, recordDefinitionRecommendationChanges } from './recommendations.ts';
 import { listSkills } from './skills.ts';
@@ -157,16 +158,32 @@ export function createSavedAgentService(runtime: AgentStorage, readProjection?: 
         .parse(
           (
             await transaction.client.query(
-              `SELECT id, definition_revision AS revision, scope FROM ${relation(transaction, 'tf_agent_activations')} WHERE agent_id = $1 AND revoked_at IS NULL ORDER BY activated_at DESC NULLS LAST, id DESC`,
+              `SELECT a.id, a.definition_revision AS revision, a.scope FROM ${relation(transaction, 'tf_agent_activations')} a WHERE a.agent_id = $1 AND a.revoked_at IS NULL AND ${currentActivation(transaction)} ORDER BY a.activated_at DESC NULLS LAST, a.id DESC`,
               [agentId],
             )
           ).rows,
         );
       const { formatVersion: _formatVersion, id: _id, ...definition } = document;
+      const replacedActivations =
+        'commonVersion' in transaction && Number(transaction.commonVersion) >= 59
+          ? z.array(z.object({ id: z.uuid(), revision: z.string(), scope: scopeSchema })).parse(
+              (
+                await transaction.client.query(
+                  `SELECT a.id,a.definition_revision AS revision,a.scope FROM ${relation(transaction, 'tf_agent_activations')} a
+              WHERE a.agent_id=$1 AND a.revoked_at IS NULL AND a.superseded_by_activation_id IS NOT NULL AND (
+                EXISTS(SELECT 1 FROM ${relation(transaction, 'tf_agent_tasks')} t WHERE t.activation_id=a.id)
+                OR EXISTS(SELECT 1 FROM ${relation(transaction, 'tf_agent_runs')} r WHERE r.activation_id=a.id AND r.status IN ('ready','running','waiting'))
+              ) ORDER BY a.activated_at DESC NULLS LAST,a.id DESC`,
+                  [agentId],
+                )
+              ).rows,
+            )
+          : [];
       return {
         ...savedAgentSchema.parse(selected.item),
         definition: agentDefinitionSchema.parse(definition),
         capabilities,
+        replacedActivations,
         activations: await Promise.all(
           activations.map(async activation => ({
             ...activation,
@@ -517,6 +534,10 @@ export function createSavedAgentService(runtime: AgentStorage, readProjection?: 
         executor.activate(workspaceId, actor, { agentId, ...input }),
       );
     },
+    replaceActivation: (workspaceId: string, user: string, agentId: string, value: unknown) =>
+      administer(workspaceId, user, agentId, actor =>
+        executor.replaceActivation(workspaceId, actor, { ...replaceAgentActivationSchema.parse(value), agentId }),
+      ),
     configure: (workspaceId: string, user: string, agentId: string, value: unknown) => {
       const input = executionPolicySchema.parse(value);
       return administer(workspaceId, user, agentId, actor =>

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
+import { AccessDenied } from '@tulipfarm/access';
 import { createWorkspaceRuntime } from '@tulipfarm/workspace-storage/runtime';
 import { workspaceTableMigrations } from '@tulipfarm/workspaces/table-migrations';
 import { fixture, loadPlatformBaseline } from '../../workspace-storage/test/integration/fixture.mjs';
@@ -12,6 +13,8 @@ import { createAgentRecordTools } from '../src/record-tools.ts';
 import { createTaskRuntime } from '../src/task-runtime.ts';
 import { syntheticContinuity } from './continuity-fixture.mjs';
 import { savedTaskAgent, seedExecution } from './task-fixture.mjs';
+import { createWorkflows } from '../../workflows/src/service.ts';
+import { activate as activateWorkflow } from '../../workflows/test/commands.fixture.mjs';
 
 async function environment(t) {
   const db = await fixture();
@@ -68,6 +71,193 @@ async function environment(t) {
   const value = () => ({ requestId: randomUUID(), agentId: agent.agentId, text: 'Count the customer rows.' });
   return { db, w, runtime, user, member, table, agent, customers, scope, saved, tasks, value };
 }
+
+test('replacement preserves each activation scope and a workflow pin stays narrow', { timeout: 60000 }, async t => {
+  const f = await environment(t);
+  const broad = [{ ...f.scope[0], permissions: ['table.row.read', 'table.row.update'] }];
+  await f.db.platform.query(
+    `INSERT INTO ${f.table('tf_grants')}(team_id,asset_id,permission) VALUES($1,$2,'table.row.update')`,
+    [f.agent.teamId, f.customers.tableId],
+  );
+  await seedExecution(f.db, f.w, f.agent.agentId, [f.agent.teamId], broad);
+  const store = createAgentStore(f.runtime);
+  const latest = await f.agent.activate();
+  await f.db.platform.query(
+    `UPDATE ${f.table('tf_agent_saved_revisions')} SET projection=jsonb_build_object('workspaceId',$2::text,'commit',soul_revision,'kind','agent','id',agent_id,'path','agent.json','bucket','fixture','key','fixture','sha256',definition_revision) WHERE agent_id=$1`,
+    [f.agent.agentId, f.w.id],
+  );
+  await f.db.platform.query(`UPDATE ${f.table('tf_agent_activations')} SET scope=$2 WHERE id=$1`, [
+    latest.activationId,
+    JSON.stringify(broad),
+  ]);
+  const originalTask = await f.tasks.start(f.w.id, f.user, {
+    ...f.value(),
+    activationId: f.agent.activationId,
+  });
+  const workflow = createWorkflows(f.runtime, { agentTasks: f.tasks });
+  const workflowId = randomUUID(),
+    revision = randomUUID();
+  const limits = { toolCalls: 12, activeMilliseconds: 6000, credits: 4 };
+  await workflow.save(f.w.id, f.user, workflowId, {
+    revision,
+    expectedRevision: null,
+    definition: {
+      version: 1,
+      name: 'Read customers',
+      triggers: [],
+      steps: [
+        {
+          id: 'read',
+          kind: 'agent',
+          agentId: f.agent.agentId,
+          activationId: f.agent.activationId,
+          prompt: { kind: 'literal', value: 'Read the customer list.' },
+          limits,
+        },
+      ],
+    },
+  });
+  await activateWorkflow(workflow, f.w.id, f.user, workflowId, revision, true);
+  const policy = (
+    await f.db.platform.query(`SELECT saved_revision,policy_version FROM ${f.table('tf_agents')} WHERE id=$1`, [
+      f.agent.agentId,
+    ])
+  ).rows[0];
+  const actor = { kind: 'human', userId: f.w.userId, membershipId: f.w.membershipId };
+  const request = {
+    agentId: f.agent.agentId,
+    requestId: randomUUID(),
+    revision: latest.revision,
+    scope: broad,
+    expectedSavedRevision: policy.saved_revision,
+    expectedPolicyVersion: policy.policy_version,
+    expectedActivationIds: [f.agent.activationId, latest.activationId],
+  };
+  await store.replaceActivation(f.w.id, actor, request);
+  assert.deepEqual(await store.replaceActivation(f.w.id, actor, request), { activationId: request.requestId });
+  const pairs = (
+    await f.db.platform.query(
+      `SELECT a.id,a.scope,b.id AS replacement,b.scope AS replacement_scope,b.definition_revision,b.revoked_at
+    FROM ${f.table('tf_agent_activations')} a JOIN ${f.table('tf_agent_activations')} b ON b.id=a.superseded_by_activation_id
+    WHERE a.id=ANY($1::uuid[])`,
+      [request.expectedActivationIds],
+    )
+  ).rows;
+  assert.equal(pairs.length, 2);
+  assert.equal(new Set(pairs.map(pair => pair.replacement)).size, 2);
+  for (const pair of pairs) {
+    assert.deepEqual(pair.replacement_scope, pair.scope);
+    assert.equal(pair.definition_revision, latest.revision);
+    assert.equal(pair.revoked_at, null);
+  }
+  const run = await workflow.start(f.w.id, f.user, workflowId, { requestId: randomUUID(), input: {} });
+  assert.equal((await workflow.advance({ workspaceId: f.w.id, runId: run.runId })).kind, 'wait');
+  const taskId = (await workflow.history(f.w.id, f.user, workflowId)).runs[0].steps[0].output.taskId;
+  const task = await f.tasks.read(f.w.id, f.user, taskId);
+  assert.equal(task.activationId, pairs.find(pair => pair.id === f.agent.activationId).replacement);
+  assert.deepEqual(task.scope, f.scope);
+  assert.deepEqual(task.limits, limits);
+  assert.equal(task.definitionRevision, latest.revision);
+  assert.deepEqual(
+    (await f.db.platform.query(`SELECT scope FROM ${f.table('tf_agent_limits')} WHERE agent_id=$1`, [f.agent.agentId]))
+      .rows[0].scope,
+    broad,
+  );
+  const detail = await f.saved.detail(f.w.id, f.user, f.agent.agentId);
+  assert.equal(detail.activations.length, 2);
+  assert.ok(detail.replacedActivations.some(activation => activation.id === f.agent.activationId));
+  assert.equal((await f.tasks.read(f.w.id, f.user, originalTask.id)).activationId, f.agent.activationId);
+  await f.db.platform.query(`UPDATE ${f.table('tf_agent_tasks')} SET status='completed' WHERE id=$1`, [
+    originalTask.id,
+  ]);
+  assert.ok(
+    (await f.saved.detail(f.w.id, f.user, f.agent.agentId)).replacedActivations.some(
+      activation => activation.id === f.agent.activationId,
+    ),
+    'a completed task keeps its replaced activation visible for revocation before reopening',
+  );
+  await store.revokeActivation(f.w.id, actor, { agentId: f.agent.agentId, activationId: f.agent.activationId });
+  assert.ok(
+    !(await f.saved.detail(f.w.id, f.user, f.agent.agentId)).replacedActivations.some(
+      activation => activation.id === f.agent.activationId,
+    ),
+  );
+  await assert.rejects(
+    f.tasks.reopen(f.w.id, f.user, originalTask.id, {
+      requestId: randomUUID(),
+      expectedGeneration: 0,
+      text: 'Read customers again.',
+    }),
+    AccessDenied,
+  );
+});
+
+test('replacement refuses different scopes tied at the newest activation time without changing state', async t => {
+  const f = await environment(t);
+  await seedExecution(f.db, f.w, f.agent.agentId, [f.agent.teamId], f.scope);
+  const latest = await f.agent.activate();
+  const store = createAgentStore(f.runtime);
+  const actor = { kind: 'human', userId: f.w.userId, membershipId: f.w.membershipId };
+  const policy = async () =>
+    (
+      await f.db.platform.query(`SELECT saved_revision,policy_version FROM ${f.table('tf_agents')} WHERE id=$1`, [
+        f.agent.agentId,
+      ])
+    ).rows[0];
+  const snapshot = async () => ({
+    activations: (
+      await f.db.platform.query(
+        `SELECT row_to_json(a)::text AS value FROM ${f.table('tf_agent_activations')} a WHERE agent_id=$1 ORDER BY id`,
+        [f.agent.agentId],
+      )
+    ).rows,
+    audit: (await f.db.platform.query(`SELECT count(*) FROM ${f.table('tf_audit_events')}`)).rows[0].count,
+  });
+  const current = async () =>
+    (
+      await f.db.platform.query(
+        `SELECT id,scope FROM ${f.table('tf_agent_activations')} WHERE agent_id=$1 AND revoked_at IS NULL AND superseded_by_activation_id IS NULL ORDER BY activated_at DESC NULLS LAST,id DESC`,
+        [f.agent.agentId],
+      )
+    ).rows;
+  for (const activatedAt of [null, '2026-01-01T00:00:00Z']) {
+    await f.db.platform.query(`UPDATE ${f.table('tf_agent_activations')} SET activated_at=$2 WHERE agent_id=$1`, [
+      f.agent.agentId,
+      activatedAt,
+    ]);
+    const active = await current(),
+      expected = await policy(),
+      before = await snapshot();
+    for (let index = 0; index < 12; index++) {
+      await assert.rejects(
+        store.replaceActivation(f.w.id, actor, {
+          agentId: f.agent.agentId,
+          requestId: randomUUID(),
+          revision: latest.revision,
+          scope: active[0].scope,
+          expectedSavedRevision: expected.saved_revision,
+          expectedPolicyVersion: expected.policy_version,
+          expectedActivationIds: active.map(activation => activation.id),
+        }),
+        error => error.status === 409 && error.code === 'activation-selection-required',
+      );
+      assert.deepEqual(await snapshot(), before);
+    }
+  }
+  const newest = await f.agent.activate();
+  const active = await current(),
+    expected = await policy();
+  await store.replaceActivation(f.w.id, actor, {
+    agentId: f.agent.agentId,
+    requestId: randomUUID(),
+    revision: newest.revision,
+    scope: active[0].scope,
+    expectedSavedRevision: expected.saved_revision,
+    expectedPolicyVersion: expected.policy_version,
+    expectedActivationIds: active.map(activation => activation.id),
+  });
+  assert.equal((await current()).length, 3, 'different scopes tied below a unique default do not block replacement');
+});
 
 test('default manual and workflow tasks list and read the same table as their run form', async t => {
   const f = await environment(t);

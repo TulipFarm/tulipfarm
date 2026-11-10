@@ -16,7 +16,7 @@ import {
 import { activeGeneration, readableGeneration, GenerationError, identity } from '@tulipfarm/tables/store';
 import { TableError } from '@tulipfarm/tables/service-contracts';
 import { canonicalJson } from '@tulipfarm/tables/canonical';
-import { relation, type AgentStorage, type AgentTransaction } from './store.ts';
+import { currentActivation, relation, type AgentStorage, type AgentTransaction } from './store.ts';
 import { createAgentAuthoring } from './authoring.ts';
 import { resolveProcedures } from './workspace-skills.ts';
 import { requireAgentCreation, requireAgentPermission } from './saved-policy.ts';
@@ -351,7 +351,7 @@ export function createAuthoringDrafts(
       if ((policy?.policy_version ?? 0) !== proposal.input.expectedPolicyVersion) return true;
       const active = (
         await tx.client.query(
-          `SELECT id FROM ${relation(tx, 'tf_agent_activations')} WHERE agent_id=$1 AND revoked_at IS NULL ORDER BY id`,
+          `SELECT a.id FROM ${relation(tx, 'tf_agent_activations')} a WHERE a.agent_id=$1 AND a.revoked_at IS NULL AND ${currentActivation(tx)} ORDER BY a.id`,
           [proposal.targetId],
         )
       ).rows.map(row => z.uuid().parse(row.id));
