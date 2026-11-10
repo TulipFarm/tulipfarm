@@ -30,13 +30,21 @@ test('project reviews load, decide and retain their results after reloading', { 
         page.setDefaultTimeout(10000);
         const errors = [];
         let reloadFailures = false;
+        let generation = 0;
+        let reloadGeneration;
+        const requestGenerations = new WeakMap();
+        const isReloadRead = request => reloadFailures && requestGenerations.get(request) === reloadGeneration;
         let permanentFailure = true;
         let historyReads = 0;
         const draftReads = new Map();
         const inFlight = new Set();
         let peak = 0;
+        page.on('framenavigated', frame => {
+          if (frame === page.mainFrame()) generation++;
+        });
         page.on('request', request => {
-          if (!reloadFailures || !/\/drafts\/[\w-]+$/.test(new URL(request.url()).pathname)) return;
+          requestGenerations.set(request, generation);
+          if (!isReloadRead(request) || !/\/drafts\/[\w-]+$/.test(new URL(request.url()).pathname)) return;
           inFlight.add(request);
           peak = Math.max(peak, inFlight.size);
         });
@@ -157,7 +165,7 @@ test('project reviews load, decide and retain their results after reloading', { 
             if (draft && drafts.has(draft[1])) {
               const current = drafts.get(draft[1]);
               if (method === 'GET' && !draft[2]) {
-                if (reloadFailures) {
+                if (isReloadRead(request)) {
                   const attempt = (draftReads.get(draft[1]) ?? 0) + 1;
                   draftReads.set(draft[1], attempt);
                   if (draft[1] === cases[0].id && attempt <= 3) return route.abort('failed');
@@ -272,8 +280,17 @@ test('project reviews load, decide and retain their results after reloading', { 
           projects.some(project => project.id === cases[1].projectId),
           false,
         );
+        reloadGeneration = generation + 1;
         reloadFailures = true;
+        const outgoingStatus = await page.evaluate(
+          async url => (await fetch(url)).status,
+          `/v1/workspaces/${workspace.id}/conversations/${chatId}/drafts/${cases[5].id}`,
+        );
+        assert.equal(outgoingStatus, 200, 'outgoing-document reads do not consume the reload failure script');
+        assert.equal(draftReads.size, 0, 'outgoing-document reads do not count as reloaded reads');
+        assert.equal(peak, 0, 'outgoing-document reads do not count toward reloaded concurrency');
         await page.reload();
+        assert.equal(generation, reloadGeneration, 'failure scripting is scoped to the reloaded document');
         await page.getByText('Could not load draft', { exact: true }).waitFor({ timeout: 45000 });
         assert.ok(
           draftReads.get(cases[5].id) <= 8,
