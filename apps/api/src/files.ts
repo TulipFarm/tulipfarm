@@ -508,6 +508,7 @@ export function registerFiles(
         return {
           item: preview.item,
           files: preview.files,
+          knowledgeEntries: preview.knowledgeEntries,
           bytes: preview.bytes,
           blockerCount: preview.blockerCount,
           blockers: preview.blockers.map(({ ownerMembershipId, ...item }) => ({

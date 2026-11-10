@@ -6,6 +6,246 @@ import { registerKnowledgeComposition } from '../dist/knowledge-composition.js';
 import { docx, pdf } from '../../../packages/knowledge/test/fixtures/parser-documents.mjs';
 import { knowledgeFixture } from './knowledge-fixture.mjs';
 
+test('file Knowledge stays listed in Trash, restores its index, and retires before a failed permanent deletion', async () => {
+  const f = await knowledgeFixture();
+  try {
+    const fileId = randomUUID(),
+      documentId = randomUUID(),
+      noteId = randomUUID();
+    const base = `/v1/workspaces/${f.workspace.id}/files/${fileId}`;
+    assert.equal((await f.upload(fileId, 'Orchard harvest starts Tuesday.')).status, 200);
+    const input = f.command({ kind: 'file', fileId });
+    assert.equal((await f.save(documentId, input)).status, 200);
+    await f.process(input.commandId);
+    const note = f.command({ kind: 'note', text: 'Unrelated note.' });
+    assert.equal((await f.save(noteId, note)).status, 200);
+    const search = async () => (await f.call('/search?query=orchard')).json().hits;
+    const hit = (await search())[0];
+    const citation = `/citations/${hit.citation.publicationId}:0`;
+    assert.equal((await f.call(citation)).status, 200);
+    const listIds = async () =>
+      (await f.call('/documents'))
+        .json()
+        .items.map(item => item.documentId)
+        .sort();
+
+    assert.equal((await f.call(`${base}/trash`, { method: 'PUT', body: { trashed: true } })).status, 200);
+    assert.deepEqual(await listIds(), [documentId, noteId].sort(), 'Trash keeps the entry visible');
+    assert.equal((await f.call(`/documents/${documentId}`)).status, 200, 'polling keeps the entry visible');
+    assert.equal((await f.call(`/documents/${documentId}/original?revisionId=${input.commandId}`)).status, 404);
+    assert.deepEqual(await search(), [], 'Trash content is not searched or cited');
+    assert.equal((await f.call(citation)).status, 404);
+    assert.equal((await f.call(`${base}/content`)).status, 404);
+    assert.equal((await f.call(`${base}/trash`, { method: 'PUT', body: { trashed: false } })).status, 200);
+    assert.equal((await search())[0].citation.publicationId, hit.citation.publicationId);
+    assert.equal((await f.call(citation)).status, 200, 'restore reuses the publication without parsing');
+
+    assert.equal((await f.call(`${base}/trash`, { method: 'PUT', body: { trashed: true } })).status, 200);
+    const preview = await f.call(`${base}/deletion`);
+    assert.equal(preview.status, 200, preview.bytes.toString());
+    assert.equal(preview.json().knowledgeEntries, 1);
+    let beforeRemove;
+    f.object.faults.beforeRemove = async () => {
+      beforeRemove = (
+        await f.db.platform.query(
+          `SELECT d.tombstoned_at,d.lexical_publication_id,d.vector_publication_id,f.deleting_at
+        FROM ${f.table('tf_knowledge_documents')} d CROSS JOIN ${f.table('tf_files')} f
+        WHERE d.id=$1 AND f.id=$2`,
+          [documentId, fileId],
+        )
+      ).rows[0];
+    };
+    f.object.faults.remove = true;
+    assert.equal((await f.call(`${base}/delete-forever`, { method: 'POST' })).json().state, 'failed');
+    assert.ok(beforeRemove.deleting_at && beforeRemove.tombstoned_at, 'both lifecycles commit before byte removal');
+    assert.equal(beforeRemove.lexical_publication_id, null);
+    assert.equal(beforeRemove.vector_publication_id, null);
+    const retired = (
+      await f.db.platform.query(
+        `SELECT tombstoned_at,lexical_publication_id,vector_publication_id FROM ${f.table('tf_knowledge_documents')} WHERE id=$1`,
+        [documentId],
+      )
+    ).rows[0];
+    assert.ok(retired.tombstoned_at, 'the entry is retired even when byte deletion fails');
+    assert.equal(retired.lexical_publication_id, null);
+    assert.equal(retired.vector_publication_id, null);
+    assert.deepEqual(await listIds(), [noteId]);
+    assert.deepEqual(await search(), []);
+    assert.equal((await f.call(citation)).status, 404, 'old citations return removed, not a server error');
+    assert.equal((await f.call(`${base}/trash`, { method: 'PUT', body: { trashed: false } })).status, 404);
+    assert.deepEqual(
+      await f.service.process({
+        workspaceId: f.workspace.id,
+        revisionId: input.commandId,
+        generation: 1,
+      }),
+      { disposition: 'stale' },
+    );
+    f.object.faults.remove = false;
+    assert.equal((await f.call(`${base}/delete-forever`, { method: 'POST' })).json().state, 'deleted');
+    assert.deepEqual(await listIds(), [noteId], 'retry cannot revive the entry');
+    assert.equal((await f.call(citation)).status, 404);
+  } finally {
+    await f.close();
+  }
+});
+
+test('folder deletion counts only visible Knowledge but removes every person’s linked entries', async () => {
+  const f = await knowledgeFixture();
+  try {
+    const folderId = randomUUID(),
+      fileId = randomUUID(),
+      nestedId = randomUUID(),
+      pendingId = randomUUID(),
+      otherId = randomUUID();
+    const base = `/v1/workspaces/${f.workspace.id}/files`;
+    assert.equal(
+      (
+        await f.call(`${base}/${folderId}/folder`, {
+          method: 'PUT',
+          body: { name: 'Harvest', parentId: null },
+        })
+      ).status,
+      200,
+    );
+    assert.equal(
+      (
+        await f.call(
+          `${base}/${fileId}/content?${new URLSearchParams({
+            name: 'Orchard.txt',
+            mediaType: 'text/plain',
+            parentId: folderId,
+          })}`,
+          { method: 'PUT', body: Buffer.from('Orchard harvest starts Tuesday.') },
+        )
+      ).status,
+      200,
+    );
+    assert.equal((await f.upload(otherId, 'Other orchard information.')).status, 200);
+    assert.equal(
+      (
+        await f.call(`${base}/${nestedId}/folder`, {
+          method: 'PUT',
+          body: { name: 'Pending', parentId: folderId },
+        })
+      ).status,
+      200,
+    );
+    assert.equal(
+      (
+        await f.call(
+          `${base}/${pendingId}/content?${new URLSearchParams({
+            name: 'Pending.txt',
+            mediaType: 'text/plain',
+            parentId: nestedId,
+          })}`,
+          { method: 'PUT', body: Buffer.from('Pending orchard instructions.') },
+        )
+      ).status,
+      200,
+    );
+    assert.equal((await f.share(fileId, 'viewer')).status, 200);
+    const added = [];
+    for (const [sourceId, cookie] of [
+      [fileId, f.signed.owner.cookie],
+      [fileId, f.signed.admin.cookie],
+      [pendingId, f.signed.owner.cookie],
+      [otherId, f.signed.owner.cookie],
+    ]) {
+      const id = randomUUID(),
+        input = f.command({ kind: 'file', fileId: sourceId });
+      assert.equal((await f.save(id, input, { cookie })).status, 200);
+      if (sourceId !== pendingId) await f.process(input.commandId);
+      added.push(id);
+    }
+    assert.equal(
+      (
+        await f.call(`${base}/${folderId}/trash`, {
+          method: 'PUT',
+          body: { trashed: true },
+        })
+      ).status,
+      200,
+    );
+    for (const cookie of [f.signed.owner.cookie, f.signed.admin.cookie])
+      assert.ok(
+        (await f.call('/documents', { cookie })).json().items.some(item => added.includes(item.documentId)),
+        'entries under a trashed folder remain listed',
+      );
+    assert.equal((await f.call(`/documents/${added[1]}`)).status, 404, 'another person’s entry stays private');
+    assert.equal((await f.call(`${base}/${folderId}/deletion`)).json().knowledgeEntries, 2);
+    assert.equal((await f.call(`${base}/${folderId}/delete-forever`, { method: 'POST' })).json().state, 'deleted');
+    assert.deepEqual(
+      (await f.call('/documents')).json().items.map(item => item.documentId),
+      [added[3]],
+    );
+    assert.deepEqual((await f.call('/documents', { cookie: f.signed.admin.cookie })).json().items, []);
+    assert.deepEqual(
+      (await f.call('/search?query=orchard')).json().hits.map(hit => hit.citation.documentId),
+      [added[3]],
+    );
+    const retired = (
+      await f.db.platform.query(
+        `SELECT id FROM ${f.table('tf_knowledge_documents')} WHERE tombstoned_at IS NOT NULL ORDER BY id`,
+      )
+    ).rows.map(row => row.id);
+    assert.deepEqual(retired, added.slice(0, 3).sort());
+  } finally {
+    await f.close();
+  }
+});
+
+test('deletion confirmation does not reveal private Knowledge entries saved by another person', async () => {
+  const f = await knowledgeFixture();
+  try {
+    const fileId = randomUUID(),
+      privateId = randomUUID(),
+      ownId = randomUUID();
+    const base = `/v1/workspaces/${f.workspace.id}/files/${fileId}`;
+    assert.equal((await f.upload(fileId, 'Supplier delivery instructions.')).status, 200);
+    assert.equal((await f.share(fileId, 'viewer')).status, 200);
+    const privateEntry = f.command({ kind: 'file', fileId });
+    assert.equal((await f.save(privateId, privateEntry, { cookie: f.signed.admin.cookie })).status, 200);
+    assert.equal((await f.call(`${base}/trash`, { method: 'PUT', body: { trashed: true } })).status, 200);
+    assert.deepEqual((await f.call('/documents')).json().items, []);
+    assert.equal((await f.call(`/documents/${privateId}`)).status, 404);
+    assert.equal(
+      (await f.call(`${base}/deletion`)).json().knowledgeEntries,
+      0,
+      'hidden-only entries must not cause a warning',
+    );
+
+    assert.equal((await f.call(`${base}/trash`, { method: 'PUT', body: { trashed: false } })).status, 200);
+    assert.equal((await f.save(ownId, f.command({ kind: 'file', fileId }))).status, 200);
+    assert.equal((await f.call(`${base}/trash`, { method: 'PUT', body: { trashed: true } })).status, 200);
+    assert.deepEqual(
+      (await f.call('/documents')).json().items.map(item => item.documentId),
+      [ownId],
+    );
+    assert.equal(
+      (await f.call(`${base}/deletion`)).json().knowledgeEntries,
+      1,
+      'the count includes only entries the person can list',
+    );
+    assert.equal((await f.call(`${base}/delete-forever`, { method: 'POST' })).json().state, 'deleted');
+    for (const cookie of [f.signed.owner.cookie, f.signed.admin.cookie])
+      assert.deepEqual((await f.call('/documents', { cookie })).json().items, []);
+    assert.equal(
+      (
+        await f.db.platform.query(
+          `SELECT count(*)::int AS total FROM ${f.table('tf_knowledge_documents')}
+      WHERE id=ANY($1::uuid[]) AND tombstoned_at IS NOT NULL`,
+          [[ownId, privateId]],
+        )
+      ).rows[0].total,
+      2,
+      'permanent deletion still retires hidden entries',
+    );
+  } finally {
+    await f.close();
+  }
+});
+
 test('authenticated HTTP notes save, parse, search, cite, edit and remove without an object store', async () => {
   const f = await knowledgeFixture({ filesEnabled: false });
   try {

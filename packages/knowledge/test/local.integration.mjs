@@ -201,7 +201,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       assert.equal((await api.original(one.id, owner.userId, fileInput.documentId)).filename, 'inventory.md');
       await files.trash(one.id, owner.userId, folderId, true);
       assert.deepEqual((await api.search(one.id, owner.userId, { query: 'warehouse' })).hits, []);
-      await assert.rejects(api.get(one.id, owner.userId, fileInput.documentId), AccessDenied);
+      assert.equal((await api.get(one.id, owner.userId, fileInput.documentId)).documentId, fileInput.documentId);
       await assert.rejects(api.evidence(one.id, owner.userId, hit.citation), AccessDenied);
       await assert.rejects(api.original(one.id, owner.userId, fileInput.documentId), AccessDenied);
       await files.trash(one.id, owner.userId, folderId, false);

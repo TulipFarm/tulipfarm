@@ -141,7 +141,16 @@ export function DeleteForeverDialog({
                 )}
               </>
             ) : (
-              <p className="text-sm text-foreground">{contents(state.data)}</p>
+              <div className="space-y-2 text-sm text-foreground">
+                <p>{contents(state.data)}</p>
+                {state.data.knowledgeEntries > 0 && (
+                  <p>
+                    {state.data.knowledgeEntries === 1
+                      ? 'This also removes its Knowledge entry.'
+                      : `This also removes ${state.data.knowledgeEntries} Knowledge entries.`}
+                  </p>
+                )}
+              </div>
             ))}
           {sending.kind === 'failed' && (
             <Alert variant="destructive" role="alert">
