@@ -37,7 +37,7 @@ test('follow-ups run later in the chat they were asked in, once, as the requeste
   });
   const origin = { conversationId: chatId, turnId: asked.turnId };
   const schedule = (call, from = origin) =>
-    followUps.schedule(w.id, actor, randomUUID(), from, { tool: 'followups.schedule', ...call });
+    followUps.schedule(w.id, actor, randomUUID(), { sources: [], ...from }, { tool: 'followups.schedule', ...call });
   const forceDue = id =>
     db.platform.query(`UPDATE ${table('tf_follow_ups')} SET due_at=now()-interval '1 second' WHERE id=$1`, [id]);
   const firedTurn = async id =>
@@ -94,9 +94,8 @@ test('follow-ups run later in the chat they were asked in, once, as the requeste
     assert.equal(fired.length, 1);
     assert.deepEqual(
       { id: fired[0].followUp.id, instruction: fired[0].followUp.instruction, author: fired[0].author },
-      { id: quote.id, instruction: 'Follow-up unavailable', author: 'human' },
+      { id: quote.id, instruction: 'Post a coding quote in #tech.', author: 'human' },
     );
-    assert.doesNotMatch(JSON.stringify(fired[0]), /Post a coding quote/);
     assert.equal(fired[0].turn.status, 'queued');
     assert.equal((await followUps.readInChat(w.id, w.userId, chatId, quote.id)).status, 'fired');
   });
@@ -123,6 +122,20 @@ test('follow-ups run later in the chat they were asked in, once, as the requeste
       { conversationId: chatId, turnId },
     );
     assert.deepEqual([capped.status, capped.reason], ['not-scheduled', 'chain-limit']);
+  });
+
+  await t.test('legacy instructions without an origin step remain unavailable and cannot dispatch', async () => {
+    const { followUp } = await schedule({ instruction: 'Unattributed private instruction.', delayMinutes: 5 });
+    await db.platform.query(`UPDATE ${table('tf_follow_ups')} SET sources=NULL WHERE id=$1`, [followUp.id]);
+    assert.equal(
+      (await followUps.readInChat(w.id, w.userId, chatId, followUp.id)).instruction,
+      'Follow-up unavailable',
+    );
+    assert.doesNotMatch(JSON.stringify(await followUps.list(w.id, actor, origin)), /Unattributed private instruction/);
+    await forceDue(followUp.id);
+    assert.deepEqual(await followUps.due(w.id, chats.send), []);
+    assert.equal(await firedTurn(followUp.id), undefined);
+    assert.equal((await followUps.readInChat(w.id, w.userId, chatId, followUp.id)).status, 'skipped');
   });
 
   await t.test('a requester removed before it is due is skipped without a message', async () => {

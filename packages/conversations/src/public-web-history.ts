@@ -14,7 +14,7 @@ const retainedOutputSchema = z.object({ sources: conversationResultSchema.shape.
 export async function publicWebReceiptForHistory(
   tx: AuthorizationTransaction,
   actor: HumanActor,
-  row: { tool: string; call: unknown; output: unknown; sources: unknown; status: string },
+  row: { tool: string; call: unknown; output: unknown; sources: unknown; status: string; projectChatId?: string },
 ): Promise<z.infer<typeof publicWebReceiptSchema> | null> {
   if (row.tool !== 'web.fetch' && row.tool !== 'web.search') return null;
   try {
@@ -22,6 +22,7 @@ export async function publicWebReceiptForHistory(
       tx,
       actor,
       conversationResultSchema.shape.sources.parse(row.sources),
+      row.projectChatId,
     );
     const outputSources = row.output == null ? [] : retainedOutputSchema.parse(row.output).sources;
     for (const source of outputSources) await requireProtectedSource(tx, actor, source);

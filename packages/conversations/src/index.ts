@@ -51,6 +51,7 @@ import {
   requireWorkflowSources,
   KnowledgeSourceRemoved,
   canReadToolDetails,
+  generatedMessageSources,
 } from './source-access.ts';
 import { calendarResultsForHistory } from './calendar-results.ts';
 import {
@@ -704,19 +705,14 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
       const hidden = new Set<string>();
       const followUpMessages = messages.filter(message => message.followUp);
       if (followUpMessages.length) {
-        const origins = (
-          await tx.client.query(
-            `SELECT f.fired_message_id,s.sources,s.output FROM ${table(tx, 'tf_follow_ups')} f
-             LEFT JOIN ${table(tx, 'tf_conversation_execution_steps')} s ON s.turn_id=f.origin_turn_id
-               AND s.call->>'tool'='followups.schedule' AND s.output->'result'->'followUp'->>'id'=f.id::text
-             WHERE f.conversation_id=$1 AND f.fired_message_id=ANY($2::uuid[])`,
-            [chatId, followUpMessages.map(message => message.id)],
-          )
-        ).rows;
+        const origins = await generatedMessageSources(
+          tx,
+          chatId,
+          followUpMessages.map(message => message.id),
+        );
         for (const message of followUpMessages) {
           if (!message.followUp) continue;
-          const origin = origins.find(row => row.fired_message_id === message.id);
-          if (await canReadToolDetails(tx, actor, origin?.sources, origin?.output, chat.projectId ? chatId : undefined))
+          if (await canReadToolDetails(tx, actor, origins.get(message.id), null, chat.projectId ? chatId : undefined))
             continue;
           message.followUp = { ...message.followUp, instruction: 'Follow-up unavailable' };
           message.parts = [
@@ -890,6 +886,7 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
                     ? null
                     : (googleToolActivity(row.tool, row.call, row.stored_activity) ?? row.activity),
                 web: await publicWebReceiptForHistory(tx, actor, {
+                  ...(chat.projectId ? { projectChatId: chatId } : {}),
                   tool: row.tool,
                   status: row.status,
                   call: row.call,
@@ -900,6 +897,7 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
                   ? null
                   : apiCallReceipt(row.tool, row.output, row.tool === 'api.request' && digestedApiCalls.has(row.id)),
                 knowledge: await knowledgeActivityForHistory(tx, actor, {
+                  ...(chat.projectId ? { projectChatId: chatId } : {}),
                   tool: row.tool,
                   status: row.status,
                   call: row.call,

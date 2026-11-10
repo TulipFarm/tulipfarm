@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import { fixture, connect } from '../../../packages/workspace-storage/test/integration/fixture.mjs';
-import { createWorkspaceRuntime } from '@tulipfarm/workspace-storage/runtime';
+import { commonCompatibility, createWorkspaceRuntime } from '@tulipfarm/workspace-storage/runtime';
 import { inTransaction } from '@tulipfarm/workspace-storage/provisioning';
 import { workspaceTableMigrations } from '@tulipfarm/workspaces/table-migrations';
 import { tableProposalOptions } from '@tulipfarm/agents/table-proposals';
@@ -26,7 +26,7 @@ test(
     await db.platform.query(`SET search_path TO app; DROP TABLE IF EXISTS app.accounts;
 ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.meta.url), 'utf8')}`);
     const migrations = await workspaceTableMigrations();
-    assert.equal(migrations.length, 10);
+    assert.equal(migrations.length, commonCompatibility.maximum);
     const ws = await db.create(migrations);
     t.diagnostic(`Workspace common stream: ${migrations.length}`);
     const s = `"${ws.names.schema}"`;

@@ -9,6 +9,12 @@ import { createConversationExecutor } from '../../conversations/src/runtime.ts';
 import { fixture } from '../../workspace-storage/test/integration/fixture.mjs';
 import { createAuthoringDrafts } from '../src/drafts.ts';
 import { createChatTools } from '../src/tools.ts';
+import { createFollowUps } from '../src/follow-ups.ts';
+import {
+  insertCompaction,
+  readConversationMessage,
+  replaceWorkingSummary,
+} from '../../conversations/src/compaction.ts';
 import { createFiles } from '../../files/src/index.ts';
 import { AccessDenied, protectedSourceClosure, requireProtectedSource } from '@tulipfarm/access';
 import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
@@ -289,33 +295,83 @@ for (const change of ['remove note', 'replace note', 'remove file']) {
     const opaqueText = 'An older reply with no recorded tool attribution.';
     let legacySources;
     let followUpMessageId;
+    let pendingFollowUpId;
     if (change === 'remove note') {
       const scheduled = await tool({ tool: 'followups.schedule', instruction: narration, delayMinutes: 1 });
       assert.equal(scheduled.status, 'scheduled');
       followUpMessageId = scheduled.followUp.id;
-      const fired = await chats.send(w.id, w.userId, chatId, {
-        messageId: followUpMessageId,
-        commandId: randomUUID(),
-        parts: [{ kind: 'text', text: narration }],
+      await t.test('legacy follow-ups derive their scheduling sources without rewriting stored data', async () => {
+        const saved = (
+          await db.platform.query(`SELECT sources FROM "${w.names.schema}".tf_follow_ups WHERE id=$1`, [
+            followUpMessageId,
+          ])
+        ).rows[0];
+        assert.ok(
+          saved.sources.some(
+            dependency => dependency.kind === 'knowledge-document' && dependency.documentId === added.documentId,
+          ),
+        );
+        const listed = await createChatTools(runtime).invokeWithSources(
+          {
+            workspaceId: w.id,
+            actor,
+            callId: randomUUID(),
+            origin: { conversationId: chatId, turnId: narratedStep.turn_id, sources: [] },
+          },
+          { tool: 'followups.list' },
+        );
+        assert.ok(
+          listed.sources.some(
+            dependency => dependency.kind === 'knowledge-document' && dependency.documentId === added.documentId,
+          ),
+        );
+        await db.platform.query(`UPDATE "${w.names.schema}".tf_follow_ups SET sources=NULL WHERE id=$1`, [
+          followUpMessageId,
+        ]);
+        assert.equal(
+          (await createFollowUps(runtime).readInChat(w.id, w.userId, chatId, followUpMessageId)).instruction,
+          narration,
+        );
       });
       await db.platform.query(
-        `UPDATE "${w.names.schema}".tf_follow_ups SET status='fired',fired_message_id=$1 WHERE id=$1`,
+        `UPDATE "${w.names.schema}".tf_follow_ups SET due_at=clock_timestamp()-interval '1 second' WHERE id=$1`,
         [followUpMessageId],
       );
+      assert.deepEqual(await createFollowUps(runtime).due(w.id, chats.send), [chatId]);
+      const fired = (
+        await db.platform.query(`SELECT id FROM "${w.names.schema}".tf_conversation_turns WHERE source_message_id=$1`, [
+          followUpMessageId,
+        ])
+      ).rows[0];
       await createConversationExecutor(runtime, async () => ({
         text: 'The scheduled work is done.',
-        sources: [source],
+        sources: [],
       })).process({
         workspaceId: w.id,
         conversationId: chatId,
-        turnId: fired.turnId,
+        turnId: fired.id,
         generation: 0,
+      });
+      await t.test('a standalone follow-up reply inherits its saved instruction sources', async () => {
+        const stored = (
+          await db.platform.query(`SELECT sources FROM "${w.names.schema}".tf_conversation_results WHERE turn_id=$1`, [
+            fired.id,
+          ])
+        ).rows[0];
+        assert.ok(
+          stored.sources.some(
+            dependency => dependency.kind === 'knowledge-document' && dependency.documentId === added.documentId,
+          ),
+        );
       });
       assert.equal(
         (await chats.history(w.id, w.userId, chatId)).messages.find(message => message.id === followUpMessageId)
           .followUp.instruction,
         narration,
       );
+      const pending = await tool({ tool: 'followups.schedule', instruction: narration, delayMinutes: 1 });
+      assert.equal(pending.status, 'scheduled');
+      pendingFollowUpId = pending.followUp.id;
       await reply(messages => `Legacy uncited copy: ${copyFromContext(messages)}`, { tool: 'knowledge.list' });
       await reply(opaqueText);
       const old = (
@@ -355,6 +411,26 @@ for (const change of ['remove note', 'replace note', 'remove file']) {
     );
     const decision = { commandId: randomUUID(), digest: changed.digest, decision: 'save' };
     await drafts.decide(w.id, w.userId, chatId, changed.draftId, decision);
+    if (pendingFollowUpId)
+      await t.test('removed instruction sources prevent pending dispatch', async () => {
+        await db.platform.query(
+          `UPDATE "${w.names.schema}".tf_follow_ups SET due_at=clock_timestamp()-interval '1 second' WHERE id=$1`,
+          [pendingFollowUpId],
+        );
+        assert.deepEqual(await createFollowUps(runtime).due(w.id, chats.send), []);
+        assert.equal(
+          (await createFollowUps(runtime).readInChat(w.id, w.userId, chatId, pendingFollowUpId)).status,
+          'skipped',
+        );
+        assert.equal(
+          (
+            await db.platform.query(`SELECT sources FROM "${w.names.schema}".tf_follow_ups WHERE id=$1`, [
+              followUpMessageId,
+            ])
+          ).rows[0].sources,
+          null,
+        );
+      });
 
     for (let reload = 0; reload < 2; reload++) {
       const reader = createAuthoringDrafts(runtime);
@@ -437,6 +513,113 @@ for (const change of ['remove note', 'replace note', 'remove file']) {
         );
         assert.equal(message.followUp.instruction, 'Follow-up unavailable');
         assert.doesNotMatch(JSON.stringify(message), /Private source passage/);
+        assert.equal(
+          (await createFollowUps(runtime).readInChat(w.id, w.userId, chatId, followUpMessageId)).instruction,
+          'Follow-up unavailable',
+        );
+        const listed = await tool({ tool: 'followups.list' });
+        assert.doesNotMatch(JSON.stringify(listed), /Private source passage/);
+        await runtime.transaction(w.id, commonCompatibility, tx =>
+          assert.rejects(readConversationMessage(tx, actor, chatId, followUpMessageId), AccessDenied),
+        );
+      });
+    if (followUpMessageId)
+      await t.test('removed source text in a generated user message cannot be copied into a fresh reply', async () => {
+        await reply(messages => {
+          const generated = messages.find(message => message.role === 'user' && message.text?.includes(narration));
+          return generated
+            ? `Copied generated instruction: ${generated.text}`
+            : 'The removed instruction is not in this context.';
+        });
+        for (let reload = 0; reload < 2; reload++) {
+          const history = await createConversations(runtime).history(w.id, w.userId, chatId);
+          assert.doesNotMatch(JSON.stringify(history.messages), /Private source passage/);
+        }
+      });
+    if (followUpMessageId)
+      await t.test('legacy working summaries retain generated instruction provenance', async () => {
+        const compactionId = randomUUID();
+        const coveredThrough = (
+          await db.platform.query(
+            `SELECT id,accepted_sequence FROM "${w.names.schema}".tf_conversation_turns WHERE source_message_id=$1`,
+            [followUpMessageId],
+          )
+        ).rows[0];
+        await runtime.transaction(w.id, commonCompatibility, async tx => {
+          await insertCompaction(tx, {
+            id: compactionId,
+            conversationId: chatId,
+            turnId: coveredThrough.id,
+            trigger: 'automatic',
+            state: 'compacted',
+            previousId: null,
+            coveredThrough: coveredThrough.accepted_sequence,
+            policyRevision: 0,
+            familyId: null,
+            fallbackFrom: null,
+            before: null,
+            afterTokens: 10,
+            triggerPercent: 70,
+            targetPercent: 30,
+            errorCode: null,
+          });
+          assert.equal(
+            await replaceWorkingSummary(tx, {
+              conversationId: chatId,
+              compactionId,
+              expectedPrevious: null,
+              coveredThrough: coveredThrough.accepted_sequence,
+              summary: { goal: narration, state: '', decisions: [], openWork: [] },
+              protectedMessageIds: [followUpMessageId],
+              sources: [{ kind: 'private-conversation', conversationId: chatId, snapshot: true }],
+            }),
+            true,
+          );
+        });
+        const sent = await chats.send(w.id, w.userId, chatId, {
+          messageId: randomUUID(),
+          commandId: randomUUID(),
+          parts: [{ kind: 'text', text: 'Continue from the working summary.' }],
+        });
+        let context;
+        const compactor = {
+          policy: async () => ({
+            automatic: false,
+            triggerPercent: 70,
+            targetPercent: 30,
+            outputPrompt: null,
+            revision: 0,
+            families: [],
+          }),
+          measure: async () => ({ tokens: 10, window: 100000 }),
+          window: async () => 100000,
+          summarize: async () => {
+            throw new Error('Unexpected summary generation');
+          },
+        };
+        assert.equal(
+          await createConversationExecutor(
+            runtime,
+            async ({ messages }) => {
+              context = messages;
+              return 'No removed material is available.';
+            },
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            compactor,
+          ).process({
+            workspaceId: w.id,
+            conversationId: chatId,
+            turnId: sent.turnId,
+            generation: 0,
+          }),
+          'completed',
+        );
+        assert.doesNotMatch(JSON.stringify(context), /Private source passage/);
       });
     if (legacySources)
       await t.test('legacy context exposure is not cleared by an unrelated Knowledge list output', async () => {

@@ -17,6 +17,8 @@ import {
   requireKnowledgeSources,
   requireWorkflowSources,
   requireResultSources,
+  generatedMessageSources,
+  canReadToolDetails,
 } from './source-access.ts';
 import type { MaintenanceFence } from './maintenance-contracts.ts';
 import type { ChatMessage, ContextMeasure, ContextMessage, Summarizer } from '@tulipfarm/memory-core/ports/summarizer';
@@ -220,6 +222,7 @@ export type CompactionSnapshot = {
   cleaned: string[];
   breaker: { failures: number; ineffective: number };
   wording: { id: string; text: string }[];
+  generatedSources?: SourceDependency[];
 };
 
 export async function compactCommand(
@@ -314,7 +317,21 @@ export async function compactionSnapshot(
         ...new Set([...(first ? [uuidSchema.parse(first)] : []), ...summary.protectedMessageIds]),
       ])
     : [];
-  return { command, requested, completed, summary, cleaned, breaker, wording };
+  const generatedIds = summary
+    ? (
+        await tx.client.query(
+          `SELECT source_message_id FROM ${table(tx, 'tf_conversation_turns')}
+         WHERE conversation_id=$1 AND accepted_sequence<=$2`,
+          [conversationId, summary.coveredThrough],
+        )
+      ).rows.map(row => uuidSchema.parse(row.source_message_id))
+    : [];
+  const generated = await generatedMessageSources(tx, conversationId, [
+    ...generatedIds,
+    ...wording.map(item => item.id),
+  ]);
+  const generatedSources = [...generated.values()].flat();
+  return { command, requested, completed, summary, cleaned, breaker, wording, generatedSources };
 }
 
 export const breakerOpen = (breaker: { failures: number; ineffective: number }) =>
@@ -568,6 +585,7 @@ async function requireReadable(
   await requireWorkflowSources(tx, actor, sources);
   await requireGoogleSources(tx, actor, sources);
   await requireGoogleFileSources(tx, actor, sources);
+  return project;
 }
 
 /** Caller has already authorized the actor for the conversation. Handoff text is withheld when its sources are no longer readable. */
@@ -641,10 +659,16 @@ export async function readConversationMessage(
       ).rows[0],
     );
   if (!row || !row.turnResponse) return null;
+  const generated = (await generatedMessageSources(tx, conversationId, [messageId])).get(messageId);
   const sources: SourceDependency[] =
+    generated ??
     row.sources ??
     (row.role === 'assistant' ? [{ kind: 'unknown' }] : [{ kind: 'private-conversation', conversationId }]);
-  if (row.role === 'assistant') await requireReadable(tx, actor, conversationId, sources);
+  if (row.role === 'assistant' || generated) {
+    const project = await requireReadable(tx, actor, conversationId, sources);
+    if (generated && !(await canReadToolDetails(tx, actor, generated, null, project ? conversationId : undefined)))
+      throw new AccessDenied();
+  }
   const characters = [...row.text];
   const start = Math.min(Math.max(0, offset), characters.length);
   let end = start;

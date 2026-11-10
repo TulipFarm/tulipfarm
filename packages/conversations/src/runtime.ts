@@ -54,6 +54,8 @@ import {
   requireSlackTurn,
   requireReplyMcpSources,
   requireChatReviewSources,
+  generatedMessageSources,
+  canReadToolDetails,
 } from './source-access.ts';
 import {
   bindFileSources,
@@ -1391,6 +1393,22 @@ export function createConversationExecutor(
               )
             ).rows[0],
           );
+          const currentGenerated = (await generatedMessageSources(tx, fence.conversationId, [currentMessage.id])).get(
+            currentMessage.id,
+          );
+          if (
+            currentGenerated &&
+            !(await canReadToolDetails(
+              tx,
+              chat.requester,
+              chat.context?.kind === 'channel'
+                ? currentGenerated.filter(source => source.kind !== 'shared-slack-turn')
+                : currentGenerated,
+              null,
+              chat.project_id ? fence.conversationId : undefined,
+            ))
+          )
+            throw new AccessDenied();
           const managed = Boolean(compactor) && !chat.slack && !chat.context && !chat.standalone;
           const compaction = managed
             ? await compactionSnapshot(tx, fence.conversationId, fence.turnId, turn.source_message_id)
@@ -1405,6 +1423,16 @@ export function createConversationExecutor(
           const summarySources: SourceDependency[] = [];
           if (compaction?.summary)
             try {
+              if (
+                !(await canReadToolDetails(
+                  tx,
+                  chat.requester,
+                  compaction.generatedSources ?? [],
+                  null,
+                  chat.project_id ? fence.conversationId : undefined,
+                ))
+              )
+                throw new AccessDenied();
               if (chat.project_id)
                 await requireResultSources(tx, chat.requester, fence.conversationId, compaction.summary.sources);
               await requireGitHubSources(tx, chat.requester, compaction.summary.sources);
@@ -1413,7 +1441,7 @@ export function createConversationExecutor(
               await requireKnowledgeSources(tx, chat.requester, compaction.summary.sources);
               await requireWorkflowSources(tx, chat.requester, compaction.summary.sources);
               await requireGoogleFileSources(tx, chat.requester, compaction.summary.sources);
-              summarySources.push(...compaction.summary.sources);
+              summarySources.push(...compaction.summary.sources, ...(compaction.generatedSources ?? []));
             } catch (error) {
               if (!(error instanceof AccessDenied)) throw error;
               // An unreadable summary leaves context; the covered messages return so their own checks apply.
@@ -1720,6 +1748,30 @@ export function createConversationExecutor(
                   },
                   ...(chat.context?.sources ?? []),
                 ];
+          const generated = await generatedMessageSources(
+            tx,
+            fence.conversationId,
+            messages.map(message => message.id),
+          );
+          for (const [messageId, sources] of generated) {
+            const message = messages.find(message => message.id === messageId);
+            if (!message) continue;
+            if (
+              !(await canReadToolDetails(
+                tx,
+                chat.requester,
+                chat.context?.kind === 'channel'
+                  ? sources.filter(source => source.kind !== 'shared-slack-turn')
+                  : sources,
+                null,
+                chat.project_id ? fence.conversationId : undefined,
+              ))
+            ) {
+              message.text = '';
+              continue;
+            }
+            inherited.push(...sources);
+          }
           // Question and approval cards add no text to model context, so they carry no result sources.
           const assistants = messages.filter(message => message.role === 'assistant' && message.text);
           const rows = z
