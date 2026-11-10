@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
-import { createChatExecution } from '../src/chat-execution.ts';
+import { createChatExecution, runIsolated } from '../src/chat-execution.ts';
 
 const profile = { id: 'small', resources: { kind: 'limited', cpuMillis: 1000, memoryMiB: 512, diskBytes: 1048576 } };
 const configuration = {
@@ -86,4 +86,28 @@ test('A failed job still destroys its allocation', async () => {
     /backend-down/,
   );
   assert.equal(calls.at(-1)[0], 'destroy');
+});
+
+test('TypeScript chat code runs as an ES module with types stripped', async () => {
+  const { backend, calls } = fakeBackend({
+    events: [{ kind: 'end', sequence: 1 }],
+    finish: { state: 'completed', exitCode: 0 },
+  });
+  const code = 'const n: number = 2; console.log(await Promise.resolve(n));';
+  await createChatExecution(backend, configuration)({ conversationId: randomUUID(), language: 'typescript', code });
+  const [, started] = calls.find(([name]) => name === 'startJob');
+  assert.deepEqual(started.command, { program: 'node', args: ['--input-type=module-typescript', '-e', code] });
+});
+
+test('A timeout shorter than the policy limit caps the job deadline', async () => {
+  const { backend, calls } = fakeBackend({
+    events: [{ kind: 'end', sequence: 1 }],
+    finish: { state: 'completed', exitCode: 0 },
+  });
+  const before = Date.now();
+  const command = { program: 'true', args: [] };
+  await runIsolated(backend, configuration, { areaId: randomUUID(), command, timeoutMs: 20000 });
+  const [, started] = calls.find(([name]) => name === 'startJob');
+  const budget = Date.parse(started.deadline) - before;
+  assert.ok(budget >= 20000 && budget < 21000, `job budget was ${budget} ms`);
 });

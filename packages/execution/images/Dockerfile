@@ -1,4 +1,4 @@
-FROM node:22-bookworm-slim
+FROM node:26-bookworm-slim
 LABEL org.tulipfarm.execution.protocol="1"
 RUN apt-get update \
     && apt-get install --no-install-recommends -y python3 python3-venv python3-pip git ca-certificates \

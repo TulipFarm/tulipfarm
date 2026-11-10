@@ -12,9 +12,11 @@ A value is `{"kind":"literal","value"}`, `{"kind":"input","path":[]}`, or `{"kin
 - `{"id","kind":"delay","seconds"}`
 - `{"id","kind":"wait-until","at":value holding an ISO datetime}`
 - `{"id","kind":"transform","fields":{name:value}}`
-- `{"id","kind":"code","language":"javascript" or "python","source","input":value}`
+- `{"id","kind":"code","language":"javascript", "typescript", "python" or "bash","source","input":value}`
 
-Code steps need a configured isolated runner. A human step asks for input; it does not approve a provider action.
+JavaScript, TypeScript and Python `source` is a function body: it reads `input` and its `return` value, which must be JSON, is the step output. Bash `source` reads the input JSON from `$INPUT`; its printed output is the step output, parsed as JSON when it is valid JSON. Each step runs in a fresh isolated machine for at most 20 seconds, with public network access and no secrets.
+
+Code steps need a configured execution backend. A human step asks for input; it does not approve a provider action.
 
 ## Agent step
 

@@ -28,7 +28,8 @@ import { createConversationActivities } from './conversation-activities.ts';
 import { createConversationMaintenanceActivities } from './conversation-maintenance-activities.ts';
 import { createGoogleHeartbeatActivities } from './google-heartbeat-activities.ts';
 import { createWorkflows } from '@tulipfarm/workflows';
-import { configuredSnippetClient } from '@tulipfarm/workflow-snippets/client';
+import type { SnippetClient } from '@tulipfarm/workflow-snippets/protocol';
+import { createExecutionSnippetClient } from './workflow-code-steps.ts';
 import { createTaskComposition } from './task-composition.ts';
 import { createModelBundleRegistry } from './model-bundle-registry.ts';
 import { createTaskDispatcher, createTaskRecovery } from './task-dispatch.ts';
@@ -70,11 +71,15 @@ const service = workerTelemetryService(role);
 // Bare package names in TULIPFARM_EXTENSIONS resolve from this app.
 await startExtensions('worker', { resolve: specifier => import.meta.resolve(specifier), service });
 let chatExecution: ChatExecution | undefined;
+let snippets: SnippetClient | undefined;
 if (role !== 'knowledge') {
   try {
     const configuration = executionConfiguration();
     const backend = configuredExecutionBackend(configuration);
-    if (backend && configuration.mode !== 'off') chatExecution = createChatExecution(backend, configuration);
+    if (backend && configuration.mode !== 'off') {
+      chatExecution = createChatExecution(backend, configuration);
+      snippets = createExecutionSnippetClient(backend, configuration);
+    }
   } catch (error) {
     await shutdownExtensions();
     throw error;
@@ -285,7 +290,6 @@ async function run() {
         )
       : undefined;
     const gmail = coreResources ? createGoogleHeartbeatActivities(coreResources.runtime) : undefined;
-    const snippets = configuredSnippetClient();
     const workflowSlack = guarded ? slackActionsFromEnvironment()?.(guarded) : undefined;
     const workflows = coreResources
       ? {

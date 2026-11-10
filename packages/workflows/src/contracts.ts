@@ -191,7 +191,7 @@ export const stepSchema = z.discriminatedUnion('kind', [
   z.strictObject({
     id: name,
     kind: z.literal('code'),
-    language: z.enum(['javascript', 'python']),
+    language: z.enum(['javascript', 'typescript', 'python', 'bash']),
     source: z.string().min(1).max(32768),
     input: valueSchema,
   }),

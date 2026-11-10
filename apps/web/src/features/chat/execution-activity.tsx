@@ -5,6 +5,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@tulipfarm/
 const languageNames: Record<ExecutionReceipt['language'], string> = {
   python: 'Python',
   javascript: 'JavaScript',
+  typescript: 'TypeScript',
   bash: 'Bash',
 };
 const block = 'max-h-80 overflow-auto whitespace-pre-wrap break-all rounded-md bg-muted p-3 font-mono text-xs';

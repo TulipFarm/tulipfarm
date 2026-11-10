@@ -4017,7 +4017,7 @@
                         },
                         "language": {
                           "type": "string",
-                          "enum": ["javascript", "python"]
+                          "enum": ["javascript", "typescript", "python", "bash"]
                         },
                         "source": {
                           "type": "string",

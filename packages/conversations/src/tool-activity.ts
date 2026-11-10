@@ -500,7 +500,7 @@ export function apiCallReceipt(
 }
 
 export const executionReceiptSchema = z.object({
-  language: z.enum(['python', 'javascript', 'bash']),
+  language: z.enum(['python', 'javascript', 'typescript', 'bash']),
   code: z.string().max(32768),
   result: z
     .object({

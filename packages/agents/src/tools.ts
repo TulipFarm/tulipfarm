@@ -214,7 +214,7 @@ export const frameworkCallSchema = z.discriminatedUnion('tool', [
   z.strictObject({ tool: z.literal('github.personal.execute'), batchId: z.uuid() }),
   z.strictObject({
     tool: z.literal('execution.run'),
-    language: z.enum(['python', 'javascript', 'bash']),
+    language: z.enum(['python', 'javascript', 'typescript', 'bash']),
     code: z.string().min(1).max(32768),
   }),
   z.strictObject({ tool: z.literal('tables.propose'), input: tableProposalInput }),
@@ -773,7 +773,7 @@ const descriptions: Record<ToolName, string> = {
   'skills.execute':
     'Run a Bash, Python, or Node file from an exact reviewed package. No network, secrets, or installs. Outputs support text, JSON, CSV, Markdown, PNG, and JPEG. If pending, reuse its invocationId with the exact same arguments; never rerun an unknown outcome with a new ID. Tests run only when requested.',
   'execution.run':
-    'Run a short Python, JavaScript (Node.js), or Bash program in a fresh isolated machine and return its exit code, stdout, and stderr. Use it to calculate, check, or transform data exactly instead of guessing. Print the answer. Each call starts empty: no files persist, and no secrets are available.',
+    'Run a short Python, JavaScript (Node.js), TypeScript (Node.js, ES module), or Bash program in a fresh isolated machine and return its exit code, stdout, and stderr. Use it to calculate, check, or transform data exactly instead of guessing. Print the answer. Each call starts empty: no files persist, and no secrets are available.',
   'skills.import':
     'Prepare public skills.sh, GitHub, or website skill packages from one URL. Returns the discovered packages. Nothing is installed. The human selects packages and approves the exact safety review.',
   'skills.import.status':

@@ -328,7 +328,7 @@ export function conversationApi(workspaceId: string, denied: (status: number) =>
         throw new TableRequestError(
           response.status,
           code,
-          'JavaScript and Python steps cannot run here yet because no isolated code runner is configured. Ask chat for a draft without code steps.',
+          'Code steps cannot run here yet because no execution backend is configured. Ask chat for a draft without code steps.',
         );
       if (code === 'memory-unavailable')
         throw new TableRequestError(

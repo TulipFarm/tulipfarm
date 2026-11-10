@@ -578,6 +578,9 @@ importers:
       '@tulipfarm/email':
         specifier: workspace:*
         version: link:../../packages/email
+      '@tulipfarm/execution-contract':
+        specifier: workspace:*
+        version: link:../../packages/execution-contract
       '@tulipfarm/extensions':
         specifier: workspace:*
         version: link:../../packages/extensions
