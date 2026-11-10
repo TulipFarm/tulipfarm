@@ -312,6 +312,7 @@ export function AuthoringDraftCard({
         result={result}
         feedback={feedback}
         checkStatus={checkStatus}
+        refresh={read.refresh}
       />
     );
   const definition = proposal.input.definition;

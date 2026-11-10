@@ -160,11 +160,17 @@ test('blocked activation keeps the reviewed draft and retries the same setup', {
   await step('Review');
   await form.getByRole('button', { name: 'Create and activate', exact: true }).click();
   await form
-    .getByText('Instructions saved, but setup is incomplete. No new triggers were started.', { exact: true })
+    .getByText('Agent saved, but not active yet. No new triggers or Slack channels were started.', { exact: true })
     .waitFor();
+  await form.getByText('The Slack app can’t post in this channel yet. Retry setup later.', { exact: true }).waitFor();
+  assert.equal(
+    await form.getByText('The earlier active setup was not replaced.', { exact: false }).count(),
+    0,
+    'a new agent has no earlier active setup',
+  );
   assert.equal(await page.getByRole('heading', { name: 'Agent created and activated.', exact: true }).count(), 0);
   assert.equal(fixture.publications.size, 1);
-  await form.getByRole('button', { name: 'Retry this setup', exact: true }).click();
+  await form.getByRole('button', { name: 'Retry setup', exact: true }).click();
   await page.getByRole('heading', { name: 'Agent created and activated.', exact: true }).waitFor();
   assert.equal(fixture.publications.size, 1);
   assert.equal(fixture.requests.filter(request => request.path.endsWith('/retry')).length, 1);

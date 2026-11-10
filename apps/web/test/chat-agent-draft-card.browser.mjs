@@ -434,3 +434,217 @@ test(
     }
   },
 );
+
+test(
+  'a stopped chat setup explains why, offers retry only when it can help, and links to a saved agent',
+  { timeout: 120000 },
+  async () => {
+    const fixture = agentBuilderFixture();
+    const { workspace } = fixture;
+    const server = await startBuiltApp();
+    const browser = await chromium.launch(builderBrowserOptions());
+    const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, reducedMotion: 'reduce' });
+    page.setDefaultTimeout(10000);
+    try {
+      const targetId = randomUUID(),
+        draftId = randomUUID(),
+        commandId = randomUUID();
+      const retries = [],
+        errors = [];
+      page.on('pageerror', error => errors.push(error.message));
+      let setupReceipt,
+        priorRevision = null;
+      const blocked = error => ({
+        commandId,
+        agentId: targetId,
+        version: 1,
+        digest: 'd'.repeat(64),
+        status: 'blocked',
+        savedRevision: 'e'.repeat(40),
+        activationId: null,
+        error,
+        workflowId: null,
+      });
+      const view = () => ({
+        id: draftId,
+        digest: 'd'.repeat(64),
+        status: setupReceipt.status === 'conflict' ? 'stale' : 'failed',
+        outcome: {
+          kind: 'agent',
+          receipt: {
+            commandId: randomUUID(),
+            agentId: targetId,
+            status: setupReceipt.status === 'failed' ? 'failed' : 'accepted',
+            savedRevision: setupReceipt.savedRevision,
+          },
+          setupReceipt,
+        },
+        proposal: {
+          kind: 'agent',
+          targetId,
+          input: {
+            expectedSoulRevision: 'a'.repeat(40),
+            expectedSavedRevision: priorRevision,
+            expectedPolicyVersion: 0,
+            expectedActivationIds: [],
+            expectedWorkflowRevision: null,
+            expectedWorkflowGeneration: null,
+            owningTeamId: fixture.team.id,
+            definition: {
+              name: 'Pull request notifier',
+              instructions: 'Summarise new pull requests for the team.',
+              tools: [],
+              responseRule: 'tag',
+            },
+            setup: {
+              policy: { grants: [{ teamId: fixture.team.id, permissions: ['read', 'invoke'] }], personGrants: [] },
+              enrollment: [fixture.team.id],
+              scope: [],
+              limits: [],
+              taskLimits: { toolCalls: 25, activeMilliseconds: 60000, credits: 20 },
+              slackSender: 'app',
+              slackChannels: [],
+              prompt: 'Post a summary when a pull request opens.',
+              runLimits: { toolCalls: 10, activeMilliseconds: 60000, credits: 10 },
+              triggers: [{ id: randomUUID(), trigger: { kind: 'event', name: 'pull_request_opened' } }],
+            },
+          },
+        },
+      });
+      const chat = {
+        id: chatId,
+        title: 'Pull request notifier',
+        titleRevision: 1,
+        titleManual: false,
+        archived: false,
+        activityAt: '2026-10-12T10:00:00Z',
+        createdAt: '2026-10-12T10:00:00Z',
+        projectId: null,
+      };
+      await page.route('**/v1/**', async route => {
+        const request = route.request(),
+          url = request.url(),
+          path = new URL(url).pathname,
+          method = request.method();
+        if (path.endsWith(`/drafts/${draftId}`)) return route.fulfill({ json: view() });
+        if (path.endsWith(`/setup-commands/${commandId}/retry`)) {
+          retries.push(method);
+          return route.fulfill({ json: setupReceipt });
+        }
+        if (path.endsWith(`/conversations/${chatId}/messages`))
+          return route.fulfill({
+            json: {
+              messages: [
+                {
+                  id: randomUUID(),
+                  sequence: 1,
+                  author: 'human',
+                  createdAt: '2026-10-12T10:00:00Z',
+                  parts: [{ kind: 'text', text: 'Tell the team about new pull requests.' }],
+                  turn: { id: randomUUID(), status: 'completed', generation: 0 },
+                  tools: [tool(draftId)],
+                },
+              ],
+              nextBefore: null,
+              hasGitHubProposals: false,
+            },
+          });
+        if (path.endsWith(`/conversations/${chatId}`)) return route.fulfill({ json: chat });
+        if (path.endsWith('/system-package-installations'))
+          return route.fulfill({ json: { installations: [], nextCursor: null } });
+        if (path.endsWith('/conversations')) return route.fulfill({ json: { chats: [chat], nextCursor: null } });
+        return route.fulfill(fixture.respond(method, url, request.postDataJSON()));
+      });
+      const visit = async (receipt, row) => {
+        setupReceipt = receipt;
+        await page.goto(`${server.origin}/${workspace.slug}/chat/${chatId}`);
+        await page.getByText(row, { exact: true }).waitFor();
+      };
+      const open = async (receipt, row) => {
+        await visit(receipt, row);
+        await captureBuilderScreenshot(page, `agent-setup-${receipt.status}-row`);
+        await page.getByRole('button', { name: 'View agent', exact: true }).click();
+        const card = page.getByRole('region', { name: 'Review agent draft' }).first();
+        await card.waitFor();
+        return card;
+      };
+
+      let card = await open(blocked('github-trigger-unavailable'), 'Saved · Setup incomplete');
+      await card
+        .getByText('Agent saved, but not active yet. No new triggers or Slack channels were started.', { exact: true })
+        .waitFor();
+      await card.getByText('GitHub triggers aren’t available right now. Retry setup later.', { exact: true }).waitFor();
+      assert.equal(
+        await card.getByRole('link', { name: 'Open agent', exact: true }).getAttribute('href'),
+        `/${workspace.slug}/agents/${targetId}`,
+      );
+      await captureBuilderScreenshot(page, 'agent-setup-blocked-card');
+      setupReceipt = blocked('setup-type-error');
+      await card.getByRole('button', { name: 'Retry setup', exact: true }).click();
+      await card
+        .getByText(
+          'Setup could not finish (error: setup-type-error). Retry setup. If it happens again, share this code when you ask for help.',
+          { exact: true },
+        )
+        .waitFor();
+      assert.deepEqual(retries, ['POST'], 'retry resumes the stored setup command');
+
+      card = await open(blocked('saved-revision-conflict'), 'Saved · Setup incomplete');
+      await card
+        .getByText(
+          'A newer version of this agent was saved after this setup was reviewed. Review the setup again, then activate it.',
+          { exact: true },
+        )
+        .waitFor();
+      assert.equal(
+        await card.getByRole('button', { name: 'Retry setup' }).count(),
+        0,
+        'retrying a reviewed setup that changed since cannot succeed',
+      );
+      assert.equal(await card.getByRole('link', { name: 'Open agent', exact: true }).count(), 1);
+
+      const failed = { ...blocked('definition-failed'), status: 'failed', savedRevision: null };
+      await visit(failed, 'Not saved');
+      await captureBuilderScreenshot(page, 'agent-setup-failed-new-agent-row');
+      assert.equal(
+        await page.getByRole('button', { name: 'View agent' }).count(),
+        0,
+        'a new agent whose first save failed has no agent to view',
+      );
+
+      priorRevision = 'f'.repeat(40);
+      card = await open(failed, 'Not saved');
+      await card
+        .getByText('Setup did not finish. The agent was not saved and nothing was activated.', { exact: true })
+        .waitFor();
+      await card.getByText('The agent could not be saved. Nothing was changed.', { exact: true }).waitFor();
+      await card.getByText('Not saved', { exact: true }).waitFor();
+      assert.equal(await card.getByRole('button', { name: 'Retry setup' }).count(), 0);
+      assert.equal(
+        await card.getByRole('link', { name: 'Open agent', exact: true }).getAttribute('href'),
+        `/${workspace.slug}/agents/${targetId}`,
+        'a failed update still links to the existing agent',
+      );
+      await captureBuilderScreenshot(page, 'agent-setup-failed-update-card');
+
+      priorRevision = null;
+      card = await open({ ...blocked('definition-conflict'), status: 'conflict', savedRevision: null }, 'Out of date');
+      await card
+        .getByText('This agent changed before it could be saved. Review the setup again, then activate it.', {
+          exact: true,
+        })
+        .waitFor();
+      await card.getByText('Out of date', { exact: true }).waitFor();
+      assert.equal(await card.getByText(/workflow changed after this draft was made/).count(), 0);
+      assert.equal(await card.getByRole('button', { name: 'Retry setup' }).count(), 0);
+      await captureBuilderScreenshot(page, 'agent-setup-conflict-card');
+      assert.deepEqual(errors, []);
+    } catch (error) {
+      await captureBrowserFailure(page, 'agent-setup-stopped');
+      throw error;
+    } finally {
+      await browser.close();
+      await server.close();
+    }
+  },
+);
