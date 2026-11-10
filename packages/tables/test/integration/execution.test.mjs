@@ -180,7 +180,7 @@ test(
         (await proposals.status(ws.id, ws.userId, chat, create.id)).status,
         (await proposals.status(ws.id, ws.userId, chat, create.id)).plans[0].receipt.code,
       ],
-      ['failed', 'storage-fault'],
+      ['failed', 'access-denied'],
     );
     assert.equal(await advance(ws.id, create.id), 'blocked');
     const resume = proposal =>
@@ -205,8 +205,8 @@ test(
         )
       ).rows,
       [
-        { status: 'failed', code: 'storage-fault' },
-        { status: 'failed', code: 'storage-fault' },
+        { status: 'failed', code: 'access-denied' },
+        { status: 'failed', code: 'access-denied' },
       ],
     );
     await db.platform.query(`GRANT ${provenanceGrant} TO ${executors}`);

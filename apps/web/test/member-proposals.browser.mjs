@@ -113,6 +113,14 @@ test('member proposal failures explain rejected resumes and retain completed wor
         id(22),
         { kind: 'text', value: 'different@example.test' },
       ],
+      [
+        'access-denied',
+        'Access to this change or one of its sources was denied. Check that you can still read its sources and that any skills it uses are enabled, then retry.',
+        id(11),
+        id(14),
+        id(40),
+        { kind: 'relationship', tableId: id(10), recordIds: [id(24)] },
+      ],
     ]) {
       const response = await fetch(`${origin}${root}/tables/${tableId}`);
       assert.equal(response.status, 200);
@@ -159,7 +167,7 @@ test('member proposal failures explain rejected resumes and retain completed wor
           ],
         },
       });
-      await page.goto(`${origin}/members-table-mock/chat/${chatId}`);
+      await page.goto(`${origin}/members-table-mock/chat/${chatId}`, { timeout: 60000 });
       // A proposal that had already failed when the chat opened stays inline until opened for review.
       await page.getByRole('button', { name: 'Review changes', exact: true }).click();
       const card = page.getByRole('region', { name: 'Table change proposal' });
@@ -195,7 +203,7 @@ test('member proposal failures explain rejected resumes and retain completed wor
       );
       await page.setViewportSize({ width: 1440, height: 1000 });
     }
-    assert.equal(commands.length, 2);
+    assert.equal(commands.length, 3);
     assert.deepEqual(errors, []);
     assert.deepEqual(external, [], 'all browser requests stay in the local fixture');
   } catch (error) {

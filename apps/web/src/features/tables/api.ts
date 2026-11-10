@@ -174,6 +174,8 @@ export type RecordMutation = MutationBase &
 export type WorkspaceMemberState = z.infer<typeof workspaceMemberStateSchema>;
 export type MemberStateQuery = { ids?: readonly string[]; after?: string; attention?: boolean };
 export const memberMessages: Readonly<Record<string, string>> = {
+  'access-denied':
+    'Access to this change or one of its sources was denied. Check that you can still read its sources and that any skills it uses are enabled, then retry.',
   'member-table-protected':
     'Workspace members is a built-in table. Its name, owner, and core fields stay fixed. Add your own business fields in chat.',
   'member-field-protected':

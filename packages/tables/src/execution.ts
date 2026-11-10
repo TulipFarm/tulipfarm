@@ -1105,7 +1105,7 @@ export function createTableExecution(
           ['proposal-redacted', 'proposal-not-approved', 'dependency-unfinished'].includes(error.code)
         )
           return 'blocked';
-        // The receipt only says storage-fault; keep the database's own code and the throwing frame for operators.
+        // Keep the database's own code and throwing frame even when the receipt reports an access refusal.
         if (storageFault)
           log('warn', 'activity', 'call_failed', {
             operation: 'tables.execution',
@@ -1141,7 +1141,7 @@ export function createTableExecution(
               ).rows[0];
             const job = executionSchema.parse(existing);
             const code =
-              error instanceof AccessDenied
+              error instanceof AccessDenied || (storageFault && error.code === '42501')
                 ? 'access-denied'
                 : error instanceof TableProposalError ||
                     error instanceof store.GenerationError ||
