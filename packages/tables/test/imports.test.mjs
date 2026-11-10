@@ -380,6 +380,29 @@ test('explicit sheet and header choices are authoritative during preparation', a
   await rejects(fitFileImportSelection(file, { format: 'xlsx', sheet: 'Missing' }), 'invalid-selection');
 });
 
+test('an explicit header row given as the first data row moves up to the row that reads as the header', async () => {
+  const file = bytes('Name,Total\nAna,12\nBen,5\n');
+  const fitted = await fitFileImportSelection(file, {
+    format: 'csv',
+    delimiter: ',',
+    header: 2,
+    conversions: { Total: 'numeric' },
+  });
+  assert.deepEqual(fitted.selection.header, { kind: 'row', row: 1 });
+  assert.deepEqual(fitted.adjustments, [{ kind: 'header', requested: 2, used: 1 }]);
+  assert.equal((await parseImportFile(file, fitted.selection)).length, 2);
+
+  const titled = await workbook([['Orders export'], ['Order ID', 'Total'], ['A-1', 12]]);
+  const kept = await fitFileImportSelection(titled, {
+    format: 'xlsx',
+    sheet: 'Tickets',
+    header: 2,
+    conversions: { Total: 'numeric' },
+  });
+  assert.deepEqual(kept.selection.header, { kind: 'row', row: 2 });
+  assert.deepEqual(kept.adjustments, []);
+});
+
 test('an exact worksheet name wins when another name differs only by surrounding spaces', async () => {
   for (const columns of [['ID'], ['ID', 'Total']]) {
     const file = await workbook([columns, columns.map(() => 'A-1')], book =>
