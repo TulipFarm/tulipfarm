@@ -29,6 +29,7 @@ import { AgentRead } from './feedback';
 import { agentDraftErrors } from './draft';
 import { useAgentChanges } from './queries';
 import { AgentSetupReview, useSetupTriggerNames } from './setup-review';
+import { setupErrorText } from './setup-errors';
 import { useSlackDestinationNames } from './reference-names';
 import type { agentApi, AgentContext } from './api';
 
@@ -531,8 +532,7 @@ export function AgentBuilder({
                   {receipt?.error && (
                     <Alert variant="destructive">
                       <AlertDescription>
-                        Setup stopped: {receipt.error}. Recheck access and trigger settings. The earlier active setup
-                        was not replaced.
+                        {setupErrorText(receipt.error)} The earlier active setup was not replaced.
                       </AlertDescription>
                     </Alert>
                   )}

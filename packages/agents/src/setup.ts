@@ -12,6 +12,7 @@ import {
 } from '@tulipfarm/access';
 import { canonicalJson } from '@tulipfarm/tables/canonical';
 import { WorkflowConflict } from '@tulipfarm/workflows';
+import { errorAttributes, recordAgentSetup } from '@tulipfarm/observability';
 import { createAgentAuthoring } from './authoring.ts';
 import { createSavedAgentService } from './saved-service.ts';
 import {
@@ -136,17 +137,24 @@ export function agentSetupDigest(agentId: string, input: SaveAgentSetupDraft | S
     .update(canonicalJson({ agentId, version: expectedVersion + 1, ...reviewed }))
     .digest('hex');
 }
+const setupCode = /^[a-z][a-z0-9-]{0,63}$/;
+/**
+ * The stored code for a setup that stopped. A kebab-case error message is already a code; any other error keeps its
+ * class or reviewed telemetry code, never its message.
+ */
 function setupFailure(error: unknown) {
   if (error instanceof AgentError) return error.code;
   if (error instanceof AccessDenied) return 'setup-access-denied';
   if (error instanceof LinkedWorkflowConflict) return error.message;
   if (error instanceof WorkflowConflict && /^[a-z0-9-]{1,64}$/.test(error.message)) return `workflow-${error.message}`;
-  if (
-    error instanceof Error &&
-    ['slack-attachment-conflict', 'slack-channel-delivery-disabled'].includes(error.message)
-  )
-    return error.message;
-  return 'setup-operation-unavailable';
+  if (error instanceof Error && setupCode.test(error.message)) return error.message;
+  const { 'error.code': code, 'error.type': type } = errorAttributes(error);
+  const name = (code ?? type)
+    .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
+  return !name || name === 'error' || name === 'unknown' ? 'setup-operation-unavailable' : `setup-${name}`.slice(0, 64);
 }
 /** An active setup names the agent's linked Workflow when it has one. */
 async function linkedWorkflowFor(tx: AgentTransaction, command: Command) {
@@ -479,7 +487,9 @@ export function createAgentSetup(
     }
   }
   async function advance(workspaceId: string, user: string | HumanActor, commandId: string) {
-    return withHuman(runtime, workspaceId, user, 'write', async (tx, actor) => {
+    // Recorded only after the result commits, and only when this call settled the setup.
+    let settled: { status: string; error: string | null; cause?: unknown } | undefined;
+    const result = await withHuman(runtime, workspaceId, user, 'write', async (tx, actor) => {
       installed(tx);
       let command = await loadCommand(tx, actor, commandId);
       const draft = await loadDraft(tx, actor, command.agent_id, command.version);
@@ -510,6 +520,7 @@ export function createAgentSetup(
         saved_revision: definition.savedRevision,
         error: saveStatus === 'saved' ? null : `definition-${saveStatus}`,
       };
+      let cause: unknown;
       if (saveStatus === 'saved' && command.input.decision === 'activate') {
         // Soul acceptance is durable already. Only the database setup is rolled back on a recoverable failure.
         await tx.client.query('SAVEPOINT tf_agent_setup');
@@ -525,14 +536,18 @@ export function createAgentSetup(
           // A linked Workflow that changed after review needs a new review, not a retry.
           command.status = error instanceof LinkedWorkflowConflict ? 'conflict' : 'blocked';
           command.error = setupFailure(error);
+          cause = error;
         }
       }
       await tx.client.query(
         `UPDATE ${relation(tx, 'tf_agent_setup_commands')} SET status=$2,saved_revision=$3,error=$4,updated_at=clock_timestamp() WHERE id=$1`,
         [command.id, command.status, command.saved_revision, command.error],
       );
+      settled = { status: command.status, error: command.error, ...(cause === undefined ? {} : { cause }) };
       return receipt(command, await linkedWorkflowFor(tx, command));
     });
+    if (settled) recordAgentSetup(settled.status, settled.error, settled.cause);
+    return result;
   }
   async function readCommand(workspaceId: string, user: string | HumanActor, commandId: string) {
     return withHuman(runtime, workspaceId, user, 'read', async (tx, actor) => {

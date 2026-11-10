@@ -957,6 +957,34 @@ export function recordKnowledgeImport(
     });
 }
 
+const agentSetupStatuses: readonly string[] = ['saved', 'active', 'blocked', 'conflict', 'failed'];
+// A stored setup error code such as `setup-access-denied`; it becomes a metric label, so only kebab-case words pass.
+const agentSetupErrorCode = /^[a-z][a-z0-9-]{0,63}$/;
+
+/**
+ * One agent setup that reached a result, with the setup's stored error code when it did not finish. The log line adds
+ * the original error's class and code location; neither the counter nor the log carries ids or content.
+ */
+export function recordAgentSetup(status: string, errorCode: string | null, error?: unknown) {
+  try {
+    const result = agentSetupStatuses.includes(status) ? status : 'unknown';
+    const code = errorCode === null ? undefined : agentSetupErrorCode.test(errorCode) ? errorCode : 'unclassified';
+    metrics
+      .getMeter(scope)
+      .createCounter('cloud_agent_setups', { description: 'Agent setups that reached a result, by status and error' })
+      .add(1, { ...dimensions, status: result, error_code: code ?? 'none' });
+    log(code ? 'warn' : 'info', 'activity', code ? 'call_failed' : 'call_completed', {
+      operation: 'agents.setup',
+      outcome: result,
+      status: result,
+      ...(error === undefined ? {} : { ...errorAttributes(error), 'error.site': errorSite(error) }),
+      ...(code ? { 'error.code': code } : {}),
+    });
+  } catch {
+    /* Telemetry must not replace the setup result. */
+  }
+}
+
 export interface KnowledgeSyncSnapshot {
   failedItems: number;
   failedSources: number;
