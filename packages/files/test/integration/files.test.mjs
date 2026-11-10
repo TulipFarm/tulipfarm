@@ -604,7 +604,7 @@ ${await readFile(new URL('../../../../apps/database/migrations/0001_baseline.sql
     const main = await workspaceTableMigrations();
     const migrations = main;
     assert.deepEqual(migrations, main);
-    assert.equal(migrations.length, 10);
+    assert.equal(migrations.length, commonCompatibility.maximum);
     const w = await db.create(migrations);
     runtime = createWorkspaceRuntime({
       replicaCount: 1,

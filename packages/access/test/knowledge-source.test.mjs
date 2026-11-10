@@ -135,3 +135,13 @@ test('shared transitive dependencies are not mistaken for cycles', async () => {
   });
   assert.deepEqual(await protectedSourceClosure(tx, [root]), [root, left, right, leaf]);
 });
+
+test('a chat snapshot retains its explicit Knowledge and MCP dependencies without reading later chat turns', async () => {
+  const source = knowledge();
+  const snapshot = { kind: 'private-conversation', conversationId: randomUUID(), snapshot: true };
+  const mcp = { kind: 'mcp-integration', integrationId: randomUUID(), authorizationEpoch: 1 };
+  const tx = transaction({ knowledgeSourceDependencies: async () => [mcp] });
+  assert.deepEqual(await protectedSourceClosure(tx, [snapshot, source]), [snapshot, source, mcp]);
+  assert.deepEqual(await mcpSourceClosure(tx, [snapshot, source]), [mcp]);
+  await assert.rejects(requireNoMcpDerived(tx, [snapshot, source]), AccessDenied);
+});

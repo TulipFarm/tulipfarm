@@ -1,5 +1,6 @@
 import {
   AccessDenied,
+  SourceAuthorizationUnavailable,
   canAccessAsset,
   canAccessTable,
   currentMember,
@@ -19,9 +20,61 @@ import { qualified } from '@tulipfarm/workspace-storage/runtime';
 import { z } from 'zod';
 import { sourceDependencySchema } from './results.ts';
 import { standaloneTurn, turnRequester } from './turn-requester.ts';
+import { chatAccess } from './chat-access.ts';
 
 const sourceDependenciesSchema = z.array(sourceDependencySchema);
 const slackRootSchema = z.object({ installation_id: z.uuid() }).optional();
+export const followUpSourcesVersion = 54;
+
+/** Legacy model instructions inherit their scheduling step; fixed reaction reminders consume no model context. */
+export async function retainedFollowUpSources(tx: AuthorizationTransaction, ids: readonly string[]) {
+  const found = new Map<string, SourceDependency[]>();
+  if (!ids.length) return found;
+  const rows = await tx.client.query(
+    `SELECT f.id,COALESCE(NULLIF(to_jsonb(f)->'sources','null'::jsonb),
+       CASE WHEN f.origin='slack-reaction' THEN '[]'::jsonb END,s.sources) AS sources
+     FROM ${qualified(tx.schema, 'tf_follow_ups')} f
+     LEFT JOIN ${qualified(tx.schema, 'tf_conversation_execution_steps')} s
+       ON s.turn_id=f.origin_turn_id AND s.call->>'tool'='followups.schedule'
+       AND s.output->'result'->'followUp'->>'id'=f.id::text
+     WHERE f.id=ANY($1::uuid[])`,
+    [ids],
+  );
+  for (const row of rows.rows) {
+    const sources = sourceDependenciesSchema.safeParse(row.sources);
+    found.set(row.id, sources.success ? sources.data : [{ kind: 'unknown' }]);
+  }
+  return found;
+}
+
+export async function generatedMessageSources(
+  tx: AuthorizationTransaction,
+  conversationId: string,
+  messageIds: readonly string[],
+) {
+  const found = new Map<string, SourceDependency[]>();
+  if (!messageIds.length || Number((tx as { commonVersion?: number }).commonVersion ?? 0) < 27) return found;
+  const rows = await tx.client.query(
+    `SELECT m.id,f.id AS follow_up_id FROM ${qualified(tx.schema, 'tf_conversation_messages')} m
+     JOIN ${qualified(tx.schema, 'tf_conversation_turns')} t ON t.conversation_id=m.conversation_id
+       AND (t.source_message_id=m.id OR t.response_message_id=m.id
+         OR t.id=(SELECT r.turn_id FROM ${qualified(tx.schema, 'tf_conversation_results')} r WHERE r.message_id=m.id))
+     JOIN ${qualified(tx.schema, 'tf_follow_ups')} f ON
+       (f.conversation_id=m.conversation_id AND (f.id=t.source_message_id OR f.fired_message_id=t.source_message_id))
+       OR f.fired_event_id IN (
+         SELECT event_id FROM ${qualified(tx.schema, 'tf_slack_dm_events')} WHERE turn_id=t.id AND conversation_id=t.conversation_id
+         UNION ALL SELECT event_id FROM ${qualified(tx.schema, 'tf_slack_default_turns')} WHERE turn_id=t.id AND conversation_id=t.conversation_id
+       )
+     WHERE m.conversation_id=$1 AND m.id=ANY($2::uuid[])`,
+    [conversationId, messageIds],
+  );
+  const sources = await retainedFollowUpSources(
+    tx,
+    rows.rows.map(row => row.follow_up_id),
+  );
+  for (const row of rows.rows) found.set(row.id, sources.get(row.follow_up_id) ?? [{ kind: 'unknown' }]);
+  return found;
+}
 
 export async function requireResultSources(
   tx: AuthorizationTransaction,
@@ -160,9 +213,25 @@ export async function requireGoogleSources(tx: AuthorizationTransaction, actor: 
     if (source.kind === 'google-integration') await requireProtectedSource(tx, actor, source);
 }
 
+export class KnowledgeSourceRemoved extends AccessDenied {}
+
 export async function requireKnowledgeSources(tx: AuthorizationTransaction, actor: HumanActor, sources: unknown) {
   for (const source of sourceDependenciesSchema.parse(sources))
-    if (source.kind === 'knowledge-document') await requireProtectedSource(tx, actor, source);
+    if (source.kind === 'knowledge-document')
+      try {
+        await requireProtectedSource(tx, actor, source);
+      } catch (error) {
+        if (error instanceof SourceAuthorizationUnavailable || !(error instanceof AccessDenied)) throw error;
+        const removed = await tx.client.query(
+          `SELECT 1 FROM ${qualified(tx.schema, 'tf_knowledge_documents')} d
+           JOIN ${qualified(tx.schema, 'tf_knowledge_sources')} s ON s.id=d.source_id
+           WHERE d.id=$1 AND s.id=$2 AND s.provider IN ('note','file') AND s.owner_membership_id=$3
+             AND (d.tombstoned_at IS NOT NULL OR d.observed_revision_id<>$4)`,
+          [source.documentId, source.sourceId, actor.membershipId, source.revisionId],
+        );
+        if (removed.rowCount) throw new KnowledgeSourceRemoved();
+        throw error;
+      }
 }
 
 export async function requireWorkflowSources(tx: AuthorizationTransaction, actor: HumanActor, sources: unknown) {
@@ -179,14 +248,51 @@ export async function requireWorkflowSources(tx: AuthorizationTransaction, actor
  * stay readable. Provenance markers are not revocable sources, so they never change the receipt's outcome; the viewer's own
  * personal memory is readable, and opaque provenance only conceals the receipt's details. Returns whether to conceal them.
  */
-export async function requireRetainedToolSources(tx: AuthorizationTransaction, actor: HumanActor, sources: unknown) {
+export async function requireRetainedToolSources(
+  tx: AuthorizationTransaction,
+  actor: HumanActor,
+  sources: unknown,
+  projectChatId?: string,
+) {
   let opaque = false;
   for (const source of sourceDependenciesSchema.parse(sources))
     if (source.kind === 'personal-memory') opaque ||= source.membershipId !== actor.membershipId;
     else if (source.kind === 'unknown' || source.kind === 'unavailable' || source.kind === 'shared-slack-turn')
       opaque = true;
-    else await requireProtectedSource(tx, actor, source);
+    else if (source.kind === 'private-conversation' && !source.snapshot && source.conversationId === projectChatId) {
+      const chat = await chatAccess(tx, actor, source.conversationId);
+      if (!chat.projectId) await requireProtectedSource(tx, actor, source);
+    } else await requireProtectedSource(tx, actor, source);
   return opaque;
+}
+
+export async function canReadToolDetails(
+  tx: AuthorizationTransaction,
+  actor: HumanActor,
+  sources: unknown,
+  output: unknown = null,
+  projectChatId?: string,
+) {
+  const retained = sourceDependenciesSchema.safeParse(sources);
+  const result =
+    output == null
+      ? { success: true as const, data: { sources: [] } }
+      : z
+          .object({
+            sources: sourceDependenciesSchema,
+          })
+          .safeParse(output);
+  if (!retained.success || !result.success) return false;
+  try {
+    const dependencies = [...retained.data, ...result.data.sources];
+    if (await requireRetainedToolSources(tx, actor, dependencies, projectChatId)) return false;
+    if (projectChatId) await requireResultSources(tx, actor, projectChatId, dependencies);
+    return true;
+  } catch (error) {
+    if (error instanceof SourceAuthorizationUnavailable) throw error;
+    if (!(error instanceof AccessDenied)) throw error;
+    return false;
+  }
 }
 
 /** Slack row drafts check their thread's audience when proposed, read and decided, not through the generic source reader. */

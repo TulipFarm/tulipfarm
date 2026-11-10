@@ -17,6 +17,8 @@ import {
   requireKnowledgeSources,
   requireWorkflowSources,
   requireResultSources,
+  generatedMessageSources,
+  canReadToolDetails,
 } from './source-access.ts';
 import type { MaintenanceFence } from './maintenance-contracts.ts';
 import type { ChatMessage, ContextMeasure, ContextMessage, Summarizer } from '@tulipfarm/memory-core/ports/summarizer';
@@ -222,6 +224,32 @@ export type CompactionSnapshot = {
   wording: { id: string; text: string }[];
 };
 
+export async function readWorkingSummary(
+  tx: AuthorizationTransaction,
+  conversationId: string,
+  compactionId: string | null = null,
+): Promise<ActiveSummary | null> {
+  const row = (
+    await tx.client.query(
+      `SELECT compaction_id AS "compactionId", revision, covered_through AS "coveredThrough", summary, protected_message_ids AS "protectedMessageIds", sources
+       FROM ${table(tx, 'tf_conversation_working_summaries')}
+       WHERE conversation_id=$1 AND (($2::uuid IS NULL AND active) OR compaction_id=$2)`,
+      [conversationId, compactionId],
+    )
+  ).rows[0];
+  if (!row) return null;
+  const summary = activeSummaryRowSchema.parse(row);
+  const ids = (
+    await tx.client.query(
+      `SELECT source_message_id FROM ${table(tx, 'tf_conversation_turns')}
+       WHERE conversation_id=$1 AND accepted_sequence<=$2`,
+      [conversationId, summary.coveredThrough],
+    )
+  ).rows.map(row => uuidSchema.parse(row.source_message_id));
+  const generated = await generatedMessageSources(tx, conversationId, [...ids, ...summary.protectedMessageIds]);
+  return { ...summary, sources: mergeSources([...summary.sources, ...[...generated.values()].flat()]) };
+}
+
 export async function compactCommand(
   tx: AuthorizationTransaction,
   conversationId: string,
@@ -273,14 +301,7 @@ export async function compactionSnapshot(
       )
     ).rowCount,
   );
-  const row = (
-    await tx.client.query(
-      `SELECT compaction_id AS "compactionId", revision, covered_through AS "coveredThrough", summary, protected_message_ids AS "protectedMessageIds", sources
-    FROM ${table(tx, 'tf_conversation_working_summaries')} WHERE conversation_id=$1 AND active`,
-      [conversationId],
-    )
-  ).rows[0];
-  const summary = row ? activeSummaryRowSchema.parse(row) : null;
+  const summary = await readWorkingSummary(tx, conversationId);
   const cleaned = z
     .array(uuidSchema)
     .parse(
@@ -568,6 +589,7 @@ async function requireReadable(
   await requireWorkflowSources(tx, actor, sources);
   await requireGoogleSources(tx, actor, sources);
   await requireGoogleFileSources(tx, actor, sources);
+  return project;
 }
 
 /** Caller has already authorized the actor for the conversation. Handoff text is withheld when its sources are no longer readable. */
@@ -579,7 +601,7 @@ export async function readCompaction(
 ): Promise<CompactionDetail | null> {
   const row = (
     await tx.client.query(
-      `SELECT c.id, c.trigger, c.state, c.covered_through AS "coveredThrough", c.created_at AS "createdAt", c.before_tokens AS "beforeTokens", c.after_tokens AS "afterTokens", c.window_tokens AS "windowTokens",
+      `SELECT c.id, c.previous_id AS "previousId", c.trigger, c.state, c.covered_through AS "coveredThrough", c.created_at AS "createdAt", c.before_tokens AS "beforeTokens", c.after_tokens AS "afterTokens", c.window_tokens AS "windowTokens",
     c.trigger_percent AS "triggerPercent", c.target_percent AS "targetPercent", c.model_family_id AS "modelFamilyId", c.fallback_from_family_id AS "fallbackFromFamilyId", c.error_code AS "errorCode",
     (SELECT count(*)::int FROM ${table(tx, 'tf_conversation_context_cleanups')} x WHERE x.compaction_id=c.id) AS "cleanedMessages",
     CASE WHEN h.compaction_id IS NULL THEN NULL ELSE jsonb_build_object('status', h.status, 'text', h.text, 'prompt', h.prompt, 'modelFamilyId', h.model_family_id,
@@ -593,9 +615,18 @@ export async function readCompaction(
   const detail = compactionDetailSchema.parse({ ...row, createdAt: row.createdAt.toISOString() });
   if (detail.handoff?.text) {
     try {
-      await requireReadable(tx, actor, conversationId, row.handoffSources);
+      const summary =
+        (await readWorkingSummary(tx, conversationId, compactionId)) ??
+        (row.previousId ? await readWorkingSummary(tx, conversationId, uuidSchema.parse(row.previousId)) : null);
+      const sources = mergeSources([
+        ...z.array(sourceDependencySchema).parse(row.handoffSources),
+        ...(summary?.sources ?? []),
+      ]);
+      const project = await requireReadable(tx, actor, conversationId, sources);
+      if (!(await canReadToolDetails(tx, actor, sources, null, project ? conversationId : undefined)))
+        throw new AccessDenied();
       if (detail.trigger === 'inactivity')
-        for (const source of z.array(sourceDependencySchema).parse(row.handoffSources)) {
+        for (const source of sources) {
           if (source.kind === 'private-conversation' && source.conversationId === conversationId) continue;
           await requireProtectedSource(tx, actor, source);
         }
@@ -641,10 +672,15 @@ export async function readConversationMessage(
       ).rows[0],
     );
   if (!row || !row.turnResponse) return null;
+  const generated = (await generatedMessageSources(tx, conversationId, [messageId])).get(messageId);
   const sources: SourceDependency[] =
-    row.sources ??
+    (generated ? mergeSources([...(row.sources ?? []), ...generated]) : row.sources) ??
     (row.role === 'assistant' ? [{ kind: 'unknown' }] : [{ kind: 'private-conversation', conversationId }]);
-  if (row.role === 'assistant') await requireReadable(tx, actor, conversationId, sources);
+  if (row.role === 'assistant' || generated) {
+    const project = await requireReadable(tx, actor, conversationId, sources);
+    if (generated && !(await canReadToolDetails(tx, actor, generated, null, project ? conversationId : undefined)))
+      throw new AccessDenied();
+  }
   const characters = [...row.text];
   const start = Math.min(Math.max(0, offset), characters.length);
   let end = start;

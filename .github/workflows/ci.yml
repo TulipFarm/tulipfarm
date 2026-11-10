@@ -143,3 +143,7 @@ jobs:
         run: pnpm run test:behind-workspace
       - name: Check that authorization lock readers share and writers queue fairly
         run: pnpm --filter @tulipfarm/access exec node --test --test-concurrency=1 test/authorization-lock.integration.mjs
+      - name: Check row review drafts
+        env:
+          XAI_API_KEY: synthetic-not-secret
+        run: pnpm --filter @tulipfarm/agents exec node --test --test-concurrency=1 test/row-drafts.integration.mjs
