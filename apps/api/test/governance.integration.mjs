@@ -8,13 +8,17 @@ import swagger from '@fastify/swagger';
 import { Pool, escapeIdentifier, escapeLiteral } from 'pg';
 import { createAuth } from '../src/auth.ts';
 import { registerGovernance } from '../src/governance.ts';
+import { protectWorkspaceRequests } from '../src/business.ts';
+import { registerTableChanges } from '../src/table-changes.ts';
+import { registerWorkspaceSettings } from '../src/workspace-settings.ts';
+import { registerSecurity } from '../src/security.ts';
 import {
   fixture,
   connect,
   denied,
   markWorkspaceReady,
 } from '../../../packages/workspace-storage/test/integration/fixture.mjs';
-import { createWorkspaceRuntime } from '@tulipfarm/workspace-storage/runtime';
+import { createWorkspaceRuntime, StorageUnavailableError } from '@tulipfarm/workspace-storage/runtime';
 import { decryptEmailDelivery } from '@tulipfarm/workspaces/email-delivery';
 import { createInvitationExpirySweep } from '../../../packages/workspaces/src/invitation-expiry.ts';
 import {
@@ -27,6 +31,130 @@ import {
 import { workspaceTableMigrations } from '@tulipfarm/workspaces/table-migrations';
 import { createMemberProfileProjection, memberProfileSource } from '@tulipfarm/workspaces/member-profiles';
 import { createWorkspaceMember } from '../../../packages/tables/test/fixture.mjs';
+
+test('workspace HTTP conceals unknown, non-member and removed access before feature validation', async t => {
+  const f = await fixture();
+  t.after(() => f.close());
+  const migrations = await workspaceTableMigrations();
+  const workspace = await f.create(migrations);
+  const memberId = randomUUID();
+  const outsiderId = randomUUID();
+  const membershipId = randomUUID();
+  await f.platform.query(
+    `INSERT INTO "${workspace.names.schema}".tf_memberships(id,user_id,role) VALUES($1,$2,'member')`,
+    [membershipId, memberId],
+  );
+  const runtime = createWorkspaceRuntime({
+    maxPools: 2,
+    replicaCount: 1,
+    reservedConnections: 2,
+    databaseConnectionBudget: 10,
+    connectionsPerPool: 2,
+    resolveCredential: async id => {
+      if (id !== workspace.id) throw new StorageUnavailableError('disabled');
+      return { workspaceId: id, generation: 1, connectionString: f.login(workspace) };
+    },
+  });
+  t.after(() => runtime.close());
+  const auth = {
+    api: {
+      getSession: async ({ headers }) => {
+        const id = headers.get('x-test-user');
+        return id ? { user: { id }, session: { id: 'test-session' } } : null;
+      },
+    },
+  };
+  const identity = {
+    query: async (_sql, [ids]) => ({
+      rows: ids.map(id => ({ id, name: 'Member', email: `${id}@example.test`, email_verified: true })),
+    }),
+  };
+  let removeBeforeHandler = false;
+  async function server(gated) {
+    const app = Fastify();
+    registerSecurity(app, 'http://localhost:5173');
+    app.register(
+      async routes => {
+        if (gated) protectWorkspaceRequests(routes, auth, runtime);
+        routes.addHook('preHandler', async () => {
+          if (!removeBeforeHandler) return;
+          removeBeforeHandler = false;
+          await f.platform.query(`UPDATE "${workspace.names.schema}".tf_memberships SET removed_at=now() WHERE id=$1`, [
+            membershipId,
+          ]);
+        });
+        registerGovernance(routes, {
+          auth,
+          runtime,
+          identity,
+          compatibility: { minimum: migrations.length, maximum: migrations.length },
+        });
+        registerTableChanges(routes, { auth, runtime, requireSources: async () => {} });
+        registerWorkspaceSettings(routes, { auth, runtime, pool: f.platform });
+      },
+      { prefix: '/v1' },
+    );
+    t.after(() => app.close());
+    return app;
+  }
+  const app = await server(true);
+  const baseline = await server(false);
+  const teamId = randomUUID();
+  const requests = [
+    { path: 'governance/invitations' },
+    { path: 'governance/teams' },
+    { path: 'tables' },
+    { path: 'governance' },
+    { path: `governance/teams/${teamId}`, method: 'PUT', payload: { name: 'Operations' } },
+    { path: 'governance/teams/invalid', method: 'PUT', payload: {} },
+    { path: 'governance/teams/invalid', method: 'PUT', payload: '{"' },
+    { path: 'governance/invitations?open=invalid' },
+    { path: 'tables/invalid' },
+  ];
+  const request = (server, userId, workspaceId, { path, method = 'GET', payload }) =>
+    server.inject({
+      method,
+      url: `/v1/workspaces/${workspaceId}/${path}`,
+      headers: {
+        'x-test-user': userId,
+        origin: 'http://localhost:5173',
+        ...(payload === undefined ? {} : { 'content-type': 'application/json' }),
+      },
+      ...(payload === undefined ? {} : { payload }),
+    });
+  for (const userId of [workspace.userId, memberId]) {
+    for (const input of requests) {
+      const expected = await request(baseline, userId, workspace.id, input);
+      const actual = await request(app, userId, workspace.id, input);
+      assert.equal(actual.statusCode, expected.statusCode, `${userId}: ${input.path}`);
+      assert.equal(actual.body, expected.body, input.path);
+    }
+  }
+  for (const input of requests) {
+    for (const workspaceId of [workspace.id, randomUUID(), 'invalid']) {
+      const response = await request(app, outsiderId, workspaceId, input);
+      assert.equal(response.statusCode, 404, `${input.path}: ${response.body}`);
+      assert.equal(response.body, '{"error":"not-found"}', input.path);
+    }
+  }
+  await f.platform.query(`UPDATE "${workspace.names.schema}".tf_memberships SET removed_at=now() WHERE id=$1`, [
+    membershipId,
+  ]);
+  for (const input of requests) {
+    const response = await request(app, memberId, workspace.id, input);
+    assert.equal(response.statusCode, 404, `${input.path}: ${response.body}`);
+    assert.equal(response.body, '{"error":"not-found"}', input.path);
+  }
+  for (const path of ['governance/me', 'tables', 'settings']) {
+    await f.platform.query(`UPDATE "${workspace.names.schema}".tf_memberships SET removed_at=NULL WHERE id=$1`, [
+      membershipId,
+    ]);
+    removeBeforeHandler = true;
+    const response = await request(app, memberId, workspace.id, { path });
+    assert.equal(response.statusCode, 404, `${path}: ${response.body}`);
+    assert.equal(response.body, '{"error":"not-found"}', path);
+  }
+});
 
 test('governance HTTP uses local authority, serializes final-admin races, and grants exact resource actions', async () => {
   const f = await fixture();
@@ -101,6 +229,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
     app.register(swagger, { openapi: { info: { title: 'Governance verification', version: '1' } } });
     app.register(
       async routes => {
+        protectWorkspaceRequests(routes, auth, runtime);
         invitationLinks.current = registerGovernance(routes, {
           auth,
           runtime,

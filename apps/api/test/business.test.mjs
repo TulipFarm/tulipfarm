@@ -3,11 +3,178 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { test } from 'node:test';
 import Fastify from 'fastify';
-import { protectBusinessRequests } from '../src/business.ts';
+import { protectBusinessRequests, protectWorkspaceRequests } from '../src/business.ts';
 import { buildApp } from '../src/app.ts';
+import { resolveHuman } from '@tulipfarm/access';
+import { StorageUnavailableError } from '@tulipfarm/workspace-storage/runtime';
+import { workflowWebhookOperations } from '../src/abuse.ts';
+import { registerWorkflows } from '../src/workflows.ts';
 
 // The app serves the shipped model catalog, which needs a provider key.
 process.env.ANTHROPIC_API_KEY ??= 'test-key';
+
+test('workspace admission hides membership before parsing and preserves public receivers', async t => {
+  const workspaceId = '22222222-2222-4222-8222-222222222222';
+  const userId = '33333333-3333-4333-8333-333333333333';
+  const app = Fastify();
+  t.after(() => app.close());
+  let membership = false;
+  let storage = true;
+  let revoked = false;
+  let revokedUser = userId;
+  let reads = 0;
+  let fallbacks = 0;
+  let fastFailure;
+  let fallbackFailure;
+  let session = { user: { id: userId }, session: { id: 'session' } };
+  const auth = { api: { getSession: async () => session } };
+  protectWorkspaceRequests(app, auth, {
+    hasCurrentMember: async (id, user) => {
+      reads++;
+      assert.equal(id, workspaceId);
+      assert.equal(user, userId);
+      if (fastFailure) throw fastFailure;
+      if (!storage) throw new StorageUnavailableError('disabled');
+      return membership;
+    },
+    transaction: async (id, _compatibility, operation) => {
+      fallbacks++;
+      assert.equal(id, workspaceId);
+      if (fallbackFailure) throw fallbackFailure;
+      if (!storage) throw new StorageUnavailableError('disabled');
+      return operation({
+        schema: 'workspace',
+        client: {
+          query: async (sql, values) => {
+            assert.match(sql, /WHERE user_id = \$1 AND removed_at IS NULL/);
+            assert.doesNotMatch(sql, /FOR (SHARE|UPDATE)|advisory/);
+            assert.deepEqual(values, [userId]);
+            return { rows: membership ? [{ allowed: 1 }] : [], rowCount: membership ? 1 : 0 };
+          },
+        },
+      });
+    },
+  });
+  app.register(async routes => {
+    routes.setErrorHandler((_error, _request, reply) => reply.code(503).send({ error: 'feature-error' }));
+    routes.post(
+      '/workspaces/:workspaceId/resource/:id',
+      {
+        schema: {
+          params: {
+            type: 'object',
+            properties: { id: { type: 'string', format: 'uuid' } },
+          },
+          body: { type: 'object', required: ['name'], properties: { name: { type: 'string' } } },
+        },
+      },
+      async () => {
+        if (revoked)
+          await resolveHuman({ schema: 'workspace', client: { query: async () => ({ rows: [] }) } }, revokedUser);
+        return { ok: true };
+      },
+    );
+    for (const [index, operationId] of [...workflowWebhookOperations].entries())
+      routes.post(`/workspaces/:workspaceId/receiver/${index}`, { schema: { operationId } }, async () => ({
+        accepted: true,
+      }));
+    routes.post('/invitations/redeem', async () => ({ joined: true }));
+  });
+  const request = (id, payload, headers = {}) =>
+    app.inject({
+      method: 'POST',
+      url: `/workspaces/${workspaceId}/resource/${id}`,
+      headers,
+      payload,
+    });
+  for (const available of [true, false]) {
+    storage = available;
+    for (const [id, payload] of [
+      [workspaceId, { name: 'Valid' }],
+      ['invalid', {}],
+      ['invalid', '{"'],
+    ]) {
+      const response = await request(id, payload, { 'content-type': 'application/json' });
+      assert.equal(response.statusCode, 404, response.body);
+      assert.equal(response.body, '{"error":"not-found"}');
+      assert.equal(response.headers['cache-control'], 'no-store');
+    }
+  }
+  storage = true;
+  membership = true;
+  assert.deepEqual((await request(workspaceId, { name: 'Valid' })).json(), { ok: true });
+  const previousFallbacks = fallbacks;
+  fastFailure = new Error('Pool read failed');
+  assert.deepEqual((await request(workspaceId, { name: 'Valid' })).json(), { ok: true });
+  assert.equal(fallbacks, previousFallbacks + 1);
+  membership = false;
+  assert.equal((await request(workspaceId, { name: 'Valid' })).statusCode, 404);
+  fallbackFailure = new StorageUnavailableError('updating');
+  const updating = await request(workspaceId, { name: 'Valid' });
+  assert.equal(updating.statusCode, 503);
+  assert.deepEqual(updating.json(), { error: 'workspace-updating' });
+  membership = true;
+  fastFailure = undefined;
+  fallbackFailure = undefined;
+  revoked = true;
+  const removed = await request(workspaceId, { name: 'Valid' });
+  assert.equal(removed.statusCode, 404);
+  assert.equal(removed.body, '{"error":"not-found"}');
+  revokedUser = '44444444-4444-4444-8444-444444444444';
+  const otherMember = await request(workspaceId, { name: 'Valid' });
+  assert.equal(otherMember.statusCode, 503);
+  assert.deepEqual(otherMember.json(), { error: 'feature-error' });
+  const previousReads = reads;
+  const changed = await request(workspaceId, { name: 'Valid' }, { 'x-tulipfarm-expected-session': 'old-session' });
+  assert.equal(changed.statusCode, 401);
+  assert.deepEqual(changed.json(), { error: 'session-changed' });
+  session = null;
+  assert.equal((await request(workspaceId, { name: 'Valid' })).statusCode, 401);
+  for (const index of [0, 1]) {
+    const response = await app.inject({ method: 'POST', url: `/workspaces/${workspaceId}/receiver/${index}` });
+    assert.deepEqual(response.json(), { accepted: true });
+  }
+  assert.deepEqual((await app.inject({ method: 'POST', url: '/invitations/redeem' })).json(), { joined: true });
+  assert.equal(reads, previousReads);
+});
+
+test('workspace admission leaves signed webhook authentication with the workflow receiver', async t => {
+  const id = '22222222-2222-4222-8222-222222222222';
+  const auth = { api: { getSession: async () => assert.fail('Public receivers do not need a browser session') } };
+  const app = Fastify();
+  t.after(() => app.close());
+  protectBusinessRequests(app);
+  protectWorkspaceRequests(app, auth, {
+    hasCurrentMember: async () => assert.fail('Public receivers must not run membership admission'),
+    transaction: async () => assert.fail('Public receivers must not run membership admission'),
+  });
+  const deliveries = [];
+  registerWorkflows(app, {
+    auth,
+    service: {
+      webhook: async (workspaceId, workflowId, request, triggerId) => {
+        assert.equal(workspaceId, id);
+        assert.equal(workflowId, id);
+        assert.equal(request.headers.authorization, 'Bearer fixture-signature');
+        assert.deepEqual(request.body, { event: 'created' });
+        deliveries.push(triggerId);
+        return { runId: id, replayed: false };
+      },
+      recordWebhookDelivery: async () => {},
+    },
+  });
+  for (const suffix of ['webhook', 'triggers/incoming/webhook']) {
+    const response = await app.inject({
+      method: 'POST',
+      url: `/workspaces/${id}/workflows/${id}/${suffix}`,
+      headers: { authorization: 'Bearer fixture-signature' },
+      payload: { event: 'created' },
+    });
+    assert.equal(response.statusCode, 200, response.body);
+    assert.deepEqual(response.json(), { runId: id });
+  }
+  assert.deepEqual(deliveries, [undefined, 'incoming']);
+});
 
 test('Turbo dev passes Soul read and integration credentials to the API in strict mode', () => {
   const credentials = {

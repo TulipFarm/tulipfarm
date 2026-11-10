@@ -489,6 +489,43 @@ export function createWorkspaceRuntime(
     entry.idleSince = Date.now();
   }
 
+  async function hasCurrentMember(workspaceIdInput: string, userId: string): Promise<boolean> {
+    const workspaceId = workspaceIdSchema.parse(workspaceIdInput);
+    const deadline = new TransactionDeadline();
+    const background = isBackground();
+    let admitted = false;
+    let pooled = false;
+    let entry: Entry | undefined;
+    try {
+      await admit(deadline, background);
+      admitted = true;
+      entry = await claim(await credentialFor(workspaceId, deadline), deadline);
+      await acquireConnection(entry, deadline, background);
+      pooled = true;
+      deadline.started();
+      // This unlocked read only admits requests to their normal, fully fenced authorization transaction.
+      return (
+        (
+          await entry.pool.query(
+            `SELECT 1 FROM ${qualified(workspaceNames(workspaceId).schema, 'tf_memberships')} WHERE user_id = $1 AND removed_at IS NULL LIMIT 1`,
+            [userId],
+          )
+        ).rowCount === 1
+      );
+    } finally {
+      try {
+        if (entry) {
+          if (pooled) releaseConnection(entry, background);
+          releaseClaim(entry);
+          if (!entry.claims && entry.retiring) await remove(entry);
+        }
+      } finally {
+        if (admitted) releaseAdmission(background);
+        deadline.dispose();
+      }
+    }
+  }
+
   function transaction<T>(
     workspaceIdInput: string,
     compatibility: { minimum: number; maximum: number; access?: 'exclusive'; deadlineAt?: number },
@@ -653,6 +690,7 @@ export function createWorkspaceRuntime(
   }
 
   return {
+    hasCurrentMember,
     transaction,
     close,
     stats: () => ({

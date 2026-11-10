@@ -1,12 +1,63 @@
 import assert from 'node:assert/strict';
 import { setTimeout as delay } from 'node:timers/promises';
 import { test } from 'node:test';
-import { randomBytes } from 'node:crypto';
-import { escapeIdentifier, escapeLiteral } from 'pg';
-import { createWorkspaceRuntime } from '../../src/runtime.ts';
+import { randomBytes, randomUUID } from 'node:crypto';
+import { Pool, escapeIdentifier, escapeLiteral } from 'pg';
+import { createWorkspaceRuntime, StorageUnavailableError } from '../../src/runtime.ts';
 import { qualified } from '../../src/provisioning.ts';
 import { fixture } from './fixture.mjs';
 import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
+
+test('membership admission uses one pooled read and isolates unknown, removed and other-workspace users', async t => {
+  const db = await fixture();
+  let router;
+  try {
+    const a = await db.create();
+    const b = await db.create();
+    router = createWorkspaceRuntime({
+      maxPools: 2,
+      connectionsPerPool: 1,
+      replicaCount: 1,
+      reservedConnections: 1,
+      databaseConnectionBudget: 3,
+      resolveCredential: async id => {
+        const workspace = db.workspaces.find(item => item.id === id);
+        if (!workspace) throw new StorageUnavailableError('disabled');
+        return { workspaceId: id, generation: 1, connectionString: db.login(workspace) };
+      },
+    });
+    await assert.rejects(router.hasCurrentMember(randomUUID(), a.userId), { code: 'disabled' });
+    assert.equal(router.stats().pools, 0);
+    assert.equal(router.stats().connections, 0);
+    const queries = [];
+    const query = Pool.prototype.query;
+    t.mock.method(Pool.prototype, 'query', function (sql, values) {
+      queries.push(sql);
+      return query.call(this, sql, values);
+    });
+    assert.equal(await router.hasCurrentMember(a.id, a.userId), true);
+    assert.equal(await router.hasCurrentMember(a.id, b.userId), false);
+    assert.equal(await router.hasCurrentMember(b.id, b.userId), true);
+    await db.platform.query(`UPDATE "${a.names.schema}".tf_memberships SET removed_at=now() WHERE id=$1`, [
+      a.membershipId,
+    ]);
+    assert.equal(await router.hasCurrentMember(a.id, a.userId), false);
+    assert.equal(queries.length, 4);
+    for (const sql of queries) {
+      assert.match(
+        sql,
+        /^SELECT 1 FROM "ws_[a-f0-9]+"."tf_memberships" WHERE user_id = \$1 AND removed_at IS NULL LIMIT 1$/,
+      );
+      assert.doesNotMatch(sql, /BEGIN|COMMIT|FOR (SHARE|UPDATE)/);
+    }
+    assert.equal(router.stats().activeTransactions, 0);
+    await router.close();
+    await assert.rejects(router.hasCurrentMember(b.id, b.userId), { code: 'closed' });
+  } finally {
+    await router?.close();
+    await db.close();
+  }
+});
 
 test(
   'bounded direct-login routing isolates workspaces, rotates generations, resets sessions and drains shutdown',

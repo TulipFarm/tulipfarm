@@ -19,8 +19,9 @@ export class WorkspaceSettingsError extends Error {
       | 'workspace-settings-request-conflict'
       | 'workspace-settings-revision-conflict'
       | 'workspace-settings-confirmation-mismatch',
+    options?: ErrorOptions,
   ) {
-    super(code);
+    super(code, options);
   }
 }
 const errorCode = z.enum([
@@ -81,7 +82,7 @@ export function createWorkspaceSettingsService(store: WorkspaceStore) {
       );
     } catch (error) {
       if (error instanceof AccessDenied || (error instanceof StorageUnavailableError && error.code === 'disabled'))
-        throw new WorkspaceSettingsError('workspace-settings-not-found');
+        throw new WorkspaceSettingsError('workspace-settings-not-found', { cause: error });
       if (error instanceof Error) {
         const code = errorCode.safeParse(error.message);
         if (code.success) throw new WorkspaceSettingsError(code.data);

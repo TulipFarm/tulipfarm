@@ -64,6 +64,12 @@ export class AccessDenied extends Error {
   }
 }
 
+export class WorkspaceMembershipDenied extends AccessDenied {
+  constructor(readonly userId: string) {
+    super();
+  }
+}
+
 export class SourceAuthorizationUnavailable extends AccessDenied {}
 /** Refuses another member's personal memory, so callers can say why instead of reporting a missing resource. */
 export class PersonalMemoryDenied extends AccessDenied {}
@@ -120,7 +126,7 @@ export async function resolveHuman(transaction: AuthorizationTransaction, userId
     [userId],
   );
   const member = membershipSchema.optional().parse(result.rows[0]);
-  if (!member) throw new AccessDenied();
+  if (!member) throw new WorkspaceMembershipDenied(userId);
   return { kind: 'human', userId: member.user_id, membershipId: member.id };
 }
 
@@ -130,7 +136,7 @@ export async function currentMember(transaction: AuthorizationTransaction, actor
     [actor.membershipId, actor.userId],
   );
   const member = membershipSchema.optional().parse(result.rows[0]);
-  if (!member) throw new AccessDenied();
+  if (!member) throw new WorkspaceMembershipDenied(actor.userId);
   return member;
 }
 
