@@ -38,7 +38,9 @@ const secret = (secretId, name, value) => ({
   canManage: true,
 });
 
-test('a chat MCP proposal sets up a personal integration with saved secrets', { timeout: 120000 }, async () => {
+const authorizationUrl = 'https://oauth.posthog.com/oauth/authorize?client_id=tulipfarm';
+
+async function withCard(authentication, steps) {
   const server = spawn(
     process.execPath,
     ['node_modules/vite/bin/vite.js', '--host', '127.0.0.1', '--port', String(port), '--strictPort'],
@@ -86,8 +88,8 @@ test('a chat MCP proposal sets up a personal integration with saved secrets', { 
           ownership: body.ownership,
           endpoint: body.endpoint,
           accountLabel: null,
-          authMethod: 'secret-headers',
-          status: 'review-required',
+          authMethod: authentication === 'oauth' ? 'oauth' : 'secret-headers',
+          status: authentication === 'oauth' ? 'oauth-pending' : 'review-required',
           version: 1,
           authorizationEpoch: 1,
           canManage: true,
@@ -96,7 +98,10 @@ test('a chat MCP proposal sets up a personal integration with saved secrets', { 
           statusReason: null,
         };
         integrations.push(integration);
-        json = { kind: 'saved', integration };
+        json =
+          authentication === 'oauth'
+            ? { kind: 'oauth', integration, authorizationUrl }
+            : { kind: 'saved', integration };
       } else if (path.endsWith(`/workspace-mcp/integrations/${savedId}`))
         json = {
           integration: integrations[0],
@@ -141,7 +146,7 @@ test('a chat MCP proposal sets up a personal integration with saved secrets', { 
                   id: toolId,
                   tool: 'integrations.mcp.connect',
                   status: 'completed',
-                  integration: { action: 'mcp', name: 'PostHog', endpoint, authentication: 'secrets' },
+                  integration: { action: 'mcp', name: 'PostHog', endpoint, authentication },
                 },
               ],
             },
@@ -167,7 +172,16 @@ test('a chat MCP proposal sets up a personal integration with saved secrets', { 
     await card.getByText('Not connected', { exact: true }).waitFor();
     await card.getByText('Only you', { exact: true }).waitFor();
     await card.getByRole('button', { name: 'Set up PostHog' }).click();
+    await steps({ page, card, integrations, setups });
+    assert.deepEqual(errors, []);
+  } finally {
+    await browser?.close();
+    server.kill();
+  }
+}
 
+test('a chat MCP proposal sets up a personal integration with saved secrets', { timeout: 120000 }, () =>
+  withCard('secrets', async ({ card, setups }) => {
     assert.equal(await card.getByLabel('MCP endpoint').inputValue(), endpoint);
     const ownership = card.getByRole('combobox', { name: 'Integration ownership' });
     assert.equal((await ownership.textContent()).trim(), 'Personal, private to you');
@@ -192,9 +206,24 @@ test('a chat MCP proposal sets up a personal integration with saved secrets', { 
       },
     );
     assert.equal(await review.getAttribute('href'), `/${workspace.slug}/integrations#review-mcp-${savedId}`);
-    assert.deepEqual(errors, []);
-  } finally {
-    await browser?.close();
-    server.kill();
-  }
-});
+  }),
+);
+
+test('a chat OAuth proposal keeps the provider sign-in link after the chat reloads', { timeout: 120000 }, () =>
+  withCard('oauth', async ({ page, card, integrations }) => {
+    assert.equal(
+      (await card.getByRole('combobox', { name: 'Authentication', exact: true }).textContent()).trim(),
+      'OAuth',
+    );
+    await card.getByRole('button', { name: 'Start OAuth setup' }).click();
+    const signIn = card.getByRole('link', { name: 'Continue to PostHog sign-in' });
+    await signIn.waitFor();
+    await card.getByText('Authorization pending', { exact: true }).waitFor();
+    assert.equal(await signIn.getAttribute('href'), authorizationUrl);
+    assert.equal(await signIn.getAttribute('target'), '_blank');
+    integrations[0] = { ...integrations[0], status: 'review-required' };
+    await page.reload();
+    await card.getByRole('link', { name: 'Review PostHog tools' }).waitFor();
+    assert.equal(await card.getByRole('link', { name: 'Continue to PostHog sign-in' }).count(), 0);
+  }),
+);

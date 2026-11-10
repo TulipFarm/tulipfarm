@@ -28,6 +28,7 @@ export function McpSetup({
   integration,
   close,
   saved,
+  authorizing,
 }: {
   api: McpApi;
   capabilities: Capabilities;
@@ -37,6 +38,8 @@ export function McpSetup({
   integration?: Integration;
   close: () => void;
   saved: (id: string) => void;
+  /** Receives the provider sign-in link when OAuth setup starts. */
+  authorizing?: (id: string, authorizationUrl: string) => void;
 }) {
   const prefix = useId();
   const heading = useRef<HTMLHeadingElement>(null);
@@ -147,6 +150,7 @@ export function McpSetup({
       async () => {
         const next = await api.setup(payload, integration?.id ?? result?.integration.id);
         setResult(next);
+        if (next.kind === 'oauth') authorizing?.(next.integration.id, next.authorizationUrl);
         setToken('');
         setClientSecret('');
         setHeaders(previous => previous.map(header => ({ name: header.name, value: '' })));
