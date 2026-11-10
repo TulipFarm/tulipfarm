@@ -600,7 +600,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     assert.equal(called, 1);
     assert.equal((await service.read(w.id, user, next.id)).status, 'completed');
   });
-  await t.test('a reply that only announces its next step continues once, then completes', async () => {
+  await t.test('a reply that only announces its next step continues once, then pauses', async () => {
     const next = await start();
     const prompts = [];
     const announcing = createTaskRuntime(runtime, {
@@ -621,7 +621,10 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     await announcing.process(w.id, next.id);
     assert.equal(prompts.length, 2);
     assert.match(prompts[1].followThrough, /tool calls/);
-    assert.equal((await service.read(w.id, user, next.id)).status, 'completed', 'a second announcement ends the task');
+    const incomplete = await service.read(w.id, user, next.id);
+    assert.equal(incomplete.status, 'paused', 'a second announcement cannot complete the task');
+    assert.equal(incomplete.pauseReason, 'decision');
+    assert.match((await service.history(w.id, user, next.id)).messages.at(-1).text, /before continuing/);
     await announcing.process(w.id, next.id);
     assert.equal(prompts.length, 2);
 

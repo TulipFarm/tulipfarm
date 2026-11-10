@@ -5,7 +5,7 @@ import Fastify from 'fastify';
 import { registerAgents } from '../src/agents.ts';
 import { registerAccountDetails } from '../src/account-details.ts';
 import { Pool } from 'pg';
-import { createHmac } from 'node:crypto';
+import { createHmac, randomUUID } from 'node:crypto';
 
 // The app serves the shipped model catalog, which needs a provider key.
 process.env.ANTHROPIC_API_KEY ??= 'test-key';
@@ -22,6 +22,36 @@ test('saved-agent and chat routes compile with the aggregate integration tool co
   } finally {
     await app.close();
   }
+});
+
+test('agent detail responses preserve effective access for each activation', async t => {
+  const scope = [{ assetId: randomUUID(), permissions: ['table.row.read'] }];
+  const activation = { id: randomUUID(), revision: 'b'.repeat(64), scope, effectiveScope: scope };
+  const detail = {
+    id: randomUUID(),
+    name: 'Counter',
+    owningTeamId: null,
+    savedRevision: 'a'.repeat(40),
+    definitionRevision: activation.revision,
+    definition: { name: 'Counter', instructions: 'Count rows.', tools: ['tables.list', 'rows.list'] },
+    capabilities: ['invoke'],
+    activations: [activation, { ...activation, id: randomUUID(), effectiveScope: [] }],
+    replacedActivations: [{ ...activation, id: randomUUID() }],
+  };
+  const app = Fastify();
+  app.addHook('onRoute', route => {
+    if (route.schema?.operationId === 'getAgentV1') route.handler = async () => detail;
+  });
+  registerAgents(app, {
+    auth: { api: { getSession: async () => ({ user: { id: 'reader' } }) } },
+    runtime: {},
+    pool: { query: async () => ({ rows: [] }) },
+    agentModel: null,
+  });
+  t.after(() => app.close());
+  const response = await app.inject(`/workspaces/${randomUUID()}/agents/${detail.id}`);
+  assert.equal(response.statusCode, 200, response.body);
+  assert.deepEqual(response.json(), detail);
 });
 
 test('private account details reject guests before reading account data', async () => {
