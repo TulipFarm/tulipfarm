@@ -8,6 +8,7 @@ import { useFeatureRead } from '@/lib/query';
 import { useTableWrite } from '@/features/tables/use-table-write';
 import { WriteFeedback } from '@/features/tables/feedback';
 import type { skillApi } from './api';
+import { skillSourceLabel } from './import-api';
 
 export function SkillPackageDetails({
   api,
@@ -59,9 +60,7 @@ export function SkillPackageDetails({
         {source =>
           source ? (
             <>
-              <p className="break-all text-sm">
-                {source.source.canonicalUrl === 'chat' ? 'Created in chat' : source.source.canonicalUrl}
-              </p>
+              <p className="break-all text-sm">{skillSourceLabel(source.source.canonicalUrl)}</p>
               {source.localChanges && (
                 <p className="text-sm">
                   Edited locally in chat. An upstream update can replace these edits, or you can ask chat to merge the
@@ -100,7 +99,7 @@ export function SkillPackageDetails({
                   </div>
                 </dl>
               </Disclosure>
-              {canUpdate && source.source.submittedUrl !== 'chat' && (
+              {canUpdate && source.kind === 'url' && (
                 <Button
                   variant="outline"
                   disabled={write.state.kind === 'sending' || write.state.kind === 'uncertain'}
@@ -161,11 +160,7 @@ function SkillHistory({ api, id, revision }: { api: ReturnType<typeof skillApi>;
                     {new Date(item.createdAt).toLocaleString()}
                     {item.revision === revision ? ' · Current saved version' : ''}
                   </p>
-                  <p className="break-all">
-                    {item.provenance.source.canonicalUrl === 'chat'
-                      ? 'Created in chat'
-                      : item.provenance.source.canonicalUrl}
-                  </p>
+                  <p className="break-all">{skillSourceLabel(item.provenance.source.canonicalUrl)}</p>
                   <p>{item.provenance.localChanges ? 'Edited locally in chat' : 'Original package snapshot'}</p>
                   <p className="break-all">Revision: {item.revision}</p>
                 </li>

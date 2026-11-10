@@ -59,9 +59,12 @@ export function createSkillTools(runtime: AgentStorage, bytes?: Pick<FileBytes, 
     skillId: string,
     input: z.infer<typeof skillDraftInputSchema>,
     origin: readonly SourceDependency[],
+    source: 'chat' | 'manual' = 'chat',
   ) {
     if (!objects) throw new SkillPackageError('package-unavailable');
-    const requestDigest = createHash('sha256').update(canonicalJson({ skillId, input, origin })).digest('hex');
+    const requestDigest = createHash('sha256')
+      .update(canonicalJson({ skillId, input, origin, ...(source === 'manual' ? { source } : {}) }))
+      .digest('hex');
     const replay = await imports.replayDraft(workspaceId, actor, id, requestDigest);
     if (replay) return draftReceipt(replay);
     let files: SkillPackageFile[] = [];
@@ -110,7 +113,7 @@ export function createSkillTools(runtime: AgentStorage, bytes?: Pick<FileBytes, 
       }
       files = [...map.values()];
     }
-    const view = await imports.draft(workspaceId, actor, id, files, origin, objects, target, requestDigest);
+    const view = await imports.draft(workspaceId, actor, id, files, origin, objects, target, requestDigest, source);
     return draftReceipt(view);
   }
   async function readFile(

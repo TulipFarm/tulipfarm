@@ -97,7 +97,9 @@ export function skillImportFixture() {
           id,
           input: { kind: 'draft', packageDigest: built.definition.package.digest },
           status: 'ready',
-          candidates: [{ ...candidate, report }],
+          candidates: [
+            { ...candidate, source: { ...candidate.source, submittedUrl: 'manual', canonicalUrl: 'manual' }, report },
+          ],
           selected: [candidate.id],
           links: [],
           digest: 'b'.repeat(64),

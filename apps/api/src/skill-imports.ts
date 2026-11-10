@@ -175,6 +175,7 @@ export function registerSkillImports(
           'new',
           { expectedVersion: 0, definition: procedure.parse(request.body) },
           [],
+          'manual',
         );
         return imports.read(p.workspaceId, actor, p.importId);
       },

@@ -277,6 +277,7 @@ test(
       );
       const prepared = await ok(owner, 'PUT', `${manualPath}/draft`, procedure);
       assert.equal(prepared.status, 'pending-review');
+      assert.equal(prepared.candidates[0].source.canonicalUrl, 'manual');
       assert.deepEqual(await ok(owner, 'PUT', `${manualPath}/draft`, procedure), prepared);
       assert.equal((await http(reader, 'GET', manualPath)).status, 404);
       assert.equal(
@@ -314,6 +315,10 @@ test(
       assert.equal(created.activeRevision, created.savedRevision);
       assert.ok(
         (await ok(owner, 'GET', `${base}/skills?view=reviewed`)).workspace.some(item => item.id === created.id),
+      );
+      assert.equal(
+        (await ok(owner, 'GET', `${base}/skills?view=reviewed`)).workspace.find(item => item.id === created.id).source,
+        'Written by you',
       );
       const resolved = await createWorkspaceSkills(runtime).resolve(w.id, actor, [
         { id: created.id, revision: created.activeRevision },

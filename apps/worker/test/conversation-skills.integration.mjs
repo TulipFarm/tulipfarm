@@ -295,6 +295,7 @@ test('an Azure Foundry model prepares a package through chat, meters its review,
     await f.db.platform.query(`UPDATE ${f.table('tf_credit_account')} SET available=0`);
     await assert.rejects(activities.prepareSkillImport(w.id, deniedId), /credits-exhausted/);
     assert.equal((await imports.read(w.id, actor, deniedId)).status, 'failed');
+    assert.equal((await imports.read(w.id, actor, deniedId)).error, 'credits-unavailable');
     assert.equal(requests.length, beforeReview + 1, 'Credit denial prevents dispatch to the reviewer');
   } finally {
     await f.close();

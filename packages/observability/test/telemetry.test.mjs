@@ -1186,6 +1186,7 @@ test('error codes accept reviewed values, not arbitrary short strings', () => {
     'plan-operation-unavailable',
     'skill-revision-required',
     'skill-storage-unavailable',
+    'credits-unavailable',
   ])
     assert.equal(telemetryErrorCode(value), value);
   for (const value of ['private-user-text', 'user@example.com', 'a'.repeat(1024), 401, { code: 'access-denied' }])

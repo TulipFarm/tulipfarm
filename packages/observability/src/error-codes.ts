@@ -58,6 +58,7 @@ const codes = new Set<string>([
   'reply-interrupted',
   'tool-unavailable',
   'credits-exhausted',
+  'credits-unavailable',
   'project-context-too-large',
   'skill-unavailable',
   'compaction-paused',

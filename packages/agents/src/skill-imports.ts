@@ -13,6 +13,7 @@ import {
   type SourceDependency,
 } from '@tulipfarm/access';
 import { canonicalJson } from '@tulipfarm/tables/canonical';
+import { CreditsExhausted } from '@tulipfarm/workspace-storage/credits';
 import { relation, type AgentStorage, type AgentTransaction } from './store.ts';
 import { createWorkspaceSkills } from './workspace-skills.ts';
 import { createSkillObjects, skillPackageCompatibility } from './skill-objects.ts';
@@ -189,6 +190,7 @@ export function createSkillImports(
     objects: ReturnType<typeof createSkillObjects>,
     target?: { id: string; expectedVersion: number },
     requestDigest?: string,
+    source: 'chat' | 'manual' = 'chat',
   ) {
     id = uuidSchema.parse(id);
     const built = buildSkillPackage(files);
@@ -255,7 +257,7 @@ export function createSkillImports(
         id,
         path: '',
         definition: prepared.definition,
-        source: { submittedUrl: 'chat', canonicalUrl: 'chat', digest: built.definition.package.digest },
+        source: { submittedUrl: source, canonicalUrl: source, digest: built.definition.package.digest },
         report: null,
         ...(changes ? { changes } : {}),
       };
@@ -522,7 +524,14 @@ export function createSkillImports(
       await runtime.transaction(workspaceId, skillPackageCompatibility, tx =>
         tx.client.query(
           `UPDATE ${relation(tx, 'tf_skill_imports')} SET status='failed',error=$2 WHERE id=$1 AND status IN ('preparing','reviewing')`,
-          [id, error instanceof SkillPackageError ? error.code : 'preparation-failed'],
+          [
+            id,
+            error instanceof CreditsExhausted
+              ? 'credits-unavailable'
+              : error instanceof SkillPackageError
+                ? error.code
+                : 'preparation-failed',
+          ],
         ),
       );
       throw error;

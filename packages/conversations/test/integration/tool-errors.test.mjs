@@ -24,12 +24,12 @@ test('skill failures name safe causes, offer recovery, and retain failed activit
         [
           Object.assign(new Error('private diagnostic'), { name: 'SkillPackageError', code: 'invalid-package' }),
           'invalid-package',
-          /SKILL.md/,
+          /name, description, or instructions/,
         ],
         [
           Object.assign(new Error('private diagnostic'), { name: 'SkillPackageError', code: 'package-unavailable' }),
           'package-unavailable',
-          /package.*unavailable/i,
+          /no longer available/i,
         ],
         [
           Object.assign(new Error('private diagnostic'), { name: 'SkillPackageError', code: 'private-value' }),
@@ -44,7 +44,7 @@ test('skill failures name safe causes, offer recovery, and retain failed activit
         });
         assert.equal(output.result.error, code);
         assert.match(output.result.instruction, words);
-        assert.match(output.result.instruction, /[Rr]etry/);
+        assert.match(output.result.instruction, /try again/);
         assert.match(output.result.instruction, /Create manually/);
         assert.doesNotMatch(JSON.stringify(output), /private diagnostic|private-value|unconfirmed reason/);
       }
@@ -93,7 +93,7 @@ test('skill reads retry a transient storage failure twice, but never retry a den
         throw new StorageUnavailableError('wait_timeout');
       });
       assert.equal(failed.result.error, 'skill-storage-unavailable');
-      assert.match(failed.result.instruction, /[Rr]etry/);
+      assert.match(failed.result.instruction, /try again/);
       return 'The guide was read. The later reads failed.';
     });
     assert.equal(

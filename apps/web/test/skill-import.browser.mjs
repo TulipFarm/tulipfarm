@@ -24,18 +24,26 @@ test(
       const page = await browser.newPage({ viewport: { width: 1280, height: 900 }, reducedMotion: 'reduce' });
       const errors = [];
       const attempts = [];
+      let releaseFirstDraft;
+      const firstDraft = new Promise(resolve => {
+        releaseFirstDraft = resolve;
+      });
       page.on('pageerror', error => errors.push(error.message));
       await page.route('**/v1/**', route => {
         const request = route.request();
         if (new URL(request.url()).pathname.endsWith('/draft')) {
           attempts.push({ url: request.url(), body: request.postDataJSON() });
-          if (attempts.length === 1) return route.fulfill({ status: 503, json: { error: 'skill-import-unavailable' } });
+          if (attempts.length === 1)
+            return firstDraft.then(() => route.fulfill({ status: 503, json: { error: 'skill-import-unavailable' } }));
         }
         return route.fulfill(fixture.respond(request.method(), request.url(), request.postDataJSON()));
       });
       await page.goto(`${server.resolvedUrls.local[0]}${fixture.workspace.slug}/skills`);
       await page.getByRole('link', { name: 'Create manually', exact: true }).click();
       await page.getByRole('heading', { name: 'Create skill', exact: true }).waitFor();
+      await page.getByRole('button', { name: 'Review skill', exact: true }).click();
+      for (const message of ['Enter a name.', 'Enter a description.', 'Enter instructions.'])
+        await page.getByText(message, { exact: true }).waitFor();
       await page.getByLabel('Name', { exact: true }).fill('Monthly close');
       await page
         .getByLabel('Description', { exact: true })
@@ -53,15 +61,21 @@ test(
       }
       await page.screenshot({ path: '/tmp/skill-create-form.png', fullPage: true });
       await page.getByRole('button', { name: 'Review skill', exact: true }).click();
-      await page.getByRole('button', { name: 'Retry same operation', exact: true }).waitFor();
+      await page.getByText('Starting review…', { exact: true }).waitFor();
+      assert.equal(await page.getByText('Starting review…', { exact: true }).count(), 1);
+      assert.equal(await page.getByText('Submitting your operation…', { exact: true }).count(), 0);
+      releaseFirstDraft();
+      await page.getByRole('button', { name: 'Try again', exact: true }).waitFor();
+      assert.equal(await page.getByText('Starting review…', { exact: true }).count(), 0);
       assert.equal(await page.getByLabel('Name', { exact: true }).inputValue(), 'Monthly close');
       assert.equal(
         await page.getByLabel('Instructions', { exact: true }).inputValue(),
         'Read the guide, check the totals, and ask before any change.',
       );
-      await page.getByRole('button', { name: 'Retry same operation', exact: true }).click();
+      await page.getByRole('button', { name: 'Try again', exact: true }).click();
       const install = page.getByRole('button', { name: 'Install and enable', exact: true });
       await install.waitFor();
+      await page.getByText('Written by you', { exact: true }).waitFor();
       assert.deepEqual(attempts[1], attempts[0]);
       assert.equal(fixture.installed.length, 0);
       assert.equal(
@@ -71,6 +85,13 @@ test(
       const draft = fixture.requests.find(request => request.path.endsWith('/draft'));
       assert.equal(draft.body.name, 'Monthly close');
       assert.equal(draft.body.instructions, 'Read the guide, check the totals, and ask before any change.');
+      const proposal = fixture.imports.get(draft.path.split('/').at(-2));
+      proposal.candidates[0].source.canonicalUrl = 'chat';
+      await page.reload();
+      await page.getByText('Drafted in chat', { exact: true }).waitFor();
+      proposal.candidates[0].source.canonicalUrl = 'manual';
+      await page.reload();
+      await page.getByText('Written by you', { exact: true }).waitFor();
       await page.getByRole('button', { name: 'Read package files', exact: true }).click();
       await page.getByRole('button', { name: 'SKILL.md', exact: true }).click();
       await page
@@ -118,6 +139,10 @@ test(
         return route.fulfill(fixture.respond(request.method(), request.url(), request.postDataJSON()));
       });
       await page.goto(`${server.resolvedUrls.local[0]}${fixture.workspace.slug}/skills`);
+      assert.equal(
+        await page.getByRole('link', { name: 'New skill', exact: true }).getAttribute('aria-description'),
+        'Opens a chat with Bud',
+      );
       await page.getByRole('link', { name: 'New skill', exact: true }).click();
       await page.getByRole('combobox', { name: /Model: Grok Fast/ }).waitFor();
       await page.getByText('Create a reusable skill · Version latest', { exact: true }).waitFor();

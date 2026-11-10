@@ -262,7 +262,7 @@ function ConversationWorkspace({ api }: { api: ConversationApi }) {
         : intent === 'create-skill'
           ? {
               prompt:
-                'Help me create a reusable skill. Draft from my description without asking for confirmation first. Use sensible defaults for optional details, then prepare a skill package for my review.',
+                'Help me create a reusable skill from my description below. Draft it without asking me to confirm first. If I leave something out, choose a sensible default and tell me what you chose. Then prepare it for my review.',
               skill: { id: 'workspace-skill-authoring', revision: 'latest' },
             }
           : intent === 'edit-skill' && skillIntent.id && skillIntent.version

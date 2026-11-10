@@ -133,6 +133,7 @@ export function SkillsPage() {
           </Button>
           <Button
             nativeButton={false}
+            aria-description="Opens a chat with Bud"
             render={
               <Link
                 to="/$workspaceSlug"

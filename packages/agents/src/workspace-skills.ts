@@ -430,7 +430,7 @@ export function createWorkspaceSkills(storage: AgentStorage) {
       const reads = definitionGrantPredicate(tx, 'skill', 's.id', '$1', query.view === 'reviewed' ? "'use'" : "'read'");
       const source =
         tx.commonVersion >= skillPackageCompatibility.minimum
-          ? `COALESCE((SELECT CASE WHEN p.provenance->'source'->>'submittedUrl'='chat' THEN 'Created in chat' ELSE p.provenance->'source'->>'canonicalUrl' END FROM ${relation(tx, 'tf_skill_package_provenance')} p WHERE p.skill_id=s.id AND p.revision=r.revision),'Legacy skill')`
+          ? `COALESCE((SELECT CASE WHEN p.provenance->'source'->>'submittedUrl'='chat' THEN 'Created in chat' WHEN p.provenance->'source'->>'submittedUrl'='manual' THEN 'Written by you' ELSE p.provenance->'source'->>'canonicalUrl' END FROM ${relation(tx, 'tf_skill_package_provenance')} p WHERE p.skill_id=s.id AND p.revision=r.revision),'Legacy skill')`
           : "'Legacy skill'";
       const page = await visiblePage(
         query,

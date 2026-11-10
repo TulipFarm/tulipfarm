@@ -200,10 +200,10 @@ const failureFallbacks: Readonly<Record<string, string>> = {
 };
 const skillFailureReasons: Readonly<Record<string, string>> = {
   'invalid-package':
-    'The skill package has an invalid or missing SKILL.md. Correct its name, description and instructions.',
-  'package-unavailable': 'The skill package is unavailable.',
+    'The skill draft is missing or has an invalid name, description, or instructions. Fix the draft and prepare the review again. If a detail is missing, ask the person for it.',
+  'package-unavailable': 'The skill draft is no longer available. Prepare it again.',
   'package-limit':
-    'The skill package or pending review limit was reached. Use a smaller package or cancel unused reviews.',
+    'The skill is too large, or too many skill reviews are waiting. Suggest shortening the skill, or cancelling reviews the person no longer needs.',
   'import-conflict': 'The skill or review changed. Read its current version before preparing another review.',
   'import-expired': 'The skill review expired. Prepare a new review.',
 };
@@ -221,13 +221,13 @@ function skillFailure(name: string, error: unknown) {
           : 'tool-failed';
   const reason =
     code === 'skill-storage-unavailable'
-      ? 'Skill storage is temporarily unavailable.'
+      ? "Skills can't be saved or read right now. Suggest trying again in a few minutes."
       : code === 'invalid-arguments'
-        ? 'The skill request has invalid fields. For a built-in guide use its listed skillId without a revision; for a workspace skill copy the exact revision from skills.workspace.'
+        ? 'The skill request has invalid fields. For a built-in guide use its listed skillId without a revision; for a workspace skill copy the exact revision from skills.workspace. Correct the call and retry. Mention the problem to the person only if the retry fails.'
         : (skillFailureReasons[code] ?? 'TulipFarm could not prepare or read the skill.');
   return {
     error: code,
-    instruction: `${reason} Tell the person what failed in plain words. Offer Retry, or Create manually on the Skills page. Do not claim a skill was saved or enabled. Do not infer missing permissions or expose internal diagnostics.`,
+    instruction: `${reason} Tell the person in one or two plain sentences what failed and what they can do next: try again, or use Create manually on the Skills page. Do not say a skill was saved or enabled. Do not guess about permissions. Do not mention error codes, file names, field names, or tool names such as SKILL.md, skillId, or skills.workspace.`,
   };
 }
 const rootConversationSchema = z

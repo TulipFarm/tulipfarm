@@ -29,7 +29,22 @@ export const importErrors: Record<string, string> = {
     'The isolated script runner is unavailable. Ask a workspace operator to check it, then retry this decision.',
   'credits-unavailable': 'The safety review needs more Credits. Check workspace Credits, then start a new review.',
 };
-export function skillImportApi(workspaceId: string) {
+export const skillDraftErrors: Record<string, string> = {
+  ...importErrors,
+  'invalid-package':
+    "This skill couldn't be prepared. Check that the name, description, and instructions are filled in and not too long, then try again.",
+  'package-limit':
+    'This skill is too large, or too many skill reviews are waiting. Shorten the instructions, or cancel reviews you no longer need.',
+  'import-expired': 'This review expired. Select Review skill to start a new one.',
+  'import-conflict': 'This review changed. Check its current status before continuing.',
+  'review-required': 'Read the warnings before installing.',
+  'package-unavailable': 'This skill draft is no longer available. Select Review skill to prepare it again.',
+};
+export function skillSourceLabel(source: string) {
+  return source === 'manual' ? 'Written by you' : source === 'chat' ? 'Drafted in chat' : source;
+}
+export function skillImportApi(workspaceId: string, draftCopy = false) {
+  const messages = draftCopy ? skillDraftErrors : importErrors;
   const base = `${apiOrigin}/v1/workspaces/${workspaceId}/skill-imports`;
   async function request(id: string, suffix: string, method: string, body?: unknown, signal?: AbortSignal) {
     const response = await jsonResponse(`${base}/${id}${suffix}`, {
@@ -43,10 +58,14 @@ export function skillImportApi(workspaceId: string) {
       throw new TableRequestError(
         response.status,
         code,
-        importErrors[code] ??
+        messages[code] ??
           ([401, 403, 404].includes(response.status)
-            ? 'This import is unavailable or your access changed.'
-            : 'Could not confirm the import request. Check its status, or retry the same request.'),
+            ? draftCopy
+              ? 'This skill review is unavailable, or your access changed.'
+              : 'This import is unavailable or your access changed.'
+            : draftCopy
+              ? "We couldn't confirm that the review started. Check its status, or try again."
+              : 'Could not confirm the import request. Check its status, or retry the same request.'),
       );
     }
     return value;

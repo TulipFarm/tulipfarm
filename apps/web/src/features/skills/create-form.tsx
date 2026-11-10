@@ -7,21 +7,23 @@ import { Input } from '@tulipfarm/sprout/input';
 import { Textarea } from '@tulipfarm/sprout/textarea';
 import { PageContent } from '@tulipfarm/sprout/page-content';
 import { PageHeader } from '@tulipfarm/sprout/page-header';
+import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { workspaceSkillDefinitionSchema } from '@tulipfarm/agents/workspace-skill-contracts';
 import { workspaceRoute } from '@/router';
 import { useTableWrite } from '@/features/tables/use-table-write';
-import { WriteFeedback } from '@/features/tables/feedback';
 import { skillImportApi } from './import-api';
 
 export function CreateSkillPage() {
   const { workspace } = workspaceRoute.useRouteContext();
   const navigate = useNavigate();
-  const api = useMemo(() => skillImportApi(workspace.id), [workspace.id]);
+  const api = useMemo(() => skillImportApi(workspace.id, true), [workspace.id]);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [instructions, setInstructions] = useState('');
-  const [error, setError] = useState('');
+  const [errors, setErrors] = useState<Partial<Record<'name' | 'description' | 'instructions', string>>>({});
   const nameInput = useRef<HTMLInputElement>(null);
+  const descriptionInput = useRef<HTMLInputElement>(null);
+  const instructionsInput = useRef<HTMLTextAreaElement>(null);
   const open = (id: string) =>
     void navigate({
       to: '/$workspaceSlug/skills/import/$importId',
@@ -53,51 +55,111 @@ export function CreateSkillPage() {
               .required({ description: true })
               .safeParse({ name, description, instructions });
             if (!parsed.success) {
-              setError('Enter a name, description and instructions.');
-              nameInput.current?.focus();
+              const invalid = {
+                ...(!name.trim() ? { name: 'Enter a name.' } : {}),
+                ...(!description.trim() ? { description: 'Enter a description.' } : {}),
+                ...(!instructions.trim() ? { instructions: 'Enter instructions.' } : {}),
+              };
+              setErrors(invalid);
+              (invalid.name ? nameInput : invalid.description ? descriptionInput : instructionsInput).current?.focus();
               return 'invalid';
             }
-            setError('');
+            setErrors({});
             void write.submit({ id: crypto.randomUUID(), definition: parsed.data });
           }}
         >
           <div className="max-w-2xl space-y-4">
-            <Field id="skill-name" label="Name" required>
-              <Input ref={nameInput} value={name} maxLength={120} onChange={event => setName(event.target.value)} />
+            <Field id="skill-name" label="Name" required error={errors.name}>
+              <Input
+                ref={nameInput}
+                value={name}
+                maxLength={120}
+                onChange={event => {
+                  setName(event.target.value);
+                  setErrors(current => ({ ...current, name: '' }));
+                }}
+              />
             </Field>
             <Field
               id="skill-description"
               label="Description"
               required
+              error={errors.description}
               helper="What this skill does and when to use it."
             >
-              <Input value={description} maxLength={280} onChange={event => setDescription(event.target.value)} />
+              <Input
+                ref={descriptionInput}
+                value={description}
+                maxLength={280}
+                onChange={event => {
+                  setDescription(event.target.value);
+                  setErrors(current => ({ ...current, description: '' }));
+                }}
+              />
             </Field>
-            <Field id="skill-instructions" label="Instructions" required helper="The steps to follow.">
+            <Field
+              id="skill-instructions"
+              label="Instructions"
+              required
+              error={errors.instructions}
+              helper="The steps to follow."
+            >
               <Textarea
+                ref={instructionsInput}
                 value={instructions}
                 maxLength={32000}
                 rows={10}
-                onChange={event => setInstructions(event.target.value)}
+                onChange={event => {
+                  setInstructions(event.target.value);
+                  setErrors(current => ({ ...current, instructions: '' }));
+                }}
               />
             </Field>
             <FormFooter
               dirty={false}
               submit={{
                 label: 'Review skill',
-                pendingLabel: 'Preparing review…',
-                state: busy ? { kind: 'busy' } : { kind: 'ready' },
+                pendingLabel: 'Starting review…',
+                state:
+                  write.state.kind === 'sending'
+                    ? { kind: 'busy' }
+                    : write.state.kind === 'uncertain'
+                      ? { kind: 'blocked', reason: 'Check whether it started before trying again.' }
+                      : { kind: 'ready' },
               }}
-              error={error || undefined}
-              note="Nothing is saved or enabled until you approve. Safety review uses workspace Credits."
+              note="Starts a safety review, which uses workspace Credits when the review runs. The skill isn't saved or enabled until you approve it."
             >
-              <WriteFeedback
-                state={write.state}
-                retry={input => void write.submit(input)}
-                checkStatus={() => {
-                  if ('input' in write.state) open(write.state.input.id);
-                }}
-              />
+              {(write.state.kind === 'uncertain' || write.state.kind === 'rejected') && (
+                <div className="space-y-3">
+                  <Alert variant="destructive">
+                    <AlertDescription>
+                      {write.state.kind === 'uncertain'
+                        ? "We couldn't confirm that the safety review started. Your skill is still here. Check whether it started before trying again."
+                        : write.state.message}
+                    </AlertDescription>
+                  </Alert>
+                  {write.state.kind === 'uncertain' && (
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        variant="outline"
+                        onClick={() => {
+                          if ('input' in write.state) open(write.state.input.id);
+                        }}
+                      >
+                        Check whether it started
+                      </Button>
+                      <Button
+                        variant="outline"
+                        onClick={() => {
+                          if ('input' in write.state) void write.submit(write.state.input);
+                        }}
+                      >
+                        Try again
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              )}
               <Button
                 variant="outline"
                 nativeButton={false}
