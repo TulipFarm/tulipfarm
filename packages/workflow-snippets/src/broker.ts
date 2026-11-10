@@ -3,7 +3,6 @@ import { createServer } from 'node:http';
 import { DatabaseSync } from 'node:sqlite';
 import { z } from 'zod';
 import { createSnippetRunner, SnippetError } from './index.ts';
-import { jobSchema, maxJobBytes, resultSchema, type SnippetResult } from './protocol.ts';
 import { canonical } from './canonical.ts';
 import { skillJobSchema, skillResultSchema, maxSkillJobBytes, type SkillResult } from './skill-protocol.ts';
 
@@ -45,12 +44,8 @@ export async function createSnippetBroker(options: {
     runner = createSnippetRunner({ ...options, owner: z.uuid().parse(owner) });
     await runner.reconcile();
     db.prepare(
-      "UPDATE jobs SET state='failed',result=?,request='' WHERE state='running' AND json_extract(request,'$.kind')='skill'",
+      "UPDATE jobs SET state='failed',result=?,request='' WHERE state='running' OR (state='queued' AND json_extract(request,'$.kind') IS NOT 'skill')",
     ).run(JSON.stringify({ kind: 'failed', error: 'interrupted' }));
-    db.prepare("UPDATE jobs SET state='queued' WHERE state='running' AND attempts<3").run();
-    db.prepare("UPDATE jobs SET state='failed',result=?,request='' WHERE state='running'").run(
-      JSON.stringify({ kind: 'failed', error: 'interrupted' }),
-    );
   } catch (error) {
     db.close();
     throw error;
@@ -64,21 +59,15 @@ export async function createSnippetBroker(options: {
     for (const raw of rows) {
       if (active.size >= 4) break;
       const row = rowSchema.parse(raw),
-        job = z.union([jobSchema, skillJobSchema]).parse(JSON.parse(row.request));
+        job = skillJobSchema.parse(JSON.parse(row.request));
       if ((workspaces.get(job.workspaceId) ?? 0) >= 2) continue;
       db.prepare("UPDATE jobs SET state='running',attempts=attempts+1 WHERE id=?").run(row.id);
       workspaces.set(job.workspaceId, (workspaces.get(job.workspaceId) ?? 0) + 1);
       const task = (async () => {
-        let result: SnippetResult | SkillResult;
+        let result: SkillResult;
         try {
-          if ('kind' in job) {
-            if (!options.enableSkillJobs) throw new SnippetError('unavailable');
-            result = skillResultSchema.parse(await runner.executeSkill(job));
-          } else {
-            const output = await runner.execute({ language: job.language, source: job.source, input: job.input });
-            const parsed = resultSchema.safeParse({ kind: 'completed', output });
-            result = parsed.success ? parsed.data : { kind: 'failed', error: 'output-limit' };
-          }
+          if (!options.enableSkillJobs) throw new SnippetError('unavailable');
+          result = skillResultSchema.parse(await runner.executeSkill(job));
         } catch (error) {
           if (error instanceof SnippetError && error.code === 'cleanup-failed') throw error;
           result = { kind: 'failed', error: error instanceof SnippetError ? error.code : 'unavailable' };
@@ -137,13 +126,12 @@ export async function createSnippetBroker(options: {
         request.resume();
         return;
       }
-      const skillRequest = request.url === '/v1/skill-jobs';
-      if (request.method !== 'POST' || (request.url !== '/v1/jobs' && !skillRequest)) {
+      if (request.method !== 'POST' || request.url !== '/v1/skill-jobs') {
         send(404, { error: 'not-found' });
         request.resume();
         return;
       }
-      if (skillRequest && !options.enableSkillJobs) {
+      if (!options.enableSkillJobs) {
         send(503, { error: 'skill-runtime-unavailable' });
         request.resume();
         return;
@@ -158,15 +146,13 @@ export async function createSnippetBroker(options: {
       try {
         for await (const chunk of request) {
           size += chunk.length;
-          if (size > (skillRequest ? maxSkillJobBytes : maxJobBytes)) {
+          if (size > maxSkillJobBytes) {
             send(413, { error: 'request-too-large' });
             return;
           }
           chunks.push(chunk);
         }
-        const parsed = (skillRequest ? skillJobSchema : jobSchema).safeParse(
-          JSON.parse(Buffer.concat(chunks).toString('utf8')),
-        );
+        const parsed = skillJobSchema.safeParse(JSON.parse(Buffer.concat(chunks).toString('utf8')));
         if (!parsed.success) {
           send(400, { error: 'invalid-request' });
           return;
@@ -174,10 +160,7 @@ export async function createSnippetBroker(options: {
         const job = parsed.data,
           body = canonical(job);
         const digest = createHash('sha256').update(body).digest('hex');
-        const id =
-          'kind' in job
-            ? [job.workspaceId, 'skill', job.invocationId].join('/')
-            : [job.workspaceId, job.runId, job.revision, job.stepId].join('/');
+        const id = [job.workspaceId, 'skill', job.invocationId].join('/');
         const existing = db.prepare('SELECT * FROM jobs WHERE id=?').get(id);
         if (existing) {
           const row = rowSchema.parse(existing);
@@ -187,9 +170,7 @@ export async function createSnippetBroker(options: {
           }
           send(
             row.result ? 200 : 202,
-            row.result
-              ? (skillRequest ? skillResultSchema : resultSchema).parse(JSON.parse(row.result))
-              : { kind: 'pending' },
+            row.result ? skillResultSchema.parse(JSON.parse(row.result)) : { kind: 'pending' },
           );
           return;
         }

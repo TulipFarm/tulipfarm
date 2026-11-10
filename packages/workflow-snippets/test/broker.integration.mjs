@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { fork, execFileSync } from 'node:child_process';
-import { randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -9,21 +9,32 @@ import { DatabaseSync } from 'node:sqlite';
 import { setTimeout } from 'node:timers/promises';
 import { test } from 'node:test';
 import { createSnippetBroker } from '../src/broker.ts';
-import { createSnippetClient, configuredSnippetClient } from '../src/client.ts';
+import { createSkillClient, configuredSkillClient } from '../src/client.ts';
+import { maxSkillJobBytes } from '../src/skill-protocol.ts';
 
 const image = process.env.SNIPPET_TEST_IMAGE;
-function job(overrides = {}) {
+function job({ source = 'process.stdout.write(process.argv.slice(2).join(" "));', ...overrides } = {}) {
   return {
+    kind: 'skill',
+    version: 1,
     workspaceId: randomUUID(),
-    runId: randomUUID(),
-    revision: randomUUID(),
-    stepId: 'code',
-    language: 'javascript',
-    source: 'return {value: input.value + 1};',
-    input: { value: 4 },
+    invocationId: randomUUID(),
+    packageDigest: 'a'.repeat(64),
+    language: 'node',
+    entrypoint: 'script.js',
+    args: ['hello'],
+    input: null,
+    files: [
+      {
+        path: 'script.js',
+        content: Buffer.from(source).toString('base64'),
+        digest: createHash('sha256').update(source).digest('hex'),
+      },
+    ],
     ...overrides,
   };
 }
+const completed = stdout => ({ kind: 'completed', exitCode: 0, stdout, stderr: '', files: [] });
 async function complete(client, request) {
   for (let i = 0; i < 300; i++) {
     const result = await client.submit(request);
@@ -34,108 +45,70 @@ async function complete(client, request) {
 }
 
 test(
-  'authenticated broker executes, enforces limits and replays persisted results after restart',
-  { timeout: 120000 },
+  'authenticated broker runs skill jobs, enforces limits and replays persisted results after restart',
+  { timeout: 240000 },
   async () => {
     assert.ok(image, 'SNIPPET_TEST_IMAGE required');
     const directory = await mkdtemp(join(tmpdir(), 'snippet-broker-')),
       database = join(directory, 'jobs.sqlite');
     const token = randomBytes(32).toString('hex'),
-      options = { database, token, image, runtime: 'runc', allowLocalRunc: true, timeoutMs: 10000 };
+      options = {
+        database,
+        token,
+        image,
+        runtime: 'runc',
+        allowLocalRunc: true,
+        timeoutMs: 20000,
+        enableSkillJobs: true,
+      };
     let broker;
     try {
       broker = await createSnippetBroker(options);
       await new Promise(resolve => broker.server.listen(0, '127.0.0.1', resolve));
       let url = `http://127.0.0.1:${broker.server.address().port}`;
-      let client = createSnippetClient({ url, token, allowLocalHttp: true });
+      let client = createSkillClient({ url, token, allowLocalHttp: true });
       const request = job();
-      const post = (body, auth = `Bearer ${token}`) =>
-        fetch(`${url}/v1/jobs`, {
+      const post = (body, auth = `Bearer ${token}`, path = '/v1/skill-jobs') =>
+        fetch(`${url}${path}`, {
           method: 'POST',
           headers: { authorization: auth, 'content-type': 'application/json' },
           body: typeof body === 'string' ? body : JSON.stringify(body),
         });
       assert.equal((await post(request, '')).status, 401);
       assert.equal((await post(request, `Bearer ${'0'.repeat(64)}`)).status, 401);
+      assert.equal((await post(request, undefined, '/v1/jobs')).status, 404);
       assert.equal((await post({ ...request, unexpected: true })).status, 400);
       assert.equal((await post('{')).status, 400);
-      assert.equal((await post(' '.repeat(131073))).status, 413);
-      assert.equal((await post({ ...request, input: 'x'.repeat(32769) })).status, 400);
+      assert.equal((await post(' '.repeat(maxSkillJobBytes + 1))).status, 413);
       await assert.rejects(createSnippetBroker(options), /locked/);
-      assert.deepEqual(await complete(client, request), { kind: 'completed', output: { value: 5 } });
-      assert.equal((await post({ ...request, source: 'return 99;' })).status, 409);
-      assert.deepEqual(
-        await complete(client, job({ language: 'python', source: 'return {"value": input["value"] * 3}' })),
-        { kind: 'completed', output: { value: 12 } },
-      );
-      assert.deepEqual(await complete(client, job({ source: 'return "x".repeat(40000);' })), {
-        kind: 'failed',
-        error: 'output-limit',
-      });
-      const unicode = `/*${'界'.repeat(10900)}*/return input`;
-      assert.deepEqual(await complete(client, job({ source: unicode, input: 'x'.repeat(32766) })), {
-        kind: 'completed',
-        output: 'x'.repeat(32766),
-      });
-      assert.deepEqual(await complete(client, job({ source: 'return "界".repeat(10922);' })), {
-        kind: 'completed',
-        output: '界'.repeat(10922),
-      });
-      assert.deepEqual(await complete(client, job({ source: 'return "界".repeat(10923);' })), {
-        kind: 'failed',
-        error: 'output-limit',
-      });
-      assert.deepEqual(await complete(client, job({ language: 'python', source: 'return "界" * 10922' })), {
-        kind: 'completed',
-        output: '界'.repeat(10922),
-      });
-      assert.deepEqual(await complete(client, job({ language: 'python', source: 'return "界" * 10923' })), {
-        kind: 'failed',
-        error: 'output-limit',
-      });
-      assert.deepEqual(await complete(client, job({ source: 'throw new Error("private-marker");' })), {
-        kind: 'failed',
-        error: 'execution-failed',
-      });
+      assert.deepEqual(await complete(client, request), completed('hello'));
+      assert.equal((await post({ ...request, args: ['changed'] })).status, 409);
+      assert.deepEqual(await complete(client, job({ source: 'process.exit(3);' })), { ...completed(''), exitCode: 3 });
       const workspaceId = randomUUID(),
-        slow = job({ workspaceId, source: 'while(true) {}' });
-      for (let i = 0; i < 4; i++) assert.equal((await post({ ...slow, runId: randomUUID() })).status, 202);
-      assert.equal((await post({ ...slow, runId: randomUUID() })).status, 429);
-      assert.equal((await complete(client, job({ source: 'while(true) {}' }))).error, 'deadline');
+        slow = job({ workspaceId, source: 'setTimeout(() => {}, 60000);' });
+      for (let i = 0; i < 4; i++) assert.equal((await post({ ...slow, invocationId: randomUUID() })).status, 202);
+      assert.equal((await post({ ...slow, invocationId: randomUUID() })).status, 429);
+      assert.deepEqual(await complete(client, job({ source: 'setTimeout(() => {}, 60000);' })), {
+        kind: 'failed',
+        error: 'deadline',
+      });
       await broker.close();
       broker = undefined;
-      const store = new DatabaseSync(database);
-      assert.equal(
-        store
-          .prepare('SELECT attempts FROM jobs WHERE id=?')
-          .get([request.workspaceId, request.runId, request.revision, request.stepId].join('/')).attempts,
-        1,
-      );
-      assert.equal(
-        store
-          .prepare('SELECT request FROM jobs WHERE id=?')
-          .get([request.workspaceId, request.runId, request.revision, request.stepId].join('/')).request,
-        '',
-      );
+      const store = new DatabaseSync(database),
+        id = [request.workspaceId, 'skill', request.invocationId].join('/');
+      assert.equal(store.prepare('SELECT attempts FROM jobs WHERE id=?').get(id).attempts, 1);
+      assert.equal(store.prepare('SELECT request FROM jobs WHERE id=?').get(id).request, '');
       store.close();
       broker = await createSnippetBroker(options);
       await new Promise(resolve => broker.server.listen(0, '127.0.0.1', resolve));
       url = `http://127.0.0.1:${broker.server.address().port}`;
-      client = createSnippetClient({ url, token, allowLocalHttp: true });
-      assert.deepEqual(
-        await client.submit({
-          ...request,
-          workspaceId: request.workspaceId.toUpperCase(),
-          runId: request.runId.toUpperCase(),
-          revision: request.revision.toUpperCase(),
-        }),
-        { kind: 'completed', output: { value: 5 } },
-      );
-      assert.deepEqual(await complete(client, job()), { kind: 'completed', output: { value: 5 } });
-      assert.equal(configuredSnippetClient({}), undefined);
-      assert.throws(() => configuredSnippetClient({ SNIPPET_BROKER_URL: url }));
-      assert.throws(() => createSnippetClient({ url, token }));
-      assert.throws(() => createSnippetClient({ url: 'https://example.com/path', token }));
+      client = createSkillClient({ url, token, allowLocalHttp: true });
+      assert.deepEqual(await client.submit(request), completed('hello'));
+      assert.deepEqual(await complete(client, job()), completed('hello'));
+      assert.equal(configuredSkillClient({}), undefined);
+      assert.throws(() => configuredSkillClient({ SKILL_SCRIPTS_ENABLED: 'true', SNIPPET_BROKER_URL: url }));
+      assert.throws(() => createSkillClient({ url, token }));
+      assert.throws(() => createSkillClient({ url: 'https://example.com/path', token }));
     } finally {
       await broker?.close();
       await rm(directory, { recursive: true, force: true });
@@ -143,61 +116,54 @@ test(
   },
 );
 
-test(
-  'SIGKILL reconciles abandoned containers and replays interrupted jobs with a bounded attempt count',
-  { timeout: 120000 },
-  async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'snippet-crash-')),
-      database = join(directory, 'jobs.sqlite');
-    const token = randomBytes(32).toString('hex'),
-      request = job({ source: 'await new Promise(resolve => setTimeout(resolve, 3000)); return input.value;' });
-    let child;
-    async function start() {
-      child = fork(new URL('./broker-process.mjs', import.meta.url), {
-        env: { ...process.env, TEST_BROKER_DB: database, TEST_BROKER_TOKEN: token },
-        stdio: ['ignore', 'ignore', 'inherit', 'ipc'],
-      });
-      const [{ port }] = await once(child, 'message');
-      return createSnippetClient({ url: `http://127.0.0.1:${port}`, token, allowLocalHttp: true });
+test('SIGKILL reconciles abandoned containers and reports the interrupted skill job', { timeout: 240000 }, async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'snippet-crash-')),
+    database = join(directory, 'jobs.sqlite');
+  const token = randomBytes(32).toString('hex'),
+    request = job({ source: 'setTimeout(() => process.stdout.write("late"), 3000);' });
+  let child;
+  async function start() {
+    child = fork(new URL('./broker-process.mjs', import.meta.url), {
+      env: { ...process.env, TEST_BROKER_DB: database, TEST_BROKER_TOKEN: token },
+      stdio: ['ignore', 'ignore', 'inherit', 'ipc'],
+    });
+    const [{ port }] = await once(child, 'message');
+    return createSkillClient({ url: `http://127.0.0.1:${port}`, token, allowLocalHttp: true });
+  }
+  async function stop(signal) {
+    const exit = once(child, 'exit');
+    child.kill(signal);
+    await exit;
+    child = undefined;
+  }
+  try {
+    let client = await start();
+    await client.submit(request);
+    let before = '';
+    for (let i = 0; i < 100; i++) {
+      before = execFileSync('docker', ['ps', '-q', '--filter', 'label=ai.tulipfarm.snippet-owner'], {
+        encoding: 'utf8',
+      }).trim();
+      if (before) break;
+      await setTimeout(50);
     }
-    async function stop(signal) {
-      const exit = once(child, 'exit');
-      child.kill(signal);
-      await exit;
-      child = undefined;
-    }
-    try {
-      let client = await start();
-      await client.submit(request);
-      let before = '';
-      for (let i = 0; i < 100; i++) {
-        before = execFileSync('docker', ['ps', '-q', '--filter', 'label=ai.tulipfarm.snippet-owner'], {
-          encoding: 'utf8',
-        }).trim();
-        if (before) break;
-        await setTimeout(50);
-      }
-      assert.ok(before, 'real disposable container started');
-      await stop('SIGKILL');
-      client = await start();
-      assert.deepEqual(await complete(client, request), { kind: 'completed', output: 4 });
-      await stop('SIGTERM');
-      const store = new DatabaseSync(database);
-      assert.equal(store.prepare('SELECT attempts FROM jobs').get().attempts, 2);
-      const owner = store.prepare('SELECT id FROM identity').get().id;
-      store.prepare("UPDATE jobs SET state='running', attempts=3, result=NULL, request=?").run(JSON.stringify(request));
-      store.close();
-      assert.equal(
-        execFileSync('docker', ['ps', '-aq', '--filter', `label=ai.tulipfarm.snippet-owner=${owner}`], {
-          encoding: 'utf8',
-        }).trim(),
-        '',
-      );
-      client = await start();
-      assert.deepEqual(await client.submit(request), { kind: 'failed', error: 'interrupted' });
-    } finally {
-      if (child) await stop('SIGTERM');
-      await rm(directory, { recursive: true, force: true });
-    }
-  },
-);
+    assert.ok(before, 'real disposable container started');
+    await stop('SIGKILL');
+    client = await start();
+    assert.deepEqual(await client.submit(request), { kind: 'failed', error: 'interrupted' });
+    await stop('SIGTERM');
+    const store = new DatabaseSync(database);
+    assert.equal(store.prepare('SELECT attempts FROM jobs').get().attempts, 1);
+    const owner = store.prepare('SELECT id FROM identity').get().id;
+    store.close();
+    assert.equal(
+      execFileSync('docker', ['ps', '-aq', '--filter', `label=ai.tulipfarm.snippet-owner=${owner}`], {
+        encoding: 'utf8',
+      }).trim(),
+      '',
+    );
+  } finally {
+    if (child) await stop('SIGTERM');
+    await rm(directory, { recursive: true, force: true });
+  }
+});

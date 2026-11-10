@@ -7,6 +7,7 @@ const broker = await createSnippetBroker({
   runtime: 'runc',
   allowLocalRunc: true,
   timeoutMs: 30000,
+  enableSkillJobs: true,
 });
 await new Promise(resolve => broker.server.listen(0, '127.0.0.1', resolve));
 process.send({ port: broker.server.address().port });
