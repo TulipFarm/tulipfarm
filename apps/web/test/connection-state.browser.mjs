@@ -29,6 +29,7 @@ test(
     const base = `/v1/workspaces/${workspace.id}`;
     const shell = new Map(workspaceShellReads(workspace.id));
     let github = [];
+    let githubBegins = 0;
     let accounts = [];
     let slack = { state: 'disconnected', teamId: null, canManage: true, linked: false, scopes: [] };
     const providers = ['atlassian-mcp', 'trello'].map(protocol => ({ protocol, configured: true }));
@@ -80,10 +81,12 @@ test(
       else if (path === `${base}/github/accounts` && request.method() === 'GET')
         json = { configured: true, accounts: github };
       else if (path === `${base}/github/accounts/begin` || /\/github\/accounts\/[^/]+\/reconnect$/.test(path)) {
+        if (path.endsWith('/begin')) githubBegins++;
         if (!github.length)
           github = [
             { id: randomUUID(), state: 'authorizing', configured: true, identity: null, generation: 1, scopes: [] },
           ];
+        github[0].state = 'authorizing';
         json = { accountId: github[0].id, url: 'https://github.com/login/oauth/authorize?client_id=fixture' };
       } else if (/\/github\/accounts\/[^/]+\/disconnect$/.test(path)) {
         const account = { ...github[0], state: 'disconnected' };
@@ -158,6 +161,13 @@ test(
         await visit(id);
         await neutral(id);
       }
+      github[0].state = 'disconnected';
+      await visit('github', undefined, true);
+      await page.getByRole('button', { name: 'Connect GitHub', exact: true }).click();
+      await page.getByRole('heading', { name: 'Provider sign-in' }).waitFor();
+      assert.equal(githubBegins, 1, 'retry resumes the existing disconnected attempt');
+      await visit('github');
+      await neutral('github');
       await visit('github', 'accounts');
       await page.getByRole('button', { name: 'Finish connecting', exact: true }).waitFor();
       await page.getByRole('button', { name: 'Dismiss attempt', exact: true }).click();
@@ -189,7 +199,7 @@ test(
             }
           : account,
       );
-      slack = { ...slack, state: 'failed', teamId: 'TEXISTING', scopes: ['chat:write'] };
+      slack = { ...slack, state: 'reconnect-required', teamId: 'TEXISTING', scopes: ['chat:write'] };
       await visit(undefined, undefined, true);
       await page.getByRole('button', { name: 'Needs attention 4', exact: true }).waitFor();
       await page.getByLabel('Integration authorization', { exact: true }).waitFor();
@@ -201,6 +211,13 @@ test(
         await page.getByLabel('Integration authorization', { exact: true }).waitFor();
       }
       await page.screenshot({ path: '/tmp/connection-state-repair.png' });
+      slack = { ...slack, state: 'revoked' };
+      github = [];
+      accounts = [];
+      await visit('slack', undefined, true);
+      await neutral('slack');
+      await visit();
+      await page.getByRole('button', { name: 'Needs attention 0', exact: true }).waitFor();
       assert.deepEqual(errors, []);
     } catch (error) {
       await page.screenshot({ path: '/tmp/connection-state-failure.png' });

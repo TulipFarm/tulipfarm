@@ -8,13 +8,9 @@ export function accountConnectionState(account: { state: string; identity: unkno
   return 'attention';
 }
 
-export function slackConnectionState(slack: { state: string; scopes: readonly string[] }): ConnectionState {
+export function slackConnectionState(slack: { state: string }): ConnectionState {
   if (slack.state === 'active') return 'connected';
-  if (slack.state === 'disconnected') return 'disconnected';
-  if (
-    ['reconnect-required', 'permissions-required', 'scope-missing'].includes(slack.state) ||
-    (slack.scopes.length > 0 && ['reserved', 'authorizing', 'failed', 'revoked'].includes(slack.state))
-  )
-    return 'attention';
+  if (['disconnected', 'revoked'].includes(slack.state)) return 'disconnected';
+  if (['reconnect-required', 'permissions-required', 'scope-missing'].includes(slack.state)) return 'attention';
   return 'pending';
 }

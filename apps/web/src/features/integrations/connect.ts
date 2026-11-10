@@ -14,7 +14,7 @@ async function startGoogle(workspaceId: string, app: Integration['googleApp']) {
 
 export async function startGitHub(workspaceId: string) {
   const unfinished = (await githubApi.list(workspaceId)).accounts.find(
-    account => account.state !== 'active' && account.state !== 'disconnected',
+    account => account.state !== 'active' && (account.state !== 'disconnected' || !account.identity),
   );
   githubConsent(
     (unfinished ? await githubApi.reconnect(workspaceId, unfinished.id) : await githubApi.begin(workspaceId)).url,

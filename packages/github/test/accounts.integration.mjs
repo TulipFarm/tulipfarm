@@ -6,6 +6,33 @@ import { GitHubCredentialRejected, githubCompatibility } from '@tulipfarm/github
 import { credentialCipher } from '../src/credentials.ts';
 import { githubFixture } from './fixture.mjs';
 
+test('repeated cancelled first consent reuses one account instead of exhausting reservation limits', async () => {
+  const f = await githubFixture();
+  try {
+    let accountId;
+    for (let attempt = 0; attempt < 25; attempt++) {
+      const started = await f.begin();
+      accountId ??= started.accountId;
+      assert.equal(started.accountId, accountId);
+      await assert.rejects(
+        f.service.complete({ state: started.state, error: 'access_denied' }, 'test-session', f.member.userId),
+        /authorization-denied/,
+      );
+    }
+    const accounts = (await f.service.list(f.one.id, f.member.userId)).accounts;
+    assert.equal(accounts.length, 1);
+    assert.equal(accounts[0].state, 'disconnected');
+    assert.equal(f.calls.length, 0);
+    const started = await f.begin();
+    await f.complete(started);
+    assert.equal((await f.service.status(f.one.id, f.member.userId, accountId)).state, 'active');
+    await f.service.disconnect(f.one.id, f.member.userId, accountId);
+    assert.notEqual((await f.begin()).accountId, accountId);
+  } finally {
+    await f.close();
+  }
+});
+
 test('private multi-account lifecycle, consent fencing and credential access in PostgreSQL', async t => {
   const f = await githubFixture();
   const { service, one, two, member, table, db } = f;
@@ -288,7 +315,7 @@ test('account limits serialize concurrent creation and permit recovery at capaci
   const f = await githubFixture();
   try {
     await f.db.platform.query(
-      `INSERT INTO ${f.table('tf_github_accounts')} (id,owner_membership_id,state,config_hash) SELECT gen_random_uuid(),$1,'disconnected','fixture' FROM generate_series(1,19)`,
+      `INSERT INTO ${f.table('tf_github_accounts')} (id,owner_membership_id,state,config_hash) SELECT gen_random_uuid(),$1,'authorizing','fixture' FROM generate_series(1,19)`,
       [f.member.membershipId],
     );
     const attempts = await Promise.allSettled([f.begin(), f.begin()]);
@@ -299,7 +326,7 @@ test('account limits serialize concurrent creation and permit recovery at capaci
     await f.complete({ state: new URL(next.url).searchParams.get('state') });
     assert.equal((await f.service.list(f.one.id, f.member.userId)).accounts.length, 20);
     await f.db.platform.query(
-      `INSERT INTO ${f.table('tf_github_accounts')} (id,owner_membership_id,state,config_hash) SELECT gen_random_uuid(),$1,'disconnected','fixture' FROM generate_series(1,80)`,
+      `INSERT INTO ${f.table('tf_github_accounts')} (id,owner_membership_id,state,config_hash) SELECT gen_random_uuid(),$1,'authorizing','fixture' FROM generate_series(1,80)`,
       [f.one.membershipId],
     );
     await assert.rejects(f.service.begin(f.one.id, f.one.userId, 'admin-session'), /account-limit-reached/);

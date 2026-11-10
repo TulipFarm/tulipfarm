@@ -149,8 +149,22 @@ export function createGitHubAccounts(options: {
       userId,
       async (tx, actor) => {
         let id: string = randomUUID();
-        if (existingId) {
-          const row = await load(tx, actor, existingId);
+        const reusable = existingId
+          ? undefined
+          : z
+              .object({ id: uuidSchema })
+              .optional()
+              .parse(
+                (
+                  await tx.client.query(
+                    `SELECT id FROM ${relation(tx, 'accounts')} WHERE owner_membership_id=$1 AND identity IS NULL AND state='disconnected' ORDER BY created_at,id LIMIT 1 FOR UPDATE`,
+                    [actor.membershipId],
+                  )
+                ).rows[0],
+              );
+        const accountId = existingId ?? reusable?.id;
+        if (accountId) {
+          const row = await load(tx, actor, accountId);
           id = row.id;
           const recommendations = await watchIntegrationRecommendations(tx, id, () => githubRecommendations(tx, id));
           await tx.client.query(

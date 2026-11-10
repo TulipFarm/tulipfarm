@@ -37,7 +37,7 @@ test('unused, disconnected, healthy and unknown integrations never ask for autho
     [],
   );
   for (const state of ['disconnected', 'authorizing', 'failed', 'revoked', 'unavailable'])
-    assert.deepEqual(authorizationAttention({ slack: { ...slack, state, scopes: [] } }), []);
+    assert.deepEqual(authorizationAttention({ slack: { ...slack, state } }), []);
   assert.deepEqual(
     authorizationAttention({ google: { ...google, status: { status: 'disconnected' } }, slack: 'unavailable' }),
     [],
