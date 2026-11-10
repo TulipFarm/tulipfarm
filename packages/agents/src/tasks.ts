@@ -38,6 +38,7 @@ import {
   taskHistoryQuerySchema,
   taskLimitsSchema,
   taskListQuerySchema,
+  readTaskListCursor,
   taskMessageSchema,
   taskReceiptSchema,
   taskSourceSchema,
@@ -874,19 +875,22 @@ export function createAgentTasks(
   }
   async function list(workspaceId: string, user: string, value: unknown = {}) {
     const query = taskListQuerySchema.parse(value);
+    const position = query.after ? readTaskListCursor(query.after) : null;
+    const scanLimit = query.search ? 1000 : query.limit + 1;
     return transaction(workspaceId, user, false, async (tx, actor) => {
       const rows = z
-        .array(storedSchema)
+        .array(storedSchema.extend({ cursorCreatedAt: z.iso.datetime({ precision: 6 }) }))
         .parse(
           (
             await tx.client.query(
-              `SELECT ${columns(tx)} FROM ${relation(tx, 'tf_agent_tasks')} WHERE owner_user_id=$1 AND owner_membership_id=$2 AND ($3::uuid IS NULL OR id>$3) AND (NOT $5::boolean OR status NOT IN ('completed','failed')) ORDER BY id LIMIT $4`,
+              `SELECT ${columns(tx)},to_char(created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS "cursorCreatedAt" FROM ${relation(tx, 'tf_agent_tasks')} WHERE owner_user_id=$1 AND owner_membership_id=$2 AND ($3::timestamptz IS NULL OR (created_at,id)<($3::timestamptz,$6::uuid)) AND (NOT $5::boolean OR status NOT IN ('completed','failed')) ORDER BY created_at DESC,id DESC LIMIT $4`,
               [
                 actor.userId,
                 actor.membershipId,
-                query.after ?? null,
-                query.search ? 1000 : query.limit + 1,
+                position?.createdAt ?? null,
+                scanLimit,
                 query.state === 'active',
+                position?.id ?? null,
               ],
             )
           ).rows,
@@ -925,14 +929,13 @@ export function createAgentTasks(
       }
       const tasks = [];
       for (const row of matched.slice(0, query.limit)) tasks.push(await summary(tx, row));
+      const last =
+        matched.length > query.limit ? matched[query.limit - 1] : rows.length === scanLimit ? rows.at(-1) : null;
       return {
         tasks,
-        nextCursor:
-          matched.length > query.limit
-            ? (tasks.at(-1)?.id ?? null)
-            : !query.search && rows.length > query.limit
-              ? (rows.at(-1)?.id ?? null)
-              : null,
+        nextCursor: last
+          ? Buffer.from(JSON.stringify({ createdAt: last.cursorCreatedAt, id: last.id })).toString('base64url')
+          : null,
       };
     });
   }

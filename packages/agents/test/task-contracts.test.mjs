@@ -10,8 +10,28 @@ import {
   taskSourcesSchema,
   taskSummarySchema,
   taskPauseReasonSchema,
+  taskListQuerySchema,
+  readTaskListCursor,
 } from '../src/task-contracts.ts';
 import { taskFailurePauseReason } from '../src/task-pause.ts';
+
+test('task list cursors keep microseconds and reject stale or malformed positions', () => {
+  const position = { createdAt: '2026-11-01T00:00:00.123456Z', id: randomUUID() };
+  const after = Buffer.from(JSON.stringify(position)).toString('base64url');
+  assert.equal(taskListQuerySchema.parse({ after }).after, after);
+  assert.deepEqual(readTaskListCursor(after), position);
+  for (const value of [
+    randomUUID(),
+    'invalid-cursor',
+    'a'.repeat(257),
+    Buffer.from('{}').toString('base64url'),
+    Buffer.from(JSON.stringify({ ...position, createdAt: 'not-a-date' })).toString('base64url'),
+    Buffer.from(JSON.stringify({ ...position, createdAt: '0000-01-01T00:00:00.000000Z' })).toString('base64url'),
+    Buffer.from(JSON.stringify({ ...position, id: 'not-an-id' })).toString('base64url'),
+    Buffer.from(JSON.stringify({ ...position, extra: true })).toString('base64url'),
+  ])
+    assert.equal(taskListQuerySchema.safeParse({ after: value }).success, false, value);
+});
 
 test('task summaries retain every structured pause reason and accept legacy absence', () => {
   const summary = taskSummarySchema.pick({ pauseReason: true });

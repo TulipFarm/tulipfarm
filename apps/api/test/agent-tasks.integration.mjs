@@ -7,7 +7,7 @@ import { test } from 'node:test';
 import Fastify from 'fastify';
 import { Pool } from 'pg';
 import { buildApp } from '../src/app.ts';
-import { createAuth } from '../src/auth.ts';
+import { authConfig, createAuth } from '../src/auth.ts';
 import { registerAgentTasks } from '../src/agent-tasks.ts';
 import { workspaceTableMigrations } from '@tulipfarm/workspaces/table-migrations';
 import { encryptCredential } from '../../../packages/workspaces/src/credentials.ts';
@@ -22,6 +22,70 @@ import { createAgentRecordTools } from '../../../packages/agents/src/record-tool
 import { createAgentExecutor } from '@tulipfarm/agents';
 import { createTaskRuntime } from '@tulipfarm/agents/task-runtime';
 
+test('task list HTTP validates opaque cursors and preserves newest-first page boundaries', async t => {
+  const db = await fixture();
+  let runtime;
+  const app = Fastify();
+  t.after(async () => {
+    await app.close();
+    await runtime?.close();
+    await db.close();
+  });
+  const w = await db.create(await workspaceTableMigrations());
+  runtime = createWorkspaceRuntime({
+    replicaCount: 1,
+    reservedConnections: 2,
+    databaseConnectionBudget: 20,
+    resolveCredential: async id => ({ workspaceId: id, generation: 1, connectionString: db.login(w) }),
+  });
+  const agent = await savedTaskAgent(db, w, runtime, w.userId, w.membershipId);
+  registerAgentTasks(app, {
+    runtime,
+    auth: { api: { getSession: async () => ({ user: { id: w.userId }, session: { id: 'fixture-session' } }) } },
+  });
+  const base = `/workspaces/${w.id}/agent-tasks`;
+  for (const after of [
+    randomUUID(),
+    'invalid-cursor',
+    'a'.repeat(257),
+    Buffer.from(JSON.stringify({ createdAt: '0000-01-01T00:00:00.000000Z', id: randomUUID() })).toString('base64url'),
+  ]) {
+    const response = await app.inject(`${base}?after=${after}`);
+    assert.equal(response.statusCode, 400, response.body);
+    assert.equal(response.json().error, 'invalid-request');
+  }
+  const ids = [];
+  for (const createdAt of ['2026-11-01T00:00:00.123455Z', '2026-11-01T00:00:00.123456Z']) {
+    const response = await app.inject({
+      method: 'POST',
+      url: base,
+      headers: { origin: authConfig().webOrigin },
+      payload: { requestId: randomUUID(), agentId: agent.agentId, text: 'Find my request.' },
+    });
+    assert.equal(response.statusCode, 200, response.body);
+    const { id } = response.json();
+    ids.unshift(id);
+    await db.platform.query(
+      `UPDATE "${w.names.schema}".tf_agent_tasks SET status='completed',created_at=$2 WHERE id=$1`,
+      [id, createdAt],
+    );
+  }
+  for (const search of ['', '&search=my+request']) {
+    const first = await app.inject(`${base}?limit=1${search}`);
+    assert.equal(first.statusCode, 200, first.body);
+    assert.equal(first.json().tasks[0].id, ids[0]);
+    const after = first.json().nextCursor;
+    assert.equal(typeof after, 'string');
+    const second = await app.inject(`${base}?limit=1&after=${encodeURIComponent(after)}${search}`);
+    assert.equal(second.statusCode, 200, second.body);
+    assert.deepEqual(
+      second.json().tasks.map(task => task.id),
+      [ids[1]],
+    );
+    assert.equal(second.json().nextCursor, null);
+  }
+});
+
 test(
   'default app authenticates private tasks through real HTTP and retains explicitly attached bytes across continuation',
   { timeout: 120000 },
@@ -30,6 +94,7 @@ test(
     process.env = {
       PATH: previous.PATH,
       NODE_ENV: 'test',
+      ANTHROPIC_API_KEY: 'test-placeholder',
       TEST_ADMIN_DATABASE_URL: previous.TEST_ADMIN_DATABASE_URL,
       BETTER_AUTH_SECRET: 'synthetic-task-foundation-secret-at-least-32-characters',
       BETTER_AUTH_URL: 'http://127.0.0.1:3001',

@@ -242,6 +242,8 @@ export function AgentTaskPage() {
 }
 
 function TaskDetail({ workspace, taskId }: { workspace: { id: string; slug: string }; taskId: string }) {
+  const { user } = workspaceRoute.useRouteContext();
+  const pages = useCatalogNavigation(`${user.id}/${workspace.id}/tasks`);
   const api = useTaskApi(workspace.id);
   const read = useTaskDetail(api, taskId);
   const [pausing, setPausing] = useState(false);
@@ -253,6 +255,7 @@ function TaskDetail({ workspace, taskId }: { workspace: { id: string; slug: stri
           variant="ghost"
           size="sm"
           nativeButton={false}
+          onClick={() => pages.setSearch('')}
           render={<Link to="/$workspaceSlug/agent-tasks" params={{ workspaceSlug: workspace.slug }} />}
         >
           <ChevronLeftIcon data-icon="inline-start" aria-hidden="true" />
