@@ -831,6 +831,8 @@ export const workflowSchema = z.object({
   capabilities: z
     .object({ read: z.boolean(), invoke: z.boolean(), manage: z.boolean() })
     .default({ read: false, invoke: false, manage: false }),
+  /** Whether this server can run code steps, so editors offer them only where a save would succeed. */
+  codeStepsAvailable: z.boolean().default(false),
   sponsorMembershipId: idSchema.nullable().default(null),
   sponsor: workflowPersonSchema.nullable().default(null),
   sponsorshipAccepted: z.boolean().default(false),
