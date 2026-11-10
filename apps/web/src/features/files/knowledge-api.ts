@@ -1,7 +1,9 @@
 import { z } from 'zod';
+import { knowledgeSearchResultSchema, type KnowledgeSave } from '@tulipfarm/knowledge/contracts';
 import { apiOrigin } from '@/lib/auth';
 import { jsonResponse, readJson, responseError } from '@/lib/http';
 import { TableRequestError } from '@/features/tables/request-state';
+import type { FeatureReadOptions } from '@/lib/query/options';
 
 /** Parts of a document that could not be read: the full count and the first few. */
 export const knowledgeGapsSchema = z.object({
@@ -19,20 +21,40 @@ const documentSchema = z.object({
   gaps: knowledgeGapsSchema.optional(),
   kind: z.enum(['note', 'file']),
   fileId: z.uuid().optional(),
+  noteText: z.string().optional(),
 });
 export type KnowledgeEntry = z.infer<typeof documentSchema>;
 
 const messages: Record<string, string> = {
-  'knowledge-not-found': 'You can’t open this file anymore, or the Knowledge entry was removed.',
+  'knowledge-not-found': 'You can’t open this entry anymore, or it was removed.',
   'knowledge-quota': 'Your Knowledge is full, or this file is too large to add.',
-  'knowledge-conflict': 'This file changed while it was being added. Try again.',
+  'knowledge-conflict':
+    'This entry changed while you were working. Close this dialog, refresh the list, and try again.',
+  'knowledge-superseded': 'This entry has a newer revision. Close this dialog, refresh the list, and try again.',
   'knowledge-unavailable': 'Knowledge isn’t available right now. Try again in a few minutes.',
   'file-integrity': 'TulipFarm couldn’t verify this file’s content. Try again.',
 };
 
-/** Personal Knowledge, the only Knowledge destination today. Adding a file queues text extraction; nothing is indexed automatically. */
+export const personalKnowledgeKeys = ['knowledge', 'personal'] as const;
+const pending = (entry: KnowledgeEntry) => entry.parsing === 'queued' || entry.parsing === 'parsing';
+const interval = (checks: number) => Math.min(2000 * 2 ** checks, 30_000);
+
+export function personalKnowledgeRead(api: ReturnType<typeof knowledgeApi>): FeatureReadOptions<KnowledgeEntry[]> {
+  return {
+    key: personalKnowledgeKeys,
+    load: api.list,
+    pollLoad: api.pending,
+    staleTime: 0,
+    pollWhile: entries => entries.some(pending),
+    interval,
+    maxChecks: 13,
+    maxDuration: 5 * 60_000,
+  };
+}
+
 export function knowledgeApi(workspaceId: string) {
-  const base = `${apiOrigin}/v1/workspaces/${encodeURIComponent(workspaceId)}/knowledge/documents`;
+  const knowledge = `${apiOrigin}/v1/workspaces/${encodeURIComponent(workspaceId)}/knowledge`;
+  const base = `${knowledge}/documents`;
   async function request(path: string, method: string, signal: AbortSignal, body?: unknown) {
     const response = await jsonResponse(`${base}${path}`, {
       method,
@@ -50,12 +72,38 @@ export function knowledgeApi(workspaceId: string) {
     }
     return readJson(response);
   }
+  const get = async (documentId: string, signal: AbortSignal) =>
+    documentSchema.parse(await request(`/${documentId}`, 'GET', signal));
   return {
-    /** The first page of your Knowledge, used to find files already added. */
-    list: async (signal: AbortSignal) =>
-      z.object({ items: z.array(documentSchema) }).parse(await request('', 'GET', signal)).items,
-    get: async (documentId: string, signal: AbortSignal) =>
-      documentSchema.parse(await request(`/${documentId}`, 'GET', signal)),
+    list: async (signal: AbortSignal) => {
+      const entries: KnowledgeEntry[] = [];
+      let cursor: string | null = null;
+      do {
+        const page = z
+          .object({ items: z.array(documentSchema), nextCursor: z.uuid().nullable().default(null) })
+          .parse(await request(cursor ? `?cursor=${cursor}` : '', 'GET', signal));
+        entries.push(...page.items);
+        cursor = page.nextCursor;
+      } while (cursor);
+      return entries;
+    },
+    get,
+    pending: async (entries: KnowledgeEntry[], signal: AbortSignal) => {
+      const refreshed: KnowledgeEntry[] = [];
+      for (const entry of entries) {
+        signal.throwIfAborted();
+        if (!pending(entry)) {
+          refreshed.push(entry);
+          continue;
+        }
+        try {
+          refreshed.push(await get(entry.documentId, signal));
+        } catch (error) {
+          if (!(error instanceof TableRequestError) || error.status !== 404) throw error;
+        }
+      }
+      return refreshed;
+    },
     add: async (input: { documentId: string; commandId: string; title: string; fileId: string }, signal: AbortSignal) =>
       documentSchema.parse(
         await request(`/${input.documentId}`, 'PUT', signal, {
@@ -65,6 +113,27 @@ export function knowledgeApi(workspaceId: string) {
           input: { kind: 'file', fileId: input.fileId },
         }),
       ),
+    save: async ({ documentId, ...body }: KnowledgeSave, signal: AbortSignal) =>
+      documentSchema.parse(await request(`/${documentId}`, 'PUT', signal, body)),
+    remove: async (entry: KnowledgeEntry, commandId: string, signal: AbortSignal) =>
+      request(`/${entry.documentId}/remove`, 'POST', signal, {
+        commandId,
+        expectedRevisionId: entry.revisionId,
+      }),
+    search: async (query: string, signal: AbortSignal) => {
+      const response = await jsonResponse(`${knowledge}/search?${new URLSearchParams({ query })}`, {
+        method: 'GET',
+        signal,
+        cache: 'no-store',
+      });
+      if (!response.ok)
+        throw new TableRequestError(
+          response.status,
+          'knowledge-search-failed',
+          'Could not search Knowledge. Try again.',
+        );
+      return knowledgeSearchResultSchema.parse(await readJson(response));
+    },
     retry: async (entry: KnowledgeEntry, commandId: string, signal: AbortSignal) =>
       documentSchema.parse(
         await request(`/${entry.documentId}/retry`, 'POST', signal, {

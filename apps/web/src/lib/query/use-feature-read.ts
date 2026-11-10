@@ -31,8 +31,9 @@ export function useFeatureRead<T>(input: FeatureReadOptions<T>) {
         },
         interval: input.interval ?? 2000,
         maxChecks: input.maxChecks ?? 30,
+        ...(input.maxDuration === undefined ? {} : { maxDuration: input.maxDuration }),
       }),
-    [runtime, key, current, input.interval, input.maxChecks],
+    [runtime, key, current, input.interval, input.maxChecks, input.maxDuration],
   );
   useEffect(() => {
     runtime.polling.sync();
@@ -44,9 +45,10 @@ export function useFeatureRead<T>(input: FeatureReadOptions<T>) {
   );
   const refresh = useCallback(async () => {
     if (input.enabled === false || !current()) return;
+    if (input.pollLoad) await runtime.client.cancelQueries({ queryKey: key, exact: true });
     runtime.polling.reset(key);
     await result.refetch({ cancelRefetch: false });
-  }, [runtime, key, current, input.enabled, result.refetch]);
+  }, [runtime, key, current, input.enabled, input.pollLoad, result.refetch]);
   const restart = useCallback(() => {
     runtime.polling.reset(key);
   }, [runtime, key]);

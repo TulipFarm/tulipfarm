@@ -44,6 +44,9 @@ import { slackErrorMessages, slackKnowledgeApi, slackSourceKeys } from '@/featur
 import { CommandFeedback, useCommand } from '@/features/integrations/slack-knowledge-shared';
 import { useFeatureChanges, useFeatureRead } from '@/lib/query';
 import { workspaceRoute } from '@/router';
+import { knowledgeApi, personalKnowledgeRead } from '@/features/files/knowledge-api';
+import { KnowledgeLibrary } from '@/features/files/knowledge-library';
+import { ReadResult } from '@/features/integrations/slack-knowledge-shared';
 
 const units: Record<DefaultKnowledgeProduct, [string, string]> = {
   'google-drive': ['drive', 'drives'],
@@ -297,18 +300,22 @@ function KnowledgePanel({
       <CommandFeedback state={command.state} retry={command.retry} />
       <KnowledgeBase sources={sources}>
         <KnowledgeBaseHeader subtitle="Your automatic Knowledge" />
-        <KnowledgeBaseDiagram>
-          <KnowledgeBaseActivity />
-        </KnowledgeBaseDiagram>
-        <KnowledgeBaseSummary>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => void navigate({ to: '/$workspaceSlug/integrations', params: { workspaceSlug: slug } })}
-          >
-            Manage integrations
-          </Button>
-        </KnowledgeBaseSummary>
+        {sources.some(source => (source.chunks ?? 0) > 0) && (
+          <KnowledgeBaseDiagram>
+            <KnowledgeBaseActivity />
+          </KnowledgeBaseDiagram>
+        )}
+        {sources.some(source => (source.chunks ?? 0) > 0) && (
+          <KnowledgeBaseSummary>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => void navigate({ to: '/$workspaceSlug/integrations', params: { workspaceSlug: slug } })}
+            >
+              Manage integrations
+            </Button>
+          </KnowledgeBaseSummary>
+        )}
         <KnowledgeBaseSources
           onConnect={open}
           onSettings={open}
@@ -324,12 +331,23 @@ function KnowledgePanel({
 export default function KnowledgePage() {
   const { workspace } = workspaceRoute.useRouteContext();
   const { enabled, read } = useDefaultKnowledge(workspace.id);
+  const api = useMemo(() => knowledgeApi(workspace.id), [workspace.id]);
+  const entries = useFeatureRead(personalKnowledgeRead(api));
   return (
     <PageContent>
-      <PageHeader
-        title="Knowledge"
-        description="What TulipFarm reads from your connected apps, and how each source is syncing."
-      />
+      <PageHeader title="Knowledge" description="Your notes, files, and connected sources." />
+      <ReadResult state={entries.state} label="your Knowledge" retry={entries.refresh}>
+        {items => (
+          <KnowledgeLibrary
+            workspaceId={workspace.id}
+            slug={workspace.slug}
+            entries={items}
+            refresh={entries.refresh}
+            delayed={entries.delayed}
+            restart={entries.restart}
+          />
+        )}
+      </ReadResult>
       {!enabled ? (
         <StatePanel
           kind="empty"

@@ -2,13 +2,26 @@ import { type QueryClient, type QueryKey, hashKey } from '@tanstack/react-query'
 
 /** A fixed delay, or a delay chosen from the number of checks the entry has made since its last reset. */
 export type PollInterval = number | ((checks: number) => number);
-type Poll = { pending: () => boolean; enabled?: () => boolean; interval: PollInterval; maxChecks: number };
+type Poll = {
+  pending: () => boolean;
+  enabled?: () => boolean;
+  interval: PollInterval;
+  maxChecks: number;
+  maxDuration?: number;
+};
 
 /** Fast at first, then slower, never stopping: 500 ms for 20 checks, 2 s until 60 checks, then 5 s. */
 export const replyBackoff = (checks: number) => (checks < 20 ? 500 : checks < 60 ? 2000 : 5000);
 const delay = (poll: Poll, checks: number) =>
   typeof poll.interval === 'number' ? poll.interval : poll.interval(checks);
-type Entry = { key: QueryKey; readers: Set<Poll>; checks: number; timer: ReturnType<typeof setTimeout> | undefined };
+type Entry = {
+  key: QueryKey;
+  readers: Set<Poll>;
+  checks: number;
+  startedAt?: number | undefined;
+  checking?: boolean;
+  timer: ReturnType<typeof setTimeout> | undefined;
+};
 
 /** One timer and budget per cache key, regardless of the number of React observers. */
 export function createPolling(client: QueryClient, visible: () => boolean, online: () => boolean) {
@@ -26,6 +39,11 @@ export function createPolling(client: QueryClient, visible: () => boolean, onlin
     clearTimeout(entry.timer);
     entry.timer = undefined;
   };
+  const remaining = (entry: Entry, poll: Poll) =>
+    poll.maxDuration === undefined || entry.startedAt === undefined
+      ? Infinity
+      : poll.maxDuration - (Date.now() - entry.startedAt);
+  const exhausted = (entry: Entry, poll: Poll) => entry.checks >= poll.maxChecks || remaining(entry, poll) <= 0;
   const schedule = (entry: Entry) => {
     const query = client.getQueryCache().find({ queryKey: entry.key, exact: true });
     const poll = policy(entry);
@@ -37,23 +55,34 @@ export function createPolling(client: QueryClient, visible: () => boolean, onlin
       query.state.fetchStatus !== 'idle' ||
       query.state.error ||
       !poll ||
-      (!revalidate && entry.checks >= poll.maxChecks)
+      (!revalidate && exhausted(entry, poll))
     ) {
       clear(entry);
       return;
     }
+    if (!revalidate && poll.maxDuration !== undefined) entry.startedAt ??= Date.now();
     if (entry.timer !== undefined) return;
     entry.timer = setTimeout(
       () => {
         entry.timer = undefined;
-        if (!visible() || !online() || !policy(entry)) return;
-        if (!revalidations.has(hashKey(entry.key))) entry.checks++;
+        const current = policy(entry);
+        if (!visible() || !online() || !current) return;
+        const revalidate = revalidations.has(hashKey(entry.key));
+        if (!revalidate && exhausted(entry, current)) {
+          notify();
+          return;
+        }
+        entry.checking = !revalidate;
+        if (!revalidate) entry.checks++;
         notify();
         void client
           .refetchQueries({ queryKey: entry.key, exact: true, type: 'active' }, { cancelRefetch: false })
-          .finally(() => schedule(entry));
+          .finally(() => {
+            entry.checking = false;
+            schedule(entry);
+          });
       },
-      delay(poll, entry.checks),
+      revalidate ? delay(poll, entry.checks) : Math.min(delay(poll, entry.checks), remaining(entry, poll)),
     );
   };
   return {
@@ -84,6 +113,7 @@ export function createPolling(client: QueryClient, visible: () => boolean, onlin
     },
     sync: () => {
       for (const entry of entries.values()) schedule(entry);
+      notify();
     },
     pause: () => {
       for (const entry of entries.values()) clear(entry);
@@ -92,15 +122,20 @@ export function createPolling(client: QueryClient, visible: () => boolean, onlin
       const entry = entries.get(hashKey(key));
       if (entry) {
         entry.checks = 0;
+        entry.startedAt = undefined;
+        entry.checking = false;
         clear(entry);
         schedule(entry);
         notify();
       }
     },
+    checking(key: QueryKey) {
+      return entries.get(hashKey(key))?.checking === true;
+    },
     delayed(key: QueryKey) {
       const entry = entries.get(hashKey(key));
       const poll = entry && policy(entry);
-      return !!entry && !!poll && entry.checks >= poll.maxChecks;
+      return !!entry && !!poll && exhausted(entry, poll);
     },
     remove(key: QueryKey) {
       const hash = hashKey(key);

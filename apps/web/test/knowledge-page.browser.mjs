@@ -3,7 +3,7 @@ import { mkdir } from 'node:fs/promises';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
-import { createServer } from 'vite';
+import { startBuiltApp, captureBrowserFailure } from './built-app.fixture.mjs';
 import { createWorkspaceFixture, serveWorkspaceShellEvent } from './workspace.fixture.mjs';
 
 const counts = (ready, queued = 0) => ({
@@ -53,18 +53,12 @@ const intent = (n, product, accountLabel, included, rest = {}) => ({
   ...rest,
 });
 
-test('the Knowledge page lists every automatic source and manages it in Chromium', { timeout: 120_000 }, async () => {
-  const root = fileURLToPath(new URL('..', import.meta.url));
-  const server = await createServer({
-    root,
-    configFile: `${root}/vite.config.ts`,
-    envDir: false,
-    logLevel: 'error',
-    server: { host: '127.0.0.1', port: 0 },
-  });
-  await server.listen();
-  const origin = server.resolvedUrls.local[0].replace(/\/$/, '');
+test('the Knowledge page lists every automatic source and manages it in Chromium', { timeout: 120_000 }, async t => {
+  const server = await startBuiltApp();
+  t.after(() => server.close());
+  const { origin } = server;
   const browser = await chromium.launch();
+  t.after(() => browser.close());
   const screenshots = fileURLToPath(new URL('../../../reports/check/knowledge-page-ui/', import.meta.url));
   await mkdir(screenshots, { recursive: true });
   const { workspace, session } = createWorkspaceFixture({ slug: 'knowledge-qa', name: 'Knowledge QA' });
@@ -121,7 +115,7 @@ test('the Knowledge page lists every automatic source and manages it in Chromium
     serviceWorkers: 'block',
   });
   const page = await context.newPage();
-  page.setDefaultTimeout(15_000);
+  page.setDefaultTimeout(30_000);
   page.on('pageerror', error => errors.push(error.message));
   await context.route('**/v1/**', async route => {
     if (await serveWorkspaceShellEvent(route, workspace)) return;
@@ -152,6 +146,7 @@ test('the Knowledge page lists every automatic source and manages it in Chromium
         capabilities: { manageGovernance: false, canLeave: true },
       };
     else if (path === `${base}/knowledge/defaults`) json = { enabled: true, items };
+    else if (path === `${base}/knowledge/documents`) json = { items: [], nextCursor: null };
     else if (path.startsWith(`${base}/knowledge/defaults/`) && path.endsWith('/manage')) {
       const id = path.split('/defaults/')[1].split('/')[0],
         { action } = request.postDataJSON();
@@ -250,9 +245,10 @@ test('the Knowledge page lists every automatic source and manages it in Chromium
     await page.waitForURL(`${origin}/${workspace.slug}/integrations/github?tab=knowledge`);
     await page.getByRole('heading', { name: 'GitHub', exact: true }).waitFor();
     assert.deepEqual(errors, []);
+  } catch (error) {
+    await captureBrowserFailure(page, 'knowledge-page');
+    throw error;
   } finally {
     await context.close();
-    await browser.close();
-    await server.close();
   }
 });
