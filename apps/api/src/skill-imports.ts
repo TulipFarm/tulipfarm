@@ -1,7 +1,9 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { AccessDenied, SourceAuthorizationUnavailable, uuidSchema } from '@tulipfarm/access';
+import { AccessDenied, SourceAuthorizationUnavailable, resolveHuman, uuidSchema } from '@tulipfarm/access';
 import { createSkillImports } from '@tulipfarm/agents/skill-imports';
+import { createSkillTools } from '@tulipfarm/agents/skill-tools';
+import { skillPackageCompatibility } from '@tulipfarm/agents/skill-objects';
 import { configuredSkillRuntimeProbe } from '@tulipfarm/workflow-snippets/client';
 import type { FileBytes } from '@tulipfarm/files';
 import { createSkillPreviews } from '@tulipfarm/agents/skill-previews';
@@ -15,7 +17,11 @@ import {
   skillProvenanceSchema,
 } from '@tulipfarm/agents/skill-import-contracts';
 import { SkillPackageError } from '@tulipfarm/agents/skill-package-contracts';
-import { workspaceSkillReceiptSchema, WorkspaceSkillError } from '@tulipfarm/agents/workspace-skill-contracts';
+import {
+  workspaceSkillDefinitionSchema,
+  workspaceSkillReceiptSchema,
+  WorkspaceSkillError,
+} from '@tulipfarm/agents/workspace-skill-contracts';
 import type { WorkspaceRuntime } from '@tulipfarm/workspaces/storage';
 import { StorageUnavailableError } from '@tulipfarm/workspace-storage/runtime';
 import { authenticateRoutes } from './authenticated-routes.ts';
@@ -153,6 +159,26 @@ export function registerSkillImports(
       ...(body ? { body: validation.json(body) } : {}),
       response: { 200: validation.json(output) },
     });
+    const procedure = workspaceSkillDefinitionSchema.omit({ package: true }).required({ description: true });
+    routes.put(
+      `${base}/draft`,
+      { schema: schema('prepareSkillProcedureV1', skillImportViewSchema, procedure) },
+      async request => {
+        const p = params.parse(request.params);
+        const actor = await dependencies.runtime.transaction(p.workspaceId, skillPackageCompatibility, tx =>
+          resolveHuman(tx, user(request)),
+        );
+        await createSkillTools(dependencies.runtime, dependencies.objects).draft(
+          p.workspaceId,
+          actor,
+          p.importId,
+          'new',
+          { expectedVersion: 0, definition: procedure.parse(request.body) },
+          [],
+        );
+        return imports.read(p.workspaceId, actor, p.importId);
+      },
+    );
     routes.put(
       base,
       { schema: schema('prepareSkillImportV1', skillImportViewSchema, skillImportInputSchema) },

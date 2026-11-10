@@ -121,6 +121,13 @@ export function SkillsPage() {
           onChange={pages.setSearch}
         />
         <div className="flex shrink-0 gap-2">
+          <Button
+            variant="outline"
+            nativeButton={false}
+            render={<Link to="/$workspaceSlug/skills/new" params={{ workspaceSlug: workspace.slug }} />}
+          >
+            Create manually
+          </Button>
           <Button variant="outline" onClick={() => setImportOpen(true)}>
             Import skill
           </Button>

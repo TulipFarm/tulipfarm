@@ -228,13 +228,13 @@ function Greeting() {
 
 function ConversationWorkspace({ api }: { api: ConversationApi }) {
   const { workspace, user } = workspaceRoute.useRouteContext();
-  const models = useChatModels(workspace.id, user);
+  const searchIntent = newChatSearch.parse(Object.fromEntries(new URLSearchParams(window.location.search)));
+  const models = useChatModels(workspace.id, user, searchIntent.intent === 'create-skill');
   const chatId = workspaceChatRoute.useParams({ shouldThrow: false })?.chatId;
   const { workspaceSlug } = workspaceRoute.useParams();
   const navigate = useNavigate();
   const headerElement = useContext(ChatHeaderContext);
   const project = useSearch({ strict: false, select: search => search.project ?? null });
-  const searchIntent = newChatSearch.parse(Object.fromEntries(new URLSearchParams(window.location.search)));
   const skillIntent = {
     intent: searchIntent.intent,
     id: searchIntent.skillId,
@@ -262,7 +262,8 @@ function ConversationWorkspace({ api }: { api: ConversationApi }) {
         : intent === 'create-skill'
           ? {
               prompt:
-                'Help me create a reusable skill. Ask only what you need to know, then prepare a skill package for my review.',
+                'Help me create a reusable skill. Draft from my description without asking for confirmation first. Use sensible defaults for optional details, then prepare a skill package for my review.',
+              skill: { id: 'workspace-skill-authoring', revision: 'latest' },
             }
           : intent === 'edit-skill' && skillIntent.id && skillIntent.version
             ? {
@@ -560,6 +561,15 @@ function ConversationDetail({
     if (!prefill?.skill || sharedChat) return;
     const selected = prefill.skill,
       controller = new AbortController();
+    if (selected.id === 'workspace-skill-authoring') {
+      skills.stage({ skillId: selected.id, revision: selected.revision, name: 'Create a reusable skill' });
+      if (!text.trim()) {
+        setContent(textDocument(prefill.prompt));
+        selectPrefill(prefill.prompt);
+      }
+      onPrefillApplied?.();
+      return () => controller.abort();
+    }
     void skillApi(workspace.id)
       .read(selected.id, controller.signal)
       .then(

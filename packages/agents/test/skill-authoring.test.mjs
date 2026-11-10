@@ -3,6 +3,58 @@ import { createHash } from 'node:crypto';
 import { test } from 'node:test';
 import { readSkill } from '../dist/skills.js';
 import { chatCallSchema, createChatTools } from '../dist/tools.js';
+import { inferWithTools } from '../src/inference.ts';
+import { nativeRoutes, nativeReply, use, offeredTools, isCompletionRequest, selectReply } from './native-fixture.mjs';
+
+for (const model of ['grok-4.3', 'Kimi-K2.6'])
+  test(`${model} drafts a plain procedure in one turn after reading the authoring guide`, async t => {
+    let step = 0;
+    const executed = [];
+    const definition = {
+      name: 'Weekly summary',
+      description: 'Summarize weekly work when asked.',
+      instructions: 'List completed work, open questions, and next actions.',
+    };
+    t.mock.method(globalThis, 'fetch', async (_url, init) => {
+      const body = JSON.parse(init.body);
+      if (isCompletionRequest(body))
+        return Response.json(
+          selectReply('azure', { status: 'waiting', reason: 'The exact package needs human approval.' }),
+        );
+      if (step > 0) assert.ok(offeredTools('azure', body).some(tool => tool.name === 'skills_draft'));
+      return Response.json(
+        nativeReply(
+          'azure',
+          [
+            { calls: [use('skills.read', { skillId: 'workspace-skill-authoring' })] },
+            { calls: [use('skills.workspace')] },
+            { calls: [use('skills.draft', { skillId: 'new', input: { expectedVersion: 0, definition } })] },
+            { text: 'Review the proposed weekly summary skill before installing it.' },
+          ][step++],
+        ),
+      );
+    });
+    const result = await inferWithTools(
+      { ...nativeRoutes.azure, model },
+      [
+        {
+          role: 'user',
+          text: 'Create a weekly summary skill that lists completed work, open questions, and next actions.',
+        },
+      ],
+      async call => {
+        executed.push(call.tool);
+        if (call.tool === 'skills.read') return readSkill(call.skillId);
+        if (call.tool === 'skills.workspace') return { workspace: [], nextCursor: null };
+        assert.equal(call.tool, 'skills.draft');
+        assert.deepEqual(call.input.definition, definition);
+        return { importId: '00000000-0000-4000-8000-000000000001', status: 'pending-review', receipts: [] };
+      },
+    );
+    assert.deepEqual(executed, ['skills.read', 'skills.workspace', 'skills.draft']);
+    assert.match(result.text, /Review the proposed/);
+    assert.equal(step, 4);
+  });
 
 test('the chat creator can load pinned writing and example guides on demand', async () => {
   const creator = readSkill('workspace-skill-authoring');
@@ -14,6 +66,7 @@ test('the chat creator can load pinned writing and example guides on demand', as
       throw new Error('Bundled guides must not access workspace data');
     },
   });
+
   for (const reference of creator.resources) {
     const call = chatCallSchema.parse({ tool: 'skills.read', skillId: creator.id, resource: reference.path });
     const guide = await tools.invoke(
@@ -32,4 +85,29 @@ test('the chat creator can load pinned writing and example guides on demand', as
     chatCallSchema.safeParse({ tool: 'skills.approve', importId: '00000000-0000-4000-8000-000000000001' }).success,
     false,
   );
+});
+
+test('workspace reads with a malformed or absent revision give a safe correction without querying storage', async () => {
+  const tools = createChatTools({
+    transaction() {
+      throw new Error('Invalid pins must not query storage');
+    },
+  });
+  for (const revision of [undefined, 'latest', '1', 'not-a-revision']) {
+    const result = await tools.invoke(
+      {
+        workspaceId: '00000000-0000-4000-8000-000000000001',
+        actor: { kind: 'human', membershipId: '00000000-0000-4000-8000-000000000002', userId: 'fixture' },
+        callId: '00000000-0000-4000-8000-000000000003',
+      },
+      chatCallSchema.parse({
+        tool: 'skills.read',
+        skillId: '00000000-0000-4000-8000-000000000004',
+        ...(revision ? { revision } : {}),
+      }),
+    );
+    assert.equal(result.error, 'skill-revision-required');
+    assert.match(result.instruction, /skills.workspace/);
+    assert.match(result.instruction, /64/);
+  }
 });

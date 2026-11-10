@@ -190,6 +190,8 @@ const codes = new Set<string>([
   'no-skills',
   'skill-in-use',
   'skill-archived',
+  'skill-revision-required',
+  'skill-storage-unavailable',
   'invalid-values',
   'duplicate-key',
   'linked-record',

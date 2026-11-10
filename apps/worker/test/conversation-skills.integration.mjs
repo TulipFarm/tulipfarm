@@ -262,11 +262,12 @@ test('an Azure Foundry model prepares a package through chat, meters its review,
       0,
     );
     phase = 'review';
+    const beforeReview = requests.length;
     const activities = createSkillActivities(f.runtime, bytes, () => false);
     await activities.prepareSkillImport(w.id, id);
     const ready = await imports.read(w.id, actor, id);
     assert.equal(ready.status, 'ready');
-    assert.equal(requests.length, 7);
+    assert.equal(requests.length, beforeReview + 1);
     const reviewUsage = (
       await f.db.platform.query(
         `SELECT charged,provider_pico_usd FROM ${f.table('tf_credit_usage')} WHERE flow_id=$1`,
@@ -277,7 +278,7 @@ test('an Azure Foundry model prepares a package through chat, meters its review,
     assert.ok(BigInt(reviewUsage[0].charged) > 0n);
     assert.ok(BigInt(reviewUsage[0].provider_pico_usd) > 0n);
     await activities.prepareSkillImport(w.id, id);
-    assert.equal(requests.length, 7, 'Completed review replay makes no paid request');
+    assert.equal(requests.length, beforeReview + 1, 'Completed review replay makes no paid request');
     const [installed] = await imports.approve(w.id, actor, id, {
       commandId: randomUUID(),
       digest: ready.digest,
@@ -294,7 +295,7 @@ test('an Azure Foundry model prepares a package through chat, meters its review,
     await f.db.platform.query(`UPDATE ${f.table('tf_credit_account')} SET available=0`);
     await assert.rejects(activities.prepareSkillImport(w.id, deniedId), /credits-exhausted/);
     assert.equal((await imports.read(w.id, actor, deniedId)).status, 'failed');
-    assert.equal(requests.length, 7, 'Credit denial prevents dispatch to the reviewer');
+    assert.equal(requests.length, beforeReview + 1, 'Credit denial prevents dispatch to the reviewer');
   } finally {
     await f.close();
   }

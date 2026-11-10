@@ -285,7 +285,7 @@ function ImportReview({
   return (
     <section className="min-w-0 space-y-6">
       <h2 ref={heading} tabIndex={-1} className="text-base font-medium">
-        {view.input.kind === 'draft' ? 'Created in chat' : 'From a public source'}
+        {view.input.kind === 'draft' ? 'Proposed skill' : 'From a public source'}
       </h2>
       {view.input.url && <p className="break-all text-sm text-muted-foreground">{view.input.url}</p>}
       {pending && (

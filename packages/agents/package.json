@@ -3,6 +3,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./skill-tools": {
+      "types": "./dist/skill-tools.d.ts",
+      "default": "./dist/skill-tools.js"
+    },
     "./system-package-contracts": {
       "types": "./dist/system-package-contracts.d.ts",
       "default": "./dist/system-package-contracts.js"

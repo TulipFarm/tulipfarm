@@ -42,6 +42,7 @@ function dismissedNotice(workspaceId: string) {
 export function useChatModels(
   workspaceId: string,
   user: Pick<typeof authClient.$Infer.Session.user, 'lastModelFamilyId'>,
+  preferWorkspaceDefault = false,
 ) {
   const catalog = useModelCatalog(workspaceId);
   const [selected, setSelected] = useState<ComposerModel | null>(null);
@@ -49,19 +50,28 @@ export function useChatModels(
   // The remembered model the member already acknowledged here, by dismissing the notice, choosing or sending.
   const [acknowledged, setAcknowledged] = useState(() => dismissedNotice(workspaceId));
   const saving = useRef(false);
+  const defaultRequested = useRef(false);
+  const defaultApplied = useRef(false);
   const { state } = catalog;
   const families = state.kind === 'ready' ? state.data.families : [];
   const saved = user.lastModelFamilyId ?? null;
   useEffect(() => {
+    if (preferWorkspaceDefault) defaultRequested.current = true;
     if (state.kind !== 'ready') return;
     const listed = (id: string | null | undefined) => state.data.families.find(family => family.id === id);
     const savedFamily = listed(saved);
-    const first =
-      (savedFamily?.available ? savedFamily : undefined) ??
+    const startDefault = defaultRequested.current && !defaultApplied.current;
+    const workspaceDefault =
       state.data.families.find(family => family.id === state.data.defaultChatFamilyId && family.available) ??
       state.data.families.find(family => family.available);
-    setSelected(current => (current && listed(current.id) ? current : first ? composerModel(first) : null));
-  }, [state, saved]);
+    const first = (!startDefault && savedFamily?.available ? savedFamily : undefined) ?? workspaceDefault;
+    setSelected(current => {
+      if (!startDefault && current && listed(current.id)?.available) return current;
+      const replacement = current ? workspaceDefault : first;
+      return replacement ? composerModel(replacement) : null;
+    });
+    if (startDefault) defaultApplied.current = true;
+  }, [state, saved, preferWorkspaceDefault]);
   useEffect(() => setAcknowledged(dismissedNotice(workspaceId)), [workspaceId]);
   const current = families.find(family => family.id === selected?.id);
   const model = state.kind === 'unavailable' ? null : current ? composerModel(current) : selected;

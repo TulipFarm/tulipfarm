@@ -2443,6 +2443,12 @@ export function createChatTools(
         return listSkills(telemetryRuntime === 'chat' && context.origin ? 'chat' : 'agent');
       case 'skills.read': {
         if (z.uuid().safeParse(call.skillId).success) {
+          if (!call.revision || !/^[a-f0-9]{64}$/.test(call.revision))
+            return {
+              error: 'skill-revision-required',
+              instruction:
+                'Call skills.workspace and copy the exact 64-character revision for this workspace skill, then retry skills.read. Never invent a revision or replace an existing valid pin. Built-in guides use their listed name, such as workspace-skill-authoring, without a revision.',
+            };
           if (call.resource)
             return {
               error: 'skill-resource-unavailable',

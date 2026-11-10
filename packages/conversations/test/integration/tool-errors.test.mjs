@@ -1,10 +1,116 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
+import { z } from 'zod';
 import { AccessDenied, SourceAuthorizationUnavailable } from '@tulipfarm/access';
 import { observeTool } from '@tulipfarm/observability';
+import { StorageUnavailableError } from '@tulipfarm/workspace-storage/runtime';
 import { createConversationExecutor } from '../../src/runtime.ts';
 import { conversationFixture } from '../fixture.mjs';
+
+test('skill failures name safe causes, offer recovery, and retain failed activity', async () => {
+  const f = await conversationFixture();
+  try {
+    const w = f.workspace,
+      chatId = randomUUID();
+    await f.store.create(w.id, w.userId, { chatId, commandId: randomUUID() });
+    const sent = await f.store.send(w.id, w.userId, chatId, {
+      commandId: randomUUID(),
+      messageId: randomUUID(),
+      parts: [{ kind: 'text', text: 'Create a weekly summary skill.' }],
+    });
+    const executor = createConversationExecutor(f.runtime, async ({ executeTool }) => {
+      for (const [failure, code, words] of [
+        [
+          Object.assign(new Error('private diagnostic'), { name: 'SkillPackageError', code: 'invalid-package' }),
+          'invalid-package',
+          /SKILL.md/,
+        ],
+        [
+          Object.assign(new Error('private diagnostic'), { name: 'SkillPackageError', code: 'package-unavailable' }),
+          'package-unavailable',
+          /package.*unavailable/i,
+        ],
+        [
+          Object.assign(new Error('private diagnostic'), { name: 'SkillPackageError', code: 'private-value' }),
+          'tool-failed',
+          /could not/i,
+        ],
+        [new Error('private diagnostic'), 'tool-failed', /could not/i],
+        [z.string().safeParse(42).error, 'invalid-arguments', /invalid fields/],
+      ]) {
+        const output = await executeTool('skills.draft', false, async () => {
+          throw failure;
+        });
+        assert.equal(output.result.error, code);
+        assert.match(output.result.instruction, words);
+        assert.match(output.result.instruction, /[Rr]etry/);
+        assert.match(output.result.instruction, /Create manually/);
+        assert.doesNotMatch(JSON.stringify(output), /private diagnostic|private-value|unconfirmed reason/);
+      }
+      return 'The skill could not be prepared. Retry, or use Create manually on the Skills page.';
+    });
+    assert.equal(
+      await executor.process({ workspaceId: w.id, conversationId: chatId, turnId: sent.turnId, generation: 0 }),
+      'completed',
+    );
+    assert.deepEqual(
+      (await f.store.history(w.id, w.userId, chatId)).messages[0].tools.map(tool => tool.status),
+      Array(5).fill('failed'),
+    );
+  } finally {
+    await f.close();
+  }
+});
+
+test('skill reads retry a transient storage failure twice, but never retry a denial', async () => {
+  const f = await conversationFixture();
+  try {
+    const w = f.workspace,
+      chatId = randomUUID();
+    await f.store.create(w.id, w.userId, { chatId, commandId: randomUUID() });
+    const sent = await f.store.send(w.id, w.userId, chatId, {
+      commandId: randomUUID(),
+      messageId: randomUUID(),
+      parts: [{ kind: 'text', text: 'Read the skill authoring guide.' }],
+    });
+    let attempts = 0,
+      denied = 0,
+      exhausted = 0;
+    const executor = createConversationExecutor(f.runtime, async ({ executeTool }) => {
+      const read = await executeTool('skills.read', false, async () => {
+        if (++attempts < 3) throw new StorageUnavailableError('wait_timeout');
+        return { result: { instructions: 'Draft a procedure for review.' }, sources: [] };
+      });
+      assert.match(read.result.instructions, /Draft/);
+      const refused = await executeTool('skills.read', false, async () => {
+        denied++;
+        throw new AccessDenied();
+      });
+      assert.equal(refused.result.error, 'access-denied');
+      const failed = await executeTool('skills.read', false, async () => {
+        exhausted++;
+        throw new StorageUnavailableError('wait_timeout');
+      });
+      assert.equal(failed.result.error, 'skill-storage-unavailable');
+      assert.match(failed.result.instruction, /[Rr]etry/);
+      return 'The guide was read. The later reads failed.';
+    });
+    assert.equal(
+      await executor.process({ workspaceId: w.id, conversationId: chatId, turnId: sent.turnId, generation: 0 }),
+      'completed',
+    );
+    assert.equal(attempts, 3);
+    assert.equal(exhausted, 3);
+    assert.equal(denied, 1);
+    assert.deepEqual(
+      (await f.store.history(w.id, w.userId, chatId)).messages[0].tools.map(tool => tool.status),
+      ['completed', 'blocked', 'failed'],
+    );
+  } finally {
+    await f.close();
+  }
+});
 
 test('generic tool failures do not instruct the model to infer missing permissions', async () => {
   const f = await conversationFixture();

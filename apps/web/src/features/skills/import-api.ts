@@ -5,7 +5,10 @@ import {
   type skillImportDecisionSchema,
   type skillImportInputSchema,
 } from '@tulipfarm/agents/skill-import-contracts';
-import { workspaceSkillReceiptSchema } from '@tulipfarm/agents/workspace-skill-contracts';
+import {
+  workspaceSkillReceiptSchema,
+  type workspaceSkillDefinitionSchema,
+} from '@tulipfarm/agents/workspace-skill-contracts';
 import { apiOrigin } from '@/lib/auth';
 import { jsonResponse, readJson } from '@/lib/http';
 import { TableRequestError } from '@/features/tables/request-state';
@@ -61,6 +64,10 @@ export function skillImportApi(workspaceId: string) {
       ),
     prepare: async (id: string, input: z.infer<typeof skillImportInputSchema>) =>
       skillImportViewSchema.parse(await request(id, '', 'PUT', input)),
+    draft: async (
+      id: string,
+      definition: Pick<z.infer<typeof workspaceSkillDefinitionSchema>, 'name' | 'description' | 'instructions'>,
+    ) => skillImportViewSchema.parse(await request(id, '/draft', 'PUT', definition)),
     read: async (id: string, signal?: AbortSignal) =>
       skillImportViewSchema.parse(await request(id, '', 'GET', undefined, signal)),
     select: async (id: string, selected: string[]) =>
