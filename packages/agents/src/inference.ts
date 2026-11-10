@@ -2601,15 +2601,26 @@ const invitationUnavailableReply =
   "I can't see workspace invitations in chat. Open Settings > Members to see pending invitations and their teams.";
 const invitationTopic = /\b(?:invitations?|invitees?|invites?|invited)\b/i;
 const eventInvitationTopic = /\b(?:calendar|meetings?|events?)\b/i;
-const invitationLookup = (text: string) =>
+const invitationQuestion = (text: string) =>
   invitationTopic.test(text) &&
-  !eventInvitationTopic.test(text) &&
-  /\b(?:who|which|list|show|find|check|count|status|how many|are there|do we have|tell me|any)\b/i.test(text) &&
+  (!eventInvitationTopic.test(text) || /\bworkspace\s+(?:invitations?|invitees?|invites?)\b/i.test(text)) &&
+  /\b(?:who|what|which|list|show|find|check|count|status|pending|outstanding|unaccepted|how many|are there|do we have|tell me|any)\b/i.test(
+    text,
+  ) &&
   !/\b(?:draft|write|compose|template|example|sample|how (?:do|can|to))\b/i.test(text);
-const invitationClaim = (text: string) =>
-  invitationTopic.test(text) &&
-  !eventInvitationTopic.test(text) &&
-  /\b(?:no|none|zero|0|checked|found|retrieved|looked|fetched|verified)\b/i.test(text);
+const invitationFollowup =
+  /^(?:(?:please|can you|could you|would you)\s+)?(?:(?:check|try|look|verify|refresh|show|list|count)(?:\s+(?:again|now|once more|them|those|these|it|that|their teams|the list|please))*|(?:how many|which ones|which teams|are there any|any yet|who else|yes|okay|go ahead)(?:\s+(?:now|again|please))?)[.!?\s]*$/i;
+
+function invitationLookup(messages: readonly ChatTurn[]) {
+  let active = false;
+  for (const turn of messages) {
+    if (turn.role !== 'user') continue;
+    const text = textTurn(turn).text;
+    if (text.split(/[.!?;\n]+|\b(?:and|also)\b/i).some(invitationQuestion)) active = true;
+    else if (!invitationFollowup.test(text.trim())) active = false;
+  }
+  return active;
+}
 
 export async function inferWithTools(
   route: InferenceRoute,
@@ -2634,13 +2645,8 @@ export async function inferWithTools(
   let outputProduced = false;
   const items: LoopItem[] = messages.map(turn => ({ kind: 'turn', turn }));
   // People lookup has no invitation source. Do not stream an invented answer before applying this boundary.
-  const invitationQuestion = invitationLookup(
-    [...sourceMessages]
-      .reverse()
-      .map(textTurn)
-      .find(turn => turn.role === 'user')?.text ?? '',
-  );
-  const answerText = invitationQuestion ? undefined : tools?.answerText;
+  const unavailableInvitations = invitationLookup(sourceMessages);
+  const answerText = unavailableInvitations ? undefined : tools?.answerText;
   let calls = z
     .number()
     .int()
@@ -2719,7 +2725,6 @@ export async function inferWithTools(
     checked = false,
     layout?: { layout: ReplyRenderInput } | { layoutFailed: true },
   ) => {
-    const unavailableInvitations = invitationQuestion || invitationClaim(text);
     report(checked ? 'done' : 'finishing');
     return {
       text: unavailableInvitations ? invitationUnavailableReply : text,
@@ -3394,12 +3399,12 @@ export async function inferWithTools(
           avatar = { name: 'Bud', state: 'Idle' };
           updateAvatar();
         }
-        if (invitationQuestion || invitationClaim(candidate)) return finish(invitationUnavailableReply, true);
+        if (unavailableInvitations) return finish(invitationUnavailableReply, true);
         return rendered
           ? finish(rendered.input.summary, true, { layout: rendered.input })
           : finish(selected.text, true);
       };
-      if (invitationQuestion || invitationClaim(candidate)) return accept();
+      if (unavailableInvitations) return accept();
       if (rendered) preview(rendered.input.summary);
       // The check catches unfinished tool work. A first-try answer that used no work tool has nothing to catch,
       // unless it reports an outcome that only a tool call could have produced.
