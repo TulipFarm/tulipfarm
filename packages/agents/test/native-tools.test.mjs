@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { discoveryBytes, nativeChatTools, nativeToolName } from '../src/native-tools.ts';
+import { deferredToolIndex, discoveryBytes, nativeChatTools, nativeToolName } from '../src/native-tools.ts';
 import { createMcpCatalog } from '../src/mcp-catalog.ts';
 import { chatCallSchema, discoverTools, toolDescription } from '../src/tools.ts';
 import { mcpName } from './native-fixture.mjs';
@@ -241,6 +241,115 @@ test('existing rows can be found and patched without discovering a write tool', 
 test('discovery ranks an exact tool name ahead of description-only matches', () => {
   const catalog = nativeChatTools(undefined, false, new Set());
   assert.equal(catalog.search('rows.create')[0], 'rows_create');
+});
+
+test('deferred discovery names are visible outside the search description without loading their schemas', () => {
+  const loaded = new Set();
+  const catalog = nativeChatTools(undefined, false, loaded);
+  for (const name of [
+    'agents_draft',
+    'workflows_draft',
+    'bud_preference_ask',
+    'bud_preference_propose',
+    'knowledge_add',
+    'knowledge_update',
+    'knowledge_remove',
+    'projects_draft',
+    'files_rename',
+    'integrations_connect',
+  ]) {
+    assert.ok(catalog.discovery?.includes(name), name);
+    assert.ok(!catalog.tools.some(tool => tool.name === name), `schema stays deferred: ${name}`);
+  }
+  for (const name of ['memory_read', 'memory_edit', 'memory_forget']) {
+    assert.ok(
+      catalog.tools.some(tool => tool.name === name),
+      name,
+    );
+    assert.ok(!catalog.discovery.includes(name), `core tool is not duplicated: ${name}`);
+  }
+  assert.equal(loaded.size, 0);
+  catalog.search('agents_draft');
+  const next = nativeChatTools(undefined, false, loaded);
+  assert.ok(next.tools.some(tool => tool.name === 'agents_draft'));
+  assert.ok(!next.discovery.includes('agents_draft'), 'the index follows the current loaded set');
+});
+
+test('deferred discovery uses only the current admitted catalog and has a bounded text cost', t => {
+  const previous = process.env.SLACK_OUTBOUND_ENABLED;
+  t.after(() => {
+    if (previous === undefined) delete process.env.SLACK_OUTBOUND_ENABLED;
+    else process.env.SLACK_OUTBOUND_ENABLED = previous;
+  });
+  process.env.SLACK_OUTBOUND_ENABLED = 'false';
+  const initial = nativeChatTools(undefined, false, new Set());
+  for (const name of ['conversation_messages_read', 'images_generate', 'slack_resolve'])
+    assert.ok(!initial.discovery?.includes(name), name);
+  process.env.SLACK_OUTBOUND_ENABLED = 'true';
+  const admitted = nativeChatTools(undefined, true, new Set(), true);
+  for (const name of ['conversation_messages_read', 'images_generate', 'slack_resolve'])
+    assert.ok(admitted.discovery?.includes(name), name);
+  const offered = new Set(admitted.tools.map(tool => tool.name));
+  for (const tool of nativeChatTools(undefined, true, undefined, true).tools)
+    if (!offered.has(tool.name)) assert.ok(admitted.discovery.includes(tool.name), tool.name);
+  assert.ok(Buffer.byteLength(admitted.discovery) <= 4096);
+  assert.ok(
+    Buffer.byteLength(admitted.tools.find(tool => tool.name === 'tools_search').description) < 400,
+    'do not duplicate an unbounded description catalog inside the search tool',
+  );
+});
+
+test('without integrations the index and search load exactly the same admitted deferred tools', t => {
+  for (const name of ['SLACK_OUTBOUND_ENABLED', 'INTEGRATION_CREDENTIAL_KEY', 'INTEGRATION_CREDENTIAL_KEY_ID']) {
+    const previous = process.env[name];
+    delete process.env[name];
+    t.after(() => {
+      if (previous === undefined) delete process.env[name];
+      else process.env[name] = previous;
+    });
+  }
+  process.env.SLACK_OUTBOUND_ENABLED = 'false';
+  const catalog = nativeChatTools(undefined, false, new Set());
+  const offered = new Set(catalog.tools.map(tool => tool.name));
+  const admitted = discoverTools({ kind: 'chat', earlierMessages: false, chatFiles: false }).map(tool =>
+    nativeToolName(tool.name),
+  );
+  const deferred = admitted.filter(name => !offered.has(name));
+  assert.deepEqual(catalog.discovery.split('\n')[2].split(', '), deferred);
+  for (const name of ['slack_resolve', 'secrets_request', 'images_generate', 'conversation_messages_read']) {
+    assert.ok(!catalog.discovery.includes(name), name);
+    assert.ok(!nativeChatTools(undefined, false, new Set()).search(name).includes(name), name);
+  }
+  for (const name of deferred) {
+    const loaded = new Set();
+    const current = nativeChatTools(undefined, false, loaded);
+    assert.equal(current.search(name)[0], name, name);
+    assert.ok(
+      [...loaded].every(tool => deferred.includes(tool)),
+      name,
+    );
+    assert.ok(
+      nativeChatTools(undefined, false, loaded).tools.some(tool => tool.name === name),
+      name,
+    );
+  }
+  const withMcp = nativeChatTools(createMcpCatalog([entry]).model(), false, new Set());
+  assert.equal(withMcp.discovery, catalog.discovery, 'external labels and descriptions never enter the system index');
+});
+
+test('the discovery cap keeps a deterministic prefix and leaves overflow discoverable', () => {
+  const catalog = nativeChatTools(undefined, true, new Set(), true);
+  const current = catalog.discovery.split('\n')[2].split(', ');
+  const names = [...current, ...Array.from({ length: 500 }, (_, i) => `future_tool_${String(i).padStart(4, '0')}`)];
+  const index = deferredToolIndex(names);
+  assert.equal(index, deferredToolIndex(names));
+  assert.ok(Buffer.byteLength(index) <= 4096);
+  const listed = index.split('\n')[2].split(', ');
+  assert.deepEqual(listed, names.slice(0, listed.length), 'tools drop from the registration-order tail, not randomly');
+  assert.ok(listed.length < names.length);
+  assert.ok(listed.includes('agents_draft'));
+  assert.ok(listed.includes('workflows_draft'));
+  assert.match(index, /More tools are available through tools_search by purpose/);
 });
 
 test('declared skill tools load only admitted definitions and do not widen optional access', () => {

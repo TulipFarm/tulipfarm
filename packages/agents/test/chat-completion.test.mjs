@@ -55,6 +55,78 @@ const verdict = (status = 'completed') => ({
     status === 'continue' ? 'The requested work has not been attempted.' : 'The reply accurately states the result.',
 });
 
+for (const [model, kind, failure] of [
+  ['grok-4.3', 'workflow', 'Use an HTTP request to tulipfarm.ai/api/workflows/draft.'],
+  ['Kimi-K2.6', 'agent', 'agents.draft is not offered in this chat.'],
+])
+  test(`offline discovery replay: ${model} sees ${kind} drafting without inspecting tools_search`, async t => {
+    const executed = [];
+    const target = kind === 'agent' ? 'agents.draft' : 'workflows.draft';
+    const nativeTarget = nativeName(target);
+    const input =
+      kind === 'agent'
+        ? {
+            agent: 'new',
+            input: {
+              expectedSoulRevision: 'a'.repeat(40),
+              expectedPolicyVersion: 0,
+              expectedActivationIds: [],
+              expectedWorkflowRevision: null,
+              expectedWorkflowGeneration: null,
+              owningTeamId: null,
+              definition: { name: 'Records assistant', instructions: 'Read records.', tools: ['rows.list'] },
+              setup: {
+                policy: { grants: [], personGrants: [] },
+                enrollment: [],
+                scope: [],
+                limits: [],
+                taskLimits: { toolCalls: 10, activeMilliseconds: 60000, credits: 10 },
+                slackSender: 'user',
+                slackChannels: [],
+                triggers: [],
+              },
+            },
+          }
+        : {
+            definition: JSON.stringify({
+              version: 1,
+              name: 'Daily summary',
+              triggers: [{ id: 'daily', kind: 'cron', expression: '0 9 * * *', timezone: 'Asia/Kolkata' }],
+              steps: [{ id: 'review', kind: 'human', prompt: 'Review records.', timeoutSeconds: 86400 }],
+            }),
+            activate: false,
+          };
+    let round = 0;
+    t.mock.method(globalThis, 'fetch', async (_url, init) => {
+      const body = JSON.parse(init.body);
+      if (isCompletionRequest(body)) return Response.json(selectReply('azure', verdict('blocked')));
+      const system = body.messages[0].content;
+      const index = system.split('# Deferred tools\n')[1]?.split('\n\n')[0] ?? '';
+      // This offline stand-in ignores the search function's description, reproducing the reported discovery gap.
+      if (!round && !index.includes(nativeTarget)) return Response.json(nativeReply('azure', { text: failure }));
+      const offered = offeredTools('azure', body).map(tool => tool.name);
+      if (!round++) {
+        assert.ok(!offered.includes(nativeTarget), 'the compact index does not preload the draft schema');
+        return Response.json(nativeReply('azure', { calls: [use('tools.search', { query: nativeTarget })] }));
+      }
+      assert.ok(offered.includes(nativeTarget));
+      if (round === 2) return Response.json(nativeReply('azure', { calls: [use(target, input)] }));
+      return Response.json(nativeReply('azure', { text: 'The draft is ready for your review.' }));
+    });
+    const result = await inferWithTools(
+      { ...nativeRoutes.azure, model },
+      [{ role: 'user', text: `Create a ${kind} for a daily records summary.` }],
+      async call => {
+        executed.push(call.tool);
+        assert.equal(call.tool, target, 'no invented HTTP endpoint or helper delegation');
+        return { draftId: 'draft', digest: 'd'.repeat(64), status: 'review-required' };
+      },
+    );
+    assert.deepEqual(executed, [target], result.text);
+    assert.equal(result.text, 'The draft is ready for your review.');
+    assert.equal(round, 3);
+  });
+
 for (const model of ['grok-4.3', 'Kimi-K2.6'])
   for (const invoked of [false, true])
     test(`${model} offers agent setup tools when the authoring skill is ${invoked ? 'invoked' : 'read'}`, async t => {
