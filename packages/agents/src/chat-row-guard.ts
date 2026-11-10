@@ -71,7 +71,7 @@ export type ChatRowReview = {
   reason: RowReviewReason;
   table?: string;
   instruction: string;
-  /** Rows this reply already wrote directly; they stay, and the card holds only the rest. */
+  /** Rows already written directly in this chat; the card holds only the rest. */
   written?: RowsAlreadyWritten;
 };
 /** Nothing is written and no card is made: the model must stop or change its call. */
@@ -88,9 +88,8 @@ export type ChatRowRefusal = {
  * Larger writes, writes to an unnamed table and writes in a reply that prepares a table change need an
  * approval card. Models otherwise write into a similarly named table or add rows to "fix" a field conversion.
  *
- * Models also split a large request into single-row calls, or retry it in the next reply, so the row limit
- * would only hold per call. A second single-row create in one reply must be one batch instead, and while a
- * row card for the table waits in this chat no other row change to that table is written or drafted.
+ * The table's direct-write budget spans replies until a row review is decided or its revision changes.
+ * The per-reply limit still applies across tables. Single-row creates in one reply must be one batch.
  */
 export async function chatRowReview(
   runtime: AgentStorage,
@@ -98,7 +97,7 @@ export async function chatRowReview(
   actor: HumanActor,
   origin: { conversationId: string; turnId: string },
   callId: string,
-  call: { tool: string; tableId: string; rows?: readonly unknown[] },
+  call: { tool: string; tableId: string; expectedAppliedRevision: string; rows?: readonly unknown[] },
 ): Promise<ChatRowReview | ChatRowRefusal | null> {
   return withHuman(runtime, workspaceId, actor, 'read', async tx => {
     const label = (
@@ -128,9 +127,9 @@ export async function chatRowReview(
     ).rows.map(row => row.text);
     const waiting = (
       await tx.client.query<{ id: string }>(
-        `SELECT d.id FROM ${relation(tx, 'tf_chat_authoring_drafts')} d WHERE d.conversation_id=$1 AND d.id<>$2 AND d.proposal->>'kind'='row' AND d.proposal->'input'->>'tableId'=$3
+        `SELECT d.id FROM ${relation(tx, 'tf_chat_authoring_drafts')} d WHERE d.conversation_id=$1 AND d.id<>$2 AND d.proposal->>'kind'='row' AND d.proposal->'input'->>'tableId'=$3 AND d.proposal->'input'->>'expectedAppliedRevision'=$4
           AND NOT EXISTS (SELECT 1 FROM ${relation(tx, 'tf_chat_authoring_decisions')} c WHERE c.draft_id=d.id) ORDER BY d.created_at DESC LIMIT 1`,
-        [origin.conversationId, callId, call.tableId],
+        [origin.conversationId, callId, call.tableId, call.expectedAppliedRevision],
       )
     ).rows[0]?.id;
     if (waiting)
@@ -147,25 +146,38 @@ export async function chatRowReview(
         table: label,
         instruction: `The person never named the table "${label}", so this change needs approval on the chat card. Write rows only to the table they named. If that table does not exist or is not ready yet, tell them and write nothing; never use a similar table instead.`,
       };
-    const earlier = earlierRowWrites(
-      (
-        await tx.client.query<EarlierWrite>(
-          `SELECT c.tool,s.call,s.output,EXISTS (SELECT 1 FROM ${relation(tx, 'tf_chat_authoring_drafts')} d WHERE d.id=c.id) AS drafted
+    const writes = (
+      await tx.client.query<EarlierWrite & { turnId: string }>(
+        `SELECT c.tool,c.turn_id AS "turnId",s.call,s.output,EXISTS (SELECT 1 FROM ${relation(tx, 'tf_chat_authoring_drafts')} d WHERE d.id=c.id) AS drafted
             FROM ${relation(tx, 'tf_conversation_tool_calls')} c JOIN ${relation(tx, 'tf_conversation_execution_steps')} s ON s.call_id=c.id AND s.turn_id=c.turn_id
-            WHERE c.conversation_id=$1 AND c.turn_id=$2 AND c.id<>$3 AND c.tool IN ('rows.create','rows.create.batch','rows.update','rows.delete')`,
-          [origin.conversationId, origin.turnId, callId],
-        )
-      ).rows,
+            WHERE c.conversation_id=$1 AND c.id<>$3 AND c.tool IN ('rows.create','rows.create.batch','rows.update','rows.delete')
+            AND (c.turn_id=$2 OR (s.call->>'tableId'=$4 AND s.call->>'expectedAppliedRevision'=$5
+              AND c.created_at > COALESCE((
+                SELECT max(decision.created_at) FROM ${relation(tx, 'tf_chat_authoring_drafts')} draft
+                JOIN ${relation(tx, 'tf_chat_authoring_decisions')} decision ON decision.draft_id=draft.id
+                WHERE draft.conversation_id=$1 AND draft.proposal->>'kind'='row' AND draft.proposal->'input'->>'tableId'=$4
+                  AND decision.outcome->>'kind' IN ('row','dismissed','rejected')
+              ),'-infinity'::timestamptz)))`,
+        [origin.conversationId, origin.turnId, callId, call.tableId, call.expectedAppliedRevision],
+      )
+    ).rows;
+    const earlier = earlierRowWrites(
+      writes.filter(write => write.turnId === origin.turnId),
       call.tableId,
     );
-    if (earlier.reviewing || earlier.rows + (call.rows?.length ?? 1) > directChatRowLimit)
+    const tableWrites = earlierRowWrites(
+      writes.filter(write => record(write.call).tableId === call.tableId),
+      call.tableId,
+    );
+    const budget = tableWrites.rows > earlier.rows ? tableWrites : earlier;
+    if (earlier.reviewing || tableWrites.reviewing || budget.rows + (call.rows?.length ?? 1) > directChatRowLimit)
       return {
         reason: 'too-many-rows',
         table: label,
-        instruction: earlier.rows
-          ? `This reply already wrote ${earlier.rows} ${earlier.rows === 1 ? 'row' : 'rows'} directly, which stay written, and more than ${directChatRowLimit} rows in one reply need approval. The card holds only the rows in this call and tells the person which rows were already added. In your reply, say which rows were already added and that the rest wait on the card.`
+        instruction: budget.rows
+          ? `This chat already wrote ${budget.rows} ${budget.rows === 1 ? 'row' : 'rows'} directly within this write budget, which stay written. More than ${directChatRowLimit} rows need approval, including across continued replies to the same table. The card holds only the rows in this call and tells the person which rows were already added. In your reply, say which rows were already added and that the rest wait on the card.`
           : `This reply changes more than ${directChatRowLimit} rows, so the change needs the person's approval on one chat card.`,
-        ...(earlier.rows > 0 && { written: alreadyWritten(earlier) }),
+        ...(budget.rows > 0 && { written: alreadyWritten(budget) }),
       };
     if (call.tool === 'rows.create' && earlier.singleCreate)
       return {

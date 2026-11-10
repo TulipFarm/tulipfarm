@@ -30,6 +30,30 @@ export const conversationResultSchema = z.strictObject({
 });
 export type ConversationResult = z.infer<typeof conversationResultSchema>;
 
+export type ReviewCardReference = { kind: 'table' | 'row'; id: string };
+export type ReviewCardState = { reference: ReviewCardReference; status: string; summary?: string };
+
+export function reviewCardReference(tool: string, value: unknown): ReviewCardReference | undefined {
+  if (!value || typeof value !== 'object' || 'error' in value) return undefined;
+  const parsed = z
+    .object({
+      status: z.string(),
+      id: z.string().min(1).optional(),
+      draftId: z.string().min(1).optional(),
+    })
+    .safeParse(value);
+  if (!parsed.success) return undefined;
+  const receipt = parsed.data;
+  if (tool === 'tables.propose' && receipt.status === 'pending' && receipt.id) return { kind: 'table', id: receipt.id };
+  if (
+    /^rows\.(?:create(?:\.batch)?|update|delete)$/.test(tool) &&
+    receipt.status === 'review-required' &&
+    receipt.draftId
+  )
+    return { kind: 'row', id: receipt.draftId };
+  return undefined;
+}
+
 export function conversationResult(value: string | ConversationResult): ConversationResult {
   return conversationResultSchema.parse(
     typeof value === 'string' ? { text: value, sources: [{ kind: 'unknown' }] } : value,

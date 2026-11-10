@@ -7,6 +7,7 @@ import { budPreferenceAskSchema, budPreferenceProposeSchema } from '@tulipfarm/c
 import { createBudAssistant } from '@tulipfarm/conversations/bud-assistant';
 import { renameLegacyToolCall } from '@tulipfarm/conversations/tool-activity';
 import type { ConversationPlanning } from '@tulipfarm/conversations/runtime';
+import type { ReviewCardReference, ReviewCardState } from '@tulipfarm/conversations/results';
 import { z } from 'zod';
 import {
   errorSite,
@@ -97,7 +98,7 @@ import type { createGitHubInvestigation } from '@tulipfarm/github/investigation'
 import { requireInvestigationToolBoundary } from './investigation-boundary.ts';
 import { GitHubBatchError } from '@tulipfarm/github/batch-contracts';
 import type { createGitHubBatches } from '@tulipfarm/github/batches';
-import { proposeTableSchema, tableProposalRules } from '@tulipfarm/tables/proposal-contracts';
+import { proposeTableSchema, tableProposalRules, TableProposalError } from '@tulipfarm/tables/proposal-contracts';
 import { tableProposalJsonSchema } from '@tulipfarm/tables/proposal-json-schema';
 import { createChatTableProposals, tableReviewSummary } from './table-proposals.ts';
 import { chatRowReview } from './chat-row-guard.ts';
@@ -162,7 +163,12 @@ import {
   planClaimSchema,
   planSubmitReportSchema,
 } from './plan-contracts.ts';
-import { agentDraftInputSchema, type FilesProposal, type KnowledgeProposal } from './draft-contracts.ts';
+import {
+  agentDraftInputSchema,
+  type DraftView,
+  type FilesProposal,
+  type KnowledgeProposal,
+} from './draft-contracts.ts';
 import { createKnowledgeDrafts } from './knowledge-drafts.ts';
 import { supportedAgentToolRuntimes, toolNameSchema } from './tool-capabilities.ts';
 import { createAgentSetup, type AgentSetupOptions } from './setup.ts';
@@ -2561,8 +2567,7 @@ export function createChatTools(
             instruction:
               'The row review is no longer available for approval. No rows from this call have been written.',
           };
-        const count = call.tool === 'rows.create.batch' ? call.rows.length : 1;
-        const reviewSummary = `A review card for ${count} ${count === 1 ? 'row' : 'rows'} in ${JSON.stringify(readable.rowTable.name)} is ready in this chat. No rows from this card have been written.${written?.count ? ` ${written.count} ${written.count === 1 ? 'row was' : 'rows were'} already written earlier in this reply and are not included in this card.` : ''} Review and approve it to ${draft.operation} these rows.`;
+        const reviewSummary = rowReviewSummary(readable);
         if (!review) return { ...draft, reviewSummary };
         const batch = call.tool === 'rows.create.batch' ? call.rows.length : 0;
         return {
@@ -3187,6 +3192,62 @@ export function createChatTools(
     });
   }
   return {
+    reviewCards: async (
+      workspaceId: string,
+      actor: HumanActor,
+      conversationId: string,
+      references: readonly ReviewCardReference[],
+    ): Promise<ReviewCardState[]> => {
+      const states: ReviewCardState[] = [];
+      for (const reference of references) {
+        try {
+          if (reference.kind === 'row') {
+            const review = await createAuthoringDrafts(runtime).read(
+              workspaceId,
+              actor.userId,
+              conversationId,
+              reference.id,
+            );
+            const summary = rowReviewSummary(review);
+            states.push({
+              reference,
+              status: review.status === 'pending' && !summary ? 'unavailable' : review.status,
+              ...(summary && { summary }),
+            });
+          } else {
+            const review = await createChatTableProposals(runtime, objects).read(
+              workspaceId,
+              actor.userId,
+              conversationId,
+              reference.id,
+            );
+            if (review.content !== 'available' || review.unavailableFileIds?.length) {
+              states.push({ reference, status: 'unavailable' });
+              continue;
+            }
+            if (review.status !== 'pending' || review.freshness !== 'current') {
+              states.push({ reference, status: review.status === 'pending' ? review.freshness : review.status });
+              continue;
+            }
+            const attachments = review.manifest.plans.some(
+              plan => plan.input.kind === 'import' && plan.input.reference.kind === 'file',
+            )
+              ? (await chatAttachments(workspaceId, actor, { conversationId, sources: [] })).attachments
+              : [];
+            states.push({
+              reference,
+              status: 'pending',
+              summary: tableReviewSummary(review.manifest.plans, attachments),
+            });
+          }
+        } catch (error) {
+          if (!(error instanceof AccessDenied || error instanceof AgentError || error instanceof TableProposalError))
+            throw error;
+          states.push({ reference, status: 'unavailable' });
+        }
+      }
+      return states;
+    },
     invoke: (...args: Parameters<typeof invoke>) =>
       observeTool(
         args[1].tool,
@@ -3202,6 +3263,14 @@ export function createChatTools(
         value => toolObservation(value.result, args[1].tool),
       ),
   };
+}
+
+function rowReviewSummary(review: DraftView) {
+  if (review.status !== 'pending' || review.proposal.kind !== 'row' || !review.rowTable) return undefined;
+  const { input, written } = review.proposal;
+  const count = input.tool === 'rows.create.batch' ? input.rows.length : 1;
+  const operation = input.tool === 'rows.update' ? 'update' : input.tool === 'rows.delete' ? 'delete' : 'create';
+  return `A review card for ${count} ${count === 1 ? 'row' : 'rows'} in ${JSON.stringify(review.rowTable.name)} is ready in this chat. No rows from this card have been written.${written?.count ? ` ${written.count} ${written.count === 1 ? 'row was' : 'rows were'} already written earlier in this chat and are not included in this card.` : ''} Review and approve it to ${operation} these rows.`;
 }
 
 export function toolObservation(value: unknown, tool?: ToolName): ToolObservation {

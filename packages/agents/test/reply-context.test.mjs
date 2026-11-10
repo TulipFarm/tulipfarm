@@ -67,7 +67,7 @@ const notesFor = text =>
     notes: JSON.parse(text).results.map(({ callId, tool }) => ({ callId, note: `${tool} read one page.` })),
   });
 
-test('capping a tool result cannot erase its authoritative review summary', async t => {
+test('capping a tool result preserves the identity used to refresh its review', async t => {
   const summary = 'A review card for "Orders" from "orders.csv" is ready in this chat. No rows have been written.';
   let requests = 0;
   t.mock.method(globalThis, 'fetch', async (_url, init) => {
@@ -85,7 +85,13 @@ test('capping a tool result cannot erase its authoritative review summary', asyn
     undefined,
     false,
     null,
-    { context: limits(40000) },
+    {
+      context: limits(40000),
+      reviewCards: async refs => {
+        assert.deepEqual(refs, [{ kind: 'table', id: 'review' }]);
+        return refs.map(reference => ({ reference, status: 'pending', summary }));
+      },
+    },
   );
   assert.equal(result.text, summary);
 });

@@ -38,6 +38,7 @@ import {
   conversationResult,
   conversationResultSchema,
   mergeSources,
+  reviewCardReference,
   type ConversationResult,
   type SourceDependency,
 } from './results.ts';
@@ -266,7 +267,7 @@ export type ConversationReply = (input: {
   timeZone: string | null;
   priorCalls?: number;
   priorToolCalls?: readonly unknown[];
-  priorReviewSummaries?: readonly string[];
+  priorReviewCards?: readonly import('./results.ts').ReviewCardReference[];
   /** The working context holds a compaction summary, so earlier messages may be reread by id. */
   earlierMessages?: boolean;
   /** The images reader read this turn's files, so the model may call `files.read`. */
@@ -2675,20 +2676,18 @@ export function createConversationExecutor(
             timeZone: source.timeZone,
             priorCalls: source.priorTools.length,
             priorToolCalls: source.executionSteps.map(step => step.call),
-            priorReviewSummaries: source.executionSteps.flatMap(step => {
+            priorReviewCards: source.executionSteps.flatMap(step => {
               const call = z.object({ tool: z.string() }).safeParse(step.call);
               if (
                 !call.success ||
                 !/^(?:tables\.propose|rows\.(?:create(?:\.batch)?|update|delete))$/.test(call.data.tool)
               )
                 return [];
-              const result = z
-                .object({
-                  status: z.enum(['pending', 'review-required']),
-                  reviewSummary: z.string(),
-                })
-                .safeParse(step.output === null ? null : protectedOutputSchema.parse(step.output).result);
-              return result.success ? [result.data.reviewSummary] : [];
+              const reference = reviewCardReference(
+                call.data.tool,
+                step.output === null ? null : protectedOutputSchema.parse(step.output).result,
+              );
+              return reference ? [reference] : [];
             }),
             earlierMessages: refersToEarlierMessages(prepared),
             ...(images ? { chatFiles: true } : {}),

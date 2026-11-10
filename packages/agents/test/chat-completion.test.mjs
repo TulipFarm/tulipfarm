@@ -41,6 +41,87 @@ const verdict = (status = 'completed') => ({
 });
 
 for (const model of ['grok-4.3', 'Kimi-K2.6'])
+  for (const sse of [false, true])
+    test(`${model} ${sse ? 'SSE' : 'JSON'} refreshes superseded reviews and resumed decisions`, async t => {
+      const oldSummary = 'Review the structure of "Vendors". Nothing has been applied.';
+      const summary = 'A review card for "Partners" is ready. Review and approve it.';
+      const references = [
+        { kind: 'table', id: 'vendors' },
+        { kind: 'table', id: 'partners' },
+      ];
+      const replies = [
+        nativeReply('azure', {
+          calls: [use('tables.propose', { input: '{"plans":[],"label":"Vendors"}' })],
+        }),
+        nativeReply('azure', {
+          calls: [use('tables.propose', { input: '{"plans":[],"label":"Partners"}' })],
+        }),
+        nativeReply('azure', { text: 'Approve both Vendors and Partners.' }),
+      ];
+      let proposed = 0;
+      t.mock.method(globalThis, 'fetch', async () => {
+        const reply = replies.shift();
+        assert.ok(reply, 'current card state needs no extra model request');
+        return sse ? stream(reply) : Response.json(reply);
+      });
+      const revised = await inferWithTools(
+        { ...nativeRoutes.azure, model },
+        [{ role: 'user', text: 'Create Partners instead of Vendors.' }],
+        async () => ({
+          id: references[proposed++].id,
+          status: 'pending',
+          reviewSummary: proposed === 1 ? oldSummary : summary,
+        }),
+        undefined,
+        false,
+        null,
+        {
+          reviewCards: async refs => {
+            assert.deepEqual(refs, references);
+            return [
+              { reference: references[0], status: 'superseded' },
+              { reference: references[1], status: 'pending', summary },
+            ];
+          },
+        },
+      );
+      assert.equal(revised.text, summary);
+      t.mock.restoreAll();
+      for (const status of ['completed', 'rejected', 'expired', 'superseded', 'saved', 'dismissed']) {
+        const text =
+          status === 'completed' || status === 'saved'
+            ? 'The changes were applied and the workflow is active.'
+            : `The earlier review is ${status}. Nothing is waiting for approval.`;
+        t.mock.method(globalThis, 'fetch', async (_url, init) => {
+          const body = JSON.parse(init.body);
+          if (isCompletionRequest(body)) return Response.json(selectReply('azure', verdict()));
+          const current = body.messages.find(message =>
+            message.content?.startsWith?.('Current server-verified review states'),
+          );
+          assert.ok(current, 'the resumed model sees current state, not just its old pending receipt');
+          assert.match(current.content, new RegExp(`"status":"${status}"`));
+          const reply = nativeReply('azure', { text });
+          return sse ? stream(reply) : Response.json(reply);
+        });
+        const result = await inferWithTools(
+          { ...nativeRoutes.azure, model },
+          [{ role: 'user', text: 'What is the current state?' }],
+          () => assert.fail('Do not repeat a completed proposal'),
+          undefined,
+          false,
+          null,
+          {
+            priorCalls: 1,
+            priorReviewCards: [references[0]],
+            reviewCards: async refs => refs.map(reference => ({ reference, status })),
+          },
+        );
+        assert.equal(result.text, text);
+        t.mock.restoreAll();
+      }
+    });
+
+for (const model of ['grok-4.3', 'Kimi-K2.6'])
   for (const lookup of [false, true])
     for (const sse of [false, true])
       test(`${model} cannot report invitation state from ${lookup ? 'active members' : 'no lookup'} over ${sse ? 'SSE' : 'JSON'}`, async t => {
@@ -192,7 +273,9 @@ for (const model of ['grok-4.3', 'Kimi-K2.6'])
         undefined,
         false,
         null,
-        { answerText: update => previews.push(update.text) },
+        {
+          answerText: update => previews.push(update.text),
+        },
       );
       assert.equal(
         result.text,
@@ -766,7 +849,7 @@ test('successful work and nested pending data are not review-card receipts', () 
     assert.equal(unbackedCardClaim('The approval card is ready.', items)?.status, 'continue', name);
   }
   for (const [name, output] of [
-    ['workflows_create', { draftId: 'draft', status: 'review-required' }],
+    ['workflows_draft', { draftId: 'draft', status: 'review-required' }],
     ['google_propose', { provider: 'google-workspace', data: { id: 'proposal', decision: null, receipt: null } }],
     ['integrations_disconnect', { status: 'review-required' }],
   ]) {
@@ -774,6 +857,130 @@ test('successful work and nested pending data are not review-card receipts', () 
     assert.equal(unbackedCardClaim('The approval card is ready.', items), undefined, name);
   }
 });
+
+test('every pending review-card family has an explicit receipt and excludes completed actions', () => {
+  const authoring = [
+    'agents.draft',
+    'skills.draft',
+    'workflows.draft',
+    'workflows.archive',
+    'workflows.restore',
+    'agents.archive',
+    'agents.restore',
+    'skills.archive',
+    'skills.restore',
+    'projects.draft',
+    'files.rename',
+    'files.move',
+    'files.trash',
+    'files.restore',
+    'files.share',
+    'knowledge.add',
+    'knowledge.update',
+    'knowledge.remove',
+    'memory.edit',
+    'rows.create',
+    'rows.create.batch',
+    'rows.update',
+    'rows.delete',
+  ];
+  const pending = [
+    ...authoring.map(tool => [tool, { draftId: 'draft', digest: 'digest', status: 'review-required' }]),
+    ['tables.propose', { id: 'proposal', status: 'pending' }],
+    ['github.personal.propose', { batchId: 'batch', decision: null, statuses: ['unattempted'] }],
+    ['google.propose', { provider: 'google-workspace', data: { id: 'proposal', decision: null, receipt: null } }],
+    ['integrations.connect', { status: 'connect-card', app: 'github' }],
+    [
+      'integrations.mcp.connect',
+      {
+        status: 'mcp-connect-card',
+        name: 'External tools',
+        endpoint: 'https://tools.example.com/mcp',
+        authentication: 'none',
+      },
+    ],
+    ['integrations.disconnect', { status: 'review-required', connection: { id: 'connection' } }],
+    ['api.request', { provider: 'api-call', kind: 'waiting', callId: 'call' }],
+    ['skills.import', { importId: 'import', status: 'ready' }],
+    ['skills.import.status', { importId: 'import', status: 'ready' }],
+    ['skills.import.select', { importId: 'import', status: 'ready' }],
+    ['skills.draft', { importId: 'import', status: 'ready' }],
+  ];
+  const items = (tool, output) => [
+    { kind: 'results', results: [{ name: tool.replaceAll('.', '_'), output: JSON.stringify(output), error: false }] },
+  ];
+  for (const [tool, output] of pending)
+    assert.equal(unbackedCardClaim('The review card is ready.', items(tool, output)), undefined, tool);
+  for (const [tool, output] of [
+    ['github.personal.propose', { batchId: 'batch', decision: 'approve', statuses: ['succeeded'] }],
+    ['github.personal.propose', { batchId: 'batch', decision: 'reject', statuses: ['rejected'] }],
+    ['api.request', { provider: 'api-call', kind: 'sent', callId: 'call', status: 'sent' }],
+    ['skills.import', { importId: 'import', status: 'installed' }],
+    ['skills.import.status', { importId: 'import', status: 'reviewing' }],
+    ['plans.create', { planId: 'plan', version: 1, added: [] }],
+    ['memory.forget', { draftId: 'undo', revision: 'revision' }],
+    ['present.choice', { requestId: 'question', status: 'pending' }],
+    ['files.create', { id: 'file', status: 'completed' }],
+    ['workflows.run', { draftId: 'data', status: 'review-required' }],
+  ])
+    assert.equal(unbackedCardClaim('The review card is ready.', items(tool, output))?.status, 'continue', tool);
+});
+
+for (const model of ['grok-4.3', 'Kimi-K2.6'])
+  for (const sse of [false, true])
+    test(`${model} ${sse ? 'SSE' : 'JSON'} accepts rendered GitHub and MCP connect receipts`, async t => {
+      for (const [tool, args, receipt] of [
+        [
+          'integrations.mcp.connect',
+          { name: 'External tools', endpoint: 'https://tools.example.com/mcp', authentication: 'none' },
+          {
+            status: 'mcp-connect-card',
+            name: 'External tools',
+            endpoint: 'https://tools.example.com/mcp',
+            authentication: 'none',
+          },
+        ],
+        [
+          'github.personal.propose',
+          {
+            actions: [
+              {
+                kind: 'issue.create',
+                owner: 'octocat',
+                repo: 'example',
+                title: 'Update docs',
+                body: 'Describe the change.',
+              },
+            ],
+          },
+          { batchId: 'batch', decision: null, statuses: ['unattempted'] },
+        ],
+      ]) {
+        const answer = 'The review card is shown. Open it to continue.';
+        const replies = [nativeReply('azure', { calls: [use(tool, args)] }), nativeReply('azure', { text: answer })];
+        t.mock.method(globalThis, 'fetch', async (_url, init) => {
+          assert.ok(!isCompletionRequest(JSON.parse(init.body)), 'a rendered pending card is its own receipt');
+          const reply = replies.shift();
+          assert.ok(reply, 'do not reject a truthful card summary');
+          return sse ? stream(reply) : Response.json(reply);
+        });
+        const result = await inferWithTools(
+          { ...nativeRoutes.azure, model },
+          [{ role: 'user', text: 'Prepare the requested change for review.' }],
+          async call => {
+            assert.equal(call.tool, tool);
+            return receipt;
+          },
+          undefined,
+          false,
+          null,
+          { preloadedTools: [tool] },
+        );
+        assert.equal(result.text, answer, tool);
+        assert.equal(replies.length, 0);
+        t.mock.restoreAll();
+      }
+    });
 
 for (const model of ['grok-4.3', 'Kimi-K2.6'])
   for (const sse of [false, true])
@@ -806,7 +1013,10 @@ for (const model of ['grok-4.3', 'Kimi-K2.6'])
           undefined,
           false,
           null,
-          { answerText: update => previews.push(update.text) },
+          {
+            answerText: update => previews.push(update.text),
+            reviewCards: async refs => refs.map(reference => ({ reference, status: 'pending', summary })),
+          },
         );
         assert.equal(result.text, summary);
         assert.equal(previews.at(-1), summary);
@@ -826,7 +1036,11 @@ for (const model of ['grok-4.3', 'Kimi-K2.6'])
         undefined,
         false,
         null,
-        { priorCalls: 1, priorReviewSummaries: [priorSummary] },
+        {
+          priorCalls: 1,
+          priorReviewCards: [{ kind: 'row', id: 'review' }],
+          reviewCards: async refs => refs.map(reference => ({ reference, status: 'pending', summary: priorSummary })),
+        },
       );
       assert.equal(resumed.text, priorSummary);
       t.mock.restoreAll();
@@ -843,7 +1057,11 @@ for (const model of ['grok-4.3', 'Kimi-K2.6'])
         undefined,
         false,
         null,
-        { priorCalls: 1000, priorReviewSummaries: [priorSummary] },
+        {
+          priorCalls: 1000,
+          priorReviewCards: [{ kind: 'row', id: 'review' }],
+          reviewCards: async refs => refs.map(reference => ({ reference, status: 'pending', summary: priorSummary })),
+        },
       );
       assert.equal(exhausted.text, priorSummary);
       t.mock.restoreAll();
