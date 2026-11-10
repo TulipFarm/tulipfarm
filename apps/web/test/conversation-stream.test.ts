@@ -238,47 +238,71 @@ test('three failures without an open make the stream unavailable, then it retrie
   t.mock.timers.tick(2000);
   assert.equal(sources.length, 2, 'a rejected stream reconnects after 2 s');
   latest().drop();
-  latest().drop();
+  t.mock.timers.tick(3999);
+  assert.equal(sources.length, 2);
+  t.mock.timers.tick(1);
+  assert.equal(sources.length, 3, 'the next failed connection backs off to 4 s');
+  latest().reject();
   assert.equal(stream.snapshot().status, 'unavailable');
   assert.equal(latest().closed, true);
   t.mock.timers.tick(59_999);
-  assert.equal(sources.length, 2);
-  t.mock.timers.tick(1);
   assert.equal(sources.length, 3);
+  t.mock.timers.tick(1);
+  assert.equal(sources.length, 4);
   assert.equal(stream.snapshot().status, 'connecting');
   latest().open();
   assert.equal(stream.snapshot().status, 'open');
   stream.stop();
 });
 
-test('a server close after an open is not a failure; a command or visibility return retries an unavailable stream', t => {
+test('a lost open stream immediately requests durable history and stops reporting open', t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { stream, latest, refetches } = harness();
+  stream.start();
+  latest().open();
+  t.mock.timers.tick(100);
+  assert.equal(refetches(), 1);
+  latest().drop();
+  assert.equal(stream.snapshot().status, 'connecting');
+  t.mock.timers.tick(100);
+  assert.equal(refetches(), 2);
+  stream.stop();
+});
+
+test('returning to a stopped stream immediately reads durable state without losing the visible answer', t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { stream, latest, sources, refetches, changes } = harness();
+  stream.start();
+  latest().open();
+  latest().text({ text: 'The visible answer', reset: true });
+  t.mock.timers.tick(100);
+  assert.equal(refetches(), 1);
+  stream.stop();
+  stream.resume();
+  assert.equal(refetches(), 2, 'returning reads history before any timer runs or the new stream opens');
+  assert.deepEqual(changes.at(-1), { history: true, plans: true });
+  assert.equal(sources.length, 2);
+  assert.equal(stream.snapshot().status, 'connecting');
+  assert.equal(stream.snapshot().previews.get(turnId)?.text, 'The visible answer');
+  stream.stop();
+});
+
+test('a server close after an open reconnects with a fresh source', t => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const { stream, sources, latest } = harness();
   stream.start();
   for (let cycle = 0; cycle < 5; cycle++) {
     latest().open();
     latest().drop();
+    assert.equal(stream.snapshot().status, 'connecting');
+    t.mock.timers.tick(2000);
   }
-  assert.equal(stream.snapshot().status, 'open', 'server closes keep the stream healthy');
-  latest().drop();
-  latest().drop();
-  assert.equal(stream.snapshot().status, 'connecting');
-  latest().drop();
-  assert.equal(stream.snapshot().status, 'unavailable');
-  stream.retry();
-  assert.equal(sources.length, 2);
-  assert.equal(stream.snapshot().status, 'connecting');
-  latest().reject();
-  t.mock.timers.tick(2000);
-  latest().reject();
-  t.mock.timers.tick(2000);
-  latest().reject();
-  assert.equal(stream.snapshot().status, 'unavailable');
+  assert.equal(sources.length, 6);
   stream.stop();
   stream.start();
-  assert.equal(sources.length, 5, 'returning to the page reconnects at once');
+  assert.equal(sources.length, 7, 'returning to the page reconnects at once');
   stream.retry();
-  assert.equal(sources.length, 5, 'retry leaves a connecting stream alone');
+  assert.equal(sources.length, 7, 'retry leaves a connecting stream alone');
   stream.stop();
   assert.equal(latest().closed, true);
 });

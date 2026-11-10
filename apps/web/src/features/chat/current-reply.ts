@@ -58,8 +58,6 @@ export function currentReply({ messages, outgoing, command, stream }: ReplyInput
   // A saved tool row shows the same text in the activity list, so the live note steps aside.
   const narration = tools.some(tool => tool.narration?.includes(stepText.trim())) ? '' : stepText;
   const answerText = stepText ? '' : previewText;
-  // A final answer on screen ends the progress UI even while the turn still saves or names the chat.
-  const delivered = progress?.status === 'done' && !!answerText;
   const activity = thinkingOf(running, tools.length > 0, progress);
   const queuedKey = turn?.status === 'queued' ? `${turn.id}:${turn.generation}` : null;
   const processingKey =
@@ -79,7 +77,7 @@ export function currentReply({ messages, outgoing, command, stream }: ReplyInput
     /** The composer hides its submitted draft until the send settles, even after saved history shows the message. */
     draftSent: (!!pending && !unconfirmed) || (command.kind === 'sending' && command.command.kind === 'send'),
     turn,
-    thinking: ((!!pending && !waiting && !pendingQueued && !unconfirmed) || !!replying) && !delivered,
+    thinking: (!!pending && !waiting && !pendingQueued && !unconfirmed) || !!replying,
     waiting,
     pendingQueued,
     queuedMessages,

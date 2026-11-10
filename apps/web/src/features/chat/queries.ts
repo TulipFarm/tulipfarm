@@ -7,7 +7,6 @@ import {
   useLoadedWindow,
   useOptimisticUpdate,
 } from '@/lib/query';
-import { replyBackoff } from '@/lib/query/polling';
 import { useFeatureContext } from '@/lib/query/provider';
 import { scopeKey } from '@/lib/query/scope';
 import { creditKeys } from '@/lib/credit-keys';
@@ -15,7 +14,6 @@ import { modelKeys } from '@/features/models/queries';
 import { editChat, editList, type ChatEdit } from './chat-edits';
 import {
   conversationApi,
-  hasPendingReplies,
   type Chat,
   type ChatHistoryPage,
   type ChatListPage,
@@ -26,6 +24,8 @@ import {
 import type { AuthoringProposal } from '@tulipfarm/agents/draft-contracts';
 import { createPageReuse } from './page-reuse';
 import { interactionPending, type InteractionReference } from './interaction-contracts';
+import type { ConversationStreamSnapshot } from './conversation-stream';
+import { useReplyResync } from './reply-resync';
 
 export const conversationKeys = {
   lists: () => ['conversations', 'list'] as const,
@@ -175,9 +175,6 @@ export function listChanges(history: ConversationHistory) {
   ];
 }
 
-/** A live event stream announces changes, so polling only backs it up; otherwise poll with a backoff that never gives up on a pending reply. */
-export const historyInterval = (live: boolean) => (checks: number) => (live ? 15_000 : replyBackoff(checks));
-
 /**
  * Starts reading a chat's first page before it opens, under the same key and freshness its
  * history query uses. A failed read is dropped, so opening the chat reads again and shows the
@@ -208,23 +205,22 @@ export function useConversationPrefetch(workspaceId: string) {
   );
 }
 
-export function useConversationHistory(api: ConversationApi, chatId: string, pages: number, live = false) {
+export function useConversationHistory(
+  api: ConversationApi,
+  chatId: string,
+  pages: number,
+  stream: ConversationStreamSnapshot,
+) {
   const { runtime, scope } = useFeatureContext();
   const identity = JSON.stringify(scopeKey(scope));
   const reuse = useMemo(() => createPageReuse<ChatHistoryPage>(), [runtime, identity, api, chatId]);
-  const interval = useMemo(() => historyInterval(live), [live]);
   const read = useFeatureRead({
     key: conversationKeys.history(chatId, pages),
     load: signal => api.history(chatId, signal, pages, reuse),
     staleTime: freshness.chat,
-    pollWhile: hasPendingReplies,
-    interval,
-    maxChecks: Infinity,
   });
-  const { restart } = read;
-  useEffect(() => {
-    restart();
-  }, [live, restart]);
+  const state = useLoadedWindow(read.state, chatId, pages, conversationKeys.history(chatId, pages));
+  const recovery = useReplyResync(state.kind === 'ready' ? state.data : undefined, stream, read.refresh);
   const changes = useConversationChanges();
   const observed = useRef<Set<string> | null>(null);
   useEffect(() => {
@@ -243,7 +239,11 @@ export function useConversationHistory(api: ConversationApi, chatId: string, pag
     }
     if (changed) void changes.progress();
   }, [read.state, changes]);
-  return { ...read, state: useLoadedWindow(read.state, chatId, pages, conversationKeys.history(chatId, pages)) };
+  return {
+    ...read,
+    ...recovery,
+    state,
+  };
 }
 
 export function useConversationInteraction(

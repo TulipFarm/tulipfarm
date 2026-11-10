@@ -21,8 +21,9 @@ export function useConversationStream(api: ConversationApi, chatId: string, enab
   );
   useEffect(() => {
     if (!enabled) return;
-    const sync = () => {
+    const sync = (event?: Event) => {
       if (document.visibilityState === 'hidden') stream.stop();
+      else if (event) stream.resume();
       else stream.start();
     };
     sync();

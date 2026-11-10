@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { mkdir } from 'node:fs/promises';
+import { createServer } from 'node:http';
 import { test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { chromium } from 'playwright';
@@ -52,7 +53,7 @@ test('browser fixture cleanup releases owned resources even when a close fails',
   }
 });
 
-test('chat reply streaming and polling fallback in Chromium', { timeout: 180000 }, async t => {
+test('chat reply streaming and polling fallback in Chromium', { timeout: 240000 }, async t => {
   const port = Number(process.env.CHAT_STREAMING_PORT ?? 5301);
   const origin = `http://127.0.0.1:${port}`;
   const vite = spawn(
@@ -68,7 +69,28 @@ test('chat reply streaming and polling fallback in Chromium', { timeout: 180000 
     { cwd: new URL('..', import.meta.url), stdio: 'ignore' },
   );
   let browser;
+  const streams = new Map();
+  const eventServer = createServer(async (request, response) => {
+    const state = streams.get(new URL(request.url, origin).searchParams.get('chat'));
+    if (!state) {
+      response.writeHead(404).end();
+      return;
+    }
+    if (state.events.ready) await state.events.ready;
+    response.writeHead(200, {
+      'access-control-allow-origin': origin,
+      'access-control-allow-credentials': 'true',
+      'content-type': 'text/event-stream',
+      'cache-control': 'no-cache',
+    });
+    response.write(state.events.body || ': connected\n\n');
+    state.events.disconnect = () => response.end();
+    response.on('close', () => response.end());
+  });
+  let eventOrigin;
   try {
+    await new Promise(resolve => eventServer.listen(0, '127.0.0.1', resolve));
+    eventOrigin = `http://127.0.0.1:${eventServer.address().port}`;
     for (let i = 0; ; i++) {
       if (
         await fetch(origin).then(
@@ -95,9 +117,10 @@ test('chat reply streaming and polling fallback in Chromium', { timeout: 180000 
         );
     };
     async function scenario(name, run) {
+      if (process.env.CHAT_STREAMING_SCENARIO && !new RegExp(process.env.CHAT_STREAMING_SCENARIO).test(name)) return;
       await t.test(name, async () => {
-        const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
-        page.setDefaultTimeout(15000);
+        const page = await browser.newPage({ viewport: { width: 1280, height: 900 }, reducedMotion: 'reduce' });
+        page.setDefaultTimeout(30000);
         page.setDefaultNavigationTimeout(60000);
         const errors = [];
         page.on('pageerror', error => errors.push(String(error)));
@@ -132,12 +155,14 @@ test('chat reply streaming and polling fallback in Chromium', { timeout: 180000 
         const state = {
           events: { status: 503, body: '' },
           historyReads: 0,
+          historySnapshots: [],
           historyStatus: 200,
           eventRequests: 0,
           commands: [],
           question: null,
           sendGate: null,
         };
+        streams.set(chatId, state);
         const cors = { 'access-control-allow-origin': origin, 'access-control-allow-credentials': 'true' };
         await page.route('**/v1/**', async route => {
           const request = route.request(),
@@ -155,17 +180,13 @@ test('chat reply streaming and polling fallback in Chromium', { timeout: 180000 
           else if (path.endsWith('/governance/me')) json = membership;
           else if (path.endsWith('/credits')) json = credits;
           else if (path.endsWith('/model-catalog')) json = chatCatalog;
+          else if (path.endsWith('/system-package-installations')) json = { installations: [], nextCursor: null };
           else if (path.endsWith('/slack/status'))
             json = { state: 'active', teamId: 'T_TEST', canManage: false, linked: true, scopes: [] };
           else if (path.endsWith(`/conversations/${chatId}/events`)) {
             state.eventRequests++;
             if (state.events.status === 200) {
-              if (state.events.ready) await state.events.ready;
-              await route.fulfill({
-                status: 200,
-                headers: { ...cors, 'content-type': 'text/event-stream', 'cache-control': 'no-cache' },
-                body: state.events.body,
-              });
+              await route.continue({ url: `${eventOrigin}/events?chat=${chatId}` });
               return;
             }
             status = state.events.status;
@@ -198,6 +219,7 @@ test('chat reply streaming and polling fallback in Chromium', { timeout: 180000 
             json = { messageId, turnId: queued.id, sequence: history.length };
           } else if (request.method() === 'GET' && path.endsWith(`/conversations/${chatId}/messages`)) {
             state.historyReads++;
+            state.historySnapshots.push({ eventRequests: state.eventRequests });
             status = state.historyStatus;
             json = { messages: history, nextBefore: null, hasGitHubProposals: false };
           } else if (request.method() === 'POST' && /\/turns\/[^/]+\/cancel$/.test(path)) {
@@ -246,6 +268,7 @@ test('chat reply streaming and polling fallback in Chromium', { timeout: 180000 
           throw error;
         } finally {
           await page.close();
+          streams.delete(chatId);
         }
       });
     }
@@ -311,6 +334,224 @@ test('chat reply streaming and polling fallback in Chromium', { timeout: 180000 
     );
 
     await scenario(
+      'a lost stream recovers a completed denied step without reload or duplicate text',
+      async ({ page, state, history, turnId, complete, open }) => {
+        const answer = 'The action was denied. No records were changed.';
+        const tool = {
+          id: randomUUID(),
+          tool: 'rows.delete',
+          status: 'blocked',
+          presentation: { label: 'Deleting a row', brand: null },
+        };
+        history[0].tools = [tool];
+        state.events = {
+          status: 200,
+          body: `event: text\ndata: ${JSON.stringify({ turnId, generation: 0, epoch: 1, step: 0, seq: 0, offset: 0, text: answer, reset: true })}\n\n`,
+        };
+        await open();
+        await page.getByText(answer, { exact: true }).waitFor();
+        await delay(200);
+        await screenshot(page, 'completion-before-resync');
+        await page.evaluate(answer => {
+          window.replyCopies = [];
+          new MutationObserver(() => {
+            window.replyCopies.push(document.body.innerText.split(answer).length - 1);
+          }).observe(document.body, { childList: true, subtree: true, characterData: true });
+        }, answer);
+        const reads = state.historyReads;
+        const connections = state.eventRequests;
+        complete(answer);
+        state.events.disconnect();
+        await page.getByRole('button', { name: 'Stop reply' }).waitFor({ state: 'detached' });
+        assert.equal(
+          state.historySnapshots[reads].eventRequests,
+          connections,
+          'stream loss refreshes history before a reconnect can supply another open event',
+        );
+        assert.equal(await page.getByText(answer, { exact: true }).count(), 1);
+        assert.equal(
+          await page.getByRole('list', { name: 'Messages', exact: true }).locator('[aria-busy="true"]').count(),
+          0,
+        );
+        assert.ok(
+          await page.evaluate(() => window.replyCopies.length > 0 && window.replyCopies.every(count => count === 1)),
+        );
+        await screenshot(page, 'completion-after-resync');
+        await page.reload();
+        await page.getByText(answer, { exact: true }).waitFor();
+        assert.equal(await page.getByRole('button', { name: 'Stop reply' }).count(), 0);
+        assert.equal(await page.getByText(answer, { exact: true }).count(), 1);
+        await page.getByRole('button', { name: /Tool activity · 1 tool · Access denied/ }).waitFor();
+      },
+    );
+
+    await scenario(
+      'a quiet stream with no done event checks saved completion after one second',
+      async ({ page, state, turnId, complete, open }) => {
+        const answer = 'The saved reply is ready.';
+        state.events = {
+          status: 200,
+          body: `event: text\ndata: ${JSON.stringify({ turnId, generation: 0, epoch: 1, step: 0, seq: 0, offset: 0, text: answer, reset: true })}\n\n`,
+        };
+        await open();
+        await page.getByText(answer, { exact: true }).waitFor();
+        await delay(200);
+        const reads = state.historyReads;
+        complete(answer);
+        await page.getByRole('button', { name: 'Stop reply' }).waitFor({ state: 'detached', timeout: 1800 });
+        assert.equal(state.historyReads - reads, 1);
+        assert.equal(state.eventRequests, 1);
+        assert.equal(await page.getByText(answer, { exact: true }).count(), 1);
+      },
+    );
+
+    await scenario(
+      'unconfirmed completion keeps the answer and Stop, bounds checks, and recovers with Retry',
+      async ({ page, state, turnId, complete, open }) => {
+        await page.clock.install();
+        const answer = 'This reply is still on screen.';
+        state.events = {
+          status: 200,
+          body: `event: text\ndata: ${JSON.stringify({ turnId, generation: 0, epoch: 1, step: 0, seq: 0, offset: 0, text: answer, reset: true })}\n\n`,
+        };
+        await open();
+        await page.getByText(answer, { exact: true }).waitFor();
+        await page.clock.runFor(200);
+        const reads = state.historyReads;
+        await page.getByLabel('Message', { exact: true }).fill('Keep this draft');
+        for (const ms of [1000, 2000, 5000]) {
+          await page.clock.fastForward(ms);
+          await delay(100);
+        }
+        const notice = page.getByRole('alert').filter({ hasText: "We couldn't confirm whether this reply finished." });
+        await notice.waitFor();
+        const recoveryReads = state.historyReads - reads;
+        assert.ok(recoveryReads <= 3);
+        assert.equal(await page.getByRole('button', { name: 'Stop reply', exact: true }).count(), 1);
+        assert.equal(await page.getByText(answer, { exact: true }).count(), 1);
+        assert.equal(
+          await page.getByRole('list', { name: 'Messages', exact: true }).locator('[aria-busy="true"]').count(),
+          0,
+        );
+        await page.clock.fastForward(60_000);
+        assert.equal(state.historyReads - reads, recoveryReads, 'automatic checks stop at their budget');
+        assert.equal(await page.getByLabel('Message', { exact: true }).innerText(), 'Keep this draft');
+        await screenshot(page, 'completion-unconfirmed');
+        await page.emulateMedia({ colorScheme: 'dark' });
+        await screenshot(page, 'completion-unconfirmed-dark');
+        await page.setViewportSize({ width: 390, height: 844 });
+        await screenshot(page, 'completion-unconfirmed-mobile-dark');
+        assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
+        await page.emulateMedia({ colorScheme: 'light' });
+        await screenshot(page, 'completion-unconfirmed-mobile');
+        complete(answer);
+        await notice.getByRole('button', { name: 'Retry', exact: true }).click();
+        await notice.waitFor({ state: 'detached' });
+        await page.getByRole('button', { name: 'Stop reply', exact: true }).waitFor({ state: 'detached' });
+        assert.equal(await page.getByText(answer, { exact: true }).count(), 1);
+        assert.equal(await page.getByLabel('Message', { exact: true }).innerText(), 'Keep this draft');
+      },
+    );
+
+    await scenario(
+      'returning from a hidden tab refreshes completion without a stream open or polling timer',
+      async ({ page, state, turnId, complete, open }) => {
+        await page.clock.install();
+        const answer = 'This reply completed while the tab was hidden.';
+        state.events = {
+          status: 200,
+          body: `event: text\ndata: ${JSON.stringify({ turnId, generation: 0, epoch: 1, step: 0, seq: 0, offset: 0, text: answer, reset: true })}\n\n`,
+        };
+        await open();
+        await page.getByText(answer, { exact: true }).waitFor();
+        const now = await page.evaluate(() => Date.now());
+        await page.clock.pauseAt(new Date(now + 1000));
+        const visibility = value =>
+          page.evaluate(value => {
+            Object.defineProperty(document, 'visibilityState', { configurable: true, value });
+            Object.defineProperty(document, 'hidden', { configurable: true, value: value === 'hidden' });
+            document.dispatchEvent(new Event('visibilitychange'));
+          }, value);
+        const reconnect = Promise.withResolvers();
+        try {
+          await visibility('hidden');
+          await page.clock.runFor(1);
+          await delay(100);
+          const reads = state.historyReads;
+          complete(answer);
+          state.events.ready = reconnect.promise;
+          await page.clock.fastForward(60_000);
+          assert.equal(state.historyReads, reads, 'hidden tabs do not poll history');
+          await visibility('visible');
+          for (let i = 0; i < 50; i++) {
+            await page.clock.runFor(1);
+            await delay(25);
+            if (!(await page.getByRole('button', { name: 'Stop reply', exact: true }).count())) break;
+          }
+          assert.equal(
+            await page.getByRole('button', { name: 'Stop reply', exact: true }).count(),
+            0,
+            'foreground return reads saved completion without waiting for a stream open or a polling interval',
+          );
+          assert.equal(await page.getByText(answer, { exact: true }).count(), 1);
+        } finally {
+          reconnect.resolve();
+          await page.clock.resume();
+        }
+        await page.getByRole('status', { name: 'Loading plans', exact: true }).waitFor({ state: 'detached' });
+        await screenshot(page, 'completion-visibility-after');
+      },
+    );
+
+    await scenario(
+      'going offline keeps an explicit status notice and Retry cannot claim completion',
+      async ({ page, state, turnId, complete, open }) => {
+        const answer = 'This reply stays here while offline.';
+        state.events = {
+          status: 200,
+          body: `event: text\ndata: ${JSON.stringify({ turnId, generation: 0, epoch: 1, step: 0, seq: 0, offset: 0, text: answer, reset: true })}\n\n`,
+        };
+        await open();
+        await page.getByText(answer, { exact: true }).waitFor();
+        await page.context().setOffline(true);
+        const notice = page.getByRole('alert').filter({ hasText: "We couldn't confirm whether this reply finished." });
+        await notice.waitFor();
+        await notice.getByRole('button', { name: 'Retry', exact: true }).click();
+        await notice.waitFor();
+        assert.equal(await page.getByRole('button', { name: 'Stop reply', exact: true }).count(), 1);
+        assert.equal(await page.getByText(answer, { exact: true }).count(), 1);
+        complete(answer);
+        await page.context().setOffline(false);
+        await page.getByRole('button', { name: 'Stop reply', exact: true }).waitFor({ state: 'detached' });
+        await notice.waitFor({ state: 'detached' });
+        assert.equal(await page.getByText(answer, { exact: true }).count(), 1);
+      },
+    );
+
+    await scenario(
+      'a genuinely running tool does not trigger quiet-answer completion checks',
+      async ({ page, state, history, turnId, open }) => {
+        await page.clock.install();
+        history[0].tools = [{ id: randomUUID(), tool: 'tables.list', status: 'running' }];
+        state.events = {
+          status: 200,
+          body: `event: text\ndata: ${JSON.stringify({ turnId, generation: 0, epoch: 1, step: 0, seq: 0, offset: 0, text: 'I am checking the table.', reset: true })}\n\n`,
+        };
+        await open();
+        await page.getByText('I am checking the table.', { exact: true }).waitFor();
+        await page.clock.runFor(200);
+        const reads = state.historyReads;
+        await page.clock.fastForward(8000);
+        assert.equal(state.historyReads, reads);
+        assert.equal(await page.getByRole('button', { name: 'Stop reply', exact: true }).count(), 1);
+        assert.equal(
+          await page.getByText("We couldn't confirm whether this reply finished.", { exact: true }).count(),
+          0,
+        );
+      },
+    );
+
+    await scenario(
       'expanded provisional activity survives its saved message arriving',
       async ({ page, state, workspace, chatId, history, open }) => {
         history.length = 0;
@@ -366,8 +607,8 @@ test('chat reply streaming and polling fallback in Chromium', { timeout: 180000 
         const reads = state.historyReads;
         await delay(3000);
         assert.ok(
-          state.historyReads - reads <= 1,
-          `history is not polled every 500 ms while the stream is open (${state.historyReads - reads} reads in 3 s)`,
+          state.historyReads - reads <= 2,
+          `quiet-text recovery is backoff-spaced, not polled every 500 ms (${state.historyReads - reads} reads in 3 s)`,
         );
         assert.equal(state.eventRequests, 1, 'one event stream per open chat');
         complete('Hello from the stream');
@@ -661,6 +902,6 @@ test('chat reply streaming and polling fallback in Chromium', { timeout: 180000 
       },
       browser,
       vite,
-    );
+    ).finally(() => new Promise(resolve => eventServer.close(resolve)));
   }
 });
