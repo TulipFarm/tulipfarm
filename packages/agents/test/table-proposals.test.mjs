@@ -1,10 +1,53 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { randomUUID } from 'node:crypto';
-import { blockedArchive, importPlanResult, missingTransformNote, structureOnlyNote } from '../src/table-proposals.ts';
+import {
+  blockedArchive,
+  importPlanResult,
+  missingTransformNote,
+  structureOnlyNote,
+  tableReviewSummary,
+} from '../src/table-proposals.ts';
 import { TableImportPlanError } from '@tulipfarm/tables/proposal-contracts';
 
 const revision = 'a'.repeat(40);
+
+test('review summaries use persisted table labels and the matching import source', () => {
+  const source = randomUUID();
+  const summary = tableReviewSummary(
+    [
+      {
+        input: { kind: 'import', reference: { kind: 'file', attachmentId: source } },
+        after: { label: 'Orders' },
+        effectCount: 9,
+      },
+      {
+        input: { kind: 'schema', expectedRevision: null },
+        after: { label: 'Customers' },
+        effectCount: 0,
+      },
+    ],
+    [
+      { attachmentId: randomUUID(), filename: 'wrong.csv' },
+      { attachmentId: source, filename: 'orders.csv' },
+    ],
+  );
+  assert.match(summary, /Import 9 row changes into "Orders" from "orders.csv"/);
+  assert.match(summary, /structure of "Customers".*no rows are included/);
+  assert.doesNotMatch(summary, /wrong.csv/);
+  assert.match(summary, /Nothing in this card has been applied/);
+  const integration = tableReviewSummary(
+    [
+      {
+        input: { kind: 'import', reference: { kind: 'integration', resultId: source } },
+        after: { label: 'Tasks' },
+        effectCount: 2,
+      },
+    ],
+    [],
+  );
+  assert.ok(integration.includes(`into "Tasks" from integration result ${source}`));
+});
 
 test('a proposal that creates a table without rows says the rows are not included', () => {
   const note = structureOnlyNote({ plans: [{ kind: 'schema', expectedRevision: null }] });

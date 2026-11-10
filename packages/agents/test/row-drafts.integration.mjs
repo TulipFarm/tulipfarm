@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import { AccessDenied, withMcpSourceContext } from '@tulipfarm/access';
 import { inTransaction } from '@tulipfarm/workspace-storage/provisioning';
 import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
-import { activateGeneration, createGeneration } from '@tulipfarm/tables/store';
+import { activateGeneration, createGeneration, readRecords, writePhysicalRecord } from '@tulipfarm/tables/store';
 import { createConversationExecutor } from '../../conversations/src/runtime.ts';
 import { createPersonalMemoryService } from '../../conversations/src/personal-memory.ts';
 import { conversationFixture } from '../../conversations/test/fixture.mjs';
@@ -59,6 +59,21 @@ test('chat row writes after untrusted content become member-approved review draf
       table.tableId,
       permission,
     ]);
+  const otherDefinition = tableDefinition({ owningTeamId: team, label: 'Other Notes', fields: [note] });
+  const otherTable = await createTableWithRows({
+    db: f.db,
+    workspace: w,
+    runtime: f.runtime,
+    definition: otherDefinition,
+    revision: 'c'.repeat(40),
+    records: [{ values: { [note.id]: text('original') } }],
+  });
+  for (const permission of ['table.row.read', 'table.row.create'])
+    await f.db.platform.query(`INSERT INTO ${f.table('tf_grants')} (team_id,asset_id,permission) VALUES ($1,$2,$3)`, [
+      team,
+      otherTable.tableId,
+      permission,
+    ]);
   const runtime = withKnowledgeSourceAuthorization(f.runtime);
   const objects = new Map(),
     files = createFiles(f.runtime, {
@@ -91,13 +106,24 @@ test('chat row writes after untrusted content become member-approved review draf
   });
 
   /** Runs one chat turn whose tool call carries the given turn sources, as the worker does after web.fetch; `before` tools run first in the same turn. */
-  async function chatTool(call, sources = [web], { parts = [], before = [], memory = false, invoke } = {}) {
-    const chatId = randomUUID();
-    await f.store.create(w.id, owner.userId, { chatId, commandId: randomUUID() });
+  async function chatTool(
+    call,
+    sources = [web],
+    {
+      parts = [],
+      before = [],
+      memory = false,
+      invoke,
+      chatId = randomUUID(),
+      message = 'Summarize the page and keep the result in Notes.',
+    } = {},
+  ) {
+    if (!(await f.db.platform.query(`SELECT 1 FROM ${f.table('tf_conversations')} WHERE id=$1`, [chatId])).rowCount)
+      await f.store.create(w.id, owner.userId, { chatId, commandId: randomUUID() });
     const sent = await f.store.send(w.id, owner.userId, chatId, {
       messageId: randomUUID(),
       commandId: randomUUID(),
-      parts: [{ kind: 'text', text: 'Summarize the page and keep the result in Notes.' }, ...parts],
+      parts: [{ kind: 'text', text: message }, ...parts],
     });
     let output, waitingCards;
     const executor = createConversationExecutor(
@@ -135,6 +161,8 @@ test('chat row writes after untrusted content become member-approved review draf
     const { chatId, result: draft } = await chatTool(createCall('MARKER'));
     assert.equal(draft.status, 'review-required');
     assert.equal(draft.operation, 'create');
+    assert.match(draft.reviewSummary, /1 row in "Notes".*ready in this chat/);
+    assert.match(draft.reviewSummary, /No rows from this card have been written/);
     assert.match(
       draft.instruction,
       /^No row has been created\..*choose Approve\. Never treat chat text as approval\.$/,
@@ -147,6 +175,12 @@ test('chat row writes after untrusted content become member-approved review draf
     assert.deepEqual(view.proposal, { kind: 'row', input: createCall('MARKER') });
     assert.deepEqual(view.rowTable, { name: 'Notes', fields: [{ id: note.id, label: 'Note', kind: 'text' }] });
     assert.equal(view.rowCurrent, null);
+    const reference = { kind: 'row', id: draft.draftId };
+    const cards = createChatTools(runtime);
+    assert.deepEqual(await cards.reviewCards(w.id, owner, chatId, [reference]), [
+      { reference, status: 'pending', summary: draft.reviewSummary },
+    ]);
+    assert.deepEqual(await cards.reviewCards(w.id, other, chatId, [reference]), [{ reference, status: 'unavailable' }]);
     const tools = (await f.store.history(w.id, owner.userId, chatId)).messages.flatMap(message => message.tools ?? []);
     assert.equal(tools.find(tool => tool.tool === 'rows.create')?.rowDraftId, draft.draftId);
     assert.equal(tools.find(tool => tool.tool === 'rows.create')?.rowChange, undefined);
@@ -170,6 +204,114 @@ test('chat row writes after untrusted content become member-approved review draf
     assert.deepEqual(written[0].actor, { kind: 'human', userId: owner.userId, membershipId: owner.membershipId });
     assert.deepEqual(written[0].values, { [note.id]: text('MARKER') });
     assert.equal((await drafts.read(w.id, owner.userId, chatId, draft.draftId)).status, 'saved');
+    assert.deepEqual(await cards.reviewCards(w.id, owner, chatId, [reference]), [{ reference, status: 'saved' }]);
+  });
+
+  await t.test('a nine-row batch has a readable review summary and writes nothing before approval', async () => {
+    const before = await live();
+    const call = {
+      tool: 'rows.create.batch',
+      tableId: table.tableId,
+      expectedAppliedRevision: table.revision,
+      rows: Array.from({ length: 9 }, (_, index) => ({ values: { [note.id]: text(`Note ${index + 1}`) } })),
+    };
+    const { chatId, result } = await chatTool(call, []);
+    assert.equal(result.status, 'review-required');
+    assert.match(result.reviewSummary, /9 rows in "Notes".*ready in this chat/);
+    assert.deepEqual(await live(), before);
+    const readable = await drafts.read(w.id, owner.userId, chatId, result.draftId);
+    assert.equal(readable.status, 'pending');
+    assert.deepEqual(readable.proposal.input, call);
+  });
+
+  await t.test('continued turns share the table limit until a row review is decided', async () => {
+    const before = await live();
+    const chatId = randomUUID();
+    for (let index = 0; index < 5; index++) {
+      const { result } = await chatTool(createCall(`continued-${index}`), [], {
+        chatId,
+        message: index === 0 ? 'Add nine rows to Notes, one at a time.' : 'continue',
+      });
+      assert.equal(typeof result.id, 'string');
+    }
+    const sixth = await chatTool(createCall('continued-5'), [], { chatId, message: 'continue' });
+    assert.equal(sixth.result.status, 'review-required');
+    assert.equal(sixth.result.reason, 'too-many-rows');
+    assert.equal(sixth.result.alreadyWritten, 5);
+    for (let index = 6; index < 9; index++) {
+      const { result } = await chatTool(createCall(`continued-${index}`), [], { chatId, message: 'weiter' });
+      assert.equal(result.error, 'approval-pending');
+      assert.equal(result.waitingDraftId, sixth.result.draftId);
+    }
+    assert.equal((await live()).length, before.length + 5);
+    for (const decision of ['save', 'dismiss']) {
+      await decide(owner, chatId, sixth.result, decision);
+      const { result } = await chatTool(createCall(`after-${decision}`), [], {
+        chatId,
+        message: 'Add another row to Notes.',
+      });
+      assert.equal(typeof result.id, 'string');
+      assert.equal(result.status, undefined);
+      if (decision === 'save') {
+        for (let index = 0; index < 4; index++)
+          await chatTool(createCall(`after-save-${index}`), [], { chatId, message: 'continue' });
+        const next = await chatTool(createCall('next-review'), [], { chatId, message: 'continue' });
+        assert.equal(next.result.status, 'review-required');
+        sixth.result = next.result;
+      }
+    }
+  });
+
+  await t.test('cross-turn budgets are separate for each table and reset on a table revision', async () => {
+    const chatId = randomUUID();
+    for (let index = 0; index < 5; index++) await chatTool(createCall(`budget-${index}`), [], { chatId });
+    const { result } = await chatTool(
+      { ...createCall('other-table'), tableId: otherTable.tableId, expectedAppliedRevision: otherTable.revision },
+      [],
+      {
+        chatId,
+        message: 'Add one row to Other Notes.',
+      },
+    );
+    assert.equal(typeof result.id, 'string');
+    for (let index = 0; index < 4; index++) {
+      const { result } = await chatTool(
+        { ...createCall(`other-${index}`), tableId: otherTable.tableId, expectedAppliedRevision: otherTable.revision },
+        [],
+        { chatId, message: 'Add one row to Other Notes.' },
+      );
+      assert.equal(typeof result.id, 'string', JSON.stringify(result));
+    }
+    const nextDefinition = { ...otherDefinition, fields: [...otherDefinition.fields, textField('Extra')] };
+    const revision = 'b'.repeat(40);
+    const migration = await connect(f.db.login(w, 'migration'));
+    try {
+      await inTransaction(migration, async client => {
+        await client.query(`SET LOCAL ROLE "${w.names.customOwner}"`);
+        const tx = { client, schema: w.names.schema };
+        const generation = await createGeneration(tx, { definition: nextDefinition, revision });
+        for (const row of await readRecords(tx, otherTable.generation)) await writePhysicalRecord(tx, generation, row);
+        await activateGeneration(tx, {
+          generationId: generation.id,
+          expectedActiveGenerationId: otherTable.generation.id,
+        });
+        await client.query(
+          `UPDATE ${f.table('tf_table_catalog')} SET applied_revision=$2,target_revision=$2,applied_definition=$3,physical_table=$4 WHERE id=$1`,
+          [otherTable.tableId, revision, nextDefinition, generation.physical_table],
+        );
+      });
+    } finally {
+      await migration.end();
+    }
+    const revised = await chatTool(
+      { ...createCall('new-revision'), tableId: otherTable.tableId, expectedAppliedRevision: revision },
+      [],
+      {
+        chatId,
+        message: 'Add one row to Other Notes.',
+      },
+    );
+    assert.equal(typeof revised.result.id, 'string');
   });
 
   await t.test('dismissing commits nothing and closes the draft', async () => {

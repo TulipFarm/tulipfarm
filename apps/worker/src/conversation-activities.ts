@@ -173,6 +173,7 @@ export function meteredReply(
     timeZone,
     priorCalls = 0,
     priorToolCalls = [],
+    priorReviewCards = [],
     earlierMessages = false,
     chatFiles: chatFilesOffered = false,
     waitingCards,
@@ -232,7 +233,7 @@ export function meteredReply(
         slack,
         mcp,
         outputs: Boolean(outputs),
-        requester: !externalContext && !project,
+        requester: !externalContext,
         inventory: !externalContext && !project,
         inventoryRead: inventory?.take(fence),
         retainedSources,
@@ -242,6 +243,16 @@ export function meteredReply(
       }),
     );
     const { requester, destinations } = session;
+    const reviewCards: ToolInferenceContext['reviewCards'] =
+      requester?.kind === 'human' && !externalContext
+        ? references =>
+            createChatTools(runtime, { objects }).reviewCards(
+              fence.workspaceId,
+              requester,
+              fence.conversationId,
+              references,
+            )
+        : undefined;
     // A Slack turn is laid out as Block Kit, with follow-ups and forms. The flag only changes what the model is asked
     // for; saved layouts always render.
     const generativeUi = await observeChatDetail('feature-flag', () =>
@@ -457,6 +468,8 @@ export function meteredReply(
               ...(layout ? { layout } : {}),
               priorCalls,
               priorToolCalls,
+              priorReviewCards,
+              reviewCards,
               earlierMessages,
               waitingCards,
               chatFiles: chatFilesOffered && Boolean(chatFiles),
@@ -485,6 +498,8 @@ export function meteredReply(
               ...(layout ? { layout } : {}),
               priorCalls,
               priorToolCalls,
+              priorReviewCards,
+              reviewCards,
               earlierMessages,
               waitingCards,
               chatFiles: chatFilesOffered && Boolean(chatFiles),

@@ -119,11 +119,15 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     const output = (await tools.invokeWithSources(context, { tool: 'tables.propose', input: JSON.stringify(input) }))
       .result;
     assert.equal(output.status, 'pending');
+    assert.ok(output.reviewSummary.includes(JSON.stringify(input.plans[0].target.label)));
+    assert.match(output.reviewSummary, /no rows are included/);
     // A new table's review holds only its structure, so chat must not call it an import.
     assert.equal(output.rowsIncluded, false);
     assert.match(output.instruction, /holds no rows, so approving it imports nothing/);
     const review = await createChatTableProposals(runtime).read(ws.id, actor, conversationId, output.id);
     assert.equal(review.manifest.plans[0].effectCount, 0);
+    assert.equal(review.content, 'available');
+    assert.equal(review.status, 'pending');
     assert.deepEqual(review.manifest.plans[0].after, input.plans[0].target);
     assert.equal(await count('tf_table_proposals'), 1);
     assert.equal(await count('tf_table_catalog'), catalogTables);
@@ -722,6 +726,10 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
           if (state === 'completed' || state === 'blocked') break;
         }
         assert.equal(state, 'completed');
+        const reference = { kind: 'table', id: output.id };
+        assert.deepEqual(await tools.reviewCards(ws.id, actor, conversationId, [reference]), [
+          { reference, status: 'completed' },
+        ]);
         const status = await proposals.status(ws.id, actor, conversationId, output.id);
         assert.deepEqual(status.plans[0].importProgress, { applied: 3, remaining: 0 });
         assert.equal(
@@ -735,5 +743,50 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         );
       }
     }
+  });
+  await t.test('review summaries follow supersession, rejection, and expiry', async () => {
+    const propose = async (label, revises) => {
+      const id = randomUUID();
+      const plan = { ...input.plans[0], tableId: id, target: { ...input.plans[0].target, id, label } };
+      return (
+        await tools.invokeWithSources(
+          { ...context, callId: randomUUID() },
+          {
+            tool: 'tables.propose',
+            input: JSON.stringify({ ...(revises && { revises }), plans: [plan] }),
+          },
+        )
+      ).result;
+    };
+    const first = await propose('Vendors');
+    const second = await propose('Partners', first.id);
+    const references = [
+      { kind: 'table', id: first.id },
+      { kind: 'table', id: second.id },
+    ];
+    const current = await tools.reviewCards(ws.id, actor, conversationId, references);
+    assert.deepEqual(current[0], { reference: references[0], status: 'superseded' });
+    assert.equal(current[1].status, 'pending');
+    assert.match(current[1].summary, /"Partners"/);
+    assert.doesNotMatch(current[1].summary, /Vendors/);
+    await createTableProposalDecisions({
+      ...tableProposalOptions(runtime),
+      resolveConfirmationCredential: async () => db.login(ws, 'confirmation'),
+    }).decide(ws.id, actor, conversationId, second.id, {
+      digest: second.digest,
+      commandId: randomUUID(),
+      decision: 'reject',
+    });
+    const rejected = await tools.reviewCards(ws.id, actor, conversationId, references);
+    assert.equal(rejected[0].status, 'pending');
+    assert.match(rejected[0].summary, /"Vendors"/);
+    assert.deepEqual(rejected[1], { reference: references[1], status: 'rejected' });
+    await db.platform.query(
+      `UPDATE ${s}.tf_table_proposals SET created_at=clock_timestamp()-interval '2 minutes',expires_at=clock_timestamp()-interval '1 minute' WHERE id=$1`,
+      [first.id],
+    );
+    const expired = await tools.reviewCards(ws.id, actor, conversationId, [references[0]]);
+    assert.equal(expired[0].summary, undefined);
+    assert.notEqual(expired[0].status, 'pending');
   });
 });

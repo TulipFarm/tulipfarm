@@ -9,6 +9,7 @@ import {
   TableProposalError,
   TableProposalValidationError,
   type ImportProblem,
+  type ProposalManifest,
 } from '@tulipfarm/tables/proposal-contracts';
 import { z } from 'zod';
 
@@ -113,6 +114,31 @@ export function structureOnlyNote(value: unknown) {
   const createsTable = input.plans.some(plan => plan.kind === 'schema' && plan.expectedRevision === null);
   const bringsRows = input.plans.some(plan => plan.kind === 'records' || plan.kind === 'import');
   return createsTable && !bringsRows ? { rowsIncluded: false as const, instruction: structureOnly } : {};
+}
+
+export function tableReviewSummary(
+  plans: ProposalManifest['plans'],
+  attachments: readonly { attachmentId: string; filename: string }[],
+) {
+  const changes = plans.map(plan => {
+    const table = JSON.stringify(plan.after.label);
+    if (plan.input.kind === 'import') {
+      const reference = plan.input.reference;
+      const source =
+        reference.kind === 'file'
+          ? JSON.stringify(
+              attachments.find(file => file.attachmentId === reference.attachmentId)?.filename ??
+                reference.attachmentId,
+            )
+          : `integration result ${reference.resultId}`;
+      return `Import ${plan.effectCount} row changes into ${table} from ${source}.`;
+    }
+    if (plan.input.kind === 'records') return `Review ${plan.effectCount} row changes in ${table}.`;
+    if (plan.input.kind === 'schema')
+      return `Review the structure of ${table}.${plan.input.expectedRevision === null ? ' This creates the table only; no rows are included.' : ''}`;
+    return `Review the ${plan.input.kind} of ${table}.`;
+  });
+  return `A review card is ready in this chat.\n\n${changes.join('\n\n')}\n\nNothing in this card has been applied. Review and approve it to apply these changes.`;
 }
 
 const keptValues =

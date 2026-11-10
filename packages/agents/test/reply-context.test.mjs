@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { inferWithTools } from '../src/inference.ts';
 import {
+  azureStreamReply,
   completionReply,
   conversation,
   formats,
@@ -66,6 +67,172 @@ const notesFor = text =>
   JSON.stringify({
     notes: JSON.parse(text).results.map(({ callId, tool }) => ({ callId, note: `${tool} read one page.` })),
   });
+
+test('capping a tool result preserves the identity used to refresh its review', async t => {
+  const summary = 'A review card for "Orders" from "orders.csv" is ready in this chat. No rows have been written.';
+  let requests = 0;
+  t.mock.method(globalThis, 'fetch', async (_url, init) => {
+    if (++requests === 1)
+      return Response.json(nativeReply('azure', { calls: [use('tables.propose', { input: '{"plans":[]}' })] }));
+    assert.equal(requests, 2);
+    const output = toolResults('azure', JSON.parse(init.body)).at(-1).output;
+    assert.doesNotMatch(output, /orders.csv/);
+    return Response.json(nativeReply('azure', { text: 'No card was created.' }));
+  });
+  const result = await inferWithTools(
+    nativeRoutes.azure,
+    [{ role: 'user', text: 'Import orders.csv into Orders.' }],
+    async () => ({ id: 'review', status: 'pending', padding: 'x'.repeat(50000), reviewSummary: summary }),
+    undefined,
+    false,
+    null,
+    {
+      context: limits(40000),
+      reviewCards: async refs => {
+        assert.deepEqual(refs, [{ kind: 'table', id: 'review' }]);
+        return refs.map(reference => ({ reference, status: 'pending', summary }));
+      },
+    },
+  );
+  assert.equal(result.text, summary);
+});
+
+const reviewId = '11111111-1111-4111-8111-111111111111';
+const reviewFamilies = [
+  ['tables.propose', { input: '{"plans":[]}' }, { id: reviewId, status: 'pending' }],
+  [
+    'rows.create',
+    { tableId: reviewId, expectedAppliedRevision: 'a'.repeat(40), values: {} },
+    { draftId: reviewId, status: 'review-required' },
+  ],
+  [
+    'workflows.archive',
+    {
+      workflows: Array.from({ length: 20 }, (_, index) => ({
+        workflowId: `11111111-1111-4111-8111-${String(index + 1).padStart(12, '0')}`,
+        revision: reviewId,
+      })),
+    },
+    { draftId: reviewId, status: 'review-required' },
+  ],
+  [
+    'google.propose',
+    {
+      operation: {
+        kind: 'gmail.drafts.create',
+        message: { to: ['reader@example.com'], subject: 'Report', body: 'Please review the report.' },
+      },
+    },
+    { provider: 'google-workspace', data: { id: reviewId, decision: null, receipt: null } },
+  ],
+  [
+    'github.personal.propose',
+    {
+      actions: [
+        { kind: 'issue.create', owner: 'octocat', repo: 'example', title: 'Update docs', body: 'Describe it.' },
+      ],
+    },
+    { batchId: reviewId, decision: null, statuses: ['unattempted'] },
+  ],
+  [
+    'api.request',
+    { method: 'POST', url: 'https://example.com/items' },
+    { provider: 'api-call', kind: 'waiting', callId: reviewId },
+  ],
+  ['integrations.connect', { app: 'github-personal' }, { status: 'connect-card', app: 'github-personal' }],
+  [
+    'integrations.mcp.connect',
+    { name: 'External tools', endpoint: 'https://tools.example.com/mcp', authentication: 'none' },
+    {
+      status: 'mcp-connect-card',
+      name: 'External tools',
+      endpoint: 'https://tools.example.com/mcp',
+      authentication: 'none',
+    },
+  ],
+  ['integrations.disconnect', { connectionId: 'google' }, { status: 'review-required', connection: { id: 'google' } }],
+  ['skills.import.status', { importId: reviewId }, { importId: reviewId, status: 'ready' }],
+];
+
+for (const model of ['grok-4.3', 'Kimi-K2.6'])
+  for (const sse of [false, true])
+    for (const transformation of ['oversized', 'capped', 'compacted'])
+      test(`${model} ${sse ? 'SSE' : 'JSON'} preserves rendered review receipts through ${transformation} outputs`, async t => {
+        for (const [tool, args, receipt] of reviewFamilies)
+          await t.test(tool, async t => {
+            const route = { ...nativeRoutes.azure, model };
+            const answer = 'The review card is ready.';
+            const batched = tool === 'skills.import.status';
+            let rounds = 0;
+            let transformed = false;
+            let summaries = 0;
+            let executed = 0;
+            t.mock.method(globalThis, 'fetch', async (_url, init) => {
+              const body = JSON.parse(init.body);
+              if (isCompletionRequest(body)) {
+                const evidence = JSON.parse(body.messages.at(-1).content);
+                assert.deepEqual(evidence.reviewCards, { [tool.replaceAll('.', '_')]: 1 });
+                return Response.json(completionReply('azure'));
+              }
+              rounds++;
+              const outputs = allOutputs('azure', body);
+              if (outputs.length) {
+                if (transformation === 'oversized') transformed ||= outputs[0].includes('result-too-large');
+                if (transformation === 'capped')
+                  transformed ||= outputs[0].includes('Output truncated to save context');
+                if (transformation === 'compacted') transformed ||= outputs[0].includes('summarised to save context');
+              }
+              const reply = withUsage(
+                'azure',
+                nativeReply(
+                  'azure',
+                  rounds === 1
+                    ? {
+                        calls: [
+                          use(tool, args, 'Preparing the review', { id: 'review_call' }),
+                          ...(batched ? [fetchCall(0, { id: 'batched_read' })] : []),
+                        ],
+                      }
+                    : rounds === 2 && transformation === 'compacted'
+                      ? { calls: [fetchCall(rounds, { id: 'read_call' })] }
+                      : { text: answer },
+                ),
+                rounds === 2 && transformation === 'compacted' ? 30000 : 1,
+              );
+              return sse ? azureStreamReply(reply) : Response.json(reply);
+            });
+            const result = await inferWithTools(
+              route,
+              [{ role: 'user', text: 'Prepare the requested review card, then read https://example.com/2.' }],
+              async call => {
+                executed++;
+                if (call.tool === 'web.fetch') return { text: 'A short page.' };
+                assert.equal(call.tool, tool);
+                return {
+                  ...receipt,
+                  padding: 'x'.repeat(
+                    transformation === 'oversized' ? 100000 : transformation === 'capped' ? 50000 : 6000,
+                  ),
+                };
+              },
+              undefined,
+              false,
+              null,
+              {
+                context: limits(40000),
+                compactToolResults: async ({ text }) => {
+                  summaries++;
+                  return notesFor(text);
+                },
+              },
+            );
+            assert.equal(transformed, true, 'the receipt output was actually replaced');
+            assert.equal(result.text, answer);
+            assert.equal(executed, (transformation === 'compacted' ? 2 : 1) + Number(batched));
+            assert.equal(rounds, transformation === 'compacted' ? 3 : 2);
+            assert.equal(summaries, transformation === 'compacted' ? 1 : 0);
+          });
+      });
 
 for (const format of formats)
   test(`${format} compacts older tool results past the trigger and still answers`, async t => {

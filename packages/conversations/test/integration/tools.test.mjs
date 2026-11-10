@@ -5,6 +5,86 @@ import { createConversationExecutor } from '../../src/runtime.ts';
 import { createChatTools } from '../../../agents/src/tools.ts';
 import { conversationFixture } from '../fixture.mjs';
 
+test('continuing a reply carries review identities instead of frozen summaries', async () => {
+  const f = await conversationFixture();
+  try {
+    const w = f.workspace;
+    const chatId = randomUUID();
+    await f.store.create(w.id, w.userId, { chatId, commandId: randomUUID() });
+    const sent = await f.store.send(w.id, w.userId, chatId, {
+      commandId: randomUUID(),
+      messageId: randomUUID(),
+      parts: [{ kind: 'text', text: 'Prepare Contacts for review.' }],
+    });
+    const team = (await f.db.platform.query(`SELECT id FROM ${f.table('tf_teams')} WHERE name='_admin'`)).rows[0].id;
+    const tableId = randomUUID();
+    const call = {
+      tool: 'tables.propose',
+      input: JSON.stringify({
+        plans: [
+          {
+            kind: 'schema',
+            tableId,
+            expectedRevision: null,
+            dependsOn: [],
+            target: {
+              formatVersion: 2,
+              id: tableId,
+              owningTeamId: team,
+              label: 'Contacts',
+              uniqueKeys: [],
+              fields: [
+                {
+                  id: randomUUID(),
+                  label: 'Name',
+                  kind: 'text',
+                  required: false,
+                  maxLength: 10000,
+                },
+              ],
+            },
+            transforms: { outputs: [] },
+          },
+        ],
+      }),
+    };
+    const work = { workspaceId: w.id, conversationId: chatId, turnId: sent.turnId, generation: 0 };
+    let receipt;
+    const interrupted = createConversationExecutor(f.runtime, async ({ executeTool }) => {
+      receipt = (
+        await executeTool(
+          call.tool,
+          false,
+          context => createChatTools(context.runtime).invokeWithSources(context, call),
+          [],
+          call,
+        )
+      ).result;
+      assert.equal(receipt.status, 'pending');
+      throw new Error('lost final response');
+    });
+    assert.equal(await interrupted.process(work), 'retry');
+    await f.db.platform.query(
+      `UPDATE ${f.table('tf_conversation_turns')} SET retry_at=clock_timestamp()-interval '1 second' WHERE id=$1`,
+      [sent.turnId],
+    );
+    assert.equal(await interrupted.process({ ...work, generation: 1 }), 'stale');
+    const history = await f.store.history(w.id, w.userId, chatId);
+    const retried = await f.store.retry(w.id, w.userId, chatId, sent.turnId, {
+      commandId: randomUUID(),
+      expectedGeneration: history.messages[0].turn.generation,
+    });
+    const resume = createConversationExecutor(f.runtime, async input => {
+      assert.deepEqual(input.priorReviewCards, [{ kind: 'table', id: receipt.id }]);
+      assert.equal('priorReviewSummaries' in input, false);
+      return { text: 'Read the current review state before summarizing it.', sources: [] };
+    });
+    assert.equal(await resume.process({ ...work, generation: retried.generation }), 'completed');
+  } finally {
+    await f.close();
+  }
+});
+
 for (const interruption of ['cancel', 'reclaim', 'membership'])
   test(`external receipts terminalize on ${interruption} and stale completion cannot overwrite them`, async t => {
     const f = await conversationFixture();
