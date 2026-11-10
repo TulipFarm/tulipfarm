@@ -43,6 +43,7 @@ export function safeAuthRedirect(value: unknown) {
   try {
     const url = new URL(value, globalThis.location?.origin ?? 'http://localhost');
     const path = decodeURIComponent(url.pathname);
+    if (url.searchParams.has('error')) url.searchParams.delete('error');
     if (path === '/invite') {
       const token = invitationTokenSchema.safeParse(url.searchParams.get('token'));
       return url.pathname === '/invite' && token.success && [...url.searchParams.keys()].length === 1 && !url.hash
