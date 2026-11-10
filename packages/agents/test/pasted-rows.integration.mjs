@@ -71,7 +71,14 @@ test(
         turnId: turn,
         sources: [{ kind: 'private-conversation', conversationId: chat }],
       };
-      const csv = `Name,Status,Due\nsample-golf-${run},done,\nsample-hotel-${run},Done,2026-11-12`;
+      const delimiter = run === 1 ? '\t' : ',';
+      const csv = [
+        ['Name', 'Status', 'Due'],
+        [`sample-golf-${run}`, 'done', ''],
+        [`sample-hotel-${run}`, 'Done', '2026-11-12'],
+      ]
+        .map(row => row.join(delimiter))
+        .join('\r\n');
       await db.platform.query(
         `INSERT INTO ${s}.tf_conversations(id,owner_user_id,owner_membership_id) VALUES($1,$2,$3)`,
         [chat, actor.userId, actor.membershipId],

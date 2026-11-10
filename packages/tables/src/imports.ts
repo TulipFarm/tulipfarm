@@ -830,13 +830,12 @@ export async function preparePastedImport(text: string, definition: TableDefinit
   if (Buffer.byteLength(text) > importLimits.bytes) throw new TableImportError('byte-limit');
   if (!text.trim()) return { error: 'empty-paste' as const };
   const bytes = Buffer.from(text);
-  const rows = await parseImportFile(bytes, {
-    format: 'csv',
-    delimiter: ',',
-    header: { kind: 'row', row: 1 },
-    conversions: {},
-    empty: 'null',
-  });
+  const { selection } = await fitFileImportSelection(
+    bytes,
+    { format: 'csv', header: { kind: 'row', row: 1 }, conversions: {}, empty: 'null' },
+    [definition.fields.map(field => field.label)],
+  );
+  const rows = await parseImportFile(bytes, selection);
   if (rows.length > pastedImportRowLimit)
     return { error: 'row-limit' as const, count: rows.length, limit: pastedImportRowLimit };
   if (!rows.length) return { error: 'empty-paste' as const };

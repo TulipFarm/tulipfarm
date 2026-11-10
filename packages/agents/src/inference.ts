@@ -9,6 +9,7 @@ import {
   type WorkspaceDirectory,
 } from './workspace-directory.ts';
 import { z } from 'zod';
+import { fitFileImportSelection, parseImportFile, TableImportError } from '@tulipfarm/tables/imports';
 import {
   estimateInputTokens,
   modelApiSupported,
@@ -2545,7 +2546,7 @@ export function forcedRowTools(request: string, offered: readonly string[]) {
   return [nativeToolName('schema.inspect'), ...(write ? [write] : [])].filter(name => offered.includes(name));
 }
 
-function pastedCsvFileQuestion(request: string, candidate: string) {
+async function pastedCsvFileQuestion(request: string, candidate: string) {
   if (!/\b(?:import|add|load|insert)\b/i.test(request)) return false;
   if (
     !/(?:^|[.!?;,\n]|\bplease|\b(?:can|could|would|will) you|\byou (?:must|should|need to|have to))\s*(?:attach|upload|provide|send|paste)\b[^.!?\n]{0,80}\b(?:file|attachment)\b|\b(?:I|we)(?:['’]ll)?\s+(?:need|require)\b[^.!?\n]{0,40}\b(?:csv|xlsx|spreadsheet) file\b|\b(?:this|the) (?:import|operation) requires?\b[^.!?\n]{0,40}\b(?:csv|xlsx|spreadsheet) file\b/i.test(
@@ -2554,13 +2555,46 @@ function pastedCsvFileQuestion(request: string, candidate: string) {
   )
     return false;
   const lines = request.split(/\r?\n/);
-  return lines.some((line, index) => {
-    const header = line.split(',');
-    const next = lines[index + 1];
-    return (
-      header.length >= 2 && header.every(cell => cell.trim() && /\p{L}/u.test(cell)) && Boolean(next?.includes(','))
-    );
-  });
+  for (let index = 0; index + 2 < lines.length; index++) {
+    const sample = lines.slice(index, index + 3);
+    if (sample.some(line => !line.trim() || /^\s*(?:[-*+]|\d+[.)])\s/.test(line))) continue;
+    if (!sample.every(line => line.includes(',') || line.includes('\t'))) continue;
+    try {
+      const bytes = Buffer.from(sample.join('\n'));
+      const { selection } = await fitFileImportSelection(bytes, {
+        format: 'csv',
+        header: { kind: 'row', row: 1 },
+        conversions: {},
+        empty: 'null',
+      });
+      if (selection.format !== 'csv' || ![',', '\t'].includes(selection.delimiter)) continue;
+      const rows = await parseImportFile(bytes, selection);
+      const header = Object.keys(rows[0] ?? {});
+      if (
+        rows.length === 2 &&
+        header.length >= 2 &&
+        header.every(
+          name => /^[\p{L}_][\p{L}\p{N}_ /()-]{0,79}$/u.test(name.trim()) && name.trim().split(/\s+/).length <= 4,
+        ) &&
+        rows.every(row => Object.values(row).some(value => value !== null))
+      ) {
+        const boundary = lines.findIndex(
+          (line, offset) => offset > index && (!line.trim() || line.trim().startsWith('```')),
+        );
+        const block = lines.slice(index, boundary < 0 ? undefined : boundary).join('\n');
+        try {
+          const all = await parseImportFile(Buffer.from(block), selection);
+          return all.length >= 2 && all.every(row => Object.values(row).some(value => value !== null));
+        } catch (error) {
+          if (!(error instanceof TableImportError)) throw error;
+          return false;
+        }
+      }
+    } catch (error) {
+      if (!(error instanceof TableImportError)) throw error;
+    }
+  }
+  return false;
 }
 
 /** Whether a row write's result says its table ID was wrong and names the one table the person meant. */
@@ -4261,8 +4295,8 @@ export async function inferWithTools(
           ? finish(rendered.input.summary, true, { layout: rendered.input })
           : finish(selected.text, true);
       };
-      if (pastedCsvFileQuestion(request, candidate)) {
-        if (pastedFileRetried || finalizing) return finish(unfinishedNoToolsReply, true);
+      if (await pastedCsvFileQuestion(request, candidate)) {
+        if (pastedFileRetried || finalizing) return finish(candidate, true);
         pastedFileRetried = true;
         preview('');
         items.push(
