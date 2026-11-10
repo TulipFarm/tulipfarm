@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
-import { AccessDenied } from '@tulipfarm/access';
+import { AccessDenied, lockAuthorization } from '@tulipfarm/access';
+import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import { createConversationExecutor } from '../../conversations/src/runtime.ts';
 import { conversationFixture } from '../../conversations/test/fixture.mjs';
 import { createTableWithRows, tableDefinition, textField, text } from '../../tables/test/fixture.mjs';
@@ -9,6 +10,7 @@ import { createAgentRecordTools } from '../src/record-tools.ts';
 import { createAuthoringDrafts } from '../src/drafts.ts';
 import { nativeChatTools } from '../src/native-tools.ts';
 import { createChatTools } from '../src/tools.ts';
+import { slackRowDraftCards } from '../src/slack-row-drafts.ts';
 
 test('chat patches live rows without creating replacements or changing other fields', { timeout: 60000 }, async t => {
   const previous = process.env.ANTHROPIC_API_KEY;
@@ -28,7 +30,10 @@ test('chat patches live rows without creating replacements or changing other fie
     db: f.db,
     workspace: w,
     runtime: f.runtime,
-    definition: tableDefinition({ owningTeamId: team, label: 'Tickets', fields: [key, note] }),
+    definition: {
+      ...tableDefinition({ owningTeamId: team, label: 'Tickets', fields: [note, key] }),
+      uniqueKeys: [{ id: randomUUID(), fieldIds: [key.id], nulls: 'distinct' }],
+    },
     records: Array.from({ length: 7 }, (_, index) => ({
       values: { [key.id]: text(`T-${index + 1}`), [note.id]: text('Waiting') },
     })),
@@ -48,7 +53,7 @@ test('chat patches live rows without creating replacements or changing other fie
       values: { [note.id]: text(value) },
     })),
   });
-  async function chat(call, message = 'Update the existing rows in Tickets: set Note to Done.') {
+  async function chat(call, message = 'Update the existing rows in Tickets: set Note to Done.', earlier) {
     const chatId = randomUUID();
     await f.store.create(w.id, w.userId, { chatId, commandId: randomUUID() });
     const sent = await f.store.send(w.id, w.userId, chatId, {
@@ -91,21 +96,23 @@ test('chat patches live rows without creating replacements or changing other fie
           for (const row of call.rows)
             assert.ok(found.result.records.some(record => record.id === row.recordId && record.token));
       }
-      const selected = catalog.resolve({
-        id: 'update',
-        name: 'rows_update_batch',
-        providerId: true,
-        input: { ...call, tool: undefined, activity: 'Updating tickets' },
-      });
-      assert.equal(selected.ok, true);
-      assert.equal(selected.call.tool, 'rows.update.batch');
-      output = await executeTool(
-        selected.call.tool,
-        false,
-        context => createChatTools(context.runtime).invokeWithSources(context, selected.call),
-        [],
-        selected.call,
-      );
+      for (const [index, update] of (earlier ? [earlier, call] : [call]).entries()) {
+        const selected = catalog.resolve({
+          id: `update-${index}`,
+          name: 'rows_update_batch',
+          providerId: true,
+          input: { ...update, tool: undefined, activity: 'Updating tickets' },
+        });
+        assert.equal(selected.ok, true);
+        assert.equal(selected.call.tool, 'rows.update.batch');
+        output = await executeTool(
+          selected.call.tool,
+          false,
+          context => createChatTools(context.runtime).invokeWithSources(context, selected.call),
+          [],
+          selected.call,
+        );
+      }
       return {
         text: output.result.error ? 'No rows changed. Try the change again.' : 'The change is ready.',
         sources: [],
@@ -124,10 +131,10 @@ test('chat patches live rows without creating replacements or changing other fie
     const tools = history.messages.flatMap(message => message.tools);
     assert.deepEqual(
       tools.map(tool => tool.tool),
-      ['schema.inspect', 'rows.list', 'rows.update.batch'],
+      ['schema.inspect', 'rows.list', ...(earlier ? ['rows.update.batch'] : []), 'rows.update.batch'],
     );
     assert.match(tools[2].presentation.label, /Updating/);
-    return { chatId, result: output.result, history, tools: tools.slice(2) };
+    return { chatId, turnId: sent.turnId, result: output.result, history, tools: tools.slice(2) };
   }
   await t.test('one partial patch preserves required fields and other rows', async () => {
     const before = await live();
@@ -160,14 +167,24 @@ test('chat patches live rows without creating replacements or changing other fie
   await t.test('six rows wait on one before/after card and approve atomically', async () => {
     const before = await live();
     const call = await patch(6, 'Approved');
-    const { chatId, result, tools } = await chat(call);
+    const { chatId, turnId, result, tools } = await chat(call);
     assert.equal(result.status, 'review-required');
     assert.equal(tools[0].rowDraftId, result.draftId);
     assert.deepEqual(await live(), before);
     const card = await drafts.read(w.id, w.userId, chatId, result.draftId);
     assert.equal(card.proposal.reason, 'too-many-rows');
     assert.deepEqual(card.proposal.input, call);
+    assert.deepEqual(card.rowTable.labelFieldIds, [key.id]);
     for (const row of before.slice(0, 6)) assert.deepEqual(card.rowCurrents[row.id], row.values);
+    const blocks = await f.runtime.transaction(w.id, commonCompatibility, async tx => {
+      await lockAuthorization(tx, 'write');
+      return slackRowDraftCards(tx, w.id, actor, chatId, turnId);
+    });
+    const fields = blocks.find(block => block.type === 'section' && block.fields)?.fields;
+    assert.equal(fields.length, 6);
+    assert.equal(fields[0].text, 'T-1\nNote: Approved\nBefore Checked');
+    assert.equal(fields[5].text, 'T-6\nNote: Approved\nBefore Waiting');
+    assert.doesNotMatch(JSON.stringify(blocks), /Row 1|Row 6/);
     const decision = { commandId: randomUUID(), digest: result.digest, decision: 'save' };
     const receipt = await drafts.decide(w.id, w.userId, chatId, result.draftId, decision);
     assert.equal(receipt.operation, 'update');
@@ -194,6 +211,22 @@ test('chat patches live rows without creating replacements or changing other fie
     assert.match(result.instruction, /No rows changed/);
     assert.deepEqual(await live(), before);
     assert.equal(history.messages.at(-1).parts[0].text, 'No rows changed. Try the change again.');
+  });
+  await t.test('review cards describe earlier direct updates as changed, not added', async () => {
+    const before = await live();
+    const earlier = await patch(7, 'Changed directly');
+    earlier.rows = earlier.rows.slice(-1);
+    const { chatId, turnId, result } = await chat(await patch(6, 'Needs review'), undefined, earlier);
+    const card = await drafts.read(w.id, w.userId, chatId, result.draftId);
+    assert.deepEqual(card.proposal.written, { count: 1, rows: [] });
+    assert.deepEqual((await live()).slice(0, 6), before.slice(0, 6));
+    const blocks = await f.runtime.transaction(w.id, commonCompatibility, async tx => {
+      await lockAuthorization(tx, 'write');
+      return slackRowDraftCards(tx, w.id, actor, chatId, turnId);
+    });
+    const text = JSON.stringify(blocks);
+    assert.match(text, /1 row was already changed in this reply/);
+    assert.doesNotMatch(text, /already added/);
   });
   await t.test('a stale last reviewed row blocks the whole approval', async () => {
     const { chatId, result } = await chat(await patch(6, 'Outdated'));

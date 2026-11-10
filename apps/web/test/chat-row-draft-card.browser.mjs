@@ -10,6 +10,7 @@ import { membership, credits } from './chat-query.fixture.mjs';
 const chatId = '12121212-1212-4212-8212-121212121212';
 const tableId = '44444444-4444-4444-8444-444444444444';
 const noteField = '55555555-5555-4555-8555-555555555555';
+const keyField = '54545454-5454-4454-8454-545454545454';
 const statusField = '56565656-5656-4656-8656-565656565656';
 const openOption = '57575757-5757-4757-8757-575757575757';
 const recordId = '58585858-5858-4858-8858-585858585858';
@@ -22,7 +23,9 @@ const revision = 'a'.repeat(40),
   token = '59595959-5959-4959-8959-595959595959';
 const rowTable = {
   name: 'Support tickets',
+  labelFieldIds: [keyField],
   fields: [
+    { id: keyField, label: 'Key', kind: 'text' },
     { id: noteField, label: 'Note', kind: 'text' },
     { id: statusField, label: 'Status', kind: 'single-select', options: [{ id: openOption, label: 'Open' }] },
   ],
@@ -115,7 +118,10 @@ test('row review drafts show the exact change and act only on the member decisio
             rowCurrents: Object.fromEntries(
               Array.from({ length: 6 }, (_, index) => [
                 `60606060-6060-4060-8060-60606060606${index}`,
-                { [noteField]: { kind: 'text', value: `Waiting ${index + 1}` } },
+                {
+                  [keyField]: { kind: 'text', value: `T-${index + 1}` },
+                  [noteField]: { kind: 'text', value: `Waiting ${index + 1}` },
+                },
               ]),
             ),
           },
@@ -129,6 +135,8 @@ test('row review drafts show the exact change and act only on the member decisio
           values: { [noteField]: { kind: 'text', value: `Order ${name}` } },
         })),
       };
+      drafts[updateBatchDraft].proposal.before = drafts[updateBatchDraft].rowCurrents;
+      drafts[updateBatchDraft].proposal.written = { count: 1, rows: [] };
       const decisions = [];
       const context = await browser.newContext({
         viewport: mobile ? { width: 390, height: 844 } : { width: 1440, height: 1000 },
@@ -269,6 +277,15 @@ test('row review drafts show the exact change and act only on the member decisio
         await updates.getByText('Updates 6 existing rows together', { exact: true }).waitFor();
         await updates.getByText('Note: Resolved 6', { exact: true }).waitFor();
         await updates.getByText('Before Waiting 6', { exact: true }).waitFor();
+        await updates.getByText('T-1', { exact: true }).waitFor();
+        await updates.getByText('T-6', { exact: true }).waitFor();
+        assert.equal(await updates.getByText('Row 1', { exact: true }).count(), 0);
+        await updates
+          .getByText(
+            '1 row was already changed in this reply. Those changes stay. This card holds only the other 6 rows, which need your approval.',
+            { exact: true },
+          )
+          .waitFor();
         assert.equal(await updates.getByRole('list', { name: 'Rows to update' }).getByRole('listitem').count(), 6);
         if (shots)
           await updates.screenshot({
@@ -318,7 +335,7 @@ test('row review drafts show the exact change and act only on the member decisio
           .waitFor();
         await batch
           .getByText(
-            '2 rows were already added in this reply and stay in the table. This card holds only the other 6 rows, which need your approval.',
+            '2 rows were already changed in this reply. Those changes stay. This card holds only the other 6 rows, which need your approval.',
             { exact: true },
           )
           .waitFor();

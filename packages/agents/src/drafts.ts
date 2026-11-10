@@ -433,6 +433,11 @@ export function createAuthoringDrafts(
     }
     const rowTable = {
       name: definition.label,
+      labelFieldIds:
+        definition.uniqueKeys[0]?.fieldIds ??
+        [(definition.fields.find(field => field.kind === 'text') ?? definition.fields[0])?.id].filter(
+          id => id !== undefined,
+        ),
       fields: definition.fields.map(field => ({
         id: field.id,
         label: field.label,

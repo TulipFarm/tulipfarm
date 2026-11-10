@@ -65,6 +65,17 @@ export function RowDraftCard({
     }));
   const format = (values: Values, fieldId: string) =>
     formatTableValue(values[fieldId] ?? null, table ?? { fields: [] }, fieldId);
+  const rowLabel = (index: number) => {
+    const before = updates && draft.rowCurrents?.[updates[index]!.recordId];
+    const ids = table?.labelFieldIds?.length
+      ? table.labelFieldIds
+      : [(table?.fields.find(field => field.kind === 'text') ?? table?.fields[0])?.id].filter(
+          (id): id is string => id !== undefined,
+        );
+    return before && ids.some(id => before[id] != null)
+      ? ids.map(id => format(before, id)).join(' · ')
+      : `Row ${index + 1}`;
+  };
   const shown = kind === 'delete' ? fields(draft.rowCurrent ?? {}) : fields(proposed);
   return (
     <ReviewCard
@@ -166,10 +177,11 @@ export function RowDraftCard({
         <ReviewRow label="Table">{tableName}</ReviewRow>
       </ReviewRows>
       {written && (
-        <section aria-label="Rows already added" className="grid gap-2 text-sm">
+        <section aria-label="Rows already changed" className="grid gap-2 text-sm">
           <p role="note">
-            {written.count === 1 ? '1 row was' : `${written.count} rows were`} already added in this reply and stay in
-            the table. This card holds only the other {count === 1 ? 'row' : `${count} rows`}, which need your approval.
+            {written.count === 1 ? '1 row was' : `${written.count} rows were`} already changed in this reply. Those
+            changes stay. This card holds only the other {count === 1 ? 'row' : `${count} rows`}, which need your
+            approval.
           </p>
           {written.rows.length > 0 && (
             <ol aria-label="Already added" className="grid gap-2">
@@ -195,7 +207,7 @@ export function RowDraftCard({
           {batch.map((values, index) => (
             <li key={index}>
               <ReviewRows>
-                <ReviewRow label={`Row ${index + 1}`}>
+                <ReviewRow label={updates ? rowLabel(index) : `Row ${index + 1}`}>
                   {updates ? (
                     <div className="grid gap-1">
                       {fields(values).map(({ fieldId, label }) => {

@@ -208,6 +208,10 @@ test('existing rows can be found and patched without discovering a write tool', 
       catalog.tools.some(tool => tool.name === name),
       name,
     );
+  const bytes = catalog.tools
+    .filter(tool => ['rows_list', 'rows_update_batch'].includes(tool.name))
+    .reduce((sum, tool) => sum + Buffer.byteLength(JSON.stringify(tool)), 0);
+  assert.ok(bytes < 4500, `lookup and partial-update definitions must fit their prompt budget: ${bytes} bytes`);
   const row = {
     recordId: '11111111-1111-4111-8111-111111111111',
     expectedToken: '22222222-2222-4222-8222-222222222222',
@@ -221,7 +225,16 @@ test('existing rows can be found and patched without discovering a write tool', 
   };
   const resolve = input => catalog.resolve({ id: 'call', name: 'rows_update_batch', input, providerId: true });
   assert.equal(resolve(input).ok, true);
-  for (const rows of [[], [row, row], [{ ...row, expectedToken: undefined }], [{ ...row, values: {} }]])
+  for (const rows of [
+    [],
+    [row, row],
+    [{ ...row, expectedToken: undefined }],
+    [{ ...row, expectedToken: 'not-a-token' }],
+    [{ ...row, recordId: 'not-an-id' }],
+    [{ ...row, values: {} }],
+    [{ ...row, values: { invalid: { kind: 'text', value: 'Done' } } }],
+    [{ ...row, values: { '33333333-3333-4333-8333-333333333333': { kind: 'invented', value: 'Done' } } }],
+  ])
     assert.equal(resolve({ ...input, rows }).ok, false);
 });
 

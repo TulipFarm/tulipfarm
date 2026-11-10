@@ -58,7 +58,8 @@ function formatValue(value: unknown, options: readonly { id: string; label: stri
 
 /**
  * Review cards for the turn's undecided row drafts, shown under the Slack answer like the chat's row card. They show
- * only the proposed values the answer itself came from, never the row's current values, since the thread may be shared.
+ * proposed values and, for batch updates, the reviewed identifiers and before-values of the patched fields.
+ * Unrelated current values stay out of shared threads.
  */
 export async function slackRowDraftCards(
   tx: AgentTransaction,
@@ -82,8 +83,13 @@ export async function slackRowDraftCards(
     const proposal = draft.proposal,
       { input } = proposal,
       kind = operation(proposal);
-    let table: { label: string; fields: { id: string; label: string; options: { id: string; label: string }[] }[] } = {
+    let table: {
+      label: string;
+      labelFieldIds: string[];
+      fields: { id: string; label: string; options: { id: string; label: string }[] }[];
+    } = {
       label: 'a table you cannot see',
+      labelFieldIds: [],
       fields: [],
     };
     if (await canAccessTable(tx, actor, input.tableId, 'table.row.read'))
@@ -91,6 +97,11 @@ export async function slackRowDraftCards(
         const { definition } = await activeGeneration(tx, input.tableId);
         table = {
           label: definition.label,
+          labelFieldIds:
+            definition.uniqueKeys[0]?.fieldIds ??
+            [(definition.fields.find(field => field.kind === 'text') ?? definition.fields[0])?.id].filter(
+              id => id !== undefined,
+            ),
           fields: definition.fields.map(field => ({
             id: field.id,
             label: field.label,
@@ -110,18 +121,28 @@ export async function slackRowDraftCards(
         : Object.entries(input.tool === 'rows.delete' ? {} : input.values);
     const fields =
       input.tool === 'rows.create.batch' || input.tool === 'rows.update.batch'
-        ? input.rows.slice(0, shownFields).map(({ values: row }, index) => ({
-            type: 'plain_text' as const,
-            text: clip(
-              `Row ${index + 1}\n${Object.entries(row)
-                .map(([fieldId, value]) => {
-                  const shown = cell(fieldId, value);
-                  return `${shown.label}: ${shown.value}`;
-                })
-                .join(', ')}`,
-              500,
-            ),
-          }))
+        ? input.rows.slice(0, shownFields).map((row, index) => {
+            const before =
+              input.tool === 'rows.update.batch' && table.fields.length
+                ? proposal.before?.[input.rows[index]!.recordId]
+                : undefined;
+            const label =
+              before && table.labelFieldIds.some(id => before[id] != null)
+                ? table.labelFieldIds.map(id => cell(id, before[id]).value).join(' · ')
+                : `Row ${index + 1}`;
+            return {
+              type: 'plain_text' as const,
+              text: clip(
+                `${label}\n${Object.entries(row.values)
+                  .map(([fieldId, value]) => {
+                    const shown = cell(fieldId, value);
+                    return `${shown.label}: ${shown.value}${input.tool === 'rows.update.batch' ? `\nBefore ${before ? cell(fieldId, before[fieldId]).value : 'value unavailable'}` : ''}`;
+                  })
+                  .join(', ')}`,
+                500,
+              ),
+            };
+          })
         : Object.entries(input.tool === 'rows.delete' ? {} : input.values)
             .slice(0, shownFields)
             .map(([fieldId, value]) => {
@@ -160,7 +181,7 @@ export async function slackRowDraftCards(
                 ? `${values.length - shownFields} more ${input.tool === 'rows.create.batch' || input.tool === 'rows.update.batch' ? 'rows are' : 'fields are'} set.`
                 : '',
               proposal.written
-                ? `${proposal.written.count === 1 ? '1 row was' : `${proposal.written.count} rows were`} already added in this reply and stay in the table; this card holds only the rest.`
+                ? `${proposal.written.count === 1 ? '1 row was' : `${proposal.written.count} rows were`} already changed in this reply; those changes stay. This card holds only the rest.`
                 : '',
               proposal.reason
                 ? 'Chat writes only a few rows directly into a table you named, so this change waits for approval by the person who asked. Approving makes this exact change with their table access.'
