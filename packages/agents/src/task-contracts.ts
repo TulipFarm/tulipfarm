@@ -144,7 +144,7 @@ export const taskMessageSchema = z.object({
   createdAt: z.string(),
 });
 const taskListPositionSchema = z.strictObject({
-  createdAt: z.iso.datetime({ precision: 6 }),
+  createdAt: z.iso.datetime({ precision: 6 }).refine(value => !value.startsWith('0000-')),
   id: uuidSchema,
 });
 export function readTaskListCursor(value: string) {

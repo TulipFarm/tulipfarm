@@ -26,6 +26,7 @@ test('task list cursors keep microseconds and reject stale or malformed position
     'a'.repeat(257),
     Buffer.from('{}').toString('base64url'),
     Buffer.from(JSON.stringify({ ...position, createdAt: 'not-a-date' })).toString('base64url'),
+    Buffer.from(JSON.stringify({ ...position, createdAt: '0000-01-01T00:00:00.000000Z' })).toString('base64url'),
     Buffer.from(JSON.stringify({ ...position, id: 'not-an-id' })).toString('base64url'),
     Buffer.from(JSON.stringify({ ...position, extra: true })).toString('base64url'),
   ])

@@ -44,7 +44,12 @@ test('task list HTTP validates opaque cursors and preserves newest-first page bo
     auth: { api: { getSession: async () => ({ user: { id: w.userId }, session: { id: 'fixture-session' } }) } },
   });
   const base = `/workspaces/${w.id}/agent-tasks`;
-  for (const after of [randomUUID(), 'invalid-cursor', 'a'.repeat(257)]) {
+  for (const after of [
+    randomUUID(),
+    'invalid-cursor',
+    'a'.repeat(257),
+    Buffer.from(JSON.stringify({ createdAt: '0000-01-01T00:00:00.000000Z', id: randomUUID() })).toString('base64url'),
+  ]) {
     const response = await app.inject(`${base}?after=${after}`);
     assert.equal(response.statusCode, 400, response.body);
     assert.equal(response.json().error, 'invalid-request');
