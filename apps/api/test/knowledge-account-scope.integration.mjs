@@ -99,10 +99,10 @@ test(
           1,
         ],
       ];
-      const search = async sourceId => {
+      const search = async (sourceId, query = 'orchid') => {
         const response = await f.call('/search', {
           method: 'POST',
-          body: { kind: 'typing', query: 'orchid', filters: { sourceIds: [sourceId] } },
+          body: { kind: 'typing', query, filters: { sourceIds: [sourceId] } },
         });
         assert.equal(response.status, 200, response.bytes.toString());
         return response.json().hits;
@@ -191,6 +191,43 @@ test(
               total,
               'paused content remains searchable after permission renewal',
             );
+            if (kind === 'atlassian') {
+              await f.db.platform.query(
+                `UPDATE ${f.table('tf_knowledge_atlassian_access')} SET expires_at=observed_at+interval '1 minute' WHERE source_id=$1`,
+                [sourceId],
+              );
+              await f.db.platform.query(
+                `UPDATE ${f.table('tf_knowledge_atlassian_sources')} SET next_attempt_at=clock_timestamp() WHERE source_id=$1`,
+                [sourceId],
+              );
+              const citation = hits[0].citation;
+              const citationPath = `/citations/${citation.publicationId}:${citation.ordinal}`;
+              assert.equal((await f.call(citationPath)).status, 200);
+              atlassian.state.failure = (_user, path) =>
+                ['/wiki/api/v2/pages', '/rest/api/3/issue/bulkfetch'].includes(path)
+                  ? new Response('{}', { status: 503 })
+                  : null;
+              try {
+                assert.equal((await engine.refresh(f.workspace.id, f.signed.owner.id, sourceId)).refreshed, 0);
+                assert.equal((await search(sourceId)).length, total, 'transient failure retains unexpired proofs');
+                assert.equal((await f.call(citationPath)).status, 200);
+                atlassian.state.failure = (_user, path) =>
+                  ['/wiki/api/v2/pages', '/rest/api/3/issue/bulkfetch'].includes(path)
+                    ? new Response('{}', { status: 403 })
+                    : null;
+                const deniedWork = (await engine.due(f.workspace.id)).find(item => item.sourceId === sourceId);
+                assert.equal((await engine.process(deniedWork)).disposition, 'ready');
+                assert.deepEqual(await search(sourceId), [], 'HTTP 403 invalidates cached search access immediately');
+                for (const response of [
+                  await f.call(citationPath),
+                  await f.call('/evidence', { method: 'POST', body: citation }),
+                ])
+                  assert.ok([404, 409].includes(response.status), response.bytes.toString());
+              } finally {
+                atlassian.state.failure = null;
+              }
+              await engine.refresh(f.workspace.id, f.signed.owner.id, sourceId);
+            }
             const memberships =
               kind === 'slack'
                 ? [...slack.state.conversations.values()].map(item => item.members)
@@ -273,6 +310,94 @@ test(
           assert.equal((await search(manual.sourceId)).length, selectedTotal, 'resume keeps hand-picked sources');
         });
       }
+      await t.test('paused permission renewal reaches readable pages after one hundred denied pages', async () => {
+        const pages = new Map(atlassian.state.pages);
+        atlassian.state.pages.clear();
+        try {
+          for (let id = 1000; id <= 1100; id++)
+            atlassian.state.pages.set(String(id), {
+              title: `Orchid page ${id}`,
+              space: '9001',
+              ancestors: [],
+              text: `orchid${id}`,
+              version: 1,
+              viewers: new Set(['owner-aaid', 'reader-aaid', 'fair-owner']),
+            });
+          const account = await atlassian.link(f, f.workspace.membershipId, 'fair-owner');
+          const { intentId } = await f.runtime.transaction(f.workspace.id, commonCompatibility, tx =>
+            recordDefaultKnowledgeIntent(tx, {
+              product: 'confluence',
+              membershipId: f.workspace.membershipId,
+              accountKey: account.accountId,
+              accountLabel: 'fair@example.test',
+            }),
+          );
+          const work = (await defaults.due(f.workspace.id)).find(item => item.intentId === intentId);
+          assert.equal((await defaults.process(work)).disposition, 'ready');
+          const intent = (await defaults.list(f.workspace.id, f.signed.owner.id)).items.find(
+            item => item.intentId === intentId,
+          );
+          const sourceId = intent.sources[0].sourceId;
+          await sync(engines.atlassian, sourceId);
+          assert.equal(
+            (
+              await f.db.platform.query(
+                `SELECT count(*)::int AS n FROM ${f.table('tf_knowledge_documents')} WHERE source_id=$1 AND tombstoned_at IS NULL`,
+                [sourceId],
+              )
+            ).rows[0].n,
+            101,
+          );
+          assert.equal((await search(sourceId, 'orchid1100')).length, 1);
+          assert.equal(
+            (await f.call(`/defaults/${intentId}/manage`, { method: 'POST', body: { action: 'opt-out' } })).status,
+            200,
+          );
+          for (let id = 1000; id < 1100; id++) atlassian.state.pages.get(String(id)).viewers.clear();
+          await f.db.platform.query(
+            `UPDATE ${f.table('tf_knowledge_atlassian_access')} SET observed_at=observed_at-interval '6 minutes',expires_at=expires_at-interval '6 minutes' WHERE source_id=$1`,
+            [sourceId],
+          );
+          await f.db.platform.query(
+            `UPDATE ${f.table('tf_knowledge_access_proofs')} SET acl_checked_at=acl_checked_at-interval '6 minutes',membership_checked_at=membership_checked_at-interval '6 minutes',expires_at=expires_at-interval '6 minutes' WHERE document_id IN (SELECT id FROM ${f.table('tf_knowledge_documents')} WHERE source_id=$1)`,
+            [sourceId],
+          );
+          assert.equal((await search(sourceId, 'orchid1100')).length, 0);
+          atlassian.state.failure = (_user, path) =>
+            path === '/wiki/api/v2/pages' ? new Response('{}', { status: 403 }) : null;
+          for (let tick = 0; tick < 3; tick++) {
+            await f.db.platform.query(
+              `UPDATE ${f.table('tf_knowledge_atlassian_sources')} SET next_attempt_at=clock_timestamp() WHERE source_id=$1`,
+              [sourceId],
+            );
+            const callStart = atlassian.calls.length;
+            const permissionWork = (await engines.atlassian.due(f.workspace.id)).find(
+              item => item.sourceId === sourceId,
+            );
+            assert.equal((await engines.atlassian.process(permissionWork)).disposition, 'ready');
+            atlassian.state.failure = null;
+            const calls = atlassian.calls.slice(callStart);
+            assert.ok(
+              calls.every(call => call.path === '/wiki/api/v2/pages'),
+              JSON.stringify(calls),
+            );
+            const checked = calls.flatMap(call => call.query.id.split(','));
+            assert.ok(checked.length <= 100, 'each tick stays within the permission-check bound');
+            if (tick === 0) assert.equal(checked.length, 50, 'a failed batch stops the tick');
+            if (tick === 1) assert.ok(checked.includes('1100'), 'the next tick advances past the failed batch');
+          }
+          assert.equal(
+            (await search(sourceId, 'orchid1100')).length,
+            1,
+            'readable page is renewed despite earlier denied items',
+          );
+          assert.deepEqual(await search(sourceId, 'orchid1000'), [], 'revoked pages remain hidden');
+        } finally {
+          atlassian.state.failure = null;
+          atlassian.state.pages.clear();
+          for (const [id, page] of pages) atlassian.state.pages.set(id, page);
+        }
+      });
       await t.test('narrowing one account never removes another account owned by the same person', async () => {
         const second = await atlassian.link(f, f.workspace.membershipId, 'second-owner');
         for (const page of atlassian.state.pages.values()) page.viewers.add('second-owner');

@@ -58,6 +58,7 @@ const cursorSchema = z.strictObject({
   page: atlassianCursorTokenSchema.nullable(),
   after: z.string().max(128).nullable(),
   pages: z.number().int().min(0).max(20000),
+  permissionAfter: z.string().max(128).nullable().optional(),
 });
 const initialCursor = () => cursorSchema.parse({ phase: 'listing', index: 0, page: null, after: null, pages: 0 });
 const sourceSchema = z.object({
@@ -576,7 +577,7 @@ export function createAtlassianKnowledge({
         captured.fences.map(f => itemOf(f.native_id)),
       );
     } catch (error) {
-      if (credentialDenied(error))
+      if (credentialDenied(error) || (error instanceof AtlassianCorpusError && itemGone.includes(error.code)))
         await transaction(workspaceId, async tx =>
           invalidate(tx, sourceId, {
             nativeIds: captured.fences.map(f => f.native_id),
@@ -634,7 +635,14 @@ export function createAtlassianKnowledge({
       return { visible: advanced.length, denied: captured.fences.length - advanced.length };
     });
   }
-  async function renew(workspaceId: string, userId: string, sourceId: string, limit: number, staleOnly: boolean) {
+  async function renew(
+    workspaceId: string,
+    userId: string,
+    sourceId: string,
+    limit: number,
+    staleOnly: boolean,
+    permissionAfter?: string | null,
+  ) {
     const captured = await memberTransaction(workspaceId, userId, async (tx, actor) => {
       await store.source(tx, actor, sourceId);
       const rows = z.array(z.object({ native_id: z.string() })).parse(
@@ -644,8 +652,9 @@ export function createAtlassianKnowledge({
         JOIN ${table(tx, 'atlassian_targets')} t ON t.source_id=i.source_id AND t.target_id=i.target_id AND t.state='active'
         LEFT JOIN ${table(tx, 'atlassian_access')} x ON x.source_id=i.source_id AND x.native_id=i.native_id AND x.membership_id=$2
         WHERE i.source_id=$1 AND i.document_id IS NOT NULL AND (NOT $4 OR x.expires_at IS NULL OR x.expires_at<clock_timestamp()+interval '2 minutes')
-        ORDER BY x.expires_at NULLS FIRST,i.native_id LIMIT $3`,
-            [sourceId, actor.membershipId, limit, staleOnly],
+        ORDER BY CASE WHEN $5::boolean AND $6::text IS NOT NULL AND i.native_id<=$6 THEN 1 ELSE 0 END,
+          CASE WHEN NOT $5 THEN x.expires_at END NULLS FIRST,i.native_id LIMIT $3`,
+            [sourceId, actor.membershipId, limit, staleOnly, permissionAfter !== undefined, permissionAfter ?? null],
           )
         ).rows,
       );
@@ -653,8 +662,10 @@ export function createAtlassianKnowledge({
     });
     let refreshed = 0,
       unavailableCount = 0;
+    let after = permissionAfter ?? null;
     for (let start = 0; start < captured.ids.length; start += limits.accessBatch) {
       const batch = captured.ids.slice(start, start + limits.accessBatch);
+      after = batch.at(-1) ?? after;
       try {
         const outcome = await check(workspaceId, captured.actor, sourceId, batch);
         refreshed += outcome.visible;
@@ -670,11 +681,12 @@ export function createAtlassianKnowledge({
         break;
       }
     }
-    return { refreshed, unavailable: unavailableCount, bounded: true as const };
+    return { refreshed, unavailable: unavailableCount, bounded: true as const, after };
   }
   async function refresh(workspaceId: string, userId: string, sourceId: string) {
     denyMcpEgress();
-    return renew(workspaceId, userId, uuidSchema.parse(sourceId), 100, false);
+    const { after: _after, ...result } = await renew(workspaceId, userId, uuidSchema.parse(sourceId), 100, false);
+    return result;
   }
   async function due(workspaceId: string): Promise<AtlassianKnowledgeWork[]> {
     const held = gate ? await gate(workspaceId) : [];
@@ -1007,13 +1019,15 @@ export function createAtlassianKnowledge({
     });
     if (typeof claim === 'string') return { disposition: claim };
     if (claim.state === 'paused') {
+      let permissionAfter = claim.cursor.permissionAfter ?? null;
       try {
-        await renew(work.workspaceId, claim.owner_user_id, claim.source_id, 100, true);
+        const result = await renew(work.workspaceId, claim.owner_user_id, claim.source_id, 100, true, permissionAfter);
+        permissionAfter = result.after;
       } finally {
         await transaction(work.workspaceId, tx =>
           tx.client.query(
-            `UPDATE ${table(tx, 'atlassian_sources')} SET generation=generation+1,lease_token=NULL,lease_until=NULL,next_attempt_at=clock_timestamp()+interval '1 minute' WHERE source_id=$1 AND generation=$2 AND lease_token=$3`,
-            [work.sourceId, work.generation, token],
+            `UPDATE ${table(tx, 'atlassian_sources')} SET generation=generation+1,lease_token=NULL,lease_until=NULL,next_attempt_at=clock_timestamp()+interval '1 minute',cursor=jsonb_set(cursor,'{permissionAfter}',$4::jsonb) WHERE source_id=$1 AND generation=$2 AND lease_token=$3`,
+            [work.sourceId, work.generation, token, JSON.stringify(permissionAfter)],
           ),
         );
       }
