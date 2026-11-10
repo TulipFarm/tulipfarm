@@ -1,7 +1,7 @@
 import { useMemo, type ReactNode } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { z } from 'zod';
-import { withheldOutputSchema, type RunDetail } from '@tulipfarm/workflows/contracts';
+import { withheldOutputSchema, type RunDetail, type Step } from '@tulipfarm/workflows/contracts';
 import { Button } from '@tulipfarm/sprout/button';
 import { Skeleton } from '@tulipfarm/sprout/skeleton';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
@@ -15,7 +15,7 @@ import { workspaceRoute } from '@/router';
 import { useWorkflowDefinition, useWorkflowRun } from './queries';
 import { NamedWorkflowViewer } from './named-viewer';
 import { workflowRunStates } from './run-projection';
-import { runErrorNote, runNote, stepNote } from './run-notes';
+import { inputErrorNote, runErrorNote, runNote, stepNote } from './run-notes';
 import { startedByPerson } from './triggers';
 
 export type WorkflowReference =
@@ -184,6 +184,8 @@ export function WorkflowRun({
                   agent={detail.definition.steps.some(step => step.id === id && step.kind === 'agent')}
                   receipt={detail.run.steps.find(step => step.stepId === id)}
                   error={states[id] === 'failed' ? detail.run.error : null}
+                  step={detail.definition.steps.find(step => step.id === id)}
+                  input={detail.run.input}
                 />
               )
             }
@@ -198,15 +200,21 @@ function RunStepDetail({
   agent,
   receipt,
   error,
+  step,
+  input,
 }: {
   workspaceId: string;
   agent: boolean;
   receipt: RunDetail['run']['steps'][number] | undefined;
   error: string | null;
+  step: Step | undefined;
+  input: unknown;
 }) {
   const failure = error && (
     <p role="alert" className="text-destructive">
-      {runErrorNote(error) ?? `The run failed at this step: ${error}`}
+      {inputErrorNote(error, step ? [step] : [], input) ??
+        runErrorNote(error) ??
+        `The run failed at this step: ${error}`}
     </p>
   );
   if (!receipt) return failure || null;
@@ -233,6 +241,32 @@ function RunStepDetail({
         </Disclosure>
       )}
     </div>
+  );
+}
+
+export function WorkflowRunError({
+  workspaceId,
+  workflowId,
+  run,
+}: {
+  workspaceId: string;
+  workflowId: string;
+  run: RunDetail['run'];
+}) {
+  const isInputError = !!run.error && inputErrorNote(run.error, [], run.input) !== null;
+  const read = useWorkflowDefinition(workspaceId, isInputError ? workflowId : null, run.revision);
+  let note = run.error ? runErrorNote(run.error) : null;
+  if (run.error && read.state.kind === 'ready') {
+    const definition = read.state.data.definition;
+    const states = workflowRunStates({ definition, run });
+    const steps = definition.steps.filter(step => states[step.id] === 'failed');
+    note = inputErrorNote(run.error, steps, run.input) ?? note;
+  }
+  return (
+    <p role="alert" className="text-sm text-destructive">
+      {note ?? 'The run could not complete. Open its diagram to check the step that failed.'}
+      <span className="block font-mono text-xs">{run.error}</span>
+    </p>
   );
 }
 function WorkflowTask({ workspaceId, taskId }: { workspaceId: string; taskId: string }) {
