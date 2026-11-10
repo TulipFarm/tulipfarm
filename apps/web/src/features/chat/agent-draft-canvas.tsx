@@ -168,6 +168,13 @@ export function AgentDraftLink({
                 : draft?.outcome?.kind === 'agent' && draft.outcome.setupReceipt?.status === 'blocked'
                   ? 'Saved · Setup incomplete'
                   : (statuses[draft?.status ?? ''] ?? 'Draft');
+  // A new agent exists only once its definition is saved, so a failed first save has no agent to view.
+  const outcome = draft?.outcome?.kind === 'agent' ? draft.outcome : null;
+  const noAgent =
+    !!outcome &&
+    (outcome.setupReceipt?.status ?? outcome.receipt.status) === 'failed' &&
+    draft?.proposal.kind === 'agent' &&
+    draft.proposal.input.expectedSavedRevision === null;
   return (
     <div className="w-full">
       <ResultCard
@@ -176,15 +183,19 @@ export function AgentDraftLink({
         apps={[]}
         icon={<Users size={18} />}
         status={status}
-        action={{
-          label:
-            draft?.status === 'pending'
-              ? 'Review agent'
-              : draft?.outcome?.kind === 'builder'
-                ? 'Edit agent'
-                : 'View agent',
-          onClick: () => show(agentDraftCanvasItem(workspaceId, chatId, id)),
-        }}
+        action={
+          noAgent
+            ? undefined
+            : {
+                label:
+                  draft?.status === 'pending'
+                    ? 'Review agent'
+                    : draft?.outcome?.kind === 'builder'
+                      ? 'Edit agent'
+                      : 'View agent',
+                onClick: () => show(agentDraftCanvasItem(workspaceId, chatId, id)),
+              }
+        }
       />
     </div>
   );

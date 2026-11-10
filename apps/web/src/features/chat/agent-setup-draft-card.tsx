@@ -59,7 +59,7 @@ export function AgentSetupDraftCard({
     owningTeamId: proposal.input.owningTeamId,
   };
   const receipt = draft.outcome?.kind === 'agent' ? draft.outcome.setupReceipt : undefined;
-  const stopped = receipt?.status === 'blocked' || receipt?.status === 'failed';
+  const stopped = receipt?.status === 'blocked' || receipt?.status === 'failed' || receipt?.status === 'conflict';
   const canRetry = receipt?.status === 'blocked' && setupRetryable(receipt.error);
   async function retrySetup(commandId: string) {
     setRetry({ kind: 'sending' });
@@ -156,12 +156,6 @@ export function AgentSetupDraftCard({
               >
                 Open this agent&apos;s workflow
               </Button>
-            )}
-            {receipt?.status === 'conflict' && (
-              <p role="status">
-                This agent&apos;s workflow changed after this draft was made. Nothing was changed. Ask chat for a fresh
-                draft.
-              </p>
             )}
             {receipt?.status === 'saved' && (
               <p role="status">Draft saved. No new triggers were started. Any earlier active revision is unchanged.</p>

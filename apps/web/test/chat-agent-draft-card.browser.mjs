@@ -452,7 +452,8 @@ test(
       const retries = [],
         errors = [];
       page.on('pageerror', error => errors.push(error.message));
-      let setupReceipt;
+      let setupReceipt,
+        priorRevision = null;
       const blocked = error => ({
         commandId,
         agentId: targetId,
@@ -467,7 +468,7 @@ test(
       const view = () => ({
         id: draftId,
         digest: 'd'.repeat(64),
-        status: 'failed',
+        status: setupReceipt.status === 'conflict' ? 'stale' : 'failed',
         outcome: {
           kind: 'agent',
           receipt: {
@@ -483,7 +484,7 @@ test(
           targetId,
           input: {
             expectedSoulRevision: 'a'.repeat(40),
-            expectedSavedRevision: null,
+            expectedSavedRevision: priorRevision,
             expectedPolicyVersion: 0,
             expectedActivationIds: [],
             expectedWorkflowRevision: null,
@@ -554,10 +555,13 @@ test(
         if (path.endsWith('/conversations')) return route.fulfill({ json: { chats: [chat], nextCursor: null } });
         return route.fulfill(fixture.respond(method, url, request.postDataJSON()));
       });
-      const open = async (receipt, row) => {
+      const visit = async (receipt, row) => {
         setupReceipt = receipt;
         await page.goto(`${server.origin}/${workspace.slug}/chat/${chatId}`);
         await page.getByText(row, { exact: true }).waitFor();
+      };
+      const open = async (receipt, row) => {
+        await visit(receipt, row);
         await captureBuilderScreenshot(page, `agent-setup-${receipt.status}-row`);
         await page.getByRole('button', { name: 'View agent', exact: true }).click();
         const card = page.getByRole('region', { name: 'Review agent draft' }).first();
@@ -599,7 +603,17 @@ test(
       );
       assert.equal(await card.getByRole('link', { name: 'Open agent', exact: true }).count(), 1);
 
-      card = await open({ ...blocked('definition-failed'), status: 'failed', savedRevision: null }, 'Not saved');
+      const failed = { ...blocked('definition-failed'), status: 'failed', savedRevision: null };
+      await visit(failed, 'Not saved');
+      await captureBuilderScreenshot(page, 'agent-setup-failed-new-agent-row');
+      assert.equal(
+        await page.getByRole('button', { name: 'View agent' }).count(),
+        0,
+        'a new agent whose first save failed has no agent to view',
+      );
+
+      priorRevision = 'f'.repeat(40);
+      card = await open(failed, 'Not saved');
       await card
         .getByText('Setup did not finish. The agent was not saved and nothing was activated.', { exact: true })
         .waitFor();
@@ -607,11 +621,23 @@ test(
       await card.getByText('Not saved', { exact: true }).waitFor();
       assert.equal(await card.getByRole('button', { name: 'Retry setup' }).count(), 0);
       assert.equal(
-        await card.getByRole('link', { name: 'Open agent' }).count(),
-        0,
-        'a new agent whose first save failed has no page to open',
+        await card.getByRole('link', { name: 'Open agent', exact: true }).getAttribute('href'),
+        `/${workspace.slug}/agents/${targetId}`,
+        'a failed update still links to the existing agent',
       );
-      await captureBuilderScreenshot(page, 'agent-setup-failed-card');
+      await captureBuilderScreenshot(page, 'agent-setup-failed-update-card');
+
+      priorRevision = null;
+      card = await open({ ...blocked('definition-conflict'), status: 'conflict', savedRevision: null }, 'Out of date');
+      await card
+        .getByText('This agent changed before it could be saved. Review the setup again, then activate it.', {
+          exact: true,
+        })
+        .waitFor();
+      await card.getByText('Out of date', { exact: true }).waitFor();
+      assert.equal(await card.getByText(/workflow changed after this draft was made/).count(), 0);
+      assert.equal(await card.getByRole('button', { name: 'Retry setup' }).count(), 0);
+      await captureBuilderScreenshot(page, 'agent-setup-conflict-card');
       assert.deepEqual(errors, []);
     } catch (error) {
       await captureBrowserFailure(page, 'agent-setup-stopped');
