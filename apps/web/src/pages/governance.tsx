@@ -336,7 +336,11 @@ function AccessContent({
       } catch (error) {
         if (error instanceof GovernanceRequestError && [401, 403, 404].includes(error.status)) {
           void changes.accessLost();
-          return { ok: false, message: 'You no longer have access to this policy, so we can’t check whether your change was saved. Ask a workspace admin to check it.' };
+          return {
+            ok: false,
+            message:
+              'You no longer have access to this policy, so we can’t check whether your change was saved. Ask a workspace admin to check it.',
+          };
         }
         if (Date.now() + wait > deadline)
           return {

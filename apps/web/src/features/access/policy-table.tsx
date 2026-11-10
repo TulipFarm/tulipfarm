@@ -479,7 +479,6 @@ export function PolicyTable({
                           to="/$workspaceSlug/teams/$teamId"
                           params={{ workspaceSlug, teamId: row.source.teamId }}
                           aria-label={`${row.source.teamName} team`}
-                          className="underline-offset-4 hover:underline"
                         >
                           {row.source.teamName}
                         </Link>
