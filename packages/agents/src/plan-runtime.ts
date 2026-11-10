@@ -50,7 +50,7 @@ import {
   toNode,
   wakePlanWait,
 } from './plans.ts';
-import { relation, type AgentStorage, type AgentTransaction } from './store.ts';
+import { currentActivation, relation, type AgentStorage, type AgentTransaction } from './store.ts';
 import { AgentTaskError } from './task-contracts.ts';
 import type { createAgentTasks } from './tasks.ts';
 import { taskTransition } from './task-telemetry.ts';
@@ -530,8 +530,8 @@ export function createPlanRuntime(
       .parse(
         (
           await tx.client.query(
-            `SELECT id, definition_revision AS revision FROM ${relation(tx, 'tf_agent_activations')}
-      WHERE agent_id=$1 AND revoked_at IS NULL ORDER BY activated_at DESC NULLS LAST, id DESC LIMIT 1`,
+            `SELECT a.id, a.definition_revision AS revision FROM ${relation(tx, 'tf_agent_activations')} a
+      WHERE a.agent_id=$1 AND a.revoked_at IS NULL AND ${currentActivation(tx)} ORDER BY a.activated_at DESC NULLS LAST, a.id DESC LIMIT 1`,
             [agentId],
           )
         ).rows[0],

@@ -16,6 +16,7 @@ import {
 } from '@tulipfarm/access';
 import { qualified, commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import { requireAgentPermission } from './saved-policy.ts';
+import { currentActivation } from './store.ts';
 import { scopeSchema, toolCallSchema, toolResultSchema } from './contracts.ts';
 import { createAgentChat, type ModelContinuity } from './chat.ts';
 import { requireDraftSources } from './draft-sources.ts';
@@ -431,7 +432,7 @@ export function createSlackChannelAgents(options: {
   }
   // The rule an agent's saved definition asks for, used when a channel sets none.
   const agentRuleSql = (tx: AuthorizationTransaction, agent: string) =>
-    `(SELECT d.definition->>'responseRule' FROM ${table(tx, 'tf_agents')} a JOIN ${table(tx, 'tf_agent_activations')} s ON s.agent_id=a.id AND s.revoked_at IS NULL JOIN ${table(tx, 'tf_agent_definitions')} d ON d.agent_id=a.id AND d.revision=s.definition_revision WHERE a.id=${agent} AND a.enabled AND a.deleted_at IS NULL ORDER BY s.activated_at DESC NULLS LAST,s.id DESC LIMIT 1)`;
+    `(SELECT d.definition->>'responseRule' FROM ${table(tx, 'tf_agents')} a JOIN ${table(tx, 'tf_agent_activations')} s ON s.agent_id=a.id AND s.revoked_at IS NULL AND ${currentActivation(tx, 's')} JOIN ${table(tx, 'tf_agent_definitions')} d ON d.agent_id=a.id AND d.revision=s.definition_revision WHERE a.id=${agent} AND a.enabled AND a.deleted_at IS NULL ORDER BY s.activated_at DESC NULLS LAST,s.id DESC LIMIT 1)`;
   const effectiveReplies = (row: z.infer<typeof settingRowSchema>) =>
     row.replies ?? (row.agent_rule === 'every-message' ? 'every-message' : 'tag');
   async function invocable(tx: AuthorizationTransaction, actor: HumanActor, agentId: string) {
@@ -738,7 +739,7 @@ export function createSlackChannelAgents(options: {
         : attached?.agent_id
           ? (
               await tx.client.query(
-                `SELECT d.definition->>'responseRule' AS rule FROM ${table(tx, 'tf_agents')} a JOIN ${table(tx, 'tf_agent_activations')} s ON s.agent_id=a.id AND s.revoked_at IS NULL JOIN ${table(tx, 'tf_agent_definitions')} d ON d.agent_id=a.id AND d.revision=s.definition_revision WHERE a.id=$1 AND a.enabled AND a.deleted_at IS NULL ORDER BY s.activated_at DESC NULLS LAST,s.id DESC LIMIT 1`,
+                `SELECT d.definition->>'responseRule' AS rule FROM ${table(tx, 'tf_agents')} a JOIN ${table(tx, 'tf_agent_activations')} s ON s.agent_id=a.id AND s.revoked_at IS NULL AND ${currentActivation(tx, 's')} JOIN ${table(tx, 'tf_agent_definitions')} d ON d.agent_id=a.id AND d.revision=s.definition_revision WHERE a.id=$1 AND a.enabled AND a.deleted_at IS NULL ORDER BY s.activated_at DESC NULLS LAST,s.id DESC LIMIT 1`,
                 [attached.agent_id],
               )
             ).rows[0]?.rule
@@ -1137,7 +1138,7 @@ export function createSlackChannelAgents(options: {
         .parse(
           (
             await tx.client.query(
-              `SELECT a.id,a.scope FROM ${table(tx, 'tf_agent_activations')} a JOIN ${table(tx, 'tf_agents')} g ON g.id=a.agent_id WHERE a.agent_id=$1 AND a.revoked_at IS NULL AND g.enabled AND g.deleted_at IS NULL ORDER BY a.activated_at DESC NULLS LAST,a.id DESC LIMIT 1`,
+              `SELECT a.id,a.scope FROM ${table(tx, 'tf_agent_activations')} a JOIN ${table(tx, 'tf_agents')} g ON g.id=a.agent_id WHERE a.agent_id=$1 AND a.revoked_at IS NULL AND ${currentActivation(tx)} AND g.enabled AND g.deleted_at IS NULL ORDER BY a.activated_at DESC NULLS LAST,a.id DESC LIMIT 1`,
               [root.agent_id],
             )
           ).rows[0],

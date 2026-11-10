@@ -78,6 +78,14 @@ export const agentPolicyDetailSchema = agentPolicySchema.extend({
 });
 export const agentDataScopeSchema = z.strictObject({ version: z.number().int().nonnegative(), scope: scopeSchema });
 export const agentDataScopeReceiptSchema = z.object({ saved: z.literal(true), reactivated: z.boolean() });
+export const replaceAgentActivationSchema = z.strictObject({
+  requestId: uuidSchema,
+  revision: definitionRevisionSchema,
+  scope: scopeSchema,
+  expectedSavedRevision: soulRevisionSchema,
+  expectedPolicyVersion: z.number().int().nonnegative(),
+  expectedActivationIds: z.array(uuidSchema).max(100),
+});
 export const agentListSchema = z.object({
   agents: z.array(savedAgentSchema),
   count: z.number().optional(),

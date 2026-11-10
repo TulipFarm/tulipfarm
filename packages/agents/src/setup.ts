@@ -23,7 +23,7 @@ import {
   requireAgentTriggerCadence,
   type AgentWorkflowOptions,
 } from './agent-trigger-workflows.ts';
-import { createAgentStore, relation, type AgentStorage, type AgentTransaction } from './store.ts';
+import { createAgentStore, currentActivation, relation, type AgentStorage, type AgentTransaction } from './store.ts';
 import { AgentError, agentCommandStatusSchema } from './saved-contracts.ts';
 import { requireAgentCreation, requireAgentPermission, withHuman } from './saved-policy.ts';
 import { resolveProcedures } from './workspace-skills.ts';
@@ -392,7 +392,7 @@ export function createAgentSetup(
     if (current.policy_version !== draft.expectedPolicyVersion) throw new AgentError('policy-version-conflict');
     const active = (
       await tx.client.query(
-        `SELECT id FROM ${relation(tx, 'tf_agent_activations')} WHERE agent_id=$1 AND revoked_at IS NULL ORDER BY id`,
+        `SELECT a.id FROM ${relation(tx, 'tf_agent_activations')} a WHERE a.agent_id=$1 AND a.revoked_at IS NULL AND ${currentActivation(tx)} ORDER BY a.id`,
         [command.agent_id],
       )
     ).rows.map(row => uuidSchema.parse(row.id));

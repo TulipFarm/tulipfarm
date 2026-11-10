@@ -231,6 +231,8 @@ export function useAgentApi(workspaceId: string) {
       archive: (id: string) => leaving(id, false, () => permissions(id, api.archive(id))),
       restore: (id: string) => leaving(id, true, () => saved(id, api.restore(id))),
       activate: (id: string, input: Parameters<Api['activate']>[1]) => saved(id, api.activate(id, input)),
+      replaceActivation: (id: string, input: Parameters<Api['replaceActivation']>[1]) =>
+        saved(id, api.replaceActivation(id, input)),
       revokeActivation: (id: string, activationId: string) => permissions(id, api.revokeActivation(id, activationId)),
       chat: (id: string, input: Parameters<Api['chat']>[1]) => usage(id, api.chat(id, input)),
       retryModel: (id: string, turnId: string, input: Parameters<Api['retryModel']>[2]) =>

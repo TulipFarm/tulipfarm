@@ -71,7 +71,7 @@ import { createSkillImports, skillImportSummary } from './skill-imports.ts';
 import type { SkillExecutionFactory } from './skill-execution.ts';
 import { skillImportInputSchema, skillImportSelectionSchema } from './skill-import-contracts.ts';
 import { SkillPackageError } from './skill-package-contracts.ts';
-import { relation, type AgentStorage } from './store.ts';
+import { currentActivation, relation, type AgentStorage } from './store.ts';
 import { fetchPublicText, searchPublicWeb } from './web-fetch.ts';
 import { inspectMarketplacePackage } from './package-inspection.ts';
 import { listSkills, readSkill } from './skills.ts';
@@ -1619,7 +1619,7 @@ export function createChatTools(
               return {
                 activations: (
                   await tx.client.query(
-                    `SELECT id FROM ${relation(tx, 'tf_agent_activations')} WHERE agent_id=$1 AND revoked_at IS NULL ORDER BY id`,
+                    `SELECT a.id FROM ${relation(tx, 'tf_agent_activations')} a WHERE a.agent_id=$1 AND a.revoked_at IS NULL AND ${currentActivation(tx)} ORDER BY a.id`,
                     [call.agentId],
                   )
                 ).rows.map(row => z.uuid().parse(row.id)),

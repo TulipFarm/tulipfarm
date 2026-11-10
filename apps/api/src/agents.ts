@@ -30,6 +30,7 @@ import {
   agentPolicySchema,
   saveAgentSchema,
   savedAgentSchema,
+  replaceAgentActivationSchema,
 } from '@tulipfarm/agents/saved-contracts';
 import { readVerifiedProjection } from '@tulipfarm/workspaces/soul-revisions';
 import { soulStorageConfig } from '@tulipfarm/workspaces/soul';
@@ -482,6 +483,21 @@ export function registerAgents(
       request => {
         const p = activationParams.parse(request.params);
         return service.revokeActivation(p.workspaceId, user(request), p.agentId, p.activationId);
+      },
+    );
+    routes.post(
+      `${base}/:agentId/activations/replace`,
+      {
+        schema: schema(
+          'replaceAgentActivationV1',
+          agent,
+          z.object({ activationId: z.uuid() }),
+          replaceAgentActivationSchema,
+        ),
+      },
+      request => {
+        const p = agent.parse(request.params);
+        return service.replaceActivation(p.workspaceId, user(request), p.agentId, request.body);
       },
     );
     routes.post(

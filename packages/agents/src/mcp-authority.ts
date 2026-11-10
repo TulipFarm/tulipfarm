@@ -14,7 +14,7 @@ import { sourceDependenciesSchema, mergeSources, type SourceDependency } from '@
 import { standaloneTurn, turnRequester } from '@tulipfarm/conversations/turn-requester';
 import { requireDraftSources, requireTaskDefinitionSources } from './draft-sources.ts';
 import { agentDefinitionSchema, toolCallSchema, toolResultSchema } from './contracts.ts';
-import { relation } from './store.ts';
+import { currentActivation, relation } from './store.ts';
 import { taskSourcesSchema } from './task-contracts.ts';
 import { createAgentTasks } from './tasks.ts';
 import { boundRuntime, lockTask } from './task-approval-gate.ts';
@@ -73,7 +73,7 @@ export const authorizeMcpSelection: NonNullable<WorkspaceMcpOptions['authorizeSe
       .parse(
         (
           await tx.client.query(
-            `SELECT d.definition FROM ${relation(tx, 'tf_agent_activations')} a JOIN ${relation(tx, 'tf_agents')} g ON g.id=a.agent_id JOIN ${relation(tx, 'tf_agent_definitions')} d ON d.agent_id=a.agent_id AND d.revision=a.definition_revision WHERE a.agent_id=$1 AND a.revoked_at IS NULL AND g.enabled AND g.deleted_at IS NULL ORDER BY a.activated_at DESC NULLS LAST,a.id DESC LIMIT 1`,
+            `SELECT d.definition FROM ${relation(tx, 'tf_agent_activations')} a JOIN ${relation(tx, 'tf_agents')} g ON g.id=a.agent_id JOIN ${relation(tx, 'tf_agent_definitions')} d ON d.agent_id=a.agent_id AND d.revision=a.definition_revision WHERE a.agent_id=$1 AND a.revoked_at IS NULL AND ${currentActivation(tx)} AND g.enabled AND g.deleted_at IS NULL ORDER BY a.activated_at DESC NULLS LAST,a.id DESC LIMIT 1`,
             [agentId],
           )
         ).rows,

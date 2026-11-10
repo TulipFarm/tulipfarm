@@ -18,16 +18,18 @@ export async function definitionRecommendationAudience(tx: AuthorizationTransact
   const table = (name: string) => qualified(tx.schema, name);
   const entity = kind === 'agent' ? 'tf_agents' : 'tf_workspace_skills';
   const usable = kind === 'agent' ? 'invoke' : 'use';
+  const current =
+    'commonVersion' in tx && Number(tx.commonVersion) >= 59 ? 'a.superseded_by_activation_id IS NULL' : 'true';
   const state =
     kind === 'agent'
       ? `jsonb_build_object('definitions',(SELECT jsonb_agg(DISTINCT jsonb_build_array(a.definition_revision,a.scope))
-         FROM ${table('tf_agent_activations')} a WHERE a.agent_id=e.id AND a.revoked_at IS NULL),
+         FROM ${table('tf_agent_activations')} a WHERE a.agent_id=e.id AND a.revoked_at IS NULL AND ${current}),
          'teams',(SELECT jsonb_agg(team_id ORDER BY team_id) FROM ${table('tf_agent_teams')} WHERE agent_id=e.id),
          'limits',(SELECT scope FROM ${table('tf_agent_limits')} WHERE agent_id=e.id))`
       : `jsonb_build_object('revision',e.active_revision)`;
   const active =
     kind === 'agent'
-      ? `EXISTS(SELECT 1 FROM ${table('tf_agent_activations')} a WHERE a.agent_id=e.id AND a.revoked_at IS NULL)`
+      ? `EXISTS(SELECT 1 FROM ${table('tf_agent_activations')} a WHERE a.agent_id=e.id AND a.revoked_at IS NULL AND ${current})`
       : 'e.active_revision IS NOT NULL AND e.archived_at IS NULL';
   const rows = z
     .array(z.object({ membershipId: z.uuid(), userId: z.string(), value: z.string(), revision: z.string().nullable() }))
