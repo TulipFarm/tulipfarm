@@ -17,6 +17,119 @@ import { hostedCreditPricingExtension } from '../../workspace-storage/test/hoste
 // Budget and balance assertions here count whole credits, so they use the hosted price.
 await registerExtension(hostedCreditPricingExtension, { app: 'worker', env: {} });
 
+test('task pages and request search stay newest first across timestamp ties and new starts', async t => {
+  const db = await fixture();
+  let runtime;
+  t.after(async () => {
+    await runtime?.close();
+    await db.close();
+  });
+  const w = await db.create(await workspaceTableMigrations());
+  runtime = createWorkspaceRuntime({
+    replicaCount: 1,
+    reservedConnections: 2,
+    databaseConnectionBudget: 20,
+    resolveCredential: async id => ({ workspaceId: id, generation: 1, connectionString: db.login(w) }),
+  });
+  const table = name => `"${w.names.schema}".${name}`;
+  const agent = await savedTaskAgent(db, w, runtime, w.userId, w.membershipId);
+  const tasks = createAgentTasks(runtime);
+  async function start() {
+    const task = await tasks.start(w.id, w.userId, {
+      requestId: randomUUID(),
+      agentId: agent.agentId,
+      text: 'Find the matching request.',
+    });
+    await db.platform.query(`UPDATE ${table('tf_agent_tasks')} SET status='completed' WHERE id=$1`, [task.id]);
+    return task.id;
+  }
+  const ids = [];
+  for (let i = 0; i < 5; i++) ids.push(await start());
+  ids.sort();
+  const dates = [
+    '2026-11-01T00:00:00.123455Z',
+    '2026-11-01T00:00:00.123456Z',
+    '2026-11-02T00:00:00.000000Z',
+    '2026-11-02T00:00:00.000000Z',
+    '2026-11-03T00:00:00.000000Z',
+  ];
+  for (const [index, id] of ids.entries())
+    await db.platform.query(`UPDATE ${table('tf_agent_tasks')} SET created_at=$2 WHERE id=$1`, [id, dates[index]]);
+  const expected = ids.toReversed();
+  for (const search of ['', 'MATCHING REQUEST']) {
+    assert.deepEqual(
+      (await tasks.list(w.id, w.userId, { search })).tasks.map(task => task.id),
+      expected,
+    );
+    const listed = [];
+    for (let after; ;) {
+      const page = await tasks.list(w.id, w.userId, { search, limit: 1, ...(after ? { after } : {}) });
+      listed.push(...page.tasks.map(task => task.id));
+      if (!page.nextCursor) break;
+      assert.ok(listed.length <= expected.length, 'pagination must advance');
+      after = page.nextCursor;
+    }
+    assert.deepEqual(listed, expected);
+  }
+  const first = await tasks.list(w.id, w.userId, { limit: 2 });
+  const newest = await start();
+  assert.equal((await tasks.list(w.id, w.userId)).tasks[0].id, newest);
+  const remainder = await tasks.list(w.id, w.userId, { after: first.nextCursor });
+  assert.deepEqual(
+    remainder.tasks.map(task => task.id),
+    expected.slice(2),
+  );
+  assert.equal(remainder.nextCursor, null);
+});
+
+test('request search resumes after its bounded scan even when a batch has no matches', async t => {
+  const db = await fixture();
+  let runtime;
+  t.after(async () => {
+    await runtime?.close();
+    await db.close();
+  });
+  const w = await db.create(await workspaceTableMigrations());
+  runtime = createWorkspaceRuntime({
+    replicaCount: 1,
+    reservedConnections: 2,
+    databaseConnectionBudget: 20,
+    resolveCredential: async id => ({ workspaceId: id, generation: 1, connectionString: db.login(w) }),
+  });
+  const table = name => `"${w.names.schema}".${name}`;
+  const agent = await savedTaskAgent(db, w, runtime, w.userId, w.membershipId);
+  const tasks = createAgentTasks(runtime);
+  const target = await tasks.start(w.id, w.userId, {
+    requestId: randomUUID(),
+    agentId: agent.agentId,
+    text: 'Find this older request.',
+  });
+  await db.platform.query(
+    `UPDATE ${table('tf_agent_tasks')} SET status='completed',created_at='2026-10-01T00:00:00Z' WHERE id=$1`,
+    [target.id],
+  );
+  await db.platform.query(
+    `WITH inserted AS (
+      INSERT INTO ${table('tf_agent_tasks')}
+        (id,owner_user_id,owner_membership_id,agent_id,activation_id,definition_revision,skills,scope,limits,flow_id,status,created_at)
+      SELECT gen_random_uuid(),owner_user_id,owner_membership_id,agent_id,activation_id,definition_revision,skills,scope,limits,
+        gen_random_uuid(),'completed','2026-11-01T00:00:00Z'::timestamptz+n*interval '1 second'
+      FROM ${table('tf_agent_tasks')} CROSS JOIN generate_series(1,1001) n WHERE id=$1 RETURNING id,created_at
+    ) INSERT INTO ${table('tf_agent_task_messages')} (task_id,sequence,generation,role,text,sources,created_at)
+      SELECT id,0,0,'owner','Another request.','[]',created_at FROM inserted`,
+    [target.id],
+  );
+  const first = await tasks.list(w.id, w.userId, { search: 'older request' });
+  assert.deepEqual(first.tasks, []);
+  assert.ok(first.nextCursor, 'a full scan batch must remain resumable');
+  const second = await tasks.list(w.id, w.userId, { search: 'older request', after: first.nextCursor });
+  assert.deepEqual(
+    second.tasks.map(task => task.id),
+    [target.id],
+  );
+  assert.equal(second.nextCursor, null);
+});
+
 for (const version of [1, 27, 28]) {
   test(`task list and detail support the archive schema boundary at common version ${version}`, async t => {
     const db = await fixture();

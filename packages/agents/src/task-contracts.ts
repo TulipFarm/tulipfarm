@@ -143,8 +143,24 @@ export const taskMessageSchema = z.object({
   sources: taskSourcesSchema,
   createdAt: z.string(),
 });
+const taskListPositionSchema = z.strictObject({
+  createdAt: z.iso.datetime({ precision: 6 }),
+  id: uuidSchema,
+});
+export function readTaskListCursor(value: string) {
+  try {
+    return taskListPositionSchema.parse(JSON.parse(atob(value.replaceAll('-', '+').replaceAll('_', '/'))));
+  } catch {
+    return null;
+  }
+}
+export const taskListCursorSchema = z
+  .string()
+  .max(256)
+  .regex(/^[A-Za-z0-9_-]+$/)
+  .refine(value => readTaskListCursor(value) !== null, 'Invalid task cursor');
 export const taskListQuerySchema = z.strictObject({
-  after: uuidSchema.optional(),
+  after: taskListCursorSchema.optional(),
   limit: z.number().int().min(1).max(100).default(25),
   search: z.string().trim().max(120).default(''),
   state: z.literal('active').optional(),

@@ -4,8 +4,138 @@ import { test } from 'node:test';
 import { chromium } from 'playwright';
 import { taskSummarySchema } from '@tulipfarm/agents/task-contracts';
 import { agentBuilderFixture } from './agent-builder.fixture.mjs';
-import { startBuiltApp, captureBuilderScreenshot, captureBrowserFailure } from './built-app.fixture.mjs';
+import {
+  startBuiltApp,
+  captureBuilderScreenshot,
+  captureBrowserFailure,
+  builderBrowserOptions,
+} from './built-app.fixture.mjs';
 import { serveWorkspaceShellEvent, workspaceShellReads } from './workspace.fixture.mjs';
+
+test(
+  'returning to my tasks clears saved paging and search so the newest task comes first',
+  { timeout: 60000 },
+  async t => {
+    const server = await startBuiltApp();
+    t.after(() => server.close());
+    const browser = await chromium.launch(builderBrowserOptions());
+    t.after(() => browser.close());
+    const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, reducedMotion: 'reduce' });
+    page.setDefaultTimeout(10000);
+    const fixture = agentBuilderFixture();
+    fixture.workspace.name = 'Operations';
+    const tasks = ['2026-11-03T09:00:00Z', '2026-11-02T09:00:00Z', '2026-11-01T09:00:00Z'].map(createdAt =>
+      taskSummarySchema.parse({
+        id: randomUUID(),
+        agentId: randomUUID(),
+        agentLifecycle: 'archived',
+        activationId: randomUUID(),
+        definitionRevision: 'b'.repeat(64),
+        parentTaskId: null,
+        delegationDepth: 0,
+        generation: 0,
+        status: 'completed',
+        skills: [],
+        scope: [],
+        limits: { toolCalls: 100, activeMilliseconds: 300000, credits: 100 },
+        flowId: randomUUID(),
+        activeMilliseconds: '1000',
+        toolCalls: 0,
+        createdAt,
+        cost: { chargedCreditUnits: '0', heldCreditUnits: '0' },
+      }),
+    );
+    const names = ['New task request', 'Existing task request', 'Older existing task request'];
+    const cursor = Buffer.from(JSON.stringify({ createdAt: '2026-11-02T09:00:00.000000Z', id: tasks[1].id })).toString(
+      'base64url',
+    );
+    const base = `/v1/workspaces/${fixture.workspace.id}`;
+    const shell = new Map([
+      ...workspaceShellReads(fixture.workspace.id),
+      ['/v1/google-workspace/availability', { configured: false }],
+      [`${base}/google-workspace`, { status: 'disconnected' }],
+      [
+        `${base}/governance`,
+        {
+          actorMembershipId: fixture.membership.membershipId,
+          members: [],
+          teams: [],
+          directory: [],
+          tableTeamIds: [],
+          tables: [],
+          grants: [],
+        },
+      ],
+    ]);
+    const errors = [],
+      unexpected = [],
+      reads = [];
+    page.on('pageerror', error => errors.push(error.message));
+    page.on('console', message => {
+      if (message.type() === 'error') errors.push(message.text());
+    });
+    await page.route('**/v1/**', async route => {
+      if (await serveWorkspaceShellEvent(route, fixture.workspace)) return;
+      const req = route.request(),
+        url = new URL(req.url()),
+        path = url.pathname;
+      const send = json => route.fulfill({ json });
+      if (path === `${base}/agent-tasks`) {
+        reads.push({ after: url.searchParams.get('after'), search: url.searchParams.get('search') });
+        if (url.searchParams.has('after')) return send({ tasks: [tasks[2]], nextCursor: null });
+        return send({ tasks: url.searchParams.has('search') ? [tasks[1]] : tasks.slice(0, 2), nextCursor: cursor });
+      }
+      for (const [index, task] of tasks.entries()) {
+        if (path === `${base}/agent-tasks/${task.id}`) return send(task);
+        if (path === `${base}/agent-tasks/${task.id}/history`)
+          return send({
+            messages: [
+              { sequence: 0, generation: 0, role: 'owner', text: names[index], sources: [], createdAt: task.createdAt },
+            ],
+            nextCursor: null,
+          });
+        if (path === `${base}/agent-tasks/${task.id}/proposals`) return send({ proposals: [], nextCursor: null });
+        if (path === `${base}/agent-tasks/${task.id}/secret-requests`) return send({ requests: [] });
+        if (path === `${base}/agent-tasks/${task.id}/api-calls`) return send({ calls: [] });
+        if (path === `${base}/slack/tasks/${task.id}/actions`) return send({ actions: [] });
+      }
+      if (path.endsWith('/recent')) return send([]);
+      if (shell.has(path)) return send(shell.get(path));
+      const response = fixture.respond(req.method(), req.url(), req.postDataJSON());
+      if (response.status >= 400) unexpected.push(`${req.method()} ${path}`);
+      return route.fulfill(response);
+    });
+    try {
+      await page.goto(`${server.origin}/${fixture.workspace.slug}/agent-tasks`);
+      await page.getByRole('link', { name: names[1], exact: true }).waitFor();
+      await Promise.all([
+        page.waitForResponse(response => {
+          const url = new URL(response.url());
+          return url.pathname === `${base}/agent-tasks` && url.searchParams.get('search') === 'existing';
+        }),
+        page.getByRole('searchbox', { name: 'Find a task request' }).fill('existing'),
+      ]);
+      await page.getByRole('button', { name: 'Next task page', exact: true }).click();
+      await page.getByRole('link', { name: names[2], exact: true }).waitFor();
+      await captureBuilderScreenshot(page, 'tasks-before-return');
+      await page.getByRole('link', { name: names[2], exact: true }).click();
+      await page.getByRole('heading', { name: names[2], exact: true }).waitFor();
+      await page.getByRole('link', { name: 'Back to my tasks', exact: true }).click();
+      await page.getByRole('link', { name: names[0], exact: true }).waitFor();
+      const rows = page.getByRole('row').filter({ has: page.getByRole('link') });
+      assert.ok((await rows.first().innerText()).includes(names[0]));
+      assert.equal(await page.getByRole('searchbox', { name: 'Find a task request' }).inputValue(), '');
+      assert.ok(reads.some(read => read.after === cursor && read.search === 'existing'));
+      assert.equal(await page.getByRole('button', { name: 'Previous task page', exact: true }).count(), 0);
+      await captureBuilderScreenshot(page, 'tasks-newest-first');
+      assert.deepEqual(unexpected, []);
+      assert.deepEqual(errors, []);
+    } catch (error) {
+      await captureBrowserFailure(page, 'tasks-newest-first');
+      throw error;
+    }
+  },
+);
 
 for (const lifecycle of ['deleted', 'archived']) {
   test(`task history stays readable after its agent is ${lifecycle}`, { timeout: 120000 }, async t => {

@@ -155,3 +155,7 @@ jobs:
           pnpm --filter @tulipfarm/agents exec node --test --test-name-pattern='table enrollment' test/setup.integration.mjs
       - name: Check activation replacement and running-task authority
         run: pnpm --filter @tulipfarm/agents exec node --test --test-concurrency=1 test/activation-replacement.integration.mjs
+      - name: Check private task ordering and paging
+        run: |
+          pnpm --filter @tulipfarm/agents exec node --test --test-concurrency=1 test/tasks.integration.mjs
+          pnpm --filter @tulipfarm/api exec node --test --test-name-pattern='task list HTTP' test/agent-tasks.integration.mjs
