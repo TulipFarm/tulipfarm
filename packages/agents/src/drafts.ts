@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import {
   AccessDenied,
+  SourceAuthorizationUnavailable,
   canAccessTable,
   currentMember,
   lockAuthorization,
@@ -56,6 +57,7 @@ import { createAgentSetup, type AgentSetupOptions } from './setup.ts';
 import { agentSetupSchema } from './setup-contracts.ts';
 import { agentLinkedWorkflow } from './agent-trigger-workflows.ts';
 import { agentWorkflowCommonVersion } from '@tulipfarm/workflows';
+import { closeUnavailableDraft } from '@tulipfarm/conversations/activity';
 
 const sourcesSchema = sourceDependenciesSchema;
 const rowSchema = z.object({
@@ -493,7 +495,21 @@ export function createAuthoringDrafts(
         ).rows[0],
       );
     if (!row) throw new AccessDenied();
-    await requireSources(tx, workspaceId, actor, row.proposal, row.sources);
+    try {
+      await requireSources(tx, workspaceId, actor, row.proposal, row.sources);
+    } catch (error) {
+      if (!(error instanceof AccessDenied) && !(error instanceof SourceAuthorizationUnavailable)) throw error;
+      const origin = (
+        await tx.client.query(`SELECT turn_id FROM ${relation(tx, 'tf_chat_authoring_drafts')} WHERE id=$1`, [id])
+      ).rows[0];
+      await closeUnavailableDraft(
+        tx,
+        { workspaceId, conversationId: chatId, turnId: uuidSchema.parse(origin.turn_id) },
+        actor,
+        id,
+      );
+      return null;
+    }
     return row;
   }
   async function propose(workspaceId: string, actor: HumanActor, id: string, origin: Origin, value: unknown) {
@@ -697,8 +713,9 @@ export function createAuthoringDrafts(
   async function read(workspaceId: string, user: string, chatId: string, id: string) {
     chatId = uuidSchema.parse(chatId);
     id = uuidSchema.parse(id);
-    return transaction(workspaceId, user, id, async (tx, actor, bound) => {
+    const result = await transaction(workspaceId, user, id, async (tx, actor, bound) => {
       const row = await load(tx, workspaceId, actor, chatId, id);
+      if (!row) return null;
       const saved = (
         await tx.client.query(`SELECT outcome FROM ${relation(tx, 'tf_chat_authoring_decisions')} WHERE draft_id=$1`, [
           id,
@@ -741,30 +758,32 @@ export function createAuthoringDrafts(
           ? row.proposal.kind === 'skill' || (await stale(tx, row.proposal, actor, bound, workspaceId, id))
             ? 'stale'
             : 'pending'
-          : outcome.kind === 'dismissed'
-            ? 'dismissed'
-            : outcome.kind === 'builder'
-              ? 'continued'
-              : outcome.kind === 'skill' ||
-                  outcome.kind === 'workflow' ||
-                  outcome.kind === 'workflow-archive' ||
-                  outcome.kind === 'workflow-restore' ||
-                  outcome.kind === 'agent-archive' ||
-                  outcome.kind === 'agent-restore' ||
-                  outcome.kind === 'skill-archive' ||
-                  outcome.kind === 'skill-restore' ||
-                  outcome.kind === 'project' ||
-                  outcome.kind === 'files' ||
-                  outcome.kind === 'file-share' ||
-                  outcome.kind === 'knowledge' ||
-                  outcome.kind === 'memory' ||
-                  outcome.kind === 'row'
-                ? 'saved'
-                : outcome.receipt.status === 'accepted'
+          : outcome.kind === 'unavailable'
+            ? 'failed'
+            : outcome.kind === 'dismissed'
+              ? 'dismissed'
+              : outcome.kind === 'builder'
+                ? 'continued'
+                : outcome.kind === 'skill' ||
+                    outcome.kind === 'workflow' ||
+                    outcome.kind === 'workflow-archive' ||
+                    outcome.kind === 'workflow-restore' ||
+                    outcome.kind === 'agent-archive' ||
+                    outcome.kind === 'agent-restore' ||
+                    outcome.kind === 'skill-archive' ||
+                    outcome.kind === 'skill-restore' ||
+                    outcome.kind === 'project' ||
+                    outcome.kind === 'files' ||
+                    outcome.kind === 'file-share' ||
+                    outcome.kind === 'knowledge' ||
+                    outcome.kind === 'memory' ||
+                    outcome.kind === 'row'
                   ? 'saved'
-                  : outcome.receipt.status === 'conflict'
-                    ? 'stale'
-                    : outcome.receipt.status;
+                  : outcome.receipt.status === 'accepted'
+                    ? 'saved'
+                    : outcome.receipt.status === 'conflict'
+                      ? 'stale'
+                      : outcome.receipt.status;
       const replaced =
         status === 'stale' && !outcome && isWorkflow(row.proposal)
           ? await superseded(tx, id, row.proposal.targetId)
@@ -797,6 +816,8 @@ export function createAuthoringDrafts(
         ...(await rowView(tx, actor, bound, workspaceId, id, row.proposal)),
       });
     });
+    if (!result) throw new AccessDenied();
+    return result;
   }
   async function decide(workspaceId: string, user: string, chatId: string, id: string, value: unknown) {
     chatId = uuidSchema.parse(chatId);
@@ -806,6 +827,7 @@ export function createAuthoringDrafts(
     const woken: Work[] = [];
     const decided = await transaction(workspaceId, user, true, async (tx, actor, bound) => {
       const row = await load(tx, workspaceId, actor, chatId, id);
+      if (!row) return null;
       if (row.digest !== input.digest) throw new AgentError('draft-conflict');
       if (
         (input.decision === 'activate' || input.decision === 'continue') &&
@@ -953,6 +975,7 @@ export function createAuthoringDrafts(
       );
       return outcome;
     });
+    if (!decided) throw new AccessDenied();
     if (wake) await Promise.all(woken.map(wake));
     return decided;
   }

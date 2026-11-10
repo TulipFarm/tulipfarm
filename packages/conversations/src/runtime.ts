@@ -1,6 +1,6 @@
 import { loadModelCatalog } from '@tulipfarm/config';
 import { randomUUID } from 'node:crypto';
-import { recordConversationActivity } from './activity.ts';
+import { closeUnavailableDraft, recordConversationActivity } from './activity.ts';
 import { createConversationRequests } from './requests.ts';
 import { presentChoiceSchema } from './request-contracts.ts';
 import { z } from 'zod';
@@ -52,6 +52,7 @@ import {
   requireResultSources,
   requireSlackTurn,
   requireReplyMcpSources,
+  requireChatReviewSources,
 } from './source-access.ts';
 import {
   bindFileSources,
@@ -587,6 +588,30 @@ export function createConversationExecutor(
         return operation(bindFileSources(tx));
       }),
     );
+  }
+
+  async function readableDrafts(tx: RuntimeTransaction, fence: ReplyFence, actor: HumanActor, turnId?: string) {
+    const rows = z
+      .array(z.object({ id: uuidSchema, turn_id: uuidSchema, sources: conversationResultSchema.shape.sources }))
+      .parse(
+        (
+          await tx.client.query(
+            `SELECT d.id,d.turn_id,d.sources FROM ${table(tx, 'tf_chat_authoring_drafts')} d WHERE d.conversation_id=$1 AND d.membership_id=$2 AND d.user_id=$3
+            AND ($4::uuid IS NULL OR d.turn_id=$4) AND NOT EXISTS (SELECT 1 FROM ${table(tx, 'tf_chat_authoring_decisions')} c WHERE c.draft_id=d.id)`,
+            [fence.conversationId, actor.membershipId, actor.userId, turnId ?? null],
+          )
+        ).rows,
+      );
+    let readable = 0;
+    for (const draft of rows)
+      try {
+        await requireChatReviewSources(tx, actor, draft.sources);
+        readable++;
+      } catch (error) {
+        if (!(error instanceof AccessDenied) && !(error instanceof SourceAuthorizationUnavailable)) throw error;
+        await closeUnavailableDraft(tx, { ...fence, turnId: draft.turn_id }, actor, draft.id);
+      }
+    return { readable, unavailable: rows.length - readable };
   }
 
   /**
@@ -1916,12 +1941,8 @@ export function createConversationExecutor(
         source.openGoogleProposals.filter(proposal => !proposal.approved).length;
       const waitingCards = () =>
         transaction(fence.workspaceId, async tx => {
-          const drafts = await tx.client.query<{ count: number }>(
-            `SELECT count(*)::int AS count FROM ${table(tx, 'tf_chat_authoring_drafts')} d WHERE d.conversation_id=$1 AND d.membership_id=$2 AND d.user_id=$3
-              AND NOT EXISTS (SELECT 1 FROM ${table(tx, 'tf_chat_authoring_decisions')} c WHERE c.draft_id=d.id)`,
-            [fence.conversationId, source.requester.membershipId, source.requester.userId],
-          );
-          return (drafts.rows[0]?.count ?? 0) + earlierProposals;
+          const drafts = await readableDrafts(tx, fence, source.requester);
+          return drafts.readable + earlierProposals;
         });
       const currentPersonalMemory = () =>
         staged('memory', () =>
@@ -2175,11 +2196,15 @@ export function createConversationExecutor(
               )
                 throw new AccessDenied();
               await receipt(tx, 'running');
-              const request = await createConversationRequests(context.runtime).createForChat(fence, {
-                producerId: callId,
-                prompt: choice.prompt,
-                answerSchema: { kind: 'choices', choices: choice.choices, multiple: false, allowText: true },
-              });
+              const request = await createConversationRequests(context.runtime).createForChat(
+                fence,
+                {
+                  producerId: callId,
+                  prompt: choice.prompt,
+                  answerSchema: { kind: 'choices', choices: choice.choices, multiple: false, allowText: true },
+                },
+                mergeSources([...context.origin.sources, ...fileSources]),
+              );
               await receipt(tx, 'completed');
               await saveOutput(tx, {
                 result: request,
@@ -2214,11 +2239,15 @@ export function createConversationExecutor(
             await guarded(async (tx, context) => {
               await receipt(tx, 'running');
               const secretRequestId = randomUUID();
-              const request = await createConversationRequests(context.runtime).createForChat(fence, {
-                producerId: callId,
-                prompt: prepared.prompt,
-                answerSchema: { kind: 'secrets', secretRequestId },
-              });
+              const request = await createConversationRequests(context.runtime).createForChat(
+                fence,
+                {
+                  producerId: callId,
+                  prompt: prepared.prompt,
+                  answerSchema: { kind: 'secrets', secretRequestId },
+                },
+                context.origin.sources,
+              );
               const result = await secrets.create(tx, {
                 id: secretRequestId,
                 membershipId: context.actor.membershipId,
@@ -2333,7 +2362,46 @@ export function createConversationExecutor(
           await guarded(tx => receipt(tx, 'running'));
           return await guarded(async (tx, context) => {
             await planning?.authorizeTool?.(tx, fence, name, callId);
-            const result = await observeChatTool(() => operation(context));
+            let result = await observeChatTool(() => operation(context));
+            const review = z
+              .object({
+                result: z.object({ draftId: uuidSchema.optional(), waitingDraftId: uuidSchema.optional() }),
+              })
+              .safeParse(result);
+            const draftId = review.success && (review.data.result.draftId ?? review.data.result.waitingDraftId);
+            if (draftId) {
+              const draft = (
+                await tx.client.query(
+                  `SELECT id,turn_id,sources FROM ${table(tx, 'tf_chat_authoring_drafts')} WHERE id=$1 AND conversation_id=$2 AND membership_id=$3 AND user_id=$4`,
+                  [draftId, fence.conversationId, context.actor.membershipId, context.actor.userId],
+                )
+              ).rows[0];
+              try {
+                if (!draft) throw new AccessDenied();
+                await requireChatReviewSources(
+                  tx,
+                  context.actor,
+                  conversationResultSchema.shape.sources.parse(draft.sources),
+                );
+              } catch (error) {
+                if (!(error instanceof AccessDenied) && !(error instanceof SourceAuthorizationUnavailable)) throw error;
+                if (draft)
+                  await closeUnavailableDraft(
+                    tx,
+                    { ...fence, turnId: uuidSchema.parse(draft.turn_id) },
+                    context.actor,
+                    draftId,
+                  );
+                result = {
+                  result: {
+                    error: 'review-unavailable',
+                    instruction:
+                      'The review card could not be opened and is not waiting for approval. Do not point the person to it. Explain that the review failed and ask for a fresh request.',
+                  },
+                  sources: [],
+                };
+              }
+            }
             await receipt(tx, 'completed');
             await saveOutput(tx, result);
             return result;
@@ -2630,6 +2698,13 @@ export function createConversationExecutor(
           !turn.lease_live
         )
           return 'stale';
+        const reviews = await readableDrafts(tx, fence, chat.requester, fence.turnId);
+        if (reviews.unavailable) {
+          text =
+            'The review card could not be opened, so I closed it. No pending change was approved. Send a new message to make a fresh request.';
+          answerLayout = undefined;
+          sources = [];
+        }
         const used = replied ? source.invoked : null;
         if (used && (chat.project_id || !(await skills?.resolve(tx, chat.requester, used)))) {
           await skillUnavailable(tx, fence);

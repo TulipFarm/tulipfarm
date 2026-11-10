@@ -209,6 +209,7 @@ export const workflowActivationOutcomeSchema = z.enum([
 ]);
 export const draftOutcomeSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('dismissed') }),
+  z.object({ kind: z.literal('unavailable') }),
   z.object({
     kind: z.literal('agent'),
     receipt: agentCommandStatusSchema,
