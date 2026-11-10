@@ -2,6 +2,9 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { integrationCredentialKeyring } from '@tulipfarm/integrations';
 import { createWorkspaceMcp } from '@tulipfarm/workspace-mcp';
+import { bindMcpSecrets, createSecrets } from '@tulipfarm/secrets';
+import { apiCallPrivateHosts } from '@tulipfarm/api-calls';
+import type { createTemporalClient } from './temporal.ts';
 import { createWorkspaceMcpTransport, MCP_OAUTH_CLIENT_METADATA } from '@tulipfarm/workspace-mcp-transport';
 import { authorizeMcpOrigin, authorizeMcpSources, authorizeMcpSelection } from '@tulipfarm/agents/mcp-authority';
 import type { WorkspaceRuntime } from '@tulipfarm/workspaces/storage';
@@ -50,8 +53,14 @@ export function workspaceMcpApi(
   app: FastifyInstance,
   runtime: WorkspaceRuntime,
   resolveConfirmationCredential: (workspaceId: string) => Promise<string>,
+  temporal?: ReturnType<typeof createTemporalClient>,
   env: NodeJS.ProcessEnv = process.env,
 ) {
+  const secrets = createSecrets({
+    runtime,
+    keyring: () => integrationCredentialKeyring(env),
+    privateHosts: apiCallPrivateHosts(env),
+  });
   const flag = (name: string) => z.enum(['true', 'false']).parse(env[name] ?? 'false') === 'true';
   const admissionEnabled = flag('WORKSPACE_MCP_ADMISSION_ENABLED');
   const dispatchEnabled = flag('WORKSPACE_MCP_DISPATCH_ENABLED');
@@ -75,6 +84,8 @@ export function workspaceMcpApi(
     authorizeOrigin: authorizeMcpOrigin,
     authorizeSources: authorizeMcpSources,
     authorizeSelection: authorizeMcpSelection,
+    // The API only checks who may send saved secrets; the worker decrypts them.
+    secrets: { bind: (tx, input) => bindMcpSecrets(secrets, tx, input) },
     resolveConfirmationCredential,
     admissionEnabled,
     dispatchEnabled,
@@ -97,5 +108,19 @@ export function workspaceMcpApi(
     permissions,
     authorizeSelection: authorizeMcpSelection,
     authorizeSources: authorizeMcpSources,
+    ...(temporal
+      ? {
+          queueDiscovery: async ({ workspaceId, userId, integrationId, requestId, expectedVersion }) => {
+            await temporal.connection.withDeadline(Date.now() + 10_000, () =>
+              temporal.client.workflow.start('workspaceMcpDiscovery', {
+                workflowId: `workspace-mcp-discovery-v1:${workspaceId}:${integrationId}:${expectedVersion}`,
+                taskQueue: env.TEMPORAL_TASK_QUEUE ?? 'tulipfarm',
+                args: [workspaceId, userId, integrationId, requestId, expectedVersion],
+                workflowIdConflictPolicy: 'USE_EXISTING',
+              }),
+            );
+          },
+        }
+      : {}),
   });
 }

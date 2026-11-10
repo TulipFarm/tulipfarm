@@ -39,7 +39,7 @@ export const integrationSchema = z.object({
   ownership: z.enum(['personal', 'shared']),
   endpoint: text,
   accountLabel: text.nullable(),
-  authMethod: z.enum(['none', 'headers', 'bearer', 'oauth']),
+  authMethod: z.enum(['none', 'headers', 'bearer', 'oauth', 'secret-bearer', 'secret-headers']),
   status: z.enum([
     'setup',
     'oauth-pending',
@@ -97,6 +97,7 @@ export const authSchema = z.discriminatedUnion('kind', [
       .min(1)
       .max(10),
   }),
+  z.object({ kind: z.literal('secrets'), secretIds: z.array(id).min(1).max(10) }),
   z.object({
     kind: z.literal('oauth'),
     client: z

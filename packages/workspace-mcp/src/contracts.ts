@@ -50,7 +50,8 @@ export class McpError extends Error {
       | 'expired'
       | 'integration-blocked'
       | 'outcome-unknown'
-      | 'oauth-conflict',
+      | 'oauth-conflict'
+      | 'secret-denied',
   ) {
     super(`Workspace MCP ${code}`);
     this.name = 'McpError';
@@ -133,8 +134,61 @@ export const mcpCredentialSchema = z.discriminatedUnion('kind', [
     scopes: z.array(z.string().max(256)).max(100),
     accountId: z.string().max(512).nullable(),
   }),
+  z.strictObject({ kind: z.literal('secret-bearer'), secretId: z.uuid() }),
+  z.strictObject({
+    kind: z.literal('secret-headers'),
+    secretIds: z
+      .array(z.uuid())
+      .min(1)
+      .max(10)
+      .refine(ids => new Set(ids).size === ids.length),
+  }),
 ]);
 export type McpCredential = z.infer<typeof mcpCredentialSchema>;
+export type McpSecretCredential = Extract<McpCredential, { kind: 'secret-bearer' | 'secret-headers' }>;
+export const isSecretCredential = (credential: McpCredential): credential is McpSecretCredential =>
+  credential.kind === 'secret-bearer' || credential.kind === 'secret-headers';
+export const secretIdsOf = (credential: McpSecretCredential) =>
+  credential.kind === 'secret-bearer' ? [credential.secretId] : credential.secretIds;
+/** What the transport sends: a stored credential, or the bearer token or headers resolved from saved secrets. */
+export type McpSendCredential =
+  | Exclude<McpCredential, McpSecretCredential>
+  | { kind: 'headers'; headers: Record<string, string>; cookie?: string };
+export type McpSecretVersion = { secretId: string; version: number; policyVersion: number };
+export type McpSecretUsers = { membershipIds: string[]; teamIds: string[] };
+/**
+ * Saved secrets an integration authenticates with. `bind` reads policy only and may run in the API; `resolve` and
+ * `recordUse` decrypt or record sends and are given only in the worker.
+ */
+export type McpSecretsPort = {
+  bind(
+    tx: AuthorizationTransaction,
+    input: { credential: McpSecretCredential; endpoint: string; users: McpSecretUsers },
+  ): Promise<McpSecretVersion[]>;
+  resolve?: (
+    tx: AuthorizationTransaction,
+    input: {
+      workspaceId: string;
+      membershipId: string;
+      credential: McpSecretCredential;
+      endpoint: string;
+      expected?: McpSecretVersion[];
+    },
+  ) => Promise<{ credential: McpSendCredential; secrets: McpSecretVersion[]; values: string[] }>;
+  recordUse?: (
+    tx: AuthorizationTransaction,
+    input: { secretIds: string[]; membershipId: string; endpoint: string; tool: string },
+  ) => Promise<void>;
+};
+export const secretVersionsSchema = z
+  .array(
+    z.strictObject({
+      secretId: z.uuid(),
+      version: z.number().int().positive(),
+      policyVersion: z.number().int().positive(),
+    }),
+  )
+  .max(10);
 export const mcpToolSchema = z.strictObject({
   name: z.string().min(1).max(256),
   description: z.string().max(32768),
@@ -150,7 +204,7 @@ export const mcpResultSchema = z.strictObject({
   isError: z.boolean().optional(),
 });
 export type McpResult = z.infer<typeof mcpResultSchema>;
-export type ProtocolContext = { endpoint: string; credential: McpCredential; signal: AbortSignal };
+export type ProtocolContext = { endpoint: string; credential: McpSendCredential; signal: AbortSignal };
 export type McpProtocolPort = {
   discover(input: ProtocolContext): Promise<{ tools: McpTool[] }>;
   call(
@@ -197,6 +251,7 @@ export type WorkspaceMcpOptions = {
     subject: McpSelectionSubject;
   }) => Promise<McpSelectionAuthority>;
   resolveConfirmationCredential?: (workspaceId: string) => Promise<string>;
+  secrets?: McpSecretsPort;
   admissionEnabled?: boolean;
   dispatchEnabled?: boolean;
 };
@@ -216,8 +271,10 @@ export const integrationRowSchema = z.object({
   refresh_started_at: z.date().nullable(),
   descriptor_approved: z.boolean(),
   version: z.number().int(),
-  auth_method: z.enum(['none', 'bearer', 'headers', 'oauth']),
+  auth_method: z.enum(['none', 'bearer', 'headers', 'oauth', 'secret-bearer', 'secret-headers']),
   credential_expires_at: z.date().nullable(),
+  discovery: z.enum(['queued', 'failed']).nullable(),
+  status_reason: z.string().nullable(),
 });
 export const integrationMetadataSchema = z.object({
   id: z.uuid(),
@@ -233,6 +290,8 @@ export const integrationMetadataSchema = z.object({
   version: z.number().int(),
   authMethod: integrationRowSchema.shape.auth_method,
   refreshDue: z.boolean(),
+  discovery: integrationRowSchema.shape.discovery,
+  statusReason: z.string().nullable(),
   blocked: z.boolean(),
   barrierActionId: z.uuid().nullable(),
   capabilities: z.object({ read: z.boolean(), manage: z.boolean(), use: z.boolean() }),
@@ -252,6 +311,7 @@ export const actionRowSchema = z.object({
   sources: mcpSourcesSchema,
   digest: z.string(),
   requires_consent: z.boolean(),
+  secrets: secretVersionsSchema,
   created_at: z.date(),
   expires_at: z.date(),
 });

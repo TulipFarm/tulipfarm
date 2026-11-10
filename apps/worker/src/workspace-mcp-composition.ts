@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { AccessDenied } from '@tulipfarm/access';
 import {
   createWorkspaceMcp,
+  workspaceMcpDiscovery,
   McpError,
   type WorkspaceMcpOptions,
   type WorkspaceMcpService,
@@ -14,6 +15,9 @@ import { mcpExecutionResultSchema } from '@tulipfarm/agents/mcp-contracts';
 import type { McpExecutionContext, McpExecutionFactory, McpExecutionPort } from '@tulipfarm/agents/mcp-runtime';
 import { sourceDependenciesSchema } from '@tulipfarm/conversations/results';
 import { canonicalJson } from '@tulipfarm/tables/canonical';
+import { bindMcpSecrets, createSecrets } from '@tulipfarm/secrets';
+import { mcpSecretSends } from '@tulipfarm/secrets/send';
+import { apiCallPrivateHosts } from '@tulipfarm/api-calls';
 
 export function createMcpExecution(
   service: WorkspaceMcpService,
@@ -150,25 +154,40 @@ export function createMcpExecution(
   };
 }
 
-export function workspaceMcpFactory(
-  options: Omit<WorkspaceMcpOptions, 'runtime' | 'authorizeOrigin' | 'authorizeSources' | 'authorizeSelection'>,
-  oauth = createOAuthOperations(),
-): McpExecutionFactory {
-  return runtime =>
-    createMcpExecution(
-      createWorkspaceMcp({
-        ...options,
-        runtime,
-        authorizeOrigin: authorizeMcpOrigin,
-        authorizeSources: authorizeMcpSources,
-        authorizeSelection: authorizeMcpSelection,
-      }),
-      oauth,
-      options.dispatchEnabled === true,
-    );
+type McpServiceOptions = Omit<
+  WorkspaceMcpOptions,
+  'runtime' | 'authorizeOrigin' | 'authorizeSources' | 'authorizeSelection' | 'secrets'
+>;
+
+/** Lets MCP requests send saved secrets. Only the worker decrypts them, inside the dispatch transaction. */
+export function mcpSecretsPort(
+  runtime: WorkspaceMcpOptions['runtime'],
+  env: NodeJS.ProcessEnv = process.env,
+): NonNullable<WorkspaceMcpOptions['secrets']> {
+  const secrets = createSecrets({
+    runtime,
+    keyring: () => integrationCredentialKeyring(env),
+    privateHosts: apiCallPrivateHosts(env),
+  });
+  return { bind: (tx, input) => bindMcpSecrets(secrets, tx, input), ...mcpSecretSends(secrets) };
 }
 
-export function workspaceMcpFromEnvironment(env: NodeJS.ProcessEnv = process.env): McpExecutionFactory | undefined {
+export function workspaceMcpService(options: McpServiceOptions, runtime: WorkspaceMcpOptions['runtime']) {
+  return createWorkspaceMcp({
+    ...options,
+    runtime,
+    secrets: mcpSecretsPort(runtime),
+    authorizeOrigin: authorizeMcpOrigin,
+    authorizeSources: authorizeMcpSources,
+    authorizeSelection: authorizeMcpSelection,
+  });
+}
+
+export function workspaceMcpFactory(options: McpServiceOptions, oauth = createOAuthOperations()): McpExecutionFactory {
+  return runtime => createMcpExecution(workspaceMcpService(options, runtime), oauth, options.dispatchEnabled === true);
+}
+
+function mcpOptionsFromEnvironment(env: NodeJS.ProcessEnv): McpServiceOptions | undefined {
   if (env.WORKSPACE_MCP_DISPATCH_ENABLED === undefined && env.WORKSPACE_MCP_ADMISSION_ENABLED === undefined)
     return undefined;
   const flag = z.enum(['true', 'false']).default('false');
@@ -198,10 +217,54 @@ export function workspaceMcpFromEnvironment(env: NodeJS.ProcessEnv = process.env
       });
     },
   };
-  return workspaceMcpFactory({
+  return {
     keyring: integrationCredentialKeyring(),
     protocol,
     admissionEnabled: flag.parse(env.WORKSPACE_MCP_ADMISSION_ENABLED) === 'true',
     dispatchEnabled: flag.parse(env.WORKSPACE_MCP_DISPATCH_ENABLED) === 'true',
-  });
+  };
+}
+
+export function workspaceMcpFromEnvironment(env: NodeJS.ProcessEnv = process.env): McpExecutionFactory | undefined {
+  const options = mcpOptionsFromEnvironment(env);
+  return options && workspaceMcpFactory(options);
+}
+
+const failureReasons: Partial<Record<string, string>> = {
+  'credential-unavailable': 'A saved secret could not be read. Check that it is still saved and names this endpoint.',
+  'discovery-failed': 'The server did not return a usable tool list.',
+  'secret-denied':
+    'A saved secret is not shared with everyone who uses this integration, or does not name its endpoint.',
+};
+
+/** Discovers tools for integrations that send saved secrets, which the API cannot decrypt. */
+export function createWorkspaceMcpDiscoveryActivities(
+  runtime: WorkspaceMcpOptions['runtime'],
+  env: NodeJS.ProcessEnv = process.env,
+) {
+  const options = mcpOptionsFromEnvironment(env);
+  const service = options && workspaceMcpService(options, runtime);
+  const discovery = service && workspaceMcpDiscovery(runtime, service);
+  return {
+    async discoverWorkspaceMcp(
+      workspaceId: string,
+      userId: string,
+      integrationId: string,
+      requestId: string,
+      expectedVersion: number,
+    ) {
+      if (!service || !discovery) throw new Error('Workspace MCP is not configured');
+      try {
+        await discovery.discover(workspaceId, userId, integrationId, { requestId, expectedVersion });
+      } catch (error) {
+        if (error instanceof McpError && error.code === 'conflict') return;
+        await service.failDiscovery(
+          workspaceId,
+          integrationId,
+          expectedVersion,
+          (error instanceof McpError && failureReasons[error.code]) || 'Tool discovery failed. Try again.',
+        );
+      }
+    },
+  };
 }

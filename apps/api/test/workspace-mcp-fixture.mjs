@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { fixture } from '../../../packages/workspace-storage/test/integration/fixture.mjs';
-import { createWorkspaceRuntime, qualified } from '@tulipfarm/workspace-storage/runtime';
+import { commonCompatibility, createWorkspaceRuntime, qualified } from '@tulipfarm/workspace-storage/runtime';
 import { workspaceTableMigrations } from '../../../packages/workspaces/src/table-migrations.ts';
 import { createWorkspaceMcp } from '@tulipfarm/workspace-mcp';
 import { authorizeMcpOrigin, authorizeMcpSources, authorizeMcpSelection } from '@tulipfarm/agents/mcp-authority';
@@ -14,7 +14,7 @@ export async function apiMcpFixture(overrides = {}) {
     await db.platform.query(`SET search_path TO app; DROP TABLE IF EXISTS app.accounts;
 ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', import.meta.url), 'utf8')}`);
     const migrations = await workspaceTableMigrations();
-    assert.equal(migrations.length, 10);
+    assert.equal(migrations.length, commonCompatibility.maximum);
     const one = await db.create(migrations);
     const two = await db.create(migrations);
     const table = (name, workspace = one) =>

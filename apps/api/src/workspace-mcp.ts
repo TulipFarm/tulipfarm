@@ -55,6 +55,8 @@ function classify(error: unknown) {
         return new McpHttpError('invalid-request', 400);
       case 'expired':
         return new McpHttpError('mcp-expired', 410);
+      case 'secret-denied':
+        return new McpHttpError('mcp-secret-denied', 400);
       case 'oauth-conflict':
         return new McpHttpError('mcp-not-found', 404);
       default:

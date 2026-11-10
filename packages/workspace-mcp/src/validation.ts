@@ -10,6 +10,7 @@ import {
   type JsonObject,
   type McpTool,
   type McpCredential,
+  type McpSendCredential,
 } from './contracts.ts';
 
 export function canonicalJson(value: unknown): string {
@@ -150,15 +151,24 @@ export function validateArguments(tool: McpTool, value: JsonObject) {
 export function validateOutput(tool: McpTool, value: JsonObject | undefined) {
   if (tool.outputSchema && (!value || !compile(tool.outputSchema)(value))) throw new McpError('outcome-unknown');
 }
-export function rejectReflectedSecrets(value: unknown, credential: McpCredential) {
-  const secrets =
-    credential.kind === 'bearer'
+export function rejectReflectedSecrets(
+  value: unknown,
+  credential: McpCredential | McpSendCredential,
+  values: readonly string[] = [],
+) {
+  const secrets = [
+    ...values,
+    ...(credential.kind === 'bearer'
       ? [credential.token]
       : credential.kind === 'headers'
-        ? Object.values(credential.headers)
+        ? [
+            ...Object.values(credential.headers),
+            ...('cookie' in credential && credential.cookie ? [credential.cookie] : []),
+          ]
         : credential.kind === 'oauth'
           ? [credential.accessToken, credential.refreshToken, credential.clientSecret]
-          : [];
+          : []),
+  ];
   const text = canonicalJson(value);
   if (
     secrets.some(

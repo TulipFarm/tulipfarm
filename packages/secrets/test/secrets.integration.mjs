@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
-import { createSecrets } from '../dist/index.js';
-import { recordUse, resolveForSend } from '../dist/send.js';
+import { bindMcpSecrets, createSecrets } from '../dist/index.js';
+import { mcpSecretSends, recordUse, resolveForSend } from '../dist/send.js';
 import { code, denied, keyring, setup } from './fixture.mjs';
 
 test('secrets', async t => {
@@ -375,6 +375,73 @@ test('secrets', async t => {
       false,
     );
   });
+
+  await t.test(
+    'MCP connections bind saved secrets for every user and resolve them only for the exact endpoint',
+    async () => {
+      const endpoint = 'https://mcp.example.com/mcp';
+      const destinations = [{ kind: 'endpoint', url: endpoint }];
+      const key = await f.secrets.create(ws, ana, f.input({ name: 'MCP key', destinations }));
+      const project = await f.secrets.create(
+        ws,
+        ana,
+        f.input({
+          name: 'MCP project',
+          value: { value: 'project-synthetic-42' },
+          placement: { kind: 'header', name: 'X-Project' },
+          destinations,
+        }),
+      );
+      const hostOnly = await f.secrets.create(
+        ws,
+        ana,
+        f.input({ name: 'MCP host', destinations: [{ kind: 'host', host: 'mcp.example.com' }] }),
+      );
+      const credential = { kind: 'secret-headers', secretIds: [key.id, project.id] };
+      const owner = { membershipIds: [ana.membershipId], teamIds: [] };
+      const bind = (value, users = owner, url = endpoint) =>
+        f.runtime.transaction(ws, commonCompatibility, tx =>
+          bindMcpSecrets(f.secrets, tx, { credential: value, endpoint: url, users }),
+        );
+      assert.deepEqual(await bind(credential), [
+        { secretId: key.id, version: 1, policyVersion: 1 },
+        { secretId: project.id, version: 1, policyVersion: 1 },
+      ]);
+      await assert.rejects(bind({ kind: 'secret-bearer', secretId: hostOnly.id }), code('destination-denied'));
+      await assert.rejects(bind(credential, owner, 'https://mcp.example.com/other'), code('destination-denied'));
+      await assert.rejects(bind({ kind: 'secret-bearer', secretId: project.id }), code('placement-unsupported'));
+      await assert.rejects(
+        bind(credential, { membershipIds: [ana.membershipId, ben.membershipId], teamIds: [] }),
+        code('not-found'),
+      );
+      await assert.rejects(bind(credential, { membershipIds: [], teamIds: [randomUUID()] }), code('not-found'));
+
+      const sends = mcpSecretSends(f.secrets);
+      const resolve = expected =>
+        f.runtime.transaction(ws, commonCompatibility, tx =>
+          sends.resolve(tx, { workspaceId: ws, membershipId: ana.membershipId, credential, endpoint, expected }),
+        );
+      const resolved = await resolve();
+      assert.deepEqual(resolved.credential, {
+        kind: 'headers',
+        headers: { authorization: 'Bearer phx-synthetic-secret-value', 'x-project': 'project-synthetic-42' },
+      });
+      assert.deepEqual(resolved.values, ['phx-synthetic-secret-value', 'project-synthetic-42']);
+      assert.deepEqual((await resolve(resolved.secrets)).secrets, resolved.secrets);
+      await assert.rejects(resolve(resolved.secrets.slice(0, 1)), code('conflict'));
+      await f.secrets.replace(ws, ana, key.id, {
+        requestId: randomUUID(),
+        expectedVersion: 1,
+        value: { value: 'phx-rotated' },
+      });
+      await assert.rejects(resolve(resolved.secrets), code('conflict'));
+
+      await f.runtime.transaction(ws, commonCompatibility, tx =>
+        sends.recordUse(tx, { secretIds: [key.id], membershipId: ana.membershipId, endpoint, tool: 'mcp:write' }),
+      );
+      assert.ok((await f.secrets.get(ws, ana, key.id)).lastUsedAt);
+    },
+  );
 
   await t.test('without a key, secrets are unavailable', async () => {
     const keyless = createSecrets({

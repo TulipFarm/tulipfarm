@@ -93,7 +93,13 @@ export function createWorkspaceMcpTransport({ fetcher }: { fetcher?: typeof fetc
     const headers = authenticationHeaders(input.authentication);
     const secretValues = [
       ...(input.secrets ?? []),
-      ...Object.values(headers).flatMap(value => (value.startsWith('Bearer ') ? [value, value.slice(7)] : [value])),
+      ...Object.entries(headers).flatMap(([name, value]) =>
+        name === 'cookie'
+          ? [value, ...value.split('; ').map(pair => pair.slice(pair.indexOf('=') + 1))]
+          : value.startsWith('Bearer ')
+            ? [value, value.slice(7)]
+            : [value],
+      ),
     ];
     function beforeRequest(signal?: AbortSignal | null) {
       input.signal?.throwIfAborted();

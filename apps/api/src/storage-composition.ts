@@ -204,7 +204,7 @@ export function registerStorageComposition(
     },
     skillRuntimeAvailable: configuredSkillRuntimeProbe(),
   });
-  const mcp = workspaceMcpApi(app, runtime, confirmation.resolveConfirmationCredential);
+  const mcp = workspaceMcpApi(app, runtime, confirmation.resolveConfirmationCredential, temporal);
   registerWorkspaceMcp(app, dependencies.auth, mcp, wakeTaskAction);
   registerSecrets(app, dependencies.auth, secretsServices(runtime), wakeTask);
   const github = githubAccounts(runtime);

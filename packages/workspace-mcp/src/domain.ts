@@ -19,6 +19,11 @@ import {
   mcpResultSchema,
   jsonObjectSchema,
   integrationMetadataSchema,
+  isSecretCredential,
+  secretIdsOf,
+  type McpCredential,
+  type McpSecretVersion,
+  type McpSendCredential,
   type WorkspaceMcpOptions,
   type McpPrincipal,
   type McpOrigin,
@@ -292,15 +297,53 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
         : null,
     };
   }
-  async function discoverPrepared(workspaceId: string, row: IntegrationRow) {
-    const credential = store.credential(workspaceId, row);
+  /** Checks that everyone who can use the integration may send its saved secrets to its endpoint, and lists them. */
+  async function bindSecrets(tx: AuthorizationTransaction, row: IntegrationRow, credential: McpCredential) {
+    await tx.client.query(`DELETE FROM ${table(tx, 'integration_secrets')} WHERE integration_id=$1`, [row.id]);
+    if (!isSecretCredential(credential)) return [];
+    const versions = await store.checkSecrets(tx, row, credential);
+    for (const secretId of secretIdsOf(credential))
+      await tx.client.query(
+        `INSERT INTO ${table(tx, 'integration_secrets')} (integration_id,secret_id) VALUES ($1,$2)`,
+        [row.id, secretId],
+      );
+    return versions;
+  }
+  /**
+   * What a request to the integration sends for one member: its stored credential, or the saved secrets it names,
+   * decrypted inside the caller's transaction. Only the worker can decrypt secrets.
+   */
+  async function material(
+    tx: AuthorizationTransaction,
+    workspaceId: string,
+    membershipId: string,
+    row: IntegrationRow,
+    expected?: McpSecretVersion[],
+  ): Promise<{ credential: McpSendCredential; secrets: McpSecretVersion[]; values: string[] }> {
+    const stored = store.credential(workspaceId, row);
+    if (!isSecretCredential(stored)) return { credential: stored, secrets: [], values: [] };
+    if (!options.secrets?.resolve) throw new McpError('credential-unavailable');
+    try {
+      return await options.secrets.resolve(tx, {
+        workspaceId,
+        membershipId,
+        credential: stored,
+        endpoint: row.endpoint,
+        ...(expected ? { expected } : {}),
+      });
+    } catch {
+      throw new McpError('credential-unavailable');
+    }
+  }
+  async function discoverPrepared(row: IntegrationRow, prepared: { credential: McpSendCredential; values: string[] }) {
+    const { credential, values } = prepared;
     let tools: McpTool[];
     try {
       const response = await timed(Date.now() + mcpLimits.discoveryMs, signal =>
         options.protocol.discover({ endpoint: row.endpoint, credential, signal }),
       );
       bounded(response, mcpLimits.catalogBytes);
-      rejectReflectedSecrets(response, credential);
+      rejectReflectedSecrets(response, credential, values);
       tools = z.array(mcpToolSchema).max(mcpLimits.discoveredTools).parse(response.tools);
       if (new Set(tools.map(tool => tool.name)).size !== tools.length) throw new Error();
     } catch {
@@ -392,6 +435,7 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
                 [id, actor.membershipId],
               );
             }
+            await bindSecrets(tx, await store.load(tx, id), value.credential);
             await recommendations();
             return store.metadata(tx, actor, await store.load(tx, id));
           },
@@ -494,6 +538,7 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
               `UPDATE ${table(tx, 'integrations')} SET grants_version=grants_version+1,version=version+1 WHERE id=$1`,
               [id],
             );
+            if (row.credential) await bindSecrets(tx, row, store.credential(workspaceId, row));
             if (changedIntegrationRecommendationMembers(recommendationBefore, await mcpRecommendations(tx, id)).length)
               await store.invalidate(tx, row);
             await recordIntegrationRecommendationChange(tx, id, recommendationBefore, await mcpRecommendations(tx, id));
@@ -588,6 +633,8 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
               `UPDATE ${table(tx, 'integrations')} SET version=version+1,lifecycle=$2,credential=CASE WHEN $2 IN ('deleted','disconnected') THEN NULL ELSE credential END WHERE id=$1`,
               [id, lifecycle],
             );
+            if (lifecycle === 'deleted' || lifecycle === 'disconnected')
+              await tx.client.query(`DELETE FROM ${table(tx, 'integration_secrets')} WHERE integration_id=$1`, [id]);
             await recommendations();
             return store.metadata(tx, actor, await store.load(tx, id));
           },
@@ -643,11 +690,35 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
                 value.credential.kind === 'oauth' ? value.credential.expiresAt : null,
               ],
             );
+            await bindSecrets(tx, await store.load(tx, id), value.credential);
             await recommendations();
             return store.metadata(tx, actor, await store.load(tx, id));
           },
         );
       });
+    },
+    /** Marks discovery as running elsewhere, such as in the worker, and returns the version it must match. */
+    queueDiscovery(workspaceId: string, principal: McpPrincipal, id: string) {
+      admitted();
+      return store.authorized(workspaceId, principal, async (tx, actor) => {
+        const row = await store.load(tx, id);
+        await store.permit(tx, actor, row, 'manage');
+        if (row.lifecycle !== 'active' || !row.credential) throw new McpError('integration-unavailable');
+        await tx.client.query(
+          `UPDATE ${table(tx, 'integrations')} SET discovery='queued',status_reason=NULL WHERE id=$1`,
+          [id],
+        );
+        return row.version;
+      });
+    },
+    /** Records why queued discovery failed, unless the integration changed since it was queued. */
+    async failDiscovery(workspaceId: string, id: string, expectedVersion: number, reason: string) {
+      await store.transaction(workspaceId, tx =>
+        tx.client.query(
+          `UPDATE ${table(tx, 'integrations')} SET discovery='failed',status_reason=$3 WHERE id=$1 AND version=$2 AND discovery='queued'`,
+          [id, expectedVersion, reason.slice(0, 500)],
+        ),
+      );
     },
     async discover(
       workspaceId: string,
@@ -680,10 +751,10 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
           }
           if (row.version !== command.expectedVersion) throw new McpError('conflict');
         }
-        return { row, result: null };
+        return { row, result: null, material: await material(tx, workspaceId, actor.membershipId, row) };
       });
       if (before.result) return before.result;
-      const tools = await discoverPrepared(workspaceId, before.row);
+      const tools = await discoverPrepared(before.row, before.material!);
       return store.authorized(workspaceId, principal, async (tx, actor) => {
         const row = await store.load(tx, id);
         await store.permit(tx, actor, row, 'manage');
@@ -703,7 +774,10 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
             )
               throw new McpError('conflict');
             await saveDiscovery(tx, row, tools);
-            await tx.client.query(`UPDATE ${table(tx, 'integrations')} SET version=version+1 WHERE id=$1`, [id]);
+            await tx.client.query(
+              `UPDATE ${table(tx, 'integrations')} SET version=version+1,discovery=NULL,status_reason=NULL WHERE id=$1`,
+              [id],
+            );
             return policies(tx, id);
           },
         );
@@ -898,6 +972,8 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
         )
           throw new AccessDenied();
         if (await store.barrier(tx, row.id)) throw new McpError('integration-blocked');
+        const stored = store.credential(workspaceId, row);
+        const secrets = isSecretCredential(stored) ? await store.checkSecrets(tx, row, stored) : [];
         const sources = sourceUnion(authority.sources, [
           { kind: 'mcp-integration', integrationId: row.id, authorizationEpoch: row.authorization_epoch },
         ]);
@@ -937,7 +1013,7 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
           return actionView(tx, actor, await store.action(tx, old.id));
         }
         await tx.client.query(
-          `INSERT INTO ${table(tx, 'actions')} (id,requester,origin,integration_id,authorization_epoch,selection_version,tool_name,tool_revision,policy_version,arguments,sources,digest,requires_consent) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+          `INSERT INTO ${table(tx, 'actions')} (id,requester,origin,integration_id,authorization_epoch,selection_version,tool_name,tool_revision,policy_version,arguments,sources,digest,requires_consent,secrets) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
           [
             value.id,
             actor,
@@ -952,6 +1028,7 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
             JSON.stringify(sources),
             hash,
             requiresConsent,
+            JSON.stringify(secrets),
           ],
         );
         if (!requiresConsent && policy.standing_exception)
@@ -1094,13 +1171,17 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
         const claim = (await tx.client.query(`SELECT 1 FROM ${table(tx, 'claims')} WHERE action_id=$1`, [id])).rowCount;
         if (claim) return null;
         const { row } = await authorizeAction(tx, action.requester, action, 'dispatch');
-        return { row, action };
+        return {
+          row,
+          action,
+          material: await material(tx, workspaceId, action.requester.membershipId, row, action.secrets),
+        };
       });
       if (!prepared) {
         await service.recover(workspaceId);
         return service.dispatchStatus(workspaceId, id);
       }
-      const discovered = await discoverPrepared(workspaceId, prepared.row);
+      const discovered = await discoverPrepared(prepared.row, prepared.material);
       await store.transaction(workspaceId, async tx => {
         const row = await store.load(tx, prepared.row.id);
         if (
@@ -1130,7 +1211,13 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
           throw new McpError('conflict');
         if (decision?.decision !== 'approve' && (action.requires_consent || !policy.standing_exception))
           throw new McpError('approval-required');
-        const credential = store.credential(workspaceId, row);
+        const { credential, values } = await material(
+          tx,
+          workspaceId,
+          action.requester.membershipId,
+          row,
+          action.secrets,
+        );
         if (credential.kind === 'oauth' && Date.parse(credential.expiresAt) <= Date.now())
           throw new McpError('integration-unavailable');
         const token = randomUUID();
@@ -1144,7 +1231,7 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
               )
             ).rows[0],
           );
-        return { action, row, tool: policy.tool, credential, token, deadline: deadline.getTime() };
+        return { action, row, tool: policy.tool, credential, values, token, deadline: deadline.getTime() };
       });
       if (!claimed) return service.dispatchStatus(workspaceId, id);
       const authorize = async () => {
@@ -1179,7 +1266,7 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
           });
         });
         bounded(response, mcpLimits.responseBytes);
-        rejectReflectedSecrets(response, claimed.credential);
+        rejectReflectedSecrets(response, claimed.credential, claimed.values);
         const parsed = mcpResultSchema.parse(response);
         if (parsed.isError) throw new Error();
         validateOutput(claimed.tool, parsed.structuredContent);
@@ -1189,10 +1276,17 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
       }
       await store.transaction(workspaceId, async tx => {
         await store.load(tx, claimed.row.id);
-        await tx.client.query(
+        const receipt = await tx.client.query(
           `INSERT INTO ${table(tx, 'receipts')} (action_id,status,result,sources) SELECT $1,$2,$3,$4 FROM ${table(tx, 'claims')} WHERE action_id=$1 AND token=$5 ON CONFLICT DO NOTHING`,
           [id, result ? 'succeeded' : 'outcome-unknown', result, JSON.stringify(claimed.action.sources), claimed.token],
         );
+        if (receipt.rowCount && claimed.action.secrets.length && options.secrets?.recordUse)
+          await options.secrets.recordUse(tx, {
+            secretIds: claimed.action.secrets.map(secret => secret.secretId),
+            membershipId: claimed.action.requester.membershipId,
+            endpoint: claimed.row.endpoint,
+            tool: `mcp:${claimed.action.tool_name}`,
+          });
       });
       return service.dispatchStatus(workspaceId, id);
     },

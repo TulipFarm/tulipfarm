@@ -13,3 +13,12 @@ export {
 } from './service.ts';
 export * from './requests.ts';
 export { chatSecretTools, taskSecretTools, type ChatSecretTools, type TaskSecretTools } from './chat-tools.ts';
+export {
+  bindMcpSecrets,
+  mcpCredentialFrom,
+  mcpSecretIds,
+  type McpSecretCredential,
+  type McpSecretUsers,
+  type McpSecretVersion,
+  type McpResolvedCredential,
+} from './mcp.ts';

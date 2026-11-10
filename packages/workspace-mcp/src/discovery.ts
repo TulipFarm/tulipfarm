@@ -2,12 +2,8 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { lockAuthorization, resolveHuman } from '@tulipfarm/access';
 import { qualified } from '@tulipfarm/workspace-storage/runtime';
-import {
-  McpError,
-  workspaceMcpCompatibility,
-  type WorkspaceMcpOptions,
-  type WorkspaceMcpService,
-} from '@tulipfarm/workspace-mcp';
+import { McpError, workspaceMcpCompatibility, type WorkspaceMcpOptions } from './contracts.ts';
+import type { WorkspaceMcpService } from './domain.ts';
 
 export function mcpDiscoveryRequestId(requestId: string) {
   const hash = createHash('sha256').update(`workspace-mcp-discovery:${requestId}`).digest('hex');

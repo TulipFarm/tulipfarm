@@ -44,7 +44,7 @@ export const mcpIntegrationSchema = z.strictObject({
   ownership: z.enum(['personal', 'shared']),
   endpoint: z.string(),
   accountLabel: z.string().nullable(),
-  authMethod: z.enum(['none', 'headers', 'bearer', 'oauth']),
+  authMethod: z.enum(['none', 'headers', 'bearer', 'oauth', 'secret-bearer', 'secret-headers']),
   status: z.enum([
     'setup',
     'oauth-pending',
@@ -101,6 +101,14 @@ export const mcpAuthenticationSchema = z.discriminatedUnion('kind', [
       )
       .min(1)
       .max(10),
+  }),
+  z.strictObject({
+    kind: z.literal('secrets'),
+    secretIds: z
+      .array(mcpHttpId)
+      .min(1)
+      .max(10)
+      .refine(ids => new Set(ids).size === ids.length),
   }),
   z.strictObject({
     kind: z.literal('oauth'),

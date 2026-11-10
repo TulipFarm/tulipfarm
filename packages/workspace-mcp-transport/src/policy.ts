@@ -40,7 +40,7 @@ export class McpNetworkError extends Error {
 export type McpAuthentication =
   | { kind: 'none' }
   | { kind: 'bearer'; token: string }
-  | { kind: 'headers'; headers: Readonly<Record<string, string>> };
+  | { kind: 'headers'; headers: Readonly<Record<string, string>>; cookie?: string };
 
 export type PrivateHost = { host: string; port: number | null; http: boolean };
 export type DestinationAddresses = 'public' | { privateHosts: readonly PrivateHost[] };
@@ -153,7 +153,7 @@ export function authenticationHeaders(auth: McpAuthentication): Record<string, s
   }
   const result: Record<string, string> = {};
   const entries = Object.entries(auth.headers);
-  if (!entries.length || entries.length > 16) throw new McpNetworkError('headers-denied');
+  if ((!entries.length && !auth.cookie) || entries.length > 16) throw new McpNetworkError('headers-denied');
   for (const [raw, value] of entries) {
     const name = raw.toLowerCase();
     if (
@@ -167,6 +167,15 @@ export function authenticationHeaders(auth: McpAuthentication): Record<string, s
     )
       throw new McpNetworkError('headers-denied');
     result[name] = value;
+  }
+  // Only a cookie built from saved secrets may be sent; a free-form `cookie` header stays denied above.
+  if (auth.cookie !== undefined) {
+    if (
+      !/^[!#-+\--:<-~]+=[!#-+\--:<-~]*(?:; [!#-+\--:<-~]+=[!#-+\--:<-~]*)*$/.test(auth.cookie) ||
+      auth.cookie.length > 8192
+    )
+      throw new McpNetworkError('headers-denied');
+    result.cookie = auth.cookie;
   }
   if (Buffer.byteLength(JSON.stringify(result)) > 16384) throw new McpNetworkError('headers-denied');
   return result;

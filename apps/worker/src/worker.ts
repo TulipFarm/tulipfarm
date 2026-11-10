@@ -52,6 +52,7 @@ import { createDefaultKnowledgeWorker } from './knowledge-defaults-composition.t
 import { createDefaultKnowledgeGate, withKnowledgeSourceAuthorization } from '@tulipfarm/knowledge';
 import { createWorkflowAgentTasks } from './workflow-agent-tasks.ts';
 import { createSkillActivities } from './skill-activities.ts';
+import { createWorkspaceMcpDiscoveryActivities } from './workspace-mcp-composition.ts';
 import { configuredSkillClient } from '@tulipfarm/workflow-snippets/client';
 import { createSkillExecutionFactory } from '@tulipfarm/agents/skill-execution';
 import { slackActionsFromEnvironment } from '@tulipfarm/agents/slack-environment';
@@ -320,6 +321,7 @@ async function run() {
               ...slack?.activities,
               ...gmail,
               ...skillImports,
+              ...(coreResources ? createWorkspaceMcpDiscoveryActivities(coreResources.runtime) : {}),
             },
             ...workerTelemetry(telemetry),
             shutdownGraceTime: '5 seconds',

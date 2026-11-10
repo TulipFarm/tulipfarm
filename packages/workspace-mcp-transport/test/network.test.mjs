@@ -104,6 +104,14 @@ test('secret headers cannot override routing, protocol or browser security heade
     assert.throws(() => authenticationHeaders({ kind: 'headers', headers }), { code: 'headers-denied' });
 });
 
+test('a cookie built from saved secrets is sent only when well formed', () => {
+  assert.deepEqual(authenticationHeaders({ kind: 'headers', headers: {}, cookie: 'session=abc%3D; team=42' }), {
+    cookie: 'session=abc%3D; team=42',
+  });
+  for (const cookie of ['', 'no-value', 'a=b;c=d', 'a=b\r\nHost: x', 'a=b c', `a=${'x'.repeat(8192)}`])
+    assert.throws(() => authenticationHeaders({ kind: 'headers', headers: {}, cookie }), { code: 'headers-denied' });
+});
+
 test('real TLS preserves hostname verification and socket-pinned DNS, bounds responses and rejects redirects', async t => {
   const directory = mkdtempSync(join(tmpdir(), 'mcp-tls-'));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
