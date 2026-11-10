@@ -30,9 +30,17 @@ export function currentReply({ messages, outgoing, command, stream }: ReplyInput
   const pending = outgoing && sending && !messages?.some(message => message.id === outgoing.id) ? outgoing : null;
   // A message queued while the workspace updates shows as sent, labelled, without a reply indicator.
   const waiting = !!pending && command.kind === 'sending' && !!command.waiting;
-  const replying = messages
-    ?.filter(message => message.turn && ['queued', 'processing'].includes(message.turn.status))
-    .at(-1);
+  const first = messages?.find(
+    message => message.turn && !['completed', 'cancelled', 'blocked'].includes(message.turn.status),
+  );
+  const replying = first?.turn && ['queued', 'processing'].includes(first.turn.status) ? first : undefined;
+  const queuedMessages =
+    messages?.filter(message => message.turn?.status === 'queued' && first && message.sequence > first.sequence) ?? [];
+  const pendingQueued = !!pending && !!first;
+  const queueLabel =
+    first?.turn && ['waiting', 'reconciling'].includes(first.turn.status)
+      ? 'Waiting for your answer above. This message will be answered next.'
+      : 'This message will be answered after the reply above.';
   const turn = replying?.turn;
   const tools = replying?.tools ?? [];
   const preview = turn && stream.previews.get(turn.id);
@@ -67,8 +75,11 @@ export function currentReply({ messages, outgoing, command, stream }: ReplyInput
     /** The composer hides its submitted draft until the send settles, even after saved history shows the message. */
     draftSent: !!pending || (command.kind === 'sending' && command.command.kind === 'send'),
     turn,
-    thinking: ((!!pending && !waiting) || !!replying) && !delivered,
+    thinking: ((!!pending && !waiting && !pendingQueued) || !!replying) && !delivered,
     waiting,
+    pendingQueued,
+    queuedMessages,
+    queueLabel,
     since: replying?.createdAt ?? pending?.at,
     narration,
     answerText,

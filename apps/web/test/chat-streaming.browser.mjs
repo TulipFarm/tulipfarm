@@ -55,10 +55,18 @@ test('browser fixture cleanup releases owned resources even when a close fails',
 test('chat reply streaming and polling fallback in Chromium', { timeout: 180000 }, async t => {
   const port = Number(process.env.CHAT_STREAMING_PORT ?? 5301);
   const origin = `http://127.0.0.1:${port}`;
-  const vite = spawn('pnpm', ['exec', 'vite', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
-    cwd: new URL('..', import.meta.url),
-    stdio: 'ignore',
-  });
+  const vite = spawn(
+    process.execPath,
+    [
+      new URL('../node_modules/vite/bin/vite.js', import.meta.url).pathname,
+      '--host',
+      '127.0.0.1',
+      '--port',
+      String(port),
+      '--strictPort',
+    ],
+    { cwd: new URL('..', import.meta.url), stdio: 'ignore' },
+  );
   let browser;
   try {
     for (let i = 0; ; i++) {
@@ -127,6 +135,8 @@ test('chat reply streaming and polling fallback in Chromium', { timeout: 180000 
           historyStatus: 200,
           eventRequests: 0,
           commands: [],
+          question: null,
+          sendGate: null,
         };
         const cors = { 'access-control-allow-origin': origin, 'access-control-allow-credentials': 'true' };
         await page.route('**/v1/**', async route => {
@@ -159,14 +169,43 @@ test('chat reply streaming and polling fallback in Chromium', { timeout: 180000 
               return;
             }
             status = state.events.status;
+          } else if (state.question && path.includes(`/requests/${state.question.id}`)) {
+            if (request.method() === 'GET') json = state.question;
+            else {
+              const responseId = path.split('/').at(-1);
+              state.question.status = 'answered';
+              state.question.response = {
+                id: responseId,
+                answer: request.postDataJSON().answer,
+                createdAt: new Date().toISOString(),
+              };
+              history[0].turn = { id: turnId, generation: 1, status: 'queued' };
+              json = { requestId: state.question.id, revision: 1, status: 'answered', responseId };
+            }
+          } else if (request.method() === 'PUT' && path.includes(`/conversations/${chatId}/messages/`)) {
+            if (state.sendGate) await state.sendGate;
+            const body = request.postDataJSON();
+            const messageId = path.split('/').at(-1);
+            const queued = { id: randomUUID(), generation: 0, status: 'queued' };
+            history.push({
+              id: messageId,
+              sequence: history.length + 1,
+              author: 'human',
+              createdAt: new Date().toISOString(),
+              parts: body.parts,
+              turn: queued,
+            });
+            json = { messageId, turnId: queued.id, sequence: history.length };
           } else if (request.method() === 'GET' && path.endsWith(`/conversations/${chatId}/messages`)) {
             state.historyReads++;
             status = state.historyStatus;
             json = { messages: history, nextBefore: null, hasGitHubProposals: false };
-          } else if (request.method() === 'POST' && path.endsWith(`/turns/${turnId}/cancel`)) {
+          } else if (request.method() === 'POST' && /\/turns\/[^/]+\/cancel$/.test(path)) {
             state.commands.push(request.postDataJSON());
-            history[0].turn.status = 'cancelled';
-            json = { turnId, generation: history[0].turn.generation, status: 'cancelled' };
+            const cancelled = history.find(message => message.turn?.id === path.split('/').at(-2)).turn;
+            cancelled.status = 'cancelled';
+            cancelled.generation++;
+            json = { turnId: cancelled.id, generation: cancelled.generation, status: 'cancelled' };
           } else if (request.method() === 'POST' && path.endsWith(`/turns/${turnId}/retry`)) {
             state.commands.push(request.postDataJSON());
             history[0].turn = { id: turnId, generation: history[0].turn.generation + 1, status: 'queued' };
@@ -202,7 +241,7 @@ test('chat reply streaming and polling fallback in Chromium', { timeout: 180000 
           });
           assert.deepEqual(errors, []);
         } catch (error) {
-          console.error('Reply failure:', errors, await page.locator('body').innerText());
+          console.error('Reply failure:', error, errors, await page.locator('body').innerText());
           await screenshot(page, 'reply-failure');
           throw error;
         } finally {
@@ -476,6 +515,121 @@ test('chat reply streaming and polling fallback in Chromium', { timeout: 180000 
         assert.equal(await page.getByText('I am checking the table.', { exact: true }).count(), 0);
         assert.equal(await thinking.count(), 0);
         assert.equal(await slow.count(), 0);
+      },
+    );
+
+    await scenario(
+      'a separate message waits for a choice through send, reload and answer before replying in order',
+      async ({ page, state, workspace, chatId, turnId, history, complete, open }) => {
+        await page.clock.install();
+        history[0].turn.status = 'waiting';
+        const requestId = randomUUID();
+        state.question = {
+          id: requestId,
+          turnId,
+          revision: 1,
+          prompt: 'Which day works?',
+          expiresAt: '2099-01-01T00:00:00Z',
+          answerSchema: {
+            kind: 'choices',
+            multiple: false,
+            choices: [
+              { id: 'monday', label: 'Monday' },
+              { id: 'tuesday', label: 'Tuesday' },
+            ],
+          },
+          status: 'pending',
+          response: null,
+        };
+        history.push({
+          id: requestId,
+          sequence: 2,
+          author: 'assistant',
+          createdAt: new Date().toISOString(),
+          parts: [{ kind: 'request', requestId }],
+          turn: null,
+        });
+        await open();
+        const dock = page.getByRole('region', { name: 'Questions', exact: true });
+        await dock.getByRole('radio', { name: /Tuesday/ }).waitFor();
+        let accept;
+        state.sendGate = new Promise(resolve => (accept = resolve));
+        await page.getByLabel('Message', { exact: true }).fill('Also prepare the agenda.');
+        await page.getByRole('button', { name: 'Send message', exact: true }).click();
+        await page.getByText('Also prepare the agenda.', { exact: true }).waitFor();
+        const queuedNotice = page.getByText('Waiting for your answer above. This message will be answered next.', {
+          exact: true,
+        });
+        try {
+          await queuedNotice.waitFor({ timeout: 1000 });
+          assert.equal(await page.locator('[data-slot="reply-progress"]').count(), 0);
+        } finally {
+          await screenshot(page, 'queued-question');
+          accept();
+        }
+        await page.getByRole('button', { name: 'Remove queued message', exact: true }).waitFor();
+        const queued = history.at(-1);
+        for (const reload of [false, true]) {
+          if (reload) await page.reload();
+          await queuedNotice.waitFor();
+          await page.getByRole('button', { name: 'Remove queued message', exact: true }).waitFor();
+          await page.clock.fastForward(120_001);
+          assert.equal(await page.locator('[data-slot="reply-progress"]').count(), 0);
+          assert.equal(await page.getByText('Reply is taking too long', { exact: true }).count(), 0);
+          assert.equal(await page.getByText(/Cancel it, then send your message again/).count(), 0);
+          assert.equal(await page.getByRole('button', { name: 'Stop reply', exact: true }).count(), 0);
+        }
+        await screenshot(page, 'queued-question-reloaded');
+        await dock.getByRole('radio', { name: /Tuesday/ }).check();
+        await dock.getByRole('button', { name: 'Continue', exact: true }).click();
+        await page.getByText('This message will be answered after the reply above.', { exact: true }).waitFor();
+        await page.getByRole('button', { name: 'Stop reply', exact: true }).waitFor();
+        history[0].turn.status = 'processing';
+        complete('Tuesday is confirmed.');
+        history.at(-1).sequence = history.length;
+        queued.turn.status = 'processing';
+        await notifyChange(page, workspace.id, 'ada', 'detail', chatId);
+        await page.getByText('Tuesday is confirmed.', { exact: true }).waitFor();
+        await page.getByRole('button', { name: 'Remove queued message', exact: true }).waitFor({ state: 'detached' });
+        queued.turn.status = 'completed';
+        history.push({
+          id: randomUUID(),
+          sequence: history.length + 1,
+          author: 'assistant',
+          createdAt: new Date().toISOString(),
+          parts: [{ kind: 'text', text: 'The agenda is ready.' }],
+          turn: null,
+        });
+        await notifyChange(page, workspace.id, 'ada', 'detail', chatId);
+        await page.getByText('The agenda is ready.', { exact: true }).waitFor();
+        const replies = await page.getByRole('list', { name: 'Messages' }).innerText();
+        assert.ok(replies.indexOf('Tuesday is confirmed.') < replies.indexOf('The agenda is ready.'));
+        assert.equal(await queuedNotice.count(), 0);
+      },
+    );
+
+    await scenario(
+      'removing a queued message leaves the waiting turn alone',
+      async ({ page, state, history, turnId, open }) => {
+        history[0].turn.status = 'waiting';
+        const queuedTurn = { id: randomUUID(), generation: 4, status: 'queued' };
+        history.push({
+          id: randomUUID(),
+          sequence: 2,
+          author: 'human',
+          createdAt: new Date().toISOString(),
+          parts: [{ kind: 'text', text: 'Remove this follow-up.' }],
+          turn: queuedTurn,
+        });
+        await open();
+        await page.getByRole('button', { name: 'Remove queued message', exact: true }).click();
+        await page.getByRole('button', { name: 'Remove queued message', exact: true }).waitFor({ state: 'detached' });
+        assert.equal(state.commands.length, 1);
+        assert.equal(state.commands[0].expectedGeneration, 4);
+        assert.equal(queuedTurn.status, 'cancelled');
+        assert.equal(history[0].turn.id, turnId);
+        assert.equal(history[0].turn.status, 'waiting');
+        assert.equal(await page.getByText('Reply is taking too long', { exact: true }).count(), 0);
       },
     );
 

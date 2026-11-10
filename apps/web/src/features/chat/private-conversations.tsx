@@ -840,6 +840,9 @@ function ConversationDetail({
   const {
     pending,
     waiting,
+    pendingQueued,
+    queuedMessages,
+    queueLabel,
     draftSent,
     turn,
     thinking,
@@ -1152,6 +1155,29 @@ function ConversationDetail({
                                     });
                                 }}
                               />
+                              {queuedMessages.includes(message) && message.turn && (
+                                <div className="flex flex-col items-end gap-2">
+                                  <p role="status" className="text-sm text-muted-foreground">
+                                    {queueLabel}
+                                  </p>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    disabled={locked}
+                                    onClick={() =>
+                                      submit({
+                                        kind: 'cancel',
+                                        chatId,
+                                        commandId: crypto.randomUUID(),
+                                        turnId: message.turn!.id,
+                                        expectedGeneration: message.turn!.generation,
+                                      })
+                                    }
+                                  >
+                                    Remove queued message
+                                  </Button>
+                                </div>
+                              )}
                               <ToolActivity
                                 key="activity"
                                 variant="transcript"
@@ -1248,6 +1274,11 @@ function ConversationDetail({
                                 {waiting && (
                                   <p className="self-end text-xs text-muted-foreground">Sending when ready</p>
                                 )}
+                                {pendingQueued && (
+                                  <p role="status" className="self-end text-sm text-muted-foreground">
+                                    {queueLabel}
+                                  </p>
+                                )}
                               </MessageContent>
                             </Message>
                           </li>
@@ -1280,7 +1311,7 @@ function ConversationDetail({
                           </li>
                         )),
                       ]}
-                      {pending && !waiting && !turn && !incomingTurns.length && (
+                      {pending && !waiting && !pendingQueued && !turn && !incomingTurns.length && (
                         <li>
                           <ToolActivity
                             variant="transcript"

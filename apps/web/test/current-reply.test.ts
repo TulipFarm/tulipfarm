@@ -175,11 +175,11 @@ test('continuing a failed turn does not show the last sent message again', () =>
   assert.equal(reply({ messages: [], outgoing, command: { kind: 'sending', command: other } }).pending, null);
 });
 
-test('saved history selects the last queued or processing turn and removes streamed text on completion', () => {
+test('saved history selects the first runnable turn and removes streamed text on completion', () => {
   const first = message({ turn: { id: 'earlier', generation: 0, status: 'queued' } });
   const active = message();
   const completed = message({ turn: { id: 'done', generation: 0, status: 'completed' } });
-  assert.equal(reply({ messages: [first, active, completed] }).turn, active.turn);
+  assert.equal(reply({ messages: [first, active, completed] }).turn, first.turn);
   const streamed = stream({ previews: new Map([['turn', preview()]]) });
   assert.equal(reply({ stream: streamed }).answerText, 'Reply text');
   for (const status of ['completed', 'failed', 'blocked', 'cancelled', 'waiting', 'reconciling'] as const) {
@@ -189,6 +189,52 @@ test('saved history selects the last queued or processing turn and removes strea
     assert.equal(result.thinking, false);
     assert.equal(result.turn, undefined);
   }
+});
+
+test('a follow-up waits behind a saved question or approval without working indicators or a stalled timer', () => {
+  for (const status of ['waiting', 'reconciling'] as const) {
+    const waiting = message({ turn: { id: 'question-turn', generation: 1, status } });
+    const queued = message({
+      id: 'follow-up',
+      sequence: 3,
+      turn: { id: 'follow-up-turn', generation: 0, status: 'queued' },
+    });
+    const result = currentReply(input({ messages: [waiting, queued] }));
+    assert.equal(result.thinking, false);
+    assert.equal(result.turn, undefined);
+    assert.equal(result.queuedKey, null);
+    assert.equal(result.processingKey, null);
+    assert.deepEqual(result.queuedMessages, [queued]);
+    assert.equal(result.queueLabel, 'Waiting for your answer above. This message will be answered next.');
+    const pending = reply({ messages: [waiting], outgoing, command: sending });
+    assert.equal(pending.pending, outgoing);
+    assert.equal(pending.pendingQueued, true);
+    assert.equal(pending.thinking, false);
+    assert.equal(pending.draftSent, true);
+  }
+});
+
+test('answering a question shows the resumed reply before queued follow-ups become runnable', () => {
+  const resumed = message({ turn: { id: 'turn', generation: 3, status: 'queued' } });
+  const queued = message({
+    id: 'follow-up',
+    sequence: 3,
+    turn: { id: 'follow-up-turn', generation: 0, status: 'queued' },
+  });
+  for (const status of ['queued', 'processing'] as const) {
+    resumed.turn!.status = status;
+    const result = currentReply(input({ messages: [resumed, queued] }));
+    assert.equal(result.turn, resumed.turn);
+    assert.equal(result.thinking, true);
+    assert.deepEqual(result.queuedMessages, [queued]);
+    assert.equal(result.queueLabel, 'This message will be answered after the reply above.');
+    assert.equal(result.queuedKey, status === 'queued' ? 'turn:3' : null);
+  }
+  resumed.turn!.status = 'completed';
+  const next = currentReply(input({ messages: [resumed, queued] }));
+  assert.equal(next.turn, queued.turn);
+  assert.deepEqual(next.queuedMessages, []);
+  assert.equal(next.queuedKey, 'follow-up-turn:0');
 });
 
 test('streamed text and progress must each match the saved generation', () => {
