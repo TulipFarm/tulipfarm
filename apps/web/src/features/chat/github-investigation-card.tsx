@@ -22,8 +22,9 @@ type CardProps = {
 
 export function GitHubTaskSourceCard({
   requested = false,
+  working = false,
   ...props
-}: Omit<CardProps, 'task'> & { requested?: boolean }) {
+}: Omit<CardProps, 'task'> & { requested?: boolean; working?: boolean }) {
   const read = useGitHubInvestigation(props.workspaceId, props.chatId, true);
   return read.state.kind === 'ready' && !read.state.error && !read.state.data.investigation && !requested ? (
     <GitHubAccountCard
@@ -33,6 +34,7 @@ export function GitHubTaskSourceCard({
       disabled={props.disabled}
       picked={props.picked}
       task
+      taskWorking={working}
     />
   ) : (
     <GitHubInvestigationCard

@@ -35,7 +35,7 @@ export function McpActions({
   const [cursor, setCursor] = useState('');
   const read = useMcpActions(api, kind, originId, cursor);
   if (
-    kind === 'chat' &&
+    kind !== 'integration' &&
     !cursor &&
     (read.state.kind === 'loading' ||
       (read.state.kind === 'ready' && !read.state.error && !read.state.data.actions.length))

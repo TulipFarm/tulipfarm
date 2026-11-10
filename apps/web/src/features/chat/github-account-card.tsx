@@ -14,6 +14,7 @@ export function GitHubAccountCard({
   disabled,
   picked,
   task = false,
+  taskWorking = false,
 }: {
   workspaceId: string;
   chatId: string;
@@ -21,6 +22,7 @@ export function GitHubAccountCard({
   disabled: boolean;
   picked: (login: string) => void;
   task?: boolean;
+  taskWorking?: boolean;
 }) {
   const accountsRead = useGitHubAccounts(workspaceId);
   const selectionRead = useGitHubSelection(workspaceId, chatId, task);
@@ -103,6 +105,7 @@ export function GitHubAccountCard({
   const selection = selectionState.data;
   const usable = accounts.accounts.filter(account => account.state === 'active' && account.identity);
   const hidden = accounts.accounts.length - usable.length;
+  if (task && !stale && !accounts.accounts.length && !selection.accountId) return null;
   return (
     <section aria-label="Choose a GitHub account" className="space-y-3 rounded-xl border p-4">
       <div className="space-y-1">
@@ -158,7 +161,7 @@ export function GitHubAccountCard({
           {hidden === 1 ? '1 account needs attention' : `${hidden} accounts need attention`} in Integrations.
         </p>
       )}
-      {disabled && (
+      {disabled && (!task || taskWorking) && (
         <p role="status" className="text-sm text-muted-foreground">
           {task
             ? 'Account selection is locked while task work is active.'
