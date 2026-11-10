@@ -82,6 +82,8 @@ const codes = new Set<string>([
   'approval-pending',
   'batch-required',
   'import-file-failed',
+  'import-paste-failed',
+  'empty-paste',
   'table-not-found',
   // Corrections the model or person can make, returned instead of a change.
   'no-change',
