@@ -247,12 +247,7 @@ export function SkillsPage() {
                   title="No workspace skills yet"
                   description="Import a skill, or ask chat to make one for a task you repeat. Review it once to save and enable it privately."
                   sample={<SkillsSample />}
-                >
-                  <Button onClick={() => setImportOpen(true)}>
-                    <Add size={16} aria-hidden="true" />
-                    Import skill
-                  </Button>
-                </StatePanel>
+                />
               )}
               {(after || data.nextCursor) && (
                 <nav aria-label="Skill pages" className="flex flex-wrap items-center gap-2">
