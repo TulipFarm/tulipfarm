@@ -90,6 +90,9 @@ Then take the authorization row lock, followed by resource catalog rows and phys
 Protected ordinary operations take the authorization lock before a separate permission-read statement.
 Ordinary record operations never take the workspace migration lock.
 Use `FOR SHARE` for protected operations and `FOR UPDATE` for authorization mutation.
+`lockAuthorization` first joins a per-workspace advisory queue (shared for reads, exclusive for writes) so a waiting
+write is not overtaken by later reads. A write whose lock wait times out or deadlocks retries the wait from a savepoint,
+up to three attempts with jitter; callers that retry their whole transaction pass `retry: false`.
 The otherwise inert `lock_version` column supplies PostgreSQL's UPDATE privilege needed for row locks.
 
 The runtime router requires an inclusive minimum/maximum common version for each transaction.

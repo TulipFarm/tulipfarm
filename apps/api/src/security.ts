@@ -42,15 +42,24 @@ export function workspaceUpdatingError(error: unknown, reply: FastifyReply): boo
   return true;
 }
 
+const refusedCodes = new Set(['40001', '40P01', '55P03', '57014', '57P03', '08001', 'ECONNREFUSED']);
+
+function refusedBeforeChange(error: unknown) {
+  if (error instanceof StorageUnavailableError || !transientStorageError(error)) return false;
+  const { code, message } = error as { code?: unknown; message?: unknown };
+  return (typeof code === 'string' && refusedCodes.has(code)) || message === 'timeout exceeded when trying to connect';
+}
+
 export function requestBoundaryError(error: unknown, reply: FastifyReply): boolean {
   if (workspaceUpdatingError(error, reply)) return true;
   if (error instanceof StorageUnavailableError && error.code === 'disabled') {
     reply.code(404).send({ error: 'not-found' });
     return true;
   }
-  // A lock wait, serialization conflict or dropped connection clears up on retry; each route keeps its own answer
-  // for a full or closed workspace queue.
-  if (!(error instanceof StorageUnavailableError) && transientStorageError(error)) {
+  // A lock wait, deadlock, serialization conflict, statement timeout or refused connection means Postgres rolled the
+  // work back, so the client can safely send it again. A connection lost mid-transaction may have committed and stays
+  // a server error. Each route keeps its own answer for a full or closed workspace queue.
+  if (refusedBeforeChange(error)) {
     reply.code(503).header('Retry-After', '1').send({ error: 'temporarily-unavailable' });
     return true;
   }
