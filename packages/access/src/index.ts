@@ -65,8 +65,11 @@ export class AccessDenied extends Error {
 }
 
 export class WorkspaceMembershipDenied extends AccessDenied {
-  constructor(readonly userId: string) {
+  readonly userId: string;
+
+  constructor(userId: string) {
     super();
+    this.userId = userId;
   }
 }
 
