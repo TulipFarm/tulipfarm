@@ -300,11 +300,15 @@ export function KnowledgeLibrary({
   slug,
   entries,
   refresh,
+  delayed,
+  restart,
 }: {
   workspaceId: string;
   slug: string;
   entries: KnowledgeEntry[];
   refresh: () => Promise<void>;
+  delayed: boolean;
+  restart: () => void;
 }) {
   const api = useMemo(() => knowledgeApi(workspaceId), [workspaceId]);
   const navigate = useNavigate();
@@ -315,7 +319,10 @@ export function KnowledgeLibrary({
   const [selected, setSelected] = useState<FileSummary | null>(null);
   const [query, setQuery] = useState('');
   const [search, setSearch] = useState('');
-  const changed = () => change({ kind: 'conceal', keys: [personalKnowledgeKeys] });
+  const changed = () => {
+    restart();
+    return change({ kind: 'conceal', keys: [personalKnowledgeKeys] });
+  };
   const retry = useCommand(
     ({ entry, commandId }: { entry: KnowledgeEntry; commandId: string }, signal) => api.retry(entry, commandId, signal),
     changed,
@@ -410,6 +417,7 @@ export function KnowledgeLibrary({
           description="Add a note, add a file from Files, upload files, or connect a source using the actions above."
         />
       )}
+      {delayed && <p role="status">Automatic checks stopped. Refresh entries to check again.</p>}
       <Button variant="ghost" onClick={() => void refresh()}>
         Refresh entries
       </Button>

@@ -3,6 +3,7 @@ import { knowledgeSearchResultSchema, type KnowledgeSave } from '@tulipfarm/know
 import { apiOrigin } from '@/lib/auth';
 import { jsonResponse, readJson, responseError } from '@/lib/http';
 import { TableRequestError } from '@/features/tables/request-state';
+import type { FeatureReadOptions } from '@/lib/query/options';
 
 /** Parts of a document that could not be read: the full count and the first few. */
 export const knowledgeGapsSchema = z.object({
@@ -35,6 +36,21 @@ const messages: Record<string, string> = {
 };
 
 export const personalKnowledgeKeys = ['knowledge', 'personal'] as const;
+const pending = (entry: KnowledgeEntry) => entry.parsing === 'queued' || entry.parsing === 'parsing';
+const interval = (checks: number) => Math.min(2000 * 2 ** checks, 30_000);
+
+export function personalKnowledgeRead(api: ReturnType<typeof knowledgeApi>): FeatureReadOptions<KnowledgeEntry[]> {
+  return {
+    key: personalKnowledgeKeys,
+    load: api.list,
+    pollLoad: api.pending,
+    staleTime: 0,
+    pollWhile: entries => entries.some(pending),
+    interval,
+    maxChecks: 13,
+    maxDuration: 5 * 60_000,
+  };
+}
 
 export function knowledgeApi(workspaceId: string) {
   const knowledge = `${apiOrigin}/v1/workspaces/${encodeURIComponent(workspaceId)}/knowledge`;
@@ -56,6 +72,8 @@ export function knowledgeApi(workspaceId: string) {
     }
     return readJson(response);
   }
+  const get = async (documentId: string, signal: AbortSignal) =>
+    documentSchema.parse(await request(`/${documentId}`, 'GET', signal));
   return {
     list: async (signal: AbortSignal) => {
       const entries: KnowledgeEntry[] = [];
@@ -69,8 +87,23 @@ export function knowledgeApi(workspaceId: string) {
       } while (cursor);
       return entries;
     },
-    get: async (documentId: string, signal: AbortSignal) =>
-      documentSchema.parse(await request(`/${documentId}`, 'GET', signal)),
+    get,
+    pending: async (entries: KnowledgeEntry[], signal: AbortSignal) => {
+      const refreshed: KnowledgeEntry[] = [];
+      for (const entry of entries) {
+        signal.throwIfAborted();
+        if (!pending(entry)) {
+          refreshed.push(entry);
+          continue;
+        }
+        try {
+          refreshed.push(await get(entry.documentId, signal));
+        } catch (error) {
+          if (!(error instanceof TableRequestError) || error.status !== 404) throw error;
+        }
+      }
+      return refreshed;
+    },
     add: async (input: { documentId: string; commandId: string; title: string; fileId: string }, signal: AbortSignal) =>
       documentSchema.parse(
         await request(`/${input.documentId}`, 'PUT', signal, {

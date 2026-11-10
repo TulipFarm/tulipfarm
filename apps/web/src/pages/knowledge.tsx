@@ -44,7 +44,7 @@ import { slackErrorMessages, slackKnowledgeApi, slackSourceKeys } from '@/featur
 import { CommandFeedback, useCommand } from '@/features/integrations/slack-knowledge-shared';
 import { useFeatureChanges, useFeatureRead } from '@/lib/query';
 import { workspaceRoute } from '@/router';
-import { knowledgeApi, personalKnowledgeKeys } from '@/features/files/knowledge-api';
+import { knowledgeApi, personalKnowledgeRead } from '@/features/files/knowledge-api';
 import { KnowledgeLibrary } from '@/features/files/knowledge-library';
 import { ReadResult } from '@/features/integrations/slack-knowledge-shared';
 
@@ -332,13 +332,7 @@ export default function KnowledgePage() {
   const { workspace } = workspaceRoute.useRouteContext();
   const { enabled, read } = useDefaultKnowledge(workspace.id);
   const api = useMemo(() => knowledgeApi(workspace.id), [workspace.id]);
-  const entries = useFeatureRead({
-    key: personalKnowledgeKeys,
-    load: api.list,
-    staleTime: 0,
-    pollWhile: items => items.some(entry => entry.parsing === 'queued' || entry.parsing === 'parsing'),
-    maxChecks: Infinity,
-  });
+  const entries = useFeatureRead(personalKnowledgeRead(api));
   return (
     <PageContent>
       <PageHeader title="Knowledge" description="Your notes, files, and connected sources." />
@@ -349,6 +343,8 @@ export default function KnowledgePage() {
             slug={workspace.slug}
             entries={items}
             refresh={entries.refresh}
+            delayed={entries.delayed}
+            restart={entries.restart}
           />
         )}
       </ReadResult>

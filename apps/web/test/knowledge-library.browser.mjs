@@ -1,9 +1,14 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { test } from 'node:test';
+import { after, before, test } from 'node:test';
 import { chromium } from 'playwright';
 import { knowledgeSaveSchema, knowledgeCommandSchema } from '@tulipfarm/knowledge/contracts';
-import { startBuiltApp, captureBuilderScreenshot, builderBrowserOptions } from './built-app.fixture.mjs';
+import {
+  startBuiltApp,
+  captureBuilderScreenshot,
+  captureBrowserFailure,
+  builderBrowserOptions,
+} from './built-app.fixture.mjs';
 import { createWorkspaceFixture, serveWorkspaceShellEvent, workspaceShellReads } from './workspace.fixture.mjs';
 
 const entry = (title, rest = {}) => ({
@@ -19,13 +24,28 @@ const entry = (title, rest = {}) => ({
   ...rest,
 });
 
-async function environment(t, { entries = [], enabled = true, otherMember = false } = {}) {
-  const server = await startBuiltApp();
-  t.after(() => server.close());
-  const browser = await chromium.launch(builderBrowserOptions());
-  t.after(() => browser.close());
-  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, reducedMotion: 'reduce' });
-  page.setDefaultTimeout(15000);
+let server, browser;
+before(async () => {
+  server = await startBuiltApp();
+  browser = await chromium.launch(builderBrowserOptions());
+});
+after(async () => {
+  try {
+    await browser?.close();
+  } finally {
+    await server?.close();
+  }
+});
+
+async function environment(t, { entries = [], enabled = true, otherMember = false, clock = false } = {}) {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, reducedMotion: 'reduce' });
+  t.after(() => context.close());
+  const page = await context.newPage();
+  page.setDefaultTimeout(30000);
+  if (clock) {
+    await page.clock.install({ time: new Date(0) });
+    await page.clock.pauseAt(new Date(0));
+  }
   const { workspace, session } = createWorkspaceFixture({
     slug: 'knowledge-demo',
     name: 'Knowledge demo',
@@ -157,7 +177,14 @@ async function environment(t, { entries = [], enabled = true, otherMember = fals
     }
     await route.fulfill(response);
   });
+  const initialPages = clock
+    ? page.waitForResponse(response => new URL(response.url()).searchParams.has('cursor'))
+    : null;
   await page.goto(`${server.origin}/${workspace.slug}/knowledge`);
+  if (initialPages) {
+    await (await initialPages).finished();
+    await page.clock.runFor(100);
+  }
   const library = page.locator('section[aria-label="Your Knowledge"]');
   await library.getByRole('heading', { name: 'Your entries', exact: true }).waitFor();
   t.after(() => {
@@ -174,6 +201,8 @@ async function environment(t, { entries = [], enabled = true, otherMember = fals
     get listReads() {
       return listReads;
     },
+    documentReads: () =>
+      requests.filter(request => request.method === 'GET' && request.path.startsWith(`${base}/knowledge/documents/`)),
   };
 }
 
@@ -235,7 +264,11 @@ test(
       .getByText('Failed', { exact: true })
       .waitFor();
     await captureBuilderScreenshot(page, 'knowledge-library');
-    assert.ok(env.listReads >= 6, 'cursor pages and progress are read');
+    assert.equal(env.listReads, 4, 'only initial and mutation reads traverse the cursor pages');
+    assert.ok(
+      env.documentReads().some(request => request.path.endsWith(pending.documentId)),
+      'pending entries are checked',
+    );
   },
 );
 
@@ -339,10 +372,39 @@ test(
 );
 
 test('another member sees no personal entries or search passages', { timeout: 60000 }, async t => {
-  const { library } = await environment(t, { entries: [entry('Private handbook')], otherMember: true });
-  await library.getByText('No personal entries yet').waitFor();
-  assert.equal(await library.getByText('Private handbook').count(), 0);
-  await library.getByRole('searchbox', { name: 'Search Knowledge' }).fill('manager');
-  await library.getByRole('button', { name: 'Search', exact: true }).click();
-  await library.getByText('No matching passages.').waitFor();
+  const env = await environment(t, { entries: [entry('Private handbook')], otherMember: true });
+  const { page, library } = env;
+  try {
+    await library.getByText('No personal entries yet').waitFor();
+    assert.equal(await library.getByText('Private handbook').count(), 0);
+    await library.getByRole('searchbox', { name: 'Search Knowledge' }).fill('manager');
+    const searched = page.waitForResponse(response => response.url().includes('/knowledge/search?query=manager'));
+    await library.getByRole('button', { name: 'Search', exact: true }).click();
+    assert.equal((await searched).status(), 200);
+    await library.getByText('No matching passages.').waitFor();
+  } catch (error) {
+    await captureBrowserFailure(page, 'knowledge-member-search');
+    throw error;
+  }
+});
+
+test('stalled entries stop automatic checks and manual Refresh restarts them', { timeout: 60000 }, async t => {
+  const pending = entry('Stalled report', { parsing: 'queued' });
+  const env = await environment(t, { entries: [pending, entry('Ready handbook')], clock: true });
+  const { page, library } = env;
+  await page.clock.fastForward(300000);
+  await library.getByText('Automatic checks stopped. Refresh entries to check again.').waitFor();
+  assert.ok(env.documentReads().length <= 12, 'automatic document reads have an upper bound');
+  assert.equal(env.listReads, 2, 'automatic checks do not reload the library');
+  await captureBuilderScreenshot(page, 'knowledge-polling-stopped');
+  const stopped = env.documentReads().length;
+  await page.clock.fastForward(300000);
+  assert.equal(env.documentReads().length, stopped);
+  pending.parsing = 'ready';
+  await page.clock.resume();
+  await library.getByRole('button', { name: 'Refresh entries', exact: true }).click();
+  await library.getByText('Queued', { exact: true }).waitFor({ state: 'detached' });
+  assert.equal(env.listReads, 4, 'manual Refresh reloads both cursor pages');
+  assert.equal(await library.getByText('Automatic checks stopped. Refresh entries to check again.').count(), 0);
+  await captureBuilderScreenshot(page, 'knowledge-polling-refreshed');
 });

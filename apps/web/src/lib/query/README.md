@@ -10,11 +10,13 @@ mutation recovery, and change-to-query rules.
 useFeatureRead<T>({
   key: readonly unknown[],
   load: (signal: AbortSignal) => Promise<T>,
+  pollLoad?: (data: T, signal: AbortSignal) => Promise<T>,
   enabled?: boolean,
   staleTime?: number,
   pollWhile?: (data: T) => boolean,
-  interval?: number,
+  interval?: number | ((checks: number) => number),
   maxChecks?: number,
+  maxDuration?: number,
 }): {
   state: ReadState<T>,
   refresh: () => Promise<void>,
@@ -60,6 +62,12 @@ No additional QueryObserver is created for polling. Hidden or offline tabs pause
 Visibility return waits a full interval and does not reset the budget. An explicit
 `refresh()` resets that query's budget. Polling stops on a read error or when the
 last interested reader leaves. `Infinity` supports unbounded credits polling.
+An optional `maxDuration` limits elapsed time from the first scheduled progress
+check, including hidden/offline time and request latency. No new progress check
+starts at or after that deadline; an already running read may finish. An optional
+`pollLoad` refreshes the cached result during progress checks only, under the same
+abort and authority fences. Initial reads, manual Refresh, and concealed
+revalidations use `load`; manual Refresh cancels an in-flight partial read first.
 
 Freshness defaults are `ordinary: 60_000`, `catalog: 900_000`, and `chat: 30_000`.
 Inactive memory retention is 30 minutes. Focus never refreshes feature queries.
