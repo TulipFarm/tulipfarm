@@ -3,7 +3,14 @@ import { Link } from '@tanstack/react-router';
 import { Button } from '@tulipfarm/sprout/button';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { Form, FormFooter } from '@tulipfarm/sprout/form';
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@tulipfarm/sprout/sheet';
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+  type SheetContentProps,
+} from '@tulipfarm/sprout/sheet';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -42,6 +49,7 @@ export function RecordEditor({
   close,
   saved,
   refresh,
+  finalFocus,
 }: {
   record: TableDataRow | null;
   table: TableDefinition;
@@ -53,6 +61,7 @@ export function RecordEditor({
   /** Receives the saved row's ID. */
   saved: (recordId: string) => void;
   refresh: () => Promise<void>;
+  finalFocus?: SheetContentProps['finalFocus'];
 }) {
   const isMember = table.systemKind === 'workspace-members';
   const [recordId] = useState(() => record?.id ?? repair?.id ?? crypto.randomUUID());
@@ -137,7 +146,7 @@ export function RecordEditor({
         if (!open) requestClose();
       }}
     >
-      <SheetContent size="lg" showCloseButton={!sending}>
+      <SheetContent size="lg" showCloseButton={!sending} finalFocus={finalFocus}>
         <SheetHeader>
           <SheetTitle>
             {repair

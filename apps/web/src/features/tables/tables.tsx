@@ -519,16 +519,36 @@ export function Records({
   const [notice, setNotice] = useState('');
   const [addedRow, setAddedRow] = useState<string | null>(null);
   const [returnFocus, setReturnFocus] = useState(0);
-  const heading = useRef<HTMLHeadingElement>(null);
-  useEffect(() => {
-    if (returnFocus) heading.current?.focus();
-  }, [returnFocus]);
+  const region = useRef<HTMLElement>(null);
+  const opener = useRef<{ element: HTMLElement | null; rowId: string | null; index: number }>({
+    element: null,
+    rowId: null,
+    index: 0,
+  });
+  const focusAdded = useRef<string | null>(null);
+  const restoredFocus = useRef(0);
+  const [refreshing, setRefreshing] = useState(false);
   const editing = selection !== null;
   const refresh = async () => {
-    await read.refresh();
-    await refreshTable();
+    setRefreshing(true);
+    try {
+      await read.refresh();
+      await refreshTable();
+    } finally {
+      setRefreshing(false);
+    }
   };
-  const select = (next: RowSelection) => {
+  const select = (next: RowSelection, element = document.activeElement) => {
+    const rowId = 'record' in next ? next.record.id : null;
+    opener.current = {
+      element: element instanceof HTMLElement ? element : null,
+      rowId,
+      index: Math.max(
+        0,
+        shownRows.findIndex(record => record.id === rowId),
+      ),
+    };
+    focusAdded.current = null;
     setNotice('');
     setAddedRow(null);
     setSelection(next);
@@ -537,6 +557,7 @@ export function Records({
     setSelection(null);
     setNotice(message);
     setAddedRow(added);
+    focusAdded.current = added;
     setReturnFocus(count => count + 1);
   };
   const apply = (next: TableView) => {
@@ -547,11 +568,54 @@ export function Records({
   const clear = () => apply({ ...view, where: '', search: undefined });
   const locked =
     disabled ||
+    refreshing ||
     exporting ||
     read.state.kind !== 'ready' ||
     !!read.state.error ||
     read.state.refreshing ||
     data?.mode === 'invalid';
+  const finalFocus = () => {
+    const controls = Array.from(region.current?.querySelectorAll<HTMLElement>('[data-row-control]') ?? []).filter(
+      element => !element.matches(':disabled, [aria-disabled="true"]') && element.getClientRects().length > 0,
+    );
+    const edit = (id: string | null) =>
+      controls.find(element => element.dataset.rowId === id && element.dataset.rowControl === 'edit');
+    const add = region.current?.querySelector<HTMLElement>('[data-add-row]:not(:disabled)');
+    if (focusAdded.current) return edit(focusAdded.current) ?? add ?? region.current;
+    const { element, rowId, index } = opener.current;
+    if (
+      element?.isConnected &&
+      !element.matches(':disabled, [aria-disabled="true"]') &&
+      element.getClientRects().length > 0
+    )
+      return element;
+    const same = controls.find(
+      control => control.dataset.rowId === rowId && control.dataset.rowControl === element?.dataset.rowControl,
+    );
+    const nearest = [...new Set(controls.map(control => control.dataset.rowId))];
+    return (
+      same ??
+      edit(rowId) ??
+      (rowId
+        ? controls.find(control => control.dataset.rowId === nearest[Math.min(index, nearest.length - 1)])
+        : add) ??
+      region.current
+    );
+  };
+  useEffect(() => {
+    if (!editing && !locked && returnFocus !== restoredFocus.current) {
+      let cancelled = false;
+      queueMicrotask(() => {
+        if (!cancelled) {
+          finalFocus()?.focus({ preventScroll: true });
+          restoredFocus.current = returnFocus;
+        }
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
+  }, [editing, locked, returnFocus]);
   if (search.row)
     return (
       <section className="space-y-4">
@@ -572,7 +636,12 @@ export function Records({
   const firstUse =
     result?.mode === 'rows' && !result.records.length && !pages.after && !filtered && !summary && !groupProblem;
   const addRow = (size: 'sm' | 'md' = 'md') => (
-    <Button size={size} disabled={locked || editing} onClick={() => select({ kind: 'create' })}>
+    <Button
+      size={size}
+      data-add-row
+      disabled={locked || editing}
+      onClick={event => select({ kind: 'create' }, event.currentTarget)}
+    >
       <Add size={size === 'sm' ? 14 : 16} aria-hidden="true" />
       {systemKind ? 'Add member' : 'Add row'}
     </Button>
@@ -621,6 +690,7 @@ export function Records({
         close={() => finish()}
         saved={recordId => finish('Row added.', recordId)}
         refresh={refresh}
+        finalFocus={finalFocus}
       />
     ) : selection.kind === 'edit' ? (
       <RecordEditor
@@ -633,6 +703,7 @@ export function Records({
         close={() => finish()}
         saved={() => finish('Row saved.')}
         refresh={refresh}
+        finalFocus={finalFocus}
       />
     ) : selection.kind === 'profile' ? (
       <MemberProfilePanel
@@ -696,7 +767,9 @@ export function Records({
           size="icon-sm"
           disabled={locked || editing}
           aria-label={`Edit ${rowLabel(table.definition, record.values, systemKind)}`}
-          onClick={() => select({ kind: 'edit', record })}
+          data-row-control="edit"
+          data-row-id={record.id}
+          onClick={event => select({ kind: 'edit', record }, event.currentTarget)}
         >
           <Edit size={16} aria-hidden="true" />
         </Button>
@@ -949,11 +1022,16 @@ export function Records({
     );
   return (
     <>
-      <section key={applied.revision} className="space-y-4 pb-20">
+      <section
+        key={applied.revision}
+        ref={region}
+        tabIndex={-1}
+        aria-label={table.definition.label}
+        className="space-y-4 pb-20"
+      >
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-baseline gap-3">
             <h2
-              ref={heading}
               tabIndex={-1}
               aria-live={!summary && filtered ? 'polite' : undefined}
               className="text-sm font-medium tabular-nums"
@@ -1153,7 +1231,7 @@ export function Records({
 type RowActionProps = {
   record: TableDataRow;
   permissions: RowPermissions;
-  select: (next: RowSelection) => void;
+  select: (next: RowSelection, element?: Element | null) => void;
   systemKind?: TableDefinition['systemKind'];
 };
 
@@ -1219,15 +1297,31 @@ function RowActions({
   select,
   systemKind,
 }: RowActionProps & { disabled: boolean; label: string }) {
+  const trigger = useRef<HTMLButtonElement>(null);
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        render={<Button variant="ghost" size="icon-sm" disabled={disabled} aria-label={`Actions for ${label}`} />}
+        render={
+          <Button
+            ref={trigger}
+            variant="ghost"
+            size="icon-sm"
+            disabled={disabled}
+            aria-label={`Actions for ${label}`}
+            data-row-control="actions"
+            data-row-id={record.id}
+          />
+        }
       >
         <MoreH size={16} aria-hidden="true" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        <RowActionItems record={record} permissions={permissions} select={select} systemKind={systemKind} />
+        <RowActionItems
+          record={record}
+          permissions={permissions}
+          select={next => select(next, trigger.current)}
+          systemKind={systemKind}
+        />
       </DropdownMenuContent>
     </DropdownMenu>
   );
