@@ -282,6 +282,14 @@ function TaskDetail({ workspace, taskId }: { workspace: { id: string; slug: stri
         {task => (
           <>
             <TaskHeading workspaceId={workspace.id} task={task} />
+            <TaskHistory
+              key={`history/${taskId}`}
+              api={api}
+              taskId={taskId}
+              workspaceId={workspace.id}
+              task={task}
+              refreshTask={read.refresh}
+            />
             {task.agentLifecycle !== 'active' && (
               <p role="status">
                 The agent for this task was {task.agentLifecycle}. You can read this task but not continue it.
@@ -333,6 +341,7 @@ function TaskDetail({ workspace, taskId }: { workspace: { id: string; slug: stri
                   slug={workspace.slug}
                   requested={task.skills.some(skill => skill.id === 'github-investigation')}
                   disabled={!['paused', 'waiting-clarification', 'failed'].includes(task.status)}
+                  working={task.status === 'pending'}
                   picked={() => void read.refresh()}
                 />
                 <GitHubBatches
@@ -353,14 +362,6 @@ function TaskDetail({ workspace, taskId }: { workspace: { id: string; slug: stri
               workspaceId={workspace.id}
               taskId={taskId}
               revision={`${task.status}/${task.toolCalls}/${task.activeMilliseconds}`}
-            />
-            <TaskHistory
-              key={`history/${taskId}`}
-              api={api}
-              taskId={taskId}
-              workspaceId={workspace.id}
-              task={task}
-              refreshTask={read.refresh}
             />
             <ActivityResultCard id={`task-activity:${taskId}`} items={task.activity} title="Task actions" />
             <TaskProposals

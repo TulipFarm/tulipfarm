@@ -90,6 +90,15 @@ function McpSelection({
     else if (state.kind !== 'loading') onSelection?.(savedBindings.current ? unresolved : none);
   }, [read.state, onSelection]);
   useEffect(() => () => onSelection?.(savedBindings.current ? unresolved : none), [onSelection]);
+  if (
+    kind === 'task' &&
+    read.state.kind === 'ready' &&
+    !read.state.error &&
+    !read.state.data.stale &&
+    !read.state.data.bindings.length &&
+    !read.state.data.choices.length
+  )
+    return null;
   if (!prepared)
     return (
       <div className="space-y-2">
