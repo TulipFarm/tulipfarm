@@ -5,7 +5,7 @@ import { applyCommonMigrations, inTransaction, qualified } from '../../src/provi
 import { workspaceTableMigrations } from '../../../workspaces/src/table-migrations.ts';
 import { fixture } from './fixture.mjs';
 
-for (const version of [54, 55]) {
+for (const version of [54, 55, 56]) {
   test(
     `upgrading account coverage from version ${version} preserves sources and separates accounts`,
     { timeout: 60000 },
@@ -13,7 +13,7 @@ for (const version of [54, 55]) {
       const db = await fixture();
       try {
         const stream = await workspaceTableMigrations();
-        const upgrade = stream.findIndex(item => item.name === '0056_knowledge_account_coverage.sql');
+        const upgrade = stream.findIndex(item => item.name === '0057_knowledge_account_coverage.sql');
         assert.ok(upgrade > 0);
         const workspace = await db.create(stream.slice(0, version));
         const table = name => qualified(workspace.names.schema, name);
