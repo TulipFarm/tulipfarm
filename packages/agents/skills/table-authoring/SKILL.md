@@ -2,6 +2,7 @@
 name: table-authoring
 title: Propose business records for review
 description: Design or update business table schemas and prepare changes for human review. Use it to define a new table, add or change fields, or archive or restore a table. Adding rows, including fake/sample tickets, to an existing table does not need this skill: inspect the fields and use the row tools.
+tools: tables.definitions schema.context schema.inspect tables.propose
 ---
 
 # Propose business tables for review

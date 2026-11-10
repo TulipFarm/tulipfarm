@@ -243,6 +243,29 @@ test('discovery ranks an exact tool name ahead of description-only matches', () 
   assert.equal(catalog.search('rows.create')[0], 'rows_create');
 });
 
+test('declared skill tools load only admitted definitions and do not widen optional access', () => {
+  const loaded = new Set();
+  const catalog = nativeChatTools(undefined, false, loaded);
+  assert.deepEqual(
+    catalog.load([
+      'agents.context',
+      'agents.draft',
+      'execution.run',
+      'secrets.request',
+      'conversation.messages.read',
+      'made.up',
+    ]),
+    ['agents_context', 'agents_draft'],
+  );
+  assert.deepEqual(catalog.load(['agents.context', 'agents.draft']), []);
+  const next = nativeChatTools(undefined, false, loaded);
+  assert.ok(next.tools.some(tool => tool.name === 'agents_draft'));
+  for (const name of ['execution_run', 'secrets_request', 'conversation_messages_read', 'made_up']) {
+    assert.ok(!next.tools.some(tool => tool.name === name));
+    assert.equal(next.resolve({ id: 'call', name, input: { activity: 'Reading' }, providerId: true }).ok, false);
+  }
+});
+
 test('discovery loads a bounded set of definitions and skips large unrelated tools', () => {
   const loaded = new Set();
   const catalog = nativeChatTools(undefined, false, loaded);

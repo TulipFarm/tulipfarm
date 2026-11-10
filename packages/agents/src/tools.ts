@@ -1658,7 +1658,7 @@ export function createChatTools(
           models: {
             choices: models,
             instruction:
-              'Recommend the choice that best fits the job: higher quality for judgment, writing or multi-step work; higher speed and lower cost for simple, frequent work. Save its id as definition.modelFamilyId.',
+              'Unless the person chose another model, use the workspace default chat model marked default. Save its id as definition.modelFamilyId; leave it unset if no default choice is available. The person can edit it in the builder.',
           },
           triggers: {
             linkedWorkflow: linked

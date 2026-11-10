@@ -2,6 +2,7 @@
 name: workflow-authoring
 title: Draft a workflow
 description: Draft or update an automated workflow for human review. Use it whenever someone wants work to happen on a schedule, when a row is created or changed, from a webhook, or as a repeatable sequence of steps, even if they do not say "workflow". Also use it to enable or disable one.
+tools: workflows.list workflows.read workflows.draft workflows.providers workflows.archive workflows.restore
 ---
 
 # Draft a workflow for review
