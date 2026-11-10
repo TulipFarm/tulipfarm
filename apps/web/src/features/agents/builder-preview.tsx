@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { CalendarClock, MessageSquare, ScrollText, ShieldCheck, Wrench } from 'lucide-react';
+import { CalendarClock, Database, MessageSquare, ScrollText, ShieldCheck, Wrench } from 'lucide-react';
 import { AgentAvatar } from '@tulipfarm/sprout/agent-avatar';
 import { Badge } from '@tulipfarm/sprout/badge';
 import { Button } from '@tulipfarm/sprout/button';
@@ -20,6 +20,8 @@ export function AgentDraftSummary({
   channelNames,
   postsTo = [],
   triggerLabels,
+  dataAccess,
+  hasSlackAccess = false,
   onEdit,
 }: {
   name: string;
@@ -32,6 +34,8 @@ export function AgentDraftSummary({
   /** Slack channels the agent may post to, even with no channel attached. */
   postsTo?: readonly string[];
   triggerLabels: readonly string[];
+  dataAccess?: ReactNode;
+  hasSlackAccess?: boolean;
   onEdit?: ((step: BuilderStep) => void) | undefined;
 }) {
   return (
@@ -103,6 +107,25 @@ export function AgentDraftSummary({
           </div>
         ))}
       </dl>
+      {dataAccess && (
+        <div className="flex min-w-0 items-start gap-3 text-sm">
+          <Database aria-hidden="true" size={16} className="mt-0.5 shrink-0 text-muted-foreground" />
+          <div className="grid min-w-0 flex-1 gap-0.5">
+            <p className="text-muted-foreground">{hasSlackAccess ? 'Data access' : 'Table access'}</p>
+            <div className="wrap-anywhere">{dataAccess}</div>
+          </div>
+          {onEdit && (
+            <Button
+              variant="ghost"
+              size="sm"
+              aria-label={hasSlackAccess ? 'Edit data access' : 'Edit table access'}
+              onClick={() => onEdit('access')}
+            >
+              Edit
+            </Button>
+          )}
+        </div>
+      )}
       <Disclosure title="Details">
         <div className="grid min-w-0 gap-3 text-sm">
           <p className="wrap-anywhere">{name.trim() || 'Untitled agent'}</p>

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link } from '@tanstack/react-router';
+import { useNavigate } from '@tanstack/react-router';
 import type { AgentSetupReceipt, SaveAgentSetupDraft, PublishAgentSetup } from '@tulipfarm/agents/setup-contracts';
 import { tableAccessProblem } from '@tulipfarm/agents/setup-contracts';
 import { Button } from '@tulipfarm/sprout/button';
@@ -19,11 +19,21 @@ import { ModelOption } from '@/features/models/model-option';
 import { ImportSkillForm, SkillImportPanel } from '@/features/skills/import-flow';
 import { AgentSkillPicker } from './skill-picker';
 import { BuilderAccess } from './builder-access';
+import { BuilderTablePicker } from './builder-table-picker';
+import { suggestedTools, type ToolName } from './tool-picker';
 import { BuilderSlack } from './builder-slack';
 import { BuilderTriggers } from './builder-triggers';
 import { AgentBuilderLayout, builderSteps, type BuilderStep } from './builder-layout';
 import { AgentBuilderPreview, AgentDraftSummary } from './builder-preview';
-import { builderDraft, builderDefinition, parseBuilder, type BuilderDraft, type BuilderInitial } from './builder-draft';
+import {
+  builderDraft,
+  builderDefinition,
+  nextBuilderStep,
+  updateBuilderLimits,
+  parseBuilder,
+  type BuilderDraft,
+  type BuilderInitial,
+} from './builder-draft';
 import { InstructionImprovement } from './instruction-improvement';
 import { BuilderTestChat, useBuilderTestChat } from './builder-test-chat';
 import { AgentRead } from './feedback';
@@ -31,7 +41,7 @@ import { agentDraftErrors } from './draft';
 import { useAgentChanges } from './queries';
 import { AgentSetupReview, useSetupTriggerNames } from './setup-review';
 import { setupErrorText, setupRetryable } from './setup-errors';
-import { useSlackDestinationNames } from './reference-names';
+import { ScopeSummary, useSlackDestinationNames } from './reference-names';
 import type { agentApi, AgentContext } from './api';
 
 type Operation = {
@@ -80,6 +90,14 @@ export function AgentBuilder({
   compact?: boolean | undefined;
 }) {
   const [draft, setDraft] = useState(() => builderDraft(initial));
+  const navigate = useNavigate();
+  const [suggested, setSuggested] = useState<ToolName[]>([]);
+  const tableSuggestionRemoved = useRef(false);
+  const [suggestionRemoved, setSuggestionRemoved] = useState(false);
+  const removedMessage = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    if (suggestionRemoved) removedMessage.current?.focus();
+  }, [suggestionRemoved]);
   const [base, setBase] = useState(initial);
   const [step, setStep] = useState<BuilderStep>(initialStep);
   const [visited, setVisited] = useState<ReadonlySet<BuilderStep>>(new Set(['basics', initialStep]));
@@ -142,8 +160,15 @@ export function AgentBuilder({
     if ((receipt?.status === 'saved' || receipt?.status === 'active') && settled.current !== receipt.commandId) {
       settled.current = receipt.commandId;
       onSettled?.();
+      if (receipt.status === 'active')
+        void navigate({
+          to: '/$workspaceSlug/agents/$agentId',
+          params: { workspaceSlug: slug, agentId: id },
+          hash: 'run-agent-now',
+          ignoreBlocker: true,
+        });
     }
-  }, [receipt, onSettled]);
+  }, [receipt, onSettled, navigate, slug, id]);
   const sending = write.state.kind === 'sending' || (!!commandId && (!receipt || receipt.status === 'preparing'));
   const uncertain =
     write.state.kind === 'uncertain' ||
@@ -176,6 +201,33 @@ export function AgentBuilder({
     }));
   const updateDefinition = (change: Partial<BuilderDraft['definition']>) =>
     update({ definition: { ...draft.definition, ...change } });
+  const updateTools = (tools: ToolName[], manuallyPicked: readonly ToolName[] = []) => {
+    if (suggestedTools.some(tool => draft.definition.tools.includes(tool) && !tools.includes(tool)))
+      tableSuggestionRemoved.current = true;
+    setSuggested(previous => previous.filter(tool => tools.includes(tool) && !manuallyPicked.includes(tool)));
+    updateDefinition({ tools });
+  };
+  const updateAccess = (change: Partial<BuilderDraft['access']>) => {
+    const addedTable = change.limits?.some(
+      entry =>
+        entry.permissions.includes('table.row.read') &&
+        !draft.access.limits.some(previous => previous.assetId === entry.assetId),
+    );
+    const missing =
+      addedTable && !tableSuggestionRemoved.current
+        ? suggestedTools.filter(tool => !draft.definition.tools.includes(tool))
+        : [];
+    if (missing.length) setSuggested(previous => [...new Set([...previous, ...missing])]);
+    update({
+      access: { ...draft.access, ...change },
+      ...(missing.length
+        ? { definition: { ...draft.definition, tools: [...draft.definition.tools, ...missing] } }
+        : {}),
+    });
+  };
+  const tableLimits = draft.access.limits.filter(entry =>
+    entry.permissions.some(permission => permission.startsWith('table.')),
+  );
   const team = context.teams.find(team => team.id === draft.owningTeamId)?.name;
   const family =
     catalog.state.kind === 'ready'
@@ -193,6 +245,10 @@ export function AgentBuilder({
       channelNames={draft.channels.filter(channel => !channel.detach).map(channel => channel.name)}
       postsTo={slack.postsTo}
       triggerLabels={draft.triggers.map(triggerName)}
+      dataAccess={<ScopeSummary workspaceId={workspaceId} scope={draft.access.scope} />}
+      hasSlackAccess={draft.access.scope.some(entry =>
+        entry.permissions.some(permission => permission.startsWith('slack.')),
+      )}
       onEdit={chooseStep}
     />
   );
@@ -201,7 +257,7 @@ export function AgentBuilder({
     submitIntent.current = null;
     if (locked) return;
     if (!decision) {
-      chooseStep(builderSteps[currentIndex + 1]!.id);
+      chooseStep(nextBuilderStep(step, draft));
       return;
     }
     setActivating(decision === 'activate');
@@ -268,6 +324,37 @@ export function AgentBuilder({
       );
     }
   }
+  const tableSuggestion = (
+    <>
+      {suggested.length > 0 && (
+        <section aria-label="Suggested actions: read tables" className="grid gap-2 text-sm">
+          <p className="font-medium">Suggested actions: read tables</p>
+          <p className="text-muted-foreground">
+            Added so the agent can read the tables you chose: find tables, read their fields, and find, read, and total
+            rows. These actions cannot change data. Remove them here, or change actions in the Access step.
+          </p>
+          <div>
+            <Button
+              variant="outline"
+              disabled={locked}
+              aria-label="Remove suggested table actions"
+              onClick={() => {
+                updateTools(draft.definition.tools.filter(tool => !suggested.includes(tool)));
+                setSuggestionRemoved(true);
+              }}
+            >
+              Remove these actions
+            </Button>
+          </div>
+        </section>
+      )}
+      {suggestionRemoved && (
+        <p role="status" tabIndex={-1} ref={removedMessage} className="text-sm text-muted-foreground">
+          Suggested actions removed. To use the tables you chose, add an action that reads rows in the Access step.
+        </p>
+      )}
+    </>
+  );
   const panels = {
     basics: (
       <>
@@ -331,6 +418,38 @@ export function AgentBuilder({
             onApply={instructions => updateDefinition({ instructions })}
           />
         </FormSection>
+        <FormSection
+          title="Business tables"
+          meta="Optional"
+          description="Choose the tables this agent can read. You can change its actions and table access later in the Access step."
+        >
+          <BuilderTablePicker
+            workspaceId={workspaceId}
+            teams={context.teams}
+            value={tableLimits.map(entry => entry.assetId)}
+            disabled={locked}
+            hideLegend
+            onChange={ids => {
+              const tables = ids
+                .map(
+                  assetId =>
+                    tableLimits.find(entry => entry.assetId === assetId) ?? {
+                      assetId,
+                      permissions: ['table.row.read'] as const,
+                    },
+                )
+                .map(entry => ({ ...entry, permissions: [...entry.permissions] }));
+              updateAccess(
+                updateBuilderLimits(
+                  draft.access,
+                  [...draft.access.limits.filter(entry => !tableLimits.includes(entry)), ...tables],
+                  context.teams,
+                ),
+              );
+            }}
+          />
+          {step === 'basics' && tableSuggestion}
+        </FormSection>
         <AgentModelPicker
           workspaceId={workspaceId}
           value={draft.definition.modelFamilyId}
@@ -358,11 +477,12 @@ export function AgentBuilder({
         teams={context.teams}
         previous={initial?.setup}
         tools={draft.definition.tools}
-        onTools={tools => updateDefinition({ tools })}
+        onTools={updateTools}
         value={draft.access}
-        onChange={change => update({ access: { ...draft.access, ...change } })}
+        onChange={updateAccess}
         disabled={locked}
         showErrors={showErrors}
+        tableSuggestion={step === 'access' ? tableSuggestion : null}
       />
     ),
     triggers: (
@@ -425,24 +545,7 @@ export function AgentBuilder({
   return (
     <section aria-label="Agent builder" className="grid min-w-0 gap-4">
       <UnsavedChanges dirty={(dirty && !terminal) || uncertain} />
-      {receipt?.status === 'active' ? (
-        <section aria-label="Agent creation receipt" className="grid gap-4">
-          <h2 tabIndex={-1} ref={node => node?.focus()} className="text-lg font-medium">
-            Agent created and activated.
-          </h2>
-          <p className="text-sm text-muted-foreground">
-            Its reviewed access, channel attachments, and workflow triggers are now in place.
-          </p>
-          <div>
-            <Button
-              nativeButton={false}
-              render={<Link to="/$workspaceSlug/agents/$agentId" params={{ workspaceSlug: slug, agentId: id }} />}
-            >
-              Open agent
-            </Button>
-          </div>
-        </section>
-      ) : (
+      {receipt?.status !== 'active' && (
         <>
           <AgentBuilderLayout
             step={step}
@@ -469,6 +572,19 @@ export function AgentBuilder({
             }
             footer={
               <>
+                {showErrors &&
+                  activating &&
+                  parsed.problems.some(problem => problem.message.startsWith('This agent has table access')) && (
+                    <div role="alert" className="grid justify-items-start gap-2 text-sm">
+                      <p>
+                        This agent has table access but no action that reads rows. Add Find rows or Read a row in the
+                        Access step, or remove its table access.
+                      </p>
+                      <Button variant="outline" onClick={() => chooseStep('access')}>
+                        Go to Access
+                      </Button>
+                    </div>
+                  )}
                 <nav aria-label="Setup navigation" className="flex items-center justify-between gap-3">
                   <Button
                     variant="ghost"

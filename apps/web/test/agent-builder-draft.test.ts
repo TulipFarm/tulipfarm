@@ -2,9 +2,14 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
 import { toolNameSchema } from '@tulipfarm/agents/contracts';
-import { builderDraft, parseBuilder } from '../src/features/agents/builder-draft.ts';
 import { tableAccessEnrollment } from '@tulipfarm/agents/setup-contracts';
 import { agentContextSchema } from '@tulipfarm/agents/saved-contracts';
+import {
+  builderDraft,
+  nextBuilderStep,
+  parseBuilder,
+  updateBuilderLimits,
+} from '../src/features/agents/builder-draft.ts';
 
 const member = randomUUID(),
   agent = randomUUID();
@@ -77,6 +82,7 @@ test('restored setup preserves distinct scopes and needs explicit consent for un
     triggerId = randomUUID();
   draft.access.scope = [{ assetId, permissions: ['table.row.read'] }];
   draft.access.limits = [{ assetId, permissions: ['table.row.read', 'table.row.update'] }];
+  draft.definition.tools = ['rows.list'];
   draft.triggers = [
     { id: triggerId, trigger: { kind: 'cron', expression: '0 9 * * 1', timezone: 'UTC' } },
     { id: randomUUID(), label: 'On request', trigger: { kind: 'event', name: 'weekly_update' } },
@@ -97,4 +103,77 @@ test('restored setup preserves distinct scopes and needs explicit consent for un
   assert.deepEqual(parseBuilder(draft, member, false, agent).problems, [
     { step: 'triggers', message: 'Triggers need a prompt.' },
   ]);
+});
+
+test('table setup skips empty optional sections but keeps configured skills and triggers in the flow', () => {
+  const draft = complete();
+  assert.equal(nextBuilderStep('basics', draft), 'access');
+  assert.equal(nextBuilderStep('access', draft), 'review');
+  draft.access.limits = [{ assetId: randomUUID(), permissions: ['table.row.read'] }];
+  assert.equal(nextBuilderStep('basics', draft), 'review');
+  draft.definition.skills = [{ id: randomUUID(), revision: 'a'.repeat(64) }];
+  assert.equal(nextBuilderStep('basics', draft), 'access');
+  assert.equal(nextBuilderStep('access', draft), 'skills');
+  assert.equal(nextBuilderStep('skills', draft), 'review');
+  draft.prompt = 'Prepare the weekly update.';
+  assert.equal(nextBuilderStep('skills', draft), 'triggers');
+  assert.equal(nextBuilderStep('triggers', draft), 'review');
+});
+
+test('activation needs a row reader for table scope, without changing manual tools or blocking draft saves', () => {
+  const draft = complete();
+  draft.access.scope = [{ assetId: randomUUID(), permissions: ['table.row.read'] }];
+  draft.access.limits = draft.access.scope;
+  assert.ok(parseBuilder(draft, member, false, agent).setup);
+  draft.definition.tools = ['tables.list', 'schema.inspect'];
+  assert.deepEqual(parseBuilder(draft, member, true, agent).problems, [
+    {
+      step: 'access',
+      message:
+        'This agent has table access but no action that reads rows. Add Find rows or Read a row in the Access step, or remove its table access.',
+    },
+  ]);
+  assert.deepEqual(draft.definition.tools, ['tables.list', 'schema.inspect']);
+  draft.definition.tools = ['rows.summarize'];
+  assert.equal(parseBuilder(draft, member, true, agent).setup, null);
+  for (const tool of ['rows.list', 'rows.get'] as const) {
+    draft.definition.tools = [tool];
+    assert.ok(parseBuilder(draft, member, true, agent).setup);
+  }
+});
+
+test('adding a table preserves an existing narrower scope until its permissions are explicitly changed', () => {
+  const { access } = complete();
+  const customers = randomUUID(),
+    orders = randomUUID();
+  access.limits = [{ assetId: customers, permissions: ['table.row.read', 'table.row.update'] }];
+  access.scope = [{ assetId: customers, permissions: ['table.row.read'] }];
+  const teams = [
+    {
+      id: randomUUID(),
+      name: 'Operations',
+      canAssign: true,
+      tableScope: [{ assetId: orders, permissions: ['table.row.read' as const] }],
+    },
+  ];
+  const added = updateBuilderLimits(
+    access,
+    [
+      { ...access.limits[0]!, permissions: [...access.limits[0]!.permissions] },
+      { assetId: orders, permissions: ['table.row.read'] },
+    ],
+    teams,
+  );
+  assert.deepEqual(added.enrollment, [teams[0]!.id]);
+  assert.deepEqual(added.scope, [
+    { assetId: customers, permissions: ['table.row.read'] },
+    { assetId: orders, permissions: ['table.row.read'] },
+  ]);
+  const changed = updateBuilderLimits(
+    { ...access, ...added },
+    [{ assetId: customers, permissions: ['table.row.read', 'table.row.delete'] }, added.limits[1]!],
+    teams,
+  );
+  assert.deepEqual(changed.scope[1], { assetId: customers, permissions: ['table.row.read', 'table.row.delete'] });
+  assert.deepEqual(updateBuilderLimits({ ...access, ...changed }, [], teams).scope, []);
 });

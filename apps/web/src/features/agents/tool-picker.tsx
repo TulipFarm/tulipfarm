@@ -96,13 +96,14 @@ export function AgentToolPicker({
   suggestions = true,
 }: {
   value: readonly ToolName[];
-  onChange: (tools: ToolName[]) => void;
+  onChange: (tools: ToolName[], manuallyPicked?: readonly ToolName[]) => void;
   error: string | undefined;
   disabled: boolean;
   suggestions?: boolean;
 }) {
   const [search, setSearch] = useState('');
   const [adding, setAdding] = useState(false);
+  const [presetError, setPresetError] = useState(false);
   const [open, setOpen] = useState(
     () =>
       new Set(
@@ -117,11 +118,18 @@ export function AgentToolPicker({
       else copy.delete(key);
       return copy;
     });
-  const replace = (tools: readonly ToolName[], next: readonly ToolName[]) =>
-    onChange([
+  const replace = (tools: readonly ToolName[], next: readonly ToolName[], preset = false) => {
+    const selection = [
       ...value.filter(tool => !tools.includes(tool) || next.includes(tool)),
       ...next.filter(tool => !value.includes(tool)),
-    ]);
+    ];
+    if (preset && selection.length > 20) {
+      setPresetError(true);
+      return;
+    }
+    setPresetError(false);
+    onChange(selection, preset ? next : next.filter(tool => !value.includes(tool)));
+  };
   const images = useFlag('images');
   const matches = (tool: ToolName, app: string) =>
     (images || tool !== 'images.generate' || value.includes(tool)) &&
@@ -133,6 +141,11 @@ export function AgentToolPicker({
   const catalogOpen = adding || !!error;
   return (
     <div className="grid gap-4">
+      {presetError && (
+        <p role="alert" className="text-sm text-destructive">
+          Choose no more than 20 actions.
+        </p>
+      )}
       {value.length ? (
         <ul aria-label="Chosen actions" className="grid divide-y rounded-lg border">
           {value.map(tool => (
@@ -261,6 +274,32 @@ export function AgentToolPicker({
                         </h3>
                         <CollapsibleContent keepMounted>
                           <div className="grid gap-4 px-3 pb-4 pt-1">
+                            <div className="flex gap-2">
+                              {app.read.length > 0 && (
+                                <Button
+                                  variant="outline"
+                                  disabled={disabled}
+                                  aria-label={`${app.label}: read only`}
+                                  onClick={() => replace(tools, app.read, true)}
+                                >
+                                  Read only
+                                </Button>
+                              )}
+                              {app.change.length > 0 && (
+                                <Button
+                                  variant="outline"
+                                  disabled={disabled}
+                                  aria-label={
+                                    app.key === 'tables'
+                                      ? 'Read and change rows'
+                                      : `${app.label}: all actions, including actions that change data`
+                                  }
+                                  onClick={() => replace(tools, tools, true)}
+                                >
+                                  {app.key === 'tables' ? 'Read and change rows' : 'All actions'}
+                                </Button>
+                              )}
+                            </div>
                             {reads.length > 0 && (
                               <ChoiceGroup
                                 type="checkbox"

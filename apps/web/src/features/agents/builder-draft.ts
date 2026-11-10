@@ -1,6 +1,7 @@
 import {
   agentSetupSchema,
   unattendedTrigger,
+  tableAccessEnrollment,
   tableAccessProblem,
   type AgentSetup,
   type AgentSetupDraft,
@@ -84,6 +85,39 @@ export function builderDefinition(draft: BuilderDraft): BuilderDraft['definition
   };
 }
 
+export function nextBuilderStep(step: BuilderStep, draft: BuilderDraft): BuilderStep {
+  const skills = !!draft.definition.skills?.length;
+  const triggers = !!draft.triggers.length || !!draft.channels.length || !!draft.prompt;
+  if (step === 'basics') {
+    const tables = draft.access.limits.some(entry => entry.permissions.includes('table.row.read'));
+    return tables && !skills && !triggers ? 'review' : 'access';
+  }
+  if (step === 'access' && skills) return 'skills';
+  if ((step === 'access' || step === 'skills') && triggers) return 'triggers';
+  return 'review';
+}
+
+export function updateBuilderLimits(
+  access: BuilderAccessDraft,
+  limits: BuilderAccessDraft['limits'],
+  teams: AgentContext['teams'],
+) {
+  let scope = access.scope.filter(entry => limits.some(limit => limit.assetId === entry.assetId));
+  let enrollment = access.enrollment;
+  for (const limit of limits) {
+    const previous = access.limits.find(entry => entry.assetId === limit.assetId);
+    if (
+      !previous ||
+      previous.permissions.length !== limit.permissions.length ||
+      previous.permissions.some(permission => !limit.permissions.includes(permission))
+    ) {
+      scope = [...scope.filter(entry => entry.assetId !== limit.assetId), limit];
+      enrollment = tableAccessEnrollment(teams, limit, enrollment);
+    }
+  }
+  return { limits, scope, enrollment };
+}
+
 export function parseBuilder(
   draft: BuilderDraft,
   membershipId: string,
@@ -105,6 +139,15 @@ export function parseBuilder(
   const limits = parseLimits(draft.access.taskLimits, { kind: 'start' });
   if (!limits.ok) problems.push({ step: 'access', message: 'Check the execution limits.' });
   if (activating) {
+    if (
+      draft.access.scope.some(entry => entry.permissions.includes('table.row.read')) &&
+      !draft.definition.tools.some(tool => tool === 'rows.list' || tool === 'rows.get')
+    )
+      problems.push({
+        step: 'access',
+        message:
+          'This agent has table access but no action that reads rows. Add Find rows or Read a row in the Access step, or remove its table access.',
+      });
     if (draft.triggers.some(trigger => unattendedTrigger(trigger.trigger)) && !draft.sponsorConsent)
       problems.push({ step: 'triggers', message: 'Sponsor the triggers before activation.' });
     if (draft.channels.some(channel => !channel.detach && !channel.channelResponses))

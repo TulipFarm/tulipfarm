@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { Button, type ButtonState, type ButtonBlockerFix } from '@tulipfarm/sprout/button';
@@ -43,12 +43,18 @@ export function TaskStart({
   const api = useTaskApi(workspaceId);
   const navigate = useNavigate();
   const [acceptedId, setAcceptedId] = useState<string>();
+  const runSection = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!concealed && detail.activations.length && window.location.hash === '#run-agent-now') {
+      runSection.current?.querySelector<HTMLTextAreaElement>('textarea')?.focus();
+    }
+  }, [concealed, detail.activations.length]);
   useEffect(() => {
     if (acceptedId)
       void navigate({ to: '/$workspaceSlug/agent-tasks/$taskId', params: { workspaceSlug: slug, taskId: acceptedId } });
   }, [acceptedId, navigate, slug]);
   return (
-    <div hidden={concealed}>
+    <div ref={runSection} id="run-agent-now" hidden={concealed}>
       <FormSection
         title="Run agent now"
         label="Run agent now"
