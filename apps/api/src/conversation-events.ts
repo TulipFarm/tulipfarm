@@ -34,6 +34,38 @@ export type ConversationStreamEvent =
   | { event: typeof conversationStreamEvents.subagents; data: StreamSubagents }
   | { event: typeof conversationStreamEvents.resync; data: Record<string, never> };
 
+export function concealStreamDetails(event: ConversationStreamEvent): ConversationStreamEvent {
+  switch (event.event) {
+    case 'text':
+      return { event: 'text', data: { ...event.data, text: '', offset: 0, reset: true } };
+    case 'tool':
+      return { event: 'tool', data: { ...event.data, presentation: { label: 'Used a tool', brand: null } } };
+    case 'progress':
+      return {
+        event: 'progress',
+        data: { ...event.data, ...(event.data.tool ? { tool: 'Used a tool' } : {}) },
+      };
+    case 'subagents':
+      return {
+        event: 'subagents',
+        data: {
+          ...event.data,
+          agents: event.data.agents.map(({ key, kind, status, credits, elapsedMs }) => ({
+            key,
+            kind,
+            status,
+            credits,
+            elapsedMs,
+            name: 'Assistant',
+            role: 'Used a tool',
+          })),
+        },
+      };
+    default:
+      return event;
+  }
+}
+
 export type ConversationEventHub = {
   healthy(): boolean;
   /** Receives every event for one conversation until the returned function runs. */

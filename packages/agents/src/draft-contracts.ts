@@ -285,7 +285,17 @@ const filterLabelsSchema = z.object({
 export const draftViewSchema = z.object({
   id: z.uuid(),
   digest: draftDecisionSchema.shape.digest,
-  proposal: authoringProposalSchema,
+  proposal: z.discriminatedUnion('kind', [
+    ...authoringProposalSchema.options,
+    z.strictObject({
+      kind: z.literal('knowledge-receipt'),
+      targetId: uuidSchema,
+      input: z.strictObject({
+        operation: z.enum(['add', 'update', 'remove']),
+        entry: z.enum(['note', 'file']),
+      }),
+    }),
+  ]),
   status: z.enum(['pending', 'stale', 'preparing', 'saved', 'failed', 'dismissed', 'continued']),
   outcome: draftOutcomeSchema.nullable(),
   /** An undecided workflow draft that a later draft in the same chat replaced. Its status is `stale`. */

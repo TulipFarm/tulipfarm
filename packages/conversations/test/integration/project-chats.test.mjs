@@ -8,6 +8,54 @@ import { conversationFixture } from '../fixture.mjs';
 const send = (store, w, user, chatId, text) =>
   store.send(w.id, user, chatId, { commandId: randomUUID(), messageId: randomUUID(), parts: [{ kind: 'text', text }] });
 
+test('project colleagues retain source-independent tool narration in a shared chat', async () => {
+  const f = await conversationFixture();
+  try {
+    const { workspace: w, store } = f;
+    const projects = createProjects(f.runtime);
+    const owner = { id: randomUUID(), user: randomUUID() };
+    const outsider = { id: randomUUID(), user: randomUUID() };
+    for (const person of [owner, outsider])
+      await f.db.platform.query(`INSERT INTO ${f.table('tf_memberships')} (id,user_id,role) VALUES ($1,$2,'member')`, [
+        person.id,
+        person.user,
+      ]);
+    const projectId = randomUUID();
+    await projects.create(w.id, w.userId, { id: projectId, name: 'Shared work' });
+    await projects.member(w.id, w.userId, projectId, { membershipId: owner.id, role: 'member', removed: false });
+    const chatId = randomUUID();
+    await store.create(w.id, owner.user, { chatId, commandId: randomUUID(), projectId });
+    const sent = await send(store, w, w.userId, chatId, 'Read the table definitions.');
+    const narration = 'Reading shared table definitions.';
+    await createConversationExecutor(f.runtime, async ({ executeTool }) => {
+      await executeTool(
+        'tables.definitions',
+        false,
+        async () => ({ result: { tables: [] }, sources: [] }),
+        [],
+        { tool: 'tables.definitions' },
+        undefined,
+        narration,
+      );
+      return { text: 'The definitions are ready.', sources: [] };
+    }).process({ workspaceId: w.id, conversationId: chatId, turnId: sent.turnId, generation: 0 });
+    const steps = async user => (await store.history(w.id, user, chatId)).messages.flatMap(message => message.tools);
+    const owned = await steps(owner.user);
+    assert.equal(owned[0].narration, narration);
+    assert.deepEqual(await steps(w.userId), owned);
+    const stream = { kind: 'tool', turnId: sent.turnId, generation: 0, epoch: 1, id: owned[0].id };
+    assert.equal(await store.canReadStream(w.id, owner.user, chatId, stream), true);
+    assert.equal(await store.canReadStream(w.id, w.userId, chatId, stream), true);
+    await assert.rejects(store.history(w.id, outsider.user, chatId), /Resource not found/);
+    await assert.rejects(store.canReadStream(w.id, outsider.user, chatId, stream), /Resource not found/);
+    await projects.member(w.id, w.userId, projectId, { membershipId: owner.id, role: 'member', removed: true });
+    await assert.rejects(store.history(w.id, owner.user, chatId), /Resource not found/);
+    await assert.rejects(store.canReadStream(w.id, owner.user, chatId, stream), /Resource not found/);
+  } finally {
+    await f.close();
+  }
+});
+
 test(
   'project chats share access with members, snapshot context, protect the audience and move with confirmation',
   { timeout: 60000 },

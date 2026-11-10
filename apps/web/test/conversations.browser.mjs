@@ -77,6 +77,7 @@ try {
     else if (path.endsWith('/governance/me')) json = membership;
     else if (path.endsWith('/credits')) json = credits;
     else if (path.endsWith('/model-catalog')) json = chatCatalog;
+    else if (path.endsWith('/system-package-installations')) json = { installations: [], nextCursor: null };
     else if (path.endsWith('/events')) status = 503;
     else if (path.includes('/conversations')) {
       const suffix = path.split('/conversations')[1];
@@ -295,11 +296,11 @@ try {
   assert.equal(await page.getByLabel('Message', { exact: true }).innerText(), 'Hello 🌱');
   dropWrite = true;
   await page.getByRole('button', { name: 'Send message', exact: true }).dblclick();
-  await page.getByRole('button', { name: 'Try again', exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Check message status', exact: true }).waitFor();
   const createRequest = writes[0];
   const chatId = chats[0].id;
   assert.equal(writes.length, 1, 'A double send creates only one chat');
-  await page.getByRole('button', { name: 'Try again', exact: true }).click();
+  await page.getByRole('button', { name: 'Check message status', exact: true }).click();
   await page.waitForURL(`${origin}/acme/chat/${chatId}`);
   await page.getByRole('button', { name: 'Stop reply' }).waitFor();
   assert.deepEqual(writes[1], createRequest, 'A lost create response retries the same chat and command');
@@ -309,14 +310,17 @@ try {
   await page.getByRole('region', { name: 'Conversation', exact: true }).getByRole('heading', { level: 2 }).waitFor();
   await page.getByLabel('Message', { exact: true }).fill('Hello 🌱');
   dropWrite = true;
+  const writesBeforeSend = writes.length;
   await page.getByRole('button', { name: 'Send message', exact: true }).dblclick();
-  await page.getByRole('button', { name: 'Try again', exact: true }).waitFor();
-  assert.equal(await page.getByLabel('Message', { exact: true }).innerText(), 'Hello 🌱');
-  assert.equal(await page.getByLabel('Message', { exact: true }).isDisabled(), true);
+  await page.waitForFunction(() => document.querySelector('[aria-label="Message"]').innerText.trim() === '');
   const sent = writes.at(-1);
-  await page.getByRole('button', { name: 'Try again', exact: true }).click();
   await page.getByRole('button', { name: 'Stop reply' }).waitFor();
-  assert.deepEqual(writes.at(-1), sent);
+  assert.equal(await page.getByRole('button', { name: 'Check message status', exact: true }).count(), 0);
+  assert.equal(
+    writes.length,
+    writesBeforeSend + 1,
+    'A saved message with a lost response is confirmed without resending',
+  );
   assert.equal(sent.body.model, 'claude-sonnet');
   assert.equal(messages.get(chatId).length, 1);
   await page.getByRole('combobox', { name: 'Model: Claude Sonnet', exact: true }).click();

@@ -54,6 +54,8 @@ import {
   requireSlackTurn,
   requireReplyMcpSources,
   requireChatReviewSources,
+  generatedMessageSources,
+  canReadToolDetails,
 } from './source-access.ts';
 import {
   bindFileSources,
@@ -111,12 +113,12 @@ import {
   insertStatusMessage,
   recordCleanups,
   replaceWorkingSummary,
+  readWorkingSummary,
   summarize,
   omittedBlock,
   refersToEarlierMessages,
   summaryBlock,
   updateBreaker,
-  workingSummarySchema,
   type ChatMessage,
   type CompactionError,
   type CompactionRecord,
@@ -1179,7 +1181,10 @@ export function createConversationExecutor(
   /** A `/compact` turn: compacts everything before the latest completed exchange and writes a separate handoff. It never calls the chat responder. */
   async function compactTurn(
     fence: ReplyFence,
-    source: CompactionSource & { compaction: Awaited<ReturnType<typeof compactionSnapshot>> | null },
+    source: CompactionSource & {
+      requester: HumanActor;
+      compaction: Awaited<ReturnType<typeof compactionSnapshot>> | null;
+    },
     command: { prompt: string | null; compactionId: string | null },
     policy: EffectiveCompactionPolicy,
     compactor: ConversationCompactor,
@@ -1209,31 +1214,44 @@ export function createConversationExecutor(
       );
     if (command.compactionId) {
       const retryId = command.compactionId;
-      const target = await guarded(fence, async tx =>
-        z
-          .object({ summary: z.unknown().nullable(), prompt: z.string().nullable() })
+      const target = await guarded(fence, async tx => {
+        const row = z
+          .object({ prompt: z.string().nullable() })
           .optional()
           .parse(
             (
               await tx.client.query(
-                `SELECT s.summary, h.prompt FROM ${table(tx, 'tf_conversation_compactions')} c
-        LEFT JOIN ${table(tx, 'tf_conversation_working_summaries')} s ON s.compaction_id=c.id LEFT JOIN ${table(tx, 'tf_conversation_handoffs')} h ON h.compaction_id=c.id
+                `SELECT h.prompt FROM ${table(tx, 'tf_conversation_compactions')} c
+        LEFT JOIN ${table(tx, 'tf_conversation_handoffs')} h ON h.compaction_id=c.id
         WHERE c.conversation_id=$1 AND c.id=$2`,
                 [fence.conversationId, retryId],
               )
             ).rows[0],
+          );
+        if (!row) return null;
+        const summary = (await readWorkingSummary(tx, fence.conversationId, retryId)) ?? state.summary;
+        const sources = summary?.sources ?? [];
+        return {
+          ...row,
+          summary: summary?.summary ?? null,
+          sources,
+          readable: await canReadToolDetails(
+            tx,
+            source.requester,
+            sources,
+            null,
+            source.project ? fence.conversationId : undefined,
           ),
-      );
+        };
+      });
       if (target === 'stale') return 'stale';
       if (!target) {
         await guarded(fence, tx => failTurn(tx, fence, 'compaction-not-found', 'compaction'));
         return 'stale';
       }
-      const parsed = target.summary ? workingSummarySchema.safeParse(target.summary) : null;
-      const written = await writeHandoff(
-        parsed?.success ? parsed.data : (state.summary?.summary ?? null),
-        target.prompt ?? prompt,
-      );
+      const written = target.readable
+        ? await writeHandoff(target.summary, target.prompt ?? prompt)
+        : { status: 'failed' as const, errorCode: 'handoff-unavailable' as const };
       const done = await guarded(fence, async (tx, chat) => {
         await tx.client.query(
           `INSERT INTO ${table(tx, 'tf_conversation_handoffs')} AS h (compaction_id, conversation_id, status, prompt, text, model_family_id, fallback_from_family_id, error_code, attempts, sources)
@@ -1248,7 +1266,7 @@ export function createConversationExecutor(
             written.status === 'completed' ? written.familyId : null,
             written.status === 'completed' ? written.fallbackFrom : null,
             written.status === 'failed' ? written.errorCode : null,
-            JSON.stringify(mergeSources(source.inherited)),
+            JSON.stringify(mergeSources([...source.inherited, ...target.sources])),
           ],
         );
         await respond(tx, chat, retryId);
@@ -1391,6 +1409,22 @@ export function createConversationExecutor(
               )
             ).rows[0],
           );
+          const currentGenerated = (await generatedMessageSources(tx, fence.conversationId, [currentMessage.id])).get(
+            currentMessage.id,
+          );
+          if (
+            currentGenerated &&
+            !(await canReadToolDetails(
+              tx,
+              chat.requester,
+              chat.context?.kind === 'channel'
+                ? currentGenerated.filter(source => source.kind !== 'shared-slack-turn')
+                : currentGenerated,
+              null,
+              chat.project_id ? fence.conversationId : undefined,
+            ))
+          )
+            throw new AccessDenied();
           const managed = Boolean(compactor) && !chat.slack && !chat.context && !chat.standalone;
           const compaction = managed
             ? await compactionSnapshot(tx, fence.conversationId, fence.turnId, turn.source_message_id)
@@ -1405,6 +1439,16 @@ export function createConversationExecutor(
           const summarySources: SourceDependency[] = [];
           if (compaction?.summary)
             try {
+              if (
+                !(await canReadToolDetails(
+                  tx,
+                  chat.requester,
+                  compaction.summary.sources,
+                  null,
+                  chat.project_id ? fence.conversationId : undefined,
+                ))
+              )
+                throw new AccessDenied();
               if (chat.project_id)
                 await requireResultSources(tx, chat.requester, fence.conversationId, compaction.summary.sources);
               await requireGitHubSources(tx, chat.requester, compaction.summary.sources);
@@ -1708,13 +1752,42 @@ export function createConversationExecutor(
                     ).rows,
                   )
                   .reverse();
+          const ownerOnly = !chat.project_id && !chat.slack && !chat.context;
           const inherited: SourceDependency[] =
             chat.context?.kind === 'channel'
               ? chat.context.sources
               : [
-                  { kind: 'private-conversation', conversationId: fence.conversationId },
+                  {
+                    kind: 'private-conversation',
+                    conversationId: fence.conversationId,
+                    ...(ownerOnly ? { snapshot: true as const } : {}),
+                  },
                   ...(chat.context?.sources ?? []),
                 ];
+          const generated = await generatedMessageSources(
+            tx,
+            fence.conversationId,
+            messages.map(message => message.id),
+          );
+          for (const [messageId, sources] of generated) {
+            const message = messages.find(message => message.id === messageId);
+            if (!message) continue;
+            if (
+              !(await canReadToolDetails(
+                tx,
+                chat.requester,
+                chat.context?.kind === 'channel'
+                  ? sources.filter(source => source.kind !== 'shared-slack-turn')
+                  : sources,
+                null,
+                chat.project_id ? fence.conversationId : undefined,
+              ))
+            ) {
+              message.text = '';
+              continue;
+            }
+            inherited.push(...sources);
+          }
           // Question and approval cards add no text to model context, so they carry no result sources.
           const assistants = messages.filter(message => message.role === 'assistant' && message.text);
           const rows = z
@@ -1752,7 +1825,15 @@ export function createConversationExecutor(
               if (hidden) hidden.text = '';
               continue;
             }
-            inherited.push(...row.sources);
+            // Earlier assistant text exposes its sources even when the new reply has no citation.
+            for (const dependency of row.sources)
+              inherited.push(
+                ownerOnly &&
+                  dependency.kind === 'private-conversation' &&
+                  dependency.conversationId === fence.conversationId
+                  ? { ...dependency, snapshot: true }
+                  : dependency,
+              );
           }
           if (rows.length !== assistants.length && !chat.project_id) inherited.push({ kind: 'unknown' });
           if (chat.slack) {

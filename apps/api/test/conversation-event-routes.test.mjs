@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
 import { test } from 'node:test';
 import Fastify from 'fastify';
-import { AccessDenied } from '@tulipfarm/access';
+import { AccessDenied, SourceAuthorizationUnavailable } from '@tulipfarm/access';
 import { registerConversations } from '../src/conversations.ts';
 import { registerSecurity } from '../src/security.ts';
 
@@ -41,13 +41,18 @@ function fakeHub({ healthy = true, snapshot = [] } = {}) {
 }
 
 function fakeService() {
-  const state = { denied: false, reads: 0 };
+  const state = { denied: false, reads: 0, sourcesDenied: false, sourceReads: [] };
   return {
     state,
     read: async () => {
       state.reads++;
       if (state.denied) throw new AccessDenied();
       return {};
+    },
+    canReadStream: async (_workspace, _user, _chat, reference) => {
+      state.sourceReads.push(reference);
+      if (state.denied) throw new AccessDenied();
+      return !state.sourcesDenied;
     },
   };
 }
@@ -157,6 +162,81 @@ test('an event stream ends when a recheck finds access revoked', async t => {
   while (service.state.reads < 3) await new Promise(resolve => setTimeout(resolve, 5));
   service.state.denied = true;
   assert.equal(await stream.end(), 'retry: 2000\n\n');
+  assert.equal(events.listeners.size, 0);
+});
+
+test('snapshots and live tool fields recheck source access without dropping the tool step', async t => {
+  const secret = 'PRIVATE SOURCE PASSAGE';
+  const tool = {
+    turnId,
+    generation: 1,
+    epoch: 0,
+    id: randomUUID(),
+    tool: 'api.request',
+    sequence: 1,
+    status: 'completed',
+    presentation: { label: secret, brand: null },
+  };
+  const subagents = {
+    turnId,
+    generation: 1,
+    epoch: 0,
+    id: randomUUID(),
+    seq: 0,
+    agents: [
+      {
+        key: 'a0',
+        kind: 'helper',
+        name: secret,
+        role: secret,
+        step: secret,
+        status: 'running',
+        credits: 0,
+        elapsedMs: 1,
+      },
+    ],
+  };
+  const service = fakeService();
+  service.state.sourcesDenied = true;
+  const events = fakeHub({
+    snapshot: [
+      { event: 'text', data: { ...preview, text: secret } },
+      { event: 'tool', data: tool },
+      { event: 'subagents', data: subagents },
+      { event: 'progress', data: { ...progress, tool: secret } },
+    ],
+  });
+  const { url } = await start(t, { service, events });
+  const stream = reader(await open(url));
+  await stream.until(body => body.includes('event: progress'), 'all snapshots are authorized');
+  assert.doesNotMatch(stream.body, /PRIVATE SOURCE/);
+  assert.match(stream.body, /Used a tool/);
+  assert.match(stream.body, new RegExp(tool.id));
+  assert.match(stream.body, /"text":"","reset":true/);
+  service.state.sourcesDenied = false;
+  events.emit({ event: 'tool', data: { ...tool, presentation: { label: 'Allowed label', brand: null } } });
+  await stream.until(body => body.includes('Allowed label'), 'readable tool details are preserved');
+  const before = stream.body.length;
+  service.state.sourcesDenied = true;
+  events.emit({ event: 'text', data: { ...preview, seq: 3, text: secret } });
+  events.emit({ event: 'tool', data: tool });
+  events.emit({ event: 'subagents', data: { ...subagents, seq: 1 } });
+  events.emit({ event: 'changed', data: { turnId } });
+  await stream.until(body => body.slice(before).includes('event: changed'), 'live source checks finish in order');
+  assert.doesNotMatch(stream.body.slice(before), /PRIVATE SOURCE/);
+  assert.equal(service.state.sourceReads.length, 8);
+  await stream.cancel();
+});
+
+test('temporary source authorization failures never replay cached private text', async t => {
+  const service = fakeService();
+  service.canReadStream = async () => {
+    throw new SourceAuthorizationUnavailable();
+  };
+  const events = fakeHub({ snapshot: [{ event: 'text', data: { ...preview, text: 'PRIVATE SOURCE' } }] });
+  const { url } = await start(t, { service, events });
+  const body = await reader(await open(url)).end();
+  assert.equal(body, 'retry: 2000\n\n');
   assert.equal(events.listeners.size, 0);
 });
 

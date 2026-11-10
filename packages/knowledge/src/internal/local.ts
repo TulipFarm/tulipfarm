@@ -6,6 +6,7 @@ import {
   currentMember,
   denyMcpEgress,
   lockAuthorization,
+  protectedSourceClosure,
   uuidSchema,
   type AuthorizationTransaction,
   type HumanActor,
@@ -111,7 +112,7 @@ export function createLocalKnowledge({ runtime, files, recognition, recognitionA
       throw new AccessDenied();
     return local;
   }
-  async function context(tx: Transaction, actor: HumanActor, documentId: string) {
+  async function context(tx: Transaction, actor: HumanActor, documentId: string, includeTrash = false) {
     const doc = await store.document(tx, documentId);
     const source = await store.source(tx, actor, doc.source_id);
     if (!doc.observed_revision_id || (source.provider !== 'note' && source.provider !== 'file'))
@@ -121,7 +122,11 @@ export function createLocalKnowledge({ runtime, files, recognition, recognitionA
       (await tx.client.query(`SELECT * FROM ${table(tx, 'revisions')} WHERE id=$1`, [doc.observed_revision_id]))
         .rows[0],
     );
-    await store.dependencies(tx, actor, revision);
+    if (includeTrash && revision.original.kind === 'file') {
+      const file = await requireReadableFile(tx, actor, revision.original.fileId, { includeTrash: true });
+      if (file.sha256 !== revision.original.sha256 || file.size !== revision.original.bytes) throw new AccessDenied();
+      await protectedSourceClosure(tx, revision.sources);
+    } else await store.dependencies(tx, actor, revision);
     return { doc, source, local, revision };
   }
   async function noteBytes(tx: Transaction, revision: z.infer<Store['revisionRow']>) {
@@ -142,8 +147,9 @@ export function createLocalKnowledge({ runtime, files, recognition, recognitionA
     actor: HumanActor,
     documentId: string,
     includeText = false,
+    includeTrash = false,
   ): Promise<KnowledgeDocument> {
-    const { doc, revision } = await context(tx, actor, documentId);
+    const { doc, revision } = await context(tx, actor, documentId, includeTrash);
     const work = workRow.parse(
       (await tx.client.query(`SELECT * FROM ${table(tx, 'work')} WHERE revision_id=$1`, [revision.id])).rows[0],
     );
@@ -167,9 +173,9 @@ export function createLocalKnowledge({ runtime, files, recognition, recognitionA
         : {}),
     };
   }
-  async function finalDocuments(tx: Transaction, actor: HumanActor, ids: string[]) {
+  async function finalDocuments(tx: Transaction, actor: HumanActor, ids: string[], includeTrash = false) {
     await currentMember(tx, actor);
-    for (const id of ids) await context(tx, actor, id);
+    for (const id of ids) await context(tx, actor, id, includeTrash);
   }
   async function clock(tx: Transaction) {
     return z.object({ now: z.date() }).parse((await tx.client.query('SELECT clock_timestamp() AS now')).rows[0]).now;
@@ -177,8 +183,8 @@ export function createLocalKnowledge({ runtime, files, recognition, recognitionA
   async function get(workspaceId: string, userId: string, documentId: string) {
     documentId = uuidSchema.parse(documentId);
     return transaction(workspaceId, userId, false, async (tx, actor) => {
-      const result = await dto(tx, actor, documentId, true);
-      await finalDocuments(tx, actor, [documentId]);
+      const result = await dto(tx, actor, documentId, true, true);
+      await finalDocuments(tx, actor, [documentId], true);
       return result;
     });
   }
@@ -321,7 +327,7 @@ export function createLocalKnowledge({ runtime, files, recognition, recognitionA
       const items: KnowledgeDocument[] = [];
       for (const row of rows.slice(0, 100)) {
         try {
-          items.push(await dto(tx, actor, row.id));
+          items.push(await dto(tx, actor, row.id, false, true));
         } catch (error) {
           if (!hidden(error)) throw error;
         }
@@ -330,6 +336,7 @@ export function createLocalKnowledge({ runtime, files, recognition, recognitionA
         tx,
         actor,
         items.map(item => item.documentId),
+        true,
       );
       return { items, nextCursor: rows.length > 100 ? (rows[99]?.id ?? null) : null };
     });

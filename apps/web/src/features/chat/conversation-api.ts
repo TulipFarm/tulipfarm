@@ -372,7 +372,9 @@ export function conversationApi(workspaceId: string, denied: (status: number) =>
         );
       const message =
         response.status === 409
-          ? 'This request or proposal changed. Check its current status before deciding again.'
+          ? interaction && /\/(requests|approvals|drafts)\//.test(path)
+            ? 'This request or proposal changed. Check its current status before deciding again.'
+            : 'This chat changed. Refresh it before trying again. Your draft is kept.'
           : response.status === 429
             ? 'Too many requests. Wait a moment, then retry the same operation.'
             : response.status === 400 || response.status === 413
@@ -606,6 +608,17 @@ export function conversationApi(workspaceId: string, denied: (status: number) =>
         hasGitHubProposals,
       };
     },
+    async findMessage(chatId: string, messageId: string, signal: AbortSignal) {
+      let before: number | null = null;
+      for (let pages = 1; pages <= 2; pages++) {
+        const query = before === null ? '' : `?before=${before}`;
+        const page = historySchema.parse(await request(`/${chatId}/messages${query}`, 'GET', signal));
+        if (page.messages.some(message => message.id === messageId && message.author === 'human')) return pages;
+        before = page.nextBefore;
+        if (before === null) break;
+      }
+      return null;
+    },
     async command(command: ConversationCommand, signal: AbortSignal) {
       const path = `/${command.chatId}`;
       const commandId = command.commandId;
@@ -764,6 +777,10 @@ export function draftConversationApi(
     async command(command, signal) {
       await ensureCreated(signal);
       return api.command(command, signal);
+    },
+    async findMessage(id, messageId, signal) {
+      if (!created) return null;
+      return api.findMessage(id, messageId, signal);
     },
     async upload(id, attachmentId, file, signal) {
       await ensureCreated(signal);

@@ -21,6 +21,26 @@ const operations = {
   },
 } as const;
 
+export function KnowledgeReceiptCard({ draft }: { draft: DraftView }) {
+  if (draft.proposal.kind !== 'knowledge-receipt') return null;
+  const { operation, entry } = draft.proposal.input;
+  const copy = operations[operation];
+  return (
+    <ReviewCard
+      label={`Knowledge ${copy.done}`}
+      icon={copy.icon}
+      title={entry === 'file' ? 'Knowledge file' : 'Knowledge note'}
+      badge={{ label: copy.done[0]!.toUpperCase() + copy.done.slice(1), variant: 'info' }}
+      settled
+    >
+      <p role="status">
+        {copy.done[0]!.toUpperCase() + copy.done.slice(1)}
+        {operation === 'remove' ? ' from' : ' in'} Knowledge.
+      </p>
+    </ReviewCard>
+  );
+}
+
 export function KnowledgeDraftCard({
   id,
   draft,

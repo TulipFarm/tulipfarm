@@ -7,6 +7,149 @@ import { createServer } from 'vite';
 import { chromium } from 'playwright';
 import { installTurnstileFixture } from './turnstile-fixture.mjs';
 
+test('signup reload restores workspace details and keeps edits and automatic URLs', { timeout: 90000 }, async () => {
+  const server = await createServer({ server: { host: '127.0.0.1', port: 0 } });
+  await server.listen();
+  const cdp = process.env.SIGNUP_RELOAD_CDP_PORT;
+  const browser = await chromium.launch({ headless: true, args: cdp ? [`--remote-debugging-port=${cdp}`] : [] });
+  try {
+    const page = await browser.newPage();
+    page.setDefaultTimeout(15000);
+    const errors = [];
+    const failures = [];
+    const checks = [];
+    page.on('pageerror', error => errors.push(error.message));
+    page.on('console', message => {
+      if (message.type() === 'error') errors.push(message.text());
+    });
+    page.on('requestfailed', request => failures.push(request.url()));
+    await page.route('**/v1/**', route => {
+      const path = new URL(route.request().url()).pathname;
+      if (path === '/v1/auth/get-session') return route.fulfill({ json: null });
+      if (path === '/v1/auth/options')
+        return route.fulfill({ json: { google: false, magicLink: true, turnstileSiteKey: null } });
+      if (path === '/v1/onboarding/availability') {
+        checks.push(route.request().postDataJSON().slug);
+        return route.fulfill({ json: { available: true } });
+      }
+      throw new Error(`Unexpected API request ${path}`);
+    });
+    const name = page.getByLabel('Workspace name', { exact: true });
+    const slug = page.getByLabel('Workspace URL', { exact: true });
+    const next = page.getByRole('button', { name: 'Continue', exact: true });
+    for (const custom of [false, true]) {
+      await page.goto(`${server.resolvedUrls.local[0]}register`, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      await name.fill('Reload studio');
+      if (custom) await slug.fill('custom-studio');
+      const expectedSlug = custom ? 'custom-studio' : 'reload-studio';
+      await next.click();
+      await page.getByRole('heading', { name: 'Create your account', exact: true }).waitFor();
+      await page.getByRole('button', { name: 'Edit workspace details' }).click();
+      assert.equal(await name.inputValue(), 'Reload studio');
+      assert.equal(await slug.inputValue(), expectedSlug);
+      await next.click();
+      await page.getByRole('heading', { name: 'Create your account', exact: true }).waitFor();
+      const recheck = page
+        .waitForResponse(response => response.url().endsWith('/onboarding/availability'))
+        .catch(() => null);
+      await page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 });
+      await page.getByRole('heading', { name: 'Create your workspace', exact: true }).waitFor();
+      assert.equal(await name.inputValue(), 'Reload studio');
+      assert.equal(await slug.inputValue(), expectedSlug);
+      assert.ok(await recheck, 'Reload rechecks the restored workspace URL');
+      assert.equal(checks.at(-1), expectedSlug);
+      if (process.env.SIGNUP_RELOAD_SCREENSHOTS) {
+        assert.ok(cdp, 'Screenshots use agent-browser over CDP');
+        await promisify(execFile)('npx', [
+          '--no-install',
+          'agent-browser',
+          '--session',
+          'signup-workspace-reload',
+          '--cdp',
+          cdp,
+          'screenshot',
+          `${process.env.SIGNUP_RELOAD_SCREENSHOTS}/signup-reload-after.png`,
+        ]);
+      }
+      await name.fill('Renamed studio');
+      assert.equal(await slug.inputValue(), custom ? expectedSlug : 'renamed-studio');
+      await next.click();
+      await page.getByRole('heading', { name: 'Create your account', exact: true }).waitFor();
+      await page.getByRole('button', { name: 'Edit workspace details' }).click();
+      assert.equal(await name.inputValue(), 'Renamed studio');
+      assert.equal(await slug.inputValue(), custom ? expectedSlug : 'renamed-studio');
+      await page.evaluate(() => sessionStorage.clear());
+    }
+    assert.deepEqual(errors, []);
+    assert.deepEqual(failures, []);
+  } finally {
+    await browser.close();
+    await server.close();
+  }
+});
+
+test(
+  'signup ignores invalid or expired drafts and works when session storage is blocked',
+  { timeout: 120000 },
+  async () => {
+    const server = await createServer({ server: { host: '127.0.0.1', port: 0 } });
+    await server.listen();
+    const browser = await chromium.launch({ headless: true });
+    try {
+      for (const stored of [
+        '{broken',
+        JSON.stringify({ name: 42, customSlug: {}, expiresAt: Date.now() + 60000 }),
+        JSON.stringify({ name: 'Old studio', customSlug: 'old-studio', expiresAt: Date.now() - 1000 }),
+        'blocked',
+      ]) {
+        const context = await browser.newContext();
+        try {
+          await context.addInitScript(stored => {
+            if (stored === 'blocked') {
+              for (const method of ['getItem', 'setItem', 'removeItem'])
+                Storage.prototype[method] = () => {
+                  throw new DOMException('Storage blocked', 'SecurityError');
+                };
+            } else sessionStorage.setItem('tulipfarm:signup-workspace', stored);
+          }, stored);
+          await context.route('**/v1/**', route => {
+            const path = new URL(route.request().url()).pathname;
+            if (path === '/v1/auth/get-session') return route.fulfill({ json: null });
+            if (path === '/v1/auth/options')
+              return route.fulfill({ json: { google: false, magicLink: true, turnstileSiteKey: null } });
+            if (path === '/v1/onboarding/availability') return route.fulfill({ json: { available: true } });
+            throw new Error(`Unexpected API request ${path}`);
+          });
+          const page = await context.newPage();
+          page.setDefaultTimeout(15000);
+          const errors = [];
+          page.on('pageerror', error => errors.push(error.message));
+          page.on('console', message => {
+            if (message.type() === 'error') errors.push(message.text());
+          });
+          await page.goto(`${server.resolvedUrls.local[0]}register`, { waitUntil: 'domcontentloaded', timeout: 30000 });
+          const name = page.getByLabel('Workspace name', { exact: true });
+          const slug = page.getByLabel('Workspace URL', { exact: true });
+          assert.equal(await name.inputValue(), '');
+          assert.equal(await slug.inputValue(), '');
+          await name.fill('Fresh studio');
+          await page.getByRole('button', { name: 'Continue', exact: true }).click();
+          await page.getByRole('heading', { name: 'Create your account', exact: true }).waitFor();
+          await page.getByRole('button', { name: 'Edit workspace details' }).click();
+          assert.equal(await name.inputValue(), 'Fresh studio');
+          assert.equal(await slug.inputValue(), 'fresh-studio');
+          assert.deepEqual(errors, []);
+        } finally {
+          await context.close();
+        }
+      }
+    } finally {
+      await browser.close();
+      await server.close();
+    }
+  },
+);
+
 test('signup checks URL availability before account details and permits retry', { timeout: 60000 }, async () => {
   const server = await createServer({ server: { host: '127.0.0.1', port: 0 } });
   await server.listen();
@@ -227,6 +370,7 @@ test(
       await page.emulateMedia({ colorScheme: 'light' });
       await page.getByRole('button', { name: 'Create workspace with email' }).click();
       await page.getByText('Could not save the draft. Try again.').waitFor();
+      assert.notEqual(await page.evaluate(() => sessionStorage.getItem('tulipfarm:signup-workspace')), null);
       assert.equal(emails.length, 0, 'Do not start auth before the draft is durable');
       await page
         .getByRole('main')
@@ -237,6 +381,7 @@ test(
       await page.evaluate(() => window.challenge.solve());
       await page.getByRole('button', { name: 'Create workspace with email' }).click();
       await page.getByText('Check your email', { exact: true }).waitFor();
+      assert.equal(await page.evaluate(() => sessionStorage.getItem('tulipfarm:signup-workspace')), null);
       assert.equal(saves[0].token, saves[1].token, 'An uncertain save reuses its token');
       const callback = emails[0].callbackURL;
       assert.equal(emails[0].newUserCallbackURL, callback);

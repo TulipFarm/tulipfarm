@@ -58,6 +58,7 @@ import { agentSetupSchema } from './setup-contracts.ts';
 import { agentLinkedWorkflow } from './agent-trigger-workflows.ts';
 import { agentWorkflowCommonVersion } from '@tulipfarm/workflows';
 import { closeUnavailableDraft } from '@tulipfarm/conversations/activity';
+import { chatAccess } from '@tulipfarm/conversations/chat-access';
 
 const sourcesSchema = sourceDependenciesSchema;
 const rowSchema = z.object({
@@ -191,15 +192,7 @@ export function createAuthoringDrafts(
     });
   }
   async function owned(tx: AgentTransaction, actor: HumanActor, chatId: string) {
-    if (
-      !(
-        await tx.client.query(
-          `SELECT 1 FROM ${relation(tx, 'tf_conversations')} WHERE id=$1 AND kind='private' AND owner_user_id=$2 AND owner_membership_id=$3 FOR UPDATE`,
-          [chatId, actor.userId, actor.membershipId],
-        )
-      ).rowCount
-    )
-      throw new AccessDenied();
+    if (!(await chatAccess(tx, actor, chatId, 'read', true)).owner) throw new AccessDenied();
   }
   async function writable(
     tx: AgentTransaction,
@@ -712,10 +705,51 @@ export function createAuthoringDrafts(
       ? createAgentSetup(bound, eligible, setupOptions).readCommand(workspaceId, actor, uuidSchema.parse(command.id))
       : undefined;
   }
+  async function knowledgeReceipt(tx: AgentTransaction, actor: HumanActor, chatId: string, id: string) {
+    await owned(tx, actor, chatId);
+    return z
+      .object({
+        digest: draftDecisionSchema.shape.digest,
+        input: draftDecisionSchema,
+        outcome: draftOutcomeSchema,
+        entry: z.enum(['note', 'file']),
+      })
+      .optional()
+      .parse(
+        (
+          await tx.client.query(
+            `SELECT d.digest,c.input,c.outcome,
+          CASE WHEN d.proposal->'input'->>'operation'='remove' THEN d.proposal->'input'->>'entry'
+               ELSE d.proposal->'input'->'content'->>'kind' END AS entry
+         FROM ${relation(tx, 'tf_chat_authoring_drafts')} d
+         JOIN ${relation(tx, 'tf_chat_authoring_decisions')} c ON c.draft_id=d.id
+         WHERE d.id=$1 AND d.conversation_id=$2 AND d.membership_id=$3 AND d.user_id=$4
+           AND d.proposal->>'kind'='knowledge' AND c.outcome->>'kind'='knowledge'`,
+            [id, chatId, actor.membershipId, actor.userId],
+          )
+        ).rows[0],
+      );
+  }
   async function read(workspaceId: string, user: string, chatId: string, id: string) {
     chatId = uuidSchema.parse(chatId);
     id = uuidSchema.parse(id);
     const result = await transaction(workspaceId, user, id, async (tx, actor, bound) => {
+      const receipt = await knowledgeReceipt(tx, actor, chatId, id);
+      if (receipt) {
+        const outcome = draftOutcomeSchema.parse(receipt.outcome);
+        if (outcome.kind !== 'knowledge') throw new AccessDenied();
+        return draftViewSchema.parse({
+          id,
+          digest: receipt.digest,
+          status: 'saved',
+          outcome,
+          proposal: {
+            kind: 'knowledge-receipt',
+            targetId: outcome.documentId,
+            input: { operation: outcome.operation, entry: receipt.entry },
+          },
+        });
+      }
       const row = await load(tx, workspaceId, actor, chatId, id);
       if (!row) return null;
       const saved = (
@@ -828,6 +862,12 @@ export function createAuthoringDrafts(
     // Woken runs read their workflow state, so they are signalled only once this decision has committed.
     const woken: Work[] = [];
     const decided = await transaction(workspaceId, user, true, async (tx, actor, bound) => {
+      const receipt = await knowledgeReceipt(tx, actor, chatId, id);
+      if (receipt) {
+        if (receipt.digest !== input.digest) throw new AgentError('draft-conflict');
+        if (canonicalJson(receipt.input) !== canonicalJson(input)) throw new AgentError('idempotency-conflict');
+        return draftOutcomeSchema.parse(receipt.outcome);
+      }
       const row = await load(tx, workspaceId, actor, chatId, id);
       if (!row) return null;
       if (row.digest !== input.digest) throw new AgentError('draft-conflict');

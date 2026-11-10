@@ -9,7 +9,7 @@ import Fastify from '../../api/node_modules/fastify/fastify.js';
 import { Pool } from 'pg';
 import { NativeConnection, Worker } from '@temporalio/worker';
 import { fixture, loadPlatformBaseline } from '../../../packages/workspace-storage/test/integration/fixture.mjs';
-import { createWorkspaceRuntime } from '@tulipfarm/workspace-storage/runtime';
+import { commonCompatibility, createWorkspaceRuntime } from '@tulipfarm/workspace-storage/runtime';
 import { workspaceTableMigrations } from '@tulipfarm/workspaces/table-migrations';
 import { requireTableSources, requireTableFiles, requireTableImportReference } from '@tulipfarm/agents/table-sources';
 import { tableProposalOptions } from '@tulipfarm/agents/table-proposals';
@@ -53,7 +53,7 @@ test(
     });
     await loadPlatformBaseline(db.platform);
     const migrations = await workspaceTableMigrations();
-    assert.equal(migrations.length, 10);
+    assert.equal(migrations.length, commonCompatibility.maximum);
     const pool = new Pool({ connectionString: db.connectionString, options: '-c search_path=app' });
     cleanup.push(() => pool.end());
     let link;

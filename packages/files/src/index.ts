@@ -335,10 +335,18 @@ async function activeMembers(tx: AuthorizationTransaction, ids: string[] | null)
 /**
  * The file `actor` can read now, as its id, digest, and size. It leaves out the object key: since 0110 a key alone does
  * not locate the bytes, so readers go through `download`, which resolves the path from the key and its owner.
+ * `includeTrash` admits metadata only; content reads still reject Trash.
  */
-export async function requireReadableFile(tx: AuthorizationTransaction, actor: HumanActor, id: string) {
+export async function requireReadableFile(
+  tx: AuthorizationTransaction,
+  actor: HumanActor,
+  id: string,
+  { includeTrash = false }: { includeTrash?: boolean } = {},
+) {
   await currentMember(tx, actor);
-  const { item } = await access(tx, actor, uuidSchema.parse(id));
+  const { item } = await access(tx, actor, uuidSchema.parse(id), 'viewer', {
+    trash: includeTrash ? 'lineage' : false,
+  });
   if (item.kind !== 'file' || !item.object_key || !item.sha256 || item.size === null) throw new AccessDenied();
   return Object.freeze({ id: item.id, sha256: item.sha256, size: item.size });
 }
@@ -1474,6 +1482,40 @@ export function createFiles(
     SELECT * FROM ${table(tx, 'tf_files')} WHERE id = $1
     UNION SELECT f.* FROM ${table(tx, 'tf_files')} f JOIN subtree s ON f.parent_id = s.id
   )`;
+  const fileKnowledge = (tx: AuthorizationTransaction) => `${subtree(tx)}
+    SELECT d.id,s.owner_membership_id,r.original FROM ${table(tx, 'tf_knowledge_documents')} d
+    JOIN ${table(tx, 'tf_knowledge_sources')} s ON s.id=d.source_id AND s.provider='file'
+    JOIN ${table(tx, 'tf_knowledge_revisions')} r ON r.id=d.observed_revision_id
+    JOIN subtree f ON r.original->>'kind'='file' AND r.original->>'fileId'=f.id::text
+    WHERE d.tombstoned_at IS NULL`;
+  async function retireFileKnowledge(tx: AuthorizationTransaction, id: string) {
+    if (!(await installed(tx, 'tf_knowledge_documents'))) return;
+    const entries = z
+      .array(z.object({ id: uuidSchema, owner_membership_id: uuidSchema }))
+      .parse((await tx.client.query(fileKnowledge(tx), [id])).rows);
+    if (!entries.length) return;
+    const ids = entries.map(entry => entry.id);
+    await tx.client.query(
+      `UPDATE ${table(tx, 'tf_knowledge_documents')} SET tombstoned_at=clock_timestamp(),
+        retain_until=clock_timestamp()+interval '30 days',lexical_publication_id=NULL,vector_publication_id=NULL
+      WHERE id=ANY($1::uuid[])`,
+      [ids],
+    );
+    await tx.client.query(
+      `UPDATE ${table(tx, 'tf_knowledge_jobs')} j SET generation=generation+1,lease_token=NULL,lease_until=NULL,
+        dispatched_at=NULL,dispatch_after=clock_timestamp()
+      FROM ${table(tx, 'tf_knowledge_revisions')} r WHERE r.id=j.revision_id AND r.document_id=ANY($1::uuid[])`,
+      [ids],
+    );
+    for (const entry of entries)
+      await recordRecommendationChange(tx, {
+        id: randomUUID(),
+        kind: 'knowledge',
+        sourceId: entry.id,
+        membershipIds: [entry.owner_membership_id],
+        invalidate: true,
+      });
+  }
   /** Only the owner of a Trash item who also owns everything inside it may delete it forever. */
   async function deletable(tx: AuthorizationTransaction, actor: HumanActor, id: string) {
     const { item, role } = await access(tx, actor, id, 'manager', { trash: true });
@@ -1521,8 +1563,36 @@ export function createFiles(
     return transaction(workspaceId, userId, false, async (tx, actor) => {
       const preview = await deletable(tx, actor, id);
       const owners = await activeMembers(tx, [...new Set(preview.blockers.map(item => item.creator_membership_id))]);
+      let knowledgeEntries = 0;
+      if (await installed(tx, 'tf_knowledge_documents')) {
+        const entries = z
+          .array(
+            z.object({
+              original: z.object({ fileId: uuidSchema, sha256: z.string(), bytes: z.number() }),
+            }),
+          )
+          .parse(
+            (
+              await tx.client.query(
+                `${fileKnowledge(tx)} AND s.owner_membership_id=$2 AND s.state IN ('active','paused')
+          AND EXISTS (SELECT 1 FROM ${table(tx, 'tf_knowledge_local_revisions')} l
+            WHERE l.revision_id=r.id AND l.owner_membership_id=$2 AND l.owner_user_id=$3)`,
+                [id, actor.membershipId, actor.userId],
+              )
+            ).rows,
+          );
+        for (const { original } of entries) {
+          try {
+            const file = await requireReadableFile(tx, actor, original.fileId, { includeTrash: true });
+            if (file.sha256 === original.sha256 && file.size === original.bytes) knowledgeEntries++;
+          } catch (error) {
+            if (!(error instanceof AccessDenied)) throw error;
+          }
+        }
+      }
       return {
         ...preview,
+        knowledgeEntries,
         blockers: preview.blockers.map(item => ({
           id: item.id,
           name: item.name,
@@ -1544,6 +1614,8 @@ export function createFiles(
       // cleanup, so neither side removes the object while the other still reads it. Both may remove it after that, which is
       // harmless because removing a missing object succeeds.
       const doomed = await runtime.transaction(workspaceId, compatibility, async tx => {
+        await lockAuthorization(tx, 'write');
+        await retireFileKnowledge(tx, id);
         await lockStorage(tx);
         // Every version's object goes with the file, the current one included.
         const objects = z.array(
@@ -1629,9 +1701,11 @@ export function createFiles(
         .parse((await tx.client.query(`SELECT * FROM ${table(tx, 'tf_files')} WHERE id = $1`, [id])).rows[0]);
       if (existing?.deleting_at) {
         if (existing.creator_membership_id !== actor.membershipId) throw new FileError('not-owner');
+        await retireFileKnowledge(tx, id);
         return;
       }
       if ((await deletable(tx, actor, id)).blockerCount) throw new FileError('owned-by-others');
+      await retireFileKnowledge(tx, id);
       await tx.client.query(
         `${subtree(tx)} UPDATE ${table(tx, 'tf_files')} SET deleting_at = clock_timestamp() WHERE id IN (SELECT id FROM subtree)`,
         [id],

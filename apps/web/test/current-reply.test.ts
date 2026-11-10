@@ -103,11 +103,7 @@ test('the screen interface keeps the outgoing message until acceptance appears i
     assert.equal(result.turn, saved.turn);
     assert.equal(result.since, saved.createdAt);
   }
-  const failed: CommandState[] = [
-    { kind: 'idle' },
-    { kind: 'uncertain', command: send },
-    { kind: 'rejected', message: 'No', status: 400 },
-  ];
+  const failed: CommandState[] = [{ kind: 'idle' }, { kind: 'rejected', message: 'No', status: 400 }];
   for (const command of failed) assert.equal(reply({ messages: [], outgoing, command }).pending, null);
   assert.equal(reply({ messages: undefined, outgoing, command: accepted }).pending, outgoing);
 });
@@ -133,11 +129,7 @@ test('the composer keeps a sent draft hidden when saved history arrives before t
   assert.equal(reply({ messages: [], outgoing, command: sending }).draftSent, true);
   assert.equal(reply({ messages: [], outgoing, command: accepted }).draftSent, true);
   assert.equal(reply({ messages: [saved], outgoing, command: accepted }).draftSent, false);
-  const failed: CommandState[] = [
-    { kind: 'uncertain', command: send },
-    { kind: 'rejected', message: 'No', status: 400 },
-    { kind: 'idle' },
-  ];
+  const failed: CommandState[] = [{ kind: 'rejected', message: 'No', status: 400 }, { kind: 'idle' }];
   for (const command of failed)
     assert.equal(reply({ messages: [], outgoing, command }).draftSent, false, 'a failed send restores the draft');
   for (const command of [
@@ -145,6 +137,28 @@ test('the composer keeps a sent draft hidden when saved history arrives before t
     { kind: 'accepted', operation: 'retry' },
   ] satisfies CommandState[])
     assert.equal(reply({ messages: [saved], outgoing, command }).draftSent, false);
+});
+
+test('checking an uncertain send keeps its bubble and draft without claiming a reply is running', () => {
+  for (const command of [
+    { kind: 'checking', command: send },
+    { kind: 'uncertain', command: send, offline: false },
+    { kind: 'uncertain', command: send, offline: true },
+  ] satisfies CommandState[]) {
+    const result = reply({ messages: [], outgoing, command });
+    assert.equal(result.pending, outgoing);
+    assert.equal(result.unconfirmed, true);
+    assert.equal(result.draftSent, false);
+    assert.equal(result.thinking, false);
+    const waiting = message({ turn: { id: 'waiting-turn', generation: 0, status: 'waiting' } });
+    const queued = reply({ messages: [waiting], outgoing, command });
+    assert.equal(queued.pendingQueued, false, 'an unconfirmed send must not claim to be accepted into the queue');
+    assert.equal(reply({ messages: [message({ id: outgoing.id })], outgoing, command }).pending, null);
+    assert.equal(
+      reply({ messages: [], outgoing, command: { ...command, command: { ...send, messageId: 'other' } } }).pending,
+      null,
+    );
+  }
 });
 
 test('sending the same text again shows its own pending bubble', () => {

@@ -644,8 +644,9 @@ function ConversationDetail({
     await read.refresh();
     setRefreshed(true);
   };
-  const write = useConversationCommand(api, command => {
+  const write = useConversationCommand(api, (command, recoveredPages) => {
     if (command.kind === 'send') {
+      if (recoveredPages) setPages(value => Math.max(value, recoveredPages));
       if (command.model) models.sent(command.model);
       setContent(emptyRichDocument());
       uploads.clear();
@@ -657,6 +658,15 @@ function ConversationDetail({
     stream.retry();
     setRefreshed(true);
   });
+  const uncertainSend =
+    write.state.kind === 'uncertain' && write.state.command.kind === 'send' ? write.state.command : null;
+  const recoveredSend =
+    uncertainSend && data?.messages.some(message => message.id === uncertainSend.messageId)
+      ? uncertainSend.messageId
+      : null;
+  useEffect(() => {
+    if (recoveredSend) void write.recover();
+  }, [recoveredSend]);
   const submit = (...args: Parameters<typeof write.submit>) => {
     setRefreshed(false);
     void write.submit(...args);
@@ -843,6 +853,7 @@ function ConversationDetail({
     pendingQueued,
     queuedMessages,
     queueLabel,
+    unconfirmed,
     draftSent,
     turn,
     thinking,
@@ -1278,6 +1289,9 @@ function ConversationDetail({
                                   <p role="status" className="self-end text-sm text-muted-foreground">
                                     {queueLabel}
                                   </p>
+                                )}
+                                {unconfirmed && (
+                                  <p className="self-end text-xs text-muted-foreground">Not confirmed sent</p>
                                 )}
                               </MessageContent>
                             </Message>

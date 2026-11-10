@@ -1659,7 +1659,7 @@ test('a chat follow-up posts as the sender chosen when it was scheduled', async 
       f.workspace.id,
       { kind: 'human', ...f.alice },
       randomUUID(),
-      { conversationId: chatId, turnId: asked.turnId },
+      { conversationId: chatId, turnId: asked.turnId, sources: [] },
       { tool: 'followups.schedule', instruction: 'Send hey to HR on Slack.', delayMinutes: 5 },
     );
     assert.equal(scheduled.status, 'scheduled');
