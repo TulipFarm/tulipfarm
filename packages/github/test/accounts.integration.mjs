@@ -131,7 +131,29 @@ test('private multi-account lifecycle, consent fencing and credential access in 
         service.complete({ state: denied.state, error: 'access_denied' }, 'test-session', member.userId),
         /authorization-denied/,
       );
+      const cancelled = await service.status(one.id, member.userId, denied.accountId);
+      assert.equal(cancelled.state, 'disconnected');
+      assert.equal(cancelled.identity, null);
       await assert.rejects(f.complete(denied), AccessDenied);
+      const failed = await f.begin();
+      f.setBehavior(async () => new Response(null, { status: 400 }));
+      await assert.rejects(f.complete(failed), /reconnect-required/);
+      assert.equal((await service.status(one.id, member.userId, failed.accountId)).state, 'disconnected');
+      f.setBehavior(f.defaultBehavior);
+      const reconnect = await service.reconnect(one.id, member.userId, 'test-session', first.accountId);
+      await assert.rejects(
+        service.complete(
+          { state: new URL(reconnect.url).searchParams.get('state'), error: 'access_denied' },
+          'test-session',
+          member.userId,
+        ),
+        /authorization-denied/,
+      );
+      const interrupted = await service.status(one.id, member.userId, first.accountId);
+      assert.equal(interrupted.state, 'reconnect-required');
+      assert.equal(interrupted.identity.id, '123');
+      const restored = await service.reconnect(one.id, member.userId, 'test-session', first.accountId);
+      await f.complete({ state: new URL(restored.url).searchParams.get('state') });
       const old = await f.begin();
       const next = await service.reconnect(one.id, member.userId, 'test-session', old.accountId);
       await assert.rejects(f.complete(old), AccessDenied);

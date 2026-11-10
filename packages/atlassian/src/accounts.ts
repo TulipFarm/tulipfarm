@@ -251,7 +251,7 @@ export function createAtlassianAccounts(options: {
       await load(tx, id, true);
       const recommendations = await watchIntegrationRecommendations(tx, id, () => atlassianRecommendations(tx, id));
       await tx.client.query(
-        `UPDATE ${relation(tx, 'accounts')} SET state='reconnect-required',credential=NULL,expires_at=NULL,refresh_started_at=NULL WHERE id=$1 AND generation=$2 AND state=$3`,
+        `UPDATE ${relation(tx, 'accounts')} SET state=CASE WHEN identity IS NULL THEN 'disconnected' ELSE 'reconnect-required' END,credential=NULL,expires_at=NULL,refresh_started_at=NULL WHERE id=$1 AND generation=$2 AND state=$3`,
         [id, generation, state],
       );
       if (state === 'authorizing')
@@ -334,7 +334,7 @@ export function createAtlassianAccounts(options: {
           );
           if (!consumed.rowCount) throw new AccountError('account-conflict');
           await tx.client.query(
-            `UPDATE ${relation(tx, 'accounts')} SET state='reconnect-required',credential=NULL,expires_at=NULL WHERE id=$1`,
+            `UPDATE ${relation(tx, 'accounts')} SET state=CASE WHEN identity IS NULL THEN 'disconnected' ELSE 'reconnect-required' END,credential=NULL,expires_at=NULL WHERE id=$1`,
             [row.id],
           );
           await audit(tx, actor, row.id, 'authorization-denied');

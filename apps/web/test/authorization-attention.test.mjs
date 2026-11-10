@@ -37,11 +37,30 @@ test('unused, disconnected, healthy and unknown integrations never ask for autho
     [],
   );
   for (const state of ['disconnected', 'authorizing', 'failed', 'revoked', 'unavailable'])
-    assert.deepEqual(authorizationAttention({ slack: { ...slack, state } }), []);
+    assert.deepEqual(authorizationAttention({ slack: { ...slack, state, scopes: [] } }), []);
   assert.deepEqual(
     authorizationAttention({ google: { ...google, status: { status: 'disconnected' } }, slack: 'unavailable' }),
     [],
   );
+});
+test('unfinished accounts do not renew, but interrupted reconnects of established identities do', () => {
+  for (const state of ['authorizing', 'reconnect-required', 'disconnected']) {
+    assert.deepEqual(
+      authorizationAttention({
+        github: { configured: true, accounts: [{ ...github, state, identity: null }] },
+        atlassian: { accounts: [{ ...atlassian, state, identity: null }] },
+      }),
+      [],
+    );
+    if (state !== 'disconnected')
+      assert.equal(
+        authorizationAttention({
+          github: { configured: true, accounts: [{ ...github, state }] },
+          atlassian: { accounts: [{ ...atlassian, state }] },
+        }).length,
+        2,
+      );
+  }
 });
 test('Google renews expired accounts and partially granted apps, not unused apps', () => {
   assert.deepEqual(

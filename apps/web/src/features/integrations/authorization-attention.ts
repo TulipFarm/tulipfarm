@@ -4,6 +4,7 @@ import type { githubApi } from '@/lib/github';
 import type { AccountList } from '@/lib/atlassian';
 import type { SlackStatus } from './slack';
 import type { Integration } from '@/features/workspace-mcp/contracts';
+import { accountConnectionState, slackConnectionState } from './connection-state.ts';
 
 type Target =
   | { kind: 'google'; app?: GoogleApp }
@@ -61,7 +62,7 @@ export function authorizationAttention(sources: AuthorizationSources): Authoriza
   }
   const slack = sources.slack;
   if (slack && slack !== 'unavailable') {
-    if (slack.canManage && ['reconnect-required', 'permissions-required', 'scope-missing'].includes(slack.state)) {
+    if (slack.canManage && slackConnectionState(slack) === 'attention') {
       items.push({
         id: 'slack',
         name: 'Slack workspace',
@@ -78,7 +79,7 @@ export function authorizationAttention(sources: AuthorizationSources): Authoriza
       });
   }
   for (const account of sources.github?.configured ? sources.github.accounts : []) {
-    if (account.configured && account.state === 'reconnect-required')
+    if (account.configured && accountConnectionState(account) === 'attention')
       items.push({
         id: `github:${account.id}`,
         name: account.identity ? `GitHub (@${account.identity.login})` : 'GitHub',
@@ -87,7 +88,7 @@ export function authorizationAttention(sources: AuthorizationSources): Authoriza
       });
   }
   for (const account of sources.atlassian?.accounts ?? []) {
-    if (account.configured && account.capabilities.manage && account.state === 'reconnect-required') {
+    if (account.configured && account.capabilities.manage && accountConnectionState(account) === 'attention') {
       const provider = account.protocol === 'trello' ? 'Trello' : 'Atlassian';
       items.push({
         id: `atlassian:${account.id}`,

@@ -22,6 +22,7 @@
     "test:settings": "node --test test/settings.browser.mjs",
     "test:shell": "node test/shell.browser.mjs",
     "test:atlassian": "node test/atlassian.browser.mjs",
+    "test:connections": "node --test test/connection-state.browser.mjs",
     "test:google": "node --test test/google.browser.mjs",
     "typecheck": "tsc --noEmit"
   },

@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
 import { Spinner } from '@tulipfarm/sprout/spinner';
 import { atlassianApi, atlassianError, rejected, type Account, type AccountList, type Grants } from '@/lib/atlassian';
+import { accountConnectionState } from '@/features/integrations/connection-state';
 
 export const protocolNames: Record<AccountProtocol, string> = {
   'atlassian-mcp': 'Jira and Confluence',
@@ -150,7 +151,7 @@ export function AccountSetup({
           <Alert variant="destructive">
             <AlertDescription>
               {authorization.message}
-              {authorization.uncertain && ' Check the account list, then reconnect the unfinished account.'}
+              {authorization.uncertain && ' Check the account list, then finish connecting the unfinished account.'}
             </AlertDescription>
           </Alert>
           <Button variant="outline" onClick={onChanged}>
@@ -213,6 +214,7 @@ export function AccountRow({
     }
   }
   const busy = authorization.kind === 'pending' || disconnect === 'pending';
+  const connection = accountConnectionState(account);
   return (
     <li className="space-y-3 py-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -226,20 +228,20 @@ export function AccountRow({
         <Badge variant={account.state === 'active' ? 'success' : 'secondary'}>
           {
             {
-              active: 'Connected',
-              authorizing: 'Sign-in incomplete',
+              connected: 'Connected',
+              pending: 'Sign-in incomplete',
               refreshing: 'Refreshing',
-              'reconnect-required': 'Reconnect needed',
+              attention: 'Reconnect needed',
               disconnected: 'Disconnected',
-            }[account.state]
+            }[connection]
           }
         </Badge>
       </div>
       {!account.configured && (
         <p>This account's provider is not configured. Ask your operator to restore configuration.</p>
       )}
-      {account.state === 'authorizing' && (
-        <p className="text-muted-foreground">Sign-in was not completed. Reconnect to continue with this account.</p>
+      {connection === 'pending' && (
+        <p className="text-muted-foreground">Sign-in was not completed. Finish connecting to use this account.</p>
       )}
       {account.capabilities.manage && (
         <div className="flex flex-wrap gap-2">
@@ -249,7 +251,9 @@ export function AccountRow({
             aria-busy={authorization.kind === 'pending'}
             onClick={() => void change('reconnect')}
           >
-            Reconnect
+            {connection === 'pending' || (connection === 'disconnected' && !account.identity)
+              ? 'Finish connecting'
+              : 'Reconnect'}
           </Button>
           <Button
             variant="outline"

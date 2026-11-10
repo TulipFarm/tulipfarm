@@ -163,6 +163,41 @@ test('accounts preserve private ownership, one-time consent, isolation and rotat
       );
       assert.equal((await service.status(one.id, member.userId, started.accountId)).state, 'disconnected');
     });
+    await t.test('cancelled first consent is disconnected but cancelled established consent needs repair', async () => {
+      for (const protocol of ['atlassian-mcp', 'trello']) {
+        const started = await f.begin(protocol);
+        const calls = f.calls.length;
+        await assert.rejects(
+          service.complete(null, started.state, 'test-session', member.userId),
+          /authorization-denied/,
+        );
+        const cancelled = await service.status(one.id, member.userId, started.accountId);
+        assert.equal(cancelled.state, 'disconnected');
+        assert.equal(cancelled.identity, null);
+        assert.equal(f.calls.length, calls);
+        await assert.rejects(service.complete('code', started.state, 'test-session', member.userId), AccessDenied);
+        const failed = await f.begin(protocol);
+        f.setBehavior(async () => new Response(null, { status: 400 }));
+        await assert.rejects(
+          service.complete('code', failed.state, 'test-session', member.userId),
+          /reconnect-required/,
+        );
+        assert.equal((await service.status(one.id, member.userId, failed.accountId)).state, 'disconnected');
+        f.setBehavior(f.defaultBehavior);
+        const established = (await service.list(one.id, member.userId)).accounts.find(
+          account => account.protocol === protocol && account.state === 'active',
+        );
+        assert.ok(established);
+        const reconnect = await service.reconnect(one.id, member.userId, 'test-session', established.id);
+        await assert.rejects(
+          service.complete(null, new URL(reconnect.url).searchParams.get('state'), 'test-session', member.userId),
+          /authorization-denied/,
+        );
+        const interrupted = await service.status(one.id, member.userId, established.id);
+        assert.equal(interrupted.state, 'reconnect-required');
+        assert.deepEqual(interrupted.identity, established.identity);
+      }
+    });
     await t.test('refresh commits a claim before the provider, serializes callers and rotates once', async () => {
       const id = await f.connect();
       await db.platform.query(`UPDATE ${table('tf_atlassian_accounts')} SET expires_at=clock_timestamp() WHERE id=$1`, [

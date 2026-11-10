@@ -14,6 +14,7 @@ import { Form, FormFooter } from '@tulipfarm/sprout/form';
 import { apiOrigin } from '@/lib/auth';
 import { jsonResponse, readJson, requestSignal } from '@/lib/http';
 import { SlackKnowledgeSources } from './slack-knowledge';
+import { slackConnectionState } from './connection-state';
 
 const statusSchema = z.object({
   state: z.string(),
@@ -69,6 +70,7 @@ export function SlackIntegration({ workspaceId }: { workspaceId: string }) {
     setCommand(null);
     void read.refresh();
   };
+  const needsRepair = state.kind === 'ready' && slackConnectionState(state.value) === 'attention';
   async function connect() {
     setCommand('opening');
     try {
@@ -111,9 +113,13 @@ export function SlackIntegration({ workspaceId }: { workspaceId: string }) {
         )
       ) : (
         <StatePanel
-          kind={state.value.state === 'disconnected' ? 'empty' : 'error'}
-          title={state.value.state === 'disconnected' ? 'Connect a Slack workspace' : 'Slack workspace needs attention'}
-          description="Members can create an integration. Appointed managers can reconnect it. Reconnect does not restore revoked members or approve previous actions."
+          kind={needsRepair ? 'error' : 'empty'}
+          title={needsRepair ? 'Slack workspace needs attention' : 'Connect a Slack workspace'}
+          description={
+            needsRepair
+              ? 'Members can create an integration. Appointed managers can reconnect it. Reconnect does not restore revoked members or approve previous actions.'
+              : 'Connect Slack and complete sign-in to use this workspace.'
+          }
         >
           {read.state.kind === 'ready' && read.state.error && (
             <p role="alert">Slack status could not refresh. Check Slack status before reconnecting.</p>
@@ -121,6 +127,8 @@ export function SlackIntegration({ workspaceId }: { workspaceId: string }) {
           {state.value.canManage &&
             [
               'disconnected',
+              'reserved',
+              'authorizing',
               'failed',
               'revoked',
               'reconnect-required',
@@ -131,7 +139,7 @@ export function SlackIntegration({ workspaceId }: { workspaceId: string }) {
                 disabled={read.state.kind === 'ready' && (!!read.state.error || read.state.refreshing)}
                 onClick={() => void connect()}
               >
-                {state.value.state === 'disconnected'
+                {!needsRepair
                   ? 'Connect Slack'
                   : state.value.state === 'permissions-required' || state.value.state === 'scope-missing'
                     ? 'Update Slack permissions'
@@ -143,9 +151,9 @@ export function SlackIntegration({ workspaceId }: { workspaceId: string }) {
           </Button>
         </StatePanel>
       )}
-      {state.kind === 'ready' &&
-        state.value.canManage &&
-        !['disconnected', 'unavailable'].includes(state.value.state) && <SlackGrants workspaceId={workspaceId} />}
+      {state.kind === 'ready' && state.value.canManage && (state.value.state === 'active' || needsRepair) && (
+        <SlackGrants workspaceId={workspaceId} />
+      )}
     </section>
   );
 }
