@@ -19,8 +19,14 @@ import { taskSourcesSchema } from './task-contracts.ts';
 import { createAgentTasks } from './tasks.ts';
 import { boundRuntime, lockTask } from './task-approval-gate.ts';
 
+/**
+ * Checks an MCP origin's closure the way chat drafts check theirs: the actor's own personal memory is accepted, since a
+ * private chat's steps and saved definitions it read can retain the memory of the member who asked. Another member's
+ * memory, a Slack thread, and unknown or unavailable provenance are still refused. Private-chat origins never belong to a
+ * Slack chat, so no Slack audience applies here.
+ */
 export const authorizeMcpSources: WorkspaceMcpOptions['authorizeSources'] = async ({ transaction, actor, sources }) => {
-  await requireDraftSources(transaction, actor, sources);
+  await requireDraftSources(transaction, actor, sources, new Set(), undefined, false, true);
 };
 
 export const authorizeMcpSelection: NonNullable<WorkspaceMcpOptions['authorizeSelection']> = async ({

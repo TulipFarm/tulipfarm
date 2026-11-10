@@ -326,7 +326,17 @@ export async function beginReplySession(input: {
       : input.inventory
         ? (preread ?? { inventory: undefined, sources: [] })
         : undefined;
-    const mcp = await observeChatDetail('catalog', () => readCatalog(tx));
+    // A refused MCP catalog leaves this reply without MCP tools rather than failing it: each MCP call checks its origin
+    // again, so nothing the refusal protects becomes reachable. The refusal is still logged by `chat.detail.catalog`.
+    const mcp = await observeChatDetail('catalog', () => readCatalog(tx)).catch((error: unknown) => {
+      if (!(error instanceof AccessDenied)) throw error;
+      log('warn', 'activity', 'call_failed', {
+        operation: 'chat.catalog-skipped',
+        outcome: 'blocked',
+        'error.type': 'AccessDenied',
+      });
+      return undefined;
+    });
     const sources = mergeSources([...(mcp?.sources ?? []), ...(read?.sources ?? [])]);
     const authorized = await observeChatDetail('authorize', () =>
       authorize(tx, slackActor, [...input.retainedSources, ...sources], read?.sources ?? []),

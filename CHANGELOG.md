@@ -66,6 +66,14 @@ One version identifies all apps and images of a release.
 
 ### Fixed
 
+- A private chat reply that resumes, for example after the requester answers a
+  question card, no longer fails every attempt with `access-denied` when its
+  earlier steps used the requester's own personal memory. The MCP tool check
+  now accepts the requester's own memory, as chat drafts do, and a refused MCP
+  tool check at reply start leaves the reply without MCP tools instead of
+  failing it (`chat.catalog-skipped`). A failed or paused `chat.tool` log line
+  now names the tool, the kinds of the sources it ran with (`source.kinds`) and
+  the error type.
 - Busy workspaces no longer fail writes and background jobs with lock
   timeouts. Chat reply inventory reads, Slack dispatch polls and
   `/workspace-mcp` actions share the workspace authorization lock instead of

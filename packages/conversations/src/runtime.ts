@@ -93,6 +93,8 @@ import {
   noteChatReplyFinal,
   noteChatReplyCause,
   observeChatTool,
+  sourceKinds,
+  type ChatStageFailure,
   telemetryErrorCode,
   toolFailureLogged,
 } from '@tulipfarm/observability';
@@ -171,9 +173,13 @@ type ReplyStage =
   | 'tool-recovery'
   | 'delivery';
 const failedStages = new WeakMap<object, ReplyStage>();
-async function staged<T>(stage: ReplyStage, action: () => Promise<T>): Promise<T> {
+async function staged<T>(
+  stage: ReplyStage,
+  action: () => Promise<T>,
+  failure?: (error: unknown) => ChatStageFailure,
+): Promise<T> {
   try {
-    return await observeChatStage(stage, action);
+    return await observeChatStage(stage, action, {}, failure);
   } catch (error) {
     if (typeof error === 'object' && error !== null && !failedStages.has(error)) failedStages.set(error, stage);
     throw error;
@@ -2462,8 +2468,18 @@ export function createConversationExecutor(
             );
         }
       };
+      // A failed or paused tool names itself and the kinds of the sources it ran with, so a later refusal can be traced
+      // to the step that recorded them. A pause for an answer or approval reports `ExternalActionWaiting`.
       const executeTool: Parameters<ConversationReply>[0]['executeTool'] = (...args) =>
-        staged('tool', () => runTool(...args));
+        staged(
+          'tool',
+          () => runTool(...args),
+          error => ({
+            tool: args[0],
+            'source.kinds': sourceKinds([...inheritedSources, ...(args[3] ?? [])]),
+            'error.type': errorType(error),
+          }),
+        );
       const { describedHandles, sourceMessages, render, tail } = observeChatDetailSync('render', () => {
         const replay = [
           ...source.executionSteps.flatMap(step => [

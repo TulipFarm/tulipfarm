@@ -279,6 +279,7 @@ const logOnlyAttributes = new Set([
   'task.id',
   'table',
   'workspace.version',
+  'source.kinds',
 ]);
 // Where an error was thrown: up to eight "function@file:line" frames from TulipFarm's own code, innermost first.
 const errorSitePattern = /^[\w$.<>-]{1,80}@[\w.-]{1,80}:\d{1,6}( < [\w$.<>-]{1,80}@[\w.-]{1,80}:\d{1,6}){0,7}$/;
@@ -329,6 +330,9 @@ function safeAttribute(key: string, value: unknown, logLine = false): boolean {
     // A TulipFarm table's fixed name; customer tables are logged only as "custom".
     if (key === 'table') return typeof value === 'string' && /^(tf_[a-z0-9_]{1,60}|custom|other)$/.test(value);
     if (key === 'workspace.version') return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+    // Distinct source kinds, comma-joined: a fixed vocabulary of kebab-case names.
+    if (key === 'source.kinds')
+      return typeof value === 'string' && /^[a-z][a-z-]{0,40}(,[a-z][a-z-]{0,40}){0,63}$/.test(value);
     return typeof value === 'string' && value.length > 0 && value.length <= providerMessageLimit;
   }
   if (!spanAttributes.has(key)) return false;
@@ -1505,17 +1509,28 @@ export function observeFetch(
         );
 }
 
+/** Fields a failed chat stage adds to its log line; they name what failed, never its content or identifiers. */
+export type ChatStageFailure = { tool?: string; 'source.kinds'?: string; 'error.type'?: string };
+
+/** The distinct source kinds, sorted and comma-joined, for a log line. Kinds are a fixed vocabulary and carry no ids. */
+export function sourceKinds(sources: readonly { kind: string }[]) {
+  return [...new Set(sources.map(source => source.kind))].sort().join(',');
+}
+
 export async function observeChatStage<T>(
   phase: ChatStage,
   call: () => Promise<T>,
   attributes: { dispatch_source?: ChatDispatchSource } = {},
+  failure?: (error: unknown) => ChatStageFailure,
 ): Promise<T> {
   const start = performance.now();
   let outcome = 'success';
+  let failed: ChatStageFailure = {};
   try {
     return await call();
   } catch (error) {
     outcome = 'error';
+    failed = failure?.(error) ?? {};
     throw error;
   } finally {
     const seconds = (performance.now() - start) / 1000;
@@ -1528,6 +1543,7 @@ export async function observeChatStage<T>(
       outcome,
       duration_ms: seconds * 1000,
       ...attributes,
+      ...failed,
     });
   }
 }
