@@ -86,6 +86,8 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     const blocked = (await withoutRunner.list(w.id, w.userId)).find(item => item.id === saved);
     assert.equal(blocked.enabled, false);
     assert.equal(blocked.activeRevision, null);
+    assert.equal(blocked.codeStepsAvailable, false, 'editors hide code steps where saves would fail');
+    assert.equal((await withRunner.list(w.id, w.userId)).find(item => item.id === saved).codeStepsAvailable, true);
 
     assert.equal((await activate(withRunner, w.id, w.userId, saved, revision, true)).enabled, true);
     assert.equal((await activate(withoutRunner, w.id, w.userId, saved, revision, false)).enabled, false);

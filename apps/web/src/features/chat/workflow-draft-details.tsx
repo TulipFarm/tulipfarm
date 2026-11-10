@@ -16,6 +16,7 @@ import { useGitHubNames } from '@/features/workflows/queries';
 import { triggerName } from '@/features/workflows/triggers';
 import { AgentName } from '@/features/agents/reference-names';
 import { WorkflowSlackDestinationLabel } from '@/features/workflows/slack-step';
+import { codeLanguages } from '@/features/workflows/code-languages';
 
 type Definition = WorkflowProposal['input']['definition'];
 type Trigger = Definition['triggers'][number];
@@ -323,12 +324,12 @@ function describeStep(step: Step, sources: TableStepSources, workspaceId: string
       };
     case 'code':
       return {
-        summary: `${name}: run ${step.language === 'python' ? 'Python' : 'JavaScript'} code with ${describeValue(step.input)}`,
+        summary: `${name}: run ${codeLanguages[step.language].name} code with ${describeValue(step.input)}`,
         detail: (
           <CodeBlock
             code={step.source}
             language={step.language}
-            filename={`${step.id}.${step.language === 'python' ? 'py' : 'js'}`}
+            filename={`${step.id}.${codeLanguages[step.language].extension}`}
           />
         ),
       };

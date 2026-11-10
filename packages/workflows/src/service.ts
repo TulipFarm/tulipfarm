@@ -530,6 +530,7 @@ export function createWorkflows(
       sponsor,
       capabilities,
       historyAudience,
+      codeStepsAvailable,
     });
   }
   async function readRowQueue(

@@ -1,3 +1,4 @@
+import { codeLanguages } from './code-languages';
 import { useMemo, useState } from 'react';
 import type { z } from 'zod';
 import {
@@ -40,7 +41,7 @@ export function stepTitle(step: Definition['steps'][number]) {
     case 'wait-until':
       return 'Wait until a date';
     case 'code':
-      return `Run ${step.language === 'javascript' ? 'JavaScript' : 'Python'} code`;
+      return `Run ${codeLanguages[step.language].name} code`;
     case 'http':
       return `Send ${step.method} request`;
     case 'transform':

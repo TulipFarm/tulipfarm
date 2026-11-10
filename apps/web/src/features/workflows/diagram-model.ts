@@ -19,6 +19,7 @@ import {
   type GitHubNames,
   type WorkflowValue,
 } from './definition-description.ts';
+import { codeLanguages } from './code-languages.ts';
 
 export type WorkflowLabels = {
   actor: string;
@@ -109,7 +110,7 @@ function sourceText(step: Step, labels: WorkflowLabels, timezone: string): strin
     case 'human':
       return step.prompt;
     case 'code':
-      return step.language === 'javascript' ? 'JavaScript' : 'Python';
+      return codeLanguages[step.language].name;
     case 'agent':
       return labels.agents?.[step.agentId] ?? 'Agent name unavailable';
     case 'http':

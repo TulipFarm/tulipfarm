@@ -57,6 +57,7 @@ import { AgentStepStatus } from '@/features/workflows/agent-step-status';
 import { runIsLive, runNote } from '@/features/workflows/run-notes';
 import { webhookTriggers } from '@/features/workflows/webhook-status';
 import { TriggerList } from '@/features/workflows/trigger-list';
+import { CodeSteps } from '@/features/workflows/code-steps';
 import {
   knownTriggers,
   liveTriggers,
@@ -724,6 +725,29 @@ function WorkflowPage({
                         void changes.saved(workflow.id);
                         setError('');
                         setMessage('Trigger updated.');
+                      }}
+                    />
+                  </div>
+                  <div className="max-w-3xl pt-6 empty:hidden">
+                    <CodeSteps
+                      key={`${selected.id}/${selected.revision}`}
+                      workspaceId={workspaceId}
+                      workflow={selected}
+                      blocked={blocked}
+                      onDenied={deny}
+                      onSaved={(workflow, action) => {
+                        selection.observed(workflow);
+                        void changes.saved(workflow.id);
+                        setError('');
+                        setMessage(
+                          action === 'removed'
+                            ? workflow.enabled
+                              ? 'Step removed. Activate the saved revision to stop running it.'
+                              : 'Step removed.'
+                            : workflow.enabled
+                              ? 'Step saved. Activate the saved revision to use it.'
+                              : 'Step saved.',
+                        );
                       }}
                     />
                   </div>
