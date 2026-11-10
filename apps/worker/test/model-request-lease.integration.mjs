@@ -4,8 +4,56 @@ import { test } from 'node:test';
 import { createConversationExecutor } from '@tulipfarm/conversations/runtime';
 import { conversationFixture } from '../../../packages/conversations/test/fixture.mjs';
 import { meteredReply } from '../src/conversation-activities.ts';
-import { anthropicChat } from './native-chat-fixture.mjs';
+import { anthropicChat, anthropicText, isTitleRequest } from './native-chat-fixture.mjs';
 import { useModelCatalog } from './model-catalog-fixture.mjs';
+
+test('a reply attempt that loses its lease saves no message, so the turn is answered once', async t => {
+  const f = await conversationFixture();
+  const previous = process.env.ANTHROPIC_API_KEY;
+  process.env.ANTHROPIC_API_KEY = 'synthetic';
+  t.after(() => {
+    if (previous === undefined) delete process.env.ANTHROPIC_API_KEY;
+    else process.env.ANTHROPIC_API_KEY = previous;
+  });
+  t.after(useModelCatalog());
+  try {
+    const w = f.workspace,
+      chatId = randomUUID();
+    await f.store.create(w.id, w.userId, { chatId, commandId: randomUUID() });
+    const sent = await f.store.send(w.id, w.userId, chatId, {
+      messageId: randomUUID(),
+      commandId: randomUUID(),
+      model: 'claude-sonnet',
+      parts: [{ kind: 'text', text: 'Say hello.' }],
+    });
+    const work = { workspaceId: w.id, conversationId: chatId, turnId: sent.turnId, generation: 0 };
+    let answers = 0;
+    t.mock.method(globalThis, 'fetch', async (_url, init) => {
+      const body = JSON.parse(init.body);
+      if (isTitleRequest(body)) return Response.json(anthropicText('Hello'));
+      // The first attempt's lease runs out while its model call is in flight, as on a slow provider.
+      if (++answers === 1)
+        await f.db.platform.query(
+          `UPDATE ${f.table('tf_conversation_turns')} SET lease_until=clock_timestamp()-interval '1 second' WHERE id=$1`,
+          [sent.turnId],
+        );
+      return Response.json(anthropicText(`Hello from attempt ${answers}.`));
+    });
+    const executor = createConversationExecutor(f.runtime, meteredReply(f.runtime, { mcp: null }));
+    assert.equal(await executor.process(work), 'stale');
+    assert.equal((await f.store.history(w.id, w.userId, chatId)).messages.length, 1);
+    assert.equal(await executor.process(work), 'completed');
+    const replies = (await f.store.history(w.id, w.userId, chatId)).messages.filter(
+      message => message.author === 'assistant',
+    );
+    assert.deepEqual(
+      replies.map(message => message.parts.map(part => part.text).join('')),
+      ['Hello from attempt 2.'],
+    );
+  } finally {
+    await f.close();
+  }
+});
 
 for (const mode of ['expired', 'takeover', 'cancelled', 'generation', 'failure'])
   test(`model admission fences ${mode} and preserves spent credits`, async t => {
