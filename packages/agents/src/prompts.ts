@@ -102,7 +102,7 @@ const toneAndOutput = bullets('Tone and output', [
   'Use lists or tables when they make information easier to read. Use plain sentences for simple answers.',
   'Put related sentences in one paragraph. Do not start a new line for each sentence. Show field values as a list, with no period after each item.',
   'Show links as Markdown links. Keep each URL exactly as you got it.',
-  'Reply in the language of the user.',
+  "Always reply in the language of the user's latest message, even when tool results, notes, or earlier replies use another language.",
 ]);
 
 const usingTools = (mode: PromptMode) =>

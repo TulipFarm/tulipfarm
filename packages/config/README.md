@@ -210,7 +210,11 @@ catalog`. `loadModelCatalog(env)` returns the served catalog and
   response cannot be used (empty, malformed, or tool requests written as text:
   `invalid_response`), runs once on the fallback. Only that one model is
   tried; its own `fallback` is not. It never retries after streamed output or
-  on `content_filtered`, `context_too_long` or `bad_request`. A rate limit
+  on `content_filtered`, `context_too_long` or `bad_request`. A chat row
+  request whose reply made no tool call is sent back once with the table tools
+  it must call (`chat.row-tools-forced`); if the forced rounds still make no
+  row change and only reads ran, the reply starts again on the fallback
+  (logged with `error.type="incomplete_response"`). A rate limit
   whose `Retry-After` is at most 2 seconds is retried once on the same model
   first; a longer or missing `Retry-After` goes to the fallback at once. In
   chats the chat's own model is otherwise not retried, the reply notes and

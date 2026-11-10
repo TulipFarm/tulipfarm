@@ -2253,6 +2253,56 @@ export function heldBackReply(held: HeldBackWrite, request = '') {
   return `Nothing new was added. A card to ${held.summary} "${held.table.slice(0, 80)}" is still waiting for your approval in this chat. Approve or dismiss it, then ask again for ${asked.length ? asked.join(', ') : 'this change'}.`;
 }
 
+const writtenRecordSchema = z.object({ id: z.string(), values: z.record(z.string(), z.unknown()) });
+const writtenResultSchema = z.union([z.object({ records: z.array(writtenRecordSchema).min(1) }), writtenRecordSchema]);
+const toolResultValue = (output: string): unknown => {
+  try {
+    const value: unknown = JSON.parse(output.slice(output.indexOf('{')));
+    return z.object({ result: z.object({}).loose() }).safeParse(value).data?.result ?? value;
+  } catch {
+    return undefined;
+  }
+};
+const shownValue = (value: unknown) => {
+  const plain = value && typeof value === 'object' && 'value' in value ? value.value : value;
+  return typeof plain === 'string' || typeof plain === 'number' || typeof plain === 'boolean' ? String(plain) : '';
+};
+/**
+ * The rows this reply wrote without a card, one sentence per table change, such as `Rose 3 was added to "Ledger".` A
+ * fixed reply about a waiting card names them, so it never hides a change that did happen.
+ */
+export function writtenRows(items: readonly LoopItem[]) {
+  const names = new Map<string, string>();
+  const sentences: string[] = [];
+  let calls: readonly { id: string; input: unknown }[] = [];
+  for (const item of items) {
+    if (item.kind === 'model') calls = item.calls;
+    if (item.kind !== 'results') continue;
+    for (const result of item.results) {
+      const value = toolResultValue(result.output);
+      const table = z.object({ id: z.string(), name: z.string().min(1), savedRevision: z.string() }).safeParse(value);
+      if (table.success) names.set(table.data.id, table.data.name);
+      const written = writtenResultSchema.safeParse(value);
+      if (result.error || !written.success || !/^rows_(?:create|update)/.test(result.name)) continue;
+      const records = 'records' in written.data ? written.data.records : [written.data];
+      const tableId = z.object({ tableId: z.string() }).safeParse(calls.find(call => call.id === result.id)?.input)
+        .data?.tableId;
+      const label = tableId && names.has(tableId) ? `"${names.get(tableId)!.slice(0, 80)}"` : 'the table';
+      if (result.name.startsWith('rows_update')) {
+        sentences.push(`${records.length === 1 ? '1 row was' : `${records.length} rows were`} changed in ${label}.`);
+        continue;
+      }
+      const shown = records.map(record => Object.values(record.values).map(shownValue).filter(Boolean).join(' '));
+      sentences.push(
+        records.length <= 3 && shown.every(Boolean)
+          ? `${shown.join(', ')} ${records.length === 1 ? 'was' : 'were'} added to ${label}.`
+          : `${records.length === 1 ? '1 row was' : `${records.length} rows were`} added to ${label}.`,
+      );
+    }
+  }
+  return sentences.join(' ');
+}
+
 /** The rows a request lists after its colon, such as "Lime 10" in "Add one more row: Lime 10." */
 export function requestedRows(request: string) {
   const listed = request.includes(':') ? request.slice(request.lastIndexOf(':') + 1) : '';
@@ -2469,6 +2519,39 @@ export function rowRequestSkipped(
     status: 'continue' as const,
     reason: `The person asked for a row change and none was tried in this turn. Make it now. Nothing failed or was denied; a card earlier in this chat still waits to ${card.summary} "${card.table.slice(0, 60)}", and if that holds the change back, the result says what to tell the person.`,
   };
+}
+
+const rowVerbs = [
+  { verb: /\b(?:delete|remove)\b/i, tools: ['rows.list', 'rows.delete'] },
+  { verb: /\b(?:change|update|edit|set)\b/i, tools: ['rows.list', 'rows.update.batch', 'rows.update'] },
+  { verb: /\b(?:add|insert|append|put|include|create)\b/i, tools: ['rows.create.batch', 'rows.create'] },
+];
+/**
+ * The table tools a row request's next rounds must call, one per round, after its reply made no tool call and was sent
+ * back: the table's schema, then the row change the request names first. A change or removal looks up the live rows
+ * first, since it needs their tokens. Only offered tools are listed.
+ */
+export function forcedRowTools(request: string, offered: readonly string[]) {
+  if (!rowRequest.test(request) || tableRequest.test(request)) return [];
+  const first = rowVerbs
+    .map(entry => ({ ...entry, at: request.search(entry.verb) }))
+    .filter(entry => entry.at >= 0)
+    .sort((a, b) => a.at - b.at)[0];
+  const write = first?.tools.map(nativeToolName).find(name => offered.includes(name));
+  return [nativeToolName('schema.inspect'), ...(write ? [write] : [])].filter(name => offered.includes(name));
+}
+
+/** Whether a row write's result says its table ID was wrong and names the one table the person meant. */
+function tableIdCorrected(output: string) {
+  try {
+    const value: unknown = JSON.parse(output.slice(output.indexOf('{')));
+    const result = z
+      .object({ error: z.literal('table-not-found'), tables: z.array(z.unknown()).length(1) })
+      .safeParse(z.object({ result: z.unknown() }).safeParse(value).data?.result ?? value);
+    return result.success;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -3238,7 +3321,7 @@ export async function inferWithTools(
     .min(0)
     .max(chatToolCallLimit)
     .parse(tools?.priorCalls ?? 0);
-  const guard = createChatToolGuard(tools?.priorToolCalls);
+  let guard = createChatToolGuard(tools?.priorToolCalls);
   let corrections = 0;
   // Three rejected tool requests end tool use for the reply; the model then answers in plain text.
   let rejectionsSpent = false;
@@ -3259,6 +3342,13 @@ export async function inferWithTools(
   let forceRender = false;
   /** A tool the model must call in its next round, where the route accepts a forced tool choice. */
   let forceTool: string | undefined;
+  /**
+   * Table tools the next rounds must call, one per round, until a row change is tried. They are set once per model,
+   * when a row request's reply made no tool call and was sent back.
+   */
+  let rowTools: string[] = [];
+  let rowToolsForced = false;
+  let rowWriteRetried = false;
   const slackLayout = typeof tools?.layout === 'object' ? tools.layout.slack : undefined;
   type Renderer = {
     name: string;
@@ -3715,9 +3805,70 @@ export async function inferWithTools(
       },
     });
   }
+  const replyStart = items.length;
+  const workBefore = workToolUsed;
+  /**
+   * Starts the reply again on the configured fallback model, after a row request's forced table tools still left it
+   * without the change. Only reads ran so far in this reply, so its rounds are dropped and the fallback answers the
+   * person's request from the start, under the same checks.
+   */
+  const restartOnFallback = () => {
+    if (!tools?.fallback || answeredBy !== undefined || tools.priorToolCalls?.length) return false;
+    const fallback = inferenceRouteSchema.parse(tools.fallback.route);
+    const target = { provider: fallback.provider, model: fallback.model };
+    const primary = { provider: config.provider, model: config.model, errorClass: 'incomplete_response' };
+    const changed = items
+      .slice(replyStart)
+      .some(
+        item =>
+          item.kind === 'model' &&
+          item.calls.some(call => isWorkTool(call.name) && !readOnlyNativeTools.has(call.name)),
+      );
+    if (
+      changed ||
+      (fallback.provider === config.provider && fallback.model === config.model) ||
+      (turnImages(loopTurns(items)).length > 0 && !routeCapabilities(fallback).imageInput)
+    ) {
+      recordModelFallback('not_eligible', primary, target);
+      return false;
+    }
+    items.length = replyStart;
+    config = fallback;
+    answeredBy = tools.fallback.label;
+    recordModelFallback('used', primary, target);
+    guard = createChatToolGuard(tools.priorToolCalls);
+    corrections = 0;
+    completionCorrections = 0;
+    cardClaimed = false;
+    workToolUsed = workBefore;
+    carried = '';
+    forceRender = false;
+    forceTool = undefined;
+    rowTools = [];
+    rowToolsForced = false;
+    rowWriteRetried = false;
+    return true;
+  };
   for (let step = 0; ; step++) {
     const finalizing = calls >= chatToolCallLimit || guard.stalled || rejectionsSpent;
     const stoppingReply = rejectionsSpent ? toolRejectedReply : guard.stalled ? toolLoopReply : toolLimitReply;
+    // A forced table tool runs only while no row change has been tried, and the change only after a schema that read.
+    // A forced change that used a wrong table ID is forced once more, with the ID its result names.
+    const lastResults = [...items].reverse().find(item => item.kind === 'results');
+    const misnamed =
+      rowToolsForced && !rowWriteRetried && lastResults?.kind === 'results'
+        ? lastResults.results.find(result => rowWriteName.test(result.name) && tableIdCorrected(result.output))
+        : undefined;
+    if (misnamed) {
+      rowWriteRetried = true;
+      rowTools = [misnamed.name];
+    } else if (
+      rowWriteTried(items) ||
+      (lastResults?.kind === 'results' && lastResults.results.some(result => result.error))
+    )
+      rowTools = [];
+    const rowTool = forceTool || forceRender ? undefined : rowTools.shift();
+    if (rowTool) forceTool = rowTool;
     const { selected, mcp, answerStep, activeCatalog } = await withChatModelRequest('reply', async () => {
       const mcp = await observeChatDetail('round-prepare', async () => {
         await tools?.beforeRound?.();
@@ -3883,6 +4034,21 @@ export async function inferWithTools(
       };
     });
     if (selected.kind === 'failure') {
+      // A forced table tool round that ran away or came back unreadable goes to the fallback, else back to the model.
+      if (rowTool && (selected.reason === 'output-limit' || selected.reason === 'invalid-decision')) {
+        rowTools = [];
+        if (restartOnFallback()) continue;
+        if (selected.reason === 'output-limit' && corrections++ < 2) {
+          items.push({
+            kind: 'turn',
+            turn: {
+              role: 'user',
+              text: `Your last response was empty or malformed, so it was ignored. ${formatOnly} Answer in plain text, or call an offered tool.`,
+            },
+          });
+          continue;
+        }
+      }
       if (finalizing && selected.reason === 'invalid-decision') return finish(stoppingReply);
       if (selected.reason !== 'invalid-decision' || corrections++ >= 2)
         throw new ModelCallError(selected.reason, { outputStarted: outputProduced });
@@ -4246,7 +4412,32 @@ export async function inferWithTools(
       preview('');
       // Asked to confirm invitations, the next round must look them up again rather than restate the earlier answer.
       if (invitesUnchecked && invitationRecheckAsked(items)) forceTool = membersFindName;
-      if (finalizing) return finish(unbacked ? `${stoppingReply} ${noCardReply(waiting)}` : stoppingReply);
+      if (finalizing)
+        return finish(
+          unbacked
+            ? [stoppingReply, writtenRows(items), noCardReply(waiting)].filter(Boolean).join(' ')
+            : stoppingReply,
+        );
+      // A row request whose reply made no tool call is sent back with table tools it must call. If the reply still
+      // makes no row change, the fallback model answers the request before the reply gives up.
+      const rowUntried = rowRequest.test(request) && !tableRequest.test(request) && !rowWriteTried(items);
+      if (rowUntried && rowToolsForced && restartOnFallback()) continue;
+      if (
+        rowUntried &&
+        !rowToolsForced &&
+        !items.slice(replyStart).some(item => item.kind === 'model' && item.calls.some(call => isWorkTool(call.name)))
+      ) {
+        rowToolsForced = true;
+        rowTools = forcedRowTools(
+          request,
+          activeCatalog.tools.map(tool => tool.name),
+        );
+        log('info', 'activity', 'call_completed', {
+          operation: 'chat.row-tools-forced',
+          outcome: routeCapabilities(config).toolChoice === 'auto' ? 'asked' : 'forced',
+          tool: rowTools.join(',') || 'none',
+        });
+      }
       if (completionCorrections++ >= 2) {
         // Corrections are spent, so the reply ends with an answer rather than failing after its tools ran.
         recordChatCompletionCheck('exhausted');
@@ -4261,7 +4452,10 @@ export async function inferWithTools(
           !otherTableSkipped &&
           (unbacked || (cardClaimed && waiting && !cardInReply(items)) || (misdescribed && waiting))
         )
-          return finish(noCardReply(waiting, held ?? rowCards[0]), true);
+          return finish(
+            [writtenRows(items), noCardReply(waiting, held ?? rowCards[0])].filter(Boolean).join(' '),
+            true,
+          );
         if (invitesUnchecked) return finish(invitationFallback(items), true);
         // Asking the person which table, after looking tables up, writes nothing and is a safe place to stop.
         if (idAsked || (asksAboutTable(candidate) && lookedUpTable(items))) return accept();
