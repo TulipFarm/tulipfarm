@@ -40,6 +40,173 @@ const verdict = (status = 'completed') => ({
     status === 'continue' ? 'The requested work has not been attempted.' : 'The reply accurately states the result.',
 });
 
+for (const model of ['grok-4.3', 'Kimi-K2.6'])
+  for (const lookup of [false, true])
+    for (const sse of [false, true])
+      test(`${model} cannot report invitation state from ${lookup ? 'active members' : 'no lookup'} over ${sse ? 'SSE' : 'JSON'}`, async t => {
+        const claim = 'I checked. There are no pending invitees.';
+        const replies = [
+          ...(lookup ? [nativeReply('azure', { calls: [use('members.find')] })] : []),
+          nativeReply('azure', { text: claim }),
+        ];
+        const previews = [];
+        t.mock.method(globalThis, 'fetch', async (_url, init) => {
+          if (isCompletionRequest(JSON.parse(init.body))) return Response.json(selectReply('azure', verdict()));
+          assert.ok(replies.length, 'bounded provider requests');
+          const reply = replies.shift();
+          return sse ? stream(reply) : Response.json(reply);
+        });
+        const result = await inferWithTools(
+          { ...nativeRoutes.azure, model },
+          [{ role: 'user', text: 'Who are the pending invitees in this workspace, and which teams will they join?' }],
+          async call => {
+            assert.equal(call.tool, 'members.find');
+            return {
+              invitations: 'not-available',
+              memberCount: 0,
+              members: [],
+              teamCount: 0,
+              teams: [],
+              truncated: false,
+            };
+          },
+          undefined,
+          false,
+          null,
+          { preloadedTools: ['members.find'], answerText: update => previews.push(update.text) },
+        );
+        assert.equal(
+          result.text,
+          "I can't see workspace invitations in chat. Open Settings > Members to see pending invitations and their teams.",
+        );
+        assert.ok(
+          previews.every(text => !text.includes(claim)),
+          'unsupported claims never reach streamed text',
+        );
+        assert.equal(replies.length, 0);
+      });
+
+test('old invitation claims cannot justify a current answer, but do not block later member questions', async t => {
+  const history = [
+    { role: 'user', text: 'Are there pending workspace invitations?' },
+    { role: 'assistant', text: 'I checked. There are none.' },
+  ];
+  for (const [question, answer, expected] of [
+    [
+      'Check pending invitations again.',
+      'There are none.',
+      "I can't see workspace invitations in chat. Open Settings > Members to see pending invitations and their teams.",
+    ],
+    ['Who is on the Ops team?', 'The team roster is not available.', 'The team roster is not available.'],
+    [
+      'Write an example reminder for pending invitees.',
+      'Please accept your invitation to join the workspace.',
+      'Please accept your invitation to join the workspace.',
+    ],
+    ['What is the capital of France?', 'The capital is Paris.', 'The capital is Paris.'],
+    ['Who is invited to the planning meeting?', 'The meeting has two guests.', 'The meeting has two guests.'],
+  ]) {
+    t.mock.method(globalThis, 'fetch', async () => Response.json(nativeReply('azure', { text: answer })));
+    const result = await inferWithTools(nativeRoutes.azure, [...history, { role: 'user', text: question }], () =>
+      assert.fail('No lookup requested by the model'),
+    );
+    assert.equal(result.text, expected);
+    t.mock.restoreAll();
+  }
+});
+
+for (const model of ['grok-4.3', 'Kimi-K2.6'])
+  for (const scenario of [
+    {
+      name: 'streamed follow-up',
+      question: 'Check again.',
+      answer: 'I checked. There are no pending invitees.',
+      sse: true,
+    },
+    { name: 'plain follow-up', question: 'Check again.', answer: 'There are none.' },
+    {
+      name: 'polite repeated lookup',
+      question: 'Could you check one more time?',
+      answer: 'I checked. There are no pending invitees.',
+      sse: true,
+    },
+    {
+      name: 'confirmation follow-up',
+      question: 'Are you sure?',
+      answer: 'I checked. There are no pending invitees.',
+      sse: true,
+    },
+    {
+      name: 'invitee team follow-up',
+      question: 'What about their teams?',
+      answer: 'I checked. There are no pending invitees.',
+      sse: true,
+    },
+    { name: 'count follow-up', question: 'How many?', answer: 'There are none.' },
+    { name: 'status follow-up', question: 'What is the status?', answer: 'There are none.' },
+    { name: 'invitation noun phrase', question: 'Pending invitees?', answer: 'There are none.' },
+    {
+      name: 'mixed workspace and calendar lookup',
+      question: 'Are there any pending workspace invitations? Also show my meetings.',
+      answer: 'There are no pending invitations and no meetings.',
+    },
+    {
+      name: 'mixed invitation and calendar clause',
+      question: 'List pending workspace invitations and show my meetings.',
+      answer: 'There are no pending invitations and no meetings.',
+    },
+    {
+      name: 'draft with negative wording',
+      question: 'Write a reminder for pending invitees.',
+      answer: 'Please accept your invitation. No reply is needed.',
+      draft: true,
+    },
+    {
+      name: 'meeting invitee list',
+      question: 'Show my meetings and list their invitees.',
+      answer: 'The meeting has two invitees.',
+      event: true,
+    },
+    {
+      name: 'meeting attendance question',
+      question: 'Who is invited and attending the planning meeting?',
+      answer: 'The meeting has two invitees.',
+      event: true,
+    },
+  ])
+    test(`${model} respects invitation context for ${scenario.name}`, async t => {
+      const previews = [];
+      t.mock.method(globalThis, 'fetch', async (_url, init) => {
+        if (isCompletionRequest(JSON.parse(init.body))) return Response.json(selectReply('azure', verdict()));
+        const reply = nativeReply('azure', { text: scenario.answer });
+        return scenario.sse ? stream(reply) : Response.json(reply);
+      });
+      const result = await inferWithTools(
+        { ...nativeRoutes.azure, model },
+        [
+          { role: 'user', text: 'Are there pending workspace invitations?' },
+          { role: 'assistant', text: "I can't see invitations. Open Settings > Members." },
+          { role: 'user', text: scenario.question },
+        ],
+        () => assert.fail('No lookup requested by the model'),
+        undefined,
+        false,
+        null,
+        { answerText: update => previews.push(update.text) },
+      );
+      assert.equal(
+        result.text,
+        scenario.draft || scenario.event
+          ? scenario.answer
+          : "I can't see workspace invitations in chat. Open Settings > Members to see pending invitations and their teams.",
+      );
+      if (!scenario.draft && !scenario.event)
+        assert.ok(
+          previews.every(text => !text.includes(scenario.answer)),
+          'unsupported invitation answers are not streamed',
+        );
+    });
+
 function stream(reply) {
   const choice = reply.choices[0];
   return new Response(

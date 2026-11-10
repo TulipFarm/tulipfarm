@@ -2597,6 +2597,45 @@ export async function inferWithContent(
 /** The saved step text must fit the `narration` column of `tf_conversation_tool_calls`. */
 const narrationLimit = 2000;
 
+const invitationUnavailableReply =
+  "I can't see workspace invitations in chat. Open Settings > Members to see pending invitations and their teams.";
+const invitationTopic = /\b(?:invitations?|invitees?|invites?|invited)\b/i;
+const eventInvitationTopic = /\b(?:calendar|meetings?|events?)\b/i;
+const workspaceInvitationTopic =
+  /\bworkspace\s+(?:invitations?|invitees?|invites?)\b|\b(?:invitations?|invitees?|invites?)\s+(?:in|for|to)\s+(?:(?:the|this|our)\s+)?workspace\b/i;
+const invitationDraft = /\b(?:draft|write|compose|template|example|sample|how (?:do|can|to))\b/i;
+const invitationQuestion = (text: string) =>
+  invitationTopic.test(text) &&
+  /\b(?:who|what|which|list|show|find|check|count|status|pending|outstanding|unaccepted|how many|are there|do we have|tell me|any)\b/i.test(
+    text,
+  ) &&
+  !invitationDraft.test(text);
+function invitationTopicChange(text: string) {
+  if (/\b(?:they|them|their|those|these|it|that|again|pending|outstanding|unaccepted)\b/i.test(text)) return false;
+  return (
+    /\b(?:tables?|rows?|files?|folders?|workflows?|agents?|skills?|knowledge|memory|members?)\b|\b(?:new|different|another)\s+(?:topic|question|task)\b/i.test(
+      text,
+    ) ||
+    (/^(?:who|what|where|when)\s+(?:is|are|was|were)\b/i.test(text.trim()) &&
+      !/\b(?:status|count|number|results?|answer|state|teams)\b/i.test(text)) ||
+    /^(?:please\s+)?(?:create|explain|summari[sz]e|translate|calculate|convert|search)\b|^(?:thanks|thank you|hello|hi|hey)\b/i.test(
+      text.trim(),
+    )
+  );
+}
+
+function invitationLookup(messages: readonly ChatTurn[]) {
+  let active = false;
+  for (const turn of messages) {
+    if (turn.role !== 'user') continue;
+    const text = textTurn(turn).text;
+    if (eventInvitationTopic.test(text) && !workspaceInvitationTopic.test(text)) active = false;
+    else if (text.split(/[.!?;\n]+|\b(?:and|also)\b/i).some(invitationQuestion)) active = true;
+    else if (invitationDraft.test(text) || invitationTopicChange(text)) active = false;
+  }
+  return active;
+}
+
 export async function inferWithTools(
   route: InferenceRoute,
   messages: readonly ChatTurn[],
@@ -2619,6 +2658,9 @@ export async function inferWithTools(
   // Any model output in this turn, streamed or stepped, makes a later fallback unsafe: its history is provider-native.
   let outputProduced = false;
   const items: LoopItem[] = messages.map(turn => ({ kind: 'turn', turn }));
+  // People lookup has no invitation source. Do not stream an invented answer before applying this boundary.
+  const unavailableInvitations = invitationLookup(sourceMessages);
+  const answerText = unavailableInvitations ? undefined : tools?.answerText;
   let calls = z
     .number()
     .int()
@@ -2699,8 +2741,8 @@ export async function inferWithTools(
   ) => {
     report(checked ? 'done' : 'finishing');
     return {
-      text,
-      ...layout,
+      text: unavailableInvitations ? invitationUnavailableReply : text,
+      ...(unavailableInvitations ? {} : layout),
       ...(tools?.avatar ? { avatar } : {}),
       ...(answeredBy ? { fallback: answeredBy } : {}),
     };
@@ -3152,7 +3194,7 @@ export async function inferWithTools(
                   : {}),
               };
             },
-            tools?.answerText,
+            answerText,
             target,
             (measure, usage) => {
               lastRequest = measure;
@@ -3361,7 +3403,7 @@ export async function inferWithTools(
       const candidate = rendered?.text ?? selected.text;
       const preview = (text: string) => {
         try {
-          tools?.answerText?.({ step: answerStep, text });
+          answerText?.({ step: answerStep, text });
         } catch {
           /* Progress is a preview. */
         }
@@ -3371,10 +3413,12 @@ export async function inferWithTools(
           avatar = { name: 'Bud', state: 'Idle' };
           updateAvatar();
         }
+        if (unavailableInvitations) return finish(invitationUnavailableReply, true);
         return rendered
           ? finish(rendered.input.summary, true, { layout: rendered.input })
           : finish(selected.text, true);
       };
+      if (unavailableInvitations) return accept();
       if (rendered) preview(rendered.input.summary);
       // The check catches unfinished tool work. A first-try answer that used no work tool has nothing to catch,
       // unless it reports an outcome that only a tool call could have produced.

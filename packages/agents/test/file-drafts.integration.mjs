@@ -224,8 +224,22 @@ test('chat lists every team with its people, without plan documents, and hides p
       ]),
     );
 
+  const pendingEmail = 'pending@example.test';
+  await db.platform.query(
+    `INSERT INTO ${table('tf_invitations')} (id,issuer_membership_id,kind,email,token_hash,assignments)
+     VALUES ($1,$2,'email',$3,$4,$5)`,
+    [
+      randomUUID(),
+      mine,
+      pendingEmail,
+      '0'.repeat(64),
+      { teams: [{ id: ops, name: 'Ops', role: 'member' }], policies: [] },
+    ],
+  );
   const asAdmin = await tool({ tool: 'members.find' });
   assert.equal(asAdmin.error, undefined, 'the lookup does not depend on plan documents');
+  assert.equal(asAdmin.invitations, 'not-available', 'existing invitations are unavailable, not an empty list');
+  assert.ok(!JSON.stringify(asAdmin).includes(pendingEmail));
   assert.deepEqual([asAdmin.memberCount, asAdmin.teamCount, asAdmin.truncated], [3, 3, false]);
   const adminView = people(asAdmin);
   assert.deepEqual(
@@ -245,7 +259,10 @@ test('chat lists every team with its people, without plan documents, and hides p
   );
 
   await db.platform.query(`UPDATE ${table('tf_memberships')} SET role='member' WHERE id=$1`, [mine]);
-  const memberView = people(await tool({ tool: 'members.find' }));
+  const asMember = await tool({ tool: 'members.find' });
+  assert.equal(asMember.invitations, 'not-available');
+  assert.ok(!JSON.stringify(asMember).includes(pendingEmail));
+  const memberView = people(asMember);
   assert.deepEqual(
     [memberView.Ops, memberView.Sales],
     [
