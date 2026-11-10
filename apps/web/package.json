@@ -67,7 +67,9 @@
     "pptx-preview": "1.0.7",
     "react": "19.3.0",
     "react-dom": "19.3.0",
+    "react-markdown": "10.1.0",
     "reicon-react": "1.2.5",
+    "remark-gfm": "4.0.1",
     "three": "0.186.1",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
     "zod": "4.6.6"
