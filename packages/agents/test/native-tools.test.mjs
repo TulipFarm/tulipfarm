@@ -107,6 +107,10 @@ test('optional tools appear only when their context admits them', () => {
   assert.ok(names(undefined, true).includes('conversation_messages_read'));
   assert.equal(names().includes('files_read'), false);
   assert.ok(names(undefined, false, undefined, true).includes('files_read'));
+  assert.equal(names(undefined, false, new Set()).includes('images_generate'), false);
+  const images = nativeChatTools(undefined, false, new Set(), true);
+  assert.ok(images.tools.some(tool => tool.name === 'images_generate'));
+  assert.doesNotMatch(images.discovery, /\bimages_generate\b/);
   for (const name of ['mcp_search', 'mcp_describe']) {
     assert.equal(names().includes(name), false);
     assert.equal(names(createMcpCatalog([entry]).model()).includes(name), false);
@@ -287,8 +291,9 @@ test('deferred discovery uses only the current admitted catalog and has a bounde
     assert.ok(!initial.discovery?.includes(name), name);
   process.env.SLACK_OUTBOUND_ENABLED = 'true';
   const admitted = nativeChatTools(undefined, true, new Set(), true);
-  for (const name of ['conversation_messages_read', 'images_generate', 'slack_resolve'])
+  for (const name of ['conversation_messages_read', 'slack_resolve'])
     assert.ok(admitted.discovery?.includes(name), name);
+  assert.ok(admitted.tools.some(tool => tool.name === 'images_generate'));
   const offered = new Set(admitted.tools.map(tool => tool.name));
   for (const tool of nativeChatTools(undefined, true, undefined, true).tools)
     if (!offered.has(tool.name)) assert.ok(admitted.discovery.includes(tool.name), tool.name);

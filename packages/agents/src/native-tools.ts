@@ -153,6 +153,7 @@ const coreChatTools = new Set(
     'api.request',
     'execution.run',
     'files.read',
+    'images.generate',
     'agents.delegate',
     'followups.schedule',
   ].map(nativeToolName),

@@ -74,6 +74,13 @@ const actionsWithCare = bullets('Executing actions with care', [
   'Integration access, source-data permission, and action approval are three different checks. One check does not satisfy another.',
 ]);
 
+const generatingImages = bullets('Generating images', [
+  'Use images.generate for any image generation or edit request. It uses the workspace-configured image model, independently of whether the chat model reads images.',
+  'Unless the member explicitly asks to use one of their own connections, never call an image provider through api.request, web.fetch, code execution, or other generic tools to fulfill an image request.',
+  'Never ask the member for a provider API key or account.',
+  'If images.generate reports image-model-unavailable, follow its instruction: say generation is turned off for the workspace, or unavailable for the selected model and name the alternative family when supplied. Do not retry through another tool.',
+]);
+
 const businessConcepts = bullets('Business concepts', [
   'A table defines the shape of business data. A row is one item in a table.',
   'An agent has a role and limited authority. A skill gives a procedure. A skill does not give authority.',
@@ -202,6 +209,7 @@ export function getSystemPrompt(mode: PromptMode): string {
     ...(mode === 'text' ? [] : [skills]),
     ...(mode === 'tools' ? [plans, subagents] : []),
     ...(mode === 'text' ? [] : [usingTools(mode)]),
+    ...(mode === 'text' ? [] : [generatingImages]),
   ].join('\n\n');
 }
 
