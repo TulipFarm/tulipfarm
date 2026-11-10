@@ -21,9 +21,13 @@ test('refused skill links return client errors before creating an import', async
   });
   try {
     for (const [url, code] of [
-      ['ftp://example.com/SKILL.md', 'source-unsupported'],
-      ['file:///etc/passwd', 'source-unsupported'],
-      ['javascript:alert(1)', 'source-unsupported'],
+      ['ftp://example.com/SKILL.md', 'source-not-https'],
+      ['file:///etc/passwd', 'source-not-https'],
+      ['javascript:alert(1)', 'source-not-https'],
+      ['http://example.com/SKILL.md', 'source-not-https'],
+      ['https://github.com/example', 'source-unsupported'],
+      ['https://example.com:8443/SKILL.md', 'source-unsupported'],
+      ['https://example.com/SKILL.md?token=x', 'source-unsupported'],
       ['http://localhost/SKILL.md', 'source-not-public'],
       ['http://127.0.0.1:3002/SKILL.md', 'source-not-public'],
       ['http://169.254.169.254/latest/meta-data/', 'source-not-public'],

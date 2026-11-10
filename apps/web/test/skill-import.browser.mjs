@@ -19,13 +19,16 @@ test('refused import links stay editable and missing imports offer a neutral res
   try {
     const fixture = skillImportFixture();
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' });
-    const unsupported = 'This link does not use HTTPS. Use a public skills.sh, GitHub, or HTTPS skill package link.';
+    const notHttps = 'This link does not use HTTPS. Use a public skills.sh, GitHub, or HTTPS skill package link.';
+    const unsupported = 'Use a public skills.sh, GitHub, or HTTPS skill package link.';
     const nonPublic =
       'This link points to a private or local address. Use a public skills.sh, GitHub, or HTTPS skill package link.';
     const refused = new Map([
-      ['ftp://example.com/SKILL.md', ['source-unsupported', unsupported]],
-      ['file:///etc/passwd', ['source-unsupported', unsupported]],
-      ['javascript:alert(1)', ['source-unsupported', unsupported]],
+      ['ftp://example.com/SKILL.md', ['source-not-https', notHttps]],
+      ['file:///etc/passwd', ['source-not-https', notHttps]],
+      ['javascript:alert(1)', ['source-not-https', notHttps]],
+      ['http://example.com/SKILL.md', ['source-not-https', notHttps]],
+      ['https://github.com/example', ['source-unsupported', unsupported]],
       ['http://localhost/SKILL.md', ['source-not-public', nonPublic]],
       ['http://127.0.0.1:3002/SKILL.md', ['source-not-public', nonPublic]],
       ['http://169.254.169.254/latest/meta-data/', ['source-not-public', nonPublic]],

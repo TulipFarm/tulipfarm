@@ -81,6 +81,7 @@ export class SkillPackageError extends Error {
     | 'source-rate-limit'
     | 'source-unavailable'
     | 'source-unsupported'
+    | 'source-not-https'
     | 'source-not-public'
     | 'source-invalid-url'
     | 'source-limit'

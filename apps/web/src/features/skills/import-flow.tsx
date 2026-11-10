@@ -53,7 +53,7 @@ export function ImportSkillForm({
         if (
           error instanceof TableRequestError &&
           error.status === 400 &&
-          ['source-invalid-url', 'source-unsupported', 'source-not-public'].includes(error.code)
+          ['source-invalid-url', 'source-unsupported', 'source-not-https', 'source-not-public'].includes(error.code)
         )
           setError(error.message);
         throw error;

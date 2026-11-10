@@ -13,6 +13,8 @@ function sourceFailure(error: unknown): never {
   if (error instanceof McpNetworkError) {
     if (error.code === 'address-denied' || error.detail === 'non-public')
       throw new SkillPackageError('source-not-public');
+    if (error.code === 'endpoint-denied' && error.detail === 'not-https')
+      throw new SkillPackageError('source-not-https');
     if (error.code === 'endpoint-denied') throw new SkillPackageError('source-unsupported');
     if (error.code === 'response-limit') throw new SkillPackageError('source-limit');
     if (error.code === 'network-failed' || error.code === 'redirect-denied')

@@ -52,7 +52,13 @@ export function registerSkillImports(
       if (error instanceof SkillPackageError)
         return reply
           .code(
-            ['source-unsupported', 'source-not-public', 'source-invalid-url', 'package-limit'].includes(error.code)
+            [
+              'source-unsupported',
+              'source-not-https',
+              'source-not-public',
+              'source-invalid-url',
+              'package-limit',
+            ].includes(error.code)
               ? 400
               : 409,
           )

@@ -37,6 +37,17 @@ test('source resolution preserves GitHub ref/path and skills.sh hints', () => {
   ])
     assert.throws(() => resolveSkillSource(input));
 });
+test('non-HTTPS refusals remain distinct from unsupported HTTPS links', () => {
+  for (const [url, code] of [
+    ['http://example.com/SKILL.md', 'source-not-https'],
+    ['ftp://example.com/SKILL.md', 'source-not-https'],
+    ['https://github.com/example', 'source-unsupported'],
+    ['https://github.com/example/repository/tree/%ZZ', 'source-unsupported'],
+    ['https://example.com:8443/SKILL.md', 'source-unsupported'],
+    ['https://example.com/SKILL.md?token=x', 'source-unsupported'],
+  ])
+    assert.throws(() => resolveSkillSource(url), { name: 'SkillPackageError', code }, url);
+});
 test('discovery separates nested packages and requires the exact directory', () => {
   const files = [
     { path: 'parent-skill/SKILL.md', bytes: markdown('parent-skill') },
