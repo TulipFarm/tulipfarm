@@ -122,14 +122,24 @@ const other = {
   definition: { label: 'Customers', fields: [{ id: randomUUID(), label: 'Customer' }], uniqueKeys: [] },
 };
 
-test('an import naming no readable table goes into the one table that holds the file’s columns', async () => {
+test('an import without a target can infer the one table that holds the file’s columns', async () => {
   const outcome = await repairImportPlans(
-    { plans: [{ kind: 'import', tableId: 'Sales', reference, mappings: 'by name' }] },
+    { plans: [{ kind: 'import', reference, mappings: 'by name' }] },
     { ...repair, tables: async () => [other, table] },
   );
   const plan = proposeTableSchema.parse(outcome.input).plans[0];
   assert.equal(plan.tableId, tableId);
   assert.equal(plan.mappings.length, 3);
+});
+
+test('an explicit missing destination never falls back to a table with matching columns', async () => {
+  const outcome = await repairImportPlans(
+    { plans: [{ kind: 'import', tableName: 'Sales', reference, mappings: 'by name' }] },
+    { ...repair, tables: async () => [other, table] },
+  );
+  assert.equal(outcome.missingTable.requested, 'Sales');
+  assert.equal(outcome.template, undefined);
+  assert.equal(proposeTableSchema.safeParse(outcome.input).success, false);
 });
 
 test('an import whose table cannot be found or inferred lists the readable tables instead', async () => {

@@ -431,12 +431,12 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     ).result;
     assert.equal(output.status, 'pending');
   });
-  await t.test('file import tools prepare and propose CSV and XLSX without sheet or header hints', async () => {
+  await t.test('file import tools prepare and propose CSV and XLSX without sheet or header hints', async importTest => {
     const definition = {
       formatVersion: 2,
       id: randomUUID(),
       owningTeamId: team,
-      label: 'Orders',
+      label: 'Current Orders',
       fields: [
         { id: randomUUID(), label: 'Order ID', kind: 'text', required: true, maxLength: 100 },
         { id: randomUUID(), label: 'Total', kind: 'numeric', required: false, precision: 8, scale: 2 },
@@ -445,23 +445,49 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     };
     definition.uniqueKeys.push({ id: randomUUID(), fieldIds: [definition.fields[0].id], nulls: 'distinct' });
     const revision = 'b'.repeat(40);
-    let physicalTable;
+    const other = {
+      ...definition,
+      id: randomUUID(),
+      label: 'Historical Orders',
+      fields: definition.fields.map(field => ({ ...field, id: randomUUID() })),
+    };
+    other.uniqueKeys = [{ ...definition.uniqueKeys[0], id: randomUUID(), fieldIds: [other.fields[0].id] }];
+    const pending = { ...other, id: randomUUID(), label: 'Pending Orders' };
+    const punctuated = { ...other, id: randomUUID(), label: 'Current Orders, Priority' };
+    const physicalTables = new Map();
     const migration = await connect(db.login(ws, 'migration'));
     try {
       await inTransaction(migration, async client => {
         await client.query(`SET LOCAL ROLE "${ws.names.customOwner}"`);
         const tx = { client, schema: ws.names.schema };
-        const generation = await createGeneration(tx, { definition, revision });
-        physicalTable = generation.physical_table;
-        await activateGeneration(tx, { generationId: generation.id, expectedActiveGenerationId: null });
-        await client.query(
-          `UPDATE ${s}.tf_table_catalog SET applied_revision=$2,target_revision=$2,applied_definition=$3,physical_table=$4 WHERE id=$1`,
-          [definition.id, revision, definition, generation.physical_table],
-        );
+        for (const table of [definition, other, pending, punctuated]) {
+          const generation = await createGeneration(tx, { definition: table, revision });
+          physicalTables.set(table.id, generation.physical_table);
+          if (table === pending) continue;
+          await activateGeneration(tx, { generationId: generation.id, expectedActiveGenerationId: null });
+          await client.query(
+            `UPDATE ${s}.tf_table_catalog SET applied_revision=$2,target_revision=$2,applied_definition=$3,physical_table=$4 WHERE id=$1`,
+            [table.id, revision, table, generation.physical_table],
+          );
+        }
       });
     } finally {
       await migration.end();
     }
+    const physicalTable = physicalTables.get(definition.id);
+    await db.platform.query(`INSERT INTO ${s}.tf_grants(team_id,asset_id,permission) VALUES($1,$2,'table.row.read')`, [
+      team,
+      definition.id,
+    ]);
+    await db.platform.query(
+      `INSERT INTO ${s}.tf_conversation_parts(conversation_id,message_id,ordinal,kind,text) VALUES($1,$2,5,'text',$3)`,
+      [conversationId, message, `Import the attached file into the existing table ${definition.label}`],
+    );
+    const request = name =>
+      db.platform.query(`UPDATE ${s}.tf_conversation_parts SET text=$2 WHERE message_id=$1 AND kind='text'`, [
+        message,
+        `Import the attached file into the existing table ${name}`,
+      ]);
     const objects = importObjectFixture();
     const files = createChatTools(runtime, { objects });
     await createTableService(runtime, {}, executionCompatibility).mutate(ws.id, actor, {
@@ -513,33 +539,114 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       ).result;
       assert.equal(prepared.error, undefined, JSON.stringify(prepared));
       assert.deepEqual(prepared.columns, ['Order ID', 'Total']);
-      const output = (
-        await files.invokeWithSources(
+      const importPlan = table => ({
+        kind: 'import',
+        tableId: table.id,
+        dependsOn: [],
+        expectedRevision: revision,
+        reference: { kind: 'file', attachmentId, contentDigest },
+        matchFieldIds: table.uniqueKeys[0].fieldIds,
+        mappings: table.fields.map(field => ({ sourceColumn: field.label, fieldId: field.id })),
+      });
+      const propose = plans =>
+        files.invokeWithSources(
           { ...context, callId: randomUUID() },
-          {
-            tool: 'tables.propose',
-            input: JSON.stringify({
-              plans: [
-                {
-                  kind: 'import',
-                  tableId: definition.id,
-                  dependsOn: [],
-                  expectedRevision: revision,
-                  reference: { kind: 'file', attachmentId, contentDigest },
-                  matchFieldIds: definition.uniqueKeys[0].fieldIds,
-                  mappings: definition.fields.map(field => ({ sourceColumn: field.label, fieldId: field.id })),
-                },
-              ],
-            }),
-          },
-        )
+          { tool: 'tables.propose', input: JSON.stringify({ plans }) },
+        );
+      await importTest.test(`partial destination names cannot select an existing table (${ordinal})`, async () => {
+        const before = await count('tf_table_proposals');
+        try {
+          for (const name of ['Missing Current Orders', 'Current', 'Current Orders Extended', 'Current-Orders']) {
+            await request(name);
+            const wrong = (await propose([importPlan(definition)])).result;
+            assert.equal(wrong.error, 'table-not-found', JSON.stringify(wrong));
+          }
+          assert.equal(await count('tf_table_proposals'), before);
+        } finally {
+          await request(definition.label);
+        }
+      });
+      await importTest.test(`destination names end at sentence and clause boundaries (${ordinal})`, async () => {
+        try {
+          for (const suffix of [
+            '.',
+            ', please',
+            ';',
+            '!',
+            '?',
+            ':',
+            ' thanks',
+            '\nand then show the review',
+            ' and then show the review',
+          ]) {
+            await request(`${definition.label}${suffix}`);
+            const output = (await propose([importPlan(definition)])).result;
+            assert.equal(output.status, 'pending', JSON.stringify(output));
+            assert.deepEqual(output.tables, [{ id: definition.id, name: definition.label }]);
+          }
+          await db.platform.query(`UPDATE ${s}.tf_conversation_parts SET text=$2 WHERE message_id=$1 AND kind='text'`, [
+            message,
+            `${definition.label}, please`,
+          ]);
+          assert.equal((await propose([importPlan(definition)])).result.status, 'pending');
+          await request(`${punctuated.label}, please`);
+          assert.equal((await propose([importPlan(definition)])).result.error, 'table-not-found');
+          const exact = (await propose([importPlan(punctuated)])).result;
+          assert.equal(exact.status, 'pending', JSON.stringify(exact));
+          assert.deepEqual(exact.tables, [{ id: punctuated.id, name: punctuated.label }]);
+          await request(`Missing ${definition.label}, please`);
+          assert.equal((await propose([importPlan(definition)])).result.error, 'table-not-found');
+        } finally {
+          await request(definition.label);
+        }
+      });
+      const before = await count('tf_table_proposals');
+      for (let attempt = 0; attempt < 10; attempt++) {
+        const wrong = (await propose([importPlan(other)])).result;
+        assert.equal(wrong.error, 'table-not-found', JSON.stringify(wrong));
+        assert.equal(wrong.tables[0].id, definition.id);
+        assert.equal(wrong.tables[0].name, definition.label);
+      }
+      const repairedWrong = (
+        await propose([{ kind: 'import', tableName: other.label, reference: importPlan(other).reference }])
       ).result;
+      assert.equal(repairedWrong.error, 'table-not-found', JSON.stringify(repairedWrong));
+      const mixed = (await propose([importPlan(definition), importPlan(other)])).result;
+      assert.equal(mixed.error, 'table-not-found', JSON.stringify(mixed));
+      for (const name of ['Missing Orders', pending.label]) {
+        await request(name);
+        const wrong = (await propose([importPlan(other)])).result;
+        assert.equal(wrong.error, 'table-not-found', JSON.stringify(wrong));
+        assert.match(wrong.instruction, /no table.*exists or is ready/i);
+        const loose = (await propose([{ kind: 'import', tableName: name, reference: importPlan(other).reference }]))
+          .result;
+        assert.equal(loose.error, 'import-table-not-found', JSON.stringify(loose));
+      }
+      const notApplied = (await propose([importPlan(pending)])).result;
+      assert.equal(notApplied.error, 'table-not-found', JSON.stringify(notApplied));
+      await request(definition.label);
+      await db.platform.query(`UPDATE ${s}.tf_table_catalog SET maintenance=true WHERE id=$1`, [definition.id]);
+      try {
+        const unavailable = (await propose([importPlan(definition)])).result;
+        assert.equal(unavailable.error, 'table-not-ready', JSON.stringify(unavailable));
+      } finally {
+        await db.platform.query(`UPDATE ${s}.tf_table_catalog SET maintenance=false WHERE id=$1`, [definition.id]);
+      }
+      assert.equal(await count('tf_table_proposals'), before);
+      await request(ordinal === 2 ? '  CURRENT \t ORDERS  ' : ordinal === 3 ? `"${definition.label}"` : definition.id);
+      const output = (await propose([importPlan(definition)])).result;
       assert.equal(output.status, 'pending', JSON.stringify(output));
+      assert.deepEqual(output.tables, [{ id: definition.id, name: definition.label }]);
+      assert.ok(output.instruction.includes(definition.label));
+      assert.ok(!output.instruction.includes(other.label));
       const proposals = createChatTableProposals(runtime, objects);
       const review = await proposals.read(ws.id, actor, conversationId, output.id);
       const plan = review.manifest.plans[0];
+      assert.equal(plan.input.tableId, definition.id);
+      assert.equal(plan.after.label, definition.label);
       assert.equal(plan.effectCount, 3);
       assert.equal(plan.audience.administrators, true);
+      assert.deepEqual(plan.audience.teams, [team]);
       assert.deepEqual(
         plan.input.mappings.map(mapping => mapping.sourceColumn),
         ['Order ID', 'Total'],
@@ -560,6 +667,50 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
           commandId: randomUUID(),
           decision: 'approve',
         });
+        await importTest.test('a post-approval import follow-up keeps the approved destination', async () => {
+          const nextMessage = randomUUID(),
+            nextTurn = randomUUID();
+          await db.platform.query(
+            `INSERT INTO ${s}.tf_conversation_messages(id,conversation_id,sequence,author_kind,membership_id) VALUES($1,$2,2,'human',$3)`,
+            [nextMessage, conversationId, actor.membershipId],
+          );
+          await db.platform.query(
+            `INSERT INTO ${s}.tf_conversation_parts(conversation_id,message_id,ordinal,kind,text) VALUES($1,$2,0,'text','Import the file now')`,
+            [conversationId, nextMessage],
+          );
+          await db.platform.query(
+            `INSERT INTO ${s}.tf_conversation_turns(id,conversation_id,source_message_id,accepted_sequence) VALUES($1,$2,$3,2)`,
+            [nextTurn, conversationId, nextMessage],
+          );
+          const followUp = { ...context, origin: { ...context.origin, turnId: nextTurn } };
+          await files.invokeWithSources(
+            { ...followUp, callId: randomUUID() },
+            {
+              tool: 'tables.import.file',
+              attachmentId,
+              contentDigest,
+              selection: JSON.stringify(selection),
+            },
+          );
+          const followUpPlan = async table =>
+            (
+              await files.invokeWithSources(
+                { ...followUp, callId: randomUUID() },
+                { tool: 'tables.propose', input: JSON.stringify({ plans: [importPlan(table)] }) },
+              )
+            ).result;
+          const wrong = await followUpPlan(other);
+          assert.equal(wrong.error, 'table-not-found', JSON.stringify(wrong));
+          const continued = await followUpPlan(definition);
+          assert.equal(continued.status, 'pending', JSON.stringify(continued));
+          assert.deepEqual(continued.tables, [{ id: definition.id, name: definition.label }]);
+          await db.platform.query(
+            `UPDATE ${s}.tf_conversation_parts SET text='Import into the existing table Missing Current Orders' WHERE message_id=$1`,
+            [nextMessage],
+          );
+          const missing = await followUpPlan(definition);
+          assert.equal(missing.error, 'table-not-found', JSON.stringify(missing));
+        });
         const advance = createTableExecution({
           requireSources: requireTableSources,
           requireImportReference: requireTableImportReference,
@@ -576,6 +727,11 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         assert.equal(
           (await db.platform.query(`SELECT count(*)::int AS count FROM ${s}."${physicalTable}"`)).rows[0].count,
           3,
+        );
+        assert.equal(
+          (await db.platform.query(`SELECT count(*)::int AS count FROM ${s}."${physicalTables.get(other.id)}"`)).rows[0]
+            .count,
+          0,
         );
       }
     }

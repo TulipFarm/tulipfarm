@@ -220,7 +220,7 @@ export type RepairOutcome = {
   template?: Loose;
   fields?: Loose[];
   fileColumns?: string[];
-  /** Set when an import plan names no readable table and none holds the file's columns. */
+  /** Set when an explicit destination is missing, or an unnamed destination cannot be inferred. */
   missingTable?: { requested?: string; tables: { id: string; label: string }[] };
 };
 
@@ -242,16 +242,17 @@ export async function repairImportPlans(raw: unknown, repair: ImportPlanRepair):
     }
     label ??= text(plan.label);
     let table: RepairTable | undefined;
-    for (const hint of tableHints(plan)) if ((table = await repair.table(hint))) break;
+    const hints = tableHints(plan);
+    for (const hint of hints) if ((table = await repair.table(hint))) break;
     const source = reference(plan);
     let cached: Promise<string[] | undefined> | undefined;
     const columns = () =>
       (cached ??= source ? repair.columns(source).catch(() => undefined) : Promise.resolve(undefined));
     if (!table && repair.tables) {
       const readable = await repair.tables().catch(() => []);
-      table = coveringTable(readable, await columns());
+      if (!hints.length) table = coveringTable(readable, await columns());
       if (!table) {
-        const hint = tableHints(plan)[0];
+        const hint = hints[0];
         missingTable ??= {
           ...(hint ? { requested: (hint.name ?? hint.id)!.slice(0, 120) } : {}),
           tables: readable.slice(0, 50).map(item => ({ id: item.id, label: item.definition.label })),

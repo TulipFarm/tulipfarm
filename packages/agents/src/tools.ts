@@ -1406,7 +1406,7 @@ export function createChatTools(
           else if (repair?.missingTable)
             return {
               error: 'import-table-not-found',
-              instruction: `No proposal was created. This is not a permission denial. ${repair.missingTable.requested ? `No readable table is named "${repair.missingTable.requested}", and` : 'The import plan names no table, and'} no table holds most of the file's columns. If one of tables is the right one, call tables.propose again with its id as tableId. If the data needs a new table, propose a schema plan for it first, then propose the import after the person approves the table. If you cannot tell, ask the person which table to import into.`,
+              instruction: `No proposal was created. This is not a permission denial. ${repair.missingTable.requested ? `No readable table named "${repair.missingTable.requested}" exists or is ready. Tell the person; do not substitute a similar table.` : "The import plan names no table, and no table holds most of the file's columns. Ask the person which table to import into."} The readable tables are listed below. If the person wants a new table, propose its schema first, then propose the import after they approve it.`,
               tables: repair.missingTable.tables,
             };
           else {
@@ -1442,17 +1442,47 @@ export function createChatTools(
             };
           }
         }
-        const proposed = await createChatTableProposals(runtime, objects, async tableId =>
+        for (const plan of input.plans) {
+          if (plan.kind !== 'import') continue;
+          const guessed = await guessedChatTable(
+            runtime,
+            resources,
+            workspaceId,
+            actor,
+            origin,
+            plan.tableId,
+            true,
+            true,
+          );
+          if (guessed) return guessed.result;
+        }
+        const proposals = createChatTableProposals(runtime, objects, async tableId =>
           Promise.all(
             (await createWorkflows(runtime).usingTable(workspaceId, actor.userId, tableId)).map(async workflow => {
               const url = await workflowLink?.(workspaceId, workflow.id).catch(() => undefined);
               return url ? { ...workflow, url } : workflow;
             }),
           ),
-        ).propose(workspaceId, actor, callId, context.origin, input);
-        if (!deferred.length || !proposed || typeof proposed !== 'object' || 'error' in proposed) return proposed;
-        return {
+        );
+        const proposed = await proposals.propose(workspaceId, actor, callId, context.origin, input);
+        let tables: { id: string; name: string }[] | undefined;
+        if ('id' in proposed && 'status' in proposed && input.plans.some(plan => plan.kind === 'import')) {
+          const review = await proposals.read(workspaceId, actor.userId, origin.conversationId, proposed.id);
+          if (review.content === 'available')
+            tables = review.manifest.plans.map(plan => ({ id: plan.input.tableId, name: plan.after.label }));
+        }
+        const presented = {
           ...proposed,
+          ...(tables
+            ? {
+                tables,
+                instruction: `This review targets ${tables.map(table => `"${table.name}"`).join(', ')}. Name these actual destination tables in your reply. Never give a table another name or invent a display name.`,
+              }
+            : {}),
+        };
+        if (!deferred.length || 'error' in proposed) return presented;
+        return {
+          ...presented,
           deferredPlans: deferred,
           deferredInstruction:
             'The records and import plans listed in deferredPlans target a table this proposal creates, so they were left out: a new table cannot be filled until the person approves it. Tell the person, and propose those rows or that import after the table is approved.',
