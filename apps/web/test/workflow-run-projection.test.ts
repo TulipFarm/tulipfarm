@@ -8,7 +8,7 @@ import {
   type RunDetail,
   type Step,
 } from '@tulipfarm/workflows/contracts';
-import { workflowRunStates } from '../src/features/workflows/run-projection.ts';
+import { runStepProgress, workflowRunStates } from '../src/features/workflows/run-projection.ts';
 
 const uuid = '11111111-1111-4111-8111-111111111111';
 const at = '2026-10-12T12:00:00Z';
@@ -101,6 +101,30 @@ test('a failed run marks only the step it stopped at as failed', () => {
     assert.equal(states.second, 'unknown', status);
     assert.equal(states.last, 'unknown', status);
   }
+});
+
+test('history counts failed attempts without a receipt and does not count skipped branches', () => {
+  const steps = [plain('first'), plain('last')];
+  assert.deepEqual(runStepProgress(detail(steps, 'failed')), {
+    count: 1,
+    failedStep: { id: 'first', ordinal: 0 },
+  });
+  assert.deepEqual(runStepProgress(detail(steps, 'failed', [receipt('first'), receipt('last', null, 'waiting')])), {
+    count: 2,
+    failedStep: { id: 'last', ordinal: 1 },
+  });
+  const check = condition('check', ['yes'], ['no'], false);
+  assert.deepEqual(
+    runStepProgress(
+      detail([check, plain('yes'), plain('no')], 'failed', [receipt('check', runCondition(check, {}, new Map()))]),
+    ),
+    { count: 2, failedStep: { id: 'no', ordinal: 2 } },
+  );
+  assert.deepEqual(runStepProgress(detail(steps, 'completed', [receipt('first'), receipt('last')])), {
+    count: 2,
+    failedStep: null,
+  });
+  assert.deepEqual(runStepProgress(detail(steps, 'blocked')), { count: 0, failedStep: null });
 });
 
 test('next eligibility follows condition receipts, including reversed arrays and inherited gates', () => {

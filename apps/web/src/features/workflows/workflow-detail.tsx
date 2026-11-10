@@ -14,8 +14,8 @@ import { useFeatureRead } from '@/lib/query';
 import { workspaceRoute } from '@/router';
 import { useWorkflowDefinition, useWorkflowRun } from './queries';
 import { NamedWorkflowViewer } from './named-viewer';
-import { workflowRunStates } from './run-projection';
-import { inputErrorNote, runErrorNote, runNote, stepNote } from './run-notes';
+import { runStepProgress, workflowRunStates } from './run-projection';
+import { inputErrorNote, runErrorNote, runNote, stepNote, stepStatusLabel } from './run-notes';
 import { startedByPerson } from './triggers';
 
 export type WorkflowReference =
@@ -214,7 +214,8 @@ function RunStepDetail({
     <p role="alert" className="text-destructive">
       {inputErrorNote(error, step ? [step] : [], input) ??
         runErrorNote(error) ??
-        `The run failed at this step: ${error}`}
+        'This step could not complete. Check its settings and input, then run the workflow again.'}
+      <span className="block font-mono text-xs">{error}</span>
     </p>
   );
   if (!receipt) return failure || null;
@@ -241,6 +242,51 @@ function RunStepDetail({
         </Disclosure>
       )}
     </div>
+  );
+}
+
+export function WorkflowRunSteps({
+  workspaceId,
+  workflowId,
+  run,
+  children,
+}: {
+  workspaceId: string;
+  workflowId: string;
+  run: RunDetail['run'];
+  children: ReactNode;
+}) {
+  const read = useWorkflowDefinition(workspaceId, run.status === 'failed' ? workflowId : null, run.revision);
+  const progress =
+    run.status === 'failed' && read.state.kind === 'ready'
+      ? runStepProgress({ definition: read.state.data.definition, run })
+      : null;
+  const count = progress?.count ?? run.steps.length;
+  const failed = progress?.failedStep;
+  const title =
+    run.status === 'failed' && !progress
+      ? 'Recorded workflow steps'
+      : `${count} workflow ${count === 1 ? 'step' : 'steps'}${failed ? ` · failed at step ${failed.ordinal + 1}` : ''}`;
+  return (
+    <Disclosure title={title}>
+      <ol className="space-y-3">
+        {run.steps.map(step => (
+          <li key={step.stepId}>
+            <p>
+              {step.stepId.replaceAll('_', ' ')} / {stepStatusLabel(run.status, step.status)}
+            </p>
+            {stepNote(step.output) && <p>{stepNote(step.output)}</p>}
+            <pre className="max-h-64 overflow-auto text-xs">{JSON.stringify(step.output, null, 2)}</pre>
+          </li>
+        ))}
+        {failed && !run.steps.some(step => step.stepId === failed.id) && (
+          <li>
+            <p>{failed.id.replaceAll('_', ' ')} / Failed</p>
+          </li>
+        )}
+      </ol>
+      {children}
+    </Disclosure>
   );
 }
 

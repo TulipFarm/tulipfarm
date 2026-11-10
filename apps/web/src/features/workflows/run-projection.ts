@@ -7,6 +7,18 @@ import {
 } from '@tulipfarm/workflows/contracts';
 import type { WorkflowStepState } from '../../components/workflow-diagram.tsx';
 
+export function runStepProgress(detail: Pick<RunDetail, 'definition' | 'run'>) {
+  const states = workflowRunStates(detail);
+  const failedIndex = detail.definition.steps.findIndex(step => states[step.id] === 'failed');
+  const failedStep = failedIndex < 0 ? null : detail.definition.steps[failedIndex]!;
+  return {
+    count:
+      detail.run.steps.length +
+      (failedStep && !detail.run.steps.some(receipt => receipt.stepId === failedStep.id) ? 1 : 0),
+    failedStep: failedStep ? { id: failedStep.id, ordinal: failedIndex } : null,
+  };
+}
+
 export function workflowRunStates({
   definition,
   run,
