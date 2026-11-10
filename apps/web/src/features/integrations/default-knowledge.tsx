@@ -444,6 +444,7 @@ function IntentRow({
       await change({ keys: [defaultKnowledgeKeys] });
       setConfirm(false);
       setNarrowing(false);
+      if (last.current === 'resume') setSaved(false);
       if (last.current === 'narrow') setSelecting(true);
     },
     [defaultKnowledgeKeys, ...sourceKeys],
@@ -544,8 +545,8 @@ function IntentRow({
       )}
       {intent.state === 'opted-out' && (
         <p className="text-sm text-muted-foreground">
-          Automatic indexing is paused for this account. Imported content stays searchable unless removed. Hand-picked
-          sources keep their own settings.
+          Automatic indexing is paused for this account. Imported content stays searchable while access is still proven.
+          Hand-picked sources keep their own settings.
         </p>
       )}
       {issue && intent.state === 'active' && (
@@ -620,7 +621,8 @@ function IntentRow({
         <div className="space-y-2">
           <p id={`stop-${intent.intentId}`}>
             Pause automatic {disclosure.name} indexing for this account? Current automatic sources stop syncing.
-            Imported content stays searchable. Hand-picked sources are not changed.
+            Permission checks continue so imported content stays searchable while access is still proven. Hand-picked
+            sources are not changed.
           </p>
           <div className="flex flex-wrap gap-2">
             <Button

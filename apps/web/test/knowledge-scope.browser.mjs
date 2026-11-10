@@ -23,6 +23,7 @@ test('each automatic account can switch to selected content in the same flow', {
   if (screenshots) await mkdir(screenshots, { recursive: true });
 
   for (const product of ['google-drive', 'gmail', 'slack', 'jira', 'confluence']) {
+    if (process.env.KNOWLEDGE_SCOPE_PRODUCT && product !== process.env.KNOWLEDGE_SCOPE_PRODUCT) continue;
     await t.test(product, async () => {
       const context = await browser.newContext({ viewport: { width: 1440, height: 1100 } });
       try {
@@ -217,6 +218,15 @@ test('each automatic account can switch to selected content in the same flow', {
           .waitFor();
         assert.equal(writes.length, 2);
         assert.equal(writes[1].accountId, item.accountKey);
+        await region.getByRole('button', { name: 'Turn automatic Knowledge back on', exact: true }).click();
+        await region.getByRole('button', { name: 'Stop automatic Knowledge', exact: true }).waitFor();
+        if (screenshots) await region.screenshot({ path: `${screenshots}/${product}-resumed.png` });
+        assert.equal(
+          await region
+            .getByText('Your selection was saved. Only selected sources will be indexed.', { exact: true })
+            .count(),
+          0,
+        );
         assert.deepEqual(errors, []);
       } finally {
         await context.close();

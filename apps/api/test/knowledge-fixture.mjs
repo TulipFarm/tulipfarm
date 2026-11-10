@@ -22,6 +22,7 @@ export async function knowledgeFixture({
   slackCorpus,
   githubCorpus,
   atlassianCorpus,
+  createOtherWorkspace = true,
 } = {}) {
   const db = await fixture();
   let runtime, identity, object, app;
@@ -33,7 +34,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
     const signed = await authenticatedFixture(db);
     identity = signed.identity;
     const workspace = await db.create(stream, { userId: signed.owner.id }),
-      other = await db.create(stream, { userId: signed.admin.id });
+      other = createOtherWorkspace ? await db.create(stream, { userId: signed.admin.id }) : undefined;
     const table = name => qualified(workspace.names.schema, name);
     const adminMembership = await signed.addAdmin(workspace);
     runtime = createWorkspaceRuntime({
@@ -41,7 +42,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       reservedConnections: 2,
       databaseConnectionBudget: 24,
       resolveCredential: async id => {
-        const target = [workspace, other].find(item => item.id === id);
+        const target = [workspace, other].find(item => item?.id === id);
         if (!target) throw new AccessDenied();
         return { workspaceId: id, generation: 1, connectionString: db.login(target) };
       },

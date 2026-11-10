@@ -217,6 +217,7 @@ const intentSchema = z.object({
   account_label: z.string(),
   github_user_id: z.string().nullish(),
   state: z.enum(['active', 'opted-out']),
+  restore_coverage: z.boolean().optional(),
   sync_state: z.enum(['queued', 'discovering', 'ready', 'failed']),
   failure: z.string().nullable(),
   cursor: z.object({ page: z.string().nullable(), pages: z.number().int() }).nullable(),
@@ -560,8 +561,8 @@ export function createDefaultKnowledge({
         )
         .map(r => ({ key: r.scope_key, group: r.group_key, title: r.title }));
       if (!pending.length) return;
-      // Manual, paused or removed choices of this member keep their scopes; discovery never recreates or expands them.
-      const covered = await adapter.covered(tx, i, pending);
+      // Existing choices win unless the owner explicitly restores whole-account coverage.
+      const covered = i.restore_coverage ? new Set<string>() : await adapter.covered(tx, i, pending);
       if (!adapter.perAccount)
         for (const key of await owned(
           tx,
@@ -621,7 +622,7 @@ export function createDefaultKnowledge({
         ),
     }));
     for (const row of planned.rows.slice(0, defaultKnowledgeLimits.configuresPerStep)) {
-      // A manual choice made after planning wins; its scopes move to it and the rest return to the next discovery pass.
+      // Outside explicit restoration, a manual choice made after planning wins.
       const check = await fenced(work, token, async (tx, i) => {
         if ((await tx.client.query(`SELECT 1 FROM ${table(tx, 'sources')} WHERE id=$1`, [row.source_id])).rowCount)
           return { yielded: false, scopes: [] };
@@ -636,7 +637,7 @@ export function createDefaultKnowledge({
             ).rows,
           )
           .map(r => ({ key: r.scope_key, group: r.group_key, title: r.title }));
-        const covered = await adapter.covered(tx, i, scopes);
+        const covered = i.restore_coverage ? new Set<string>() : await adapter.covered(tx, i, scopes);
         if (!covered.size) return { yielded: false, scopes };
         await tx.client.query(
           `UPDATE ${table(tx, 'default_sources')} SET state='failed',failure='existing' WHERE source_id=$1`,
@@ -790,7 +791,7 @@ export function createDefaultKnowledge({
       await fenced(work, token, tx =>
         tx.client.query(
           `UPDATE ${table(tx, 'default_intents')} SET generation=generation+1,lease_token=NULL,lease_until=NULL,attempts=0,
-        cursor=CASE WHEN $2 THEN NULL ELSE cursor END,sync_state=CASE WHEN $3 THEN 'failed' WHEN $2 THEN 'ready' ELSE 'discovering' END,failure=CASE WHEN $3 THEN 'scope-limit' ELSE NULL END,
+        cursor=CASE WHEN $2 THEN NULL ELSE cursor END,restore_coverage=CASE WHEN $2 THEN false ELSE restore_coverage END,sync_state=CASE WHEN $3 THEN 'failed' WHEN $2 THEN 'ready' ELSE 'discovering' END,failure=CASE WHEN $3 THEN 'scope-limit' ELSE NULL END,
         discovered_at=CASE WHEN $2 THEN $4::timestamptz ELSE discovered_at END,next_attempt_at=$4::timestamptz+CASE WHEN $2 THEN $5::double precision*interval '1 millisecond' ELSE interval '0' END WHERE id=$1`,
           [work.intentId, done, limited, now(), defaultKnowledgeLimits.rediscoverMs],
         ),
@@ -1028,8 +1029,8 @@ export function createDefaultKnowledge({
     }
     if (action === 'narrow')
       await tx.client.query(
-        `UPDATE ${table(tx, 'default_sources')} SET state='failed',failure='excluded' WHERE intent_id=$1 AND state='planned'`,
-        [i.id],
+        `UPDATE ${table(tx, 'default_sources')} SET state='failed',failure='excluded' WHERE intent_id=$1 AND (state='planned' OR source_id=ANY($2::uuid[]))`,
+        [i.id, ids],
       );
   }
 
@@ -1047,13 +1048,23 @@ export function createDefaultKnowledge({
       const i = await owned(tx, actor);
       if (input.action === 'opt-out' || input.action === 'narrow') {
         await tx.client.query(
-          `UPDATE ${table(tx, 'default_intents')} SET state='opted-out',generation=generation+1,lease_token=NULL,lease_until=NULL WHERE id=$1`,
-          [i.id],
+          `UPDATE ${table(tx, 'default_intents')} SET state='opted-out',restore_coverage=restore_coverage OR $2,generation=generation+1,lease_token=NULL,lease_until=NULL WHERE id=$1`,
+          [i.id, input.action === 'narrow'],
         );
         await changeSources(tx, i, input.action);
         return null;
       }
       if (input.action !== 'resume' && i.state !== 'active') throw new KnowledgeError('conflict');
+      if (input.action === 'resume' && i.state === 'opted-out' && i.restore_coverage) {
+        await tx.client.query(
+          `UPDATE ${table(tx, 'default_scopes')} SET disposition='pending',source_id=NULL WHERE intent_id=$1`,
+          [i.id],
+        );
+        await tx.client.query(
+          `UPDATE ${table(tx, 'default_intents')} SET restore_coverage=true,cursor=NULL,sync_state='queued' WHERE id=$1`,
+          [i.id],
+        );
+      }
       await tx.client.query(
         `UPDATE ${table(tx, 'default_intents')} SET state='active',generation=generation+1,lease_token=NULL,lease_until=NULL,next_attempt_at=$2,attempts=0,sync_state=CASE WHEN sync_state='failed' THEN 'queued' ELSE sync_state END WHERE id=$1`,
         [i.id, now()],
