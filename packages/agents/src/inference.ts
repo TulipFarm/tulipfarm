@@ -2127,6 +2127,10 @@ export function reviewCardReceipt(name: string, value: unknown): CardReceipt | u
     receipt.importId
   )
     return metadata(receipt.importId, receipt.status);
+  if (name === nativeToolName('memory.forget'))
+    return receipt.status === 'forgotten' && typeof receipt.draftId === 'string' && receipt.draftId
+      ? metadata(receipt.draftId, receipt.status)
+      : undefined;
   return authoringReviewTools.has(name) &&
     receipt.status === 'review-required' &&
     typeof receipt.draftId === 'string' &&
