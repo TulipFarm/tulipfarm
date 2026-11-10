@@ -120,7 +120,24 @@ export function registerWorkspaceMembers(
     const photoParams = memberParams.extend({ digest: z.string().regex(/^[a-f0-9]{64}$/) });
     routes.get(
       `${base}/:memberId/photos/:digest`,
-      { logLevel: 'silent', schema: { operationId: 'workspaceMemberPhoto', params: validation.json(photoParams) } },
+      {
+        logLevel: 'silent',
+        schema: {
+          operationId: 'workspaceMemberPhoto',
+          params: validation.json(photoParams),
+          response: {
+            200: {
+              description: 'Member photo',
+              content: {
+                'image/png': { schema: { type: 'string', format: 'binary' } },
+                'image/jpeg': { schema: { type: 'string', format: 'binary' } },
+                'image/webp': { schema: { type: 'string', format: 'binary' } },
+              },
+            },
+            302: { type: 'null', description: 'Redirect to the member photo' },
+          },
+        },
+      },
       async (request, reply) => {
         const p = photoParams.parse(request.params);
         const image = await service.photo(p.workspaceId, user(request), p.memberId, p.digest);

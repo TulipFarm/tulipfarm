@@ -32,7 +32,15 @@ export function registerRecommendationEvents(
         summary: 'Stream private recommendation change identifiers',
         tags: ['Conversations'],
         params: z.toJSONSchema(z.object({ workspaceId: z.uuid() }), { target: 'draft-7' }),
-        response: { 401: error, 404: error, 503: error },
+        response: {
+          200: {
+            description: 'Live recommendation change events',
+            content: { 'text/event-stream': { schema: { type: 'string' } } },
+          },
+          401: error,
+          404: error,
+          503: error,
+        },
       },
     },
     async (request, reply) => {

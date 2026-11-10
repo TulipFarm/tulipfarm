@@ -144,7 +144,14 @@ export function registerSkills(
     );
     routes.put(
       `${base}/:skillId`,
-      { schema: { operationId: 'retiredSaveWorkspaceSkillV1', params: json(skill) } },
+      {
+        schema: {
+          operationId: 'retiredSaveWorkspaceSkillV1',
+          deprecated: true,
+          params: json(skill),
+          response: { 410: errors[400] },
+        },
+      },
       (request, reply) => {
         user(request);
         return reply.code(410).send({ error: 'skill-authoring-chat-only' });

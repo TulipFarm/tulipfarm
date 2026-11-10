@@ -1,11 +1,37 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
-import { buildApp } from '../src/app.ts';
+import { after, mock, test } from 'node:test';
 import Fastify from 'fastify';
-import { registerAgents } from '../src/agents.ts';
-import { registerAccountDetails } from '../src/account-details.ts';
 import { Pool } from 'pg';
 import { createHmac } from 'node:crypto';
+import dns from 'node:dns/promises';
+import { syncBuiltinESMExports } from 'node:module';
+
+mock.method(globalThis, 'fetch', async () => {
+  throw new Error('Network access blocked in composition test');
+});
+mock.method(dns, 'lookup', async () => {
+  throw new Error('DNS access blocked in composition test');
+});
+syncBuiltinESMExports();
+const [
+  { buildApp },
+  { registerAgents },
+  { registerAccountDetails },
+  { registerGoogleOperations },
+  { registerSkills },
+  { authConfig },
+] = await Promise.all([
+  import('../src/app.ts'),
+  import('../src/agents.ts'),
+  import('../src/account-details.ts'),
+  import('../src/google-operations.ts'),
+  import('../src/skills.ts'),
+  import('../src/auth.ts'),
+]);
+after(() => {
+  mock.restoreAll();
+  syncBuiltinESMExports();
+});
 
 // The app serves the shipped model catalog, which needs a provider key.
 process.env.ANTHROPIC_API_KEY ??= 'test-key';
@@ -47,6 +73,96 @@ test('private account details reject guests before reading account data', async 
     assert.equal(sessionReads, 1);
   } finally {
     await app.close();
+  }
+});
+
+test('Google operation documentation does not validate or strip service response fields', async t => {
+  const workspaceId = '11111111-1111-4111-8111-111111111111';
+  const proposalId = '22222222-2222-4222-8222-222222222222';
+  const result = { untrusted: true, data: { title: 'Document' }, extension: { revision: 'next' } };
+  const proposal = {
+    id: proposalId,
+    operation: { kind: 'docs.documents.create', title: 'Document' },
+    digest: 'a'.repeat(64),
+    expiresAt: '2026-01-01T00:00:00.000Z',
+    integration: { integrationId: workspaceId, accountId: 'account', generation: 1, scopes: [], requiredScopes: [] },
+    decision: null,
+    receipt: null,
+    extension: { revision: 'next' },
+  };
+  const receipt = { status: 'succeeded', result, error: null, extension: { revision: 'next' } };
+  const content = {
+    kind: 'sheet-range',
+    data: { range: 'A1', majorDimension: 'ROWS', values: [['Cell']] },
+    extension: { revision: 'next' },
+  };
+  const app = Fastify();
+  t.after(() => app.close());
+  registerGoogleOperations(app, {
+    auth: { api: { getSession: async () => ({ user: { id: 'user' } }) } },
+    runtime: {},
+    operations: {
+      read: async () => result,
+      propose: async () => proposal,
+      proposal: async () => proposal,
+      execute: async () => receipt,
+      fileContent: async () => content,
+    },
+    approve: async () => proposal,
+  });
+  const base = `/workspaces/${workspaceId}/google-workspace/operations`;
+  for (const [path, method, payload, output] of [
+    ['/read', 'POST', { operation: { kind: 'docs.documents.get', documentId: 'document' } }, result],
+    ['/proposals', 'POST', { operation: proposal.operation, commandId: proposalId }, proposal],
+    [`/proposals/${proposalId}`, 'GET', undefined, proposal],
+    [`/proposals/${proposalId}/decision`, 'POST', { digest: proposal.digest, decision: 'approve' }, proposal],
+    [`/proposals/${proposalId}/execute`, 'POST', undefined, receipt],
+    [
+      '/files/content',
+      'POST',
+      {
+        kind: 'sheet-range',
+        fileId: 'spreadsheet',
+        expectedIntegration: { integrationId: workspaceId, accountId: 'account', generation: 1 },
+        sheetName: 'Sheet1',
+        startRow: 1,
+        rowCount: 1,
+        startColumn: 1,
+        columnCount: 1,
+      },
+      content,
+    ],
+  ]) {
+    const response = await app.inject({
+      url: `${base}${path}`,
+      method,
+      payload,
+      headers: { origin: authConfig().webOrigin },
+    });
+    assert.equal(response.statusCode, 200, `${method} ${path}: ${response.body}`);
+    assert.equal(response.body, JSON.stringify(output), `${method} ${path} preserves the original body`);
+  }
+});
+
+test('the deprecated skill route preserves its exact retired response body', async t => {
+  for (const documented of [false, true]) {
+    const app = Fastify();
+    t.after(() => app.close());
+    if (!documented)
+      app.addHook('onRoute', route => {
+        if (route.schema?.response) delete route.schema.response['410'];
+      });
+    registerSkills(app, {
+      auth: { api: { getSession: async () => ({ user: { id: 'user' } }) } },
+      runtime: {},
+    });
+    const response = await app.inject({
+      method: 'PUT',
+      url: '/workspaces/11111111-1111-4111-8111-111111111111/skills/22222222-2222-4222-8222-222222222222',
+      headers: { origin: authConfig().webOrigin },
+    });
+    assert.equal(response.statusCode, 410);
+    assert.equal(response.body, '{"error":"skill-authoring-chat-only"}');
   }
 });
 
@@ -218,7 +334,7 @@ test('v1 documentation describes the routes and their response contracts', async
   }
 });
 
-test('isolated buildApp registers the model catalog and OpenAPI contract while database access is blocked', async t => {
+test('isolated buildApp documents success responses for all route groups while database access is blocked', async t => {
   const environment = {
     NODE_ENV: 'test',
     SLACK_INTAKE_ENABLED: 'true',
@@ -245,6 +361,11 @@ test('isolated buildApp registers the model catalog and OpenAPI contract while d
     WORKSPACE_RUNTIME_PREVIOUS_KEYS: '{}',
     INTEGRATION_CREDENTIAL_PREVIOUS_KEYS: '{}',
     EMAIL_DELIVERY_PREVIOUS_KEYS: '{}',
+    TULIPFARM_OBJECT_STORAGE_FILES_BUCKET: 'contract-test-files',
+    TULIPFARM_OBJECT_STORAGE_REGION: 'us-east-1',
+    TULIPFARM_OBJECT_STORAGE_ENDPOINT: 'http://127.0.0.1:1',
+    TULIPFARM_OBJECT_STORAGE_ACCESS_KEY_ID: 'synthetic',
+    TULIPFARM_OBJECT_STORAGE_SECRET_ACCESS_KEY: 'synthetic',
     WORKSPACE_PROVISIONING_DATABASE_URL: undefined,
     WORKSPACE_MIGRATION_KEY: undefined,
     WORKSPACE_MIGRATION_PREVIOUS_KEYS: undefined,
@@ -295,7 +416,79 @@ test('isolated buildApp registers the model catalog and OpenAPI contract while d
     assert.equal(response.headers['cache-control'], 'no-store');
     const docs = await app.inject('/v1/docs/json');
     assert.equal(docs.statusCode, 200);
-    const operation = docs.json().paths['/v1/workspaces/{workspaceId}/model-catalog'].get;
+    const spec = docs.json();
+    const operations = Object.entries(spec.paths).flatMap(([path, methods]) =>
+      Object.entries(methods)
+        .filter(([method]) => ['get', 'post', 'put', 'patch', 'delete', 'head', 'options', 'trace'].includes(method))
+        .map(([method, operation]) => ({ path, method, operation })),
+    );
+    assert.deepEqual(
+      [...new Set(operations.flatMap(({ operation }) => operation.tags ?? []))].sort(),
+      [
+        'API calls',
+        'Account',
+        'Agent plans',
+        'Agent tasks',
+        'Agents',
+        'Atlassian accounts',
+        'Atlassian operations',
+        'Bud',
+        'Conversations',
+        'Files',
+        'GitHub investigation',
+        'GitHub personal accounts',
+        'Google Workspace',
+        'Google heartbeat',
+        'Google operations',
+        'Governance',
+        'Health',
+        'Integrations',
+        'Knowledge',
+        'Models',
+        'Onboarding',
+        'Personal memory',
+        'Projects',
+        'Public guide',
+        'Secrets',
+        'Skills',
+        'Slack',
+        'Social accounts',
+        'System packages',
+        'Workflows',
+        'Workspace MCP',
+        'Workspace settings',
+        'Workspaces',
+      ].sort(),
+      'The document must include every route group',
+    );
+    assert.ok(operations.some(({ operation }) => operation.operationId === 'readSkillImportV1'));
+    assert.ok(operations.some(({ operation }) => operation.operationId === 'copyGoogleFileToFilesV1'));
+    const retired = operations.find(({ operation }) => operation.operationId === 'retiredSaveWorkspaceSkillV1');
+    assert.ok(retired);
+    assert.equal(retired.operation.deprecated, true);
+    assert.ok(retired.operation.responses['410']);
+    assert.equal(
+      Object.keys(retired.operation.responses).some(status => /^[23]\d\d$/.test(status)),
+      false,
+    );
+    const redirects = new Set(['publicGuideGoogleV1', 'completeGoogleWorkspaceOAuthV1']);
+    assert.deepEqual(
+      operations
+        .filter(
+          ({ operation }) =>
+            operation.operationId !== 'retiredSaveWorkspaceSkillV1' &&
+            !Object.keys(operation.responses).some(
+              status => /^2\d\d$/.test(status) || (redirects.has(operation.operationId) && /^3\d\d$/.test(status)),
+            ),
+        )
+        .map(({ path, method }) => `${method.toUpperCase()} ${path}`),
+      [],
+      'Every documented operation must declare a success response',
+    );
+    const events = spec.paths['/v1/workspaces/{workspaceId}/conversations/{chatId}/events'].get;
+    assert.equal(events.operationId, 'streamConversationEventsV1');
+    assert.deepEqual(events.responses['200'].content, { 'text/event-stream': { schema: { type: 'string' } } });
+    const operation = spec.paths['/v1/workspaces/{workspaceId}/model-catalog'].get;
     assert.equal(operation.operationId, 'getModelCatalogV1');
     assert.equal(operation.parameters.find(parameter => parameter.name === 'workspaceId').required, true);
     assert.deepEqual(Object.keys(operation.responses).sort(), [
