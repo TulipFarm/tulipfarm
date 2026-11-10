@@ -296,6 +296,8 @@ for (const change of ['remove note', 'replace note', 'remove file']) {
     let legacySources;
     let followUpMessageId;
     let pendingFollowUpId;
+    let legacyFollowUpReply;
+    let legacyFollowUpStream;
     if (change === 'remove note') {
       const scheduled = await tool({ tool: 'followups.schedule', instruction: narration, delayMinutes: 1 });
       assert.equal(scheduled.status, 'scheduled');
@@ -343,10 +345,23 @@ for (const change of ['remove note', 'replace note', 'remove file']) {
           followUpMessageId,
         ])
       ).rows[0];
-      await createConversationExecutor(runtime, async () => ({
-        text: 'The scheduled work is done.',
-        sources: [],
-      })).process({
+      await createConversationExecutor(runtime, async ({ messages, executeTool }) => {
+        await executeTool(
+          'tables.definitions',
+          false,
+          async () => ({ result: { tables: [] }, sources: [] }),
+          [],
+          { tool: 'tables.definitions' },
+          undefined,
+          narration,
+        );
+        return {
+          text: messages.some(message => message.role === 'user' && message.text.includes(narration))
+            ? `Copied scheduled instruction: ${narration}`
+            : 'No scheduled instruction is available.',
+          sources: [],
+        };
+      }).process({
         workspaceId: w.id,
         conversationId: chatId,
         turnId: fired.id,
@@ -364,6 +379,21 @@ for (const change of ['remove note', 'replace note', 'remove file']) {
           ),
         );
       });
+      legacyFollowUpReply = (
+        await db.platform.query(
+          `UPDATE "${w.names.schema}".tf_conversation_results SET sources=$2 WHERE turn_id=$1 RETURNING message_id`,
+          [fired.id, JSON.stringify([{ kind: 'private-conversation', conversationId: chatId, snapshot: true }])],
+        )
+      ).rows[0].message_id;
+      const step = (
+        await db.platform.query(
+          `UPDATE "${w.names.schema}".tf_conversation_execution_steps SET sources=$2 WHERE turn_id=$1
+           RETURNING call_id,(SELECT attempt_epoch FROM "${w.names.schema}".tf_conversation_turns WHERE id=$1) AS epoch`,
+          [fired.id, JSON.stringify([{ kind: 'private-conversation', conversationId: chatId, snapshot: true }])],
+        )
+      ).rows[0];
+      legacyFollowUpStream = { kind: 'tool', turnId: fired.id, generation: 0, epoch: step.epoch, id: step.call_id };
+      assert.equal(await chats.canReadStream(w.id, w.userId, chatId, legacyFollowUpStream), true);
       assert.equal(
         (await chats.history(w.id, w.userId, chatId)).messages.find(message => message.id === followUpMessageId)
           .followUp.instruction,
@@ -411,6 +441,20 @@ for (const change of ['remove note', 'replace note', 'remove file']) {
     );
     const decision = { commandId: randomUUID(), digest: changed.digest, decision: 'save' };
     await drafts.decide(w.id, w.userId, chatId, changed.draftId, decision);
+    if (legacyFollowUpReply)
+      await t.test('legacy standalone replies retain generated instruction provenance', async () => {
+        const history = await chats.history(w.id, w.userId, chatId);
+        const message = history.messages.find(message => message.id === legacyFollowUpReply);
+        assert.match(JSON.stringify(message.parts), /removed or replaced by you/);
+        assert.doesNotMatch(JSON.stringify(message.parts), /Private source passage/);
+        const generated = history.messages.find(message => message.id === followUpMessageId);
+        assert.equal(generated.tools[0].narration, null);
+        assert.equal(generated.tools[0].presentation.label, 'Used a tool');
+        assert.equal(await chats.canReadStream(w.id, w.userId, chatId, legacyFollowUpStream), false);
+        await runtime.transaction(w.id, commonCompatibility, tx =>
+          assert.rejects(readConversationMessage(tx, actor, chatId, legacyFollowUpReply), AccessDenied),
+        );
+      });
     if (pendingFollowUpId)
       await t.test('removed instruction sources prevent pending dispatch', async () => {
         await db.platform.query(
@@ -526,7 +570,7 @@ for (const change of ['remove note', 'replace note', 'remove file']) {
     if (followUpMessageId)
       await t.test('removed source text in a generated user message cannot be copied into a fresh reply', async () => {
         await reply(messages => {
-          const generated = messages.find(message => message.role === 'user' && message.text?.includes(narration));
+          const generated = messages.find(message => message.text?.includes(narration));
           return generated
             ? `Copied generated instruction: ${generated.text}`
             : 'The removed instruction is not in this context.';

@@ -56,14 +56,16 @@ export async function generatedMessageSources(
   if (!messageIds.length || Number((tx as { commonVersion?: number }).commonVersion ?? 0) < 27) return found;
   const rows = await tx.client.query(
     `SELECT m.id,f.id AS follow_up_id FROM ${qualified(tx.schema, 'tf_conversation_messages')} m
-     JOIN ${qualified(tx.schema, 'tf_conversation_turns')} t ON t.source_message_id=m.id AND t.conversation_id=m.conversation_id
+     JOIN ${qualified(tx.schema, 'tf_conversation_turns')} t ON t.conversation_id=m.conversation_id
+       AND (t.source_message_id=m.id OR t.response_message_id=m.id
+         OR t.id=(SELECT r.turn_id FROM ${qualified(tx.schema, 'tf_conversation_results')} r WHERE r.message_id=m.id))
      JOIN ${qualified(tx.schema, 'tf_follow_ups')} f ON
-       (f.conversation_id=m.conversation_id AND (f.id=m.id OR f.fired_message_id=m.id))
+       (f.conversation_id=m.conversation_id AND (f.id=t.source_message_id OR f.fired_message_id=t.source_message_id))
        OR f.fired_event_id IN (
          SELECT event_id FROM ${qualified(tx.schema, 'tf_slack_dm_events')} WHERE turn_id=t.id AND conversation_id=t.conversation_id
          UNION ALL SELECT event_id FROM ${qualified(tx.schema, 'tf_slack_default_turns')} WHERE turn_id=t.id AND conversation_id=t.conversation_id
        )
-     WHERE m.conversation_id=$1 AND m.id=ANY($2::uuid[]) AND m.author_kind='human'`,
+     WHERE m.conversation_id=$1 AND m.id=ANY($2::uuid[])`,
     [conversationId, messageIds],
   );
   const sources = await retainedFollowUpSources(

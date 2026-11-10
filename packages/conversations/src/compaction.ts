@@ -661,8 +661,7 @@ export async function readConversationMessage(
   if (!row || !row.turnResponse) return null;
   const generated = (await generatedMessageSources(tx, conversationId, [messageId])).get(messageId);
   const sources: SourceDependency[] =
-    generated ??
-    row.sources ??
+    (generated ? mergeSources([...(row.sources ?? []), ...generated]) : row.sources) ??
     (row.role === 'assistant' ? [{ kind: 'unknown' }] : [{ kind: 'private-conversation', conversationId }]);
   if (row.role === 'assistant' || generated) {
     const project = await requireReadable(tx, actor, conversationId, sources);

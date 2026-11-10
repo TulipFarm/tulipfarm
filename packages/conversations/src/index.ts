@@ -16,7 +16,7 @@ import { publicWebReceiptForHistory } from './public-web-history.ts';
 import { knowledgeActivityForHistory } from './knowledge-activity-history.ts';
 import { rowChangeForReceipt, rowViewForReceipt } from './row-view.ts';
 import { readableWorkflows, workflowReferences } from './workflow-receipts.ts';
-import { sourceDependenciesSchema } from './results.ts';
+import { mergeSources, sourceDependenciesSchema } from './results.ts';
 import { requireCredits, CreditsExhausted } from '@tulipfarm/workspace-storage/credits';
 import { recordFileUse } from '@tulipfarm/files';
 import { observeChatDetail, trackEvent } from '@tulipfarm/observability';
@@ -694,31 +694,37 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
         messages.map(message => message.id),
       );
       for (const message of messages) message.calendarResults = calendar.get(message.id) ?? [];
+      const origins = await generatedMessageSources(
+        tx,
+        chatId,
+        messages.map(message => message.id),
+      );
       const results = new Map<string, unknown>(
         (
           await tx.client.query(
             `SELECT message_id, sources FROM ${table(tx, 'tf_conversation_results')} WHERE message_id=ANY($1::uuid[])`,
             [messages.map(message => message.id)],
           )
-        ).rows.map(row => [row.message_id, row.sources]),
+        ).rows.map(row => {
+          const retained = sourceDependenciesSchema.safeParse(row.sources);
+          const generated = origins.get(row.message_id);
+          return [
+            row.message_id,
+            generated && retained.success ? mergeSources([...retained.data, ...generated]) : row.sources,
+          ];
+        }),
       );
       const hidden = new Set<string>();
-      const followUpMessages = messages.filter(message => message.followUp);
-      if (followUpMessages.length) {
-        const origins = await generatedMessageSources(
-          tx,
-          chatId,
-          followUpMessages.map(message => message.id),
-        );
-        for (const message of followUpMessages) {
-          if (!message.followUp) continue;
-          if (await canReadToolDetails(tx, actor, origins.get(message.id), null, chat.projectId ? chatId : undefined))
-            continue;
+      for (const message of messages) {
+        const generated = origins.get(message.id);
+        if (!generated && !message.followUp) continue;
+        if (await canReadToolDetails(tx, actor, generated, null, chat.projectId ? chatId : undefined)) continue;
+        if (message.followUp) {
           message.followUp = { ...message.followUp, instruction: 'Follow-up unavailable' };
           message.parts = [
             { kind: 'text', text: 'This follow-up is unavailable because a source it used is no longer available.' },
           ];
-        }
+        } else message.parts = [{ kind: 'text', text: hiddenReply }];
       }
       async function conceal(
         text: string | ((error: AccessDenied) => string),
@@ -813,6 +819,9 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
           // A card made in this same reply is already shown with it, so only point to earlier ones, once each.
           const shownDrafts = new Set(rows.flatMap(row => (row.row_draft_id ? [row.row_draft_id] : [])));
           for (const row of rows) {
+            const retained = sourceDependenciesSchema.safeParse(row.sources);
+            const generated = origins.get(message.id);
+            if (generated && retained.success) row.sources = mergeSources([...retained.data, ...generated]);
             if (!(await canReadToolDetails(tx, actor, row.sources, row.output, chat.projectId ? chatId : undefined))) {
               message.tools.push(
                 toolReceiptSchema.parse({
@@ -948,7 +957,7 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
       await requireConversationMcpSources(tx, actor, chatId);
       const row = (
         await tx.client.query(
-          `SELECT t.generation,t.attempt_epoch,to_jsonb(t)->'streamed' AS streamed,s.sources,s.output,
+          `SELECT t.generation,t.attempt_epoch,t.source_message_id,to_jsonb(t)->'streamed' AS streamed,s.sources,s.output,
             (SELECT jsonb_agg(m.sources) FROM ${table(tx, 'tf_conversation_model_sources')} m
              WHERE m.turn_id=t.id AND m.epoch=$4) AS model_sources
            FROM ${table(tx, 'tf_conversation_turns')} t
@@ -958,9 +967,19 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
         )
       ).rows[0];
       if (!row || row.generation !== input.generation || row.attempt_epoch !== input.epoch) return false;
+      const generated =
+        (await generatedMessageSources(tx, chatId, [row.source_message_id])).get(row.source_message_id) ?? [];
       if (input.kind === 'tool' || input.kind === 'subagents') {
         if (!input.id || (input.kind === 'subagents' && row.output == null)) return false;
-        return canReadToolDetails(tx, actor, row.sources, row.output, chat.projectId ? chatId : undefined);
+        const retained = sourceDependenciesSchema.safeParse(row.sources);
+        if (!retained.success) return false;
+        return canReadToolDetails(
+          tx,
+          actor,
+          mergeSources([...retained.data, ...generated]),
+          row.output,
+          chat.projectId ? chatId : undefined,
+        );
       }
       const streamed = z
         .object({
@@ -974,7 +993,7 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
       return canReadToolDetails(
         tx,
         actor,
-        [...streamed.data.sources, ...modelSources.data.flat()],
+        mergeSources([...streamed.data.sources, ...modelSources.data.flat(), ...generated]),
         null,
         chat.projectId ? chatId : undefined,
       );
