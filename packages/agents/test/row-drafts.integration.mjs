@@ -23,7 +23,7 @@ import {
 const web = { kind: 'public-web', url: 'https://attacker.example.net/page' };
 const text = value => ({ kind: 'text', value });
 
-test('chat row writes after untrusted content become member-approved review drafts', { timeout: 120000 }, async t => {
+test('chat row writes after untrusted content become member-approved review drafts', { timeout: 300000 }, async t => {
   const f = await conversationFixture();
   t.after(() => f.close());
   const w = f.workspace,
@@ -831,7 +831,13 @@ test('chat row writes after untrusted content become member-approved review draf
         empty.tableId,
         permission,
       ]);
-    const { chatId, result: draft } = await chatTool({ ...createCall('old revision'), tableId: empty.tableId });
+    const { chatId, result: draft } = await chatTool(
+      { ...createCall('old revision'), tableId: empty.tableId, expectedAppliedRevision: empty.revision },
+      [web],
+      { message: 'Summarize the page and keep the result in Empty.' },
+    );
+    assert.equal(draft.status, 'review-required', JSON.stringify(draft));
+    assert.equal((await drafts.read(w.id, owner.userId, chatId, draft.draftId)).status, 'pending');
     const migration = await connect(f.db.login(w, 'migration'));
     try {
       await inTransaction(migration, async client => {
