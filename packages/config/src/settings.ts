@@ -1621,7 +1621,8 @@ export const settings: readonly Setting[] = [
     services: ['snippet-broker'],
     requirement: 'required',
     secret: false,
-    description: 'Container image that runs snippets.',
+    description:
+      'Container image that runs snippets. If the broker runs in a container, mount its `TMPDIR` at the same host path, because the host Docker daemon mounts skill packages from there.',
   },
   {
     name: 'SNIPPET_DATABASE',
