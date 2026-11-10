@@ -238,8 +238,12 @@ test('chat lists every team with its people, without plan documents, and hides p
   );
   const asAdmin = await tool({ tool: 'members.find' });
   assert.equal(asAdmin.error, undefined, 'the lookup does not depend on plan documents');
-  assert.equal(asAdmin.invitations, 'not-available', 'existing invitations are unavailable, not an empty list');
-  assert.ok(!JSON.stringify(asAdmin).includes(pendingEmail));
+  assert.deepEqual(
+    asAdmin.pendingInvitations.map(invite => [invite.email, invite.status, invite.teams]),
+    [[pendingEmail, 'pending', [{ name: 'Ops', role: 'member' }]]],
+    'an admin sees open invitations and the teams they join',
+  );
+  assert.equal(asAdmin.pendingInvitationCount, 1);
   assert.deepEqual([asAdmin.memberCount, asAdmin.teamCount, asAdmin.truncated], [3, 3, false]);
   const adminView = people(asAdmin);
   assert.deepEqual(
@@ -260,7 +264,7 @@ test('chat lists every team with its people, without plan documents, and hides p
 
   await db.platform.query(`UPDATE ${table('tf_memberships')} SET role='member' WHERE id=$1`, [mine]);
   const asMember = await tool({ tool: 'members.find' });
-  assert.equal(asMember.invitations, 'not-available');
+  assert.equal(asMember.pendingInvitations, 'not-visible');
   assert.ok(!JSON.stringify(asMember).includes(pendingEmail));
   const memberView = people(asMember);
   assert.deepEqual(

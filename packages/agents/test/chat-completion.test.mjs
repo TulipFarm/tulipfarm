@@ -123,51 +123,83 @@ for (const model of ['grok-4.3', 'Kimi-K2.6'])
       }
     });
 
+const unchecked =
+  "I couldn't check pending invitations just now. Ask again, or a workspace admin can see them on Members.";
+const inviteeQuestion = [
+  { role: 'user', text: 'Who are the pending invitees in this workspace, and which teams will they join?' },
+];
+const roster = { memberCount: 0, members: [], teamCount: 0, teams: [], truncated: false };
+
 for (const model of ['grok-4.3', 'Kimi-K2.6'])
-  for (const lookup of [false, true])
-    for (const sse of [false, true])
-      test(`${model} cannot report invitation state from ${lookup ? 'active members' : 'no lookup'} over ${sse ? 'SSE' : 'JSON'}`, async t => {
-        const claim = 'I checked. There are no pending invitees.';
-        const replies = [
-          ...(lookup ? [nativeReply('azure', { calls: [use('members.find')] })] : []),
-          nativeReply('azure', { text: claim }),
-        ];
-        const previews = [];
-        t.mock.method(globalThis, 'fetch', async (_url, init) => {
-          if (isCompletionRequest(JSON.parse(init.body))) return Response.json(selectReply('azure', verdict()));
-          assert.ok(replies.length, 'bounded provider requests');
-          const reply = replies.shift();
-          return sse ? stream(reply) : Response.json(reply);
-        });
-        const result = await inferWithTools(
-          { ...nativeRoutes.azure, model },
-          [{ role: 'user', text: 'Who are the pending invitees in this workspace, and which teams will they join?' }],
-          async call => {
-            assert.equal(call.tool, 'members.find');
-            return {
-              invitations: 'not-available',
-              memberCount: 0,
-              members: [],
-              teamCount: 0,
-              teams: [],
-              truncated: false,
-            };
-          },
-          undefined,
-          false,
-          null,
-          { preloadedTools: ['members.find'], answerText: update => previews.push(update.text) },
-        );
-        assert.equal(
-          result.text,
-          "I can't see workspace invitations in chat. Open Settings > Members to see pending invitations and their teams.",
-        );
-        assert.ok(
-          previews.every(text => !text.includes(claim)),
-          'unsupported claims never reach streamed text',
-        );
-        assert.equal(replies.length, 0);
+  for (const sse of [false, true]) {
+    const over = sse ? 'SSE' : 'JSON';
+    const run = async (t, replies, found) => {
+      const previews = [];
+      t.mock.method(globalThis, 'fetch', async (_url, init) => {
+        if (isCompletionRequest(JSON.parse(init.body))) return Response.json(selectReply('azure', verdict()));
+        const reply = replies.length > 1 ? replies.shift() : replies[0];
+        return sse ? stream(reply) : Response.json(reply);
       });
+      const result = await inferWithTools(
+        { ...nativeRoutes.azure, model },
+        inviteeQuestion,
+        async call => {
+          assert.equal(call.tool, 'members.find');
+          return { ...roster, ...found };
+        },
+        undefined,
+        false,
+        null,
+        { preloadedTools: ['members.find'], answerText: update => previews.push(update.text) },
+      );
+      return { result, previews };
+    };
+
+    test(`${model} cannot report invitation state without a lookup over ${over}`, async t => {
+      const claim = 'I checked. There are no pending invitees.';
+      const { result, previews } = await run(t, [nativeReply('azure', { text: claim })], {});
+      assert.equal(result.text, unchecked);
+      assert.ok(
+        previews.every(text => !text.includes(claim)),
+        'unsupported claims never reach streamed text',
+      );
+    });
+
+    test(`${model} names every listed invitee over ${over}`, async t => {
+      const answer = 'ana@example.com is invited to Ops.';
+      const { result, previews } = await run(
+        t,
+        [
+          nativeReply('azure', { calls: [use('members.find')] }),
+          nativeReply('azure', { text: 'There are no pending invitees.' }),
+          nativeReply('azure', { text: answer }),
+        ],
+        {
+          pendingInvitationCount: 1,
+          pendingInvitations: [
+            { email: 'ana@example.com', status: 'pending', role: 'member', teams: [{ name: 'Ops', role: 'member' }] },
+          ],
+          invitationsInstruction: 'List each one.',
+        },
+      );
+      assert.equal(result.text, answer);
+      assert.ok(previews.every(text => !text.includes('no pending')));
+    });
+
+    test(`${model} says hidden invitations are on Members over ${over}`, async t => {
+      const answer = "I can't see pending invitations. A workspace admin can check them on Members.";
+      const { result } = await run(
+        t,
+        [
+          nativeReply('azure', { calls: [use('members.find')] }),
+          nativeReply('azure', { text: 'There are none.' }),
+          nativeReply('azure', { text: answer }),
+        ],
+        { pendingInvitations: 'not-visible', invitationsInstruction: 'Only admins.' },
+      );
+      assert.equal(result.text, answer);
+    });
+  }
 
 test('old invitation claims cannot justify a current answer, but do not block later member questions', async t => {
   const history = [
@@ -175,11 +207,7 @@ test('old invitation claims cannot justify a current answer, but do not block la
     { role: 'assistant', text: 'I checked. There are none.' },
   ];
   for (const [question, answer, expected] of [
-    [
-      'Check pending invitations again.',
-      'There are none.',
-      "I can't see workspace invitations in chat. Open Settings > Members to see pending invitations and their teams.",
-    ],
+    ['Check pending invitations again.', 'There are none.', unchecked],
     ['Who is on the Ops team?', 'The team roster is not available.', 'The team roster is not available.'],
     [
       'Write an example reminder for pending invitees.',
@@ -279,12 +307,7 @@ for (const model of ['grok-4.3', 'Kimi-K2.6'])
           answerText: update => previews.push(update.text),
         },
       );
-      assert.equal(
-        result.text,
-        scenario.draft || scenario.event
-          ? scenario.answer
-          : "I can't see workspace invitations in chat. Open Settings > Members to see pending invitations and their teams.",
-      );
+      assert.equal(result.text, scenario.draft || scenario.event ? scenario.answer : unchecked);
       if (!scenario.draft && !scenario.event)
         assert.ok(
           previews.every(text => !text.includes(scenario.answer)),
