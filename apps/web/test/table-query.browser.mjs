@@ -79,6 +79,7 @@ test(
         let value = 'Original',
           releaseWrite,
           releaseProposal,
+          created = false,
           denied = false;
         const calls = { list: 0, detail: 0, first: 0, second: 0, writes: 0 };
         window.fetch = async (url, init) => {
@@ -88,6 +89,7 @@ test(
               releaseProposal = resolve;
             });
             value = 'Proposal changed';
+            created = true;
             return Response.json({
               id,
               digest: 'a'.repeat(64),
@@ -113,7 +115,23 @@ test(
           }
           if (path.pathname.endsWith('/tables')) {
             calls.list++;
-            return Response.json({ tables: [{ ...table, appliedAt: null, recordCount: '1' }], nextCursor: null });
+            return Response.json({
+              tables: [
+                { ...table, appliedAt: null, recordCount: '1' },
+                ...(created
+                  ? [
+                      {
+                        ...table,
+                        id: '44444444-4444-4444-8444-444444444444',
+                        definition: { ...table.definition, label: 'New orders' },
+                        appliedAt: null,
+                        recordCount: '0',
+                      },
+                    ]
+                  : []),
+              ],
+              nextCursor: null,
+            });
           }
           if (path.pathname.endsWith('/rows/page')) {
             if (path.searchParams.has('after')) calls.second++;
@@ -125,7 +143,7 @@ test(
             });
           }
           calls.detail++;
-          if (denied) return Response.json({ error: 'table-not-found' }, { status: 404 });
+          if (denied) return Response.json({ error: 'table-unavailable' }, { status: 404 });
           return Response.json({
             id,
             saved: null,
@@ -233,6 +251,7 @@ test(
         await wait(() => document.body.textContent.includes('Changed'));
         render(undefined);
         await sleep(20);
+        const newTableAbsentBeforeReceipt = !document.body.textContent.includes('New orders');
         const proposalPending = submitProposal({ commandId: id, digest: 'a'.repeat(64), decision: 'approve' });
         await wait(() => !!releaseProposal);
         render(undefined, false);
@@ -240,7 +259,9 @@ test(
         releaseProposal();
         await proposalPending;
         await wait(() => document.body.textContent.includes('Proposal changed'));
+        await wait(() => document.body.textContent.includes('New orders'));
         const proposalRefreshedAfterUnmount = document.body.textContent.includes('Proposal changed');
+        const newTableListedAfterReceipt = document.body.textContent.includes('New orders');
         root.unmount();
         return {
           cold,
@@ -253,6 +274,8 @@ test(
           retainedRecords,
           listSurvives,
           proposalRefreshedAfterUnmount,
+          newTableAbsentBeforeReceipt,
+          newTableListedAfterReceipt,
         };
       });
       assert.deepEqual(result.cold, { list: 1, detail: 1, first: 1, second: 0, writes: 0 });
@@ -267,6 +290,8 @@ test(
         true,
         'A command receipt updates tables even without a mounted proposal reader',
       );
+      assert.equal(result.newTableAbsentBeforeReceipt, true);
+      assert.equal(result.newTableListedAfterReceipt, true, 'A completed receipt refreshes the list without a reload');
       console.log('Table query request/timing proof:', JSON.stringify(result));
     } finally {
       await browser.close();

@@ -97,8 +97,20 @@ export type PrepareTableDefinition = (input: {
   tableNames?: TableNames;
 }) => Promise<{ commit: string; parentCommit: string; bundle: { key: string; sha256: string }; projection: unknown }>;
 
-async function load(tx: TableTransaction, proposalId: string) {
-  await lockAuthorization(tx);
+async function load(tx: TableTransaction, proposalId: string, writeCreationAccess = false) {
+  z.uuid().parse(proposalId);
+  // Choose the write lock before taking any shared authorization lock, so first activation never upgrades it.
+  const createsTable =
+    writeCreationAccess &&
+    !!(
+      await tx.client.query(
+        `SELECT 1 FROM ${table(tx, 'tf_table_proposals')} p,
+          LATERAL jsonb_array_elements(p.manifest->'plans') plan
+        WHERE p.id=$1 AND plan->'input'->>'kind'='schema' AND plan->'before'='null'::jsonb LIMIT 1`,
+        [proposalId],
+      )
+    ).rowCount;
+  await lockAuthorization(tx, createsTable ? 'write' : 'read');
   await tx.client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,761031))', [
     `${tx.schema}:${z.uuid().parse(proposalId)}`,
   ]);
@@ -518,6 +530,7 @@ async function switchGeneration(
     `UPDATE ${table(tx, 'tf_table_catalog')} SET physical_table=$2,display_name=$3,target_revision=$4,applied_revision=$4,applied_definition=$5 WHERE id=$1`,
     [job.table_id, target.physical_table, target.definition.label, target.revision, target.definition],
   );
+  if (!source) await tx.client.query(`SELECT ${table(tx, 'tf_table_creation_access')}($1)`, [job.id]);
   await recordTableRecommendationChange(tx, job.table_id, 'definition', job.source_generation !== null);
   await complete(tx, job, target.revision);
 }
@@ -574,7 +587,7 @@ export function createTableExecution(
             await action();
             slowestWorkMs = Math.max(slowestWorkMs, performance.now() - start);
           };
-          const manifest = await load(tx, proposalId),
+          const manifest = await load(tx, proposalId, true),
             plan = await selected(tx, manifest);
           if (!plan) return 'completed';
           const previous = executionSchema
