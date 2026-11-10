@@ -2,6 +2,7 @@ import { z } from 'zod';
 import {
   AccessDenied,
   canAccessTable,
+  chatReviewClosure,
   currentMember,
   lockAuthorization,
   protectedSourceClosure,
@@ -19,6 +20,7 @@ import { requireNoMcpDerived } from '@tulipfarm/access';
 /**
  * `ownMemory` accepts the actor's own personal memory anywhere in the closure; chat drafts set it. `slackTurn`
  * checks a Slack thread in the closure against its current audience; without it a Slack thread is refused.
+ * `chatReview` checks the closure a chat review card depends on (see `chatReviewClosure`); chat drafts set it.
  */
 export async function requireDraftSources(
   tx: AgentTransaction,
@@ -30,10 +32,13 @@ export async function requireDraftSources(
   ownMemory = false,
   slackTurn?: (eventId: string) => Promise<void>,
   privateConversation?: (source: SourceDependency) => Promise<void>,
+  chatReview = false,
 ): Promise<void> {
   await currentMember(tx, actor);
   await lockAuthorization(tx);
-  for (const source of await protectedSourceClosure(tx, sources)) {
+  for (const source of chatReview
+    ? await chatReviewClosure(tx, actor, sources)
+    : await protectedSourceClosure(tx, sources)) {
     const key = canonicalJson(source);
     if (visited.has(key)) continue;
     visited.add(key);
