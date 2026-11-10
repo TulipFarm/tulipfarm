@@ -190,6 +190,7 @@ const spanAttributes = new Set([
   'status',
   'gen_ai.provider.name',
   'gen_ai.request.model',
+  'marker_stripped',
   'gen_ai.operation.name',
   'build.commit',
   'gen_ai.usage.input_tokens',
@@ -836,6 +837,7 @@ type Event =
   | 'dispatch_failed'
   | 'call_completed'
   | 'call_failed'
+  | 'reply_marker_stripped'
   | 'task_status_changed';
 type Level = 'debug' | 'info' | 'warn' | 'error';
 const severity = {

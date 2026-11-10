@@ -14,7 +14,7 @@ import {
 
 const routes = [
   ...formats.map(format => ({ label: format, format, route: nativeRoutes[format] })),
-  ...['grok-4.3', 'Kimi-K2.6'].map(model => ({
+  ...['grok-4.3', 'Kimi-K2.6', 'DeepSeek-V4-Pro'].map(model => ({
     label: model,
     format: 'azure',
     route: { ...nativeRoutes.azure, model },
@@ -59,7 +59,7 @@ for (const { label, format, route } of routes)
                   ),
                 ],
               },
-              { text: reply },
+              { text: `${reply}\nTULIPMEM` },
             ][step++],
           ),
         );

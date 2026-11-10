@@ -9,6 +9,7 @@ import { imageReceipt } from './image-outputs.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { budCompatibility, clearBudConversation } from './bud-assistant.ts';
 import { z } from 'zod';
+import { withoutTrailingControlMarker } from './reply-text.ts';
 import { googleToolActivity } from './google-tool-activity.ts';
 import { apiCallReceipt, executionReceipt, toolPresentation } from './tool-activity.ts';
 import { storedToolActivity, storedToolPresentation, waitingRowDraft } from './tool-activity-history.ts';
@@ -685,6 +686,12 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
         .reverse()
         .map(({ stoppedTurnId, ...row }) => ({
           ...row,
+          parts:
+            row.author === 'assistant'
+              ? row.parts.map(part =>
+                  part.kind === 'text' ? { ...part, text: withoutTrailingControlMarker(part.text) } : part,
+                )
+              : row.parts,
           createdAt: row.createdAt.toISOString(),
           ...(stoppedTurnId ? { stoppedTurnId } : {}),
         }));

@@ -3,11 +3,88 @@ import { createServer } from 'node:http';
 import { once } from 'node:events';
 import { test } from 'node:test';
 import { inferWithTools } from '../dist/inference.js';
-import { serverSentEvents } from '../dist/inference-stream.js';
+import { readModelResponse, serverSentEvents } from '../dist/inference-stream.js';
 import { withoutReasoningMarkup } from '../dist/reasoning-markup.js';
 import { selectReply } from './native-fixture.mjs';
 
 const encoder = new TextEncoder();
+
+test('all provider streams hide a trailing marker even when it arrives one character at a time', async () => {
+  const fragments = ['Answer.\n', ...'TULIPMEM', '\n'];
+  const formats = {
+    'chat-completions': fragments.map(content => ({ choices: [{ index: 0, delta: { content } }] })),
+    anthropic: [
+      { type: 'message_start', message: { role: 'assistant' } },
+      { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
+      ...fragments.map(text => ({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } })),
+    ],
+    responses: fragments.map(delta => ({ type: 'response.output_text.delta', delta })),
+    gemini: fragments.map(text => ({ candidates: [{ content: { parts: [{ text }] } }] })),
+  };
+  for (const [format, events] of Object.entries(formats)) {
+    const seen = [];
+    await readModelResponse(
+      new Response(events.map(event => `data: ${JSON.stringify(event)}\n\n`).join(''), {
+        headers: { 'content-type': 'text/event-stream' },
+      }),
+      format,
+      { onText: text => seen.push(text) },
+    );
+    assert.ok(seen.length, format);
+    assert.ok(
+      seen.every(text => text === 'Answer.\n' || text === 'Answer.'),
+      JSON.stringify({ format, seen }),
+    );
+  }
+});
+
+test('a stream restores an unfinished marker prefix when the answer ends', async () => {
+  const seen = [];
+  await readModelResponse(
+    new Response(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: 'Answer.\nTU' } }] })}\n\n`, {
+      headers: { 'content-type': 'text/event-stream' },
+    }),
+    'chat-completions',
+    { onText: text => seen.push(text) },
+  );
+  assert.deepEqual(seen, ['Answer.', 'Answer.\nTU']);
+});
+
+test('a reply logs one content-free marker event after the stream ends', async t => {
+  const logs = [];
+  t.mock.method(process.stdout, 'write', line => {
+    logs.push(JSON.parse(line));
+    return true;
+  });
+  const content = ['Private answer.\n', ...'TULIPMEM', '\n', ' '].map(fragment => ({
+    choices: [{ index: 0, delta: { content: fragment }, finish_reason: null }],
+  }));
+  provider(t, [
+    () =>
+      new Response(
+        [...content, { choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] }]
+          .map(chunk => `data: ${JSON.stringify(chunk)}\n\n`)
+          .join(''),
+        { headers: { 'content-type': 'text/event-stream' } },
+      ),
+  ]);
+  const result = await inferWithTools(
+    routes.azure,
+    [{ role: 'user', text: 'Hi' }],
+    () => assert.fail('No tool call expected'),
+    undefined,
+    false,
+    null,
+    { answerText: () => assert.ok(!logs.some(log => log.event === 'reply_marker_stripped')) },
+  );
+  assert.deepEqual(result, { text: 'Private answer.' });
+  const events = logs.filter(log => log.marker_stripped);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].event, 'reply_marker_stripped');
+  assert.equal(events[0]['gen_ai.request.model'], routes.azure.model);
+  assert.doesNotMatch(JSON.stringify(events), /Private answer|TULIPMEM/);
+});
+
 const known = { kind: 'known', input: 10, output: 7, cacheRead: 3, cacheWrite: 0, cacheWrite5m: 0, cacheWrite1h: 0 };
 const routes = {
   forced: {

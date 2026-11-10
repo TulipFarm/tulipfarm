@@ -22,6 +22,40 @@ const results = async f =>
     )
   ).rows;
 
+test('history hides an old trailing assistant marker without changing human or quoted text', async t => {
+  t.mock.method(globalThis, 'fetch', () => assert.fail('This test must not call a model provider'));
+  const f = await conversationFixture();
+  try {
+    const chatId = randomUUID();
+    await f.store.create(f.workspace.id, f.workspace.userId, { chatId, commandId: randomUUID() });
+    const work = await send(f, chatId, 'Human text.\nTULIPMEM');
+    assert.equal(
+      await createConversationExecutor(f.runtime, async () => ({
+        text: 'Answer.',
+        sources: [],
+      })).process(work),
+      'completed',
+    );
+    const saved = await f.store.history(f.workspace.id, f.workspace.userId, chatId);
+    const assistantId = saved.messages.find(message => message.author === 'assistant').id;
+    for (const [stored, visible] of [
+      ['Answer.\nTULIPMEM', 'Answer.'],
+      ['Answer. TULIPMEM', 'Answer. TULIPMEM'],
+      ['> TULIPMEM', '> TULIPMEM'],
+    ]) {
+      await f.db.platform.query(
+        `UPDATE ${f.table('tf_conversation_parts')} SET text=$2 WHERE message_id=$1 AND kind='text'`,
+        [assistantId, stored],
+      );
+      const history = await f.store.history(f.workspace.id, f.workspace.userId, chatId);
+      assert.equal(history.messages[0].parts[0].text, 'Human text.\nTULIPMEM');
+      assert.equal(history.messages[1].parts[0].text, visible);
+    }
+  } finally {
+    await f.close();
+  }
+});
+
 test('queued B inherits completed A lineage despite physical message order, without another chat or later C', async () => {
   const f = await conversationFixture();
   try {
