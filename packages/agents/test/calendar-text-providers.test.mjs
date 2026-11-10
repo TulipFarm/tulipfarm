@@ -65,11 +65,8 @@ for (const route of routes)
     assert.deepEqual(result, { text: 'Ready.' });
     assert.deepEqual(calls, [proposed.call]);
     assert.deepEqual(steps, [0, 1, 2, 3]);
-    assert.ok(
-      offeredTools(route, requests[0]).some(
-        tool => tool.name === 'tools_search' && tool.description.includes('google_propose'),
-      ),
-    );
+    assert.ok(offeredTools(route, requests[0]).some(tool => tool.name === 'tools_search'));
+    assert.match(JSON.stringify(requests[0]), /google_propose/);
     assert.equal(JSON.stringify(requests[1]).includes('google_propose'), false);
     const body = requests[1];
     const encoded =

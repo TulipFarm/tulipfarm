@@ -174,7 +174,26 @@ function schemaBytes(tool: NativeTool) {
 }
 const searchSchema = z.strictObject({ query: z.string().trim().min(1).max(200) });
 
+export function deferredToolIndex(remaining: readonly string[]): string {
+  if (!remaining.length) return '';
+  const heading =
+    '# Deferred tools\nThese tools are available, but their argument schemas are not loaded. Call tools_search with a listed name or purpose, then call the loaded tool on the next step. Do not report a listed tool as unavailable or substitute helper agents or invented HTTP endpoints for it. Loading a schema does not grant permission or approve an action.\n';
+  const overflow = '\nMore tools are available through tools_search by purpose.';
+  // Keep the entire index within 4 KiB (1,024 estimated tokens), including its instructions and overflow notice.
+  const names: string[] = [];
+  let bytes = Buffer.byteLength(heading + overflow);
+  for (const name of remaining) {
+    const size = Buffer.byteLength(name) + (names.length ? 2 : 0);
+    if (bytes + size > 4096) break;
+    names.push(name);
+    bytes += size;
+  }
+  return heading + names.join(', ') + (names.length < remaining.length ? overflow : '');
+}
+
 export type ChatCatalog = NativeCatalog & {
+  /** Bounded index of admitted, unloaded tools for the request's system context. */
+  discovery: string;
   /** Loads up to 16 named, admitted tools without granting authority. */
   load(names: readonly string[]): string[];
   /** Loads the deferred tools that match the query and returns their names. Empty without `loaded`. */
@@ -193,16 +212,14 @@ export function nativeChatTools(
 ): ChatCatalog {
   const full = nativeTools({ kind: 'chat', mcp, earlierMessages, chatFiles }, chatCallSchema);
   if (!full.tools.length) throw new Error('tool-catalog-empty');
-  if (!loaded) return { ...full, load: () => [], search: () => [] };
+  if (!loaded) return { ...full, discovery: '', load: () => [], search: () => [] };
   const deferred = full.tools.filter(tool => !coreChatTools.has(tool.name) && !tool.name.startsWith('mcp_'));
   const offered = (tool: NativeTool) => !deferred.includes(tool) || loaded.has(tool.name);
-  const summary = deferred
-    .filter(tool => !loaded.has(tool.name))
-    .map(tool => `${tool.name}: ${tool.description.split(/(?<=\.)\s/)[0]}`)
-    .join('\n');
+  const remaining = deferred.filter(tool => !loaded.has(tool.name));
   const search = {
     name: toolSearchName,
-    description: `Load tool definitions that are not offered yet. Pass words from the tool name or purpose. Loaded tools can be called in the next step of this turn.\nNot loaded:\n${summary}`,
+    description:
+      'Load available deferred tool definitions. See the Deferred tools index in the system context. Pass a listed name or words describing the purpose. Loaded tools can be called in the next step of this turn.',
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -211,7 +228,8 @@ export function nativeChatTools(
     },
   };
   return {
-    tools: [...full.tools.filter(offered), ...(summary ? [search] : [])],
+    tools: [...full.tools.filter(offered), ...(remaining.length ? [search] : [])],
+    discovery: deferredToolIndex(remaining.map(tool => tool.name)),
     load(names) {
       const requested = new Set(names.slice(0, 16).map(nativeToolName));
       const added = deferred.filter(tool => requested.has(tool.name) && !loaded.has(tool.name));

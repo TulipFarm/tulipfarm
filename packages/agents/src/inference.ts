@@ -3662,6 +3662,7 @@ export async function inferWithTools(
         ];
   const roundBlocks = () => [
     ...chatSystemBlocks(tools?.projectInstructions),
+    ...(catalog?.discovery ? [catalog.discovery] : []),
     ...(tools?.agentBuilderUrl && activeBuiltinSkills.has('agent-authoring')
       ? [
           `If an agent setup cannot be prepared, say why plainly at the first failed prerequisite, stop without repeated helpers, and link to [Configure manually](${tools.agentBuilderUrl}). Do not expose internal tool names.`,
@@ -5066,14 +5067,15 @@ export function measureToolRequest(
         ),
       ),
     };
+    const catalog = observeChatDetailSync('tool-schemas', () => nativeChatTools(undefined, false, new Set()));
     return observeChatDetailSync('serialize', () =>
       Buffer.byteLength(
         JSON.stringify(
           nativeRequest(
             config,
-            chatSystemBlocks(projectInstructions),
+            [...chatSystemBlocks(projectInstructions), ...(catalog.discovery ? [catalog.discovery] : [])],
             [reminder, ...messages].map(turn => ({ kind: 'turn', turn })),
-            observeChatDetailSync('tool-schemas', () => nativeChatTools(undefined, false, new Set())).tools,
+            catalog.tools,
           ).body,
         ),
       ),

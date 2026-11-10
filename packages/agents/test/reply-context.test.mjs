@@ -448,7 +448,8 @@ test('compaction unloads searched tools idle for two rounds; tool search can loa
       );
     if (rounds === 6) {
       const search = offeredTools(format, body).find(tool => tool.name === 'tools_search');
-      assert.match(search.description, /rows_create/);
+      assert.ok(search);
+      assert.match(body.system.find(block => block.text.startsWith('# Deferred tools\n')).text, /rows_create/);
     }
     return Response.json(nativeReply(format, { text: 'Answered.' }));
   });
