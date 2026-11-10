@@ -13,10 +13,20 @@ mock.method(dns, 'lookup', async () => {
   throw new Error('DNS access blocked in composition test');
 });
 syncBuiltinESMExports();
-const [{ buildApp }, { registerAgents }, { registerAccountDetails }] = await Promise.all([
+const [
+  { buildApp },
+  { registerAgents },
+  { registerAccountDetails },
+  { registerGoogleOperations },
+  { registerSkills },
+  { authConfig },
+] = await Promise.all([
   import('../src/app.ts'),
   import('../src/agents.ts'),
   import('../src/account-details.ts'),
+  import('../src/google-operations.ts'),
+  import('../src/skills.ts'),
+  import('../src/auth.ts'),
 ]);
 after(() => {
   mock.restoreAll();
@@ -63,6 +73,96 @@ test('private account details reject guests before reading account data', async 
     assert.equal(sessionReads, 1);
   } finally {
     await app.close();
+  }
+});
+
+test('Google operation documentation does not validate or strip service response fields', async t => {
+  const workspaceId = '11111111-1111-4111-8111-111111111111';
+  const proposalId = '22222222-2222-4222-8222-222222222222';
+  const result = { untrusted: true, data: { title: 'Document' }, extension: { revision: 'next' } };
+  const proposal = {
+    id: proposalId,
+    operation: { kind: 'docs.documents.create', title: 'Document' },
+    digest: 'a'.repeat(64),
+    expiresAt: '2026-01-01T00:00:00.000Z',
+    integration: { integrationId: workspaceId, accountId: 'account', generation: 1, scopes: [], requiredScopes: [] },
+    decision: null,
+    receipt: null,
+    extension: { revision: 'next' },
+  };
+  const receipt = { status: 'succeeded', result, error: null, extension: { revision: 'next' } };
+  const content = {
+    kind: 'sheet-range',
+    data: { range: 'A1', majorDimension: 'ROWS', values: [['Cell']] },
+    extension: { revision: 'next' },
+  };
+  const app = Fastify();
+  t.after(() => app.close());
+  registerGoogleOperations(app, {
+    auth: { api: { getSession: async () => ({ user: { id: 'user' } }) } },
+    runtime: {},
+    operations: {
+      read: async () => result,
+      propose: async () => proposal,
+      proposal: async () => proposal,
+      execute: async () => receipt,
+      fileContent: async () => content,
+    },
+    approve: async () => proposal,
+  });
+  const base = `/workspaces/${workspaceId}/google-workspace/operations`;
+  for (const [path, method, payload, output] of [
+    ['/read', 'POST', { operation: { kind: 'docs.documents.get', documentId: 'document' } }, result],
+    ['/proposals', 'POST', { operation: proposal.operation, commandId: proposalId }, proposal],
+    [`/proposals/${proposalId}`, 'GET', undefined, proposal],
+    [`/proposals/${proposalId}/decision`, 'POST', { digest: proposal.digest, decision: 'approve' }, proposal],
+    [`/proposals/${proposalId}/execute`, 'POST', undefined, receipt],
+    [
+      '/files/content',
+      'POST',
+      {
+        kind: 'sheet-range',
+        fileId: 'spreadsheet',
+        expectedIntegration: { integrationId: workspaceId, accountId: 'account', generation: 1 },
+        sheetName: 'Sheet1',
+        startRow: 1,
+        rowCount: 1,
+        startColumn: 1,
+        columnCount: 1,
+      },
+      content,
+    ],
+  ]) {
+    const response = await app.inject({
+      url: `${base}${path}`,
+      method,
+      payload,
+      headers: { origin: authConfig().webOrigin },
+    });
+    assert.equal(response.statusCode, 200, `${method} ${path}: ${response.body}`);
+    assert.equal(response.body, JSON.stringify(output), `${method} ${path} preserves the original body`);
+  }
+});
+
+test('the deprecated skill route preserves its exact retired response body', async t => {
+  for (const documented of [false, true]) {
+    const app = Fastify();
+    t.after(() => app.close());
+    if (!documented)
+      app.addHook('onRoute', route => {
+        if (route.schema?.response) delete route.schema.response['410'];
+      });
+    registerSkills(app, {
+      auth: { api: { getSession: async () => ({ user: { id: 'user' } }) } },
+      runtime: {},
+    });
+    const response = await app.inject({
+      method: 'PUT',
+      url: '/workspaces/11111111-1111-4111-8111-111111111111/skills/22222222-2222-4222-8222-222222222222',
+      headers: { origin: authConfig().webOrigin },
+    });
+    assert.equal(response.statusCode, 410);
+    assert.equal(response.body, '{"error":"skill-authoring-chat-only"}');
   }
 });
 

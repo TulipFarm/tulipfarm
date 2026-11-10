@@ -92,7 +92,8 @@ export function registerGoogleOperations(
       tags: ['Google operations'],
       params: json(params),
       ...(body ? { body: json(body) } : {}),
-      response: { 200: json(output) },
+      // Keep response documents outside the validator map to preserve existing JSON serialization.
+      response: { 200: z.toJSONSchema(output, { target: 'openapi-3.0', io: 'input' }) },
     });
     const base = '/workspaces/:workspaceId/google-workspace/operations';
     const fileRequests = new Map<FastifyRequest, AbortController>();
@@ -176,7 +177,10 @@ export function registerGoogleOperations(
               description: 'File bytes or a structured spreadsheet range',
               content: {
                 'application/json': {
-                  schema: json(z.object({ kind: z.literal('sheet-range'), data: googleSheetRangeSchema })),
+                  schema: z.toJSONSchema(z.object({ kind: z.literal('sheet-range'), data: googleSheetRangeSchema }), {
+                    target: 'openapi-3.0',
+                    io: 'input',
+                  }),
                 },
                 '*/*': { schema: { type: 'string', format: 'binary' } },
               },
