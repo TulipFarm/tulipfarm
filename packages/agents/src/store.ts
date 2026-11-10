@@ -257,20 +257,23 @@ export function createAgentStore(storage: AgentStorage, externalGuard?: External
       if (previous) {
         const replaced = (
           await transaction.client.query(
-            `SELECT id FROM ${relation(transaction, 'tf_agent_activations')} WHERE agent_id=$1 AND superseded_by_activation_id=$2`,
-            [value.agentId, value.requestId],
+            `SELECT id,superseded_by_activation_id FROM ${relation(transaction, 'tf_agent_activations')}
+            WHERE agent_id=$1 AND id=ANY($2::uuid[])`,
+            [value.agentId, value.expectedActivationIds],
           )
-        ).rows
-          .map(row => row.id)
-          .sort();
+        ).rows;
+        const replacements = value.expectedActivationIds.length
+          ? replaced.map(row => row.superseded_by_activation_id).sort()
+          : [value.requestId];
         if (
           previous.agent_id !== value.agentId ||
           previous.definition_revision !== value.revision ||
           canonicalJson(previous.scope) !== canonicalJson(value.scope) ||
           previous.revoked_at !== null ||
-          active.length !== 1 ||
           active[0]?.id !== value.requestId ||
-          canonicalJson(replaced) !== canonicalJson([...value.expectedActivationIds].sort())
+          replaced.length !== value.expectedActivationIds.length ||
+          new Set(replacements).size !== replacements.length ||
+          canonicalJson(active.map(row => row.id).sort()) !== canonicalJson(replacements)
         )
           throw new AgentError('activation-request-conflict');
         return { activationId: value.requestId };
@@ -289,15 +292,20 @@ export function createAgentStore(storage: AgentStorage, externalGuard?: External
       if (canonicalJson(scope) !== canonicalJson(value.scope)) throw new AgentError('activation-scope-conflict');
       await resolveDefinitionProcedures(transaction, value.agentId, value.revision, actor);
       const before = await definitionRecommendationAudience(transaction, 'agent', value.agentId);
-      await transaction.client.query(
-        `INSERT INTO ${relation(transaction, 'tf_agent_activations')}(id,agent_id,definition_revision,scope) VALUES($1,$2,$3,$4)`,
-        [value.requestId, value.agentId, value.revision, JSON.stringify(scope)],
-      );
-      await transaction.client.query(
-        `UPDATE ${relation(transaction, 'tf_agent_activations')} SET superseded_by_activation_id=$2,superseded_at=clock_timestamp()
-        WHERE agent_id=$1 AND id=ANY($3::uuid[])`,
-        [value.agentId, value.requestId, value.expectedActivationIds],
-      );
+      for (const original of active.length ? [...active].reverse() : [{ id: null, scope }]) {
+        const id = original.id === active[0]?.id || original.id === null ? value.requestId : randomUUID();
+        await transaction.client.query(
+          `INSERT INTO ${relation(transaction, 'tf_agent_activations')}(id,agent_id,definition_revision,scope,activated_at)
+          VALUES($1,$2,$3,$4,clock_timestamp())`,
+          [id, value.agentId, value.revision, JSON.stringify(original.scope)],
+        );
+        if (original.id)
+          await transaction.client.query(
+            `UPDATE ${relation(transaction, 'tf_agent_activations')} SET superseded_by_activation_id=$2,superseded_at=clock_timestamp()
+            WHERE agent_id=$1 AND id=$3`,
+            [value.agentId, id, original.id],
+          );
+      }
       await transaction.client.query(
         `INSERT INTO ${relation(transaction, 'tf_audit_events')}(id,actor_id,operation,subject_id) VALUES($1,$2,'agent.activate',$3)`,
         [randomUUID(), actor.membershipId, value.agentId],

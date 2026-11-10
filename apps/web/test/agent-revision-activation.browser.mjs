@@ -140,13 +140,24 @@ test('existing-agent instructions save and activation in the real app', { timeou
           assert.equal(input.revision, state.detail.definitionRevision);
           assert.deepEqual(input.expectedActivationIds.sort(), state.detail.activations.map(item => item.id).sort());
           assert.equal(input.expectedSavedRevision, state.detail.savedRevision);
-          state.detail.activations = [{ id: input.requestId, revision: input.revision, scope: input.scope }];
+          state.detail.activations = state.detail.activations.map((activation, index) => ({
+            ...activation,
+            id: index === 0 ? input.requestId : randomUUID(),
+            revision: input.revision,
+          }));
           if (state.loseActivation) {
             state.loseActivation = false;
             await route.abort('failed');
             return;
           }
           json = { activationId: input.requestId };
+        } else if (method === 'DELETE' && path.includes(`/agents/${id}/activations/`)) {
+          const activationId = path.split('/').at(-1);
+          state.writes.push({ kind: 'revoke', activationId });
+          state.detail.replacedActivations = state.detail.replacedActivations.filter(
+            activation => activation.id !== activationId,
+          );
+          json = { saved: true };
         } else if (path.endsWith('/auth/get-session'))
           json = {
             session: { id: 'demo', userId: 'owner' },
@@ -286,6 +297,36 @@ test('existing-agent instructions save and activation in the real app', { timeou
         state.writes.map(write => write.kind),
         ['save', 'activate'],
       );
+    });
+
+    await t.test('review lists every scope and replaced running activations remain revocable', async () => {
+      const state = fixture();
+      state.detail.activations.push({ id: randomUUID(), revision: state.detail.definitionRevision, scope: [] });
+      const replacedId = randomUUID();
+      state.detail.replacedActivations = [{ id: replacedId, revision: '0'.repeat(64), scope }];
+      const { page } = await open(state);
+      await page.getByRole('button', { name: 'More actions', exact: true }).click();
+      await page.getByRole('button', { name: 'Knowledge and web', exact: false }).click();
+      await page.getByRole('checkbox', { name: 'Read a web page', exact: false }).check();
+      await save(page).click();
+      const dialog = page.getByRole('alertdialog');
+      await dialog.getByText('read rows', { exact: false }).waitFor();
+      await dialog.getByText('No table access', { exact: true }).waitFor();
+      assert.equal(await dialog.locator('li').count(), 2);
+      if (process.env.AGENT_REVISION_SCREENSHOT) await page.screenshot({ path: '/tmp/agent-revision-scopes.png' });
+      await dialog.getByRole('button', { name: 'Save and activate', exact: true }).click();
+      await live(page).waitFor();
+      assert.equal(state.detail.activations.length, 2);
+      await page.getByRole('tab', { name: 'Execution', exact: true }).click();
+      const replaced = page.getByText('Replaced. Running tasks may still use it.', { exact: true });
+      await replaced.waitFor();
+      if (process.env.AGENT_REVISION_SCREENSHOT) {
+        await replaced.scrollIntoViewIfNeeded();
+        await page.screenshot({ path: '/tmp/agent-revision-replaced.png' });
+      }
+      await replaced.locator('..').getByRole('button', { name: 'Revoke activation', exact: true }).click();
+      await page.getByText('Activation revoked.', { exact: true }).waitFor();
+      assert.equal(state.writes.at(-1).activationId, replacedId);
     });
 
     await t.test('an inactive saved version is reviewed even when only its instructions change', async () => {

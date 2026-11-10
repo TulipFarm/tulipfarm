@@ -39,6 +39,10 @@ export function AgentActivations({
         JSON.stringify(activation.scope) === JSON.stringify(uncertainActivation.scope),
     );
   const [submitted, setSubmitted] = useState<string | null>(null);
+  const activations = [
+    ...detail.activations.map(activation => ({ ...activation, replaced: false })),
+    ...(detail.replacedActivations ?? []).map(activation => ({ ...activation, replaced: true })),
+  ];
   const write = useTableWrite(
     (activationId: string) => {
       setSubmitted(activationId);
@@ -46,7 +50,7 @@ export function AgentActivations({
     },
     () => {},
   );
-  const recovered = submitted !== null && !detail.activations.some(activation => activation.id === submitted);
+  const recovered = submitted !== null && !activations.some(activation => activation.id === submitted);
   if (concealed) return null;
   const pendingId = write.state.kind === 'sending' ? write.state.input : null;
   const read = policy.state.kind === 'ready' ? policy.state : null;
@@ -123,19 +127,22 @@ export function AgentActivations({
           Saved instructions are activated.
         </p>
       )}
-      {detail.activations.length ? (
+      {activations.length ? (
         <div className="grid gap-3">
           <p className="text-sm text-muted-foreground">Revoking stops new work that uses that version.</p>
           <ul className="grid gap-3">
-            {detail.activations.map(activation => (
+            {activations.map(activation => (
               <li key={activation.id} className="grid gap-2 rounded-lg border p-3">
                 <p className="break-words text-sm font-medium text-foreground">{activationLabel(detail, activation)}</p>
+                {activation.replaced && (
+                  <p className="text-sm text-muted-foreground">Replaced. Running tasks may still use it.</p>
+                )}
                 <p className="text-sm">Limited to {activation.scope.length} configured assets.</p>
                 <p className="break-words text-sm">
                   <ScopeSummary workspaceId={workspaceId} scope={activation.scope} />
                 </p>
                 <Disclosure title="Technical identifiers">
-                  <p className="break-all text-sm">Revision {activation.revision}</p>
+                  <p className="break-all text-sm">Version {activation.revision}</p>
                   <p className="break-all text-sm">Activation {activation.id}</p>
                 </Disclosure>
                 <Button

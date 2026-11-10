@@ -552,7 +552,11 @@ export function AgentEditor({
       <RevisionReview
         workspaceId={workspaceId}
         definition={review?.kind === 'save' ? review.input.definition : review ? (detail?.definition ?? null) : null}
-        scope={review?.kind === 'save' ? review.activation.scope : (review?.input.scope ?? [])}
+        scopes={
+          detail?.activations.length
+            ? detail.activations.map(activation => activation.scope)
+            : [review?.kind === 'save' ? review.activation.scope : (review?.input.scope ?? [])]
+        }
         close={() => setReview(null)}
         saved={review?.kind === 'activate'}
         confirm={() => {

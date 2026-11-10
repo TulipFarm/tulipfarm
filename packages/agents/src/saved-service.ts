@@ -164,10 +164,26 @@ export function createSavedAgentService(runtime: AgentStorage, readProjection?: 
           ).rows,
         );
       const { formatVersion: _formatVersion, id: _id, ...definition } = document;
+      const replacedActivations =
+        'commonVersion' in transaction && Number(transaction.commonVersion) >= 59
+          ? z.array(z.object({ id: z.uuid(), revision: z.string(), scope: scopeSchema })).parse(
+              (
+                await transaction.client.query(
+                  `SELECT a.id,a.definition_revision AS revision,a.scope FROM ${relation(transaction, 'tf_agent_activations')} a
+              WHERE a.agent_id=$1 AND a.revoked_at IS NULL AND a.superseded_by_activation_id IS NOT NULL AND (
+                EXISTS(SELECT 1 FROM ${relation(transaction, 'tf_agent_tasks')} t WHERE t.activation_id=a.id AND t.status NOT IN ('completed','failed'))
+                OR EXISTS(SELECT 1 FROM ${relation(transaction, 'tf_agent_runs')} r WHERE r.activation_id=a.id AND r.status IN ('ready','running','waiting'))
+              ) ORDER BY a.activated_at DESC NULLS LAST,a.id DESC`,
+                  [agentId],
+                )
+              ).rows,
+            )
+          : [];
       return {
         ...savedAgentSchema.parse(selected.item),
         definition: agentDefinitionSchema.parse(definition),
         capabilities,
+        replacedActivations,
         activations: await Promise.all(
           activations.map(async activation => ({
             ...activation,

@@ -16,14 +16,14 @@ import { DraftSkill } from './setup-review';
 export function RevisionReview({
   workspaceId,
   definition,
-  scope,
+  scopes,
   confirm,
   close,
   saved,
 }: {
   workspaceId: string;
   definition: AgentDetail['definition'] | null;
-  scope: AgentDetail['activations'][number]['scope'];
+  scopes: AgentDetail['activations'][number]['scope'][];
   confirm: () => void;
   close: () => void;
   saved: boolean;
@@ -71,9 +71,13 @@ export function RevisionReview({
             <p>
               Slack trigger: {definition.responseRule === 'every-message' ? 'Every channel message' : 'When tagged'}
             </p>
-            <p>
-              <ScopeSummary workspaceId={workspaceId} scope={scope} />
-            </p>
+            <ul className="grid gap-2">
+              {scopes.map((scope, index) => (
+                <li key={index}>
+                  <ScopeSummary workspaceId={workspaceId} scope={scope} />
+                </li>
+              ))}
+            </ul>
           </div>
         )}
         <AlertDialogFooter>

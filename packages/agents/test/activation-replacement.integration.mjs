@@ -56,6 +56,13 @@ test('activation replacement swaps new admissions without changing running tasks
         [agent.agentId],
       )
     ).rows;
+  const terminal = async id => {
+    const rows = new Map((await before()).map(row => [row.id, row]));
+    while (rows.get(id).superseded_by_activation_id) id = rows.get(id).superseded_by_activation_id;
+    return id;
+  };
+  const currentIds = async () =>
+    (await before()).filter(row => !row.superseded_by_activation_id && !row.revoked_at).map(row => row.id);
   assert.equal((await before()).length, 2, 'direct activation still keeps older activations');
   const savedRevision = (
     await db.platform.query(`SELECT saved_revision FROM ${table('tf_agents')} WHERE id=$1`, [agent.agentId])
@@ -96,18 +103,22 @@ test('activation replacement swaps new admissions without changing running tasks
     assert.equal(outcomes.filter(result => result.status === 'rejected' && result.reason.status === 409).length, 1);
     replacement = outcomes.find(result => result.status === 'fulfilled').value.activationId;
     const rows = await before();
-    assert.equal(rows.length, 3);
-    for (const row of rows.filter(row => row.id !== replacement)) {
-      assert.equal(row.superseded_by_activation_id, replacement);
+    assert.equal(rows.length, 4);
+    for (const row of rows.filter(row => input.expectedActivationIds.includes(row.id))) {
+      assert.ok(row.superseded_by_activation_id);
       assert.ok(row.superseded_at);
       assert.equal(row.revoked_at, null);
     }
+    assert.equal(
+      new Set(rows.filter(row => row.superseded_by_activation_id).map(row => row.superseded_by_activation_id)).size,
+      2,
+    );
     assert.deepEqual(rows.find(row => row.id === replacement).scope, []);
   });
   await t.test('new tasks follow old pins and default to the new definition', async () => {
     for (const pin of [agent.activationId, saved.activationId, undefined]) {
       const task = await tasks.read(w.id, user, (await start(pin)).id);
-      assert.equal(task.activationId, replacement);
+      assert.equal(task.activationId, await terminal(pin ?? saved.activationId));
       assert.equal(task.definitionRevision, saved.revision);
     }
   });
@@ -125,7 +136,7 @@ test('activation replacement swaps new admissions without changing running tasks
   await t.test(
     'replacement retries are idempotent and old workflow pins follow more than one replacement',
     async () => {
-      const next = { ...input, requestId: randomUUID(), expectedActivationIds: [replacement] };
+      const next = { ...input, requestId: randomUUID(), expectedActivationIds: await currentIds() };
       const result = await store.replaceActivation(w.id, manager, next);
       assert.deepEqual(await store.replaceActivation(w.id, manager, next), result);
       await assert.rejects(
@@ -138,19 +149,20 @@ test('activation replacement swaps new admissions without changing running tasks
       );
       replacement = result.activationId;
       const task = await tasks.read(w.id, user, (await start(agent.activationId)).id);
-      assert.equal(task.activationId, replacement);
+      assert.equal(task.activationId, await terminal(agent.activationId));
       const { runId } = await store.startDelegated(w.id, reader, { activationId: agent.activationId, scope: [] });
       assert.equal(
         (await db.platform.query(`SELECT activation_id FROM ${table('tf_agent_runs')} WHERE id=$1`, [runId])).rows[0]
           .activation_id,
-        replacement,
+        await terminal(agent.activationId),
       );
     },
   );
   await t.test(
     'revocation still stops original running authority and does not fall back to superseded versions',
     async () => {
-      await store.revokeActivation(w.id, manager, { agentId: agent.agentId, activationId: replacement });
+      for (const activationId of await currentIds())
+        await store.revokeActivation(w.id, manager, { agentId: agent.agentId, activationId });
       await assert.rejects(start(), AccessDenied);
       await assert.rejects(start(saved.activationId), AccessDenied);
       await tasks.pause(w.id, user, continuing.id, { expectedGeneration: 0 });
