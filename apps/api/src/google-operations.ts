@@ -11,6 +11,7 @@ import {
   googleFileContentRequestSchema,
   googleFilePageSchema,
   googleFileMetadataSchema,
+  googleSheetRangeSchema,
 } from '@tulipfarm/google-workspace/public-contracts';
 import {
   googleOperationCatalog,
@@ -19,6 +20,9 @@ import {
   approvalDecisionSchema as decision,
   googleProposalListQuerySchema,
   googleProposalListSchema,
+  googleResultSchema,
+  googleProposalSchema,
+  googleReceiptSchema,
 } from '@tulipfarm/google-workspace/public-contracts';
 import { GoogleLifecycleError, type createGoogleOperations } from '@tulipfarm/google-workspace/operations';
 import type { createGoogleApproval } from '@tulipfarm/google-workspace/operation-approval';
@@ -78,11 +82,17 @@ export function registerGoogleOperations(
       if (!id) throw new AccessDenied();
       return id;
     };
-    const schema = (operationId: string, params: z.ZodType, body?: z.ZodType) => ({
+    const schema = (
+      operationId: string,
+      params: z.ZodType,
+      body?: z.ZodType,
+      output: z.ZodType = googleProposalSchema,
+    ) => ({
       operationId,
       tags: ['Google operations'],
       params: json(params),
       ...(body ? { body: json(body) } : {}),
+      response: { 200: json(output) },
     });
     const base = '/workspaces/:workspaceId/google-workspace/operations';
     const fileRequests = new Map<FastifyRequest, AbortController>();
@@ -159,7 +169,20 @@ export function registerGoogleOperations(
         logLevel: 'silent',
         bodyLimit: 8192,
         preHandler: reserveFileRead,
-        schema: schema('readGoogleFileContentV1', workspace, googleFileContentRequestSchema),
+        schema: {
+          ...schema('readGoogleFileContentV1', workspace, googleFileContentRequestSchema),
+          response: {
+            200: {
+              description: 'File bytes or a structured spreadsheet range',
+              content: {
+                'application/json': {
+                  schema: json(z.object({ kind: z.literal('sheet-range'), data: googleSheetRangeSchema })),
+                },
+                '*/*': { schema: { type: 'string', format: 'binary' } },
+              },
+            },
+          },
+        },
       },
       async (request, reply) => {
         const result = await dependencies.operations.fileContent(
@@ -181,7 +204,19 @@ export function registerGoogleOperations(
     );
     routes.get(
       `${base}/catalog`,
-      { logLevel: 'silent', schema: schema('listGoogleOperationsV1', workspace) },
+      {
+        logLevel: 'silent',
+        schema: {
+          ...schema('listGoogleOperationsV1', workspace),
+          response: {
+            200: {
+              type: 'object',
+              properties: { operations: { type: 'array', items: { type: 'object', additionalProperties: true } } },
+              required: ['operations'],
+            },
+          },
+        },
+      },
       async request => {
         const workspaceId = workspace.parse(request.params).workspaceId;
         await dependencies.runtime.transaction(workspaceId, commonCompatibility, async tx => {
@@ -193,7 +228,11 @@ export function registerGoogleOperations(
     );
     routes.post(
       `${base}/read`,
-      { logLevel: 'silent', bodyLimit: 2_101_248, schema: schema('readGoogleOperationV1', workspace, read) },
+      {
+        logLevel: 'silent',
+        bodyLimit: 2_101_248,
+        schema: schema('readGoogleOperationV1', workspace, read, googleResultSchema),
+      },
       async request =>
         z
           .json()
@@ -256,7 +295,10 @@ export function registerGoogleOperations(
     );
     routes.post(
       `${base}/proposals/:proposalId/execute`,
-      { logLevel: 'silent', schema: schema('executeGoogleProposalV1', proposal) },
+      {
+        logLevel: 'silent',
+        schema: schema('executeGoogleProposalV1', proposal, undefined, googleReceiptSchema),
+      },
       async request => {
         if (request.body !== undefined) z.never().parse(request.body);
         const p = proposal.parse(request.params);

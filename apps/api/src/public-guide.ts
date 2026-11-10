@@ -108,6 +108,18 @@ export function registerPublicGuideRoutes(app: FastifyInstance, deps: PublicGuid
           operationId: 'publicGuideOptionsV1',
           tags: ['Public guide'],
           summary: 'Public guide availability and browser configuration',
+          response: {
+            200: json(
+              z.object({
+                enabled: z.boolean(),
+                modelAvailable: z.boolean(),
+                turnstileSiteKey: z.string().nullable(),
+                appOrigin: z.string(),
+                googleAvailable: z.boolean(),
+                messageCharacters: z.number(),
+              }),
+            ),
+          },
         },
       },
       async () => ({
@@ -129,6 +141,7 @@ export function registerPublicGuideRoutes(app: FastifyInstance, deps: PublicGuid
           tags: ['Public guide'],
           summary: 'Verify a visitor and issue a short-lived anonymous browser token',
           body: json(sessionSchema),
+          response: { 200: json(z.object({ token: z.string(), expiresIn: z.number() })) },
         },
       },
       async request => {
@@ -150,6 +163,12 @@ export function registerPublicGuideRoutes(app: FastifyInstance, deps: PublicGuid
           tags: ['Public guide'],
           summary: 'Stream a bounded TulipFarm-only answer as status, delta, action, done or error SSE events',
           body: json(guideMessageSchema),
+          response: {
+            200: {
+              description: 'Public guide answer events',
+              content: { 'text/event-stream': { schema: { type: 'string' } } },
+            },
+          },
         },
       },
       async (request, reply) => {
@@ -233,6 +252,14 @@ export function registerPublicGuideRoutes(app: FastifyInstance, deps: PublicGuid
           tags: ['Public guide'],
           summary: 'Save reviewed workspace details and begin verified email or Google signup',
           body: json(signupSchema),
+          response: {
+            200: json(
+              z.discriminatedUnion('status', [
+                z.object({ status: z.literal('email-sent') }),
+                z.object({ status: z.literal('redirect'), url: z.string() }),
+              ]),
+            ),
+          },
         },
       },
       async request => {
@@ -256,6 +283,7 @@ export function registerPublicGuideRoutes(app: FastifyInstance, deps: PublicGuid
           tags: ['Public guide'],
           summary: 'Continue a verified signup in a first-party Google OAuth navigation',
           querystring: json(z.strictObject({ token: z.string().max(1024) })),
+          response: { 302: { type: 'null', description: 'Continue to Google sign-in' } },
         },
       },
       async (request, reply) => {

@@ -1,11 +1,27 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
-import { buildApp } from '../src/app.ts';
+import { after, mock, test } from 'node:test';
 import Fastify from 'fastify';
-import { registerAgents } from '../src/agents.ts';
-import { registerAccountDetails } from '../src/account-details.ts';
 import { Pool } from 'pg';
 import { createHmac } from 'node:crypto';
+import dns from 'node:dns/promises';
+import { syncBuiltinESMExports } from 'node:module';
+
+mock.method(globalThis, 'fetch', async () => {
+  throw new Error('Network access blocked in composition test');
+});
+mock.method(dns, 'lookup', async () => {
+  throw new Error('DNS access blocked in composition test');
+});
+syncBuiltinESMExports();
+const [{ buildApp }, { registerAgents }, { registerAccountDetails }] = await Promise.all([
+  import('../src/app.ts'),
+  import('../src/agents.ts'),
+  import('../src/account-details.ts'),
+]);
+after(() => {
+  mock.restoreAll();
+  syncBuiltinESMExports();
+});
 
 // The app serves the shipped model catalog, which needs a provider key.
 process.env.ANTHROPIC_API_KEY ??= 'test-key';
@@ -218,7 +234,7 @@ test('v1 documentation describes the routes and their response contracts', async
   }
 });
 
-test('isolated buildApp registers the model catalog and OpenAPI contract while database access is blocked', async t => {
+test('isolated buildApp documents success responses for all route groups while database access is blocked', async t => {
   const environment = {
     NODE_ENV: 'test',
     SLACK_INTAKE_ENABLED: 'true',
@@ -245,6 +261,11 @@ test('isolated buildApp registers the model catalog and OpenAPI contract while d
     WORKSPACE_RUNTIME_PREVIOUS_KEYS: '{}',
     INTEGRATION_CREDENTIAL_PREVIOUS_KEYS: '{}',
     EMAIL_DELIVERY_PREVIOUS_KEYS: '{}',
+    TULIPFARM_OBJECT_STORAGE_FILES_BUCKET: 'contract-test-files',
+    TULIPFARM_OBJECT_STORAGE_REGION: 'us-east-1',
+    TULIPFARM_OBJECT_STORAGE_ENDPOINT: 'http://127.0.0.1:1',
+    TULIPFARM_OBJECT_STORAGE_ACCESS_KEY_ID: 'synthetic',
+    TULIPFARM_OBJECT_STORAGE_SECRET_ACCESS_KEY: 'synthetic',
     WORKSPACE_PROVISIONING_DATABASE_URL: undefined,
     WORKSPACE_MIGRATION_KEY: undefined,
     WORKSPACE_MIGRATION_PREVIOUS_KEYS: undefined,
@@ -295,7 +316,79 @@ test('isolated buildApp registers the model catalog and OpenAPI contract while d
     assert.equal(response.headers['cache-control'], 'no-store');
     const docs = await app.inject('/v1/docs/json');
     assert.equal(docs.statusCode, 200);
-    const operation = docs.json().paths['/v1/workspaces/{workspaceId}/model-catalog'].get;
+    const spec = docs.json();
+    const operations = Object.entries(spec.paths).flatMap(([path, methods]) =>
+      Object.entries(methods)
+        .filter(([method]) => ['get', 'post', 'put', 'patch', 'delete', 'head', 'options', 'trace'].includes(method))
+        .map(([method, operation]) => ({ path, method, operation })),
+    );
+    assert.deepEqual(
+      [...new Set(operations.flatMap(({ operation }) => operation.tags ?? []))].sort(),
+      [
+        'API calls',
+        'Account',
+        'Agent plans',
+        'Agent tasks',
+        'Agents',
+        'Atlassian accounts',
+        'Atlassian operations',
+        'Bud',
+        'Conversations',
+        'Files',
+        'GitHub investigation',
+        'GitHub personal accounts',
+        'Google Workspace',
+        'Google heartbeat',
+        'Google operations',
+        'Governance',
+        'Health',
+        'Integrations',
+        'Knowledge',
+        'Models',
+        'Onboarding',
+        'Personal memory',
+        'Projects',
+        'Public guide',
+        'Secrets',
+        'Skills',
+        'Slack',
+        'Social accounts',
+        'System packages',
+        'Workflows',
+        'Workspace MCP',
+        'Workspace settings',
+        'Workspaces',
+      ].sort(),
+      'The document must include every route group',
+    );
+    assert.ok(operations.some(({ operation }) => operation.operationId === 'readSkillImportV1'));
+    assert.ok(operations.some(({ operation }) => operation.operationId === 'copyGoogleFileToFilesV1'));
+    const retired = operations.find(({ operation }) => operation.operationId === 'retiredSaveWorkspaceSkillV1');
+    assert.ok(retired);
+    assert.equal(retired.operation.deprecated, true);
+    assert.ok(retired.operation.responses['410']);
+    assert.equal(
+      Object.keys(retired.operation.responses).some(status => /^[23]\d\d$/.test(status)),
+      false,
+    );
+    const redirects = new Set(['publicGuideGoogleV1', 'completeGoogleWorkspaceOAuthV1']);
+    assert.deepEqual(
+      operations
+        .filter(
+          ({ operation }) =>
+            operation.operationId !== 'retiredSaveWorkspaceSkillV1' &&
+            !Object.keys(operation.responses).some(
+              status => /^2\d\d$/.test(status) || (redirects.has(operation.operationId) && /^3\d\d$/.test(status)),
+            ),
+        )
+        .map(({ path, method }) => `${method.toUpperCase()} ${path}`),
+      [],
+      'Every documented operation must declare a success response',
+    );
+    const events = spec.paths['/v1/workspaces/{workspaceId}/conversations/{chatId}/events'].get;
+    assert.equal(events.operationId, 'streamConversationEventsV1');
+    assert.deepEqual(events.responses['200'].content, { 'text/event-stream': { schema: { type: 'string' } } });
+    const operation = spec.paths['/v1/workspaces/{workspaceId}/model-catalog'].get;
     assert.equal(operation.operationId, 'getModelCatalogV1');
     assert.equal(operation.parameters.find(parameter => parameter.name === 'workspaceId').required, true);
     assert.deepEqual(Object.keys(operation.responses).sort(), [
