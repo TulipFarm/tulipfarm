@@ -1,5 +1,7 @@
 ALTER TABLE {{schema}}.tf_table_executions ADD COLUMN creation_access_granted_at timestamptz;
 
+GRANT SELECT(id) ON {{schema}}.tf_slack_destinations TO {{customOwner}};
+
 -- Generation owners must not be able to erase the history that prevents a second grant.
 CREATE TABLE {{schema}}.tf_table_creation_access_receipts (
   table_id uuid PRIMARY KEY,
@@ -8,7 +10,9 @@ CREATE TABLE {{schema}}.tf_table_creation_access_receipts (
 REVOKE ALL ON {{schema}}.tf_table_creation_access_receipts
   FROM PUBLIC,{{runtime}},{{migration}},{{customOwner}},{{confirmation}};
 INSERT INTO {{schema}}.tf_table_creation_access_receipts(table_id)
-  SELECT id FROM {{schema}}.tf_table_catalog;
+  SELECT c.id FROM {{schema}}.tf_table_catalog c
+  WHERE EXISTS (SELECT 1 FROM {{schema}}.tf_table_generations g
+    WHERE g.table_id=c.id AND g.activated_at IS NOT NULL);
 
 CREATE FUNCTION {{schema}}.tf_table_creation_access(execution_id uuid)
 RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
@@ -29,6 +33,10 @@ BEGIN
   JOIN {{schema}}.tf_table_catalog c ON c.id=e.table_id
   CROSS JOIN LATERAL jsonb_array_elements(p.manifest->'plans') plan
   WHERE e.id=execution_id AND e.phase='reconciling' AND e.source_generation IS NULL
+    AND NOT EXISTS (SELECT 1 FROM {{schema}}.tf_teams team WHERE team.id=e.table_id)
+    AND NOT EXISTS (SELECT 1 FROM {{schema}}.tf_slack_destinations destination WHERE destination.id=e.table_id)
+    AND NOT EXISTS (SELECT 1 FROM {{schema}}.tf_grants grant_row
+      WHERE grant_row.asset_id=e.table_id AND grant_row.permission NOT LIKE 'table.%')
     AND g.state='active' AND g.revision=e.revision AND g.activated_at IS NOT NULL
     AND c.physical_table=g.physical_table AND c.applied_revision=g.revision AND c.applied_definition=g.definition
     AND g.xmin=pg_current_xact_id()::xid AND c.xmin=pg_current_xact_id()::xid
