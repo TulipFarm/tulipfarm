@@ -73,7 +73,7 @@ const isWorkflow = (proposal: AuthoringProposal): proposal is WorkflowProposal =
 const rowOperation = ({ input }: RowProposal) =>
   input.tool === 'rows.create' || input.tool === 'rows.create.batch'
     ? ('create' as const)
-    : input.tool === 'rows.update'
+    : input.tool === 'rows.update' || input.tool === 'rows.update.batch'
       ? ('update' as const)
       : ('delete' as const);
 /** The rows a draft writes: a single create uses the draft ID, a batch derives one ID per row from it. */
@@ -82,7 +82,9 @@ const rowRecordIds = (id: string, { input }: RowProposal) =>
     ? [id]
     : input.tool === 'rows.create.batch'
       ? batchRecordIds(id, input.rows.length)
-      : [input.recordId];
+      : input.tool === 'rows.update.batch'
+        ? input.rows.map(row => row.recordId)
+        : [input.recordId];
 const staleRowError = (error: unknown) =>
   (error instanceof GenerationError &&
     ['not-active', 'not-found', 'stale-record', 'stale-generation', 'linked-record', 'duplicate-key'].includes(
@@ -101,6 +103,7 @@ async function applyRow(
 ) {
   const records = createAgentRecordTools(bound);
   if (input.tool === 'rows.create.batch') return records.createRecords(workspaceId, actor, input, id);
+  if (input.tool === 'rows.update.batch') return records.updateRecords(workspaceId, actor, input);
   if (input.tool === 'rows.create')
     return records.createRecord(workspaceId, actor, input.tableId, input.expectedAppliedRevision, input.values, id);
   if (input.tool === 'rows.update')
@@ -128,7 +131,7 @@ function rowOutcome(id: string, proposal: RowProposal): DraftOutcome {
     kind: 'row',
     operation: rowOperation(proposal),
     recordId: recordIds[0]!,
-    ...(proposal.input.tool === 'rows.create.batch' && { recordIds }),
+    ...((proposal.input.tool === 'rows.create.batch' || proposal.input.tool === 'rows.update.batch') && { recordIds }),
   };
 }
 async function savepoint<T>(tx: AgentTransaction, operation: () => Promise<T>, keep: boolean) {
@@ -312,6 +315,13 @@ export function createAuthoringDrafts(
           if ((await identity(tx, tableId, recordId)) !== null) return true;
         return false;
       }
+      if (proposal.input.tool === 'rows.update.batch') {
+        for (const row of proposal.input.rows) {
+          const current = await identity(tx, tableId, row.recordId);
+          if (!current?.live || current.token !== row.expectedToken) return true;
+        }
+        return false;
+      }
       const current = await identity(tx, tableId, rowRecordIds(id, proposal)[0]!);
       return proposal.input.tool === 'rows.create'
         ? current !== null
@@ -433,6 +443,31 @@ export function createAuthoringDrafts(
       })),
     };
     if (input.tool === 'rows.create' || input.tool === 'rows.create.batch') return { rowTable, rowCurrent: null };
+    if (input.tool === 'rows.update.batch') {
+      if (proposal.before) return { rowTable, rowCurrent: null, rowCurrents: proposal.before };
+      const rowCurrents: NonNullable<z.infer<typeof draftViewSchema>['rowCurrents']> = {};
+      try {
+        for (const row of input.rows) {
+          const record = await savepoint(
+            tx,
+            () =>
+              createAgentRecordTools(bound).getRecord(
+                workspaceId,
+                actor,
+                input.tableId,
+                input.expectedAppliedRevision,
+                row.recordId,
+              ),
+            false,
+          );
+          if (record) rowCurrents[row.recordId] = record.values;
+        }
+      } catch (error) {
+        if (staleRowError(error) || error instanceof AccessDenied) return { rowTable, rowCurrent: null };
+        throw error;
+      }
+      return { rowTable, rowCurrent: null, rowCurrents };
+    }
     try {
       const record = await savepoint(
         tx,
@@ -526,16 +561,20 @@ export function createAuthoringDrafts(
       await owned(tx, actor, origin.conversationId);
       if (parsed.kind === 'memory') await requireMemoryChat(tx, actor, origin.conversationId);
       const proposal = parsed.kind === 'workflow' ? await chatWorkflow(tx, origin.conversationId, parsed) : parsed;
-      const digest = createHash('sha256').update(canonicalJson(proposal)).digest('hex');
       await requireNoMcpDerived(tx, [
         { kind: 'private-conversation', conversationId: origin.conversationId },
         ...sources,
       ]);
       await requireSources(tx, workspaceId, actor, proposal, sources);
       await writable(tx, actor, proposal, bound, workspaceId);
+      if (proposal.kind === 'row' && proposal.input.tool === 'rows.update.batch') {
+        const view = await rowView(tx, actor, bound, workspaceId, id, { ...proposal, before: undefined });
+        proposal.before = view.rowCurrents ?? {};
+      }
       if (proposal.kind === 'agent') await resolveProcedures(tx, proposal.input.definition.skills, actor);
       if (proposal.kind === 'row') await savepoint(tx, () => applyRow(bound, workspaceId, actor, id, proposal), false);
       else if (await stale(tx, proposal, actor, bound, workspaceId, id)) throw new AgentError('draft-stale');
+      const digest = createHash('sha256').update(canonicalJson(proposal)).digest('hex');
       await tx.client.query(
         `INSERT INTO ${relation(tx, 'tf_chat_authoring_drafts')} (id,conversation_id,turn_id,membership_id,user_id,proposal,digest,sources) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
         [

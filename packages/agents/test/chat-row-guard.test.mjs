@@ -21,10 +21,11 @@ test('earlier direct writes in a reply count their rows, and any review keeps th
     earlierRowWrites([
       written('rows.create.batch', { records: [{ id: 'a' }, { id: 'b' }, { id: 'c' }] }),
       written('rows.update', { id: 'd' }),
+      written('rows.update.batch', { records: [{ id: 'f' }, { id: 'g' }] }),
       written('rows.create', { error: 'record-invalid' }),
       { tool: 'rows.create', call: {}, output: null, drafted: false },
     ]),
-    { rows: 4, reviewing: false, singleCreate: false, created: [] },
+    { rows: 6, reviewing: false, singleCreate: false, created: [] },
   );
   assert.equal(earlierRowWrites([written('rows.create', { id: 'e' })]).singleCreate, true);
   assert.equal(earlierRowWrites([written('rows.create.batch', { error: 'review-required' })]).reviewing, true);
@@ -86,5 +87,9 @@ test('a waiting row card is described by the change its saved call holds', () =>
     'change 1 row (Kiwi 4) in',
   );
   assert.equal(waitingCardChange({ tool: 'rows.delete' }).summary, 'delete 1 row from');
+  assert.equal(
+    waitingCardChange({ tool: 'rows.update.batch', rows: [row('Done'), row('Closed')] }).summary,
+    'change 2 rows (Done, Closed) in',
+  );
   assert.equal(waitingCardChange({ tool: 'rows.create', values: { name: 'not a field id' } }).summary, 'add 1 row to');
 });

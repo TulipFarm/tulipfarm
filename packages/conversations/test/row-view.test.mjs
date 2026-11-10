@@ -131,6 +131,16 @@ test('completed writes project only the table, revision and written row IDs', as
     output: { result: { id: recordId }, sources: [] },
   });
   assert.equal(updated.kind, 'updated');
+  assert.deepEqual(
+    rowChangeForReceipt({
+      id,
+      tool: 'rows.update.batch',
+      status: 'completed',
+      call: { tool: 'rows.update.batch', tableId, expectedAppliedRevision: revision, rows: [] },
+      output: { result: { records: [{ id: recordId }, { id: other }] }, sources: [] },
+    }),
+    { callId: id, tableId, revision, kind: 'updated', recordIds: [recordId, other] },
+  );
   const parsed = toolReceiptSchema.parse({ id, tool: 'rows.create', status: 'completed', rowChange: created });
   assert.equal(JSON.stringify(parsed).includes('private'), false);
   for (const row of [

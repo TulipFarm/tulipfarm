@@ -209,7 +209,7 @@ export function deniedProposalDetail(call: unknown) {
     return `Access denied. This change needs Read rows plus Create rows, Update rows or Delete rows on the table, depending on the change. ${askTableAccess} them to you or your team in Table access, then ask again.`;
   return undefined;
 }
-const rowWriteTools = new Set(['rows.create', 'rows.create.batch', 'rows.update', 'rows.delete']);
+const rowWriteTools = new Set(['rows.create', 'rows.create.batch', 'rows.update', 'rows.update.batch', 'rows.delete']);
 const rowReviewReasons: Record<string, (table?: string) => string> = {
   'too-many-rows': () => 'Changes to more than 5 rows in one request need your approval on a chat card.',
   'table-not-named': table =>

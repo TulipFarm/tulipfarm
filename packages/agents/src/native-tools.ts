@@ -113,6 +113,8 @@ const coreChatTools = new Set(
     'tables.import.attachments',
     'tables.import.file',
     'rows.create.batch',
+    'rows.list',
+    'rows.update.batch',
     'skills.read',
     'knowledge.retrieve',
     'knowledge.search',

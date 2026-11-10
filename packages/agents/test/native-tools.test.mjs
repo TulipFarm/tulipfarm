@@ -201,6 +201,30 @@ test('ordinary row work offers inspection and one bounded batch create without d
     assert.equal(resolve({ ...input, rows }).ok, false);
 });
 
+test('existing rows can be found and patched without discovering a write tool', () => {
+  const catalog = nativeChatTools(undefined, false, new Set());
+  for (const name of ['rows_list', 'rows_update_batch'])
+    assert.ok(
+      catalog.tools.some(tool => tool.name === name),
+      name,
+    );
+  const row = {
+    recordId: '11111111-1111-4111-8111-111111111111',
+    expectedToken: '22222222-2222-4222-8222-222222222222',
+    values: { '33333333-3333-4333-8333-333333333333': { kind: 'text', value: 'Done' } },
+  };
+  const input = {
+    activity: 'Updating a ticket',
+    tableId: '44444444-4444-4444-8444-444444444444',
+    expectedAppliedRevision: 'a'.repeat(40),
+    rows: [row],
+  };
+  const resolve = input => catalog.resolve({ id: 'call', name: 'rows_update_batch', input, providerId: true });
+  assert.equal(resolve(input).ok, true);
+  for (const rows of [[], [row, row], [{ ...row, expectedToken: undefined }], [{ ...row, values: {} }]])
+    assert.equal(resolve({ ...input, rows }).ok, false);
+});
+
 test('discovery ranks an exact tool name ahead of description-only matches', () => {
   const catalog = nativeChatTools(undefined, false, new Set());
   assert.equal(catalog.search('rows.create')[0], 'rows_create');

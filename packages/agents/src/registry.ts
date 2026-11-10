@@ -1,6 +1,6 @@
 import type { Actor } from '@tulipfarm/access';
 import type { createAgentRecordTools } from './record-tools.ts';
-import type { CreateRecordBatch, ToolCall } from './contracts.ts';
+import type { CreateRecordBatch, UpdateRecordBatch, ToolCall } from './contracts.ts';
 
 export type TableTools = {
   records: Pick<
@@ -15,6 +15,7 @@ export type TableTools = {
     | 'createRecord'
     | 'createRecords'
     | 'updateRecord'
+    | 'updateRecords'
     | 'deleteRecord'
     | 'getRecord'
   >;
@@ -76,6 +77,8 @@ export function createToolRegistry(resources: TableTools) {
       ),
     'rows.create.batch': (context: ToolContext, call: CreateRecordBatch) =>
       resources.records.createRecords(context.workspaceId, context.actor, call, context.callId),
+    'rows.update.batch': (context: ToolContext, call: UpdateRecordBatch) =>
+      resources.records.updateRecords(context.workspaceId, context.actor, call),
     'rows.update': (context: ToolContext, call: Extract<ToolCall, { tool: 'rows.update' }>) =>
       resources.records.updateRecord(
         context.workspaceId,
@@ -109,6 +112,7 @@ export function createToolRegistry(resources: TableTools) {
     context: ToolContext,
     call:
       | CreateRecordBatch
+      | UpdateRecordBatch
       | Exclude<
           ToolCall,
           {
@@ -146,6 +150,8 @@ export function createToolRegistry(resources: TableTools) {
       case 'rows.create':
         return handlers[call.tool](context, call);
       case 'rows.create.batch':
+        return handlers[call.tool](context, call);
+      case 'rows.update.batch':
         return handlers[call.tool](context, call);
       case 'rows.update':
         return handlers[call.tool](context, call);

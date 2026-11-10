@@ -24,7 +24,7 @@ const verbs = { create: 'Add', update: 'Update', delete: 'Delete' } as const;
 const operation = ({ input }: RowProposal) =>
   input.tool === 'rows.create' || input.tool === 'rows.create.batch'
     ? 'create'
-    : input.tool === 'rows.update'
+    : input.tool === 'rows.update' || input.tool === 'rows.update.batch'
       ? 'update'
       : 'delete';
 const clip = (text: string, length: number) => (text.length > length ? `${text.slice(0, length - 1)}…` : text);
@@ -105,11 +105,11 @@ export async function slackRowDraftCards(
       return { label: field?.label ?? fieldId, value: formatValue(value, field?.options ?? []) };
     };
     const values =
-      input.tool === 'rows.create.batch'
+      input.tool === 'rows.create.batch' || input.tool === 'rows.update.batch'
         ? input.rows
         : Object.entries(input.tool === 'rows.delete' ? {} : input.values);
     const fields =
-      input.tool === 'rows.create.batch'
+      input.tool === 'rows.create.batch' || input.tool === 'rows.update.batch'
         ? input.rows.slice(0, shownFields).map(({ values: row }, index) => ({
             type: 'plain_text' as const,
             text: clip(
@@ -128,7 +128,7 @@ export async function slackRowDraftCards(
               const shown = cell(fieldId, value);
               return { type: 'plain_text' as const, text: `${clip(shown.label, 100)}\n${clip(shown.value, 500)}` };
             });
-    const count = input.tool === 'rows.create.batch' ? input.rows.length : 1;
+    const count = input.tool === 'rows.create.batch' || input.tool === 'rows.update.batch' ? input.rows.length : 1;
     const value = JSON.stringify({ workspaceId, chatId: conversationId, draftId: draft.id, digest: draft.digest });
     blocks.push(
       { type: 'divider' },
@@ -153,9 +153,11 @@ export async function slackRowDraftCards(
                 ? 'Adds a new row.'
                 : input.tool === 'rows.create.batch'
                   ? `Adds ${count} new rows together.`
-                  : `${verbs[kind]}s row ${input.recordId}.`,
+                  : input.tool === 'rows.update.batch'
+                    ? `Updates ${count} existing rows together.`
+                    : `${verbs[kind]}s row ${input.recordId}.`,
               values.length > shownFields
-                ? `${values.length - shownFields} more ${input.tool === 'rows.create.batch' ? 'rows are' : 'fields are'} set.`
+                ? `${values.length - shownFields} more ${input.tool === 'rows.create.batch' || input.tool === 'rows.update.batch' ? 'rows are' : 'fields are'} set.`
                 : '',
               proposal.written
                 ? `${proposal.written.count === 1 ? '1 row was' : `${proposal.written.count} rows were`} already added in this reply and stay in the table; this card holds only the rest.`

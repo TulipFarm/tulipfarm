@@ -99,6 +99,23 @@ export const createRecordBatchSchema = z.strictObject({
     .max(100),
 });
 export type CreateRecordBatch = z.infer<typeof createRecordBatchSchema>;
+export const updateRecordBatchSchema = z.strictObject({
+  tool: z.literal('rows.update.batch'),
+  ...resource,
+  expectedAppliedRevision: revisionSchema,
+  rows: z
+    .array(
+      z.strictObject({
+        recordId: uuidSchema,
+        expectedToken: uuidSchema.describe('The current token returned by rows.list for this existing row.'),
+        values: recordWrite.values.refine(value => Object.keys(value).length > 0, 'Specify fields to change'),
+      }),
+    )
+    .min(1)
+    .max(100)
+    .refine(rows => new Set(rows.map(row => row.recordId)).size === rows.length, 'Rows must be distinct'),
+});
+export type UpdateRecordBatch = z.infer<typeof updateRecordBatchSchema>;
 // Optional so calls persisted before read tokens existed still parse. Direct writes and task proposals treat a missing token as a conflict.
 const readToken = {
   expectedToken: uuidSchema
