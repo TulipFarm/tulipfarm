@@ -17,6 +17,57 @@ import { hostedCreditPricingExtension } from '../../workspace-storage/test/hoste
 // Budget and balance assertions here count whole credits, so they use the hosted price.
 await registerExtension(hostedCreditPricingExtension, { app: 'worker', env: {} });
 
+for (const version of [1, 27, 28]) {
+  test(`task list and detail support the archive schema boundary at common version ${version}`, async t => {
+    const db = await fixture();
+    let runtime;
+    t.after(async () => {
+      await runtime?.close();
+      await db.close();
+    });
+    const w = await db.create((await workspaceTableMigrations()).slice(0, version));
+    runtime = createWorkspaceRuntime({
+      replicaCount: 1,
+      reservedConnections: 2,
+      databaseConnectionBudget: 20,
+      resolveCredential: async id => ({ workspaceId: id, generation: 1, connectionString: db.login(w) }),
+    });
+    const table = name => `"${w.names.schema}".${name}`;
+    const agent = await savedTaskAgent(db, w, runtime, w.userId, w.membershipId);
+    const tasks = createAgentTasks(runtime);
+    const task = await tasks.start(w.id, w.userId, {
+      requestId: randomUUID(),
+      agentId: agent.agentId,
+      text: 'Read my task history.',
+    });
+    const stranger = randomUUID();
+    await db.platform.query(`INSERT INTO ${table('tf_memberships')} (id,user_id,role) VALUES ($1,$2,'member')`, [
+      randomUUID(),
+      stranger,
+    ]);
+
+    for (const lifecycle of ['active', 'deleted', ...(version >= 28 ? ['archived'] : [])]) {
+      if (lifecycle !== 'active')
+        await db.platform.query(
+          `UPDATE ${table('tf_agents')} SET ${lifecycle === 'archived' ? 'archived_at' : 'deleted_at'}=now() WHERE id=$1`,
+          [agent.agentId],
+        );
+      await t.test(`${lifecycle} detail`, async () => {
+        assert.equal((await tasks.read(w.id, w.userId, task.id)).agentLifecycle, lifecycle);
+      });
+      await t.test(`${lifecycle} list`, async () => {
+        const page = await tasks.list(w.id, w.userId);
+        assert.deepEqual(
+          page.tasks.map(({ id, agentLifecycle }) => ({ id, agentLifecycle })),
+          [{ id: task.id, agentLifecycle: lifecycle }],
+        );
+      });
+      await assert.rejects(tasks.read(w.id, stranger, task.id), AccessDenied);
+      assert.deepEqual((await tasks.list(w.id, stranger)).tasks, []);
+    }
+  });
+}
+
 for (const lifecycle of ['deleted', 'archived']) {
   test(`owners retain private task history and results when their agent is ${lifecycle}`, async t => {
     const db = await fixture();

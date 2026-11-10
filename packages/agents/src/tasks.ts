@@ -694,7 +694,7 @@ export function createAgentTasks(
       return saveReceipt(tx, actor, input.requestId, command.digest, reopened);
     });
   }
-  async function summary(tx: AgentTransaction, task: Task) {
+  async function summary(tx: AgentTransaction & { commonVersion: number }, task: Task) {
     const cost = (
       await tx.client.query(
         `SELECT COALESCE(sum(charged),0)::text AS "chargedCreditUnits",COALESCE(sum(reserved) FILTER (WHERE charged IS NULL),0)::text AS "heldCreditUnits" FROM ${relation(tx, 'tf_credit_usage')} WHERE flow_id=$1`,
@@ -704,7 +704,7 @@ export function createAgentTasks(
     const knowledge = await knowledgeTaskUsage(tx, task.flowId);
     const agent = (
       await tx.client.query(
-        `SELECT CASE WHEN archived_at IS NOT NULL THEN 'archived' WHEN deleted_at IS NOT NULL THEN 'deleted' ELSE 'active' END AS lifecycle FROM ${relation(tx, 'tf_agents')} WHERE id=$1`,
+        `SELECT CASE ${tx.commonVersion >= 28 ? "WHEN archived_at IS NOT NULL THEN 'archived' " : ''}WHEN deleted_at IS NOT NULL THEN 'deleted' ELSE 'active' END AS lifecycle FROM ${relation(tx, 'tf_agents')} WHERE id=$1`,
         [task.agentId],
       )
     ).rows[0];
