@@ -3,6 +3,8 @@ import { test } from 'node:test';
 import { createSkillSourceReader, discoverSkillFiles, resolveSkillSource } from '../src/skill-import-sources.ts';
 import { inspectSkillFiles, reviewSkillPackage } from '../src/skill-package-review.ts';
 import { buildSkillPackage } from '../src/skill-packages.ts';
+import { McpNetworkError, pinnedRequest } from '@tulipfarm/workspace-mcp-transport';
+import { createPublicDownload } from '@tulipfarm/workspace-mcp-transport/public-download';
 
 const markdown = name => Buffer.from(`---\nname: ${name}\ndescription: Repeat a task\n---\nUse the task steps.`);
 test('source resolution preserves GitHub ref/path and skills.sh hints', () => {
@@ -34,6 +36,17 @@ test('source resolution preserves GitHub ref/path and skills.sh hints', () => {
     'https://example.com/a?token=secret',
   ])
     assert.throws(() => resolveSkillSource(input));
+});
+test('non-HTTPS refusals remain distinct from unsupported HTTPS links', () => {
+  for (const [url, code] of [
+    ['http://example.com/SKILL.md', 'source-not-https'],
+    ['ftp://example.com/SKILL.md', 'source-not-https'],
+    ['https://github.com/example', 'source-unsupported'],
+    ['https://github.com/example/repository/tree/%ZZ', 'source-unsupported'],
+    ['https://example.com:8443/SKILL.md', 'source-unsupported'],
+    ['https://example.com/SKILL.md?token=x', 'source-unsupported'],
+  ])
+    assert.throws(() => resolveSkillSource(url), { name: 'SkillPackageError', code }, url);
 });
 test('discovery separates nested packages and requires the exact directory', () => {
   const files = [
@@ -161,4 +174,82 @@ test('source failures distinguish rate limits, missing sources, and malformed fr
   }
   assert.throws(() => resolveSkillSource('https://github.com/a/b#%ZZ'), /source-unsupported/);
   assert.throws(() => resolveSkillSource('https://github.com/a/b/tree/%ZZ'), /source-unsupported/);
+  const missing = createSkillSourceReader(async url => ({
+    url,
+    status: 404,
+    mediaType: 'application/json',
+    bytes: Buffer.from('{}'),
+  }));
+  await assert.rejects(missing('https://github.com/missing/repository'), { code: 'source-unavailable' });
+});
+
+test('download policy failures retain distinct source errors', async () => {
+  for (const [code, expected] of [
+    ['endpoint-denied', 'source-unsupported'],
+    ['address-denied', 'source-not-public'],
+    ['network-failed', 'source-unavailable'],
+    ['redirect-denied', 'source-unavailable'],
+    ['response-limit', 'source-limit'],
+  ]) {
+    const read = createSkillSourceReader(async () => {
+      throw new McpNetworkError(code);
+    });
+    await assert.rejects(read('https://example.com/SKILL.md'), { name: 'SkillPackageError', code: expected });
+  }
+});
+
+test('private DNS answers and redirects are refused before connecting', async () => {
+  for (const address of [
+    '127.0.0.1',
+    '10.0.0.1',
+    '172.16.0.1',
+    '192.168.0.1',
+    '169.254.169.254',
+    '100.64.0.1',
+    '168.63.129.16',
+    '::1',
+    'fc00::1',
+    'fe80::1',
+    '::ffff:7f00:1',
+  ]) {
+    for (const redirect of [false, true]) {
+      const lookups = [];
+      let connections = 0;
+      const download = createPublicDownload(async (url, init) => {
+        if (url === 'https://example.com/start')
+          return new Response(null, { status: 302, headers: { location: 'https://blocked.example/SKILL.md' } });
+        await pinnedRequest(url, init, {
+          dependencies: {
+            lookup: async host => {
+              lookups.push(host);
+              return [
+                { address: '93.184.216.34', family: 4 },
+                { address, family: address.includes(':') ? 6 : 4 },
+              ];
+            },
+            request() {
+              connections++;
+              throw new Error('A non-public DNS answer must not be contacted');
+            },
+          },
+        });
+        throw new Error('A refused destination must not return a response');
+      });
+      await assert.rejects(
+        createSkillSourceReader(download)(redirect ? 'https://example.com/start' : 'https://blocked.example/SKILL.md'),
+        { name: 'SkillPackageError', code: 'source-not-public' },
+      );
+      assert.deepEqual(lookups, ['blocked.example']);
+      assert.equal(connections, 0);
+    }
+  }
+  let requests = 0;
+  const read = createSkillSourceReader(
+    createPublicDownload(async () => {
+      requests++;
+      return new Response(null, { status: 302, headers: { location: 'http://169.254.169.254/latest/meta-data/' } });
+    }),
+  );
+  await assert.rejects(read('https://example.com/start'), { name: 'SkillPackageError', code: 'source-not-public' });
+  assert.equal(requests, 1);
 });

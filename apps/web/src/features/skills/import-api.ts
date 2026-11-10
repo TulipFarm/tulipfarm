@@ -14,7 +14,11 @@ import { jsonResponse, readJson } from '@/lib/http';
 import { TableRequestError } from '@/features/tables/request-state';
 
 export const importErrors: Record<string, string> = {
+  'source-invalid-url': 'Use a public skills.sh, GitHub, or HTTPS skill package link.',
   'source-unsupported': 'Use a public skills.sh, GitHub, or HTTPS skill package link.',
+  'source-not-https': 'This link does not use HTTPS. Use a public skills.sh, GitHub, or HTTPS skill package link.',
+  'source-not-public':
+    'This link points to a private or local address. Use a public skills.sh, GitHub, or HTTPS skill package link.',
   'source-unavailable': 'The source could not be read. Check that the link is public, then try again.',
   'source-rate-limit': 'The source is limiting downloads. Wait a few minutes, then try again.',
   'invalid-package': 'This is not a complete skill package. Ask its author for a package with a valid SKILL.md.',

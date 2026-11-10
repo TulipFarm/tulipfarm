@@ -8,6 +8,99 @@ import { catalogFamily } from '../src/features/models/catalog-fixture.ts';
 import { notifyChange } from './chat-query.fixture.mjs';
 import { startBuiltApp, captureBrowserFailure } from './built-app.fixture.mjs';
 
+test('refused import links stay editable and missing imports offer a neutral restart', { timeout: 60000 }, async () => {
+  const server = await createServer({
+    root: fileURLToPath(new URL('..', import.meta.url)),
+    server: { host: '127.0.0.1', port: 0 },
+    logLevel: 'error',
+  });
+  await server.listen();
+  const browser = await chromium.launch();
+  try {
+    const fixture = skillImportFixture();
+    const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' });
+    const notHttps = 'This link does not use HTTPS. Use a public skills.sh, GitHub, or HTTPS skill package link.';
+    const unsupported = 'Use a public skills.sh, GitHub, or HTTPS skill package link.';
+    const nonPublic =
+      'This link points to a private or local address. Use a public skills.sh, GitHub, or HTTPS skill package link.';
+    const refused = new Map([
+      ['ftp://example.com/SKILL.md', ['source-not-https', notHttps]],
+      ['file:///etc/passwd', ['source-not-https', notHttps]],
+      ['javascript:alert(1)', ['source-not-https', notHttps]],
+      ['http://example.com/SKILL.md', ['source-not-https', notHttps]],
+      ['https://github.com/example', ['source-unsupported', unsupported]],
+      ['http://localhost/SKILL.md', ['source-not-public', nonPublic]],
+      ['http://127.0.0.1:3002/SKILL.md', ['source-not-public', nonPublic]],
+      ['http://169.254.169.254/latest/meta-data/', ['source-not-public', nonPublic]],
+      ['not a url', ['source-invalid-url', 'Use a public skills.sh, GitHub, or HTTPS skill package link.']],
+    ]);
+    const attempts = [];
+    let refusedId;
+    await page.route('**/v1/**', route => {
+      const request = route.request();
+      const path = new URL(request.url()).pathname;
+      if (request.method() === 'PUT' && /\/skill-imports\/[^/]+$/.test(path)) {
+        const body = request.postDataJSON();
+        const rejection = refused.get(body.url);
+        if (rejection) {
+          refusedId = path.split('/').at(-1);
+          return route.fulfill({ status: 400, json: { error: rejection[0] } });
+        }
+        attempts.push({ path, body });
+        if (attempts.length === 1) return route.abort('timedout');
+      }
+      return route.fulfill(fixture.respond(request.method(), request.url(), request.postDataJSON()));
+    });
+    const origin = server.resolvedUrls.local[0];
+    await page.goto(`${origin}${fixture.workspace.slug}/skills`);
+    await page.getByRole('button', { name: 'Import skill', exact: true }).first().click();
+    const input = page.getByLabel('Source URL');
+    for (const [url, [, message]] of refused) {
+      await input.fill(url);
+      await page.getByRole('button', { name: 'Find skills', exact: true }).click();
+      await page.getByText(message, { exact: true }).waitFor({ timeout: 2000 });
+      assert.equal(await input.inputValue(), url);
+      assert.equal(await page.getByRole('button', { name: 'Find skills', exact: true }).isEnabled(), true);
+      const field = await input.evaluate(element => ({
+        invalid: element.getAttribute('aria-invalid'),
+        focused: document.activeElement === element,
+        description: (element.getAttribute('aria-describedby') ?? '')
+          .split(/\s+/)
+          .map(id => document.getElementById(id)?.textContent ?? '')
+          .join(' '),
+      }));
+      assert.equal(field.invalid, 'true', url);
+      assert.equal(field.focused, true, url);
+      assert.ok(field.description.includes(message), url);
+      assert.equal(await page.getByRole('button', { name: 'Retry same operation', exact: true }).count(), 0);
+      assert.equal(await page.getByRole('button', { name: 'Check status again', exact: true }).count(), 0);
+      assert.equal(await page.getByText(/We could not confirm the outcome/).count(), 0);
+    }
+    for (const id of [refusedId, crypto.randomUUID()]) {
+      await page.goto(`${origin}${fixture.workspace.slug}/skills/import/${id}`);
+      await page.getByRole('heading', { name: 'Import not found', exact: true }).waitFor();
+      await page.getByText('Check the link, or start a new import.', { exact: true }).waitFor();
+      assert.equal(await page.getByText(/private to the person/).count(), 0);
+      assert.equal(await page.getByRole('button', { name: 'Check status again', exact: true }).count(), 0);
+      await page.getByRole('link', { name: 'Start a new import', exact: true }).click();
+      await input.waitFor();
+    }
+    await input.fill('https://github.com/example/business-skills/tree/main/skills/monthly-close');
+    await page.getByRole('button', { name: 'Find skills', exact: true }).click();
+    await page.getByText(/We could not confirm the outcome/).waitFor();
+    await page.getByRole('button', { name: 'Check status again', exact: true }).waitFor();
+    await page.getByRole('button', { name: 'Retry same operation', exact: true }).click();
+    assert.deepEqual(attempts[1], attempts[0]);
+    await page.getByRole('group', { name: 'Choose skills to review' }).waitFor();
+    await page.getByRole('checkbox').first().check();
+    await page.getByRole('button', { name: 'Review selected skills', exact: true }).click();
+    await page.getByRole('button', { name: 'Install and enable', exact: true }).waitFor();
+  } finally {
+    await browser.close();
+    await server.close();
+  }
+});
+
 test(
   'a procedure can be created without chat and still requires the package review decision',
   { timeout: 60000 },
