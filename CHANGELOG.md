@@ -66,6 +66,11 @@ One version identifies all apps and images of a release.
 
 ### Fixed
 
+- In a Slack thread, the member who saved a workflow or skill from a chat that
+  used their personal memory can now read it, and their later turns in that
+  thread keep working. Anyone else is still refused: the tool now returns a
+  `private-to-author` result that says why instead of failing with a bare
+  access error, and the refusal logs as `PersonalMemoryDenied`.
 - A private chat reply that resumes, for example after the requester answers a
   question card, no longer fails every attempt with `access-denied` when its
   earlier steps used the requester's own personal memory. The MCP tool check

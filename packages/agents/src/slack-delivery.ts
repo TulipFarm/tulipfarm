@@ -17,7 +17,7 @@ import {
   sameSlackMessage,
 } from '@tulipfarm/slack';
 import { matchesSlackSnapshot, sameSlackPublicationText } from '@tulipfarm/slack';
-import { requireDraftSources } from './draft-sources.ts';
+import { requireOwnDefinitionSources } from './draft-sources.ts';
 import { SlackAdmissionDenied, slackReplyFailureNotices } from './slack-rejections.ts';
 import { requireNoMcpDerived } from '@tulipfarm/access';
 
@@ -165,12 +165,12 @@ export function createSlackDelivery(
         if (dependency.eventId !== eventId)
           await sources(tx, workspaceId, actor, dependency.eventId, new Set(visited), publicOnly);
       } else
-        await requireDraftSources(
+        // An earlier reply's saved workflow or skill stays readable only by the member whose memory it carries.
+        await requireOwnDefinitionSources(
           tx,
           actor,
           [await currentKnowledgeRevision(tx, dependency)],
-          new Set(),
-          undefined,
+          false,
           publicOnly,
         );
     }

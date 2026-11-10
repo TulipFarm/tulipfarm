@@ -5,6 +5,7 @@ import {
   canAccessAsset,
   canAccessTable,
   currentMember,
+  PersonalMemoryDenied,
   requirePersonalGitHubSource,
   type AuthorizationTransaction,
   type HumanActor,
@@ -118,7 +119,7 @@ export async function requirePersonalMemorySource(
   actor: HumanActor,
   source: Extract<SourceDependency, { kind: 'personal-memory' }>,
 ) {
-  if (source.membershipId !== actor.membershipId) throw new AccessDenied();
+  if (source.membershipId !== actor.membershipId) throw new PersonalMemoryDenied();
   await currentMember(tx, actor);
 }
 
