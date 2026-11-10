@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { chromium } from 'playwright';
 import { createWorkspaceFixture } from './workspace.fixture.mjs';
 import { chatCatalog } from './chat-catalog.fixture.mjs';
-import { membership, credits } from './chat-query.fixture.mjs';
+import { membership, credits, notifyChange } from './chat-query.fixture.mjs';
 import { randomUUID } from 'node:crypto';
 import { agentBuilderFixture } from './agent-builder.fixture.mjs';
 import {
@@ -255,7 +255,7 @@ test(
 );
 
 test(
-  'a chat setup draft opens the agent builder in the canvas, and saving there continues the draft in the builder',
+  'a new chat setup draft automatically opens the agent builder in the canvas, and saving there continues the draft',
   { timeout: 120000 },
   async () => {
     const fixture = agentBuilderFixture();
@@ -271,7 +271,8 @@ test(
       const decisions = [],
         errors = [];
       let deny = false,
-        continued = false;
+        continued = false,
+        drafted = false;
       page.on('pageerror', error => errors.push(error.message));
       const setup = {
         policy: { grants: [{ teamId: fixture.team.id, permissions: ['read', 'invoke'] }], personGrants: [] },
@@ -330,6 +331,8 @@ test(
           path = new URL(url).pathname,
           method = request.method(),
           body = request.postDataJSON();
+        if (path.endsWith('/system-package-installations'))
+          return route.fulfill({ json: { installations: [], nextCursor: null } });
         if (path.endsWith(`/drafts/${draftId}`))
           return route.fulfill(
             deny
@@ -358,7 +361,7 @@ test(
                   createdAt: '2026-10-12T10:00:00Z',
                   parts: [{ kind: 'text', text: 'Create my People Ops helper.' }],
                   turn: { id: randomUUID(), status: 'completed', generation: 0 },
-                  tools: [tool(draftId)],
+                  tools: drafted ? [tool(draftId)] : [],
                 },
               ],
               nextBefore: null,
@@ -370,7 +373,12 @@ test(
         return route.fulfill(fixture.respond(method, url, body));
       });
       await page.goto(`${server.origin}/${workspace.slug}/chat/${chatId}`);
-      await page.getByRole('button', { name: 'Review agent', exact: true }).click();
+      await page.getByText('Create my People Ops helper.', { exact: true }).waitFor();
+      assert.equal(await page.getByRole('region', { name: 'Canvas', exact: true }).count(), 0);
+      drafted = true;
+      await notifyChange(page, workspace.id, fixture.session.user.id, 'detail', chatId);
+      await page.getByRole('button', { name: 'Review agent', exact: true }).waitFor();
+      await page.getByText('Draft · Waiting for your review', { exact: true }).waitFor();
       const canvas = page.getByRole('region', { name: 'Canvas', exact: true });
       const form = canvas.getByRole('form', { name: 'Agent setup', exact: true });
       await form.getByLabel('Agent name', { exact: true }).waitFor();
@@ -378,6 +386,7 @@ test(
         await form.getByRole('textbox', { name: 'Instructions', exact: true }).inputValue(),
         view.proposal.input.definition.instructions,
       );
+      await captureBuilderScreenshot(page, 'agent-builder-chat-basics');
       assert.equal(await canvas.getByRole('region', { name: 'Review agent draft' }).count(), 0);
       assert.equal(
         await canvas.getByRole('tablist', { name: 'Agent setup sections' }).getByRole('tab').count(),

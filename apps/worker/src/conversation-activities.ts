@@ -178,6 +178,7 @@ export function meteredReply(
     priorReviewCards = [],
     earlierMessages = false,
     chatFiles: chatFilesOffered = false,
+    builtinSkills,
     waitingCards,
     waitingRowCards,
     retainedSources = [],
@@ -197,7 +198,10 @@ export function meteredReply(
     const validatedRoute = inferenceRouteSchema.parse(chat.route);
     const fallback = chatFallbackModel(chat.price.familyId);
     const completionCheck = roleModel('completion-check') ?? undefined;
+    const slug = await workspaceSlug?.(fence.workspaceId);
     const replyContext = {
+      builtinSkills,
+      ...(slug ? { agentBuilderUrl: `/${encodeURIComponent(slug)}/agents/new` } : {}),
       context: {
         window: chat.price.maxInputTokens,
         triggerPercent: compactionPolicy?.triggerPercent ?? compactionDefaults.triggerPercent,
@@ -222,7 +226,10 @@ export function meteredReply(
       completionCheckWindow:
         completionCheck?.price.maxInputTokens ??
         Math.min(chat.price.maxInputTokens, fallback?.price.maxInputTokens ?? chat.price.maxInputTokens),
-    } satisfies Pick<ToolInferenceContext, 'context' | 'compactToolResults' | 'completionCheckWindow'>;
+    } satisfies Pick<
+      ToolInferenceContext,
+      'context' | 'compactToolResults' | 'completionCheckWindow' | 'builtinSkills' | 'agentBuilderUrl'
+    >;
     // A Slack turn linked to a member is that member's request. The start transaction requires the same requester, so a
     // sender removed mid-turn fails the turn there instead of answering without their destinations and tools.
     const session = await observeChatDetail('reply-start', () =>

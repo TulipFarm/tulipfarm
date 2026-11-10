@@ -281,6 +281,7 @@ export type ConversationReply = (input: {
   earlierMessages?: boolean;
   /** The images reader read this turn's files, so the model may call `files.read`. */
   chatFiles?: boolean;
+  builtinSkills?: readonly string[];
   /** Counts the requester's undecided review and approval cards in this chat, so a reply may point to one. */
   waitingCards?: () => Promise<number>;
   /** The requester's undecided row cards from earlier turns in this chat, newest first, with their table and proposed change. */
@@ -2812,6 +2813,9 @@ export function createConversationExecutor(
             }),
             earlierMessages: refersToEarlierMessages(prepared),
             ...(images ? { chatFiles: true } : {}),
+            builtinSkills: [source.invoked, source.planningSkill, source.packageSkill].flatMap(skill =>
+              skill?.origin === 'built-in' ? [skill.skillId] : [],
+            ),
             waitingCards,
             waitingRowCards,
             retainedSources: mergeSources(inheritedSources),

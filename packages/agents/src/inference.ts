@@ -43,6 +43,7 @@ import {
 } from './model.ts';
 import { readOnlyCall, readOnlyTools, type FrameworkCall } from './tools.ts';
 import { toolNameSchema } from './tool-capabilities.ts';
+import { builtinSkillTools } from './skills.ts';
 import { providerFetch } from './provider-fetch.ts';
 import {
   agentInstructionsPrompt,
@@ -1288,6 +1289,9 @@ export type ToolInferenceContext = {
   chatFiles?: boolean;
   /** Deferred chat tools, by framework name, offered from the first round without a `tools_search`. */
   preloadedTools?: readonly string[];
+  /** Built-in procedures resolved by the server for this request, not names extracted from message text. */
+  builtinSkills?: readonly string[] | undefined;
+  agentBuilderUrl?: string;
   /** Receives the full visible answer so far whenever it changes while a step streams. `step` matches the meter's step. */
   answerText?: (update: { step: number; text: string }) => void;
   /**
@@ -1948,6 +1952,15 @@ const pendingWork = new RegExp(
  */
 export function promisesWork(text: string) {
   return pendingWork.test(text);
+}
+
+function singleQuestion(text: string) {
+  return (
+    /^(?:who|what|which|where|when|why|how|can you|could you|would you)\b[^.!?\n]*\?$/i.test(text) &&
+    !blamesFailure(text) &&
+    !claimsActionOutcome(text) &&
+    !promisesWork(text)
+  );
 }
 
 const importReviewClaim = new RegExp(
@@ -3460,7 +3473,9 @@ export async function inferWithTools(
   let previousMemory: string | undefined;
   let previousInventory: string | undefined;
   let catalog: ReturnType<typeof nativeChatTools> | undefined;
-  const loaded = new Set<string>(tools?.preloadedTools?.map(nativeToolName));
+  const loaded = new Set(
+    [...(tools?.preloadedTools ?? []), ...(tools?.builtinSkills ?? []).flatMap(builtinSkillTools)].map(nativeToolName),
+  );
   const mcpJson = new WeakMap<object, string>();
   const catalogKey = (mcp: McpModelCatalog | undefined) => {
     let json = mcp ? mcpJson.get(mcp) : 'null';
@@ -3525,6 +3540,11 @@ export async function inferWithTools(
         ];
   const roundBlocks = () => [
     ...chatSystemBlocks(tools?.projectInstructions),
+    ...(tools?.agentBuilderUrl
+      ? [
+          `If an agent setup cannot be prepared, say why plainly at the first failed prerequisite, stop without repeated helpers, and link to [Configure manually](${tools.agentBuilderUrl}). Do not expose internal tool names.`,
+        ]
+      : []),
     ...(renderer ? [renderer.prompt] : []),
     ...(tools?.avatar ? [budReminder(avatar)] : []),
   ];
@@ -4171,6 +4191,7 @@ export async function inferWithTools(
           !misdescribed &&
           !promisesWork(answer) &&
           (workToolUsed || !claimsActionOutcome(answer));
+        if (grounded && singleQuestion(answer)) return accept();
         // Tool activity is only shown once a tool ran in this turn.
         if (!calls) return finish(grounded ? `${answer}\n\n${unfinishedNoToolsReply}` : unfinishedNoToolsReply, true);
         return finish(grounded ? `${answer}\n\n${unfinishedNote}` : unfinishedReply, true);
@@ -4200,6 +4221,8 @@ export async function inferWithTools(
       providerId: call.providerId,
     });
     const executedResult = (native: NativeCall, call: FrameworkCall, value: unknown): ToolResult => {
+      if (call.tool === 'skills.read' && value && typeof value === 'object' && !('error' in value))
+        for (const name of activeCatalog.load(builtinSkillTools(call.skillId))) lastUsed.set(name, step);
       const cardReceipt = reviewCardReceipt(native.name, value);
       const reviewCard = reviewCardReference(call.tool, value);
       return {

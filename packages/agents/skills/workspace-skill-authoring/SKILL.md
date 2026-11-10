@@ -2,6 +2,7 @@
 name: workspace-skill-authoring
 title: Create, import, and improve reusable skills
 description: Draft a reusable workspace procedure for review. Use it whenever someone wants to create, import, edit, or improve a skill, or to save a repeated way of working as a reusable procedure. Also use it to archive or restore a skill.
+tools: skills.workspace skills.workspace.read skills.draft skills.import skills.import.status skills.import.select skills.archive skills.restore
 ---
 
 # Create, import, and improve reusable skills

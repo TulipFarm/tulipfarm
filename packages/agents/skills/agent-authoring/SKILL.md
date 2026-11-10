@@ -2,11 +2,14 @@
 name: agent-authoring
 title: Set up an agent for review
 description: Guide Basics, Skills, Access and Triggers into one bounded agent setup for human review. Use when someone wants an assistant, bot or helper, or wants to change, archive, remove or restore an existing agent.
+tools: agents.context agents.draft agents.list agents.read agents.status agents.archive agents.restore slack.resolve
 ---
 
 # Draft an agent for review
 
 An agent has a role and bounded authority. Prepare one shared setup. The person reviews the exact card and chooses **Save draft** or **Create and activate**. Your prose and tool calls never provide approval, sponsorship or replacement consent.
+
+Prepare the draft yourself in the main chat. Helpers cannot draft agents. Do not delegate this setup; at most one helper may research a necessary independent source. If authoring is blocked, stop at the first failed prerequisite, say plainly why no draft was prepared, and link to **Configure manually** using the supplied builder URL. Do not claim a tool is unavailable or try repeated helpers.
 
 For a larger request spanning tables, agents, and automation, use Planning in the default chat first. Keep this setup as a deliverable in that same plan; do not replace the plan with a separate agent interview. Planning itself is not a selectable capability for the saved agent.
 
@@ -21,16 +24,13 @@ For a larger request spanning tables, agents, and automation, use Planning in th
 
 ## 2. Resolve Basics, Skills, Access and Triggers
 
-Reuse decisions already made. Ask only unresolved questions that change the role, access, audience or trigger. Ask one focused question at a time; do not restart an interview or silently choose wider access. When only a safe wording detail is missing, propose it on the card.
+Reuse decisions already made. Ask at most one necessary question before drafting; do not restart an interview or silently choose wider access. When only a safe wording detail is missing, propose it on the card.
 
 ### Basics
 
 Write a focused name (at most 120 characters), instructions (at most 32,000 characters) and a model preference. Use `owningTeamId:null` for personal placement. A selected team is placement, not sharing, enrollment or borrowed authority.
 
-Before calling `agents.draft` for a new agent, settle the name and the model with `present.choice`, one question at a time:
-
-1. **Name.** If the person already named the agent, use that name and do not ask. Otherwise ask what to call it, offering two or three short names that describe the job, such as "Leave Request Assistant". Put your suggestion first, marked (Recommended). They can type their own.
-2. **Model.** If the person already chose a model, use it and do not ask. Otherwise ask which model the agent should use, offering the `models.choices` from `agents.context`. Put the one that best fits the job first, marked (Recommended), with a few words on why (for example, quality for judgment-heavy work, speed and cost for simple, frequent work). List the other choices after it. Save the chosen `id` as `definition.modelFamilyId`. If `models.choices` is empty, skip the question and leave the preference unset.
+Use the person's name and model when supplied. Otherwise derive a short name from the requested job and use the workspace's default chat model, marked `default` in `agents.context.models.choices`. If no default choice is available, leave the model preference unset. Do not ask for a name or model just to prepare the draft. State these defaults; both remain editable in the builder.
 
 When changing an existing agent, ask about the name or model only when the person wants to change it.
 

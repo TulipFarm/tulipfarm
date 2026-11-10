@@ -146,6 +146,8 @@ function schemaBytes(tool: NativeTool) {
 const searchSchema = z.strictObject({ query: z.string().trim().min(1).max(200) });
 
 export type ChatCatalog = NativeCatalog & {
+  /** Loads up to 16 named, admitted tools without granting authority. */
+  load(names: readonly string[]): string[];
   /** Loads the deferred tools that match the query and returns their names. Empty without `loaded`. */
   search(query: string): string[];
 };
@@ -162,7 +164,7 @@ export function nativeChatTools(
 ): ChatCatalog {
   const full = nativeTools({ kind: 'chat', mcp, earlierMessages, chatFiles }, chatCallSchema);
   if (!full.tools.length) throw new Error('tool-catalog-empty');
-  if (!loaded) return { ...full, search: () => [] };
+  if (!loaded) return { ...full, load: () => [], search: () => [] };
   const deferred = full.tools.filter(tool => !coreChatTools.has(tool.name) && !tool.name.startsWith('mcp_'));
   const offered = (tool: NativeTool) => !deferred.includes(tool) || loaded.has(tool.name);
   const summary = deferred
@@ -181,6 +183,12 @@ export function nativeChatTools(
   };
   return {
     tools: [...full.tools.filter(offered), ...(summary ? [search] : [])],
+    load(names) {
+      const requested = new Set(names.slice(0, 16).map(nativeToolName));
+      const added = deferred.filter(tool => requested.has(tool.name) && !loaded.has(tool.name));
+      for (const tool of added) loaded.add(tool.name);
+      return added.map(tool => tool.name);
+    },
     resolve(call) {
       const resolved = full.resolve(call);
       const unloaded = deferred.some(tool => tool.name === call.name && !loaded.has(tool.name));

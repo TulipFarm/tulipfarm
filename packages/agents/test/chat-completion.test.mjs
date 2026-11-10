@@ -23,6 +23,7 @@ import {
   waitingRowChanges,
 } from '../src/inference.ts';
 import { completionEvaluation, evaluationMessages } from './completion-evaluation-fixture.mjs';
+import { readSkill } from '../src/skills.ts';
 import {
   azureStreamReply as stream,
   formats,
@@ -50,6 +51,170 @@ const verdict = (status = 'completed') => ({
   reason:
     status === 'continue' ? 'The requested work has not been attempted.' : 'The reply accurately states the result.',
 });
+
+for (const model of ['grok-4.3', 'Kimi-K2.6'])
+  for (const invoked of [false, true])
+    test(`${model} offers agent setup tools when the authoring skill is ${invoked ? 'invoked' : 'read'}`, async t => {
+      let step = invoked ? 1 : 0;
+      let checks = 0;
+      const executed = [];
+      const membershipId = '11111111-1111-4111-8111-111111111111';
+      const input = {
+        expectedSoulRevision: 'a'.repeat(40),
+        expectedPolicyVersion: 0,
+        expectedActivationIds: [],
+        expectedWorkflowRevision: null,
+        expectedWorkflowGeneration: null,
+        owningTeamId: null,
+        definition: {
+          name: 'Records assistant',
+          instructions: 'Answer questions about records. Do not change data.',
+          tools: ['rows.list'],
+        },
+        setup: {
+          policy: { grants: [], personGrants: [{ membershipId, permissions: ['read', 'manage', 'invoke'] }] },
+          enrollment: [],
+          scope: [],
+          limits: [],
+          taskLimits: { toolCalls: 10, activeMilliseconds: 60000, credits: 10 },
+          slackSender: 'user',
+          slackChannels: [],
+          triggers: [],
+        },
+      };
+      t.mock.method(globalThis, 'fetch', async (_url, init) => {
+        const body = JSON.parse(init.body);
+        if (isCompletionRequest(body)) {
+          checks++;
+          return Response.json(selectReply('azure', verdict('waiting')));
+        }
+        const offered = offeredTools('azure', body).map(tool => tool.name);
+        if (step) {
+          assert.ok(offered.includes('agents_context'));
+          assert.ok(offered.includes('agents_draft'));
+          assert.ok(offered.includes('agents_delegate'), 'other work can still use delegation');
+        }
+        return Response.json(
+          nativeReply(
+            'azure',
+            [
+              { calls: [use('skills.read', { skillId: 'agent-authoring' })] },
+              { calls: [use('agents.context')] },
+              { calls: [use('agents.draft', { agent: 'new', input })] },
+              { text: 'The Records assistant draft is ready for your review.' },
+            ][step++],
+          ),
+        );
+      });
+      const result = await inferWithTools(
+        { ...nativeRoutes.azure, model },
+        [{ role: 'user', text: 'Create a read-only agent that answers questions about records.' }],
+        async call => {
+          executed.push(call.tool);
+          if (call.tool === 'skills.read') return readSkill(call.skillId);
+          if (call.tool === 'agents.context') return { membershipId, currentSoulRevision: 'a'.repeat(40) };
+          assert.equal(call.tool, 'agents.draft');
+          assert.equal(call.agent, 'new');
+          assert.deepEqual(call.input.definition, input.definition);
+          assert.deepEqual(call.input.setup, input.setup);
+          return { draftId: 'draft', digest: 'd'.repeat(64), status: 'review-required' };
+        },
+        undefined,
+        false,
+        null,
+        { builtinSkills: invoked ? ['agent-authoring'] : [] },
+      );
+      assert.equal(result.text, 'The Records assistant draft is ready for your review.');
+      assert.deepEqual(executed, [...(invoked ? [] : ['skills.read']), 'agents.context', 'agents.draft']);
+      assert.equal(step, 4);
+      assert.equal(checks, 0, 'a pending draft is a sufficient stopping point');
+    });
+
+test('reading another bundled authoring skill loads its own tools, not agent tools', async t => {
+  let step = 0;
+  t.mock.method(globalThis, 'fetch', async (_url, init) => {
+    const body = JSON.parse(init.body);
+    if (isCompletionRequest(body)) return Response.json(selectReply('azure', verdict('waiting')));
+    if (!step++)
+      return Response.json(nativeReply('azure', { calls: [use('skills.read', { skillId: 'workflow-authoring' })] }));
+    const offered = offeredTools('azure', body).map(tool => tool.name);
+    for (const name of ['workflows_list', 'workflows_read', 'workflows_draft', 'workflows_providers'])
+      assert.ok(offered.includes(name), name);
+    assert.ok(!offered.includes('agents_draft'));
+    return Response.json(nativeReply('azure', { text: 'Which day should it run?' }));
+  });
+  const result = await inferWithTools(
+    nativeRoutes.azure,
+    [{ role: 'user', text: 'Create a weekly workflow.' }],
+    async call => readSkill(call.skillId),
+  );
+  assert.equal(result.text, 'Which day should it run?');
+});
+
+test('a failed skill read does not load its declared tools', async t => {
+  let step = 0;
+  t.mock.method(globalThis, 'fetch', async (_url, init) => {
+    const body = JSON.parse(init.body);
+    if (isCompletionRequest(body)) return Response.json(selectReply('azure', verdict('blocked')));
+    if (!step++)
+      return Response.json(nativeReply('azure', { calls: [use('skills.read', { skillId: 'agent-authoring' })] }));
+    assert.ok(!offeredTools('azure', body).some(tool => tool.name === 'agents_draft'));
+    return Response.json(nativeReply('azure', { text: 'The setup guide could not be read. Nothing was changed.' }));
+  });
+  const result = await inferWithTools(nativeRoutes.azure, [{ role: 'user', text: 'Create an agent.' }], async () => ({
+    error: 'unavailable',
+  }));
+  assert.equal(result.text, 'The setup guide could not be read. Nothing was changed.');
+});
+
+test('blocked authoring has a manual builder link and needs no repeated helper', async t => {
+  let step = 0;
+  const executed = [];
+  const answer = 'You do not have access to create an agent. [Configure manually](/test-space/agents/new).';
+  t.mock.method(globalThis, 'fetch', async (_url, init) => {
+    const body = JSON.parse(init.body);
+    if (isCompletionRequest(body)) return Response.json(selectReply('azure', verdict('blocked')));
+    assert.match(body.messages[0].content, /first failed prerequisite/);
+    assert.match(body.messages[0].content, /\[Configure manually\]\(\/test-space\/agents\/new\)/);
+    return Response.json(nativeReply('azure', step++ ? { text: answer } : { calls: [use('agents.context')] }));
+  });
+  const result = await inferWithTools(
+    nativeRoutes.azure,
+    [{ role: 'user', text: 'Create a read-only agent.' }],
+    async call => {
+      executed.push(call.tool);
+      return { error: 'access-denied' };
+    },
+    undefined,
+    false,
+    null,
+    { builtinSkills: ['agent-authoring'], agentBuilderUrl: '/test-space/agents/new' },
+  );
+  assert.equal(result.text, answer);
+  assert.deepEqual(executed, ['agents.context']);
+});
+
+for (const [question, genuine] of [
+  ['Which records should this agent read?', true],
+  ['Could you name the table this agent should read?', true],
+  ['Which records should it read? Who should see it?', false],
+  ['The setup failed. Which records should it read?', false],
+  ['Should I continue?', false],
+])
+  test(`completion exhaustion ${genuine ? 'keeps' : 'does not excuse'} ${JSON.stringify(question)}`, async t => {
+    let step = 0;
+    t.mock.method(globalThis, 'fetch', async (_url, init) => {
+      if (isCompletionRequest(JSON.parse(init.body))) return Response.json(selectReply('azure', verdict('continue')));
+      return Response.json(nativeReply('azure', step++ ? { text: question } : { calls: [use('tables.definitions')] }));
+    });
+    const result = await inferWithTools(
+      nativeRoutes.azure,
+      [{ role: 'user', text: 'Create a read-only agent.' }],
+      async () => ({ tables: [] }),
+    );
+    if (genuine) assert.equal(result.text, question);
+    else assert.match(result.text, /I stopped (?:here|before finishing)/);
+  });
 
 for (const model of ['grok-4.3', 'Kimi-K2.6'])
   for (const sse of [false, true])

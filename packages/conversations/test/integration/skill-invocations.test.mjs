@@ -31,7 +31,7 @@ async function setup(admission) {
     f.runtime,
     async input => {
       replies.push({ messages: input.messages, sourceMessages: input.sourceMessages });
-      await hooks.reply();
+      await hooks.reply(input);
       return { text: hooks.text ?? answer, sources: [] };
     },
     undefined,
@@ -81,6 +81,33 @@ async function setup(admission) {
     ).rows.map(row => row.sources);
   return { ...f, w, skills, conversations, replies, hooks, skill, enable, chat, send, process, messages, results };
 }
+
+test(
+  'only server-resolved built-in skills are passed to tool discovery for their own reply',
+  { timeout: 60000 },
+  async t => {
+    const f = await setup();
+    t.after(() => f.close());
+    const active = [];
+    f.hooks.reply = async input => active.push(input.builtinSkills);
+    const chatId = await f.chat();
+    const skill = await f.skill();
+    for (const parts of [
+      [
+        { kind: 'skill', skillId: 'agent-authoring', revision: 'latest' },
+        { kind: 'text', text: 'Draft a support agent.' },
+      ],
+      [{ kind: 'text', text: 'Continue.' }],
+      [
+        { kind: 'skill', ...skill },
+        { kind: 'text', text: 'Qualify this lead.' },
+      ],
+    ]) {
+      assert.equal(await f.process(chatId, await f.send(chatId, parts)), 'completed');
+    }
+    assert.deepEqual(active, [['agent-authoring'], [], []]);
+  },
+);
 
 test('exact Install handoff works without any configured model provider', { timeout: 60000 }, async t => {
   const keys = ['MODEL_CATALOG', 'MODEL_CATALOG_FILE', ...modelCatalogEnvNames(readModelCatalog({}).catalog)];

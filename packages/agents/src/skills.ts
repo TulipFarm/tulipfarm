@@ -18,6 +18,9 @@ function loadSkill(id: z.infer<typeof skillIdSchema>) {
     description = meta.get('description');
   if (meta.get('name') !== id || !name || !description) throw new Error(`Invalid built-in skill ${id}`);
   const references = new URL(`${id}/references/`, root);
+  const tools = (meta.get('tools') ?? '').split(/\s+/).filter(Boolean);
+  if (tools.length > 16 || tools.some(tool => !/^[a-z][a-zA-Z0-9.]{0,63}$/.test(tool)))
+    throw new Error(`Invalid built-in skill tools ${id}`);
   const resources = existsSync(references)
     ? Object.fromEntries(
         readdirSync(references)
@@ -27,6 +30,7 @@ function loadSkill(id: z.infer<typeof skillIdSchema>) {
     : {};
   return {
     skill: { id, revision: builtinSkillRevision, name, description, instructions: match[2]!.trimEnd() },
+    tools,
     resources,
   };
 }
@@ -34,6 +38,11 @@ function loadSkill(id: z.infer<typeof skillIdSchema>) {
 const loaded = skillIdSchema.options.map(loadSkill);
 export const skills = loaded.map(({ skill }) => skill);
 const resourcesById = new Map(loaded.map(({ skill, resources }) => [skill.id, resources]));
+const toolsById = new Map<string, readonly string[]>(loaded.map(({ skill, tools }) => [skill.id, tools]));
+
+export function builtinSkillTools(id: string): readonly string[] {
+  return toolsById.get(id) ?? [];
+}
 
 export function resolveSelectedSkills(selections: z.infer<typeof skillSelectionsSchema> = []) {
   return selections.map(selection => ({
