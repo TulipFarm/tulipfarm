@@ -99,8 +99,7 @@ test('chat table approvals recheck workspace skill access under storage roles', 
       projection: { definition: input.definition },
     }),
   });
-  async function propose(sources = [], approve = true) {
-    const tableId = randomUUID();
+  async function propose(sources = [], approve = true, tableId = randomUUID()) {
     const result = (
       await tools.invokeWithSources(
         { workspaceId: ws.id, actor, callId: randomUUID(), origin: { conversationId, turnId, sources } },
@@ -246,17 +245,59 @@ test('chat table approvals recheck workspace skill access under storage roles', 
     await expectCreated(completed);
     const failed = await propose([skill]);
     const pending = await propose([skill], false);
+    const rejected = await propose([skill], false);
+    await decisions.decide(ws.id, actor, conversationId, rejected.id, {
+      digest: rejected.digest,
+      commandId: randomUUID(),
+      decision: 'reject',
+    });
+    const expired = await propose([skill], false);
+    await db.platform.query(
+      `UPDATE ${s}.tf_table_proposals SET created_at=now()-interval '2 days',expires_at=now()-interval '1 day' WHERE id=$1`,
+      [expired.id],
+    );
+    const superseded = await propose([skill], false);
+    await propose([skill], false, superseded.tableId);
+    const approved = await propose([skill]);
+    const running = await propose([skill]);
+    assert.equal(await advance(ws.id, running.id), 'publish');
+    const cancelled = await propose([skill]);
+    await decisions.control(ws.id, actor, conversationId, cancelled.id, {
+      digest: cancelled.digest,
+      commandId: randomUUID(),
+      operation: 'cancel',
+    });
+    const history = [
+      [completed, 'completed', undefined],
+      [failed, 'failed', 'skill-unavailable'],
+      [pending, 'pending', 'skill-unavailable'],
+      [cancelled, 'cancelled', 'skill-unavailable'],
+      [rejected, 'rejected', undefined],
+      [expired, 'expired', undefined],
+      [superseded, 'superseded', undefined],
+      [approved, 'approved', undefined],
+      [running, 'running', undefined],
+    ];
     await db.platform.query(`UPDATE ${s}.tf_workspace_skills SET enabled=false WHERE id=$1`, [skillId]);
     try {
       await expectBlocked(failed);
-      for (const proposal of [completed, failed, pending]) {
+      for (const [proposal, status, blockedReason] of history) {
         assert.deepEqual(await proposals.outcome(ws.id, actor.userId, conversationId, proposal.id), {
           kind: 'proposal',
         });
         const view = await proposals.read(ws.id, actor.userId, conversationId, proposal.id);
         assert.equal(view.content, 'available');
-        assert.equal(view.blockedReason, proposal === completed ? undefined : 'skill-unavailable');
+        assert.equal(view.status, status);
+        assert.equal(view.blockedReason, blockedReason, status);
       }
+      await db.platform.query(
+        `UPDATE ${s}.tf_table_proposals SET created_at=now()-interval '2 days',expires_at=now()-interval '1 day' WHERE id=$1`,
+        [cancelled.id],
+      );
+      const expiredCancellation = await proposals.read(ws.id, actor.userId, conversationId, cancelled.id);
+      assert.equal(expiredCancellation.status, 'cancelled');
+      assert.equal(expiredCancellation.expired, true);
+      assert.equal(expiredCancellation.blockedReason, undefined);
       await assert.rejects(
         decisions.decide(ws.id, actor, conversationId, pending.id, {
           digest: pending.digest,
@@ -267,7 +308,7 @@ test('chat table approvals recheck workspace skill access under storage roles', 
       );
       await db.platform.query(`DELETE FROM ${s}.tf_skill_person_grants WHERE skill_id=$1`, [skillId]);
       try {
-        for (const proposal of [completed, failed, pending])
+        for (const [proposal] of history)
           await assert.rejects(proposals.read(ws.id, actor.userId, conversationId, proposal.id), AccessDenied);
       } finally {
         await db.platform.query(

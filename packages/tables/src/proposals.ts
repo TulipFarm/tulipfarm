@@ -967,7 +967,12 @@ function operations(options: TableProposalOptions) {
           await current(tx, actor, row.manifest);
         } catch (error) {
           if (error instanceof SkillUnavailable) {
-            if (status.status !== 'completed') blockedReason = 'skill-unavailable';
+            if (
+              !status.expired &&
+              (status.status === 'pending' ||
+                (status.decision === 'approve' && ['cancelled', 'failed', 'partial'].includes(status.status)))
+            )
+              blockedReason = 'skill-unavailable';
           } else {
             if (
               !(
