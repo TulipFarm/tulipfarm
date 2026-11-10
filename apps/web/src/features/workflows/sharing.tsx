@@ -356,7 +356,7 @@ export function AcceptWorkflowSponsorship({
   workspaceId: string;
   workflow: Workflow;
   userId: string;
-  changed: () => Promise<void>;
+  changed: (accepted: Workflow) => Promise<void>;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -379,10 +379,12 @@ export function AcceptWorkflowSponsorship({
           setBusy(true);
           setError('');
           try {
-            await workflowRequest(`/workspaces/${workspaceId}/workflows/${workflow.id}/sponsorship/accept`, 'POST', {
-              expectedGeneration: workflow.generation,
-            });
-            await changed();
+            const accepted = workflowSchema.parse(
+              await workflowRequest(`/workspaces/${workspaceId}/workflows/${workflow.id}/sponsorship/accept`, 'POST', {
+                expectedGeneration: workflow.generation,
+              }),
+            );
+            await changed(accepted);
           } catch (failure) {
             setError(
               denied(failure)

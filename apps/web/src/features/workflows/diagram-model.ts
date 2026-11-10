@@ -129,7 +129,7 @@ function triggerText(trigger: Trigger, labels: WorkflowLabels) {
     case 'webhook':
       return 'An authenticated incoming event';
     case 'event':
-      return trigger.name;
+      return trigger.name === 'manual' ? 'A person with run access starts it' : trigger.name;
     case 'provider':
       return `${labels.provider ?? 'Connected source'} / every ${workflowDuration(trigger.minutes * 60)}`;
     case 'github':
@@ -280,7 +280,12 @@ export function workflowGraph(
   const rowLine = (trigger: Extract<Trigger, { kind: 'row' }>) =>
     rowTriggerLine(trigger, labels.tables?.[trigger.tableId]);
   const name = (trigger: Trigger) =>
-    trigger.label ?? (trigger.kind === 'row' ? rowLine(trigger) : triggerTitles[trigger.kind]);
+    trigger.label ??
+    (trigger.kind === 'event' && trigger.name === 'manual'
+      ? 'Started by hand'
+      : trigger.kind === 'row'
+        ? rowLine(trigger)
+        : triggerTitles[trigger.kind]);
   // A labelled row trigger still says which change to which table starts it.
   const starts = (trigger: Trigger) =>
     trigger.kind === 'row' && trigger.label ? rowLine(trigger) : triggerText(trigger, labels);

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { createRequire } from 'node:module';
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
@@ -93,9 +94,16 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       );
       await app.listen({ host: '127.0.0.1', port: 3373 });
       vite = spawn(
-        'pnpm',
-        ['--filter', '@tulipfarm/web', 'dev', '--host', '127.0.0.1', '--port', '5373', '--strictPort'],
-        { env: { ...process.env, VITE_API_URL: apiOrigin }, stdio: 'ignore' },
+        process.execPath,
+        [
+          new URL('../node_modules/vite/bin/vite.js', import.meta.url).pathname,
+          '--host',
+          '127.0.0.1',
+          '--port',
+          '5373',
+          '--strictPort',
+        ],
+        { cwd: new URL('..', import.meta.url), env: { ...process.env, VITE_API_URL: apiOrigin }, stdio: 'ignore' },
       );
       for (let attempt = 0; ; attempt++) {
         try {
@@ -142,7 +150,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       let viewer = await openWorkflow(page, hourly);
       await assertConfiguration(viewer, 0, hourly.definition.triggers);
       await sponsor('Hourly sync');
-      await page.getByRole('button', { name: 'Activate saved revision' }).click();
+      await page.getByRole('button', { name: 'Activate workflow' }).click();
       await page.getByRole('button', { name: 'Disable workflow' }).waitFor();
       const interval = await saved('Hourly sync');
       assert.deepEqual(interval.definition.triggers, [{ id: 'interval', kind: 'interval', minutes: 15 }]);
@@ -183,7 +191,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       viewer = await openWorkflow(page, monday);
       await assertConfiguration(viewer, 0, monday.definition.triggers);
       await sponsor('Monday report');
-      await page.getByRole('button', { name: 'Activate saved revision' }).click();
+      await page.getByRole('button', { name: 'Activate workflow' }).click();
       await page.getByRole('button', { name: 'Disable workflow' }).waitFor();
       const cron = await saved('Monday report');
       assert.deepEqual(cron.definition.triggers, [
@@ -301,7 +309,11 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       assert.deepEqual(errors, []);
     } finally {
       await browser?.close();
-      vite?.kill('SIGTERM');
+      if (vite && vite.exitCode === null) {
+        const stopped = once(vite, 'exit');
+        vite.kill('SIGTERM');
+        await stopped;
+      }
       await app?.close();
       await runtime?.close();
       await db.close();

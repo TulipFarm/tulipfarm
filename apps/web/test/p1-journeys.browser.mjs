@@ -356,7 +356,7 @@ try {
       await page.reload();
       await assertConfiguration(viewer, 2, workflows[0].definition.steps[1]);
       assert.equal(await page.getByLabel('Bearer token for new source or rotation').count(), 0);
-      await page.getByRole('button', { name: 'Activate saved revision', exact: true }).click();
+      await page.getByRole('button', { name: 'Activate workflow', exact: true }).click();
       await page.getByRole('button', { name: 'Disable workflow', exact: true }).waitFor();
       assert.equal(activationWrites.length, 1);
       assert.deepEqual(

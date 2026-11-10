@@ -208,7 +208,10 @@ test('history counts attempted steps, keeps singular/plural copy, and explains s
   await screenshot(page, 'run-history');
   await failed.getByRole('button', { name: 'View run diagram', exact: true }).click();
   await page.getByRole('button', { name: 'Steps', exact: true }).click();
-  await page.getByRole('button', { name: 'Inspect Prepare data', exact: true }).first().click();
+  await page
+    .getByRole('button', { name: /^Inspect .*Prepare data/ })
+    .first()
+    .click();
   await page
     .getByLabel('Step details')
     .getByRole('alert')
@@ -220,7 +223,10 @@ test('history counts attempted steps, keeps singular/plural copy, and explains s
     .getByRole('button', { name: 'View run diagram', exact: true })
     .click();
   await page.getByRole('button', { name: 'Steps', exact: true }).click();
-  await page.getByRole('button', { name: 'Inspect Prepare data', exact: true }).nth(1).click();
+  await page
+    .getByRole('button', { name: /^Inspect .*Prepare data/ })
+    .nth(1)
+    .click();
   await page.getByRole('alert').filter({ hasText: 'This step could not complete.' }).waitFor();
   assert.match(
     await page.getByRole('alert').filter({ hasText: 'This step could not complete.' }).innerText(),

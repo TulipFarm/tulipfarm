@@ -29,8 +29,16 @@ type Filter = NonNullable<Extract<Trigger, { kind: 'record' | 'row' }>['filter']
 type TableStepSources = DraftView['workflowTableStepSources'];
 
 export function workflowSaveLabel(proposal: WorkflowProposal) {
-  if (proposal.kind === 'workflow') return proposal.input.activate ? 'Save and activate' : 'Save workflow';
+  if (proposal.kind === 'workflow')
+    return proposal.input.activate || handStartedDraft(proposal) ? 'Save and activate' : 'Save workflow';
   return proposal.input.enabled ? 'Activate workflow' : 'Disable workflow';
+}
+
+export function handStartedDraft(proposal: WorkflowProposal) {
+  return (
+    proposal.kind === 'workflow' &&
+    proposal.input.definition.triggers.every(trigger => trigger.kind === 'event' && trigger.name === 'manual')
+  );
 }
 
 export function WorkflowDraftDetails({
@@ -51,7 +59,8 @@ export function WorkflowDraftDetails({
   onSlackReady: (id: string, ready: boolean) => void;
 }) {
   const { triggers, steps } = proposal.input.definition;
-  const runs = proposal.kind === 'workflow' ? proposal.input.activate : proposal.input.enabled;
+  const runs =
+    proposal.kind === 'workflow' ? proposal.input.activate || handStartedDraft(proposal) : proposal.input.enabled;
   const github = useGitHubNames(workspaceId, triggers);
   // Table labels describe the first record and row trigger; others name their table by a short ID.
   const firstRecord = triggers.find(trigger => trigger.kind === 'record')?.id;
@@ -179,7 +188,7 @@ export function workflowChange(proposal: WorkflowProposal) {
     proposal.input.expectedRevision === null
       ? 'Creates a new workflow'
       : 'Saves a new revision of an existing workflow';
-  if (proposal.input.activate) return `${saved} and activates it`;
+  if (proposal.input.activate || handStartedDraft(proposal)) return `${saved} and activates it`;
   return proposal.input.expectedRevision === null
     ? `${saved}. It stays inactive.`
     : `${saved}. The active revision does not change.`;
@@ -196,7 +205,7 @@ function describeTrigger(trigger: Trigger, recordSource: RecordSource, rowSource
     case 'webhook':
       return `Webhook request. ${!trigger.payload ? 'Run input is the input field of a request ID envelope' : trigger.payload.headers?.length ? 'Run input is { body, headers } with the raw JSON body and copied headers' : 'Run input is the raw JSON body'}. Create its key on the Workflows page.`;
     case 'event':
-      return `Workspace event “${trigger.name}”`;
+      return trigger.name === 'manual' ? 'Started by hand' : `Workspace event “${trigger.name}”`;
     case 'provider':
       return `Connected provider records ${trigger.event}, checked every ${trigger.minutes} minutes`;
     case 'github':

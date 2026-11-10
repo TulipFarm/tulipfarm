@@ -600,7 +600,7 @@ test('agent flows resolve permitted names without changing commands or approvals
       const workflow = page.getByRole('region', { name: 'Review customers workflow', exact: true });
       if (width === 1440) await workflow.getByText('Loading connected names...', { exact: false }).waitFor();
       await workflow.getByRole('button', { name: 'Steps', exact: true }).click();
-      await workflow.getByRole('button', { name: 'Inspect Run an agent task', exact: true }).click();
+      await workflow.getByRole('button', { name: /^Inspect .*Run an agent task/ }).click();
       const inspector = workflow.getByRole('region', { name: 'Step details', exact: true });
       await inspector.getByText('Customer reviewer', { exact: true }).first().waitFor();
       await inspector.getByText('"Review customers."', { exact: true }).waitFor();

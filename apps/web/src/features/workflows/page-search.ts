@@ -4,6 +4,7 @@ export const workflowPageSearch = z.object({
   workflow: z.uuid().optional().catch(undefined),
   view: z.enum(['runs', 'settings']).optional().catch(undefined),
   run: z.uuid().optional().catch(undefined),
+  start: z.boolean().optional().catch(undefined),
 });
 export type WorkflowLink = z.infer<typeof workflowPageSearch>;
 export const workflowLinkKey = (link: WorkflowLink) =>

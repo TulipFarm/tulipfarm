@@ -66,7 +66,13 @@ export function WebhookSetup({
   const payload = webhookPayload(workflow, triggerId);
   const instructionsMode = webhook.mode ?? mode;
   return (
-    <section hidden={hidden} className="max-w-3xl space-y-3" aria-label={`Webhook setup for ${title}`}>
+    <section
+      id={`webhook-setup-${triggerId}`}
+      tabIndex={-1}
+      hidden={hidden}
+      className="max-w-3xl space-y-3"
+      aria-label={`Webhook setup for ${title}`}
+    >
       <AlertDialog open={confirmRevoke} onOpenChange={setConfirmRevoke}>
         <AlertDialogContent>
           <AlertDialogTitle>Revoke the previous webhook key?</AlertDialogTitle>
@@ -104,7 +110,7 @@ export function WebhookSetup({
             <dt className="font-medium">Previous key</dt>
             <dd className="flex flex-wrap items-center gap-2">
               <Badge variant="warning">Still accepted</Badge>
-              {`The previous ${modeLabel[webhook.previous.mode].toLowerCase()} keeps working until ${formatTime(webhook.previous.expiresAt)}.`}
+              {`The previous key keeps working until ${formatTime(webhook.previous.expiresAt)}.`}
               <Button variant="outline" disabled={blocked} onClick={() => setConfirmRevoke(true)}>
                 Revoke previous key now
               </Button>

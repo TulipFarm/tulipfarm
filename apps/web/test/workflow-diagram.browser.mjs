@@ -77,7 +77,7 @@ test('workflow page and chat show inspectable, immutable diagrams', async t => {
       );
       assert.equal(await page.getByRole('button', { name: /Toggle Interactivity/ }).count(), 0);
       const before = await positions();
-      const prepare = page.getByRole('button', { name: 'Inspect Prepare PR summary', exact: true });
+      const prepare = page.getByRole('button', { name: /^Inspect .*Prepare PR summary/ });
       const box = await prepare.boundingBox();
       await page.mouse.move(box.x + 40, box.y + 50);
       await page.mouse.down();
@@ -93,7 +93,7 @@ test('workflow page and chat show inspectable, immutable diagrams', async t => {
       await page.mouse.up();
       assert.equal(await page.locator('.react-flow__edge').count(), 2, 'dragging handles cannot connect or reconnect');
       assert.equal(await page.locator('.react-flow__edgeupdater').count(), 0);
-      await page.getByRole('button', { name: 'Inspect Notify engineering', exact: true }).click();
+      await page.getByRole('button', { name: /^Inspect .*Notify engineering/ }).click();
       assert.equal(await inspect.locator('[data-brand="slack"]').count(), 1);
       await inspect.getByText('The requester or sponsor approves each exact message before it is sent.').waitFor();
       assert.equal(await inspect.locator('pre').count(), 0, 'raw configuration starts collapsed');
@@ -181,7 +181,7 @@ test('workflow page and chat show inspectable, immutable diagrams', async t => {
       await page.locator('.workflow-step-list [data-brand="slack"]').waitFor();
       await page
         .getByRole('list', { name: 'Workflow steps' })
-        .getByRole('button', { name: 'Inspect Notify engineering' })
+        .getByRole('button', { name: /^Inspect .*Notify engineering/ })
         .click();
       await inspect.getByRole('heading', { name: 'Notify engineering' }).waitFor();
     });
@@ -211,7 +211,7 @@ test('workflow page and chat show inspectable, immutable diagrams', async t => {
         await page.getByRole('list', { name: 'Workflow steps' }).getByText('30 minutes', { exact: true }).waitFor();
         await page
           .getByRole('list', { name: 'Workflow steps' })
-          .getByRole('button', { name: 'Inspect Wait until a date' })
+          .getByRole('button', { name: /^Inspect .*Wait until a date/ })
           .click();
         assert.ok(!(await inspect.innerText()).includes('2027-01-12T03:30:00Z'));
       }

@@ -8,10 +8,19 @@ import { createWorkspaceFixture, serveWorkspaceShellEvent, workspaceShellReads }
 import { chatCatalog } from './chat-catalog.fixture.mjs';
 import { membership, credits } from './chat-query.fixture.mjs';
 import { assertConfiguration } from './workflow-definition.fixture.mjs';
+import { workflowSchema } from '@tulipfarm/workflows/contracts';
 
 const chatId = '12121212-1212-4212-8212-121212121212';
 const workflowId = '66666666-6666-4666-8666-666666666666';
 const saveDraft = '14141414-1414-4414-8414-141414141414';
+const handDraft = '34343434-3434-4434-8434-343434343434';
+const handWorkflowId = '35353535-3535-4535-8535-353535353535';
+const handDefinition = {
+  version: 1,
+  name: 'Prepare an order',
+  triggers: [],
+  steps: [{ id: 'prepare', kind: 'transform', fields: {} }],
+};
 const webhookDraft = '16161616-1616-4616-8616-161616161616';
 const codeSource = 'export default ({ amount }) => {\n  return { cents: Math.round(amount * 100) };\n};';
 const webhookDefinition = {
@@ -166,6 +175,19 @@ const tableDefinitions = [
   },
 ];
 const initialDrafts = () => ({
+  [handDraft]: {
+    id: handDraft,
+    digest: '8'.repeat(64),
+    status: 'pending',
+    outcome: null,
+    agentChange: null,
+    workflowNextRunAt: null,
+    proposal: {
+      kind: 'workflow',
+      targetId: handWorkflowId,
+      input: { expectedRevision: null, definition: handDefinition, activate: false },
+    },
+  },
   [saveDraft]: {
     id: saveDraft,
     digest: 'd'.repeat(64),
@@ -275,7 +297,7 @@ test(
   'compact workflow reviews use Canvas inspectors and same-chat editing while retaining exact approval and Slack checks',
   { timeout: 300000 },
   async () => {
-    const { workspace, session } = createWorkspaceFixture();
+    const { workspace, session } = createWorkspaceFixture({ slug: 'workflow-review', name: 'Workflow review' });
     const server = await createServer({
       root: fileURLToPath(new URL('..', import.meta.url)),
       server: { host: '127.0.0.1', port: 0 },
@@ -290,7 +312,7 @@ test(
     try {
       for (const mobile of [false, true]) {
         const context = await browser.newContext({
-          viewport: mobile ? { width: 390, height: 844 } : { width: 1440, height: 1000 },
+          viewport: mobile ? { width: 375, height: 844 } : { width: 1440, height: 1000 },
           hasTouch: mobile,
           isMobile: mobile,
           colorScheme: mobile ? 'dark' : 'light',
@@ -307,6 +329,9 @@ test(
           sendRequests = [],
           definitionReads = [];
         const drafts = initialDrafts();
+        const activations = [];
+        let handActive = false;
+        let failHandActivation = mobile;
         let failReads = true;
         let slackFailure = 503;
         let tableFailure = 0;
@@ -343,6 +368,7 @@ test(
               tool(rowDraft, 'workflows.draft'),
               tool(slackDraft, 'workflows.draft'),
               tool(replacedDraft, 'workflows.draft'),
+              tool(handDraft, 'workflows.draft'),
             ],
             calendarResults: [],
           },
@@ -380,6 +406,66 @@ test(
             return route.fulfill({ status: 404, json: { error: 'not-found' } });
           if (path.endsWith('/candidates')) return route.fulfill({ json: [] });
           if (path.endsWith('/integrations')) return route.fulfill({ json: { integrations: [] } });
+          if (path.endsWith('/workflows'))
+            return route.fulfill({
+              json: [
+                ...(drafts[saveDraft].status === 'saved'
+                  ? [
+                      workflowSchema.parse({
+                        id: workflowId,
+                        revision: saveDraft,
+                        activeRevision: saveDraft,
+                        enabled: true,
+                        generation: 1,
+                        nextRunAt: savedOutcome.nextRunAt,
+                        definition,
+                        activeTriggers: definition.triggers,
+                        capabilities: { read: true, invoke: true, manage: true },
+                      }),
+                    ]
+                  : []),
+                ...(drafts[handDraft].status === 'saved'
+                  ? [
+                      workflowSchema.parse({
+                        id: handWorkflowId,
+                        revision: handDraft,
+                        activeRevision: handActive ? handDraft : null,
+                        enabled: handActive,
+                        generation: handActive ? 2 : 1,
+                        nextRunAt: null,
+                        definition: handDefinition,
+                        activeTriggers: handActive ? [] : null,
+                        capabilities: { read: true, invoke: true, manage: true },
+                      }),
+                    ]
+                  : []),
+              ],
+            });
+          if (path.endsWith(`/workflows/${handWorkflowId}/activation`)) {
+            activations.push(request.postDataJSON());
+            assert.equal(drafts[handDraft].status, 'saved', 'activation follows a confirmed save');
+            assert.equal(activations[0].revision, handDraft, 'activate only the revision this card saved');
+            assert.equal(activations[0].expectedGeneration, 1);
+            assert.equal(activations[0].enabled, true);
+            if (failHandActivation) {
+              failHandActivation = false;
+              return route.fulfill({ status: 503, json: { error: 'unavailable' } });
+            }
+            handActive = true;
+            return route.fulfill({
+              json: workflowSchema.parse({
+                id: handWorkflowId,
+                revision: handDraft,
+                activeRevision: handDraft,
+                enabled: true,
+                generation: 2,
+                nextRunAt: null,
+                definition: handDefinition,
+                activeTriggers: [],
+                capabilities: { read: true, invoke: true, manage: true },
+              }),
+            });
+          }
           if (path.endsWith('/github/accounts')) return route.fulfill({ json: { configured: true, accounts: [] } });
           if (path.endsWith(`/github/chats/${chatId}/selection`))
             return route.fulfill({ json: { accountId: null, generation: null, version: 0 } });
@@ -454,7 +540,18 @@ test(
                 return route.abort('failed');
               }
               const outcome =
-                decision[1] === saveDraft ? savedOutcome : { ...savedOutcome, revision: decision[1], nextRunAt: null };
+                decision[1] === saveDraft
+                  ? savedOutcome
+                  : decision[1] === handDraft
+                    ? {
+                        ...savedOutcome,
+                        workflowId: handWorkflowId,
+                        revision: handDraft,
+                        nextRunAt: null,
+                        enabled: false,
+                        activation: 'not-requested',
+                      }
+                    : { ...savedOutcome, revision: decision[1], nextRunAt: null };
               drafts[decision[1]] = { ...drafts[decision[1]], status: 'saved', outcome };
               return route.fulfill({ json: outcome });
             }
@@ -772,11 +869,50 @@ test(
           assert.ok(definitionReads.length > 0);
           assert.deepEqual([...new Set(definitionReads)], [saveDraft]);
           assert.deepEqual(sendRequests, []);
+          await returnToChat();
+          const hand = cards.filter({ hasText: handDefinition.name });
+          assert.equal(activations.length, 0, 'loading a draft must not activate it');
+          await hand.getByRole('button', { name: 'Save and activate', exact: true }).click();
+          if (mobile) {
+            await hand.getByRole('status').filter({ hasText: 'Workflow saved, but not activated.' }).waitFor();
+            assert.equal(
+              await hand.getByText('Active', { exact: true }).count(),
+              0,
+              'a failed activation never shows the Active badge',
+            );
+            await hand.getByRole('link', { name: 'Open workflow', exact: true }).waitFor();
+            assert.equal(await hand.getByRole('link', { name: 'Start a run', exact: true }).count(), 0);
+            await hand.getByRole('button', { name: 'Activate workflow', exact: true }).click();
+          }
+          await hand.getByText('Prepare an order is active. You can start a run now.', { exact: true }).waitFor();
+          assert.equal(activations.length, mobile ? 2 : 1);
+          if (mobile)
+            assert.deepEqual(activations[1], activations[0], 'an uncertain activation retries the same command');
+          assert.deepEqual(
+            Object.keys(decisions.at(-1).body).sort(),
+            ['commandId', 'decision', 'digest'],
+            'the reviewed proposal payload stays unchanged',
+          );
+          await hand.getByRole('link', { name: 'Open workflow', exact: true }).waitFor();
+          const startLink = hand.getByRole('link', { name: 'Start a run', exact: true });
+          await startLink.waitFor();
+          assert.match(await startLink.getAttribute('href'), /start=true/);
+          await hand.getByText('Active', { exact: true }).first().waitFor();
+          if (shots) {
+            const path = `${shots}/workflow-hand-saved-${mobile ? 'mobile-dark' : 'desktop-light'}.png`;
+            await hand.scrollIntoViewIfNeeded();
+            if (cdpPort)
+              execFileSync('agent-browser', ['--session', 'workflow-draft', '--cdp', cdpPort, 'screenshot', path], {
+                stdio: 'inherit',
+              });
+            else await hand.screenshot({ path });
+          }
           assert.ok(reads.includes(disableDraft));
           assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
           assert.deepEqual(errors, []);
         } catch (error) {
           await page.screenshot({ path: `/tmp/workflow-draft-failure-${mobile ? 'mobile' : 'desktop'}.png` });
+          console.error({ reads, decisions, activations });
           console.error(await page.locator('body').ariaSnapshot());
           throw error;
         } finally {

@@ -41,7 +41,7 @@ export function triggerLine(trigger: TriggerBody | Trigger, tableNames?: Readonl
     case 'github':
       return githubShortSummary(trigger);
     case 'event':
-      return `App event ${trigger.name}`;
+      return trigger.name === 'manual' ? 'Started by hand' : `App event ${trigger.name}`;
     case 'row':
       return rowTriggerLine(trigger, tableNames?.get(trigger.tableId));
     case 'provider':

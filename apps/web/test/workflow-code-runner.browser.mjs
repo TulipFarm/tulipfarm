@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { setTimeout } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { test } from 'node:test';
@@ -75,9 +76,16 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       );
       await app.listen({ host: '127.0.0.1', port: 3313 });
       vite = spawn(
-        'pnpm',
-        ['--filter', '@tulipfarm/web', 'dev', '--host', '127.0.0.1', '--port', '5313', '--strictPort'],
-        { env: { ...process.env, VITE_API_URL: apiOrigin }, stdio: 'ignore' },
+        process.execPath,
+        [
+          new URL('../node_modules/vite/bin/vite.js', import.meta.url).pathname,
+          '--host',
+          '127.0.0.1',
+          '--port',
+          '5313',
+          '--strictPort',
+        ],
+        { cwd: new URL('..', import.meta.url), env: { ...process.env, VITE_API_URL: apiOrigin }, stdio: 'ignore' },
       );
       for (let i = 0; ; i++) {
         try {
@@ -134,7 +142,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       const savedCode = (await service.list(w.id, w.userId)).find(item => item.id === id);
       const viewer = await openWorkflow(page, savedCode);
       await assertConfiguration(viewer, 1, savedCode.definition.steps[0]);
-      await page.getByRole('button', { name: 'Activate saved revision', exact: true }).click();
+      await page.getByRole('button', { name: 'Activate workflow', exact: true }).click();
       await page.getByRole('alert').filter({ hasText: unavailable }).waitFor();
       assert.equal((await service.list(w.id, w.userId)).find(item => item.id === id).enabled, false);
       const fixed = await saveWorkflow(
@@ -147,12 +155,16 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
         savedCode,
       );
       await openWorkflow(page, fixed);
-      await page.getByRole('button', { name: 'Activate saved revision', exact: true }).click();
+      await page.getByRole('button', { name: 'Activate workflow', exact: true }).click();
       await page.getByRole('button', { name: 'Disable workflow', exact: true }).waitFor();
       assert.equal((await service.list(w.id, w.userId)).find(item => item.id === id).activeRevision, fixed.revision);
     } finally {
       await browser?.close();
-      vite?.kill('SIGTERM');
+      if (vite && vite.exitCode === null) {
+        const stopped = once(vite, 'exit');
+        vite.kill('SIGTERM');
+        await stopped;
+      }
       await app?.close();
       await runtime?.close();
       await db.close();
