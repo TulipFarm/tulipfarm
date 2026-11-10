@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { AccessDenied } from '@tulipfarm/access';
+import { AccessDenied, SourceAuthorizationUnavailable } from '@tulipfarm/access';
 import {
   chatCallSchema,
   createChatTools,
@@ -19,6 +19,28 @@ import { randomUUID } from 'node:crypto';
 import { fetchPublicText, publicIPv4 } from '../src/web-fetch.ts';
 import { inferWithTools } from '../src/inference.ts';
 import { completionReply, formats, nativeReply, nativeRoutes, toolResults, use } from './native-fixture.mjs';
+
+test('review refresh retries temporary authorization failures instead of hiding the card', async () => {
+  const workspaceId = randomUUID();
+  const actor = { kind: 'human', userId: randomUUID(), membershipId: randomUUID() };
+  const conversationId = randomUUID();
+  for (const kind of ['row', 'table']) {
+    const reference = { kind, id: randomUUID() };
+    for (const error of [new AccessDenied(), new SourceAuthorizationUnavailable()]) {
+      const tools = createChatTools({
+        transaction: async () => {
+          throw error;
+        },
+      });
+      if (error instanceof SourceAuthorizationUnavailable)
+        await assert.rejects(tools.reviewCards(workspaceId, actor, conversationId, [reference]), error);
+      else
+        assert.deepEqual(await tools.reviewCards(workspaceId, actor, conversationId, [reference]), [
+          { reference, status: 'unavailable' },
+        ]);
+    }
+  }
+});
 
 test('catalog restrictions and strict invocation validation agree', () => {
   const access = { kind: 'agent', tools: ['rows.list', 'rows.reverse', 'skills.read'] };

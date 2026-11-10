@@ -19,6 +19,7 @@ import {
 } from '@tulipfarm/observability';
 import {
   AccessDenied,
+  SourceAuthorizationUnavailable,
   denyMcpEgress,
   requireProtectedSource,
   type AuthorizationTransaction,
@@ -1473,8 +1474,8 @@ export function createChatTools(
         const result = await proposals.propose(workspaceId, actor, callId, context.origin, input);
         let tables: { id: string; name: string }[] | undefined;
         let reviewSummary: string | undefined;
-        const imports = input.plans.some(plan => plan.kind === 'import');
-        if ('status' in result && (result.status === 'pending' || imports)) {
+        const hasImport = input.plans.some(plan => plan.kind === 'import');
+        if ('id' in result && 'status' in result && (result.status === 'pending' || hasImport)) {
           const review = await proposals.read(workspaceId, actor.userId, origin.conversationId, result.id);
           if (result.status === 'pending') {
             if (
@@ -1494,7 +1495,7 @@ export function createChatTools(
               : [];
             reviewSummary = tableReviewSummary(review.manifest.plans, attachments);
           }
-          if (review.content === 'available' && imports)
+          if (review.content === 'available' && hasImport)
             tables = review.manifest.plans.map(plan => ({ id: plan.input.tableId, name: plan.after.label }));
         }
         const proposed = { ...result, ...(reviewSummary && { reviewSummary }) };
@@ -3241,6 +3242,7 @@ export function createChatTools(
             });
           }
         } catch (error) {
+          if (error instanceof SourceAuthorizationUnavailable) throw error;
           if (!(error instanceof AccessDenied || error instanceof AgentError || error instanceof TableProposalError))
             throw error;
           states.push({ reference, status: 'unavailable' });
