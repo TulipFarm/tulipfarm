@@ -49,7 +49,7 @@ import type { TableNames } from './names.ts';
 import { WorkspaceMemberError } from './workspace-members.ts';
 
 export const executionCompatibility = commonCompatibility;
-const tableCreationAccessVersion = 54;
+const tableCreationAccessVersion = 55;
 const executionSchema = z.object({
   id: z.uuid(),
   proposal_id: z.uuid(),

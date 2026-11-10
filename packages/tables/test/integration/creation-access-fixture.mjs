@@ -22,15 +22,16 @@ export const permissions = [
   'table.schema.manage',
 ];
 
-let database;
+const databases = new Map();
 const runtimes = [];
 after(async () => {
   for (const runtime of runtimes) await runtime.close();
-  if (database) await (await database).close();
+  for (const database of databases.values()) await (await database).close();
 });
 
 export async function creationAccessFixture(version = commonCompatibility.maximum) {
-  const db = await (database ??= fixture());
+  if (!databases.has(version)) databases.set(version, fixture());
+  const db = await databases.get(version);
   await loadPlatformBaseline(db.platform);
   const workspace = await db.create(db.baseline.slice(0, version)),
     s = `"${workspace.names.schema}"`,
