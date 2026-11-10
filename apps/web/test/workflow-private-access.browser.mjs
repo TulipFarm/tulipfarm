@@ -90,9 +90,21 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       );
       await app.listen({ host: '127.0.0.1', port: 3306 });
       vite = spawn(
-        'pnpm',
-        ['--filter', '@tulipfarm/web', 'dev', '--host', '127.0.0.1', '--port', '5306', '--strictPort'],
-        { env: { ...process.env, VITE_API_URL: apiOrigin }, stdio: 'ignore', detached: true },
+        process.execPath,
+        [
+          new URL('../node_modules/vite/bin/vite.js', import.meta.url).pathname,
+          '--host',
+          '127.0.0.1',
+          '--port',
+          '5306',
+          '--strictPort',
+        ],
+        {
+          cwd: new URL('..', import.meta.url),
+          env: { ...process.env, VITE_API_URL: apiOrigin },
+          stdio: 'ignore',
+          detached: true,
+        },
       );
       for (let i = 0; ; i++) {
         try {
@@ -170,7 +182,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       await page.getByRole('button', { name: 'Activate saved revision', exact: true }).click();
       await page.getByRole('button', { name: 'Disable workflow', exact: true }).waitFor();
       await page.getByRole('button', { name: 'Start a run', exact: true }).click();
-      await page.getByLabel('Request to review', { exact: true }).fill('Private creator input');
+      await page.getByLabel('Input JSON', { exact: true }).fill('{"request":"Private creator input"}');
       await page.getByRole('button', { name: 'Run workflow', exact: true }).click();
       await page.locator('article').getByText('Queued', { exact: true }).waitFor();
       const ownRun = (await service.history(w.id, creator.userId, current.id).then(page => page.runs))[0];
