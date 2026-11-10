@@ -3209,12 +3209,14 @@ export async function inferWithTools(
   // An answer about workspace invitations is held back until the invitation checks have run, so a wrong "none" never streams.
   const directoryExpected = !invitationLookup(sourceMessages) && directoryAnswerExpected(sourceMessages.map(textTurn));
   let directory: WorkspaceDirectory | undefined;
+  let directorySucceeded = false;
   let directoryAttempted = false;
   let directoryRecovery = false;
   if (directoryExpected && tools?.readWorkspaceDirectory) {
     const retained = workspaceDirectorySchema.safeParse(await tools.readWorkspaceDirectory());
     if (retained.success) {
       directory = retained.data;
+      directorySucceeded = true;
       items.push({
         kind: 'turn',
         turn: {
@@ -4042,6 +4044,7 @@ export async function inferWithTools(
         const found = workspaceDirectorySchema.safeParse(value);
         if (!found.success) return finish(directoryUnavailableReply, true);
         directory = found.data;
+        directorySucceeded = true;
         items.push({
           kind: 'turn',
           turn: {
@@ -4105,7 +4108,8 @@ export async function inferWithTools(
           ? undefined
           : unbackedWriteClaim(candidate, wroteInReply(items));
       const invitesUnchecked = unbacked || writeUnbacked ? undefined : uncheckedInvitationClaim(candidate, items);
-      if (directoryExpected && directoryAttempted && !directory) return finish(directoryUnavailableReply, true);
+      if (directoryExpected && directoryAttempted && !directorySucceeded)
+        return finish(directoryUnavailableReply, true);
       const idAsked =
         unbacked || writeUnbacked || otherTableSkipped
           ? undefined
@@ -4204,12 +4208,17 @@ export async function inferWithTools(
           }
           // A check model that fails must not discard a finished answer; admission, authorization and cancellation still end the turn.
           // An answer that reports an outcome no tool in this reply produced is never sent unchecked.
-          if (!directoryExpected && (workToolUsed || !claimsActionOutcome(candidate))) return accept();
+          if (workToolUsed || !claimsActionOutcome(candidate)) return accept();
           checked = unverifiedOutcome;
         }
       }
-      if (directoryExpected && checked.workspaceDirectory !== 'not-applicable') {
-        if (directory && checked.workspaceDirectory === 'grounded') return accept();
+      if (directoryExpected && directorySucceeded && checked.workspaceDirectory === 'grounded') return accept();
+      if (
+        directoryExpected &&
+        (checked.workspaceDirectory === 'lookup-required' ||
+          checked.workspaceDirectory === 'unsupported' ||
+          (checked.workspaceDirectory === 'grounded' && !directorySucceeded))
+      ) {
         if (directoryRecovery) return finish(directory ? directoryReply(directory) : directoryUnavailableReply, true);
         if (finalizing) return finish(directory ? directoryReply(directory) : directoryUnavailableReply, true);
         directoryRecovery = true;
@@ -4294,9 +4303,12 @@ export async function inferWithTools(
     });
     const executedResult = (native: NativeCall, call: FrameworkCall, value: unknown): ToolResult => {
       if (call.tool === 'members.find') {
-        directoryAttempted = true;
+        if (call.query === undefined) directoryAttempted = true;
         const found = workspaceDirectorySchema.safeParse(value);
-        directory = found.success ? found.data : undefined;
+        if (found.success) {
+          directorySucceeded = true;
+          if (call.query === undefined) directory = found.data;
+        }
       }
       if (call.tool === 'skills.read' && value && typeof value === 'object' && !('error' in value)) {
         if (builtinSkillTools(call.skillId).length) activeBuiltinSkills.add(call.skillId);

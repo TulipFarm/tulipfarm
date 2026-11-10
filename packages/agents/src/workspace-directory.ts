@@ -63,4 +63,5 @@ This turn may answer a workspace people-and-teams question. Set workspaceDirecto
 - grounded: every person, team, email, count and membership asserted in the reply is supported by those directory results. A table owner, user text, an assistant's earlier answer, or a proposed example is not directory evidence.
 - unsupported: a lookup exists but the reply invents or changes names, counts or membership, omits requested teams, or reveals a roster marked not-visible.
 Use continue for lookup-required or unsupported. Never certify a directory answer from model claims alone. A failed lookup is not an empty directory.
+When members.find has a query, its names and counts describe only matching results, never workspace totals. It can support an answer about those matches, but not a claim about everyone or every team.
 Retained results are from an authorized lookup in this same chat, not a fresh lookup; they may support an answer about that earlier result.`;

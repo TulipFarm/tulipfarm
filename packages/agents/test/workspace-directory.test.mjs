@@ -250,6 +250,129 @@ test('false-positive eligibility only buffers streamed text and adds one structu
   assert.deepEqual(previews, []);
 });
 
+for (const question of ['List members of a mathematical set.', 'Show the members table.'])
+  for (const verdict of ['omitted', 'failed'])
+    test(`a ${verdict} directory verdict preserves the normal answer to ${JSON.stringify(question)}`, async t => {
+      const original = 'The members table is available in the workspace.';
+      let requests = 0;
+      t.mock.method(globalThis, 'fetch', async (_url, init) => {
+        requests++;
+        const body = JSON.parse(init.body);
+        if (!isCompletionRequest(body)) return Response.json(nativeReply('azure', { text: original }));
+        return verdict === 'failed'
+          ? Response.json(
+              { error: { code: 'invalid_request', message: 'The checker is unavailable.' } },
+              { status: 400 },
+            )
+          : Response.json(
+              selectReply('azure', { status: 'completed', reason: 'The informational answer is sufficient.' }),
+            );
+      });
+      const result = await inferWithTools(nativeRoutes.azure, [{ role: 'user', text: question }], () =>
+        assert.fail('A missing verdict or checker failure does not authorize a directory lookup'),
+      );
+      assert.equal(result.text, original);
+      assert.equal(requests, 2);
+    });
+
+test('a local correction on a directory-eligible table question keeps the normal correction path', async t => {
+  const replies = [
+    nativeReply('azure', { text: 'Which table do you mean?' }),
+    nativeReply('azure', { calls: [use('tables.definitions', { name: 'Members' })] }),
+    nativeReply('azure', { text: 'The Members table is available.' }),
+    checked(undefined),
+  ];
+  const executed = [];
+  t.mock.method(globalThis, 'fetch', async () => {
+    assert.ok(replies.length, 'only the table correction is needed');
+    return Response.json(replies.shift());
+  });
+  const result = await inferWithTools(
+    nativeRoutes.azure,
+    [{ role: 'user', text: 'Show the members table.' }],
+    async call => {
+      executed.push(call.tool);
+      return { tables: [{ name: 'Members' }] };
+    },
+  );
+  assert.equal(result.text, 'The Members table is available.');
+  assert.deepEqual(executed, ['tables.definitions']);
+  assert.equal(replies.length, 0);
+});
+
+test('filtered results support matching names without requiring a workspace-wide lookup', async t => {
+  const replies = [
+    nativeReply('azure', { calls: [use('members.find', { query: 'Operations' })] }),
+    nativeReply('azure', { text: 'Sam is the Operations manager.' }),
+    checked('grounded'),
+  ];
+  let lookups = 0;
+  t.mock.method(globalThis, 'fetch', async () => {
+    assert.ok(replies.length, 'the checked team answer needs no extra lookup');
+    return Response.json(replies.shift());
+  });
+  const result = await inferWithTools(
+    nativeRoutes.azure,
+    [{ role: 'user', text: 'Who is on the Operations team?' }],
+    async call => {
+      assert.equal(call.query, 'Operations');
+      lookups++;
+      return { ...directory, members: [], memberCount: 0, teams: [directory.teams[0]], teamCount: 1 };
+    },
+  );
+  assert.equal(result.text, 'Sam is the Operations manager.');
+  assert.equal(lookups, 1);
+});
+
+test('filtered lookup counts never become workspace totals when a rewrite needs a fallback', async t => {
+  let requests = 0;
+  const executed = [];
+  t.mock.method(globalThis, 'fetch', async (_url, init) => {
+    const body = JSON.parse(init.body);
+    assert.ok(++requests <= 6, 'one unfiltered lookup is sufficient');
+    return Response.json(
+      isCompletionRequest(body)
+        ? checked('unsupported', 'continue')
+        : nativeReply(
+            'azure',
+            requests === 1 ? { calls: [use('members.find', { query: 'Operations' })] } : { text: invented },
+          ),
+    );
+  });
+  const result = await inferWithTools(nativeRoutes.azure, sequence, async call => {
+    executed.push(call);
+    return call.query
+      ? { ...directory, members: [], memberCount: 0, teams: [directory.teams[0]], teamCount: 1 }
+      : directory;
+  });
+  assert.deepEqual(executed, [{ tool: 'members.find', query: 'Operations' }, { tool: 'members.find' }]);
+  assert.equal(result.text, directoryReply(directory));
+  assert.doesNotMatch(result.text, /Workspace teams: 1|Current members: 0/);
+  assert.equal(requests, 6);
+});
+
+test('a later failed lookup does not erase the last successful directory result', async t => {
+  const replies = [
+    nativeReply('azure', { calls: [use('members.find')] }),
+    nativeReply('azure', { calls: [use('members.find')] }),
+    nativeReply('azure', { text: invented }),
+    checked('unsupported', 'continue'),
+    nativeReply('azure', { text: invented }),
+    checked('unsupported', 'continue'),
+  ];
+  let lookups = 0;
+  t.mock.method(globalThis, 'fetch', async () => {
+    assert.ok(replies.length, 'the earlier successful read is retained');
+    return Response.json(replies.shift());
+  });
+  const result = await inferWithTools(nativeRoutes.azure, sequence, async () =>
+    ++lookups === 1 ? directory : { error: 'tool-failed' },
+  );
+  assert.equal(lookups, 2);
+  assert.equal(result.text, directoryReply(directory));
+  assert.equal(replies.length, 0);
+});
+
 test('ordinary team and person mentions keep one model call, streaming and no retained-directory read', async t => {
   for (const text of ['My team wants a sales table.', 'Write a note to Sam and my team.', 'Hello Sam.']) {
     let requests = 0;
