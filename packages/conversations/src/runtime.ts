@@ -276,6 +276,7 @@ export type ConversationReply = (input: {
   timeZone: string | null;
   priorCalls?: number;
   priorToolCalls?: readonly unknown[];
+  readWorkspaceDirectory?: () => Promise<unknown>;
   priorReviewCards?: readonly import('./results.ts').ReviewCardReference[];
   /** The working context holds a compaction summary, so earlier messages may be reread by id. */
   earlierMessages?: boolean;
@@ -2798,6 +2799,67 @@ export function createConversationExecutor(
             timeZone: source.timeZone,
             priorCalls: source.priorTools.length,
             priorToolCalls: source.executionSteps.map(step => step.call),
+            readWorkspaceDirectory: async () => {
+              if (!interactiveChat) return undefined;
+              let directory: unknown;
+              await authorize(async tx => {
+                const actor = await turnRequester(tx, fence.conversationId, fence.turnId);
+                if (await standaloneTurn(tx, fence.conversationId, fence.turnId)) return;
+                const membership = await currentMember(tx, actor);
+                const row = (
+                  await tx.client.query(
+                    `SELECT s.output FROM ${table(tx, 'tf_conversation_execution_steps')} s
+                    JOIN ${table(tx, 'tf_conversation_tool_calls')} c ON c.id=s.call_id
+                    JOIN ${table(tx, 'tf_conversation_turns')} t ON t.id=s.turn_id
+                    JOIN ${table(tx, 'tf_conversation_messages')} m ON m.id=t.source_message_id AND m.conversation_id=t.conversation_id
+                    WHERE t.conversation_id=$1 AND c.tool='members.find' AND c.status='completed'
+                    AND m.membership_id=$2 AND s.output IS NOT NULL AND NOT (s.call ? 'query')
+                    ORDER BY t.accepted_sequence DESC,c.sequence DESC LIMIT 1`,
+                    [fence.conversationId, actor.membershipId],
+                  )
+                ).rows[0];
+                if (!row) return;
+                const output = protectedOutputSchema.parse(row.output);
+                if (!(await canReadToolDetails(tx, actor, output.sources, null, fence.conversationId))) return;
+                const parsed = z
+                  .object({
+                    teams: z.array(
+                      z
+                        .object({
+                          teamId: z.string(),
+                          people: z.unknown(),
+                          peopleCount: z.unknown().optional(),
+                          peopleTruncated: z.unknown().optional(),
+                        })
+                        .loose(),
+                    ),
+                  })
+                  .loose()
+                  .safeParse(output.result);
+                if (!parsed.success) return;
+                const ownTeams = new Set(
+                  (
+                    await tx.client.query(
+                      `SELECT team_id FROM ${table(tx, 'tf_member_teams')} WHERE membership_id=$1`,
+                      [actor.membershipId],
+                    )
+                  ).rows.map(row => row.team_id),
+                );
+                directory = {
+                  ...parsed.data,
+                  teams: parsed.data.teams.map(team => {
+                    if (membership.role === 'admin' || ownTeams.has(team.teamId)) return team;
+                    const { people: _people, peopleCount: _count, peopleTruncated: _truncated, ...rest } = team;
+                    return { ...rest, people: 'not-visible' };
+                  }),
+                  ...(membership.role === 'admin'
+                    ? {}
+                    : { pendingInvitations: 'not-visible', pendingInvitationCount: undefined }),
+                };
+                inheritedSources.push(...output.sources);
+              });
+              return directory;
+            },
             priorReviewCards: source.executionSteps.flatMap(step => {
               const call = z.object({ tool: z.string() }).safeParse(step.call);
               if (

@@ -420,7 +420,7 @@ test('old invitation claims cannot justify a current answer, but do not block la
   ];
   for (const [question, answer, expected] of [
     ['Check pending invitations again.', 'There are none.', unchecked],
-    ['Who is on the Ops team?', 'The team roster is not available.', 'The team roster is not available.'],
+    ['Explain how team membership works.', 'Teams group workspace members.', 'Teams group workspace members.'],
     [
       'Write an example reminder for pending invitees.',
       'Please accept your invitation to join the workspace.',
