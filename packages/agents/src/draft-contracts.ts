@@ -281,6 +281,7 @@ export const agentDraftChangeSchema = z.discriminatedUnion('kind', [
 ]);
 export const rowDraftTableSchema = z.object({
   name: z.string(),
+  archived: z.boolean().default(false),
   labelFieldIds: z.array(z.string()).default([]),
   fields: z.array(
     z.object({

@@ -13,7 +13,7 @@ import {
   uuidSchema,
   type HumanActor,
 } from '@tulipfarm/access';
-import { activeGeneration, GenerationError, identity } from '@tulipfarm/tables/store';
+import { activeGeneration, readableGeneration, GenerationError, identity } from '@tulipfarm/tables/store';
 import { TableError } from '@tulipfarm/tables/service-contracts';
 import { canonicalJson } from '@tulipfarm/tables/canonical';
 import { relation, type AgentStorage, type AgentTransaction } from './store.ts';
@@ -426,13 +426,20 @@ export function createAuthoringDrafts(
     const { input } = proposal;
     let definition;
     try {
-      definition = (await activeGeneration(tx, input.tableId)).definition;
+      definition = (await readableGeneration(tx, input.tableId)).definition;
     } catch (error) {
       if (error instanceof GenerationError) return { rowTable: null, rowCurrent: null };
       throw error;
     }
     const rowTable = {
       name: definition.label,
+      archived: Boolean(
+        (
+          await tx.client.query(`SELECT archived_at FROM ${relation(tx, 'tf_table_catalog')} WHERE id=$1`, [
+            input.tableId,
+          ])
+        ).rows[0]?.archived_at,
+      ),
       labelFieldIds:
         definition.uniqueKeys[0]?.fieldIds ??
         [(definition.fields.find(field => field.kind === 'text') ?? definition.fields[0])?.id].filter(

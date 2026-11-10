@@ -58,10 +58,16 @@ export function RowDraftCard({
     input.tool === 'rows.delete' || input.tool === 'rows.create.batch' || input.tool === 'rows.update.batch'
       ? {}
       : input.values;
+  const fieldIds = [
+    ...new Set([
+      ...(batch ?? [kind === 'delete' ? (draft.rowCurrent ?? {}) : proposed]).flatMap(values => Object.keys(values)),
+      ...(written?.rows.flatMap(row => Object.keys(row.values)) ?? []),
+    ]),
+  ];
   const fields = (values: Values) =>
     Object.keys(values).map(fieldId => ({
       fieldId,
-      label: table?.fields.find(field => field.id === fieldId)?.label ?? fieldId,
+      label: table?.fields.find(field => field.id === fieldId)?.label ?? `Field ${fieldIds.indexOf(fieldId) + 1}`,
     }));
   const format = (values: Values, fieldId: string) =>
     formatTableValue(values[fieldId] ?? null, table ?? { fields: [] }, fieldId);
@@ -110,8 +116,11 @@ export function RowDraftCard({
             {draft.status === 'stale' && (
               <div className="space-y-2">
                 <p role="status">
-                  The table or row changed after this draft. Nothing was changed. Ask chat for a fresh draft and review
-                  it again.
+                  {table?.archived
+                    ? `${tableName} was archived after this draft, so ${count === 1 ? 'this row' : 'these rows'} cannot be ${kind === 'create' ? 'added' : kind === 'update' ? 'updated' : 'deleted'}. Nothing was changed. Restore the table, then ask chat for a fresh draft.`
+                    : !table
+                      ? 'You cannot read this table. Nothing was changed. Ask chat for a fresh draft once the table is available.'
+                      : 'The table or row changed after this draft. Nothing was changed. Ask chat for a fresh draft and review it again.'}
                 </p>
                 {!draft.outcome && (
                   <Button variant="ghost" disabled={locked} onClick={() => decide('dismiss')}>
