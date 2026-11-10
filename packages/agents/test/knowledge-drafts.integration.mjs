@@ -581,7 +581,7 @@ for (const change of ['remove note', 'replace note', 'remove file']) {
         }
       });
     if (followUpMessageId)
-      await t.test('legacy working summaries retain generated instruction provenance', async () => {
+      await t.test('legacy working summaries retain generated instruction provenance', async t => {
         const compactionId = randomUUID();
         const coveredThrough = (
           await db.platform.query(
@@ -626,6 +626,7 @@ for (const change of ['remove note', 'replace note', 'remove file']) {
           parts: [{ kind: 'text', text: 'Continue from the working summary.' }],
         });
         let context;
+        const handoffInputs = [];
         const compactor = {
           policy: async () => ({
             automatic: false,
@@ -633,29 +634,37 @@ for (const change of ['remove note', 'replace note', 'remove file']) {
             targetPercent: 30,
             outputPrompt: null,
             revision: 0,
-            families: [],
+            families: ['claude-haiku'],
           }),
           measure: async () => ({ tokens: 10, window: 100000 }),
           window: async () => 100000,
-          summarize: async () => {
-            throw new Error('Unexpected summary generation');
+          summarize: async input => {
+            handoffInputs.push(input);
+            return {
+              text: JSON.stringify(input).includes('Private source passage')
+                ? `Retried handoff: ${narration}`
+                : 'No removed material is available.',
+              familyId: 'claude-haiku',
+              fallbackFrom: null,
+            };
           },
         };
+        const executor = createConversationExecutor(
+          runtime,
+          async ({ messages }) => {
+            context = messages;
+            return 'No removed material is available.';
+          },
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          compactor,
+        );
         assert.equal(
-          await createConversationExecutor(
-            runtime,
-            async ({ messages }) => {
-              context = messages;
-              return 'No removed material is available.';
-            },
-            undefined,
-            undefined,
-            undefined,
-            undefined,
-            undefined,
-            undefined,
-            compactor,
-          ).process({
+          await executor.process({
             workspaceId: w.id,
             conversationId: chatId,
             turnId: sent.turnId,
@@ -664,6 +673,57 @@ for (const change of ['remove note', 'replace note', 'remove file']) {
           'completed',
         );
         assert.doesNotMatch(JSON.stringify(context), /Private source passage/);
+        await t.test('handoff retry never admits a summary whose generated source was removed', async () => {
+          const retry = await chats.send(w.id, w.userId, chatId, {
+            messageId: randomUUID(),
+            commandId: randomUUID(),
+            parts: [{ kind: 'compact', compactionId }],
+          });
+          assert.equal(
+            await executor.process({
+              workspaceId: w.id,
+              conversationId: chatId,
+              turnId: retry.turnId,
+              generation: 0,
+            }),
+            'completed',
+          );
+          assert.doesNotMatch(JSON.stringify(handoffInputs), /Private source passage/);
+          const retained = (
+            await db.platform.query(
+              `SELECT sources FROM "${w.names.schema}".tf_conversation_handoffs WHERE compaction_id=$1`,
+              [compactionId],
+            )
+          ).rows[0];
+          assert.ok(
+            retained.sources.some(
+              dependency => dependency.kind === 'knowledge-document' && dependency.documentId === added.documentId,
+            ),
+          );
+          for (let reload = 0; reload < 2; reload++) {
+            const detail = await chats.compaction(w.id, w.userId, chatId, compactionId);
+            assert.doesNotMatch(JSON.stringify(detail.handoff), /Private source passage/);
+          }
+        });
+        await t.test('legacy handoff reads derive the selected summary instruction sources', async () => {
+          await db.platform.query(
+            `INSERT INTO "${w.names.schema}".tf_conversation_handoffs
+             (compaction_id,conversation_id,status,prompt,text,model_family_id,attempts,sources)
+             VALUES ($1,$2,'completed',NULL,$3,'claude-haiku',1,$4)
+             ON CONFLICT (compaction_id) DO UPDATE SET status='completed',text=$3,sources=$4,error_code=NULL`,
+            [
+              compactionId,
+              chatId,
+              `Legacy handoff: ${narration}`,
+              JSON.stringify([{ kind: 'private-conversation', conversationId: chatId, snapshot: true }]),
+            ],
+          );
+          for (let reload = 0; reload < 2; reload++) {
+            const detail = await chats.compaction(w.id, w.userId, chatId, compactionId);
+            assert.equal(detail.handoff.text, null);
+            assert.equal(detail.handoff.errorCode, 'handoff-unavailable');
+          }
+        });
       });
     if (legacySources)
       await t.test('legacy context exposure is not cleared by an unrelated Knowledge list output', async () => {

@@ -113,12 +113,12 @@ import {
   insertStatusMessage,
   recordCleanups,
   replaceWorkingSummary,
+  readWorkingSummary,
   summarize,
   omittedBlock,
   refersToEarlierMessages,
   summaryBlock,
   updateBreaker,
-  workingSummarySchema,
   type ChatMessage,
   type CompactionError,
   type CompactionRecord,
@@ -1181,7 +1181,10 @@ export function createConversationExecutor(
   /** A `/compact` turn: compacts everything before the latest completed exchange and writes a separate handoff. It never calls the chat responder. */
   async function compactTurn(
     fence: ReplyFence,
-    source: CompactionSource & { compaction: Awaited<ReturnType<typeof compactionSnapshot>> | null },
+    source: CompactionSource & {
+      requester: HumanActor;
+      compaction: Awaited<ReturnType<typeof compactionSnapshot>> | null;
+    },
     command: { prompt: string | null; compactionId: string | null },
     policy: EffectiveCompactionPolicy,
     compactor: ConversationCompactor,
@@ -1211,31 +1214,44 @@ export function createConversationExecutor(
       );
     if (command.compactionId) {
       const retryId = command.compactionId;
-      const target = await guarded(fence, async tx =>
-        z
-          .object({ summary: z.unknown().nullable(), prompt: z.string().nullable() })
+      const target = await guarded(fence, async tx => {
+        const row = z
+          .object({ prompt: z.string().nullable() })
           .optional()
           .parse(
             (
               await tx.client.query(
-                `SELECT s.summary, h.prompt FROM ${table(tx, 'tf_conversation_compactions')} c
-        LEFT JOIN ${table(tx, 'tf_conversation_working_summaries')} s ON s.compaction_id=c.id LEFT JOIN ${table(tx, 'tf_conversation_handoffs')} h ON h.compaction_id=c.id
+                `SELECT h.prompt FROM ${table(tx, 'tf_conversation_compactions')} c
+        LEFT JOIN ${table(tx, 'tf_conversation_handoffs')} h ON h.compaction_id=c.id
         WHERE c.conversation_id=$1 AND c.id=$2`,
                 [fence.conversationId, retryId],
               )
             ).rows[0],
+          );
+        if (!row) return null;
+        const summary = (await readWorkingSummary(tx, fence.conversationId, retryId)) ?? state.summary;
+        const sources = summary?.sources ?? [];
+        return {
+          ...row,
+          summary: summary?.summary ?? null,
+          sources,
+          readable: await canReadToolDetails(
+            tx,
+            source.requester,
+            sources,
+            null,
+            source.project ? fence.conversationId : undefined,
           ),
-      );
+        };
+      });
       if (target === 'stale') return 'stale';
       if (!target) {
         await guarded(fence, tx => failTurn(tx, fence, 'compaction-not-found', 'compaction'));
         return 'stale';
       }
-      const parsed = target.summary ? workingSummarySchema.safeParse(target.summary) : null;
-      const written = await writeHandoff(
-        parsed?.success ? parsed.data : (state.summary?.summary ?? null),
-        target.prompt ?? prompt,
-      );
+      const written = target.readable
+        ? await writeHandoff(target.summary, target.prompt ?? prompt)
+        : { status: 'failed' as const, errorCode: 'handoff-unavailable' as const };
       const done = await guarded(fence, async (tx, chat) => {
         await tx.client.query(
           `INSERT INTO ${table(tx, 'tf_conversation_handoffs')} AS h (compaction_id, conversation_id, status, prompt, text, model_family_id, fallback_from_family_id, error_code, attempts, sources)
@@ -1250,7 +1266,7 @@ export function createConversationExecutor(
             written.status === 'completed' ? written.familyId : null,
             written.status === 'completed' ? written.fallbackFrom : null,
             written.status === 'failed' ? written.errorCode : null,
-            JSON.stringify(mergeSources(source.inherited)),
+            JSON.stringify(mergeSources([...source.inherited, ...target.sources])),
           ],
         );
         await respond(tx, chat, retryId);
@@ -1427,7 +1443,7 @@ export function createConversationExecutor(
                 !(await canReadToolDetails(
                   tx,
                   chat.requester,
-                  compaction.generatedSources ?? [],
+                  compaction.summary.sources,
                   null,
                   chat.project_id ? fence.conversationId : undefined,
                 ))
@@ -1441,7 +1457,7 @@ export function createConversationExecutor(
               await requireKnowledgeSources(tx, chat.requester, compaction.summary.sources);
               await requireWorkflowSources(tx, chat.requester, compaction.summary.sources);
               await requireGoogleFileSources(tx, chat.requester, compaction.summary.sources);
-              summarySources.push(...compaction.summary.sources, ...(compaction.generatedSources ?? []));
+              summarySources.push(...compaction.summary.sources);
             } catch (error) {
               if (!(error instanceof AccessDenied)) throw error;
               // An unreadable summary leaves context; the covered messages return so their own checks apply.
