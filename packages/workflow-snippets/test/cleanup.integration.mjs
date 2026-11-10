@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdtemp, writeFile, chmod, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,7 +9,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { setTimeout } from 'node:timers/promises';
 import { createSnippetRunner } from '../src/index.ts';
 import { createSnippetBroker } from '../src/broker.ts';
-import { createSnippetClient } from '../src/client.ts';
+import { createSkillClient } from '../src/client.ts';
 
 test(
   'failed real Docker cleanup blocks runner and broker admission until reconciliation',
@@ -60,21 +60,41 @@ test(
       process.env.PATH = path;
       await runner.reconcile();
       assert.equal(ids(owner).length, 0);
-      const options = { database, token, image, runtime: 'runc', allowLocalRunc: true, timeoutMs: 1500 };
+      const options = {
+        database,
+        token,
+        image,
+        runtime: 'runc',
+        allowLocalRunc: true,
+        timeoutMs: 1500,
+        enableSkillJobs: true,
+      };
       broker = await createSnippetBroker(options);
       await new Promise(resolve => broker.server.listen(0, '127.0.0.1', resolve));
-      const client = createSnippetClient({
+      const client = createSkillClient({
         url: `http://127.0.0.1:${broker.server.address().port}`,
         token,
         allowLocalHttp: true,
       });
       process.env.PATH = `${directory}:${path}`;
+      const script = 'setTimeout(() => {}, 120000);';
       const request = {
-        ...input,
+        kind: 'skill',
+        version: 1,
         workspaceId: randomUUID(),
-        runId: randomUUID(),
-        revision: randomUUID(),
-        stepId: 'code',
+        invocationId: randomUUID(),
+        packageDigest: 'a'.repeat(64),
+        language: 'node',
+        entrypoint: 'script.js',
+        args: [],
+        input: null,
+        files: [
+          {
+            path: 'script.js',
+            content: Buffer.from(script).toString('base64'),
+            digest: createHash('sha256').update(script).digest('hex'),
+          },
+        ],
       };
       assert.deepEqual(await client.submit(request), { kind: 'pending' });
       for (let i = 0; i < 100 && broker.server.listening; i++) await setTimeout(100);
@@ -93,7 +113,7 @@ test(
       process.env.PATH = path;
       broker = await createSnippetBroker(options);
       await new Promise(resolve => broker.server.listen(0, '127.0.0.1', resolve));
-      const restarted = createSnippetClient({
+      const restarted = createSkillClient({
         url: `http://127.0.0.1:${broker.server.address().port}`,
         token,
         allowLocalHttp: true,
@@ -104,7 +124,7 @@ test(
         if (result.kind !== 'pending') break;
         await setTimeout(100);
       }
-      assert.deepEqual(result, { kind: 'failed', error: 'deadline' });
+      assert.deepEqual(result, { kind: 'failed', error: 'interrupted' });
       assert.equal(ids(brokerOwner).length, 0);
     } finally {
       process.env.PATH = path;

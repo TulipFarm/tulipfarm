@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
 import { test } from 'node:test';
-import { createSnippetClient } from '../src/client.ts';
+import { createSkillClient } from '../src/client.ts';
 import { jobSchema, maxJobBytes } from '../src/protocol.ts';
 import { parseSnippet } from '../src/index.ts';
 
@@ -35,6 +35,19 @@ test('serialized source and input budgets cover Unicode, escaping and the comple
   }
 });
 
+const skillJob = (entrypoint = 'script') => ({
+  kind: 'skill',
+  version: 1,
+  workspaceId: randomUUID(),
+  invocationId: randomUUID(),
+  packageDigest: 'a'.repeat(64),
+  language: 'bash',
+  entrypoint,
+  args: [],
+  input: null,
+  files: [{ path: 'script', content: '', digest: createHash('sha256').update('').digest('hex') }],
+});
+
 test('client returns permanent failures without retries and preserves transient HTTP failures', async () => {
   let status = 413,
     calls = 0;
@@ -46,18 +59,17 @@ test('client returns permanent failures without retries and preserves transient 
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   try {
-    const client = createSnippetClient({
+    const client = createSkillClient({
       url: `http://127.0.0.1:${server.address().port}`,
       token: 'a'.repeat(64),
       allowLocalHttp: true,
     });
-    assert.deepEqual(await client.submit(job('界'.repeat(32740))), { kind: 'failed', error: 'invalid-input' });
+    assert.deepEqual(await client.submit(skillJob('../script')), { kind: 'failed', error: 'invalid-input' });
     assert.equal(calls, 0);
     for (status of [400, 401, 403, 404, 409, 413, 415, 422])
-      assert.deepEqual(await client.submit(job('return input')), { kind: 'failed', error: 'broker-rejected' });
+      assert.deepEqual(await client.submit(skillJob()), { kind: 'failed', error: 'broker-rejected' });
     assert.equal(calls, 8);
-    for (status of [408, 429, 500, 503])
-      await assert.rejects(client.submit(job('return input')), /snippet-broker-unavailable/);
+    for (status of [408, 429, 500, 503]) await assert.rejects(client.submit(skillJob()), /snippet-broker-unavailable/);
     assert.equal(calls, 12);
   } finally {
     await new Promise(resolve => server.close(resolve));

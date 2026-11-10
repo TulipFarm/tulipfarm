@@ -3,6 +3,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./execution": {
+      "types": "./dist/execution.d.ts",
+      "default": "./dist/execution.js"
+    },
     "./package-links": {
       "types": "./dist/package-links.d.ts",
       "default": "./dist/package-links.js"
@@ -78,6 +82,7 @@
     "test": "node --test --test-concurrency=1 test/*.test.mjs"
   },
   "dependencies": {
+    "@tulipfarm/execution-contract": "workspace:*",
     "zod": "4.6.6"
   },
   "devDependencies": {

@@ -64,6 +64,7 @@ export const toolActivityLabels = {
   'skills.load': 'Loading a reviewed workspace skill',
   'skills.files.read': 'Reading a skill resource',
   'skills.execute': 'Running an isolated skill script',
+  'execution.run': 'Running code in an isolated machine',
   'skills.import': 'Preparing skill packages from a link',
   'skills.import.status': 'Checking a skill package review',
   'skills.import.select': 'Preparing selected skills for safety review',
@@ -179,6 +180,7 @@ const toolAreaNames: Record<string, string> = {
   api: 'APIs',
   files: 'Files',
   images: 'Images',
+  execution: 'Code',
   skills: 'Skills',
   agents: 'Agents',
   plans: 'Plans',
@@ -495,6 +497,30 @@ export function apiCallReceipt(
   return result.status === 'sent'
     ? { httpStatus: result.response.status, ...marked }
     : { error: result.code, ...marked };
+}
+
+export const executionReceiptSchema = z.object({
+  language: z.enum(['python', 'javascript', 'typescript', 'bash']),
+  code: z.string().max(32768),
+  result: z
+    .object({
+      state: z.string().max(32),
+      exitCode: z.int().optional(),
+      stdout: z.string().max(65536),
+      stderr: z.string().max(65536),
+      truncated: z.boolean(),
+    })
+    .nullable(),
+});
+export type ExecutionReceipt = z.infer<typeof executionReceiptSchema>;
+const executionCallSchema = executionReceiptSchema.pick({ language: true, code: true });
+const executionOutputSchema = z.object({ result: executionReceiptSchema.shape.result.unwrap() });
+/** The code an `execution.run` call ran and, once it ended, what it printed. */
+export function executionReceipt(tool: string, call: unknown, output: unknown): ExecutionReceipt | null {
+  if (tool !== 'execution.run') return null;
+  const parsed = executionCallSchema.safeParse(call);
+  if (!parsed.success) return null;
+  return { ...parsed.data, result: executionOutputSchema.safeParse(output).data?.result ?? null };
 }
 
 const apiCallProblems = new Map(

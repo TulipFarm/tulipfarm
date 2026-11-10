@@ -3,6 +3,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./execution": {
+      "types": "./dist/execution.d.ts",
+      "default": "./dist/execution.js"
+    },
     "./personal-memory-contracts": {
       "types": "./dist/personal-memory-contracts.d.ts",
       "default": "./dist/personal-memory-contracts.js"
@@ -210,6 +214,8 @@
     "@tulipfarm/access": "workspace:*",
     "@tulipfarm/config": "workspace:*",
     "@tulipfarm/content-budget": "workspace:*",
+    "@tulipfarm/execution": "workspace:*",
+    "@tulipfarm/execution-contract": "workspace:*",
     "@tulipfarm/files": "workspace:*",
     "@tulipfarm/google-workspace": "workspace:*",
     "@tulipfarm/media": "workspace:*",

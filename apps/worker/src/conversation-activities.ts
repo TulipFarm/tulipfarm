@@ -109,6 +109,7 @@ export type MeteredReplyOptions = {
   /** Files publication; with `read`, chat may also generate images into it. */
   outputs?: (FileOutputStore & Partial<Pick<ImageOutputStore, 'read'>>) | undefined;
   skillExecution?: SkillExecutionFactory | undefined;
+  chatExecution?: ChatExecution | undefined;
   wakePlan?: PlanWake | undefined;
   wakeTask?: TaskWake | undefined;
   /** Delivers per-card Stop requests to running sub-agents. */
@@ -150,6 +151,7 @@ export function meteredReply(
     knowledge = createKnowledgeTools({ runtime }),
     outputs,
     skillExecution,
+    chatExecution,
     wakePlan,
     wakeTask,
     subagentStops = (sharedSubagentStops ??= createSubagentStops()),
@@ -328,6 +330,7 @@ export function meteredReply(
       knowledgeBudgetRuntime: runtime,
       outputs: outputs ? { files: outputs, autonomous: !requester } : undefined,
       skillExecution,
+      chatExecution,
       telemetryRuntime: externalContext ? 'slack' : 'chat',
       wakePlan,
       agentSetup: slackAgentSetupFromEnvironment(toolRuntime),
@@ -547,6 +550,7 @@ export function createConversationActivities(
   wakePlan?: PlanWake,
   wakeTask?: TaskWake,
   workspaceSlug?: (workspaceId: string) => Promise<string | undefined>,
+  chatExecution?: ChatExecution,
 ) {
   const runtime = withFileSources(withKnowledgeSourceAuthorization(withGitHubSourceAuthorization(storage)));
   const slack = slackActionsFromEnvironment()?.(runtime);
@@ -579,6 +583,7 @@ export function createConversationActivities(
             knowledge: knowledge ?? createKnowledgeTools({ runtime: storage }),
             outputs: files,
             skillExecution,
+            chatExecution,
             wakePlan,
             wakeTask,
             inventory,
@@ -668,3 +673,4 @@ export function createConversationActivities(
   };
 }
 import type { SkillExecutionFactory } from '@tulipfarm/agents/skill-execution';
+import type { ChatExecution } from '@tulipfarm/agents/chat-execution';

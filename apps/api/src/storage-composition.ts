@@ -35,6 +35,8 @@ import { createPersonalMemoryService } from '@tulipfarm/conversations/personal-m
 import { createProjects } from '@tulipfarm/conversations/projects';
 import { chatObjectStore } from '@tulipfarm/workspaces/chat-objects';
 import { createAttachments } from '@tulipfarm/conversations/attachments';
+import { createChatExecution } from '@tulipfarm/conversations/execution';
+import { registerExecutionFiles } from './execution-files.ts';
 import { createConversationRequests } from '@tulipfarm/conversations/requests';
 import { createTableApprovalRequests } from '@tulipfarm/tables/conversation-approvals';
 import type { ModelContinuity } from '@tulipfarm/agents/chat';
@@ -118,6 +120,10 @@ export function registerStorageComposition(
   const githubSubscriptions = createGitHubSubscriptions(dependencies.pool);
   const agentSetup: AgentSetupOptions = { ...configuredAgentSetup, workflowWake: wake, githubSubscriptions };
   const chatObjects = chatObjectStore();
+  registerExecutionFiles(app, {
+    auth: dependencies.auth,
+    service: createChatExecution(runtime, { mode: 'off' }, undefined, chatObjects ?? undefined),
+  });
   registerAuthoringDrafts(app, {
     runtime,
     auth: dependencies.auth,

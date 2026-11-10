@@ -1,5 +1,6 @@
 import '@tulipfarm/config/load-secret-files';
-import { shutdownExtensions, startExtensions } from '@tulipfarm/extensions';
+import { configuredExecutionBackend, shutdownExtensions, startExtensions } from '@tulipfarm/extensions';
+import { executionConfiguration } from '@tulipfarm/config/execution';
 import { captureException, log, startTelemetry } from '@tulipfarm/observability';
 import { buildInfo } from './build-info.ts';
 import { apiRole, apiTelemetryService } from './api-role.ts';
@@ -8,6 +9,12 @@ import { apiRole, apiTelemetryService } from './api-role.ts';
 const service = apiTelemetryService(apiRole());
 // Bare package names in TULIPFARM_EXTENSIONS resolve from this app.
 await startExtensions('api', { resolve: specifier => import.meta.resolve(specifier), service });
+try {
+  configuredExecutionBackend(executionConfiguration());
+} catch (error) {
+  await shutdownExtensions();
+  throw error;
+}
 const telemetry = startTelemetry(buildInfo, { serviceName: service });
 const { buildApp } = await import('./app.ts');
 const { logUnconfiguredIntegrations } = await import('./integration-status.ts');

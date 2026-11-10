@@ -1,24 +1,20 @@
 import assert from 'node:assert/strict';
 import { activate } from './commands.fixture.mjs';
-import { randomBytes, randomUUID } from 'node:crypto';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { setTimeout } from 'node:timers/promises';
 import { test } from 'node:test';
-import { createServer } from 'node:http';
 import { Worker, NativeConnection } from '@temporalio/worker';
 import { Client, Connection } from '@temporalio/client';
-import { createSnippetBroker } from '../../workflow-snippets/src/broker.ts';
-import { createSnippetClient } from '../../workflow-snippets/src/client.ts';
+import { createSnippetRunner } from '../../workflow-snippets/src/index.ts';
 import { fixture } from '../../workspace-storage/test/integration/fixture.mjs';
 import { workspaceTableMigrations } from '../../workspaces/src/table-migrations.ts';
 import { createWorkspaceRuntime } from '@tulipfarm/workspace-storage/runtime';
 import { createWorkflows } from '../src/service.ts';
 
 test(
-  'Temporal drives authenticated isolated JS and Python with retry, worker restart and authority fencing',
+  'Temporal drives isolated JS and Python with retry, worker restart and authority fencing',
   { timeout: 120000 },
   async () => {
     assert.ok(
@@ -26,23 +22,24 @@ test(
       'Set SNIPPET_TEST_IMAGE to the local snippet image ID. See docs/verification.md',
     );
     const db = await fixture(),
-      directory = await mkdtemp(join(tmpdir(), 'workflow-snippets-'));
-    let broker, runtime, native, connection, worker, running;
+      runner = createSnippetRunner({ image: process.env.SNIPPET_TEST_IMAGE, runtime: 'runc', allowLocalRunc: true });
+    let runtime, native, connection, worker, running;
     try {
-      const token = randomBytes(32).toString('hex');
-      broker = await createSnippetBroker({
-        database: join(directory, 'broker.sqlite'),
-        token,
-        image: process.env.SNIPPET_TEST_IMAGE,
-        runtime: 'runc',
-        allowLocalRunc: true,
-      });
-      await new Promise(resolve => broker.server.listen(0, '127.0.0.1', resolve));
-      const client = createSnippetClient({
-        url: `http://127.0.0.1:${broker.server.address().port}`,
-        token,
-        allowLocalHttp: true,
-      });
+      const jobs = new Map();
+      const client = {
+        submit: async ({ runId, revision, stepId, language, source, input }) => {
+          const key = [runId, revision, stepId].join('/');
+          if (!jobs.has(key)) {
+            const entry = { result: { kind: 'pending' } };
+            jobs.set(key, entry);
+            runner.execute({ language, source, input }).then(
+              output => (entry.result = { kind: 'completed', output }),
+              error => (entry.result = { kind: 'failed', error: error.code ?? 'unavailable' }),
+            );
+          }
+          return jobs.get(key).result;
+        },
+      };
       await db.platform.query(`SET search_path TO app; DROP TABLE IF EXISTS app.accounts;
 ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', import.meta.url), 'utf8')}`);
       const w = await db.create(await workspaceTableMigrations());
@@ -178,32 +175,22 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         'snippet-runner-deadline',
       );
       let rejectedCalls = 0;
-      const rejectingBroker = createServer((request, response) => {
-        rejectedCalls++;
-        request.resume();
-        response.writeHead(413);
-        response.end('{}');
+      const rejected = await admit();
+      const rejecting = createWorkflows(runtime, {
+        snippets: {
+          submit: async () => {
+            rejectedCalls++;
+            return { kind: 'failed', error: 'broker-rejected' };
+          },
+        },
       });
-      await new Promise(resolve => rejectingBroker.listen(0, '127.0.0.1', resolve));
-      try {
-        const rejected = await admit();
-        const rejecting = createWorkflows(runtime, {
-          snippets: createSnippetClient({
-            url: `http://127.0.0.1:${rejectingBroker.address().port}`,
-            token,
-            allowLocalHttp: true,
-          }),
-        });
-        assert.deepEqual(await rejecting.advance(rejected.work), { kind: 'done' });
-        assert.deepEqual(await rejecting.advance(rejected.work), { kind: 'done' });
-        assert.equal(rejectedCalls, 1);
-        assert.equal(
-          (await service.history(w.id, w.userId, rejected.id).then(page => page.runs))[0].error,
-          'snippet-broker-rejected',
-        );
-      } finally {
-        await new Promise(resolve => rejectingBroker.close(resolve));
-      }
+      assert.deepEqual(await rejecting.advance(rejected.work), { kind: 'done' });
+      assert.deepEqual(await rejecting.advance(rejected.work), { kind: 'done' });
+      assert.equal(rejectedCalls, 1);
+      assert.equal(
+        (await service.history(w.id, w.userId, rejected.id).then(page => page.runs))[0].error,
+        'snippet-broker-rejected',
+      );
       await assert.rejects(admit([{ ...steps[0], source: `/*${'界'.repeat(32740)}*/return input` }]));
       for (const action of ['cancel', 'disable', 'revoke']) {
         const fenced = await admit();
@@ -249,8 +236,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       await connection?.close();
       await runtime?.close();
       await db.close();
-      await broker?.close();
-      await rm(directory, { recursive: true, force: true });
+      await runner.reconcile();
     }
   },
 );

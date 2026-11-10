@@ -1302,7 +1302,7 @@ function commandError(error: RequestError) {
     'record-trigger-unavailable': 'Record date triggers are unavailable until this workspace finishes updating.',
     'record-field-unavailable': 'The table, fields or filter are no longer available. Edit the trigger in chat.',
     'record-source-denied': recordSourceDenied,
-    'code-steps-unavailable': 'Code steps cannot run until an isolated code runner is configured.',
+    'code-steps-unavailable': 'Code steps cannot run until an execution backend is configured.',
     'workflow-archived': 'This workflow is archived. Restore it from Archived before changing it.',
     'workflow-not-archived': 'This workflow was already restored. Refresh workflows.',
     'workflow-archive-unavailable':

@@ -212,7 +212,7 @@ export const agentWorkflowCommonVersion = 39;
 const agentLinked = (tx: WorkflowTransaction) => tx.commonVersion >= agentWorkflowCommonVersion;
 
 export const workflowCodeStepsEnabled = (env: NodeJS.ProcessEnv = process.env) =>
-  env.WORKFLOW_CODE_STEPS_ENABLED === 'true';
+  (env.TULIPFARM_EXECUTION_BACKEND ?? 'off') !== 'off';
 
 /** Whether `actor` may read every source a workflow agent task's result retained. Without it, history withholds agent results. */
 type AgentResultReadable = (tx: AuthorizationTransaction, actor: HumanActor, taskId: string) => Promise<boolean>;

@@ -1,10 +1,12 @@
 export type * from './slots.ts';
 export {
   captureAnalytics,
+  configuredExecutionBackend,
   creditGate,
   creditPricing,
   creditUnitsForProviderCost,
   emitHook,
+  executionBackend,
   extensionMigrations,
   ExtensionRegistrationError,
   flagProvider,

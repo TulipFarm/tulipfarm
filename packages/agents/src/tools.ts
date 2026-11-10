@@ -92,6 +92,7 @@ import { personalDefinitionSources } from './personal-definition-sources.ts';
 import type { SlackActionsFactory } from './slack-actions.ts';
 import { slackResolveSchema, slackThreadReactionSchema, SlackChannelAccessError } from '@tulipfarm/slack';
 import { slackOutboundEnabled } from './slack-outbound.ts';
+import type { ChatExecution } from './chat-execution.ts';
 import { GitHubReadError } from '@tulipfarm/github/read-contracts';
 import { GitHubSourceDenied } from '@tulipfarm/github/source-runtime';
 import { GitHubAccountError } from '@tulipfarm/github';
@@ -211,6 +212,11 @@ export const frameworkCallSchema = z.discriminatedUnion('tool', [
   slackResolveSchema,
   slackThreadReactionSchema,
   z.strictObject({ tool: z.literal('github.personal.execute'), batchId: z.uuid() }),
+  z.strictObject({
+    tool: z.literal('execution.run'),
+    language: z.enum(['python', 'javascript', 'typescript', 'bash']),
+    code: z.string().min(1).max(32768),
+  }),
   z.strictObject({ tool: z.literal('tables.propose'), input: tableProposalInput }),
   z.strictObject({ tool: z.literal('tables.import.attachments') }),
   z.strictObject({
@@ -766,6 +772,8 @@ const descriptions: Record<ToolName, string> = {
     'Read a text resource from an exact reviewed skill version, 16000 characters per page. Binary assets are not sent as model text.',
   'skills.execute':
     'Run a Bash, Python, or Node file from an exact reviewed package. No network, secrets, or installs. Outputs support text, JSON, CSV, Markdown, PNG, and JPEG. If pending, reuse its invocationId with the exact same arguments; never rerun an unknown outcome with a new ID. Tests run only when requested.',
+  'execution.run':
+    'Run a short Python, JavaScript (Node.js), TypeScript (Node.js, ES module), or Bash program in a fresh isolated machine and return its exit code, stdout, and stderr. Use it to calculate, check, or transform data exactly instead of guessing. Print the answer. Each call starts empty: no files persist, and no secrets are available.',
   'skills.import':
     'Prepare public skills.sh, GitHub, or website skill packages from one URL. Returns the discovered packages. Nothing is installed. The human selects packages and approves the exact safety review.',
   'skills.import.status':
@@ -876,6 +884,10 @@ function secretsAvailable() {
     return false;
   }
 }
+function executionAvailable() {
+  const mode = process.env.TULIPFARM_EXECUTION_BACKEND;
+  return mode !== undefined && mode !== '' && mode !== 'off';
+}
 function admittedToolSchemas(access: ToolAccess) {
   if (access.kind === 'agent') access = { ...access, tools: withKnowledgeRetrieveGrant(access.tools) };
   const slack = access.kind === 'chat' ? (access.slack ?? slackOutboundEnabled()) : true;
@@ -893,6 +905,8 @@ function admittedToolSchemas(access: ToolAccess) {
       )
       // Saved agents delegate through their own task tools; only a chat reply runs sub-agents.
       .filter(schema => schema.shape.tool.value !== 'agents.delegate' || access.kind === 'chat')
+      // Code runs only in a chat reply, and only when this deployment configures an execution backend.
+      .filter(schema => schema.shape.tool.value !== 'execution.run' || (access.kind === 'chat' && executionAvailable()))
       // Follow-ups belong to the chat or Slack thread a person asked in, so only a chat reply offers them.
       .filter(schema => !schema.shape.tool.value.startsWith('followups.') || access.kind === 'chat')
       // Projects belong to the person in this chat; saved agent runs cannot cite project sources.
@@ -955,6 +969,7 @@ export function discoverTools(access: ToolAccess) {
 export function isExternalTool(tool: ToolName) {
   return (
     tool === 'skills.execute' ||
+    tool === 'execution.run' ||
     tool === 'skills.draft' ||
     tool === 'skills.files.read' ||
     tool === 'mcp.call' ||
@@ -995,6 +1010,8 @@ export type ChatToolsOptions = {
   knowledgeBudgetRuntime?: AgentStorage | undefined;
   outputs?: ChatFileOutputs | undefined;
   skillExecution?: SkillExecutionFactory | undefined;
+  /** Runs `execution.run` code in an isolated machine; without it, the tool is refused. */
+  chatExecution?: ChatExecution | undefined;
   telemetryRuntime?: ToolRuntime | undefined;
   wakePlan?: ((workspaceId: string, planId: string) => Promise<unknown>) | undefined;
   agentSetup?: AgentSetupOptions | undefined;
@@ -1085,6 +1102,7 @@ export function createChatTools(
     knowledgeBudgetRuntime,
     outputs,
     skillExecution,
+    chatExecution,
     telemetryRuntime = 'chat',
     wakePlan,
     agentSetup,
@@ -1738,6 +1756,12 @@ export function createChatTools(
             sources: [...context.origin.sources, ...(context.origin.files ?? [])],
           },
           call,
+        );
+      case 'execution.run':
+        if (!chatExecution || !context.origin) throw new AccessDenied();
+        return chatExecution(
+          { conversationId: context.origin.conversationId, language: call.language, code: call.code },
+          context.signal,
         );
       case 'skills.import': {
         if (!context.origin) throw new AccessDenied();
