@@ -54,7 +54,7 @@ import { delegatedRequestId, subagentLimits } from './subagent-contracts.ts';
 const columns = (tx: AgentTransaction) =>
   `id, agent_id AS "agentId", activation_id AS "activationId", definition_revision AS "definitionRevision", parent_task_id AS "parentTaskId", delegation_depth AS "delegationDepth", delegation_tools AS "delegationTools", skills, scope, limits, flow_id AS "flowId", generation, status, pause_reason AS "pauseReason", ${recordsTaskFailure(tx) ? 'failure_reason' : 'NULL::text'} AS "failureReason", active_milliseconds::text AS "activeMilliseconds", tool_calls AS "toolCalls", created_at::text AS "createdAt"`;
 const storedSchema = taskSummarySchema
-  .omit({ cost: true })
+  .omit({ cost: true, agentLifecycle: true })
   .extend({ delegationTools: z.array(toolNameSchema).nullable() });
 type Task = z.infer<typeof storedSchema>;
 type Sources = z.infer<typeof taskSourcesSchema>;
@@ -192,7 +192,8 @@ export function createAgentTasks(
     runId?: string,
   ) {
     if (depth > 8) throw new AgentTaskError('context-limit');
-    for (const source of await protectedSourceClosure(tx, sources))
+    const direct = sources.filter(source => source.kind !== 'task' && source.kind !== 'private-task');
+    for (const source of await protectedSourceClosure(tx, direct))
       await requireProtectedSource(tx, actor, source, runId);
     for (const source of sources) {
       if (source.kind === 'table') {
@@ -217,12 +218,27 @@ export function createAgentTasks(
       } else if (source.kind === 'private-task') {
         await requirePrivateTaskSource(tx, actor, source.taskId);
         if (runId) await requireMcpTaskRun(tx, actor, runId);
+        const sequence = (
+          await tx.client.query(
+            `SELECT max(sequence) AS sequence FROM ${relation(tx, 'tf_agent_task_messages')} WHERE task_id=$1`,
+            [source.taskId],
+          )
+        ).rows[0]?.sequence;
+        if (sequence === null || sequence === undefined) throw new AccessDenied();
+        await sourcesAllowed(
+          tx,
+          actor,
+          [{ kind: 'task', taskId: source.taskId, throughSequence: sequence }],
+          visited,
+          depth,
+          budget,
+          runId,
+        );
       } else if (source.kind === 'mcp-integration') {
         if (runId) await requireMcpTaskRun(tx, actor, runId);
         await requireMcpSource(tx, actor, source);
       } else if (source.kind === 'task') {
-        const task = await owned(tx, actor, source.taskId);
-        await requireTaskInvocation(tx, actor, task.agentId);
+        await owned(tx, actor, source.taskId);
         await requireTaskDefinitionSources(tx, actor, source.taskId, runId);
         const key = `${source.taskId}/${source.throughSequence}`;
         if (visited.has(key)) continue;
@@ -624,9 +640,7 @@ export function createAgentTasks(
         const parent = await owned(tx, actor, parentId);
         if (task.parentTaskId !== parent.id || task.delegationDepth !== parent.delegationDepth + 1)
           throw new AccessDenied();
-        await requireTaskInvocation(tx, actor, parent.agentId);
       }
-      await requireTaskInvocation(tx, actor, task.agentId);
       await requireTaskDefinitionSources(tx, actor, id);
       await retainedSources(tx, actor, id);
       const latest =
@@ -680,7 +694,7 @@ export function createAgentTasks(
       return saveReceipt(tx, actor, input.requestId, command.digest, reopened);
     });
   }
-  async function summary(tx: AgentTransaction, task: Task) {
+  async function summary(tx: AgentTransaction & { commonVersion: number }, task: Task) {
     const cost = (
       await tx.client.query(
         `SELECT COALESCE(sum(charged),0)::text AS "chargedCreditUnits",COALESCE(sum(reserved) FILTER (WHERE charged IS NULL),0)::text AS "heldCreditUnits" FROM ${relation(tx, 'tf_credit_usage')} WHERE flow_id=$1`,
@@ -688,8 +702,15 @@ export function createAgentTasks(
       )
     ).rows[0];
     const knowledge = await knowledgeTaskUsage(tx, task.flowId);
+    const agent = (
+      await tx.client.query(
+        `SELECT CASE ${tx.commonVersion >= 28 ? "WHEN archived_at IS NOT NULL THEN 'archived' " : ''}WHEN deleted_at IS NOT NULL THEN 'deleted' ELSE 'active' END AS lifecycle FROM ${relation(tx, 'tf_agents')} WHERE id=$1`,
+        [task.agentId],
+      )
+    ).rows[0];
     return taskSummarySchema.parse({
       ...task,
+      agentLifecycle: agent?.lifecycle ?? 'deleted',
       cost: {
         chargedCreditUnits: (BigInt(cost.chargedCreditUnits) + knowledge.known).toString(),
         heldCreditUnits: (BigInt(cost.heldCreditUnits) + knowledge.held).toString(),
@@ -832,7 +853,7 @@ export function createAgentTasks(
       )
     )
       return;
-    for (const source of retained) await requireProtectedSource(tx, actor, source);
+    await sourcesAllowed(tx, actor, [{ kind: 'task', taskId: id, throughSequence: row?.sequence }]);
   }
   async function list(workspaceId: string, user: string, value: unknown = {}) {
     const query = taskListQuerySchema.parse(value);
@@ -863,7 +884,6 @@ export function createAgentTasks(
         }
         if (query.search) {
           try {
-            await requireTaskInvocation(tx, actor, row.agentId);
             await requireTaskDefinitionSources(tx, actor, row.id);
             const first = taskMessageSchema
               .optional()
@@ -910,8 +930,7 @@ export function createAgentTasks(
     id: string,
     query: z.infer<typeof taskHistoryQuerySchema>,
   ) {
-    const task = await owned(tx, actor, id);
-    await requireTaskInvocation(tx, actor, task.agentId);
+    await owned(tx, actor, id);
     await requireTaskDefinitionSources(tx, actor, id);
     await retainedSources(tx, actor, id);
     const githubContext = await githubTaskContext(tx, id);
@@ -963,8 +982,7 @@ export function createAgentTasks(
     id = uuidSchema.parse(id);
     attachmentId = uuidSchema.parse(attachmentId);
     return transaction(workspaceId, user, false, async (tx, actor) => {
-      const task = await owned(tx, actor, id);
-      await requireTaskInvocation(tx, actor, task.agentId);
+      await owned(tx, actor, id);
       await retainedSources(tx, actor, id);
       const rows = z
         .array(z.object({ sources: taskSourcesSchema }))

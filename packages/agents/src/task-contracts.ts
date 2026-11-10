@@ -120,6 +120,7 @@ export const taskSummarySchema = taskReceiptSchema.extend({
   pauseReason: taskPauseReasonSchema.nullish(),
   failureReason: taskFailureReasonSchema.nullish(),
   agentId: uuidSchema,
+  agentLifecycle: z.enum(['active', 'deleted', 'archived']).default('active'),
   activationId: uuidSchema,
   definitionRevision: definitionRevisionSchema,
   parentTaskId: uuidSchema.nullable(),

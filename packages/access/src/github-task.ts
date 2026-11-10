@@ -67,7 +67,6 @@ export async function requireGitHubTask(tx: AuthorizationTransaction, actor: Hum
       ).rows[0],
     );
   if (!task) throw new AccessDenied();
-  await requireTaskInvocation(tx, actor, task.agent_id);
   return task;
 }
 
@@ -79,6 +78,7 @@ export async function requireGitHubTaskExecution(
   tool?: string,
 ) {
   const task = await requireGitHubTask(tx, actor, taskId);
+  await requireTaskInvocation(tx, actor, task.agent_id);
   if (task.generation !== generation || !['pending', 'waiting-approval'].includes(task.status))
     throw new AccessDenied();
   if (
