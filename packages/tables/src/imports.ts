@@ -33,6 +33,7 @@ export class TableImportError extends Error {
   constructor(
     readonly code:
       | 'invalid-selection'
+      | 'ambiguous-selection'
       | 'attachment-unknown'
       | 'snapshot-unavailable'
       | 'snapshot-conflict'
@@ -53,6 +54,7 @@ export class TableImportError extends Error {
      * shortened copy of it.
      */
     readonly location?: ImportFailureLocation,
+    readonly candidates?: { sheet?: string; row: number }[],
   ) {
     super(code);
   }
@@ -68,7 +70,7 @@ type ImportFailureCode = TableImportError['code'];
 /** Who can fix a failure: the assistant by correcting its selection, the person by fixing the file, or nobody now. */
 const importFailures: Record<
   ImportFailureCode,
-  { reason: string; fix: 'reference' | 'selection' | 'value' | 'file' | 'retry' | 'prepared' }
+  { reason: string; fix: 'reference' | 'selection' | 'value' | 'file' | 'retry' | 'prepared' | 'choose' }
 > = {
   'attachment-unknown': {
     reason: 'The file reference doesn’t match a file attached to this chat.',
@@ -78,6 +80,10 @@ const importFailures: Record<
     reason:
       'The import settings don’t match the file. Check the format, delimiter, sheet name, header row and conversions.',
     fix: 'selection',
+  },
+  'ambiguous-selection': {
+    reason: 'More than one sheet or header row could be imported.',
+    fix: 'choose',
   },
   'invalid-header': {
     reason: 'The header row is missing, or a column name in it is blank or too long.',
@@ -112,6 +118,7 @@ const personSteps = {
   file: 'Fix the file, attach it again and ask again.',
   retry: 'Try again in a moment.',
   prepared: 'The assistant can continue with the file as first prepared.',
+  choose: 'Specify the sheet and header row to import, then ask again.',
 };
 const assistantSteps = {
   reference:
@@ -125,6 +132,8 @@ const assistantSteps = {
     'Call tables.import.file once more in this reply; if it fails again, tell the person preparation failed and to try later.',
   prepared:
     'Do not call tables.import.file again for this file in this reply, and do not schedule a retry. Continue now: call tables.propose with this same attachmentId and contentDigest as the import reference.',
+  choose:
+    'Use the requested destination table to disambiguate the listed candidates. If more than one still matches, ask the person which sheet and header row to use; never guess.',
 };
 
 function failureWhere(location: ImportFailureLocation) {
@@ -144,10 +153,14 @@ function failureWhere(location: ImportFailureLocation) {
 export function tableImportFailure(error: TableImportError) {
   const { reason, fix } = importFailures[error.code];
   const where = error.location ? `: ${failureWhere(error.location)}` : '';
+  const candidates = error.candidates?.length
+    ? ` Candidates: ${error.candidates.map(item => `${item.sheet ? `"${item.sheet}" ` : ''}row ${item.row}`).join(', ')}.`
+    : '';
   return {
     error: 'import-file-failed' as const,
     code: error.code,
-    reason: `${reason.replace(/\.$/, '')}${where}. ${personSteps[fix]}`,
+    reason: `${reason.replace(/\.$/, '')}${where}. ${personSteps[fix]}${candidates}`,
+    ...(error.candidates ? { candidates: error.candidates } : {}),
     ...(error.location ? { location: error.location } : {}),
     instruction:
       fix === 'prepared'
@@ -196,6 +209,15 @@ export const fileImportSelectionSchema = z.discriminatedUnion('format', [
   z.strictObject({ format: z.literal('xlsx'), sheet: z.string().min(1).max(31), ...fileTabular }),
 ]);
 export type FileImportSelection = z.infer<typeof fileImportSelectionSchema>;
+export const fileImportPreparationSchema = z.strictObject({
+  format: z.enum(['csv', 'xlsx']).optional(),
+  delimiter: z.enum([',', ';', '\t', '|']).optional(),
+  sheet: z.string().min(1).max(31).optional(),
+  header: fileTabular.header.unwrap().optional(),
+  conversions: fileTabular.conversions,
+  empty: fileTabular.empty,
+});
+type FileImportPreparation = z.infer<typeof fileImportPreparationSchema>;
 // A prepared file stores its fitted selection with the adjustments made; files prepared before then store the bare selection.
 const preparedFileSchema = z.union([
   z.strictObject({ selection: fileImportSelectionSchema, adjustments: importAdjustmentsSchema }),
@@ -270,13 +292,11 @@ export function lenientFileImportSelection(input: unknown): unknown {
     out.format = 'csv';
     out.delimiter ??= '\t';
   }
-  if (out.format === undefined) out.format = out.sheet !== undefined ? 'xlsx' : 'csv';
-  if (out.format === 'csv') {
-    delete out.sheet;
-    if (typeof out.delimiter === 'string')
-      out.delimiter = delimiterAliases[out.delimiter.trim().toLowerCase()] ?? out.delimiter;
-    out.delimiter ??= ',';
-  } else if (out.format === 'xlsx') delete out.delimiter;
+  if (out.format === undefined && out.sheet !== undefined) out.format = 'xlsx';
+  if (typeof out.delimiter === 'string')
+    out.delimiter = delimiterAliases[out.delimiter.trim().toLowerCase()] ?? out.delimiter;
+  if (out.format === 'csv') delete out.sheet;
+  else if (out.format === 'xlsx') delete out.delimiter;
   if (out.sheet === undefined) delete out.sheet;
   if (out.delimiter === undefined) delete out.delimiter;
   if (typeof out.header === 'string' && /^\d+$/.test(out.header)) out.header = Number(out.header);
@@ -534,47 +554,162 @@ function unquotedCount(line: string, delimiter: string) {
   return count;
 }
 const columnKey = (name: string) => name.trim().replace(/\s+/g, ' ').toLowerCase();
+type HeaderCandidate = { sheet?: string; row: number; width: number };
+
+function headerWidth(cells: unknown[], fields: string[][]) {
+  const parsed = z.array(nameSchema).min(1).max(importLimits.columns).safeParse(cells);
+  if (!parsed.success) return 0;
+  const names = parsed.data.map(columnKey);
+  if (new Set(names).size !== names.length) return 0;
+  return fields.some(labels => {
+    const known = new Set(labels.map(columnKey));
+    return names.every(name => known.has(name));
+  })
+    ? names.length
+    : 0;
+}
+
+function chooseHeader<T extends HeaderCandidate>(candidates: T[]) {
+  const width = candidates.reduce((maximum, candidate) => Math.max(maximum, candidate.width), 0);
+  const best = candidates.filter(candidate => candidate.width === width);
+  if (best.length > 1)
+    throw new TableImportError(
+      'ambiguous-selection',
+      undefined,
+      best.slice(0, 100).map(({ sheet, row }) => ({ ...(sheet ? { sheet } : {}), row })),
+    );
+  return best[0];
+}
+
+async function csvHeaders(
+  bytes: Uint8Array,
+  delimiter: ',' | ';' | '\t' | '|',
+  fields: string[][],
+  header: FileImportPreparation['header'],
+) {
+  const candidates: (HeaderCandidate & { delimiter: typeof delimiter })[] = [];
+  const parser = parse({ bom: true, delimiter, relax_column_count: true, max_record_size: 1024 * 1024 });
+  let row = 0;
+  try {
+    const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    Readable.from([text]).pipe(parser);
+    for await (const cells of parser) {
+      if (++row > importLimits.rows + 1) break;
+      if (header?.kind === 'row' && row !== header.row) continue;
+      const width = headerWidth(cells, fields);
+      if (width) candidates.push({ row, width, delimiter });
+    }
+  } catch {
+    // A guessed delimiter may not parse. The selected parser still reports the actual file error.
+  } finally {
+    parser.destroy();
+  }
+  return candidates;
+}
 
 /**
- * Fits a chat model's valid selection to the attached file before it is prepared: the delimiter the header row
- * uses, a sheet named in another case or the only sheet, conversions keyed by a header in another case or
+ * Resolves omitted format, sheet and header choices from the file and destination fields; explicit sheet and
+ * header choices remain authoritative. Fits the delimiter, conversions keyed by a header in another case or
  * spacing (others are dropped, so the column stays text), and a conversion that a column's values don't fit
  * replaced by text, or a timestamp for spreadsheet dates. Import plans still convert text to each field's kind.
  * Each change is returned as an adjustment, so the import review can list it.
  */
 export async function fitFileImportSelection(
   bytes: Uint8Array,
-  input: FileImportSelection,
+  input: unknown,
+  fields: string[][] = [],
 ): Promise<{ selection: FileImportSelection; adjustments: ImportAdjustment[] }> {
-  let selection: FileImportSelection = { ...input, conversions: { ...input.conversions } };
+  const requested = validated(fileImportPreparationSchema, input, 'invalid-selection');
+  if (!bytes.byteLength || bytes.byteLength > importLimits.bytes) throw new TableImportError('byte-limit');
+  const format = requested.format ?? (bytes[0] === 0x50 && bytes[1] === 0x4b ? 'xlsx' : 'csv');
+  let selection: FileImportSelection;
   const adjustments: ImportAdjustment[] = [];
-  if (selection.format === 'csv') {
+  if (format === 'csv') {
+    let delimiter = requested.delimiter ?? ',';
+    const candidates =
+      fields.length && requested.header?.kind !== 'provided'
+        ? (
+            await Promise.all(csvDelimiters.map(candidate => csvHeaders(bytes, candidate, fields, requested.header)))
+          ).flat()
+        : [];
+    const matched = chooseHeader([
+      ...new Map(
+        candidates.map(candidate => [
+          `${candidate.row}:${candidate.width === 1 ? '' : candidate.delimiter}`,
+          candidate,
+        ]),
+      ).values(),
+    ]);
+    if (matched) delimiter = matched.delimiter;
     const head = new TextDecoder().decode(bytes.subarray(0, 64 * 1024)).replace(/^\uFEFF/, '');
     const line = head.split(/\r?\n/, 1)[0] ?? '';
-    if (!unquotedCount(line, selection.delimiter)) {
+    if (!matched && !unquotedCount(line, delimiter)) {
       const [best] = csvDelimiters
         .map(delimiter => ({ delimiter, count: unquotedCount(line, delimiter) }))
         .sort((a, b) => b.count - a.count);
-      if (best?.count) {
-        adjustments.push({ kind: 'delimiter', requested: selection.delimiter, used: best.delimiter });
-        selection = { ...selection, delimiter: best.delimiter };
-      }
+      if (best?.count) delimiter = best.delimiter;
     }
-  } else if (bytes.byteLength && bytes.byteLength <= importLimits.bytes) {
+    if (delimiter !== (requested.delimiter ?? ','))
+      adjustments.push({ kind: 'delimiter', requested: requested.delimiter ?? ',', used: delimiter });
+    selection = validated(
+      fileImportSelectionSchema,
+      {
+        format,
+        delimiter,
+        header: requested.header ?? { kind: 'row', row: matched?.row ?? 1 },
+        conversions: requested.conversions,
+        empty: requested.empty,
+      },
+      'invalid-selection',
+    );
+  } else {
     const workbook = new ExcelJS.Workbook();
-    const names = await checkArchive(bytes)
-      .then(() => workbook.xlsx.read(Readable.from([Buffer.from(bytes)])))
-      .then(() => workbook.worksheets.map(sheet => sheet.name))
-      .catch(() => null);
-    const wanted = selection.sheet;
-    if (names && !names.includes(wanted)) {
-      const matched = names.find(name => columnKey(name) === columnKey(wanted));
-      const sheet = matched ?? (names.length === 1 ? names[0] : undefined);
-      if (sheet) {
-        adjustments.push({ kind: 'sheet', requested: wanted, used: sheet, only: !matched });
-        selection = { ...selection, sheet };
+    await checkArchive(bytes);
+    await workbook.xlsx.read(Readable.from([Buffer.from(bytes)])).catch(() => {
+      throw new TableImportError('malformed-file');
+    });
+    const sheets = requested.sheet
+      ? workbook.worksheets.filter(sheet => columnKey(sheet.name) === columnKey(requested.sheet!))
+      : workbook.worksheets;
+    if (!sheets.length) throw new TableImportError('invalid-selection');
+    const candidates: HeaderCandidate[] = [];
+    if (fields.length && requested.header?.kind !== 'provided')
+      for (const sheet of sheets) {
+        for (let row = 1; row <= Math.min(sheet.rowCount, importLimits.rows + 1); row++) {
+          if (requested.header?.kind === 'row' && row !== requested.header.row) continue;
+          const cells = sheet.getRow(row);
+          if (cells.cellCount > importLimits.columns) continue;
+          const width = headerWidth(
+            Array.from({ length: cells.cellCount }, (_, column) => cells.getCell(column + 1).value),
+            fields,
+          );
+          if (width) candidates.push({ sheet: sheet.name, row, width });
+        }
       }
-    }
+    const matched = chooseHeader(candidates);
+    if (!matched && sheets.length > 1)
+      throw new TableImportError(
+        'ambiguous-selection',
+        undefined,
+        sheets.slice(0, 100).map(sheet => ({
+          sheet: sheet.name,
+          row: requested.header?.kind === 'row' ? requested.header.row : 1,
+        })),
+      );
+    const sheet = matched?.sheet ?? sheets[0]!.name;
+    if (requested.sheet && requested.sheet !== sheet)
+      adjustments.push({ kind: 'sheet', requested: requested.sheet, used: sheet, only: false });
+    selection = validated(
+      fileImportSelectionSchema,
+      {
+        format,
+        sheet,
+        header: requested.header ?? { kind: 'row', row: matched?.row ?? 1 },
+        conversions: requested.conversions,
+        empty: requested.empty,
+      },
+      'invalid-selection',
+    );
   }
   if (Object.keys(selection.conversions).length) {
     const rows = await parseImportFile(bytes, { ...selection, conversions: {} }).catch(error => {
@@ -842,11 +977,12 @@ export function createTableImports(options: TableImportOptions) {
       origin: ImportOrigin,
       input: unknown,
       decision: unknown,
+      fields: string[][] = [],
     ) =>
       safe(async () => {
         const reference = validated(referenceSchema, input, 'invalid-selection');
         if (reference.kind !== 'file') throw new TableImportError('invalid-selection');
-        const selection = validated(fileImportSelectionSchema, decision, 'invalid-selection');
+        const selection = validated(fileImportPreparationSchema, decision, 'invalid-selection');
         await runtime.transaction(workspaceId, commonCompatibility, async tx => {
           await owned(tx, actor, origin);
           // The reference names no file of the requester's in this chat: a wrong ID or digest, not a denial.
@@ -862,7 +998,7 @@ export function createTableImports(options: TableImportOptions) {
           const bytes = await options.attachments.read(`${tx.workspaceId}/${stored.object_key}`, stored.size);
           if (bytes.byteLength !== stored.size || sha(bytes) !== reference.contentDigest)
             throw new TableImportError('digest-mismatch');
-          await save(fileKey(tx, actor, origin, reference), await fitFileImportSelection(bytes, selection));
+          await save(fileKey(tx, actor, origin, reference), await fitFileImportSelection(bytes, selection, fields));
           return reference;
         });
       }),

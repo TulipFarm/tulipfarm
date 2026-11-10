@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { canonicalJson } from '@tulipfarm/tables/canonical';
+import { fitFileImportSelection, parseImportFile } from '@tulipfarm/tables/imports';
+import { importWorkbook } from '../../tables/test/import-object-fixture.mjs';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
 import { test } from 'node:test';
@@ -1179,6 +1181,59 @@ test('Azure tool schemas preserve literal values as enums for Foundry model comp
   );
   assert.equal(JSON.stringify(wire.received[1].body.tools).includes('"const":'), false);
 });
+
+for (const model of ['grok-4.3', 'Kimi-K2.6'])
+  test(`${model} can prepare a hint-free file and continue to an import review in one reply`, async t => {
+    const tableId = '11111111-1111-4111-8111-111111111111';
+    const reference = {
+      kind: 'file',
+      attachmentId: '22222222-2222-4222-8222-222222222222',
+      contentDigest: 'a'.repeat(64),
+    };
+    const file = await importWorkbook([['Orders export'], [], ['Order ID', 'Total'], ['A-1', 12]]);
+    let step = 0;
+    await boundary(t, (_req, res) => {
+      res.writeHead(200);
+      const replies = [
+        {
+          calls: [
+            use('tables.import.file', {
+              attachmentId: reference.attachmentId,
+              contentDigest: reference.contentDigest,
+              tableId,
+              selection: '{}',
+            }),
+          ],
+        },
+        {
+          calls: [
+            use('tables.propose', { input: JSON.stringify({ plans: [{ kind: 'import', tableId, reference }] }) }),
+          ],
+        },
+        { text: 'The import review is ready for you to approve.' },
+      ];
+      assert.ok(step < replies.length, 'no correction turn is needed');
+      res.end(JSON.stringify(nativeReply('azure', replies[step++])));
+    });
+    const called = [];
+    const result = await inferWithTools(
+      { ...routes.azure, model },
+      [{ role: 'user', text: 'Prepare the attached orders for import.' }],
+      async call => {
+        called.push(call.tool);
+        if (call.tool === 'tables.import.file') {
+          const fitted = await fitFileImportSelection(file, JSON.parse(call.selection), [['Order ID', 'Total']]);
+          assert.equal((await parseImportFile(file, fitted.selection)).length, 1);
+          return { ...reference, columns: ['Order ID', 'Total'] };
+        }
+        assert.equal(call.tool, 'tables.propose');
+        assert.deepEqual(JSON.parse(call.input).plans[0].reference, reference);
+        return { status: 'pending', id: '33333333-3333-4333-8333-333333333333' };
+      },
+    );
+    assert.deepEqual(called, ['tables.import.file', 'tables.propose']);
+    assert.match(result.text, /review is ready/);
+  });
 
 test('native chat tool schemas accept and reject the same arguments as the server', async t => {
   const wire = await boundary(t, (_req, res) => {
