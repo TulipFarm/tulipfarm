@@ -149,8 +149,8 @@ function setupFailure(error: unknown) {
   if (error instanceof WorkflowConflict && /^[a-z0-9-]{1,64}$/.test(error.message)) return `workflow-${error.message}`;
   if (error instanceof Error && setupCode.test(error.message)) return error.message;
   const { 'error.code': code, 'error.type': type } = errorAttributes(error);
-  const name = (code ?? type)
-    .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
+  // A class name such as TypeError becomes type-error; a code such as 40P01 only changes case.
+  const name = (code ?? type.replace(/([a-z0-9])([A-Z])/g, '$1-$2'))
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-|-$/g, '');

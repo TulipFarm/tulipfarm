@@ -29,7 +29,7 @@ import { AgentRead } from './feedback';
 import { agentDraftErrors } from './draft';
 import { useAgentChanges } from './queries';
 import { AgentSetupReview, useSetupTriggerNames } from './setup-review';
-import { setupErrorText } from './setup-errors';
+import { setupErrorText, setupRetryable } from './setup-errors';
 import { useSlackDestinationNames } from './reference-names';
 import type { agentApi, AgentContext } from './api';
 
@@ -43,7 +43,7 @@ const resultText: Record<AgentSetupReceipt['status'], string> = {
   preparing: 'Saving your setup. Nothing new runs until activation completes.',
   saved: 'Draft saved. Slack channels and workflow triggers are not started.',
   active: 'Agent created and activated.',
-  blocked: 'Instructions saved, but setup is incomplete. No new triggers were started.',
+  blocked: 'Agent saved, but not active yet. No new triggers or Slack channels were started.',
   conflict: 'Something changed before this setup could be applied. Your draft is kept.',
   failed: 'Setup did not finish. Your draft is kept.',
 };
@@ -532,7 +532,8 @@ export function AgentBuilder({
                   {receipt?.error && (
                     <Alert variant="destructive">
                       <AlertDescription>
-                        {setupErrorText(receipt.error)} The earlier active setup was not replaced.
+                        {setupErrorText(receipt.error)}
+                        {base?.expectedSavedRevision ? ' The earlier active setup was not replaced.' : ''}
                       </AlertDescription>
                     </Alert>
                   )}
@@ -555,7 +556,7 @@ export function AgentBuilder({
                           Continue editing
                         </Button>
                       )}
-                      {receipt?.status === 'blocked' && (
+                      {receipt?.status === 'blocked' && setupRetryable(receipt.error) && (
                         <Button
                           variant="outline"
                           onClick={() => {
@@ -575,7 +576,7 @@ export function AgentBuilder({
                             );
                           }}
                         >
-                          Retry this setup
+                          Retry setup
                         </Button>
                       )}
                     </div>

@@ -165,7 +165,9 @@ export function AgentDraftLink({
               ? 'Active'
               : draft?.outcome?.kind === 'builder' && draft.status === 'saved'
                 ? 'Saved in the agent builder · Not active yet'
-                : (statuses[draft?.status ?? ''] ?? 'Draft');
+                : draft?.outcome?.kind === 'agent' && draft.outcome.setupReceipt?.status === 'blocked'
+                  ? 'Saved · Setup incomplete'
+                  : (statuses[draft?.status ?? ''] ?? 'Draft');
   return (
     <div className="w-full">
       <ResultCard

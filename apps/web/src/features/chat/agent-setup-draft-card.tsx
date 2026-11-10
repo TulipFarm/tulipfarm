@@ -16,7 +16,7 @@ import { MoreH } from 'reicon-react/icons/MoreH';
 import { ReviewCard } from '@tulipfarm/sprout/review-card';
 import { UnsavedChanges } from '@/features/tables/feedback';
 import { agentApi } from '@/features/agents/api';
-import { setupErrorText } from '@/features/agents/setup-errors';
+import { setupErrorText, setupRetryable } from '@/features/agents/setup-errors';
 import { AgentSetupReview, useSetupTriggerNames } from '@/features/agents/setup-review';
 import { workspaceRoute } from '@/router';
 import type { ConversationCommand } from './conversation-api';
@@ -60,6 +60,7 @@ export function AgentSetupDraftCard({
   };
   const receipt = draft.outcome?.kind === 'agent' ? draft.outcome.setupReceipt : undefined;
   const stopped = receipt?.status === 'blocked' || receipt?.status === 'failed';
+  const canRetry = receipt?.status === 'blocked' && setupRetryable(receipt.error);
   async function retrySetup(commandId: string) {
     setRetry({ kind: 'sending' });
     try {
@@ -81,6 +82,8 @@ export function AgentSetupDraftCard({
     (!sponsored.length || consent.sponsor) &&
     replacements.every(channel => consent.replaceChannels.includes(channel.channel));
   const updating = proposal.input.expectedSavedRevision !== null;
+  // A new agent exists only once its definition is saved, so a failed first save has no agent page.
+  const agentPage = receipt?.status === 'blocked' || (receipt?.status === 'failed' && updating);
   const handoff = {
     setupAgentId: proposal.targetId,
     ...(draft.status === 'pending' ? { chatId, draftId: draft.id } : {}),
@@ -92,19 +95,21 @@ export function AgentSetupDraftCard({
         ? { label: 'Out of date', variant: 'warning' as const }
         : receipt?.status === 'blocked'
           ? { label: 'Setup incomplete', variant: 'warning' as const }
-          : {
-              label:
-                draft.status === 'pending'
-                  ? 'Draft'
-                  : draft.status === 'preparing'
-                    ? 'Saving'
-                    : draft.status === 'saved'
-                      ? 'Saved draft'
-                      : draft.status === 'dismissed'
-                        ? 'Dismissed'
-                        : 'Needs review',
-              variant: 'secondary' as const,
-            };
+          : draft.status === 'failed'
+            ? { label: 'Not saved', variant: 'destructive' as const }
+            : {
+                label:
+                  draft.status === 'pending'
+                    ? 'Draft'
+                    : draft.status === 'preparing'
+                      ? 'Saving'
+                      : draft.status === 'saved'
+                        ? 'Saved draft'
+                        : draft.status === 'dismissed'
+                          ? 'Dismissed'
+                          : 'Needs review',
+                variant: 'secondary' as const,
+              };
   return (
     <ReviewCard
       label="Review agent draft"
@@ -162,13 +167,17 @@ export function AgentSetupDraftCard({
               <p role="status">Draft saved. No new triggers were started. Any earlier active revision is unchanged.</p>
             )}
             {receipt?.status === 'blocked' && (
-              <p role="status">Instructions saved, but setup is incomplete. No new triggers were started.</p>
+              <p role="status">
+                {updating
+                  ? 'Changes saved, but not active yet. Any earlier active revision is unchanged.'
+                  : 'Agent saved, but not active yet. No new triggers or Slack channels were started.'}
+              </p>
             )}
             {draft.status === 'stale' && (
               <p role="status">This proposal is out of date. Ask chat for a fresh draft before approving changes.</p>
             )}
             {draft.status === 'failed' && receipt?.status !== 'blocked' && receipt?.status !== 'conflict' && (
-              <p role="status">Setup did not finish. Check its status before trying again.</p>
+              <p role="status">Setup did not finish. The agent was not saved and nothing was activated.</p>
             )}
             {draft.status === 'dismissed' && <p role="status">Draft dismissed. Nothing was saved or activated.</p>}
           </div>
@@ -182,9 +191,9 @@ export function AgentSetupDraftCard({
               <AlertDescription>{retry.message}</AlertDescription>
             </Alert>
           )}
-          {stopped && (
+          {stopped && (canRetry || agentPage) && (
             <div className="flex flex-wrap gap-2">
-              {receipt.status === 'blocked' && (
+              {canRetry && (
                 <Button
                   variant="outline"
                   size="sm"
@@ -194,19 +203,21 @@ export function AgentSetupDraftCard({
                   {retry.kind === 'sending' ? 'Retrying setup…' : 'Retry setup'}
                 </Button>
               )}
-              <Button
-                variant="link"
-                size="sm"
-                nativeButton={false}
-                render={
-                  <Link
-                    to="/$workspaceSlug/agents/$agentId"
-                    params={{ workspaceSlug: workspace.slug, agentId: receipt.agentId }}
-                  />
-                }
-              >
-                Open agent to finish setup
-              </Button>
+              {agentPage && (
+                <Button
+                  variant="link"
+                  size="sm"
+                  nativeButton={false}
+                  render={
+                    <Link
+                      to="/$workspaceSlug/agents/$agentId"
+                      params={{ workspaceSlug: workspace.slug, agentId: receipt.agentId }}
+                    />
+                  }
+                >
+                  Open agent
+                </Button>
+              )}
             </div>
           )}
           {feedback}
