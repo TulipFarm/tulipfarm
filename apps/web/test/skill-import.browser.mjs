@@ -6,6 +6,7 @@ import { chromium } from 'playwright';
 import { skillImportFixture } from './skill-import.fixture.mjs';
 import { catalogFamily } from '../src/features/models/catalog-fixture.ts';
 import { notifyChange } from './chat-query.fixture.mjs';
+import { startBuiltApp, captureBrowserFailure } from './built-app.fixture.mjs';
 
 test(
   'a procedure can be created without chat and still requires the package review decision',
@@ -112,15 +113,11 @@ test(
 
 test(
   'New skill uses the workspace default and replaces stale models without replacing a valid choice',
-  { timeout: 60000 },
+  { timeout: 90000 },
   async () => {
-    const server = await createServer({
-      root: fileURLToPath(new URL('..', import.meta.url)),
-      server: { host: '127.0.0.1', port: 0 },
-      logLevel: 'error',
-    });
-    await server.listen();
+    const server = await startBuiltApp();
     const browser = await chromium.launch();
+    let activePage;
     try {
       const fixture = skillImportFixture();
       fixture.workspace.name = 'Acme';
@@ -131,14 +128,49 @@ test(
         defaultChatFamilyId: 'grok-fast',
       };
       const page = await browser.newPage();
+      activePage = page;
+      const savedModels = [];
+      const sends = [];
+      const chats = new Map();
       await page.route('**/v1/**', route => {
         const request = route.request();
         const path = new URL(request.url()).pathname;
         if (path.endsWith('/model-catalog')) return route.fulfill({ json: catalog });
-        if (path === '/v1/auth/update-user') return route.fulfill({ json: { status: true } });
+        if (path === '/v1/auth/update-user') {
+          const model = request.postDataJSON().lastModelFamilyId;
+          savedModels.push(model);
+          fixture.session.user.lastModelFamilyId = model;
+          return route.fulfill({ json: { status: true } });
+        }
+        const conversation = /\/conversations\/([\w-]+)(\/.*)?$/.exec(path);
+        if (conversation) {
+          const [, id, rest = ''] = conversation;
+          if (request.method() === 'PUT' && !rest) {
+            chats.set(id, {
+              id,
+              title: 'Weekly summary',
+              titleRevision: 1,
+              archived: false,
+              activityAt: '2026-10-01T00:00:00Z',
+              createdAt: '2026-10-01T00:00:00Z',
+            });
+            return route.fulfill({ json: { id } });
+          }
+          if (request.method() === 'PUT' && rest.startsWith('/messages/')) {
+            const body = request.postDataJSON();
+            sends.push(body);
+            chats.get(id).model = body.model;
+            return route.fulfill({
+              json: { messageId: rest.split('/').at(-1), turnId: crypto.randomUUID(), sequence: 1 },
+            });
+          }
+          if (rest === '/messages')
+            return route.fulfill({ json: { messages: [], nextBefore: null, hasGitHubProposals: false } });
+          if (!rest) return route.fulfill({ json: chats.get(id) });
+        }
         return route.fulfill(fixture.respond(request.method(), request.url(), request.postDataJSON()));
       });
-      await page.goto(`${server.resolvedUrls.local[0]}${fixture.workspace.slug}/skills`);
+      await page.goto(`${server.origin}/${fixture.workspace.slug}/skills`);
       assert.equal(
         await page.getByRole('link', { name: 'New skill', exact: true }).getAttribute('aria-description'),
         'Opens a chat with Bud',
@@ -146,11 +178,43 @@ test(
       await page.getByRole('link', { name: 'New skill', exact: true }).click();
       await page.getByRole('combobox', { name: /Model: Grok Fast/ }).waitFor();
       await page.getByText('Create a reusable skill · Version latest', { exact: true }).waitFor();
+      const message = page.getByRole('textbox', { name: 'Message', exact: true });
+      await message.fill('Create a weekly summary with completed work, open questions, and next actions.');
+      await message.press('Enter');
+      await page.waitForFunction(
+        () => document.querySelector('[role="textbox"][aria-label="Message"]')?.textContent === '',
+      );
+      assert.equal(sends[0].model, 'grok-fast');
+      assert.deepEqual(savedModels, [], 'Sending an applied workspace default must not save a preference');
+      await page.goto(`${server.origin}/${fixture.workspace.slug}`);
+      await page.getByRole('combobox', { name: 'Model: DeepSeek Pro', exact: true }).waitFor();
+      await page.getByRole('combobox', { name: 'Model: DeepSeek Pro', exact: true }).click();
+      await page.getByRole('option', { name: /Grok Fast/ }).click();
+      await page.getByText('Saving your default model…', { exact: true }).waitFor({ state: 'hidden' });
+      await message.fill('Summarize this week.');
+      await message.press('Enter');
+      await page.waitForFunction(
+        () => document.querySelector('[role="textbox"][aria-label="Message"]')?.textContent === '',
+      );
+      assert.equal(sends.at(-1).model, 'grok-fast');
+      assert.deepEqual(savedModels, ['grok-fast']);
+      await page.goto(`${server.origin}/${fixture.workspace.slug}`);
+      await page.getByRole('combobox', { name: 'Model: Grok Fast', exact: true }).waitFor();
+      await page.getByRole('link', { name: 'Skills', exact: true }).click();
+      await page.getByRole('link', { name: 'New skill', exact: true }).click();
       await page.getByRole('combobox', { name: /Model: Grok Fast/ }).click();
       await page.getByRole('option', { name: /Kimi/ }).click();
       await page.getByRole('combobox', { name: /Model: Kimi/ }).waitFor();
+      assert.deepEqual(savedModels, ['grok-fast', 'kimi']);
       await notifyChange(page, fixture.workspace.id, fixture.session.user.id, 'catalog');
       await page.getByRole('combobox', { name: /Model: Kimi/ }).waitFor();
+      await page.goto(`${server.origin}/${fixture.workspace.slug}`);
+      await page.getByRole('combobox', { name: 'Model: Kimi', exact: true }).waitFor();
+      await page.getByRole('link', { name: 'Skills', exact: true }).click();
+      await page.getByRole('link', { name: 'New skill', exact: true }).click();
+      await page.getByRole('combobox', { name: 'Model: Grok Fast', exact: true }).click();
+      await page.getByRole('option', { name: /Kimi/ }).click();
+      await page.getByRole('combobox', { name: 'Model: Kimi', exact: true }).waitFor();
       catalog.families = catalog.families.map(family =>
         family.id === 'kimi' ? { ...family, available: false, unavailableReason: 'model-family-unavailable' } : family,
       );
@@ -161,6 +225,9 @@ test(
         fixture.requests.some(request => request.path.includes('/skills/workspace-skill-authoring')),
         false,
       );
+    } catch (error) {
+      await captureBrowserFailure(activePage, 'skill-model-default');
+      throw error;
     } finally {
       await browser.close();
       await server.close();

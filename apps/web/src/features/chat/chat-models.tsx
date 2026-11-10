@@ -111,13 +111,8 @@ export function useChatModels(
         void savePreference(id);
       }
     },
-    /** A sent message makes its model the member's last model. */
-    sent: (id: string) => {
+    sent: () => {
       setAcknowledged(saved);
-      if (id !== saved && !saving.current)
-        void authClient
-          .updateUser({ lastModelFamilyId: id }, { signal: AbortSignal.timeout(15_000) })
-          .catch(() => undefined);
     },
     dismissReplacedModel: () => {
       if (!saved) return;

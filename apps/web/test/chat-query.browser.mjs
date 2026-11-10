@@ -401,7 +401,7 @@ test('the last-model notice shows only for an unavailable last model and stops a
             'section',
             { 'aria-label': workspaceId },
             React.createElement('output', null, `${models.model?.id}:${models.replacedModel ?? 'none'}`),
-            React.createElement('button', { onClick: () => models.model && models.sent(models.model.id) }, 'Send'),
+            React.createElement('button', { onClick: () => models.model && models.sent() }, 'Send'),
             React.createElement('button', { onClick: models.dismissReplacedModel }, 'Dismiss'),
           );
         }
@@ -438,8 +438,7 @@ test('the last-model notice shows only for an unavailable last model and stops a
     await output('sent').filter({ hasText: 'claude-sonnet:none' }).waitFor();
     await button('dismissed', 'Dismiss').click();
     await output('dismissed').filter({ hasText: 'claude-sonnet:none' }).waitFor();
-    for (let wait = 0; !saves.length && wait < 50; wait++) await page.waitForTimeout(100);
-    assert.deepEqual(saves, ['claude-sonnet']);
+    assert.deepEqual(saves, []);
     // A dismissal is kept for this workspace, so the next new chat does not repeat the notice.
     await mount();
     await output('dismissed').filter({ hasText: 'claude-sonnet:none' }).waitFor();

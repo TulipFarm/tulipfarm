@@ -657,7 +657,7 @@ function ConversationDetail({
   const write = useConversationCommand(api, (command, recoveredPages) => {
     if (command.kind === 'send') {
       if (recoveredPages) setPages(value => Math.max(value, recoveredPages));
-      if (command.model) models.sent(command.model);
+      if (command.model) models.sent();
       setContent(emptyRichDocument());
       uploads.clear();
       mentions.clear();

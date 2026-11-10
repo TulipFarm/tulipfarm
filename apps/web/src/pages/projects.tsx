@@ -621,7 +621,7 @@ function ProjectComposer({ project }: { project: Project }) {
   const reviewing = useRef(false);
   const allowNavigation = useRef(false);
   const write = useConversationCommand(api, command => {
-    if (command.kind === 'send' && command.model) models.sent(command.model);
+    if (command.kind === 'send' && command.model) models.sent();
     setContent(emptyRichDocument());
     uploads.clear();
     allowNavigation.current = true;
