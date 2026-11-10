@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { assertDefaultSourceEnabled } from './default-source-policy.ts';
 import { effectiveSelection, type EngineClock } from './rolling.ts';
 import { systemClock } from '../host-ports.ts';
 import { z } from 'zod';
@@ -57,6 +58,7 @@ const cursorSchema = z.strictObject({
   page: atlassianCursorTokenSchema.nullable(),
   after: z.string().max(128).nullable(),
   pages: z.number().int().min(0).max(20000),
+  permissionAfter: z.string().max(128).nullable().optional(),
 });
 const initialCursor = () => cursorSchema.parse({ phase: 'listing', index: 0, page: null, after: null, pages: 0 });
 const sourceSchema = z.object({
@@ -291,6 +293,8 @@ export function createAtlassianKnowledge({
         return null;
       const existing = await manager(tx, human, input.commandId);
       if (existing.fingerprint !== fingerprint || existing.state === 'removed') throw new KnowledgeError('conflict');
+      if (input.accountId !== undefined && existing.binding.accountId !== input.accountId)
+        throw new KnowledgeError('conflict');
       return dto(tx, existing);
     };
     const replay = await memberTransaction(workspaceId, userId, prior);
@@ -312,6 +316,7 @@ export function createAtlassianKnowledge({
       throw new AtlassianCorpusError('invalid-selection');
     return memberTransaction(workspaceId, userId, async (tx, human) => {
       if (human.membershipId !== actor.membershipId) throw new AccessDenied();
+      await assertDefaultSourceEnabled(tx, input.commandId);
       const again = await prior(tx, human);
       if (again) return again;
       const linked = await tx.client.query(
@@ -331,13 +336,14 @@ export function createAtlassianKnowledge({
       );
       if (active.rowCount !== memberIds.length) throw new AccessDenied();
       const inserted = await tx.client.query(
-        `INSERT INTO ${table(tx, 'sources')} (id,provider,account_namespace,selection,owner_membership_id) VALUES ($1,$2,$3,$4::jsonb::text,$5) ON CONFLICT DO NOTHING`,
+        `INSERT INTO ${table(tx, 'sources')} (id,provider,account_namespace,selection,owner_membership_id,account_identity) VALUES ($1,$2,$3,$4::jsonb::text,$5,$6) ON CONFLICT DO NOTHING`,
         [
           input.commandId,
           input.selection.product,
           input.selection.cloudId,
           JSON.stringify(input.selection),
           human.membershipId,
+          inspected.binding.accountId,
         ],
       );
       if (!inserted.rowCount) throw new KnowledgeError('conflict');
@@ -464,7 +470,10 @@ export function createAtlassianKnowledge({
     const inspected =
       input.action === 'retry'
         ? await memberTransaction(workspaceId, userId, async (tx, actor) => manager(tx, actor, sourceId)).then(s =>
-            provider.inspectSelection(workspaceId, userId, s.selection, { skipUnavailable: true }),
+            provider.inspectSelection(workspaceId, userId, s.selection, {
+              skipUnavailable: true,
+              account: s.binding.accountId,
+            }),
           )
         : null;
     return memberTransaction(workspaceId, userId, async (tx, actor) => {
@@ -568,7 +577,7 @@ export function createAtlassianKnowledge({
         captured.fences.map(f => itemOf(f.native_id)),
       );
     } catch (error) {
-      if (credentialDenied(error))
+      if (credentialDenied(error) || (error instanceof AtlassianCorpusError && itemGone.includes(error.code)))
         await transaction(workspaceId, async tx =>
           invalidate(tx, sourceId, {
             nativeIds: captured.fences.map(f => f.native_id),
@@ -581,7 +590,8 @@ export function createAtlassianKnowledge({
     return memberTransaction(workspaceId, actor.userId, async (tx, human) => {
       const s = await source(tx, sourceId);
       await store.source(tx, human, sourceId);
-      if (s.access_epoch !== captured.s.access_epoch || s.state !== 'active') throw new KnowledgeError('superseded');
+      if (s.access_epoch !== captured.s.access_epoch || !['active', 'paused'].includes(s.state))
+        throw new KnowledgeError('superseded');
       const current = await tx.client.query(
         `SELECT 1 FROM ${table(tx, 'atlassian_readers')} WHERE source_id=$1 AND membership_id=$2 AND account_id=$3 AND account_generation=$4 AND atlassian_account_id=$5`,
         [
@@ -625,7 +635,14 @@ export function createAtlassianKnowledge({
       return { visible: advanced.length, denied: captured.fences.length - advanced.length };
     });
   }
-  async function renew(workspaceId: string, userId: string, sourceId: string, limit: number, staleOnly: boolean) {
+  async function renew(
+    workspaceId: string,
+    userId: string,
+    sourceId: string,
+    limit: number,
+    staleOnly: boolean,
+    permissionAfter?: string | null,
+  ) {
     const captured = await memberTransaction(workspaceId, userId, async (tx, actor) => {
       await store.source(tx, actor, sourceId);
       const rows = z.array(z.object({ native_id: z.string() })).parse(
@@ -635,8 +652,9 @@ export function createAtlassianKnowledge({
         JOIN ${table(tx, 'atlassian_targets')} t ON t.source_id=i.source_id AND t.target_id=i.target_id AND t.state='active'
         LEFT JOIN ${table(tx, 'atlassian_access')} x ON x.source_id=i.source_id AND x.native_id=i.native_id AND x.membership_id=$2
         WHERE i.source_id=$1 AND i.document_id IS NOT NULL AND (NOT $4 OR x.expires_at IS NULL OR x.expires_at<clock_timestamp()+interval '2 minutes')
-        ORDER BY x.expires_at NULLS FIRST,i.native_id LIMIT $3`,
-            [sourceId, actor.membershipId, limit, staleOnly],
+        ORDER BY CASE WHEN $5::boolean AND $6::text IS NOT NULL AND i.native_id<=$6 THEN 1 ELSE 0 END,
+          CASE WHEN NOT $5 THEN x.expires_at END NULLS FIRST,i.native_id LIMIT $3`,
+            [sourceId, actor.membershipId, limit, staleOnly, permissionAfter !== undefined, permissionAfter ?? null],
           )
         ).rows,
       );
@@ -644,8 +662,10 @@ export function createAtlassianKnowledge({
     });
     let refreshed = 0,
       unavailableCount = 0;
+    let after = permissionAfter ?? null;
     for (let start = 0; start < captured.ids.length; start += limits.accessBatch) {
       const batch = captured.ids.slice(start, start + limits.accessBatch);
+      after = batch.at(-1) ?? after;
       try {
         const outcome = await check(workspaceId, captured.actor, sourceId, batch);
         refreshed += outcome.visible;
@@ -661,11 +681,12 @@ export function createAtlassianKnowledge({
         break;
       }
     }
-    return { refreshed, unavailable: unavailableCount, bounded: true as const };
+    return { refreshed, unavailable: unavailableCount, bounded: true as const, after };
   }
   async function refresh(workspaceId: string, userId: string, sourceId: string) {
     denyMcpEgress();
-    return renew(workspaceId, userId, uuidSchema.parse(sourceId), 100, false);
+    const { after: _after, ...result } = await renew(workspaceId, userId, uuidSchema.parse(sourceId), 100, false);
+    return result;
   }
   async function due(workspaceId: string): Promise<AtlassianKnowledgeWork[]> {
     const held = gate ? await gate(workspaceId) : [];
@@ -678,7 +699,7 @@ export function createAtlassianKnowledge({
         .parse(
           (
             await tx.client.query(
-              `SELECT g.source_id,g.generation FROM ${table(tx, 'atlassian_sources')} g JOIN ${table(tx, 'sources')} s ON s.id=g.source_id WHERE s.state='active' AND g.lease_token IS NULL AND g.next_attempt_at<=clock_timestamp() AND NOT g.source_id=ANY($1::uuid[]) ORDER BY g.next_attempt_at,g.source_id LIMIT 20`,
+              `SELECT g.source_id,g.generation FROM ${table(tx, 'atlassian_sources')} g JOIN ${table(tx, 'sources')} s ON s.id=g.source_id WHERE s.state IN ('active','paused') AND g.lease_token IS NULL AND g.next_attempt_at<=clock_timestamp() AND NOT g.source_id=ANY($1::uuid[]) ORDER BY g.next_attempt_at,g.source_id LIMIT 20`,
               [held],
             )
           ).rows,
@@ -987,16 +1008,31 @@ export function createAtlassianKnowledge({
     if (gate && (await gate(work.workspaceId)).includes(work.sourceId)) return { disposition: 'stale' };
     const claim = await transaction(work.workspaceId, async tx => {
       const s = await source(tx, work.sourceId);
-      if (s.generation !== work.generation || s.state !== 'active') return 'stale' as const;
+      if (s.generation !== work.generation || !['active', 'paused'].includes(s.state)) return 'stale' as const;
       if (s.lease_token) return 'busy' as const;
       if (s.next_attempt_at.getTime() > clock.now()) return 'busy' as const;
       await tx.client.query(
-        `UPDATE ${table(tx, 'atlassian_sources')} SET lease_token=$2,lease_until=clock_timestamp()+interval '15 minutes',sync_state='syncing' WHERE source_id=$1`,
-        [s.source_id, token],
+        `UPDATE ${table(tx, 'atlassian_sources')} SET lease_token=$2,lease_until=clock_timestamp()+interval '15 minutes',sync_state=CASE WHEN $3 THEN sync_state ELSE 'syncing' END WHERE source_id=$1`,
+        [s.source_id, token, s.state === 'paused'],
       );
       return s;
     });
     if (typeof claim === 'string') return { disposition: claim };
+    if (claim.state === 'paused') {
+      let permissionAfter = claim.cursor.permissionAfter ?? null;
+      try {
+        const result = await renew(work.workspaceId, claim.owner_user_id, claim.source_id, 100, true, permissionAfter);
+        permissionAfter = result.after;
+      } finally {
+        await transaction(work.workspaceId, tx =>
+          tx.client.query(
+            `UPDATE ${table(tx, 'atlassian_sources')} SET generation=generation+1,lease_token=NULL,lease_until=NULL,next_attempt_at=clock_timestamp()+interval '1 minute',cursor=jsonb_set(cursor,'{permissionAfter}',$4::jsonb) WHERE source_id=$1 AND generation=$2 AND lease_token=$3`,
+            [work.sourceId, work.generation, token, JSON.stringify(permissionAfter)],
+          ),
+        );
+      }
+      return { disposition: 'ready' };
+    }
     try {
       await fenced(work, token, async () => undefined);
       const owner: HumanActor = { kind: 'human', membershipId: claim.owner_membership_id, userId: claim.owner_user_id };

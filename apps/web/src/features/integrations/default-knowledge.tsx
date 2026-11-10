@@ -26,6 +26,13 @@ import { useAtlassianAccounts, useIntegrationChanges, useGitHubAccounts, useSlac
 import { startSlackInstall } from './slack';
 import { CommandFeedback, useCommand } from './slack-knowledge-shared';
 import { KnowledgeMeter, searchablePercent } from './knowledge-meter';
+import { DefaultKnowledgeSelection } from './default-knowledge-selection';
+import { googleConcealKeys } from './google-knowledge-api';
+import { slackConcealKeys } from './slack-knowledge-api';
+import { atlassianConcealKeys } from './atlassian-knowledge-api';
+import { githubConcealKeys } from './github-knowledge-api';
+
+const sourceKeys = [...googleConcealKeys, ...slackConcealKeys, ...atlassianConcealKeys, ...githubConcealKeys];
 
 type Disclosure = { name: string; scope: string; coverage: string; excluded: string; scopes: string; sources: string };
 export const disclosures: Record<DefaultKnowledgeProduct, Disclosure> = {
@@ -411,6 +418,13 @@ function IntentRow({
   const api = useMemo(() => defaultKnowledgeApi(workspaceId), [workspaceId]);
   const { change } = useFeatureChanges();
   const [confirm, setConfirm] = useState(false);
+  const [narrowing, setNarrowing] = useState(false);
+  const [selecting, setSelecting] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const selectionRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (selecting) selectionRef.current?.focus();
+  }, [selecting]);
   // Each control unmounts when activated, so focus moves deliberately to the action that replaces it.
   const focus = useRef<Focus>(null),
     last = useRef<DefaultKnowledgeAction>('retry');
@@ -426,10 +440,14 @@ function IntentRow({
     },
     async () => {
       focus.current = last.current === 'opt-out' ? 'resume' : 'stop';
+      await change({ kind: 'conceal', keys: sourceKeys });
       await change({ keys: [defaultKnowledgeKeys] });
       setConfirm(false);
+      setNarrowing(false);
+      if (last.current === 'resume') setSaved(false);
+      if (last.current === 'narrow') setSelecting(true);
     },
-    [defaultKnowledgeKeys],
+    [defaultKnowledgeKeys, ...sourceKeys],
   );
   useEffect(() => {
     const target = { confirm: confirmRef, stop: stopRef, resume: resumeRef, none: null }[focus.current ?? 'none']
@@ -527,8 +545,8 @@ function IntentRow({
       )}
       {intent.state === 'opted-out' && (
         <p className="text-sm text-muted-foreground">
-          TulipFarm no longer adds new content for this account. Sources already imported keep their state; pause or
-          remove them in {disclosure.sources}.
+          Automatic indexing is paused for this account. Imported content stays searchable while access is still proven.
+          Hand-picked sources keep their own settings.
         </p>
       )}
       {issue && intent.state === 'active' && (
@@ -558,6 +576,19 @@ function IntentRow({
         </Alert>
       )}
       <div className="flex flex-wrap gap-2 empty:hidden">
+        {intent.product !== 'github' && !narrowing && !selecting && (
+          <Button
+            variant="outline"
+            disabled={command.locked}
+            onClick={() => {
+              setConfirm(false);
+              setSaved(false);
+              setNarrowing(true);
+            }}
+          >
+            Choose what to index
+          </Button>
+        )}
         {intent.state === 'active' && issue?.recovery === 'reconnect' && action && (
           <RepairAction workspaceId={workspaceId} repair={action} />
         )}
@@ -578,7 +609,7 @@ function IntentRow({
           <Button
             ref={resumeRef}
             variant="outline"
-            disabled={command.locked}
+            disabled={command.locked || selecting}
             aria-busy={pending}
             onClick={() => void command.send('resume')}
           >
@@ -589,8 +620,9 @@ function IntentRow({
       {confirm && (
         <div className="space-y-2">
           <p id={`stop-${intent.intentId}`}>
-            Stop adding new {disclosure.name} content for this account? Imported content stays until you pause or remove
-            its sources in {disclosure.sources}.
+            Pause automatic {disclosure.name} indexing for this account? Current automatic sources stop syncing.
+            Permission checks continue so imported content stays searchable while access is still proven. Hand-picked
+            sources are not changed.
           </p>
           <div className="flex flex-wrap gap-2">
             <Button
@@ -616,6 +648,43 @@ function IntentRow({
           </div>
         </div>
       )}
+      {narrowing && (
+        <div className="space-y-2">
+          <p>This stops indexing everything in this account and removes it from Knowledge. Then choose what to keep.</p>
+          <p className="text-sm text-muted-foreground">
+            Hand-picked sources are not removed. Nothing changes in {disclosure.name}. Selected content will be imported
+            again.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="destructive"
+              disabled={command.locked}
+              aria-busy={pending}
+              onClick={() => void command.send('narrow')}
+            >
+              Continue to selection
+            </Button>
+            <Button variant="ghost" disabled={command.locked} onClick={() => setNarrowing(false)}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
+      {selecting && (
+        <div ref={selectionRef} tabIndex={-1} className="outline-none">
+          <DefaultKnowledgeSelection
+            workspaceId={workspaceId}
+            intent={intent}
+            onClose={() => setSelecting(false)}
+            onSaved={async () => {
+              setSelecting(false);
+              setSaved(true);
+              await change({ keys: [defaultKnowledgeKeys, ...sourceKeys] });
+            }}
+          />
+        </div>
+      )}
+      {saved && <p role="status">Your selection was saved. Only selected sources will be indexed.</p>}
       {pending && (
         <p role="status" className="text-sm">
           Updating automatic Knowledge…

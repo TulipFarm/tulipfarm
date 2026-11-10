@@ -54,6 +54,7 @@ export type GoogleKind = z.infer<typeof googleCorpusKindSchema>;
 export type GoogleChoice = z.infer<typeof choiceSchema>;
 export type ConfigureGoogle = {
   commandId: string;
+  accountId?: string;
   selection: z.infer<typeof googleCorpusSelectionSchema>;
   memberIds: string[];
 };

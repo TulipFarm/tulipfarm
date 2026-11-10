@@ -30,6 +30,7 @@ const workspaceParams = z.strictObject({ workspaceId: z.uuid() });
 const sourceParams = workspaceParams.extend({ sourceId: z.uuid() });
 const documentParams = workspaceParams.extend({ documentId: z.uuid() });
 const originalQuery = z.strictObject({ revisionId: z.uuid() });
+const accountQuery = z.strictObject({ account: z.uuid().optional() });
 export const atlassianDocumentsResponseSchema = atlassianKnowledgeDocumentsSchema.extend({
   items: z
     .array(atlassianKnowledgeDocumentsSchema.shape.items.element.extend({ validUntil: z.iso.datetime() }))
@@ -143,7 +144,7 @@ export function registerAtlassianKnowledge(
         ),
       },
       request => {
-        const { cloudId, kind, within, cursor } = atlassianKnowledgeDiscoverSchema.parse(request.query);
+        const { cloudId, kind, within, cursor, account } = atlassianKnowledgeDiscoverSchema.parse(request.query);
         return service.discover(
           workspaceParams.parse(request.params).workspaceId,
           user(request),
@@ -151,6 +152,7 @@ export function registerAtlassianKnowledge(
           kind,
           within,
           cursor,
+          account ? { account } : undefined,
         );
       },
     );
@@ -158,9 +160,22 @@ export function registerAtlassianKnowledge(
       `${base}/sites`,
       {
         logLevel: 'silent',
-        schema: schema('listAtlassianKnowledgeSitesV1', workspaceParams, atlassianKnowledgeSitesSchema),
+        schema: schema(
+          'listAtlassianKnowledgeSitesV1',
+          workspaceParams,
+          atlassianKnowledgeSitesSchema,
+          undefined,
+          accountQuery,
+        ),
       },
-      request => service.sites(workspaceParams.parse(request.params).workspaceId, user(request)),
+      request => {
+        const { account } = accountQuery.parse(request.query);
+        return service.sites(
+          workspaceParams.parse(request.params).workspaceId,
+          user(request),
+          account ? { account } : undefined,
+        );
+      },
     );
     routes.get(
       `${base}/sources`,

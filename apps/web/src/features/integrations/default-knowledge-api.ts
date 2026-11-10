@@ -8,7 +8,7 @@ import { apiOrigin } from '@/lib/auth';
 import { jsonResponse, readJson, requestSignal, responseError } from '@/lib/http';
 
 export type { DefaultKnowledgeIntent, DefaultKnowledgeProduct };
-export type DefaultKnowledgeAction = 'opt-out' | 'resume' | 'retry';
+export type DefaultKnowledgeAction = 'opt-out' | 'resume' | 'retry' | 'narrow';
 
 export class DefaultKnowledgeError extends Error {
   constructor(

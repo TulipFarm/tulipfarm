@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { assertDefaultSourceEnabled } from './default-source-policy.ts';
 import { effectiveSelection, type EngineClock } from './rolling.ts';
 import { systemClock } from '../host-ports.ts';
 import { z } from 'zod';
@@ -289,6 +290,7 @@ export function createSlackKnowledge({
       throw new SlackCorpusError('wrong-kind');
     return memberTransaction(workspaceId, userId, async (tx, human) => {
       if (human.membershipId !== actor.membershipId) throw new AccessDenied();
+      await assertDefaultSourceEnabled(tx, input.commandId);
       if ((await tx.client.query(`SELECT 1 FROM ${table(tx, 'sources')} WHERE id=$1`, [input.commandId])).rowCount) {
         const prior = await manager(tx, human, input.commandId);
         if (prior.fingerprint !== fingerprint || prior.state === 'removed') throw new KnowledgeError('conflict');
@@ -556,7 +558,8 @@ export function createSlackKnowledge({
     return memberTransaction(workspaceId, actor.userId, async (tx, human) => {
       const s = await source(tx, sourceId);
       await store.source(tx, human, sourceId);
-      if (s.access_epoch !== captured.s.access_epoch || s.state !== 'active') throw new KnowledgeError('superseded');
+      if (s.access_epoch !== captured.s.access_epoch || !['active', 'paused'].includes(s.state))
+        throw new KnowledgeError('superseded');
       const current = await tx.client.query(
         `SELECT 1 FROM ${table(tx, 'slack_readers')} WHERE source_id=$1 AND membership_id=$2 AND identity_id=$3 AND installation_id=$4 AND installation_generation=$5 AND slack_user_id=$6 AND authorization_version=$7`,
         [
@@ -656,7 +659,7 @@ export function createSlackKnowledge({
         .parse(
           (
             await tx.client.query(
-              `SELECT g.source_id,g.generation FROM ${table(tx, 'slack_sources')} g JOIN ${table(tx, 'sources')} s ON s.id=g.source_id WHERE s.state='active' AND g.lease_token IS NULL AND g.next_attempt_at<=clock_timestamp() AND NOT g.source_id=ANY($1::uuid[]) ORDER BY g.next_attempt_at,g.source_id LIMIT 20`,
+              `SELECT g.source_id,g.generation FROM ${table(tx, 'slack_sources')} g JOIN ${table(tx, 'sources')} s ON s.id=g.source_id WHERE s.state IN ('active','paused') AND g.lease_token IS NULL AND g.next_attempt_at<=clock_timestamp() AND NOT g.source_id=ANY($1::uuid[]) ORDER BY g.next_attempt_at,g.source_id LIMIT 20`,
               [held],
             )
           ).rows,
@@ -918,16 +921,29 @@ export function createSlackKnowledge({
     if (gate && (await gate(work.workspaceId)).includes(work.sourceId)) return { disposition: 'stale' };
     const claim = await transaction(work.workspaceId, async tx => {
       const s = await source(tx, work.sourceId);
-      if (s.generation !== work.generation || s.state !== 'active') return 'stale' as const;
+      if (s.generation !== work.generation || !['active', 'paused'].includes(s.state)) return 'stale' as const;
       if (s.lease_token) return 'busy' as const;
       if (s.next_attempt_at.getTime() > clock.now()) return 'busy' as const;
       await tx.client.query(
-        `UPDATE ${table(tx, 'slack_sources')} SET lease_token=$2,lease_until=clock_timestamp()+interval '15 minutes',sync_state='syncing' WHERE source_id=$1`,
-        [s.source_id, token],
+        `UPDATE ${table(tx, 'slack_sources')} SET lease_token=$2,lease_until=clock_timestamp()+interval '15 minutes',sync_state=CASE WHEN $3 THEN sync_state ELSE 'syncing' END WHERE source_id=$1`,
+        [s.source_id, token, s.state === 'paused'],
       );
       return s;
     });
     if (typeof claim === 'string') return { disposition: claim };
+    if (claim.state === 'paused') {
+      try {
+        await renew(work.workspaceId, claim.owner_user_id, claim.source_id, 50, true);
+      } finally {
+        await transaction(work.workspaceId, tx =>
+          tx.client.query(
+            `UPDATE ${table(tx, 'slack_sources')} SET generation=generation+1,lease_token=NULL,lease_until=NULL,next_attempt_at=clock_timestamp()+interval '1 minute' WHERE source_id=$1 AND generation=$2 AND lease_token=$3`,
+            [work.sourceId, work.generation, token],
+          ),
+        );
+      }
+      return { disposition: 'ready' };
+    }
     try {
       await fenced(work, token, async () => undefined);
       const owner: HumanActor = { kind: 'human', membershipId: claim.owner_membership_id, userId: claim.owner_user_id };

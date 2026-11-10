@@ -71,7 +71,12 @@ export type AtlassianSource = z.infer<typeof sourceSchema>;
 export type AtlassianProduct = z.infer<typeof atlassianProductSchema>;
 export type AtlassianTargetChoice = z.infer<typeof targetSchema>;
 export type AtlassianSelection = z.infer<typeof atlassianCorpusSelectionSchema>;
-export type ConfigureAtlassian = { commandId: string; selection: AtlassianSelection; memberIds: string[] };
+export type ConfigureAtlassian = {
+  commandId: string;
+  selection: AtlassianSelection;
+  memberIds: string[];
+  accountId?: string;
+};
 export type ManageAtlassian = { commandId: string; action: 'pause' | 'resume' | 'retry' | 'remove' };
 export type DiscoverKind = 'spaces' | 'pages' | 'projects';
 export { atlassianCorpusSelectionSchema, atlassianTargetKey };
@@ -111,7 +116,7 @@ export class AtlassianKnowledgeError extends KnowledgeRequestError {
   }
 }
 
-export function atlassianKnowledgeApi(workspaceId: string) {
+export function atlassianKnowledgeApi(workspaceId: string, accountId?: string) {
   const base = `${apiOrigin}/v1/workspaces/${encodeURIComponent(workspaceId)}/knowledge/atlassian`;
   async function request(path: string, method: string, signal: AbortSignal, body?: unknown) {
     const response = await jsonResponse(`${base}${path}`, {
@@ -132,7 +137,9 @@ export function atlassianKnowledgeApi(workspaceId: string) {
     sites: async (signal: AbortSignal) =>
       z
         .object({ items: z.array(z.object({ cloudId: z.uuid(), name: z.string(), url: z.url() })) })
-        .parse(await request('/sites', 'GET', signal)),
+        .parse(
+          await request(`/sites${accountId ? `?${new URLSearchParams({ account: accountId })}` : ''}`, 'GET', signal),
+        ),
     documents: async (sourceId: string, cursor: string | null, signal: AbortSignal) =>
       z
         .object({ items: z.array(documentSchema), nextCursor: z.string().nullable() })
@@ -152,7 +159,7 @@ export function atlassianKnowledgeApi(workspaceId: string) {
     ) =>
       discoverySchema.parse(
         await request(
-          `/discover?${new URLSearchParams({ cloudId, kind, ...(within ? { within } : {}), ...(cursor ? { cursor } : {}) })}`,
+          `/discover?${new URLSearchParams({ cloudId, kind, ...(accountId ? { account: accountId } : {}), ...(within ? { within } : {}), ...(cursor ? { cursor } : {}) })}`,
           'GET',
           signal,
         ),

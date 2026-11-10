@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { assertDefaultSourceEnabled } from './default-source-policy.ts';
 import { effectiveSelection, type EngineClock } from './rolling.ts';
 import { systemClock } from '../host-ports.ts';
 import { z } from 'zod';
@@ -256,6 +257,7 @@ export function createGoogleKnowledge({
       throw new KnowledgeAccountChanged();
     return memberTransaction(workspaceId, userId, async (tx, human) => {
       if (human.membershipId !== actor.membershipId) throw new AccessDenied();
+      await assertDefaultSourceEnabled(tx, input.commandId);
       const existing = await tx.client.query(`SELECT 1 FROM ${table(tx, 'sources')} WHERE id=$1`, [input.commandId]);
       if (existing.rowCount) {
         const prior = await manager(tx, human, input.commandId);
