@@ -98,6 +98,7 @@ test('a chat without the images feature does not execute a replayed image call',
     if (isCompletionRequest(body)) return Response.json(completionReply('azure'));
     rounds++;
     assert.ok(!body.tools.some(tool => tool.function?.name === 'images_generate'));
+    assert.doesNotMatch(JSON.stringify(body), /# Generating images|workspace-configured image model/);
     return Response.json(
       rounds === 1
         ? nativeReply('azure', { calls: [use('images.generate', { prompt: 'A red tulip' })] })
@@ -114,11 +115,12 @@ test('a chat without the images feature does not execute a replayed image call',
 
 test('chat and saved agents use workspace images without requesting provider credentials', () => {
   for (const mode of ['tools', 'agent']) {
-    const prompt = getSystemPrompt(mode);
+    const prompt = getSystemPrompt(mode, true);
     assert.match(prompt, /workspace-configured image model/);
     assert.match(prompt, /Unless the member explicitly asks to use one of their own connections/);
     assert.match(prompt, /Never ask the member for a provider API key or account/);
     assert.match(prompt, /image-model-unavailable.*turned off.*alternative family.*Do not retry through another tool/);
+    assert.doesNotMatch(getSystemPrompt(mode), /# Generating images|workspace-configured image model/);
   }
 });
 

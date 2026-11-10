@@ -27,14 +27,20 @@ const activityFieldsSchema = z.object({ activity: activitySchema }).loose();
 const mcpInputSchema = z.strictObject({ activity: activitySchema, arguments: z.record(z.string(), z.json()) });
 
 /** Replaces the `tool` discriminator with the user-visible `activity` argument. The root stays `type: object`. */
-function withActivity(schema: Record<string, unknown>): Record<string, unknown> {
+function withActivity(schema: Record<string, unknown>, tool: string): Record<string, unknown> {
   const { $schema: _dialect, properties, required, ...rest } = schema;
   const { tool: _tool, ...fields } = propertiesSchema.parse(properties ?? {});
   const names = requiredSchema.parse(required ?? []).filter(name => name !== 'tool');
   return {
     ...rest,
     type: 'object',
-    properties: { activity: activityJson, ...fields },
+    properties: {
+      activity:
+        tool === 'images.generate'
+          ? { ...activityJson, description: 'Short present-tense progress. No tool names, IDs or Markdown.' }
+          : activityJson,
+      ...fields,
+    },
     required: ['activity', ...names],
   };
 }
@@ -103,7 +109,7 @@ function nativeTools(
     tools.push({
       name,
       description: entry.description,
-      parameters: rowParameters(tool, withActivity(entry.inputSchema)),
+      parameters: rowParameters(tool, withActivity(entry.inputSchema, tool)),
     });
     resolvers.set(name, input => {
       const fields = activityFieldsSchema.safeParse(input);
