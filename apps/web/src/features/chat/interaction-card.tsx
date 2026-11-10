@@ -1,10 +1,14 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
-import { useChoiceDock, useRegisterPendingQuestion } from './choice-dock';
+import Markdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import { Check } from 'reicon-react/icons/Check';
+import { HelpCircle } from 'reicon-react/icons/HelpCircle';
+import { useRegisterPendingQuestion } from './pending-question';
 import { useResultAttention } from './canvas-state';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { Button } from '@tulipfarm/sprout/button';
-import { ChoiceList, ChoiceSummary } from '@tulipfarm/sprout/choice-list';
+import { Badge } from '@tulipfarm/sprout/badge';
+import { ChoiceList } from '@tulipfarm/sprout/choice-list';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@tulipfarm/sprout/collapsible';
 import { ChatConfirmation, type ConfirmationState } from '@tulipfarm/sprout/chat-confirmation';
 import { Label } from '@tulipfarm/sprout/label';
@@ -37,7 +41,6 @@ export function InteractionCard({
   chatId: string;
   reference: InteractionReference;
 }) {
-  const dock = useChoiceDock();
   const requestId = reference.kind === 'request' ? reference.requestId : reference.approvalId;
   const kind = reference.kind === 'request' ? 'request' : 'approval';
   const changes = useConversationChanges();
@@ -53,6 +56,11 @@ export function InteractionCard({
   const secrets =
     read.state.kind === 'ready' && read.state.data.kind === 'information' && !isQuestion(read.state.data.request);
   useRegisterPendingQuestion(kind === 'request' && pending && !writeDenied && !secrets);
+  useEffect(() => {
+    if (kind !== 'request' || !pending || secrets) return;
+    const frame = requestAnimationFrame(() => region.current?.scrollIntoView({ block: 'nearest' }));
+    return () => cancelAnimationFrame(frame);
+  }, [kind, pending, secrets]);
   useResultAttention(
     `interaction:${kind}:${requestId}`,
     pending,
@@ -144,7 +152,7 @@ export function InteractionCard({
       )}
     </div>
   );
-  const card = (
+  return (
     <div
       ref={region}
       aria-label={kind === 'request' ? 'Information request' : 'Table approval'}
@@ -286,7 +294,6 @@ export function InteractionCard({
       {metadata}
     </div>
   );
-  return kind === 'request' && dock && !secrets && (!interaction || pending) ? createPortal(card, dock) : card;
 }
 
 function confirmationState(
@@ -330,24 +337,33 @@ function InformationCard({
       ? request.answerSchema.choices.map(choice => [choice.id, choice.label])
       : [],
   );
+  const recordedAnswer = answer
+    ? answer.kind === 'text'
+      ? answer.text
+      : answer.kind === 'secrets'
+        ? undefined
+        : answer.choiceIds.map(id => labels.get(id) ?? 'Unavailable choice').join(', ')
+    : undefined;
   if (!pending)
     return (
       <section aria-labelledby={`${id}-title`} className="space-y-1">
-        <h4 id={`${id}-title`} className="sr-only">
-          {request.prompt}
-        </h4>
-        <ChoiceSummary
-          prompt={request.prompt}
-          answer={
-            answer
-              ? answer.kind === 'text'
-                ? answer.text
-                : answer.kind === 'secrets'
-                  ? undefined
-                  : answer.choiceIds.map(id => labels.get(id) ?? 'Unavailable choice').join(', ')
-              : undefined
-          }
-        />
+        <div
+          data-slot="choice-summary"
+          className="relative flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 pl-6 text-sm"
+        >
+          <span className="absolute top-0.5 left-0 text-muted-foreground">
+            <HelpCircle size={16} aria-hidden="true" />
+          </span>
+          <h4 id={`${id}-title`} className="min-w-0 text-muted-foreground">
+            <QuestionPrompt>{request.prompt}</QuestionPrompt>
+          </h4>
+          {recordedAnswer && (
+            <Badge variant="secondary">
+              <Check aria-hidden="true" />
+              <span className="min-w-0 whitespace-pre-wrap break-words">{recordedAnswer}</span>
+            </Badge>
+          )}
+        </div>
         {request.status !== 'answered' && (
           <p role="status" className="pl-6 text-xs text-muted-foreground">
             {request.status === 'expired'
@@ -364,7 +380,7 @@ function InformationCard({
     >
       <UnsavedChanges dirty={!!text || choices.length > 0} />
       <h4 id={`${id}-title`} className="min-w-0 whitespace-pre-wrap break-words text-sm font-medium">
-        {request.prompt}
+        <QuestionPrompt>{request.prompt}</QuestionPrompt>
       </h4>
       <Form
         disabled={locked}
@@ -451,5 +467,28 @@ function InformationCard({
         </FormFooter>
       </Form>
     </section>
+  );
+}
+
+function QuestionPrompt({ children }: { children: string }) {
+  return (
+    <span className="sprout-message-response text-sm leading-5 text-inherit [&>*]:mt-0">
+      <Markdown
+        remarkPlugins={[remarkGfm]}
+        allowedElements={['a', 'br', 'code', 'del', 'em', 'strong']}
+        unwrapDisallowed
+        skipHtml
+        // Mirrors the Sprout reply renderer's link and HTML safety.
+        components={{
+          a: ({ href, children }) => (
+            <a href={href} target="_blank" rel="noopener noreferrer">
+              {children}
+            </a>
+          ),
+        }}
+      >
+        {children}
+      </Markdown>
+    </span>
   );
 }

@@ -2,7 +2,7 @@ import { useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type
 import type { Extensions } from '@tiptap/core';
 import { editorDocument, type ChatDraft } from './editor-document';
 import { packageReferenceExtension } from './package-reference';
-import { usePendingQuestion } from './choice-dock';
+import { usePendingQuestion } from './pending-question';
 import { ArrowUp } from 'reicon-react/icons/ArrowUp';
 import { Stop3 } from 'reicon-react/icons/Stop3';
 import { ChevronDown } from 'reicon-react/icons/ChevronDown';

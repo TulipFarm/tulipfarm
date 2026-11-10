@@ -9,12 +9,12 @@ import { createWorkspaceFixture } from './workspace.fixture.mjs';
 import { chatCatalog } from './chat-catalog.fixture.mjs';
 
 test(
-  'choice questions live above the composer and retain answers through retries, reload and skip',
-  { timeout: 90000 },
+  'choice questions render inline Markdown below activity and retain answers through retries, reload and skip',
+  { timeout: 120000 },
   async () => {
     const port = 5778,
       origin = `http://127.0.0.1:${port}`;
-    const { workspace, session } = createWorkspaceFixture({ slug: 'choices-qa', name: 'Choices QA' });
+    const { workspace, session } = createWorkspaceFixture({ slug: 'account-choice', name: 'Account choice' });
     const membershipId = randomUUID(),
       chatId = randomUUID(),
       turnId = randomUUID(),
@@ -23,7 +23,7 @@ test(
       id: requestId,
       turnId,
       revision: 1,
-      prompt: 'Who should send the Slack message?',
+      prompt: 'Who should send the **Slack message**? Use `sender_id` or [the guide](https://example.com/guide).',
       expiresAt: '2099-10-11T00:00:00Z',
       answerSchema: {
         kind: 'choices',
@@ -70,7 +70,10 @@ test(
       const errors = [],
         answers = [];
       let failRead = true,
-        failWrite = 'lost';
+        failWrite = 'lost',
+        historyLength = 0,
+        showRequest = true,
+        inlineRequest = false;
       page.on('pageerror', error => errors.push(String(error)));
       await page.route('**/v1/**', async route => {
         const request = route.request(),
@@ -108,29 +111,45 @@ test(
         } else if (path.endsWith('/messages'))
           json = {
             messages: [
+              ...Array.from({ length: historyLength }, (_, index) => ({
+                id: `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`,
+                sequence: index + 1,
+                author: 'assistant',
+                createdAt: workspace.createdAt,
+                parts: [{ kind: 'text', text: `Earlier account details ${index + 1}.` }],
+                turn: null,
+                tools: [],
+              })),
               {
                 id: turnId,
-                sequence: 1,
+                sequence: historyLength + 1,
                 author: 'human',
                 createdAt: workspace.createdAt,
-                parts: [{ kind: 'text', text: 'Set up my Slack workflow.' }],
+                parts: [
+                  { kind: 'text', text: 'Set up my Slack workflow.' },
+                  ...(inlineRequest ? [{ kind: 'request', requestId }] : []),
+                ],
                 turn: { id: turnId, status: view.status === 'pending' ? 'waiting' : 'completed', generation: 0 },
                 tools,
               },
-              {
-                id: requestId,
-                sequence: 2,
-                author: 'assistant',
-                createdAt: workspace.createdAt,
-                parts: [{ kind: 'request', requestId }],
-                turn: null,
-                tools: [],
-              },
+              ...(showRequest && !inlineRequest
+                ? [
+                    {
+                      id: requestId,
+                      sequence: historyLength + 2,
+                      author: 'assistant',
+                      createdAt: workspace.createdAt,
+                      parts: [{ kind: 'request', requestId }],
+                      turn: null,
+                      tools: [],
+                    },
+                  ]
+                : []),
               ...(view.response
                 ? [
                     {
                       id: view.response.id,
-                      sequence: 3,
+                      sequence: historyLength + 3,
                       author: 'human',
                       createdAt: workspace.createdAt,
                       parts: [{ kind: 'response', responseId: view.response.id }],
@@ -153,11 +172,41 @@ test(
             createdAt: workspace.createdAt,
           };
         else if (path.endsWith('/tables')) json = { tables: [], nextCursor: null };
+        else if (path.endsWith('/system-package-installations')) json = { installations: [], nextCursor: null };
         else return route.fulfill({ status: 404, json: { error: 'not-found' } });
         return route.fulfill({ json });
       });
       const load = () => page.goto(`${origin}/${workspace.slug}/chat/${chatId}`);
-      const dock = page.getByRole('region', { name: 'Questions', exact: true });
+      const dock = page.getByRole('region', { name: 'Conversation', exact: true });
+      const plainPrompt = 'Who should send the Slack message? Use sender_id or the guide.';
+      const question = page.getByRole('region', { name: plainPrompt, exact: true });
+      const formattedQuestion = async () => {
+        await question.waitFor();
+        const heading = question.getByRole('heading', { name: plainPrompt, exact: true });
+        assert.equal(await heading.locator('strong').textContent(), 'Slack message');
+        assert.equal(await heading.locator('code').textContent(), 'sender_id');
+        const link = heading.getByRole('link', { name: 'the guide', exact: true });
+        assert.equal(await link.getAttribute('href'), 'https://example.com/guide');
+        assert.equal(await link.getAttribute('target'), '_blank');
+        assert.equal(await link.getAttribute('rel'), 'noopener noreferrer');
+        assert.equal(await heading.textContent(), plainPrompt);
+        assert.ok((await question.ariaSnapshot()).startsWith(`- region "${plainPrompt}":`));
+        assert.equal(await heading.locator('p, div, pre, img, script, ul, h1').count(), 0);
+      };
+      const capture = async state => {
+        if (!process.env.CHOICES_SCREENSHOT) return;
+        const path = process.env.CHOICES_SCREENSHOT.replace(/\.png$/, `-${state}.png`);
+        if (process.env.CHOICES_CDP_PORT)
+          await promisify(execFile)('agent-browser', [
+            '--session',
+            'choice-question',
+            '--cdp',
+            process.env.CHOICES_CDP_PORT,
+            'screenshot',
+            path,
+          ]);
+        else await page.screenshot({ path });
+      };
       const answered = text => page.locator('[data-slot="choice-summary"]').getByText(text, { exact: true }).waitFor();
       await load();
       await dock.getByRole('button', { name: 'Retry loading request' }).waitFor();
@@ -165,6 +214,7 @@ test(
       await dock.getByRole('button', { name: 'Retry loading request' }).click();
       const recommended = dock.getByRole('radio', { name: /TulipFarm app.*Recommended/ });
       await recommended.waitFor();
+      await formattedQuestion();
       const canvas = page.getByRole('region', { name: 'Canvas', exact: true });
       assert.equal(await canvas.count(), 0, 'questions do not open a result view');
       const activity = page
@@ -178,7 +228,7 @@ test(
           .getByRole('region', { name: 'Conversation', exact: true })
           .getByRole('radio', { name: /TulipFarm app/ })
           .count(),
-        0,
+        1,
       );
       assert.equal(await recommended.isChecked(), false, 'recommendation does not choose an answer');
       assert.equal(await dock.getByRole('button', { name: 'Continue', exact: true }).isEnabled(), true);
@@ -222,17 +272,38 @@ test(
       const input = page.locator('[contenteditable="true"]').first();
       const questionBox = await dock.boundingBox(),
         inputBox = await input.boundingBox();
-      assert.ok(questionBox.y + questionBox.height <= inputBox.y, 'options are immediately above composer');
-      if (process.env.CHOICES_SCREENSHOT) {
-        if (process.env.CHOICES_CDP_PORT)
-          await promisify(execFile)('agent-browser', [
-            '--cdp',
-            process.env.CHOICES_CDP_PORT,
-            'screenshot',
-            process.env.CHOICES_SCREENSHOT,
-          ]);
-        else await page.screenshot({ path: process.env.CHOICES_SCREENSHOT });
-      }
+      assert.ok(questionBox.y + questionBox.height <= inputBox.y, 'transcript ends above composer');
+      await activity.getByRole('button', { expanded: true }).click();
+      const activityBox = await activity.boundingBox(),
+        cardBox = await question.boundingBox();
+      assert.ok(cardBox.y - activityBox.y - activityBox.height <= 40, 'question directly follows Tool activity');
+      await recommended.check();
+      await capture('pending-desktop');
+      await page.setViewportSize({ width: 375, height: 844 });
+      await formattedQuestion();
+      await capture('pending-mobile');
+      await page.setViewportSize({ width: 375, height: 480 });
+      await input.focus();
+      await recommended.focus();
+      await page.keyboard.press('Space');
+      assert.equal(await recommended.isChecked(), true, 'keyboard can select an answer with the composer open');
+      await page.keyboard.press('Tab');
+      await page.keyboard.press('Tab');
+      await page.keyboard.press('Tab');
+      assert.equal(
+        await page
+          .getByRole('button', { name: 'Continue', exact: true })
+          .evaluate(element => element === document.activeElement),
+        true,
+      );
+      const focusedBox = await page.getByRole('button', { name: 'Continue', exact: true }).boundingBox();
+      const viewportBox = await dock.boundingBox();
+      assert.ok(
+        focusedBox.y >= viewportBox.y && focusedBox.y + focusedBox.height <= viewportBox.y + viewportBox.height,
+        'keyboard keeps the answer action in the visible transcript',
+      );
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+      await page.setViewportSize({ width: 1440, height: 1000 });
       const custom = dock.getByRole('textbox', { name: 'Your answer', exact: true });
       await dock.getByRole('button', { name: 'Other answer', exact: true }).click();
       assert.equal(
@@ -256,6 +327,12 @@ test(
       assert.equal(await recommended.isDisabled(), true, 'pending writes lock the answer options');
       await dock.getByRole('button', { name: 'Retry same response' }).click();
       await answered('TulipFarm app (Recommended)');
+      await formattedQuestion();
+      await capture('answered-desktop');
+      await page.setViewportSize({ width: 375, height: 844 });
+      await formattedQuestion();
+      await capture('answered-mobile');
+      await page.setViewportSize({ width: 1440, height: 1000 });
       assert.deepEqual(answers[0], answers[1], 'retry keeps command and answer');
       assert.deepEqual(answers[1].answer, { kind: 'choices', choiceIds: ['app'] });
       await load();
@@ -267,6 +344,41 @@ test(
         0,
         'a response-only message is not rendered',
       );
+      historyLength = 18;
+      showRequest = false;
+      view.status = 'pending';
+      view.response = null;
+      await load();
+      await dock.getByText('Earlier account details 1.', { exact: true }).waitFor();
+      await dock.evaluate(element => {
+        element.scrollTop = 0;
+      });
+      await page.waitForTimeout(100);
+      showRequest = true;
+      await page.evaluate(
+        ({ workspaceId, userId, membershipId, chatId }) => {
+          const channel = new BroadcastChannel('tulipfarm:query:v1');
+          channel.postMessage({
+            version: 1,
+            id: crypto.randomUUID(),
+            sessionId: 'other-tab',
+            scope: { kind: 'workspace', workspaceId, userId, membershipId },
+            kind: 'change',
+            keys: [['conversations', 'detail', chatId]],
+          });
+          channel.close();
+        },
+        { workspaceId: workspace.id, userId: session.user.id, membershipId, chatId },
+      );
+      await recommended.waitFor();
+      await formattedQuestion();
+      const arrivedBox = await question.boundingBox(),
+        timelineBox = await dock.boundingBox();
+      assert.ok(
+        arrivedBox.y >= timelineBox.y && arrivedBox.y + arrivedBox.height <= timelineBox.y + timelineBox.height,
+        'a new question is scrolled into view',
+      );
+      historyLength = 0;
       view.status = 'pending';
       view.response = null;
       await load();
@@ -360,6 +472,45 @@ test(
       await dock.getByRole('button', { name: 'Skip', exact: true }).click();
       await page.clock.runFor(1000);
       await page.getByText('This request was cancelled without an answer.', { exact: true }).waitFor();
+      await page.clock.resume();
+      inlineRequest = true;
+      view.prompt =
+        '# **Safe**\n\n*emphasis* ~~removed~~ `value` [unsafe](javascript:alert%281%29) ![image](https://example.com/image.png)\n\n<script>alert("unsafe")</script>\n\n- item';
+      for (const status of ['pending', 'answered']) {
+        view.status = status;
+        view.response =
+          status === 'answered'
+            ? { id: randomUUID(), answer: { kind: 'text', text: 'A'.repeat(200) }, createdAt: workspace.createdAt }
+            : null;
+        await load();
+        const heading = dock.getByRole('heading', { name: /Safe.*emphasis.*removed.*value/ });
+        await heading.waitFor();
+        assert.equal(await heading.locator('strong').textContent(), 'Safe');
+        assert.equal(await heading.locator('em').textContent(), 'emphasis');
+        assert.equal(await heading.locator('del').textContent(), 'removed');
+        assert.equal(await heading.locator('code').textContent(), 'value');
+        assert.equal(
+          await heading.locator('p, div, pre, img, script, ul, li, h1').count(),
+          0,
+          'question markup stays inline',
+        );
+        assert.equal(
+          await heading.getByRole('link', { name: 'unsafe' }).getAttribute('href'),
+          '',
+          'unsafe link protocols are removed',
+        );
+        assert.equal(await heading.textContent().then(text => text.includes('alert(')), false, 'raw HTML is dropped');
+        assert.equal(
+          await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
+          true,
+          'long recorded answers wrap on mobile',
+        );
+        if (status === 'pending') {
+          const activityBox = await activity.boundingBox(),
+            cardBox = await heading.locator('xpath=..').boundingBox();
+          assert.ok(cardBox.y >= activityBox.y + activityBox.height, 'an inline request follows its own Tool activity');
+        }
+      }
       assert.deepEqual(errors, []);
     } finally {
       await browser?.close();

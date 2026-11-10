@@ -113,7 +113,7 @@ import { GitHubInvestigationCard } from './github-investigation-card';
 import { GitHubBatches } from './github-batches';
 import { TableProposalCard } from './table-proposal-card';
 import { ApprovalDock, ApprovalDockProvider } from './approval-dock';
-import { ChoiceDock, ChoiceDockProvider, usePendingQuestion } from './choice-dock';
+import { PendingQuestionsProvider, usePendingQuestion } from './pending-question';
 import { McpChatActions } from '@/features/workspace-mcp/selection';
 import { IntegrationLinks } from './integration-links';
 import { UpcomingMeetings, showAllMeetingsPrompt } from './upcoming-meetings';
@@ -186,7 +186,7 @@ export function BudConversation({
       {api => (
         <CanvasProvider onOpenItem={compact ? openFullChat : undefined}>
           <ApprovalDockProvider>
-            <ChoiceDockProvider>
+            <PendingQuestionsProvider>
               <ChatWithCanvas enabled={!compact}>
                 <PendingGoogleActions workspaceId={workspaceId} slug={workspace.slug} chatId={chatId} />
                 <ConversationDetail
@@ -199,7 +199,7 @@ export function BudConversation({
                   compact={compact}
                 />
               </ChatWithCanvas>
-            </ChoiceDockProvider>
+            </PendingQuestionsProvider>
           </ApprovalDockProvider>
         </CanvasProvider>
       )}
@@ -358,7 +358,7 @@ function ConversationWorkspace({ api }: { api: ConversationApi }) {
       )}
       <CanvasProvider key={activeChatId}>
         <ApprovalDockProvider>
-          <ChoiceDockProvider>
+          <PendingQuestionsProvider>
             <ChatWithCanvas>
               <ConversationDetail
                 api={activeApi}
@@ -380,7 +380,7 @@ function ConversationWorkspace({ api }: { api: ConversationApi }) {
                 }
               />
             </ChatWithCanvas>
-          </ChoiceDockProvider>
+          </PendingQuestionsProvider>
         </ApprovalDockProvider>
       </CanvasProvider>
     </section>
@@ -1229,6 +1229,11 @@ function ConversationDetail({
                                   followLatest.current = 'inspecting';
                                 }}
                               />
+                              {message.parts.map((part, index) =>
+                                part.kind === 'request' ? (
+                                  <InteractionCard key={index} api={api} chatId={chatId} reference={part} />
+                                ) : null,
+                              )}
                               {message.tools.map(tool => {
                                 const replyTurn = message.turn;
                                 return tool.tool === 'agents.delegate' ? (
@@ -1568,7 +1573,6 @@ function ConversationDetail({
               >
                 {!sharedChat && <BudPreferences chatId={chatId} />}
                 <ApprovalDock />
-                <ChoiceDock />
               </div>
               <Composer
                 compact={compact}
@@ -1832,6 +1836,7 @@ function ConversationEntry({
   );
   const skill = message.parts.find(part => part.kind === 'skill');
   const entry = useRef<HTMLDivElement>(null);
+  if (message.parts.every(part => part.kind === 'request' || part.kind === 'response')) return null;
   return (
     <div className="space-y-3">
       <Message align={message.author === 'human' ? 'end' : 'start'}>
@@ -1840,6 +1845,7 @@ function ConversationEntry({
           {message.parts.map((part, index) => {
             switch (part.kind) {
               case 'request':
+                return null;
               case 'approval':
               case 'approval-resolution':
                 return <InteractionCard key={index} api={api} chatId={chatId} reference={part} />;
