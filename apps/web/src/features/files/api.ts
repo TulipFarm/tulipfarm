@@ -26,6 +26,7 @@ import { jsonResponse, readJson, requestSignal, responseError, writesAllowed } f
 import { editListed, editListedIn, useFeatureChanges, useOptimisticUpdate } from '@/lib/query';
 import { TableRequestError } from '@/features/tables/request-state';
 import type { FilesSearch } from './search.ts';
+import { personalKnowledgeKeys } from './knowledge-api';
 export {
   filesViewSchema,
   modifiedPresets,
@@ -306,8 +307,8 @@ export function useFilesChanges() {
   const { change } = useFeatureChanges();
   return useMemo(
     () => ({
-      changed: () => change({ keys: [fileKeys.all] }),
-      concealed: () => change({ kind: 'conceal', keys: [fileKeys.all] }),
+      changed: () => change({ keys: [fileKeys.all, personalKnowledgeKeys] }),
+      concealed: () => change({ kind: 'conceal', keys: [fileKeys.all, personalKnowledgeKeys] }),
     }),
     [change],
   );

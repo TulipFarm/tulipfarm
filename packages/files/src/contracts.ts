@@ -302,6 +302,7 @@ export const deletionBlockerSchema = z.object({
 export const deletionPreviewSchema = z.object({
   item: fileSummarySchema,
   files: z.number().int().nonnegative(),
+  knowledgeEntries: z.number().int().nonnegative(),
   bytes: z.number().int().nonnegative(),
   blockers: z.array(deletionBlockerSchema),
   blockerCount: z.number().int().nonnegative(),

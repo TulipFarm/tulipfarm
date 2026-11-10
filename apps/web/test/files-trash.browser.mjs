@@ -144,6 +144,10 @@ test(
         ).status,
         200,
       );
+      const entryId = randomUUID();
+      const entry = f.command({ kind: 'file', fileId: ledger });
+      assert.equal((await f.save(entryId, entry)).status, 200);
+      await f.process(entry.commandId);
       assert.equal(
         (
           await f.call(`${base}/${mixed}/folder`, {
@@ -201,6 +205,7 @@ test(
       await page.getByRole('button', { name: 'Delete Old ledger.csv forever' }).click();
       await confirm.getByText('This can’t be undone.', { exact: false }).waitFor();
       await confirm.getByText('1 KB of storage will be freed.').waitFor();
+      await confirm.getByText('This also removes its Knowledge entry.', { exact: true }).waitFor();
       await page.screenshot({ path: `${shots}/delete-forever-confirm-1280.png` });
       const removals = () => writes.filter(write => write === `POST /${ledger}/delete-forever`).length;
       await confirm.getByRole('button', { name: 'Delete forever' }).dblclick();

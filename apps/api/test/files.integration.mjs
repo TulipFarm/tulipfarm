@@ -394,6 +394,7 @@ test('HTTP deletes Trash items forever for owners only, names blocking items and
           deletion: null,
         },
         files: 2,
+        knowledgeEntries: 0,
         bytes: 22,
         blockerCount: 1,
         blockers: [{ id: theirs, name: 'Theirs.txt', kind: 'file', owner: f.adminMembership }],

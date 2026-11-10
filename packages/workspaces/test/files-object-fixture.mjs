@@ -12,6 +12,7 @@ export async function filesObjectFixture() {
     oversized: false,
     remove: false,
     afterRead: null,
+    beforeRemove: null,
     writeDelayMs: 0,
     readDelayMs: 0,
   };
@@ -34,6 +35,9 @@ export async function filesObjectFixture() {
       return response.writeHead(200).end();
     }
     if (request.method === 'DELETE') {
+      const hook = faults.beforeRemove;
+      faults.beforeRemove = null;
+      if (hook) await hook();
       if (faults.remove) return response.writeHead(503).end();
       objects.delete(key);
       return response.writeHead(204).end();

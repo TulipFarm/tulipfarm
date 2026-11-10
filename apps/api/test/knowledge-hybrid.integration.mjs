@@ -70,6 +70,58 @@ export async function hybridFixture() {
   };
 }
 
+test('file deletion retires hybrid search results and old citations while restore reuses both indexes', async () => {
+  const f = await hybridFixture();
+  try {
+    const fileId = randomUUID(),
+      documentId = randomUUID();
+    const base = `/v1/workspaces/${f.workspace.id}/files/${fileId}`;
+    assert.equal((await f.upload(fileId, 'Supplier payment terms precede shipment.')).status, 200);
+    const input = f.command({ kind: 'file', fileId });
+    assert.equal((await f.save(documentId, input)).status, 200);
+    await f.process(input.commandId);
+    for (const work of await f.embeddings.due(f.workspace.id)) await f.embeddings.process(work);
+    const indexes = async () =>
+      (
+        await f.db.platform.query(
+          `SELECT lexical_publication_id,vector_publication_id,tombstoned_at
+      FROM ${f.table('tf_knowledge_documents')} WHERE id=$1`,
+          [documentId],
+        )
+      ).rows[0];
+    const original = await indexes();
+    assert.ok(original.lexical_publication_id && original.vector_publication_id);
+    const body = { kind: 'submitted', commandId: randomUUID(), query: 'supplier settlement policy' };
+    const search = async () => {
+      const response = await f.call('/search', { method: 'POST', body });
+      assert.equal(response.status, 200, response.bytes.toString());
+      return response.json();
+    };
+    const ready = await search();
+    assert.equal(ready.mode, 'hybrid');
+    assert.equal(ready.hits[0].citation.documentId, documentId);
+    const citation = `/citations/${original.lexical_publication_id}:0`;
+    assert.equal((await f.call(citation)).status, 200);
+    assert.equal((await f.call(`${base}/trash`, { method: 'PUT', body: { trashed: true } })).status, 200);
+    assert.deepEqual((await search()).hits, [], 'replayed search cannot return Trash content');
+    assert.equal((await f.call(citation)).status, 404);
+    assert.equal((await f.call(`${base}/trash`, { method: 'PUT', body: { trashed: false } })).status, 200);
+    assert.deepEqual(await indexes(), original, 'restore keeps the lexical and vector publications');
+    assert.equal((await search()).hits[0].citation.documentId, documentId);
+    assert.equal((await f.call(citation)).status, 200);
+    assert.equal((await f.call(`${base}/trash`, { method: 'PUT', body: { trashed: true } })).status, 200);
+    assert.equal((await f.call(`${base}/delete-forever`, { method: 'POST' })).json().state, 'deleted');
+    const removed = await indexes();
+    assert.ok(removed.tombstoned_at);
+    assert.equal(removed.lexical_publication_id, null);
+    assert.equal(removed.vector_publication_id, null);
+    assert.deepEqual((await search()).hits, [], 'cached query vectors cannot revive a deleted source');
+    assert.equal((await f.call(citation)).status, 404);
+  } finally {
+    await f.close();
+  }
+});
+
 test(
   'authenticated hybrid HTTP submits once, preserves paid cache and falls back on failure or credits',
   { timeout: 60000 },
