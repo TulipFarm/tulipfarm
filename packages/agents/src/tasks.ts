@@ -47,10 +47,12 @@ import {
 } from './task-contracts.ts';
 import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import { taskTransition, withTaskTelemetry } from './task-telemetry.ts';
+import { recordsTaskFailure } from './task-pause.ts';
 import { visiblePage } from './visible-page.ts';
 import { delegatedRequestId, subagentLimits } from './subagent-contracts.ts';
 
-const columns = `id, agent_id AS "agentId", activation_id AS "activationId", definition_revision AS "definitionRevision", parent_task_id AS "parentTaskId", delegation_depth AS "delegationDepth", delegation_tools AS "delegationTools", skills, scope, limits, flow_id AS "flowId", generation, status, pause_reason AS "pauseReason", active_milliseconds::text AS "activeMilliseconds", tool_calls AS "toolCalls", created_at::text AS "createdAt"`;
+const columns = (tx: AgentTransaction) =>
+  `id, agent_id AS "agentId", activation_id AS "activationId", definition_revision AS "definitionRevision", parent_task_id AS "parentTaskId", delegation_depth AS "delegationDepth", delegation_tools AS "delegationTools", skills, scope, limits, flow_id AS "flowId", generation, status, pause_reason AS "pauseReason", ${recordsTaskFailure(tx) ? 'failure_reason' : 'NULL::text'} AS "failureReason", active_milliseconds::text AS "activeMilliseconds", tool_calls AS "toolCalls", created_at::text AS "createdAt"`;
 const storedSchema = taskSummarySchema
   .omit({ cost: true })
   .extend({ delegationTools: z.array(toolNameSchema).nullable() });
@@ -133,7 +135,7 @@ export function createAgentTasks(
       .parse(
         (
           await tx.client.query(
-            `SELECT ${columns} FROM ${relation(tx, 'tf_agent_tasks')} WHERE id=$1 AND owner_user_id=$2 AND owner_membership_id=$3`,
+            `SELECT ${columns(tx)} FROM ${relation(tx, 'tf_agent_tasks')} WHERE id=$1 AND owner_user_id=$2 AND owner_membership_id=$3`,
             [id, actor.userId, actor.membershipId],
           )
         ).rows[0],
@@ -840,7 +842,7 @@ export function createAgentTasks(
         .parse(
           (
             await tx.client.query(
-              `SELECT ${columns} FROM ${relation(tx, 'tf_agent_tasks')} WHERE owner_user_id=$1 AND owner_membership_id=$2 AND ($3::uuid IS NULL OR id>$3) AND (NOT $5::boolean OR status NOT IN ('completed','failed')) ORDER BY id LIMIT $4`,
+              `SELECT ${columns(tx)} FROM ${relation(tx, 'tf_agent_tasks')} WHERE owner_user_id=$1 AND owner_membership_id=$2 AND ($3::uuid IS NULL OR id>$3) AND (NOT $5::boolean OR status NOT IN ('completed','failed')) ORDER BY id LIMIT $4`,
               [
                 actor.userId,
                 actor.membershipId,

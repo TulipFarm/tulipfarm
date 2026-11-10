@@ -20,3 +20,8 @@ export function taskFailurePauseReason(failure: string | null): TaskPauseReason 
       return 'model';
   }
 }
+
+/** Whether the workspace schema has `tf_agent_tasks.failure_reason`, added by common migration 52. */
+export function recordsTaskFailure(tx: object) {
+  return Number((tx as { commonVersion?: number }).commonVersion ?? 0) >= 52;
+}

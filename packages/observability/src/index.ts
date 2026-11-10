@@ -198,6 +198,7 @@ const spanAttributes = new Set([
   'error.issues',
   'error.stage',
   'error.origin',
+  'failure_code',
   'duration_ms',
   'title_generation',
   'dispatch_source',
@@ -304,6 +305,11 @@ const titleGenerationOutcomeValues = ['generated', 'skipped', 'failed', 'timeout
 export type TitleGenerationOutcome = (typeof titleGenerationOutcomeValues)[number];
 const titleGenerationOutcomes = new Set<string>(titleGenerationOutcomeValues);
 
+// A stored task failure code such as `authority-revoked`; it becomes a metric label, so only short kebab-case words pass.
+function safeFailureCode(value: unknown): value is string {
+  return typeof value === 'string' && /^[a-z][a-z-]{0,39}$/.test(value);
+}
+
 function safeAttribute(key: string, value: unknown, logLine = false): boolean {
   if (logLine && logOnlyAttributes.has(key)) {
     if (key === 'provider.error_code' || key === 'response.finish_reason') return safeProviderCode(value) === value;
@@ -332,6 +338,7 @@ function safeAttribute(key: string, value: unknown, logLine = false): boolean {
   if (key === 'error.reason') return safeErrorReason(value);
   if (key === 'error.stage') return safeErrorStage(value);
   if (key === 'error.origin') return safeErrorOrigin(value);
+  if (key === 'failure_code') return safeFailureCode(value);
   if (key === 'dependency.endpoint') return typeof value === 'string' && endpoints.has(value);
   if (key === 'title_generation') return typeof value === 'string' && titleGenerationOutcomes.has(value);
   if (key === 'chat.stop.reason') return (chatStopReasons as readonly unknown[]).includes(value);
@@ -2549,13 +2556,39 @@ export function recordSubagent(
   });
 }
 
-export function recordTaskTransition(status: 'started' | 'paused' | 'failed' | 'completed') {
-  const attributes = { runtime: 'task', status };
+/** Why a task failed: its stored failure code, the error behind it and, for an access refusal, the check's name. */
+export type TaskFailure = { code: string; taskId: string; error?: unknown; check?: string };
+
+/**
+ * Records a task status change. A failure carries its `failure_code` on the metric, log line and active span, and the
+ * log line and span also carry the error's type, code and origin.
+ */
+export function recordTaskTransition(status: 'started' | 'paused' | 'failed' | 'completed', failure?: TaskFailure) {
+  const failureCode =
+    status === 'failed' ? (failure && safeFailureCode(failure.code) ? failure.code : 'unknown') : undefined;
+  const attributes = { runtime: 'task', status, ...(failureCode ? { failure_code: failureCode } : {}) };
   metrics
     .getMeter(scope)
     .createCounter('cloud_agent_task_transitions')
     .add(1, { ...dimensions, ...attributes });
-  log(status === 'failed' ? 'error' : 'info', 'task', 'task_status_changed', attributes);
+  if (!failureCode) {
+    log('info', 'task', 'task_status_changed', attributes);
+    return;
+  }
+  const details = {
+    ...(failure?.error === undefined ? { 'error.type': 'unknown' } : errorAttributes(failure.error)),
+    ...(failure?.check ? { 'error.code': failure.check } : {}),
+  };
+  const span = trace.getActiveSpan();
+  span?.setAttributes({ failure_code: failureCode, ...details });
+  span?.recordException({ name: details['error.type'], message: failureCode });
+  span?.setStatus({ code: SpanStatusCode.ERROR });
+  log('error', 'task', 'task_status_changed', {
+    ...attributes,
+    ...details,
+    ...(failure ? { 'task.id': failure.taskId } : {}),
+    ...(failure?.error instanceof Error ? { 'error.site': errorSite(failure.error) } : {}),
+  });
 }
 
 /** `alwaysSample` keeps the request's trace regardless of the ratio, for routes such as a chat send that start a reply. */

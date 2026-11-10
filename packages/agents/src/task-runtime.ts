@@ -44,7 +44,7 @@ import {
   taskSourcesSchema,
   type TaskPauseReason,
 } from './task-contracts.ts';
-import { taskFailurePauseReason } from './task-pause.ts';
+import { recordsTaskFailure, taskFailurePauseReason } from './task-pause.ts';
 import { AgentError } from './saved-contracts.ts';
 import { requireTaskDefinitionSources } from './draft-sources.ts';
 import type { SlackActionsFactory } from './slack-actions.ts';
@@ -63,15 +63,15 @@ import { canonicalJson } from '@tulipfarm/tables/canonical';
 import { taskMcpSources, authorizeMcpSources } from './mcp-authority.ts';
 import type { GitHubTaskFactory } from './github-tasks.ts';
 import type { KnowledgeToolsFactory } from './tools.ts';
-import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
+import { commonCompatibility, transientStorageError } from '@tulipfarm/workspace-storage/runtime';
 import {
   taskAccessCheck,
-  taskAccessDenied,
+  taskFailure,
   taskTelemetryCheckpoint,
   taskTransition,
   withTaskTelemetry,
 } from './task-telemetry.ts';
-import { log } from '@tulipfarm/observability';
+import { errorAttributes, log } from '@tulipfarm/observability';
 import { readPersonalMemory } from '@tulipfarm/conversations/personal-memory';
 import { messageLinks } from '@tulipfarm/conversations/links';
 import { defaultImageInputLimits, type ResolvedModel } from '@tulipfarm/config';
@@ -128,6 +128,36 @@ export type TaskFileScope = { workspaceId: string; userId: string; membershipId:
 export type TaskFilesReader = (
   input: TaskFileScope & { fileId: string },
 ) => Promise<{ filename: string; text: string; read: FileReadReceipt }>;
+// What the model is told about each step the task refused, so its next step can avoid the same mistake.
+const decisionRejections = {
+  'tool-not-admitted': 'It called a tool this task does not offer. Call only the offered tools.',
+  'mcp-origin-denied': 'It called an MCP tool this task cannot use. Call only the offered tools.',
+  'invalid-tool-call': "Its tool call did not match the tool's input. Check the tool's arguments.",
+  'parallel-write': 'It combined a change with other tool calls. Make each change in a step of its own.',
+  'tool-limit': 'It made more than 8 tool calls in one step. Make at most 8.',
+  'task-has-unfinished-proposal':
+    'It ended the task while approved changes were still running. Continue with a tool call until they finish.',
+  'invalid-decision': 'It could not be read as a tool call or a reply. Make one tool call or write a plain reply.',
+} as const;
+type DecisionRejection = keyof typeof decisionRejections;
+/** A model may choose steps the task refuses this many times in a row before the task pauses for its owner. */
+const decisionAttempts = 3;
+const rejectedNotice =
+  'Your latest steps could not be used, so the task did not take them. The reasons are listed in order. Choose a step that avoids them.';
+const rejectedPause =
+  "The agent repeatedly chose a step this task cannot take. Reply with clearer instructions or check the agent's tools before continuing.";
+
+/** The model chose a step this task cannot take; `cause` says why. */
+class TaskDecisionRejected extends Error {
+  readonly code: DecisionRejection;
+  constructor(cause: unknown) {
+    super('decision-rejected', { cause });
+    this.code =
+      cause instanceof Error && Object.hasOwn(decisionRejections, cause.message)
+        ? (cause.message as DecisionRejection)
+        : 'invalid-decision';
+  }
+}
 export class TaskFileUnsupported extends Error {
   constructor() {
     super('task-file-unsupported');
@@ -438,6 +468,21 @@ export function createTaskRuntime(
       [taskId, reason],
     );
     taskTransition(tx, 'paused', changed.rowCount);
+  }
+  /** Why the model's steps were refused since the owner last wrote or a step of this run was used, oldest first. */
+  async function rejectedSteps(tx: Transaction, taskId: string, runId: string) {
+    return z
+      .array(z.object({ failure: z.string() }))
+      .parse(
+        (
+          await tx.client.query(
+            `SELECT g.failure FROM ${relation(tx, 'tf_model_generations')} g WHERE g.run_id=$1 AND g.status='failed' AND g.failure LIKE 'rejected-%' AND g.created_at > GREATEST(COALESCE((SELECT max(created_at) FROM ${relation(tx, 'tf_agent_task_messages')} WHERE task_id=$2 AND role='owner'),'-infinity'),COALESCE((SELECT max(created_at) FROM ${relation(tx, 'tf_model_generations')} WHERE run_id=$1 AND status='committed'),'-infinity')) ORDER BY g.generation`,
+            [runId, taskId],
+          )
+        ).rows,
+      )
+      .map(row => row.failure.slice('rejected-'.length))
+      .filter((code): code is DecisionRejection => Object.hasOwn(decisionRejections, code));
   }
   async function prepare(workspaceId: string, taskId: string, materializing?: Materialized) {
     return locked(workspaceId, taskId, async tx => {
@@ -776,9 +821,13 @@ export function createTaskRuntime(
         : [];
       // An earlier reply of this request announced work it did not do; the runtime continued once (see `process`).
       const continued = await answered(tx, taskId, task.generation);
+      const rejected = await rejectedSteps(tx, taskId, runId);
       const prompt = JSON.stringify({
         instructions,
         ...(continued ? { followThrough } : {}),
+        ...(rejected.length
+          ? { rejectedSteps: { notice: rejectedNotice, reasons: rejected.map(code => decisionRejections[code]) } }
+          : {}),
         history: c.history,
         results,
         references,
@@ -1021,18 +1070,20 @@ export function createTaskRuntime(
       // A context limit cannot clear on retry, so it pauses the task rather than escaping as a retryable step failure.
       const contextLimit = error instanceof AgentTaskError && error.code === 'context-limit';
       if (!(error instanceof AccessDenied) && !(error instanceof AgentError) && !contextLimit) throw error;
-      if (error instanceof AccessDenied) taskAccessDenied(taskId, error);
       await locked(workspaceId, taskId, async tx => {
-        const status = error instanceof AccessDenied ? 'failed' : 'paused';
+        if (error instanceof AccessDenied) {
+          const changed = await tx.client.query(
+            `UPDATE ${relation(tx, 'tf_agent_tasks')} SET status='failed',pause_reason=NULL${recordsTaskFailure(tx) ? ",failure_reason='authority-revoked'" : ''} WHERE id=$1 AND status IN ('pending','waiting-approval')`,
+            [taskId],
+          );
+          taskTransition(tx, 'failed', changed.rowCount, taskId, taskFailure(taskId, 'authority-revoked', error));
+          return;
+        }
         const changed = await tx.client.query(
-          `UPDATE ${relation(tx, 'tf_agent_tasks')} SET status=$2,pause_reason=$3 WHERE id=$1 AND status IN ('pending','waiting-approval') AND status IS DISTINCT FROM $2`,
-          [
-            taskId,
-            status,
-            error instanceof AgentError ? taskFailurePauseReason(error.code) : contextLimit ? 'context' : null,
-          ],
+          `UPDATE ${relation(tx, 'tf_agent_tasks')} SET status='paused',pause_reason=$2 WHERE id=$1 AND status IN ('pending','waiting-approval')`,
+          [taskId, error instanceof AgentError ? taskFailurePauseReason(error.code) : 'context'],
         );
-        taskTransition(tx, status, changed.rowCount, taskId);
+        taskTransition(tx, 'paused', changed.rowCount);
       });
       return;
     }
@@ -1143,11 +1194,13 @@ export function createTaskRuntime(
         let completedRows: number | null = 0;
         try {
           const c = await context(tx, workspaceId, taskId);
-          if (
-            c.task.status !== 'pending' ||
-            c.task.generation !== claim.taskGeneration ||
-            !(await permitted(tx, model, workspaceId, generation, claim.attempt.resolution, claim.attempt.role))
-          )
+          // The owner paused or continued the task during the model call, so this step's answer is no longer wanted.
+          if (c.task.status !== 'pending' || c.task.generation !== claim.taskGeneration) {
+            await tx.client.query('RELEASE SAVEPOINT task_decision');
+            await failGeneration(tx, generation, 'superseded');
+            return;
+          }
+          if (!(await permitted(tx, model, workspaceId, generation, claim.attempt.resolution, claim.attempt.role)))
             throw new AccessDenied();
           const spending = await latestGeneration(tx, claim.runId);
           if (
@@ -1167,7 +1220,12 @@ export function createTaskRuntime(
             );
             return;
           }
-          const decision = parseModelDecision(result.decision, claim.input);
+          let decision: ReturnType<typeof parseModelDecision>;
+          try {
+            decision = parseModelDecision(result.decision, claim.input);
+          } catch (error) {
+            throw new TaskDecisionRejected(error);
+          }
           let persistedDecision = decision;
           let callId: string | null = null,
             proposalId: string | null = null,
@@ -1285,7 +1343,7 @@ export function createTaskRuntime(
                 )
               ).rowCount
             )
-              throw new Error('task-has-unfinished-proposal');
+              throw new TaskDecisionRejected(new Error('task-has-unfinished-proposal'));
             // A reply that announces its next step without calling a tool continues once per owner request instead of ending the task.
             continuing =
               decision.kind === 'answer' &&
@@ -1320,20 +1378,50 @@ export function createTaskRuntime(
           await tx.client.query('RELEASE SAVEPOINT task_decision');
           taskTransition(tx, 'completed', completedRows, taskId);
         } catch (error) {
+          // A lost connection, lock timeout or serialization conflict rolls back the whole step so the activity retries it.
+          if (transientStorageError(error)) throw error;
           await tx.client.query('ROLLBACK TO SAVEPOINT task_decision');
           rollbackTelemetry();
           continuing = false;
-          await failGeneration(
-            tx,
-            generation,
-            error instanceof AccessDenied ? 'authority-revoked' : 'decision-rejected',
-          );
+          if (error instanceof AgentError) {
+            await failGeneration(tx, generation, error.code);
+            await pause(
+              tx,
+              taskId,
+              claim.taskGeneration,
+              taskFailurePauseReason(error.code),
+              'Model execution stopped. Review partial results before continuing.',
+            );
+            return;
+          }
+          if (error instanceof TaskDecisionRejected) {
+            const earlier = (await rejectedSteps(tx, taskId, claim.runId)).length;
+            await failGeneration(tx, generation, `rejected-${error.code}`);
+            log('warn', 'task', 'call_failed', {
+              operation: 'task.decision',
+              'task.id': taskId,
+              ...errorAttributes(error.cause),
+              'error.code': error.code,
+            });
+            if (earlier + 1 < decisionAttempts) {
+              // The next step starts fresh and tells the model why this one was refused.
+              await tx.client.query(
+                `UPDATE ${relation(tx, 'tf_agent_task_steps')} SET completed=true WHERE run_id=$1 AND step=$2`,
+                [claim.runId, claim.step],
+              );
+              return;
+            }
+            await pause(tx, taskId, claim.taskGeneration, recordsTaskFailure(tx) ? 'decision' : 'model', rejectedPause);
+            return;
+          }
+          const reason = error instanceof AccessDenied ? 'authority-revoked' : 'internal';
+          await failGeneration(tx, generation, reason);
           const changed = await tx.client.query(
-            `UPDATE ${relation(tx, 'tf_agent_tasks')} SET status='failed' WHERE id=$1 AND status IS DISTINCT FROM 'failed'`,
-            [taskId],
+            `UPDATE ${relation(tx, 'tf_agent_tasks')} SET status='failed'${recordsTaskFailure(tx) ? ',failure_reason=$2' : ''} WHERE id=$1 AND status IS DISTINCT FROM 'failed'`,
+            recordsTaskFailure(tx) ? [taskId, reason] : [taskId],
           );
           await secrets?.tools.endRun(tx, { kind: 'task', taskId, runId: claim.runId });
-          taskTransition(tx, 'failed', changed.rowCount, taskId);
+          taskTransition(tx, 'failed', changed.rowCount, taskId, taskFailure(taskId, reason, error));
         }
       });
       if (continuing)

@@ -1,5 +1,5 @@
 import type { z } from 'zod';
-import type { taskSummarySchema, TaskPauseReason } from '@tulipfarm/agents/task-contracts';
+import type { taskSummarySchema, TaskFailureReason, TaskPauseReason } from '@tulipfarm/agents/task-contracts';
 import type { StatusState } from '@tulipfarm/sprout/status';
 
 type TaskSummary = z.infer<typeof taskSummarySchema>;
@@ -9,7 +9,7 @@ export const taskStatusLabels: Record<TaskSummary['status'], string> = {
   'waiting-clarification': 'Needs your answer',
   'waiting-approval': 'Needs your review',
   paused: 'Paused',
-  failed: 'Stopped. Check access and try again.',
+  failed: 'Stopped',
 };
 /** The Status mark for each task status; waiting on a person reads as a warning, like its badge. */
 export const taskStatusStates: Record<TaskSummary['status'], StatusState> = {
@@ -27,7 +27,8 @@ const taskNextSteps: Record<TaskSummary['status'], string> = {
   'waiting-approval': 'Review the proposed changes below. Nothing in an unapproved batch can run.',
   paused:
     'This task is paused and keeps its progress. Read the latest update, then reply below when you want it to continue.',
-  failed: 'The task stopped. Review the latest update and check source access before trying to continue.',
+  failed:
+    "The task stopped. Read the latest update, then reply to try again. If it stops again, check the agent's sources and your access.",
 };
 const pauseGuidance: Record<TaskPauseReason, { label: string; recovery: string }> = {
   user: { label: 'Paused by you', recovery: 'Your progress is saved. Reply to continue when you are ready.' },
@@ -75,16 +76,37 @@ const pauseGuidance: Record<TaskPauseReason, { label: string; recovery: string }
     label: 'Paused for approval',
     recovery: 'Review the pending changes before replying to continue. Continuing does not approve any changes.',
   },
+  decision: {
+    label: 'Paused because the agent kept choosing steps it cannot take',
+    recovery:
+      "Read the latest update, then reply with clearer instructions to continue. If the task needs a tool the agent does not have, check the agent's tools first.",
+  },
 };
 
-export function taskStatusLabel(task: Pick<TaskSummary, 'status' | 'pauseReason'>) {
-  return task.status === 'paused' && task.pauseReason
-    ? pauseGuidance[task.pauseReason].label
-    : taskStatusLabels[task.status];
+const failureGuidance: Record<TaskFailureReason, { label: string; recovery: string }> = {
+  'authority-revoked': {
+    label: 'Stopped because access changed',
+    recovery:
+      "The agent or you lost access to something this task needs, such as a source, tool, or table. Check the agent's sources and your access, then reply to try again.",
+  },
+  internal: {
+    label: 'Stopped by an unexpected error',
+    recovery: 'Something went wrong on our side. Your progress is saved. Reply to try again.',
+  },
+};
+
+type TaskState = Pick<TaskSummary, 'status' | 'pauseReason'> & Partial<Pick<TaskSummary, 'failureReason'>>;
+
+function guidance(task: TaskState) {
+  if (task.status === 'paused' && task.pauseReason) return pauseGuidance[task.pauseReason];
+  if (task.status === 'failed' && task.failureReason) return failureGuidance[task.failureReason];
+  return undefined;
 }
 
-export function taskNextStep(task: Pick<TaskSummary, 'status' | 'pauseReason'>) {
-  return task.status === 'paused' && task.pauseReason
-    ? pauseGuidance[task.pauseReason].recovery
-    : taskNextSteps[task.status];
+export function taskStatusLabel(task: TaskState) {
+  return guidance(task)?.label ?? taskStatusLabels[task.status];
+}
+
+export function taskNextStep(task: TaskState) {
+  return guidance(task)?.recovery ?? taskNextSteps[task.status];
 }

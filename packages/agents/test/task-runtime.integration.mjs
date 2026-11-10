@@ -496,10 +496,12 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
   );
   await t.test('direct model mutations cannot bypass proposal admission', async () => {
     const next = await start();
+    const prompts = [];
     const bad = createTaskRuntime(runtime, {
       ...model,
-      infer: async () =>
-        success({
+      infer: async (_resolution, input) => {
+        prompts.push(JSON.parse(input.prompt));
+        return success({
           kind: 'tool',
           text: 'Bypass review.',
           call: {
@@ -509,10 +511,21 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
             recordId,
             values: { [fieldId]: text('BYPASS') },
           },
-        }),
+        });
+      },
     });
+    for (let attempt = 1; attempt < 3; attempt++) {
+      await bad.process(w.id, next.id);
+      assert.equal((await service.read(w.id, user, next.id)).status, 'pending');
+    }
     await bad.process(w.id, next.id);
-    assert.equal((await service.read(w.id, user, next.id)).status, 'failed');
+    const paused = await service.read(w.id, user, next.id);
+    assert.deepEqual([paused.status, paused.pauseReason, paused.failureReason ?? null], ['paused', 'decision', null]);
+    assert.equal(prompts.length, 3);
+    assert.equal(prompts[0].rejectedSteps, undefined);
+    assert.equal(prompts[1].rejectedSteps.reasons.length, 1);
+    assert.equal(prompts[2].rejectedSteps.reasons.length, 2);
+    assert.match(prompts[2].rejectedSteps.reasons[0], /tool/i);
     assert.equal(
       (await createAgentRecordTools(runtime).getRecord(w.id, user, tableId, revision, recordId)).values[fieldId].value,
       'Alice',
@@ -548,7 +561,8 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     ]);
     resolve();
     await running;
-    assert.equal((await service.read(w.id, user, next.id)).status, 'failed');
+    const failed = await service.read(w.id, user, next.id);
+    assert.deepEqual([failed.status, failed.failureReason], ['failed', 'authority-revoked']);
     assert.equal(
       (await service.history(w.id, user, next.id)).messages.some(m => m.text === 'Should not publish.'),
       false,
@@ -740,7 +754,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     });
     release.resolve();
     await running;
-    assert.equal((await service.read(w.id, user, next.id)).status, 'failed');
+    assert.equal((await service.read(w.id, user, next.id)).failureReason, 'authority-revoked');
     assert.equal(
       (
         await db.platform.query(
@@ -944,7 +958,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       release.resolve();
       await processing;
       assert.equal(inferred, false);
-      assert.equal((await service.read(w.id, user, revoked.id)).status, 'failed');
+      assert.equal((await service.read(w.id, user, revoked.id)).failureReason, 'authority-revoked');
       await db.platform.query(`UPDATE ${table('tf_agent_activations')} SET revoked_at=NULL WHERE id=$1`, [
         agent.activationId,
       ]);
@@ -988,7 +1002,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     );
     await bounded.process(w.id, denied.id);
     assert.equal(called, 1);
-    assert.equal((await service.read(w.id, user, denied.id)).status, 'failed');
+    assert.equal((await service.read(w.id, user, denied.id)).failureReason, 'authority-revoked');
   });
   await t.test('an oversized task reference pauses the task instead of failing every retry', async () => {
     let called = 0;

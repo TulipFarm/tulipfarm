@@ -66,6 +66,18 @@ One version identifies all apps and images of a release.
 
 ### Fixed
 
+- A stopped agent task now records why it stopped. The task and its summary
+  carry `failureReason` (`authority-revoked` when the agent or owner lost access
+  to something the task needs, `internal` otherwise), the web app explains it,
+  and `cloud_agent_task_transitions` gains a `failure_code` label on `failed`
+  transitions. The `task_status_changed` error log and the task span carry the
+  same code with the error type, origin and failing access check. This replaces
+  the separate `task.access` `call_failed` log line.
+- When the model picks a step a task can't take, such as a tool the task does
+  not offer, the task no longer fails. The model is told why and tries again; after
+  3 refused steps in a row the task pauses with the new pause reason `decision`.
+  A model answer that arrives after the owner paused or reopened the task is
+  now discarded instead of failing the task.
 - Chats and background jobs no longer fail with a missing table or column
   (`42P01`) in the few minutes after a release while a workspace still waits
   for the release's workspace migrations. The API answers 503
