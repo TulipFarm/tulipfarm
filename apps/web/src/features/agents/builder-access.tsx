@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link } from '@tanstack/react-router';
 import { Plus, X } from 'lucide-react';
 import { Button } from '@tulipfarm/sprout/button';
+import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { ChoiceGroup, Field } from '@tulipfarm/sprout/field';
 import { FormSection } from '@tulipfarm/sprout/form';
 import { Input } from '@tulipfarm/sprout/input';
@@ -18,7 +19,7 @@ import { useAgentSlackApi, useAgentSlackDestinations } from './slack-queries';
 import { AgentRead } from './feedback';
 import type { AgentContext } from './api';
 import type { Policy, RecordPermission, TeamPermission } from './administration';
-import { tableAccessEnrollment } from '@tulipfarm/agents/setup-contracts';
+import { tableAccessEnrollment, tableAccessProblem, type AgentSetup } from '@tulipfarm/agents/setup-contracts';
 
 export type BuilderAccessDraft = {
   grants: Policy['grants'];
@@ -48,6 +49,7 @@ export function BuilderAccess({
   onChange,
   disabled,
   showErrors,
+  previous,
 }: {
   workspaceId: string;
   slug: string;
@@ -58,10 +60,13 @@ export function BuilderAccess({
   onChange: (change: Partial<BuilderAccessDraft>) => void;
   disabled: boolean;
   showErrors: boolean;
+  previous?: AgentSetup | undefined;
 }) {
   const [limitsOpen, setLimitsOpen] = useState(false);
   const parsedLimits = parseLimits(value.taskLimits, { kind: 'start' });
   const limitErrors = showErrors && !parsedLimits.ok ? parsedLimits.errors : {};
+  const problem = tableAccessProblem(teams, value.scope, value.enrollment, previous);
+  const enrolledNames = teams.filter(team => value.enrollment.includes(team.id)).map(team => team.name);
   function addScope(assetId: string, permissions: Policy['limits'][number]['permissions']) {
     const scope = withScopeEntry(value.scope, assetId, permissions);
     onChange({
@@ -122,12 +127,16 @@ export function BuilderAccess({
         )}
         <p className="wrap-anywhere text-sm text-muted-foreground" role="status">
           {value.enrollment.length
-            ? `Uses access from ${teams
-                .filter(team => value.enrollment.includes(team.id))
-                .map(team => `team ${team.name}`)
-                .join(', ')}.`
+            ? enrolledNames.length
+              ? `Uses access from ${new Intl.ListFormat('en').format(enrolledNames)}.`
+              : 'Uses access from enrolled teams.'
             : 'No team access selected. Choose a team that can read the selected tables.'}
         </p>
+        {problem && (
+          <Alert>
+            <AlertDescription>{problem}</AlertDescription>
+          </Alert>
+        )}
         <Disclosure title="Change teams used for access">
           <ChoiceGroup
             type="checkbox"
@@ -135,7 +144,11 @@ export function BuilderAccess({
             legend="Teams whose permissions the agent may use"
             helper="Separate from team placement and from who can use this agent."
             value={value.enrollment}
-            options={teams.map(team => ({ value: team.id, label: team.name }))}
+            options={teams.map(team => ({
+              value: team.id,
+              label: team.name,
+              disabled: !team.canAssign && !previous?.enrollment.includes(team.id),
+            }))}
             onValueChange={enrollment => onChange({ enrollment })}
           />
         </Disclosure>

@@ -43,6 +43,8 @@ export type AgentCommand = z.infer<typeof agentCommandStatusSchema>;
 type ExecutionSettings = z.infer<typeof executionPolicySchema>;
 
 const rejections: Partial<Record<string, string>> = {
+  'agent-team-assignment-required':
+    'You need a manager of the selected team to give this agent access. Ask a team manager to enroll it. Your input is retained.',
   'agent-table-access-unavailable':
     'A selected table is not available through your selected teams. In What data it can use, choose a team you belong to that grants the selected table access. Your input is retained.',
   'trigger-sponsor-consent-required':

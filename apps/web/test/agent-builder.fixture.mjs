@@ -7,7 +7,7 @@ import { membership } from './chat-query.fixture.mjs';
 export function agentBuilderFixture() {
   const imports = skillImportFixture();
   const { workspace, session } = imports;
-  const team = { id: randomUUID(), name: 'People Ops' };
+  const team = { id: randomUUID(), name: 'People Ops', canAssign: true };
   const businessTable = {
     id: randomUUID(),
     revision: 'a'.repeat(40),

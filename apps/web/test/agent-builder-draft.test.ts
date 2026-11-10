@@ -25,18 +25,25 @@ test('table selection adds the fewest granting teams and keeps explicit enrollme
     { id: reader, tableScope: [{ assetId, permissions: ['table.row.read' as const] }] },
     { id: editor, tableScope: [{ assetId, permissions: ['table.row.update' as const] }] },
     { id: both, tableScope: [{ assetId, permissions: ['table.row.read' as const, 'table.row.update' as const] }] },
-  ];
+  ].map(team => ({ ...team, canAssign: true }));
   const entry = { assetId, permissions: ['table.row.read' as const, 'table.row.update' as const] };
   assert.deepEqual(tableAccessEnrollment(teams, entry, []), [both]);
   assert.deepEqual(tableAccessEnrollment(teams, entry, [unrelated]), [unrelated, both]);
   assert.deepEqual(tableAccessEnrollment(teams, entry, [reader, editor]), [reader, editor]);
   assert.deepEqual(tableAccessEnrollment([], entry, []), [], 'never invent a granting team');
+  const memberOnly = [{ ...teams[1]!, canAssign: false }];
+  assert.deepEqual(
+    tableAccessEnrollment(memberOnly, { assetId, permissions: ['table.row.read'] }, []),
+    [],
+    'plain membership does not authorize assigning a team',
+  );
   const context = agentContextSchema.parse({
     currentSoulRevision: 'a'.repeat(40),
     teams: [
       {
         id: both,
         name: 'Operations',
+        canAssign: true,
         tableScope: [...Array.from({ length: 100 }, () => ({ ...entry, assetId: randomUUID() })), entry],
       },
     ],

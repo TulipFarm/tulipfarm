@@ -1,13 +1,16 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import { mkdir } from 'node:fs/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 import { chromium } from 'playwright';
-import { startBuiltApp } from './built-app.fixture.mjs';
 
 const port = Number(process.env.TASK_COMPOSER_BROWSER_PORT ?? 5271);
+const origin = `http://127.0.0.1:${port}`;
 const shots = process.env.TASK_COMPOSER_SCREENSHOTS;
-const server = await startBuiltApp({ port });
-const origin = server.origin;
+const server = spawn('pnpm', ['exec', 'vite', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
+  cwd: new URL('..', import.meta.url),
+  stdio: 'ignore',
+});
 const uuid = digit =>
   `${digit.repeat(8)}-${digit.repeat(4)}-4${digit.repeat(3)}-8${digit.repeat(3)}-${digit.repeat(12)}`;
 const [wid, mid, tid, aid, idleId, scopedId, rid, taskId, pausedId, activationId, otherActivationId] = [
@@ -214,6 +217,17 @@ const describedBy = (locator, page) =>
   );
 
 try {
+  for (
+    let attempt = 0;
+    !(await fetch(origin).then(
+      response => response.ok,
+      () => false,
+    ));
+    attempt++
+  ) {
+    assert.ok(attempt < 150, 'Vite did not start');
+    await delay(100);
+  }
   browser = await chromium.launch({ headless: true });
   const { context, page } = await open({ width: 1440, height: 1000, theme: 'light' });
   active = page;
@@ -445,5 +459,5 @@ try {
   throw error;
 } finally {
   await browser?.close();
-  await server.close();
+  server.kill('SIGTERM');
 }

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { canAccessAsset, canUseAgentEnrollment, type HumanActor } from '@tulipfarm/access';
+import { canAccessAsset, canAssignTeam, canUseAgentEnrollment, type HumanActor } from '@tulipfarm/access';
 import { scopeSchema } from './contracts.ts';
 import { relation, type AgentTransaction } from './store.ts';
 import { AgentError } from './saved-contracts.ts';
@@ -32,12 +32,15 @@ export async function tableAccessTeams(tx: AgentTransaction, actor: HumanActor) 
         )
       ).rows,
     );
-  return teams.map(team => ({
-    ...team,
-    tableScope: grants
-      .filter(grant => grant.teamId === team.id)
-      .map(({ assetId, permissions }) => ({ assetId, permissions })),
-  }));
+  return Promise.all(
+    teams.map(async team => ({
+      ...team,
+      canAssign: await canAssignTeam(tx, actor, team.id),
+      tableScope: grants
+        .filter(grant => grant.teamId === team.id)
+        .map(({ assetId, permissions }) => ({ assetId, permissions })),
+    })),
+  );
 }
 
 export async function requireTableEnrollment(
@@ -45,21 +48,42 @@ export async function requireTableEnrollment(
   actor: HumanActor,
   enrollment: readonly string[],
   scope: Scope,
+  agentId: string,
 ) {
+  const previousTeams = (
+    await tx.client.query(`SELECT team_id FROM ${relation(tx, 'tf_agent_teams')} WHERE agent_id=$1`, [agentId])
+  ).rows.map(row => z.uuid().parse(row.team_id));
+  const previousLimits = scopeSchema.parse(
+    (await tx.client.query(`SELECT scope FROM ${relation(tx, 'tf_agent_limits')} WHERE agent_id=$1`, [agentId])).rows[0]
+      ?.scope ?? [],
+  );
+  const previousActivations = (
+    await tx.client.query(
+      `SELECT scope FROM ${relation(tx, 'tf_agent_activations')} WHERE agent_id=$1 AND revoked_at IS NULL`,
+      [agentId],
+    )
+  ).rows.map(row => scopeSchema.parse(row.scope));
   const teams = await tableAccessTeams(tx, actor);
-  if (enrollment.some(id => !teams.some(team => team.id === id)))
-    throw new AgentError('agent-table-access-unavailable', 403);
+  if (enrollment.some(id => !previousTeams.includes(id) && !teams.some(team => team.id === id && team.canAssign)))
+    throw new AgentError('agent-team-assignment-required', 403);
   for (const entry of scope)
-    for (const permission of entry.permissions.filter(permission => permission.startsWith('table.row.')))
+    for (const permission of entry.permissions.filter(permission => permission.startsWith('table.row.'))) {
+      const permits = (bound: Scope) =>
+        bound.some(item => item.assetId === entry.assetId && item.permissions.includes(permission));
+      if (permits(previousLimits) && previousActivations.some(permits)) continue;
       if (
         !(await canAccessAsset(tx, actor, entry.assetId, permission)) ||
-        !teams.some(
-          team =>
-            enrollment.includes(team.id) &&
-            team.tableScope.some(grant => grant.assetId === entry.assetId && grant.permissions.includes(permission)),
-        )
+        !(
+          await tx.client.query(
+            `SELECT 1 FROM ${relation(tx, 'tf_grants')} g JOIN ${relation(tx, 'tf_table_catalog')} c ON c.id=$2
+           WHERE g.team_id=ANY($1::uuid[]) AND (g.asset_id=c.id OR g.asset_id=c.owning_team_id)
+           AND g.permission=$3 AND c.archived_at IS NULL LIMIT 1`,
+            [enrollment, entry.assetId, permission],
+          )
+        ).rowCount
       )
         throw new AgentError('agent-table-access-unavailable', 403);
+    }
 }
 
 export async function effectiveAgentScope(
@@ -107,10 +131,12 @@ export async function unavailableTableMessage(
   requested: Scope,
   effective: Scope,
 ) {
-  const missing = requested.filter(
-    entry =>
-      entry.permissions.includes('table.row.read') &&
-      !effective.some(bound => bound.assetId === entry.assetId && bound.permissions.includes('table.row.read')),
+  const missing = requested.filter(entry =>
+    entry.permissions.some(
+      permission =>
+        permission.startsWith('table.row.') &&
+        !effective.some(bound => bound.assetId === entry.assetId && bound.permissions.includes(permission)),
+    ),
   );
   if (!missing.length) return null;
   const names: string[] = [];
@@ -124,5 +150,5 @@ export async function unavailableTableMessage(
       ).rows[0]?.display_name;
     names.push(typeof name === 'string' ? name : 'a selected table');
   }
-  return `The agent couldn't reach ${names.join(', ')}. Open the agent's data settings, choose Add table access and a team that grants it, then start a new task.`;
+  return `The agent couldn't reach ${names.join(', ')} with every required permission. Open the agent's Access settings and update Team enrollment, or use Change teams used for access in the builder to choose a granting team, then start a new task.`;
 }

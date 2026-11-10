@@ -140,7 +140,7 @@ test('unreachable selected tables are disclosed and stop manual and workflow tas
     assert.equal((await f.tasks.read(f.w.id, f.user, task.id)).failureReason, 'authority-revoked');
     const history = await f.tasks.history(f.w.id, f.user, task.id);
     assert.match(history.messages.at(-1).text, /couldn't reach Customers/);
-    assert.match(history.messages.at(-1).text, /Add table access/);
+    assert.match(history.messages.at(-1).text, /Change teams used for access/);
   }
   assert.equal(
     (await f.db.platform.query(`SELECT 1 FROM ${f.table('tf_agent_teams')} WHERE agent_id=$1`, [f.agent.agentId]))
@@ -159,6 +159,23 @@ test('invocation scope and current limits narrow the run form without granting e
   assert.deepEqual((await f.saved.detail(f.w.id, f.user, f.agent.agentId)).activations[0].effectiveScope, []);
   const narrowed = await f.tasks.start(f.w.id, f.user, f.value());
   assert.equal(narrowed.status, 'failed');
+});
+
+test('missing write permissions fail tasks even when the selected table remains readable', async t => {
+  const f = await environment(t);
+  for (const permissions of [['table.row.update'], ['table.row.read', 'table.row.update']]) {
+    const scope = [{ assetId: f.customers.tableId, permissions }];
+    await f.db.platform.query(`UPDATE ${f.table('tf_agent_activations')} SET scope=$2 WHERE id=$1`, [
+      f.agent.activationId,
+      JSON.stringify(scope),
+    ]);
+    await seedExecution(f.db, f.w, f.agent.agentId, [f.agent.teamId], scope);
+    for (const start of [f.tasks.start, f.tasks.startForWorkflow]) {
+      const task = await start(f.w.id, f.user, f.value());
+      assert.equal(task.status, 'failed');
+      assert.match((await f.tasks.history(f.w.id, f.user, task.id)).messages.at(-1).text, /couldn't reach Customers/);
+    }
+  }
 });
 
 test('a task cannot complete after table access is removed before processing or before its answer', async t => {

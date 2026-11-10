@@ -1,12 +1,13 @@
 import {
   agentSetupSchema,
   unattendedTrigger,
+  tableAccessProblem,
   type AgentSetup,
   type AgentSetupDraft,
 } from '@tulipfarm/agents/setup-contracts';
 import type { AgentAuthoringSource } from '@tulipfarm/agents/authoring-assistance-contracts';
 import { defaultTaskLimits, limitDraft, parseLimits } from '../tasks/limits.ts';
-import type { AgentInput } from './api';
+import type { AgentContext, AgentInput } from './api';
 import type { BuilderAccessDraft } from './builder-access';
 import type { BuilderChannel } from './builder-slack';
 import type { BuilderTrigger } from './builder-triggers';
@@ -83,8 +84,17 @@ export function builderDefinition(draft: BuilderDraft): BuilderDraft['definition
   };
 }
 
-export function parseBuilder(draft: BuilderDraft, membershipId: string, activating: boolean, agentId: string) {
+export function parseBuilder(
+  draft: BuilderDraft,
+  membershipId: string,
+  activating: boolean,
+  agentId: string,
+  access?: { teams: AgentContext['teams']; previous?: AgentSetup | undefined },
+) {
   const problems: { step: BuilderStep; message: string }[] = [];
+  const tableProblem =
+    access && tableAccessProblem(access.teams, draft.access.scope, draft.access.enrollment, access.previous);
+  if (tableProblem) problems.push({ step: 'access', message: tableProblem });
   if (!draft.definition.name.trim() || draft.definition.name.length > 120)
     problems.push({ step: 'basics', message: 'Use an agent name from 1 to 120 characters.' });
   if (!draft.definition.instructions.trim() || draft.definition.instructions.length > 32000)

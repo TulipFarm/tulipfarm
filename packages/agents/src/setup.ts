@@ -188,7 +188,8 @@ export function createAgentSetup(
     else await requireAgentCreation(tx, actor, input.setup.owningTeamId);
     await requireSharedMcpSlots(tx, input.setup.definition);
     await resolveProcedures(tx, input.setup.definition.skills, actor);
-    if (permission !== 'read') await requireTableEnrollment(tx, actor, input.setup.enrollment, input.setup.scope);
+    if (permission !== 'read')
+      await requireTableEnrollment(tx, actor, input.setup.enrollment, input.setup.scope, agentId);
     await requireNoMcpDerived(
       tx,
       (input.setup.definition.skills ?? [])
@@ -399,7 +400,7 @@ export function createAgentSetup(
       throw new AgentError('activation-version-conflict');
     const bound = boundRuntime(tx, workspaceId),
       { setup } = draft;
-    await requireTableEnrollment(tx, actor, setup.enrollment, setup.scope);
+    await requireTableEnrollment(tx, actor, setup.enrollment, setup.scope, command.agent_id);
     for (const entry of [...setup.scope, ...setup.limits])
       for (const permission of entry.permissions) {
         if (!(await canAccessAsset(tx, actor, entry.assetId, permission))) throw new AccessDenied();

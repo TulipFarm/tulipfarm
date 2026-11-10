@@ -15,9 +15,13 @@ import { createConversationExecutor } from '../../conversations/src/runtime.ts';
 import { createAuthoringDrafts } from '../src/drafts.ts';
 import { createChatTools } from '../src/tools.ts';
 import { agentLinkedDefinition, agentLinkedWorkflowId } from '../src/agent-trigger-workflows.ts';
-import { agentWorkflowTriggerId } from '../src/setup-contracts.ts';
+import { agentWorkflowTriggerId, tableAccessEnrollment } from '../src/setup-contracts.ts';
 import { createWorkflows } from '@tulipfarm/workflows';
-import { createTableWithRows, tableDefinition } from '../../tables/test/fixture.mjs';
+import { createTableWithRows, tableDefinition, textField, textValues } from '../../tables/test/fixture.mjs';
+import { builderDraft, parseBuilder } from '../../../apps/web/src/features/agents/builder-draft.ts';
+import { createAgentTasks } from '../src/tasks.ts';
+import { createTaskRuntime } from '../src/task-runtime.ts';
+import { syntheticContinuity } from './continuity-fixture.mjs';
 
 const limits = { toolCalls: 10, activeMilliseconds: 60000, credits: 10 };
 async function environment(t) {
@@ -168,13 +172,13 @@ test('table enrollment requires current author membership and grants at save and
   assert.deepEqual((await createSavedAgentService(f.runtime).context(f.w.id, f.user)).teams, []);
   await assert.rejects(
     service.saveDraft(f.w.id, f.user, f.agentId, await f.input({ setup })),
-    error => error.code === 'agent-table-access-unavailable',
+    error => error.code === 'agent-team-assignment-required',
     'a granting team the author does not belong to cannot be enrolled',
   );
-  await f.db.platform.query(`INSERT INTO ${f.table('tf_member_teams')}(membership_id,team_id) VALUES($1,$2)`, [
-    f.member,
-    teamId,
-  ]);
+  await f.db.platform.query(
+    `INSERT INTO ${f.table('tf_member_teams')}(membership_id,team_id,role) VALUES($1,$2,'manager')`,
+    [f.member, teamId],
+  );
   const context = await createSavedAgentService(f.runtime).context(f.w.id, f.user);
   assert.deepEqual(context.teams[0].tableScope, scope);
   await assert.rejects(
@@ -192,6 +196,192 @@ test('table enrollment requires current author membership and grants at save and
   );
   assert.deepEqual((await f.state()).activations, []);
   assert.equal((await service.readDraft(f.w.id, f.user, f.agentId)).setup.enrollment[0], teamId);
+});
+
+async function tableSetup(f, role = 'manager') {
+  const teamId = randomUUID(),
+    field = textField();
+  await f.db.platform.query(`INSERT INTO ${f.table('tf_teams')}(id,name) VALUES($1,'Operations')`, [teamId]);
+  await f.db.platform.query(`INSERT INTO ${f.table('tf_member_teams')}(membership_id,team_id,role) VALUES($1,$2,$3)`, [
+    f.member,
+    teamId,
+    role,
+  ]);
+  const customers = await createTableWithRows({
+    db: f.db,
+    workspace: f.w,
+    runtime: f.runtime,
+    definition: tableDefinition({ owningTeamId: teamId, label: 'Customers', fields: [field] }),
+    records: [{ values: textValues(field, 'Alice') }],
+  });
+  await f.db.platform.query(
+    `INSERT INTO ${f.table('tf_grants')}(team_id,asset_id,permission) VALUES($1,$2,'table.row.read')`,
+    [teamId, customers.tableId],
+  );
+  const scope = [{ assetId: customers.tableId, permissions: ['table.row.read'] }];
+  return {
+    teamId,
+    customers,
+    scope,
+    setup: {
+      ...f.setup(),
+      definition: {
+        name: 'Customer reader',
+        instructions: 'Count the customer rows.',
+        tools: ['tables.list', 'rows.list'],
+      },
+      enrollment: [teamId],
+      scope,
+      limits: scope,
+    },
+  };
+}
+
+test('table enrollment blocks plain members in the builder and a manager can create, activate and read rows', async t => {
+  const f = await environment(t),
+    service = createAgentSetup(f.runtime),
+    data = await tableSetup(f, 'member');
+  const saved = createSavedAgentService(f.runtime);
+  let context = await saved.context(f.w.id, f.user);
+  assert.equal(context.teams[0].canAssign, false);
+  const draft = builderDraft();
+  draft.definition = data.setup.definition;
+  draft.access.scope = data.scope;
+  draft.access.limits = data.scope;
+  draft.access.enrollment = tableAccessEnrollment(context.teams, data.scope[0], []);
+  const blocked = parseBuilder(draft, f.member, true, f.agentId, { teams: context.teams });
+  assert.equal(blocked.setup, null);
+  assert.equal(blocked.problems[0].message, 'You need a manager of Operations to give this agent access.');
+  await assert.rejects(
+    service.saveDraft(f.w.id, f.user, f.agentId, await f.input({ setup: data.setup })),
+    error => error.code === 'agent-team-assignment-required',
+  );
+  await f.db.platform.query(
+    `UPDATE ${f.table('tf_member_teams')} SET role='manager' WHERE membership_id=$1 AND team_id=$2`,
+    [f.member, data.teamId],
+  );
+  context = await saved.context(f.w.id, f.user);
+  assert.equal(context.teams[0].canAssign, true);
+  draft.access.enrollment = tableAccessEnrollment(context.teams, data.scope[0], []);
+  const ready = parseBuilder(draft, f.member, true, f.agentId, { teams: context.teams });
+  assert.ok(ready.setup);
+  const staged = await service.saveDraft(f.w.id, f.user, f.agentId, await f.input({ setup: ready.setup }));
+  const command = await service.publish(f.w.id, f.user, f.agentId, f.decision(staged));
+  await f.accept(service, command);
+  assert.equal((await service.advance(f.w.id, f.user, command.commandId)).status, 'active');
+  const tasks = createAgentTasks(f.runtime),
+    task = await tasks.start(f.w.id, f.user, {
+      requestId: randomUUID(),
+      agentId: f.agentId,
+      text: 'Count the customer rows.',
+    });
+  const engine = createTaskRuntime(
+    f.runtime,
+    syntheticContinuity(async input => {
+      const { results } = JSON.parse(input.prompt);
+      if (!results.length) return { kind: 'tool', text: 'Find the table.', call: { tool: 'tables.list' } };
+      const tables = results[0].result.tables;
+      assert.deepEqual(
+        tables.map(table => table.name),
+        ['Customers'],
+      );
+      if (results.length === 1)
+        return {
+          kind: 'tool',
+          text: 'Read the rows.',
+          call: {
+            tool: 'rows.list',
+            tableId: tables[0].id,
+            expectedAppliedRevision: tables[0].appliedRevision,
+            query: {},
+          },
+        };
+      assert.equal(results[1].result.records.length, 1);
+      return { kind: 'answer', text: 'Customers has 1 row.' };
+    }),
+  );
+  for (let step = 0; step < 8 && (await tasks.read(f.w.id, f.user, task.id)).status === 'pending'; step++)
+    await engine.process(f.w.id, task.id);
+  assert.equal((await tasks.read(f.w.id, f.user, task.id)).status, 'completed');
+  assert.equal((await tasks.history(f.w.id, f.user, task.id)).messages.at(-1).text, 'Customers has 1 row.');
+});
+
+test('table enrollment keeps existing teams when a different manager or admin saves and activates', async t => {
+  const f = await environment(t),
+    service = createAgentSetup(f.runtime),
+    data = await tableSetup(f);
+  const editor = { user: randomUUID(), member: randomUUID() },
+    readerTeam = randomUUID();
+  await f.db.platform.query(`INSERT INTO ${f.table('tf_memberships')}(id,user_id,role) VALUES($1,$2,'member')`, [
+    editor.member,
+    editor.user,
+  ]);
+  await f.db.platform.query(`INSERT INTO ${f.table('tf_teams')}(id,name) VALUES($1,'Readers')`, [readerTeam]);
+  await f.db.platform.query(`INSERT INTO ${f.table('tf_member_teams')}(membership_id,team_id) VALUES($1,$2)`, [
+    editor.member,
+    readerTeam,
+  ]);
+  await f.db.platform.query(
+    `INSERT INTO ${f.table('tf_grants')}(team_id,asset_id,permission) VALUES($1,$2,'table.row.read')`,
+    [readerTeam, data.customers.tableId],
+  );
+  const setup = {
+    ...data.setup,
+    policy: {
+      grants: [],
+      personGrants: [
+        { membershipId: f.member, permissions: ['read', 'edit', 'manage', 'invoke'] },
+        { membershipId: editor.member, permissions: ['read', 'edit', 'manage', 'invoke'] },
+        { membershipId: f.w.membershipId, permissions: ['read', 'edit', 'manage', 'invoke'] },
+      ],
+    },
+  };
+  const draft = await service.saveDraft(f.w.id, f.user, f.agentId, await f.input({ setup }));
+  const first = await service.publish(f.w.id, f.user, f.agentId, f.decision(draft));
+  await f.accept(service, first);
+  assert.equal((await service.advance(f.w.id, f.user, first.commandId)).status, 'active');
+  for (const user of [editor.user, f.w.userId]) {
+    const state = await f.state(),
+      current = {
+        ...setup,
+        definition: { ...setup.definition, instructions: `Count rows, edit ${state.agent.policy_version}.` },
+      };
+    const next = await service.saveDraft(
+      f.w.id,
+      user,
+      f.agentId,
+      await f.input({
+        setup: current,
+        expectedSavedRevision: state.agent.saved_revision,
+        expectedPolicyVersion: state.agent.policy_version,
+        expectedActivationIds: state.activations,
+      }),
+    );
+    const command = await service.publish(f.w.id, user, f.agentId, f.decision(next));
+    const definition = await service.definitionCommand(f.w.id, user, command.commandId);
+    assert.equal((await f.worker.prepare(f.w.id, definition.commandId)).status, 'accepted');
+    assert.equal((await service.advance(f.w.id, user, command.commandId)).status, 'active');
+    assert.deepEqual((await createSavedAgentService(f.runtime).policy(f.w.id, user, f.agentId)).enrollment, [
+      data.teamId,
+    ]);
+  }
+  const state = await f.state(),
+    expanded = [{ assetId: data.customers.tableId, permissions: ['table.row.read', 'table.row.update'] }];
+  await assert.rejects(
+    service.saveDraft(
+      f.w.id,
+      f.w.userId,
+      f.agentId,
+      await f.input({
+        expectedVersion: 1,
+        expectedSavedRevision: state.agent.saved_revision,
+        expectedPolicyVersion: state.agent.policy_version,
+        expectedActivationIds: state.activations,
+        setup: { ...setup, scope: expanded, limits: expanded },
+      }),
+    ),
+    error => error.code === 'agent-table-access-unavailable',
+  );
 });
 
 test('draft choices persist inactive; publication has one Soul write and one activation across retries', async t => {

@@ -50,7 +50,14 @@ export const agentPolicySchema = z.strictObject({
 });
 export const agentContextSchema = z.object({
   currentSoulRevision: z.string(),
-  teams: z.array(z.object({ id: z.uuid(), name: z.string(), tableScope: z.array(scopeSchema.element).optional() })),
+  teams: z.array(
+    z.object({
+      id: z.uuid(),
+      name: z.string(),
+      canAssign: z.boolean().optional(),
+      tableScope: z.array(scopeSchema.element).optional(),
+    }),
+  ),
   builtinSkills: z
     .array(z.object({ id: z.string(), name: z.string(), description: z.string(), revision: z.literal('latest') }))
     .default([]),

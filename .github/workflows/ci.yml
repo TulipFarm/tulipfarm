@@ -152,4 +152,4 @@ jobs:
       - name: Check agent table access
         run: |
           pnpm --filter @tulipfarm/agents exec node --test --test-concurrency=1 test/task-data-scope.integration.mjs
-          pnpm --filter @tulipfarm/agents exec node --test --test-name-pattern='table enrollment requires' test/setup.integration.mjs
+          pnpm --filter @tulipfarm/agents exec node --test --test-name-pattern='table enrollment' test/setup.integration.mjs
