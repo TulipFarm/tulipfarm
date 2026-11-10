@@ -3,12 +3,21 @@ import type { SlackBlock } from '@tulipfarm/slack-presentation';
 import { z } from 'zod';
 import {
   AccessDenied,
+  SourceAuthorizationUnavailable,
   lockAuthorization,
   resolveHuman,
   type AuthorizationTransaction,
   type HumanActor,
+  sourceDependencySchema,
+  type SourceDependency,
 } from '@tulipfarm/access';
 import { ConversationConflict } from '@tulipfarm/conversations/contracts';
+import { chatAccess } from '@tulipfarm/conversations/chat-access';
+import {
+  canReadToolDetails,
+  retainedFollowUpSources,
+  followUpSourcesVersion,
+} from '@tulipfarm/conversations/source-access';
 import { log } from '@tulipfarm/observability';
 import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import {
@@ -61,6 +70,7 @@ const rowSchema = z.object({
   created_at: z.date(),
   failure_reason: z.string().nullable(),
   slack_sender: z.enum(['user', 'app']).nullable().optional(),
+  sources: z.array(sourceDependencySchema).max(1000).nullable().optional(),
 });
 type FollowUpRow = z.infer<typeof rowSchema>;
 
@@ -126,7 +136,43 @@ const refused = (reason: string, instruction: string) => ({ status: 'not-schedul
 
 async function readRow(tx: Transaction, id: string) {
   const row = (await tx.client.query(`SELECT * FROM ${relation(tx, 'tf_follow_ups')} WHERE id=$1`, [id])).rows[0];
-  return row ? rowSchema.parse(row) : undefined;
+  if (!row) return undefined;
+  const parsed = rowSchema.parse(row);
+  parsed.sources = (await retainedFollowUpSources(tx, [id])).get(id) ?? [{ kind: 'unknown' }];
+  return parsed;
+}
+
+async function readableSources(
+  tx: Transaction,
+  actor: HumanActor,
+  row: Pick<FollowUpRow, 'sources' | 'surface' | 'conversation_id'>,
+) {
+  try {
+    const project =
+      row.surface === 'chat' && row.conversation_id ? await chatAccess(tx, actor, row.conversation_id) : null;
+    const sources = row.sources ?? [{ kind: 'unknown' as const }];
+    return await canReadToolDetails(
+      tx,
+      actor,
+      row.surface === 'slack' ? sources.filter(source => source.kind !== 'shared-slack-turn') : sources,
+      null,
+      project?.projectId && row.conversation_id ? row.conversation_id : undefined,
+    );
+  } catch (error) {
+    if (error instanceof SourceAuthorizationUnavailable || !(error instanceof AccessDenied)) throw error;
+    return false;
+  }
+}
+
+async function protectedView(
+  tx: Transaction,
+  actor: HumanActor,
+  row: FollowUpRow,
+  capture?: (sources: readonly SourceDependency[]) => void,
+) {
+  const readable = await readableSources(tx, actor, row);
+  if (readable) capture?.(row.sources ?? []);
+  return { ...followUpView(row), ...(!readable ? { instruction: 'Follow-up unavailable' } : {}) };
 }
 
 type Binding =
@@ -267,7 +313,7 @@ async function audit(tx: Transaction, actorId: string, operation: string, subjec
   );
 }
 
-export type FollowUpOrigin = { conversationId: string; turnId: string };
+export type FollowUpOrigin = { conversationId: string; turnId: string; sources?: readonly SourceDependency[] };
 export type ChatFollowUpSend = (
   workspaceId: string,
   userId: string,
@@ -275,7 +321,7 @@ export type ChatFollowUpSend = (
   value: unknown,
 ) => Promise<{ messageId: string }>;
 
-export function createFollowUps(runtime: AgentStorage) {
+export function createFollowUps(runtime: AgentStorage, capture?: (sources: readonly SourceDependency[]) => void) {
   async function schedule(
     workspaceId: string,
     actor: HumanActor,
@@ -284,20 +330,33 @@ export function createFollowUps(runtime: AgentStorage) {
     call: ScheduleFollowUpCall,
   ) {
     return withHuman(runtime, workspaceId, actor, 'write', async (tx, actor) => {
-      if (!installed(tx))
+      if (Number(tx.commonVersion ?? 0) < followUpSourcesVersion)
         return refused(
           'unavailable',
           'Follow-ups are not available in this workspace yet. Tell the person it could not be scheduled, and do not do the deferred work now.',
         );
       const id = deterministicId(`follow-up:${origin.turnId}:${callId}`);
       const existing = await readRow(tx, id);
-      if (existing) return { status: 'scheduled' as const, followUp: followUpView(existing) };
+      if (existing)
+        return { status: 'scheduled' as const, followUp: await protectedView(tx, actor, existing, capture) };
       const binding = await bind(tx, actor, origin);
       if (!binding)
         return refused(
           'unsupported-surface',
           'Follow-ups work only in a TulipFarm chat or a Slack thread answered by the TulipFarm app. Tell the person it could not be scheduled here; do not do the deferred work now.',
         );
+      const sources = z
+        .array(sourceDependencySchema)
+        .max(1000)
+        .parse(origin.sources ?? [{ kind: 'unknown' }]);
+      if (
+        !(await readableSources(tx, actor, {
+          sources,
+          surface: binding.surface,
+          conversation_id: binding.surface === 'chat' ? binding.conversationId : null,
+        }))
+      )
+        throw new AccessDenied();
       if ((call.delayMinutes === undefined) === (call.at === undefined))
         return refused('invalid-time', 'Give exactly one of delayMinutes or at, then call followups.schedule again.');
       const now = z.date().parse((await tx.client.query('SELECT clock_timestamp() AS now')).rows[0]?.now);
@@ -342,8 +401,8 @@ export function createFollowUps(runtime: AgentStorage) {
         );
       const saveSender = binding.surface === 'chat' && Number(tx.commonVersion ?? 0) >= followUpSenderVersion;
       await tx.client.query(
-        `INSERT INTO ${relation(tx, 'tf_follow_ups')} (id,membership_id,user_id,surface,origin,conversation_id,origin_turn_id,slack_installation_id,slack_generation,slack_channel,slack_thread_ts,slack_parent_event_id,instruction,due_at,timezone,chain_root_id,chain_depth,chain_started_at,created_at${saveSender ? ',slack_sender' : ''})
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19${saveSender ? ',$20' : ''})`,
+        `INSERT INTO ${relation(tx, 'tf_follow_ups')} (id,membership_id,user_id,surface,origin,conversation_id,origin_turn_id,slack_installation_id,slack_generation,slack_channel,slack_thread_ts,slack_parent_event_id,instruction,due_at,timezone,chain_root_id,chain_depth,chain_started_at,created_at,sources${saveSender ? ',slack_sender' : ''})
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20${saveSender ? ',$21' : ''})`,
         [
           id,
           actor.membershipId,
@@ -364,6 +423,7 @@ export function createFollowUps(runtime: AgentStorage) {
           depth,
           chainStarted,
           now,
+          JSON.stringify(sources),
           ...(saveSender && binding.surface === 'chat'
             ? [await chatSlackSender(tx, binding.conversationId, parent)]
             : []),
@@ -374,7 +434,7 @@ export function createFollowUps(runtime: AgentStorage) {
       if (!row) throw new Error('follow-up-missing');
       return {
         status: 'scheduled' as const,
-        followUp: followUpView(row),
+        followUp: await protectedView(tx, actor, row, capture),
         instruction: `Saved. It runs at ${localTime(row)} as a new turn here. Do not do the deferred work now. Confirm the time to the person; they can cancel it ${binding.surface === 'chat' ? 'from the card' : 'with the Cancel button'} or by asking.`,
       };
     });
@@ -395,7 +455,15 @@ export function createFollowUps(runtime: AgentStorage) {
           )
         ).rows,
       );
-      return { followUps: rows.map(followUpView) };
+      const sources = await retainedFollowUpSources(
+        tx,
+        rows.map(row => row.id),
+      );
+      return {
+        followUps: await Promise.all(
+          rows.map(row => protectedView(tx, actor, { ...row, sources: sources.get(row.id) }, capture)),
+        ),
+      };
     });
   }
 
@@ -423,7 +491,10 @@ export function createFollowUps(runtime: AgentStorage) {
       );
       if (!inScope.rowCount) return { status: 'not-found' as const };
       const row = await cancelRow(tx, actor, followUpId);
-      return { status: row.status === 'cancelled' ? ('cancelled' as const) : row.status, followUp: followUpView(row) };
+      return {
+        status: row.status === 'cancelled' ? ('cancelled' as const) : row.status,
+        followUp: await protectedView(tx, actor, row, capture),
+      };
     });
   }
 
@@ -433,14 +504,14 @@ export function createFollowUps(runtime: AgentStorage) {
       if (!installed(tx)) throw new AccessDenied();
       const row = await readRow(tx, followUpId);
       if (!row || row.conversation_id !== chatId || row.membership_id !== actor.membershipId) throw new AccessDenied();
-      return followUpView(row);
+      return protectedView(tx, actor, row, capture);
     });
   }
 
   async function cancelInChat(workspaceId: string, userId: string, chatId: string, followUpId: string) {
     return withHuman(runtime, workspaceId, userId, 'write', async (tx, actor) => {
       if (!installed(tx)) throw new AccessDenied();
-      return followUpView(await cancelRow(tx, actor, followUpId, 'conversation_id=$3', [chatId]));
+      return protectedView(tx, actor, await cancelRow(tx, actor, followUpId, 'conversation_id=$3', [chatId]), capture);
     });
   }
 
@@ -470,7 +541,7 @@ export function createFollowUps(runtime: AgentStorage) {
       if (!owner) throw new AccessDenied();
       const actor = await resolveHuman(tx, owner.user_id);
       if (actor.membershipId !== owner.membership_id) throw new AccessDenied();
-      return followUpView(await cancelRow(tx, actor, followUpId));
+      return protectedView(tx, actor, await cancelRow(tx, actor, followUpId), capture);
     });
   }
 
@@ -508,7 +579,20 @@ export function createFollowUps(runtime: AgentStorage) {
         ).rows,
       );
       const chats: FollowUpRow[] = [];
+      const retained = await retainedFollowUpSources(
+        tx,
+        rows.map(row => row.id),
+      );
       for (const row of rows) {
+        row.sources = retained.get(row.id) ?? [{ kind: 'unknown' }];
+        const actor = await resolveHuman(tx, row.user_id);
+        if (actor.membershipId !== row.membership_id || !(await readableSources(tx, actor, row))) {
+          await tx.client.query(
+            `UPDATE ${relation(tx, 'tf_follow_ups')} SET status='skipped',failure_reason='source-unavailable',finished_at=clock_timestamp() WHERE id=$1`,
+            [row.id],
+          );
+          continue;
+        }
         if (row.surface === 'chat') chats.push(row);
         else await fireSlack(tx, row);
       }
@@ -772,8 +856,8 @@ export async function createReactionFollowUp(
   if (pending >= pendingLimit) return null;
   const id = randomUUID();
   const inserted = await tx.client.query(
-    `INSERT INTO ${relation(tx, 'tf_follow_ups')} (id,membership_id,user_id,surface,origin,slack_installation_id,slack_generation,slack_channel,slack_thread_ts,slack_item_ts,reaction_key,instruction,due_at,chain_root_id,chain_depth,chain_started_at)
-    VALUES ($1,$2,$3,'slack','slack-reaction',$4,$5,$6,$7,$8,$9,$10,clock_timestamp()+$11*interval '1 minute',$1,1,clock_timestamp())
+    `INSERT INTO ${relation(tx, 'tf_follow_ups')} (id,membership_id,user_id,surface,origin,slack_installation_id,slack_generation,slack_channel,slack_thread_ts,slack_item_ts,reaction_key,instruction,due_at,chain_root_id,chain_depth,chain_started_at${Number(tx.commonVersion ?? 0) >= followUpSourcesVersion ? ',sources' : ''})
+    VALUES ($1,$2,$3,'slack','slack-reaction',$4,$5,$6,$7,$8,$9,$10,clock_timestamp()+$11*interval '1 minute',$1,1,clock_timestamp()${Number(tx.commonVersion ?? 0) >= followUpSourcesVersion ? ",'[]'::jsonb" : ''})
     ON CONFLICT (reaction_key) WHERE status='pending' DO NOTHING RETURNING *`,
     [
       id,
@@ -814,7 +898,13 @@ export async function scheduledFollowUp(tx: Transaction, eventId: string) {
   const row = (
     await tx.client.query(`SELECT * FROM ${relation(tx, 'tf_follow_ups')} WHERE fired_event_id=$1`, [eventId])
   ).rows[0];
-  return row ? rowSchema.parse(row) : null;
+  if (!row) return null;
+  const parsed = rowSchema.parse(row);
+  parsed.sources = (await retainedFollowUpSources(tx, [parsed.id])).get(parsed.id) ?? [{ kind: 'unknown' }];
+  const actor = await resolveHuman(tx, parsed.user_id);
+  if (actor.membershipId !== parsed.membership_id || !(await readableSources(tx, actor, parsed)))
+    throw new AccessDenied();
+  return parsed;
 }
 
 /** The pending follow-ups a Slack turn scheduled, as short confirmations with a Cancel button under its answer. */
@@ -834,7 +924,18 @@ export async function slackFollowUpCards(
       )
     ).rows,
   );
-  return rows.flatMap(row => followUpCard(workspaceId, row));
+  const sources = await retainedFollowUpSources(
+    tx,
+    rows.map(row => row.id),
+  );
+  const cards: SlackBlock[] = [];
+  for (const row of rows) {
+    const actor = await resolveHuman(tx, row.user_id);
+    row.sources = sources.get(row.id) ?? [{ kind: 'unknown' }];
+    const view = await protectedView(tx, actor, row);
+    cards.push(...followUpCard(workspaceId, { ...row, instruction: view.instruction }));
+  }
+  return cards;
 }
 
 export function followUpCard(workspaceId: string, row: FollowUpRow): SlackBlock[] {

@@ -72,7 +72,7 @@ test(
         async ({ messages, earlierMessages }) => {
           seen.push(messages);
           offered.push(earlierMessages);
-          return `reply ${seen.length}`;
+          return { text: `reply ${seen.length}`, sources: [] };
         },
         undefined,
         undefined,
@@ -137,6 +137,35 @@ test(
         f.store.compaction(w.id, w.userId, chatId, randomUUID()),
         { message: 'Resource not found' },
         'an unknown compaction reads as not found',
+      );
+      const sourceChatId = randomUUID();
+      await f.store.create(w.id, w.userId, { chatId: sourceChatId, commandId: randomUUID() });
+      const selectedSource = { kind: 'private-conversation', conversationId: sourceChatId, snapshot: true };
+      await f.db.platform.query(
+        `UPDATE ${f.table('tf_conversation_working_summaries')} SET active=false,sources=sources || $2::jsonb
+         WHERE compaction_id=$1`,
+        [status.compactionId, JSON.stringify([selectedSource])],
+      );
+      assert.equal(
+        (await exchange(f, chatId, executor, [{ kind: 'compact', compactionId: status.compactionId }])).outcome,
+        'completed',
+      );
+      assert.match(calls.at(-1).messages[0].text, /goal 1/);
+      assert.equal(calls.at(-1).purpose, 'handoff');
+      const retained = (
+        await f.db.platform.query(`SELECT sources FROM ${f.table('tf_conversation_handoffs')} WHERE compaction_id=$1`, [
+          status.compactionId,
+        ])
+      ).rows[0];
+      assert.ok(
+        retained.sources.some(
+          source => source.kind === 'private-conversation' && source.conversationId === sourceChatId,
+        ),
+        'a retry retains sources of an inactive selected summary',
+      );
+      assert.equal(
+        (await f.store.compaction(w.id, w.userId, chatId, status.compactionId)).handoff.text,
+        '## Handoff\n- Next: penalties',
       );
     } finally {
       await f.close();

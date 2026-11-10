@@ -22,7 +22,7 @@ import { LifecycleDraftCard } from './lifecycle-draft-card';
 import { ProjectDraftCard } from './project-draft-card';
 import { FileDraftCard } from './file-draft-card';
 import { FileShareDraftCard } from './file-share-draft-card';
-import { KnowledgeDraftCard } from './knowledge-draft-card';
+import { KnowledgeDraftCard, KnowledgeReceiptCard } from './knowledge-draft-card';
 import { MemoryDraftCard } from './memory-draft-card';
 import { formatRun, workflowChange, workflowSaveLabel } from './workflow-draft-details';
 import { WorkflowCanvasButton } from './workflow-canvas';
@@ -231,6 +231,7 @@ export function AuthoringDraftCard({
         checkStatus={checkStatus}
       />
     );
+  if (proposal.kind === 'knowledge-receipt') return <KnowledgeReceiptCard draft={draft} />;
   if (proposal.kind === 'knowledge')
     return (
       <KnowledgeDraftCard

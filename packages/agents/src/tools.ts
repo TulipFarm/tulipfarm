@@ -1105,7 +1105,6 @@ export function createChatTools(
   const tasks = createAgentTasks(runtime);
   const plans = createAgentPlans(runtime);
   const authoring = createAgentAuthoring(runtime);
-  const followUps = createFollowUps(runtime);
   const listTableDefinitions = async (workspaceId: string, actor: HumanActor, search?: string) => {
     const tables = [];
     let after: string | undefined;
@@ -1551,16 +1550,7 @@ export function createChatTools(
       case 'followups.schedule':
       case 'followups.list':
       case 'followups.cancel': {
-        if (!context.origin)
-          return {
-            error: 'follow-up-chat-required',
-            instruction:
-              'Follow-ups can be scheduled only from a chat or a Slack thread. Nothing was scheduled; tell the person and do not do the deferred work now.',
-          };
-        const origin = { conversationId: context.origin.conversationId, turnId: context.origin.turnId };
-        if (call.tool === 'followups.schedule') return followUps.schedule(workspaceId, actor, callId, origin, call);
-        if (call.tool === 'followups.list') return followUps.list(workspaceId, actor, origin);
-        return followUps.cancel(workspaceId, actor, origin, call.followUpId);
+        return (await invokeFollowUp(context, call)).result;
       }
       case 'slack.thread.react': {
         const thread = slack && context.origin ? slack(runtime).threadReaction : undefined;
@@ -2914,11 +2904,38 @@ export function createChatTools(
       signal: context.signal,
     });
   }
+  async function invokeFollowUp(
+    context: Parameters<typeof invoke>[0],
+    call: Extract<FrameworkCall, { tool: 'followups.schedule' | 'followups.list' | 'followups.cancel' }>,
+  ) {
+    const sources: SourceDependency[] = [];
+    if (!context.origin)
+      return {
+        result: {
+          error: 'follow-up-chat-required',
+          instruction:
+            'Follow-ups can be scheduled only from a chat or a Slack thread. Nothing was scheduled; tell the person and do not do the deferred work now.',
+        },
+        sources,
+      };
+    const followUps = createFollowUps(runtime, dependencies => sources.push(...dependencies));
+    const origin = context.origin;
+    const result =
+      call.tool === 'followups.schedule'
+        ? await followUps.schedule(context.workspaceId, context.actor, context.callId, origin, call)
+        : call.tool === 'followups.list'
+          ? await followUps.list(context.workspaceId, context.actor, origin)
+          : await followUps.cancel(context.workspaceId, context.actor, origin, call.followUpId);
+    return { result, sources };
+  }
+
   async function invokeWithSources(context: Parameters<typeof invoke>[0], call: FrameworkCall) {
     if (context.origin)
       await withHuman(runtime, context.workspaceId, context.actor, 'read', tx =>
         requireInvestigationToolBoundary(tx, context.origin!, call.tool),
       );
+    if (call.tool === 'followups.schedule' || call.tool === 'followups.list' || call.tool === 'followups.cancel')
+      return invokeFollowUp(context, call);
     if (call.tool === 'agents.delegate') {
       if (!subagents || !context.origin || telemetryRuntime !== 'chat') throw new AccessDenied();
       return subagents({ ...context, origin: context.origin }, delegateCallSchema.parse(call));

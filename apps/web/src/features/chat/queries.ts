@@ -280,7 +280,8 @@ export function useAuthoringDraft(api: ConversationApi, chatId: string, id: stri
   useEffect(() => {
     if (read.state.kind === 'ready' && read.state.data.status === 'saved' && !saved.current) {
       saved.current = true;
-      void changes.savedDraft(chatId, read.state.data.proposal.kind);
+      const kind = read.state.data.proposal.kind;
+      void changes.savedDraft(chatId, kind === 'knowledge-receipt' ? 'knowledge' : kind);
     }
   }, [read.state, changes, chatId]);
   return read;

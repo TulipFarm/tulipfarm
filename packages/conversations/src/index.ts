@@ -16,12 +16,13 @@ import { publicWebReceiptForHistory } from './public-web-history.ts';
 import { knowledgeActivityForHistory } from './knowledge-activity-history.ts';
 import { rowChangeForReceipt, rowViewForReceipt } from './row-view.ts';
 import { readableWorkflows, workflowReferences } from './workflow-receipts.ts';
-import { sourceDependenciesSchema } from './results.ts';
+import { mergeSources, sourceDependenciesSchema } from './results.ts';
 import { requireCredits, CreditsExhausted } from '@tulipfarm/workspace-storage/credits';
 import { recordFileUse } from '@tulipfarm/files';
 import { observeChatDetail, trackEvent } from '@tulipfarm/observability';
 import {
   AccessDenied,
+  SourceAuthorizationUnavailable,
   currentMember,
   lockAuthorization,
   prefetchConversationSources,
@@ -48,6 +49,9 @@ import {
   requireGoogleSources,
   requireKnowledgeSources,
   requireWorkflowSources,
+  KnowledgeSourceRemoved,
+  canReadToolDetails,
+  generatedMessageSources,
 } from './source-access.ts';
 import { calendarResultsForHistory } from './calendar-results.ts';
 import {
@@ -135,6 +139,8 @@ const movedSchema = z.object({ projectId: uuidSchema });
 const hiddenReply = 'This reply is hidden because it uses information you cannot access.';
 export const knowledgeUnavailableReply =
   'This reply is unavailable because a knowledge source it cited changed or your access to it ended. Search knowledge again to make a new request.';
+export const knowledgeRemovedReply =
+  'This reply is unavailable because a Knowledge source it used was removed or replaced by you. Make a new request to use current Knowledge.';
 const createdFileOutput = z.object({ result: z.object({ file: z.object({ id: uuidSchema }) }) });
 /** The first common migration with follow-ups. */
 const followUpsVersion = 27;
@@ -688,24 +694,52 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
         messages.map(message => message.id),
       );
       for (const message of messages) message.calendarResults = calendar.get(message.id) ?? [];
+      const origins = await generatedMessageSources(
+        tx,
+        chatId,
+        messages.map(message => message.id),
+      );
       const results = new Map<string, unknown>(
         (
           await tx.client.query(
             `SELECT message_id, sources FROM ${table(tx, 'tf_conversation_results')} WHERE message_id=ANY($1::uuid[])`,
             [messages.map(message => message.id)],
           )
-        ).rows.map(row => [row.message_id, row.sources]),
+        ).rows.map(row => {
+          const retained = sourceDependenciesSchema.safeParse(row.sources);
+          const generated = origins.get(row.message_id);
+          return [
+            row.message_id,
+            generated && retained.success ? mergeSources([...retained.data, ...generated]) : row.sources,
+          ];
+        }),
       );
       const hidden = new Set<string>();
-      async function conceal(text: string, hide: boolean, check: (sources: unknown) => Promise<void>) {
+      for (const message of messages) {
+        const generated = origins.get(message.id);
+        if (!generated && !message.followUp) continue;
+        if (await canReadToolDetails(tx, actor, generated, null, chat.projectId ? chatId : undefined)) continue;
+        if (message.followUp) {
+          message.followUp = { ...message.followUp, instruction: 'Follow-up unavailable' };
+          message.parts = [
+            { kind: 'text', text: 'This follow-up is unavailable because a source it used is no longer available.' },
+          ];
+        } else message.parts = [{ kind: 'text', text: hiddenReply }];
+      }
+      async function conceal(
+        text: string | ((error: AccessDenied) => string),
+        hide: boolean,
+        check: (sources: unknown) => Promise<void>,
+      ) {
         for (const message of messages) {
           if (!results.has(message.id)) continue;
           try {
             await check(results.get(message.id));
           } catch (error) {
+            if (error instanceof SourceAuthorizationUnavailable) throw error;
             if (!(error instanceof AccessDenied)) throw error;
             if (hide) hidden.add(message.id);
-            message.parts = [{ kind: 'text', text }];
+            message.parts = [{ kind: 'text', text: typeof text === 'function' ? text(error) : text }];
           }
         }
       }
@@ -717,7 +751,11 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
           await requireGoogleFileSources(tx, actor, sources);
         },
       );
-      await conceal(knowledgeUnavailableReply, false, sources => requireKnowledgeSources(tx, actor, sources));
+      await conceal(
+        error => (error instanceof KnowledgeSourceRemoved ? knowledgeRemovedReply : knowledgeUnavailableReply),
+        false,
+        sources => requireKnowledgeSources(tx, actor, sources),
+      );
       await conceal(
         'This reply is unavailable because its selected GitHub account or access changed. Select an active account to start fresh context.',
         false,
@@ -781,6 +819,21 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
           // A card made in this same reply is already shown with it, so only point to earlier ones, once each.
           const shownDrafts = new Set(rows.flatMap(row => (row.row_draft_id ? [row.row_draft_id] : [])));
           for (const row of rows) {
+            const retained = sourceDependenciesSchema.safeParse(row.sources);
+            const generated = origins.get(message.id);
+            if (generated && retained.success) row.sources = mergeSources([...retained.data, ...generated]);
+            if (!(await canReadToolDetails(tx, actor, row.sources, row.output, chat.projectId ? chatId : undefined))) {
+              message.tools.push(
+                toolReceiptSchema.parse({
+                  id: row.id,
+                  tool: row.tool,
+                  status: row.status,
+                  presentation: { label: 'Used a tool', brand: null },
+                  ...(row.row_draft_id ? { rowDraftId: row.row_draft_id } : {}),
+                }),
+              );
+              continue;
+            }
             const waiting = hidden.size ? undefined : waitingRowDraft(row.tool, row.output);
             const pointTo = waiting && !shownDrafts.has(waiting.id) ? waiting : undefined;
             if (waiting) shownDrafts.add(waiting.id);
@@ -842,6 +895,7 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
                     ? null
                     : (googleToolActivity(row.tool, row.call, row.stored_activity) ?? row.activity),
                 web: await publicWebReceiptForHistory(tx, actor, {
+                  ...(chat.projectId ? { projectChatId: chatId } : {}),
                   tool: row.tool,
                   status: row.status,
                   call: row.call,
@@ -852,6 +906,7 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
                   ? null
                   : apiCallReceipt(row.tool, row.output, row.tool === 'api.request' && digestedApiCalls.has(row.id)),
                 knowledge: await knowledgeActivityForHistory(tx, actor, {
+                  ...(chat.projectId ? { projectChatId: chatId } : {}),
                   tool: row.tool,
                   status: row.status,
                   call: row.call,
@@ -884,6 +939,64 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
           }
         }
       return { messages, nextBefore: rows.length > 50 ? (messages[0]?.sequence ?? null) : null, hasGitHubProposals };
+    });
+  }
+
+  async function canReadStream(workspaceId: string, userId: string, chatId: string, value: unknown) {
+    const input = z
+      .object({
+        kind: z.enum(['text', 'tool', 'subagents', 'progress']),
+        turnId: uuidSchema,
+        generation: z.number().int().nonnegative(),
+        epoch: z.number().int().nonnegative(),
+        id: uuidSchema.optional(),
+      })
+      .parse(value);
+    return human(workspaceId, userId, async (tx, actor) => {
+      const chat = await owned(tx, actor, uuidSchema.parse(chatId));
+      await requireConversationMcpSources(tx, actor, chatId);
+      const row = (
+        await tx.client.query(
+          `SELECT t.generation,t.attempt_epoch,t.source_message_id,to_jsonb(t)->'streamed' AS streamed,s.sources,s.output,
+            (SELECT jsonb_agg(m.sources) FROM ${table(tx, 'tf_conversation_model_sources')} m
+             WHERE m.turn_id=t.id AND m.epoch=$4) AS model_sources
+           FROM ${table(tx, 'tf_conversation_turns')} t
+           LEFT JOIN ${table(tx, 'tf_conversation_execution_steps')} s ON s.turn_id=t.id AND s.call_id=$3
+           WHERE t.id=$1 AND t.conversation_id=$2`,
+          [input.turnId, chatId, input.id ?? null, input.epoch],
+        )
+      ).rows[0];
+      if (!row || row.generation !== input.generation || row.attempt_epoch !== input.epoch) return false;
+      const generated =
+        (await generatedMessageSources(tx, chatId, [row.source_message_id])).get(row.source_message_id) ?? [];
+      if (input.kind === 'tool' || input.kind === 'subagents') {
+        if (!input.id || (input.kind === 'subagents' && row.output == null)) return false;
+        const retained = sourceDependenciesSchema.safeParse(row.sources);
+        if (!retained.success) return false;
+        return canReadToolDetails(
+          tx,
+          actor,
+          mergeSources([...retained.data, ...generated]),
+          row.output,
+          chat.projectId ? chatId : undefined,
+        );
+      }
+      const streamed = z
+        .object({
+          generation: z.literal(input.generation),
+          epoch: z.literal(input.epoch),
+          sources: sourceDependenciesSchema,
+        })
+        .safeParse(row.streamed);
+      const modelSources = z.array(sourceDependenciesSchema).safeParse(row.model_sources ?? []);
+      if (!streamed.success || !modelSources.success) return false;
+      return canReadToolDetails(
+        tx,
+        actor,
+        mergeSources([...streamed.data.sources, ...modelSources.data.flat(), ...generated]),
+        null,
+        chat.projectId ? chatId : undefined,
+      );
     });
   }
 
@@ -1264,6 +1377,7 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
     maintenance,
     resumeMaintenance: resume,
     history,
+    canReadStream,
     list,
     destinations,
     pinned,

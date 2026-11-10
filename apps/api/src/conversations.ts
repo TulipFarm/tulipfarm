@@ -55,6 +55,7 @@ import { withChatSendMeasurements } from '@tulipfarm/observability';
 import { compactionDetailSchema } from '@tulipfarm/conversations/compaction';
 import { maintenanceViewSchema } from '@tulipfarm/conversations/maintenance-contracts';
 import type { ConversationEventHub, ConversationStreamEvent } from './conversation-events.ts';
+import { concealStreamDetails } from './conversation-events.ts';
 import { conversationPage, conversationPages } from './conversation-pages.ts';
 import type { ReplyDispatch } from './conversation-dispatch.ts';
 
@@ -733,8 +734,32 @@ export function registerConversations(
           // A reader that stops consuming reconnects and starts from a snapshot instead of growing this buffer.
           if (stream.writableLength > timing.maxBufferedBytes) end();
         };
-        const send = ({ event, data }: ConversationStreamEvent) =>
-          write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+        let delivery = Promise.resolve();
+        let queuedBytes = 0;
+        const send = (update: ConversationStreamEvent) => {
+          if (ended) return;
+          const bytes = Buffer.byteLength(JSON.stringify(update));
+          queuedBytes += bytes;
+          if (queuedBytes > timing.maxBufferedBytes) return end();
+          delivery = delivery
+            .then(async () => {
+              if (ended) return;
+              let visible = update;
+              if (
+                (update.event === 'text' ||
+                  update.event === 'tool' ||
+                  update.event === 'subagents' ||
+                  update.event === 'progress') &&
+                !(await service.canReadStream(workspaceId, userId, chatId, { ...update.data, kind: update.event }))
+              )
+                visible = concealStreamDetails(update);
+              if (!ended) write(`event: ${visible.event}\ndata: ${JSON.stringify(visible.data)}\n\n`);
+            })
+            .catch(() => end())
+            .finally(() => {
+              queuedBytes -= bytes;
+            });
+        };
         const unsubscribe = hub.subscribe(workspaceId, chatId, send);
         function end() {
           if (ended) return;
@@ -762,7 +787,7 @@ export function registerConversations(
             }, timing.recheckMs),
           );
         recheck();
-        // Subscribing and writing the snapshot in one synchronous step keeps live events from arriving before or between snapshot events.
+        // Queue the snapshot synchronously so source checks cannot let newer live events overtake it.
         write('retry: 2000\n\n');
         for (const event of hub.snapshot(workspaceId, chatId)) send(event);
         return reply

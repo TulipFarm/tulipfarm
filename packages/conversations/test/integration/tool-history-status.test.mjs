@@ -30,9 +30,7 @@ const knowledgeResult = {
   ],
 };
 
-// Each later tool receipt retains the reply's earlier context, including markers such as an earlier answer of unknown provenance.
-// Those markers are not the row's own sources, so a tool that succeeded must not reload as failed or unavailable.
-test('tools that succeeded in a follow-up turn keep their outcome in history', async () => {
+test('opaque prior context preserves tool status but conceals model-written details in history', async () => {
   const f = await conversationFixture();
   try {
     const w = f.workspace;
@@ -100,10 +98,12 @@ test('tools that succeeded in a follow-up turn keep their outcome in history', a
         ['web.fetch', 'completed'],
       ],
     );
-    assert.equal(tools[0].knowledge.status, 'success');
-    assert.deepEqual(tools[0].knowledge.branches, [], 'opaque provenance conceals details, not the outcome');
-    assert.deepEqual(tools[1].web, { status: 'success', urls: [], failedUrls: [], widened: false });
-    assert.deepEqual(tools[2].web, { status: 'success', urls: [], failedUrls: [], widened: false });
+    for (const tool of tools) {
+      assert.deepEqual(tool.presentation, { label: 'Used a tool', brand: null });
+      assert.equal(tool.narration, null);
+      assert.equal(tool.web, null);
+      assert.equal(tool.knowledge, undefined);
+    }
     await f.db.platform.query(`UPDATE ${f.table('tf_conversation_execution_steps')} SET sources=$2 WHERE turn_id=$1`, [
       second.turnId,
       JSON.stringify([{ kind: 'personal-memory', membershipId: w.membershipId }]),
