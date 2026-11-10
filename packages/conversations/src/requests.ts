@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import {
   AccessDenied,
+  SourceAuthorizationUnavailable,
   lockAuthorization,
   resolveHuman,
   uuidSchema,
@@ -25,17 +26,11 @@ import {
   secretsAnswerSchema,
 } from './request-contracts.ts';
 import type { ConversationRuntime, ReplyFence } from './runtime.ts';
-import {
-  requireConversationMcpSources,
-  requireFileSources,
-  requireGitHubSources,
-  requireGoogleSources,
-  requireKnowledgeSources,
-  requireMcpSources,
-  requireResultSources,
-} from './source-access.ts';
+import { requireConversationMcpSources, requireChatReviewSources } from './source-access.ts';
 import { sourceDependenciesSchema } from './results.ts';
-import { recordConversationActivity } from './activity.ts';
+import { finishUnavailableReview, recordConversationActivity } from './activity.ts';
+import { bindFileSources } from './file-references.ts';
+import type { SourceDependency } from './results.ts';
 
 const table = (tx: AuthorizationTransaction, name: string) => qualified(tx.schema, name);
 const digest = (input: unknown) => createHash('sha256').update(JSON.stringify(input)).digest('hex');
@@ -59,13 +54,12 @@ export function createConversationRequests(runtime: ConversationRuntime) {
   async function transaction<T>(workspaceId: string, operation: (tx: AuthorizationTransaction) => Promise<T>) {
     return runtime.transaction(uuidSchema.parse(workspaceId), commonCompatibility, async tx => {
       await lockAuthorization(tx);
-      return operation(tx);
+      return operation(bindFileSources(tx));
     });
   }
 
   async function owned(tx: AuthorizationTransaction, actor: HumanActor, chatId: string) {
     await chatAccess(tx, actor, chatId, 'read', true);
-    await requireConversationMcpSources(tx, actor, chatId);
   }
 
   async function request(tx: AuthorizationTransaction, chatId: string, id: string) {
@@ -84,11 +78,11 @@ export function createConversationRequests(runtime: ConversationRuntime) {
   }
 
   async function requireRequestSources(tx: AuthorizationTransaction, actor: HumanActor, row: RequestRow) {
+    await requireConversationMcpSources(tx, actor, row.conversation_id);
     if (row.internal_id !== null) return;
     const step = z
       .object({ sources: sourceDependenciesSchema })
-      .optional()
-      .parse(
+      .safeParse(
         (
           await tx.client.query(
             `SELECT output->'sources' AS sources FROM ${table(tx, 'tf_conversation_execution_steps')} WHERE call_id=$1 AND turn_id=$2`,
@@ -96,20 +90,29 @@ export function createConversationRequests(runtime: ConversationRuntime) {
           )
         ).rows[0],
       );
-    if (!step) throw new AccessDenied();
-    await requireGitHubSources(tx, actor, step.sources);
-    await requireGoogleSources(tx, actor, step.sources);
-    await requireKnowledgeSources(tx, actor, step.sources);
-    await requireFileSources(tx, actor, step.sources);
-    await requireMcpSources(tx, actor, row.conversation_id, step.sources);
-    await requireResultSources(
-      tx,
-      actor,
-      row.conversation_id,
-      step.sources.filter(
-        source => source.kind === 'table' || source.kind === 'table-rows' || source.kind === 'table-schema',
-      ),
-    );
+    if (!step.success) throw new AccessDenied();
+    await requireChatReviewSources(tx, actor, step.data.sources);
+  }
+  async function readableRequest(
+    tx: AuthorizationTransaction,
+    workspaceId: string,
+    actor: HumanActor,
+    row: RequestRow,
+  ) {
+    try {
+      await requireRequestSources(tx, actor, row);
+      return true;
+    } catch (error) {
+      if (error instanceof SourceAuthorizationUnavailable) throw error;
+      if (!(error instanceof AccessDenied)) throw error;
+      if (row.status === 'pending' && row.membership_id === actor.membershipId)
+        await finishUnavailableReview(tx, {
+          workspaceId,
+          conversationId: row.conversation_id,
+          turnId: row.turn_id,
+        });
+      return false;
+    }
   }
 
   async function publish(
@@ -224,11 +227,13 @@ export function createConversationRequests(runtime: ConversationRuntime) {
     });
   }
 
-  async function createForChat(fence: ReplyFence, content: unknown) {
+  async function createForChat(fence: ReplyFence, content: unknown, sources: readonly SourceDependency[] = []) {
     const input = requestInputSchema.parse(content);
     return transaction(fence.workspaceId, async tx => {
       const actor = await turnRequester(tx, fence.conversationId, fence.turnId);
       await owned(tx, actor, fence.conversationId);
+      await requireConversationMcpSources(tx, actor, fence.conversationId);
+      await requireChatReviewSources(tx, actor, sources);
       const active = await tx.client.query(
         `SELECT 1 FROM ${table(tx, 'tf_conversation_turns')} WHERE id=$1 AND conversation_id=$2 AND generation=$3 AND attempt_epoch=$4 AND status='processing' AND lease_until>clock_timestamp() FOR UPDATE`,
         [fence.turnId, fence.conversationId, fence.generation, fence.epoch],
@@ -273,7 +278,7 @@ export function createConversationRequests(runtime: ConversationRuntime) {
       requestId = uuidSchema.parse(requestIdInput);
     const input = operation === 'answer' ? answerRequestSchema.parse(value) : cancelRequestSchema.parse(value);
     const responseId = operation === 'answer' ? uuidSchema.parse(responseIdInput) : null;
-    return transaction(workspaceId, async tx => {
+    const result = await transaction(workspaceId, async tx => {
       const actor = await resolveHuman(tx, userId);
       await tx.client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 184735))', [
         `${tx.schema}:${actor.membershipId}:${input.commandId}`,
@@ -297,8 +302,8 @@ export function createConversationRequests(runtime: ConversationRuntime) {
         return requestOutcomeSchema.parse(prior.outcome);
       }
       const row = await request(tx, chatId, requestId);
-      await requireRequestSources(tx, actor, row);
       if (row.membership_id !== actor.membershipId) throw new AccessDenied();
+      if (!(await readableRequest(tx, workspaceId, actor, row))) return null;
       // A secrets form is answered or declined only through the secrets service, which stores the values.
       if (row.answer_schema.kind === 'secrets') throw new ConversationConflict('request-conflict');
       if (row.revision !== input.expectedRevision || row.status !== 'pending')
@@ -337,16 +342,18 @@ export function createConversationRequests(runtime: ConversationRuntime) {
       );
       return outcome;
     });
+    if (!result) throw new AccessDenied();
+    return result;
   }
 
   async function read(workspaceId: string, userId: string, chatIdInput: string, requestIdInput: string) {
     const chatId = uuidSchema.parse(chatIdInput),
       requestId = uuidSchema.parse(requestIdInput);
-    return transaction(workspaceId, async tx => {
+    const result = await transaction(workspaceId, async tx => {
       const actor = await resolveHuman(tx, userId);
       await owned(tx, actor, chatId);
       const row = await request(tx, chatId, requestId);
-      await requireRequestSources(tx, actor, row);
+      if (!(await readableRequest(tx, workspaceId, actor, row))) return null;
       if (row.status === 'pending' && row.expired) await settle(tx, row, 'expired');
       const result = z
         .object({
@@ -369,6 +376,8 @@ export function createConversationRequests(runtime: ConversationRuntime) {
         );
       return requestViewSchema.parse({ ...result, expiresAt: result.expiresAt.toISOString() });
     });
+    if (!result) throw new AccessDenied();
+    return result;
   }
 
   async function expire(workspaceId: string) {

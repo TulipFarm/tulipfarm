@@ -99,10 +99,11 @@ test('chat row writes after untrusted content become member-approved review draf
       commandId: randomUUID(),
       parts: [{ kind: 'text', text: 'Summarize the page and keep the result in Notes.' }, ...parts],
     });
-    let output;
+    let output, waitingCards;
     const executor = createConversationExecutor(
       runtime,
-      async ({ executeTool, readPersonalMemory }) => {
+      async ({ executeTool, readPersonalMemory, waitingCards: countCards }) => {
+        waitingCards = countCards;
         if (memory) assert.notEqual((await readPersonalMemory()).content, '');
         for (const tool of before)
           await executeTool(tool, false, async () => ({ result: { packages: [] }, sources: [] }), [], { tool });
@@ -124,7 +125,7 @@ test('chat row writes after untrusted content become member-approved review draf
       await executor.process({ workspaceId: w.id, conversationId: chatId, turnId: sent.turnId, generation: 0 }),
       'completed',
     );
-    return { chatId, result: output.result };
+    return { chatId, result: output.result, waitingCards };
   }
   const decide = (actor, chatId, draft, decision, commandId = randomUUID()) =>
     drafts.decide(w.id, actor.userId, chatId, draft.draftId, { commandId, digest: draft.digest, decision });
@@ -569,16 +570,24 @@ test('chat row writes after untrusted content become member-approved review draf
     };
     const slack = () => ({ turnAudience });
     const before = await live();
-    const { chatId, result: draft } = await chatTool(
-      createCall('SLACK'),
-      [web, { kind: 'shared-slack-turn', eventId }],
-      {
-        invoke: context => createChatTools(context.runtime, { slack }).invokeWithSources(context, createCall('SLACK')),
-      },
-    );
+    const {
+      chatId,
+      result: draft,
+      waitingCards,
+    } = await chatTool(createCall('SLACK'), [web, { kind: 'shared-slack-turn', eventId }], {
+      invoke: context => createChatTools(context.runtime, { slack }).invokeWithSources(context, createCall('SLACK')),
+    });
     assert.equal(draft.status, 'review-required');
     assert.deepEqual(checked, [[w.id, owner.userId, eventId]]);
     assert.deepEqual(await live(), before);
+    assert.equal(await waitingCards(), 1);
+    assert.equal(
+      (await f.store.history(w.id, owner.userId, chatId)).messages
+        .flatMap(message => message.parts)
+        .filter(part => part.kind === 'text')
+        .at(-1).text,
+      'Done.',
+    );
 
     const slackDrafts = createAuthoringDrafts(runtime, undefined, undefined, undefined, turnAudience);
     const decideSlack = (actor, decision, commandId = randomUUID()) =>
@@ -586,9 +595,11 @@ test('chat row writes after untrusted content become member-approved review draf
     await assert.rejects(decide(owner, chatId, draft, 'save'), AccessDenied);
     await assert.rejects(decideSlack(other, 'save'), AccessDenied);
     visible = false;
+    await assert.rejects(slackDrafts.read(w.id, owner.userId, chatId, draft.draftId), AccessDenied);
     await assert.rejects(decideSlack(owner, 'save'), AccessDenied);
     assert.deepEqual(await live(), before);
     visible = true;
+    assert.equal((await slackDrafts.read(w.id, owner.userId, chatId, draft.draftId)).status, 'pending');
     const commandId = randomUUID();
     const saved = await decideSlack(owner, 'save', commandId);
     assert.deepEqual(saved, { kind: 'row', operation: 'create', recordId: draft.draftId });

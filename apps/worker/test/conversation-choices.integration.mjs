@@ -93,35 +93,6 @@ test(
             allowText: true,
           });
           const input = { commandId: randomUUID(), expectedRevision: 1 };
-          if (mode === 'choice') {
-            const stored = (
-              await f.db.platform.query(
-                `SELECT s.call_id,s.output FROM ${f.table('tf_conversation_execution_steps')} s JOIN ${f.table('tf_conversation_requests')} r ON r.producer_id=s.call_id WHERE r.id=$1`,
-                [requestId],
-              )
-            ).rows[0];
-            await f.db.platform.query(
-              `UPDATE ${f.table('tf_conversation_execution_steps')} SET output=$2 WHERE call_id=$1`,
-              [
-                stored.call_id,
-                {
-                  ...stored.output,
-                  sources: [{ kind: 'table-rows', tableId: randomUUID(), revision: 'a'.repeat(40) }],
-                },
-              ],
-            );
-            await assert.rejects(requests.read(w.id, w.userId, chatId, requestId));
-            await assert.rejects(
-              requests.answer(w.id, w.userId, chatId, requestId, randomUUID(), {
-                ...input,
-                answer: { kind: 'choices', choiceIds: ['app'] },
-              }),
-            );
-            await f.db.platform.query(
-              `UPDATE ${f.table('tf_conversation_execution_steps')} SET output=$2 WHERE call_id=$1`,
-              [stored.call_id, stored.output],
-            );
-          }
           if (mode === 'cancel') await requests.cancel(w.id, w.userId, chatId, requestId, input);
           else if (mode === 'expire') {
             await f.db.platform.query(

@@ -5,12 +5,14 @@ import {
   currentMember,
   protectedSourceClosure,
   requireProtectedSource,
+  requirePersonalMemorySource,
   requireMcpPrivateConversation,
   requirePersonalGitHubSource,
   requireWorkflowDefinitionSources,
   type AuthorizationTransaction,
   type ConversationSourcePrefetch,
   type HumanActor,
+  type SourceDependency,
 } from '@tulipfarm/access';
 import { requireCitedLibraryFile, requireReadableFile } from '@tulipfarm/files';
 import { qualified } from '@tulipfarm/workspace-storage/runtime';
@@ -185,6 +187,20 @@ export async function requireRetainedToolSources(tx: AuthorizationTransaction, a
       opaque = true;
     else await requireProtectedSource(tx, actor, source);
   return opaque;
+}
+
+/** Slack row drafts check their thread's audience when proposed, read and decided, not through the generic source reader. */
+export async function requireChatReviewSources(
+  tx: AuthorizationTransaction,
+  actor: HumanActor,
+  sources: readonly SourceDependency[],
+  rowDraft = false,
+) {
+  await currentMember(tx, actor);
+  for (const source of await protectedSourceClosure(tx, sources))
+    if (source.kind === 'personal-memory') await requirePersonalMemorySource(tx, actor, source);
+    else if (rowDraft && source.kind === 'shared-slack-turn') continue;
+    else await requireProtectedSource(tx, actor, source);
 }
 
 /** Files read for a turn stay readable by its requester through delivery. */
