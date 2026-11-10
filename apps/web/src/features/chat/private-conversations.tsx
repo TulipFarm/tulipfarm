@@ -216,6 +216,7 @@ const createTablePrompt =
   'Help me create a new table. Ask me what kind of rows it holds (for example, customers or invoices) and which fields I need, then propose the table for my review.';
 type NewChatPrefill = {
   prompt: string;
+  placeholder?: string;
   autoSend?: boolean;
   skill?: { id: string; revision: string };
   workflow?: WorkflowReference;
@@ -229,7 +230,11 @@ function Greeting() {
 function ConversationWorkspace({ api }: { api: ConversationApi }) {
   const { workspace, user } = workspaceRoute.useRouteContext();
   const searchIntent = newChatSearch.parse(Object.fromEntries(new URLSearchParams(window.location.search)));
-  const models = useChatModels(workspace.id, user, searchIntent.intent === 'create-skill');
+  const models = useChatModels(
+    workspace.id,
+    user,
+    searchIntent.intent === 'create-agent' || searchIntent.intent === 'create-skill',
+  );
   const chatId = workspaceChatRoute.useParams({ shouldThrow: false })?.chatId;
   const { workspaceSlug } = workspaceRoute.useParams();
   const navigate = useNavigate();
@@ -256,13 +261,14 @@ function ConversationWorkspace({ api }: { api: ConversationApi }) {
         }
       : intent === 'create-agent'
         ? {
-            prompt:
-              'Help me create an agent. Read the authoring context and ask only what is still needed about its purpose, instructions, team, skills, access, Slack channels, and scheduled task prompts. Keep it private by default. Prepare the complete setup for my review; do not activate or install anything without my explicit approval.',
+            prompt: '',
+            placeholder: 'Describe the job, for example "Answer questions about my Customers table"',
+            skill: { id: 'agent-authoring', revision: 'latest' },
           }
         : intent === 'create-skill'
           ? {
-              prompt:
-                'Help me create a reusable skill from my description below. Draft it without asking me to confirm first. If I leave something out, choose a sensible default and tell me what you chose. Then prepare it for my review.',
+              prompt: '',
+              placeholder: 'Describe the task, for example "Write a weekly customer update"',
               skill: { id: 'workspace-skill-authoring', revision: 'latest' },
             }
           : intent === 'edit-skill' && skillIntent.id && skillIntent.version
@@ -495,6 +501,7 @@ function ConversationDetail({
       else composerInput.current?.focus();
     });
   const [skillHandoffError, setSkillHandoffError] = useState('');
+  const [composerPlaceholder, setComposerPlaceholder] = useState(prefill?.placeholder);
   useEffect(() => {
     if (!prefill || prefill.skill || prefill.autoSend) {
       appliedPrefill.current = false;
@@ -561,12 +568,14 @@ function ConversationDetail({
     if (!prefill?.skill || sharedChat) return;
     const selected = prefill.skill,
       controller = new AbortController();
-    if (selected.id === 'workspace-skill-authoring') {
-      skills.stage({ skillId: selected.id, revision: selected.revision, name: 'Create a reusable skill' });
-      if (!text.trim()) {
-        setContent(textDocument(prefill.prompt));
-        selectPrefill(prefill.prompt);
-      }
+    if (selected.id === 'agent-authoring' || selected.id === 'workspace-skill-authoring') {
+      skills.stage({
+        skillId: selected.id,
+        revision: selected.revision,
+        name: selected.id === 'agent-authoring' ? 'Set up an agent for review' : 'Create a reusable skill',
+      });
+      setComposerPlaceholder(prefill.placeholder);
+      if (!text.trim()) selectPrefill('');
       onPrefillApplied?.();
       return () => controller.abort();
     }
@@ -662,6 +671,7 @@ function ConversationDetail({
       uploads.clear();
       mentions.clear();
       skills.clear();
+      setComposerPlaceholder(undefined);
     }
     if (command.kind === 'rename') setEditing(null);
     read.restart();
@@ -1533,7 +1543,9 @@ function ConversationDetail({
                 onContentChange={setContent}
                 onSend={send}
                 canSend={!locked && canSend && sendAvailable}
-                placeholder={compact ? 'Reply…' : empty ? 'What would you like to get done?' : 'Reply…'}
+                placeholder={
+                  compact ? 'Reply…' : empty ? (composerPlaceholder ?? 'What would you like to get done?') : 'Reply…'
+                }
                 mode={!sharedChat && !compact ? { value: mode, onChange: setMode } : undefined}
                 scope={draft && empty ? scope : projectSharingScope}
                 onStop={

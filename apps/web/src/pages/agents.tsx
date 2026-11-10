@@ -151,21 +151,7 @@ export function AgentsPage() {
                   title="No agents yet"
                   description="Describe the agent's job in chat, or configure it manually above. Review its tools and access before activation."
                   sample={<AgentsSample />}
-                >
-                  <Button
-                    nativeButton={false}
-                    render={
-                      <Link
-                        to="/$workspaceSlug"
-                        params={{ workspaceSlug: workspace.slug }}
-                        search={{ intent: 'create-agent' }}
-                      />
-                    }
-                  >
-                    <Add size={16} aria-hidden="true" />
-                    New agent
-                  </Button>
-                </StatePanel>
+                />
               )
             ) : archived ? (
               <DataList aria-label="Archived agents" columns="two" headings={['Name', 'Actions']}>
