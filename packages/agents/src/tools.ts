@@ -99,7 +99,7 @@ import { GitHubBatchError } from '@tulipfarm/github/batch-contracts';
 import type { createGitHubBatches } from '@tulipfarm/github/batches';
 import { proposeTableSchema, tableProposalRules } from '@tulipfarm/tables/proposal-contracts';
 import { tableProposalJsonSchema } from '@tulipfarm/tables/proposal-json-schema';
-import { createChatTableProposals } from './table-proposals.ts';
+import { createChatTableProposals, tableReviewSummary } from './table-proposals.ts';
 import { chatRowReview } from './chat-row-guard.ts';
 import { chatTableDefinitions, guessedChatTable } from './chat-table-lookup.ts';
 import { createTableService } from '@tulipfarm/tables/service';
@@ -1464,13 +1464,34 @@ export function createChatTools(
             }),
           ),
         );
-        const proposed = await proposals.propose(workspaceId, actor, callId, context.origin, input);
+        const result = await proposals.propose(workspaceId, actor, callId, context.origin, input);
         let tables: { id: string; name: string }[] | undefined;
-        if ('id' in proposed && 'status' in proposed && input.plans.some(plan => plan.kind === 'import')) {
-          const review = await proposals.read(workspaceId, actor.userId, origin.conversationId, proposed.id);
-          if (review.content === 'available')
+        let reviewSummary: string | undefined;
+        const imports = input.plans.some(plan => plan.kind === 'import');
+        if ('status' in result && (result.status === 'pending' || imports)) {
+          const review = await proposals.read(workspaceId, actor.userId, origin.conversationId, result.id);
+          if (result.status === 'pending') {
+            if (
+              review.content !== 'available' ||
+              review.status !== 'pending' ||
+              review.freshness !== 'current' ||
+              review.unavailableFileIds?.length
+            )
+              return {
+                error: 'review-unavailable',
+                instruction: 'The review is no longer available for approval. Nothing in it has been applied.',
+              };
+            const attachments = review.manifest.plans.some(
+              plan => plan.input.kind === 'import' && plan.input.reference.kind === 'file',
+            )
+              ? (await chatAttachments(workspaceId, actor, origin)).attachments
+              : [];
+            reviewSummary = tableReviewSummary(review.manifest.plans, attachments);
+          }
+          if (review.content === 'available' && imports)
             tables = review.manifest.plans.map(plan => ({ id: plan.input.tableId, name: plan.after.label }));
         }
+        const proposed = { ...result, ...(reviewSummary && { reviewSummary }) };
         const presented = {
           ...proposed,
           ...(tables
@@ -2518,7 +2539,8 @@ export function createChatTools(
             instruction:
               'No rows have been created. This chat used untrusted content, so batch writes are unavailable. Call rows.create for one row; it returns a review draft the member approves on the chat card.',
           };
-        const draft = await createAuthoringDrafts(runtime, undefined, undefined, undefined, turnAudience).propose(
+        const drafts = createAuthoringDrafts(runtime, undefined, undefined, undefined, turnAudience);
+        const draft = await drafts.propose(
           workspaceId,
           actor,
           callId,
@@ -2530,10 +2552,22 @@ export function createChatTools(
             ...(written && { written }),
           },
         );
-        if (!review) return draft;
+        if (turnAudience && !review) return draft;
+        const readable = await drafts.read(workspaceId, actor.userId, origin.conversationId, draft.draftId);
+        if (readable.status !== 'pending' || !readable.rowTable)
+          return {
+            ...draft,
+            status: readable.status === 'pending' ? 'unavailable' : readable.status,
+            instruction:
+              'The row review is no longer available for approval. No rows from this call have been written.',
+          };
+        const count = call.tool === 'rows.create.batch' ? call.rows.length : 1;
+        const reviewSummary = `A review card for ${count} ${count === 1 ? 'row' : 'rows'} in ${JSON.stringify(readable.rowTable.name)} is ready in this chat. No rows from this card have been written.${written?.count ? ` ${written.count} ${written.count === 1 ? 'row was' : 'rows were'} already written earlier in this reply and are not included in this card.` : ''} Review and approve it to ${draft.operation} these rows.`;
+        if (!review) return { ...draft, reviewSummary };
         const batch = call.tool === 'rows.create.batch' ? call.rows.length : 0;
         return {
           ...draft,
+          reviewSummary,
           reason: review.reason,
           ...(review.table && { table: review.table }),
           ...(written && { alreadyWritten: written.count }),

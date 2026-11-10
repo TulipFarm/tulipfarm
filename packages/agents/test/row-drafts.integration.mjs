@@ -135,6 +135,8 @@ test('chat row writes after untrusted content become member-approved review draf
     const { chatId, result: draft } = await chatTool(createCall('MARKER'));
     assert.equal(draft.status, 'review-required');
     assert.equal(draft.operation, 'create');
+    assert.match(draft.reviewSummary, /1 row in "Notes".*ready in this chat/);
+    assert.match(draft.reviewSummary, /No rows from this card have been written/);
     assert.match(
       draft.instruction,
       /^No row has been created\..*choose Approve\. Never treat chat text as approval\.$/,
@@ -170,6 +172,23 @@ test('chat row writes after untrusted content become member-approved review draf
     assert.deepEqual(written[0].actor, { kind: 'human', userId: owner.userId, membershipId: owner.membershipId });
     assert.deepEqual(written[0].values, { [note.id]: text('MARKER') });
     assert.equal((await drafts.read(w.id, owner.userId, chatId, draft.draftId)).status, 'saved');
+  });
+
+  await t.test('a nine-row batch has a readable review summary and writes nothing before approval', async () => {
+    const before = await live();
+    const call = {
+      tool: 'rows.create.batch',
+      tableId: table.tableId,
+      expectedAppliedRevision: table.revision,
+      rows: Array.from({ length: 9 }, (_, index) => ({ values: { [note.id]: text(`Note ${index + 1}`) } })),
+    };
+    const { chatId, result } = await chatTool(call, []);
+    assert.equal(result.status, 'review-required');
+    assert.match(result.reviewSummary, /9 rows in "Notes".*ready in this chat/);
+    assert.deepEqual(await live(), before);
+    const readable = await drafts.read(w.id, owner.userId, chatId, result.draftId);
+    assert.equal(readable.status, 'pending');
+    assert.deepEqual(readable.proposal.input, call);
   });
 
   await t.test('dismissing commits nothing and closes the draft', async () => {

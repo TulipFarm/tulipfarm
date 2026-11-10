@@ -1278,6 +1278,7 @@ export type ToolInferenceContext = {
   catalog?: () => Promise<McpModelCatalog | undefined>;
   priorCalls?: number;
   priorToolCalls?: readonly unknown[];
+  priorReviewSummaries?: readonly string[];
   /** The working context holds a compaction summary, so the model may reread earlier messages. */
   earlierMessages?: boolean;
   /** The workspace reads chat files with the images reader, so the model may call `files.read`. */
@@ -1347,6 +1348,7 @@ type ToolResult = {
   providerId: boolean;
   ref?: string;
   compacted?: 'summary' | 'stub';
+  reviewSummary?: string;
 };
 /** One entry of the in-turn tool loop. Only the final answer text outlives the turn. */
 type LoopItem =
@@ -1957,11 +1959,7 @@ const proposeTool = nativeToolName('tables.propose');
 export function unbackedImportClaim(candidate: string, items: readonly LoopItem[]) {
   if (!importReviewClaim.test(candidate)) return undefined;
   const pending = items.some(
-    item =>
-      item.kind === 'results' &&
-      item.results.some(
-        result => result.name === proposeTool && !result.error && /"status":"pending"/.test(result.output),
-      ),
+    item => item.kind === 'results' && item.results.some(result => result.name === proposeTool && madeCard(result)),
   );
   return pending
     ? undefined
@@ -2018,20 +2016,58 @@ export function pointsToWaitingCard(candidate: string, waiting: number) {
   );
 }
 
-const cardReceipt = /"draftId":"|"status":"(?:pending|waiting|review-required|awaiting-approval|waiting-approval)"/;
 const readOnlyNativeTools = new Set([...readOnlyTools].map(nativeToolName));
-/**
- * Whether a tool result may have made something the person reviews in chat. Table and row tools must show a row draft
- * or a pending change. Other actions, such as Google or MCP proposals, have their own receipts and are left to the
- * completion check.
- */
-const madeCard = (result: ToolResult) =>
-  !result.error &&
-  !/^[^{]*\{"error":/.test(result.output) &&
-  (cardReceipt.test(result.output) ||
-    (isWorkTool(result.name) &&
-      !readOnlyNativeTools.has(result.name) &&
-      !/^(?:tables|rows|schema|files|web|knowledge)_/.test(result.name)));
+function cardResult(result: ToolResult): Record<string, unknown> | undefined {
+  if (result.error || readOnlyNativeTools.has(result.name) || !isWorkTool(result.name)) return undefined;
+  try {
+    const value: unknown = JSON.parse(result.output.slice(result.output.indexOf('{')));
+    if (!value || typeof value !== 'object' || Array.isArray(value) || 'error' in value) return undefined;
+    const receipt = value as Record<string, unknown>;
+    if (result.name === proposeTool)
+      return receipt.status === 'pending' && typeof receipt.id === 'string' && receipt.id ? receipt : undefined;
+    if (result.name.startsWith('rows_'))
+      return receipt.status === 'review-required' && typeof receipt.draftId === 'string' && receipt.draftId
+        ? receipt
+        : undefined;
+    if (result.name === nativeToolName('google.propose')) {
+      const google = z
+        .object({
+          provider: z.literal('google-workspace'),
+          data: z.object({ id: z.string().min(1), decision: z.null(), receipt: z.null() }),
+        })
+        .safeParse(value);
+      return google.success ? google.data.data : undefined;
+    }
+    if (result.name === nativeToolName('integrations.connect') && receipt.status === 'connect-card') return receipt;
+    if (result.name === nativeToolName('integrations.disconnect') && receipt.status === 'review-required')
+      return receipt;
+    return typeof receipt.status === 'string' &&
+      ['review-required', 'awaiting-approval', 'waiting-approval'].includes(receipt.status) &&
+      [receipt.draftId, receipt.proposalId, receipt.approvalId].some(id => typeof id === 'string' && id)
+      ? receipt
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+const madeCard = (result: ToolResult) => cardResult(result) !== undefined;
+
+function tableReviewReply(items: readonly LoopItem[], prior: readonly string[] = []) {
+  const summaries = [
+    ...prior,
+    ...items.flatMap(item =>
+      item.kind === 'results'
+        ? item.results.flatMap(result => {
+            if (result.name !== proposeTool && !result.name.startsWith('rows_')) return [];
+            if (result.reviewSummary) return [result.reviewSummary];
+            const receipt = cardResult(result);
+            return typeof receipt?.reviewSummary === 'string' ? [receipt.reviewSummary] : [];
+          })
+        : [],
+    ),
+  ];
+  return summaries.length ? [...new Set(summaries)].join('\n\n') : undefined;
+}
 // A row write refused because an earlier card for that table is still undecided: that card exists, so naming it is true.
 const pendingCard = (result: ToolResult) => /^[^{]*\{"error":"approval-pending"/.test(result.output);
 /** Whether a tool call in this reply succeeded at something other than reading. */
@@ -2094,7 +2130,7 @@ function presentsNewCard(candidate: string, items: readonly LoopItem[]) {
     cardClaims(candidate).length > 0 &&
     !promisesWork(candidate) &&
     last?.kind === 'results' &&
-    last.results.some(result => !result.error && cardReceipt.test(result.output) && madeCard(result))
+    last.results.some(madeCard)
   );
 }
 
@@ -2739,6 +2775,13 @@ export async function inferWithTools(
     checked = false,
     layout?: { layout: ReplyRenderInput } | { layoutFailed: true },
   ) => {
+    if (!tools?.layout) {
+      const reviewReply = tableReviewReply(items, tools?.priorReviewSummaries);
+      if (reviewReply) {
+        text = reviewReply;
+        checked = true;
+      }
+    }
     report(checked ? 'done' : 'finishing');
     return {
       text: unavailableInvitations ? invitationUnavailableReply : text,
@@ -2933,6 +2976,10 @@ export async function inferWithTools(
     return ref;
   };
   const cap = (results: ToolResult[], step: number) => {
+    for (const entry of results) {
+      const summary = tableReviewReply([{ kind: 'results', results: [entry] }]);
+      if (summary) entry.reviewSummary = summary;
+    }
     if (!limits) return results;
     for (const entry of results) {
       if (Buffer.byteLength(entry.output) <= capBytes) continue;
@@ -3420,6 +3467,12 @@ export async function inferWithTools(
       };
       if (unavailableInvitations) return accept();
       if (rendered) preview(rendered.input.summary);
+      const reviewReply = tableReviewReply(items, tools?.priorReviewSummaries);
+      if (reviewReply && !renderer) {
+        preview(reviewReply);
+        recordChatCompletionCheck('done', 'readable review card receipt');
+        return finish(reviewReply, true);
+      }
       // The check catches unfinished tool work. A first-try answer that used no work tool has nothing to catch,
       // unless it reports an outcome that only a tool call could have produced.
       // Undecided cards from earlier in the chat are read only once an answer claims a card this reply did not make.

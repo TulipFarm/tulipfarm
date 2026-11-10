@@ -67,6 +67,29 @@ const notesFor = text =>
     notes: JSON.parse(text).results.map(({ callId, tool }) => ({ callId, note: `${tool} read one page.` })),
   });
 
+test('capping a tool result cannot erase its authoritative review summary', async t => {
+  const summary = 'A review card for "Orders" from "orders.csv" is ready in this chat. No rows have been written.';
+  let requests = 0;
+  t.mock.method(globalThis, 'fetch', async (_url, init) => {
+    if (++requests === 1)
+      return Response.json(nativeReply('azure', { calls: [use('tables.propose', { input: '{"plans":[]}' })] }));
+    assert.equal(requests, 2);
+    const output = toolResults('azure', JSON.parse(init.body)).at(-1).output;
+    assert.doesNotMatch(output, /orders.csv/);
+    return Response.json(nativeReply('azure', { text: 'No card was created.' }));
+  });
+  const result = await inferWithTools(
+    nativeRoutes.azure,
+    [{ role: 'user', text: 'Import orders.csv into Orders.' }],
+    async () => ({ id: 'review', status: 'pending', padding: 'x'.repeat(50000), reviewSummary: summary }),
+    undefined,
+    false,
+    null,
+    { context: limits(40000) },
+  );
+  assert.equal(result.text, summary);
+});
+
 for (const format of formats)
   test(`${format} compacts older tool results past the trigger and still answers`, async t => {
     const window = 40000;

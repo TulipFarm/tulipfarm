@@ -754,6 +754,119 @@ test('a reply that keeps claiming a card no tool made ends with a plain account 
   assert.deepEqual(outcomes, ['continue', 'continue', 'continue', 'exhausted']);
 });
 
+test('successful work and nested pending data are not review-card receipts', () => {
+  for (const [name, output] of [
+    ['projects_create', { id: 'project', name: 'Orders' }],
+    ['workflows_run', { id: 'run', status: 'completed' }],
+    ['workflows_run', { id: 'run', status: 'pending' }],
+    ['rows_create', { id: 'row', values: { status: 'pending', draftId: 'data' } }],
+    ['tables_propose', { status: 'pending' }],
+  ]) {
+    const items = [{ kind: 'results', results: [{ name, output: JSON.stringify(output), error: false }] }];
+    assert.equal(unbackedCardClaim('The approval card is ready.', items)?.status, 'continue', name);
+  }
+  for (const [name, output] of [
+    ['workflows_create', { draftId: 'draft', status: 'review-required' }],
+    ['google_propose', { provider: 'google-workspace', data: { id: 'proposal', decision: null, receipt: null } }],
+    ['integrations_disconnect', { status: 'review-required' }],
+  ]) {
+    const items = [{ kind: 'results', results: [{ name, output: JSON.stringify(output), error: false }] }];
+    assert.equal(unbackedCardClaim('The approval card is ready.', items), undefined, name);
+  }
+});
+
+for (const model of ['grok-4.3', 'Kimi-K2.6'])
+  for (const sse of [false, true])
+    test(`${model} ${sse ? 'SSE' : 'JSON'} final summaries follow the readable review receipt, not model contradictions`, async t => {
+      const summary =
+        'A review card for "Orders" is ready in this chat. It imports "orders.csv". Review and approve it to apply the changes. Nothing in this card has been applied.';
+      for (const text of [
+        'No new card was created. I will not add those rows.',
+        'An earlier card for Customers is waiting. Approve or dismiss it first.',
+        'The import review for Customers from customers.csv is ready.',
+      ]) {
+        const replies = [
+          nativeReply('azure', { calls: [use('tables.propose', { input: '{"plans":[]}' })] }),
+          nativeReply('azure', { text }),
+        ];
+        const previews = [];
+        t.mock.method(globalThis, 'fetch', async (_url, init) => {
+          assert.equal(JSON.parse(init.body).model, model);
+          const reply = replies.shift();
+          assert.ok(reply, 'a persisted review needs no extra model evaluation');
+          return sse ? stream(reply) : Response.json(reply);
+        });
+        const result = await inferWithTools(
+          { ...nativeRoutes.azure, model },
+          [{ role: 'user', text: 'Import orders.csv into Orders.' }],
+          async call => {
+            assert.equal(call.tool, 'tables.propose');
+            return { id: 'review', status: 'pending', reviewSummary: summary };
+          },
+          undefined,
+          false,
+          null,
+          { answerText: update => previews.push(update.text) },
+        );
+        assert.equal(result.text, summary);
+        assert.equal(previews.at(-1), summary);
+        assert.equal(replies.length, 0);
+        t.mock.restoreAll();
+      }
+      const priorSummary =
+        'A review card for 9 rows in "Orders" is ready in this chat. No rows from this card have been written.';
+      t.mock.method(globalThis, 'fetch', async () => {
+        const reply = nativeReply('azure', { text: 'No card was created. Ask me to create it again.' });
+        return sse ? stream(reply) : Response.json(reply);
+      });
+      const resumed = await inferWithTools(
+        { ...nativeRoutes.azure, model },
+        [{ role: 'user', text: 'Add the 9 rows to Orders.' }],
+        () => assert.fail('Do not repeat a completed proposal'),
+        undefined,
+        false,
+        null,
+        { priorCalls: 1, priorReviewSummaries: [priorSummary] },
+      );
+      assert.equal(resumed.text, priorSummary);
+      t.mock.restoreAll();
+      t.mock.method(globalThis, 'fetch', async () => {
+        const reply = nativeReply('azure', {
+          calls: [use('tables.propose', { input: '{"plans":[]}' })],
+        });
+        return sse ? stream(reply) : Response.json(reply);
+      });
+      const exhausted = await inferWithTools(
+        { ...nativeRoutes.azure, model },
+        [{ role: 'user', text: 'Add the 9 rows to Orders.' }],
+        () => assert.fail('The exhausted turn must not repeat the proposal'),
+        undefined,
+        false,
+        null,
+        { priorCalls: 1000, priorReviewSummaries: [priorSummary] },
+      );
+      assert.equal(exhausted.text, priorSummary);
+      t.mock.restoreAll();
+      const failed = [
+        nativeReply('azure', { calls: [use('tables.propose', { input: '{"plans":[]}' })] }),
+        ...Array.from({ length: 3 }, () =>
+          nativeReply('azure', { text: 'The import review card for Orders is ready below.' }),
+        ),
+      ];
+      t.mock.method(globalThis, 'fetch', async () => {
+        const reply = failed.shift();
+        assert.ok(reply, 'unbacked claims stop after bounded corrections');
+        return sse ? stream(reply) : Response.json(reply);
+      });
+      const rejected = await inferWithTools(
+        { ...nativeRoutes.azure, model },
+        [{ role: 'user', text: 'Import orders.csv into Orders.' }],
+        async () => ({ error: 'import-values-invalid' }),
+      );
+      assert.equal(rejected.text, noCardReply());
+      assert.equal(failed.length, 0);
+    });
+
 test('an unbacked import review is sent back until a proposal exists, and the new card ends the reply unchecked', async t => {
   const outcomes = checkOutcomes(t);
   const replies = [
