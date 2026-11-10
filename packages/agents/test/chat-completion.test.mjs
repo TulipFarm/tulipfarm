@@ -4,6 +4,7 @@ import {
   cardClaims,
   claimsActionOutcome,
   cardsForRequest,
+  forcedRowTools,
   completionCheckEvidence,
   heldBackMisdescribed,
   heldBackReply,
@@ -21,6 +22,7 @@ import {
   waitingCardMisdescribed,
   waitingCardStretched,
   waitingRowChanges,
+  writtenRows,
 } from '../src/inference.ts';
 import { completionEvaluation, evaluationMessages } from './completion-evaluation-fixture.mjs';
 import { readSkill } from '../src/skills.ts';
@@ -28,6 +30,7 @@ import {
   azureStreamReply as stream,
   formats,
   isCompletionRequest,
+  nativeName,
   nativeRoutes,
   nativeReply,
   selectReply,
@@ -2196,4 +2199,206 @@ test('the fixed reply for an invented card names the waiting card when one is kn
     noCardReply(1, { table: 'Fruit ledger', summary: 'add 9 rows (Apple 1, Banana 2, Cherry 3, …) to' }),
     'No new approval card is waiting from this reply. A card to add 9 rows (Apple 1, Banana 2, Cherry 3, …) to "Fruit ledger" is still waiting for your approval in this chat: approve or dismiss it there first.',
   );
+});
+
+const otherLedger = '00000000-0000-4000-8000-0000000000aa';
+const ledgerStatus = { id: otherLedger, name: 'Other Ledger', savedRevision: 'a'.repeat(40) };
+const roseRequest = [{ role: 'user', text: 'Add one row to the Other Ledger table, Item and Amount: Rose 3.' }];
+const refusal = 'A review card is still waiting for your approval. Please approve it first, then I can add Rose 3.';
+const roseWrite = (tableId = otherLedger) =>
+  use('rows.create.batch', { tableId, expectedAppliedRevision: 'a'.repeat(40), rows: [fruit('Rose', '3')] });
+const forcedTool = body => body.tool_choice?.function?.name ?? body.tool_choice?.name;
+const waitingFruit = {
+  preloadedTools: ['schema.inspect', 'rows.create.batch'],
+  waitingCards: async () => 1,
+  waitingRowCards: async () => [{ table: 'Fruit ledger', input: nineRows }],
+};
+/** Answers each provider from its own reply list and the completion check as done, recording the requests. */
+function providers(t, replies) {
+  const requests = [];
+  t.mock.method(globalThis, 'fetch', async (url, init) => {
+    const provider = String(url).includes('anthropic') ? 'anthropic' : 'azure';
+    const body = JSON.parse(init.body);
+    if (isCompletionRequest(body)) return Response.json(selectReply(provider, verdict()));
+    requests.push({ provider, body });
+    const reply = replies[provider].shift();
+    assert.ok(reply, `bounded ${provider} requests`);
+    return Response.json(reply);
+  });
+  return requests;
+}
+const rowTable = async call =>
+  call.tool === 'schema.inspect' ? ledgerStatus : { records: [{ id: 'r', values: {} }], total: null, nextCursor: null };
+
+test('a row request answered with no tool call is sent back with the table tools it must call', async t => {
+  const done = 'I added Rose 3 to Other Ledger.';
+  const requests = providers(t, {
+    azure: [
+      nativeReply('azure', { text: refusal }),
+      nativeReply('azure', { calls: [use('schema.inspect', { tableId: otherLedger })] }),
+      nativeReply('azure', { calls: [roseWrite()] }),
+      nativeReply('azure', { text: done }),
+    ],
+  });
+  const calls = [];
+  const result = await inferWithTools(
+    nativeRoutes.azure,
+    roseRequest,
+    async call => (calls.push(call.tool), rowTable(call)),
+    undefined,
+    false,
+    null,
+    waitingFruit,
+  );
+  assert.equal(result.text, done);
+  assert.deepEqual(calls, ['schema.inspect', 'rows.create.batch']);
+  assert.deepEqual(
+    requests.map(request => forcedTool(request.body)),
+    [undefined, nativeName('schema.inspect'), nativeName('rows.create.batch'), undefined],
+  );
+});
+
+test('a wrong table ID on a forced row write is corrected once with the write forced again', async t => {
+  const requests = providers(t, {
+    azure: [
+      nativeReply('azure', { text: refusal }),
+      nativeReply('azure', { calls: [use('schema.inspect', { tableId: otherLedger })] }),
+      nativeReply('azure', { calls: [roseWrite('00000000-0000-4000-8000-0000000000bb')] }),
+      nativeReply('azure', { calls: [roseWrite()] }),
+      nativeReply('azure', { text: 'I added Rose 3 to Other Ledger.' }),
+    ],
+  });
+  await inferWithTools(
+    nativeRoutes.azure,
+    roseRequest,
+    async call =>
+      call.tool === 'rows.create.batch' && call.tableId !== otherLedger
+        ? { error: 'table-not-found', tables: [{ id: otherLedger, name: 'Other Ledger' }] }
+        : rowTable(call),
+    undefined,
+    false,
+    null,
+    waitingFruit,
+  );
+  assert.deepEqual(
+    requests.map(request => forcedTool(request.body)),
+    [
+      undefined,
+      nativeName('schema.inspect'),
+      nativeName('rows.create.batch'),
+      nativeName('rows.create.batch'),
+      undefined,
+    ],
+  );
+});
+
+test('a row request still unmade under forced table tools is answered by the fallback model', async t => {
+  const done = 'I added Rose 3 to Other Ledger.';
+  const requests = providers(t, {
+    azure: [refusal, refusal, refusal].map(text => nativeReply('azure', { text })),
+    anthropic: [nativeReply('anthropic', { calls: [roseWrite()] }), nativeReply('anthropic', { text: done })],
+  });
+  const calls = [];
+  const result = await inferWithTools(
+    nativeRoutes.azure,
+    roseRequest,
+    async call => (calls.push(call.tool), rowTable(call)),
+    undefined,
+    false,
+    null,
+    { ...waitingFruit, fallback: { route: nativeRoutes.anthropic, label: 'claude-fallback' } },
+  );
+  assert.deepEqual(result, { text: done, fallback: 'claude-fallback' });
+  assert.deepEqual(calls, ['rows.create.batch']);
+  assert.deepEqual(
+    requests.slice(0, 3).map(request => [request.provider, forcedTool(request.body)]),
+    [
+      ['azure', undefined],
+      ['azure', nativeName('schema.inspect')],
+      ['anthropic', undefined],
+    ],
+  );
+});
+
+test('when the fallback also makes no row change, the reply gives up with the stop reply', async t => {
+  providers(t, {
+    azure: [refusal, refusal, refusal].map(text => nativeReply('azure', { text })),
+    anthropic: Array.from({ length: 8 }, () => nativeReply('anthropic', { text: refusal })),
+  });
+  const result = await inferWithTools(
+    nativeRoutes.azure,
+    roseRequest,
+    () => assert.fail('No tool expected'),
+    undefined,
+    false,
+    null,
+    { ...waitingFruit, fallback: { route: nativeRoutes.anthropic, label: 'claude-fallback' } },
+  );
+  assert.equal(result.fallback, 'claude-fallback');
+  assert.match(result.text, /^I stopped before finishing this request\./);
+});
+
+test('the fixed reply about a waiting card first states the rows this reply did write', async t => {
+  const claim = 'I prepared a new review card for the Rose row.';
+  providers(t, {
+    azure: [
+      nativeReply('azure', { calls: [use('schema.inspect', { tableId: otherLedger })] }),
+      nativeReply('azure', { calls: [roseWrite()] }),
+      ...[1, 2, 3, 4].map(() => nativeReply('azure', { text: claim })),
+    ],
+  });
+  const result = await inferWithTools(
+    nativeRoutes.azure,
+    roseRequest,
+    async call =>
+      call.tool === 'schema.inspect'
+        ? ledgerStatus
+        : { records: [{ id: 'r', values: fruit('Rose', '3').values }], total: null, nextCursor: null },
+    undefined,
+    false,
+    null,
+    waitingFruit,
+  );
+  assert.match(result.text, /^Rose 3 was added to "Other Ledger"\. No new approval card is waiting/);
+});
+
+test('written rows are named per table, counted when many, and changes are counted', () => {
+  const step = (call, output) => [
+    { kind: 'model', text: '', calls: [{ id: 'c', name: call.name, input: call.input }] },
+    {
+      kind: 'results',
+      results: [
+        { id: 'c', name: call.name, output: `Untrusted tool result for c: ${JSON.stringify(output)}`, error: false },
+      ],
+    },
+  ];
+  const inspect = step(use('schema.inspect', { tableId: otherLedger }), ledgerStatus);
+  const record = (item, amount) => ({ id: 'r', values: fruit(item, amount).values });
+  assert.equal(
+    writtenRows([...inspect, ...step(roseWrite(), record('Rose', '3'))]),
+    'Rose 3 was added to "Other Ledger".',
+  );
+  const batch = use('rows.create.batch', { tableId: otherLedger, rows: [] });
+  const records = ['Ash', 'Elm', 'Oak', 'Yew'].map((item, index) => record(item, String(index)));
+  assert.equal(
+    writtenRows([...step(batch, { records: records.slice(0, 2), total: null, nextCursor: null })]),
+    'Ash 0, Elm 1 were added to the table.',
+  );
+  assert.equal(
+    writtenRows([...inspect, ...step(batch, { records, total: null, nextCursor: null })]),
+    '4 rows were added to "Other Ledger".',
+  );
+  assert.equal(
+    writtenRows([...inspect, ...step(use('rows.update', { tableId: otherLedger }), record('Rose', '4'))]),
+    '1 row was changed in "Other Ledger".',
+  );
+  assert.equal(writtenRows([...inspect, ...step(roseWrite(), { error: 'approval-pending' })]), '');
+});
+
+test('the forced table tools follow the change a row request names first, among the offered tools', () => {
+  const offered = ['schema.inspect', 'rows.list', 'rows.create.batch', 'rows.update.batch'].map(nativeName);
+  const forced = request => forcedRowTools(request, offered).map(name => name.replaceAll('_', '.'));
+  assert.deepEqual(forced('Add one row to the Ledger table: Rose 3.'), ['schema.inspect', 'rows.create.batch']);
+  assert.deepEqual(forced('Change the Rose row in Ledger to 4, then add Lime 10.'), ['schema.inspect', 'rows.list']);
+  assert.deepEqual(forced('Create a new table called Ledger.'), []);
 });
