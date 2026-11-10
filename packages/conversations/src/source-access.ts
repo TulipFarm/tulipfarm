@@ -1,5 +1,6 @@
 import {
   AccessDenied,
+  SourceAuthorizationUnavailable,
   canAccessAsset,
   canAccessTable,
   currentMember,
@@ -160,9 +161,25 @@ export async function requireGoogleSources(tx: AuthorizationTransaction, actor: 
     if (source.kind === 'google-integration') await requireProtectedSource(tx, actor, source);
 }
 
+export class KnowledgeSourceRemoved extends AccessDenied {}
+
 export async function requireKnowledgeSources(tx: AuthorizationTransaction, actor: HumanActor, sources: unknown) {
   for (const source of sourceDependenciesSchema.parse(sources))
-    if (source.kind === 'knowledge-document') await requireProtectedSource(tx, actor, source);
+    if (source.kind === 'knowledge-document')
+      try {
+        await requireProtectedSource(tx, actor, source);
+      } catch (error) {
+        if (error instanceof SourceAuthorizationUnavailable || !(error instanceof AccessDenied)) throw error;
+        const removed = await tx.client.query(
+          `SELECT 1 FROM ${qualified(tx.schema, 'tf_knowledge_documents')} d
+           JOIN ${qualified(tx.schema, 'tf_knowledge_sources')} s ON s.id=d.source_id
+           WHERE d.id=$1 AND s.id=$2 AND s.provider IN ('note','file') AND s.owner_membership_id=$3
+             AND (d.tombstoned_at IS NOT NULL OR d.observed_revision_id<>$4)`,
+          [source.documentId, source.sourceId, actor.membershipId, source.revisionId],
+        );
+        if (removed.rowCount) throw new KnowledgeSourceRemoved();
+        throw error;
+      }
 }
 
 export async function requireWorkflowSources(tx: AuthorizationTransaction, actor: HumanActor, sources: unknown) {

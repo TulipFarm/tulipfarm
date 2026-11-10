@@ -369,6 +369,7 @@ async function sourceClosure(
         break;
       }
       case 'private-conversation': {
+        if (source.snapshot) break;
         const read = prefetch?.conversations.has(source.conversationId)
           ? prefetch
           : await readConversationSources(tx, [source.conversationId], installed);

@@ -10,6 +10,9 @@ import { fixture } from '../../workspace-storage/test/integration/fixture.mjs';
 import { createAuthoringDrafts } from '../src/drafts.ts';
 import { createChatTools } from '../src/tools.ts';
 import { createFiles } from '../../files/src/index.ts';
+import { AccessDenied, protectedSourceClosure, requireProtectedSource } from '@tulipfarm/access';
+import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
+import { createKnowledge, withKnowledgeSourceAuthorization } from '@tulipfarm/knowledge';
 
 async function setup(t) {
   const db = await fixture();
@@ -21,16 +24,18 @@ async function setup(t) {
   await db.platform.query(`SET search_path TO app; DROP TABLE IF EXISTS app.accounts;
 ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', import.meta.url), 'utf8')}`);
   const w = await db.create(await workspaceTableMigrations());
-  runtime = createWorkspaceRuntime({
-    replicaCount: 1,
-    reservedConnections: 2,
-    databaseConnectionBudget: 20,
-    resolveCredential: async id => ({ workspaceId: id, generation: 1, connectionString: db.login(w) }),
-  });
+  runtime = withKnowledgeSourceAuthorization(
+    createWorkspaceRuntime({
+      replicaCount: 1,
+      reservedConnections: 2,
+      databaseConnectionBudget: 20,
+      resolveCredential: async id => ({ workspaceId: id, generation: 1, connectionString: db.login(w) }),
+    }),
+  );
   const chats = createConversations(runtime),
     chatId = randomUUID();
   await chats.create(w.id, w.userId, { chatId, commandId: randomUUID() });
-  async function tool(call) {
+  async function reply(text, call, sources = []) {
     const sent = await chats.send(w.id, w.userId, chatId, {
       messageId: randomUUID(),
       commandId: randomUUID(),
@@ -38,20 +43,22 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     });
     let output;
     const executor = createConversationExecutor(runtime, async ({ executeTool }) => {
-      output = (
-        await executeTool(
-          call.tool,
-          false,
-          context => createChatTools(context.runtime).invokeWithSources(context, call),
-          [],
-          call,
-        )
-      ).result;
-      return { text: 'Review the card.', sources: [] };
+      if (call)
+        output = (
+          await executeTool(
+            call.tool,
+            false,
+            context => createChatTools(context.runtime).invokeWithSources(context, call),
+            sources,
+            call,
+          )
+        ).result;
+      return { text, sources };
     });
     await executor.process({ workspaceId: w.id, conversationId: chatId, turnId: sent.turnId, generation: 0 });
     return output;
   }
+  const tool = call => reply('Review the card.', call);
   const objects = new Map();
   const bytes = {
     putIfAbsent: async (key, body) => void objects.set(key, Buffer.from(body)),
@@ -66,7 +73,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     await drafts.decide(w.id, w.userId, chatId, proposed.draftId, decision);
     return drafts.read(w.id, w.userId, chatId, proposed.draftId);
   }
-  return { w, runtime, chatId, drafts, tool, approve, files: createFiles(runtime, bytes) };
+  return { w, db, runtime, chats, chatId, drafts, tool, reply, approve, files: createFiles(runtime, bytes) };
 }
 
 test('chat adds, updates and removes a Knowledge note only through approved cards', async t => {
@@ -168,3 +175,184 @@ test('chat adds a file from Files to Knowledge once', async t => {
   assert.equal((await approve(renamed)).status, 'saved');
   assert.equal((await tool({ tool: 'knowledge.list' })).entries[0].title, 'Support FAQ');
 });
+
+for (const change of ['remove note', 'replace note', 'remove file']) {
+  test(`${change} preserves unrelated replies and owner-only Knowledge receipts`, async t => {
+    const { w, db, runtime, chats, chatId, drafts, tool, reply, approve, files } = await setup(t);
+    const text = 'Private source passage: Starter costs $10.';
+    let fileId;
+    if (change === 'remove file') {
+      fileId = randomUUID();
+      await files.upload(
+        w.id,
+        w.userId,
+        fileId,
+        {
+          name: 'private-pricing.md',
+          parentId: null,
+          mediaType: 'text/markdown',
+        },
+        Buffer.from(text),
+      );
+    }
+    const added = await tool(
+      fileId ? { tool: 'knowledge.add', fileId } : { tool: 'knowledge.add', title: 'Private pricing', text },
+    );
+    await approve(added);
+    const before = await tool({ tool: 'knowledge.add', title: 'Independent draft', text: 'An unrelated note.' });
+    const actor = { kind: 'human', membershipId: w.membershipId, userId: w.userId };
+    const publicationId = randomUUID();
+    await createKnowledge({ runtime }).publishLexical(w.id, actor, {
+      id: publicationId,
+      documentId: added.documentId,
+      revisionId: added.draftId,
+      markdown: text,
+      pages: 0,
+      tokens: 10,
+      chunks: [{ heading: '', text, tokens: 10, offset: { kind: 'passage' } }],
+    });
+    const sourceRow = (
+      await db.platform.query(
+        `SELECT d.source_id,s.access_epoch FROM "${w.names.schema}".tf_knowledge_documents d
+         JOIN "${w.names.schema}".tf_knowledge_sources s ON s.id=d.source_id WHERE d.id=$1`,
+        [added.documentId],
+      )
+    ).rows[0];
+    const source = {
+      kind: 'knowledge-document',
+      workspaceId: w.id,
+      sourceId: sourceRow.source_id,
+      documentId: added.documentId,
+      revisionId: added.draftId,
+      publicationId,
+      accessEpoch: sourceRow.access_epoch,
+    };
+    const citedText = `${text} [Pricing](#knowledge-citation=${publicationId}:0)`;
+    const dependent = await reply(
+      citedText,
+      {
+        tool: 'knowledge.add',
+        title: 'Source-dependent draft',
+        text: 'Based on the source.',
+      },
+      [source],
+    );
+    // Reusing an earlier citation must retain that exact revision without another tool call.
+    await reply(`See [Pricing](#knowledge-citation=${publicationId}:0).`);
+    const unrelatedText = 'Good morning. This reply uses no Knowledge.';
+    await reply(unrelatedText, change === 'remove note' ? { tool: 'knowledge.list' } : undefined);
+    const opaqueText = 'An older reply with no recorded tool attribution.';
+    let legacySources;
+    if (change === 'remove note') {
+      await reply(opaqueText);
+      const old = (
+        await db.platform.query(
+          `SELECT r.message_id,r.sources FROM "${w.names.schema}".tf_conversation_results r
+         JOIN "${w.names.schema}".tf_conversation_parts p ON p.message_id=r.message_id WHERE p.text=$1`,
+          [unrelatedText],
+        )
+      ).rows[0];
+      legacySources = old.sources.map(dependency =>
+        dependency.kind === 'private-conversation'
+          ? { kind: 'private-conversation', conversationId: chatId }
+          : dependency,
+      );
+      legacySources.push(source);
+      await db.platform.query(`UPDATE "${w.names.schema}".tf_conversation_results SET sources=$2 WHERE message_id=$1`, [
+        old.message_id,
+        JSON.stringify(legacySources),
+      ]);
+      await db.platform.query(
+        `UPDATE "${w.names.schema}".tf_conversation_results SET sources=$2 WHERE message_id=(
+           SELECT message_id FROM "${w.names.schema}".tf_conversation_parts WHERE text=$1)`,
+        [opaqueText, JSON.stringify(legacySources)],
+      );
+    }
+    const after = await tool({ tool: 'knowledge.add', title: 'Other entry', text: 'Unrelated content.' });
+    await approve(after);
+    const changed = await tool(
+      change === 'replace note'
+        ? {
+            tool: 'knowledge.update',
+            documentId: added.documentId,
+            revisionId: added.draftId,
+            text: 'Starter now costs $12.',
+          }
+        : { tool: 'knowledge.remove', documentId: added.documentId, revisionId: added.draftId },
+    );
+    const decision = { commandId: randomUUID(), digest: changed.digest, decision: 'save' };
+    await drafts.decide(w.id, w.userId, chatId, changed.draftId, decision);
+
+    for (let reload = 0; reload < 2; reload++) {
+      const reader = createAuthoringDrafts(runtime);
+      for (const [card, operation] of [
+        [added, 'add'],
+        [after, 'add'],
+        [changed, change === 'replace note' ? 'update' : 'remove'],
+      ]) {
+        const view = await reader.read(w.id, w.userId, chatId, card.draftId);
+        assert.equal(view.status, 'saved');
+        assert.equal(view.outcome.operation, operation);
+        assert.deepEqual(view.proposal, {
+          kind: 'knowledge-receipt',
+          targetId: card.documentId,
+          input: { operation, entry: card === after ? 'note' : fileId ? 'file' : 'note' },
+        });
+        assert.doesNotMatch(JSON.stringify(view), /Private source passage|Private pricing|private-pricing/);
+      }
+      assert.equal((await reader.read(w.id, w.userId, chatId, before.draftId)).status, 'pending');
+      const history = await createConversations(runtime).history(w.id, w.userId, chatId);
+      const texts = history.messages
+        .filter(message => message.author === 'assistant')
+        .map(message => message.parts.map(part => part.text ?? '').join(''));
+      assert.ok(texts.includes(unrelatedText));
+      assert.ok(!texts.includes(citedText));
+      assert.ok(!texts.includes(`See [Pricing](#knowledge-citation=${publicationId}:0).`));
+      const unavailable = texts.filter(value => value.includes('removed or replaced by you'));
+      assert.equal(unavailable.length, change === 'remove note' ? 3 : 2);
+      assert.ok(!texts.includes(opaqueText), 'unattributed legacy dependencies stay withheld');
+      assert.doesNotMatch(unavailable.join(''), /access changed|access to it ended|Some work failed/);
+    }
+    assert.equal(
+      (await drafts.decide(w.id, w.userId, chatId, changed.draftId, decision)).operation,
+      change === 'replace note' ? 'update' : 'remove',
+    );
+    if (legacySources) {
+      const stored = (
+        await db.platform.query(
+          `SELECT r.sources FROM "${w.names.schema}".tf_conversation_results r
+         JOIN "${w.names.schema}".tf_conversation_parts p ON p.message_id=r.message_id WHERE p.text=$1`,
+          [unrelatedText],
+        )
+      ).rows[0];
+      assert.deepEqual(stored.sources, legacySources, 'legacy attribution is projected without rewriting stored data');
+    }
+    await assert.rejects(drafts.read(w.id, w.userId, chatId, dependent.draftId), AccessDenied);
+    await reply('A fresh reply after the source changed.');
+    assert.ok(
+      (await chats.history(w.id, w.userId, chatId)).messages.some(message =>
+        message.parts.some(part => part.text === 'A fresh reply after the source changed.'),
+      ),
+    );
+    if (fileId) assert.equal((await files.details(w.id, w.userId, fileId)).item.id, fileId);
+
+    const outsider = { userId: randomUUID(), membershipId: randomUUID() };
+    await db.platform.query(
+      `INSERT INTO "${w.names.schema}".tf_memberships (id,user_id,role) VALUES ($1,$2,'member')`,
+      [outsider.membershipId, outsider.userId],
+    );
+    await assert.rejects(drafts.read(w.id, outsider.userId, chatId, added.draftId), AccessDenied);
+    await assert.rejects(chats.history(w.id, outsider.userId, chatId), AccessDenied);
+    await runtime.transaction(w.id, commonCompatibility, async tx => {
+      const snapshot = { kind: 'private-conversation', conversationId: chatId, snapshot: true };
+      assert.deepEqual(await protectedSourceClosure(tx, [snapshot]), [snapshot]);
+      await requireProtectedSource(tx, actor, snapshot);
+      await assert.rejects(requireProtectedSource(tx, { kind: 'human', ...outsider }, snapshot), AccessDenied);
+    });
+    await db.platform.query(`UPDATE "${w.names.schema}".tf_memberships SET removed_at=clock_timestamp() WHERE id=$1`, [
+      w.membershipId,
+    ]);
+    await assert.rejects(drafts.read(w.id, w.userId, chatId, changed.draftId), AccessDenied);
+    await assert.rejects(chats.history(w.id, w.userId, chatId), AccessDenied);
+  });
+}

@@ -208,7 +208,12 @@ export const sourceDependencySchema = z.discriminatedUnion('kind', [
   /** A project's settings and knowledge list, readable only by its current members. */
   z.strictObject({ kind: z.literal('project'), projectId: uuidSchema, revision: z.number().int().nonnegative() }),
   z.strictObject({ kind: z.literal('creation-team'), teamId: uuidSchema, authority: z.enum(['agent', 'table']) }),
-  z.strictObject({ kind: z.literal('private-conversation'), conversationId: uuidSchema }),
+  z.strictObject({
+    kind: z.literal('private-conversation'),
+    conversationId: uuidSchema,
+    /** The producer retained the consumed dependencies beside this owner-only reference. */
+    snapshot: z.literal(true).optional(),
+  }),
   z.strictObject({ kind: z.literal('shared-slack-turn'), eventId: uuidSchema }),
   z.strictObject({ kind: z.literal('public-web'), url: z.url().max(2048) }),
   /** The requester's own saved personal memory; valid only for that membership. */
