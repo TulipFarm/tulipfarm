@@ -41,6 +41,7 @@ import {
 } from '@tulipfarm/observability';
 import { chatToolCallLimit, chatTitleSchema, shortenTitle } from '@tulipfarm/conversations/contracts';
 import { reviewCardReference, type ReviewCardReference, type ReviewCardState } from '@tulipfarm/conversations/results';
+import { withoutTrailingControlMarker } from '@tulipfarm/conversations/reply-text';
 import { createChatToolGuard } from './chat-tool-guard.ts';
 import {
   agentModelInputSchema,
@@ -1509,8 +1510,10 @@ function nativeStep(route: CapableRoute, body: unknown): NativeStep {
     reason: 'invalid-decision',
     rejection,
   });
-  const step = (text: string, calls: NativeCall[], raw: unknown): NativeStep =>
-    text.trim() || calls.length ? { kind: 'step', text, calls, raw } : invalid('empty');
+  const step = (text: string, calls: NativeCall[], raw: unknown): NativeStep => {
+    const cleaned = withoutTrailingControlMarker(text, false, route.model);
+    return cleaned.trim() || calls.length ? { kind: 'step', text: cleaned, calls, raw } : invalid('empty');
+  };
   switch (route.provider) {
     case 'anthropic': {
       const parsed = anthropicNativeSchema.safeParse(body);
@@ -3038,6 +3041,7 @@ async function sendChatRequest<T>(
         });
         const result = await readModelResponse(response, streamFormat, {
           onText,
+          model: target.model,
           onFirstToken: report.firstToken,
           onEvent: () => events++,
         }).catch((error: unknown) => {

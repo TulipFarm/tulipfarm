@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { withoutTrailingControlMarker } from '@tulipfarm/conversations/reply-text';
 import { withoutReasoningMarkup } from './reasoning-markup.ts';
 
 export type StreamFormat = 'anthropic' | 'chat-completions' | 'responses' | 'gemini';
@@ -484,7 +485,12 @@ async function rejectionBody(response: Response): Promise<unknown> {
 export async function readModelResponse(
   response: Response,
   format: StreamFormat | null,
-  options: { onText: ((text: string) => void) | undefined; onFirstToken?: () => void; onEvent?: () => void },
+  options: {
+    onText: ((text: string) => void) | undefined;
+    onFirstToken?: () => void;
+    onEvent?: () => void;
+    model?: string;
+  },
 ): Promise<StreamedResponse> {
   if (!response.ok) return { body: await rejectionBody(response), error: null };
   if (!format || !response.body || !/^text\/event-stream\b/i.test(response.headers.get('content-type') ?? ''))
@@ -499,10 +505,18 @@ export async function readModelResponse(
       options.onFirstToken?.();
     }
     if (!options.onText) continue;
-    const text = assembler.visible();
-    if (text === undefined || text === shown) continue;
-    shown = text;
-    options.onText(text);
+    const raw = assembler.visible();
+    if (raw === undefined) continue;
+    const text = withoutTrailingControlMarker(raw, true, options.model);
+    if (text !== shown) {
+      shown = text;
+      options.onText(text);
+    }
+  }
+  const final = assembler.visible();
+  if (options.onText && final !== undefined) {
+    const text = withoutTrailingControlMarker(final, false, options.model);
+    if (text !== shown) options.onText(text);
   }
   return assembler.result();
 }

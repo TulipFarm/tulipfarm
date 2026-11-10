@@ -3,6 +3,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./reply-text": {
+      "types": "./dist/reply-text.d.ts",
+      "default": "./dist/reply-text.js"
+    },
     "./execution": {
       "types": "./dist/execution.d.ts",
       "default": "./dist/execution.js"

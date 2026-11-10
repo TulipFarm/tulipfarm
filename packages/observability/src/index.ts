@@ -190,6 +190,7 @@ const spanAttributes = new Set([
   'status',
   'gen_ai.provider.name',
   'gen_ai.request.model',
+  'marker_stripped',
   'gen_ai.operation.name',
   'build.commit',
   'gen_ai.usage.input_tokens',
