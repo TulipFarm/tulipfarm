@@ -1012,11 +1012,23 @@ export function createWorkflows(
           current.historyAudience.length &&
           (tx.commonVersion >= workflowActiveSponsorshipCommonVersion || !current.enabled)
         ) {
-          await requireSponsorshipAuthority(tx, current, actor.membershipId);
-          await tx.client.query(
-            `UPDATE ${table(tx, 'tf_workflows')} SET sponsorship_revision=revision,sponsorship_id=COALESCE(sponsorship_id,$2) WHERE id=$1`,
-            [id, randomUUID()],
-          );
+          try {
+            await requireSponsorshipAuthority(tx, current, actor.membershipId);
+            await tx.client.query(
+              `UPDATE ${table(tx, 'tf_workflows')} SET sponsorship_revision=revision WHERE id=$1 AND sponsorship_id IS NOT NULL`,
+              [id],
+            );
+          } catch (error) {
+            // Saving a draft does not require the sponsor to be able to authorize runs.
+            if (
+              !(error instanceof AccessDenied) &&
+              !(
+                error instanceof WorkflowConflict &&
+                ['record-source-denied', 'table-step-access-denied'].includes(error.message)
+              )
+            )
+              throw error;
+          }
         }
       }
       await auditWorkflow(tx, actor.membershipId, 'workflow.save', id);

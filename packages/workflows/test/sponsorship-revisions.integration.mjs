@@ -113,6 +113,7 @@ test(
         sponsorMembershipId: w.membershipId,
         historyAudience: [w.membershipId, recipient],
       });
+      const sharedSponsorship = await sponsorship();
       await service.activate(w.id, w.userId, id, {
         commandId: randomUUID(),
         expectedGeneration: shared.generation,
@@ -120,19 +121,18 @@ test(
         enabled: true,
       });
       await service.share(w.id, w.userId, id, { principal: { kind: 'person', id: recipient }, permissions: [] });
-      await assert.rejects(
-        service.save(w.id, w.userId, id, {
-          revision: randomUUID(),
-          expectedRevision: saved.revision,
-          definition: { ...input.definition, name: 'Updated intake' },
-        }),
-        AccessDenied,
-        'self-sponsorship rechecks the audience before accepting the new revision',
-      );
+      const pending = await service.save(w.id, w.userId, id, {
+        revision: randomUUID(),
+        expectedRevision: saved.revision,
+        definition: { ...input.definition, name: 'Updated intake' },
+      });
+      assert.equal(pending.sponsorshipAccepted, false, 'lost audience access leaves the saved revision pending');
+      assert.equal(pending.activeRevision, saved.revision);
+      assert.equal(await sponsorship(), sharedSponsorship);
       assert.equal(
         (await service.list(w.id, w.userId)).find(item => item.id === id).revision,
-        saved.revision,
-        'failed authorization rolls back the save',
+        pending.revision,
+        'failed sponsorship authorization does not roll back a valid draft save',
       );
       await elapse();
       await service.due(w.id);
@@ -386,8 +386,187 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         false,
         'the active-consent marker never bypasses current source access',
       );
+      await service.share(w.id, manager.userId, id, {
+        principal: { kind: 'person', id: sponsor.membershipId },
+        permissions: ['manage', 'invoke'],
+      });
+      const pending = await service.save(w.id, sponsor.userId, id, {
+        revision: randomUUID(),
+        expectedRevision: changed.revision,
+        definition: workflowDefinition('saved without write access'),
+      });
+      assert.equal(pending.sponsorshipAccepted, false);
+      assert.equal(pending.enabled, false);
+      assert.equal(pending.activeRevision, replacementRevision);
+      assert.equal(
+        (await service.list(w.id, sponsor.userId)).find(item => item.id === id).revision,
+        pending.revision,
+        'a sponsor without source write access can still save a readable draft',
+      );
+      await db.platform.query(
+        `INSERT INTO ${table('tf_grants')}(team_id,asset_id,permission) VALUES($1,$2,'table.row.create')`,
+        [sponsor.teamId, definition.id],
+      );
+      await service.sponsorship(w.id, sponsor.userId, id, {
+        sponsorMembershipId: sponsor.membershipId,
+        historyAudience: [sponsor.membershipId, manager.membershipId],
+      });
+      await db.platform.query(
+        `DELETE FROM ${table('tf_grants')} WHERE team_id=$1 AND asset_id=$2 AND permission='table.row.read'`,
+        [manager.teamId, definition.id],
+      );
+      const audiencePending = await service.save(w.id, sponsor.userId, id, {
+        revision: randomUUID(),
+        expectedRevision: pending.revision,
+        definition: workflowDefinition('saved without audience source access'),
+      });
+      assert.equal(audiencePending.sponsorshipAccepted, false);
+      assert.equal(audiencePending.enabled, false);
+      assert.equal(
+        (await service.list(w.id, sponsor.userId)).find(item => item.id === id).revision,
+        audiencePending.revision,
+        'lost audience source access leaves a saved draft pending',
+      );
     } finally {
       await migration?.end();
+      await runtime?.close();
+      await db.close();
+    }
+  },
+);
+
+test(
+  'a nominee must explicitly accept sponsorship and can still save after losing invoke access',
+  { timeout: 60000 },
+  async t => {
+    const db = await fixture();
+    let runtime;
+    try {
+      await loadPlatformBaseline(db.platform);
+      const w = await db.create(await workspaceTableMigrations());
+      const table = name => qualified(w.names.schema, name);
+      const nominee = { membershipId: randomUUID(), userId: randomUUID() };
+      await db.platform.query(`INSERT INTO ${table('tf_memberships')}(id,user_id,role) VALUES($1,$2,'member')`, [
+        nominee.membershipId,
+        nominee.userId,
+      ]);
+      runtime = createWorkspaceRuntime({
+        replicaCount: 1,
+        reservedConnections: 2,
+        databaseConnectionBudget: 20,
+        resolveCredential: async id => ({ workspaceId: id, generation: 1, connectionString: db.login(w) }),
+      });
+      const service = createWorkflows(runtime),
+        id = randomUUID(),
+        revision = randomUUID();
+      const definition = {
+        version: 1,
+        name: 'Scheduled intake',
+        triggers: [{ id: 'interval', kind: 'interval', minutes: 15 }],
+        steps: [{ id: 'copy', kind: 'transform', fields: {} }],
+      };
+      await service.save(w.id, w.userId, id, { revision, expectedRevision: null, definition });
+      await service.share(w.id, w.userId, id, {
+        principal: { kind: 'person', id: nominee.membershipId },
+        permissions: ['manage', 'invoke'],
+      });
+      await service.sponsorship(w.id, w.userId, id, {
+        sponsorMembershipId: nominee.membershipId,
+        historyAudience: [w.membershipId, nominee.membershipId],
+      });
+      const consent = async () =>
+        (
+          await db.platform.query(
+            `SELECT sponsorship_id,sponsorship_revision FROM ${table('tf_workflows')} WHERE id=$1`,
+            [id],
+          )
+        ).rows[0];
+      const acceptAudits = async () =>
+        (
+          await db.platform.query(
+            `SELECT count(*)::integer AS count FROM ${table('tf_audit_events')} WHERE subject_id=$1 AND operation='workflow.sponsor.accept'`,
+            [id],
+          )
+        ).rows[0].count;
+      const pending = await service.save(w.id, nominee.userId, id, {
+        revision: randomUUID(),
+        expectedRevision: revision,
+        definition: { ...definition, name: 'Reviewed intake' },
+      });
+      assert.equal(pending.sponsorshipAccepted, false);
+      assert.equal(pending.enabled, false);
+      assert.deepEqual(await consent(), { sponsorship_id: null, sponsorship_revision: revision });
+      assert.equal(await acceptAudits(), 0);
+      await assert.rejects(
+        service.activate(w.id, w.userId, id, {
+          commandId: randomUUID(),
+          expectedGeneration: pending.generation,
+          revision: pending.revision,
+          enabled: true,
+        }),
+        { message: 'sponsorship-required' },
+      );
+      const accepted = await service.acceptSponsorship(w.id, nominee.userId, id, {
+        expectedGeneration: pending.generation,
+      });
+      assert.equal(accepted.sponsorshipAccepted, true);
+      assert.equal(await acceptAudits(), 1);
+      const acceptedConsent = await consent();
+      await service.activate(w.id, w.userId, id, {
+        commandId: randomUUID(),
+        expectedGeneration: accepted.generation,
+        revision: accepted.revision,
+        enabled: true,
+      });
+      await service.share(w.id, w.userId, id, {
+        principal: { kind: 'person', id: nominee.membershipId },
+        permissions: ['manage'],
+      });
+      const withoutInvoke = await service.save(w.id, nominee.userId, id, {
+        revision: randomUUID(),
+        expectedRevision: accepted.revision,
+        definition: { ...definition, name: 'Draft intake' },
+      });
+      assert.equal(withoutInvoke.sponsorshipAccepted, false);
+      assert.equal(withoutInvoke.activeRevision, accepted.revision);
+      assert.deepEqual(await consent(), acceptedConsent);
+      assert.equal(await acceptAudits(), 1);
+      assert.equal(
+        (await service.list(w.id, nominee.userId)).find(item => item.id === id).revision,
+        withoutInvoke.revision,
+      );
+      await db.platform.query(
+        `UPDATE ${table('tf_workflow_triggers')} SET next_run_at=clock_timestamp()-interval '1 minute' WHERE workflow_id=$1`,
+        [id],
+      );
+      await service.due(w.id);
+      assert.equal((await service.list(w.id, w.userId)).find(item => item.id === id).enabled, false);
+      await t.test('a sponsor without management access still cannot save a revision', async () => {
+        await service.share(w.id, w.userId, id, {
+          principal: { kind: 'person', id: nominee.membershipId },
+          permissions: ['invoke'],
+        });
+        const attemptedRevision = randomUUID();
+        await assert.rejects(
+          service.save(w.id, nominee.userId, id, {
+            revision: attemptedRevision,
+            expectedRevision: withoutInvoke.revision,
+            definition: { ...definition, name: 'Unauthorized edit' },
+          }),
+          AccessDenied,
+        );
+        assert.equal(
+          (await service.list(w.id, w.userId)).find(item => item.id === id).revision,
+          withoutInvoke.revision,
+        );
+        assert.equal(
+          (await db.platform.query(`SELECT id FROM ${table('tf_workflow_revisions')} WHERE id=$1`, [attemptedRevision]))
+            .rowCount,
+          0,
+        );
+        assert.deepEqual(await consent(), acceptedConsent);
+      });
+    } finally {
       await runtime?.close();
       await db.close();
     }
