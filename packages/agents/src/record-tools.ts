@@ -40,7 +40,7 @@ import {
 import { readableTableFiles } from './table-sources.ts';
 import { matchesTableName } from './chat-table-lookup.ts';
 import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
-import { createRecordBatchSchema } from './contracts.ts';
+import { createRecordBatchSchema, updateRecordBatchSchema } from './contracts.ts';
 import { visiblePage } from './visible-page.ts';
 
 type Transaction = AgentTransaction & { workspaceId: string; commonVersion: number };
@@ -754,6 +754,36 @@ export function createAgentRecordTools(runtime: AgentStorage, taskCapability?: o
           records.push(agentView(record));
         }
         return agentRecordListSchema.parse({ records, total: String(records.length), nextCursor: null });
+      });
+    },
+    async updateRecords(workspaceId: string, actor: Actor, input: unknown) {
+      if (actor.kind !== 'human') throw new AccessDenied();
+      const batch = updateRecordBatchSchema.parse(input);
+      return run(workspaceId, actor, batch.tableId, async (tx, principal) => {
+        await tx.client.query('SAVEPOINT tf_row_update_batch');
+        try {
+          const records = [];
+          const bound = createAgentRecordTools(local(tx));
+          for (const row of batch.rows)
+            records.push(
+              await bound.updateRecord(
+                workspaceId,
+                principal,
+                batch.tableId,
+                batch.expectedAppliedRevision,
+                row.recordId,
+                row.values,
+                row.expectedToken,
+              ),
+            );
+          const result = agentRecordListSchema.parse({ records, total: String(records.length), nextCursor: null });
+          await tx.client.query('RELEASE SAVEPOINT tf_row_update_batch');
+          return result;
+        } catch (error) {
+          await tx.client.query('ROLLBACK TO SAVEPOINT tf_row_update_batch');
+          await tx.client.query('RELEASE SAVEPOINT tf_row_update_batch');
+          throw error;
+        }
       });
     },
     updateRecord: (

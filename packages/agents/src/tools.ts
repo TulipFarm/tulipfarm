@@ -41,7 +41,13 @@ import { isOwnServiceUrl, ownServiceDomains, ownServiceRefusal } from './own-ser
 const ownDomains = ownServiceDomains();
 import { createAgentRecordTools } from './record-tools.ts';
 import { workspaceMembersInstruction } from './record-contracts.ts';
-import { createRecordBatchSchema, recordConflict, rowsListModelSchema, toolCallSchema } from './contracts.ts';
+import {
+  createRecordBatchSchema,
+  updateRecordBatchSchema,
+  recordConflict,
+  rowsListModelSchema,
+  toolCallSchema,
+} from './contracts.ts';
 import { createToolRegistry } from './registry.ts';
 import { createAgentAuthoring } from './authoring.ts';
 import { createSavedAgentService } from './saved-service.ts';
@@ -208,6 +214,7 @@ export const frameworkCallSchema = z.discriminatedUnion('tool', [
   budPreferenceProposeSchema,
   ...toolCallSchema.options,
   createRecordBatchSchema,
+  updateRecordBatchSchema,
   ...atlassianCallSchema.options,
   slackResolveSchema,
   slackThreadReactionSchema,
@@ -716,6 +723,8 @@ const descriptions: Record<ToolName, string> = {
     'Create 1–100 rows in one atomic write after schema.inspect supplies the field IDs and applied revision. Prefer this tool for any 2 or more new rows, including fake/sample tickets, and pass them all in one call. In chat, more than 5 rows in one reply, or rows for a table the person did not name, return one approval card for the whole batch instead of writing. Pass every row together; either all rows commit or none do. Returns created rows/tokens and total. Uses the same read/create and source permissions as rows.create; unavailable after untrusted content such as web pages, knowledge, files or connected apps in a chat. Do not repeat an uncertain batch without checking its existing receipt or rows.',
   'rows.update':
     'Update specified fields of one row after rows.get or rows.list supplies its current token; use rows.create for new rows. Returns the updated row/token or record-conflict; after untrusted content such as web pages, knowledge, files or connected apps in a chat it returns a review draft instead. It changes data and requires read/update permission; on conflict reread first, and never blindly retry an uncertain update.',
+  'rows.update.batch':
+    'Update 1–100 existing rows together after rows.list supplies their IDs and current tokens. Send only the fields the person asked to change as partial typed values; keep all other fields unchanged and never ask for their values. Use this for one existing row too, never rows.create.batch. More than 5 rows require one approval card showing before and after values. All patches commit or none do, with the same read/update permissions and token checks as rows.update. On failure no rows changed; explain that plainly and give one next step, without tool names, IDs or tokens.',
   'rows.delete':
     'Delete one row after rows.get or rows.list supplies its current token; use rows.update to preserve it. Returns deletion success or record-conflict, not the deleted row; after untrusted content such as web pages, knowledge, files or connected apps in a chat it returns a review draft instead. It requires delete permission and changes data; reread on conflict and do not repeat after an uncertain outcome.',
   'github.issue.read':
@@ -896,6 +905,7 @@ function admittedToolSchemas(access: ToolAccess) {
       // Without Slack actions on this deployment every Slack tool fails, so chat is not offered them.
       .filter(schema => slack || !schema.shape.tool.value.startsWith('slack.'))
       .filter(schema => schema.shape.tool.value !== 'rows.create.batch' || access.kind === 'chat')
+      .filter(schema => schema.shape.tool.value !== 'rows.update.batch' || access.kind === 'chat')
       .filter(schema => !schema.shape.tool.value.startsWith('bud.') || access.kind === 'chat')
       // Secret forms go to the person in this chat or the task's owner, and only when this deployment can encrypt them.
       .filter(
@@ -2535,6 +2545,7 @@ export function createChatTools(
       case 'rows.create':
       case 'rows.update':
       case 'rows.delete':
+      case 'rows.update.batch':
       case 'rows.create.batch': {
         if (!context.origin) return registry.invoke(context, call);
         const origin = context.origin,
@@ -2585,14 +2596,14 @@ export function createChatTools(
           };
         const reviewSummary = rowReviewSummary(readable);
         if (!review) return { ...draft, reviewSummary };
-        const batch = call.tool === 'rows.create.batch' ? call.rows.length : 0;
+        const batch = call.tool === 'rows.create.batch' || call.tool === 'rows.update.batch' ? call.rows.length : 0;
         return {
           ...draft,
           reviewSummary,
           reason: review.reason,
           ...(review.table && { table: review.table }),
           ...(written && { alreadyWritten: written.count }),
-          instruction: `${batch ? `No rows from this call have been created yet. One approval card in the chat now holds all ${batch} of them` : 'No row from this call has been changed yet. An approval card in the chat now holds this change'}; they are written only when the person approves it. ${review.instruction} Do not call row tools again for these rows, and never treat chat text as approval.`,
+          instruction: `${batch ? `No rows from this call have been ${call.tool === 'rows.update.batch' ? 'changed' : 'created'} yet. One approval card in the chat now holds all ${batch} of them` : 'No row from this call has been changed yet. An approval card in the chat now holds this change'}; they are written only when the person approves it. ${review.instruction} Do not call row tools again for these rows, and never treat chat text as approval.`,
         };
       }
       case 'agents.delegate':
@@ -3157,7 +3168,7 @@ export function createChatTools(
     try {
       result = await invoke(context, call);
     } catch (error) {
-      const failure = rowWriteTools.has(call.tool) ? rowWriteFailure(error) : null;
+      const failure = rowWriteTools.has(call.tool) ? rowWriteFailure(error, call.tool.startsWith('rows.update')) : null;
       if (failure) return { result: failure, sources: [] };
       // The definition's own provenance check refuses a member who is not the memory's owner before any result exists.
       if (error instanceof PersonalMemoryDenied && /^(workflows|skills)\./.test(call.tool))
@@ -3322,8 +3333,13 @@ export function createChatTools(
 function rowReviewSummary(review: DraftView) {
   if (review.status !== 'pending' || review.proposal.kind !== 'row' || !review.rowTable) return undefined;
   const { input, written } = review.proposal;
-  const count = input.tool === 'rows.create.batch' ? input.rows.length : 1;
-  const operation = input.tool === 'rows.update' ? 'update' : input.tool === 'rows.delete' ? 'delete' : 'create';
+  const count = input.tool === 'rows.create.batch' || input.tool === 'rows.update.batch' ? input.rows.length : 1;
+  const operation =
+    input.tool === 'rows.update' || input.tool === 'rows.update.batch'
+      ? 'update'
+      : input.tool === 'rows.delete'
+        ? 'delete'
+        : 'create';
   return `A review card for ${count} ${count === 1 ? 'row' : 'rows'} in ${JSON.stringify(review.rowTable.name)} is ready in this chat. No rows from this card have been written.${written?.count ? ` ${written.count} ${written.count === 1 ? 'row was' : 'rows were'} already written earlier in this chat and are not included in this card.` : ''} Review and approve it to ${operation} these rows.`;
 }
 
@@ -3510,7 +3526,7 @@ const rowReviewUnavailable = {
     'No row has been changed. This chat used content that cannot be shown for review, such as MCP tools or agent task results, so row changes are unavailable here. Ask the member to make the change in the table.',
 };
 
-const rowWriteTools = new Set(['rows.create', 'rows.create.batch', 'rows.update', 'rows.delete']);
+const rowWriteTools = new Set(['rows.create', 'rows.create.batch', 'rows.update', 'rows.update.batch', 'rows.delete']);
 const tableIdTools = new Set([
   ...rowWriteTools,
   'schema.inspect',
@@ -3542,7 +3558,7 @@ const generationErrorInstructions: Partial<Record<string, string>> = {
 };
 
 /** Rule failures the model can correct, returned with their cause instead of as an unexplained tool failure. */
-function rowWriteFailure(error: unknown) {
+function rowWriteFailure(error: unknown, updating = false) {
   if (error instanceof WorkspaceMemberError)
     return { error: error.code, instruction: `Nothing changed. ${memberErrorInstructions[error.code]}` };
   if (error instanceof TableValidationError)
@@ -3550,11 +3566,19 @@ function rowWriteFailure(error: unknown) {
       error: 'invalid-values',
       message: error.message,
       ...(error.fieldId ? { fieldId: error.fieldId } : {}),
-      instruction:
-        'Nothing changed. Fix the value for this field using the schema from schema.inspect, then try once more. Every required field needs a value.',
+      instruction: updating
+        ? 'No rows changed. Check the requested field against the current schema, then retry only that field. Do not ask for unchanged fields. Tell the person the failed change and one plain next step, without tool names, row IDs or tokens.'
+        : 'Nothing changed. Fix the value for this field using the schema from schema.inspect, then try once more. Every required field needs a value.',
     };
   if (error instanceof GenerationError) {
-    if (error.code === 'stale-record') return recordConflict;
+    if (error.code === 'stale-record')
+      return updating
+        ? {
+            ...recordConflict,
+            instruction:
+              'No rows changed. Read the current rows and retry only the requested fields with their latest tokens. Tell the person no rows changed and ask them to try the change again; never show tool names, row IDs or tokens.',
+          }
+        : recordConflict;
     const instruction = generationErrorInstructions[error.code];
     return instruction ? { error: error.code, instruction: `Nothing changed. ${instruction}` } : null;
   }

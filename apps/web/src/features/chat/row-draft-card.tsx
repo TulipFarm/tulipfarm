@@ -10,7 +10,7 @@ import type { DraftView, RowProposal } from '@tulipfarm/agents/draft-contracts';
 type Values = NonNullable<DraftView['rowCurrent']>;
 const verbs = { create: 'Add', update: 'Update', delete: 'Delete' } as const;
 const reasons = {
-  'too-many-rows': 'Chat adds up to 5 rows on its own. Larger changes wait for your approval.',
+  'too-many-rows': 'Chat changes up to 5 rows on its own. Larger changes wait for your approval.',
   'table-not-named': 'You didn’t name this table in the chat, so the change waits for your approval.',
   'table-change-pending': 'Chat prepared a table change in the same reply, so this row change waits for your approval.',
 } as const;
@@ -19,7 +19,7 @@ export const rowDraftElementId = (id: string) => `row-draft-${id}`;
 const operation = ({ input }: RowProposal) =>
   input.tool === 'rows.create' || input.tool === 'rows.create.batch'
     ? ('create' as const)
-    : input.tool === 'rows.update'
+    : input.tool === 'rows.update' || input.tool === 'rows.update.batch'
       ? ('update' as const)
       : ('delete' as const);
 
@@ -50,9 +50,14 @@ export function RowDraftCard({
   const table = draft.rowTable;
   const tableName = table?.name ?? 'a table you cannot see';
   const { input, written } = proposal;
-  const batch = input.tool === 'rows.create.batch' ? input.rows.map(row => row.values) : null;
+  const updates = input.tool === 'rows.update.batch' ? input.rows : null;
+  const batch =
+    input.tool === 'rows.create.batch' ? input.rows.map(row => row.values) : updates?.map(row => row.values);
   const count = batch?.length ?? 1;
-  const proposed: Values = input.tool === 'rows.delete' || input.tool === 'rows.create.batch' ? {} : input.values;
+  const proposed: Values =
+    input.tool === 'rows.delete' || input.tool === 'rows.create.batch' || input.tool === 'rows.update.batch'
+      ? {}
+      : input.values;
   const fields = (values: Values) =>
     Object.keys(values).map(fieldId => ({
       fieldId,
@@ -60,6 +65,17 @@ export function RowDraftCard({
     }));
   const format = (values: Values, fieldId: string) =>
     formatTableValue(values[fieldId] ?? null, table ?? { fields: [] }, fieldId);
+  const rowLabel = (index: number) => {
+    const before = updates && draft.rowCurrents?.[updates[index]!.recordId];
+    const ids = table?.labelFieldIds?.length
+      ? table.labelFieldIds
+      : [(table?.fields.find(field => field.kind === 'text') ?? table?.fields[0])?.id].filter(
+          (id): id is string => id !== undefined,
+        );
+    return before && ids.some(id => before[id] != null)
+      ? ids.map(id => format(before, id)).join(' · ')
+      : `Row ${index + 1}`;
+  };
   const shown = kind === 'delete' ? fields(draft.rowCurrent ?? {}) : fields(proposed);
   return (
     <ReviewCard
@@ -106,19 +122,28 @@ export function RowDraftCard({
             )}
             {draft.status === 'failed' && (
               <p role="status">
-                {count === 1 ? 'The row could not be changed.' : 'The rows could not be added.'} Ask chat for a fresh
-                draft.
+                {count === 1
+                  ? 'The row could not be changed.'
+                  : kind === 'update'
+                    ? 'No rows changed.'
+                    : 'The rows could not be added.'}{' '}
+                Ask chat for a fresh draft.
               </p>
             )}
             {draft.status === 'preparing' && (
               <p role="status">
-                Your approval is recorded. {count === 1 ? 'The row is being changed.' : 'The rows are being added.'}
+                Your approval is recorded.{' '}
+                {count === 1
+                  ? 'The row is being changed.'
+                  : kind === 'update'
+                    ? 'The rows are being updated.'
+                    : 'The rows are being added.'}
               </p>
             )}
             {draft.status === 'saved' && (
               <p role="status">
                 {count > 1
-                  ? `${count} rows added.`
+                  ? `${count} rows ${kind === 'update' ? 'updated' : 'added'}.`
                   : kind === 'create'
                     ? 'Row added.'
                     : kind === 'update'
@@ -127,7 +152,10 @@ export function RowDraftCard({
               </p>
             )}
             {draft.status === 'dismissed' && (
-              <p role="status">Draft dismissed. {count === 1 ? 'No row was changed.' : 'No rows were added.'}</p>
+              <p role="status">
+                Draft dismissed.{' '}
+                {count === 1 ? 'No row was changed.' : kind === 'update' ? 'No rows changed.' : 'No rows were added.'}
+              </p>
             )}
           </div>
           {feedback}
@@ -137,7 +165,9 @@ export function RowDraftCard({
       <ReviewRows>
         <ReviewRow label="Change">
           {count > 1
-            ? `Adds ${count} new rows together`
+            ? kind === 'update'
+              ? `Updates ${count} existing rows together`
+              : `Adds ${count} new rows together`
             : kind === 'create'
               ? 'Adds a new row'
               : kind === 'update'
@@ -147,10 +177,11 @@ export function RowDraftCard({
         <ReviewRow label="Table">{tableName}</ReviewRow>
       </ReviewRows>
       {written && (
-        <section aria-label="Rows already added" className="grid gap-2 text-sm">
+        <section aria-label="Rows already changed" className="grid gap-2 text-sm">
           <p role="note">
-            {written.count === 1 ? '1 row was' : `${written.count} rows were`} already added in this reply and stay in
-            the table. This card holds only the other {count === 1 ? 'row' : `${count} rows`}, which need your approval.
+            {written.count === 1 ? '1 row was' : `${written.count} rows were`} already changed in this reply. Those
+            changes stay. This card holds only the other {count === 1 ? 'row' : `${count} rows`}, which need your
+            approval.
           </p>
           {written.rows.length > 0 && (
             <ol aria-label="Already added" className="grid gap-2">
@@ -172,16 +203,34 @@ export function RowDraftCard({
         </section>
       )}
       {batch ? (
-        <ol aria-label="Rows to add" className="grid gap-2">
+        <ol aria-label={kind === 'update' ? 'Rows to update' : 'Rows to add'} className="grid gap-2">
           {batch.map((values, index) => (
             <li key={index}>
               <ReviewRows>
-                <ReviewRow label={`Row ${index + 1}`}>
-                  <span className="break-words">
-                    {fields(values)
-                      .map(({ fieldId, label }) => `${label}: ${format(values, fieldId)}`)
-                      .join(' · ') || 'No field values set.'}
-                  </span>
+                <ReviewRow label={updates ? rowLabel(index) : `Row ${index + 1}`}>
+                  {updates ? (
+                    <div className="grid gap-1">
+                      {fields(values).map(({ fieldId, label }) => {
+                        const before = draft.rowCurrents?.[updates[index]!.recordId];
+                        return (
+                          <div key={fieldId} className="grid gap-0.5">
+                            <span className="break-words">
+                              {label}: {format(values, fieldId)}
+                            </span>
+                            <span className="break-words text-xs text-muted-foreground">
+                              {before ? `Before ${format(before, fieldId)}` : 'Previous value unavailable.'}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <span className="break-words">
+                      {fields(values)
+                        .map(({ fieldId, label }) => `${label}: ${format(values, fieldId)}`)
+                        .join(' · ') || 'No field values set.'}
+                    </span>
+                  )}
                 </ReviewRow>
               </ReviewRows>
             </li>

@@ -3,7 +3,12 @@ import { savePersonalMemorySchema } from '@tulipfarm/conversations/personal-memo
 import { uuidSchema } from '@tulipfarm/access/contracts';
 import { saveAgentSchema, agentCommandStatusSchema } from './saved-contracts.ts';
 import { saveWorkspaceSkillSchema, workspaceSkillReceiptSchema } from './workspace-skill-contracts.ts';
-import { agentDefinitionSchema, createRecordBatchSchema, taskMutationSchema } from './contracts.ts';
+import {
+  agentDefinitionSchema,
+  createRecordBatchSchema,
+  updateRecordBatchSchema,
+  taskMutationSchema,
+} from './contracts.ts';
 import { agentRecordValueSchema } from './record-contracts.ts';
 import { fileNameSchema, moveFingerprintSchema, shareFingerprintSchema } from '@tulipfarm/files/contracts';
 import { authoredDefinitionSchema, definitionSchema } from '@tulipfarm/workflows/contracts';
@@ -187,10 +192,16 @@ export const authoringProposalSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('memory'), input: memoryDraftInput }),
   z.strictObject({
     kind: z.literal('row'),
-    input: z.discriminatedUnion('tool', [...taskMutationSchema.options, createRecordBatchSchema]),
+    input: z.discriminatedUnion('tool', [
+      ...taskMutationSchema.options,
+      createRecordBatchSchema,
+      updateRecordBatchSchema,
+    ]),
     /** Why chat could not write directly. Absent on drafts made because the chat used untrusted content. */
     reason: rowReviewReasonSchema.optional(),
     written: rowsAlreadyWrittenSchema.optional(),
+    /** Server-read values retained with the reviewed patches, including after approval. */
+    before: z.record(uuidSchema, z.record(z.string(), agentRecordValueSchema)).optional(),
   }),
 ]);
 export const draftDecisionSchema = z.strictObject({
@@ -268,6 +279,7 @@ export const agentDraftChangeSchema = z.discriminatedUnion('kind', [
 ]);
 export const rowDraftTableSchema = z.object({
   name: z.string(),
+  labelFieldIds: z.array(z.string()).default([]),
   fields: z.array(
     z.object({
       id: z.string(),
@@ -315,6 +327,7 @@ export const draftViewSchema = z.object({
     .default([]),
   rowTable: rowDraftTableSchema.nullable().default(null),
   rowCurrent: z.record(z.string(), agentRecordValueSchema).nullable().default(null),
+  rowCurrents: z.record(z.string(), z.record(z.string(), agentRecordValueSchema)).nullable().default(null),
 });
 export type AuthoringProposal = z.infer<typeof authoringProposalSchema>;
 export type RowProposal = Extract<AuthoringProposal, { kind: 'row' }>;

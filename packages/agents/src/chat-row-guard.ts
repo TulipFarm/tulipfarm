@@ -43,6 +43,8 @@ export function earlierRowWrites(writes: readonly EarlierWrite[], tableId?: stri
             if (typeof row.id === 'string')
               created.push({ recordId: row.id, values: fieldValues(sent[index]?.values) });
           });
+      } else if (write.tool === 'rows.update.batch') {
+        rows += Array.isArray(result.records) ? result.records.length : 0;
       } else {
         rows += 1;
         if (write.tool === 'rows.create') {
@@ -116,14 +118,17 @@ export function rowSummaries(rows: readonly unknown[], limit = 5) {
 export function waitingCardChange(input: unknown): WaitingCardChange {
   const call = record(input);
   const tool = typeof call.tool === 'string' ? call.tool : 'rows.create';
-  const sent = tool === 'rows.create.batch' && Array.isArray(call.rows) ? call.rows : [{ values: call.values }];
+  const sent =
+    (tool === 'rows.create.batch' || tool === 'rows.update.batch') && Array.isArray(call.rows)
+      ? call.rows
+      : [{ values: call.values }];
   const rows = Math.max(1, sent.length);
   const sample = rowSummaries(sent, 3);
   const listed = sample.length ? ` (${sample.join(', ')}${rows > sample.length ? ', …' : ''})` : '';
   const noun = `${rows} ${rows === 1 ? 'row' : 'rows'}`;
   const summary =
-    tool === 'rows.update'
-      ? `change 1 row${listed} in`
+    tool === 'rows.update' || tool === 'rows.update.batch'
+      ? `change ${noun}${listed} in`
       : tool === 'rows.delete'
         ? 'delete 1 row from'
         : `add ${noun}${listed} to`;
@@ -183,7 +188,9 @@ export async function chatRowReview(
       const card = waitingCardChange(waiting.input);
       const onCard = new Set(
         rowSummaries(
-          card.tool === 'rows.create.batch' ? (record(waiting.input).rows as unknown[]) : [record(waiting.input)],
+          card.tool === 'rows.create.batch' || card.tool === 'rows.update.batch'
+            ? (record(waiting.input).rows as unknown[])
+            : [record(waiting.input)],
         ),
       );
       const sent =
@@ -217,7 +224,7 @@ export async function chatRowReview(
       await tx.client.query<EarlierWrite & { turnId: string }>(
         `SELECT c.tool,c.turn_id AS "turnId",s.call,s.output,EXISTS (SELECT 1 FROM ${relation(tx, 'tf_chat_authoring_drafts')} d WHERE d.id=c.id) AS drafted
             FROM ${relation(tx, 'tf_conversation_tool_calls')} c JOIN ${relation(tx, 'tf_conversation_execution_steps')} s ON s.call_id=c.id AND s.turn_id=c.turn_id
-            WHERE c.conversation_id=$1 AND c.id<>$3 AND c.tool IN ('rows.create','rows.create.batch','rows.update','rows.delete')
+            WHERE c.conversation_id=$1 AND c.id<>$3 AND c.tool IN ('rows.create','rows.create.batch','rows.update','rows.update.batch','rows.delete')
             AND (c.turn_id=$2 OR (s.call->>'tableId'=$4 AND s.call->>'expectedAppliedRevision'=$5
               AND c.created_at > COALESCE((
                 SELECT max(decision.created_at) FROM ${relation(tx, 'tf_chat_authoring_drafts')} draft

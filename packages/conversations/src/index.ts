@@ -784,7 +784,7 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
             await tx.client.query(
               `SELECT c.turn_id, c.id, c.tool, c.status${googleSafeActivity}, s.call, s.output, s.sources, g.id AS google_proposal_id, d.id AS row_draft_id FROM ${table(tx, 'tf_conversation_tool_calls')} c LEFT JOIN ${table(tx, 'tf_conversation_execution_steps')} s ON s.call_id=c.id AND s.turn_id=c.turn_id
         LEFT JOIN ${table(tx, 'tf_google_proposals')} g ON c.tool='google.propose' AND c.status='completed' AND g.command_id=c.id AND g.membership_id=$3 AND g.user_id=$4
-        LEFT JOIN ${table(tx, 'tf_chat_authoring_drafts')} d ON c.tool IN ('rows.create','rows.create.batch','rows.update','rows.delete') AND c.status='completed' AND d.id=c.id AND d.proposal->>'kind'='row' AND d.membership_id=$3 AND d.user_id=$4
+        LEFT JOIN ${table(tx, 'tf_chat_authoring_drafts')} d ON c.tool IN ('rows.create','rows.create.batch','rows.update','rows.update.batch','rows.delete') AND c.status='completed' AND d.id=c.id AND d.proposal->>'kind'='row' AND d.membership_id=$3 AND d.user_id=$4
           AND NOT EXISTS (SELECT 1 FROM ${table(tx, 'tf_chat_authoring_decisions')} dc WHERE dc.draft_id=d.id AND dc.outcome->>'kind'='unavailable')
         WHERE c.turn_id = ANY($1::uuid[]) AND c.conversation_id=$2 ORDER BY c.created_at, c.sequence, c.id`,
               [turnIds, chatId, actor.membershipId, actor.userId],

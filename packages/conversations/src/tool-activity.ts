@@ -38,6 +38,7 @@ export const toolActivityLabels = {
   'rows.create': 'Creating a row',
   'rows.create.batch': 'Creating rows',
   'rows.update': 'Updating a row',
+  'rows.update.batch': 'Updating rows',
   'rows.delete': 'Deleting a row',
   'schema.context': 'Checking table authoring permissions',
   'schema.inspect': 'Inspecting table fields',

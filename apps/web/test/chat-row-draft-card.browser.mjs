@@ -10,6 +10,7 @@ import { membership, credits } from './chat-query.fixture.mjs';
 const chatId = '12121212-1212-4212-8212-121212121212';
 const tableId = '44444444-4444-4444-8444-444444444444';
 const noteField = '55555555-5555-4555-8555-555555555555';
+const keyField = '54545454-5454-4454-8454-545454545454';
 const statusField = '56565656-5656-4656-8656-565656565656';
 const openOption = '57575757-5757-4757-8757-575757575757';
 const recordId = '58585858-5858-4858-8858-585858585858';
@@ -17,11 +18,14 @@ const createDraft = '14141414-1414-4414-8414-141414141414';
 const updateDraft = '15151515-1515-4515-8515-151515151515';
 const deleteDraft = '16161616-1616-4616-8616-161616161616';
 const batchDraft = '18181818-1818-4818-8818-181818181818';
+const updateBatchDraft = '20202020-2020-4020-8020-202020202020';
 const revision = 'a'.repeat(40),
   token = '59595959-5959-4959-8959-595959595959';
 const rowTable = {
   name: 'Support tickets',
+  labelFieldIds: [keyField],
   fields: [
+    { id: keyField, label: 'Key', kind: 'text' },
     { id: noteField, label: 'Note', kind: 'text' },
     { id: statusField, label: 'Status', kind: 'single-select', options: [{ id: openOption, label: 'Open' }] },
   ],
@@ -98,6 +102,31 @@ test('row review drafts show the exact change and act only on the member decisio
           {},
           'too-many-rows',
         ),
+        [updateBatchDraft]: view(
+          updateBatchDraft,
+          {
+            tool: 'rows.update.batch',
+            tableId,
+            expectedAppliedRevision: revision,
+            rows: Array.from({ length: 6 }, (_, index) => ({
+              recordId: `60606060-6060-4060-8060-60606060606${index}`,
+              expectedToken: token,
+              values: { [noteField]: { kind: 'text', value: `Resolved ${index + 1}` } },
+            })),
+          },
+          {
+            rowCurrents: Object.fromEntries(
+              Array.from({ length: 6 }, (_, index) => [
+                `60606060-6060-4060-8060-60606060606${index}`,
+                {
+                  [keyField]: { kind: 'text', value: `T-${index + 1}` },
+                  [noteField]: { kind: 'text', value: `Waiting ${index + 1}` },
+                },
+              ]),
+            ),
+          },
+          'too-many-rows',
+        ),
       };
       drafts[batchDraft].proposal.written = {
         count: 2,
@@ -106,6 +135,8 @@ test('row review drafts show the exact change and act only on the member decisio
           values: { [noteField]: { kind: 'text', value: `Order ${name}` } },
         })),
       };
+      drafts[updateBatchDraft].proposal.before = drafts[updateBatchDraft].rowCurrents;
+      drafts[updateBatchDraft].proposal.written = { count: 1, rows: [] };
       const decisions = [];
       const context = await browser.newContext({
         viewport: mobile ? { width: 390, height: 844 } : { width: 1440, height: 1000 },
@@ -141,6 +172,7 @@ test('row review drafts show the exact change and act only on the member decisio
             tool(updateDraft, 'rows.update'),
             tool(deleteDraft, 'rows.delete'),
             tool(batchDraft, 'rows.create.batch'),
+            tool(updateBatchDraft, 'rows.update.batch'),
           ],
           calendarResults: [],
         },
@@ -233,13 +265,33 @@ test('row review drafts show the exact change and act only on the member decisio
         throw new Error(`Unexpected API request ${method} ${path}`);
       });
       try {
-        await page.goto(`${server.resolvedUrls.local[0]}${workspace.slug}/chat/${chatId}`);
-        const cards = page.getByRole('region', { name: 'Review row change' });
-        await cards.nth(3).waitFor();
+        await page.goto(`${server.resolvedUrls.local[0]}${workspace.slug}/chat/${chatId}`, { timeout: 60000 });
+        const cards = page.locator('[id^="row-draft-"]');
+        await cards.nth(4).waitFor({ state: 'attached', timeout: 60000 });
         const created = cards.filter({ hasText: 'Add a row in Support tickets' });
         const updated = cards.filter({ hasText: 'Update a row in Support tickets' });
         const deleted = cards.filter({ hasText: 'Delete a row in Support tickets' });
         const batch = cards.filter({ hasText: 'Add 6 rows in Support tickets' });
+        const updates = cards.filter({ hasText: 'Update 6 rows in Support tickets' });
+        await updates.scrollIntoViewIfNeeded();
+        await updates.getByText('Updates 6 existing rows together', { exact: true }).waitFor();
+        await updates.getByText('Note: Resolved 6', { exact: true }).waitFor();
+        await updates.getByText('Before Waiting 6', { exact: true }).waitFor();
+        await updates.getByText('T-1', { exact: true }).waitFor();
+        await updates.getByText('T-6', { exact: true }).waitFor();
+        assert.equal(await updates.getByText('Row 1', { exact: true }).count(), 0);
+        await updates
+          .getByText(
+            '1 row was already changed in this reply. Those changes stay. This card holds only the other 6 rows, which need your approval.',
+            { exact: true },
+          )
+          .waitFor();
+        assert.equal(await updates.getByRole('list', { name: 'Rows to update' }).getByRole('listitem').count(), 6);
+        if (shots)
+          await updates.screenshot({
+            path: `${shots}/batch-update-pending-${mobile ? 'mobile-dark' : 'desktop-light'}.png`,
+          });
+        await created.scrollIntoViewIfNeeded();
         await created.getByText('Needs approval', { exact: true }).waitFor();
         await created.getByText('Refund order 1042', { exact: true }).waitFor();
         await created.getByText('Open', { exact: true }).waitFor();
@@ -255,8 +307,10 @@ test('row review drafts show the exact change and act only on the member decisio
             { exact: true },
           )
           .waitFor();
+        await updated.scrollIntoViewIfNeeded();
         await updated.getByText('Escalated', { exact: true }).waitFor();
         await updated.getByText('Currently Waiting', { exact: true }).waitFor();
+        await deleted.scrollIntoViewIfNeeded();
         await deleted.getByText('Out of date', { exact: true }).waitFor();
         await deleted
           .getByText(
@@ -269,18 +323,19 @@ test('row review drafts show the exact change and act only on the member decisio
           0,
           'a stale draft cannot be approved',
         );
+        await batch.scrollIntoViewIfNeeded();
         await batch.getByText('Adds 6 new rows together', { exact: true }).waitFor();
         await batch.getByText('Row 6', { exact: true }).waitFor();
         await batch.getByText('Note: Order 6', { exact: true }).waitFor();
         await batch
           .getByText(
-            'Chat adds up to 5 rows on its own. Larger changes wait for your approval. Approving makes this exact change with your table access.',
+            'Chat changes up to 5 rows on its own. Larger changes wait for your approval. Approving makes this exact change with your table access.',
             { exact: true },
           )
           .waitFor();
         await batch
           .getByText(
-            '2 rows were already added in this reply and stay in the table. This card holds only the other 6 rows, which need your approval.',
+            '2 rows were already changed in this reply. Those changes stay. This card holds only the other 6 rows, which need your approval.',
             { exact: true },
           )
           .waitFor();
@@ -316,10 +371,13 @@ test('row review drafts show the exact change and act only on the member decisio
         await created.getByText('Applied', { exact: true }).waitFor();
         await updated.getByRole('button', { name: 'Dismiss' }).click();
         await updated.getByText('Draft dismissed. No row was changed.', { exact: true }).waitFor();
+        await updates.getByRole('button', { name: 'Approve 6 rows' }).click();
+        await updates.getByText('6 rows updated.', { exact: true }).waitFor();
         assert.deepEqual(decisions, [
           { id: batchDraft, decision: 'save', digest: 'd'.repeat(64) },
           { id: createDraft, decision: 'save', digest: 'd'.repeat(64) },
           { id: updateDraft, decision: 'dismiss', digest: 'd'.repeat(64) },
+          { id: updateBatchDraft, decision: 'save', digest: 'd'.repeat(64) },
         ]);
         if (shots)
           await page.screenshot({
@@ -328,6 +386,10 @@ test('row review drafts show the exact change and act only on the member decisio
           });
         assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
         assert.deepEqual(errors, []);
+      } catch (error) {
+        if (shots) await page.screenshot({ path: `${shots}/failure.png`, fullPage: true });
+        assert.deepEqual(errors, [], 'no browser errors');
+        throw error;
       } finally {
         await context.close();
       }

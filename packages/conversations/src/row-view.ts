@@ -105,7 +105,7 @@ export const rowChangeSchema = z.strictObject({
 export type RowChange = z.infer<typeof rowChangeSchema>;
 
 const writeCallSchema = z.object({
-  tool: z.enum(['rows.create', 'rows.create.batch', 'rows.update']),
+  tool: z.enum(['rows.create', 'rows.create.batch', 'rows.update', 'rows.update.batch']),
   tableId: z.uuid(),
   expectedAppliedRevision: rowViewSchema.shape.revision,
 });
@@ -131,7 +131,7 @@ export function rowChangeForReceipt(row: {
     callId: row.id,
     tableId: call.data.tableId,
     revision: call.data.expectedAppliedRevision,
-    kind: row.tool === 'rows.update' ? 'updated' : 'created',
+    kind: row.tool === 'rows.update' || row.tool === 'rows.update.batch' ? 'updated' : 'created',
     recordIds: 'records' in result ? result.records.map(record => record.id) : [result.id],
   });
 }

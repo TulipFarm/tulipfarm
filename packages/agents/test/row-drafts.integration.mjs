@@ -173,7 +173,11 @@ test('chat row writes after untrusted content become member-approved review draf
     const view = await drafts.read(w.id, owner.userId, chatId, draft.draftId);
     assert.equal(view.status, 'pending');
     assert.deepEqual(view.proposal, { kind: 'row', input: createCall('MARKER') });
-    assert.deepEqual(view.rowTable, { name: 'Notes', fields: [{ id: note.id, label: 'Note', kind: 'text' }] });
+    assert.deepEqual(view.rowTable, {
+      name: 'Notes',
+      labelFieldIds: [note.id],
+      fields: [{ id: note.id, label: 'Note', kind: 'text' }],
+    });
     assert.equal(view.rowCurrent, null);
     const reference = { kind: 'row', id: draft.draftId };
     const cards = createChatTools(runtime);

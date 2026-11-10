@@ -272,6 +272,7 @@ export async function resultSources(
     case 'rows.create':
     case 'rows.create.batch':
     case 'rows.update':
+    case 'rows.update.batch':
       return [{ kind: 'table-rows', tableId: call.tableId, revision: call.expectedAppliedRevision }];
     case 'rows.delete':
       return [];

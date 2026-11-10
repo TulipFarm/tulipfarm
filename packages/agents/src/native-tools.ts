@@ -39,6 +39,26 @@ function withActivity(schema: Record<string, unknown>): Record<string, unknown> 
   };
 }
 
+function rowParameters(tool: string, schema: Record<string, unknown>) {
+  if (tool !== 'rows.list' && tool !== 'rows.update.batch') return schema;
+  const compact = JSON.parse(
+    JSON.stringify(schema, function (this: { format?: string }, key, value) {
+      return key === 'pattern' && this.format === 'uuid' ? undefined : value;
+    }),
+  );
+  // Share the core create tool's value vocabulary; resolve still validates every typed patch.
+  if (tool === 'rows.update.batch')
+    compact.properties.rows.items.properties.values = {
+      type: 'object',
+      minProperties: 1,
+      maxProperties: 64,
+      additionalProperties: true,
+      description:
+        'Partial field-ID keyed values. Use the same typed value objects as rows_create_batch and rows_list results, matching schema.inspect. Omitted fields stay unchanged.',
+    };
+  return compact;
+}
+
 export const nativeToolName = (tool: string) => tool.replaceAll('.', '_');
 const mcpToolName = (handle: string) => `mcp_${createHash('sha256').update(handle).digest('hex').slice(0, 24)}`;
 
@@ -80,7 +100,11 @@ function nativeTools(
       continue;
     }
     const name = nativeToolName(tool);
-    tools.push({ name, description: entry.description, parameters: withActivity(entry.inputSchema) });
+    tools.push({
+      name,
+      description: entry.description,
+      parameters: rowParameters(tool, withActivity(entry.inputSchema)),
+    });
     resolvers.set(name, input => {
       const fields = activityFieldsSchema.safeParse(input);
       if (!fields.success) return { ok: false, error: issues(fields.error) };
@@ -113,6 +137,8 @@ const coreChatTools = new Set(
     'tables.import.attachments',
     'tables.import.file',
     'rows.create.batch',
+    'rows.list',
+    'rows.update.batch',
     'skills.read',
     'knowledge.retrieve',
     'knowledge.search',

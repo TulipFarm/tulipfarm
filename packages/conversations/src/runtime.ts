@@ -2111,7 +2111,7 @@ export function createConversationExecutor(
           name === 'secrets.list' ||
           name === 'agents.delegate' ||
           name === 'followups.schedule' ||
-          ['rows.list', 'rows.create', 'rows.create.batch', 'rows.update'].includes(name) ||
+          ['rows.list', 'rows.create', 'rows.create.batch', 'rows.update', 'rows.update.batch'].includes(name) ||
           (interactiveChat &&
             (isCalendarReadCall(name, call) ||
               name === 'web.fetch' ||
