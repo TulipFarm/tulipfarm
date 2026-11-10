@@ -151,6 +151,7 @@ test('task telemetry reports actual transitions without private data or replay d
               definition: { name: 'PRIVATE AGENT', instructions: 'PRIVATE INSTRUCTIONS', tools: [] },
               scope: [],
               activated_at: new Date(),
+              activation_rank: '1',
             },
           ]);
         if (sql.includes('SELECT task_limits')) return result();
@@ -265,7 +266,14 @@ test('task telemetry reports actual transitions without private data or replay d
           if (sql.includes('count(*)::integer')) return result([{ count: 0 }]);
           if (sql.startsWith('SELECT a.id,a.definition_revision'))
             return result([
-              { id: activationId, revision: task.definitionRevision, definition, scope: [], activated_at: new Date() },
+              {
+                id: activationId,
+                revision: task.definitionRevision,
+                definition,
+                scope: [],
+                activated_at: new Date(),
+                activation_rank: '1',
+              },
             ]);
           if (sql.startsWith('SELECT DISTINCT d.definition')) return result([{ definition }]);
           if (sql.startsWith('SELECT id, agent_id AS')) return result([task]);

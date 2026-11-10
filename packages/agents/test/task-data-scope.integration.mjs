@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
+import { AccessDenied } from '@tulipfarm/access';
 import { createWorkspaceRuntime } from '@tulipfarm/workspace-storage/runtime';
 import { workspaceTableMigrations } from '@tulipfarm/workspaces/table-migrations';
 import { fixture, loadPlatformBaseline } from '../../workspace-storage/test/integration/fixture.mjs';
@@ -166,11 +167,28 @@ test('replacement preserves each activation scope and a workflow pin stays narro
   assert.equal(detail.activations.length, 2);
   assert.ok(detail.replacedActivations.some(activation => activation.id === f.agent.activationId));
   assert.equal((await f.tasks.read(f.w.id, f.user, originalTask.id)).activationId, f.agent.activationId);
+  await f.db.platform.query(`UPDATE ${f.table('tf_agent_tasks')} SET status='completed' WHERE id=$1`, [
+    originalTask.id,
+  ]);
+  assert.ok(
+    (await f.saved.detail(f.w.id, f.user, f.agent.agentId)).replacedActivations.some(
+      activation => activation.id === f.agent.activationId,
+    ),
+    'a completed task keeps its replaced activation visible for revocation before reopening',
+  );
   await store.revokeActivation(f.w.id, actor, { agentId: f.agent.agentId, activationId: f.agent.activationId });
   assert.ok(
     !(await f.saved.detail(f.w.id, f.user, f.agent.agentId)).replacedActivations.some(
       activation => activation.id === f.agent.activationId,
     ),
+  );
+  await assert.rejects(
+    f.tasks.reopen(f.w.id, f.user, originalTask.id, {
+      requestId: randomUUID(),
+      expectedGeneration: 0,
+      text: 'Read customers again.',
+    }),
+    AccessDenied,
   );
 });
 

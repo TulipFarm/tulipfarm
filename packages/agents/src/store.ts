@@ -270,7 +270,7 @@ export function createAgentStore(storage: AgentStorage, externalGuard?: External
           previous.definition_revision !== value.revision ||
           canonicalJson(previous.scope) !== canonicalJson(value.scope) ||
           previous.revoked_at !== null ||
-          active[0]?.id !== value.requestId ||
+          !active.some(row => row.id === value.requestId) ||
           replaced.length !== value.expectedActivationIds.length ||
           new Set(replacements).size !== replacements.length ||
           canonicalJson(active.map(row => row.id).sort()) !== canonicalJson(replacements)
@@ -292,12 +292,14 @@ export function createAgentStore(storage: AgentStorage, externalGuard?: External
       if (canonicalJson(scope) !== canonicalJson(value.scope)) throw new AgentError('activation-scope-conflict');
       await resolveDefinitionProcedures(transaction, value.agentId, value.revision, actor);
       const before = await definitionRecommendationAudience(transaction, 'agent', value.agentId);
+      // Replacing instructions must not change the default scope or resolve genuinely tied activation times.
       for (const original of active.length ? [...active].reverse() : [{ id: null, scope }]) {
         const id = original.id === active[0]?.id || original.id === null ? value.requestId : randomUUID();
         await transaction.client.query(
           `INSERT INTO ${relation(transaction, 'tf_agent_activations')}(id,agent_id,definition_revision,scope,activated_at)
-          VALUES($1,$2,$3,$4,clock_timestamp())`,
-          [id, value.agentId, value.revision, JSON.stringify(original.scope)],
+          VALUES($1,$2,$3,$4,CASE WHEN $5::uuid IS NULL THEN clock_timestamp()
+            ELSE (SELECT activated_at FROM ${relation(transaction, 'tf_agent_activations')} WHERE id=$5) END)`,
+          [id, value.agentId, value.revision, JSON.stringify(original.scope), original.id],
         );
         if (original.id)
           await transaction.client.query(

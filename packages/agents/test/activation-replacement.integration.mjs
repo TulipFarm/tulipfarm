@@ -63,6 +63,15 @@ test('activation replacement swaps new admissions without changing running tasks
   };
   const currentIds = async () =>
     (await before()).filter(row => !row.superseded_by_activation_id && !row.revoked_at).map(row => row.id);
+  await db.platform.query(
+    `UPDATE ${table('tf_agent_activations')} SET activated_at=CASE WHEN id=$2 THEN '2026-01-01T00:00:00.000002Z'::timestamptz ELSE '2026-01-01T00:00:00.000001Z'::timestamptz END WHERE agent_id=$1`,
+    [agent.agentId, saved.activationId],
+  );
+  const defaultActivationId = saved.activationId;
+  await t.test('distinct timestamps within one millisecond still select the latest activation', async () => {
+    const task = await tasks.read(w.id, user, (await start()).id);
+    assert.equal(task.activationId, defaultActivationId);
+  });
   assert.equal((await before()).length, 2, 'direct activation still keeps older activations');
   const savedRevision = (
     await db.platform.query(`SELECT saved_revision FROM ${table('tf_agents')} WHERE id=$1`, [agent.agentId])
@@ -118,7 +127,7 @@ test('activation replacement swaps new admissions without changing running tasks
   await t.test('new tasks follow old pins and default to the new definition', async () => {
     for (const pin of [agent.activationId, saved.activationId, undefined]) {
       const task = await tasks.read(w.id, user, (await start(pin)).id);
-      assert.equal(task.activationId, await terminal(pin ?? saved.activationId));
+      assert.equal(task.activationId, await terminal(pin ?? defaultActivationId));
       assert.equal(task.definitionRevision, saved.revision);
     }
   });
@@ -158,6 +167,33 @@ test('activation replacement swaps new admissions without changing running tasks
       );
     },
   );
+  await t.test('repeated replacements inherit the previous default regardless of random IDs', async () => {
+    for (let index = 0; index < 10; index++) {
+      const request = { ...input, requestId: randomUUID(), expectedActivationIds: await currentIds() };
+      replacement = (await store.replaceActivation(w.id, manager, request)).activationId;
+      assert.deepEqual(await store.replaceActivation(w.id, manager, request), { activationId: replacement });
+      assert.equal(replacement, await terminal(defaultActivationId));
+      const task = await tasks.read(w.id, user, (await start()).id);
+      assert.equal(task.activationId, replacement);
+    }
+  });
+  await t.test('genuinely equal or unknown timestamps remain ambiguous after replacement', async () => {
+    for (const activatedAt of ['2026-01-01T00:00:00Z', null]) {
+      await db.platform.query(
+        `UPDATE ${table('tf_agent_activations')} SET activated_at=$2 WHERE agent_id=$1 AND superseded_by_activation_id IS NULL`,
+        [agent.agentId, activatedAt],
+      );
+      await assert.rejects(start(), error => error.code === 'activation-selection-required');
+      const request = { ...input, requestId: randomUUID(), expectedActivationIds: await currentIds() };
+      await store.replaceActivation(w.id, manager, request);
+      assert.deepEqual(await store.replaceActivation(w.id, manager, request), { activationId: request.requestId });
+      await assert.rejects(start(), error => error.code === 'activation-selection-required');
+      for (const pin of request.expectedActivationIds) {
+        const task = await tasks.read(w.id, user, (await start(pin)).id);
+        assert.equal(task.activationId, await terminal(pin));
+      }
+    }
+  });
   await t.test(
     'revocation still stops original running authority and does not fall back to superseded versions',
     async () => {

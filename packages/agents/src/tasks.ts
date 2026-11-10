@@ -154,12 +154,15 @@ export function createAgentTasks(
           definition: agentDefinitionSchema,
           scope: scopeSchema,
           activated_at: z.date().nullable(),
+          activation_rank: z.string(),
         }),
       )
       .parse(
         (
           await tx.client.query(
-            `SELECT a.id,a.definition_revision AS revision,d.definition,a.scope,a.activated_at FROM ${relation(tx, 'tf_agent_activations')} a JOIN ${relation(tx, 'tf_agents')} g ON g.id=a.agent_id JOIN ${relation(tx, 'tf_agent_definitions')} d ON d.agent_id=a.agent_id AND d.revision=a.definition_revision WHERE a.agent_id=$1 AND a.revoked_at IS NULL AND ${activationId ? 'true' : currentActivation(tx)} AND g.enabled AND ($2::uuid IS NULL OR a.id=$2) AND EXISTS (SELECT 1 FROM ${relation(tx, 'tf_agent_saved_revisions')} s WHERE s.agent_id=a.agent_id AND s.definition_revision=a.definition_revision) ORDER BY a.activated_at DESC NULLS LAST,a.id DESC`,
+            `SELECT a.id,a.definition_revision AS revision,d.definition,a.scope,a.activated_at,
+            (dense_rank() OVER (ORDER BY a.activated_at DESC NULLS LAST))::text AS activation_rank
+            FROM ${relation(tx, 'tf_agent_activations')} a JOIN ${relation(tx, 'tf_agents')} g ON g.id=a.agent_id JOIN ${relation(tx, 'tf_agent_definitions')} d ON d.agent_id=a.agent_id AND d.revision=a.definition_revision WHERE a.agent_id=$1 AND a.revoked_at IS NULL AND ${activationId ? 'true' : currentActivation(tx)} AND g.enabled AND ($2::uuid IS NULL OR a.id=$2) AND EXISTS (SELECT 1 FROM ${relation(tx, 'tf_agent_saved_revisions')} s WHERE s.agent_id=a.agent_id AND s.definition_revision=a.definition_revision) ORDER BY a.activated_at DESC NULLS LAST,a.id DESC`,
             [agentId, activationId ?? null],
           )
         ).rows,
@@ -178,7 +181,7 @@ export function createAgentTasks(
     if (
       !activationId &&
       candidates.length > 1 &&
-      (!selected.activated_at || candidates[1]?.activated_at?.getTime() === selected.activated_at.getTime())
+      (!selected.activated_at || candidates[1]?.activation_rank === selected.activation_rank)
     )
       throw new AgentTaskError('activation-selection-required');
     return selected;

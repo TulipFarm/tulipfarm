@@ -171,7 +171,7 @@ export function createSavedAgentService(runtime: AgentStorage, readProjection?: 
                 await transaction.client.query(
                   `SELECT a.id,a.definition_revision AS revision,a.scope FROM ${relation(transaction, 'tf_agent_activations')} a
               WHERE a.agent_id=$1 AND a.revoked_at IS NULL AND a.superseded_by_activation_id IS NOT NULL AND (
-                EXISTS(SELECT 1 FROM ${relation(transaction, 'tf_agent_tasks')} t WHERE t.activation_id=a.id AND t.status NOT IN ('completed','failed'))
+                EXISTS(SELECT 1 FROM ${relation(transaction, 'tf_agent_tasks')} t WHERE t.activation_id=a.id)
                 OR EXISTS(SELECT 1 FROM ${relation(transaction, 'tf_agent_runs')} r WHERE r.activation_id=a.id AND r.status IN ('ready','running','waiting'))
               ) ORDER BY a.activated_at DESC NULLS LAST,a.id DESC`,
                   [agentId],
