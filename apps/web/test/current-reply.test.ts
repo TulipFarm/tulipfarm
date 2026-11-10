@@ -237,6 +237,32 @@ test('answering a question shows the resumed reply before queued follow-ups beco
   assert.equal(next.queuedKey, 'follow-up-turn:0');
 });
 
+test('a failed turn does not hide a later running reply or keep its follow-up waiting forever', () => {
+  const failed = message({ turn: { id: 'failed-turn', generation: 1, status: 'failed' } });
+  const processing = message({
+    id: 'running-message',
+    sequence: 2,
+    turn: { id: 'running-turn', generation: 0, status: 'processing' },
+  });
+  const queued = message({
+    id: 'follow-up',
+    sequence: 3,
+    turn: { id: 'follow-up-turn', generation: 0, status: 'queued' },
+  });
+  const messages = [failed, processing, queued];
+  const running = currentReply(input({ messages }));
+  assert.equal(running.turn, processing.turn);
+  assert.equal(running.thinking, true);
+  assert.notEqual(running.processingKey, null);
+  assert.deepEqual(running.queuedMessages, [queued]);
+  assert.equal(running.queueLabel, 'This message will be answered after the reply above.');
+  processing.turn!.status = 'completed';
+  const next = currentReply(input({ messages }));
+  assert.equal(next.turn, queued.turn);
+  assert.deepEqual(next.queuedMessages, []);
+  assert.equal(next.queuedKey, 'follow-up-turn:0');
+});
+
 test('streamed text and progress must each match the saved generation', () => {
   for (const generation of [1, 3]) {
     const mismatched = reply({

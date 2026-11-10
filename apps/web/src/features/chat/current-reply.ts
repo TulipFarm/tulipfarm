@@ -31,7 +31,7 @@ export function currentReply({ messages, outgoing, command, stream }: ReplyInput
   // A message queued while the workspace updates shows as sent, labelled, without a reply indicator.
   const waiting = !!pending && command.kind === 'sending' && !!command.waiting;
   const first = messages?.find(
-    message => message.turn && !['completed', 'cancelled', 'blocked'].includes(message.turn.status),
+    message => message.turn && ['queued', 'processing', 'waiting', 'reconciling'].includes(message.turn.status),
   );
   const replying = first?.turn && ['queued', 'processing'].includes(first.turn.status) ? first : undefined;
   const queuedMessages =
