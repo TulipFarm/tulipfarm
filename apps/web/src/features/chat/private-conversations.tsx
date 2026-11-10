@@ -1990,7 +1990,7 @@ function ConversationTools({
       {message.tools
         .filter(tool => tool.status === 'completed' && tool.integration)
         .map(tool => (
-          <IntegrationCard key={tool.id} workspaceId={workspace.id} card={tool.integration!} />
+          <IntegrationCard key={tool.id} workspaceId={workspace.id} slug={workspace.slug} card={tool.integration!} />
         ))}
       {message.tools
         .filter(tool => tool.status === 'completed' && tool.importId)

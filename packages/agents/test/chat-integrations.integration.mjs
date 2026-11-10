@@ -62,7 +62,7 @@ const connections = {
   },
 };
 
-async function setup(t) {
+async function setup(t, services = connections) {
   const db = await fixture();
   let runtime;
   t.after(async () => {
@@ -79,7 +79,7 @@ async function setup(t) {
   const chats = createConversations(runtime),
     chatId = randomUUID();
   await chats.create(w.id, w.userId, { chatId, commandId: randomUUID() });
-  return async function tool(call) {
+  const tool = async function (call) {
     const sent = await chats.send(w.id, w.userId, chatId, {
       messageId: randomUUID(),
       commandId: randomUUID(),
@@ -91,7 +91,7 @@ async function setup(t) {
         await executeTool(
           call.tool,
           false,
-          context => createChatTools(context.runtime, { connections }).invokeWithSources(context, call),
+          context => createChatTools(context.runtime, { connections: services }).invokeWithSources(context, call),
           [],
           call,
         )
@@ -101,6 +101,11 @@ async function setup(t) {
     await executor.process({ workspaceId: w.id, conversationId: chatId, turnId: sent.turnId, generation: 0 });
     return output;
   };
+  tool.cards = async () =>
+    (await chats.history(w.id, w.userId, chatId)).messages.flatMap(message =>
+      message.tools.flatMap(item => (item.integration ? [item.integration] : [])),
+    );
+  return tool;
 }
 
 test('chat lists connections without credentials and offers connect and disconnect cards', async t => {
@@ -145,4 +150,88 @@ test('chat lists connections without credentials and offers connect and disconne
   const review = await tool({ tool: 'integrations.disconnect', connectionId: `github:${githubId}` });
   assert.equal(review.status, 'review-required');
   assert.equal(review.connection.account, 'ada');
+});
+
+test('chat finds remote MCP servers and offers a personal setup card', async t => {
+  const entry = (name, endpoint, extra = {}) => ({
+    id: `${name}@1:0`,
+    name,
+    version: '1',
+    title: name,
+    description: 'd'.repeat(400),
+    endpoint,
+    status: 'active',
+    compatibility: 'unverified',
+    authentication: 'unknown',
+    ...extra,
+  });
+  const queries = [];
+  const tool = await setup(t, {
+    ...connections,
+    mcp: {
+      search: async query => {
+        queries.push(query);
+        if (query === 'broken') throw new Error('registry down');
+        return [
+          entry('io.github.PostHog/mcp', 'https://mcp.posthog.com/mcp'),
+          entry('example/old', 'https://old.example.com/mcp', { status: 'deprecated' }),
+          entry('example/tenant', 'https://{tenant}.example.com/mcp', { compatibility: 'template-required' }),
+        ];
+      },
+    },
+  });
+  const found = await tool({ tool: 'integrations.mcp.search', query: 'posthog' });
+  assert.deepEqual(queries, ['posthog']);
+  assert.deepEqual(
+    found.servers.map(server => [server.registryName, server.endpoint, server.needsValues, server.description.length]),
+    [
+      ['io.github.PostHog/mcp', 'https://mcp.posthog.com/mcp', false, 300],
+      ['example/tenant', 'https://{tenant}.example.com/mcp', true, 300],
+    ],
+  );
+  assert.equal((await tool({ tool: 'integrations.mcp.search', query: 'broken' })).error, 'registry-unavailable');
+
+  assert.deepEqual(
+    {
+      ...(await tool({
+        tool: 'integrations.mcp.connect',
+        name: 'PostHog',
+        endpoint: 'https://mcp.posthog.com/mcp',
+        authentication: 'secrets',
+      })),
+      instruction: undefined,
+    },
+    {
+      status: 'mcp-connect-card',
+      name: 'PostHog',
+      endpoint: 'https://mcp.posthog.com/mcp',
+      authentication: 'secrets',
+      instruction: undefined,
+    },
+  );
+  assert.deepEqual(await tool.cards(), [
+    { action: 'mcp', name: 'PostHog', endpoint: 'https://mcp.posthog.com/mcp', authentication: 'secrets' },
+  ]);
+  for (const endpoint of ['https://{tenant}.example.com/mcp', 'http://mcp.posthog.com/mcp', 'https://127.0.0.1/mcp'])
+    assert.equal(
+      (await tool({ tool: 'integrations.mcp.connect', name: 'Bad', endpoint, authentication: 'none' })).error,
+      'endpoint-denied',
+      endpoint,
+    );
+});
+
+test('chat MCP tools explain when custom MCP connections are off', async t => {
+  const tool = await setup(t);
+  assert.equal((await tool({ tool: 'integrations.mcp.search', query: 'posthog' })).error, 'mcp-unavailable');
+  assert.equal(
+    (
+      await tool({
+        tool: 'integrations.mcp.connect',
+        name: 'PostHog',
+        endpoint: 'https://mcp.posthog.com/mcp',
+        authentication: 'oauth',
+      })
+    ).error,
+    'mcp-unavailable',
+  );
 });

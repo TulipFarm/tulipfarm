@@ -37,6 +37,7 @@ function Integrations({ api, capabilities }: { api: McpApi; capabilities: Capabi
   const hash = useLocation({ select: location => location.hash });
   const navigate = useNavigate();
   const reconnectId = hash.startsWith('reauthorize-mcp-') ? hash.slice('reauthorize-mcp-'.length) : null;
+  const reviewId = hash.startsWith('review-mcp-') ? hash.slice('review-mcp-'.length) : null;
   const [catalog, setCatalog] = useState(false);
   const read = useMcpIntegrations(api);
   return (
@@ -159,6 +160,18 @@ function Integrations({ api, capabilities }: { api: McpApi; capabilities: Capabi
             void read.refresh();
           }}
         />
+      ) : reviewId ? (
+        <div key={reviewId} ref={element => element?.scrollIntoView({ block: 'start' })}>
+          <McpIntegrationDetail
+            api={api}
+            capabilities={capabilities}
+            id={reviewId}
+            close={() => {
+              void navigate({ hash: '', replace: true });
+              void read.refresh();
+            }}
+          />
+        </div>
       ) : (
         view.kind === 'detail' && (
           <McpIntegrationDetail

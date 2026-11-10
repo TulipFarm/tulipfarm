@@ -317,7 +317,7 @@ export const imageReceiptSchema = z.array(
 );
 /** One card per image of an `images.generate` call in a chat. */
 export type ImageReceipt = z.infer<typeof imageReceiptSchema>;
-/** The card an `integrations.connect` or `integrations.disconnect` call shows; the card reads the account live. */
+/** The card an `integrations.connect`, `integrations.disconnect` or `integrations.mcp.connect` call shows; the card reads the account live. */
 export const integrationCardSchema = z.discriminatedUnion('action', [
   z.strictObject({ action: z.literal('connect'), app: z.string().regex(/^[a-z][a-z-]{0,39}$/) }),
   z.strictObject({
@@ -325,6 +325,12 @@ export const integrationCardSchema = z.discriminatedUnion('action', [
     connectionId: z
       .string()
       .regex(/^(google|(github|atlassian):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/),
+  }),
+  z.strictObject({
+    action: z.literal('mcp'),
+    name: z.string().min(1).max(120),
+    endpoint: z.url({ protocol: /^https$/ }).max(2048),
+    authentication: z.enum(['oauth', 'secrets', 'none']),
   }),
 ]);
 export const toolReceiptSchema = z.object({

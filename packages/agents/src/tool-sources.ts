@@ -300,6 +300,8 @@ export async function resultSources(
     case 'integrations.list':
     case 'integrations.connect':
     case 'integrations.disconnect':
+    case 'integrations.mcp.search':
+    case 'integrations.mcp.connect':
     case 'conversation.messages.read':
       return [];
     case 'files.read': {

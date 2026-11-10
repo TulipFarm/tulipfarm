@@ -3,6 +3,7 @@ import { BrandIcon } from '@tulipfarm/sprout/brand-icon';
 import { ReviewCard, ReviewRow, ReviewRows } from '@tulipfarm/sprout/review-card';
 import { Button } from '@tulipfarm/sprout/button';
 import type { IntegrationCardView } from './conversation-api';
+import { McpConnectCard } from './mcp-connect-card';
 import { googleApi, googleError } from '@/lib/google-workspace';
 import { githubApi, githubError } from '@/lib/github';
 import { atlassianApi, atlassianError } from '@/lib/atlassian';
@@ -16,8 +17,18 @@ import {
   useIntegrationChanges,
 } from '@/features/integrations/queries';
 
-export function IntegrationCard({ workspaceId, card }: { workspaceId: string; card: IntegrationCardView }) {
-  return card.action === 'connect' ? (
+export function IntegrationCard({
+  workspaceId,
+  slug,
+  card,
+}: {
+  workspaceId: string;
+  slug: string;
+  card: IntegrationCardView;
+}) {
+  return card.action === 'mcp' ? (
+    <McpConnectCard workspaceId={workspaceId} slug={slug} card={card} />
+  ) : card.action === 'connect' ? (
     <ConnectCard workspaceId={workspaceId} appId={card.app} />
   ) : (
     <DisconnectCard workspaceId={workspaceId} connectionId={card.connectionId} />
