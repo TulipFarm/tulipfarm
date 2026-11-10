@@ -347,6 +347,24 @@ test('chat sends reconcile transport failures and recover without reloading', { 
     );
 
     await scenario(
+      'a status check reads at most two pages even when a long history continues',
+      async ({ page, state, add, workspace, chat }) => {
+        for (let index = 0; index < 160; index++) add('assistant', `Older history ${index}`);
+        state.reads.length = 0;
+        const found = await page.evaluate(
+          async ({ workspaceId, chatId, messageId }) => {
+            const { conversationApi } = await import('/src/features/chat/conversation-api.ts');
+            return conversationApi(workspaceId, () => {}).findMessage(chatId, messageId, AbortSignal.timeout(15000));
+          },
+          { workspaceId: workspace.id, chatId: chat.id, messageId: randomUUID() },
+        );
+        assert.equal(found, null);
+        assert.deepEqual(state.reads, [Infinity, 113]);
+        assert.equal(state.writes.length, 0);
+      },
+    );
+
+    await scenario(
       'twenty sends immediately after a completed reply stay visible in stored order',
       async ({ page, state, composer, send, history }) => {
         for (let index = 0; index < 20; index++) {

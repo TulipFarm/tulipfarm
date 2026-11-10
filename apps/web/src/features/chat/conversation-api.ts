@@ -610,14 +610,13 @@ export function conversationApi(workspaceId: string, denied: (status: number) =>
     },
     async findMessage(chatId: string, messageId: string, signal: AbortSignal) {
       let before: number | null = null;
-      let pages = 0;
-      do {
+      for (let pages = 1; pages <= 2; pages++) {
         const query = before === null ? '' : `?before=${before}`;
         const page = historySchema.parse(await request(`/${chatId}/messages${query}`, 'GET', signal));
-        pages++;
         if (page.messages.some(message => message.id === messageId && message.author === 'human')) return pages;
         before = page.nextBefore;
-      } while (before !== null);
+        if (before === null) break;
+      }
       return null;
     },
     async command(command: ConversationCommand, signal: AbortSignal) {
