@@ -668,9 +668,12 @@ export async function fitFileImportSelection(
     await workbook.xlsx.read(Readable.from([Buffer.from(bytes)])).catch(() => {
       throw new TableImportError('malformed-file');
     });
-    const sheets = requested.sheet
-      ? workbook.worksheets.filter(sheet => columnKey(sheet.name) === columnKey(requested.sheet!))
-      : workbook.worksheets;
+    const exact = workbook.worksheets.find(sheet => sheet.name === requested.sheet);
+    const sheets = exact
+      ? [exact]
+      : requested.sheet
+        ? workbook.worksheets.filter(sheet => columnKey(sheet.name) === columnKey(requested.sheet!))
+        : workbook.worksheets;
     if (!sheets.length) throw new TableImportError('invalid-selection');
     const candidates: HeaderCandidate[] = [];
     if (fields.length && requested.header?.kind !== 'provided')

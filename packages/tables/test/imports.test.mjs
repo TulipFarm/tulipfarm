@@ -380,6 +380,22 @@ test('explicit sheet and header choices are authoritative during preparation', a
   await rejects(fitFileImportSelection(file, { format: 'xlsx', sheet: 'Missing' }), 'invalid-selection');
 });
 
+test('an exact worksheet name wins when another name differs only by surrounding spaces', async () => {
+  for (const columns of [['ID'], ['ID', 'Total']]) {
+    const file = await workbook([columns, columns.map(() => 'A-1')], book =>
+      book.addWorksheet(' Tickets ').addRows([
+        ['ID', 'Total'],
+        ['A-2', '12'],
+      ]),
+    );
+    for (const sheet of ['Tickets', ' Tickets ']) {
+      const { selection } = await fitFileImportSelection(file, { format: 'xlsx', sheet, header: 1 }, [['ID', 'Total']]);
+      assert.equal(selection.sheet, sheet);
+      assert.equal((await parseImportFile(file, selection)).length, 1);
+    }
+  }
+});
+
 test('a selection that already fits the file is unchanged', async () => {
   const file = bytes('a,b\n1,2\n');
   assert.deepEqual(await fitFileImportSelection(file, { ...csv, conversions: { a: 'numeric' } }), {
