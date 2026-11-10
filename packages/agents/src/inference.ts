@@ -2237,6 +2237,127 @@ export function uncheckedTableQuestion(candidate: string, items: readonly LoopIt
   };
 }
 
+const noInvitees =
+  /\b(?:no|zero|not any)\s+(?:other\s+|more\s+)?(?:pending\s+|open\s+|outstanding\s+)?(?:invit\w*|invitees?)\b(?!\s+(?:are|is)\s+visible)|\binvit\w*[^.\n]{0,40}?\b(?:none|empty|no one|nobody)\b|\bno one is waiting to join\b|\bpendingInvitationCount\W+(?:is\s+|as\s+)?(?:0|zero)\b/i;
+// A short "There are none." answers an invitation question as surely as one that names invitations.
+const bareNone = /\b(?:none|no one|nobody|zero)\b|\bthere (?:are|is) no\b/i;
+const checkedInvitees = /\b(?:double[- ]?check\w*|re-?check\w*|I(?: have|'ve)? (?:checked|verified|looked again))\b/i;
+const membersFindName = nativeToolName('members.find');
+const listedInvitations = /"pendingInvitations"\s*:\s*\[/;
+/**
+ * Why a reply that says nobody (else) is invited, or that it checked the invitations, must do more work: only an
+ * invitation list from members.find in this reply shows that, and a person who can't see invitations must be told so,
+ * not that there are none.
+ */
+export function uncheckedInvitationClaim(candidate: string, items: readonly LoopItem[]) {
+  if (invitationRecheckAsked(items))
+    return {
+      status: 'continue' as const,
+      reason:
+        "The person asked you to confirm the pending invitations. Call members.find again now and list every pending invitation it returns, with its email, team and expiry; if pendingInvitations is 'not-visible', say you can't see invitations and that a workspace admin can check Members.",
+    };
+  const unnamed = asksAboutInvitations(items)
+    ? listedInvitees(items).filter(email => !candidate.toLowerCase().includes(email))
+    : [];
+  if (unnamed.length)
+    return {
+      status: 'continue' as const,
+      reason: `The person asked about invitations, but the reply does not name every pending invitee members.find returned. List each one by email with the teams it joins, or say it joins no team. Missing: ${unnamed.join(', ')}.`,
+    };
+  if (asksAboutInvitations(items) && invitationsHidden(items) && !/\bMembers\b/.test(candidate))
+    return {
+      status: 'continue' as const,
+      reason:
+        "members.find returned pendingInvitations 'not-visible'. Say you can't see pending invitations and that a workspace admin can check them on Members.",
+    };
+  const saysNone = noInvitees.test(candidate) || (asksAboutInvitations(items) && bareNone.test(candidate));
+  if (!saysNone && !(/\binvit/i.test(candidate) && checkedInvitees.test(candidate))) return undefined;
+  const listedNone = items.some(
+    item =>
+      item.kind === 'results' &&
+      item.results.some(result => result.name === membersFindName && listedInvitations.test(result.output)),
+  );
+  return listedNone
+    ? undefined
+    : {
+        status: 'continue' as const,
+        reason:
+          "The reply says there are no pending invitations, or that it checked them, but members.find did not return the invitation list in this reply. Call members.find and report the invitations it returns; if pendingInvitations is 'not-visible', say you can't see invitations and that a workspace admin can check Members.",
+      };
+}
+
+/** The person's latest message in the reply's history. */
+function latestRequest(items: readonly LoopItem[]) {
+  for (let index = items.length - 1; index >= 0; index--) {
+    const item = items[index]!;
+    if (item.kind !== 'turn' || item.turn.role !== 'user') continue;
+    return 'text' in item.turn
+      ? item.turn.text
+      : item.turn.content.map(part => (part.type === 'text' ? part.text : '')).join(' ');
+  }
+  return '';
+}
+
+function asksAboutInvitations(items: readonly LoopItem[]) {
+  return invitationLookup(items.flatMap(item => (item.kind === 'turn' ? [item.turn] : [])));
+}
+
+function invitationsHidden(items: readonly LoopItem[]) {
+  return items.some(
+    item =>
+      item.kind === 'results' &&
+      item.results.some(
+        result => result.name === membersFindName && /"pendingInvitations"\s*:\s*"not-visible"/.test(result.output),
+      ),
+  );
+}
+
+/** The invitee emails members.find listed in this reply, when there are few enough to name each one. */
+function listedInvitees(items: readonly LoopItem[]) {
+  const emails = new Set<string>();
+  for (const item of items)
+    if (item.kind === 'results')
+      for (const result of item.results) {
+        if (result.name !== membersFindName) continue;
+        const listed = /"pendingInvitations"\s*:\s*\[([\s\S]*?)\]\s*,\s*"invitationsInstruction"/.exec(
+          result.output,
+        )?.[1];
+        for (const match of listed?.matchAll(/"email"\s*:\s*"([^"]+)"/g) ?? []) emails.add(match[1]!.toLowerCase());
+      }
+  return emails.size <= 10 ? [...emails] : [];
+}
+
+const confirmRequest =
+  /\b(?:are you (?:sure|certain)|sure about|double[- ]?check|re-?check|check again|confirm|verify|really)\b/i;
+/** Whether the person's latest message asks to confirm something about invitations. */
+function confirmsInvitations(items: readonly LoopItem[]) {
+  return asksAboutInvitations(items) && confirmRequest.test(latestRequest(items));
+}
+
+/** Whether the person asked to confirm invitations and this reply has not looked them up again yet. */
+function invitationRecheckAsked(items: readonly LoopItem[]) {
+  return confirmsInvitations(items) && !foundInvitations(items);
+}
+
+/** Whether members.find reported pending invitations, listed or not visible, in this reply. */
+function foundInvitations(items: readonly LoopItem[]) {
+  return items.some(
+    item =>
+      item.kind === 'results' &&
+      item.results.some(result => result.name === membersFindName && /"pendingInvitations"\s*:/.test(result.output)),
+  );
+}
+
+/** The reply when chat keeps saying nobody is invited without members.find showing it. */
+export const uncheckedInvitationReply =
+  "I couldn't check pending invitations just now. Ask again, or a workspace admin can see them on Members.";
+
+/** The last-resort invitation reply: the invitees members.find listed, when it listed any. */
+function invitationFallback(items: readonly LoopItem[]) {
+  const invitees = listedInvitees(items);
+  return invitees.length ? `Pending invitations: ${invitees.join(', ')}.` : uncheckedInvitationReply;
+}
+
 type EvidenceEntry =
   | { kind: 'turn'; turn: ChatTextTurn }
   | { kind: 'model'; text: string; calls: { id: string; name: string; input: unknown }[] }
@@ -2695,8 +2816,6 @@ export async function inferWithContent(
 /** The saved step text must fit the `narration` column of `tf_conversation_tool_calls`. */
 const narrationLimit = 2000;
 
-const invitationUnavailableReply =
-  "I can't see workspace invitations in chat. Open Settings > Members to see pending invitations and their teams.";
 const invitationTopic = /\b(?:invitations?|invitees?|invites?|invited)\b/i;
 const eventInvitationTopic = /\b(?:calendar|meetings?|events?)\b/i;
 const workspaceInvitationTopic =
@@ -2722,6 +2841,7 @@ function invitationTopicChange(text: string) {
   );
 }
 
+/** Whether the conversation is on workspace invitations, from the latest question about them until the topic changes. */
 function invitationLookup(messages: readonly ChatTurn[]) {
   let active = false;
   for (const turn of messages) {
@@ -2756,9 +2876,8 @@ export async function inferWithTools(
   // Any model output in this turn, streamed or stepped, makes a later fallback unsafe: its history is provider-native.
   let outputProduced = false;
   const items: LoopItem[] = messages.map(turn => ({ kind: 'turn', turn }));
-  // People lookup has no invitation source. Do not stream an invented answer before applying this boundary.
-  const unavailableInvitations = invitationLookup(sourceMessages);
-  const answerText = unavailableInvitations ? undefined : tools?.answerText;
+  // An answer about workspace invitations is held back until the invitation checks have run, so a wrong "none" never streams.
+  const answerText = invitationLookup(sourceMessages) ? undefined : tools?.answerText;
   let calls = z
     .number()
     .int()
@@ -2784,6 +2903,8 @@ export async function inferWithTools(
   let layoutAsked = false;
   // The next request must call the layout tool, after an answer came back as text instead of a layout call.
   let forceRender = false;
+  /** A tool the model must call in its next round, where the route accepts a forced tool choice. */
+  let forceTool: string | undefined;
   const slackLayout = typeof tools?.layout === 'object' ? tools.layout.slack : undefined;
   type Renderer = {
     name: string;
@@ -2864,8 +2985,8 @@ export async function inferWithTools(
   ) => {
     report(checked ? 'done' : 'finishing');
     return {
-      text: unavailableInvitations ? invitationUnavailableReply : text,
-      ...(unavailableInvitations ? {} : layout),
+      text,
+      ...layout,
       ...(tools?.avatar ? { avatar } : {}),
       ...(answeredBy ? { fallback: answeredBy } : {}),
     };
@@ -3302,10 +3423,13 @@ export async function inferWithTools(
       let activeCatalog = catalog!;
       // A forced tool choice is sent only to routes whose deployment accepts one; others are asked in the message alone.
       const required =
-        forceRender && renderer && !finalizing && routeCapabilities(config).toolChoice !== 'auto'
-          ? renderer.name
+        !finalizing && routeCapabilities(config).toolChoice !== 'auto'
+          ? forceRender && renderer
+            ? renderer.name
+            : forceTool
           : undefined;
       forceRender = false;
+      forceTool = undefined;
       const attempt = () => {
         activeCatalog = catalog!;
         const offered = roundTools(activeCatalog, finalizing);
@@ -3558,12 +3682,10 @@ export async function inferWithTools(
           avatar = { name: 'Bud', state: 'Idle' };
           updateAvatar();
         }
-        if (unavailableInvitations) return finish(invitationUnavailableReply, true);
         return rendered
           ? finish(rendered.input.summary, true, { layout: rendered.input })
           : finish(selected.text, true);
       };
-      if (unavailableInvitations) return accept();
       if (rendered) preview(rendered.input.summary);
       const reviewReply = await tableReviewReply();
       if (reviewReply) {
@@ -3586,10 +3708,11 @@ export async function inferWithTools(
         tools?.priorCalls || tools?.priorToolCalls?.length
           ? undefined
           : unbackedWriteClaim(candidate, wroteInReply(items));
+      const invitesUnchecked = unbacked || writeUnbacked ? undefined : uncheckedInvitationClaim(candidate, items);
       const idAsked =
         unbacked || writeUnbacked
           ? undefined
-          : (tableIdQuestion(candidate) ?? uncheckedTableQuestion(candidate, items));
+          : (tableIdQuestion(candidate) ?? uncheckedTableQuestion(candidate, items) ?? invitesUnchecked);
       if (
         !unbacked &&
         !writeUnbacked &&
@@ -3678,12 +3801,15 @@ export async function inferWithTools(
         );
       if (checked.status !== 'continue') return accept();
       preview('');
+      // Asked to confirm invitations, the next round must look them up again rather than restate the earlier answer.
+      if (invitesUnchecked && invitationRecheckAsked(items)) forceTool = membersFindName;
       if (finalizing) return finish(unbacked ? `${stoppingReply} ${noCardReply(waiting)}` : stoppingReply);
       if (completionCorrections++ >= 2) {
         // Corrections are spent, so the reply ends with an answer rather than failing after its tools ran.
         recordChatCompletionCheck('exhausted');
         // A reply that keeps naming a card it did not make ends by pointing at the card that does wait, if any.
         if (unbacked || (cardClaimed && waiting && !cardInReply(items))) return finish(noCardReply(waiting), true);
+        if (invitesUnchecked) return finish(invitationFallback(items), true);
         // Asking the person which table, after looking tables up, writes nothing and is a safe place to stop.
         if (idAsked || (asksAboutTable(candidate) && lookedUpTable(items))) return accept();
         // The last answer is kept only when it neither promises work nor reports an outcome no tool produced.

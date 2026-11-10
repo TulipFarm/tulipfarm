@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { activeGeneration, GenerationError, readRecords, workspaceMembersTable } from '@tulipfarm/tables/store';
 import { workspaceMemberFields } from '@tulipfarm/tables/workspace-members';
 import { currentMember, type HumanActor } from '@tulipfarm/access';
+import { canonicalEmailSql } from '@tulipfarm/workspaces/canonical-email';
 import { relation, type AgentTransaction } from './store.ts';
 
 export type MemberSummary = { membershipId: string; userId: string; name: string; email: string | null };
@@ -78,11 +79,49 @@ const teamName = (name: string) => (name === '_admin' ? 'Workspace admins' : nam
 
 type Roster = { membershipId: string; name: string; role: 'member' | 'manager' };
 
+const invitationRows = z.array(
+  z.object({
+    email: z.string(),
+    expired: z.boolean(),
+    expires_at: z.date(),
+    role: z.enum(['admin', 'member']),
+    assignments: z
+      .object({ teams: z.array(z.object({ id: z.uuid(), role: z.enum(['member', 'manager']), name: z.string() })) })
+      .catch({ teams: [] }),
+  }),
+);
+
+/** Email invitations nobody has accepted yet, the latest per address, as Members lists them; newest first. */
+async function openInvitations(tx: AgentTransaction, teams: ReadonlyMap<string, string>) {
+  const invitations = relation(tx, 'tf_invitations');
+  const rows = invitationRows.parse(
+    (
+      await tx.client.query(
+        `SELECT i.email,i.expires_at<=clock_timestamp() AS expired,i.expires_at,i.role,i.assignments FROM ${invitations} i
+        WHERE i.kind='email' AND i.revoked_at IS NULL AND i.consumed_membership_id IS NULL AND NOT EXISTS (
+          SELECT 1 FROM ${invitations} newer WHERE newer.email IS NOT NULL
+            AND ${canonicalEmailSql('newer.email')}=${canonicalEmailSql('i.email')}
+            AND (newer.created_at,newer.id)>(i.created_at,i.id))
+        ORDER BY i.created_at DESC,i.id DESC`,
+      )
+    ).rows,
+  );
+  return rows.map(row => ({
+    email: row.email,
+    status: row.expired ? ('expired' as const) : ('pending' as const),
+    expiresAt: row.expires_at.toISOString(),
+    role: row.role,
+    teams: row.assignments.teams.map(team => ({ name: teamName(teams.get(team.id) ?? team.name), role: team.role })),
+  }));
+}
+
 /**
- * Active members and teams whose name or email contains the query, ignoring case, or everyone when there is no query.
+ * Active members and teams whose name or email contains the query, ignoring case, or everyone when there is no query;
+ * a team also matches when the query contains its name.
  * Only IDs, names and emails. A team lists who is in it only when the asker could see that in Settings: a workspace
- * admin sees every team's people, anyone else only the teams they belong to. Counts are of every match, so the agent
- * never has to guess how many there are.
+ * admin sees every team's people, anyone else only the teams they belong to. Every invitation nobody has accepted yet is
+ * listed, whatever the query, only for a workspace admin, who can see them on Members; anyone else gets 'not-visible'.
+ * Counts are of every match, so the agent never has to guess how many there are.
  */
 export async function findMembers(tx: AgentTransaction, actor: HumanActor, query?: string) {
   const needle = query?.trim().toLocaleLowerCase() ?? '';
@@ -90,8 +129,16 @@ export async function findMembers(tx: AgentTransaction, actor: HumanActor, query
     !needle || values.some(value => value !== null && value.toLocaleLowerCase().includes(needle));
   const everyone = await activeMembers(tx);
   const members = everyone.filter(member => matches(member.name, member.email));
-  const teams = (await workspaceTeams(tx)).filter(team => matches(team.name, teamName(team.name)));
+  const allTeams = await workspaceTeams(tx);
+  // A query naming several teams, such as "QA Editors and QA Readers", finds each team it names.
+  const teams = allTeams.filter(
+    team =>
+      matches(team.name, teamName(team.name)) ||
+      [team.name, teamName(team.name)].some(name => name.length >= 3 && needle.includes(name.toLocaleLowerCase())),
+  );
   const admin = (await currentMember(tx, actor)).role === 'admin';
+  // Every open invitation regardless of the query: a question about a team's invitees is also about the workspace's.
+  const invitations = admin ? await openInvitations(tx, new Map(allTeams.map(team => [team.teamId, team.name]))) : null;
   const enrollments = z
     .array(z.object({ team_id: z.uuid(), membership_id: z.uuid(), role: z.enum(['member', 'manager']) }))
     .parse(
@@ -112,7 +159,6 @@ export async function findMembers(tx: AgentTransaction, actor: HumanActor, query
     rosters.set(row.team_id, roster);
   }
   return {
-    invitations: 'not-available' as const,
     memberCount: members.length,
     members: members
       .slice(0, limit)
@@ -133,6 +179,19 @@ export async function findMembers(tx: AgentTransaction, actor: HumanActor, query
           : { people: 'not-visible' as const }),
       };
     }),
-    truncated: members.length > limit || teams.length > limit,
+    ...(invitations
+      ? {
+          pendingInvitationCount: invitations.length,
+          pendingInvitations: invitations.slice(0, limit),
+          invitationsInstruction: invitations.length
+            ? 'These are every open invitation in the workspace, whatever the query. When asked about invitees, list each one by email with the teams it joins, or say it joins no team.'
+            : 'The workspace has no open invitations.',
+        }
+      : {
+          pendingInvitations: 'not-visible' as const,
+          invitationsInstruction:
+            "Only workspace admins can see pending invitations, on Members. Say you can't see them and that an admin can check Members; never say there are none.",
+        }),
+    truncated: members.length > limit || teams.length > limit || (invitations?.length ?? 0) > limit,
   };
 }
