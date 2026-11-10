@@ -133,6 +133,86 @@ test('draft retries recover transient errors, stop after the budget, and allow m
   }
 });
 
+test('draft reads retain the shared workspace-update and rate-limit retry windows', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const runtime = createFeatureClient(identity);
+  runtime.start();
+  try {
+    for (const { error, retries, delay } of [
+      { error: { status: 503, code: 'workspace-updating' }, retries: 60, delay: 5000 },
+      { error: { status: 429, retryAfter: '2' }, retries: 5, delay: 2000 },
+    ]) {
+      let calls = 0;
+      const delays: number[] = [];
+      const options = featureReadOptions(runtime, scope, {
+        key: ['draft', error.status],
+        retry: retryDraftRead,
+        retryDelay: (attempt, failure) => {
+          const value = draftRetryDelay(attempt, failure);
+          delays.push(value);
+          return value;
+        },
+        load: async () => {
+          if (++calls <= retries) throw error;
+          return 'saved';
+        },
+      });
+      const result = runtime.client.fetchQuery(options).then(
+        data => ({ data }),
+        error => ({ error }),
+      );
+      await flush();
+      for (let retry = 1; retry <= retries; retry++) {
+        t.mock.timers.tick(delay);
+        await flush();
+        assert.equal(calls, retry + 1, 'drafts keep retrying until the shared recovery window ends');
+      }
+      assert.deepEqual(await result, { data: 'saved' });
+      assert.ok(
+        delays.every(value => value === delay),
+        'shared recovery delays are preserved',
+      );
+    }
+  } finally {
+    runtime.stop();
+  }
+});
+
+test('custom draft retries stop when the page becomes hidden or offline', async () => {
+  for (const paused of ['hidden', 'offline']) {
+    let visible = true;
+    let online = true;
+    const runtime = createFeatureClient(identity, { visible: () => visible, online: () => online });
+    runtime.start();
+    let calls = 0;
+    let failing = true;
+    const options = featureReadOptions(runtime, scope, {
+      key: ['draft', paused],
+      retry: retryDraftRead,
+      retryDelay: () => 1,
+      load: async () => {
+        calls++;
+        if (failing) {
+          if (paused === 'hidden') visible = false;
+          else online = false;
+          throw Object.assign(new Error('Unavailable'), { status: 503 });
+        }
+        return 'saved';
+      },
+    });
+    try {
+      await assert.rejects(runtime.client.fetchQuery(options), { status: 503 });
+      assert.equal(calls, 1, 'custom retries obey the same visibility and connectivity guards as ordinary reads');
+      visible = true;
+      online = true;
+      failing = false;
+      assert.equal(await runtime.client.fetchQuery(options), 'saved');
+    } finally {
+      runtime.stop();
+    }
+  }
+});
+
 test('observers share one in-flight read; focus is inert; transient errors retain data; denial clears only the query', async () => {
   const runtime = createFeatureClient(identity);
   runtime.start();

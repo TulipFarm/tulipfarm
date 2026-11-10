@@ -1,4 +1,4 @@
-import { errorStatus, retryDelay, retryRead } from '@/lib/query/policy';
+import { errorStatus, retryDelay, retryRead, workspaceUpdating } from '@/lib/query/policy';
 
 type WaitingRead = { start: () => void };
 const waiting: WaitingRead[] = [];
@@ -37,8 +37,14 @@ export function scheduleDraftRead<T>(signal: AbortSignal, load: () => Promise<T>
   });
 }
 
-export const retryDraftRead = (failures: number, error: unknown) =>
-  failures < 3 && (errorStatus(error) === 0 || retryRead(0, error));
+export function retryDraftRead(failures: number, error: unknown) {
+  if (workspaceUpdating(error) || errorStatus(error) === 429) return retryRead(failures, error);
+  return failures < 3 && (errorStatus(error) === 0 || retryRead(0, error));
+}
 
-export const draftRetryDelay = (attempt: number, error: unknown) =>
-  Math.min(30_000, retryDelay(attempt, error) * (1 + Math.random() * 0.25));
+export function draftRetryDelay(attempt: number, error: unknown) {
+  const delay = retryDelay(attempt, error);
+  return workspaceUpdating(error) || errorStatus(error) === 429
+    ? delay
+    : Math.min(30_000, delay * (1 + Math.random() * 0.25));
+}

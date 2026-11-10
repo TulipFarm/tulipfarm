@@ -35,7 +35,7 @@ export function featureReadOptions<T>(
       ? {}
       : {
           retry: (failures: number, error: unknown) =>
-            runtime.isCurrent(scope) && admitted() && input.retry!(failures, error),
+            runtime.canRetry() && runtime.isCurrent(scope) && admitted() && input.retry!(failures, error),
         }),
     ...(input.retryDelay === undefined ? {} : { retryDelay: input.retryDelay }),
     queryFn: async ({ signal }) => {

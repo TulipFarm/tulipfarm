@@ -275,7 +275,10 @@ test('project reviews load, decide and retain their results after reloading', { 
         reloadFailures = true;
         await page.reload();
         await page.getByText('Could not load draft', { exact: true }).waitFor({ timeout: 45000 });
-        assert.ok(draftReads.get(cases[5].id) <= 8, 'permanent failures exhaust a bounded retry budget');
+        assert.ok(
+          draftReads.get(cases[5].id) <= 8,
+          `permanent failures exhaust a bounded retry budget, observed ${draftReads.get(cases[5].id)} requests`,
+        );
         if (shots) await page.screenshot({ path: `${shots}/project-retry-${theme}.png` });
         permanentFailure = false;
         await page.getByRole('button', { name: 'Retry loading draft', exact: true }).click();
