@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import { fixture, loadPlatformBaseline } from '../../workspace-storage/test/integration/fixture.mjs';
 import { createWorkspaceRuntime, qualified } from '@tulipfarm/workspace-storage/runtime';
 import { workspaceTableMigrations } from '../../workspaces/src/table-migrations.ts';
-import { createSlackInstallations, slackCredentialCipher } from '../src/index.ts';
+import { createSlackInstallations, createSlackInbox, slackCredentialCipher } from '../src/index.ts';
 
 /** Runs a test with the `images` flag set for every workspace. */
 function withImages(t, on) {
@@ -38,6 +38,67 @@ async function installationFixture() {
     },
   };
 }
+
+test('external Slack revocation needs repair while deliberate disconnect remains neutral with saved scopes', async t => {
+  withImages(t, false);
+  const f = await installationFixture();
+  try {
+    const installations = createSlackInstallations({
+      pool: f.db.platform,
+      runtime: f.runtime,
+      cipher: slackCredentialCipher({ activeKeyId: 'test', keys: { test: 'ab'.repeat(32) } }),
+      config: {
+        appId: 'ATEST',
+        clientId: 'client',
+        clientSecret: 'synthetic',
+        signingSecret: 'synthetic-signing-secret',
+        redirectUri: 'https://api.example.test/oauth',
+        scopeApproval: { reference: 'fixture-approved-scopes', botScopes: ['chat:write'] },
+      },
+      fetcher: async () =>
+        Response.json({
+          ok: true,
+          app_id: 'ATEST',
+          team: { id: 'TONE' },
+          token_type: 'bot',
+          bot_user_id: 'UBOT',
+          access_token: 'xoxb-synthetic',
+          scope: 'chat:write',
+        }),
+    });
+    const inbox = createSlackInbox(f.runtime);
+    for (const event of [
+      { type: 'tokens_revoked', tokens: { oauth: [], bot: ['UBOT'] } },
+      { type: 'app_uninstalled' },
+    ]) {
+      const url = new URL((await installations.begin(f.w.id, f.w.userId, 'connection-session')).url);
+      await installations.complete('code', url.searchParams.get('state'), 'connection-session', f.w.userId);
+      const row = (
+        await f.db.platform.query(`SELECT id,generation,accepts_events_after FROM ${f.table('tf_slack_installations')}`)
+      ).rows[0];
+      await inbox.accept(
+        { workspaceId: f.w.id, installationId: row.id, generation: row.generation },
+        {
+          type: 'event_callback',
+          api_app_id: 'ATEST',
+          team_id: 'TONE',
+          event_id: randomUUID(),
+          event_time: Number(row.accepts_events_after) + 1,
+          event,
+        },
+      );
+      const revoked = await installations.status(f.w.id, f.w.userId);
+      assert.equal(revoked.state, 'reconnect-required');
+      assert.deepEqual(revoked.scopes, ['chat:write']);
+      await installations.disconnect(f.w.id, f.w.userId);
+      const disconnected = await installations.status(f.w.id, f.w.userId);
+      assert.equal(disconnected.state, 'revoked');
+      assert.deepEqual(disconnected.scopes, ['chat:write']);
+    }
+  } finally {
+    await f.close();
+  }
+});
 
 test('with images on, an installation without files:read or files:write asks for them and keeps working until they are granted', async t => {
   withImages(t, true);

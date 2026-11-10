@@ -10,6 +10,7 @@ import { useGitHubAccounts, useIntegrationChanges } from './queries';
 import { GitHubKnowledgeSources } from './github-knowledge';
 import { githubMockEnabled } from './github-mock-api';
 import { GitHubBotGrants } from './github-bot-grants';
+import { accountConnectionState } from './connection-state';
 
 export function GitHubAccounts({
   workspaceId,
@@ -177,22 +178,20 @@ export function GitHubAccounts({
                     </p>
                     <Badge
                       variant={
-                        account.state === 'active'
+                        accountConnectionState(account) === 'connected'
                           ? 'success'
-                          : account.state === 'disconnected'
-                            ? 'secondary'
-                            : 'warning'
+                          : accountConnectionState(account) === 'attention'
+                            ? 'warning'
+                            : 'secondary'
                       }
                     >
                       {account.state === 'active'
                         ? 'Connected'
                         : !account.identity
                           ? 'Not connected'
-                          : account.state === 'authorizing'
-                            ? 'Waiting for GitHub'
-                            : account.state === 'disconnected'
-                              ? 'Disconnected'
-                              : 'Reconnect required'}
+                          : account.state === 'disconnected'
+                            ? 'Disconnected'
+                            : 'Reconnect required'}
                     </Badge>
                   </div>
                   {account.state !== 'active' && account.state !== 'disconnected' && (

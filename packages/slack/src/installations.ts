@@ -198,7 +198,7 @@ export function createSlackInstallations(options: {
     const matches = link?.state === 'active' && access.local?.generation === link.generation;
     if (link?.state === 'active' && access.local?.state === 'revoked')
       return {
-        state: 'revoked',
+        state: 'reconnect-required',
         teamId: link.team_id,
         canManage: access.canManage,
         linked: false,

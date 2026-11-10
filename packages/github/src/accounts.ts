@@ -149,8 +149,22 @@ export function createGitHubAccounts(options: {
       userId,
       async (tx, actor) => {
         let id: string = randomUUID();
-        if (existingId) {
-          const row = await load(tx, actor, existingId);
+        const reusable = existingId
+          ? undefined
+          : z
+              .object({ id: uuidSchema })
+              .optional()
+              .parse(
+                (
+                  await tx.client.query(
+                    `SELECT id FROM ${relation(tx, 'accounts')} WHERE owner_membership_id=$1 AND identity IS NULL AND state='disconnected' ORDER BY created_at,id LIMIT 1 FOR UPDATE`,
+                    [actor.membershipId],
+                  )
+                ).rows[0],
+              );
+        const accountId = existingId ?? reusable?.id;
+        if (accountId) {
+          const row = await load(tx, actor, accountId);
           id = row.id;
           const recommendations = await watchIntegrationRecommendations(tx, id, () => githubRecommendations(tx, id));
           await tx.client.query(
@@ -192,7 +206,7 @@ export function createGitHubAccounts(options: {
   async function invalidate(workspaceId: string, row: Row) {
     await options.runtime.transaction(workspaceId, githubCompatibility, async tx => {
       await tx.client.query(
-        `UPDATE ${relation(tx, 'accounts')} SET state='reconnect-required',credential=NULL,refresh_credential=NULL,access_expires_at=NULL,expires_at=NULL WHERE id=$1 AND generation=$2 AND state='authorizing'`,
+        `UPDATE ${relation(tx, 'accounts')} SET state=CASE WHEN identity IS NULL THEN 'disconnected' ELSE 'reconnect-required' END,credential=NULL,refresh_credential=NULL,access_expires_at=NULL,expires_at=NULL WHERE id=$1 AND generation=$2 AND state='authorizing'`,
         [row.id, row.generation],
       );
       await tx.client.query(
@@ -258,9 +272,10 @@ export function createGitHubAccounts(options: {
         );
         if (!claimed.rowCount) throw new GitHubAccountError('account-conflict');
         if (!('code' in callback)) {
-          await tx.client.query(`UPDATE ${relation(tx, 'accounts')} SET state='reconnect-required' WHERE id=$1`, [
-            row.id,
-          ]);
+          await tx.client.query(
+            `UPDATE ${relation(tx, 'accounts')} SET state=CASE WHEN identity IS NULL THEN 'disconnected' ELSE 'reconnect-required' END WHERE id=$1`,
+            [row.id],
+          );
           await audit(tx, actor, row.id, 'authorization-denied');
           return null;
         }

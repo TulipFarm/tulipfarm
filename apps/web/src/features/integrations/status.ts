@@ -8,6 +8,7 @@ import {
 } from './queries';
 import { googleAppScopes } from '@tulipfarm/google-workspace/public-contracts';
 import type { Integration } from './catalog';
+import { accountConnectionState, slackConnectionState } from './connection-state';
 
 export type Status =
   | { kind: 'loading' }
@@ -43,12 +44,10 @@ export function useIntegrationStatus(workspaceId: string, provider?: keyof Statu
   const pickAtlassian = (trello: boolean) =>
     status(atlassian.state, ({ accounts, providers }) => {
       const mine = accounts.filter(account => account.protocol === (trello ? 'trello' : 'atlassian-mcp'));
-      const active = mine.filter(account => account.state === 'active').length;
+      const active = mine.filter(account => accountConnectionState(account) === 'connected').length;
       if (active) return { kind: 'connected', detail: plural(active, 'account') };
-      if (mine.some(account => account.state === 'reconnect-required'))
+      if (mine.some(account => accountConnectionState(account) === 'attention'))
         return { kind: 'attention', detail: 'Access expired. Reconnect.' };
-      if (mine.some(account => account.state === 'authorizing'))
-        return { kind: 'attention', detail: 'Sign-in incomplete. Reconnect to continue.' };
       return providers.some(
         provider => provider.protocol === (trello ? 'trello' : 'atlassian-mcp') && provider.configured,
       )
@@ -72,7 +71,7 @@ export function useIntegrationStatus(workspaceId: string, provider?: keyof Statu
           ? value.linked
             ? { kind: 'connected', detail: null }
             : { kind: 'installed' }
-          : value.state === 'disconnected'
+          : slackConnectionState(value) !== 'attention'
             ? { kind: 'off', canConnect: value.canManage }
             : {
                 kind: 'attention',
@@ -89,10 +88,10 @@ export function useIntegrationStatus(workspaceId: string, provider?: keyof Statu
     }),
     'github-personal': status(personal.state, ({ configured, accounts }) => {
       if (!configured) return { kind: 'unavailable', detail: 'Not set up on this server' };
-      const active = accounts.filter(account => account.state === 'active').length;
+      const active = accounts.filter(account => accountConnectionState(account) === 'connected').length;
       return active
         ? { kind: 'connected', detail: plural(active, 'private account') }
-        : accounts.some(account => account.state !== 'disconnected')
+        : accounts.some(account => accountConnectionState(account) === 'attention')
           ? { kind: 'attention', detail: 'Complete fresh GitHub consent.' }
           : { kind: 'off', canConnect: true };
     }),
