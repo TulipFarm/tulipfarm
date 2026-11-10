@@ -3042,6 +3042,9 @@ export function createChatTools(
     } catch (error) {
       const failure = rowWriteTools.has(call.tool) ? rowWriteFailure(error) : null;
       if (failure) return { result: failure, sources: [] };
+      // The definition's own provenance check refuses a member who is not the memory's owner before any result exists.
+      if (error instanceof PersonalMemoryDenied && /^(workflows|skills)\./.test(call.tool))
+        return { result: privateMemoryDefinition, sources: [] };
       if (error instanceof TableError && error.code === 'table-not-found' && 'tableId' in call) {
         const listed = await tableService
           .definitions(context.workspaceId, context.actor, { limit: 50 })

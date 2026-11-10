@@ -364,6 +364,7 @@ const types = new Set([
   'TimeoutError',
   'AccessDenied',
   'PersonalMemoryDenied',
+  'ExternalActionWaiting',
   'StorageUnavailableError',
   'McpNetworkError',
   'ZodError',

@@ -425,7 +425,10 @@ export async function requireWorkflowDefinitionSources(
   actor: HumanActor,
   sources: readonly SourceDependency[],
 ) {
-  for (const source of await protectedSourceClosure(tx, sources))
+  const closure = await protectedSourceClosure(tx, sources);
+  // Memory first, so a definition derived from someone else's memory is refused as such rather than by whichever
+  // other source of the same chat happens to be checked first.
+  for (const source of closure)
     if (source.kind === 'personal-memory') await requirePersonalMemorySource(tx, actor, source);
-    else await requireProtectedSource(tx, actor, source);
+  for (const source of closure) if (source.kind !== 'personal-memory') await requireProtectedSource(tx, actor, source);
 }
