@@ -4,11 +4,12 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { WorkflowClient } from '@temporalio/client';
 import Fastify from 'fastify';
 import { Pool } from 'pg';
-import { buildApp } from '../src/app.ts';
 import { authConfig, createAuth } from '../src/auth.ts';
 import { registerAgentTasks } from '../src/agent-tasks.ts';
+import { workspaceMcpCatalog } from '../src/workspace-mcp-catalog.ts';
 import { workspaceTableMigrations } from '@tulipfarm/workspaces/table-migrations';
 import { encryptCredential } from '../../../packages/workspaces/src/credentials.ts';
 import { fixture } from '../../../packages/workspace-storage/test/integration/fixture.mjs';
@@ -94,6 +95,7 @@ test(
     process.env = {
       PATH: previous.PATH,
       NODE_ENV: 'test',
+      TULIPFARM_API_ROLE: 'requests',
       ANTHROPIC_API_KEY: 'test-placeholder',
       TEST_ADMIN_DATABASE_URL: previous.TEST_ADMIN_DATABASE_URL,
       BETTER_AUTH_SECRET: 'synthetic-task-foundation-secret-at-least-32-characters',
@@ -112,6 +114,11 @@ test(
       EMAIL_DELIVERY_KEY_ID: 'test',
       EMAIL_DELIVERY_KEY: '44'.repeat(32),
     };
+    t.mock.method(WorkflowClient.prototype, 'signalWithStart', async () => ({}));
+    t.mock.module('../src/workspace-mcp-catalog.ts', {
+      namedExports: { workspaceMcpCatalog, registerWorkspaceMcpCatalogRefresh: () => {} },
+    });
+    const { buildApp } = await import('../src/app.ts');
     let db, identity, runtime, app, attachmentApp, directory;
     t.after(async () => {
       await attachmentApp?.close();
@@ -152,10 +159,11 @@ test(
     const w = await db.create(migrations, { userId: admin.id }),
       other = await db.create(migrations);
     const table = name => `"${w.names.schema}".${name}`;
-    const membershipId = randomUUID();
+    const membershipId = randomUUID(),
+      strangerMembershipId = randomUUID();
     await db.platform.query(
       `INSERT INTO ${table('tf_memberships')} (id,user_id,role) VALUES ($1,$2,'member'),($3,$4,'member')`,
-      [membershipId, owner.id, randomUUID(), stranger.id],
+      [membershipId, owner.id, strangerMembershipId, stranger.id],
     );
     process.env.DATABASE_URL = db.connectionString;
     process.env.WORKSPACE_CONFIRMATION_REGISTRY_DATABASE_URL = db.login(w, 'confirmation');
@@ -209,6 +217,9 @@ test(
       assert.equal(response.status, status, JSON.stringify(result));
       assert.equal(response.headers.get('cache-control'), 'no-store');
       return result;
+    }
+    async function notFound(who, path, host = address) {
+      assert.deepEqual(await http(who, 'GET', path, undefined, 404, host), { error: 'task-not-found' });
     }
     await http(null, 'GET', base, undefined, 401);
     const input = { requestId: randomUUID(), agentId: agent.agentId, text: 'Private cleanup request' };
@@ -276,25 +287,42 @@ test(
         w.membershipId,
         agent.teamId,
       ]);
-      const selected = await http(admin, 'POST', base, { ...input, requestId: randomUUID() });
-      assert.equal(selected.status, 'pending');
-      assert.equal((await http(admin, 'GET', `${base}/${selected.id}/history`)).messages[0].text, input.text);
-      await db.platform.query(`DELETE FROM ${table('tf_member_teams')} WHERE membership_id=$1 AND team_id=$2`, [
-        w.membershipId,
-        agent.teamId,
-      ]);
-      await http(admin, 'POST', base, { ...input, requestId: randomUUID() }, 404);
-      await http(admin, 'GET', `${base}/${selected.id}/history`, undefined, 404);
-      assert.equal((await http(admin, 'GET', `${base}/${selected.id}`)).status, 'pending');
-      await createTaskRuntime(runtime, null).process(w.id, selected.id);
-      assert.equal((await http(admin, 'GET', `${base}/${selected.id}`)).status, 'failed');
-      await http(
-        admin,
-        'POST',
-        `${base}/${selected.id}/continue`,
-        { requestId: randomUUID(), expectedGeneration: 0, expectedSequence: 0, text: 'Cannot resume' },
-        404,
-      );
+      try {
+        const selected = await http(admin, 'POST', base, { ...input, requestId: randomUUID() });
+        assert.equal(selected.status, 'pending');
+        const history = await http(admin, 'GET', `${base}/${selected.id}/history`);
+        assert.equal(history.messages[0].text, input.text);
+        await db.platform.query(`DELETE FROM ${table('tf_member_teams')} WHERE membership_id=$1 AND team_id=$2`, [
+          w.membershipId,
+          agent.teamId,
+        ]);
+        await http(admin, 'POST', base, { ...input, requestId: randomUUID() }, 404);
+        // Invocation permission controls new work, not the owner's source-authorized past work.
+        assert.deepEqual(await http(admin, 'GET', `${base}/${selected.id}/history`), history);
+        assert.equal((await http(admin, 'GET', `${base}/${selected.id}`)).status, 'pending');
+        await createTaskRuntime(runtime, null).process(w.id, selected.id);
+        assert.equal((await http(admin, 'GET', `${base}/${selected.id}`)).status, 'failed');
+        await http(
+          admin,
+          'POST',
+          `${base}/${selected.id}/continue`,
+          { requestId: randomUUID(), expectedGeneration: 0, expectedSequence: 0, text: 'Cannot resume' },
+          404,
+        );
+        await db.platform.query(`UPDATE ${table('tf_agent_tasks')} SET status='completed' WHERE id=$1`, [selected.id]);
+        await http(
+          admin,
+          'POST',
+          `${base}/${selected.id}/reopen`,
+          { requestId: randomUUID(), expectedGeneration: 0, text: 'Cannot reopen' },
+          404,
+        );
+      } finally {
+        await db.platform.query(`DELETE FROM ${table('tf_member_teams')} WHERE membership_id=$1 AND team_id=$2`, [
+          w.membershipId,
+          agent.teamId,
+        ]);
+      }
     });
 
     directory = await mkdtemp(join(tmpdir(), 'agent-task-attachments-'));
@@ -345,9 +373,10 @@ test(
       { prefix: '/v1' },
     );
     const attachmentAddress = await attachmentApp.listen({ host: '127.0.0.1', port: 0 });
+    let proposalPath;
     await t.test(
       'real owner HTTP decisions bind exact immutable changes and produce actual record effects',
-      async () => {
+      async proposalTest => {
         const name = textField(),
           recordId = randomUUID(),
           revision = 'b'.repeat(40);
@@ -412,6 +441,7 @@ test(
           calls: [call],
         });
         const root = `${base}/${task.id}/proposals/${proposal.id}`;
+        proposalPath = root;
         assert.equal(proposal.actions[0].before.values[fieldId].value, ' eve ');
         assert.equal(proposal.actions[0].after.values[fieldId].value, 'Eve');
         const execution = { actionId: proposal.actions[0].id };
@@ -421,7 +451,8 @@ test(
           ' eve ',
         );
         for (const person of [admin, stranger]) {
-          await http(person, 'GET', root, undefined, 404);
+          await notFound(person, root);
+          await notFound(person, `${base}/${task.id}/history`);
           await http(person, 'POST', `${root}/decision`, { digest: proposal.digest, decision: 'approve' }, 404);
         }
         await http(
@@ -456,15 +487,61 @@ test(
           ).rows[0].count,
           1,
         );
-        await db.platform.query(`DELETE FROM ${table('tf_agent_grants')} WHERE agent_id=$1 AND permission='invoke'`, [
-          agent.agentId,
-        ]);
-        await http(owner, 'GET', root, undefined, 404);
-        assert.equal((await http(owner, 'GET', `${root}/status`)).actions[0].status, 'completed');
-        assert.equal((await http(owner, 'GET', `${base}/${task.id}`)).id, task.id);
-        await db.platform.query(
-          `INSERT INTO ${table('tf_agent_grants')} (agent_id,team_id,permission) VALUES ($1,$2,'invoke')`,
-          [agent.agentId, agent.teamId],
+        const retained = await http(owner, 'GET', root);
+        const history = await http(owner, 'GET', `${base}/${task.id}/history`);
+        const sourceTask = await http(owner, 'POST', base, {
+          ...input,
+          requestId: randomUUID(),
+          sources: [{ kind: 'table', tableId }],
+        });
+        const linked = await http(owner, 'POST', base, {
+          ...input,
+          requestId: randomUUID(),
+          sources: [{ kind: 'task', taskId: sourceTask.id, throughSequence: 0 }],
+        });
+        await proposalTest.test(
+          'table read revocation hides proposal content and referenced task history',
+          async () => {
+            assert.equal((await http(owner, 'GET', `${base}/${linked.id}/history`)).messages.length, 1);
+            await db.platform.query(
+              `DELETE FROM ${table('tf_grants')} WHERE team_id=$1 AND asset_id=$2 AND permission='table.row.read'`,
+              [agent.teamId, tableId],
+            );
+            try {
+              await notFound(owner, root);
+              await notFound(owner, `${base}/${sourceTask.id}/history`);
+              await notFound(owner, `${base}/${linked.id}/history`);
+              assert.equal((await http(owner, 'GET', `${root}/status`)).actions[0].status, 'completed');
+            } finally {
+              await db.platform.query(
+                `INSERT INTO ${table('tf_grants')} (team_id,asset_id,permission) VALUES ($1,$2,'table.row.read')`,
+                [agent.teamId, tableId],
+              );
+            }
+            assert.deepEqual(await http(owner, 'GET', root), retained);
+            assert.deepEqual(await http(owner, 'GET', `${base}/${task.id}/history`), history);
+          },
+        );
+        await proposalTest.test(
+          'invoke-only revocation retains proposal content without allowing new work',
+          async () => {
+            await db.platform.query(
+              `DELETE FROM ${table('tf_agent_grants')} WHERE agent_id=$1 AND permission='invoke'`,
+              [agent.agentId],
+            );
+            try {
+              assert.deepEqual(await http(owner, 'GET', root), retained);
+              assert.deepEqual(await http(owner, 'GET', `${base}/${task.id}/history`), history);
+              assert.equal((await http(owner, 'GET', `${root}/status`)).actions[0].status, 'completed');
+              assert.equal((await http(owner, 'GET', `${base}/${task.id}`)).id, task.id);
+              await http(owner, 'POST', base, { ...input, requestId: randomUUID() }, 404);
+            } finally {
+              await db.platform.query(
+                `INSERT INTO ${table('tf_agent_grants')} (agent_id,team_id,permission) VALUES ($1,$2,'invoke')`,
+                [agent.agentId, agent.teamId],
+              );
+            }
+          },
         );
       },
     );
@@ -476,15 +553,30 @@ test(
       assert.equal(await response.text(), 'Private attached report.');
     }
     await download();
-    await http(admin, 'GET', filePath, undefined, 404, attachmentAddress);
-    await http(
-      owner,
-      'GET',
-      `${base}/${first.id}/attachments/${attachmentId}/content`,
-      undefined,
-      404,
-      attachmentAddress,
-    );
+    for (const person of [admin, stranger]) {
+      await notFound(person, filePath, attachmentAddress);
+      await notFound(person, `${base}/${attached.id}/history`);
+    }
+    await notFound(owner, `${base}/${first.id}/attachments/${attachmentId}/content`, attachmentAddress);
+    await t.test('losing the attached conversation hides attachment bytes and task history', async () => {
+      const history = await http(owner, 'GET', `${base}/${attached.id}/history`);
+      await db.platform.query(
+        `UPDATE ${table('tf_conversations')} SET owner_user_id=$2,owner_membership_id=$3 WHERE id=$1`,
+        [conversationId, stranger.id, strangerMembershipId],
+      );
+      try {
+        await notFound(owner, filePath, attachmentAddress);
+        await notFound(owner, `${base}/${attached.id}/history`);
+        await notFound(stranger, filePath, attachmentAddress);
+      } finally {
+        await db.platform.query(
+          `UPDATE ${table('tf_conversations')} SET owner_user_id=$2,owner_membership_id=$3 WHERE id=$1`,
+          [conversationId, owner.id, membershipId],
+        );
+      }
+      await download();
+      assert.deepEqual(await http(owner, 'GET', `${base}/${attached.id}/history`), history);
+    });
     await db.platform.query(`UPDATE ${table('tf_agent_tasks')} SET status='completed' WHERE id=$1`, [attached.id]);
     const reopen = { requestId: randomUUID(), expectedGeneration: 0, text: 'Use the same attachment next time.' };
     assert.deepEqual(await http(owner, 'POST', `${base}/${attached.id}/reopen`, reopen), {
@@ -505,29 +597,60 @@ test(
       (await http(owner, 'GET', `${base}/${attached.id}/history?after=0&limit=1`)).messages[0].text,
       reopen.text,
     );
-    await db.platform.query(`DELETE FROM ${table('tf_agent_grants')} WHERE agent_id=$1 AND permission='invoke'`, [
-      agent.agentId,
-    ]);
-    await http(owner, 'GET', filePath, undefined, 404, attachmentAddress);
-    await http(owner, 'GET', `${base}/${attached.id}/history`, undefined, 404);
-    assert.equal((await http(owner, 'GET', `${base}/${attached.id}`)).generation, 1);
-    assert.deepEqual(await http(owner, 'POST', `${base}/${attached.id}/reopen`, reopen), {
-      id: attached.id,
-      generation: 1,
-      status: 'pending',
+    await t.test('invoke-only revocation retains attachments and history but denies a fresh reopen', async () => {
+      const history = await http(owner, 'GET', `${base}/${attached.id}/history`);
+      await db.platform.query(`DELETE FROM ${table('tf_agent_grants')} WHERE agent_id=$1 AND permission='invoke'`, [
+        agent.agentId,
+      ]);
+      try {
+        await download();
+        assert.deepEqual(await http(owner, 'GET', `${base}/${attached.id}/history`), history);
+        assert.equal((await http(owner, 'GET', `${base}/${attached.id}`)).generation, 1);
+        assert.deepEqual(await http(owner, 'POST', `${base}/${attached.id}/reopen`, reopen), {
+          id: attached.id,
+          generation: 1,
+          status: 'pending',
+        });
+        await db.platform.query(`UPDATE ${table('tf_agent_tasks')} SET status='completed' WHERE id=$1`, [attached.id]);
+        await http(
+          owner,
+          'POST',
+          `${base}/${attached.id}/reopen`,
+          { requestId: randomUUID(), expectedGeneration: 1, text: 'Cannot start another generation.' },
+          404,
+        );
+      } finally {
+        await db.platform.query(
+          `INSERT INTO ${table('tf_agent_grants')} (agent_id,team_id,permission) VALUES ($1,$2,'invoke')`,
+          [agent.agentId, agent.teamId],
+        );
+        await db.platform.query(`UPDATE ${table('tf_agent_tasks')} SET status='pending' WHERE id=$1`, [attached.id]);
+      }
+      await download();
     });
-    await db.platform.query(
-      `INSERT INTO ${table('tf_agent_grants')} (agent_id,team_id,permission) VALUES ($1,$2,'invoke')`,
-      [agent.agentId, agent.teamId],
-    );
-    await download();
-    await db.platform.query(`UPDATE ${table('tf_memberships')} SET removed_at=now() WHERE id=$1`, [membershipId]);
-    await http(owner, 'GET', filePath, undefined, 404, attachmentAddress);
-    await db.platform.query(`INSERT INTO ${table('tf_memberships')} (id,user_id,role) VALUES ($1,$2,'admin')`, [
-      randomUUID(),
-      owner.id,
-    ]);
-    await http(owner, 'GET', `${base}/${attached.id}`, undefined, 404);
-    await http(owner, 'GET', filePath, undefined, 404, attachmentAddress);
+    await t.test('membership removal and rejoining cannot expose the previous owner incarnation', async () => {
+      assert.ok(proposalPath);
+      const paths = [
+        [`${base}/${attached.id}`, address],
+        [`${base}/${attached.id}/history`, address],
+        [filePath, attachmentAddress],
+        [proposalPath, address],
+      ];
+      const replacementMembershipId = randomUUID();
+      await db.platform.query(`UPDATE ${table('tf_memberships')} SET removed_at=now() WHERE id=$1`, [membershipId]);
+      try {
+        for (const [path, host] of paths) await notFound(owner, path, host);
+        await db.platform.query(`INSERT INTO ${table('tf_memberships')} (id,user_id,role) VALUES ($1,$2,'admin')`, [
+          replacementMembershipId,
+          owner.id,
+        ]);
+        for (const [path, host] of paths) await notFound(owner, path, host);
+      } finally {
+        await db.platform.query(`UPDATE ${table('tf_memberships')} SET removed_at=now() WHERE id=$1`, [
+          replacementMembershipId,
+        ]);
+        await db.platform.query(`UPDATE ${table('tf_memberships')} SET removed_at=NULL WHERE id=$1`, [membershipId]);
+      }
+    });
   },
 );
