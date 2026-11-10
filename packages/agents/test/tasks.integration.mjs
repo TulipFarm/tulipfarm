@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
-import { AccessDenied } from '@tulipfarm/access';
+import { AccessDenied, requireGitHubTask, requireGitHubTaskExecution } from '@tulipfarm/access';
 import { createWorkspaceRuntime, commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import { workspaceTableMigrations } from '@tulipfarm/workspaces/table-migrations';
 import { reserveCredits, settleCredits } from '@tulipfarm/workspace-storage/credits';
@@ -10,11 +10,145 @@ import { fixture, connect, denied } from '../../workspace-storage/test/integrati
 import { createAgentTasks } from '../src/tasks.ts';
 import { createWorkspaceSkills } from '../src/workspace-skills.ts';
 import { savedTaskAgent } from './task-fixture.mjs';
+import { createSavedAgentService } from '../src/saved-service.ts';
 import { registerExtension } from '@tulipfarm/extensions';
 import { hostedCreditPricingExtension } from '../../workspace-storage/test/hosted-credit-pricing.mjs';
 
 // Budget and balance assertions here count whole credits, so they use the hosted price.
 await registerExtension(hostedCreditPricingExtension, { app: 'worker', env: {} });
+
+for (const lifecycle of ['deleted', 'archived']) {
+  test(`owners retain private task history and results when their agent is ${lifecycle}`, async t => {
+    const db = await fixture();
+    let runtime;
+    t.after(async () => {
+      await runtime?.close();
+      await db.close();
+    });
+    const w = await db.create(await workspaceTableMigrations());
+    runtime = createWorkspaceRuntime({
+      replicaCount: 1,
+      reservedConnections: 2,
+      databaseConnectionBudget: 20,
+      resolveCredential: async id => ({ workspaceId: id, generation: 1, connectionString: db.login(w) }),
+    });
+    const table = name => `"${w.names.schema}".${name}`;
+    const stranger = randomUUID(),
+      strangerMembership = randomUUID();
+    await db.platform.query(`INSERT INTO ${table('tf_memberships')} (id,user_id,role) VALUES ($1,$2,'member')`, [
+      strangerMembership,
+      stranger,
+    ]);
+    const agent = await savedTaskAgent(db, w, runtime, w.userId, w.membershipId);
+    await db.platform.query(`INSERT INTO ${table('tf_member_teams')} (membership_id,team_id) VALUES ($1,$2)`, [
+      strangerMembership,
+      agent.teamId,
+    ]);
+    await db.platform.query(
+      `INSERT INTO ${table('tf_agent_person_grants')} (agent_id,membership_id,permission) VALUES ($1,$2,'delete')`,
+      [agent.agentId, w.membershipId],
+    );
+    const tasks = createAgentTasks(runtime);
+    const request = 'Summarize the completed work.';
+    const task = await tasks.start(w.id, w.userId, {
+      requestId: randomUUID(),
+      agentId: agent.agentId,
+      text: request,
+    });
+    const strangerTask = await tasks.start(w.id, stranger, {
+      requestId: randomUUID(),
+      agentId: agent.agentId,
+      text: 'Read only my own work.',
+    });
+    const result = 'The work is complete.\nAll requested details are retained.';
+    await db.platform.query(
+      `INSERT INTO ${table('tf_agent_task_messages')} (task_id,sequence,generation,role,text,sources)
+       VALUES ($1,1,0,'agent',$2,$3)`,
+      [
+        task.id,
+        result,
+        JSON.stringify([
+          { kind: 'task', taskId: task.id, throughSequence: 0 },
+          { kind: 'private-task', taskId: task.id },
+        ]),
+      ],
+    );
+    await db.platform.query(`UPDATE ${table('tf_agent_tasks')} SET status='completed' WHERE id=$1`, [task.id]);
+    const before = await tasks.history(w.id, w.userId, task.id);
+    assert.deepEqual(
+      before.messages.map(message => message.text),
+      [request, result],
+    );
+    const agents = createSavedAgentService(runtime, async () => assert.fail('Deleted definitions must not be read'));
+    await agents[lifecycle === 'deleted' ? 'remove' : 'archive'](w.id, w.userId, agent.agentId);
+
+    await assert.rejects(agents.detail(w.id, w.userId, agent.agentId), AccessDenied);
+    const owner = { kind: 'human', userId: w.userId, membershipId: w.membershipId };
+    await runtime.transaction(w.id, commonCompatibility, tx => requireGitHubTask(tx, owner, task.id));
+    await assert.rejects(
+      runtime.transaction(w.id, commonCompatibility, tx => requireGitHubTaskExecution(tx, owner, task.id, 0)),
+      AccessDenied,
+    );
+    assert.deepEqual(await tasks.history(w.id, w.userId, task.id), before);
+    const detail = await tasks.read(w.id, w.userId, task.id);
+    assert.equal(detail.status, 'completed');
+    assert.equal(detail.agentLifecycle, lifecycle);
+    assert.deepEqual(await tasks.readResult(w.id, w.userId, task.id), {
+      taskId: task.id,
+      status: 'completed',
+      result,
+    });
+    for (const search of ['', 'completed work']) {
+      const page = await tasks.list(w.id, w.userId, { search });
+      assert.equal(page.tasks.length, 1);
+      assert.equal(page.tasks[0].agentLifecycle, lifecycle);
+      assert.equal(page.tasks[0].status, 'completed');
+    }
+    assert.deepEqual(await tasks.recent(w.id, w.userId), [{ id: task.id, name: request }]);
+    await assert.rejects(tasks.read(w.id, stranger, task.id), AccessDenied);
+    await assert.rejects(tasks.history(w.id, stranger, task.id), AccessDenied);
+    await assert.rejects(tasks.readResult(w.id, stranger, task.id), AccessDenied);
+    assert.deepEqual(
+      (await tasks.list(w.id, stranger)).tasks.map(task => task.id),
+      [strangerTask.id],
+    );
+    assert.equal((await tasks.history(w.id, stranger, strangerTask.id)).messages[0].text, 'Read only my own work.');
+    for (const source of [
+      { kind: 'task', taskId: task.id, throughSequence: 1 },
+      { kind: 'private-task', taskId: task.id },
+    ]) {
+      await db.platform.query(
+        `UPDATE ${table('tf_agent_task_messages')} SET sources=$2 WHERE task_id=$1 AND sequence=0`,
+        [strangerTask.id, JSON.stringify([source])],
+      );
+      await assert.rejects(tasks.history(w.id, stranger, strangerTask.id), AccessDenied);
+    }
+    await assert.rejects(
+      tasks.reopen(w.id, w.userId, task.id, {
+        requestId: randomUUID(),
+        expectedGeneration: 0,
+        text: 'Start more work.',
+      }),
+      AccessDenied,
+    );
+    await assert.rejects(
+      tasks.start(w.id, w.userId, { requestId: randomUUID(), agentId: agent.agentId, text: 'Start more work.' }),
+      AccessDenied,
+    );
+    await db.platform.query(`UPDATE ${table('tf_agent_tasks')} SET status='paused' WHERE id=$1`, [task.id]);
+    await assert.rejects(
+      tasks.continueTask(w.id, w.userId, task.id, {
+        requestId: randomUUID(),
+        expectedGeneration: 0,
+        expectedSequence: 1,
+        text: 'Continue the work.',
+      }),
+      AccessDenied,
+    );
+    await db.platform.query(`UPDATE ${table('tf_memberships')} SET removed_at=now() WHERE id=$1`, [w.membershipId]);
+    await assert.rejects(tasks.history(w.id, w.userId, task.id), AccessDenied);
+  });
+}
 
 test('member capacity counts active tasks, not completed or failed history, including reopened work', async t => {
   const db = await fixture();

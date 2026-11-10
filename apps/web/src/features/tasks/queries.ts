@@ -79,7 +79,7 @@ export function useTaskDestinations(api: Api, search: string) {
       const page = await api.list(signal, undefined, search);
       const tasks = await Promise.all(
         page.tasks
-          .filter(task => taskAcceptsMessage(task.status))
+          .filter(task => task.agentLifecycle === 'active' && taskAcceptsMessage(task.status))
           .map(async task => {
             try {
               return {
@@ -100,12 +100,13 @@ export function useTaskDestinations(api: Api, search: string) {
 export type TaskDestination = { id: string; status: TaskSummary['status']; title: string };
 
 export function taskPending(task: TaskSummary) {
-  return task.status !== 'completed' && task.status !== 'failed';
+  return task.agentLifecycle === 'active' && task.status !== 'completed' && task.status !== 'failed';
 }
 export function taskAccountingChanged(previous: TaskSummary | undefined, task: TaskSummary) {
   return (
     !previous ||
     previous.generation !== task.generation ||
+    previous.agentLifecycle !== task.agentLifecycle ||
     previous.status !== task.status ||
     previous.cost.chargedCreditUnits !== task.cost.chargedCreditUnits ||
     previous.cost.heldCreditUnits !== task.cost.heldCreditUnits
@@ -181,22 +182,27 @@ export function useTaskHistory(api: Api, id: string, task: TaskSummary) {
     pollWhile: () => ['pending', 'waiting-approval'].includes(task.status),
   });
 }
-export function useTaskIdentity(workspaceId: string, taskId: string, agentId: string) {
+export function useTaskIdentity(
+  workspaceId: string,
+  taskId: string,
+  agentId: string,
+  lifecycle: TaskSummary['agentLifecycle'],
+) {
   const api = useTaskApi(workspaceId);
   const agents = useMemo(() => agentApi(workspaceId), [workspaceId]);
   const history = useFeatureRead(taskReads.history(api, taskId));
-  const agent = useAgentDetail(agents, agentId);
+  const agent = useAgentDetail(agents, agentId, lifecycle === 'active');
   const agentState: ReadState<AgentDetail | null> =
-    agent.state.kind === 'unavailable' && agent.state.status !== 401
+    lifecycle !== 'active' || (agent.state.kind === 'unavailable' && agent.state.status !== 401)
       ? { kind: 'ready' as const, data: null, refreshing: false, error: null }
       : agent.state;
   return {
     state: combineAgentReads(history.state, agentState, (history, agent) => ({
       title: requestTitle(history.messages),
-      agent: agent?.name ?? 'Agent no longer available',
+      agent: lifecycle === 'active' ? (agent?.name ?? 'Agent no longer available') : `Agent ${lifecycle}`,
     })),
     refresh: async () => {
-      await Promise.all([history.refresh(), agent.refresh()]);
+      await Promise.all([history.refresh(), ...(lifecycle === 'active' ? [agent.refresh()] : [])]);
     },
   };
 }

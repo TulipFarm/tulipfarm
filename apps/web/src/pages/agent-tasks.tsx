@@ -282,11 +282,18 @@ function TaskDetail({ workspace, taskId }: { workspace: { id: string; slug: stri
         {task => (
           <>
             <TaskHeading workspaceId={workspace.id} task={task} />
-            <McpPrivateContext
-              workspaceId={workspace.id}
-              origin={{ kind: 'task', id: taskId, agentId: task.agentId }}
-            />
-            {task.status !== 'completed' && (
+            {task.agentLifecycle !== 'active' && (
+              <p role="status">
+                The agent for this task was {task.agentLifecycle}. You can read this task but not continue it.
+              </p>
+            )}
+            {task.agentLifecycle === 'active' && (
+              <McpPrivateContext
+                workspaceId={workspace.id}
+                origin={{ kind: 'task', id: taskId, agentId: task.agentId }}
+              />
+            )}
+            {task.agentLifecycle === 'active' && task.status !== 'completed' && (
               <div>
                 <Button
                   variant="outline"
@@ -318,20 +325,24 @@ function TaskDetail({ workspace, taskId }: { workspace: { id: string; slug: stri
                 {pauseError && <p role="alert">Pause is unconfirmed. Check task status before continuing.</p>}
               </div>
             )}
-            <GitHubTaskSourceCard
-              workspaceId={workspace.id}
-              chatId={taskId}
-              slug={workspace.slug}
-              requested={task.skills.some(skill => skill.id === 'github-investigation')}
-              disabled={!['paused', 'waiting-clarification', 'failed'].includes(task.status)}
-              picked={() => void read.refresh()}
-            />
-            <GitHubBatches
-              workspaceId={workspace.id}
-              chatId={taskId}
-              task
-              revision={`${task.status}/${task.toolCalls}/${task.activeMilliseconds}`}
-            />
+            {task.agentLifecycle === 'active' && (
+              <>
+                <GitHubTaskSourceCard
+                  workspaceId={workspace.id}
+                  chatId={taskId}
+                  slug={workspace.slug}
+                  requested={task.skills.some(skill => skill.id === 'github-investigation')}
+                  disabled={!['paused', 'waiting-clarification', 'failed'].includes(task.status)}
+                  picked={() => void read.refresh()}
+                />
+                <GitHubBatches
+                  workspaceId={workspace.id}
+                  chatId={taskId}
+                  task
+                  revision={`${task.status}/${task.toolCalls}/${task.activeMilliseconds}`}
+                />
+              </>
+            )}
             <TaskSecretRequests
               workspaceId={workspace.id}
               taskId={taskId}
@@ -449,7 +460,7 @@ function useTaskWait(workspaceId: string, task: TaskSummary) {
 }
 
 function TaskHeading({ workspaceId, task }: { workspaceId: string; task: TaskSummary }) {
-  const identity = useTaskIdentity(workspaceId, task.id, task.agentId);
+  const identity = useTaskIdentity(workspaceId, task.id, task.agentId, task.agentLifecycle);
   const wait = useTaskWait(workspaceId, task);
   return (
     <header className="space-y-3">
@@ -472,7 +483,7 @@ function TaskHeading({ workspaceId, task }: { workspaceId: string; task: TaskSum
       <p role="status" className="font-medium">
         {wait.label}
       </p>
-      <p>{wait.next}</p>
+      {task.agentLifecycle === 'active' && <p>{wait.next}</p>}
     </header>
   );
 }
@@ -572,26 +583,28 @@ function TaskHistory({
           </>
         )}
       </TaskRead>
-      <TaskComposer
-        api={api}
-        workspaceId={workspaceId}
-        concealed={read.state.kind !== 'ready'}
-        enabled={
-          read.state.kind === 'ready' &&
-          !read.state.error &&
-          !read.state.refreshing &&
-          ['waiting-clarification', 'paused', 'failed', 'completed'].includes(task.status)
-        }
-        mode={{
-          kind: 'reply',
-          task,
-          sequence: read.state.kind === 'ready' ? (read.state.data.at(-1)?.sequence ?? 0) : 0,
-        }}
-        accepted={() => {
-          void refreshTask();
-          void read.refresh();
-        }}
-      />
+      {task.agentLifecycle === 'active' && (
+        <TaskComposer
+          api={api}
+          workspaceId={workspaceId}
+          concealed={read.state.kind !== 'ready'}
+          enabled={
+            read.state.kind === 'ready' &&
+            !read.state.error &&
+            !read.state.refreshing &&
+            ['waiting-clarification', 'paused', 'failed', 'completed'].includes(task.status)
+          }
+          mode={{
+            kind: 'reply',
+            task,
+            sequence: read.state.kind === 'ready' ? (read.state.data.at(-1)?.sequence ?? 0) : 0,
+          }}
+          accepted={() => {
+            void refreshTask();
+            void read.refresh();
+          }}
+        />
+      )}
     </section>
   );
 }

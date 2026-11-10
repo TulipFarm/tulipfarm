@@ -6,7 +6,7 @@ import { useTaskIdentity } from './queries';
 export { useTaskIdentity } from './queries';
 
 export function TaskIdentity({ workspaceId, slug, task }: { workspaceId: string; slug: string; task: TaskSummary }) {
-  const read = useTaskIdentity(workspaceId, task.id, task.agentId);
+  const read = useTaskIdentity(workspaceId, task.id, task.agentId, task.agentLifecycle);
   if (read.state.kind === 'loading')
     return (
       <div role="status" aria-label="Loading task identity">
