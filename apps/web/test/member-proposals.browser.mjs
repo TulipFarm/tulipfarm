@@ -10,7 +10,7 @@ import { startWorkspaceMembersDemo } from './workspace-members-demo.mjs';
 
 const id = n => `87654321-4321-4321-8321-${String(n).padStart(12, '0')}`;
 
-test('member proposal failures explain rejected resumes and retain completed work', { timeout: 120000 }, async () => {
+test('table reviews keep history with disabled skills and failed resumes', { timeout: 120000 }, async () => {
   const server = await startWorkspaceMembersDemo({ port: 5795 });
   const { origin } = server,
     workspaceId = id(1),
@@ -26,11 +26,12 @@ test('member proposal failures explain rejected resumes and retain completed wor
     page,
     attached = false,
     view,
-    effect;
+    effect,
+    role = 'admin';
   try {
     browser = await chromium.launch({ args: cdp ? [`--remote-debugging-port=${cdp}`] : [] });
     page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, reducedMotion: 'reduce' });
-    page.setDefaultTimeout(15000);
+    page.setDefaultTimeout(30000);
     const errors = [],
       external = [],
       commands = [];
@@ -44,9 +45,26 @@ test('member proposal failures explain rejected resumes and retain completed wor
         return route.abort();
       }
       if (path.endsWith('/model-catalog')) return route.fulfill({ json: chatCatalog });
+      if (path.endsWith('/governance/me'))
+        return route.fulfill({
+          json: {
+            membershipId: id(4),
+            role,
+            teams: [],
+            capabilities: { manageGovernance: role === 'admin', canLeave: false },
+          },
+        });
       if (path === `${root}/github/chats/${chatId}/batches`) return route.fulfill({ json: { batches: [] } });
       if (path.startsWith(base)) {
         if (request.method() === 'PUT') {
+          if (path.endsWith('/decision')) {
+            assert.equal(request.postDataJSON().decision, 'approve');
+            assert.equal(view.blockedReason, undefined);
+            view.status = 'completed';
+            view.decision = 'approve';
+            view.plans[0].receipt = { status: 'completed', executionId: id(64), revision: 'a'.repeat(40) };
+            return route.fulfill({ json: view });
+          }
           assert.ok(path.endsWith('/control'));
           const command = proposalControlSchema.parse(request.postDataJSON());
           assert.equal(command.digest, view.digest);
@@ -173,8 +191,12 @@ test('member proposal failures explain rejected resumes and retain completed wor
       const card = page.getByRole('region', { name: 'Table change proposal' });
       await card.getByText(`Failed. ${message} Completed tables are unchanged.`, { exact: true }).waitFor();
       assert.equal(await page.getByText('GitHub approvals unavailable', { exact: true }).count(), 0);
-      await card.getByRole('button', { name: 'Resume unfinished work' }).click();
-      await card.getByText(message, { exact: true }).waitFor();
+      const [refusal] = await Promise.all([
+        page.waitForResponse(response => response.url().endsWith('/control') && response.request().method() === 'PUT'),
+        card.getByRole('button', { name: 'Resume unfinished work' }).click(),
+      ]);
+      assert.equal(refusal.status(), 409);
+      await card.getByText(`Failed. ${message} Completed tables are unchanged.`, { exact: true }).waitFor();
       assert.equal(view.status, 'failed');
       assert.equal(await card.getByRole('heading', { name: 'Outcome not confirmed', exact: true }).count(), 0);
       for (const width of [1440, 375]) {
@@ -204,10 +226,71 @@ test('member proposal failures explain rejected resumes and retain completed wor
       await page.setViewportSize({ width: 1440, height: 1000 });
     }
     assert.equal(commands.length, 3);
+    for (const [memberRole, message] of [
+      ['admin', 'Enable the skill or give yourself access in Skills, then try again.'],
+      [
+        'member',
+        'This change uses a skill that is disabled or that you no longer have access to. Ask a workspace admin to enable it or give you access, then try again.',
+      ],
+    ]) {
+      role = memberRole;
+      view.freshness = 'current';
+      view.blockedReason = 'skill-unavailable';
+      view.status = 'pending';
+      view.decision = null;
+      view.plans[0].receipt = null;
+      await page.goto(`${origin}/members-table-mock/chat/${chatId}`, { timeout: 60000 });
+      const card = page.getByRole('region', { name: 'Table change proposal' });
+      const review = page.getByRole('button', { name: 'Review changes', exact: true });
+      if (await review.isVisible()) await review.click();
+      await card.getByRole('heading', { name: 'Skill unavailable', exact: true }).waitFor();
+      await card.getByText(message, { exact: true }).waitFor();
+      assert.ok(await card.getByRole('button', { name: 'Approve exact changes', exact: true }).isDisabled());
+      assert.equal(await card.getByText('Table unavailable', { exact: true }).count(), 0);
+      for (const width of [1440, 375]) {
+        await page.setViewportSize({ width, height: 1000 });
+        assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+        if (cdp) {
+          attached = true;
+          await promisify(execFile)('agent-browser', [
+            '--session',
+            session,
+            '--no-auto-dialog',
+            '--cdp',
+            cdp,
+            'screenshot',
+            `/tmp/skill-unavailable-${role}-${width}.png`,
+          ]);
+          await card.screenshot({ path: `/tmp/skill-unavailable-${role}-card-${width}.png` });
+        }
+      }
+      view.status = 'failed';
+      view.decision = 'approve';
+      view.plans[0].receipt = { status: 'failed', executionId: id(64), code: 'access-denied' };
+      await card.getByRole('button', { name: 'Check proposal status' }).click();
+      await card.getByRole('button', { name: 'Resume unfinished work' }).waitFor();
+      assert.ok(await card.getByRole('button', { name: 'Resume unfinished work' }).isDisabled());
+      view.status = 'pending';
+      view.decision = null;
+      view.plans[0].receipt = null;
+      delete view.blockedReason;
+      await card.getByRole('button', { name: 'Check proposal status' }).click();
+      const approve = card.getByRole('button', { name: 'Approve exact changes', exact: true });
+      await approve.waitFor();
+      await approve.click();
+      await card.getByRole('heading', { name: 'Changes applied', exact: true }).waitFor();
+      await page.reload();
+      await page.getByRole('button', { name: 'Review changes', exact: true }).click();
+      await card.getByRole('heading', { name: 'Changes applied', exact: true }).waitFor();
+      assert.equal(await page.getByText(/details have been cleared/).count(), 0);
+      await page.setViewportSize({ width: 1440, height: 1000 });
+    }
     assert.deepEqual(errors, []);
     assert.deepEqual(external, [], 'all browser requests stay in the local fixture');
   } catch (error) {
-    await page?.screenshot({ path: '/tmp/workspace-member-proposal-failure.png', fullPage: true });
+    await page
+      ?.screenshot({ path: '/tmp/workspace-member-proposal-failure.png', fullPage: true, timeout: 3000 })
+      .catch(() => {});
     throw error;
   } finally {
     await browser?.close();

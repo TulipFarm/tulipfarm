@@ -374,7 +374,11 @@ const badgeVariant = (status: ProposalView['status']) =>
 
 function ValidTableProposalCard({ workspaceId, chatId, id, userId, membershipId, order = 0 }: ProposalCardProps) {
   const { workspaceSlug } = workspaceRoute.useParams();
-  const api = useMemo(() => proposalApi(workspaceId, chatId, id), [workspaceId, chatId, id]);
+  const { membership } = workspaceRoute.useRouteContext();
+  const api = useMemo(
+    () => proposalApi(workspaceId, chatId, id, membership?.role === 'admin'),
+    [workspaceId, chatId, id, membership?.role],
+  );
   const identity = { chatId, proposalId: id };
   const read = useTableProposal(api, identity);
   const write = useTableProposalCommand(api, identity);
@@ -533,6 +537,7 @@ function ValidTableProposalCard({ workspaceId, chatId, id, userId, membershipId,
             (membershipId === undefined || view.manifest.requester.membershipId === membershipId);
           const current =
             view.freshness === 'current' && !view.expired && Date.parse(view.manifest.expiresAt) > Date.now();
+          const blockedBySkill = view.blockedReason === 'skill-unavailable';
           const disabled = locked || !!(read.state.kind === 'ready' && (read.state.error || read.state.refreshing));
           const effectsLoaded = view.manifest.plans.every(
             plan => plan.effectCount === 0 || effectReads[plan.input.tableId],
@@ -582,11 +587,13 @@ function ValidTableProposalCard({ workspaceId, chatId, id, userId, membershipId,
                     : onlyPlan?.input.kind === 'restore'
                       ? `${onlyPlan.after.label} table restored`
                       : 'Changes applied'
-                : view.status === 'pending'
-                  ? 'Ready for your approval'
-                  : view.status === 'approved'
-                    ? 'Approval recorded'
-                    : statusLabels[view.status];
+                : blockedBySkill
+                  ? 'Skill unavailable'
+                  : view.status === 'pending'
+                    ? 'Ready for your approval'
+                    : view.status === 'approved'
+                      ? 'Approval recorded'
+                      : statusLabels[view.status];
           const details = (
             <>
               <ul aria-label="Tables in this proposal" className="divide-y border-y">
@@ -735,9 +742,13 @@ function ValidTableProposalCard({ workspaceId, chatId, id, userId, membershipId,
                       ? 'Sending your decision. Please wait.'
                       : uncertain
                         ? 'Check the current status before retrying this operation.'
-                        : view.status === 'pending'
-                          ? `${view.plans.length} ${view.plans.length === 1 ? 'change' : 'changes'} to review. Nothing has been applied yet.`
-                          : `${completed} of ${view.plans.length} table changes completed${view.status === 'approved' ? ' · Waiting for execution.' : '.'}`}
+                        : blockedBySkill
+                          ? membership?.role === 'admin'
+                            ? 'Enable the skill or give yourself access in Skills, then try again.'
+                            : 'This change uses a skill that is disabled or that you no longer have access to. Ask a workspace admin to enable it or give you access, then try again.'
+                          : view.status === 'pending'
+                            ? `${view.plans.length} ${view.plans.length === 1 ? 'change' : 'changes'} to review. Nothing has been applied yet.`
+                            : `${completed} of ${view.plans.length} table changes completed${view.status === 'approved' ? ' · Waiting for execution.' : '.'}`}
                   </p>
                 </div>
                 {checkStatus}
@@ -826,7 +837,7 @@ function ValidTableProposalCard({ workspaceId, chatId, id, userId, membershipId,
                       </Button>
                       <Button
                         size="lg"
-                        disabled={disabled || !current || !effectsLoaded}
+                        disabled={disabled || !current || blockedBySkill || !effectsLoaded}
                         aria-busy={sending === 'approve'}
                         onClick={() => submit('approve')}
                       >
@@ -853,7 +864,7 @@ function ValidTableProposalCard({ workspaceId, chatId, id, userId, membershipId,
                     view.decision === 'approve' &&
                     ['cancelled', 'failed', 'partial'].includes(view.status) && (
                       <Button
-                        disabled={disabled || !current || !effectsLoaded}
+                        disabled={disabled || !current || blockedBySkill || !effectsLoaded}
                         aria-busy={sending === 'resume'}
                         onClick={() => submit('resume')}
                       >

@@ -1007,14 +1007,43 @@ export function createTableExecution(
         },
       });
     } catch (cause) {
-      const error =
+      const creationGuardReason =
         cause instanceof Error &&
         'code' in cause &&
-        cause.code === 'P0001' &&
-        cause.message === 'proposal-stale' &&
+        cause.code === '42501' &&
         'where' in cause &&
         typeof cause.where === 'string' &&
-        cause.where.includes('.tf_table_import_completion_current()')
+        cause.where.includes('.tf_table_creation_access(uuid)') &&
+        'detail' in cause &&
+        typeof cause.detail === 'string' &&
+        [
+          'receipt-unattributed',
+          'owner-changed',
+          'definition-changed',
+          'generation-superseded',
+          'xmin-mismatch',
+        ].includes(cause.detail)
+          ? cause.detail
+          : null;
+      if (creationGuardReason)
+        log('warn', 'activity', 'call_failed', {
+          operation: 'tables.execution',
+          ...errorAttributes(cause),
+          'error.code': `table-creation-${creationGuardReason}`,
+          'error.reason': `table-creation-${creationGuardReason}`,
+          'error.site': errorSite(cause),
+        });
+      const error = creationGuardReason
+        ? new TableProposalError(
+            creationGuardReason === 'receipt-unattributed' ? 'proposal-conflict' : 'proposal-stale',
+          )
+        : cause instanceof Error &&
+            'code' in cause &&
+            cause.code === 'P0001' &&
+            cause.message === 'proposal-stale' &&
+            'where' in cause &&
+            typeof cause.where === 'string' &&
+            cause.where.includes('.tf_table_import_completion_current()')
           ? new TableProposalError('proposal-stale')
           : cause;
       const timeout =

@@ -3,6 +3,7 @@ import { tableProposalSupersededCondition } from '@tulipfarm/conversations/tool-
 import { z } from 'zod';
 import {
   AccessDenied,
+  SkillUnavailable,
   currentMember,
   humanActorSchema,
   lockAuthorization,
@@ -78,6 +79,7 @@ export const pageRestoreVersion = 46;
 export type TableProposalOptions = {
   runtime: TableRuntime;
   requireSources(tx: TableTransaction, actor: HumanActor, sources: readonly SourceDependency[]): Promise<void>;
+  readSources?(tx: TableTransaction, actor: HumanActor, sources: readonly SourceDependency[]): Promise<void>;
   data?: ProposalData;
   /** Without it, every file reference reads as unavailable and any added reference is denied. */
   readableFiles?: ReadableFiles;
@@ -658,9 +660,17 @@ function operations(options: TableProposalOptions) {
     manifest: ProposalManifest,
     files: 'require-added' | 'unchecked',
   ) => {
-    await options.requireSources(tx, actor, await effectiveProposalSources(tx, manifest, manifest.sources));
+    await (options.readSources ?? options.requireSources)(
+      tx,
+      actor,
+      await effectiveProposalSources(tx, manifest, manifest.sources),
+    );
     for (const plan of manifest.plans) {
-      await options.requireSources(tx, actor, await effectiveProposalSources(tx, manifest, plan.importSources));
+      await (options.readSources ?? options.requireSources)(
+        tx,
+        actor,
+        await effectiveProposalSources(tx, manifest, plan.importSources),
+      );
       const stored = await effects(tx, manifest.id, plan.input.tableId);
       if (tableProposalDigest(stored) !== plan.effectsDigest) throw new TableProposalError('proposal-conflict');
       if (
@@ -950,25 +960,32 @@ function operations(options: TableProposalOptions) {
             freshness: 'expired' as const,
           };
         await visible(tx, actor, row.manifest, 'unchecked');
+        const status = await state(tx, row);
         let freshness: 'current' | 'stale' = 'current';
+        let blockedReason: 'skill-unavailable' | undefined;
         try {
           await current(tx, actor, row.manifest);
         } catch (error) {
-          if (
-            !(
-              error instanceof TableProposalError && ['proposal-stale', 'table-title-immutable'].includes(error.code)
-            ) &&
-            !(error instanceof WorkspaceMemberError && error.status === 409)
-          )
-            throw error;
-          freshness = 'stale';
+          if (error instanceof SkillUnavailable) {
+            if (status.status !== 'completed') blockedReason = 'skill-unavailable';
+          } else {
+            if (
+              !(
+                error instanceof TableProposalError && ['proposal-stale', 'table-title-immutable'].includes(error.code)
+              ) &&
+              !(error instanceof WorkspaceMemberError && error.status === 409)
+            )
+              throw error;
+            freshness = 'stale';
+          }
         }
         const [unavailableFileIds = []] = await unavailableFiles(tx, actor, [row.manifest]);
         return {
           content: 'available' as const,
           manifest: row.manifest,
-          ...(await state(tx, row)),
+          ...status,
           freshness,
+          ...(blockedReason ? { blockedReason } : {}),
           ...(unavailableFileIds.length ? { unavailableFileIds } : {}),
         };
       }),

@@ -303,12 +303,13 @@ export async function requireChatReviewSources(
   actor: HumanActor,
   sources: readonly SourceDependency[],
   rowDraft = false,
+  readOnly = false,
 ) {
   await currentMember(tx, actor);
   for (const source of await chatReviewClosure(tx, actor, sources))
     if (source.kind === 'personal-memory') await requirePersonalMemorySource(tx, actor, source);
     else if (rowDraft && source.kind === 'shared-slack-turn') continue;
-    else await requireProtectedSource(tx, actor, source);
+    else await requireProtectedSource(tx, actor, source, undefined, false, readOnly);
 }
 
 /** Files read for a turn stay readable by its requester through delivery. */
@@ -337,13 +338,14 @@ export async function requireMcpSources(
   conversationId: string,
   sources: unknown,
   prefetch?: ConversationSourcePrefetch,
+  readOnly = false,
 ) {
   await requireWorkflowSources(tx, actor, sources);
   const retained = await protectedSourceClosure(tx, sources, prefetch);
   if (!retained.some(source => source.kind === 'mcp-integration')) return;
   await currentMember(tx, actor);
   await requireMcpPrivateConversation(tx, actor, conversationId);
-  for (const source of retained) await requireProtectedSource(tx, actor, source);
+  for (const source of retained) await requireProtectedSource(tx, actor, source, undefined, false, readOnly);
 }
 
 const integrationKinds = new Set(['google-integration', 'google-file', 'github-personal', 'mcp-integration']);
@@ -394,8 +396,16 @@ export async function requireConversationMcpSources(
   actor: HumanActor,
   conversationId: string,
   prefetch?: ConversationSourcePrefetch,
+  readOnly = false,
 ) {
-  await requireMcpSources(tx, actor, conversationId, [{ kind: 'private-conversation', conversationId }], prefetch);
+  await requireMcpSources(
+    tx,
+    actor,
+    conversationId,
+    [{ kind: 'private-conversation', conversationId }],
+    prefetch,
+    readOnly,
+  );
 }
 
 /**

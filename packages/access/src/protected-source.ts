@@ -6,6 +6,7 @@ import {
   canAccessTable,
   currentMember,
   PersonalMemoryDenied,
+  SkillUnavailable,
   requirePersonalGitHubSource,
   type AuthorizationTransaction,
   type HumanActor,
@@ -169,6 +170,7 @@ export async function requireProtectedSource(
   source: SourceDependency,
   runId?: string,
   publicOnly = false,
+  readOnly = false,
 ) {
   const table = (name: string) => `${escapeIdentifier(tx.schema)}.${escapeIdentifier(name)}`;
   switch (source.kind) {
@@ -386,15 +388,16 @@ export async function requireProtectedSource(
       break;
     case 'workspace-skill':
       await requireSkillGrant(tx, actor, source.skillId, 'read');
-      if (
-        !(
+      {
+        const skill = (
           await tx.client.query(
-            `SELECT 1 FROM ${table('tf_workspace_skills')} s JOIN ${table('tf_workspace_skill_reviews')} r ON r.skill_id=s.id WHERE s.id=$1 AND r.revision=$2 AND s.enabled`,
+            `SELECT s.enabled FROM ${table('tf_workspace_skills')} s JOIN ${table('tf_workspace_skill_reviews')} r ON r.skill_id=s.id WHERE s.id=$1 AND r.revision=$2`,
             [source.skillId, source.revision],
           )
-        ).rowCount
-      )
-        throw new AccessDenied();
+        ).rows[0];
+        if (!skill) throw new AccessDenied();
+        if (!readOnly && !skill.enabled) throw new SkillUnavailable();
+      }
       break;
     case 'creation-team':
       if (source.authority === 'agent') {
