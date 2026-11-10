@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { Parser } from 'htmlparser2';
-import { normalizeEndpoint } from '@tulipfarm/workspace-mcp-transport';
+import { McpNetworkError, normalizeEndpoint } from '@tulipfarm/workspace-mcp-transport';
 import { createPublicDownload } from '@tulipfarm/workspace-mcp-transport/public-download';
 import { SkillPackageError, skillPackageLimits } from './skill-package-contracts.ts';
 import { buildSkillPackage, skillBytesDigest, type SkillPackageFile } from './skill-packages.ts';
@@ -9,6 +9,17 @@ import { readSkillArchive } from './skill-package-archive.ts';
 type GitHubSource = { kind: 'github'; repository: string; tail: string[]; ref?: string; hint?: string };
 export type SkillSource = GitHubSource | { kind: 'website'; url: string };
 const segment = (value: string) => /^[a-zA-Z0-9_.-]{1,100}$/.test(value) && value !== '.' && value !== '..';
+function sourceFailure(error: unknown): never {
+  if (error instanceof McpNetworkError) {
+    if (error.code === 'address-denied' || error.detail === 'non-public')
+      throw new SkillPackageError('source-not-public');
+    if (error.code === 'endpoint-denied') throw new SkillPackageError('source-unsupported');
+    if (error.code === 'response-limit') throw new SkillPackageError('source-limit');
+    if (error.code === 'network-failed' || error.code === 'redirect-denied')
+      throw new SkillPackageError('source-unavailable');
+  }
+  throw error;
+}
 export function resolveSkillSource(input: string): SkillSource {
   input = input.trim();
   if (/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:#[^\s]+)?$/.test(input)) input = `https://github.com/${input}`;
@@ -16,7 +27,7 @@ export function resolveSkillSource(input: string): SkillSource {
   try {
     url = new URL(input);
   } catch {
-    throw new SkillPackageError('source-unsupported');
+    throw new SkillPackageError('source-invalid-url');
   }
   let ref: string | undefined;
   try {
@@ -25,7 +36,11 @@ export function resolveSkillSource(input: string): SkillSource {
     throw new SkillPackageError('source-unsupported');
   }
   url.hash = '';
-  normalizeEndpoint(url.href);
+  try {
+    normalizeEndpoint(url.href);
+  } catch (error) {
+    sourceFailure(error);
+  }
   let parts: string[];
   try {
     parts = url.pathname
@@ -131,7 +146,7 @@ export function createSkillSourceReader(download = createPublicDownload()) {
       requests = 0;
     async function get(url: string) {
       if (++requests > 256 || received >= skillPackageLimits.sourceBytes) throw new SkillPackageError('source-limit');
-      const result = await download(url, skillPackageLimits.sourceBytes - received, signal);
+      const result = await download(url, skillPackageLimits.sourceBytes - received, signal).catch(sourceFailure);
       received += result.bytes.byteLength;
       if (
         result.status === 429 ||

@@ -14,6 +14,7 @@ import { Disclosure } from '@/components/disclosure';
 import { useFeatureRead } from '@/lib/query';
 import { useTableWrite } from '@/features/tables/use-table-write';
 import { WriteFeedback } from '@/features/tables/feedback';
+import { TableRequestError } from '@/features/tables/request-state';
 import { useSkillChanges } from './queries';
 import { skillImportApi, importErrors, skillDraftErrors, skillSourceLabel } from './import-api';
 import { PackageFiles } from './package-files';
@@ -36,7 +37,7 @@ export function ImportSkillForm({
   const input = useRef<HTMLInputElement>(null);
   useEffect(() => {
     input.current?.focus();
-  }, []);
+  }, [error]);
   const open = (id: string) =>
     onOpen
       ? onOpen(id)
@@ -45,7 +46,19 @@ export function ImportSkillForm({
           params: { workspaceSlug: workspace.slug, importId: id },
         });
   const write = useTableWrite(
-    (request: { id: string; url: string }) => api.prepare(request.id, { kind: 'url', url: request.url }),
+    async (request: { id: string; url: string }) => {
+      try {
+        return await api.prepare(request.id, { kind: 'url', url: request.url });
+      } catch (error) {
+        if (
+          error instanceof TableRequestError &&
+          error.status === 400 &&
+          ['source-invalid-url', 'source-unsupported', 'source-not-public'].includes(error.code)
+        )
+          setError(error.message);
+        throw error;
+      }
+    },
     view => open(view.id),
   );
   const busy = write.state.kind === 'sending' || write.state.kind === 'uncertain';
@@ -80,6 +93,7 @@ export function ImportSkillForm({
               onChange={event => {
                 setUrl(event.target.value);
                 setError('');
+                write.reset();
               }}
             />
           </Field>
@@ -93,13 +107,15 @@ export function ImportSkillForm({
             error={error ? 'Fix the source URL to continue.' : undefined}
             note="You choose what to install. Safety review uses workspace Credits."
           >
-            <WriteFeedback
-              state={write.state}
-              retry={request => void write.submit(request)}
-              checkStatus={() => {
-                if ('input' in write.state) open(write.state.input.id);
-              }}
-            />
+            {!error && (
+              <WriteFeedback
+                state={write.state}
+                retry={request => void write.submit(request)}
+                checkStatus={() => {
+                  if ('input' in write.state) open(write.state.input.id);
+                }}
+              />
+            )}
           </FormFooter>
         </div>
       </Form>
@@ -144,6 +160,23 @@ export function SkillImportPage() {
   );
 }
 
+function RestartImport({ onRestart }: Pick<ImportNavigation, 'onRestart'>) {
+  const { workspace } = workspaceRoute.useRouteContext();
+  return onRestart ? (
+    <Button variant="outline" onClick={onRestart}>
+      Start a new import
+    </Button>
+  ) : (
+    <Button
+      variant="outline"
+      nativeButton={false}
+      render={<Link to="/$workspaceSlug/skills/import" params={{ workspaceSlug: workspace.slug }} />}
+    >
+      Start a new import
+    </Button>
+  );
+}
+
 export function SkillImportPanel({
   importId,
   onOpen,
@@ -172,12 +205,8 @@ export function SkillImportPanel({
       refreshError={message => <ReadError message={message}>{retry}</ReadError>}
       loading={<p role="status">Loading skill review…</p>}
       unavailable={() => (
-        <StatePanel
-          kind="unavailable"
-          title="Review unavailable"
-          description="This import is private to the person who started it, or your access changed."
-        >
-          {retry}
+        <StatePanel kind="unavailable" title="Import not found" description="Check the link, or start a new import.">
+          <RestartImport onRestart={onRestart} />
         </StatePanel>
       )}
     >
@@ -279,18 +308,8 @@ function ImportReview({
     >
       Review skill
     </Button>
-  ) : onRestart ? (
-    <Button variant="outline" onClick={onRestart}>
-      Start a new import
-    </Button>
   ) : (
-    <Button
-      variant="outline"
-      nativeButton={false}
-      render={<Link to="/$workspaceSlug/skills/import" params={{ workspaceSlug: workspace.slug }} />}
-    >
-      Start a new import
-    </Button>
+    <RestartImport onRestart={onRestart} />
   );
   return (
     <section className="min-w-0 space-y-6">

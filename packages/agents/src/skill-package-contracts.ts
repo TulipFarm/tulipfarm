@@ -81,6 +81,8 @@ export class SkillPackageError extends Error {
     | 'source-rate-limit'
     | 'source-unavailable'
     | 'source-unsupported'
+    | 'source-not-public'
+    | 'source-invalid-url'
     | 'source-limit'
     | 'no-skills'
     | 'runtime-unavailable';

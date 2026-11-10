@@ -23,7 +23,7 @@ export type McpNetworkErrorCode =
   | 'catalog-invalid-schema'
   | 'catalog-invalid-timestamp'
   | 'catalog-cursor-loop';
-export type McpNetworkErrorDetail = 'dns-failed' | 'timeout' | 'aborted' | 'encoded-response';
+export type McpNetworkErrorDetail = 'dns-failed' | 'timeout' | 'aborted' | 'encoded-response' | 'non-public';
 export class McpNetworkError extends Error {
   readonly code: McpNetworkErrorCode;
   readonly detail: McpNetworkErrorDetail | undefined;
@@ -89,24 +89,19 @@ export function normalizeDestination(input: string, addresses: DestinationAddres
     )
       throw new Error();
     const url = new URL(input);
+    if (url.username || url.password || url.hash || input.includes('#') || url.hostname.endsWith('.'))
+      throw new Error();
+    if (!['https:', 'http:'].includes(url.protocol)) throw new Error();
     if (
-      url.username ||
-      url.password ||
-      url.hash ||
-      input.includes('#') ||
       isIP(url.hostname) ||
       url.hostname.startsWith('[') ||
-      url.hostname.endsWith('.')
+      (!listedPrivateHost(url, addresses) && !publicHostname.test(url.hostname))
     )
-      throw new Error();
-    if (
-      !listedPrivateHost(url, addresses) &&
-      (url.protocol !== 'https:' || url.port || !publicHostname.test(url.hostname))
-    )
-      throw new Error();
+      throw new McpNetworkError('endpoint-denied', { detail: 'non-public' });
+    if (!listedPrivateHost(url, addresses) && (url.protocol !== 'https:' || url.port)) throw new Error();
     return url;
-  } catch {
-    throw new McpNetworkError('endpoint-denied');
+  } catch (error) {
+    throw error instanceof McpNetworkError ? error : new McpNetworkError('endpoint-denied');
   }
 }
 

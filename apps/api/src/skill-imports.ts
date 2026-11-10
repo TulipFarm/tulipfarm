@@ -51,7 +51,11 @@ export function registerSkillImports(
       if (error instanceof AccessDenied) return reply.code(404).send({ error: 'skill-import-not-found' });
       if (error instanceof SkillPackageError)
         return reply
-          .code(['source-unsupported', 'package-limit'].includes(error.code) ? 400 : 409)
+          .code(
+            ['source-unsupported', 'source-not-public', 'source-invalid-url', 'package-limit'].includes(error.code)
+              ? 400
+              : 409,
+          )
           .send({ error: error.code });
       if (error instanceof WorkspaceSkillError) return reply.code(409).send({ error: error.code });
       if (error instanceof z.ZodError || error instanceof SyntaxError)
