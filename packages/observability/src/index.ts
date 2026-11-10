@@ -75,6 +75,8 @@ import {
   safeErrorStage,
   safeErrorType,
   telemetryErrorCode,
+  transientFailure,
+  transientStorageFailure,
 } from './error-codes.ts';
 import {
   modelCallDiagnostics,
@@ -94,7 +96,7 @@ import { alwaysSample, chatTurnSpan, telemetrySampler } from './sampling.ts';
 
 export { context, ROOT_CONTEXT, SpanStatusCode, trace };
 export { alwaysSample, chatTurnSpan, TelemetryRootSampler, telemetrySampler } from './sampling.ts';
-export { errorAttributes, telemetryErrorCode };
+export { errorAttributes, telemetryErrorCode, transientFailure, transientStorageFailure };
 export { withErrorStage, type ChatStage, type ErrorStage } from './error-codes.ts';
 export {
   registerFlagSubjectResolver,
@@ -1345,7 +1347,10 @@ export function createBackgroundJob(job: BackgroundJob, intervalSeconds: number)
     return {
       attributes,
       parent: trace.setSpan(ROOT_CONTEXT, span),
-      finish(outcome: 'success' | 'error', error?: unknown) {
+      finish(result: 'success' | 'error', error?: unknown) {
+        // Lock and connection contention clears on the next run, so it is a skipped run rather than a fault. It
+        // does not count as a success, so the success age still shows contention that lasts.
+        const outcome = result === 'error' && transientFailure(error) ? 'skipped' : result;
         lastCompletion = Date.now() / 1000;
         if (outcome === 'success') lastSuccess = lastCompletion;
         const seconds = (performance.now() - startedAt) / 1000;
@@ -1364,6 +1369,15 @@ export function createBackgroundJob(job: BackgroundJob, intervalSeconds: number)
           });
           // Scheduled jobs run outside HTTP requests and Temporal activities, so nothing else reports them.
           captureException(error);
+        } else if (outcome === 'skipped') {
+          const details = errorAttributes(error);
+          span.setAttributes(details);
+          log('warn', 'activity', 'call_failed', {
+            operation: `job.${job}`,
+            outcome,
+            duration_ms: seconds * 1000,
+            ...details,
+          });
         }
         span.end();
       },

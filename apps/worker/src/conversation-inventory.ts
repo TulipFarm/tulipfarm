@@ -11,7 +11,7 @@ import {
 
 export function readConversationInventory(runtime: ConversationRuntime, fence: ReplyFence) {
   return runtime.transaction(fence.workspaceId, commonCompatibility, async tx => {
-    await lockAuthorization(tx, 'write');
+    await lockAuthorization(tx, 'read');
     const slack = await requireCurrentConversationSources(tx, fence.conversationId, fence.turnId);
     await renewConversationReplyLease(tx, fence);
     const chat = (

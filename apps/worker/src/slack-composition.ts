@@ -10,7 +10,13 @@ import {
   slackCredentialCipher,
   type SlackRuntime,
 } from '@tulipfarm/slack';
-import { createBackgroundJob, errorAttributes, isFeatureEnabled, log } from '@tulipfarm/observability';
+import {
+  createBackgroundJob,
+  errorAttributes,
+  isFeatureEnabled,
+  log,
+  transientFailure,
+} from '@tulipfarm/observability';
 import type { AttachmentBytes } from '@tulipfarm/conversations/attachments';
 import { createSlackDirectMessages } from '@tulipfarm/slack';
 import { createConversationExecutor } from '@tulipfarm/conversations/runtime';
@@ -155,7 +161,8 @@ export async function createSlackPromptComposition(
     const failures: unknown[] = [];
     const report = (error: unknown, stage: string) => {
       failures.push(error);
-      log('error', 'dependency', 'dispatch_failed', {
+      // A lock or connection wait is retried by the next tick two seconds later; the stored event is not lost.
+      log(transientFailure(error) ? 'warn' : 'error', 'dependency', 'dispatch_failed', {
         ...errorAttributes(error),
         operation: 'slack.dispatch',
         'error.stage': stage,

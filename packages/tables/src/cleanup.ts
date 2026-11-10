@@ -62,6 +62,7 @@ async function pruneMemberImages(tx: TableTransaction, limit: number) {
 
 const proposalCopies = ['tf_table_proposal_matches', 'tf_table_proposal_freshness', 'tf_table_proposal_capture'];
 
+// Each retry releases the migration fence before waiting, so the lock wait itself is not retried in place.
 async function retryAuthorization<T>(operation: () => Promise<T>): Promise<T> {
   for (let attempt = 0; ; attempt++) {
     try {
@@ -124,7 +125,7 @@ async function hasCleanupCandidates(tx: TableTransaction) {
 
 async function pruneProposals(tx: TableTransaction, limit: number) {
   // The authority fence also excludes previews that have not inserted their capture yet.
-  await withErrorStage('table-cleanup-authorization', () => lockAuthorization(tx, 'write'));
+  await withErrorStage('table-cleanup-authorization', () => lockAuthorization(tx, 'write', { retry: false }));
   const row = (
     await tx.client.query(`SELECT p.* FROM ${table(tx, 'tf_table_proposals')} p
     WHERE p.redacted_at IS NULL AND GREATEST(p.expires_at,
@@ -369,7 +370,7 @@ export function createTableCleanup(options: {
               ).needed,
           );
           if (!needed) return false;
-          await withErrorStage('table-cleanup-authorization', () => lockAuthorization(tx, 'write'));
+          await withErrorStage('table-cleanup-authorization', () => lockAuthorization(tx, 'write', { retry: false }));
           const marked = await withErrorStage('table-cleanup-imports', () =>
             tx.client.query(
               `UPDATE ${table(tx, 'tf_table_import_objects')} o SET cleanup_pending_at=clock_timestamp()

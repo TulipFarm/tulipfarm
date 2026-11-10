@@ -130,6 +130,16 @@ export function createSlackChannelAgents(options: {
       await lockAuthorization(tx, 'write');
       return action(tx);
     });
+  // Polling runs every few seconds for every workspace, so it only shares the authorization lock; admission and
+  // delivery still take it exclusively.
+  const poll = <T>(
+    workspaceId: string,
+    action: (tx: Parameters<Parameters<SlackRuntime['transaction']>[2]>[0]) => Promise<T>,
+  ) =>
+    runtime.transaction(workspaceId, commonCompatibility, async tx => {
+      await lockAuthorization(tx, 'read');
+      return action(tx);
+    });
   const source = (root: z.infer<typeof rootSchema>) => ({
     installationId: root.installation_id,
     generation: root.generation,
@@ -1172,12 +1182,12 @@ export function createSlackChannelAgents(options: {
     });
   }
   async function due(workspaceId: string) {
-    await transaction(workspaceId, tx =>
+    await poll(workspaceId, tx =>
       tx.client.query(
         `UPDATE ${table(tx, 'tf_slack_agent_turns')} SET state='unknown' WHERE state='sending' AND next_attempt_at<=clock_timestamp()`,
       ),
     );
-    const candidates = await transaction(workspaceId, async tx =>
+    const candidates = await poll(workspaceId, async tx =>
       z.array(z.object({ id: z.uuid() })).parse(
         (
           await tx.client
@@ -1231,7 +1241,7 @@ export function createSlackChannelAgents(options: {
         }
       }
     }
-    return transaction(workspaceId, async tx =>
+    return poll(workspaceId, async tx =>
       z
         .array(z.object({ event_id: z.uuid() }))
         .parse(

@@ -505,6 +505,59 @@ function errorOrigin(stack: unknown): string | undefined {
   return undefined;
 }
 
+// Conflicts, lock and statement timeouts, dropped connections and server restarts clear up when retried.
+const transientCodes = new Set([
+  '40001',
+  '40P01',
+  '55P03',
+  '57014',
+  '08000',
+  '08001',
+  '08003',
+  '08006',
+  '08007',
+  '57P01',
+  '57P02',
+  '57P03',
+  'ECONNRESET',
+  'ECONNREFUSED',
+  'ETIMEDOUT',
+  'EPIPE',
+]);
+// pg reports a failed checkout or a dropped connection without a code.
+const transientMessages = new Set([
+  'timeout exceeded when trying to connect',
+  'Connection terminated unexpectedly',
+  'Connection terminated due to connection timeout',
+]);
+const transientStorageCodes = new Set(['queue_full', 'wait_timeout', 'pool_capacity', 'stale_credential', 'updating']);
+
+/** Whether one storage failure is transient, so the same work can succeed on a later attempt. */
+export function transientStorageFailure(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false;
+  const { code, message, name } = error as { code?: unknown; message?: unknown; name?: unknown };
+  if (name === 'StorageUnavailableError') return typeof code === 'string' && transientStorageCodes.has(code);
+  return (
+    (typeof code === 'string' && transientCodes.has(code)) ||
+    (typeof message === 'string' && transientMessages.has(message))
+  );
+}
+
+/**
+ * Whether a failure, or what caused it, is transient storage contention. An aggregate is transient only when every
+ * failure in it is, so one real fault among lock timeouts is still reported.
+ */
+export function transientFailure(error: unknown, depth = 0): boolean {
+  if (typeof error !== 'object' || error === null || depth > 8) return false;
+  if (error instanceof AggregateError)
+    return (
+      Array.isArray(error.errors) &&
+      error.errors.length > 0 &&
+      error.errors.every(child => transientFailure(child, depth + 1))
+    );
+  return transientStorageFailure(error) || transientFailure((error as { cause?: unknown }).cause, depth + 1);
+}
+
 /** Only reviewed diagnostics cross the telemetry boundary; never copy exception text. */
 export function errorAttributes(error: unknown): {
   [key: string]: string | number | undefined;
