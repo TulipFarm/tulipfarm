@@ -31,10 +31,14 @@ export function workspaceUpdating(error: unknown) {
   );
 }
 
+// A rate-limited read says when to come back, so it waits out the limit window instead of failing the page.
+export const rateLimitedRetries = 5;
+
 export function retryRead(failures: number, error: unknown) {
   if (workspaceUpdating(error)) return failures < updatingRetries;
-  if (failures >= 2 || error instanceof ZodError) return false;
   const status = errorStatus(error);
+  if (status === 429) return failures < rateLimitedRetries;
+  if (failures >= 2 || error instanceof ZodError) return false;
   if (status !== undefined) return status === 408 || status === 429 || status >= 500;
   return error instanceof TypeError || (error instanceof DOMException && error.name === 'TimeoutError');
 }

@@ -68,6 +68,8 @@ export function governanceError(error: unknown) {
     if (error.code === 'invalid-team-name') return 'Enter a team name of 1 to 80 characters.';
     if (error.code === 'invalid-team-description') return 'Keep the description within 1,000 characters.';
     if (error.code === 'team-owns-agents') return 'This team owns active agents and cannot be deleted.';
+    if (error.code === 'invitation-expired')
+      return 'This invite has expired, so it can’t be edited. Resend it to send a new link and make it editable again, or revoke it.';
     if (error.code === 'invitation-unavailable')
       return 'This invitation is no longer available. The invitation list has been refreshed.';
     if (error.code === 'final-admin')

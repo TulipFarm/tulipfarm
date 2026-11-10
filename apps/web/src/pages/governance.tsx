@@ -14,11 +14,17 @@ import { Spinner } from '@tulipfarm/sprout/spinner';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
 import { Skeleton } from '@tulipfarm/sprout/skeleton';
 import { Tabs, TabsList, TabsTrigger } from '@tulipfarm/sprout/tabs';
-import { governanceError, governancePath, governanceRequest, GovernanceRequestError } from '@/lib/governance';
+import {
+  governanceError,
+  governancePath,
+  governanceRequest,
+  GovernanceRequestError,
+  loadGovernance,
+} from '@/lib/governance';
 import { useGovernance } from '@/features/governance/queries';
 import { useGovernanceChanges } from '@/features/governance/changes';
 import { workspaceRoute } from '@/router';
-import { describeChange, scopeObject } from '@/features/access/policies';
+import { describeChange, permissionSummary, scopeObject, sortPermissions } from '@/features/access/policies';
 import type { SaveResult, ScopeChoice } from '@/features/access/policy-table';
 import { MembersList, MembersSettings } from './access-members';
 import { InviteMembers } from './access-invite';
@@ -45,7 +51,7 @@ export type GovernanceChange = (
   | 'team-owns-integrations'
 >;
 
-type Section = 'members' | 'teams' | 'settings' | 'grants' | 'invite' | 'member' | 'team';
+type Section = 'members' | 'teams' | 'settings' | 'grants' | 'invite' | 'edit-invite' | 'member' | 'team';
 type LoadState =
   | { kind: 'loading' }
   | { kind: 'error'; message: string }
@@ -75,20 +81,56 @@ export type AccessPage = {
   recovery: ReactNode;
 };
 
+// How long a save with an unknown outcome keeps trying to read the policy back.
+const policyCheckLimit = 60_000;
+
+/** The permissions a team or person holds on one policy scope in a snapshot. */
+function heldPermissions(
+  data: GovernanceSnapshot,
+  subject: { kind: 'team' | 'member'; id: string },
+  scope: ScopeChoice,
+): PolicyPermission[] {
+  const grants =
+    subject.kind === 'team'
+      ? data.grants.filter(grant => grant.teamId === subject.id)
+      : data.personGrants.filter(grant => grant.membershipId === subject.id);
+  return sortPermissions(
+    grants
+      .filter(grant => grant.target.kind === scope.kind && grant.target.id === scope.id)
+      .map(grant => grant.target.permission),
+  );
+}
+
+const samePermissions = (a: readonly PolicyPermission[], b: readonly PolicyPermission[]) =>
+  a.length === b.length && a.every(permission => b.includes(permission));
+
+/** Resolves after `delay`, or sooner when the browser comes back online. */
+const reachable = (delay: number) =>
+  new Promise<void>(resolve => {
+    const done = () => {
+      clearTimeout(timer);
+      window.removeEventListener('online', done);
+      resolve();
+    };
+    const timer = setTimeout(done, delay);
+    window.addEventListener('online', done);
+  });
+
 // Survives the route change from one access page to another.
 let flashed: { workspaceId: string; message: string } | null = null;
 
 function AccessShell({ section }: { section: Section }) {
   const { workspace } = workspaceRoute.useRouteContext();
-  const params = useParams({ strict: false }) as { membershipId?: string; teamId?: string };
+  const params = useParams({ strict: false }) as { membershipId?: string; teamId?: string; invitationId?: string };
   return (
     <AccessContent
-      key={`${workspace.id}:${section}:${params.membershipId ?? ''}:${params.teamId ?? ''}`}
+      key={`${workspace.id}:${section}:${params.membershipId ?? ''}:${params.teamId ?? ''}:${params.invitationId ?? ''}`}
       section={section}
       workspaceId={workspace.id}
       workspaceSlug={workspace.slug}
       membershipId={params.membershipId}
       teamId={params.teamId}
+      invitationId={params.invitationId}
     />
   );
 }
@@ -99,12 +141,14 @@ function AccessContent({
   workspaceSlug,
   membershipId,
   teamId,
+  invitationId,
 }: {
   section: Section;
   workspaceId: string;
   workspaceSlug: string;
   membershipId: string | undefined;
   teamId: string | undefined;
+  invitationId: string | undefined;
 }) {
   const navigate = useNavigate();
   const { membership, administration, refresh } = useGovernance(workspaceId);
@@ -153,6 +197,7 @@ function AccessContent({
         {refreshing && <Spinner aria-hidden="true" />}Reload access
       </Button>
     ) : null;
+  const ready = state.kind === 'admin' || state.kind === 'member';
   const writePending = useRef(false);
   const mounted = useRef(true);
   useEffect(() => {
@@ -212,12 +257,17 @@ function AccessContent({
     }
   };
   const policy: AccessPage['policy'] = async (subject, scope, permissions) => {
-    if (writePending.current || refreshing || stale)
+    if (writePending.current || refreshing || stale || (state.kind !== 'admin' && state.kind !== 'member'))
       return { ok: false, message: 'Another change is saving, or access needs reloading. Try again in a moment.' };
     writePending.current = true;
     setBusy(true);
     setMessage(null);
     setNotice(null);
+    const before = heldPermissions(state.data, subject, scope);
+    const done = () => {
+      writePending.current = false;
+      if (mounted.current) setBusy(false);
+    };
     try {
       const result = policyChangeSchema.parse(
         await governanceRequest(`${governancePath(workspaceId)}/policies`, 'PUT', {
@@ -228,25 +278,80 @@ function AccessContent({
       );
       await changes.saved('/policies', 'PUT');
       if (mounted.current) setNotice(describeChange(subject.name, scopeObject(scope), result.added, result.removed));
+      done();
       return { ok: true };
     } catch (error) {
       if (error instanceof GovernanceRequestError && [401, 403, 404].includes(error.status)) {
+        done();
         void changes.accessLost();
         return { ok: false, message: 'You no longer have access to change this policy. Nothing was saved.' };
       }
-      if (error instanceof GovernanceRequestError && error.status >= 400 && error.status < 500)
+      if (error instanceof GovernanceRequestError && error.status >= 400 && error.status < 500) {
+        done();
         return { ok: false, message: `Nothing was saved. ${governanceError(error)}` };
+      }
+      // The outcome is unknown: read the policy back once TulipFarm is reachable and report what it is now.
       return {
         ok: false,
-        message:
-          'We couldn’t confirm the change. Close this and reload access to check the policy before trying again.',
+        message: 'We couldn’t confirm the change. Checking whether it was saved…',
+        checking: confirmPolicy(subject, scope, before, permissions).finally(done),
       };
-    } finally {
-      writePending.current = false;
-      if (mounted.current) setBusy(false);
     }
   };
-  const ready = state.kind === 'admin' || state.kind === 'member';
+  async function confirmPolicy(
+    subject: Parameters<AccessPage['policy']>[0],
+    scope: ScopeChoice,
+    before: PolicyPermission[],
+    requested: PolicyPermission[],
+  ): Promise<SaveResult> {
+    const deadline = Date.now() + policyCheckLimit;
+    const target = scopeObject(scope);
+    for (let wait = 1000; ; wait = Math.min(wait * 2, 8000)) {
+      try {
+        const now = heldPermissions(
+          await loadGovernance(workspaceId, AbortSignal.timeout(policyCheckLimit)),
+          subject,
+          scope,
+        );
+        await changes.saved('/policies', 'PUT');
+        if (samePermissions(now, requested)) {
+          const added = now.filter(permission => !before.includes(permission));
+          const removed = before.filter(permission => !now.includes(permission));
+          if (mounted.current) setNotice(describeChange(subject.name, target, added, removed));
+          return { ok: true };
+        }
+        if (samePermissions(now, before))
+          return {
+            ok: false,
+            message: before.length
+              ? `Your change wasn’t saved. The policy for ${subject.name} on ${target} is unchanged: ${permissionSummary(now)}. Try again.`
+              : `Your change wasn’t saved. There’s still no policy for ${subject.name} on ${target}. Try again.`,
+          };
+        return {
+          ok: false,
+          message: now.length
+            ? `Your change may not have been saved because this policy was changed while you were editing. It now gives ${subject.name}: ${permissionSummary(now)} on ${target}. Check it before you save again.`
+            : `Your change may not have been saved because this policy was changed while you were editing. There’s now no policy for ${subject.name} on ${target}. Check it before you save again.`,
+        };
+      } catch (error) {
+        if (error instanceof GovernanceRequestError && [401, 403, 404].includes(error.status)) {
+          void changes.accessLost();
+          return {
+            ok: false,
+            message:
+              'You no longer have access to this policy, so we can’t check whether your change was saved. Ask a workspace admin to check it.',
+          };
+        }
+        if (Date.now() + wait > deadline)
+          return {
+            ok: false,
+            message:
+              'We still can’t confirm whether your change was saved. Check your connection, then reload this page to see the current policy.',
+          };
+        await reachable(wait);
+      }
+    }
+  }
   const listing = section === 'members' || section === 'teams' || section === 'settings';
   const page: AccessPage | null = ready
     ? {
@@ -284,6 +389,8 @@ function AccessContent({
       />
     ) : section === 'invite' ? (
       <PageHeader titleId="governance-heading" focusable parent={members} title="Invite members" />
+    ) : section === 'edit-invite' ? (
+      <PageHeader titleId="governance-heading" focusable parent={members} title="Edit invite" />
     ) : section === 'member' ? (
       <PageHeader
         titleId="governance-heading"
@@ -377,6 +484,9 @@ function AccessContent({
           {section === 'teams' && <TeamsList page={page} />}
           {section === 'settings' && <MembersSettings page={page} />}
           {section === 'invite' && <InviteMembers page={page} />}
+          {section === 'edit-invite' && invitationId && (
+            <InviteMembers key={invitationId} page={page} invitationId={invitationId} />
+          )}
           {section === 'member' && membershipId && <MemberDetail page={page} membershipId={membershipId} />}
           {section === 'team' && teamId && <TeamDetail page={page} teamId={teamId} />}
           {section === 'grants' && <TableAccess page={page} />}
@@ -389,6 +499,7 @@ function AccessContent({
 export const MembersPage = () => <AccessShell section="members" />;
 export const MembersSettingsPage = () => <AccessShell section="settings" />;
 export const InviteMembersPage = () => <AccessShell section="invite" />;
+export const EditInvitePage = () => <AccessShell section="edit-invite" />;
 export const MemberDetailPage = () => <AccessShell section="member" />;
 export const TeamsPage = () => <AccessShell section="teams" />;
 export const TeamDetailPage = () => <AccessShell section="team" />;

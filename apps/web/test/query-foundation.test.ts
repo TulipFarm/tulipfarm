@@ -686,10 +686,12 @@ test('a reply backoff slows from 500 ms to 2 s to 5 s, never stops, and restarts
 
 test('retry policy is bounded and excludes permissions and invalid payloads', () => {
   for (const status of [401, 403, 404, 409, 422]) assert.equal(retryRead(0, { status }), false);
-  for (const status of [408, 429, 500, 503]) {
+  for (const status of [408, 500, 503]) {
     assert.equal(retryRead(1, { status }), true);
     assert.equal(retryRead(2, { status }), false);
   }
+  assert.equal(retryRead(4, { status: 429 }), true);
+  assert.equal(retryRead(5, { status: 429 }), false);
   assert.equal(retryRead(0, new Error('invalid response')), false);
   assert.equal(retryRead(0, new TypeError('network failed')), true);
   assert.equal(retryDelay(0, { status: 429, retryAfter: '9999' }), 30_000);

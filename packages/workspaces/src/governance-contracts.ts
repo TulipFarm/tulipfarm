@@ -37,6 +37,7 @@ export const tableGrantPermissionSchema = z.enum([
 export const grantTargetSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('table'), id: z.uuid(), permission: tableGrantPermissionSchema }),
   z.strictObject({ kind: z.literal('collection'), id: z.uuid(), permission: z.literal('table.create') }),
+  z.strictObject({ kind: z.literal('owned'), id: z.uuid(), permission: tableGrantPermissionSchema }),
 ]);
 export const grantInputSchema = z.strictObject({ teamId: z.uuid(), target: grantTargetSchema, granted: z.boolean() });
 export const personGrantSchema = z.strictObject({ membershipId: z.uuid(), target: grantTargetSchema });
@@ -45,10 +46,11 @@ export const personGrantListSchema = z.object({ grants: z.array(personGrantSchem
 export type PersonGrantInput = z.infer<typeof personGrantInputSchema>;
 export const policyPermissionSchema = z.enum([...tableGrantPermissionSchema.options, 'table.create']);
 export type PolicyPermission = z.infer<typeof policyPermissionSchema>;
-/** A table, or "create tables owned by team <id>". */
+/** A table, "create tables owned by team <id>", or every table team <id> owns now or later ("owned"). */
 export const policyScopeSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('table'), id: z.uuid() }),
   z.strictObject({ kind: z.literal('collection'), id: z.uuid() }),
+  z.strictObject({ kind: z.literal('owned'), id: z.uuid() }),
 ]);
 export type PolicyScope = z.infer<typeof policyScopeSchema>;
 export const policySubjectSchema = z.discriminatedUnion('kind', [
@@ -100,9 +102,12 @@ export const effectivePolicySchema = z.object({
     z.object({ kind: z.literal('all') }),
     z.object({ kind: z.literal('table'), id: z.uuid(), name: z.string() }),
     z.object({ kind: z.literal('collection'), id: z.uuid(), name: z.string() }),
+    z.object({ kind: z.literal('owned'), id: z.uuid(), name: z.string() }),
   ]),
   permissions: z.array(policyPermissionSchema),
   source: accessSourceSchema,
+  // For an "owned" scope, the tables it covers right now.
+  tables: z.array(z.object({ id: z.uuid(), name: z.string() })).default([]),
 });
 export const skippedChoicesSchema = z.object({
   teams: z.array(z.object({ id: z.uuid(), name: z.string() })).default([]),

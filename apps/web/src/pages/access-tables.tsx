@@ -21,6 +21,8 @@ type Holder = {
   summary: string;
 };
 
+const hiddenTeam = 'A team you can’t see';
+
 /** A read-only view of who can use each table; every row links to the team or member whose policy grants it. */
 export function TableAccess({ page }: { page: AccessPage }) {
   const { data, admin, workspaceSlug, busy } = page;
@@ -32,18 +34,36 @@ export function TableAccess({ page }: { page: AccessPage }) {
       : teamLabel(
           data.teams.find(team => team.id === id)?.name ??
             data.teamNames.find(team => team.id === id)?.name ??
-            'A team you can’t see',
+            hiddenTeam,
         );
+  /** The owning team's name for use inside a sentence. */
+  const teamPhrase = (id: string) => (teamName(id) === hiddenTeam ? 'a team you can’t see' : teamName(id));
   const people = new Map(data.directory.map(member => [member.id, member]));
-  function holders(kind: 'table' | 'collection', id: string) {
+  /** A table's holders include policies on every table its owning team owns, listed apart from table policies. */
+  function holders(kind: 'table' | 'collection', id: string, owningTeamId?: string) {
     const rows = new Map<string, Holder>();
     const add = (key: string, holder: Omit<Holder, 'permissions' | 'summary'>, permission: PolicyPermission) => {
       const row = rows.get(key) ?? { ...holder, permissions: [], summary: '' };
       row.permissions.push(permission);
       rows.set(key, row);
     };
+    const owned = (target: { kind: string; id: string }) =>
+      kind === 'table' && target.kind === 'owned' && target.id === owningTeamId;
+    const ownedBy = owningTeamId ? `policy on all tables owned by ${teamPhrase(owningTeamId)}` : '';
     for (const grant of data.grants)
-      if (grant.target.kind === kind && grant.target.id === id)
+      if (owned(grant.target))
+        add(
+          `owned-team:${grant.teamId}`,
+          {
+            key: `owned-team:${grant.teamId}`,
+            kind: 'team',
+            id: grant.teamId,
+            name: teamName(grant.teamId),
+            grantedBy: `Team ${ownedBy}`,
+          },
+          grant.target.permission,
+        );
+      else if (grant.target.kind === kind && grant.target.id === id)
         add(
           `team:${grant.teamId}`,
           grant.teamId === data.adminTeamId
@@ -58,7 +78,20 @@ export function TableAccess({ page }: { page: AccessPage }) {
           grant.target.permission,
         );
     for (const grant of data.personGrants)
-      if (grant.target.kind === kind && grant.target.id === id) {
+      if (owned(grant.target)) {
+        const member = people.get(grant.membershipId);
+        add(
+          `owned-member:${grant.membershipId}`,
+          {
+            key: `owned-member:${grant.membershipId}`,
+            kind: 'member',
+            id: grant.membershipId,
+            name: member ? personName(member) : 'Former member',
+            grantedBy: `Direct ${ownedBy}`,
+          },
+          grant.target.permission,
+        );
+      } else if (grant.target.kind === kind && grant.target.id === id) {
         const member = people.get(grant.membershipId);
         add(
           `member:${grant.membershipId}`,
@@ -149,7 +182,7 @@ export function TableAccess({ page }: { page: AccessPage }) {
       )}
       {tables.map(table => {
         const name = labels.get(table.id) ?? table.name;
-        const rows = holders('table', table.id);
+        const rows = holders('table', table.id, table.owningTeamId);
         return (
           <article key={table.id} aria-labelledby={`table-${table.id}`} className="flex flex-col gap-3 border-t pt-4">
             <div className="flex flex-wrap items-end justify-between gap-3">
@@ -182,7 +215,7 @@ export function TableAccess({ page }: { page: AccessPage }) {
                   </Select>
                 </div>
               ) : (
-                <p className="text-sm text-muted-foreground">Owned by {teamName(table.owningTeamId)}</p>
+                <p className="text-sm text-muted-foreground">Owned by {teamPhrase(table.owningTeamId)}</p>
               )}
             </div>
             {rows.length ? (

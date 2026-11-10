@@ -110,6 +110,7 @@ const WorkspaceChatsPage = lazyRouteComponent(() => import('@/pages/workspace-ch
 const TeamsPage = lazyRouteComponent(() => import('@/pages/governance'), 'TeamsPage');
 const GrantsPage = lazyRouteComponent(() => import('@/pages/governance'), 'GrantsPage');
 const InviteMembersPage = lazyRouteComponent(() => import('@/pages/governance'), 'InviteMembersPage');
+const EditInvitePage = lazyRouteComponent(() => import('@/pages/governance'), 'EditInvitePage');
 const MembersSettingsPage = lazyRouteComponent(() => import('@/pages/governance'), 'MembersSettingsPage');
 const MemberDetailPage = lazyRouteComponent(() => import('@/pages/governance'), 'MemberDetailPage');
 const TeamDetailPage = lazyRouteComponent(() => import('@/pages/governance'), 'TeamDetailPage');
@@ -1381,6 +1382,11 @@ const workspaceInviteMembersRoute = createRoute({
   path: 'members/invite',
   component: InviteMembersPage,
 });
+const workspaceEditInviteRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  path: 'members/invites/$invitationId',
+  component: EditInvitePage,
+});
 const workspaceMembersSettingsRoute = createRoute({
   getParentRoute: () => workspaceRoute,
   path: 'members/settings',
@@ -1499,6 +1505,7 @@ export const router = createRouter({
       workspaceUsageRoute,
       workspaceMembersRoute,
       workspaceInviteMembersRoute,
+      workspaceEditInviteRoute,
       workspaceMembersSettingsRoute,
       workspaceMemberRoute,
       workspaceTeamsRoute,

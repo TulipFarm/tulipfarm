@@ -149,6 +149,21 @@ export function MembersList({ page }: { page: AccessPage }) {
     const items: React.ReactNode[] = [];
     if (row.kind === 'invite') {
       const item = row.invitation!;
+      if (item.status === 'active')
+        items.push(
+          <DropdownMenuItem
+            key="edit"
+            disabled={busy}
+            onClick={() =>
+              void navigate({
+                to: '/$workspaceSlug/members/invites/$invitationId',
+                params: { workspaceSlug, invitationId: item.id },
+              })
+            }
+          >
+            <span className="min-w-0 wrap-anywhere">Edit invite for {row.email}</span>
+          </DropdownMenuItem>,
+        );
       items.push(
         <DropdownMenuItem
           key="resend"
@@ -172,16 +187,16 @@ export function MembersList({ page }: { page: AccessPage }) {
             });
           }}
         >
-          Resend invite to {row.email}
+          <span className="min-w-0 wrap-anywhere">Resend invite to {row.email}</span>
         </DropdownMenuItem>,
       );
       if (item.canCopy && item.status === 'active')
         items.push(
           <DropdownMenuItem key="copy" onClick={() => void invitationAction(row, 'copy')}>
-            Copy invite link for {row.email}
+            <span className="min-w-0 wrap-anywhere">Copy invite link for {row.email}</span>
           </DropdownMenuItem>,
         );
-      if (item.status === 'active')
+      if (item.status === 'active' || item.status === 'expired')
         items.push(
           <DropdownMenuSeparator key="separator" />,
           <DropdownMenuItem
@@ -197,7 +212,7 @@ export function MembersList({ page }: { page: AccessPage }) {
               })
             }
           >
-            Revoke invite for {row.email}
+            <span className="min-w-0 wrap-anywhere">Revoke invite for {row.email}</span>
           </DropdownMenuItem>,
         );
       return items;
@@ -213,7 +228,9 @@ export function MembersList({ page }: { page: AccessPage }) {
             })
           }
         >
-          {row.self ? 'View your access' : admin ? `View and edit access for ${who}` : `View access for ${who}`}
+          <span className="min-w-0 wrap-anywhere">
+            {row.self ? 'View your access' : admin ? `View and edit access for ${who}` : `View access for ${who}`}
+          </span>
         </DropdownMenuItem>,
       );
     const finalAdmin = row.admin && admins === 1;
@@ -241,7 +258,7 @@ export function MembersList({ page }: { page: AccessPage }) {
             )
           }
         >
-          {row.admin ? `Make ${who} a member` : `Make ${who} an admin`}
+          <span className="min-w-0 wrap-anywhere">{row.admin ? `Make ${who} a member` : `Make ${who} an admin`}</span>
         </DropdownMenuItem>,
         <DropdownMenuSeparator key="separator" />,
         <DropdownMenuItem
@@ -257,7 +274,7 @@ export function MembersList({ page }: { page: AccessPage }) {
             })
           }
         >
-          Remove {who} from workspace
+          <span className="min-w-0 wrap-anywhere">Remove {who} from workspace</span>
         </DropdownMenuItem>,
       );
     }
@@ -270,7 +287,7 @@ export function MembersList({ page }: { page: AccessPage }) {
           disabled={busy || !access.capabilities.canLeave}
           onClick={() => confirmation.open(leaveConfirmation(page))}
         >
-          Leave workspace
+          <span className="min-w-0 wrap-anywhere">Leave workspace</span>
         </DropdownMenuItem>,
         ...(access.capabilities.canLeave
           ? []
@@ -371,7 +388,20 @@ export function MembersList({ page }: { page: AccessPage }) {
           {
             key: 'teams',
             header: 'Teams',
-            cell: row => <TeamChips teams={row.teams} />,
+            cell: row => {
+              const skipped = row.invitation?.skipped?.teams ?? [];
+              return skipped.length ? (
+                <span className="flex flex-col gap-1">
+                  <TeamChips teams={row.teams} />
+                  <span className="text-xs text-muted-foreground wrap-anywhere">
+                    Won’t join deleted {skipped.length === 1 ? 'team' : 'teams'}:{' '}
+                    {joinList(skipped.map(team => team.name))}
+                  </span>
+                </span>
+              ) : (
+                <TeamChips teams={row.teams} />
+              );
+            },
           },
           {
             key: 'status',
@@ -404,7 +434,7 @@ export function MembersList({ page }: { page: AccessPage }) {
               <DropdownMenuTrigger render={<Button variant="ghost" size="icon-sm" aria-label={`Actions for ${who}`} />}>
                 <MoreH size={16} aria-hidden="true" />
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
+              <DropdownMenuContent align="end" size="menu">
                 {items}
                 {finalAdmin && (
                   <p className="max-w-64 px-2 py-1.5 text-xs text-muted-foreground">
