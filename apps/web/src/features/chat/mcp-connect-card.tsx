@@ -17,6 +17,8 @@ const signIn = {
   secrets: 'Saved secrets you choose',
   none: 'No sign-in',
 } as const;
+// Starting OAuth hides this chat's loaded messages, which remounts the card, so the sign-in link lives outside it.
+const authorizations = new Map<string, string>();
 
 /** A chat's suggestion to connect a remote MCP server. The person sets it up here, as their own integration. */
 export function McpConnectCard({ workspaceId, slug, card }: { workspaceId: string; slug: string; card: Proposal }) {
@@ -48,6 +50,7 @@ function Connect({
         )
       : undefined;
   const id = savedId ?? existing?.id ?? null;
+  const authorization = existing?.status === 'oauth-pending' ? authorizations.get(existing.id) : undefined;
   return (
     <ReviewCard
       label={`Connect ${card.name}`}
@@ -63,7 +66,11 @@ function Connect({
       }
       settled={existing?.status === 'ready'}
       actions={
-        id ? (
+        authorization && new URL(authorization).protocol === 'https:' ? (
+          <Button nativeButton={false} render={<a href={authorization} target="_blank" rel="noopener noreferrer" />}>
+            Continue to {card.name} sign-in
+          </Button>
+        ) : id ? (
           <Button
             nativeButton={false}
             render={
@@ -80,6 +87,10 @@ function Connect({
         !capabilities.integrationsEnabled && !id ? (
           <p role="status" className="text-sm">
             New MCP integrations are paused in this workspace.
+          </p>
+        ) : authorization ? (
+          <p role="status" className="text-sm">
+            Sign in to {card.name} in the new tab, then return here to review its tools.
           </p>
         ) : id ? (
           <p role="status" className="text-sm">
@@ -101,6 +112,7 @@ function Connect({
           capabilities={capabilities}
           proposal={card}
           close={() => setOpen(false)}
+          authorizing={(next, url) => authorizations.set(next, url)}
           saved={next => {
             setSavedId(next);
             setOpen(false);
