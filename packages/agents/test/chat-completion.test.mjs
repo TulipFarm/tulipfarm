@@ -3,15 +3,24 @@ import { test } from 'node:test';
 import {
   cardClaims,
   claimsActionOutcome,
+  cardsForRequest,
   completionCheckEvidence,
+  heldBackMisdescribed,
+  heldBackReply,
+  heldBackWrites,
   inferWithTools,
+  inventedFailure,
   noCardReply,
   reviewCardReceipt,
+  rowRequestSkipped,
   tableIdQuestion,
   unbackedCardClaim,
   unbackedImportClaim,
   unbackedWriteClaim,
   uncheckedTableQuestion,
+  waitingCardMisdescribed,
+  waitingCardStretched,
+  waitingRowChanges,
 } from '../src/inference.ts';
 import { completionEvaluation, evaluationMessages } from './completion-evaluation-fixture.mjs';
 import {
@@ -1215,7 +1224,7 @@ test('a tool-free reply that claims rows were created is sent back to do the wor
   assert.deepEqual(executed, ['tables.definitions']);
   assert.equal(replies.length, 0);
   assert.deepEqual(requests.map(isCompletionRequest), [false, false, false, true]);
-  assert.match(JSON.stringify(requests[1].messages), /no tool call in this reply wrote any/);
+  assert.match(JSON.stringify(requests[1].messages), /nothing in this turn wrote any data/);
   assert.deepEqual(outcomes, ['continue', 'done']);
 });
 
@@ -1754,6 +1763,52 @@ test('with a card still waiting, pointing to it ends the reply and a repeated ne
   assert.deepEqual(outcomes, ['skipped_no_tools', 'continue', 'continue', 'continue', 'exhausted']);
 });
 
+test('a row request for another table is made, not refused behind the waiting card', async t => {
+  const claim = 'A review card is still waiting for your approval. Please approve it first, then I can add Rose 3.';
+  const done = 'I added Rose 3 to Other Ledger.';
+  const replies = [
+    nativeReply('azure', { text: claim }),
+    nativeReply('azure', {
+      calls: [
+        use('rows.create', {
+          tableId: '00000000-0000-4000-8000-0000000000aa',
+          expectedAppliedRevision: 'a'.repeat(40),
+          values: fruit('Rose', '3').values,
+        }),
+      ],
+    }),
+    nativeReply('azure', { text: done }),
+  ];
+  const requests = [];
+  t.mock.method(globalThis, 'fetch', async (_url, init) => {
+    const body = JSON.parse(init.body);
+    if (isCompletionRequest(body)) return Response.json(selectReply('azure', verdict()));
+    requests.push(body);
+    assert.ok(replies.length, 'bounded provider requests');
+    return Response.json(replies.shift());
+  });
+  const calls = [];
+  const result = await inferWithTools(
+    nativeRoutes.azure,
+    [{ role: 'user', text: 'Add one row to the Other Ledger table, Item and Amount: Rose 3.' }],
+    async call => {
+      calls.push(call.tool);
+      return { record: { id: 'r', values: {} } };
+    },
+    undefined,
+    false,
+    null,
+    {
+      preloadedTools: ['rows.create'],
+      waitingCards: async () => 1,
+      waitingRowCards: async () => [{ table: 'Fruit ledger', input: nineRows }],
+    },
+  );
+  assert.equal(result.text, done);
+  assert.deepEqual(calls, ['rows.create']);
+  assert.match(JSON.stringify(requests[1].messages), /another table[\s\S]*Fruit ledger/);
+});
+
 test('a reply never asks the person for a table ID, and asks about a table only after looking tables up', () => {
   for (const text of [
     'Could you share the table ID for Pantry Stock?',
@@ -1791,4 +1846,151 @@ test('asking which table, after a lookup, ends the reply once corrections run ou
   assert.equal(result.text, question);
   assert.equal(replies.length, 0);
   assert.deepEqual(outcomes, ['continue', 'continue', 'continue', 'exhausted']);
+});
+
+const itemField = '00000000-0000-4000-8000-000000000001';
+const amountField = '00000000-0000-4000-8000-000000000002';
+const fruit = (item, amount) => ({
+  values: { [itemField]: { kind: 'text', value: item }, [amountField]: { kind: 'numeric', value: amount } },
+});
+const nineRows = {
+  tool: 'rows.create.batch',
+  rows: ['Apple', 'Banana', 'Cherry', 'Date', 'Fig', 'Grape', 'Kiwi', 'Mango', 'Pear'].map((item, index) =>
+    fruit(item, String(index + 1)),
+  ),
+};
+const heldBack = (notAdded = ['Lime 10']) => [
+  {
+    kind: 'results',
+    results: [
+      {
+        id: 'r',
+        name: 'rows_create',
+        output: `Untrusted tool result for r: ${JSON.stringify({
+          error: 'approval-pending',
+          table: 'Fruit ledger',
+          waitingCard: {
+            rows: 9,
+            sample: ['Apple 1', 'Banana 2', 'Cherry 3'],
+            summary: 'add 9 rows (Apple 1, Banana 2, Cherry 3, …) to',
+          },
+          notAdded,
+        })}`,
+        error: false,
+      },
+    ],
+  },
+];
+
+test('a row write held back behind a waiting card is explained with what that card holds and the row asked for', () => {
+  const [held] = heldBackWrites(heldBack());
+  assert.equal(
+    heldBackReply(held),
+    'Nothing new was added. A card to add 9 rows (Apple 1, Banana 2, Cherry 3, …) to "Fruit ledger" is still waiting for your approval in this chat. Approve or dismiss it, then ask again for Lime 10.',
+  );
+  const [unnamed] = heldBackWrites(heldBack([]));
+  assert.match(heldBackReply(unnamed, 'Add one more row: Lime 10.'), /then ask again for Lime 10\.$/);
+  assert.match(heldBackReply(unnamed, 'Add Lime 10 and Kiwi 4: Lime 10 and Kiwi 4'), /for Lime 10, Kiwi 4\.$/);
+  assert.match(heldBackReply(unnamed, 'Add one more row'), /then ask again for this change\.$/);
+});
+
+test('a reply that merges a held-back row into the waiting card or blames a failure is rewritten', () => {
+  for (const text of [
+    'I added Lime 10 to the approval card, so the card now has 10 rows.',
+    'Once you approve the card, Lime 10 will be added along with the others.',
+    'The card holds 10 rows in total.',
+    'The earlier 9 rows failed, so nothing was saved.',
+    'You do not have permission to add rows to this table.',
+  ])
+    assert.equal(heldBackMisdescribed(text, heldBack())?.status, 'continue', text);
+  for (const text of [
+    'Nothing new was added. A card to add 9 rows (Apple 1, Banana 2, Cherry 3, …) to "Fruit ledger" is still waiting. Approve or dismiss it, then ask again for Lime 10.',
+    'Lime 10 is not on any card. The waiting card holds the 9 earlier rows; approve or dismiss it and ask again.',
+  ])
+    assert.equal(heldBackMisdescribed(text, heldBack()), undefined, text);
+  assert.equal(heldBackMisdescribed('The card holds 10 rows in total.', []), undefined);
+});
+
+test('a waiting card from an earlier turn must be named for what it holds, and only holds that', () => {
+  const cards = waitingRowChanges([{ table: 'Fruit ledger', input: nineRows }]);
+  assert.equal(cards[0].summary, 'add 9 rows (Apple 1, Banana 2, Cherry 3, …) to');
+  assert.equal(waitingCardMisdescribed('Please approve the card first.', cards)?.status, 'continue');
+  assert.equal(waitingCardMisdescribed('The card for 10 rows is waiting.', cards)?.status, 'continue');
+  assert.equal(
+    waitingCardMisdescribed('The card to add 9 rows is still waiting; approve or dismiss it.', cards),
+    undefined,
+  );
+  assert.equal(waitingCardMisdescribed('The card with Apple and Banana is still waiting.', cards), undefined);
+  assert.equal(waitingCardMisdescribed('Please approve the card first.', []), undefined);
+});
+
+test('only a row request for the table of a waiting card is held to that card', () => {
+  const cards = waitingRowChanges([{ table: 'Fruit ledger', input: nineRows }]);
+  assert.equal(cardsForRequest(cards, 'Add one more row: Lime 10.').length, 1);
+  assert.equal(cardsForRequest(cards, 'Add one row to the fruit ledger table: Lime 10.').length, 1);
+  assert.equal(cardsForRequest(cards, 'Add one row to the Other Ledger table, Item and Amount: Rose 3.').length, 0);
+  assert.equal(cardsForRequest(cards, 'What is waiting in this chat?').length, 1);
+});
+
+test('a reply that says a waiting card already covers a new row request is sent back to make the change', () => {
+  const earlier = 'Add these nine rows to Fruit ledger: Apple 1, Banana 2, Cherry 3';
+  const request = 'Add one more row: Lime 10.';
+  for (const text of [
+    'Lime 10 is already on the approval card with the others.',
+    'The card covers all 10 rows, so approve it and they will all be added.',
+  ])
+    assert.equal(waitingCardStretched(text, [], request, earlier)?.status, 'continue', text);
+  for (const text of [
+    'The card holds only the 9 earlier rows. Approve or dismiss it, then ask again for Lime 10.',
+    'Should I add Lime 10 once you approve the card?',
+  ])
+    assert.equal(waitingCardStretched(text, [], request, earlier), undefined, text);
+  assert.equal(waitingCardStretched('Lime 10 is already on the card.', heldBack(), request, earlier), undefined);
+});
+
+test('a row request answered without trying the row change is sent back while a card waits', () => {
+  const cards = waitingRowChanges([{ table: 'Fruit ledger', input: nineRows }]);
+  const tableCard = [
+    {
+      kind: 'results',
+      results: [
+        {
+          id: 'p',
+          name: 'tables_propose',
+          output: '{"id":"p","status":"pending"}',
+          cardReceipt: reviewCardReceipt('tables_propose', { id: 'p', status: 'pending' }),
+          error: false,
+        },
+      ],
+    },
+  ];
+  assert.equal(rowRequestSkipped([], 'Add one more row: Lime 10.', cards)?.status, 'continue');
+  assert.equal(rowRequestSkipped(tableCard, 'Add one more row: Lime 10.', cards)?.status, 'continue');
+  assert.equal(rowRequestSkipped(tableCard, 'Create a new table with a row for Lime 10.', cards), undefined);
+  assert.equal(rowRequestSkipped(heldBack(), 'Add one more row: Lime 10.', cards), undefined);
+  assert.equal(rowRequestSkipped([], 'Add one more row: Lime 10.', []), undefined);
+  assert.equal(rowRequestSkipped([], 'What is waiting?', cards), undefined);
+  const other = 'Add one row to the Other Ledger table, Item and Amount: Rose 3.';
+  const skipped = rowRequestSkipped([], other, cardsForRequest(cards, other), cards);
+  assert.equal(skipped?.status, 'continue');
+  assert.match(skipped.reason, /another table[\s\S]*"Fruit ledger" only/);
+  assert.equal(rowRequestSkipped(heldBack(), other, [], cards), undefined);
+});
+
+test('a reply that blames access or a failure while a card waits and nothing failed is rewritten', () => {
+  const text = 'I could not add it because you do not have permission. Contact your admin.';
+  assert.equal(inventedFailure(text, [], 1)?.status, 'continue');
+  assert.equal(inventedFailure(text, [], 0), undefined);
+  const denied = [
+    { kind: 'results', results: [{ id: 'd', name: 'rows_create', output: '{"error":"access-denied"}', error: true }] },
+  ];
+  assert.equal(inventedFailure(text, denied, 1), undefined);
+  assert.equal(inventedFailure('The card to add 9 rows is still waiting.', [], 1), undefined);
+});
+
+test('the fixed reply for an invented card names the waiting card when one is known', () => {
+  assert.equal(
+    noCardReply(1, { table: 'Fruit ledger', summary: 'add 9 rows (Apple 1, Banana 2, Cherry 3, …) to' }),
+    'No new approval card is waiting from this reply. A card to add 9 rows (Apple 1, Banana 2, Cherry 3, …) to "Fruit ledger" is still waiting for your approval in this chat: approve or dismiss it there first.',
+  );
 });

@@ -283,6 +283,8 @@ export type ConversationReply = (input: {
   chatFiles?: boolean;
   /** Counts the requester's undecided review and approval cards in this chat, so a reply may point to one. */
   waitingCards?: () => Promise<number>;
+  /** The requester's undecided row cards from earlier turns in this chat, newest first, with their table and proposed change. */
+  waitingRowCards?: () => Promise<{ table: string; input: unknown }[]>;
   retainedSources?: SourceDependency[];
   /** The sources streamed text may draw on besides tool results, read when the text is saved for a stop. */
   previewSources?: () => SourceDependency[];
@@ -2049,6 +2051,20 @@ export function createConversationExecutor(
           const drafts = await readableDrafts(tx, fence, source.requester);
           return drafts.readable + earlierProposals;
         });
+      // The requester's undecided row cards from earlier turns in this chat, newest first, so a reply can say what each one holds.
+      const waitingRowCards = () =>
+        transaction(fence.workspaceId, async tx =>
+          (
+            await tx.client.query<{ table: string | null; input: unknown }>(
+              `SELECT g.definition->>'label' AS table, d.proposal->'input' AS input FROM ${table(tx, 'tf_chat_authoring_drafts')} d
+                LEFT JOIN ${table(tx, 'tf_table_generations')} g ON g.table_id::text=d.proposal->'input'->>'tableId' AND g.state='active'
+                WHERE d.conversation_id=$1 AND d.membership_id=$2 AND d.user_id=$3 AND d.turn_id<>$4 AND d.proposal->>'kind'='row'
+                AND NOT EXISTS (SELECT 1 FROM ${table(tx, 'tf_chat_authoring_decisions')} c WHERE c.draft_id=d.id)
+                ORDER BY d.created_at DESC LIMIT 3`,
+              [fence.conversationId, source.requester.membershipId, source.requester.userId, fence.turnId],
+            )
+          ).rows.flatMap(row => (row.table ? [{ table: row.table, input: row.input }] : [])),
+        );
       const currentPersonalMemory = () =>
         staged('memory', () =>
           transaction(fence.workspaceId, async tx => {
@@ -2797,6 +2813,7 @@ export function createConversationExecutor(
             earlierMessages: refersToEarlierMessages(prepared),
             ...(images ? { chatFiles: true } : {}),
             waitingCards,
+            waitingRowCards,
             retainedSources: mergeSources(inheritedSources),
             previewSources: () => mergeSources([...inheritedSources, ...fileSources]),
             describedHandles,

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { earlierRowWrites, namesTable } from '../src/chat-row-guard.ts';
+import { earlierRowWrites, namesTable, waitingCardChange } from '../src/chat-row-guard.ts';
 
 test('a chat names a table by its title, ignoring case, punctuation and a plural s', () => {
   assert.equal(namesTable(['Add these rows to qa-rv3-mig.'], 'qa-rv3-mig'), true);
@@ -63,4 +63,28 @@ test('earlier direct creates in the same table keep the values they sent, so the
     { recordId: 'p2', values: value('Plum') },
     { recordId: 'l1', values: value('Lime') },
   ]);
+});
+
+test('a waiting row card is described by the change its saved call holds', () => {
+  const field = '00000000-0000-4000-8000-000000000001';
+  const row = value => ({ values: { [field]: { kind: 'text', value } } });
+  assert.deepEqual(
+    waitingCardChange({ tool: 'rows.create.batch', rows: ['Apple 1', 'Banana 2', 'Cherry 3', 'Date 4'].map(row) }),
+    {
+      tool: 'rows.create.batch',
+      rows: 4,
+      sample: ['Apple 1', 'Banana 2', 'Cherry 3'],
+      summary: 'add 4 rows (Apple 1, Banana 2, Cherry 3, …) to',
+    },
+  );
+  assert.equal(
+    waitingCardChange({ tool: 'rows.create', values: row('Lime 10').values }).summary,
+    'add 1 row (Lime 10) to',
+  );
+  assert.equal(
+    waitingCardChange({ tool: 'rows.update', values: row('Kiwi 4').values }).summary,
+    'change 1 row (Kiwi 4) in',
+  );
+  assert.equal(waitingCardChange({ tool: 'rows.delete' }).summary, 'delete 1 row from');
+  assert.equal(waitingCardChange({ tool: 'rows.create', values: { name: 'not a field id' } }).summary, 'add 1 row to');
 });
