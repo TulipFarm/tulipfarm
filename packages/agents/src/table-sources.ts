@@ -19,6 +19,19 @@ export async function requireTableSources(
   actor: HumanActor,
   sources: readonly SourceDependency[],
 ) {
+  return checkTableSources(tx, actor, sources, false);
+}
+
+export async function readTableSources(tx: AgentTransaction, actor: HumanActor, sources: readonly SourceDependency[]) {
+  return checkTableSources(tx, actor, sources, true);
+}
+
+async function checkTableSources(
+  tx: AgentTransaction,
+  actor: HumanActor,
+  sources: readonly SourceDependency[],
+  readOnly: boolean,
+) {
   await lockAuthorization(tx);
   await requireNoMcpDerived(tx, sources);
   // The storage worker cannot read these sources' tables, so a definer function checks them, at any depth.
@@ -46,7 +59,20 @@ export async function requireTableSources(
     )
       await allowed(source);
     // The requester reviews the exact change before it is saved, so their own personal memory may inform it.
-    else await requireDraftSources(tx, actor, [source], new Set(), undefined, false, true, undefined, allowed);
+    else
+      await requireDraftSources(
+        tx,
+        actor,
+        [source],
+        new Set(),
+        undefined,
+        false,
+        true,
+        undefined,
+        allowed,
+        false,
+        readOnly,
+      );
   }
 }
 

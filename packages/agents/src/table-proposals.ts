@@ -1,6 +1,6 @@
 import { createTableProposals, type TableProposalOptions } from '@tulipfarm/tables/proposals';
 import { generationProposalData } from '@tulipfarm/tables/store';
-import { readableTableFiles, requireTableSources } from './table-sources.ts';
+import { readableTableFiles, readTableSources, requireTableSources } from './table-sources.ts';
 import {
   createTableImports,
   TableImportError,
@@ -189,6 +189,7 @@ export function tableProposalOptions(
     data: generationProposalData,
     ...(objects ? { imports: createTableImports({ ...objects, requireSources: requireTableSources }) } : {}),
     requireSources: requireTableSources,
+    readSources: readTableSources,
     readableFiles: readableTableFiles,
   };
 }

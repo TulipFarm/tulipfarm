@@ -77,8 +77,13 @@ export function createConversationRequests(runtime: ConversationRuntime) {
     return row;
   }
 
-  async function requireRequestSources(tx: AuthorizationTransaction, actor: HumanActor, row: RequestRow) {
-    await requireConversationMcpSources(tx, actor, row.conversation_id);
+  async function requireRequestSources(
+    tx: AuthorizationTransaction,
+    actor: HumanActor,
+    row: RequestRow,
+    readOnly = false,
+  ) {
+    await requireConversationMcpSources(tx, actor, row.conversation_id, undefined, readOnly);
     if (row.internal_id !== null) return;
     const step = z
       .object({ sources: sourceDependenciesSchema })
@@ -91,16 +96,17 @@ export function createConversationRequests(runtime: ConversationRuntime) {
         ).rows[0],
       );
     if (!step.success) throw new AccessDenied();
-    await requireChatReviewSources(tx, actor, step.data.sources);
+    await requireChatReviewSources(tx, actor, step.data.sources, false, readOnly);
   }
   async function readableRequest(
     tx: AuthorizationTransaction,
     workspaceId: string,
     actor: HumanActor,
     row: RequestRow,
+    readOnly = false,
   ) {
     try {
-      await requireRequestSources(tx, actor, row);
+      await requireRequestSources(tx, actor, row, readOnly);
       return true;
     } catch (error) {
       if (error instanceof SourceAuthorizationUnavailable) throw error;
@@ -353,7 +359,7 @@ export function createConversationRequests(runtime: ConversationRuntime) {
       const actor = await resolveHuman(tx, userId);
       await owned(tx, actor, chatId);
       const row = await request(tx, chatId, requestId);
-      if (!(await readableRequest(tx, workspaceId, actor, row))) return null;
+      if (!(await readableRequest(tx, workspaceId, actor, row, true))) return null;
       if (row.status === 'pending' && row.expired) await settle(tx, row, 'expired');
       const result = z
         .object({

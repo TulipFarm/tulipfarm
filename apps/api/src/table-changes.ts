@@ -3,6 +3,7 @@ import type { Pool } from 'pg';
 import { z } from 'zod';
 import {
   AccessDenied,
+  SkillUnavailable,
   currentMember,
   definitionGrantPredicate,
   lockAuthorization,
@@ -154,6 +155,7 @@ export function registerTableChanges(
     const user = authenticateRoutes(routes, dependencies.auth, { origin: authConfig().webOrigin });
     routes.setErrorHandler((error, request, reply) => {
       if (requestBoundaryError(error, reply)) return;
+      if (error instanceof SkillUnavailable) return reply.code(409).send({ error: error.code });
       if (error instanceof AccessDenied)
         return reply.code(404).send({
           error: request.routeOptions.url?.includes('/workspaces/:workspaceId/tables')

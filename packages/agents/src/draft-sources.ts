@@ -33,6 +33,7 @@ export async function requireDraftSources(
   slackTurn?: (eventId: string) => Promise<void>,
   privateConversation?: (source: SourceDependency) => Promise<void>,
   chatReview = false,
+  readOnly = false,
 ): Promise<void> {
   await currentMember(tx, actor);
   await lockAuthorization(tx);
@@ -45,7 +46,7 @@ export async function requireDraftSources(
     if (ownMemory && source.kind === 'personal-memory') await requirePersonalMemorySource(tx, actor, source);
     else if (slackTurn && source.kind === 'shared-slack-turn') await slackTurn(source.eventId);
     else if (privateConversation && source.kind === 'private-conversation') await privateConversation(source);
-    else await requireProtectedSource(tx, actor, source, runId, publicOnly);
+    else await requireProtectedSource(tx, actor, source, runId, publicOnly, readOnly);
     if (source.kind === 'agent-definition') await requireAgentPermission(tx, actor, source.agentId, 'read');
   }
 }

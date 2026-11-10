@@ -19,6 +19,7 @@ import { createConversationExecutor } from '@tulipfarm/conversations/runtime';
 import { createChatTools } from '@tulipfarm/agents/tools';
 import { registerConversations } from '../src/conversations.ts';
 import { createTableCleanup } from '@tulipfarm/tables/cleanup';
+import { SkillUnavailable } from '@tulipfarm/access';
 
 test('table change HTTP uses real sessions, requester ownership, origin enforcement and confirmation credentials', async t => {
   const db = await fixture();
@@ -105,12 +106,18 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       ],
     },
   );
-  let credentialReads = 0;
+  let credentialReads = 0,
+    skillDisabled = false;
+  const proposalOptions = tableProposalOptions(runtime);
   await app.register(swagger, { openapi: { info: { title: 'Table proposals', version: '1' } } });
   await app.register(
     async routes =>
       registerTableChanges(routes, {
-        ...tableProposalOptions(runtime),
+        ...proposalOptions,
+        requireSources: async (...args) => {
+          if (skillDisabled) throw new SkillUnavailable();
+          await proposalOptions.requireSources(...args);
+        },
         auth,
         identity: pool,
         resolveConfirmationCredential: async () => {
@@ -162,6 +169,14 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
     404,
   );
   assert.equal(credentialReads, 0);
+  skillDisabled = true;
+  const blockedRead = await app.inject({ url, headers });
+  assert.equal(blockedRead.statusCode, 200, blockedRead.body);
+  assert.equal(blockedRead.json().blockedReason, 'skill-unavailable');
+  const blockedDecision = await app.inject({ method: 'PUT', url: `${url}/decision`, headers, payload });
+  assert.equal(blockedDecision.statusCode, 409, blockedDecision.body);
+  assert.deepEqual(blockedDecision.json(), { error: 'skill-unavailable' });
+  skillDisabled = false;
   assert.equal(
     (
       await app.inject({

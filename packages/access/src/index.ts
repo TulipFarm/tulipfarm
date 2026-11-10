@@ -65,6 +65,9 @@ export class AccessDenied extends Error {
 }
 
 export class SourceAuthorizationUnavailable extends AccessDenied {}
+export class SkillUnavailable extends AccessDenied {
+  readonly code = 'skill-unavailable';
+}
 /** Refuses another member's personal memory, so callers can say why instead of reporting a missing resource. */
 export class PersonalMemoryDenied extends AccessDenied {}
 

@@ -11,6 +11,8 @@ import {
 } from './review-contracts';
 
 const messages: Record<string, string> = {
+  'skill-unavailable':
+    'This change uses a skill that is disabled or that you no longer have access to. Ask a workspace admin to enable it or give you access, then try again.',
   'proposal-stale':
     'Affected data or permissions changed. Ask the assistant for a new proposal and review its updated effects.',
   'proposal-expired': 'This proposal expired. Ask the assistant for a new proposal before approving.',
@@ -23,7 +25,7 @@ const messages: Record<string, string> = {
   'table-name-unavailable': 'A linked table is not ready. Wait for its setup to finish, then retry.',
 };
 
-export function proposalApi(workspaceId: string, chatId: string, proposalId: string) {
+export function proposalApi(workspaceId: string, chatId: string, proposalId: string, admin = false) {
   const base = `${apiOrigin}/v1/workspaces/${encodeURIComponent(workspaceId)}/conversations/${encodeURIComponent(chatId)}/table-changes/${encodeURIComponent(proposalId)}`;
   async function request(path: string, signal: AbortSignal, body?: ProposalCommand) {
     const response = await jsonResponse(`${base}${path}`, {
@@ -38,7 +40,9 @@ export function proposalApi(workspaceId: string, chatId: string, proposalId: str
       throw new TableRequestError(
         response.status,
         code,
-        messages[code] ??
+        (admin && code === 'skill-unavailable'
+          ? 'Enable the skill or give yourself access in Skills, then try again.'
+          : messages[code]) ??
           memberMessages[code] ??
           (response.status === 401
             ? 'Your session expired. Sign in to continue.'

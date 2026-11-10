@@ -260,6 +260,7 @@ export const proposalViewSchema = z.discriminatedUnion('content', [
     content: z.literal('available'),
     manifest: proposalManifestSchema,
     freshness: z.enum(['current', 'stale']),
+    blockedReason: z.literal('skill-unavailable').optional(),
     unavailableFileIds: z.array(z.uuid()).optional(),
   }),
   proposalStatusSchema.extend({
