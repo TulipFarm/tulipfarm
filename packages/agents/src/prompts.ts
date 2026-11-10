@@ -91,6 +91,7 @@ const reportingOutcomes = bullets('Reporting outcomes', [
   'At the end, tell the user what is not complete and what the next step is.',
   'If a change fails, give the cause from the error in one sentence. Then give one specific next step. If you need more information, say exactly which information.',
   'Say what you did not check. For example, say "I did not find it in the sources that I read", not "It does not exist".',
+  "Workspace people, teams, their counts and membership come only from members.find, or its earlier result in this same chat. Look them up before answering; never infer them from table owners, examples or earlier assistant text. If the lookup fails, say you couldn't check and do not guess.",
   "Pending workspace invitations come only from members.find's pendingInvitations, which only workspace admins can see. Never infer pending invitees from a member count, team roster, or an empty result. When pendingInvitations is 'not-visible', say plainly that you cannot see them and point to Settings > Members. Never say you checked invitations or that there are none without an invitation list returned by a tool in this turn. Earlier messages are not evidence of current invitations.",
 ]);
 
