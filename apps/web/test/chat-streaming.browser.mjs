@@ -84,6 +84,7 @@ test('chat reply streaming and polling fallback in Chromium', { timeout: 240000 
       'cache-control': 'no-cache',
     });
     response.write(state.events.body || ': connected\n\n');
+    state.events.send = body => response.write(body);
     state.events.disconnect = () => response.end();
     response.on('close', () => response.end());
   });
@@ -388,20 +389,75 @@ test('chat reply streaming and polling fallback in Chromium', { timeout: 240000 
     await scenario(
       'a quiet stream with no done event checks saved completion after one second',
       async ({ page, state, turnId, complete, open }) => {
+        await page.clock.install();
         const answer = 'The saved reply is ready.';
+        const beginning = 'The saved reply';
         state.events = {
           status: 200,
-          body: `event: text\ndata: ${JSON.stringify({ turnId, generation: 0, epoch: 1, step: 0, seq: 0, offset: 0, text: answer, reset: true })}\n\n`,
+          body: `event: text\ndata: ${JSON.stringify({ turnId, generation: 0, epoch: 1, step: 0, seq: 0, offset: 0, text: beginning, reset: true })}\n\n`,
         };
         await open();
-        await page.getByText(answer, { exact: true }).waitFor();
-        await delay(200);
-        const reads = state.historyReads;
-        complete(answer);
-        await page.getByRole('button', { name: 'Stop reply' }).waitFor({ state: 'detached', timeout: 1800 });
-        assert.equal(state.historyReads - reads, 1);
+        await page.getByText(beginning, { exact: true }).waitFor();
+        const now = await page.evaluate(() => Date.now());
+        await page.clock.pauseAt(new Date(now + 1000));
+        try {
+          state.events.send(
+            `event: text\ndata: ${JSON.stringify({ turnId, generation: 0, epoch: 1, step: 0, seq: 1, offset: 0, text: answer, reset: true })}\n\n`,
+          );
+          await page.getByText(answer, { exact: true }).waitFor();
+          await delay(100);
+          const reads = state.historyReads;
+          complete(answer);
+          await page.clock.fastForward(999);
+          assert.equal(state.historyReads, reads, 'the quiet delay starts at the latest actual text');
+          await page.clock.fastForward(1);
+          for (let i = 0; i < 20 && state.historyReads === reads; i++) {
+            await page.clock.runFor(1);
+            await delay(25);
+          }
+          assert.equal(state.historyReads - reads, 1, 'one saved-history check starts after one quiet second');
+        } finally {
+          await page.clock.resume();
+        }
+        await page.getByRole('button', { name: 'Stop reply' }).waitFor({ state: 'detached' });
         assert.equal(state.eventRequests, 1);
         assert.equal(await page.getByText(answer, { exact: true }).count(), 1);
+      },
+    );
+
+    await scenario(
+      'thirty seconds of steady streamed text never shows an unconfirmed reply',
+      async ({ page, state, turnId, complete, open }) => {
+        await page.clock.install();
+        let answer = 'The reply keeps growing';
+        const text = seq =>
+          `event: text\ndata: ${JSON.stringify({ turnId, generation: 0, epoch: 1, step: 0, seq, offset: 0, text: answer, reset: true })}\n\n`;
+        state.events = { status: 200, body: text(0) };
+        await open();
+        await page.getByText(answer, { exact: true }).waitFor();
+        const notice = page.getByRole('alert').filter({ hasText: "We couldn't confirm whether this reply finished." });
+        const now = await page.evaluate(() => Date.now());
+        await page.clock.pauseAt(new Date(now + 1000));
+        try {
+          for (let chunk = 1; chunk <= 6; chunk++) {
+            for (let second = 0; second < 5; second++) {
+              await page.clock.fastForward(1000);
+              await delay(50);
+              assert.equal(await notice.count(), 0, 'a steady stream is not an unconfirmed reply');
+            }
+            answer += `, part ${chunk}`;
+            state.events.send(text(chunk));
+            await page.getByText(answer, { exact: true }).waitFor();
+          }
+          await screenshot(page, 'steady-stream-running-after');
+        } finally {
+          await page.clock.resume();
+        }
+        complete(answer);
+        await page.clock.fastForward(1000);
+        await page.getByRole('button', { name: 'Stop reply', exact: true }).waitFor({ state: 'detached' });
+        assert.equal(await page.getByText(answer, { exact: true }).count(), 1);
+        await screenshot(page, 'steady-stream-after');
       },
     );
 
@@ -433,6 +489,12 @@ test('chat reply streaming and polling fallback in Chromium', { timeout: 240000 
           await page.getByRole('list', { name: 'Messages', exact: true }).locator('[aria-busy="true"]').count(),
           0,
         );
+        state.events.send(
+          `event: text\ndata: ${JSON.stringify({ turnId, generation: 0, epoch: 2, step: 0, seq: 1, offset: 0, text: answer, reset: true })}\n\n`,
+        );
+        await delay(100);
+        await page.clock.runFor(1);
+        assert.equal(await notice.count(), 1, 'replaying the same answer does not renew the recovery budget');
         await page.clock.fastForward(60_000);
         assert.equal(state.historyReads - reads, recoveryReads, 'automatic checks stop at their budget');
         assert.equal(await page.getByLabel('Message', { exact: true }).innerText(), 'Keep this draft');
@@ -482,7 +544,14 @@ test('chat reply streaming and polling fallback in Chromium', { timeout: 240000 
           state.events.ready = reconnect.promise;
           await page.clock.fastForward(60_000);
           assert.equal(state.historyReads, reads, 'hidden tabs do not poll history');
+          const returningAt = await page.evaluate(() => Date.now());
           await visibility('visible');
+          for (let i = 0; i < 20 && state.historyReads === reads; i++) {
+            await page.clock.runFor(10);
+            await delay(25);
+          }
+          assert.ok(state.historyReads > reads, 'foreground return immediately requests durable history');
+          assert.ok((await page.evaluate(() => Date.now())) - returningAt <= 200, 'the read starts within 200 ms');
           for (let i = 0; i < 50; i++) {
             await page.clock.runFor(1);
             await delay(25);

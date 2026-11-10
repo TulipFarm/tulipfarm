@@ -3,12 +3,14 @@ import type { ConversationHistory } from './conversation-api';
 import type { ConversationStreamSnapshot } from './conversation-stream';
 import { reconcileLiveTools } from './live-tools.ts';
 
-type ReplyCheck = { key: string | null; revision: string; recovery: boolean };
+type ReplyCheck = { key: string | null; progress: ReadonlyMap<string, number>; recovery: boolean };
 const recoveryDelays = [1000, 2000, 5000];
+const statusPosition = { thinking: 0, tool: 1, finishing: 2, done: 3 };
 
-/** Recovery reads have one budget per saved attempt, not a new budget for every text chunk or reconnect. */
+/** A silent period has a bounded budget. Only new work, not replayed state, renews it. */
 export function createReplyResync(refresh: () => Promise<void>) {
-  let input: ReplyCheck = { key: null, revision: '', recovery: false };
+  let input: ReplyCheck = { key: null, progress: new Map(), recovery: false };
+  const observed = new Map<string, number>();
   let timer: ReturnType<typeof setTimeout> | undefined;
   let checks = 0;
   let checking = false;
@@ -69,8 +71,16 @@ export function createReplyResync(refresh: () => Promise<void>) {
       };
     },
     update(next: ReplyCheck) {
-      if (next.key === input.key && next.revision === input.revision && next.recovery === input.recovery) return;
-      if (next.key !== input.key) {
+      const newAttempt = next.key !== input.key;
+      if (newAttempt) observed.clear();
+      let advanced = false;
+      for (const [signal, position] of next.progress) {
+        if (position <= (observed.get(signal) ?? -1)) continue;
+        observed.set(signal, position);
+        advanced = true;
+      }
+      if (!newAttempt && !advanced && next.recovery === input.recovery) return;
+      if (newAttempt || advanced) {
         checks = 0;
         publish(false);
       }
@@ -80,11 +90,15 @@ export function createReplyResync(refresh: () => Promise<void>) {
       schedule();
     },
     setVisible(next: boolean) {
+      if (next === visible) return;
+      const returning = !visible && next;
       visible = next;
       clear();
-      schedule();
+      if (returning) void check();
+      else schedule();
     },
     setOnline(next: boolean) {
+      if (next === online) return;
       online = next;
       clear();
       schedule();
@@ -96,7 +110,7 @@ export function createReplyResync(refresh: () => Promise<void>) {
       void check();
     },
     stop() {
-      input = { key: null, revision: '', recovery: false };
+      input = { key: null, progress: new Map(), recovery: false };
       clear();
     },
   };
@@ -119,18 +133,27 @@ export function useReplyResync(
   const progress = update?.generation === turn?.generation ? update : undefined;
   const running = message?.tools.some(tool => (tool.activityStatus ?? tool.status) === 'running');
   const key = turn ? `${turn.id}:${turn.generation}` : null;
-  const revision = JSON.stringify([
-    turn?.status,
-    preview?.identity,
-    preview?.seq,
-    progress,
-    message?.tools.map(tool => [tool.id, tool.status, tool.activityStatus]),
-  ]);
+  const activity = useMemo(() => {
+    // Transport epochs and replayed prefixes are not new work.
+    const activity = new Map<string, number>();
+    if (preview?.text) activity.set(`text:${preview.identity.step}`, preview.text.length);
+    if (progress) {
+      activity.set('step', progress.step);
+      activity.set(`round:${progress.step}`, progress.round);
+      if (progress.status) activity.set(`status:${progress.step}:${progress.round}`, statusPosition[progress.status]);
+      activity.set(`tools:${progress.step}`, progress.toolRounds ?? 0);
+    }
+    for (const tool of stream.tools?.values() ?? []) {
+      if (tool.turnId === turn?.id && tool.generation === turn.generation)
+        activity.set(`tool:${tool.id}`, tool.status === 'running' ? 1 : 2);
+    }
+    return activity;
+  }, [preview, progress, stream.tools, turn?.id, turn?.generation]);
   const needsRecovery = stream.status !== 'open' || (!!preview?.text && !running && progress?.status !== 'done');
   useEffect(() => {
     const sync = () => {
-      recovery.setVisible(document.visibilityState !== 'hidden');
       recovery.setOnline(navigator.onLine);
+      recovery.setVisible(document.visibilityState !== 'hidden');
     };
     sync();
     document.addEventListener('visibilitychange', sync);
@@ -144,8 +167,8 @@ export function useReplyResync(
     };
   }, [recovery]);
   useEffect(() => {
-    recovery.update({ key, revision, recovery: needsRecovery });
-  }, [recovery, key, revision, needsRecovery]);
+    recovery.update({ key, progress: activity, recovery: needsRecovery });
+  }, [recovery, key, activity, needsRecovery]);
   const uncertain = useSyncExternalStore(recovery.subscribe, recovery.snapshot, recovery.snapshot);
   return { uncertain, retryStatus: recovery.retry };
 }

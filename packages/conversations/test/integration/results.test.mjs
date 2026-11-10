@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import { conversationFixture } from '../fixture.mjs';
 import { createConversationExecutor } from '../../src/runtime.ts';
 import { createConversationRequests } from '../../src/requests.ts';
+import { ConversationConflict } from '../../src/index.ts';
 import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 
 async function send(f, chatId, text = 'Continue') {
@@ -135,6 +136,57 @@ test('answers persist lineage atomically, inherit sources after runtime restart,
     await f.close();
   }
 });
+
+test(
+  'stale Stop requests preserve saved completion and cannot cancel a newer generation',
+  { timeout: 60000 },
+  async t => {
+    t.mock.method(globalThis, 'fetch', () => assert.fail('This test uses an injected responder, not network requests'));
+    const f = await conversationFixture();
+    try {
+      const chatId = randomUUID();
+      await f.store.create(f.workspace.id, f.workspace.userId, { chatId, commandId: randomUUID() });
+      const work = await send(f, chatId);
+      const executor = createConversationExecutor(f.runtime, async () => ({ text: 'The saved answer.', sources: [] }));
+      assert.equal(await executor.process(work), 'completed');
+      const saved = await f.store.history(f.workspace.id, f.workspace.userId, chatId);
+      const receipts = await results(f);
+      assert.equal(saved.messages[0].turn.status, 'completed');
+      assert.equal(saved.messages[0].turn.generation, 0);
+      assert.equal(saved.messages[1].parts[0].text, 'The saved answer.');
+      await assert.rejects(
+        f.store.cancel(f.workspace.id, f.workspace.userId, chatId, work.turnId, {
+          commandId: randomUUID(),
+          expectedGeneration: 0,
+        }),
+        error => error instanceof ConversationConflict && error.code === 'turn-conflict',
+      );
+      assert.deepEqual(await f.store.history(f.workspace.id, f.workspace.userId, chatId), saved);
+      assert.deepEqual(await results(f), receipts);
+
+      const next = await send(f, chatId);
+      await f.db.platform.query(`UPDATE ${f.table('tf_conversation_turns')} SET generation=1 WHERE id=$1`, [
+        next.turnId,
+      ]);
+      await assert.rejects(
+        f.store.cancel(f.workspace.id, f.workspace.userId, chatId, next.turnId, {
+          commandId: randomUUID(),
+          expectedGeneration: 0,
+        }),
+        error => error instanceof ConversationConflict && error.code === 'turn-conflict',
+      );
+      assert.deepEqual(
+        await f.store.cancel(f.workspace.id, f.workspace.userId, chatId, next.turnId, {
+          commandId: randomUUID(),
+          expectedGeneration: 1,
+        }),
+        { turnId: next.turnId, generation: 2, status: 'cancelled' },
+      );
+    } finally {
+      await f.close();
+    }
+  },
+);
 
 test('cancelled and malformed replies publish neither an answer nor a source receipt', async () => {
   const f = await conversationFixture();
