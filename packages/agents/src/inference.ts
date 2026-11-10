@@ -1511,7 +1511,12 @@ function nativeStep(route: CapableRoute, body: unknown): NativeStep {
     rejection,
   });
   const step = (text: string, calls: NativeCall[], raw: unknown): NativeStep => {
-    const cleaned = withoutTrailingControlMarker(text, false, route.model);
+    const cleaned = withoutTrailingControlMarker(text);
+    if (cleaned !== text)
+      log('info', 'inference', 'reply_marker_stripped', {
+        'gen_ai.request.model': route.model,
+        marker_stripped: true,
+      });
     return cleaned.trim() || calls.length ? { kind: 'step', text: cleaned, calls, raw } : invalid('empty');
   };
   switch (route.provider) {
@@ -3041,7 +3046,6 @@ async function sendChatRequest<T>(
         });
         const result = await readModelResponse(response, streamFormat, {
           onText,
-          model: target.model,
           onFirstToken: report.firstToken,
           onEvent: () => events++,
         }).catch((error: unknown) => {

@@ -837,6 +837,7 @@ type Event =
   | 'dispatch_failed'
   | 'call_completed'
   | 'call_failed'
+  | 'reply_marker_stripped'
   | 'task_status_changed';
 type Level = 'debug' | 'info' | 'warn' | 'error';
 const severity = {

@@ -50,6 +50,41 @@ test('a stream restores an unfinished marker prefix when the answer ends', async
   assert.deepEqual(seen, ['Answer.', 'Answer.\nTU']);
 });
 
+test('a reply logs one content-free marker event after the stream ends', async t => {
+  const logs = [];
+  t.mock.method(process.stdout, 'write', line => {
+    logs.push(JSON.parse(line));
+    return true;
+  });
+  const content = ['Private answer.\n', ...'TULIPMEM', '\n', ' '].map(fragment => ({
+    choices: [{ index: 0, delta: { content: fragment }, finish_reason: null }],
+  }));
+  provider(t, [
+    () =>
+      new Response(
+        [...content, { choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] }]
+          .map(chunk => `data: ${JSON.stringify(chunk)}\n\n`)
+          .join(''),
+        { headers: { 'content-type': 'text/event-stream' } },
+      ),
+  ]);
+  const result = await inferWithTools(
+    routes.azure,
+    [{ role: 'user', text: 'Hi' }],
+    () => assert.fail('No tool call expected'),
+    undefined,
+    false,
+    null,
+    { answerText: () => assert.ok(!logs.some(log => log.event === 'reply_marker_stripped')) },
+  );
+  assert.deepEqual(result, { text: 'Private answer.' });
+  const events = logs.filter(log => log.marker_stripped);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].event, 'reply_marker_stripped');
+  assert.equal(events[0]['gen_ai.request.model'], routes.azure.model);
+  assert.doesNotMatch(JSON.stringify(events), /Private answer|TULIPMEM/);
+});
+
 const known = { kind: 'known', input: 10, output: 7, cacheRead: 3, cacheWrite: 0, cacheWrite5m: 0, cacheWrite1h: 0 };
 const routes = {
   forced: {

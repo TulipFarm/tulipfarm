@@ -32,15 +32,14 @@ test('streaming withholds split trailing prefixes but restores ordinary words an
   assert.equal(withoutTrailingControlMarker('Answer.\nTuesday', true), 'Answer.\nTuesday');
 });
 
-test('marker telemetry identifies the model but never includes reply text', t => {
+test('stripping and stream-prefix withholding have no logging side effects', t => {
   const lines = [];
   t.mock.method(process.stdout, 'write', line => {
-    lines.push(JSON.parse(line));
+    lines.push(line);
     return true;
   });
-  withoutTrailingControlMarker('Private answer.\nTULIPMEM', false, 'fixture-model');
-  assert.equal(lines.length, 1);
-  assert.equal(lines[0]['gen_ai.request.model'], 'fixture-model');
-  assert.equal(lines[0].marker_stripped, true);
-  assert.doesNotMatch(JSON.stringify(lines), /Private answer|TULIPMEM/);
+  withoutTrailingControlMarker('Private answer.\nTULIPMEM');
+  withoutTrailingControlMarker('Private answer.\nTULIPMEM', true);
+  withoutTrailingControlMarker('Private answer.\nTULIP', true);
+  assert.deepEqual(lines, []);
 });

@@ -489,7 +489,6 @@ export async function readModelResponse(
     onText: ((text: string) => void) | undefined;
     onFirstToken?: () => void;
     onEvent?: () => void;
-    model?: string;
   },
 ): Promise<StreamedResponse> {
   if (!response.ok) return { body: await rejectionBody(response), error: null };
@@ -507,7 +506,7 @@ export async function readModelResponse(
     if (!options.onText) continue;
     const raw = assembler.visible();
     if (raw === undefined) continue;
-    const text = withoutTrailingControlMarker(raw, true, options.model);
+    const text = withoutTrailingControlMarker(raw, true);
     if (text !== shown) {
       shown = text;
       options.onText(text);
@@ -515,7 +514,7 @@ export async function readModelResponse(
   }
   const final = assembler.visible();
   if (options.onText && final !== undefined) {
-    const text = withoutTrailingControlMarker(final, false, options.model);
+    const text = withoutTrailingControlMarker(final);
     if (text !== shown) options.onText(text);
   }
   return assembler.result();
