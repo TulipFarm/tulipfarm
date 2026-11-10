@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn, execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { once } from 'node:events';
 import { test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { chromium } from 'playwright';
@@ -61,13 +62,25 @@ function fixture() {
 }
 
 test('existing-agent instructions save and activation in the real app', { timeout: 240_000 }, async t => {
-  const vite = spawn('pnpm', ['exec', 'vite', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
-    cwd: new URL('..', import.meta.url),
-    stdio: 'ignore',
-  });
+  const vite = spawn(
+    process.execPath,
+    [
+      new URL('../node_modules/vite/bin/vite.js', import.meta.url).pathname,
+      '--host',
+      '127.0.0.1',
+      '--port',
+      String(port),
+      '--strictPort',
+    ],
+    {
+      cwd: new URL('..', import.meta.url),
+      stdio: 'ignore',
+    },
+  );
   let browser;
   try {
     for (let attempt = 0; ; attempt++) {
+      if (vite.exitCode !== null) throw new Error('Vite exited before it became ready');
       try {
         if ((await fetch(origin)).ok) break;
       } catch {}
@@ -356,6 +369,10 @@ test('existing-agent instructions save and activation in the real app', { timeou
     });
   } finally {
     await browser?.close();
-    vite.kill('SIGTERM');
+    if (vite.exitCode === null && vite.signalCode === null) {
+      const stopped = once(vite, 'exit');
+      vite.kill('SIGTERM');
+      await stopped;
+    }
   }
 });
