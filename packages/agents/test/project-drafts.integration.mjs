@@ -70,6 +70,16 @@ test('chat creates, edits, archives and restores a project only after the human 
     projects.list(w.id, w.userId).then(list => list.map(item => `${item.name}${item.archived ? ' (archived)' : ''}`));
 
   assert.equal((await tool({ tool: 'projects.draft', instructions: 'No name' })).error, 'invalid-arguments');
+  const declined = await tool({ tool: 'projects.draft', name: 'Not needed', instructions: 'Keep replies short.' });
+  await drafts.decide(w.id, w.userId, chatId, declined.draftId, {
+    commandId: randomUUID(),
+    digest: declined.digest,
+    decision: 'dismiss',
+  });
+  const dismissed = await drafts.read(w.id, w.userId, chatId, declined.draftId);
+  assert.equal(dismissed.status, 'dismissed');
+  assert.deepEqual(dismissed.outcome, { kind: 'dismissed' });
+  assert.deepEqual(await names(), [], 'declining creates nothing');
   const create = await tool({ tool: 'projects.draft', name: 'Launch', instructions: 'Keep replies short.' });
   const card = await drafts.read(w.id, w.userId, chatId, create.draftId);
   assert.equal(card.proposal.kind, 'project');
