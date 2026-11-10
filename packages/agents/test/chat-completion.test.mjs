@@ -103,6 +103,7 @@ test('old invitation claims cannot justify a current answer, but do not block la
       'Please accept your invitation to join the workspace.',
       'Please accept your invitation to join the workspace.',
     ],
+    ['What is the capital of France?', 'The capital is Paris.', 'The capital is Paris.'],
     ['Who is invited to the planning meeting?', 'The meeting has two guests.', 'The meeting has two guests.'],
   ]) {
     t.mock.method(globalThis, 'fetch', async () => Response.json(nativeReply('azure', { text: answer })));
@@ -123,7 +124,26 @@ for (const model of ['grok-4.3', 'Kimi-K2.6'])
       sse: true,
     },
     { name: 'plain follow-up', question: 'Check again.', answer: 'There are none.' },
+    {
+      name: 'polite repeated lookup',
+      question: 'Could you check one more time?',
+      answer: 'I checked. There are no pending invitees.',
+      sse: true,
+    },
+    {
+      name: 'confirmation follow-up',
+      question: 'Are you sure?',
+      answer: 'I checked. There are no pending invitees.',
+      sse: true,
+    },
+    {
+      name: 'invitee team follow-up',
+      question: 'What about their teams?',
+      answer: 'I checked. There are no pending invitees.',
+      sse: true,
+    },
     { name: 'count follow-up', question: 'How many?', answer: 'There are none.' },
+    { name: 'status follow-up', question: 'What is the status?', answer: 'There are none.' },
     { name: 'invitation noun phrase', question: 'Pending invitees?', answer: 'There are none.' },
     {
       name: 'mixed workspace and calendar lookup',
@@ -132,7 +152,7 @@ for (const model of ['grok-4.3', 'Kimi-K2.6'])
     },
     {
       name: 'mixed invitation and calendar clause',
-      question: 'List pending invitations and show my meetings.',
+      question: 'List pending workspace invitations and show my meetings.',
       answer: 'There are no pending invitations and no meetings.',
     },
     {
@@ -140,6 +160,18 @@ for (const model of ['grok-4.3', 'Kimi-K2.6'])
       question: 'Write a reminder for pending invitees.',
       answer: 'Please accept your invitation. No reply is needed.',
       draft: true,
+    },
+    {
+      name: 'meeting invitee list',
+      question: 'Show my meetings and list their invitees.',
+      answer: 'The meeting has two invitees.',
+      event: true,
+    },
+    {
+      name: 'meeting attendance question',
+      question: 'Who is invited and attending the planning meeting?',
+      answer: 'The meeting has two invitees.',
+      event: true,
     },
   ])
     test(`${model} respects invitation context for ${scenario.name}`, async t => {
@@ -164,11 +196,11 @@ for (const model of ['grok-4.3', 'Kimi-K2.6'])
       );
       assert.equal(
         result.text,
-        scenario.draft
+        scenario.draft || scenario.event
           ? scenario.answer
           : "I can't see workspace invitations in chat. Open Settings > Members to see pending invitations and their teams.",
       );
-      if (!scenario.draft)
+      if (!scenario.draft && !scenario.event)
         assert.ok(
           previews.every(text => !text.includes(scenario.answer)),
           'unsupported invitation answers are not streamed',
