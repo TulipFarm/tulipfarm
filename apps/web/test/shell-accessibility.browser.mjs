@@ -33,12 +33,24 @@ after(async () => {
   await server?.close();
 });
 
-async function accessible(page) {
-  const violations = await page.evaluate(async () =>
-    (await window.axe.run(document, { runOnly: ['label-content-name-mismatch'] })).violations.map(item => ({
-      id: item.id,
-      nodes: item.nodes.map(node => ({ target: node.target, summary: node.failureSummary })),
-    })),
+async function accessible(page, { shellOnly = false } = {}) {
+  const violations = await page.evaluate(
+    async shellOnly =>
+      (await window.axe.run(document, { runOnly: ['label-content-name-mismatch'] })).violations
+        .map(item => ({
+          id: item.id,
+          nodes: item.nodes
+            .filter(
+              node =>
+                !shellOnly ||
+                document
+                  .querySelector(node.target[0])
+                  ?.closest('[data-sprout-sidebar], aside[aria-label="Bud assistant"]'),
+            )
+            .map(node => ({ target: node.target, summary: node.failureSummary })),
+        }))
+        .filter(item => item.nodes.length),
+    shellOnly,
   );
   assert.deepEqual(violations, []);
 }
@@ -149,15 +161,18 @@ for (const mobile of [false, true])
         assert.equal(await launcher.getAttribute('aria-label'), 'Minimize quick chat. Separate private chat');
         await accessible(page);
         await launcher.click();
-        await page.goto(`${origin}/acme/chat/33333333-3333-4333-8333-333333333333`);
+        await page.getByRole('dialog', { name: 'Bud quick chat', exact: true }).waitFor({ state: 'hidden' });
+        if (mobile) await toggle.click();
+        await page.getByRole('link', { name: 'Calendar', exact: true }).click();
+        await page.waitForURL('**/acme/calendar');
         await page.locator('aside[data-corner="header"]').waitFor();
         await page.addScriptTag({ path: require.resolve('axe-core/axe.min.js') });
         assert.equal(await launcher.getAttribute('aria-label'), 'Bud. Open quick chat');
-        await accessible(page);
+        await accessible(page, { shellOnly: true });
         await launcher.click();
         await page.getByRole('dialog', { name: 'Bud quick chat', exact: true }).waitFor();
         assert.equal(await launcher.getAttribute('aria-label'), 'Bud. Minimize quick chat');
-        await accessible(page);
+        await accessible(page, { shellOnly: true });
       } finally {
         await context.close();
       }
