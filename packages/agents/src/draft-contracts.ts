@@ -46,7 +46,9 @@ const skillLifecycleInput = z.strictObject({
 });
 const projectSettings = z.strictObject({
   name: z.string().trim().min(1).max(160),
-  instructions: z.string().refine(value => Buffer.byteLength(value) <= 65536, 'Instructions exceed 64 KiB'),
+  instructions: z
+    .string()
+    .refine(value => new TextEncoder().encode(value).byteLength <= 65536, 'Instructions exceed 64 KiB'),
   archived: z.boolean(),
 });
 const projectDraftInput = z.strictObject({

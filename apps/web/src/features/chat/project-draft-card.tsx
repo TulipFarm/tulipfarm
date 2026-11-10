@@ -1,4 +1,5 @@
 import type { ReactNode, RefObject } from 'react';
+import { Link } from '@tanstack/react-router';
 import { Archive } from 'reicon-react/icons/Archive';
 import { ArchiveUp } from 'reicon-react/icons/ArchiveUp';
 import { Folder } from 'reicon-react/icons/Folder';
@@ -7,6 +8,7 @@ import { Button } from '@tulipfarm/sprout/button';
 import { Disclosure } from '@/components/disclosure';
 import { UnsavedChanges } from '@/features/tables/feedback';
 import type { DraftView, ProjectProposal } from '@tulipfarm/agents/draft-contracts';
+import { workspaceRoute } from '@/router';
 import { TechnicalDetail } from './row-draft-card';
 
 function changeOf(proposal: ProjectProposal) {
@@ -50,6 +52,7 @@ export function ProjectDraftCard({
   feedback: ReactNode;
   checkStatus: ReactNode;
 }) {
+  const { workspaceSlug } = workspaceRoute.useParams();
   const { current, settings, expectedRevision } = proposal.input;
   const change = changeOf(proposal);
   const renamed = current !== null && current.name !== settings.name;
@@ -108,7 +111,25 @@ export function ProjectDraftCard({
               <p role="status">The project could not be {change.done}. Ask chat to retry.</p>
             )}
             {draft.status === 'preparing' && <p role="status">Your approval is recorded. {change.doing}</p>}
-            {draft.status === 'saved' && <p role="status">Project {change.done}.</p>}
+            {draft.status === 'saved' && (
+              <>
+                <p role="status">Project {change.done}.</p>
+                {draft.outcome?.kind === 'project' && (
+                  <Button
+                    variant="link"
+                    nativeButton={false}
+                    render={
+                      <Link
+                        to="/$workspaceSlug/projects/$projectId"
+                        params={{ workspaceSlug, projectId: draft.outcome.projectId }}
+                      />
+                    }
+                  >
+                    Open project
+                  </Button>
+                )}
+              </>
+            )}
             {draft.status === 'dismissed' && <p role="status">Draft dismissed. Nothing was {change.done}.</p>}
           </div>
           {feedback}
