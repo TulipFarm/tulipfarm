@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
 import { chromium } from 'playwright';
@@ -19,6 +21,8 @@ const updateDraft = '15151515-1515-4515-8515-151515151515';
 const deleteDraft = '16161616-1616-4616-8616-161616161616';
 const batchDraft = '18181818-1818-4818-8818-181818181818';
 const updateBatchDraft = '20202020-2020-4020-8020-202020202020';
+const archivedDraft = '21212121-2121-4121-8121-212121212121';
+const unavailableDraft = '22222222-2222-4222-8222-222222222222';
 const revision = 'a'.repeat(40),
   token = '59595959-5959-4959-8959-595959595959';
 const rowTable = {
@@ -52,13 +56,15 @@ const view = (id, input, extra = {}, reason) => ({
 });
 
 test('row review drafts show the exact change and act only on the member decision', { timeout: 120000 }, async () => {
-  const { workspace, session } = createWorkspaceFixture();
+  const { workspace, session } = createWorkspaceFixture({ slug: 'row-reviews', name: 'Operations' });
   const server = await createServer({
     root: fileURLToPath(new URL('..', import.meta.url)),
     server: { host: '127.0.0.1', port: 0 },
   });
   await server.listen();
-  const browser = await chromium.launch();
+  const browser = await chromium.launch({
+    args: process.env.ROW_DRAFT_CDP_PORT ? [`--remote-debugging-port=${process.env.ROW_DRAFT_CDP_PORT}`] : [],
+  });
   const shots = process.env.ROW_DRAFT_SCREENSHOTS;
   try {
     for (const mobile of [false, true]) {
@@ -137,6 +143,33 @@ test('row review drafts show the exact change and act only on the member decisio
       };
       drafts[updateBatchDraft].proposal.before = drafts[updateBatchDraft].rowCurrents;
       drafts[updateBatchDraft].proposal.written = { count: 1, rows: [] };
+      drafts[archivedDraft] = view(
+        archivedDraft,
+        drafts[batchDraft].proposal.input,
+        { status: 'stale', rowTable: { ...rowTable, name: 'Archived tickets', archived: true } },
+        'too-many-rows',
+      );
+      drafts[unavailableDraft] = view(
+        unavailableDraft,
+        {
+          ...drafts[batchDraft].proposal.input,
+          rows: [
+            { values: { [noteField]: { kind: 'text', value: 'Order 1' } } },
+            {
+              values: {
+                [keyField]: { kind: 'text', value: 'T-2' },
+                [noteField]: { kind: 'text', value: 'Order 2' },
+              },
+            },
+          ],
+        },
+        { status: 'stale', rowTable: null },
+        'too-many-rows',
+      );
+      drafts[unavailableDraft].proposal.written = {
+        count: 1,
+        rows: [{ recordId, values: { [keyField]: { kind: 'text', value: 'T-0' } } }],
+      };
       const decisions = [];
       const context = await browser.newContext({
         viewport: mobile ? { width: 390, height: 844 } : { width: 1440, height: 1000 },
@@ -168,6 +201,8 @@ test('row review drafts show the exact change and act only on the member decisio
           parts: [{ kind: 'text', text: 'Summarize https://example.com/page.' }],
           turn: { id: '88888888-8888-4888-8888-888888888888', status: 'completed', generation: 0 },
           tools: [
+            tool(archivedDraft, 'rows.create.batch'),
+            tool(unavailableDraft, 'rows.create.batch'),
             tool(createDraft, 'rows.create'),
             tool(updateDraft, 'rows.update'),
             tool(deleteDraft, 'rows.delete'),
@@ -273,6 +308,36 @@ test('row review drafts show the exact change and act only on the member decisio
         const deleted = cards.filter({ hasText: 'Delete a row in Support tickets' });
         const batch = cards.filter({ hasText: 'Add 6 rows in Support tickets' });
         const updates = cards.filter({ hasText: 'Update 6 rows in Support tickets' });
+        const archived = page.locator(`#row-draft-${archivedDraft}`);
+        const unavailable = page.locator(`#row-draft-${unavailableDraft}`);
+        await archived.scrollIntoViewIfNeeded();
+        await archived.getByText('Add 6 rows in Archived tickets', { exact: true }).waitFor();
+        await archived.getByText('Out of date', { exact: true }).waitFor();
+        await archived.getByText('Note: Order 6', { exact: true }).waitFor();
+        await archived
+          .getByRole('status')
+          .filter({ hasText: 'Archived tickets was archived after this draft' })
+          .waitFor();
+        assert.equal(await archived.getByRole('button', { name: /Approve/ }).count(), 0);
+        const capture = async (card, name) => {
+          if (!shots) return;
+          await card.scrollIntoViewIfNeeded();
+          const path = `${shots}/${name}-${mobile ? 'mobile-dark' : 'desktop-light'}.png`;
+          if (process.env.ROW_DRAFT_CDP_PORT)
+            await promisify(execFile)('agent-browser', ['--cdp', process.env.ROW_DRAFT_CDP_PORT, 'screenshot', path]);
+          else await card.screenshot({ path });
+        };
+        await capture(archived, 'archived-row-draft');
+        await unavailable.scrollIntoViewIfNeeded();
+        await unavailable.getByText('Add 2 rows in a table you cannot see', { exact: true }).waitFor();
+        await unavailable.getByText('Out of date', { exact: true }).waitFor();
+        await unavailable.getByText('Field 1: Order 1', { exact: true }).waitFor();
+        await unavailable.getByText('Field 2: T-2 · Field 1: Order 2', { exact: true }).waitFor();
+        await unavailable.getByText('Field 2: T-0', { exact: true }).waitFor();
+        assert.equal(await unavailable.getByRole('button', { name: /Approve/ }).count(), 0);
+        const summary = await unavailable.innerText();
+        assert.doesNotMatch(summary, new RegExp([tableId, noteField, keyField].join('|')));
+        await capture(unavailable, 'unavailable-row-draft');
         await updates.scrollIntoViewIfNeeded();
         await updates.getByText('Updates 6 existing rows together', { exact: true }).waitFor();
         await updates.getByText('Note: Resolved 6', { exact: true }).waitFor();

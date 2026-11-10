@@ -175,6 +175,7 @@ test('chat row writes after untrusted content become member-approved review draf
     assert.deepEqual(view.proposal, { kind: 'row', input: createCall('MARKER') });
     assert.deepEqual(view.rowTable, {
       name: 'Notes',
+      archived: false,
       labelFieldIds: [note.id],
       fields: [{ id: note.id, label: 'Note', kind: 'text' }],
     });
@@ -226,6 +227,76 @@ test('chat row writes after untrusted content become member-approved review draf
     const readable = await drafts.read(w.id, owner.userId, chatId, result.draftId);
     assert.equal(readable.status, 'pending');
     assert.deepEqual(readable.proposal.input, call);
+  });
+
+  await t.test('archived row reviews retain only currently readable table labels and remain unapprovable', async () => {
+    const email = textField('Contact email');
+    const archived = await createTableWithRows({
+      db: f.db,
+      workspace: w,
+      runtime: f.runtime,
+      definition: tableDefinition({ owningTeamId: team, label: 'Archived contacts', fields: [email] }),
+    });
+    for (const permission of ['table.row.read', 'table.row.create'])
+      await f.db.platform.query(`INSERT INTO ${f.table('tf_grants')} (team_id,asset_id,permission) VALUES ($1,$2,$3)`, [
+        team,
+        archived.tableId,
+        permission,
+      ]);
+    const call = {
+      tool: 'rows.create.batch',
+      tableId: archived.tableId,
+      expectedAppliedRevision: archived.revision,
+      rows: Array.from({ length: 6 }, (_, index) => ({
+        values: { [email.id]: text(`contact-${index}@example.test`) },
+      })),
+    };
+    const { chatId, result } = await chatTool(call, [], { message: 'Add six rows to Archived contacts.' });
+    const before = await drafts.read(w.id, owner.userId, chatId, result.draftId);
+    assert.equal(before.status, 'pending');
+    await f.db.platform.query(`UPDATE ${f.table('tf_table_catalog')} SET archived_at=clock_timestamp() WHERE id=$1`, [
+      archived.tableId,
+    ]);
+    const card = await drafts.read(w.id, owner.userId, chatId, result.draftId);
+    assert.equal(card.status, 'stale');
+    assert.deepEqual(card.rowTable, { ...before.rowTable, archived: true });
+    assert.equal(card.rowTable.name, 'Archived contacts');
+    assert.equal(card.rowTable.fields[0].label, 'Contact email');
+    await assert.rejects(decide(owner, chatId, result, 'save'), error => error.code === 'draft-stale');
+    await f.db.platform.query(
+      `DELETE FROM ${f.table('tf_grants')} WHERE team_id=$1 AND asset_id=$2 AND permission='table.row.read'`,
+      [team, archived.tableId],
+    );
+    const hidden = await drafts.read(w.id, owner.userId, chatId, result.draftId);
+    assert.equal(hidden.status, 'stale');
+    assert.equal(hidden.rowTable, null);
+    assert.equal(hidden.rowCurrent, null);
+    assert.equal(hidden.rowCurrents, null);
+    assert.doesNotMatch(JSON.stringify(hidden), /Archived contacts|Contact email/);
+    assert.deepEqual(hidden.proposal.input, call);
+    assert.equal(
+      Number(
+        (
+          await f.db.platform.query(`SELECT count(*) FROM ${f.table('tf_table_identities')} WHERE table_id=$1`, [
+            archived.tableId,
+          ])
+        ).rows[0].count,
+      ),
+      0,
+    );
+    const later = await chatTool(
+      {
+        tool: 'rows.create.batch',
+        tableId: otherTable.tableId,
+        expectedAppliedRevision: otherTable.revision,
+        rows: Array.from({ length: 6 }, () => ({ values: { [note.id]: text('Later note') } })),
+      },
+      [],
+      { chatId, message: 'Add six rows to Other Notes.' },
+    );
+    const pending = await drafts.read(w.id, owner.userId, chatId, later.result.draftId);
+    assert.equal(pending.status, 'pending');
+    assert.equal(pending.rowTable.name, 'Other Notes');
   });
 
   await t.test('continued turns share the table limit until a row review is decided', async () => {
