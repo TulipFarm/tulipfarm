@@ -56,6 +56,7 @@ import {
   requireChatReviewSources,
   generatedMessageSources,
   canReadToolDetails,
+  canReadTableSources,
 } from './source-access.ts';
 import {
   bindFileSources,
@@ -1801,6 +1802,13 @@ export function createConversationExecutor(
               ).rows,
             );
           for (const row of rows) {
+            // An earlier answer that used a table the requester can no longer read leaves model context, so later
+            // cards don't inherit that table and stay openable.
+            if (!(await canReadTableSources(tx, chat.requester, row.sources))) {
+              const hidden = messages.find(message => message.id === row.message_id);
+              if (hidden) hidden.text = '';
+              continue;
+            }
             if (chat.project_id)
               try {
                 await requireResultSources(tx, chat.requester, fence.conversationId, row.sources);

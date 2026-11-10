@@ -1,6 +1,8 @@
 import {
   AccessDenied,
   SourceAuthorizationUnavailable,
+  chatReviewClosure,
+  tableSourceReadable,
   canAccessAsset,
   canAccessTable,
   currentMember,
@@ -303,7 +305,7 @@ export async function requireChatReviewSources(
   rowDraft = false,
 ) {
   await currentMember(tx, actor);
-  for (const source of await protectedSourceClosure(tx, sources))
+  for (const source of await chatReviewClosure(tx, actor, sources))
     if (source.kind === 'personal-memory') await requirePersonalMemorySource(tx, actor, source);
     else if (rowDraft && source.kind === 'shared-slack-turn') continue;
     else await requireProtectedSource(tx, actor, source);
@@ -314,6 +316,13 @@ export async function requireFileSources(tx: AuthorizationTransaction, actor: Hu
   for (const source of sourceDependenciesSchema.parse(sources))
     if (source.kind === 'tulipfarm-file' || source.kind === 'library-file' || source.kind === 'google-file')
       await requireProtectedSource(tx, actor, source);
+}
+
+/** Whether the requester can still read every table in `sources`, at whatever revision it has now. */
+export async function canReadTableSources(tx: AuthorizationTransaction, actor: HumanActor, sources: unknown) {
+  for (const source of sourceDependenciesSchema.parse(sources))
+    if (!(await tableSourceReadable(tx, actor, source))) return false;
+  return true;
 }
 
 /** An answer that used a Google Drive file stays usable only while the sender's integration is the one that read it. */
