@@ -36,6 +36,19 @@ const listedTable = (table: VisibleTable, teams: ReadonlyMap<string, string>) =>
   team: teams.get(table.owningTeamId) ?? null,
 });
 const quoted = (names: readonly string[]) => names.map(name => `"${name}"`).join(', ');
+const exactName = (name: string) => name.trim().replace(/\s+/gu, ' ').toLowerCase();
+
+function importDestinations(texts: readonly string[]) {
+  return texts.flatMap(text => {
+    const destination =
+      /\b(?:(?:into|to)\s+(?:the\s+)?(?:existing\s+)?(?:table\s+)?|(?:use\s+(?:the\s+)?(?:existing\s+)?table|table)\s+)(?:(?:named|called)\s+)?(.+)/iu
+        .exec(text)?.[1]
+        ?.trim();
+    if (!destination) return [];
+    const quoted = /^(["'`])(.+?)\1(?:$|[\s.,!?;])/u.exec(destination);
+    return [quoted?.[2] ?? destination];
+  });
+}
 
 /** Of the tables named in a message, the most specific: "Meadow Stock" is dropped when "Forest Meadow Stock" is named too. */
 function mostSpecific(tables: readonly VisibleTable[]) {
@@ -187,8 +200,8 @@ export async function chatTableDefinitions<T extends Definitions>(
  * return the one table they named, ask which one when several share that name, or say none matches and suggest
  * close names. People never know table IDs, so the result forbids asking for one. A write to a real table is
  * also held when the person's latest message names a title several tables share without naming the team of the
- * chosen one, or names other tables but not the chosen one. Import reviews set requireNamed so neither an unnamed
- * destination nor a table named only in an earlier message can override the current request.
+ * chosen one, or names other tables but not the chosen one. Import reviews require an exact destination; a nameless
+ * follow-up can reuse the conversation's last approved destination, but never override a newly named one.
  * Returns null when the call can go ahead.
  */
 export async function guessedChatTable(
@@ -211,7 +224,7 @@ export async function guessedChatTable(
     ),
   );
   if (found && !write) return null;
-  const { catalog, messages } = await withHuman(runtime, workspaceId, actor, 'read', async tx => ({
+  const { catalog, messages, approvedIds } = await withHuman(runtime, workspaceId, actor, 'read', async tx => ({
     catalog: await catalogTables(tx),
     messages: (
       await tx.client.query<{ text: string; sequence: number }>(
@@ -219,7 +232,18 @@ export async function guessedChatTable(
         [origin.conversationId],
       )
     ).rows,
+    approvedIds: requireNamed
+      ? ((
+          await tx.client.query<{ ids: string[] }>(
+            `SELECT ARRAY(SELECT DISTINCT plan->'input'->>'tableId' FROM jsonb_array_elements(p.manifest->'plans') plan WHERE plan->'input'->>'kind' IN ('schema','import')) AS ids FROM ${relation(tx, 'tf_table_proposals')} p JOIN ${relation(tx, 'tf_table_proposal_decisions')} d ON d.proposal_id=p.id AND d.digest=p.digest AND d.membership_id=p.membership_id WHERE p.conversation_id=$1 AND p.membership_id=$2 AND p.user_id=$3 AND p.redacted_at IS NULL AND d.decision='approve' ORDER BY d.created_at DESC,p.created_at DESC LIMIT 1`,
+            [origin.conversationId, actor.membershipId, actor.userId],
+          )
+        ).rows[0]?.ids ?? [])
+      : [],
   }));
+  const lastSequence = messages.at(-1)?.sequence;
+  const latest = messages.filter(message => message.sequence === lastSequence).map(message => message.text);
+  const destinations = requireNamed ? importDestinations(latest) : [];
   // Only the tables the person named, the chosen table and those sharing its name are checked for access.
   const texts = messages.map(message => message.text);
   const chosen = catalog.find(table => table.id === tableId);
@@ -231,6 +255,8 @@ export async function guessedChatTable(
       .filter(
         table =>
           table.id === tableId ||
+          approvedIds.includes(table.id) ||
+          destinations.some(name => exactName(name) === table.id) ||
           namesTable(texts, table.name) ||
           (chosen && tableWords(table.name) === tableWords(chosen.name)),
       )
@@ -242,20 +268,35 @@ export async function guessedChatTable(
     actor,
     visible.map(table => table.owningTeamId),
   );
-  const lastSequence = messages.at(-1)?.sequence;
-  const latest = messages.filter(message => message.sequence === lastSequence).map(message => message.text);
   const sources = (tables: readonly VisibleTable[]) =>
     tables.map(table => ({ kind: 'table-schema' as const, tableId: table.id, revision: table.savedRevision }));
   const named = (texts: readonly string[]) => mostSpecific(visible.filter(table => namesTable(texts, table.name)));
   const target = found ? visible.find(table => table.id === tableId) : undefined;
-  const latestNamed = named(latest);
+  const latestNamed = requireNamed
+    ? visible.filter(table =>
+        (destinations.length ? destinations : latest).some(
+          name => exactName(name) === exactName(table.name) || exactName(name) === table.id,
+        ),
+      )
+    : named(latest);
+  const hasDestination = destinations.length > 0 || catalog.some(table => namesTable(latest, table.name));
+  const usingApproved = requireNamed && !hasDestination && !latestNamed.length && approvedIds.length === 1;
+  const matches = requireNamed
+    ? usingApproved
+      ? visible.filter(table => table.id === approvedIds[0])
+      : latestNamed
+    : latestNamed.length
+      ? latestNamed
+      : named(messages.map(message => message.text));
   if (found && !target && !requireNamed) return null;
   // A write to a table the person did not name goes ahead, on its review card, unless they named other tables.
   if (!requireNamed && target && !namesTable(latest, target.name) && !latestNamed.length) return null;
-  if (target && (requireNamed ? latestNamed.some(table => table.id === target.id) : namesTable(latest, target.name))) {
-    const sameName = visible.filter(table => tableWords(table.name) === tableWords(target.name));
+  if (target && (requireNamed ? matches.some(table => table.id === target.id) : namesTable(latest, target.name))) {
+    const nameKey = requireNamed ? exactName : tableWords;
+    const sameName = visible.filter(table => nameKey(table.name) === nameKey(target.name));
     const team = teams.get(target.owningTeamId);
-    if (sameName.length < 2 || (team && namesTable(latest, team))) {
+    const byId = requireNamed && [...destinations, ...latest].some(name => exactName(name) === target.id);
+    if (sameName.length < 2 || usingApproved || byId || (team && namesTable(latest, team))) {
       if (requireNamed && target.maintenance)
         return {
           result: {
@@ -276,8 +317,7 @@ export async function guessedChatTable(
       sources: sources(sameName),
     };
   }
-  const matches = requireNamed || latestNamed.length ? latestNamed : named(messages.map(message => message.text));
-  const names = [...new Set(matches.map(table => tableWords(table.name)))];
+  const names = [...new Set(matches.map(table => (requireNamed ? exactName : tableWords)(table.name)))];
   const prefix = target
     ? `Nothing was written: the person did not name "${target.name}", the table you used. Never ask the person for a table ID.`
     : 'No table has the ID you used: never make up a table ID, and never ask the person for one.';

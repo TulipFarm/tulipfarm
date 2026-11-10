@@ -431,7 +431,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     ).result;
     assert.equal(output.status, 'pending');
   });
-  await t.test('file import tools prepare and propose CSV and XLSX without sheet or header hints', async () => {
+  await t.test('file import tools prepare and propose CSV and XLSX without sheet or header hints', async importTest => {
     const definition = {
       formatVersion: 2,
       id: randomUUID(),
@@ -552,6 +552,19 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
           { ...context, callId: randomUUID() },
           { tool: 'tables.propose', input: JSON.stringify({ plans }) },
         );
+      await importTest.test(`partial destination names cannot select an existing table (${ordinal})`, async () => {
+        const before = await count('tf_table_proposals');
+        try {
+          for (const name of ['Missing Current Orders', 'Current', 'Current Orders Extended', 'Current-Orders']) {
+            await request(name);
+            const wrong = (await propose([importPlan(definition)])).result;
+            assert.equal(wrong.error, 'table-not-found', JSON.stringify(wrong));
+          }
+          assert.equal(await count('tf_table_proposals'), before);
+        } finally {
+          await request(definition.label);
+        }
+      });
       const before = await count('tf_table_proposals');
       for (let attempt = 0; attempt < 10; attempt++) {
         const wrong = (await propose([importPlan(other)])).result;
@@ -585,6 +598,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         await db.platform.query(`UPDATE ${s}.tf_table_catalog SET maintenance=false WHERE id=$1`, [definition.id]);
       }
       assert.equal(await count('tf_table_proposals'), before);
+      await request(ordinal === 2 ? '  CURRENT \t ORDERS  ' : ordinal === 3 ? `"${definition.label}"` : definition.id);
       const output = (await propose([importPlan(definition)])).result;
       assert.equal(output.status, 'pending', JSON.stringify(output));
       assert.deepEqual(output.tables, [{ id: definition.id, name: definition.label }]);
@@ -617,6 +631,50 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
           digest: output.digest,
           commandId: randomUUID(),
           decision: 'approve',
+        });
+        await importTest.test('a post-approval import follow-up keeps the approved destination', async () => {
+          const nextMessage = randomUUID(),
+            nextTurn = randomUUID();
+          await db.platform.query(
+            `INSERT INTO ${s}.tf_conversation_messages(id,conversation_id,sequence,author_kind,membership_id) VALUES($1,$2,2,'human',$3)`,
+            [nextMessage, conversationId, actor.membershipId],
+          );
+          await db.platform.query(
+            `INSERT INTO ${s}.tf_conversation_parts(conversation_id,message_id,ordinal,kind,text) VALUES($1,$2,0,'text','Import the file now')`,
+            [conversationId, nextMessage],
+          );
+          await db.platform.query(
+            `INSERT INTO ${s}.tf_conversation_turns(id,conversation_id,source_message_id,accepted_sequence) VALUES($1,$2,$3,2)`,
+            [nextTurn, conversationId, nextMessage],
+          );
+          const followUp = { ...context, origin: { ...context.origin, turnId: nextTurn } };
+          await files.invokeWithSources(
+            { ...followUp, callId: randomUUID() },
+            {
+              tool: 'tables.import.file',
+              attachmentId,
+              contentDigest,
+              selection: JSON.stringify(selection),
+            },
+          );
+          const followUpPlan = async table =>
+            (
+              await files.invokeWithSources(
+                { ...followUp, callId: randomUUID() },
+                { tool: 'tables.propose', input: JSON.stringify({ plans: [importPlan(table)] }) },
+              )
+            ).result;
+          const wrong = await followUpPlan(other);
+          assert.equal(wrong.error, 'table-not-found', JSON.stringify(wrong));
+          const continued = await followUpPlan(definition);
+          assert.equal(continued.status, 'pending', JSON.stringify(continued));
+          assert.deepEqual(continued.tables, [{ id: definition.id, name: definition.label }]);
+          await db.platform.query(
+            `UPDATE ${s}.tf_conversation_parts SET text='Import into the existing table Missing Current Orders' WHERE message_id=$1`,
+            [nextMessage],
+          );
+          const missing = await followUpPlan(definition);
+          assert.equal(missing.error, 'table-not-found', JSON.stringify(missing));
         });
         const advance = createTableExecution({
           requireSources: requireTableSources,
