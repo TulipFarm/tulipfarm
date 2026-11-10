@@ -50,6 +50,7 @@ import { taskTransition, withTaskTelemetry } from './task-telemetry.ts';
 import { recordsTaskFailure } from './task-pause.ts';
 import { visiblePage } from './visible-page.ts';
 import { delegatedRequestId, subagentLimits } from './subagent-contracts.ts';
+import { effectiveAgentScope, unavailableTableMessage } from './data-scope.ts';
 
 const columns = (tx: AgentTransaction) =>
   `id, agent_id AS "agentId", activation_id AS "activationId", definition_revision AS "definitionRevision", parent_task_id AS "parentTaskId", delegation_depth AS "delegationDepth", delegation_tools AS "delegationTools", skills, scope, limits, flow_id AS "flowId", generation, status, pause_reason AS "pauseReason", ${recordsTaskFailure(tx) ? 'failure_reason' : 'NULL::text'} AS "failureReason", active_milliseconds::text AS "activeMilliseconds", tool_calls AS "toolCalls", created_at::text AS "createdAt"`;
@@ -443,9 +444,12 @@ export function createAgentTasks(
       const sources = [...own, ...carried];
       await sourcesAllowed(tx, actor, sources);
       await referencesFit(tx, own);
+      const requested = useActivationScope ? activation.scope : (input.scope ?? activation.scope);
+      const scope = await effectiveAgentScope(tx, actor, input.agentId, activation.scope, requested);
+      const unavailable = await unavailableTableMessage(tx, actor, requested, scope);
       const task = await insert(tx, actor, activation, {
         ...input,
-        scope: useActivationScope ? activation.scope : input.scope,
+        scope,
         limits: await clampLimits(tx, input.agentId, input.limits),
         sources,
         ...(subagent
@@ -461,6 +465,15 @@ export function createAgentTasks(
             }
           : {}),
       });
+      if (unavailable) {
+        await tx.client.query(
+          `UPDATE ${relation(tx, 'tf_agent_tasks')} SET status='failed'${recordsTaskFailure(tx) ? ",failure_reason='authority-revoked'" : ''} WHERE id=$1`,
+          [task.id],
+        );
+        await append(tx, task, unavailable, [], 'agent');
+        task.status = 'failed';
+        taskTransition(tx, 'failed', 1, task.id);
+      }
       if (tx.commonVersion >= 1 && knowledgeOrigin) {
         const root = await knowledgeRootForRequest(tx, actor, knowledgeOrigin);
         await tx.client.query(`UPDATE ${relation(tx, 'tf_agent_tasks')} SET knowledge_root=$2 WHERE id=$1`, [

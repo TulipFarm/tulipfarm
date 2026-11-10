@@ -651,6 +651,7 @@ function AgentPage({
                         detail={detail}
                         concealed={!ready || !can('invoke')}
                         setup={{ kind: 'jump', label: 'See setup steps', target: 'agent-setup' }}
+                        addTableAccess={can('manage') ? () => open('access', 'agent-enrollment') : undefined}
                       />
                       <section aria-labelledby="agent-triggers-title" className="grid gap-3">
                         <div className="grid gap-1">

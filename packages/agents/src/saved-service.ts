@@ -29,6 +29,7 @@ import { visiblePage } from './visible-page.ts';
 import { definitionRecommendationAudience, recordDefinitionRecommendationChanges } from './recommendations.ts';
 import { listSkills } from './skills.ts';
 import { createWorkflows } from '@tulipfarm/workflows';
+import { effectiveAgentScope, tableAccessTeams } from './data-scope.ts';
 
 /** The workflows service in the agent's own transaction, so trigger workflows change with the agent or not at all. */
 const linkedWorkflows = (transaction: AgentTransaction & { commonVersion: number }, workspaceId: string) =>
@@ -166,23 +167,19 @@ export function createSavedAgentService(runtime: AgentStorage, readProjection?: 
         ...savedAgentSchema.parse(selected.item),
         definition: agentDefinitionSchema.parse(definition),
         capabilities,
-        activations,
+        activations: await Promise.all(
+          activations.map(async activation => ({
+            ...activation,
+            effectiveScope: await effectiveAgentScope(transaction, actor, agentId, activation.scope),
+          })),
+        ),
       };
     });
   }
 
   async function context(workspaceId: string, user: string | HumanActor) {
     return withHuman(runtime, workspaceId, user, 'read', async (transaction, actor) => {
-      const teams = z
-        .array(z.object({ id: z.uuid(), name: z.string() }))
-        .parse(
-          (
-            await transaction.client.query(
-              `SELECT t.id, t.name FROM ${relation(transaction, 'tf_teams')} t JOIN ${relation(transaction, 'tf_member_teams')} mt ON mt.team_id=t.id WHERE mt.membership_id=$1 ORDER BY t.name,t.id`,
-              [actor.membershipId],
-            )
-          ).rows,
-        );
+      const teams = await tableAccessTeams(transaction, actor);
       const currentSoulRevision = z
         .string()
         .parse(

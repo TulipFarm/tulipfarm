@@ -4,6 +4,33 @@ import { agentDefinitionSchema, definitionRevisionSchema, scopeSchema, taskLimit
 import { agentPolicySchema, soulRevisionSchema } from './saved-contracts.ts';
 import { agentTaskLimitsSchema, triggerVariantSchema, type TriggerVariant } from '@tulipfarm/workflows/contracts';
 
+/** Adds the fewest of the caller's granting teams for this table, retaining their explicit enrollment choices. */
+export function tableAccessEnrollment(
+  teams: readonly { id: string; tableScope?: z.infer<typeof scopeSchema> | undefined }[],
+  entry: z.infer<typeof scopeSchema>[number],
+  enrolled: readonly string[],
+) {
+  const permissions = entry.permissions.filter(permission => permission.startsWith('table.row.'));
+  if (!permissions.length) return [...enrolled];
+  const mask = (team: (typeof teams)[number]) =>
+    permissions.reduce(
+      (bits, permission, index) =>
+        team.tableScope?.some(grant => grant.assetId === entry.assetId && grant.permissions.includes(permission))
+          ? bits | (1 << index)
+          : bits,
+      0,
+    );
+  const existing = teams.filter(team => enrolled.includes(team.id)).reduce((bits, team) => bits | mask(team), 0);
+  const choices = new Map<number, string[]>([[existing, []]]);
+  for (const team of teams.filter(team => !enrolled.includes(team.id)))
+    for (const [covered, ids] of choices) {
+      const next = covered | mask(team);
+      if (!choices.has(next) || choices.get(next)!.length > ids.length + 1) choices.set(next, [...ids, team.id]);
+    }
+  const selected = choices.get((1 << permissions.length) - 1);
+  return selected ? [...enrolled, ...selected] : [...enrolled];
+}
+
 /** Any Workflow trigger kind, without the ID and label the setup trigger gives it. */
 export const agentTriggerSchema = triggerVariantSchema;
 export type AgentTrigger = TriggerVariant;

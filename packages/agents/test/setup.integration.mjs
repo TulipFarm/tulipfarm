@@ -17,6 +17,7 @@ import { createChatTools } from '../src/tools.ts';
 import { agentLinkedDefinition, agentLinkedWorkflowId } from '../src/agent-trigger-workflows.ts';
 import { agentWorkflowTriggerId } from '../src/setup-contracts.ts';
 import { createWorkflows } from '@tulipfarm/workflows';
+import { createTableWithRows, tableDefinition } from '../../tables/test/fixture.mjs';
 
 const limits = { toolCalls: 10, activeMilliseconds: 60000, credits: 10 };
 async function environment(t) {
@@ -146,6 +147,52 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     writes: () => writes,
   };
 }
+
+test('table enrollment requires current author membership and grants at save and activation', async t => {
+  const f = await environment(t),
+    service = createAgentSetup(f.runtime),
+    teamId = randomUUID();
+  await f.db.platform.query(`INSERT INTO ${f.table('tf_teams')}(id,name) VALUES($1,'Operations')`, [teamId]);
+  const { tableId } = await createTableWithRows({
+    db: f.db,
+    workspace: f.w,
+    runtime: f.runtime,
+    definition: tableDefinition({ owningTeamId: teamId, label: 'Customers' }),
+  });
+  const scope = [{ assetId: tableId, permissions: ['table.row.read'] }];
+  const setup = { ...f.setup(), enrollment: [teamId], scope, limits: scope };
+  await f.db.platform.query(
+    `INSERT INTO ${f.table('tf_grants')}(team_id,asset_id,permission) VALUES($1,$2,'table.row.read')`,
+    [teamId, tableId],
+  );
+  assert.deepEqual((await createSavedAgentService(f.runtime).context(f.w.id, f.user)).teams, []);
+  await assert.rejects(
+    service.saveDraft(f.w.id, f.user, f.agentId, await f.input({ setup })),
+    error => error.code === 'agent-table-access-unavailable',
+    'a granting team the author does not belong to cannot be enrolled',
+  );
+  await f.db.platform.query(`INSERT INTO ${f.table('tf_member_teams')}(membership_id,team_id) VALUES($1,$2)`, [
+    f.member,
+    teamId,
+  ]);
+  const context = await createSavedAgentService(f.runtime).context(f.w.id, f.user);
+  assert.deepEqual(context.teams[0].tableScope, scope);
+  await assert.rejects(
+    service.saveDraft(f.w.id, f.user, f.agentId, await f.input({ setup: { ...setup, enrollment: [] } })),
+    error => error.code === 'agent-table-access-unavailable',
+  );
+  const draft = await service.saveDraft(f.w.id, f.user, f.agentId, await f.input({ setup }));
+  const command = await service.publish(f.w.id, f.user, f.agentId, f.decision(draft));
+  await f.accept(service, command);
+  await f.db.platform.query(`DELETE FROM ${f.table('tf_grants')} WHERE team_id=$1`, [teamId]);
+  await assert.rejects(
+    service.advance(f.w.id, f.user, command.commandId),
+    error => error.code === 'agent-table-access-unavailable',
+    'grant revocation after draft save is rechecked before activation',
+  );
+  assert.deepEqual((await f.state()).activations, []);
+  assert.equal((await service.readDraft(f.w.id, f.user, f.agentId)).setup.enrollment[0], teamId);
+});
 
 test('draft choices persist inactive; publication has one Soul write and one activation across retries', async t => {
   const f = await environment(t),

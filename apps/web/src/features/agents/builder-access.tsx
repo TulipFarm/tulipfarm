@@ -18,6 +18,7 @@ import { useAgentSlackApi, useAgentSlackDestinations } from './slack-queries';
 import { AgentRead } from './feedback';
 import type { AgentContext } from './api';
 import type { Policy, RecordPermission, TeamPermission } from './administration';
+import { tableAccessEnrollment } from '@tulipfarm/agents/setup-contracts';
 
 export type BuilderAccessDraft = {
   grants: Policy['grants'];
@@ -62,9 +63,15 @@ export function BuilderAccess({
   const parsedLimits = parseLimits(value.taskLimits, { kind: 'start' });
   const limitErrors = showErrors && !parsedLimits.ok ? parsedLimits.errors : {};
   function addScope(assetId: string, permissions: Policy['limits'][number]['permissions']) {
+    const scope = withScopeEntry(value.scope, assetId, permissions);
     onChange({
       limits: withScopeEntry(value.limits, assetId, permissions),
-      scope: withScopeEntry(value.scope, assetId, permissions),
+      scope,
+      enrollment: tableAccessEnrollment(
+        teams,
+        scope.find(entry => entry.assetId === assetId)!,
+        value.enrollment,
+      ),
     });
   }
   return (
@@ -113,7 +120,15 @@ export function BuilderAccess({
         {tools.some(tool => tool.startsWith('slack.')) && (
           <OutgoingDestinations workspaceId={workspaceId} slug={slug} disabled={disabled} add={addScope} />
         )}
-        <Disclosure title="Team enrollment">
+        <p className="wrap-anywhere text-sm text-muted-foreground" role="status">
+          {value.enrollment.length
+            ? `Uses access from ${teams
+                .filter(team => value.enrollment.includes(team.id))
+                .map(team => `team ${team.name}`)
+                .join(', ')}.`
+            : 'No team access selected. Choose a team that can read the selected tables.'}
+        </p>
+        <Disclosure title="Change teams used for access">
           <ChoiceGroup
             type="checkbox"
             optional

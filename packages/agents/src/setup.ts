@@ -28,6 +28,7 @@ import { AgentError, agentCommandStatusSchema } from './saved-contracts.ts';
 import { requireAgentCreation, requireAgentPermission, withHuman } from './saved-policy.ts';
 import { resolveProcedures } from './workspace-skills.ts';
 import { boundRuntime } from './task-approval-gate.ts';
+import { requireTableEnrollment } from './data-scope.ts';
 import { requireCommandDraftSources } from './draft-sources.ts';
 import type { ModelFamilyEligibility } from './model-policy-contracts.ts';
 import {
@@ -187,6 +188,7 @@ export function createAgentSetup(
     else await requireAgentCreation(tx, actor, input.setup.owningTeamId);
     await requireSharedMcpSlots(tx, input.setup.definition);
     await resolveProcedures(tx, input.setup.definition.skills, actor);
+    if (permission !== 'read') await requireTableEnrollment(tx, actor, input.setup.enrollment, input.setup.scope);
     await requireNoMcpDerived(
       tx,
       (input.setup.definition.skills ?? [])
@@ -397,6 +399,7 @@ export function createAgentSetup(
       throw new AgentError('activation-version-conflict');
     const bound = boundRuntime(tx, workspaceId),
       { setup } = draft;
+    await requireTableEnrollment(tx, actor, setup.enrollment, setup.scope);
     for (const entry of [...setup.scope, ...setup.limits])
       for (const permission of entry.permissions) {
         if (!(await canAccessAsset(tx, actor, entry.assetId, permission))) throw new AccessDenied();

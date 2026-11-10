@@ -50,7 +50,7 @@ export const agentPolicySchema = z.strictObject({
 });
 export const agentContextSchema = z.object({
   currentSoulRevision: z.string(),
-  teams: z.array(z.object({ id: z.uuid(), name: z.string() })),
+  teams: z.array(z.object({ id: z.uuid(), name: z.string(), tableScope: scopeSchema.optional() })),
   builtinSkills: z
     .array(z.object({ id: z.string(), name: z.string(), description: z.string(), revision: z.literal('latest') }))
     .default([]),
@@ -58,7 +58,9 @@ export const agentContextSchema = z.object({
 export const agentDetailSchema = savedAgentSchema.extend({
   definition: agentDefinitionSchema,
   capabilities: z.array(z.string()),
-  activations: z.array(z.object({ id: z.uuid(), revision: z.string(), scope: scopeSchema })),
+  activations: z.array(
+    z.object({ id: z.uuid(), revision: z.string(), scope: scopeSchema, effectiveScope: scopeSchema.optional() }),
+  ),
 });
 export const agentPolicyDetailSchema = agentPolicySchema.extend({
   enrollment: z.array(z.uuid()),

@@ -43,6 +43,8 @@ export type AgentCommand = z.infer<typeof agentCommandStatusSchema>;
 type ExecutionSettings = z.infer<typeof executionPolicySchema>;
 
 const rejections: Partial<Record<string, string>> = {
+  'agent-table-access-unavailable':
+    'A selected table is not available through your selected teams. In What data it can use, choose a team you belong to that grants the selected table access. Your input is retained.',
   'trigger-sponsor-consent-required':
     'Sponsor the triggers that run on their own before activating. Your input is retained.',
   'setup-draft-outdated': 'This setup was saved before triggers were combined. Save it again before activating.',
