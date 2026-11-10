@@ -35,6 +35,29 @@ export function formatOf(target) {
 }
 
 export const nativeName = tool => tool.replaceAll('.', '_');
+export function azureStreamReply(reply) {
+  const choice = reply.choices[0];
+  return new Response(
+    [
+      {
+        choices: [
+          {
+            index: 0,
+            delta: {
+              content: choice.message.content,
+              tool_calls: choice.message.tool_calls?.map((call, index) => ({ index, ...call })),
+            },
+            finish_reason: null,
+          },
+        ],
+      },
+      { choices: [{ index: 0, delta: {}, finish_reason: choice.finish_reason }], usage: reply.usage },
+    ]
+      .map(event => `data: ${JSON.stringify(event)}\n\n`)
+      .join('') + 'data: [DONE]\n\n',
+    { headers: { 'content-type': 'text/event-stream' } },
+  );
+}
 export const mcpName = handle => `mcp_${createHash('sha256').update(handle).digest('hex').slice(0, 24)}`;
 
 /** One native tool call. `args` excludes `tool`; `activity` is the user-visible progress phrase. */

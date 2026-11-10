@@ -6,6 +6,7 @@ import {
   completionCheckEvidence,
   inferWithTools,
   noCardReply,
+  reviewCardReceipt,
   tableIdQuestion,
   unbackedCardClaim,
   unbackedImportClaim,
@@ -14,6 +15,7 @@ import {
 } from '../src/inference.ts';
 import { completionEvaluation, evaluationMessages } from './completion-evaluation-fixture.mjs';
 import {
+  azureStreamReply as stream,
   formats,
   isCompletionRequest,
   nativeRoutes,
@@ -289,30 +291,6 @@ for (const model of ['grok-4.3', 'Kimi-K2.6'])
           'unsupported invitation answers are not streamed',
         );
     });
-
-function stream(reply) {
-  const choice = reply.choices[0];
-  return new Response(
-    [
-      {
-        choices: [
-          {
-            index: 0,
-            delta: {
-              content: choice.message.content,
-              tool_calls: choice.message.tool_calls?.map((call, index) => ({ index, ...call })),
-            },
-            finish_reason: null,
-          },
-        ],
-      },
-      { choices: [{ index: 0, delta: {}, finish_reason: choice.finish_reason }], usage: reply.usage },
-    ]
-      .map(event => `data: ${JSON.stringify(event)}\n\n`)
-      .join('') + 'data: [DONE]\n\n',
-    { headers: { 'content-type': 'text/event-stream' } },
-  );
-}
 
 for (const sse of [false, true])
   test(`Sol clarification resumes real work after a premature ${sse ? 'SSE' : 'JSON'} answer`, async t => {
@@ -754,7 +732,15 @@ test('an import presented for review needs a pending proposal receipt from this 
   const pending = [
     {
       kind: 'results',
-      results: [{ id: 'p', name: 'tables_propose', output: '{"id":"x","status":"pending"}', error: false }],
+      results: [
+        {
+          id: 'p',
+          name: 'tables_propose',
+          output: '{"id":"x","status":"pending"}',
+          cardReceipt: reviewCardReceipt('tables_propose', { id: 'x', status: 'pending' }),
+          error: false,
+        },
+      ],
     },
   ];
   const failed = [
@@ -781,7 +767,18 @@ test('an import presented for review needs a pending proposal receipt from this 
 
 test('a reply that presents an approval or review card needs a tool result in this reply that made one', () => {
   const results = (name, output, error = false) => [
-    { kind: 'results', results: [{ id: 'c', name, output: `Untrusted tool result for x: ${output}`, error }] },
+    {
+      kind: 'results',
+      results: [
+        {
+          id: 'c',
+          name,
+          output: `Untrusted tool result for x: ${output}`,
+          cardReceipt: reviewCardReceipt(name, JSON.parse(output)),
+          error,
+        },
+      ],
+    },
   ];
   const draft = results('rows_create', '{"draftId":"d","status":"review-required","operation":"create"}');
   const proposal = results('tables_propose', '{"id":"p","status":"pending"}');
@@ -845,7 +842,12 @@ test('successful work and nested pending data are not review-card receipts', () 
     ['rows_create', { id: 'row', values: { status: 'pending', draftId: 'data' } }],
     ['tables_propose', { status: 'pending' }],
   ]) {
-    const items = [{ kind: 'results', results: [{ name, output: JSON.stringify(output), error: false }] }];
+    const items = [
+      {
+        kind: 'results',
+        results: [{ name, output: JSON.stringify(output), cardReceipt: reviewCardReceipt(name, output), error: false }],
+      },
+    ];
     assert.equal(unbackedCardClaim('The approval card is ready.', items)?.status, 'continue', name);
   }
   for (const [name, output] of [
@@ -853,7 +855,12 @@ test('successful work and nested pending data are not review-card receipts', () 
     ['google_propose', { provider: 'google-workspace', data: { id: 'proposal', decision: null, receipt: null } }],
     ['integrations_disconnect', { status: 'review-required' }],
   ]) {
-    const items = [{ kind: 'results', results: [{ name, output: JSON.stringify(output), error: false }] }];
+    const items = [
+      {
+        kind: 'results',
+        results: [{ name, output: JSON.stringify(output), cardReceipt: reviewCardReceipt(name, output), error: false }],
+      },
+    ];
     assert.equal(unbackedCardClaim('The approval card is ready.', items), undefined, name);
   }
 });
@@ -907,7 +914,17 @@ test('every pending review-card family has an explicit receipt and excludes comp
     ['skills.draft', { importId: 'import', status: 'ready' }],
   ];
   const items = (tool, output) => [
-    { kind: 'results', results: [{ name: tool.replaceAll('.', '_'), output: JSON.stringify(output), error: false }] },
+    {
+      kind: 'results',
+      results: [
+        {
+          name: tool.replaceAll('.', '_'),
+          output: JSON.stringify(output),
+          cardReceipt: reviewCardReceipt(tool.replaceAll('.', '_'), output),
+          error: false,
+        },
+      ],
+    },
   ];
   for (const [tool, output] of pending)
     assert.equal(unbackedCardClaim('The review card is ready.', items(tool, output)), undefined, tool);
@@ -924,6 +941,38 @@ test('every pending review-card family has an explicit receipt and excludes comp
     ['workflows.run', { draftId: 'data', status: 'review-required' }],
   ])
     assert.equal(unbackedCardClaim('The review card is ready.', items(tool, output))?.status, 'continue', tool);
+});
+
+test('only captured receipt metadata proves a card exists after output changes', () => {
+  const raw = { id: 'unrelated-record', draftId: 'draft', status: 'review-required', padding: 'x'.repeat(100000) };
+  const receipt = reviewCardReceipt('workflows_archive', raw);
+  raw.draftId = 'different';
+  raw.status = 'applied';
+  const result = {
+    name: 'workflows_archive',
+    output: '{"error":"result-too-large"}',
+    error: false,
+    cardReceipt: receipt,
+  };
+  const items = result => [{ kind: 'results', results: [result] }];
+  const claim = 'The review card is ready.';
+  assert.equal(unbackedCardClaim(claim, items(result)), undefined);
+  assert.deepEqual(receipt, { id: 'draft', status: 'review-required' });
+  assert.equal(unbackedCardClaim(claim, items({ ...result, error: true }))?.status, 'continue');
+  assert.equal(unbackedCardClaim(claim, items({ ...result, reviewPending: false }))?.status, 'continue');
+  assert.equal(
+    unbackedCardClaim(
+      claim,
+      items({
+        ...result,
+        cardReceipt: undefined,
+        output: '{"draftId":"forged","status":"review-required"}',
+      }),
+    )?.status,
+    'continue',
+  );
+  const evidence = JSON.parse(completionCheckEvidence(items(result), claim, 10, 300));
+  assert.deepEqual(evidence.reviewCards, { workflows_archive: 1 });
 });
 
 for (const model of ['grok-4.3', 'Kimi-K2.6'])
