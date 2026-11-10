@@ -1,7 +1,12 @@
 import { createTableProposals, type TableProposalOptions } from '@tulipfarm/tables/proposals';
 import { generationProposalData } from '@tulipfarm/tables/store';
 import { readableTableFiles, requireTableSources } from './table-sources.ts';
-import { createTableImports, TableImportError, type TableImportOptions } from '@tulipfarm/tables/imports';
+import {
+  createTableImports,
+  TableImportError,
+  tableImportFailure,
+  type TableImportOptions,
+} from '@tulipfarm/tables/imports';
 import { TableValidationError } from '@tulipfarm/tables/definition';
 import {
   proposeTableSchema,
@@ -237,6 +242,12 @@ export function createChatTableProposals(
         )
           return { error: 'import-not-prepared', instruction: importNotPrepared };
         if (error instanceof TableImportPlanError) return importPlanResult(error);
+        if (error instanceof TableImportError)
+          return {
+            ...tableImportFailure(error),
+            instruction:
+              'No proposal was created and nothing changed. This is not a permission denial. The prepared file could not be read for this import. Tell the person this reason in plain words, without tool names, and what they can do next.',
+          };
         if (error instanceof TableValidationError)
           return {
             error: 'invalid-values' as const,

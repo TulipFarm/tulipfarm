@@ -28,6 +28,7 @@ export const importAdjustmentSchema = z.discriminatedUnion('kind', [
     used: z.string().min(1).max(31),
     only: z.boolean(),
   }),
+  z.strictObject({ kind: z.literal('header'), requested: z.int().min(1), used: z.int().min(1) }),
   z.strictObject({ kind: z.literal('column'), requested: importColumnSchema, used: importColumnSchema }),
   z.strictObject({
     kind: z.literal('conversion-dropped'),
