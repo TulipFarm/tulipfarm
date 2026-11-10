@@ -242,6 +242,13 @@ test('chat row writes after untrusted content become member-approved review draf
       const { result } = await chatTool(createCall(`continued-${index}`), [], { chatId, message: 'weiter' });
       assert.equal(result.error, 'approval-pending');
       assert.equal(result.waitingDraftId, sixth.result.draftId);
+      assert.deepEqual(result.waitingCard, {
+        tool: 'rows.create',
+        rows: 1,
+        sample: ['continued-5'],
+        summary: 'add 1 row (continued-5) to',
+      });
+      assert.deepEqual(result.notAdded, [`continued-${index}`]);
     }
     assert.equal((await live()).length, before.length + 5);
     for (const decision of ['save', 'dismiss']) {

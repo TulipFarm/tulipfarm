@@ -81,7 +81,54 @@ export type ChatRowRefusal = {
   instruction: string;
   /** The undecided card this change waits behind, for `approval-pending`. */
   waitingDraftId?: string;
+  /** What that waiting card changes, so a reply names it rather than the refused rows. */
+  waitingCard?: WaitingCardChange;
+  /** Short summaries of the rows this refused call asked for, which are on no card. */
+  notAdded?: string[];
 };
+
+/** A waiting row card's change: its tool, how many rows it touches, a few of their values, and a phrase for it. */
+export type WaitingCardChange = { tool: string; rows: number; sample: string[]; summary: string };
+
+const shownValue = (value: unknown) => {
+  const typed = record(value);
+  return ['text', 'numeric', 'date', 'timestamp'].includes(String(typed.kind)) && typeof typed.value === 'string'
+    ? typed.value.trim().slice(0, 40)
+    : typed.kind === 'boolean' && typeof typed.value === 'boolean'
+      ? String(typed.value)
+      : '';
+};
+/** A row's plain values joined, such as "Lime 10", in the order the call sent them. */
+export function rowSummaries(rows: readonly unknown[], limit = 5) {
+  return rows
+    .slice(0, limit)
+    .map(row =>
+      Object.values(fieldValues(record(row).values))
+        .map(shownValue)
+        .filter(Boolean)
+        .join(' ')
+        .slice(0, 80),
+    )
+    .filter(Boolean);
+}
+
+/** The change a waiting row card holds, read from its saved call. */
+export function waitingCardChange(input: unknown): WaitingCardChange {
+  const call = record(input);
+  const tool = typeof call.tool === 'string' ? call.tool : 'rows.create';
+  const sent = tool === 'rows.create.batch' && Array.isArray(call.rows) ? call.rows : [{ values: call.values }];
+  const rows = Math.max(1, sent.length);
+  const sample = rowSummaries(sent, 3);
+  const listed = sample.length ? ` (${sample.join(', ')}${rows > sample.length ? ', …' : ''})` : '';
+  const noun = `${rows} ${rows === 1 ? 'row' : 'rows'}`;
+  const summary =
+    tool === 'rows.update'
+      ? `change 1 row${listed} in`
+      : tool === 'rows.delete'
+        ? 'delete 1 row from'
+        : `add ${noun}${listed} to`;
+  return { tool, rows, sample, summary };
+}
 
 /**
  * Chat writes rows directly only when the person named the table and the reply writes at most five rows.
@@ -97,7 +144,7 @@ export async function chatRowReview(
   actor: HumanActor,
   origin: { conversationId: string; turnId: string },
   callId: string,
-  call: { tool: string; tableId: string; expectedAppliedRevision: string; rows?: readonly unknown[] },
+  call: { tool: string; tableId: string; expectedAppliedRevision: string; rows?: readonly unknown[]; values?: unknown },
 ): Promise<ChatRowReview | ChatRowRefusal | null> {
   return withHuman(runtime, workspaceId, actor, 'read', async tx => {
     const label = (
@@ -126,19 +173,39 @@ export async function chatRowReview(
       )
     ).rows.map(row => row.text);
     const waiting = (
-      await tx.client.query<{ id: string }>(
-        `SELECT d.id FROM ${relation(tx, 'tf_chat_authoring_drafts')} d WHERE d.conversation_id=$1 AND d.id<>$2 AND d.proposal->>'kind'='row' AND d.proposal->'input'->>'tableId'=$3 AND d.proposal->'input'->>'expectedAppliedRevision'=$4
+      await tx.client.query<{ id: string; input: unknown }>(
+        `SELECT d.id,d.proposal->'input' AS input FROM ${relation(tx, 'tf_chat_authoring_drafts')} d WHERE d.conversation_id=$1 AND d.id<>$2 AND d.proposal->>'kind'='row' AND d.proposal->'input'->>'tableId'=$3 AND d.proposal->'input'->>'expectedAppliedRevision'=$4
           AND NOT EXISTS (SELECT 1 FROM ${relation(tx, 'tf_chat_authoring_decisions')} c WHERE c.draft_id=d.id) ORDER BY d.created_at DESC LIMIT 1`,
         [origin.conversationId, callId, call.tableId, call.expectedAppliedRevision],
       )
-    ).rows[0]?.id;
-    if (waiting)
+    ).rows[0];
+    if (waiting) {
+      const card = waitingCardChange(waiting.input);
+      const onCard = new Set(
+        rowSummaries(
+          card.tool === 'rows.create.batch' ? (record(waiting.input).rows as unknown[]) : [record(waiting.input)],
+        ),
+      );
+      const sent =
+        call.tool === 'rows.create' ? rowSummaries([{ values: call.values }]) : rowSummaries(call.rows ?? []);
+      const asked = sent.filter(row => !onCard.has(row));
+      if (sent.length && !asked.length)
+        return {
+          error: 'approval-pending',
+          table: label,
+          waitingDraftId: waiting.id,
+          waitingCard: card,
+          instruction: `Nothing from this call was written: these rows are already on the card earlier in this chat that is still waiting to ${card.summary} "${label}", and the chat shows the person a link to it. Tell the person plainly that this card is still waiting and that they can approve or dismiss it. Never say anything was denied, failed or not allowed, and do not draft or write these rows again in this reply.`,
+        };
       return {
         error: 'approval-pending',
         table: label,
-        waitingDraftId: waiting,
-        instruction: `Nothing has been written and no new card was made. A row change for "${label}" is already waiting for approval on a card earlier in this chat, and the chat shows the person a link to it. Tell them that card is waiting and to approve or dismiss it first; do not draft or write these rows again.`,
+        waitingDraftId: waiting.id,
+        waitingCard: card,
+        ...(asked.length && { notAdded: asked }),
+        instruction: `Nothing from this call was written, and it is on no card. A card earlier in this chat is still waiting to ${card.summary} "${label}", and the chat shows the person a link to it. That card holds only that change, not the rows or changes from this call. Tell the person plainly: nothing new was added; the waiting card is the one to ${card.summary} "${label}"; approve or dismiss it, then ask again for ${asked.length ? asked.join(', ') : 'this change'}. Never say the waiting card holds this call's rows, never add their counts together, never say anything was denied, failed or not allowed, and do not draft or write these rows again in this reply.`,
       };
+    }
     if (proposing) return { ...changing, table: label };
     if (!namesTable(texts, label))
       return {
