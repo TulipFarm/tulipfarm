@@ -94,8 +94,9 @@ test('follow-ups run later in the chat they were asked in, once, as the requeste
     assert.equal(fired.length, 1);
     assert.deepEqual(
       { id: fired[0].followUp.id, instruction: fired[0].followUp.instruction, author: fired[0].author },
-      { id: quote.id, instruction: 'Post a coding quote in #tech.', author: 'human' },
+      { id: quote.id, instruction: 'Follow-up unavailable', author: 'human' },
     );
+    assert.doesNotMatch(JSON.stringify(fired[0]), /Post a coding quote/);
     assert.equal(fired[0].turn.status, 'queued');
     assert.equal((await followUps.readInChat(w.id, w.userId, chatId, quote.id)).status, 'fired');
   });

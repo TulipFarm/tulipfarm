@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import { AccessDenied, SourceAuthorizationUnavailable } from '@tulipfarm/access';
 import { knowledgeActivity, knowledgeActivitySchema } from '../src/knowledge-activity.ts';
 import { knowledgeActivityForHistory } from '../src/knowledge-activity-history.ts';
+import { canReadToolDetails } from '../src/source-access.ts';
 
 const call = { tool: 'knowledge.retrieve', action: 'search', query: 'PRIVATE QUERY' };
 const document = {
@@ -128,5 +129,49 @@ test('history rechecks both source lists and hides every title after revocation'
       },
     ),
     error => error === unexpected,
+  );
+});
+
+test('all tool detail projection fails closed on revoked, missing or opaque step provenance', async () => {
+  const actor = { kind: 'human', userId: randomUUID(), membershipId: randomUUID() };
+  const source = {
+    kind: 'knowledge-document',
+    workspaceId: randomUUID(),
+    documentId: randomUUID(),
+    sourceId: randomUUID(),
+    revisionId: randomUUID(),
+    publicationId: randomUUID(),
+    accessEpoch: 1,
+  };
+  let denied = false;
+  const tx = {
+    requireKnowledgeSource: async () => {
+      if (denied) throw new AccessDenied();
+    },
+  };
+  for (const [sources, output] of [
+    [[source], { sources: [] }],
+    [[], { sources: [source] }],
+  ]) {
+    denied = false;
+    assert.equal(await canReadToolDetails(tx, actor, sources, output), true);
+    denied = true;
+    assert.equal(await canReadToolDetails(tx, actor, sources, output), false);
+  }
+  for (const sources of [null, undefined, {}, [{ kind: 'unknown' }], [{ kind: 'unavailable' }]]) {
+    assert.equal(await canReadToolDetails(tx, actor, sources), false);
+  }
+  assert.equal(await canReadToolDetails(tx, actor, [], { result: {} }), false);
+  await assert.rejects(
+    canReadToolDetails(
+      {
+        requireKnowledgeSource: async () => {
+          throw new SourceAuthorizationUnavailable();
+        },
+      },
+      actor,
+      [source],
+    ),
+    SourceAuthorizationUnavailable,
   );
 });

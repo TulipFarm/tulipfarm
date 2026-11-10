@@ -35,7 +35,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
   const chats = createConversations(runtime),
     chatId = randomUUID();
   await chats.create(w.id, w.userId, { chatId, commandId: randomUUID() });
-  async function reply(text, call, sources = []) {
+  async function reply(text, call, sources = [], fields = {}) {
     const sent = await chats.send(w.id, w.userId, chatId, {
       messageId: randomUUID(),
       commandId: randomUUID(),
@@ -51,6 +51,8 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
             context => createChatTools(context.runtime).invokeWithSources(context, call),
             sources,
             call,
+            fields.activity,
+            typeof fields.narration === 'function' ? fields.narration(messages) : fields.narration,
           )
         ).result;
       return { text: typeof text === 'function' ? text(messages) : text, sources };
@@ -181,7 +183,7 @@ for (const change of ['remove note', 'replace note', 'remove file']) {
     const { w, db, runtime, chats, chatId, drafts, tool, reply, approve, files } = await setup(t);
     const text = 'Private source passage: Starter costs $10.';
     const unrelatedText = 'Good morning. This reply predates the Knowledge source.';
-    await reply(unrelatedText);
+    await reply(unrelatedText, { tool: 'tables.definitions' }, [], { narration: 'Reading workspace tables.' });
     let fileId;
     if (change === 'remove file') {
       fileId = randomUUID();
@@ -247,10 +249,73 @@ for (const change of ['remove note', 'replace note', 'remove file']) {
       return prior.text.slice(0, text.length);
     };
     await reply(copyFromContext);
+    await reply('I checked the table definitions.', { tool: 'tables.definitions' }, [], {
+      narration: messages => `Using source: ${copyFromContext(messages)}`,
+    });
+    const narration = `Using source: ${text}`;
+    const narratedStep = (
+      await db.platform.query(
+        `SELECT c.id,c.turn_id,t.generation,t.attempt_epoch FROM "${w.names.schema}".tf_conversation_tool_calls c
+         JOIN "${w.names.schema}".tf_conversation_turns t ON t.id=c.turn_id WHERE c.narration=$1`,
+        [narration],
+      )
+    ).rows[0];
+    const streamReference = {
+      kind: 'tool',
+      turnId: narratedStep.turn_id,
+      generation: narratedStep.generation,
+      epoch: narratedStep.attempt_epoch,
+      id: narratedStep.id,
+    };
+    assert.equal(await chats.canReadStream(w.id, w.userId, chatId, streamReference), true);
+    await db.platform.query(`UPDATE "${w.names.schema}".tf_conversation_turns SET streamed=$2 WHERE id=$1`, [
+      narratedStep.turn_id,
+      JSON.stringify({
+        generation: narratedStep.generation,
+        epoch: narratedStep.attempt_epoch,
+        text: narration,
+        sources: [source],
+      }),
+    ]);
+    const previewReference = { ...streamReference, kind: 'text', step: 0 };
+    assert.equal(await chats.canReadStream(w.id, w.userId, chatId, previewReference), true);
+    assert.ok(
+      (await chats.history(w.id, w.userId, chatId)).messages.some(message =>
+        message.tools.some(step => step.id === narratedStep.id && step.narration === narration),
+      ),
+      'readable source context still permits the original tool narration',
+    );
     const legacyText = `Legacy uncited copy: ${text}`;
     const opaqueText = 'An older reply with no recorded tool attribution.';
     let legacySources;
+    let followUpMessageId;
     if (change === 'remove note') {
+      const scheduled = await tool({ tool: 'followups.schedule', instruction: narration, delayMinutes: 1 });
+      assert.equal(scheduled.status, 'scheduled');
+      followUpMessageId = scheduled.followUp.id;
+      const fired = await chats.send(w.id, w.userId, chatId, {
+        messageId: followUpMessageId,
+        commandId: randomUUID(),
+        parts: [{ kind: 'text', text: narration }],
+      });
+      await db.platform.query(
+        `UPDATE "${w.names.schema}".tf_follow_ups SET status='fired',fired_message_id=$1 WHERE id=$1`,
+        [followUpMessageId],
+      );
+      await createConversationExecutor(runtime, async () => ({
+        text: 'The scheduled work is done.',
+        sources: [source],
+      })).process({
+        workspaceId: w.id,
+        conversationId: chatId,
+        turnId: fired.turnId,
+        generation: 0,
+      });
+      assert.equal(
+        (await chats.history(w.id, w.userId, chatId)).messages.find(message => message.id === followUpMessageId)
+          .followUp.instruction,
+        narration,
+      );
       await reply(messages => `Legacy uncited copy: ${copyFromContext(messages)}`, { tool: 'knowledge.list' });
       await reply(opaqueText);
       const old = (
@@ -349,6 +414,30 @@ for (const change of ['remove note', 'replace note', 'remove file']) {
         assert.doesNotMatch(JSON.stringify(withheld.parts), /Private source passage|access changed|Some work failed/);
       }
     });
+    await t.test('tool narration cannot retain removed source text across history reloads', async () => {
+      for (let reload = 0; reload < 2; reload++) {
+        const history = await createConversations(runtime).history(w.id, w.userId, chatId);
+        const steps = history.messages.flatMap(message => message.tools);
+        const step = steps.find(step => step.id === narratedStep.id);
+        assert.ok(step, 'the immutable tool step is not dropped');
+        assert.equal(step.tool, 'tables.definitions');
+        assert.equal(step.status, 'completed');
+        assert.equal(step.narration, null);
+        assert.equal(step.presentation.label, 'Used a tool');
+        assert.doesNotMatch(JSON.stringify(steps), /Private source passage/);
+        assert.ok(steps.some(step => step.narration === 'Reading workspace tables.'));
+        assert.equal(await chats.canReadStream(w.id, w.userId, chatId, streamReference), false);
+        assert.equal(await chats.canReadStream(w.id, w.userId, chatId, previewReference), false);
+      }
+    });
+    if (followUpMessageId)
+      await t.test('generated follow-up instructions use the scheduling step provenance', async () => {
+        const message = (await chats.history(w.id, w.userId, chatId)).messages.find(
+          message => message.id === followUpMessageId,
+        );
+        assert.equal(message.followUp.instruction, 'Follow-up unavailable');
+        assert.doesNotMatch(JSON.stringify(message), /Private source passage/);
+      });
     if (legacySources)
       await t.test('legacy context exposure is not cleared by an unrelated Knowledge list output', async () => {
         const { message_id: messageId } = (
@@ -380,6 +469,7 @@ for (const change of ['remove note', 'replace note', 'remove file']) {
     );
     await assert.rejects(drafts.read(w.id, outsider.userId, chatId, added.draftId), AccessDenied);
     await assert.rejects(chats.history(w.id, outsider.userId, chatId), AccessDenied);
+    await assert.rejects(chats.canReadStream(w.id, outsider.userId, chatId, streamReference), AccessDenied);
     await runtime.transaction(w.id, commonCompatibility, async tx => {
       const snapshot = { kind: 'private-conversation', conversationId: chatId, snapshot: true };
       assert.deepEqual(await protectedSourceClosure(tx, [snapshot]), [snapshot]);
@@ -391,5 +481,6 @@ for (const change of ['remove note', 'replace note', 'remove file']) {
     ]);
     await assert.rejects(drafts.read(w.id, w.userId, chatId, changed.draftId), AccessDenied);
     await assert.rejects(chats.history(w.id, w.userId, chatId), AccessDenied);
+    await assert.rejects(chats.canReadStream(w.id, w.userId, chatId, streamReference), AccessDenied);
   });
 }

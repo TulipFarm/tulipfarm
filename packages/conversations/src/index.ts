@@ -50,6 +50,7 @@ import {
   requireKnowledgeSources,
   requireWorkflowSources,
   KnowledgeSourceRemoved,
+  canReadToolDetails,
 } from './source-access.ts';
 import { calendarResultsForHistory } from './calendar-results.ts';
 import {
@@ -701,6 +702,28 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
         ).rows.map(row => [row.message_id, row.sources]),
       );
       const hidden = new Set<string>();
+      const followUpMessages = messages.filter(message => message.followUp);
+      if (followUpMessages.length) {
+        const origins = (
+          await tx.client.query(
+            `SELECT f.fired_message_id,s.sources,s.output FROM ${table(tx, 'tf_follow_ups')} f
+             LEFT JOIN ${table(tx, 'tf_conversation_execution_steps')} s ON s.turn_id=f.origin_turn_id
+               AND s.call->>'tool'='followups.schedule' AND s.output->'result'->'followUp'->>'id'=f.id::text
+             WHERE f.conversation_id=$1 AND f.fired_message_id=ANY($2::uuid[])`,
+            [chatId, followUpMessages.map(message => message.id)],
+          )
+        ).rows;
+        for (const message of followUpMessages) {
+          if (!message.followUp) continue;
+          const origin = origins.find(row => row.fired_message_id === message.id);
+          if (await canReadToolDetails(tx, actor, origin?.sources, origin?.output, chat.projectId ? chatId : undefined))
+            continue;
+          message.followUp = { ...message.followUp, instruction: 'Follow-up unavailable' };
+          message.parts = [
+            { kind: 'text', text: 'This follow-up is unavailable because a source it used is no longer available.' },
+          ];
+        }
+      }
       async function conceal(
         text: string | ((error: AccessDenied) => string),
         hide: boolean,
@@ -794,6 +817,18 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
           // A card made in this same reply is already shown with it, so only point to earlier ones, once each.
           const shownDrafts = new Set(rows.flatMap(row => (row.row_draft_id ? [row.row_draft_id] : [])));
           for (const row of rows) {
+            if (!(await canReadToolDetails(tx, actor, row.sources, row.output, chat.projectId ? chatId : undefined))) {
+              message.tools.push(
+                toolReceiptSchema.parse({
+                  id: row.id,
+                  tool: row.tool,
+                  status: row.status,
+                  presentation: { label: 'Used a tool', brand: null },
+                  ...(row.row_draft_id ? { rowDraftId: row.row_draft_id } : {}),
+                }),
+              );
+              continue;
+            }
             const waiting = hidden.size ? undefined : waitingRowDraft(row.tool, row.output);
             const pointTo = waiting && !shownDrafts.has(waiting.id) ? waiting : undefined;
             if (waiting) shownDrafts.add(waiting.id);
@@ -897,6 +932,54 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
           }
         }
       return { messages, nextBefore: rows.length > 50 ? (messages[0]?.sequence ?? null) : null, hasGitHubProposals };
+    });
+  }
+
+  async function canReadStream(workspaceId: string, userId: string, chatId: string, value: unknown) {
+    const input = z
+      .object({
+        kind: z.enum(['text', 'tool', 'subagents', 'progress']),
+        turnId: uuidSchema,
+        generation: z.number().int().nonnegative(),
+        epoch: z.number().int().nonnegative(),
+        id: uuidSchema.optional(),
+      })
+      .parse(value);
+    return human(workspaceId, userId, async (tx, actor) => {
+      const chat = await owned(tx, actor, uuidSchema.parse(chatId));
+      await requireConversationMcpSources(tx, actor, chatId);
+      const row = (
+        await tx.client.query(
+          `SELECT t.generation,t.attempt_epoch,to_jsonb(t)->'streamed' AS streamed,s.sources,s.output,
+            (SELECT jsonb_agg(m.sources) FROM ${table(tx, 'tf_conversation_model_sources')} m
+             WHERE m.turn_id=t.id AND m.epoch=$4) AS model_sources
+           FROM ${table(tx, 'tf_conversation_turns')} t
+           LEFT JOIN ${table(tx, 'tf_conversation_execution_steps')} s ON s.turn_id=t.id AND s.call_id=$3
+           WHERE t.id=$1 AND t.conversation_id=$2`,
+          [input.turnId, chatId, input.id ?? null, input.epoch],
+        )
+      ).rows[0];
+      if (!row || row.generation !== input.generation || row.attempt_epoch !== input.epoch) return false;
+      if (input.kind === 'tool' || input.kind === 'subagents') {
+        if (!input.id || (input.kind === 'subagents' && row.output == null)) return false;
+        return canReadToolDetails(tx, actor, row.sources, row.output, chat.projectId ? chatId : undefined);
+      }
+      const streamed = z
+        .object({
+          generation: z.literal(input.generation),
+          epoch: z.literal(input.epoch),
+          sources: sourceDependenciesSchema,
+        })
+        .safeParse(row.streamed);
+      const modelSources = z.array(sourceDependenciesSchema).safeParse(row.model_sources ?? []);
+      if (!streamed.success || !modelSources.success) return false;
+      return canReadToolDetails(
+        tx,
+        actor,
+        [...streamed.data.sources, ...modelSources.data.flat()],
+        null,
+        chat.projectId ? chatId : undefined,
+      );
     });
   }
 
@@ -1277,6 +1360,7 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
     maintenance,
     resumeMaintenance: resume,
     history,
+    canReadStream,
     list,
     destinations,
     pinned,

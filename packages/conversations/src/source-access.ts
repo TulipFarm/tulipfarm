@@ -206,6 +206,35 @@ export async function requireRetainedToolSources(tx: AuthorizationTransaction, a
   return opaque;
 }
 
+export async function canReadToolDetails(
+  tx: AuthorizationTransaction,
+  actor: HumanActor,
+  sources: unknown,
+  output: unknown = null,
+  projectChatId?: string,
+) {
+  const retained = sourceDependenciesSchema.safeParse(sources);
+  const result =
+    output == null
+      ? { success: true as const, data: { sources: [] } }
+      : z
+          .object({
+            sources: sourceDependenciesSchema,
+          })
+          .safeParse(output);
+  if (!retained.success || !result.success) return false;
+  try {
+    const dependencies = [...retained.data, ...result.data.sources];
+    if (await requireRetainedToolSources(tx, actor, dependencies)) return false;
+    if (projectChatId) await requireResultSources(tx, actor, projectChatId, dependencies);
+    return true;
+  } catch (error) {
+    if (error instanceof SourceAuthorizationUnavailable) throw error;
+    if (!(error instanceof AccessDenied)) throw error;
+    return false;
+  }
+}
+
 /** Slack row drafts check their thread's audience when proposed, read and decided, not through the generic source reader. */
 export async function requireChatReviewSources(
   tx: AuthorizationTransaction,

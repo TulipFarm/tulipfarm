@@ -21,6 +21,8 @@ const citation = '44444444-4444-4444-8444-444444444444:0';
 const addId = '55555555-5555-4555-8555-555555555555';
 const removeId = '66666666-6666-4666-8666-666666666666';
 const documentId = '77777777-7777-4777-8777-777777777777';
+const narratedId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+const narration = 'Using source: Suppliers are paid within 30 days.';
 const recovery =
   'This reply is unavailable because a knowledge source it cited changed or your access to it ended. Search knowledge again to make a new request.';
 const removedReply =
@@ -196,8 +198,25 @@ test(
                     tools: [],
                   },
                   {
-                    id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+                    id: narratedId,
                     sequence: 5,
+                    author: 'human',
+                    createdAt: workspace.createdAt,
+                    parts: [{ kind: 'text', text: 'Check the table definitions.' }],
+                    turn: { id: narratedId, status: 'completed', generation: 0 },
+                    tools: [
+                      {
+                        id: narratedId,
+                        tool: 'tables.definitions',
+                        status: 'completed',
+                        narration: state.removed ? null : narration,
+                        presentation: { label: state.removed ? 'Used a tool' : narration, brand: null },
+                      },
+                    ],
+                  },
+                  {
+                    id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+                    sequence: 6,
                     author: 'assistant',
                     createdAt: workspace.createdAt,
                     parts: [
@@ -211,7 +230,7 @@ test(
                   },
                   {
                     id: '99999999-9999-4999-8999-999999999999',
-                    sequence: 6,
+                    sequence: 7,
                     author: 'human',
                     createdAt: workspace.createdAt,
                     parts: [{ kind: 'text', text: 'Remove the old supplier note.' }],
@@ -284,6 +303,12 @@ test(
             assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
             await page.keyboard.press('Escape');
             await page.getByRole('region', { name: 'Knowledge added' }).getByText('Added', { exact: true }).waitFor();
+            const toolActivity = page
+              .getByRole('listitem')
+              .filter({ hasText: 'Check the table definitions.' })
+              .getByRole('button', { name: /Tool activity.*1 tool/ });
+            await toolActivity.click();
+            await page.getByText(narration, { exact: true }).first().waitFor();
             await capture(mobile ? 'source-removal-mobile-before' : 'source-removal-desktop-before');
             await page
               .getByRole('region', { name: 'Review Knowledge remove' })
@@ -298,6 +323,9 @@ test(
               await page.getByText(removedReply, { exact: true }).first().waitFor();
               assert.equal(await page.getByText(removedReply, { exact: true }).count(), 2);
               assert.equal(await page.getByText('Suppliers are paid within 30 days.', { exact: true }).count(), 0);
+              if ((await toolActivity.getAttribute('aria-expanded')) === 'false') await toolActivity.click();
+              assert.equal(await page.getByText(narration, { exact: true }).count(), 0);
+              await page.getByText('Used a tool', { exact: true }).waitFor();
               await page
                 .getByText('Good morning. This reply predates the Knowledge source.', { exact: true })
                 .waitFor();
