@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { z } from 'zod';
 import { parse } from 'csv-parse';
@@ -20,6 +20,9 @@ import { canonicalJson } from './canonical.ts';
 import { importAdjustmentsSchema, type ImportAdjustment } from './proposal-contracts.ts';
 import { table, type TableRuntime, type TableTransaction } from './service-store.ts';
 import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
+import { convertImportValue } from './proposal-data.ts';
+import { TableValidationError, validateValue, type TableDefinition, type TableValues } from './definition.ts';
+import type { ImportProblem, ProposalPlan } from './proposal-contracts.ts';
 
 export const importLimits = Object.freeze({
   bytes: 10 * 1024 * 1024,
@@ -818,6 +821,88 @@ export async function parseImportFile(bytes: Uint8Array, input: unknown): Promis
     if (error instanceof TableImportError) throw error;
     throw new TableImportError('malformed-file');
   }
+}
+
+export const pastedImportRowLimit = 1000;
+
+/** Prepares creates only; the normal proposal service still checks authority and applies approved effects. */
+export async function preparePastedImport(text: string, definition: TableDefinition, revision: string) {
+  if (Buffer.byteLength(text) > importLimits.bytes) throw new TableImportError('byte-limit');
+  if (!text.trim()) return { error: 'empty-paste' as const };
+  const bytes = Buffer.from(text);
+  const { selection } = await fitFileImportSelection(
+    bytes,
+    { format: 'csv', header: { kind: 'row', row: 1 }, conversions: {}, empty: 'null' },
+    [definition.fields.map(field => field.label)],
+  );
+  const rows = await parseImportFile(bytes, selection);
+  if (rows.length > pastedImportRowLimit)
+    return { error: 'row-limit' as const, count: rows.length, limit: pastedImportRowLimit };
+  if (!rows.length) return { error: 'empty-paste' as const };
+  const key = (name: string) => name.trim().toLocaleLowerCase('en-US');
+  const columns = Object.keys(rows[0]!);
+  const mapped = new Map<string, string>();
+  const problems: (ImportProblem & { label: string | null })[] = [];
+  let total = 0;
+  const report = (problem: ImportProblem & { label: string | null }) => {
+    total++;
+    if (problems.length < 100) problems.push(problem);
+  };
+  for (const column of columns) {
+    const fields = definition.fields.filter(field => key(field.label) === key(column));
+    if (fields.length !== 1 || mapped.has(fields[0]!.id)) {
+      report({
+        row: null,
+        label: null,
+        column,
+        fieldId: null,
+        field: null,
+        code: 'unknown-field',
+        value: null,
+        expected: definition.fields.map(field => field.label),
+      });
+    } else mapped.set(fields[0]!.id, column);
+  }
+  const changes: Extract<ProposalPlan, { kind: 'records' }>['changes'] = [];
+  for (const [index, row] of rows.entries()) {
+    const first = definition.fields.find(field => field.kind === 'text') ?? definition.fields[0];
+    const primary = first && row[mapped.get(first.id) ?? ''];
+    const label = primary && 'value' in primary ? String(primary.value).slice(0, 200) : null;
+    const values: TableValues = {};
+    for (const field of definition.fields) {
+      const column = mapped.get(field.id);
+      const source = column ? (row[column] ?? null) : null;
+      const value = source && 'value' in source ? String(source.value).slice(0, 40) : null;
+      const at = (code: ImportProblem['code'], expected?: string[]) =>
+        report({
+          row: index + 1,
+          label,
+          column: column ?? null,
+          fieldId: field.id,
+          field: field.label,
+          code,
+          value,
+          ...(expected ? { expected } : {}),
+        });
+      const converted = convertImportValue(field, source);
+      if ('problem' in converted) at(converted.problem, converted.expected);
+      else {
+        try {
+          values[field.id] = validateValue(field, converted.value);
+        } catch (error) {
+          if (!(error instanceof TableValidationError)) throw error;
+          at(converted.value === null ? 'missing-field' : 'invalid-output');
+        }
+      }
+    }
+    changes.push({ kind: 'create', recordId: randomUUID(), values });
+  }
+  if (total) return { error: 'invalid-values' as const, problems, total, truncated: total > problems.length };
+  return {
+    input: {
+      plans: [{ kind: 'records' as const, tableId: definition.id, dependsOn: [], expectedRevision: revision, changes }],
+    },
+  };
 }
 
 /** Reads the file's rows of cells in order until visit returns false. */

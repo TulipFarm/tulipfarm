@@ -142,6 +142,7 @@ const coreChatTools = new Set(
     // Importing an attached file into a table must not depend on the model first finding these tools.
     'tables.import.attachments',
     'tables.import.file',
+    'tables.import.paste',
     'rows.create.batch',
     'rows.list',
     'rows.update.batch',

@@ -992,8 +992,16 @@ function ProposalEffects({
                 <Table
                   aria-label={`Field changes for row ${ordinal}`}
                   getRowId={row => row.id}
-                  data={[...new Set([...Object.keys(effect.before ?? {}), ...Object.keys(effect.after ?? {})])].map(
-                    id => ({
+                  data={[
+                    ...new Set([
+                      ...plan.after.fields.map(field => field.id),
+                      ...(plan.before?.fields.map(field => field.id) ?? []),
+                      ...Object.keys(effect.before ?? {}),
+                      ...Object.keys(effect.after ?? {}),
+                    ]),
+                  ]
+                    .filter(id => Object.hasOwn(effect.before ?? {}, id) || Object.hasOwn(effect.after ?? {}, id))
+                    .map(id => ({
                       id,
                       label:
                         plan.after.fields.find(field => field.id === id)?.label ??
@@ -1004,8 +1012,7 @@ function ProposalEffects({
                           ? 'No row'
                           : formatTableValue(effect.before[id], plan.before ?? plan.after, id),
                       after: effect.after === null ? 'Row deleted' : formatTableValue(effect.after[id], plan.after, id),
-                    }),
-                  )}
+                    }))}
                   columns={[
                     { key: 'label', header: 'Field' },
                     {

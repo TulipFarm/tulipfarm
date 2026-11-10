@@ -29,6 +29,7 @@ export const toolActivityLabels = {
   'tables.propose': 'Preparing table changes for review',
   'tables.import.attachments': 'Listing attachments available for import',
   'tables.import.file': 'Preparing a file for import',
+  'tables.import.paste': 'Preparing table changes for review',
   'rows.list': 'Listing rows',
   'rows.page': 'Listing rows',
   'rows.summarize': 'Summarizing rows',
