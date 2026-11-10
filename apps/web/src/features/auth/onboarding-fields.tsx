@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { z } from 'zod';
 import { Field } from '@tulipfarm/sprout/field';
 import { Input } from '@tulipfarm/sprout/input';
 import { InputGroup, InputGroupAddon, InputGroupInput, InputGroupText } from '@tulipfarm/sprout/input-group';
@@ -8,10 +9,31 @@ import { suggestWorkspaceSlug, workspaceSlugError } from '@/lib/workspace-slug';
 
 // New workspaces are always business workspaces; the signup flow does not ask.
 const accountType = 'business';
+const workspaceDraftKey = 'tulipfarm:signup-workspace';
+const workspaceDraftSchema = z.object({
+  name: z.string().max(80),
+  customSlug: z.string().max(48).nullable(),
+  expiresAt: z.number(),
+});
+
+function readWorkspaceDraft() {
+  try {
+    const parsed = workspaceDraftSchema.safeParse(JSON.parse(sessionStorage.getItem(workspaceDraftKey) ?? 'null'));
+    if (parsed.success && parsed.data.expiresAt > Date.now()) return parsed.data;
+  } catch {}
+  return null;
+}
+
+function clearWorkspaceDraft() {
+  try {
+    sessionStorage.removeItem(workspaceDraftKey);
+  } catch {}
+}
 
 export function useOnboardingFields(disabled: boolean) {
-  const [name, setName] = useState('');
-  const [customSlug, setCustomSlug] = useState<string | null>(null);
+  const [draft] = useState(readWorkspaceDraft);
+  const [name, setName] = useState(draft?.name ?? '');
+  const [customSlug, setCustomSlug] = useState<string | null>(draft?.customSlug ?? null);
   const [submitted, setSubmitted] = useState(false);
   const [availabilityError, setAvailabilityError] = useState<{ slug: string; message: string } | null>(null);
   const checking = useRef<{ slug: string; promise: Promise<boolean> } | null>(null);
@@ -20,6 +42,16 @@ export function useOnboardingFields(disabled: boolean) {
   const slug = customSlug ?? suggestWorkspaceSlug(name);
   const currentSlug = useRef(slug);
   currentSlug.current = slug;
+  useEffect(() => {
+    try {
+      if (!name && customSlug === null) clearWorkspaceDraft();
+      else
+        sessionStorage.setItem(
+          workspaceDraftKey,
+          JSON.stringify({ name, customSlug, expiresAt: Date.now() + 24 * 60 * 60 * 1000 }),
+        );
+    } catch {}
+  }, [name, customSlug]);
   const checkAvailability = useCallback((value: string) => {
     clearTimeout(debounce.current);
     if (checking.current?.slug === value) return checking.current.promise;
@@ -67,6 +99,7 @@ export function useOnboardingFields(disabled: boolean) {
       const draft = await saveOnboarding(saved.current.token, parsed.data);
       saved.current.expiresAt = Date.parse(draft.expiresAt);
     }
+    clearWorkspaceDraft();
     return `/onboarding#token=${saved.current.token}`;
   }
   const fields = (
