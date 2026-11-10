@@ -9,10 +9,10 @@ export const budCorners = {
 };
 export type BudCorner = keyof typeof budCorners;
 export const budCornerClasses: Record<BudCorner, string> = {
-  'bottom-right': 'right-4 bottom-4 items-end',
-  'top-right': 'right-4 top-4 flex-col-reverse items-end',
-  'bottom-left': 'left-4 bottom-4 items-start',
-  'top-left': 'left-4 top-4 flex-col-reverse items-start',
+  'bottom-right': 'bud-floating-bottom right-4 items-end',
+  'top-right': 'bud-floating-top right-4 flex-col-reverse items-end',
+  'bottom-left': 'bud-floating-bottom left-4 items-start',
+  'top-left': 'bud-floating-top left-4 flex-col-reverse items-start',
 };
 export function isBudCorner(value: unknown): value is BudCorner {
   return typeof value === 'string' && Object.hasOwn(budCorners, value);

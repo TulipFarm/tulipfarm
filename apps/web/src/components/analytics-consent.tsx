@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { analytics } from '@/lib/analytics';
 import { preferencesEvent, privacySignal, readConsent, siteOrigins } from '@/lib/browser-analytics';
 import { Button } from '@tulipfarm/sprout/button';
+import { useViewportInset } from '@/lib/viewport-inset';
 
 const insetProperty = '--consent-inset';
 
@@ -18,19 +19,12 @@ export function AnalyticsConsent() {
     return () => window.removeEventListener(preferencesEvent, open);
   }, []);
   const shown = analytics.configured() && visible;
-  // Reserve space below the app shell so the banner never covers the composer.
+  useViewportInset(panel, insetProperty, { enabled: shown });
   useLayoutEffect(() => {
-    const element = panel.current;
     const root = document.documentElement;
-    if (!shown || !element) return;
+    if (!shown) return;
     root.dataset.analyticsConsent = 'open';
-    const reserve = () => root.style.setProperty(insetProperty, `${element.offsetHeight}px`);
-    reserve();
-    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(reserve);
-    observer?.observe(element);
     return () => {
-      observer?.disconnect();
-      root.style.removeProperty(insetProperty);
       delete root.dataset.analyticsConsent;
     };
   }, [shown]);
@@ -44,7 +38,7 @@ export function AnalyticsConsent() {
     <aside
       ref={panel}
       aria-label="Optional analytics"
-      className="fixed inset-x-0 bottom-0 z-50 border-t border-border bg-card text-sm text-foreground"
+      className="analytics-consent fixed inset-x-0 bottom-0 z-50 border-t border-border bg-card text-sm text-foreground"
     >
       <div className="mx-auto flex max-w-5xl flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center">
         <p className="leading-relaxed sm:flex-1">

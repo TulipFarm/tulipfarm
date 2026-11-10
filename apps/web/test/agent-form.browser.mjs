@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
 import { chromium } from 'playwright';
 import { agentBuilderFixture } from './agent-builder.fixture.mjs';
+import { assertUncovered } from './browser-controls.mjs';
 import {
   startBuiltApp,
   builderBrowserOptions,
@@ -10,20 +11,59 @@ import {
   captureBrowserFailure,
 } from './built-app.fixture.mjs';
 
-async function environment(t, workspaceName, canAssign = true) {
+async function environment(t, { width = 1440, height = 1000, floating = false, workspaceName, canAssign = true } = {}) {
   const server = await startBuiltApp();
   t.after(() => server.close());
   const browser = await chromium.launch(builderBrowserOptions());
   t.after(() => browser.close());
-  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, reducedMotion: 'reduce' });
+  const page = await browser.newPage({
+    viewport: { width, height },
+    hasTouch: width < 1280,
+    reducedMotion: 'reduce',
+  });
   page.setDefaultTimeout(10000);
   const errors = [],
     fixture = agentBuilderFixture();
+  if (floating) {
+    fixture.workspace.name = 'Example workspace';
+    fixture.workspace.slug = 'example-workspace';
+  }
   if (workspaceName) fixture.workspace.name = workspaceName;
   fixture.team.canAssign = canAssign;
   page.on('pageerror', error => errors.push(error.message));
+  if (floating)
+    page.on('console', message => {
+      if (message.type() === 'error' && !/^Failed to load resource:.*404/.test(message.text()))
+        errors.push(message.text());
+    });
+  const budId = randomUUID();
   await page.route('**/v1/**', route => {
     const request = route.request();
+    const path = new URL(request.url()).pathname;
+    if (floating && path.endsWith('/bud'))
+      return route.fulfill({
+        json: {
+          conversationId: budId,
+          onboarding: 'completed',
+          bubblesEnabled: true,
+          snoozedUntil: null,
+          nudge: null,
+          preferences: [],
+        },
+      });
+    if (floating && path.endsWith(`/conversations/${budId}/messages`))
+      return route.fulfill({ json: { messages: [], nextBefore: null } });
+    if (floating && path.endsWith(`/conversations/${budId}`))
+      return route.fulfill({
+        json: {
+          id: budId,
+          title: 'Bud',
+          titleRevision: 1,
+          archived: false,
+          activityAt: '2026-10-12T10:00:00Z',
+          createdAt: '2026-10-12T10:00:00Z',
+        },
+      });
     return route.fulfill(fixture.respond(request.method(), request.url(), request.postDataJSON()));
   });
   await page.goto(`${server.origin}/${fixture.workspace.slug}/agents/new`);
@@ -34,7 +74,7 @@ async function environment(t, workspaceName, canAssign = true) {
       .first()
       .click();
   try {
-    await form.getByLabel('Agent name', { exact: true }).waitFor();
+    await form.getByLabel('Agent name', { exact: true }).waitFor({ timeout: 30000 });
   } catch (error) {
     await captureBrowserFailure(page, 'agent-form-loading');
     console.error(await page.locator('body').innerText(), errors);
@@ -44,7 +84,7 @@ async function environment(t, workspaceName, canAssign = true) {
 }
 
 test('table access selects a granting team and shows an editable access source', { timeout: 60000 }, async t => {
-  const { page, fixture, form, step, errors } = await environment(t, 'Customer operations');
+  const { page, fixture, form, step, errors } = await environment(t, { workspaceName: 'Customer operations' });
   await form.getByLabel('Agent name', { exact: true }).fill('Customer reader');
   await form.getByRole('textbox', { name: 'Instructions', exact: true }).fill('Count the customer rows.');
   await step('Access');
@@ -73,7 +113,10 @@ test('table access selects a granting team and shows an editable access source',
 });
 
 test('table access blocks a plain member with the manager needed before activation', { timeout: 60000 }, async t => {
-  const { page, fixture, form, step, errors } = await environment(t, 'Customer operations', false);
+  const { page, fixture, form, step, errors } = await environment(t, {
+    workspaceName: 'Customer operations',
+    canAssign: false,
+  });
   await form.getByLabel('Agent name', { exact: true }).fill('Customer reader');
   await form.getByRole('textbox', { name: 'Instructions', exact: true }).fill('Count the customer rows.');
   await step('Access');
@@ -91,6 +134,121 @@ test('table access blocks a plain member with the manager needed before activati
   await page.setViewportSize({ width: 390, height: 844 });
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   await captureBuilderScreenshot(page, 'table-access-manager-required-mobile');
+  assert.deepEqual(errors, []);
+});
+
+for (const width of [375, 390, 414, 768, 1440])
+  test(`floating controls leave every builder action accessible at ${width}px`, { timeout: 90000 }, async t => {
+    const { page, fixture, form, errors } = await environment(t, {
+      width,
+      height: width === 1440 ? 900 : 812,
+      floating: true,
+    });
+    const scroller = page.locator('[data-viewport-content]');
+    const bottom = () => scroller.evaluate(node => (node.scrollTop = node.scrollHeight));
+    const choose = async name => {
+      if (width < 640) {
+        await page.getByRole('combobox', { name: 'Setup section', exact: true }).click();
+        await page.getByRole('option', { name: new RegExp(name) }).click();
+      } else
+        await page
+          .getByRole('tab', { name: new RegExp(name) })
+          .first()
+          .click();
+    };
+    await form.getByLabel('Agent name', { exact: true }).fill('Handbook helper');
+    await form.getByRole('textbox', { name: 'Instructions', exact: true }).fill('Find reviewed policies.');
+    await bottom();
+    const save = form.getByRole('button', { name: 'Save draft', exact: true });
+    const next = form.getByRole('button', { name: 'Continue', exact: true });
+    await assertUncovered(save);
+    await assertUncovered(next);
+    if (width === 375) {
+      await form.getByRole('textbox', { name: 'Instructions', exact: true }).focus();
+      for (let count = 0; count < 30 && !(await next.evaluate(node => node === document.activeElement)); count++)
+        await page.keyboard.press('Tab');
+      assert.equal(await next.evaluate(node => node === document.activeElement), true, 'Tab reaches Continue');
+      await assertUncovered(next);
+      await page.getByRole('button', { name: 'Open Bud', exact: true }).click();
+      const popup = page.getByRole('dialog', { name: 'Bud quick chat', exact: true });
+      await popup.waitFor();
+      await popup.getByRole('button', { name: 'Minimize chat', exact: true }).focus();
+      for (let count = 0; count < 12; count++) {
+        await page.keyboard.press('Tab');
+        await page.waitForFunction(
+          () =>
+            document.querySelector('[role="dialog"][data-slot="popover-content"]')?.contains(document.activeElement) ||
+            document.activeElement?.getAttribute('aria-label') === 'Minimize Bud',
+        );
+      }
+      await page.keyboard.press('Escape');
+      await popup.waitFor({ state: 'hidden' });
+      assert.equal(
+        await page
+          .getByRole('button', { name: 'Open Bud', exact: true })
+          .evaluate(node => node === document.activeElement),
+        true,
+        'closing quick chat restores focus',
+      );
+      await assertUncovered(next);
+    }
+    if (width < 1280) await next.tap();
+    else await next.click();
+    await form.getByText('What it can do', { exact: true }).waitFor();
+    for (const [step, action] of [
+      ['Skills', 'Continue'],
+      ['Access', 'Continue'],
+      ['Triggers', 'Review agent'],
+      ['Review', 'Create and activate'],
+    ]) {
+      await choose(step);
+      await bottom();
+      await assertUncovered(save);
+      await assertUncovered(form.getByRole('button', { name: action, exact: true }));
+    }
+    await captureBuilderScreenshot(page, `agent-builder-actions-${width}`);
+    const activate = form.getByRole('button', { name: 'Create and activate', exact: true });
+    if (width < 1280) await activate.tap();
+    else await activate.click();
+    await page.getByRole('region', { name: 'Run agent now', exact: true }).waitFor();
+    assert.equal(fixture.publications.size, 1);
+    assert.equal([...fixture.publications.values()][0].body.decision, 'activate');
+    assert.deepEqual(errors, []);
+  });
+
+test('the shared shell also keeps settings actions clear on a phone', { timeout: 60000 }, async t => {
+  const { page, fixture, errors } = await environment(t, { width: 375, height: 812, floating: true });
+  let name = fixture.workspace.name;
+  let revision = 0;
+  await page.route(/\/v1\/workspaces\/[^/]+\/settings(\/name)?$/, route => {
+    const request = route.request();
+    if (request.method() === 'PUT') {
+      const body = request.postDataJSON();
+      name = body.name;
+      fixture.workspace.name = name;
+      return route.fulfill({ json: { requestId: body.requestId, name, revision: ++revision } });
+    }
+    return route.fulfill({
+      json: {
+        workspaceId: fixture.workspace.id,
+        slug: fixture.workspace.slug,
+        name,
+        revision,
+        canManage: true,
+      },
+    });
+  });
+  await page.goto(`${new URL(page.url()).origin}/${fixture.workspace.slug}/settings`);
+  const workspaceName = page.getByRole('textbox', { name: 'Workspace name', exact: true });
+  await workspaceName.waitFor({ timeout: 30000 });
+  await workspaceName.fill('Renamed workspace');
+  const save = page.getByRole('button', { name: 'Save name', exact: true });
+  await save.scrollIntoViewIfNeeded();
+  await assertUncovered(save);
+  await captureBuilderScreenshot(page, 'settings-actions-375');
+  await save.tap();
+  await page.getByText('Workspace name saved.', { exact: true }).waitFor();
+  assert.equal(name, 'Renamed workspace');
   assert.deepEqual(errors, []);
 });
 

@@ -84,6 +84,7 @@ import { AddToProjectDialog } from '@/features/files/add-to-project';
 import { failedWrite, TableRequestError, type ReadState } from '@/features/tables/request-state';
 import { formatFileSize } from '@/lib/file-viewer';
 import { useFeatureRead, useFeatureScope } from '@/lib/query';
+import { useViewportInset } from '@/lib/viewport-inset';
 
 const views: Record<FilesView, string> = {
   mine: 'My files',
@@ -180,6 +181,8 @@ function Library({
         : null;
   const uploads = useUploads(api, { userId: user.id, sessionId, workspaceId, membershipId }, changed);
   const drop = useFileDrop(uploads.add);
+  const dropNotice = useRef<HTMLParagraphElement>(null);
+  useViewportInset(dropNotice, '--file-drop-inset', { enabled: !!drop.target, gap: 48 });
   const listDrop = drop.zone(view === 'google' || allSources ? null : destination);
   const chooser = useRef<HTMLInputElement>(null);
   const [dialog, setDialog] = useState<Dialog>(null);
@@ -479,8 +482,9 @@ function Library({
           >
             {drop.target && (
               <p
+                ref={dropNotice}
                 role="status"
-                className="pointer-events-none fixed inset-x-4 bottom-6 z-50 mx-auto w-fit max-w-full truncate rounded-full bg-foreground px-4 py-2 text-sm text-background shadow-lg"
+                className="file-drop-notice pointer-events-none fixed inset-x-4 z-50 mx-auto w-fit max-w-full truncate rounded-full bg-foreground px-4 py-2 text-sm text-background shadow-lg"
               >
                 Drop to upload to {drop.target.label}
               </p>
