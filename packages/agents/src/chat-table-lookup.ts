@@ -38,15 +38,24 @@ const listedTable = (table: VisibleTable, teams: ReadonlyMap<string, string>) =>
 const quoted = (names: readonly string[]) => names.map(name => `"${name}"`).join(', ');
 const exactName = (name: string) => name.trim().replace(/\s+/gu, ' ').toLowerCase();
 
-function importDestinations(texts: readonly string[]) {
+function importDestinations(texts: readonly string[], tables: readonly CatalogTable[]) {
+  const known = new Set(tables.flatMap(table => [table.id, exactName(table.name)]));
   return texts.flatMap(text => {
-    const destination =
-      /\b(?:(?:into|to)\s+(?:the\s+)?(?:existing\s+)?(?:table\s+)?|(?:use\s+(?:the\s+)?(?:existing\s+)?table|table)\s+)(?:(?:named|called)\s+)?(.+)/iu
+    const declared =
+      /\b(?:(?:into|to)\s+(?:the\s+)?(?:existing\s+)?(?:table\s+)?|(?:use\s+(?:the\s+)?(?:existing\s+)?table|table)\s+)(?:(?:named|called)\s+)?(.+)/isu
         .exec(text)?.[1]
         ?.trim();
+    const destination = declared ?? text.trim();
     if (!destination) return [];
-    const quoted = /^(["'`])(.+?)\1(?:$|[\s.,!?;])/u.exec(destination);
-    return [quoted?.[2] ?? destination];
+    const quoted = /^(["'`])(.+?)\1(?:$|[\s.,!?;:])/u.exec(destination);
+    if (quoted) return [quoted[2]!];
+    const candidates = [destination];
+    for (const boundary of destination.matchAll(/[.,;!?:\r\n]|\s+(?:and\s+then|please|thanks)\b/giu)) {
+      const candidate = destination.slice(0, boundary.index).trim();
+      if (candidate) candidates.push(candidate);
+    }
+    const exact = candidates.sort((a, b) => b.length - a.length).find(candidate => known.has(exactName(candidate)));
+    return exact ? [exact] : declared ? [destination] : [];
   });
 }
 
@@ -243,7 +252,7 @@ export async function guessedChatTable(
   }));
   const lastSequence = messages.at(-1)?.sequence;
   const latest = messages.filter(message => message.sequence === lastSequence).map(message => message.text);
-  const destinations = requireNamed ? importDestinations(latest) : [];
+  const destinations = requireNamed ? importDestinations(latest, catalog) : [];
   // Only the tables the person named, the chosen table and those sharing its name are checked for access.
   const texts = messages.map(message => message.text);
   const chosen = catalog.find(table => table.id === tableId);

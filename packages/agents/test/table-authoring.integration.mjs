@@ -453,13 +453,14 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     };
     other.uniqueKeys = [{ ...definition.uniqueKeys[0], id: randomUUID(), fieldIds: [other.fields[0].id] }];
     const pending = { ...other, id: randomUUID(), label: 'Pending Orders' };
+    const punctuated = { ...other, id: randomUUID(), label: 'Current Orders, Priority' };
     const physicalTables = new Map();
     const migration = await connect(db.login(ws, 'migration'));
     try {
       await inTransaction(migration, async client => {
         await client.query(`SET LOCAL ROLE "${ws.names.customOwner}"`);
         const tx = { client, schema: ws.names.schema };
-        for (const table of [definition, other, pending]) {
+        for (const table of [definition, other, pending, punctuated]) {
           const generation = await createGeneration(tx, { definition: table, revision });
           physicalTables.set(table.id, generation.physical_table);
           if (table === pending) continue;
@@ -561,6 +562,40 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
             assert.equal(wrong.error, 'table-not-found', JSON.stringify(wrong));
           }
           assert.equal(await count('tf_table_proposals'), before);
+        } finally {
+          await request(definition.label);
+        }
+      });
+      await importTest.test(`destination names end at sentence and clause boundaries (${ordinal})`, async () => {
+        try {
+          for (const suffix of [
+            '.',
+            ', please',
+            ';',
+            '!',
+            '?',
+            ':',
+            ' thanks',
+            '\nand then show the review',
+            ' and then show the review',
+          ]) {
+            await request(`${definition.label}${suffix}`);
+            const output = (await propose([importPlan(definition)])).result;
+            assert.equal(output.status, 'pending', JSON.stringify(output));
+            assert.deepEqual(output.tables, [{ id: definition.id, name: definition.label }]);
+          }
+          await db.platform.query(`UPDATE ${s}.tf_conversation_parts SET text=$2 WHERE message_id=$1 AND kind='text'`, [
+            message,
+            `${definition.label}, please`,
+          ]);
+          assert.equal((await propose([importPlan(definition)])).result.status, 'pending');
+          await request(`${punctuated.label}, please`);
+          assert.equal((await propose([importPlan(definition)])).result.error, 'table-not-found');
+          const exact = (await propose([importPlan(punctuated)])).result;
+          assert.equal(exact.status, 'pending', JSON.stringify(exact));
+          assert.deepEqual(exact.tables, [{ id: punctuated.id, name: punctuated.label }]);
+          await request(`Missing ${definition.label}, please`);
+          assert.equal((await propose([importPlan(definition)])).result.error, 'table-not-found');
         } finally {
           await request(definition.label);
         }
