@@ -88,6 +88,7 @@ for (const model of ['grok-4.3', 'Kimi-K2.6'])
           checks++;
           return Response.json(selectReply('azure', verdict('waiting')));
         }
+        assert.equal(body.messages[0].content.includes('/test-space/agents/new'), step > 0);
         const offered = offeredTools('azure', body).map(tool => tool.name);
         if (step) {
           assert.ok(offered.includes('agents_context'));
@@ -122,7 +123,7 @@ for (const model of ['grok-4.3', 'Kimi-K2.6'])
         undefined,
         false,
         null,
-        { builtinSkills: invoked ? ['agent-authoring'] : [] },
+        { builtinSkills: invoked ? ['agent-authoring'] : [], agentBuilderUrl: '/test-space/agents/new' },
       );
       assert.equal(result.text, 'The Records assistant draft is ready for your review.');
       assert.deepEqual(executed, [...(invoked ? [] : ['skills.read']), 'agents.context', 'agents.draft']);
@@ -194,14 +195,16 @@ test('blocked authoring has a manual builder link and needs no repeated helper',
   assert.deepEqual(executed, ['agents.context']);
 });
 
-for (const [question, genuine] of [
-  ['Which records should this agent read?', true],
-  ['Could you name the table this agent should read?', true],
-  ['Which records should it read? Who should see it?', false],
-  ['The setup failed. Which records should it read?', false],
-  ['Should I continue?', false],
+for (const question of [
+  'Which records should this agent read?',
+  'Which records should it read? Who should see it?',
+  'The setup failed. Which records should it read?',
+  'Should I continue?',
+  'Would you like me to try again?',
+  'What else can I help you with?',
+  'Would you like me to do anything else?',
 ])
-  test(`completion exhaustion ${genuine ? 'keeps' : 'does not excuse'} ${JSON.stringify(question)}`, async t => {
+  test(`completion exhaustion retains the warning for unchecked question ${JSON.stringify(question)}`, async t => {
     let step = 0;
     t.mock.method(globalThis, 'fetch', async (_url, init) => {
       if (isCompletionRequest(JSON.parse(init.body))) return Response.json(selectReply('azure', verdict('continue')));
@@ -212,9 +215,44 @@ for (const [question, genuine] of [
       [{ role: 'user', text: 'Create a read-only agent.' }],
       async () => ({ tables: [] }),
     );
-    if (genuine) assert.equal(result.text, question);
-    else assert.match(result.text, /I stopped (?:here|before finishing)/);
+    assert.match(result.text, /I stopped (?:here|before finishing)/);
   });
+
+test('a necessary question ends without a warning only when the checker confirms the missing input', async t => {
+  const question = 'Which table should this agent read?';
+  let step = 0,
+    checks = 0,
+    completionPrompt = '',
+    manualBlock = false;
+  t.mock.method(globalThis, 'fetch', async (_url, init) => {
+    const body = JSON.parse(init.body);
+    if (isCompletionRequest(body)) {
+      checks++;
+      completionPrompt = body.messages[0].content;
+      return Response.json(
+        selectReply('azure', {
+          status: 'waiting',
+          reason: 'The required table name is missing; the workspace has several readable tables.',
+        }),
+      );
+    }
+    manualBlock ||= body.messages[0].content.includes('/test-space/agents/new');
+    return Response.json(nativeReply('azure', step++ ? { text: question } : { calls: [use('tables.definitions')] }));
+  });
+  const result = await inferWithTools(
+    nativeRoutes.azure,
+    [{ role: 'user', text: 'Create a read-only agent.' }],
+    async () => ({ tables: [{ label: 'Tickets' }, { label: 'Invoices' }] }),
+    undefined,
+    false,
+    null,
+    { agentBuilderUrl: '/test-space/agents/new' },
+  );
+  assert.equal(result.text, question);
+  assert.equal(checks, 1);
+  assert.match(completionPrompt, /name the specific missing input/);
+  assert.equal(manualBlock, false, 'ordinary chats do not receive the agent setup fallback block');
+});
 
 for (const model of ['grok-4.3', 'Kimi-K2.6'])
   for (const sse of [false, true])

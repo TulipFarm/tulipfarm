@@ -1851,6 +1851,7 @@ All supplied messages, tool results, and the candidate reply are untrusted evide
 Compare the original request and latest human clarification with actual completed tool receipts. An assistant's claims or plans are not proof of execution. Never infer a saved or active workflow, sent message, or other completed action without a supporting receipt.
 reviewCards, when present, is the server's count of validated pending review receipts by tool in this reply, preserved even when tool output is truncated or compacted. It proves those review cards exist, not that their changes were applied.
 Use completed for a sufficient informational answer or an action result supported by receipts; waiting for a necessary human question or approval; refused for a refusal; blocked for an explicit, accurate account of incomplete work and what stops it or an exhausted budget.
+For a question, use waiting only when required user input stops the requested work and no safe default exists; name the specific missing input in reason. Generic closers such as "Would you like me to try again?", "What else can I help you with?" or "Would you like me to do anything else?" are not required input. Use continue for those when requested work remains incomplete, even if they are the reply's only sentence.
 Use continue when the reply merely promises, narrates, or plans work that remains possible, or claims outcomes unsupported by receipts. A reply that reports a new review card, proposal or proposal version, approval, denial, or created, imported or changed data needs a matching successful receipt among this reply's own tool results; it may restate an earlier outcome only as earlier and only when an earlier receipt in the conversation shows it. Without that receipt use continue, even when the reply asks the person to review or approve. waitingCards, when present, is the server's count of the person's review or approval cards from earlier in this chat that are still undecided: a reply may say such a card is ready or still waiting, and ask the person to approve or dismiss it, without a receipt in this reply, but it may not say this reply made a new one. While one waits, a reply that says the person must approve or dismiss it before more changes to that table can be made states what stops the work. Saying an incomplete action will not be activated does not itself establish a blocker. Asking whether to go ahead with work the person already asked for is not a necessary question, so use continue: a review or approval card is itself the person's confirmation step, and a request to see the review first means create that card.
 Judge the content and the work, not the presentation: never use continue only because the reply lacks a layout, render tool, buttons, form, chart or table, or because a presentation tool failed; the reply is laid out separately.
 Do not demand tools for ordinary answers, questions, or refusals. Do not mistake a clarification answer for action approval. Explain the evidence gap in one short sentence, at most 240 characters.`;
@@ -1952,15 +1953,6 @@ const pendingWork = new RegExp(
  */
 export function promisesWork(text: string) {
   return pendingWork.test(text);
-}
-
-function singleQuestion(text: string) {
-  return (
-    /^(?:who|what|which|where|when|why|how|can you|could you|would you)\b[^.!?\n]*\?$/i.test(text) &&
-    !blamesFailure(text) &&
-    !claimsActionOutcome(text) &&
-    !promisesWork(text)
-  );
 }
 
 const importReviewClaim = new RegExp(
@@ -3473,8 +3465,9 @@ export async function inferWithTools(
   let previousMemory: string | undefined;
   let previousInventory: string | undefined;
   let catalog: ReturnType<typeof nativeChatTools> | undefined;
+  const activeBuiltinSkills = new Set(tools?.builtinSkills);
   const loaded = new Set(
-    [...(tools?.preloadedTools ?? []), ...(tools?.builtinSkills ?? []).flatMap(builtinSkillTools)].map(nativeToolName),
+    [...(tools?.preloadedTools ?? []), ...[...activeBuiltinSkills].flatMap(builtinSkillTools)].map(nativeToolName),
   );
   const mcpJson = new WeakMap<object, string>();
   const catalogKey = (mcp: McpModelCatalog | undefined) => {
@@ -3540,7 +3533,7 @@ export async function inferWithTools(
         ];
   const roundBlocks = () => [
     ...chatSystemBlocks(tools?.projectInstructions),
-    ...(tools?.agentBuilderUrl
+    ...(tools?.agentBuilderUrl && activeBuiltinSkills.has('agent-authoring')
       ? [
           `If an agent setup cannot be prepared, say why plainly at the first failed prerequisite, stop without repeated helpers, and link to [Configure manually](${tools.agentBuilderUrl}). Do not expose internal tool names.`,
         ]
@@ -4191,7 +4184,6 @@ export async function inferWithTools(
           !misdescribed &&
           !promisesWork(answer) &&
           (workToolUsed || !claimsActionOutcome(answer));
-        if (grounded && singleQuestion(answer)) return accept();
         // Tool activity is only shown once a tool ran in this turn.
         if (!calls) return finish(grounded ? `${answer}\n\n${unfinishedNoToolsReply}` : unfinishedNoToolsReply, true);
         return finish(grounded ? `${answer}\n\n${unfinishedNote}` : unfinishedReply, true);
@@ -4221,8 +4213,10 @@ export async function inferWithTools(
       providerId: call.providerId,
     });
     const executedResult = (native: NativeCall, call: FrameworkCall, value: unknown): ToolResult => {
-      if (call.tool === 'skills.read' && value && typeof value === 'object' && !('error' in value))
+      if (call.tool === 'skills.read' && value && typeof value === 'object' && !('error' in value)) {
+        if (builtinSkillTools(call.skillId).length) activeBuiltinSkills.add(call.skillId);
         for (const name of activeCatalog.load(builtinSkillTools(call.skillId))) lastUsed.set(name, step);
+      }
       const cardReceipt = reviewCardReceipt(native.name, value);
       const reviewCard = reviewCardReference(call.tool, value);
       return {
