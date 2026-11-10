@@ -4,6 +4,7 @@ import { canonical } from '@tulipfarm/workflow-snippets/canonical';
 import { providerTriggerSchema } from './provider-contracts.ts';
 import { outputPathIssues, stepValueEntries } from './output-fields.ts';
 export {
+  stepValueEntries,
   outputAt,
   outputChoices,
   outputPathIssues,

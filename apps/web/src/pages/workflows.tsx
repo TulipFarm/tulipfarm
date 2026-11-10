@@ -46,10 +46,11 @@ import {
   useRowTableNames,
   type RunStatus,
 } from '@/features/workflows/queries';
-import { WorkflowDefinition, WorkflowRun } from '@/features/workflows/workflow-detail';
+import { WorkflowDefinition, WorkflowRun, WorkflowRunError } from '@/features/workflows/workflow-detail';
+import { WorkflowRunForm } from '@/features/workflows/run-form';
 import { WorkflowSlackAction } from '@/features/workflows/slack-step';
 import { AgentStepStatus } from '@/features/workflows/agent-step-status';
-import { runErrorNote, runIsLive, runNote, stepNote, stepStatusLabel } from '@/features/workflows/run-notes';
+import { runIsLive, runNote, stepNote, stepStatusLabel } from '@/features/workflows/run-notes';
 import { webhookTriggers } from '@/features/workflows/webhook-status';
 import { TriggerList } from '@/features/workflows/trigger-list';
 import {
@@ -123,8 +124,6 @@ function WorkflowPage({
     [search, setSearch] = useState('');
   const archivedRead = useArchivedWorkflows(workspaceId, archivedOpened);
   const [runFormOpen, setRunFormOpen] = useState(false);
-  const [input, setInput] = useState(''),
-    [inputJson, setInputJson] = useState(false);
   const [revision, setRevision] = useState<'saved' | 'active'>('saved');
   const [runStatus, setRunStatus] = useState<RunStatus | null>(null),
     [runTrigger, setRunTrigger] = useState<string | null>(null),
@@ -809,58 +808,22 @@ function WorkflowPage({
                     ) : (
                       runFormOpen &&
                       selected.capabilities.invoke && (
-                        <fieldset className="min-w-0">
-                          <section
-                            aria-label="Run workflow"
-                            className="space-y-3 rounded-xl border border-border bg-card p-4"
-                          >
-                            <h2 className="font-medium">Run manually</h2>
-                            <Label htmlFor="run-input">{inputJson ? 'Input JSON' : 'Request to review'}</Label>
-                            <Textarea
-                              id="run-input"
-                              value={input}
-                              disabled={blocked}
-                              onChange={event => setInput(event.target.value)}
-                            />
-                            <div className="flex flex-wrap items-center gap-2">
-                              <Button
-                                variant="ghost"
-                                disabled={blocked}
-                                onClick={() => {
-                                  setInput(inputJson ? input : JSON.stringify({ request: input }, null, 2));
-                                  setInputJson(!inputJson);
-                                }}
-                              >
-                                {inputJson ? 'Use plain text' : 'Advanced JSON input'}
-                              </Button>
-                              <Button
-                                disabled={blocked || !selected.enabled}
-                                onClick={() => {
-                                  try {
-                                    void execute({
-                                      path: `${base}/${selected.id}/runs`,
-                                      method: 'POST',
-                                      body: {
-                                        requestId: crypto.randomUUID(),
-                                        input: inputJson ? JSON.parse(input) : { request: input },
-                                      },
-                                    });
-                                  } catch {
-                                    setError('Enter valid JSON input.');
-                                  }
-                                }}
-                              >
-                                Run workflow
-                              </Button>
-                              <Button variant="ghost" disabled={blocked} onClick={() => setRunFormOpen(false)}>
-                                Close
-                              </Button>
-                            </div>
-                            <p className="text-sm text-muted-foreground">
-                              Runs continue after you leave. A response resumes the run right away.
-                            </p>
-                          </section>
-                        </fieldset>
+                        <WorkflowRunForm
+                          key={`${selected.id}/${selected.activeRevision}`}
+                          workspaceId={workspaceId}
+                          workflowId={selected.id}
+                          revision={selected.activeRevision ?? selected.revision}
+                          blocked={blocked}
+                          enabled={selected.enabled}
+                          onRun={input =>
+                            void execute({
+                              path: `${base}/${selected.id}/runs`,
+                              method: 'POST',
+                              body: { requestId: crypto.randomUUID(), input },
+                            })
+                          }
+                          onClose={() => setRunFormOpen(false)}
+                        />
                       )
                     )}
                     <section aria-label="Run history" className="space-y-3">
@@ -1018,12 +981,7 @@ function WorkflowPage({
                             </div>
                             {runNote(run) && <p className="text-sm">{runNote(run)}</p>}
                             {run.error && run.status !== 'skipped' && (
-                              <p role="alert" className="text-sm text-destructive">
-                                {runErrorNote(run.error) ?? run.error}
-                                {runErrorNote(run.error) && (
-                                  <span className="block font-mono text-xs">{run.error}</span>
-                                )}
-                              </p>
+                              <WorkflowRunError workspaceId={workspaceId} workflowId={selected.id} run={run} />
                             )}
                             {run.steps
                               .filter(step => step.status === 'waiting' && runIsLive(run.status))

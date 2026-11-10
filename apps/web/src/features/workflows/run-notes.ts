@@ -5,8 +5,12 @@ import {
   rowChangeSchema,
   unfinishedStatuses,
   withheldOutputSchema,
+  resolveValue,
+  payloadSchema,
+  type Definition,
   type runSchema,
 } from '@tulipfarm/workflows/contracts';
+import { runInputPaths } from './run-input.ts';
 
 const scheduledInput = z.object({
   scheduledFor: z.iso.datetime(),
@@ -66,6 +70,12 @@ export function runNote(run: Pick<z.infer<typeof runSchema>, 'source' | 'status'
 }
 
 const runErrors: Record<string, string> = {
+  'table-input-invalid':
+    'A table step received missing or invalid input. Check the input fields and their types in Input JSON, then run the workflow again.',
+  'missing-value':
+    'A value needed by a step is missing. Fill in the run input, or correct the step mapping, then run the workflow again.',
+  'wait-until-invalid':
+    'The wait step needs a valid date or date and time. Correct its input, then run the workflow again.',
   'slack-app-not-in-channel':
     'Slack message not sent: the TulipFarm app is not in this Slack channel. Add the app to the channel, then run the workflow again.',
   'slack-requester-not-in-channel':
@@ -79,6 +89,27 @@ const runErrors: Record<string, string> = {
 /** Explains a failed run's error code when the fix is known; the code itself stays visible for support. */
 export function runErrorNote(error: string) {
   return Object.hasOwn(runErrors, error) ? runErrors[error] : null;
+}
+
+export function inputErrorNote(error: string, steps: Definition['steps'], input: unknown) {
+  if (!['table-input-invalid', 'missing-value', 'wait-until-invalid'].includes(error)) return null;
+  const paths = runInputPaths(steps).filter(path => path.length);
+  const parsed = payloadSchema.safeParse(input);
+  const missing = paths.filter(path => {
+    try {
+      if (!parsed.success) return true;
+      const value = resolveValue({ kind: 'input', path }, parsed.data, new Map());
+      return value === null || value === '';
+    } catch {
+      return true;
+    }
+  });
+  const names = [...new Set((missing.length ? missing : paths).map(path => `"${path.join('.')}"`))];
+  if (!names.length) return runErrorNote(error);
+  const subject = `Input ${names.length === 1 ? 'field' : 'fields'} ${names.join(', ')}`;
+  return missing.length
+    ? `${subject} ${names.length === 1 ? 'is' : 'are'} missing. Fill in ${names.length === 1 ? 'this field' : 'these fields'} and run the workflow again.`
+    : `${subject} ${names.length === 1 ? 'has an invalid value' : 'have invalid values'}. Correct ${names.length === 1 ? 'its value' : 'their values'} or type in Input JSON, then run the workflow again.`;
 }
 
 const shortId = (id: string) => id.slice(0, 8);
