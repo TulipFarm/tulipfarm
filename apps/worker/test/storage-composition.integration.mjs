@@ -349,7 +349,7 @@ test(
       assert.equal(deniedRows.statusCode, 404);
       assert.deepEqual(
         deniedRows.json(),
-        { error: 'proposal-unavailable' },
+        { error: 'table-unavailable' },
         'storage-capacity denial probes expect this non-member response',
       );
       const restricted = workspaceRuntime(identityPool);

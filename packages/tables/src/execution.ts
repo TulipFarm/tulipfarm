@@ -49,6 +49,7 @@ import type { TableNames } from './names.ts';
 import { WorkspaceMemberError } from './workspace-members.ts';
 
 export const executionCompatibility = commonCompatibility;
+const tableCreationAccessVersion = 55;
 const executionSchema = z.object({
   id: z.uuid(),
   proposal_id: z.uuid(),
@@ -97,8 +98,20 @@ export type PrepareTableDefinition = (input: {
   tableNames?: TableNames;
 }) => Promise<{ commit: string; parentCommit: string; bundle: { key: string; sha256: string }; projection: unknown }>;
 
-async function load(tx: TableTransaction, proposalId: string) {
-  await lockAuthorization(tx);
+async function load(tx: TableTransaction, proposalId: string, writeCreationAccess = false) {
+  z.uuid().parse(proposalId);
+  // Choose the write lock before taking any shared authorization lock, so first activation never upgrades it.
+  const createsTable =
+    writeCreationAccess &&
+    !!(
+      await tx.client.query(
+        `SELECT 1 FROM ${table(tx, 'tf_table_proposals')} p,
+          LATERAL jsonb_array_elements(p.manifest->'plans') plan
+        WHERE p.id=$1 AND plan->'input'->>'kind'='schema' AND plan->'before'='null'::jsonb LIMIT 1`,
+        [proposalId],
+      )
+    ).rowCount;
+  await lockAuthorization(tx, createsTable ? 'write' : 'read');
   await tx.client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,761031))', [
     `${tx.schema}:${z.uuid().parse(proposalId)}`,
   ]);
@@ -518,6 +531,8 @@ async function switchGeneration(
     `UPDATE ${table(tx, 'tf_table_catalog')} SET physical_table=$2,display_name=$3,target_revision=$4,applied_revision=$4,applied_definition=$5 WHERE id=$1`,
     [job.table_id, target.physical_table, target.definition.label, target.revision, target.definition],
   );
+  if (!source && tx.commonVersion >= tableCreationAccessVersion)
+    await tx.client.query(`SELECT ${table(tx, 'tf_table_creation_access')}($1)`, [job.id]);
   await recordTableRecommendationChange(tx, job.table_id, 'definition', job.source_generation !== null);
   await complete(tx, job, target.revision);
 }
@@ -550,19 +565,20 @@ export function createTableExecution(
         connectionString: await options.resolveMigrationCredential(workspaceId),
         capability: 'migration',
         operation: async transaction => {
-          const tx = { ...transaction, workspaceId, commonVersion: executionCompatibility.minimum };
+          const tx: TableTransaction = { ...transaction, workspaceId, commonVersion: executionCompatibility.minimum };
           await tx.client.query(
             "SET LOCAL lock_timeout='250ms'; SET LOCAL transaction_timeout='2s'; SET LOCAL statement_timeout='1500ms'",
           );
-          const clock = z
-            .object({ xid: z.string(), elapsed: z.coerce.number() })
-            .parse(
-              (
-                await tx.client.query(
-                  'SELECT pg_current_xact_id()::text xid,extract(epoch FROM clock_timestamp()-transaction_timestamp())*1000 elapsed',
-                )
-              ).rows[0],
-            );
+          const clock = z.object({ xid: z.string(), elapsed: z.coerce.number(), common_version: z.int() }).parse(
+            (
+              await tx.client.query(
+                `SELECT pg_current_xact_id()::text xid,
+                    extract(epoch FROM clock_timestamp()-transaction_timestamp())*1000 elapsed,
+                    (SELECT count(*)::integer FROM ${table(tx, 'tf_common_migrations')}) common_version`,
+              )
+            ).rows[0],
+          );
+          tx.commonVersion = clock.common_version;
           const deadline = performance.now() + 2000 - clock.elapsed;
           let slowestWorkMs = 25;
           const hasBudget = () => performance.now() + 300 + Math.max(100, slowestWorkMs * 2) < deadline;
@@ -574,7 +590,7 @@ export function createTableExecution(
             await action();
             slowestWorkMs = Math.max(slowestWorkMs, performance.now() - start);
           };
-          const manifest = await load(tx, proposalId),
+          const manifest = await load(tx, proposalId, tx.commonVersion >= tableCreationAccessVersion),
             plan = await selected(tx, manifest);
           if (!plan) return 'completed';
           const previous = executionSchema

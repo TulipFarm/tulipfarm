@@ -152,9 +152,14 @@ export function registerTableChanges(
   app.register(async routes => {
     validation.install(routes, true);
     const user = authenticateRoutes(routes, dependencies.auth, { origin: authConfig().webOrigin });
-    routes.setErrorHandler((error, _request, reply) => {
+    routes.setErrorHandler((error, request, reply) => {
       if (requestBoundaryError(error, reply)) return;
-      if (error instanceof AccessDenied) return reply.code(404).send({ error: 'proposal-unavailable' });
+      if (error instanceof AccessDenied)
+        return reply.code(404).send({
+          error: request.routeOptions.url?.includes('/workspaces/:workspaceId/tables')
+            ? 'table-unavailable'
+            : 'proposal-unavailable',
+        });
       if (error instanceof TableProposalValidationError) return reply.code(409).send(error.validation);
       if (error instanceof TableProposalError)
         return reply.code(error.code === 'proposal-storage-unavailable' ? 503 : 409).send({ error: error.code });

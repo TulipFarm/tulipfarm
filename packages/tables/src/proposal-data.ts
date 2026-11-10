@@ -33,6 +33,7 @@ import {
   type TableEffect,
 } from './proposal-contracts.ts';
 import { requireMemberTableDefinition, workspaceMembersTable } from './store.ts';
+import { nonTableAssetIds } from './identities.ts';
 import { WorkspaceMemberError } from './workspace-members.ts';
 
 export type FileAccess = (tx: TableTransaction, actor: HumanActor, fileIds: string[]) => Promise<void>;
@@ -187,8 +188,14 @@ export async function planAuthority(
   before: TableDefinition | null,
   effects: readonly TableEffect[],
 ) {
-  if (plan.kind === 'schema' && !before) await requireTableCreation(tx, actor, plan.target.owningTeamId);
-  else {
+  if (plan.kind === 'schema' && !before) {
+    await requireTableCreation(tx, actor, plan.target.owningTeamId);
+    if (
+      (await tx.client.query(`SELECT 1 FROM (${await nonTableAssetIds(tx)}) reserved WHERE id=$1`, [plan.tableId]))
+        .rowCount
+    )
+      throw new TableProposalError('proposal-conflict');
+  } else {
     await requireTablePermission(tx, actor, plan.tableId, 'table.row.read');
     if (plan.kind === 'schema') await requireTablePermission(tx, actor, plan.tableId, 'table.schema.manage');
     const owner = z

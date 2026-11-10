@@ -10,10 +10,40 @@ import { registerGovernance } from '../src/governance.ts';
 import { registerModelCatalog } from '../src/model-catalog.ts';
 import { registerConversations } from '../src/conversations.ts';
 import { registerWorkspaceSettings } from '../src/workspace-settings.ts';
+import { registerTableChanges } from '../src/table-changes.ts';
+import { AccessDenied } from '@tulipfarm/access';
 import { StorageUnavailableError, commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 
 // The app serves the shipped model catalog, which needs a provider key.
 process.env.ANTHROPIC_API_KEY ??= 'test-key';
+
+test('denied table routes name the table while proposal routes keep their own error', async t => {
+  const id = '22222222-2222-4222-8222-222222222222';
+  const app = Fastify();
+  t.after(() => app.close());
+  await app.register(
+    async routes =>
+      registerTableChanges(routes, {
+        auth: { api: { getSession: async () => ({ user: { id } }) } },
+        runtime: {
+          transaction: async () => {
+            throw new AccessDenied();
+          },
+        },
+        requireSources: async () => {},
+      }),
+    { prefix: '/v1' },
+  );
+  const table = `/v1/workspaces/${id}/tables/${id}`,
+    proposal = `/v1/workspaces/${id}/conversations/${id}/table-changes/${id}`;
+  for (const url of [table, `${table}/query-capabilities`, proposal, `${proposal}/tables/${id}/effects`]) {
+    const response = await app.inject(url);
+    assert.equal(response.statusCode, 404, response.body);
+    assert.deepEqual(response.json(), {
+      error: url.startsWith(table) ? 'table-unavailable' : 'proposal-unavailable',
+    });
+  }
+});
 
 test('disabled workspace errors are concealed across business routes without concealing transient failures', async t => {
   const id = '22222222-2222-4222-8222-222222222222';
