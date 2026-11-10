@@ -1483,7 +1483,7 @@ export function createFiles(
     UNION SELECT f.* FROM ${table(tx, 'tf_files')} f JOIN subtree s ON f.parent_id = s.id
   )`;
   const fileKnowledge = (tx: AuthorizationTransaction) => `${subtree(tx)}
-    SELECT d.id,s.owner_membership_id FROM ${table(tx, 'tf_knowledge_documents')} d
+    SELECT d.id,s.owner_membership_id,r.original FROM ${table(tx, 'tf_knowledge_documents')} d
     JOIN ${table(tx, 'tf_knowledge_sources')} s ON s.id=d.source_id AND s.provider='file'
     JOIN ${table(tx, 'tf_knowledge_revisions')} r ON r.id=d.observed_revision_id
     JOIN subtree f ON r.original->>'kind'='file' AND r.original->>'fileId'=f.id::text
@@ -1563,11 +1563,36 @@ export function createFiles(
     return transaction(workspaceId, userId, false, async (tx, actor) => {
       const preview = await deletable(tx, actor, id);
       const owners = await activeMembers(tx, [...new Set(preview.blockers.map(item => item.creator_membership_id))]);
+      let knowledgeEntries = 0;
+      if (await installed(tx, 'tf_knowledge_documents')) {
+        const entries = z
+          .array(
+            z.object({
+              original: z.object({ fileId: uuidSchema, sha256: z.string(), bytes: z.number() }),
+            }),
+          )
+          .parse(
+            (
+              await tx.client.query(
+                `${fileKnowledge(tx)} AND s.owner_membership_id=$2 AND s.state IN ('active','paused')
+          AND EXISTS (SELECT 1 FROM ${table(tx, 'tf_knowledge_local_revisions')} l
+            WHERE l.revision_id=r.id AND l.owner_membership_id=$2 AND l.owner_user_id=$3)`,
+                [id, actor.membershipId, actor.userId],
+              )
+            ).rows,
+          );
+        for (const { original } of entries) {
+          try {
+            const file = await requireReadableFile(tx, actor, original.fileId, { includeTrash: true });
+            if (file.sha256 === original.sha256 && file.size === original.bytes) knowledgeEntries++;
+          } catch (error) {
+            if (!(error instanceof AccessDenied)) throw error;
+          }
+        }
+      }
       return {
         ...preview,
-        knowledgeEntries: (await installed(tx, 'tf_knowledge_documents'))
-          ? (await tx.client.query(fileKnowledge(tx), [id])).rows.length
-          : 0,
+        knowledgeEntries,
         blockers: preview.blockers.map(item => ({
           id: item.id,
           name: item.name,

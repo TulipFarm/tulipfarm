@@ -145,6 +145,29 @@ test(
         200,
       );
       const entryId = randomUUID();
+      const privateEntryId = randomUUID();
+      assert.equal((await f.share(ledger, 'viewer')).status, 200);
+      assert.equal(
+        (
+          await f.save(privateEntryId, f.command({ kind: 'file', fileId: ledger }), {
+            cookie: f.signed.admin.cookie,
+          })
+        ).status,
+        200,
+      );
+      assert.equal((await f.call(`${base}/${ledger}/trash`, { method: 'PUT', body: { trashed: true } })).status, 200);
+      await page.goto(`${origin}/${workspace.slug}/files?section=trash`);
+      await page.getByRole('button', { name: 'Delete Old ledger.csv forever' }).click();
+      const privatePreview = page.getByRole('dialog');
+      await privatePreview.getByText('1 KB of storage will be freed.').waitFor();
+      assert.equal(
+        await privatePreview.getByText(/This also removes/).count(),
+        0,
+        'private entries saved by another person do not cause a warning',
+      );
+      await page.screenshot({ path: `${shots}/delete-forever-private-knowledge.png` });
+      await privatePreview.getByRole('button', { name: 'Cancel', exact: true }).click();
+      assert.equal((await f.call(`${base}/${ledger}/trash`, { method: 'PUT', body: { trashed: false } })).status, 200);
       const entry = f.command({ kind: 'file', fileId: ledger });
       assert.equal((await f.save(entryId, entry)).status, 200);
       await f.process(entry.commandId);

@@ -90,7 +90,7 @@ test('file Knowledge stays listed in Trash, restores its index, and retires befo
   }
 });
 
-test('folder permanent deletion removes every person’s file Knowledge but not independent entries', async () => {
+test('folder deletion counts only visible Knowledge but removes every person’s linked entries', async () => {
   const f = await knowledgeFixture();
   try {
     const folderId = randomUUID(),
@@ -172,7 +172,8 @@ test('folder permanent deletion removes every person’s file Knowledge but not 
         (await f.call('/documents', { cookie })).json().items.some(item => added.includes(item.documentId)),
         'entries under a trashed folder remain listed',
       );
-    assert.equal((await f.call(`${base}/${folderId}/deletion`)).json().knowledgeEntries, 3);
+    assert.equal((await f.call(`/documents/${added[1]}`)).status, 404, 'another person’s entry stays private');
+    assert.equal((await f.call(`${base}/${folderId}/deletion`)).json().knowledgeEntries, 2);
     assert.equal((await f.call(`${base}/${folderId}/delete-forever`, { method: 'POST' })).json().state, 'deleted');
     assert.deepEqual(
       (await f.call('/documents')).json().items.map(item => item.documentId),
@@ -189,6 +190,57 @@ test('folder permanent deletion removes every person’s file Knowledge but not 
       )
     ).rows.map(row => row.id);
     assert.deepEqual(retired, added.slice(0, 3).sort());
+  } finally {
+    await f.close();
+  }
+});
+
+test('deletion confirmation does not reveal private Knowledge entries saved by another person', async () => {
+  const f = await knowledgeFixture();
+  try {
+    const fileId = randomUUID(),
+      privateId = randomUUID(),
+      ownId = randomUUID();
+    const base = `/v1/workspaces/${f.workspace.id}/files/${fileId}`;
+    assert.equal((await f.upload(fileId, 'Supplier delivery instructions.')).status, 200);
+    assert.equal((await f.share(fileId, 'viewer')).status, 200);
+    const privateEntry = f.command({ kind: 'file', fileId });
+    assert.equal((await f.save(privateId, privateEntry, { cookie: f.signed.admin.cookie })).status, 200);
+    assert.equal((await f.call(`${base}/trash`, { method: 'PUT', body: { trashed: true } })).status, 200);
+    assert.deepEqual((await f.call('/documents')).json().items, []);
+    assert.equal((await f.call(`/documents/${privateId}`)).status, 404);
+    assert.equal(
+      (await f.call(`${base}/deletion`)).json().knowledgeEntries,
+      0,
+      'hidden-only entries must not cause a warning',
+    );
+
+    assert.equal((await f.call(`${base}/trash`, { method: 'PUT', body: { trashed: false } })).status, 200);
+    assert.equal((await f.save(ownId, f.command({ kind: 'file', fileId }))).status, 200);
+    assert.equal((await f.call(`${base}/trash`, { method: 'PUT', body: { trashed: true } })).status, 200);
+    assert.deepEqual(
+      (await f.call('/documents')).json().items.map(item => item.documentId),
+      [ownId],
+    );
+    assert.equal(
+      (await f.call(`${base}/deletion`)).json().knowledgeEntries,
+      1,
+      'the count includes only entries the person can list',
+    );
+    assert.equal((await f.call(`${base}/delete-forever`, { method: 'POST' })).json().state, 'deleted');
+    for (const cookie of [f.signed.owner.cookie, f.signed.admin.cookie])
+      assert.deepEqual((await f.call('/documents', { cookie })).json().items, []);
+    assert.equal(
+      (
+        await f.db.platform.query(
+          `SELECT count(*)::int AS total FROM ${f.table('tf_knowledge_documents')}
+      WHERE id=ANY($1::uuid[]) AND tombstoned_at IS NOT NULL`,
+          [[ownId, privateId]],
+        )
+      ).rows[0].total,
+      2,
+      'permanent deletion still retires hidden entries',
+    );
   } finally {
     await f.close();
   }
