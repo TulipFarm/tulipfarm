@@ -15,6 +15,7 @@ import { recordRecommendationChange, recommendationsInstalled } from '@tulipfarm
 export type WorkflowTransaction = AuthorizationTransaction & { commonVersion: number };
 /** The common migration that gives workflows a list of triggers; workflow code reads only that shape. */
 export const workflowTriggersCommonVersion = 48;
+export const workflowActiveSponsorshipCommonVersion = 61;
 export const workflowCompatibility = Object.freeze({
   minimum: workflowTriggersCommonVersion,
   maximum: commonCompatibility.maximum,
@@ -71,18 +72,23 @@ export async function requireGrant(
 ) {
   if (!(await hasGrant(tx, membershipId, id, permission, domain))) throw new AccessDenied();
 }
-export async function workflowSponsor(tx: AuthorizationTransaction, workflowId: string, revision?: string) {
+export async function workflowSponsor(tx: WorkflowTransaction, workflowId: string, revision?: string) {
+  const consent = revision
+    ? 'sponsorship_revision=$2::uuid'
+    : tx.commonVersion >= workflowActiveSponsorshipCommonVersion
+      ? 'enabled AND sponsorship_active_revision=active_revision'
+      : 'sponsorship_revision=active_revision';
   const row = (
     await tx.client.query(
-      `SELECT sponsor_membership_id,sponsorship_id FROM ${table(tx, 'tf_workflows')} WHERE id=$1 AND sponsorship_revision=COALESCE($2::uuid,active_revision)`,
-      [workflowId, revision ?? null],
+      `SELECT sponsor_membership_id,sponsorship_id FROM ${table(tx, 'tf_workflows')} WHERE id=$1 AND ${consent}`,
+      revision ? [workflowId, revision] : [workflowId],
     )
   ).rows[0];
   const sponsor = z.object({ sponsor_membership_id: idSchema, sponsorship_id: idSchema }).safeParse(row);
   if (!sponsor.success) throw new AccessDenied();
   return sponsor.data;
 }
-export async function requireSponsor(tx: AuthorizationTransaction, workflowId: string, revision?: string) {
+export async function requireSponsor(tx: WorkflowTransaction, workflowId: string, revision?: string) {
   const sponsor = await workflowSponsor(tx, workflowId, revision);
   await requireGrant(tx, sponsor.sponsor_membership_id, workflowId, 'invoke');
   return sponsor;

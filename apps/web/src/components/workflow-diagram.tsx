@@ -183,8 +183,8 @@ export function WorkflowStepList({
             className="workflow-step-row"
             onClick={() => onInspect(step.id)}
             aria-pressed={step.id === selected}
-            aria-label={`Inspect ${step.title}`}
           >
+            <span className="sr-only">Inspect </span>
             <WorkflowStepIcon kind={step.kind} identity={step.identity} />
             <span className="workflow-step-copy">
               <span className="workflow-step-row-title">{step.title}</span>
@@ -209,10 +209,10 @@ function StepCard({ data: { step, inspected, inspect } }: NodeProps<StepNode>) {
       <button
         type="button"
         className="nodrag nopan workflow-node-inspect"
-        aria-label={`Inspect ${step.title}`}
         aria-pressed={inspected}
         onClick={() => inspect(step.id)}
       >
+        <span className="sr-only">Inspect </span>
         <span className="workflow-node-heading">
           <WorkflowStepIcon kind={step.kind} identity={step.identity} />
           <span className="workflow-node-type">

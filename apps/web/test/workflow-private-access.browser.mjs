@@ -179,7 +179,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
         .getByText('Can run', { exact: true })
         .waitFor();
       assert.equal((await service.list(w.id, other.userId))[0].capabilities.invoke, true);
-      await page.getByRole('button', { name: 'Activate saved revision', exact: true }).click();
+      await page.getByRole('button', { name: 'Activate workflow', exact: true }).click();
       await page.getByRole('button', { name: 'Disable workflow', exact: true }).waitFor();
       await page.getByRole('button', { name: 'Start a run', exact: true }).click();
       await page.getByLabel('Input JSON', { exact: true }).fill('{"request":"Private creator input"}');
@@ -216,7 +216,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       await scheduledRuns.getByRole('checkbox', { name: 'You', exact: true }).check();
       await page.getByRole('button', { name: 'Save scheduled runs', exact: true }).click();
       await page.getByText('Saved. Activate the saved revision to start scheduled runs.', { exact: true }).waitFor();
-      await page.getByRole('button', { name: 'Activate saved revision', exact: true }).click();
+      await page.getByRole('button', { name: 'Activate workflow', exact: true }).click();
       await page.getByRole('button', { name: 'Disable workflow', exact: true }).waitFor();
       await db.platform.query(
         `UPDATE ${table('tf_workflow_triggers')} SET next_run_at=clock_timestamp()-interval '1 minute' WHERE workflow_id=$1 AND trigger_id='hourly'`,
@@ -242,6 +242,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       await page.getByRole('button', { name: 'Refresh workflow', exact: true }).click();
       await page.getByRole('button', { name: 'Edit in chat', exact: true }).waitFor({ state: 'hidden' });
       assert.equal(await page.getByRole('button', { name: 'Activate saved revision', exact: true }).count(), 0);
+      assert.equal(await page.getByRole('button', { name: 'Activate workflow', exact: true }).count(), 0);
       assert.equal(await page.getByRole('button', { name: 'Disable workflow', exact: true }).count(), 0);
       await page.getByRole('heading', { name: current.definition.name, exact: true }).first().waitFor();
       assert.equal(await page.getByRole('region', { name: 'Workflow sharing', exact: true }).count(), 0);

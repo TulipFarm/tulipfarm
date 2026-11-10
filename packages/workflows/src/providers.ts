@@ -9,6 +9,7 @@ import {
   requireSponsor,
   initializeManager,
   disableAutomatically,
+  type WorkflowTransaction,
 } from './authorization.ts';
 import { changeGrant, listGrants } from './sharing.ts';
 import { credentialCipher, type IntegrationKeyring } from '@tulipfarm/integrations/credentials';
@@ -59,7 +60,7 @@ export function createWorkflowProviders(runtime: WorkflowRuntime, options: Provi
   const discovery = createProviderDiscovery(options.providerFetch);
   async function transaction<T>(
     workspaceId: string,
-    operation: (tx: AuthorizationTransaction) => Promise<T>,
+    operation: (tx: WorkflowTransaction) => Promise<T>,
     mode: 'read' | 'write' = 'write',
   ) {
     return workflowTransaction(runtime, workspaceId, operation, mode);
@@ -113,7 +114,7 @@ export function createWorkflowProviders(runtime: WorkflowRuntime, options: Provi
     );
   }
   async function activate(
-    tx: AuthorizationTransaction,
+    tx: WorkflowTransaction,
     workflowId: string,
     revision: string,
     trigger: Extract<Trigger, { kind: 'provider' }>,

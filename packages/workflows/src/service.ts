@@ -20,6 +20,7 @@ import {
   disableAutomatically,
   disabledReasonColumn,
   workflowCompatibility,
+  workflowActiveSponsorshipCommonVersion,
 } from './authorization.ts';
 import { changeGrant, listGrants, sharingCandidates } from './sharing.ts';
 import {
@@ -1004,6 +1005,20 @@ export function createWorkflows(
           `UPDATE ${table(tx, 'tf_workflows')} SET revision=$2,generation=generation+1 WHERE id=$1`,
           [id, input.revision],
         );
+      if (previous) {
+        const current = await read(tx, id, actor.membershipId);
+        if (
+          current.sponsorMembershipId === actor.membershipId &&
+          current.historyAudience.length &&
+          (tx.commonVersion >= workflowActiveSponsorshipCommonVersion || !current.enabled)
+        ) {
+          await requireSponsorshipAuthority(tx, current, actor.membershipId);
+          await tx.client.query(
+            `UPDATE ${table(tx, 'tf_workflows')} SET sponsorship_revision=revision,sponsorship_id=COALESCE(sponsorship_id,$2) WHERE id=$1`,
+            [id, randomUUID()],
+          );
+        }
+      }
       await auditWorkflow(tx, actor.membershipId, 'workflow.save', id);
       afterCommit(tx.client, () =>
         trackEvent('workflow_saved', { userId: user, workspaceId }, { workflow_id: id, created: !previous }),
@@ -1155,7 +1170,7 @@ export function createWorkflows(
             .parse(
               (
                 await tx.client.query(
-                  `UPDATE ${table(tx, 'tf_workflows')} SET active_revision=$2,enabled=$3,generation=generation+1 WHERE id=$1 RETURNING generation`,
+                  `UPDATE ${table(tx, 'tf_workflows')} SET active_revision=$2,enabled=$3,${tx.commonVersion >= workflowActiveSponsorshipCommonVersion ? 'sponsorship_active_revision=CASE WHEN $3 AND sponsorship_id IS NOT NULL AND sponsorship_revision=$2 THEN $2::uuid ELSE NULL END,' : ''}generation=generation+1 WHERE id=$1 RETURNING generation`,
                   [id, revision, enabled],
                 )
               ).rows[0]?.generation,
@@ -1363,7 +1378,7 @@ export function createWorkflows(
           if (input.enabled && trigger && isUnattendedTrigger(trigger)) {
             if (!current.enabled || current.activeRevision === null) throw new WorkflowConflict('sponsor-required');
             try {
-              await requireSponsor(tx, id, current.activeRevision);
+              await requireSponsor(tx, id);
             } catch (error) {
               if (error instanceof AccessDenied) throw new WorkflowConflict('sponsor-required');
               throw error;
@@ -1498,10 +1513,10 @@ export function createWorkflows(
     fired: Fired = manualFired,
     replayed: (input: z.infer<typeof payloadSchema>, trigger: Trigger | null) => unknown = value => value,
   ) {
-    const current = await read(tx, workflowId);
     const sponsor = membershipId === null ? await workflowSponsor(tx, workflowId) : null;
     membershipId = membershipId ?? sponsor?.sponsor_membership_id ?? null;
     if (!membershipId) throw new AccessDenied();
+    const current = await read(tx, workflowId, membershipId);
     if (!sponsor) await requireGrant(tx, membershipId, workflowId, 'invoke');
     const active = (
       await tx.client.query(
@@ -1511,7 +1526,20 @@ export function createWorkflows(
     ).rows[0];
     const activeDefinition = active ? definitionSchema.parse(active.definition) : null,
       trigger = activeDefinition?.triggers.find(item => item.id === fired.triggerId) ?? null;
-    if (activeDefinition) await authorizeSources(tx, activeDefinition, membershipId);
+    if (activeDefinition) {
+      if (sponsor) {
+        try {
+          await requireSponsorshipAuthority(tx, { ...current, definition: activeDefinition }, membershipId);
+        } catch (error) {
+          if (
+            error instanceof WorkflowConflict &&
+            ['record-source-denied', 'table-step-access-denied'].includes(error.message)
+          )
+            throw new AccessDenied();
+          throw error;
+        }
+      } else await authorizeSources(tx, activeDefinition, membershipId);
+    }
     const existing = (
       await tx.client.query(
         `SELECT r.id,r.input,r.membership_id,r.trigger_id,d.definition FROM ${table(tx, 'tf_workflow_runs')} r JOIN ${table(tx, 'tf_workflow_revisions')} d ON d.workflow_id=r.workflow_id AND d.id=r.revision WHERE r.workflow_id=$1 AND r.request_key=$2`,
@@ -1797,7 +1825,7 @@ export function createWorkflows(
     return null;
   }
   async function requireRunAccess(
-    tx: AuthorizationTransaction,
+    tx: WorkflowTransaction,
     membershipId: string,
     workflowId: string,
     runId: string,
@@ -1869,6 +1897,22 @@ export function createWorkflows(
       return read(tx, id, actor.membershipId);
     });
   }
+  async function requireSponsorshipAuthority(
+    tx: WorkflowTransaction,
+    current: z.infer<typeof workflowSchema>,
+    membershipId: string,
+  ) {
+    await requireGrant(tx, membershipId, current.id, 'invoke');
+    for (const trigger of current.definition.triggers)
+      if (trigger.kind === 'record' || trigger.kind === 'row')
+        await requireRecordAudience(tx, trigger, [membershipId, ...current.historyAudience]);
+    await requireTableStepAuthority(tx, current.definition, membershipId, current.historyAudience);
+    await authorizeSources(tx, current.definition, membershipId);
+    for (const recipient of current.historyAudience) {
+      await requireGrant(tx, recipient, current.id, 'read');
+      await authorizeSources(tx, current.definition, recipient);
+    }
+  }
   async function acceptSponsorship(workspaceId: string, user: string, id: string, value: unknown) {
     const input = acceptSponsorshipSchema.parse(value);
     return transaction(workspaceId, async tx => {
@@ -1878,15 +1922,7 @@ export function createWorkflows(
       const current = await read(tx, id, actor.membershipId);
       if (current.sponsorMembershipId !== actor.membershipId || !current.historyAudience.length)
         throw new AccessDenied();
-      for (const trigger of current.definition.triggers)
-        if (trigger.kind === 'record' || trigger.kind === 'row')
-          await requireRecordAudience(tx, trigger, [actor.membershipId, ...current.historyAudience]);
-      await requireTableStepAuthority(tx, current.definition, actor.membershipId, current.historyAudience);
-      await authorizeSources(tx, current.definition, actor.membershipId);
-      for (const recipient of current.historyAudience) {
-        await requireGrant(tx, recipient, id, 'read');
-        await authorizeSources(tx, current.definition, recipient);
-      }
+      await requireSponsorshipAuthority(tx, current, actor.membershipId);
       if (!current.sponsorshipAccepted) {
         if (input.expectedGeneration !== current.generation) throw new WorkflowConflict('stale-generation');
         await tx.client.query(
@@ -2654,8 +2690,7 @@ export function createWorkflows(
         .string()
         .nullable()
         .parse(event.github_repository_id ?? null);
-      const sponsor =
-        trigger.kind === 'github' ? (await workflowSponsor(tx, workflowId, revision)).sponsor_membership_id : null;
+      const sponsor = trigger.kind === 'github' ? (await workflowSponsor(tx, workflowId)).sponsor_membership_id : null;
       // An account trigger also covers the account's public repositories, which need no Knowledge connection of their own.
       const publicInAccount =
         trigger.kind === 'github' &&

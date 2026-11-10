@@ -24,7 +24,8 @@ import { FileDraftCard } from './file-draft-card';
 import { FileShareDraftCard } from './file-share-draft-card';
 import { KnowledgeDraftCard, KnowledgeReceiptCard } from './knowledge-draft-card';
 import { MemoryDraftCard } from './memory-draft-card';
-import { formatRun, workflowChange, workflowSaveLabel } from './workflow-draft-details';
+import { formatRun, handStartedDraft, workflowChange, workflowSaveLabel } from './workflow-draft-details';
+import { WorkflowSavedActions } from './workflow-saved-actions';
 import { WorkflowCanvasButton } from './workflow-canvas';
 import { GitHubInstallNote } from '@/features/workflows/github-install-note';
 import { WorkflowSlackCheck } from '@/features/workflows/slack-step';
@@ -60,6 +61,8 @@ export function AuthoringDraftCard({
   const write = useConversationCommand(api, () => {});
   const result = useRef<HTMLDivElement>(null);
   const submitted = useRef(false);
+  const [activateOnSave, setActivateOnSave] = useState(false);
+  const [savedWorkflowActive, setSavedWorkflowActive] = useState<boolean | null>(null);
   const [slackReady, setSlackReady] = useState<Record<string, boolean>>({});
   const onSlackReady = useCallback(
     (id: string, ready: boolean) =>
@@ -329,10 +332,11 @@ export function AuthoringDraftCard({
   // Only a new agent starts off. Saving over an existing agent leaves its on or off state and active revision as they were.
   const updating = proposal.kind === 'agent' && proposal.input.expectedSavedRevision !== null;
   const activeWorkflow =
-    !!workflow &&
-    draft.status === 'saved' &&
-    draft.outcome?.kind === 'workflow' &&
-    draft.outcome.activation === 'activated';
+    savedWorkflowActive ??
+    (!!workflow &&
+      draft.status === 'saved' &&
+      draft.outcome?.kind === 'workflow' &&
+      draft.outcome.activation === 'activated');
   return (
     <ReviewCard
       label={`Review ${noun} draft`}
@@ -348,7 +352,23 @@ export function AuthoringDraftCard({
             <Button
               disabled={locked || slackUnchecked}
               aria-busy={write.state.kind === 'sending'}
-              onClick={() => decide('save')}
+              pendingLabel={
+                workflow
+                  ? workflow.kind === 'workflow-activation'
+                    ? workflow.input.enabled
+                      ? 'Activating workflow...'
+                      : 'Disabling workflow...'
+                    : workflow.input.activate || handStartedDraft(workflow)
+                      ? 'Saving and activating...'
+                      : 'Saving workflow...'
+                  : undefined
+              }
+              state={workflow && write.state.kind === 'sending' ? { kind: 'busy' } : { kind: 'ready' }}
+              onClick={() => {
+                if (workflow && handStartedDraft(workflow) && workflow.kind === 'workflow' && !workflow.input.activate)
+                  setActivateOnSave(true);
+                decide('save');
+              }}
             >
               {workflow ? workflowSaveLabel(workflow) : proposal.kind === 'agent' ? 'Save agent' : 'Save skill'}
             </Button>
@@ -389,7 +409,9 @@ export function AuthoringDraftCard({
                 </span>
                 <div>
                   <p className="font-medium">Saved and active</p>
-                  <p className="text-muted-foreground">{workflowResult(draft.outcome, workflow)}</p>
+                  {(!savedWorkflowActive || draft.outcome.activation === 'activated') && (
+                    <p className="text-muted-foreground">{workflowResult(draft.outcome, workflow)}</p>
+                  )}
                 </div>
               </div>
             )}
@@ -410,6 +432,13 @@ export function AuthoringDraftCard({
                   ? 'Draft dismissed. Nothing was saved or activated.'
                   : 'Draft dismissed. No definition was saved.'}
               </p>
+            )}
+            {draft.status === 'saved' && draft.outcome?.kind === 'workflow' && (
+              <WorkflowSavedActions
+                outcome={draft.outcome}
+                activateOnSave={activateOnSave}
+                onActive={setSavedWorkflowActive}
+              />
             )}
           </div>
           {feedback}
@@ -639,13 +668,14 @@ function workflowResult(outcome: Extract<DraftOutcome, { kind: 'workflow' }>, pr
     case 'disabled':
       return 'Workflow disabled. It will not start new runs.';
     case 'sponsor-required':
-      return 'Workflow saved but not activated. Another member sponsors it, so activate it from the Workflows page.';
+      return `Workflow saved, but not activated. Another member sponsors this workflow. Ask them to accept this revision before activating.${outcome.enabled ? ' Runs still use the active revision.' : ''}`;
     case 'audience-required':
-      return 'Workflow saved but not activated. Someone who sees its run history cannot read the table. Change who sees run history on the Workflows page, then activate it.';
+      return `Workflow saved, but not activated. Someone who sees its run history cannot read the table. Change who sees run history on the Workflows page, then activate it.${outcome.enabled ? ' Runs still use the active revision.' : ''}`;
   }
 }
 
 function workflowNote(proposal: WorkflowProposal) {
+  if (handStartedDraft(proposal)) return 'Runs only when started by hand.';
   if (proposal.kind === 'workflow-activation' && !proposal.input.enabled)
     return 'Disabling stops new runs and blocks runs in progress.';
   const activates = proposal.kind === 'workflow-activation' || proposal.input.activate;

@@ -66,6 +66,7 @@ import {
   triggerState,
   triggersLine,
 } from '@/features/workflows/triggers';
+import { workflowLiveMessage } from '@/features/workflows/activation-feedback';
 import { WebhookSetup, type IssuedWebhookKey } from '@/features/workflows/webhook-setup';
 import { WebhookDeliveries } from '@/features/workflows/webhook-deliveries';
 import { RowEventQueue } from '@/features/workflows/row-event-queue';
@@ -140,7 +141,9 @@ function WorkflowPage({
   const [message, setMessage] = useState(''),
     [error, setError] = useState('');
   const [confirmArchive, setConfirmArchive] = useState(false);
-  const [focusTarget, setFocusTarget] = useState<'workflow-views' | 'workflow-run-diagram' | 'run-input' | null>(null);
+  const [focusTarget, setFocusTarget] = useState<
+    'workflow-views' | 'workflow-run-diagram' | 'run-input' | `webhook-setup-${string}` | null
+  >(null);
   const [webhookKey, setWebhookKey] = useState<IssuedWebhookKey | null>(null);
   const [testRun, setTestRun] = useState<{ workflowId: string; triggerId: string; runId: string } | null>(null);
   const loadMoreStart = useRef<number | null>(null),
@@ -181,6 +184,12 @@ function WorkflowPage({
   });
   const { selected, view, choose, openRun, clear } = selection;
   const setView = selection.showView;
+  useEffect(() => {
+    if (selected && link.start) {
+      setRunFormOpen(true);
+      setFocusTarget('run-input');
+    }
+  }, [selected?.id, link.start]);
   const historyRead = useWorkflowRuns(
     workspaceId,
     view === 'runs' ? (selected?.id ?? null) : null,
@@ -283,8 +292,9 @@ function WorkflowPage({
         selection.observed(workflowSchema.parse(result));
         notice = 'Trigger updated.';
       } else if (command.path.endsWith('/activation')) {
-        selection.observed(workflowSchema.parse(result));
-        notice = 'Workflow activation updated. Check the active revision below.';
+        const workflow = workflowSchema.parse(result);
+        selection.observed(workflow);
+        notice = workflow.enabled ? workflowLiveMessage(workflow) : 'Workflow disabled. It will not start new runs.';
       } else if (command.path.endsWith('/cancel')) notice = 'Cancellation requested. Check the run status.';
       else if (command.path.endsWith('/input')) notice = 'Your response was recorded. The run can now resume.';
       else if (command.path.endsWith('/runs')) {
@@ -586,7 +596,18 @@ function WorkflowPage({
                     {selected.capabilities.invoke && (
                       <Button
                         variant="outline"
-                        disabled={blocked || !selected.enabled}
+                        state={
+                          blocked
+                            ? { kind: 'blocked', reason: 'Finish or retry the current request first.' }
+                            : !selected.enabled
+                              ? {
+                                  kind: 'blocked',
+                                  reason: selected.capabilities.manage
+                                    ? 'Activate the workflow to start runs.'
+                                    : 'Ask a workflow manager to activate this workflow.',
+                                }
+                              : { kind: 'ready' }
+                        }
                         onClick={() => {
                           setRunFormOpen(true);
                           setView('runs');
@@ -628,7 +649,9 @@ function WorkflowPage({
                       >
                         {selected.enabled && selected.activeRevision === selected.revision
                           ? 'Disable workflow'
-                          : 'Activate saved revision'}
+                          : selected.enabled
+                            ? 'Activate saved revision'
+                            : 'Activate workflow'}
                       </Button>
                     )}
                   </div>
@@ -686,7 +709,11 @@ function WorkflowPage({
                       workspaceId={workspaceId}
                       workflow={selected}
                       userId={user.id}
-                      changed={refresh}
+                      changed={async accepted => {
+                        await refresh();
+                        if (accepted.sponsorshipAccepted && accepted.sponsor?.userId === user.id)
+                          setMessage('You now sponsor this workflow. Runs started by its triggers use your access.');
+                      }}
                     />
                   </div>
                 </>
@@ -710,15 +737,15 @@ function WorkflowPage({
                       workflow={selected}
                       blocked={blocked}
                       onDenied={deny}
-                      onSaved={workflow => {
+                      onCreateKey={triggerId => {
+                        setView('settings');
+                        setFocusTarget(`webhook-setup-${triggerId}`);
+                      }}
+                      onSaved={(workflow, notice) => {
                         selection.observed(workflow);
                         void changes.saved(workflow.id);
                         setError('');
-                        setMessage(
-                          workflow.enabled
-                            ? 'Triggers saved. Activate the saved revision to use them.'
-                            : 'Triggers saved.',
-                        );
+                        setMessage(notice);
                       }}
                       onSwitched={workflow => {
                         selection.observed(workflow);

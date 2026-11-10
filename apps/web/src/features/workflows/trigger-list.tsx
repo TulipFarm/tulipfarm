@@ -49,6 +49,7 @@ import {
 } from './queries';
 import { newTriggerId, triggerKindNames, triggerLine, type TriggerBody } from './triggers';
 import { TriggerIcon } from './workflow-summary';
+import { activationFailureMessage, workflowLiveMessage } from './activation-feedback';
 
 type Workflow = z.infer<typeof workflowSchema>;
 type GitHubDraft = {
@@ -126,13 +127,15 @@ export function TriggerList({
   onSaved,
   onSwitched,
   onDenied,
+  onCreateKey,
 }: {
   workspaceId: string;
   workflow: Workflow;
   blocked: boolean;
-  onSaved: (workflow: Workflow) => void;
+  onSaved: (workflow: Workflow, notice: string) => void;
   onSwitched: (workflow: Workflow) => void;
   onDenied: () => void;
+  onCreateKey: (triggerId: string) => void;
 }) {
   const saved = workflow.definition.triggers;
   const editable = workflow.capabilities.manage && !workflow.archivedAt;
@@ -182,10 +185,10 @@ export function TriggerList({
     setFailure(null);
   };
 
-  async function save() {
+  async function save(activate: boolean) {
     const complete = triggers.filter((trigger): trigger is Trigger => trigger !== null);
     if (complete.length !== items.length || problems.size) return;
-    setBusy('save');
+    setBusy(activate ? 'activate' : 'save');
     setFailure(null);
     try {
       const result = await workflowRequest(`/workspaces/${workspaceId}/workflows/${workflow.id}`, 'PUT', {
@@ -193,7 +196,28 @@ export function TriggerList({
         expectedRevision: workflow.revision,
         definition: { ...workflow.definition, triggers: complete },
       });
-      onSaved(workflowSchema.parse(result));
+      const savedWorkflow = workflowSchema.parse(result);
+      if (!activate)
+        return onSaved(
+          savedWorkflow,
+          savedWorkflow.enabled
+            ? 'Revision saved. Runs still use the active revision until you activate this one.'
+            : savedWorkflow.definition.triggers.length
+              ? 'Revision saved. Activate the workflow so its triggers can start runs.'
+              : 'Revision saved. Activate the workflow to start runs.',
+        );
+      try {
+        const active = await workflowRequest(`/workspaces/${workspaceId}/workflows/${workflow.id}/activation`, 'POST', {
+          commandId: crypto.randomUUID(),
+          expectedGeneration: savedWorkflow.generation,
+          revision: savedWorkflow.revision,
+          enabled: true,
+        });
+        const activeWorkflow = workflowSchema.parse(active);
+        onSaved(activeWorkflow, workflowLiveMessage(activeWorkflow));
+      } catch (error) {
+        onSaved(savedWorkflow, activationFailureMessage(error, savedWorkflow, 'editor'));
+      }
     } catch (error) {
       if (error instanceof WorkflowRequestError && [401, 403, 404].includes(error.status)) return onDenied();
       setFailure(saveFailure(error, items, saved, knownKinds));
@@ -311,6 +335,16 @@ export function TriggerList({
                         <OnceOutcome workspaceId={workspaceId} workflowId={workflow.id} triggerId={item.id} />
                       )}
                     </p>
+                    {isSaved && item.kind === 'webhook' && !state?.webhook?.configured && (
+                      <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                        <span>No key yet</span>
+                        {editable && (
+                          <Button variant="link" size="sm" disabled={locked} onClick={() => onCreateKey(item.id)}>
+                            Set up webhook key
+                          </Button>
+                        )}
+                      </div>
+                    )}
                   </div>
                   {state && workflow.capabilities.manage && !workflow.archivedAt && (
                     <Switch
@@ -427,9 +461,9 @@ export function TriggerList({
       {editable && dirty && (
         <div className="flex flex-wrap items-center gap-2">
           <Button
-            pendingLabel="Saving triggers..."
+            pendingLabel={busy === 'save' ? 'Saving triggers...' : 'Saving and activating...'}
             state={
-              busy === 'save'
+              busy === 'save' || busy === 'activate'
                 ? { kind: 'busy' }
                 : problems.size
                   ? { kind: 'blocked', reason: 'Fix the triggers marked above first.' }
@@ -437,9 +471,12 @@ export function TriggerList({
                     ? { kind: 'blocked', reason: 'Wait for the current request to finish.' }
                     : { kind: 'ready' }
             }
-            onClick={() => void save()}
+            onClick={() => void save(true)}
           >
-            Save triggers
+            Save and activate
+          </Button>
+          <Button variant="outline" disabled={locked || problems.size > 0} onClick={() => void save(false)}>
+            Save only
           </Button>
           <Button
             variant="ghost"
@@ -452,11 +489,6 @@ export function TriggerList({
           >
             Discard changes
           </Button>
-          <p className="text-sm text-muted-foreground">
-            {workflow.enabled
-              ? 'Saving makes a new revision. Activate it to use these triggers.'
-              : 'Saving makes a new revision.'}
-          </p>
         </div>
       )}
     </section>
