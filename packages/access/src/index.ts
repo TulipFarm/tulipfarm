@@ -400,6 +400,17 @@ async function canAgentAccess(
   const permits = (scope: z.infer<typeof scopeSchema>) =>
     scope.some(entry => entry.assetId === assetId && entry.permissions.includes(permission));
   if (![authority.scope, authority.activation_scope, authority.limit_scope].every(permits)) return false;
+  return canUseAgentEnrollment(transaction, owner, authority.agent_id, assetId, permission);
+}
+
+/** Enrollment and the person's current access; callers must also apply the agent's three scope bounds. */
+export async function canUseAgentEnrollment(
+  transaction: AuthorizationTransaction,
+  owner: HumanActor,
+  agentId: string,
+  assetId: string,
+  permission: AssetPermission,
+) {
   const target = grantTarget(permission);
   // Table permissions may also come from a policy on every table the owning team owns.
   const owned =
@@ -408,7 +419,7 @@ async function canAgentAccess(
       : '';
   const grant = await transaction.client.query(
     `SELECT 1 FROM ${table(transaction, 'tf_agent_teams')} t JOIN ${table(transaction, target.name)} g ON g.team_id = t.team_id WHERE t.agent_id = $1 AND (g.${target.column} = $2${owned}) AND g.permission = $3 LIMIT 1`,
-    [authority.agent_id, assetId, target.permission],
+    [agentId, assetId, target.permission],
   );
   if (!grant.rowCount) return false;
   return canAccessAsset(transaction, owner, assetId, permission);

@@ -217,9 +217,9 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       agent.teamId,
       tableId,
     ]);
-    const task = await start(member),
-      { runId } = await approvals.bindRun(w.id, member.userId, task.id, { generation: 0 });
-    assert.equal(await executor.execute(await queue(member, runId)), 'blocked');
+    const task = await start(member);
+    assert.equal(task.status, 'failed');
+    assert.match((await tasks.history(w.id, member.userId, task.id)).messages.at(-1).text, /couldn't reach/);
     await db.platform.query(
       `INSERT INTO ${table('tf_grants')} (team_id,asset_id,permission) VALUES ($1,$2,'table.row.read')`,
       [agent.teamId, tableId],

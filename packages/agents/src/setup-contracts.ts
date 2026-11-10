@@ -4,6 +4,88 @@ import { agentDefinitionSchema, definitionRevisionSchema, scopeSchema, taskLimit
 import { agentPolicySchema, soulRevisionSchema } from './saved-contracts.ts';
 import { agentTaskLimitsSchema, triggerVariantSchema, type TriggerVariant } from '@tulipfarm/workflows/contracts';
 
+/** Adds the fewest of the caller's granting teams for this table, retaining their explicit enrollment choices. */
+export function tableAccessEnrollment(
+  teams: readonly {
+    id: string;
+    canAssign?: boolean | undefined;
+    tableScope?: z.infer<typeof scopeSchema> | undefined;
+  }[],
+  entry: z.infer<typeof scopeSchema>[number],
+  enrolled: readonly string[],
+) {
+  const permissions = entry.permissions.filter(permission => permission.startsWith('table.row.'));
+  if (!permissions.length) return [...enrolled];
+  const mask = (team: (typeof teams)[number]) =>
+    permissions.reduce(
+      (bits, permission, index) =>
+        team.tableScope?.some(grant => grant.assetId === entry.assetId && grant.permissions.includes(permission))
+          ? bits | (1 << index)
+          : bits,
+      0,
+    );
+  const existing = teams.filter(team => enrolled.includes(team.id)).reduce((bits, team) => bits | mask(team), 0);
+  const choices = new Map<number, string[]>([[existing, []]]);
+  for (const team of teams.filter(team => team.canAssign && !enrolled.includes(team.id)))
+    for (const [covered, ids] of choices) {
+      const next = covered | mask(team);
+      if (!choices.has(next) || choices.get(next)!.length > ids.length + 1) choices.set(next, [...ids, team.id]);
+    }
+  const selected = choices.get((1 << permissions.length) - 1);
+  return selected ? [...enrolled, ...selected] : [...enrolled];
+}
+
+export function tableAccessProblem(
+  teams: readonly {
+    id: string;
+    name: string;
+    canAssign?: boolean | undefined;
+    tableScope?: z.infer<typeof scopeSchema> | undefined;
+  }[],
+  scope: z.infer<typeof scopeSchema>,
+  enrolled: readonly string[],
+  previous?: { scope: z.infer<typeof scopeSchema>; enrollment: readonly string[] } | undefined,
+) {
+  const managerMessage = (names: string[]) =>
+    `You need a manager of ${new Intl.ListFormat('en').format(names)} to give this agent access.`;
+  const unassignable = teams.filter(
+    team => enrolled.includes(team.id) && !previous?.enrollment.includes(team.id) && !team.canAssign,
+  );
+  if (unassignable.length) return managerMessage(unassignable.map(team => team.name));
+  for (const entry of scope) {
+    const missing = entry.permissions.filter(
+      permission =>
+        permission.startsWith('table.row.') &&
+        !(
+          previous?.enrollment.some(id => enrolled.includes(id)) &&
+          previous.scope.some(bound => bound.assetId === entry.assetId && bound.permissions.includes(permission))
+        ) &&
+        !teams.some(
+          team =>
+            enrolled.includes(team.id) &&
+            team.tableScope?.some(grant => grant.assetId === entry.assetId && grant.permissions.includes(permission)),
+        ),
+    );
+    if (
+      !missing.length ||
+      enrolled.some(id => previous?.enrollment.includes(id) && !teams.some(team => team.id === id))
+    )
+      continue;
+    const blocked = teams.filter(
+      team =>
+        !team.canAssign &&
+        team.tableScope?.some(
+          grant =>
+            grant.assetId === entry.assetId && missing.some(permission => grant.permissions.includes(permission)),
+        ),
+    );
+    return blocked.length
+      ? managerMessage(blocked.map(team => team.name))
+      : 'Choose a team that grants every selected table permission.';
+  }
+  return null;
+}
+
 /** Any Workflow trigger kind, without the ID and label the setup trigger gives it. */
 export const agentTriggerSchema = triggerVariantSchema;
 export type AgentTrigger = TriggerVariant;

@@ -70,7 +70,7 @@ export const startTaskSchema = z.strictObject({
   agentId: uuidSchema,
   activationId: uuidSchema.optional(),
   mcpSelection: z.strictObject({ selectionId: uuidSchema, version: z.number().int().positive() }).optional(),
-  scope: scopeSchema.default([]),
+  scope: scopeSchema.optional(),
   limits: taskLimitsSchema.default({ toolCalls: 100, activeMilliseconds: 300000, credits: 100 }),
   ...messageInput,
 });

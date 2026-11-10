@@ -31,12 +31,14 @@ export function TaskStart({
   detail,
   concealed,
   setup,
+  addTableAccess,
 }: {
   workspaceId: string;
   slug: string;
   detail: AgentDetail;
   concealed: boolean;
   setup?: ButtonBlockerFix | undefined;
+  addTableAccess?: (() => void) | undefined;
 }) {
   const api = useTaskApi(workspaceId);
   const navigate = useNavigate();
@@ -57,7 +59,7 @@ export function TaskStart({
           api={api}
           workspaceId={workspaceId}
           enabled={!concealed && !!detail.activations.length}
-          mode={{ kind: 'start', detail, setup }}
+          mode={{ kind: 'start', detail, setup, addTableAccess }}
           accepted={setAcceptedId}
         />
       </FormSection>
@@ -66,7 +68,12 @@ export function TaskStart({
 }
 
 type Mode =
-  | { kind: 'start'; detail: AgentDetail; setup?: ButtonBlockerFix | undefined }
+  | {
+      kind: 'start';
+      detail: AgentDetail;
+      setup?: ButtonBlockerFix | undefined;
+      addTableAccess?: (() => void) | undefined;
+    }
   | { kind: 'reply'; task: TaskSummary; sequence: number };
 type ContextSource = Extract<TaskSources[number], { kind: 'task' | 'attachment' }>;
 
@@ -100,6 +107,18 @@ export function TaskComposer({
   const activation = activations.find(item => item.id === activationId);
   // Activations arrive newest first, and the server runs an unpinned task under the newest one.
   const scope = activationId === 'latest' ? activations[0]?.scope : activation?.scope;
+  const effectiveScope =
+    (activationId === 'latest' ? activations[0]?.effectiveScope : activation?.effectiveScope) ?? [];
+  const unavailable = scope
+    ?.map(entry => ({
+      ...entry,
+      permissions: entry.permissions.filter(
+        permission =>
+          permission.startsWith('table.row.') &&
+          !effectiveScope.some(bound => bound.assetId === entry.assetId && bound.permissions.includes(permission)),
+      ),
+    }))
+    .filter(entry => entry.permissions.length);
   const [limits, setLimits] = useState(() => limitDraft(mode.kind === 'start' ? defaultTaskLimits : mode.task.limits));
   const [savedLimits, setSavedLimits] = useState(limits);
   const [limitsOpen, setLimitsOpen] = useState<boolean>();
@@ -264,8 +283,21 @@ export function TaskComposer({
             </Field>
             {scope && (
               <p className="break-words text-sm text-muted-foreground">
-                Data this task may use: {scopeText(scope, tableNames)}.
+                Data this task may use: {scopeText(effectiveScope, tableNames)}.
               </p>
+            )}
+            {!!unavailable?.length && (
+              <Alert>
+                <AlertDescription>
+                  This task cannot use {scopeText(unavailable, tableNames)}. An agent manager must add table access from
+                  a team that grants it before starting.
+                  {mode.addTableAccess && (
+                    <Button variant="link" onClick={mode.addTableAccess}>
+                      Add table access
+                    </Button>
+                  )}
+                </AlertDescription>
+              </Alert>
             )}
           </div>
         )}

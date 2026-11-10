@@ -52,7 +52,6 @@ test('task commands normalize identifiers and reject execution authority, new bu
     requestId,
     agentId,
     text: 'Work',
-    scope: [],
     limits: { toolCalls: 100, activeMilliseconds: 300000, credits: 100 },
     sources: [],
   });

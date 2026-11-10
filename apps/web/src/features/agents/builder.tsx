@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from '@tanstack/react-router';
 import type { AgentSetupReceipt, SaveAgentSetupDraft, PublishAgentSetup } from '@tulipfarm/agents/setup-contracts';
+import { tableAccessProblem } from '@tulipfarm/agents/setup-contracts';
 import { Button } from '@tulipfarm/sprout/button';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { Field } from '@tulipfarm/sprout/field';
@@ -150,8 +151,10 @@ export function AgentBuilder({
   const terminal = receipt && receipt.status !== 'preparing';
   const locked = sending || uncertain || !!terminal || concealed;
   const dirty = JSON.stringify(draft) !== savedKey;
-  const parsed = parseBuilder(draft, membershipId, activating, id);
-  const review = parseBuilder(draft, membershipId, false, id);
+  const tableAccess = { teams: context.teams, previous: initial?.setup };
+  const tableProblem = tableAccessProblem(context.teams, draft.access.scope, draft.access.enrollment, initial?.setup);
+  const parsed = parseBuilder(draft, membershipId, activating, id, tableAccess);
+  const review = parseBuilder(draft, membershipId, false, id, tableAccess);
   const errors = showErrors ? agentDraftErrors(draft.definition) : {};
   const errorSteps = new Set(showErrors ? parsed.problems.map(problem => problem.step) : []);
   const completed = new Set(
@@ -202,7 +205,7 @@ export function AgentBuilder({
       return;
     }
     setActivating(decision === 'activate');
-    const parsed = parseBuilder(draft, membershipId, decision === 'activate', id);
+    const parsed = parseBuilder(draft, membershipId, decision === 'activate', id, tableAccess);
     if (!parsed.setup) {
       setShowErrors(true);
       chooseStep(parsed.problems[0]?.step ?? 'basics');
@@ -353,6 +356,7 @@ export function AgentBuilder({
         workspaceId={workspaceId}
         slug={slug}
         teams={context.teams}
+        previous={initial?.setup}
         tools={draft.definition.tools}
         onTools={tools => updateDefinition({ tools })}
         value={draft.access}
@@ -407,7 +411,7 @@ export function AgentBuilder({
               {review.problems.map((problem, index) => (
                 <li key={index}>
                   <Button variant="link" onClick={() => chooseStep(problem.step)}>
-                    {problem.message}
+                    <span className="whitespace-normal text-left">{problem.message}</span>
                   </Button>
                 </li>
               ))}
@@ -491,7 +495,9 @@ export function AgentBuilder({
                               ? 'Check the saved status before trying again.'
                               : 'Review the save result below.',
                           }
-                        : { kind: 'ready' },
+                        : step === 'review' && tableProblem
+                          ? { kind: 'blocked', reason: tableProblem }
+                          : { kind: 'ready' },
                   }}
                   secondarySubmit={{
                     label: 'Save draft',

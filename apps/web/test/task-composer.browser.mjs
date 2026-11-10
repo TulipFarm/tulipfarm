@@ -67,7 +67,7 @@ const agentFixture = (id, name, activations) => ({
   },
   capabilities: ['read', 'invoke', 'delete'],
   admin: false,
-  activations,
+  activations: activations.map(activation => ({ ...activation, effectiveScope: activation.scope })),
 });
 const agents = [
   agentFixture(aid, 'Customer follow-up assistant', [{ id: activationId, revision: 'b'.repeat(64), scope }]),
@@ -77,6 +77,14 @@ const agents = [
     { id: otherActivationId, revision: 'c'.repeat(64), scope: [] },
   ]),
 ];
+const unreachableId = uuid('d');
+agents.push({
+  ...agentFixture(unreachableId, 'Customer reader without team access', [
+    { id: activationId, revision: 'b'.repeat(64), scope },
+  ]),
+  capabilities: ['read', 'invoke', 'manage'],
+  activations: [{ id: activationId, revision: 'b'.repeat(64), scope, effectiveScope: [] }],
+});
 const limits = { toolCalls: 100, activeMilliseconds: 300000, credits: 100 };
 // Task summaries carry delegation fields since cloud aed31db6 (#803), packages/agents/src/task-contracts.ts:52.
 const taskFixture = (id, status) => ({
@@ -136,6 +144,16 @@ async function open(device) {
     if (path.endsWith('/model-catalog')) return send({ families });
     if (path.endsWith('/agents/authoring-context'))
       return send({ currentSoulRevision: 'a'.repeat(40), teams, admin: false });
+    if (path.endsWith(`/agents/${unreachableId}/policy`))
+      return send({
+        version: 0,
+        owningTeamId: tid,
+        grants: [],
+        personGrants: [],
+        enrollment: [],
+        enabled: true,
+        limits: scope,
+      });
     const agent = agents.find(item => path.endsWith(`/agents/${item.id}`));
     if (agent && method === 'DELETE') {
       deletes++;
@@ -351,6 +369,30 @@ try {
   await page.getByRole('heading', { name: 'Agent deleted', exact: true }).waitFor();
   assert.equal(deletes, 2);
   await context.close();
+  const { context: deniedContext, page: deniedPage } = await open({ width: 1440, height: 1000, theme: 'light' });
+  await deniedPage.goto(`${origin}/acme/agents/${unreachableId}`);
+  const deniedRegion = deniedPage.getByRole('region', { name: 'Run agent now', exact: true });
+  await deniedRegion.getByText('Data this task may use: No table access.', { exact: true }).waitFor();
+  await deniedRegion.getByText(/This task cannot use/).waitFor();
+  await deniedRegion.getByText(/An agent manager must add table access/).waitFor();
+  if (shots) {
+    await mkdir(shots, { recursive: true });
+    await deniedRegion.screenshot({ path: `${shots}/unreachable-table-desktop.png` });
+  }
+  await deniedPage.setViewportSize({ width: 390, height: 844 });
+  if (shots) await deniedRegion.screenshot({ path: `${shots}/unreachable-table-mobile.png` });
+  assert.equal(
+    await deniedRegion.getByText(new RegExp(`^Data this task may use:.*${rid.slice(0, 8)}`)).count(),
+    0,
+    'the inaccessible table is never advertised as reachable',
+  );
+  await deniedRegion.getByRole('button', { name: 'Add table access', exact: true }).click();
+  await deniedPage.getByRole('region', { name: 'Team enrollment', exact: true }).waitFor();
+  assert.equal(
+    await deniedPage.getByRole('tab', { name: 'Access', exact: true }).getAttribute('aria-selected'),
+    'true',
+  );
+  await deniedContext.close();
 
   for (const device of [
     { width: 1440, height: 1000, theme: 'light' },

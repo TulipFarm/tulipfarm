@@ -3,6 +3,8 @@ import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
 import { toolNameSchema } from '@tulipfarm/agents/contracts';
 import { builderDraft, parseBuilder } from '../src/features/agents/builder-draft.ts';
+import { tableAccessEnrollment } from '@tulipfarm/agents/setup-contracts';
+import { agentContextSchema } from '@tulipfarm/agents/saved-contracts';
 
 const member = randomUUID(),
   agent = randomUUID();
@@ -11,6 +13,43 @@ function complete() {
   draft.definition = { name: 'People Ops', instructions: 'Cite policy sources.', tools: [] };
   return draft;
 }
+
+test('table selection adds the fewest granting teams and keeps explicit enrollment choices', () => {
+  const assetId = randomUUID(),
+    unrelated = randomUUID(),
+    reader = randomUUID(),
+    editor = randomUUID(),
+    both = randomUUID();
+  const teams = [
+    { id: unrelated, tableScope: [{ assetId: randomUUID(), permissions: ['table.row.read' as const] }] },
+    { id: reader, tableScope: [{ assetId, permissions: ['table.row.read' as const] }] },
+    { id: editor, tableScope: [{ assetId, permissions: ['table.row.update' as const] }] },
+    { id: both, tableScope: [{ assetId, permissions: ['table.row.read' as const, 'table.row.update' as const] }] },
+  ].map(team => ({ ...team, canAssign: true }));
+  const entry = { assetId, permissions: ['table.row.read' as const, 'table.row.update' as const] };
+  assert.deepEqual(tableAccessEnrollment(teams, entry, []), [both]);
+  assert.deepEqual(tableAccessEnrollment(teams, entry, [unrelated]), [unrelated, both]);
+  assert.deepEqual(tableAccessEnrollment(teams, entry, [reader, editor]), [reader, editor]);
+  assert.deepEqual(tableAccessEnrollment([], entry, []), [], 'never invent a granting team');
+  const memberOnly = [{ ...teams[1]!, canAssign: false }];
+  assert.deepEqual(
+    tableAccessEnrollment(memberOnly, { assetId, permissions: ['table.row.read'] }, []),
+    [],
+    'plain membership does not authorize assigning a team',
+  );
+  const context = agentContextSchema.parse({
+    currentSoulRevision: 'a'.repeat(40),
+    teams: [
+      {
+        id: both,
+        name: 'Operations',
+        canAssign: true,
+        tableScope: [...Array.from({ length: 100 }, () => ({ ...entry, assetId: randomUUID() })), entry],
+      },
+    ],
+  });
+  assert.deepEqual(tableAccessEnrollment(context.teams, entry, []), [both], 'available tables are not selected scope');
+});
 
 test('builder enforces exact manual text, skill and action bounds on the owning stage', () => {
   const draft = complete();

@@ -12,7 +12,8 @@ import {
   canAccessAsset,
   withoutGitHubSourcesBefore,
 } from '@tulipfarm/access';
-import { agentDefinitionSchema, recordConflict, toolCallSchema, toolResultSchema } from './contracts.ts';
+import { agentDefinitionSchema, recordConflict, scopeSchema, toolCallSchema, toolResultSchema } from './contracts.ts';
+import { effectiveAgentScope, unavailableTableMessage } from './data-scope.ts';
 import { agentModelInputSchema, modelDecisionSchema, parseModelDecision, taskReadTools } from './model.ts';
 import { withKnowledgeRetrieveGrant } from './knowledge-tool-contracts.ts';
 import type { InferenceResult } from './inference.ts';
@@ -109,6 +110,13 @@ const furtherWork =
   /\b(?:i(?:'|’)ll|i will|i(?:'|’)m going to|i am going to|i(?:'|’)m about to|i am about to|let me(?! know))\b/i;
 // "I will propose again if needed" or "Once you approve, I'll add it" offers later work; it does not announce a next step.
 const conditional = /\b(?:if|once|when|whenever|after|unless)\b/i;
+class TaskTableAccessDenied extends AccessDenied {
+  readonly instruction: string;
+  constructor(instruction: string) {
+    super();
+    this.instruction = instruction;
+  }
+}
 /** Whether a reply's last sentence announces a next step, such as "I will now propose the row", instead of ending the work. */
 export function announcesFurtherWork(text: string) {
   const ending = text.trim();
@@ -309,15 +317,22 @@ export function createTaskRuntime(
       tasks = createAgentTasks(local);
     const task = await tasks.read(workspaceId, owner.userId, taskId);
     await taskAccessCheck('invoke', () => requireTaskInvocation(tx, owner, task.agentId));
-    if (
-      !(
-        await tx.client.query(
-          `SELECT 1 FROM ${relation(tx, 'tf_agent_activations')} a JOIN ${relation(tx, 'tf_agents')} g ON g.id=a.agent_id WHERE a.id=$1 AND a.revoked_at IS NULL AND g.enabled AND g.deleted_at IS NULL`,
-          [task.activationId],
-        )
-      ).rowCount
-    )
-      throw new AccessDenied();
+    const activation = (
+      await tx.client.query(
+        `SELECT a.scope FROM ${relation(tx, 'tf_agent_activations')} a JOIN ${relation(tx, 'tf_agents')} g ON g.id=a.agent_id WHERE a.id=$1 AND a.revoked_at IS NULL AND g.enabled AND g.deleted_at IS NULL`,
+        [task.activationId],
+      )
+    ).rows[0];
+    if (!activation) throw new AccessDenied();
+    const effective = await effectiveAgentScope(
+      tx,
+      owner,
+      task.agentId,
+      scopeSchema.parse(activation.scope),
+      task.scope,
+    );
+    const unavailable = await unavailableTableMessage(tx, owner, task.scope, effective);
+    if (unavailable) throw new TaskTableAccessDenied(unavailable);
     const run = (
       await tx.client.query(
         `SELECT b.run_id FROM ${relation(tx, 'tf_agent_task_runs')} b JOIN ${relation(tx, 'tf_agent_runs')} r ON r.id=b.run_id WHERE b.task_id=$1 AND b.generation=$2 AND r.status IN ('ready','running','waiting')`,
@@ -468,6 +483,15 @@ export function createTaskRuntime(
       [taskId, reason],
     );
     taskTransition(tx, 'paused', changed.rowCount);
+  }
+  async function accessNotice(tx: Transaction, taskId: string, error: unknown) {
+    if (!(error instanceof TaskTableAccessDenied)) return;
+    await tx.client.query(
+      `INSERT INTO ${relation(tx, 'tf_agent_task_messages')}(task_id,sequence,generation,role,text,sources)
+       SELECT $1,COALESCE((SELECT max(sequence)+1 FROM ${relation(tx, 'tf_agent_task_messages')} WHERE task_id=$1),0),generation,'agent',$2,'[]'
+       FROM ${relation(tx, 'tf_agent_tasks')} WHERE id=$1`,
+      [taskId, error.instruction],
+    );
   }
   /** Why the model's steps were refused since the owner last wrote or a step of this run was used, oldest first. */
   async function rejectedSteps(tx: Transaction, taskId: string, runId: string) {
@@ -1077,6 +1101,7 @@ export function createTaskRuntime(
             [taskId],
           );
           taskTransition(tx, 'failed', changed.rowCount, taskId, taskFailure(taskId, 'authority-revoked', error));
+          if (changed.rowCount) await accessNotice(tx, taskId, error);
           return;
         }
         const changed = await tx.client.query(
@@ -1422,6 +1447,7 @@ export function createTaskRuntime(
           );
           await secrets?.tools.endRun(tx, { kind: 'task', taskId, runId: claim.runId });
           taskTransition(tx, 'failed', changed.rowCount, taskId, taskFailure(taskId, reason, error));
+          if (changed.rowCount) await accessNotice(tx, taskId, error);
         }
       });
       if (continuing)

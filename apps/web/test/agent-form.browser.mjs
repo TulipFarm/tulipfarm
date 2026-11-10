@@ -10,7 +10,7 @@ import {
   captureBrowserFailure,
 } from './built-app.fixture.mjs';
 
-async function environment(t) {
+async function environment(t, workspaceName, canAssign = true) {
   const server = await startBuiltApp();
   t.after(() => server.close());
   const browser = await chromium.launch(builderBrowserOptions());
@@ -19,6 +19,8 @@ async function environment(t) {
   page.setDefaultTimeout(10000);
   const errors = [],
     fixture = agentBuilderFixture();
+  if (workspaceName) fixture.workspace.name = workspaceName;
+  fixture.team.canAssign = canAssign;
   page.on('pageerror', error => errors.push(error.message));
   await page.route('**/v1/**', route => {
     const request = route.request();
@@ -31,9 +33,70 @@ async function environment(t) {
       .getByRole('tab', { name: new RegExp(name) })
       .first()
       .click();
-  await form.getByLabel('Agent name', { exact: true }).waitFor();
+  try {
+    await form.getByLabel('Agent name', { exact: true }).waitFor();
+  } catch (error) {
+    await captureBrowserFailure(page, 'agent-form-loading');
+    console.error(await page.locator('body').innerText(), errors);
+    throw error;
+  }
   return { page, fixture, errors, form, step };
 }
+
+test('table access selects a granting team and shows an editable access source', { timeout: 60000 }, async t => {
+  const { page, fixture, form, step, errors } = await environment(t, 'Customer operations');
+  await form.getByLabel('Agent name', { exact: true }).fill('Customer reader');
+  await form.getByRole('textbox', { name: 'Instructions', exact: true }).fill('Count the customer rows.');
+  await step('Access');
+  await form.getByRole('combobox', { name: 'Business table', exact: true }).click();
+  await page.getByRole('option', { name: /^Customers/ }).click();
+  await form.getByRole('button', { name: 'Add table access', exact: true }).click();
+  await form.getByText('Uses access from People Ops.', { exact: true }).waitFor();
+  await form.getByRole('button', { name: 'Change teams used for access', exact: true }).click();
+  const enrollment = form.getByRole('group', { name: 'Teams whose permissions the agent may use', exact: true });
+  assert.equal(await enrollment.getByRole('checkbox', { name: 'People Ops', exact: true }).isChecked(), true);
+  await captureBuilderScreenshot(page, 'table-access-team-desktop');
+  await step('Review');
+  await form.getByRole('button', { name: 'Save draft', exact: true }).click();
+  await form.getByText('Draft saved. Slack channels and workflow triggers are not started.', { exact: true }).waitFor();
+  assert.deepEqual([...fixture.setups.values()][0].setup.enrollment, [fixture.team.id]);
+  assert.deepEqual([...fixture.setups.values()][0].setup.scope, fixture.team.tableScope);
+  await form.getByRole('button', { name: 'Continue editing', exact: true }).click();
+  await step('Access');
+  const teamChoices = form.getByRole('button', { name: 'Change teams used for access', exact: true });
+  if ((await teamChoices.getAttribute('aria-expanded')) !== 'true') await teamChoices.click();
+  await enrollment.getByRole('checkbox', { name: 'People Ops', exact: true }).uncheck();
+  await form
+    .getByText('No team access selected. Choose a team that can read the selected tables.', { exact: true })
+    .waitFor();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await captureBuilderScreenshot(page, 'table-access-team-mobile');
+  assert.deepEqual(errors, []);
+});
+
+test('table access blocks a plain member with the manager needed before activation', { timeout: 60000 }, async t => {
+  const { page, fixture, form, step, errors } = await environment(t, 'Customer operations', false);
+  await form.getByLabel('Agent name', { exact: true }).fill('Customer reader');
+  await form.getByRole('textbox', { name: 'Instructions', exact: true }).fill('Count the customer rows.');
+  await step('Access');
+  await form.getByRole('combobox', { name: 'Business table', exact: true }).click();
+  await page.getByRole('option', { name: /^Customers/ }).click();
+  await form.getByRole('button', { name: 'Add table access', exact: true }).click();
+  await form
+    .getByRole('alert')
+    .getByText('You need a manager of People Ops to give this agent access.', { exact: true })
+    .waitFor();
+  await captureBuilderScreenshot(page, 'table-access-manager-required-desktop');
+  await step('Review');
+  const activate = form.getByRole('button', { name: 'Create and activate', exact: true });
+  assert.equal(await activate.getAttribute('aria-disabled'), 'true');
+  await activate.dispatchEvent('click');
+  assert.equal(fixture.setups.size, 0);
+  await page.setViewportSize({ width: 390, height: 844 });
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  await captureBuilderScreenshot(page, 'table-access-manager-required-mobile');
+  assert.deepEqual(errors, []);
+});
 
 test(
   'builder preserves exact choices, reviews imported skills, saves once, and resumes without activating',

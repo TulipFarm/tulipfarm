@@ -7,7 +7,22 @@ import { membership } from './chat-query.fixture.mjs';
 export function agentBuilderFixture() {
   const imports = skillImportFixture();
   const { workspace, session } = imports;
-  const team = { id: randomUUID(), name: 'People Ops' };
+  const team = { id: randomUUID(), name: 'People Ops', canAssign: true };
+  const businessTable = {
+    id: randomUUID(),
+    revision: 'a'.repeat(40),
+    appliedAt: null,
+    recordCount: '1',
+    definition: {
+      formatVersion: 2,
+      owningTeamId: team.id,
+      label: 'Customers',
+      fields: [{ id: randomUUID(), label: 'Name', kind: 'text', required: false, maxLength: 10000 }],
+      uniqueKeys: [],
+    },
+  };
+  businessTable.definition.id = businessTable.id;
+  team.tableScope = [{ assetId: businessTable.id, permissions: ['table.row.read'] }];
   const skill = {
     id: randomUUID(),
     name: 'Employee handbook answers',
@@ -66,7 +81,7 @@ export function agentBuilderFixture() {
       });
     if (path.endsWith('/agents/sharing-candidates'))
       return answer({ membershipId: membership.membershipId, teams: [team], people: [] });
-    if (path.endsWith('/tables')) return answer({ tables: [], nextCursor: null });
+    if (path.endsWith('/tables')) return answer({ tables: [businessTable], nextCursor: null });
     if (path.endsWith('/workspace-mcp/agent-permission-choices')) return answer([]);
     if (path.endsWith('/skills')) {
       const installed = imports.respond(method, inputUrl, body).json.workspace;
@@ -185,6 +200,7 @@ export function agentBuilderFixture() {
     workspace,
     session,
     team,
+    businessTable,
     skill,
     membership,
     imports,
