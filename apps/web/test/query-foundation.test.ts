@@ -9,6 +9,8 @@ import type { WorkspaceScope } from '../src/lib/query/scope.ts';
 // Vite resolves extensionless source imports; mirror that resolution for Node's TS runner.
 const hooks = registerHooks({
   resolve(specifier, context, next) {
+    if (specifier === '@/lib/query/policy')
+      return next(new URL('../src/lib/query/policy.ts', import.meta.url).href, context);
     return next(
       context.parentURL?.includes('/src/lib/query/') && specifier.startsWith('.') && !/\.[a-z]+$/.test(specifier)
         ? `${specifier}.ts`
@@ -25,6 +27,7 @@ const { createCatalogPersistence, parseCatalogSnapshot, catalogMaxAge } =
   await import('../src/lib/query/catalog-persistence.ts');
 const { replyBackoff } = await import('../src/lib/query/polling.ts');
 const { startEarlyReads } = await import('../src/lib/query/early-reads.ts');
+const { scheduleDraftRead, retryDraftRead, draftRetryDelay } = await import('../src/features/chat/draft-reads.ts');
 hooks.deregister();
 
 const scope: WorkspaceScope = { kind: 'workspace', userId: 'alice', workspaceId: 'workspace', membershipId: 'member' };
@@ -33,6 +36,102 @@ const flush = async () => {
   await setImmediate();
   await setImmediate();
 };
+
+test('draft reads share requests, bound concurrency and remove cancelled queued reads', async () => {
+  const runtime = createFeatureClient(identity);
+  runtime.start();
+  const held = Array.from({ length: 5 }, () => Promise.withResolvers<string>());
+  const calls: number[] = [];
+  const readers = held.map(
+    (_, index) =>
+      new QueryObserver(
+        runtime.client,
+        featureReadOptions(runtime, scope, {
+          key: ['draft', index],
+          schedule: scheduleDraftRead,
+          load: async () => {
+            calls.push(index);
+            return held[index]!.promise;
+          },
+        }),
+      ),
+  );
+  const duplicate = new QueryObserver(runtime.client, readers[0]!.options);
+  const unsubs = [...readers, duplicate].map(reader => reader.subscribe(() => {}));
+  try {
+    await flush();
+    assert.deepEqual(calls, [0, 1, 2]);
+    unsubs[3]!();
+    await flush();
+    held[0]!.resolve('first');
+    await flush();
+    assert.deepEqual(calls, [0, 1, 2, 4], 'a cancelled queued read does not run or block the next read');
+    assert.equal(duplicate.getCurrentResult().data, 'first');
+    held[1]!.resolve('second');
+    held[2]!.resolve('third');
+    held[4]!.resolve('last');
+    await flush();
+    assert.equal(readers[4]!.getCurrentResult().data, 'last');
+  } finally {
+    for (const result of held) result.resolve('cleanup');
+    for (const unsub of unsubs) unsub();
+    runtime.stop();
+    await flush();
+  }
+});
+
+test('draft retries recover transient errors, stop after the budget, and allow manual retry', async () => {
+  const runtime = createFeatureClient(identity);
+  runtime.start();
+  try {
+    const errors = [
+      new TypeError('Network error'),
+      new DOMException('Timed out', 'TimeoutError'),
+      ...[0, 429, 502, 503, 504].map(status => Object.assign(new Error('Unavailable'), { status })),
+    ];
+    for (const [index, error] of errors.entries()) {
+      let attempts = 0;
+      const options = featureReadOptions(runtime, scope, {
+        key: ['draft', index],
+        schedule: scheduleDraftRead,
+        retry: retryDraftRead,
+        retryDelay: () => 1,
+        load: async () => {
+          if (++attempts < 4) throw error;
+          return 'saved';
+        },
+      });
+      assert.equal(await runtime.client.fetchQuery(options), 'saved');
+      assert.equal(attempts, 4);
+    }
+    let failing = true;
+    let attempts = 0;
+    const options = featureReadOptions(runtime, scope, {
+      key: ['draft', 'permanent'],
+      retry: retryDraftRead,
+      retryDelay: () => 1,
+      load: async () => {
+        attempts++;
+        if (failing) throw Object.assign(new Error('Unavailable'), { status: 503 });
+        return 'saved';
+      },
+    });
+    await assert.rejects(runtime.client.fetchQuery(options), { status: 503 });
+    assert.equal(attempts, 4);
+    assert.equal(
+      readState({ data: undefined, error: runtime.client.getQueryState(options.queryKey)?.error, isFetching: false })
+        .kind,
+      'error',
+    );
+    failing = false;
+    assert.equal(await runtime.client.fetchQuery(options), 'saved');
+    const delays = Array.from({ length: 20 }, () => draftRetryDelay(2, errors[0]));
+    assert.ok(delays.every(delay => delay >= 3000 && delay <= 5000));
+    assert.ok(new Set(delays).size > 1, 'backoff is jittered');
+  } finally {
+    runtime.stop();
+  }
+});
 
 test('observers share one in-flight read; focus is inert; transient errors retain data; denial clears only the query', async () => {
   const runtime = createFeatureClient(identity);

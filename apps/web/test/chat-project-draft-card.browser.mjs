@@ -29,12 +29,26 @@ test('project reviews load, decide and retain their results after reloading', { 
         const page = await context.newPage();
         page.setDefaultTimeout(10000);
         const errors = [];
+        let reloadFailures = false;
+        let permanentFailure = true;
+        let historyReads = 0;
+        const draftReads = new Map();
+        const inFlight = new Set();
+        let peak = 0;
+        page.on('request', request => {
+          if (!reloadFailures || !/\/drafts\/[\w-]+$/.test(new URL(request.url()).pathname)) return;
+          inFlight.add(request);
+          peak = Math.max(peak, inFlight.size);
+        });
+        page.on('requestfinished', request => inFlight.delete(request));
+        page.on('requestfailed', request => inFlight.delete(request));
         page.on('pageerror', error => errors.push(error.message));
         page.on('console', message => {
-          if (message.type() === 'error') errors.push(message.text());
+          if (message.type() === 'error' && !reloadFailures) errors.push(message.text());
         });
         page.on('response', response => {
-          if (response.status() >= 400) errors.push(`${response.status()} ${new URL(response.url()).pathname}`);
+          if (response.status() >= 400 && !reloadFailures)
+            errors.push(`${response.status()} ${new URL(response.url()).pathname}`);
         });
         const chatId = randomUUID();
         const chat = {
@@ -142,7 +156,20 @@ test('project reviews load, decide and retain their results after reloading', { 
             const draft = /^\/drafts\/([\w-]+)(\/decision)?$/.exec(rest);
             if (draft && drafts.has(draft[1])) {
               const current = drafts.get(draft[1]);
-              if (method === 'GET' && !draft[2]) return route.fulfill({ json: current });
+              if (method === 'GET' && !draft[2]) {
+                if (reloadFailures) {
+                  const attempt = (draftReads.get(draft[1]) ?? 0) + 1;
+                  draftReads.set(draft[1], attempt);
+                  if (draft[1] === cases[0].id && attempt <= 3) return route.abort('failed');
+                  if ((draft[1] === cases[2].id && attempt <= 3) || (draft[1] === cases[5].id && permanentFailure))
+                    return route.fulfill({ status: 503, json: { error: 'draft-unavailable' } });
+                  if (attempt === 1 && [cases[3].id, cases[4].id].includes(draft[1])) {
+                    await new Promise(resolve => setTimeout(resolve, draft[1] === cases[3].id ? 16000 : 11000));
+                    if (request.failure()) return;
+                  }
+                }
+                return route.fulfill({ json: current });
+              }
               if (method === 'PUT' && draft[2]) {
                 const body = request.postDataJSON();
                 decisions.push({ id: draft[1], ...body });
@@ -167,8 +194,10 @@ test('project reviews load, decide and retain their results after reloading', { 
                 return route.fulfill({ json: outcome });
               }
             }
-            if (method === 'GET' && rest === '/messages')
+            if (method === 'GET' && rest === '/messages') {
+              historyReads++;
               return route.fulfill({ json: { messages: history, nextBefore: null, hasGitHubProposals: false } });
+            }
             if (method === 'GET' && rest === '/plans') return route.fulfill({ json: { plans: [] } });
             if (method === 'GET' && !rest) return route.fulfill({ json: chat });
             if (method === 'GET') return route.fulfill({ json: [] });
@@ -243,20 +272,81 @@ test('project reviews load, decide and retain their results after reloading', { 
           projects.some(project => project.id === cases[1].projectId),
           false,
         );
+        reloadFailures = true;
         await page.reload();
+        await page.getByText('Could not load draft', { exact: true }).waitFor({ timeout: 45000 });
+        assert.ok(draftReads.get(cases[5].id) <= 8, 'permanent failures exhaust a bounded retry budget');
+        if (shots) await page.screenshot({ path: `${shots}/project-retry-${theme}.png` });
+        permanentFailure = false;
+        await page.getByRole('button', { name: 'Retry loading draft', exact: true }).click();
         for (const item of cases) {
           await card(item)
             .getByText(item.name === 'decline' ? 'Draft dismissed. Nothing was created.' : `Project ${item.done}.`, {
               exact: true,
             })
-            .waitFor();
+            .waitFor({ timeout: 45000 });
           assert.equal(await card(item).getByRole('button', { name: 'Not now', exact: true }).count(), 0);
           if (item.name !== 'decline')
             await card(item).getByRole('link', { name: 'Open project', exact: true }).waitFor();
         }
         assert.equal(decisions.length, cases.length, 'reload does not repeat a decision');
         assert.equal(await page.getByText('Could not load draft', { exact: true }).count(), 0);
+        assert.equal(await page.getByRole('status', { name: 'Loading authoring draft' }).count(), 0);
+        assert.ok(peak <= 3, `at most three draft reads run together, observed ${peak}`);
+        assert.equal(draftReads.get(cases[0].id), 4, 'network failures recover without sibling cancellation');
+        assert.equal(draftReads.get(cases[2].id), 4, '503 failures recover automatically');
+        assert.equal(draftReads.get(cases[3].id), 2, 'a timed-out read recovers automatically');
+        assert.equal(draftReads.get(cases[4].id), 1, 'a slow successful read is not cancelled by saved siblings');
+        assert.equal(draftReads.get(cases[1].id), 1, 'a settled card does not invalidate sibling reads on reload');
         if (shots) await card(cases[0]).screenshot({ path: `${shots}/project-created-${theme}.png` });
+        reloadFailures = false;
+        const notifyDraft = async id => {
+          await page.evaluate(
+            ({ workspaceId, userId, membershipId, chatId, id }) => {
+              const channel = new BroadcastChannel('tulipfarm:query:v1');
+              channel.postMessage({
+                version: 1,
+                id: crypto.randomUUID(),
+                sessionId: 'other-tab',
+                scope: { kind: 'workspace', workspaceId, userId, membershipId },
+                kind: 'change',
+                keys: [['conversations', 'detail', chatId, 'draft', id]],
+              });
+              channel.close();
+            },
+            { workspaceId: workspace.id, userId: session.user.id, membershipId: membership.membershipId, chatId, id },
+          );
+        };
+        for (const status of ['dismissed', 'failed', 'saved']) {
+          const current = drafts.get(cases[0].id);
+          const before = historyReads;
+          drafts.set(current.id, { ...current, status: 'pending', outcome: null });
+          await notifyDraft(current.id);
+          await card(cases[0]).getByRole('button', { name: 'Create project', exact: true }).waitFor();
+          assert.equal(historyReads, before, 'a nonfinal observation does not refresh history');
+          drafts.set(current.id, {
+            ...current,
+            status,
+            outcome:
+              status === 'saved'
+                ? { kind: 'project', projectId: cases[0].projectId, revision: 2 }
+                : { kind: status === 'dismissed' ? 'dismissed' : 'unavailable' },
+          });
+          const refreshed = page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/messages'));
+          await notifyDraft(current.id);
+          await refreshed;
+          await card(cases[0])
+            .getByText(
+              status === 'saved'
+                ? 'Project created.'
+                : status === 'dismissed'
+                  ? 'Draft dismissed. Nothing was created.'
+                  : 'The project could not be created. Ask chat to retry.',
+              { exact: true },
+            )
+            .waitFor();
+          assert.equal(historyReads, before + 1, 'a final transition refreshes the conversation once');
+        }
         assert.deepEqual(errors, []);
       } finally {
         await context.close();

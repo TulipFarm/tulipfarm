@@ -11,7 +11,7 @@ import { createAuthoringDrafts } from '../src/drafts.ts';
 import { createChatTools } from '../src/tools.ts';
 import { createProjectMembership } from '../../conversations/src/project-membership.ts';
 
-async function setup(t) {
+async function setup(t, options = {}) {
   const db = await fixture();
   let runtime;
   t.after(async () => {
@@ -25,6 +25,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     replicaCount: 1,
     reservedConnections: 2,
     databaseConnectionBudget: 20,
+    ...options,
     resolveCredential: async id => ({ workspaceId: id, generation: 1, connectionString: db.login(w) }),
   });
   const chats = createConversations(runtime),
@@ -62,6 +63,73 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
   }
   return { db, w, runtime, chatId, drafts, tool, approve, table: name => qualified(w.names.schema, name) };
 }
+
+test('draft reads do not wait for chat activity, while competing decisions commit only once', async t => {
+  const { db, w, chatId, drafts, tool, table } = await setup(t, { lockTimeoutMs: 1000 });
+  const proposed = await tool({ tool: 'projects.draft', name: 'Launch', instructions: 'Keep replies short.' });
+  await db.databaseAdmin.query('BEGIN');
+  try {
+    await db.databaseAdmin.query(`SELECT id FROM ${table('tf_conversations')} WHERE id=$1 FOR UPDATE`, [chatId]);
+    const cards = await Promise.all(
+      Array.from({ length: 4 }, () => drafts.read(w.id, w.userId, chatId, proposed.draftId)),
+    );
+    assert.ok(cards.every(card => card.status === 'pending'));
+  } finally {
+    await db.databaseAdmin.query('ROLLBACK');
+  }
+  const decisions = ['save', 'dismiss'].map(decision => ({
+    commandId: randomUUID(),
+    digest: proposed.digest,
+    decision,
+  }));
+  const results = await Promise.allSettled(
+    decisions.map(decision => drafts.decide(w.id, w.userId, chatId, proposed.draftId, decision)),
+  );
+  assert.equal(results.filter(result => result.status === 'fulfilled').length, 1);
+  const rejected = results.find(result => result.status === 'rejected');
+  assert.equal(rejected.reason.code, 'idempotency-conflict');
+  const stored = await db.platform.query(
+    `SELECT input,outcome FROM ${table('tf_chat_authoring_decisions')} WHERE draft_id=$1`,
+    [proposed.draftId],
+  );
+  assert.equal(stored.rowCount, 1);
+  const { input, outcome } = stored.rows[0];
+  assert.deepEqual(await drafts.decide(w.id, w.userId, chatId, proposed.draftId, input), outcome);
+  const card = await drafts.read(w.id, w.userId, chatId, proposed.draftId);
+  assert.equal(card.status, outcome.kind === 'dismissed' ? 'dismissed' : 'saved');
+  const projects = await db.platform.query(`SELECT id FROM ${table('tf_projects')}`);
+  assert.equal(projects.rowCount, outcome.kind === 'dismissed' ? 0 : 1);
+});
+
+test('closing a source-denied draft still locks the chat before recording an unavailable outcome', async t => {
+  const { db, w, chatId, drafts, tool, table } = await setup(t, { lockTimeoutMs: 1000 });
+  const proposed = await tool({ tool: 'projects.draft', name: 'Launch', instructions: 'Keep replies short.' });
+  await db.platform.query(`UPDATE ${table('tf_chat_authoring_drafts')} SET sources=$2 WHERE id=$1`, [
+    proposed.draftId,
+    JSON.stringify([{ kind: 'private-conversation', conversationId: randomUUID() }]),
+  ]);
+  await db.databaseAdmin.query('BEGIN');
+  try {
+    await db.databaseAdmin.query(`SELECT id FROM ${table('tf_conversations')} WHERE id=$1 FOR UPDATE`, [chatId]);
+    await assert.rejects(drafts.read(w.id, w.userId, chatId, proposed.draftId), { code: '55P03' });
+    const decisions = await db.platform.query(
+      `SELECT outcome FROM ${table('tf_chat_authoring_decisions')} WHERE draft_id=$1`,
+      [proposed.draftId],
+    );
+    assert.equal(decisions.rowCount, 0, 'the read cannot close a draft before obtaining the chat lock');
+  } finally {
+    await db.databaseAdmin.query('ROLLBACK');
+  }
+  await assert.rejects(drafts.read(w.id, w.userId, chatId, proposed.draftId), { message: 'Resource not found' });
+  const decisions = await db.platform.query(
+    `SELECT outcome FROM ${table('tf_chat_authoring_decisions')} WHERE draft_id=$1`,
+    [proposed.draftId],
+  );
+  assert.deepEqual(
+    decisions.rows.map(row => row.outcome),
+    [{ kind: 'unavailable' }],
+  );
+});
 
 test('chat creates, edits, archives and restores a project only after the human approves each card', async t => {
   const { db, w, runtime, chatId, drafts, tool, approve, table } = await setup(t);
