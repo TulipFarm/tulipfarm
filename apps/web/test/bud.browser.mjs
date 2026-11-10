@@ -78,7 +78,10 @@ test(
       assert.equal(await avatar.count(), 1);
       assert.equal(await page.locator('[data-slot="tulip-avatar"]').count(), 2);
       assert.equal(
-        await page.getByRole('button', { name: 'Open Bud', exact: true }).locator('[data-slot="tulip-avatar"]').count(),
+        await page
+          .getByRole('button', { name: /Open quick chat$/ })
+          .locator('[data-slot="tulip-avatar"]')
+          .count(),
         1,
         'the only other Bud is the launcher',
       );

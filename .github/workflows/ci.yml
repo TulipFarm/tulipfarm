@@ -95,6 +95,14 @@ jobs:
         env:
           TASK: ${{ matrix.task }}
         run: pnpm run "$TASK"
+      - name: Install Chromium for shell accessibility checks
+        if: env.RUN == 'true' && matrix.task == 'test:apps'
+        run: pnpm --filter @tulipfarm/web exec playwright install --with-deps chromium
+      - name: Check shell accessible names in Chromium
+        if: env.RUN == 'true' && matrix.task == 'test:apps'
+        run: |
+          pnpm exec turbo run build --filter='@tulipfarm/web^...' --concurrency=2
+          pnpm --filter @tulipfarm/web test:shell-accessibility
 
   # A release starts its code before workspace-rollout applies its common migrations to every workspace. This runs
   # chats and background jobs against a workspace one migration short, so a missing table (42P01) fails the build.

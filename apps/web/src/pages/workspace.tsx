@@ -1,4 +1,14 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+  type ComponentProps,
+  type CSSProperties,
+} from 'react';
 import { CalendarDays } from 'lucide-react';
 import { Link, Outlet, useLocation, useNavigate, useRouter } from '@tanstack/react-router';
 import { Add } from 'reicon-react/icons/Add';
@@ -304,6 +314,18 @@ function StandardNavItem({ page }: { page: Page }) {
   );
 }
 
+function MenuAvatar({ seed, name, image, size = 'md', shape = 'circle' }: ComponentProps<typeof EntityAvatar>) {
+  return (
+    <span
+      aria-hidden="true"
+      className="menu-avatar"
+      style={{ '--menu-avatar-initial': JSON.stringify(name.trim().charAt(0).toUpperCase() || '?') } as CSSProperties}
+    >
+      <EntityAvatar seed={seed} name={name} image={image} size={size} shape={shape} />
+    </span>
+  );
+}
+
 function WorkspaceMenu() {
   const { workspace, workspaces: choices } = workspaceRoute.useRouteContext();
   const { setOpenMobile } = useSidebar();
@@ -312,12 +334,12 @@ function WorkspaceMenu() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        aria-label={`Workspace menu, ${workspace.name}`}
+        aria-label={`${workspace.name}, workspace menu`}
         render={
           <SidebarMenuButton
             tooltip={workspace.name}
             icon={
-              <EntityAvatar seed={workspace.id} name={workspace.name} image={workspace.icon} size="sm" shape="square" />
+              <MenuAvatar seed={workspace.id} name={workspace.name} image={workspace.icon} size="sm" shape="square" />
             }
             badge={<ChevronDown size={12} aria-hidden="true" />}
           />
@@ -380,11 +402,11 @@ function ProfileMenu() {
       }}
     >
       <DropdownMenuTrigger
-        aria-label="Account menu"
+        aria-label={`${name}, account menu`}
         render={
           <SidebarMenuButton
             tooltip="Account"
-            icon={<EntityAvatar seed={user.id} name={name} image={user.image} size="sm" />}
+            icon={<MenuAvatar seed={user.id} name={name} image={user.image} size="sm" />}
           />
         }
       >

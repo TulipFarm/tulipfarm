@@ -366,7 +366,7 @@ test('logging out in the uploading tab stops its queued uploads', { timeout: 240
     prompts.push(dialog.type());
     void dialog.dismiss();
   });
-  await page.getByRole('button', { name: 'Account menu' }).click();
+  await page.getByRole('button', { name: /, account menu$/ }).click();
   await page.getByRole('menuitem', { name: 'Log out' }).click();
   await page.waitForFunction(() => window.queryNotices.some(notice => notice.kind === 'logout'));
   assert.ok(

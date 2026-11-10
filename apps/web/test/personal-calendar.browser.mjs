@@ -649,7 +649,7 @@ test(
           'Calendar filters',
           'More calendar actions',
           'Create',
-          'Open Bud',
+          'Bud. Open quick chat',
         ]) {
           const box = await page.getByRole('button', { name, exact: true }).boundingBox();
           assert.ok(box.width >= 44 && box.height >= 44, `${name} has a 44px touch target at ${width}`);

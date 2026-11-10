@@ -228,7 +228,7 @@ test(
       const popup = page.getByRole('dialog', { name: 'Bud quick chat', exact: true });
       const dock = page.getByRole('complementary', { name: 'Bud assistant' });
       const dragCorner = async (corner, persisted = true) => {
-        const button = dock.getByRole('button', { name: /^(Open|Minimize) Bud$/ });
+        const button = dock.getByRole('button', { name: /^(Bud|Minimize) quick chat\./ });
         const start = await button.boundingBox(),
           viewport = page.viewportSize();
         await page.mouse.move(start.x + start.width / 2, start.y + start.height / 2);
@@ -267,7 +267,7 @@ test(
         );
       };
       await page.goto(`${origin}/acme`);
-      await page.getByRole('button', { name: 'Open Bud', exact: true }).waitFor();
+      await page.getByRole('button', { name: /Open quick chat$/ }).waitFor();
       while (!commands.some(command => command.kind === 'bootstrap')) await delay(50);
       await delay(1000);
       assert.equal(new URL(page.url()).pathname, '/acme', 'a new member is not sent to a Bud chat');
@@ -278,7 +278,7 @@ test(
         0,
         'no setup checks before the member opens Bud',
       );
-      await page.getByRole('button', { name: 'Open Bud', exact: true }).click();
+      await page.getByRole('button', { name: /Open quick chat$/ }).click();
       await popup.waitFor();
       await popup.getByText(budGreeting, { exact: true }).waitFor();
       assert.equal(history.length, 1);
@@ -292,7 +292,7 @@ test(
       assert.equal(new URL(page.url()).pathname, '/acme', 'Continue in the popup keeps the current page');
       state.onboarding = 'skipped';
       await emit('changed');
-      await page.getByRole('button', { name: 'Open Bud', exact: true }).click();
+      await page.getByRole('button', { name: /Open quick chat$/ }).click();
       await popup.waitFor();
       assert.equal(await popup.getByRole('combobox').count(), 0, 'no position selector');
       assert.equal(
@@ -321,23 +321,23 @@ test(
         .first();
       await backgroundComposer.click();
       await popup.waitFor({ state: 'hidden' });
-      await page.getByRole('button', { name: 'Open Bud', exact: true }).click();
+      await page.getByRole('button', { name: /Open quick chat$/ }).click();
       await popup.waitFor();
       assert.equal(
         await composer.innerText(),
         'Keep this draft while I look around',
         'outside click preserves the draft',
       );
-      await dock.getByRole('button', { name: 'Minimize Bud', exact: true }).click();
+      await dock.getByRole('button', { name: 'Minimize quick chat. Separate private chat', exact: true }).click();
       await popup.waitFor({ state: 'hidden' });
-      await dock.getByRole('button', { name: 'Open Bud', exact: true }).click();
+      await dock.getByRole('button', { name: /Open quick chat$/ }).click();
       assert.notEqual(await popup.getAttribute('aria-modal'), 'true', 'the page stays usable behind Bud');
       await composer.click();
       await emit('invalidated');
       assert.equal(await composer.innerText(), 'Keep this draft while I look around');
       await page.keyboard.press('Escape');
       await page.getByRole('dialog').waitFor({ state: 'hidden' });
-      await page.getByRole('button', { name: 'Open Bud', exact: true }).click();
+      await page.getByRole('button', { name: /Open quick chat$/ }).click();
       assert.equal(await composer.innerText(), 'Keep this draft while I look around');
       await page.getByRole('button', { name: 'Open full chat', exact: true }).click();
       await page.waitForURL(`**/acme/chat/${chatId}`);
@@ -352,7 +352,7 @@ test(
       await page.getByRole('button', { name: 'Add files and more', exact: true }).waitFor();
       await composer.fill('');
       await page.goBack();
-      await page.getByRole('button', { name: 'Open Bud', exact: true }).click();
+      await page.getByRole('button', { name: /Open quick chat$/ }).click();
       state.preferences = [
         {
           id: randomUUID(),
@@ -535,7 +535,7 @@ test(
       await page.keyboard.press('Escape');
       await popup.waitFor({ state: 'hidden' });
       await page.setViewportSize({ width: 1440, height: 1000 });
-      const launcher = page.getByRole('button', { name: 'Open Bud', exact: true });
+      const launcher = page.getByRole('button', { name: /Open quick chat$/ });
       await launcher.hover();
       await page.mouse.down();
       await page.mouse.move(40, 40, { steps: 8 });

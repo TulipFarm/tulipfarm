@@ -169,7 +169,7 @@ for (const width of [375, 390, 414, 768, 1440])
         await page.keyboard.press('Tab');
       assert.equal(await next.evaluate(node => node === document.activeElement), true, 'Tab reaches Continue');
       await assertUncovered(next);
-      await page.getByRole('button', { name: 'Open Bud', exact: true }).click();
+      await page.getByRole('button', { name: /Open quick chat$/ }).click();
       const popup = page.getByRole('dialog', { name: 'Bud quick chat', exact: true });
       await popup.waitFor();
       await popup.getByRole('button', { name: 'Minimize chat', exact: true }).focus();
@@ -178,15 +178,13 @@ for (const width of [375, 390, 414, 768, 1440])
         await page.waitForFunction(
           () =>
             document.querySelector('[role="dialog"][data-slot="popover-content"]')?.contains(document.activeElement) ||
-            document.activeElement?.getAttribute('aria-label') === 'Minimize Bud',
+            document.activeElement?.getAttribute('aria-label') === 'Minimize quick chat. Separate private chat',
         );
       }
       await page.keyboard.press('Escape');
       await popup.waitFor({ state: 'hidden' });
       assert.equal(
-        await page
-          .getByRole('button', { name: 'Open Bud', exact: true })
-          .evaluate(node => node === document.activeElement),
+        await page.getByRole('button', { name: /Open quick chat$/ }).evaluate(node => node === document.activeElement),
         true,
         'closing quick chat restores focus',
       );

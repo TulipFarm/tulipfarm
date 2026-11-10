@@ -142,7 +142,7 @@ try {
       JSON.stringify(focus),
     );
     if (!mobile) {
-      const identity = page.getByRole('button', { name: 'Workspace menu, Acme' });
+      const identity = page.getByRole('button', { name: 'Acme, workspace menu' });
       const a = await identity.boundingBox();
       const b = await toggle.boundingBox();
       assert.ok(Math.abs(a.y + a.height / 2 - (b.y + b.height / 2)) <= 1, 'Header controls align');
