@@ -11,6 +11,18 @@ const identitySchema = z.object({
   title: definitionSchema.shape.label,
 });
 
+export async function nonTableAssetIds(tx: AuthorizationTransaction) {
+  const destinations = (
+    await tx.client.query("SELECT has_column_privilege($1,'id','SELECT') AS readable", [
+      table(tx, 'tf_slack_destinations'),
+    ])
+  ).rows[0]?.readable;
+  // Older activation roles can see existing non-table grants, but not ungranted Slack destinations.
+  return `SELECT id FROM ${table(tx, 'tf_teams')}
+    UNION ALL SELECT asset_id FROM ${table(tx, 'tf_grants')} WHERE permission NOT LIKE 'table.%'
+    ${destinations ? `UNION ALL SELECT id FROM ${table(tx, 'tf_slack_destinations')}` : ''}`;
+}
+
 export async function tableIdentityStorageReady(tx: AuthorizationTransaction) {
   return Boolean(
     (await tx.client.query('SELECT to_regclass($1) AS relation', [table(tx, 'tf_table_names')])).rows[0]?.relation,

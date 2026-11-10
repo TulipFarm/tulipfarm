@@ -23,6 +23,7 @@ import {
 } from './definition.ts';
 import type { ProposalData } from './proposal-data.ts';
 import { recordTableRecommendationChange } from './recommendations.ts';
+import { nonTableAssetIds } from './identities.ts';
 import {
   addedMemberReferences,
   memberProfileSchema,
@@ -319,12 +320,19 @@ export async function createGeneration(
     return result;
   }
   const physical = `g_${id.replaceAll('-', '')}`;
+  const reserved = `EXISTS (SELECT 1 FROM (${await nonTableAssetIds(tx)}) reserved WHERE id=$1)`;
   await tx.client.query(
-    `INSERT INTO ${table(tx, 'tf_table_catalog')} (id,owning_team_id,physical_table,display_name,target_revision) VALUES ($1,$2,$3,$4,$5) ON CONFLICT(id) DO NOTHING`,
+    `INSERT INTO ${table(tx, 'tf_table_catalog')} (id,owning_team_id,physical_table,display_name,target_revision)
+     SELECT $1,$2,$3,$4,$5 WHERE NOT ${reserved}
+     ON CONFLICT(id) DO NOTHING`,
     [definition.id, definition.owningTeamId, physical, definition.label, revision],
   );
   const owner = (
-    await tx.client.query(`SELECT owning_team_id FROM ${table(tx, 'tf_table_catalog')} WHERE id=$1`, [definition.id])
+    await tx.client.query(
+      `SELECT owning_team_id FROM ${table(tx, 'tf_table_catalog')} WHERE id=$1
+       AND NOT ${reserved}`,
+      [definition.id],
+    )
   ).rows[0]?.owning_team_id;
   if (owner !== definition.owningTeamId) throw new GenerationError('invalid-generation');
   await tx.client.query(

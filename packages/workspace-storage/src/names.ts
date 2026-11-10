@@ -56,6 +56,7 @@ export const commonTables = {
   authoringCommands: 'tf_authoring_commands',
   soulRevisions: 'tf_soul_revisions',
   tableCatalog: 'tf_table_catalog',
+  tableCreationAccessReceipts: 'tf_table_creation_access_receipts',
   systemTables: 'tf_system_tables',
   workspaceMemberAccounts: 'tf_workspace_member_accounts',
   workspaceMemberImages: 'tf_workspace_member_images',

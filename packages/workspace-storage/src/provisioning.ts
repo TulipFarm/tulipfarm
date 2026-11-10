@@ -347,6 +347,11 @@ export async function verifyWorkspaceIsolation(client: SqlClient, workspaceId: s
           AND p.prorettype = 'pg_catalog.jsonb'::regtype AND NOT p.proretset
           AND p.proconfig = ARRAY['search_path=pg_catalog']
           AND pg_get_function_identity_arguments(p.oid) = 'member_id uuid, actor_user text, source jsonb')
+        AND NOT ($1 = $4 AND n.nspname = $2 AND p.proowner = n.nspowner
+          AND p.proname = 'tf_table_creation_access' AND p.prorettype = 'pg_catalog.void'::regtype
+          AND NOT p.proretset AND p.proconfig = ARRAY['search_path=pg_catalog']
+          AND pg_get_function_identity_arguments(p.oid) = 'execution_id uuid'
+          AND NOT has_function_privilege($1,p.oid,'EXECUTE WITH GRANT OPTION'))
         AND NOT ($1 = $3 AND n.nspname = 'app' AND p.proname = 'invitation_delivery'
           AND pg_get_function_identity_arguments(p.oid) = 'workspace uuid, invitation uuid, action text, envelope jsonb, expiry timestamp with time zone'
           AND p.proowner = (SELECT nspowner FROM pg_namespace WHERE nspname = 'app'))

@@ -454,7 +454,7 @@ try {
     } else if (path.endsWith('/tables')) {
       assert.equal(request.method(), 'GET');
       await delay(listDelay);
-      if (listStatus !== 200) return route.fulfill({ status: listStatus, json: { error: 'proposal-unavailable' } });
+      if (listStatus !== 200) return route.fulfill({ status: listStatus, json: { error: 'table-unavailable' } });
       const search = url.searchParams.get('search')?.toLowerCase();
       if (search) listSearches.push(search);
       const archived = url.searchParams.get('archived') === 'true',
@@ -531,7 +531,7 @@ try {
         plans: [{ tableId, receipt: null, importProgress: null }],
       };
     } else if (path.endsWith(`/tables/${tableId}`)) {
-      if (detailStatus !== 200) return route.fulfill({ status: detailStatus, json: { error: 'proposal-unavailable' } });
+      if (detailStatus !== 200) return route.fulfill({ status: detailStatus, json: { error: 'table-unavailable' } });
       json = {
         id: tableId,
         saved: savedDefinition,
@@ -556,7 +556,7 @@ try {
         });
       json = { chatId };
     } else if (path.endsWith(`/tables/${tableId}/schema-history`)) {
-      if (schemaStatus !== 200) return route.fulfill({ status: schemaStatus, json: { error: 'proposal-unavailable' } });
+      if (schemaStatus !== 200) return route.fulfill({ status: schemaStatus, json: { error: 'table-unavailable' } });
       const after = url.searchParams.get('after');
       schemaCursors.push(after);
       json = {
@@ -564,8 +564,7 @@ try {
         nextCursor: schemaSecondPage && !after ? executionId : null,
       };
     } else if (path.endsWith(`/tables/${tableId}/deleted-rows`)) {
-      if (deletedStatus !== 200)
-        return route.fulfill({ status: deletedStatus, json: { error: 'proposal-unavailable' } });
+      if (deletedStatus !== 200) return route.fulfill({ status: deletedStatus, json: { error: 'table-unavailable' } });
       const after = url.searchParams.get('after');
       deletedCursors.push(after);
       json = {
@@ -586,18 +585,16 @@ try {
     } else if (path.endsWith(`/tables/${customerId}/rows/${customerRecordId}/history`)) json = [];
     else if (path.endsWith(`/tables/${tableId}/rows/${recordId}/history`)) {
       assert.equal(request.method(), 'GET');
-      if (historyStatus !== 200)
-        return route.fulfill({ status: historyStatus, json: { error: 'proposal-unavailable' } });
+      if (historyStatus !== 200) return route.fulfill({ status: historyStatus, json: { error: 'table-unavailable' } });
       json = emptyHistory ? [] : history;
     } else if (path.includes(`/tables/${tableId}/requests/`)) {
       assert.equal(request.method(), 'GET');
-      if (receiptStatus !== 200)
-        return route.fulfill({ status: receiptStatus, json: { error: 'proposal-unavailable' } });
+      if (receiptStatus !== 200) return route.fulfill({ status: receiptStatus, json: { error: 'table-unavailable' } });
       const result = receipts.get(path.split('/').at(-1));
       json = result && !unknownReceipt ? { status: 'applied', result } : { status: 'unknown' };
     } else if (path.endsWith(`/tables/${customerId}/rows`)) {
       customerReads.push(url.searchParams);
-      if (linkedStatus !== 200) return route.fulfill({ status: linkedStatus, json: { error: 'proposal-unavailable' } });
+      if (linkedStatus !== 200) return route.fulfill({ status: linkedStatus, json: { error: 'table-unavailable' } });
       const ids = url.searchParams.get('ids').split(',');
       json = customers.filter(row => ids.includes(row.id));
     } else if (path.endsWith(`/tables/${customerId}/rows/page`)) {
@@ -617,11 +614,11 @@ try {
         if (recordConflict) return route.fulfill({ status: 409, json: { error: 'stale-record' } });
         if (body.kind === 'restore' && restoreError)
           return route.fulfill({
-            status: restoreError === 'proposal-unavailable' ? 404 : 409,
+            status: restoreError === 'table-unavailable' ? 404 : 409,
             json: { error: restoreError },
           });
         if (body.kind === 'update' && body.values[fileFieldId]?.fileIds.includes(forbiddenFileId))
-          return route.fulfill({ status: 404, json: { error: 'proposal-unavailable' } });
+          return route.fulfill({ status: 404, json: { error: 'table-unavailable' } });
         assert.equal(body.expectedToken, record.token);
         await delay(150);
         if (body.kind === 'restore') {
@@ -643,7 +640,7 @@ try {
     } else if (request.method() === 'POST' && path.endsWith(`/tables/${tableId}/query`)) {
       const body = request.postDataJSON();
       assert.equal(body.revision, 'a'.repeat(40));
-      if (recordStatus !== 200) return route.fulfill({ status: recordStatus, json: { error: 'proposal-unavailable' } });
+      if (recordStatus !== 200) return route.fulfill({ status: recordStatus, json: { error: 'table-unavailable' } });
       const rows = emptyRecords || deleted ? [] : [record];
       json = {
         mode: 'rows',
@@ -665,7 +662,7 @@ try {
       };
     } else if (path.endsWith(`/tables/${tableId}/rows/page`)) {
       assert.equal(url.searchParams.get('revision'), 'a'.repeat(40));
-      if (recordStatus !== 200) return route.fulfill({ status: recordStatus, json: { error: 'proposal-unavailable' } });
+      if (recordStatus !== 200) return route.fulfill({ status: recordStatus, json: { error: 'table-unavailable' } });
       const rows = emptyRecords || deleted ? [] : [record];
       json = { records: rows, total: String(rows.length), nextCursor: null };
     } else if (path.endsWith(`/conversations/${chatId}/messages`))
@@ -1513,7 +1510,7 @@ try {
   for (const [code, message] of [
     ['recovery-expired', /These historical values are no longer recoverable/],
     ['duplicate-key', /Another row already has these values/],
-    ['proposal-unavailable', /This table or a referenced file is missing/],
+    ['table-unavailable', /This table or a referenced file is missing/],
   ]) {
     restoreError = code;
     await historyPanel.getByRole('button', { name: 'Restore reviewed values', exact: true }).click();
