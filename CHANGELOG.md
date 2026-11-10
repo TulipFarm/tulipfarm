@@ -66,6 +66,15 @@ One version identifies all apps and images of a release.
 
 ### Fixed
 
+- Busy workspaces no longer fail writes and background jobs with lock
+  timeouts. Chat reply inventory reads, Slack dispatch polls and
+  `/workspace-mcp` actions share the workspace authorization lock instead of
+  taking it exclusively, writes queue fairly behind reads and retry a timed-out
+  lock wait up to three times, and a scheduled job that loses a lock wait is
+  recorded as `skipped` instead of an error. The API answers a request that
+  Postgres rolled back for contention with 503 `temporarily-unavailable` and
+  `Retry-After: 1`, and the web app sends it again automatically. A connection
+  lost mid-transaction may have committed, so it stays a 500 and is not resent.
 - A stopped agent task now records why it stopped. The task and its summary
   carry `failureReason` (`authority-revoked` when the agent or owner lost access
   to something the task needs, `internal` otherwise), the web app explains it,

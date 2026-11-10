@@ -141,3 +141,5 @@ jobs:
         run: psql "$TEST_ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -f infra/postgres/init.sql
       - name: Run chats and jobs against a workspace behind the release
         run: pnpm run test:behind-workspace
+      - name: Check that authorization lock readers share and writers queue fairly
+        run: pnpm --filter @tulipfarm/access exec node --test --test-concurrency=1 test/authorization-lock.integration.mjs

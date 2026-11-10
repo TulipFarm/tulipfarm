@@ -9,11 +9,13 @@ async function lockFixture() {
   const workspace = await setup.create();
   const holder = await connect(setup.login(workspace));
   const waiter = await connect(setup.login(workspace));
+  const reader = await connect(setup.login(workspace));
   const schema = workspace.names.schema;
   return {
     schema,
     holder,
     waiter,
+    reader,
     // Holds a shared authorization lock until the returned release is called.
     async share() {
       let release;
@@ -31,7 +33,7 @@ async function lockFixture() {
       };
     },
     async close() {
-      await Promise.all([holder.end(), waiter.end()]);
+      await Promise.all([holder.end(), waiter.end(), reader.end()]);
       await setup.close();
     },
   };
@@ -48,6 +50,29 @@ test('shared authorization locks do not wait for each other', async () => {
     });
     assert.ok(Date.now() - started < 200);
     await release();
+  } finally {
+    await locks.close();
+  }
+});
+
+test('a waiting write is not overtaken by reads that arrive after it', async () => {
+  const locks = await lockFixture();
+  try {
+    const release = await locks.share();
+    const write = inTransaction(locks.waiter, async client => {
+      await client.query(`SET LOCAL lock_timeout = '5s'`);
+      await lockAuthorization({ client, schema: locks.schema }, 'write', { retry: false });
+    });
+    await new Promise(resolve => setTimeout(resolve, 100));
+    await assert.rejects(
+      inTransaction(locks.reader, async client => {
+        await client.query(`SET LOCAL lock_timeout = '200ms'`);
+        await lockAuthorization({ client, schema: locks.schema });
+      }),
+      { code: '55P03' },
+    );
+    await release();
+    await write;
   } finally {
     await locks.close();
   }

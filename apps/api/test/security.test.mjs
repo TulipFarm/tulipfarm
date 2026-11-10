@@ -73,8 +73,11 @@ test('lock waits and deadlocks ask the client to retry; other storage faults sta
     assert.equal(response.headers['retry-after'], '1');
     assert.deepEqual(response.json(), { error: 'temporarily-unavailable' });
   }
-  failure = Object.assign(new Error('relation does not exist'), { code: '42P01' });
-  assert.equal((await app.inject(`/workspaces/${id}/governance/me`)).statusCode, 500);
+  // A connection lost mid-transaction may have committed, so it is not offered for a retry.
+  for (const code of ['42P01', '08006']) {
+    failure = Object.assign(new Error('storage failed'), { code });
+    assert.equal((await app.inject(`/workspaces/${id}/governance/me`)).statusCode, 500, code);
+  }
 });
 
 function fixture() {
