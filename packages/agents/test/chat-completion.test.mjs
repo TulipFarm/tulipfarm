@@ -1131,6 +1131,7 @@ test('every pending review-card family has an explicit receipt and excludes comp
   ];
   const pending = [
     ...authoring.map(tool => [tool, { draftId: 'draft', digest: 'digest', status: 'review-required' }]),
+    ['memory.forget', { status: 'forgotten', draftId: 'undo', revision: 2 }],
     ['tables.propose', { id: 'proposal', status: 'pending' }],
     ['github.personal.propose', { batchId: 'batch', decision: null, statuses: ['unattempted'] }],
     ['google.propose', { provider: 'google-workspace', data: { id: 'proposal', decision: null, receipt: null } }],
@@ -1174,6 +1175,11 @@ test('every pending review-card family has an explicit receipt and excludes comp
     ['skills.import.status', { importId: 'import', status: 'reviewing' }],
     ['plans.create', { planId: 'plan', version: 1, added: [] }],
     ['memory.forget', { draftId: 'undo', revision: 'revision' }],
+    ['memory.forget', { status: 'forgotten', draftId: '' }],
+    ['memory.forget', { status: 'forgotten', draftId: 7 }],
+    ['memory.forget', { status: 'forgotten' }],
+    ['memory.forget', { status: 'review-required', draftId: 'undo' }],
+    ['memory.forget', { status: 'forgotten', draftId: 'undo', error: 'memory-unavailable' }],
     ['present.choice', { requestId: 'question', status: 'pending' }],
     ['files.create', { id: 'file', status: 'completed' }],
     ['workflows.run', { draftId: 'data', status: 'review-required' }],
