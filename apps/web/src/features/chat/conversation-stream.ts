@@ -40,7 +40,6 @@ export type ConversationStreamEnvironment = {
   commit?: (publish: () => void) => void;
 };
 
-const closed = 2;
 export const streamTiming = { coalesce: 100, reconnect: 2000, unavailableRetry: 60_000, failureLimit: 3 };
 
 export const browserStreamEnvironment: ConversationStreamEnvironment = {
@@ -53,7 +52,7 @@ export const browserStreamEnvironment: ConversationStreamEnvironment = {
 /**
  * Owns one chat's event stream. `changed` asks the owner to read history or plans again, coalesced per burst.
  * Three consecutive errors with no successful open between them mark the stream unavailable until
- * `retry`, `start`, or a one-minute timer reconnects. An error right after an open is a server close, not a failure.
+ * `retry`, `start`, or a one-minute timer reconnects. Losing an open stream also rereads durable history.
  */
 export function createConversationStream(
   url: string,
@@ -112,19 +111,15 @@ export function createConversationStream(
       const failed = !opened;
       opened = false;
       if (failed) failures++;
+      close();
+      publish({ status: 'connecting' });
+      if (!failed) invalidate();
       if (failures >= streamTiming.failureLimit) {
-        close();
         publish({ status: 'unavailable' });
         reconnect = environment.setTimeout(restart, streamTiming.unavailableRetry);
         return;
       }
-      if (failed && snapshot.status !== 'connecting') publish({ status: 'connecting' });
-      // EventSource reconnects by itself unless the response was not a stream (for example 401, 404, or 503).
-      if (current.readyState === closed) {
-        current.close();
-        source = undefined;
-        reconnect = environment.setTimeout(connect, streamTiming.reconnect);
-      }
+      reconnect = environment.setTimeout(connect, streamTiming.reconnect * 2 ** Math.max(0, failures - 1));
     });
     current.addEventListener(conversationStreamEvents.changed, event => {
       if (source !== current) return;
@@ -229,11 +224,15 @@ export function createConversationStream(
       const next = applyStreamProgress(previous, update.data);
       if (next === previous) return;
       publish({ progress: new Map(snapshot.progress).set(update.data.turnId, next) });
+      if (next.status === 'done') invalidate({ history: true, plans: false });
     });
   };
   function restart() {
     failures = 0;
     connect();
+  }
+  function start() {
+    if (snapshot.status === 'unavailable' || (!source && reconnect === undefined)) restart();
   }
 
   return {
@@ -245,8 +244,11 @@ export function createConversationStream(
       };
     },
     /** Connects unless a stream is already open or reconnecting. */
-    start() {
-      if (snapshot.status === 'unavailable' || (!source && reconnect === undefined)) restart();
+    start,
+    /** Returning to the page reads durable state without waiting for timers or a stream open. */
+    resume() {
+      changed({ history: true, plans: true });
+      start();
     },
     /** Reconnects now when the stream gave up. */
     retry() {

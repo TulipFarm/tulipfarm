@@ -398,16 +398,31 @@ test('a reported status names what the reply does and numbers steps only after w
   assert.equal(running.status, 'tool');
 });
 
-test('done ends the spinner and label once the answer is on screen, even while the turn still saves', () => {
+test('only saved completion ends the spinner, while the visible answer survives a done event', () => {
   const answered = stream({
     previews: new Map([['turn', preview(2, 1, 'Hello!')]]),
     progress: new Map([['turn', status({ status: 'done', round: 2 }, 1)]]),
   });
   const done = reply({ stream: answered });
   assert.equal(done.answerText, 'Hello!');
-  assert.equal(done.thinking, false);
+  assert.equal(done.thinking, true);
   assert.equal(done.status, 'done');
   assert.equal(done.turn?.status, 'processing');
+  const saved = reply({
+    messages: [
+      message({ turn: { id: 'turn', generation: 2, status: 'completed' } }),
+      message({
+        id: 'answer',
+        author: 'assistant',
+        sequence: 2,
+        turn: null,
+        parts: [{ kind: 'text', text: 'Hello!' }],
+      }),
+    ],
+    stream: answered,
+  });
+  assert.equal(saved.thinking, false);
+  assert.equal(saved.answerText, '', 'the saved answer replaces live text');
   const finishing = reply({
     stream: stream({ ...answered, progress: new Map([['turn', status({ status: 'finishing', round: 2 }, 1)]]) }),
   });

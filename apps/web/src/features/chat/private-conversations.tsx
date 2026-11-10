@@ -434,7 +434,7 @@ function ConversationDetail({
   const stream = useConversationStream(api, chatId, !draft);
   const modelFamilies = workspaceModels.state.kind === 'ready' ? workspaceModels.state.data.families : [];
   const imagesReader = useFlag('images');
-  const read = useConversationHistory(api, chatId, pages, stream.status === 'open');
+  const read = useConversationHistory(api, chatId, pages, stream);
   const savedData = read.state.kind === 'ready' ? read.state.data : null;
   const models = useChatModelFor(workspaceModels, draft ? null : (savedData?.chat.model ?? null), chatId);
   const packages = useChatPackages(
@@ -889,6 +889,16 @@ function ConversationDetail({
     command: write.state,
     stream,
   });
+  const stopReply = turn
+    ? () =>
+        submit({
+          kind: 'cancel',
+          chatId,
+          commandId: crypto.randomUUID(),
+          turnId: turn.id,
+          expectedGeneration: turn.generation,
+        })
+    : undefined;
   const currentTool = activityTools.find(tool => (tool.activityStatus ?? tool.status) === 'running');
   const activityLabel =
     currentTool && !status
@@ -1213,7 +1223,7 @@ function ConversationDetail({
                                 key="activity"
                                 variant="transcript"
                                 items={toolActivityItems(message.tools, { admin })}
-                                active={thinking && !!turn && message.turn?.id === turn.id}
+                                active={thinking && !read.uncertain && !!turn && message.turn?.id === turn.id}
                                 activityLabel={message.turn?.id === turn?.id ? activityLabel : undefined}
                                 onToggle={() => {
                                   followLatest.current = 'inspecting';
@@ -1323,7 +1333,7 @@ function ConversationDetail({
                               key="activity"
                               variant="transcript"
                               items={toolActivityItems(incoming.tools, { admin })}
-                              active={thinking}
+                              active={thinking && !read.uncertain}
                               activityLabel={activityLabel}
                               onToggle={() => {
                                 followLatest.current = 'inspecting';
@@ -1350,13 +1360,13 @@ function ConversationDetail({
                           <ToolActivity
                             variant="transcript"
                             items={[]}
-                            active={thinking}
+                            active={thinking && !read.uncertain}
                             activityLabel={activityLabel}
                           />
                         </li>
                       )}
                       {answerText ? (
-                        <li aria-busy="true">
+                        <li aria-busy={!read.uncertain}>
                           <Message align="start">
                             <MessageContent>
                               <span className="sr-only">TulipFarm said</span>
@@ -1364,7 +1374,7 @@ function ConversationDetail({
                                 workspaceId={workspace.id}
                                 chatId={chatId}
                                 text={answerText}
-                                streaming
+                                streaming={!read.uncertain}
                                 rowViews={
                                   history.messages.at(-1)
                                     ? rowViewsForMessage(history.messages, history.messages.at(-1)!)
@@ -1375,7 +1385,8 @@ function ConversationDetail({
                           </Message>
                         </li>
                       ) : (
-                        thinking && (
+                        thinking &&
+                        !read.uncertain && (
                           <li aria-busy="true" className="space-y-2">
                             {narration && <StepNarration text={narration} />}
                             {slowTurn && (
@@ -1403,6 +1414,30 @@ function ConversationDetail({
                             )}
                           </li>
                         )
+                      )}
+                      {read.uncertain && (
+                        <li>
+                          <Alert>
+                            <AlertDescription>We couldn't confirm whether this reply finished.</AlertDescription>
+                            <div className="mt-2 flex flex-wrap gap-2">
+                              <Button
+                                variant="outline"
+                                disabled={read.state.kind === 'ready' && read.state.refreshing}
+                                onClick={() => {
+                                  stream.retry();
+                                  read.retryStatus();
+                                }}
+                              >
+                                Retry
+                              </Button>
+                              {stopReply && (text || staged) && (
+                                <Button variant="outline" disabled={locked} onClick={stopReply}>
+                                  Stop reply
+                                </Button>
+                              )}
+                            </div>
+                          </Alert>
+                        </li>
                       )}
                       {stalledTurn && (
                         <li>
@@ -1548,18 +1583,7 @@ function ConversationDetail({
                 }
                 mode={!sharedChat && !compact ? { value: mode, onChange: setMode } : undefined}
                 scope={draft && empty ? scope : projectSharingScope}
-                onStop={
-                  turn && !text && !staged
-                    ? () =>
-                        submit({
-                          kind: 'cancel',
-                          chatId,
-                          commandId: crypto.randomUUID(),
-                          turnId: turn.id,
-                          expectedGeneration: turn.generation,
-                        })
-                    : undefined
-                }
+                onStop={!text && !staged ? stopReply : undefined}
                 disabled={write.locked || projectArchived}
                 sending={write.state.kind === 'sending'}
                 validation={validation}
