@@ -68,6 +68,7 @@ export function agentBuilderFixture() {
       path = url.pathname;
     requests.push({ method, path, body });
     if (path.endsWith('/agents') && method === 'GET') return answer({ agents: [], count: 0, nextCursor: null });
+    if (path.endsWith('/last-used')) return answer({});
     if (path.endsWith('/agents/authoring-context'))
       return answer({
         currentSoulRevision: soul,

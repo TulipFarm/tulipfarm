@@ -710,8 +710,7 @@ function WorkspaceShellContent() {
   }, [user.id, workspace.id, workspace.slug]);
   return (
     <TooltipProvider>
-      {/* The analytics consent banner reserves --consent-inset at the bottom of the viewport. */}
-      <div className="grid h-svh grid-rows-1 overflow-hidden pb-(--consent-inset,0px)">
+      <div className="workspace-viewport grid h-svh grid-rows-1 overflow-hidden">
         <SidebarProvider
           open={onCalendar ? calendarNavigationOpen : navigationOpen}
           onOpenChange={onCalendar ? setCalendarNavigationOpen : setNavigationOpen}
@@ -762,6 +761,7 @@ function WorkspaceShellContent() {
                     {/* Pages scroll here; full-height pages such as chat fill it and scroll their own panes. */}
                     <div
                       data-scroll-restoration-id={workspacePageScroller}
+                      data-viewport-content=""
                       className="flex min-h-0 flex-1 flex-col overflow-y-auto"
                     >
                       <Outlet />

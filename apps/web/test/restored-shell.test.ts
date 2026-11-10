@@ -15,8 +15,9 @@ test('settled chats explain that replying still works and what the recap does', 
 test('analytics consent reserves space instead of covering the composer', () => {
   const consent = source('components/analytics-consent.tsx');
   assert.match(consent, /--consent-inset/);
-  assert.match(consent, /removeProperty\(insetProperty\)/);
-  assert.match(source('pages/workspace.tsx'), /h-svh[^"]*pb-\(--consent-inset,0px\)/);
+  assert.match(consent, /useViewportInset\(panel, insetProperty/);
+  assert.match(source('lib/viewport-inset.ts'), /removeProperty\(property\)/);
+  assert.match(source('index.css'), /var\(--consent-inset, 0px\)/);
 });
 
 test('selected navigation passes its active state to the Sprout sidebar', () => {

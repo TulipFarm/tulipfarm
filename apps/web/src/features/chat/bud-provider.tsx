@@ -8,6 +8,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type PointerEvent,
   type ReactNode,
 } from 'react';
@@ -20,10 +21,12 @@ import { jsonResponse, readJson, requestSignal, responseError } from '@/lib/http
 import { featureKey, freshness, useFeatureRead } from '@/lib/query';
 import { useFeatureContext } from '@/lib/query/provider';
 import { onWindowReturn } from '@/lib/window-return';
+import { useViewportInset } from '@/lib/viewport-inset';
 import { workspaceRoute } from '@/router';
 import { Button } from '@tulipfarm/sprout/button';
-import { Popover, PopoverContent, PopoverTitle, PopoverDescription } from '@tulipfarm/sprout/popover';
+import { Popover, PopoverContent, PopoverTitle, PopoverDescription, PopoverTrigger } from '@tulipfarm/sprout/popover';
 import { BudLauncher } from '@/components/bud-launcher';
+import { PopoverClose } from '@/components/ui/popover-close';
 import { TulipAvatar } from '@/components/tulip-avatar';
 import { bud } from '@tulipfarm/conversations/avatar';
 import { BudContext, type BudCommand } from './bud-context';
@@ -35,6 +38,12 @@ import { useConversationChanges } from './queries';
 
 const BudChat = lazy(() => import('./private-conversations').then(module => ({ default: module.BudConversation })));
 const key = ['bud'] as const;
+const narrowScreen = '(max-width: 1279px)';
+const subscribeWidth = (changed: () => void) => {
+  const media = window.matchMedia(narrowScreen);
+  media.addEventListener('change', changed);
+  return () => media.removeEventListener('change', changed);
+};
 class BudRequestError extends Error {
   constructor(
     readonly status: number,
@@ -119,6 +128,15 @@ export function BudProvider({ children, headerActions }: { children: ReactNode; 
     return element;
   });
   const full = !!data?.conversationId && pathname === `/${workspace.slug}/chat/${data.conversationId}`;
+  const narrow = useSyncExternalStore(
+    subscribeWidth,
+    () => window.matchMedia(narrowScreen).matches,
+    () => false,
+  );
+  useViewportInset(dock, position.corner.startsWith('top') ? '--floating-top-inset' : '--floating-bottom-inset', {
+    enabled: !docked && !full,
+    gap: 32,
+  });
   const returnFromSetup = useCallback(() => {
     if (full) router.history.replace(`/${workspace.slug}`);
     else setOpen(false);
@@ -324,10 +342,9 @@ export function BudProvider({ children, headerActions }: { children: ReactNode; 
             </div>
           )
         : suggestion}
-      <BudLauncher
+      <PopoverTrigger
         ref={launcher}
-        docked={docked}
-        variant={docked ? 'ghost' : 'outline'}
+        render={<BudLauncher docked={docked} variant={docked ? 'ghost' : 'outline'} />}
         aria-label={open ? 'Minimize Bud' : 'Open Bud'}
         aria-haspopup="dialog"
         aria-expanded={open}
@@ -349,6 +366,7 @@ export function BudProvider({ children, headerActions }: { children: ReactNode; 
         onLostPointerCapture={event => finishDrag(event, true)}
         onClick={event => {
           if (suppressClick.current && event.detail !== 0) {
+            event.preventDefault();
             suppressClick.current = false;
             return;
           }
@@ -374,19 +392,20 @@ export function BudProvider({ children, headerActions }: { children: ReactNode; 
             <span className="text-xs font-normal text-muted-foreground">Separate private chat</span>
           </span>
         )}
-      </BudLauncher>
+      </PopoverTrigger>
       {!docked && failureNotice}
     </aside>
   );
   return (
     <BudContext value={context}>
-      {children}
-      <div hidden ref={setParkingHost} />
-      {docked ? headerActions && createPortal(launcherDock, headerActions) : launcherDock}
       <Popover
         open={open && !full}
-        modal={false}
+        modal={narrow}
         onOpenChange={(next, details) => {
+          if (details.reason === 'trigger-press') {
+            details.cancel();
+            return;
+          }
           if (
             !next &&
             details.reason === 'outside-press' &&
@@ -399,6 +418,9 @@ export function BudProvider({ children, headerActions }: { children: ReactNode; 
           setOpen(next);
         }}
       >
+        {children}
+        <div hidden ref={setParkingHost} />
+        {docked ? headerActions && createPortal(launcherDock, headerActions) : launcherDock}
         <PopoverContent
           size="bud"
           keepMounted
@@ -430,15 +452,9 @@ export function BudProvider({ children, headerActions }: { children: ReactNode; 
                   <Maximize2Icon />
                 </Button>
               )}
-              <Button
-                size="icon-sm"
-                variant="ghost"
-                aria-label="Minimize chat"
-                title="Minimize chat"
-                onClick={() => setOpen(false)}
-              >
+              <PopoverClose aria-label="Minimize chat" title="Minimize chat">
                 <MinusIcon />
-              </Button>
+              </PopoverClose>
             </div>
           </header>
           {failure && !data?.conversationId && (

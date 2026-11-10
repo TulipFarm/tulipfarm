@@ -24,6 +24,30 @@ export async function assertVisibleFocus(page) {
   assert.deepEqual(focus, { visible: true, painted: true }, 'keyboard focus has a visible outline or ring');
 }
 
+export async function assertUncovered(action) {
+  const evidence = await action.evaluate(button => {
+    const box = button.getBoundingClientRect();
+    const points = [
+      [box.left + 8, box.top + 8],
+      [box.right - 8, box.top + 8],
+      [box.left + 8, box.bottom - 8],
+      [box.right - 8, box.bottom - 8],
+      [box.left + box.width / 2, box.top + box.height / 2],
+    ];
+    return {
+      visible:
+        Math.round(box.left) >= 0 &&
+        Math.round(box.right) <= innerWidth &&
+        Math.round(box.top) >= 0 &&
+        Math.round(box.bottom) <= innerHeight,
+      box: box.toJSON(),
+      hits: points.map(([x, y]) => button.contains(document.elementFromPoint(x, y))),
+    };
+  });
+  assert.equal(evidence.visible, true, `the entire action is inside the viewport: ${JSON.stringify(evidence.box)}`);
+  assert.deepEqual(evidence.hits, [true, true, true, true, true], 'the entire action receives pointer input');
+}
+
 export const evidenceBrowserArgs = () =>
   process.env.BROWSER_CDP_PORT ? [`--remote-debugging-port=${process.env.BROWSER_CDP_PORT}`] : [];
 

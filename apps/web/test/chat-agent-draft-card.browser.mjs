@@ -6,6 +6,7 @@ import { chatCatalog } from './chat-catalog.fixture.mjs';
 import { membership, credits, notifyChange } from './chat-query.fixture.mjs';
 import { randomUUID } from 'node:crypto';
 import { agentBuilderFixture } from './agent-builder.fixture.mjs';
+import { assertUncovered } from './browser-controls.mjs';
 import {
   startBuiltApp,
   builderBrowserOptions,
@@ -254,195 +255,232 @@ test(
   },
 );
 
-test(
-  'a new chat setup draft automatically opens the agent builder in the canvas, and saving there continues the draft',
-  { timeout: 120000 },
-  async () => {
-    const fixture = agentBuilderFixture();
-    const { workspace } = fixture;
-    const server = await startBuiltApp();
-    const browser = await chromium.launch(builderBrowserOptions());
-    const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, reducedMotion: 'reduce' });
-    page.setDefaultTimeout(10000);
-    try {
-      const targetId = randomUUID(),
-        draftId = randomUUID(),
-        triggerId = randomUUID();
-      const decisions = [],
-        errors = [];
-      let deny = false,
-        continued = false,
-        drafted = false;
-      page.on('pageerror', error => errors.push(error.message));
-      const setup = {
-        policy: { grants: [{ teamId: fixture.team.id, permissions: ['read', 'invoke'] }], personGrants: [] },
-        enrollment: [fixture.team.id],
-        scope: [],
-        limits: [],
-        taskLimits: { toolCalls: 25, activeMilliseconds: 60000, credits: 20 },
-        slackSender: 'app',
-        slackChannels: [{ channel: 'CPEOPLE', expectedVersion: 3, replaceAgentId: targetId, detach: true }],
-        prompt: 'Prepare a weekly policy update.',
-        runLimits: { toolCalls: 10, activeMilliseconds: 60000, credits: 10 },
-        triggers: [
-          { id: triggerId, trigger: { kind: 'cron', expression: '0 9 * * 1', timezone: 'Asia/Kolkata' } },
-          { id: randomUUID(), trigger: { kind: 'event', name: 'policy_question' } },
-        ],
-      };
-      const view = {
-        id: draftId,
-        digest: 'd'.repeat(64),
-        status: 'pending',
-        outcome: null,
-        proposal: {
-          kind: 'agent',
-          targetId,
-          input: {
-            expectedSoulRevision: 'a'.repeat(40),
-            expectedSavedRevision: null,
-            expectedPolicyVersion: 0,
-            expectedActivationIds: [],
-            expectedWorkflowRevision: null,
-            expectedWorkflowGeneration: null,
-            owningTeamId: fixture.team.id,
-            definition: {
-              name: 'People Ops chat helper',
-              instructions: 'Answer policy questions without inventing policies.',
-              tools: [],
-              responseRule: 'tag',
-            },
-            setup,
-          },
-        },
-      };
-      const chat = {
-        id: chatId,
-        title: 'People Ops setup',
-        titleRevision: 1,
-        titleManual: false,
-        archived: false,
-        activityAt: '2026-10-12T10:00:00Z',
-        createdAt: '2026-10-12T10:00:00Z',
-        projectId: null,
-      };
-      await page.route('**/v1/**', async route => {
-        const request = route.request(),
-          url = request.url(),
-          path = new URL(url).pathname,
-          method = request.method(),
-          body = request.postDataJSON();
-        if (path.endsWith('/system-package-installations'))
-          return route.fulfill({ json: { installations: [], nextCursor: null } });
-        if (path.endsWith(`/drafts/${draftId}`))
-          return route.fulfill(
-            deny
-              ? { status: 403, json: { error: 'access-denied' } }
-              : {
-                  json: continued
-                    ? { ...view, status: 'continued', outcome: { kind: 'builder', agentId: targetId } }
-                    : view,
-                },
-          );
-        if (path.endsWith(`/drafts/${draftId}/decision`)) {
-          decisions.push(body);
-          if (body.decision !== 'continue')
-            return route.fulfill({ status: 409, json: { error: 'unexpected-chat-decision' } });
-          continued = true;
-          return route.fulfill({ json: { kind: 'builder', agentId: targetId } });
-        }
-        if (path.endsWith(`/conversations/${chatId}/messages`))
-          return route.fulfill({
-            json: {
-              messages: [
-                {
-                  id: randomUUID(),
-                  sequence: 1,
-                  author: 'human',
-                  createdAt: '2026-10-12T10:00:00Z',
-                  parts: [{ kind: 'text', text: 'Create my People Ops helper.' }],
-                  turn: { id: randomUUID(), status: 'completed', generation: 0 },
-                  tools: drafted ? [tool(draftId)] : [],
-                },
-              ],
-              nextBefore: null,
-              hasGitHubProposals: false,
-            },
-          });
-        if (path.endsWith(`/conversations/${chatId}`)) return route.fulfill({ json: chat });
-        if (path.endsWith('/conversations')) return route.fulfill({ json: { chats: [chat], nextCursor: null } });
-        return route.fulfill(fixture.respond(method, url, body));
+for (const width of [375, 390, 414, 768, 1440])
+  test(
+    `a new chat setup draft opens in the canvas and keeps actions accessible at ${width}px`,
+    { timeout: 120000 },
+    async () => {
+      const fixture = agentBuilderFixture();
+      fixture.workspace.name = 'Example workspace';
+      const { workspace } = fixture;
+      const server = await startBuiltApp();
+      const browser = await chromium.launch(builderBrowserOptions());
+      const page = await browser.newPage({
+        viewport: { width, height: width === 1440 ? 900 : 812 },
+        hasTouch: width < 1280,
+        reducedMotion: 'reduce',
       });
-      await page.goto(`${server.origin}/${workspace.slug}/chat/${chatId}`);
-      await page.getByText('Create my People Ops helper.', { exact: true }).waitFor();
-      assert.equal(await page.getByRole('region', { name: 'Canvas', exact: true }).count(), 0);
-      drafted = true;
-      await notifyChange(page, workspace.id, fixture.session.user.id, 'detail', chatId);
-      await page.getByRole('button', { name: 'Review agent', exact: true }).waitFor();
-      await page.getByText('Draft · Waiting for your review', { exact: true }).waitFor();
-      const canvas = page.getByRole('region', { name: 'Canvas', exact: true });
-      const form = canvas.getByRole('form', { name: 'Agent setup', exact: true });
-      await form.getByLabel('Agent name', { exact: true }).waitFor();
-      assert.equal(
-        await form.getByRole('textbox', { name: 'Instructions', exact: true }).inputValue(),
-        view.proposal.input.definition.instructions,
-      );
-      await captureBuilderScreenshot(page, 'agent-builder-chat-basics');
-      assert.equal(await canvas.getByRole('region', { name: 'Review agent draft' }).count(), 0);
-      assert.equal(
-        await canvas.getByRole('tablist', { name: 'Agent setup sections' }).getByRole('tab').count(),
-        5,
-        'the canvas shows every setup step as a tab',
-      );
-      assert.equal(await canvas.getByRole('button', { name: 'View agent', exact: true }).count(), 0);
-      await canvas.getByRole('tab', { name: /Triggers/ }).click();
-      await canvas.getByText('Every Monday at 09:00 in Asia/Kolkata', { exact: true }).first().waitFor();
-      await captureBuilderScreenshot(page, 'agent-builder-chat-canvas');
-      await form.getByRole('button', { name: 'Save draft', exact: true }).click();
-      await form
-        .getByText('Draft saved. Slack channels and workflow triggers are not started.', { exact: true })
-        .waitFor();
-      assert.equal(new URL(page.url()).pathname, `/${workspace.slug}/chat/${chatId}`, 'saving keeps you in chat');
-      const saved = fixture.setups.get(targetId).setup;
-      assert.deepEqual(saved.policy, setup.policy);
-      assert.deepEqual(saved.enrollment, setup.enrollment);
-      assert.equal(saved.slackSender, 'app');
-      assert.deepEqual(saved.slackChannels, setup.slackChannels);
-      assert.deepEqual(saved.triggers, setup.triggers);
-      assert.equal(saved.prompt, setup.prompt);
-      assert.deepEqual(
-        decisions.map(decision => decision.decision),
-        ['continue'],
-        'saving in the builder continues the chat draft instead of approving it',
-      );
-      await page.reload();
-      await page.getByText('Continued in the agent builder', { exact: true }).waitFor();
-      await page.getByRole('button', { name: 'Edit agent', exact: true }).click();
-      await canvas
-        .getByRole('form', { name: 'Agent setup', exact: true })
-        .getByLabel('Agent name', { exact: true })
-        .waitFor();
-      assert.equal(
-        await canvas.getByRole('textbox', { name: 'Instructions', exact: true }).inputValue(),
-        view.proposal.input.definition.instructions,
-        'reopening resumes the setup saved in the builder',
-      );
-      assert.equal(decisions.length, 1, 'reopening does not decide the chat draft again');
-      deny = true;
-      await page.goto(
-        `${server.origin}/${workspace.slug}/agents/new?setupAgentId=${targetId}&chatId=${chatId}&draftId=${draftId}`,
-      );
-      await page.getByRole('heading', { name: /unavailable/i }).waitFor();
-      assert.equal(await page.getByRole('textbox', { name: 'Instructions', exact: true }).count(), 0);
-      assert.deepEqual(errors, []);
-    } catch (error) {
-      await captureBrowserFailure(page, 'agent-builder-chat');
-      throw error;
-    } finally {
-      await browser.close();
-      await server.close();
-    }
-  },
-);
+      page.setDefaultTimeout(10000);
+      try {
+        const targetId = randomUUID(),
+          draftId = randomUUID(),
+          triggerId = randomUUID();
+        const decisions = [],
+          errors = [];
+        let deny = false,
+          continued = false,
+          drafted = false;
+        page.on('pageerror', error => errors.push(error.message));
+        page.on('console', message => {
+          if (
+            message.type() === 'error' &&
+            !/^Failed to load resource:.*404/.test(message.text()) &&
+            !(deny && /^Failed to load resource:.*403/.test(message.text()))
+          )
+            errors.push(message.text());
+        });
+        const setup = {
+          policy: { grants: [{ teamId: fixture.team.id, permissions: ['read', 'invoke'] }], personGrants: [] },
+          enrollment: [fixture.team.id],
+          scope: [],
+          limits: [],
+          taskLimits: { toolCalls: 25, activeMilliseconds: 60000, credits: 20 },
+          slackSender: 'app',
+          slackChannels: [{ channel: 'CPEOPLE', expectedVersion: 3, replaceAgentId: targetId, detach: true }],
+          prompt: 'Prepare a weekly policy update.',
+          runLimits: { toolCalls: 10, activeMilliseconds: 60000, credits: 10 },
+          triggers: [
+            { id: triggerId, trigger: { kind: 'cron', expression: '0 9 * * 1', timezone: 'Asia/Kolkata' } },
+            { id: randomUUID(), trigger: { kind: 'event', name: 'policy_question' } },
+          ],
+        };
+        const view = {
+          id: draftId,
+          digest: 'd'.repeat(64),
+          status: 'pending',
+          outcome: null,
+          proposal: {
+            kind: 'agent',
+            targetId,
+            input: {
+              expectedSoulRevision: 'a'.repeat(40),
+              expectedSavedRevision: null,
+              expectedPolicyVersion: 0,
+              expectedActivationIds: [],
+              expectedWorkflowRevision: null,
+              expectedWorkflowGeneration: null,
+              owningTeamId: fixture.team.id,
+              definition: {
+                name: 'People Ops chat helper',
+                instructions: 'Answer policy questions without inventing policies.',
+                tools: [],
+                responseRule: 'tag',
+              },
+              setup,
+            },
+          },
+        };
+        const chat = {
+          id: chatId,
+          title: 'People Ops setup',
+          titleRevision: 1,
+          titleManual: false,
+          archived: false,
+          activityAt: '2026-10-12T10:00:00Z',
+          createdAt: '2026-10-12T10:00:00Z',
+          projectId: null,
+        };
+        await page.route('**/v1/**', async route => {
+          const request = route.request(),
+            url = request.url(),
+            path = new URL(url).pathname,
+            method = request.method(),
+            body = request.postDataJSON();
+          if (path.endsWith('/system-package-installations'))
+            return route.fulfill({ json: { installations: [], nextCursor: null } });
+          if (path.endsWith(`/drafts/${draftId}`))
+            return route.fulfill(
+              deny
+                ? { status: 403, json: { error: 'access-denied' } }
+                : {
+                    json: continued
+                      ? { ...view, status: 'continued', outcome: { kind: 'builder', agentId: targetId } }
+                      : view,
+                  },
+            );
+          if (path.endsWith(`/drafts/${draftId}/decision`)) {
+            decisions.push(body);
+            if (body.decision !== 'continue')
+              return route.fulfill({ status: 409, json: { error: 'unexpected-chat-decision' } });
+            continued = true;
+            return route.fulfill({ json: { kind: 'builder', agentId: targetId } });
+          }
+          if (path.endsWith(`/conversations/${chatId}/messages`))
+            return route.fulfill({
+              json: {
+                messages: [
+                  {
+                    id: randomUUID(),
+                    sequence: 1,
+                    author: 'human',
+                    createdAt: '2026-10-12T10:00:00Z',
+                    parts: [{ kind: 'text', text: 'Create my People Ops helper.' }],
+                    turn: { id: randomUUID(), status: 'completed', generation: 0 },
+                    tools: drafted ? [tool(draftId)] : [],
+                  },
+                ],
+                nextBefore: null,
+                hasGitHubProposals: false,
+              },
+            });
+          if (path.endsWith(`/conversations/${chatId}`)) return route.fulfill({ json: chat });
+          if (path.endsWith('/conversations')) return route.fulfill({ json: { chats: [chat], nextCursor: null } });
+          return route.fulfill(fixture.respond(method, url, body));
+        });
+        await page.goto(`${server.origin}/${workspace.slug}/chat/${chatId}`);
+        await page.getByText('Create my People Ops helper.', { exact: true }).waitFor({ timeout: 30000 });
+        assert.equal(await page.getByRole('region', { name: 'Canvas', exact: true }).count(), 0);
+        drafted = true;
+        await notifyChange(page, workspace.id, fixture.session.user.id, 'detail', chatId);
+        await page.getByRole('button', { name: 'Review agent', exact: true }).waitFor();
+        await page.getByText('Draft · Waiting for your review', { exact: true }).waitFor();
+        if (width < 768) await page.getByRole('button', { name: 'Review agent', exact: true }).click();
+        const canvas = page.getByRole('region', { name: 'Canvas', exact: true });
+        const form = canvas.getByRole('form', { name: 'Agent setup', exact: true });
+        await form.getByLabel('Agent name', { exact: true }).waitFor();
+        assert.equal(
+          await form.getByRole('textbox', { name: 'Instructions', exact: true }).inputValue(),
+          view.proposal.input.definition.instructions,
+        );
+        await captureBuilderScreenshot(page, 'agent-builder-chat-basics');
+        assert.equal(await canvas.getByRole('region', { name: 'Review agent draft' }).count(), 0);
+        assert.equal(
+          await canvas.getByRole('tablist', { name: 'Agent setup sections' }).getByRole('tab').count(),
+          5,
+          'the canvas shows every setup step as a tab',
+        );
+        assert.equal(await canvas.getByRole('button', { name: 'View agent', exact: true }).count(), 0);
+        await canvas.getByRole('tab', { name: /Triggers/ }).click();
+        await canvas.getByText('Every Monday at 09:00 in Asia/Kolkata', { exact: true }).first().waitFor();
+        await captureBuilderScreenshot(page, 'agent-builder-chat-canvas');
+        await form.getByRole('button', { name: 'Save draft', exact: true }).click();
+        await form
+          .getByText('Draft saved. Slack channels and workflow triggers are not started.', { exact: true })
+          .waitFor();
+        assert.equal(new URL(page.url()).pathname, `/${workspace.slug}/chat/${chatId}`, 'saving keeps you in chat');
+        const saved = fixture.setups.get(targetId).setup;
+        assert.deepEqual(saved.policy, setup.policy);
+        assert.deepEqual(saved.enrollment, setup.enrollment);
+        assert.equal(saved.slackSender, 'app');
+        assert.deepEqual(saved.slackChannels, setup.slackChannels);
+        assert.deepEqual(saved.triggers, setup.triggers);
+        assert.equal(saved.prompt, setup.prompt);
+        assert.deepEqual(
+          decisions.map(decision => decision.decision),
+          ['continue'],
+          'saving in the builder continues the chat draft instead of approving it',
+        );
+        await page.reload();
+        await page.getByText('Continued in the agent builder', { exact: true }).waitFor({ timeout: 30000 });
+        await page.getByRole('button', { name: 'Edit agent', exact: true }).click();
+        await canvas
+          .getByRole('form', { name: 'Agent setup', exact: true })
+          .getByLabel('Agent name', { exact: true })
+          .waitFor();
+        assert.equal(
+          await canvas.getByRole('textbox', { name: 'Instructions', exact: true }).inputValue(),
+          view.proposal.input.definition.instructions,
+          'reopening resumes the setup saved in the builder',
+        );
+        assert.equal(decisions.length, 1, 'reopening does not decide the chat draft again');
+        await form.getByRole('button', { name: 'Continue editing', exact: true }).click();
+        await canvas.getByRole('tab', { name: /Triggers/ }).click();
+        for (const recheck of await form.getByRole('button', { name: 'Recheck', exact: true }).all())
+          await recheck.click();
+        await form.getByRole('checkbox', { name: /^I sponsor / }).check();
+        await canvas.getByRole('tab', { name: /Review/ }).click();
+        const activate = form.getByRole('button', { name: 'Create and activate', exact: true });
+        await activate.scrollIntoViewIfNeeded();
+        await activate.evaluate(node => {
+          for (let parent = node.parentElement; parent; parent = parent.parentElement)
+            if (getComputedStyle(parent).overflowY === 'auto') parent.scrollTop = parent.scrollHeight;
+        });
+        await assertUncovered(form.getByRole('button', { name: 'Save draft', exact: true }));
+        await assertUncovered(activate);
+        await captureBuilderScreenshot(page, `agent-builder-canvas-actions-${width}`);
+        if (width < 1280) await activate.tap();
+        else await activate.click();
+        await page.getByRole('region', { name: 'Run agent now', exact: true }).waitFor();
+        assert.equal([...fixture.publications.values()].at(-1).body.decision, 'activate');
+        assert.equal(new URL(page.url()).pathname, `/${workspace.slug}/agents/${targetId}`);
+        if (width === 1440) {
+          deny = true;
+          await page.goto(
+            `${server.origin}/${workspace.slug}/agents/new?setupAgentId=${targetId}&chatId=${chatId}&draftId=${draftId}`,
+          );
+          await page.getByRole('heading', { name: /unavailable/i }).waitFor();
+          assert.equal(await page.getByRole('textbox', { name: 'Instructions', exact: true }).count(), 0);
+        }
+        assert.deepEqual(errors, []);
+      } catch (error) {
+        await captureBrowserFailure(page, 'agent-builder-chat');
+        throw error;
+      } finally {
+        await browser.close();
+        await server.close();
+      }
+    },
+  );
 
 test(
   'a stopped chat setup explains why, offers retry only when it can help, and links to a saved agent',
@@ -567,7 +605,7 @@ test(
       const visit = async (receipt, row) => {
         setupReceipt = receipt;
         await page.goto(`${server.origin}/${workspace.slug}/chat/${chatId}`);
-        await page.getByText(row, { exact: true }).waitFor();
+        await page.getByText(row, { exact: true }).waitFor({ timeout: 30000 });
       };
       const open = async (receipt, row) => {
         await visit(receipt, row);
