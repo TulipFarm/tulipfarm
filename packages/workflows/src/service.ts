@@ -49,11 +49,11 @@ import {
   receiptSchema,
   withheldOutput,
   resolveSlackText,
+  slackTextOrigin,
   resolveValue,
   runCondition,
   ConditionIncomparable,
   nextStep,
-  slackTextFromUnverifiedSource,
   runHistoryCursorSchema,
   runHistoryPageSize,
   runHistoryQuerySchema,
@@ -344,7 +344,6 @@ export function createWorkflows(
       !rows.some(row => row.step_id === stepId && row.status === 'waiting')
     )
       throw new AccessDenied();
-    if (slackTextFromUnverifiedSource(definition.steps, next.step.text)) throw new AccessDenied();
     const text = z
       .string()
       .min(1)
@@ -388,19 +387,9 @@ export function createWorkflows(
     await authorizeSources(tx, definition, membershipId);
     const step = definition.steps.find(step => step.id === stepId);
     if (step?.kind !== 'slack-message') throw new AccessDenied();
-    // Fixed text was shown on the reviewed draft; text a step writes at run time was not.
-    const origin = (value: typeof step.text): 'input' | 'reviewed' | 'generated' => {
-      const combined = (values: ('input' | 'reviewed' | 'generated')[]) =>
-        values.includes('generated') ? 'generated' : values.includes('reviewed') ? 'reviewed' : 'input';
-      if (value.kind === 'template') return combined(['reviewed', ...Object.values(value.values).map(origin)]);
-      if (value.kind === 'literal' || value.kind === 'trigger') return 'reviewed';
-      if (value.kind === 'input') return 'input';
-      const source = definition.steps.find(step => step.id === value.step);
-      if (!source) throw new AccessDenied();
-      if (source.kind === 'transform') return combined(Object.values(source.fields).map(origin));
-      return source.kind === 'code' || source.kind === 'agent' || source.kind === 'http' ? 'generated' : 'input';
-    };
-    return { text: origin(step.text) };
+    const text = slackTextOrigin(definition, step.text);
+    if (!text) throw new AccessDenied();
+    return { text };
   }
   // Waiting runs sleep on one durable timer; a committed change that ends or resumes the wait wakes them.
   async function wakeAfter<T>(

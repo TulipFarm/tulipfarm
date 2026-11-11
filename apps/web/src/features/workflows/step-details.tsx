@@ -1,5 +1,6 @@
 import { Button } from '@tulipfarm/sprout/button';
 import type { ReactNode } from 'react';
+import { CodeBlock } from '@tulipfarm/sprout/code-block';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@tulipfarm/sprout/collapsible';
 import {
   WorkflowStepIcon,
@@ -8,6 +9,7 @@ import {
   type WorkflowDiagramNode,
 } from '@/components/workflow-diagram';
 import type { WorkflowStepDetails } from './diagram-model';
+import { codeLanguages } from './code-languages';
 
 export function StepDetails({
   node,
@@ -22,6 +24,7 @@ export function StepDetails({
   task?: { title: string; status: string; onOpen: () => void } | undefined;
   content?: ReactNode;
 }) {
+  const step = 'kind' in details.configuration ? details.configuration : undefined;
   return (
     <section aria-label="Step details" className="workflow-inspector">
       <header className="flex items-start gap-3">
@@ -48,6 +51,15 @@ export function StepDetails({
             </div>
           ))}
       </dl>
+      {step?.kind === 'code' && (
+        <CodeBlock
+          code={step.source}
+          language={step.language}
+          filename={`${step.id}.${codeLanguages[step.language].extension}`}
+          variant="file"
+          wrap
+        />
+      )}
       {details.gates.length > 0 && (
         <div className="space-y-2">
           <h4 className="text-sm font-medium">Runs only when</h4>

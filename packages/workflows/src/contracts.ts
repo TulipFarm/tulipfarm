@@ -250,18 +250,6 @@ export type AgentStep = Extract<Step, { kind: 'agent' }>;
 export function stepValues(step: Step): z.infer<typeof valueSchema>[] {
   return stepValueEntries(step).map(entry => entry.value);
 }
-/** Whether Slack text resolves from agent or HTTP output, directly or through a transform or code step's input. Such text is never sent. */
-export function slackTextFromUnverifiedSource(steps: Step[], value: SlackText): boolean {
-  if (value.kind === 'template')
-    return Object.values(value.values).some(field => slackTextFromUnverifiedSource(steps, field));
-  if (value.kind !== 'step') return false;
-  const source = steps.find(step => step.id === value.step);
-  if (!source || source.kind === 'agent' || source.kind === 'http') return true;
-  if (source.kind === 'transform')
-    return Object.values(source.fields).some(field => slackTextFromUnverifiedSource(steps, field));
-  if (source.kind === 'code') return slackTextFromUnverifiedSource(steps, source.input);
-  return false;
-}
 export type ConditionStep = Extract<Step, { kind: 'condition' }>;
 /** A condition step's receipt records whether it held and the steps it ran and skipped, so history explains a run without its definition. */
 export const conditionOutputSchema = z.object({
@@ -987,6 +975,32 @@ export function resolveValue(
   }
   if (value === undefined) throw new Error('missing-value');
   return payloadSchema.parse(value);
+}
+export type SlackTextOrigin = 'input' | 'reviewed' | 'generated';
+/**
+ * Where a Slack step's text comes from. Fixed text, and the code or request that fetches text, were shown on the
+ * reviewed draft; an agent's reply was not. Code and requests can echo the values they are given, so an agent's
+ * reply among them stays generated. Returns null when the text names a step the definition lacks.
+ */
+export function slackTextOrigin(definition: Definition, text: SlackText): SlackTextOrigin | null {
+  const combined = (values: SlackTextOrigin[]): SlackTextOrigin =>
+    values.includes('generated') ? 'generated' : values.includes('reviewed') ? 'reviewed' : 'input';
+  const origin = (value: z.infer<typeof valueSchema> | SlackText): SlackTextOrigin => {
+    if (value.kind === 'template') return combined(['reviewed', ...Object.values(value.values).map(origin)]);
+    if (value.kind === 'literal' || value.kind === 'trigger') return 'reviewed';
+    if (value.kind === 'input') return 'input';
+    const source = definition.steps.find(step => step.id === value.step);
+    if (!source) throw new Error('missing-step');
+    if (source.kind === 'transform') return combined(Object.values(source.fields).map(origin));
+    if (source.kind === 'code' || source.kind === 'http')
+      return combined(['reviewed', ...stepValues(source).map(origin)]);
+    return source.kind === 'agent' ? 'generated' : 'input';
+  };
+  try {
+    return origin(text);
+  } catch {
+    return null;
+  }
 }
 /** The text a Slack step sends: its value, or its template with each placeholder replaced by a resolved text, number or boolean. */
 export function resolveSlackText(

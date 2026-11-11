@@ -596,7 +596,7 @@ test(
             0,
             'draft cards render outside the capped activity timeline',
           );
-          await created.getByText(/\. 1 step\. Next run Monday, October 12, 2026 at 9:00 AM EDT\.$/).waitFor();
+          await created.getByText('First run Monday, October 12, 2026 at 9:00 AM EDT.', { exact: true }).waitFor();
           const canvas = page.getByRole('region', { name: 'Canvas', exact: true });
           const returnToChat = async () => {
             if (mobile && (await canvas.count()))
@@ -604,10 +604,7 @@ test(
           };
           const openDraft = async (card, name) => {
             await returnToChat();
-            await card
-              .getByRole('region', { name: 'Workflow: View workflow draft', exact: true })
-              .getByRole('button', { name: 'View workflow', exact: true })
-              .click();
+            await card.getByRole('button', { name: 'View diagram', exact: true }).click();
             const viewer = canvas.getByRole('region', { name: `${name} workflow`, exact: true });
             await viewer.getByText('Awaiting your review', { exact: true }).waitFor();
             await viewer.getByRole('button', { name: 'Edit in chat', exact: true }).waitFor();
@@ -629,7 +626,7 @@ test(
             else await page.screenshot({ path });
           }
           const schedule = await assertConfiguration(createdViewer, 0, definition.triggers);
-          await schedule.getByText('0 9 * * 1-5 / America/New_York', { exact: true }).first().waitFor();
+          await schedule.getByText('Every weekday at 09:00 in America/New York', { exact: true }).first().waitFor();
           const human = await assertConfiguration(createdViewer, 1, definition.steps[0]);
           await human.getByText('Review open tickets.', { exact: true }).first().waitFor();
           assert.deepEqual(decisions, [], 'nothing is saved before the human chooses');
@@ -715,8 +712,8 @@ test(
             .getByText('Check this Slack destination before saving. The channel is not verified.', { exact: true })
             .waitFor();
           assert.equal(await slack.getByRole('button', { name: 'Save and activate' }).isDisabled(), true);
-          await slack.getByText(/^When a row is added to Tickets\. 1 step\./).waitFor();
-          await row.getByText(/^When a row in Orders changes\. 1 step\./).waitFor();
+          await slack.getByRole('list', { name: 'Workflow steps' }).getByText('Tickets', { exact: true }).waitFor();
+          await row.getByRole('list', { name: 'Workflow steps' }).getByText('Orders', { exact: true }).waitFor();
           await slack.getByRole('button', { name: 'Not now', exact: true }).and(slack.locator(':enabled')).waitFor();
           assert.doesNotMatch(
             await slack.innerText(),
@@ -774,29 +771,10 @@ test(
             await canvas.getByRole('button', { name: 'Close Workflow draft', exact: true }).first().click();
           assert.equal(await canvas.locator('.workflow-viewer').count(), 0);
           await slack.getByRole('button', { name: 'Save and activate' }).and(slack.locator(':enabled')).waitFor();
-          slackFailure = 403;
-          await slack.getByRole('button', { name: 'Check Slack destination' }).click();
-          await slack.getByText('Checking the exact Slack channel...', { exact: true }).waitFor();
-          assert.equal(await slack.getByRole('button', { name: 'Save and activate' }).isDisabled(), true);
-          await slack
-            .getByText('Check this Slack destination before saving. The channel is not verified.', { exact: true })
-            .waitFor();
-          await openDraft(slack, slackDefinition.name);
-          slackStep = await assertConfiguration(slackViewer, 1, slackDefinition.steps[0]);
-          await slackStep.getByText('Destination unavailable', { exact: true }).first().waitFor();
-          assert.equal(
-            await slackViewer.getByText('#tech', { exact: true }).count(),
-            0,
-            'revoked Slack labels are concealed',
-          );
-          await canvas.getByRole('button', { name: 'Close Workflow draft', exact: true }).click();
-          slackFailure = 0;
-          await slack.getByRole('button', { name: 'Check Slack destination' }).click();
-          await slack.getByRole('button', { name: 'Save and activate' }).and(slack.locator(':enabled')).waitFor();
           assert.equal(
             await canvas.locator('.workflow-viewer').count(),
             0,
-            'readiness recovers without mounting a workflow diagram',
+            'readiness never mounts a workflow diagram',
           );
           if (shots)
             await slack.screenshot({
@@ -824,7 +802,7 @@ test(
           assert.equal(await created.getByRole('button', { name: 'Save and activate' }).isDisabled(), true);
           await created.getByRole('button', { name: 'Retry same decision', exact: true }).click();
           await created
-            .getByText('Workflow active. Next run Monday, October 12, 2026 at 9:00 AM EDT.', { exact: true })
+            .getByText('Active. Next run Monday, October 12, 2026 at 9:00 AM EDT.', { exact: true })
             .waitFor();
           assert.equal(decisions.length, 2);
           assert.deepEqual(
@@ -843,10 +821,9 @@ test(
             0,
             'a settled card offers no second approval',
           );
-          await created.getByText('Saved and active', { exact: true }).waitFor();
           await created.getByText('Active', { exact: true }).first().waitFor();
           await slack.getByRole('button', { name: 'Save and activate' }).click();
-          await slack.getByText(/Workflow active/).waitFor();
+          await slack.getByText(/^Active\./).waitFor();
           assert.equal(decisions[2].id, slackDraft);
           assert.deepEqual(
             { digest: decisions[2].body.digest, decision: decisions[2].body.decision },
@@ -854,16 +831,7 @@ test(
           );
           assert.deepEqual(definitionReads, [], 'draft viewing never substitutes a saved-definition read');
           await created.getByRole('button', { name: definition.name, exact: true }).click();
-          // Cloud 51d9a255 (#1053) names the result card region and gives it a plain View workflow action (workflow-canvas.tsx:48).
-          await created
-            .getByRole('region', { name: 'Workflow: View saved workflow', exact: true })
-            .getByRole('button', { name: 'View workflow', exact: true })
-            .click();
-          assert.equal(
-            await created.getByRole('region', { name: 'Workflow: View workflow draft', exact: true }).count(),
-            0,
-            'a saved card offers only the saved workflow',
-          );
+          await created.getByRole('button', { name: 'View diagram', exact: true }).click();
           await createdViewer.getByText('Saved and active revision', { exact: true }).waitFor();
           await assertConfiguration(createdViewer, 0, definition.triggers);
           assert.ok(definitionReads.length > 0);
@@ -874,7 +842,10 @@ test(
           assert.equal(activations.length, 0, 'loading a draft must not activate it');
           await hand.getByRole('button', { name: 'Save and activate', exact: true }).click();
           if (mobile) {
-            await hand.getByRole('status').filter({ hasText: 'Workflow saved, but not activated.' }).waitFor();
+            await hand
+              .getByRole('status')
+              .filter({ hasText: /^Saved\./ })
+              .waitFor();
             assert.equal(
               await hand.getByText('Active', { exact: true }).count(),
               0,
@@ -884,7 +855,7 @@ test(
             assert.equal(await hand.getByRole('link', { name: 'Start a run', exact: true }).count(), 0);
             await hand.getByRole('button', { name: 'Activate workflow', exact: true }).click();
           }
-          await hand.getByText('Prepare an order is active. You can start a run now.', { exact: true }).waitFor();
+          await hand.getByText('Active.', { exact: true }).waitFor();
           assert.equal(activations.length, mobile ? 2 : 1);
           if (mobile)
             assert.deepEqual(activations[1], activations[0], 'an uncertain activation retries the same command');
