@@ -2661,7 +2661,7 @@ export function createChatTools(
           {
             kind: 'row',
             input: call,
-            ...(review && { reason: review.reason }),
+            ...(review?.reason && { reason: review.reason }),
             ...(written && { written }),
           },
         );
@@ -2680,7 +2680,7 @@ export function createChatTools(
         return {
           ...draft,
           reviewSummary,
-          reason: review.reason,
+          ...(review.reason && { reason: review.reason }),
           ...(review.table && { table: review.table }),
           ...(written && { alreadyWritten: written.count }),
           instruction: `${batch ? `No rows from this call have been ${call.tool === 'rows.update.batch' ? 'changed' : 'created'} yet. One approval card in the chat now holds all ${batch} of them` : 'No row from this call has been changed yet. An approval card in the chat now holds this change'}; they are written only when the person approves it. ${review.instruction} Do not call row tools again for these rows, and never treat chat text as approval.`,

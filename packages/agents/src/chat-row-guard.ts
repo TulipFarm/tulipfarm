@@ -4,6 +4,7 @@ import { relation, type AgentStorage } from './store.ts';
 import { directChatRowLimit, rowsAlreadyWrittenSchema, type rowReviewReasonSchema } from './draft-contracts.ts';
 import type { z } from 'zod';
 import { namesTable } from './chat-table-lookup.ts';
+import { requestedRowReview } from './row-review-request.ts';
 
 type RowReviewReason = z.infer<typeof rowReviewReasonSchema>;
 type RowsAlreadyWritten = z.infer<typeof rowsAlreadyWrittenSchema>;
@@ -70,7 +71,7 @@ function alreadyWritten({ rows, created }: ReturnType<typeof earlierRowWrites>):
 
 /** The row change goes to one approval card holding the whole call. */
 export type ChatRowReview = {
-  reason: RowReviewReason;
+  reason?: RowReviewReason;
   table?: string;
   instruction: string;
   /** Rows already written directly in this chat; the card holds only the rest. */
@@ -181,8 +182,12 @@ export async function chatRowReview(
     if (!label) return proposing ? changing : null;
     const texts = (
       await tx.client.query<{ text: string }>(
-        `SELECT p.text FROM ${relation(tx, 'tf_conversation_parts')} p JOIN ${relation(tx, 'tf_conversation_messages')} m ON m.id=p.message_id AND m.conversation_id=p.conversation_id WHERE p.conversation_id=$1 AND m.author_kind='human'`,
-        [origin.conversationId],
+        `SELECT COALESCE(string_agg(p.text, E'\\n' ORDER BY p.ordinal),'') AS text
+          FROM ${relation(tx, 'tf_conversation_parts')} p JOIN ${relation(tx, 'tf_conversation_messages')} m ON m.id=p.message_id AND m.conversation_id=p.conversation_id
+          WHERE p.conversation_id=$1 AND m.author_kind='human' AND m.sequence <= (
+            SELECT accepted_sequence FROM ${relation(tx, 'tf_conversation_turns')} WHERE conversation_id=$1 AND id=$2
+          ) GROUP BY m.id,m.sequence ORDER BY m.sequence`,
+        [origin.conversationId, origin.turnId],
       )
     ).rows.map(row => row.text);
     const sent = call.tool === 'rows.create' ? [{ values: call.values }] : (call.rows ?? []);
@@ -201,6 +206,12 @@ export async function chatRowReview(
     const moved = named ? null : await waitingCardElsewhere(tx, origin.conversationId, callId, call.tableId, sent);
     if (moved) return moved;
     if (proposing) return { ...changing, table: label };
+    if (requestedRowReview(texts))
+      return {
+        table: label,
+        instruction:
+          'The person explicitly asked to review these rows first. This change waits on the chat card, even for five rows or fewer. Nothing from this call is written until the person approves the card.',
+      };
     if (!named)
       return {
         reason: 'table-not-named',

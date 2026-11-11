@@ -1385,10 +1385,10 @@ test('a reply that keeps claiming a card no tool made ends with a plain account 
     [{ role: 'user', text: 'Create the approval card for all 9 rows.' }],
     () => assert.fail('No tool expected'),
   );
-  assert.equal(result.text, noCardReply());
+  assert.equal(result.text, "I couldn't prepare the review card, so no rows were changed. Ask me to try again.");
   assert.equal(replies.length, 0);
   assert.ok(!requests.some(isCompletionRequest));
-  assert.match(JSON.stringify(requests[1].messages), /no tool call in this reply created one/);
+  assert.match(JSON.stringify(requests[1].messages), /no saved row-review receipt/);
   assert.deepEqual(outcomes, ['continue', 'continue', 'continue', 'exhausted']);
 });
 

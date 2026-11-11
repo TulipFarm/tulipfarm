@@ -45,6 +45,7 @@ import {
 } from '@tulipfarm/observability';
 import { chatToolCallLimit, chatTitleSchema, shortenTitle } from '@tulipfarm/conversations/contracts';
 import { reviewCardReference, type ReviewCardReference, type ReviewCardState } from '@tulipfarm/conversations/results';
+import { requestedRowReview, tableCreationRequest as tableRequest } from './row-review-request.ts';
 import { withoutTrailingControlMarker } from '@tulipfarm/conversations/reply-text';
 import { createChatToolGuard } from './chat-tool-guard.ts';
 import {
@@ -2515,7 +2516,40 @@ function cardMisdescribed(candidate: string, cards: readonly HeldBackWrite[], re
 }
 
 const rowRequest =
-  /\b(?:add|insert|append|put|include|create|change|update|edit|set|delete|remove)\b[^.?!]*\b(?:rows?|items?|records?|entr(?:y|ies)|lines?)\b/i;
+  /\b(?:add|insert|append|put|include|create|prepare|draft|propose|generate|change|update|edit|set|delete|remove)\b[^.?!]*\b(?:rows?|items?|records?|entr(?:y|ies)|lines?)\b/i;
+const rowReviewStoppedReply = "I couldn't prepare the review card, so no rows were changed. Ask me to try again.";
+
+function rowReviewReceipt(result: ToolResult, items: readonly LoopItem[]) {
+  if (!madeCard(result)) return false;
+  if (rowWriteName.test(result.name)) return true;
+  if (result.name !== proposeTool) return false;
+  const call = items
+    .flatMap(item => (item.kind === 'model' ? item.calls : []))
+    .reverse()
+    .find(call => call.id === result.id && call.name === proposeTool);
+  const input = z.object({ input: z.string() }).safeParse(call?.input);
+  if (!input.success) return false;
+  try {
+    const proposal = z.object({ plans: z.array(z.object({ kind: z.string() })) }).parse(JSON.parse(input.data.input));
+    return proposal.plans.some(plan => plan.kind === 'records' || plan.kind === 'import');
+  } catch {
+    return false;
+  }
+}
+
+function rowReviewClarification(candidate: string, items: readonly LoopItem[]) {
+  if (!asksAboutTable(candidate) || !/\bwhich\b/i.test(candidate) || tableIdQuestion(candidate)) return false;
+  if (/\b(?:permission|allow|read|inspect|schema)\b/i.test(candidate)) return false;
+  return items.some(
+    item =>
+      item.kind === 'results' &&
+      item.results.some(result => {
+        if (result.error || !tableLookupTools.has(result.name)) return false;
+        const found = z.object({ tables: z.array(z.object({})).min(2) }).safeParse(toolResultValue(result.output));
+        return found.success;
+      }),
+  );
+}
 const commonWords = new Set(
   'add insert append put include create change update edit set delete remove one two three more another new extra row rows item items record records entry entries line lines please can could would you the and with for that this then too also table into from its it'.split(
     ' ',
@@ -2559,7 +2593,6 @@ export function waitingCardStretched(candidate: string, items: readonly LoopItem
 }
 
 const rowWriteName = /^rows_(?:create|update|delete)/;
-const tableRequest = /\b(?:new|create|make|build|set up)\b[^.?!]{0,30}\btables?\b/i;
 /** Whether this reply tried a row change, whatever its result. */
 const rowWriteTried = (items: readonly LoopItem[]) =>
   items.some(item => item.kind === 'results' && item.results.some(result => rowWriteName.test(result.name)));
@@ -2595,7 +2628,10 @@ export function rowRequestSkipped(
 const rowVerbs = [
   { verb: /\b(?:delete|remove)\b/i, tools: ['rows.list', 'rows.delete'] },
   { verb: /\b(?:change|update|edit|set)\b/i, tools: ['rows.list', 'rows.update.batch', 'rows.update'] },
-  { verb: /\b(?:add|insert|append|put|include|create)\b/i, tools: ['rows.create.batch', 'rows.create'] },
+  {
+    verb: /\b(?:add|insert|append|put|include|create|prepare|draft|propose|generate)\b/i,
+    tools: ['rows.create.batch', 'rows.create'],
+  },
 ];
 /**
  * The table tools a row request's next rounds must call, one per round, after its reply made no tool call and was sent
@@ -3415,7 +3451,10 @@ export async function inferWithTools(
   let outputProduced = false;
   const items: LoopItem[] = messages.map(turn => ({ kind: 'turn', turn }));
   const latest = [...messages].reverse().find(turn => turn.role === 'user');
-  const request = latest ? textTurn(latest).text : '';
+  const rowReviewRequest = requestedRowReview(
+    sourceMessages.filter(turn => turn.role === 'user').map(turn => textTurn(turn).text),
+  );
+  const request = rowReviewRequest ?? (latest ? textTurn(latest).text : '');
   const earlier = messages
     .filter(turn => turn !== latest)
     .map(turn => textTurn(turn).text)
@@ -3444,7 +3483,7 @@ export async function inferWithTools(
     }
   }
   const answerText: ToolInferenceContext['answerText'] =
-    invitationLookup(sourceMessages) || !tools?.answerText
+    rowReviewRequest || invitationLookup(sourceMessages) || !tools?.answerText
       ? undefined
       : update => {
           if (!directoryExpected && !activeBuiltinSkills.has('agent-authoring')) tools?.answerText?.(update);
@@ -3525,6 +3564,14 @@ export async function inferWithTools(
   const reviewReferences = new Map(
     (tools?.priorReviewCards ?? []).map(reference => [`${reference.kind}:${reference.id}`, reference]),
   );
+  const rowReviewMade = () =>
+    items.some(item => item.kind === 'results' && item.results.some(result => rowReviewReceipt(result, items))) ||
+    reviewStates.some(
+      state =>
+        state.reference.kind === 'row' &&
+        state.status === 'pending' &&
+        tools?.priorReviewCards?.some(reference => reference.kind === 'row' && reference.id === state.reference.id),
+    );
   let reviewStates: readonly ReviewCardState[] = [];
   const tableReviewReply = async () => {
     for (const item of items)
@@ -3537,7 +3584,20 @@ export async function inferWithTools(
     reviewStates = states;
     const pending = new Map(
       states
-        .filter(state => state.status === 'pending' && state.summary)
+        .filter(
+          state =>
+            state.status === 'pending' &&
+            state.summary &&
+            (!rowReviewRequest ||
+              state.reference.kind === 'row' ||
+              items.some(
+                item =>
+                  item.kind === 'results' &&
+                  item.results.some(
+                    result => result.reviewCard?.id === state.reference.id && rowReviewReceipt(result, items),
+                  ),
+              )),
+        )
         .map(state => [`${state.reference.kind}:${state.reference.id}`, state.summary!]),
     );
     for (const item of items)
@@ -3587,7 +3647,19 @@ export async function inferWithTools(
     checked = false,
     layout?: { layout: ReplyRenderInput } | { layoutFailed: true },
   ) => {
-    const reviewReply = (await tableReviewReply()) ?? skillReviewReply();
+    const reviewReply = (await tableReviewReply()) ?? (rowReviewRequest ? undefined : skillReviewReply());
+    if (rowReviewRequest && !rowReviewMade() && !rowReviewClarification(text, items)) {
+      const written = writtenRows(items);
+      const held = heldBackWrites(items)[0];
+      return completeReply(
+        held
+          ? [written, heldBackReply(held, request)].filter(Boolean).join(' ')
+          : written
+            ? `${written} ${noCardReply((await tools?.waitingCards?.()) ?? 0)}`
+            : rowReviewStoppedReply,
+        true,
+      );
+    }
     return completeReply(reviewReply ?? text, checked || Boolean(reviewReply), reviewReply ? undefined : layout);
   };
   const updateAvatar = () => tools?.avatar?.update({ step: Math.max(0, requestStep - 1), avatar });
@@ -4575,7 +4647,7 @@ export async function inferWithTools(
         continue;
       }
       if (rendered) preview(rendered.input.summary);
-      const reviewReply = (await tableReviewReply()) ?? skillReviewReply();
+      const reviewReply = (await tableReviewReply()) ?? (rowReviewRequest ? undefined : skillReviewReply());
       if (reviewReply) {
         preview(reviewReply);
         recordChatCompletionCheck('done', 'readable review card receipt');
@@ -4628,7 +4700,16 @@ export async function inferWithTools(
             rowRequestSkipped(items, request, rowCards, waitingRows) ??
             inventedFailure(candidate, items, waiting) ??
             leakedWording(candidate, request));
+      const rowReviewMissing =
+        rowReviewRequest && !rowReviewMade() && !rowReviewClarification(candidate, items)
+          ? {
+              status: 'continue' as const,
+              reason:
+                "The person explicitly requested rows for review, but this turn has no saved row-review receipt. Inspect the table and prepare the requested rows now. Reading the schema needs no extra approval. A reply, an unrelated card, or an earlier card cannot replace this turn's row review. Ask only for information that the available reads show is actually missing.",
+            }
+          : undefined;
       if (
+        !rowReviewMissing &&
         !unbacked &&
         !writeUnbacked &&
         !idAsked &&
@@ -4642,12 +4723,19 @@ export async function inferWithTools(
         recordChatCompletionCheck('skipped_no_tools');
         return accept();
       }
-      if (!unbacked && !writeUnbacked && !idAsked && !misdescribed && presentsNewCard(candidate, items)) {
+      if (
+        !rowReviewMissing &&
+        !unbacked &&
+        !writeUnbacked &&
+        !idAsked &&
+        !misdescribed &&
+        presentsNewCard(candidate, items)
+      ) {
         recordChatCompletionCheck('done', 'review card receipt');
         return accept();
       }
       let checked: z.infer<typeof completionCheckSchema>['decision'] | undefined =
-        unbacked ?? writeUnbacked ?? idAsked ?? misdescribed;
+        rowReviewMissing ?? unbacked ?? writeUnbacked ?? idAsked ?? misdescribed;
       if (!checked) {
         report('finishing');
         try {
@@ -4771,13 +4859,29 @@ export async function inferWithTools(
       if (
         rowUntried &&
         !rowToolsForced &&
-        !items.slice(replyStart).some(item => item.kind === 'model' && item.calls.some(call => isWorkTool(call.name)))
+        (rowReviewRequest ||
+          !items
+            .slice(replyStart)
+            .some(item => item.kind === 'model' && item.calls.some(call => isWorkTool(call.name))))
       ) {
         rowToolsForced = true;
-        rowTools = forcedRowTools(
-          request,
-          activeCatalog.tools.map(tool => tool.name),
+        const reads = items.flatMap(item =>
+          item.kind === 'results'
+            ? item.results.filter(result => result.name === 'schema_inspect' || result.name === 'rows_list')
+            : [],
         );
+        const readFailed = reads.some(
+          result =>
+            result.error || !!z.object({ error: z.unknown() }).safeParse(toolResultValue(result.output)).success,
+        );
+        rowTools =
+          rowReviewRequest && readFailed
+            ? []
+            : forcedRowTools(
+                request,
+                activeCatalog.tools.map(tool => tool.name),
+              );
+        if (rowReviewRequest) rowTools = rowTools.filter(name => !reads.some(result => result.name === name));
         log('info', 'activity', 'call_completed', {
           operation: 'chat.row-tools-forced',
           outcome: routeCapabilities(config).toolChoice === 'auto' ? 'asked' : 'forced',
@@ -4787,6 +4891,7 @@ export async function inferWithTools(
       if (completionCorrections++ >= 2) {
         // Corrections are spent, so the reply ends with an answer rather than failing after its tools ran.
         recordChatCompletionCheck('exhausted');
+        if (rowReviewMissing) return finish(rowReviewStoppedReply, true);
         // A row write held back behind a waiting card ends by naming that card's change and the request it did not take.
         const heldWrite = heldBackWrites(items)[0];
         const held =

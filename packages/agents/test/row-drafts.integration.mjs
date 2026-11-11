@@ -229,6 +229,48 @@ test('chat row writes after untrusted content become member-approved review draf
     assert.deepEqual(readable.proposal.input, call);
   });
 
+  for (const count of [1, 5])
+    await t.test(`an explicit review request for ${count} rows saves a card without writing`, async () => {
+      const before = await live();
+      const call =
+        count === 1
+          ? createCall('Review first')
+          : {
+              tool: 'rows.create.batch',
+              tableId: table.tableId,
+              expectedAppliedRevision: table.revision,
+              rows: Array.from({ length: count }, (_, index) => ({
+                values: { [note.id]: text(`Review ${index + 1}`) },
+              })),
+            };
+      const { chatId, result } = await chatTool(call, [], {
+        message: `Add ${count} rows to Notes for review before writing anything.`,
+      });
+      assert.equal(result.status, 'review-required', JSON.stringify(result));
+      assert.deepEqual(await live(), before);
+      const readable = await drafts.read(w.id, owner.userId, chatId, result.draftId);
+      assert.equal(readable.status, 'pending');
+      assert.deepEqual(readable.proposal.input, call);
+      const tools = (await f.store.history(w.id, owner.userId, chatId)).messages.flatMap(
+        message => message.tools ?? [],
+      );
+      assert.equal(tools.find(tool => tool.tool === call.tool)?.rowDraftId, result.draftId);
+    });
+
+  await t.test('an explicit review-card retry inherits the human row request without a direct write', async () => {
+    const before = await live();
+    const { chatId } = await chatTool({ tool: 'schema.inspect', tableId: table.tableId }, [], {
+      message: 'Add one row to Notes for review before writing anything.',
+    });
+    const call = createCall('Review retry');
+    const { result } = await chatTool(call, [], { chatId, message: 'Please create the review card.' });
+    assert.equal(result.status, 'review-required');
+    assert.deepEqual(await live(), before);
+    const readable = await drafts.read(w.id, owner.userId, chatId, result.draftId);
+    assert.equal(readable.status, 'pending');
+    assert.deepEqual(readable.proposal.input, call);
+  });
+
   await t.test('archived row reviews retain only currently readable table labels and remain unapprovable', async () => {
     const email = textField('Contact email');
     const archived = await createTableWithRows({
