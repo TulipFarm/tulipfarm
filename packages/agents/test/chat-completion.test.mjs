@@ -2731,7 +2731,124 @@ test('multiple named tables ask for a destination instead of forcing a row write
   assert.deepEqual(forced, [undefined]);
 });
 
-test('an explicit same-table continuation writes once even when the row tool runs before its queued recovery', async t => {
+for (const [index, request] of [
+  'Thanks! Now add 2 rows to Other Ledger: Rose 3 and Pear 2.',
+  'Great, add 2 rows to Other Ledger: Rose 3 and Pear 2.',
+  'OK, add 2 rows to Other Ledger: Rose 3 and Pear 2.',
+  'Also add 2 rows to Other Ledger: Rose 3 and Pear 2.',
+  'Hi Bud,\nadd these rows to Other Ledger:\n- Rose 3\n- Pear 2',
+  "I'd like you to add 2 rows to Other Ledger: Rose 3 and Pear 2.",
+  'Add 2 rows to Other Ledger before the meeting: Rose 3 and Pear 2.',
+  'Add 2 rows to Other Ledger: Rose 3 and Pear 2. If anything fails, tell me.',
+  'Add 2 rows to Other Ledger: Rose 3 and Pear 2.',
+].entries())
+  test(`table inventory grounds the checker instead of parsing row-request phrasing: ${request}`, async t => {
+    const executed = [];
+    const requests = [];
+    const updates = [];
+    let round = 0;
+    let inventoryChecks = 0;
+    const replies = [
+      { text: 'Other Ledger does not exist yet. No rows were added.' },
+      { calls: [use('schema.inspect', { tableId: otherLedger })] },
+      { calls: [use('rows.create.batch', twoRows)] },
+      { text: 'Rose 3 and Pear 2 were added to Other Ledger.' },
+    ];
+    t.mock.method(globalThis, 'fetch', async (_url, init) => {
+      const body = JSON.parse(init.body);
+      if (isCompletionRequest(body)) {
+        if (!executed.length) {
+          inventoryChecks++;
+          const evidence = JSON.parse(body.messages.at(-1).content);
+          assert.deepEqual(evidence.tableInventory, [
+            {
+              id: otherLedger,
+              name: 'Other Ledger',
+              exists: true,
+              ready: true,
+              appliedRevision: approvedLedger.appliedRevision,
+              maintenance: false,
+            },
+          ]);
+        }
+        return Response.json(
+          selectReply(
+            'azure',
+            verdict(executed.length ? 'completed' : ['continue', 'completed', 'blocked'][index % 3]),
+          ),
+        );
+      }
+      requests.push(body);
+      assert.ok(round < replies.length);
+      return stream(nativeReply('azure', replies[round++]));
+    });
+    const result = await inferWithTools(
+      { ...nativeRoutes.azure, model: 'grok-4.3' },
+      [...approvedHistory, { role: 'user', text: request }],
+      async call => {
+        executed.push(call.tool);
+        return call.tool === 'schema.inspect'
+          ? approvedLedger
+          : { records: twoRows.rows.map((row, index) => ({ id: `row-${index}`, values: row.values })) };
+      },
+      undefined,
+      false,
+      null,
+      {
+        ...approvedRowTools,
+        answerText: update => updates.push(update.text),
+        readWorkspaceInventory: async () => ({
+          ...ledgerInventory,
+          tables: [approvedLedger, { ...approvedLedger, id: '00000000-0000-4000-8000-0000000000bb', name: 'Ledger' }],
+        }),
+      },
+    );
+    assert.equal(result.text, replies.at(-1).text);
+    assert.deepEqual(executed, ['schema.inspect', 'rows.create.batch']);
+    assert.equal(inventoryChecks, 1, 'a no-tool reply about a known table always reaches the checker with facts');
+    assert.ok(
+      requests.every(body => forcedTool(body) === undefined),
+      'the checker does not force a write',
+    );
+    assert.ok(!updates.includes(replies[0].text), 'the unchecked missing-table claim never streams');
+  });
+
+for (const request of [
+  'Add the rows to Other Ledger later, not now.',
+  'Add 2 rows to Other Ledger tomorrow, not today.',
+])
+  test(`the checker accepts a deferral without forcing writes: ${request}`, async t => {
+    const updates = [];
+    const forced = [];
+    let checks = 0;
+    t.mock.method(globalThis, 'fetch', async (_url, init) => {
+      const body = JSON.parse(init.body);
+      if (isCompletionRequest(body)) {
+        checks++;
+        const evidence = JSON.parse(body.messages.at(-1).content);
+        assert.equal(evidence.tableInventory[0].ready, true);
+        return Response.json(selectReply('azure', verdict()));
+      }
+      forced.push(forcedTool(body));
+      assert.ok(forced.length < 5);
+      return stream(nativeReply('azure', { text: 'Understood. Nothing will change now.' }));
+    });
+    const result = await inferWithTools(
+      nativeRoutes.azure,
+      [...approvedHistory, { role: 'user', text: request }],
+      () => assert.fail('a deferred request must not execute a row tool'),
+      undefined,
+      false,
+      null,
+      { ...approvedRowTools, answerText: update => updates.push(update.text) },
+    );
+    assert.equal(result.text, 'Understood. Nothing will change now.');
+    assert.equal(checks, 1);
+    assert.deepEqual(forced, [undefined]);
+    assert.ok(updates.includes(result.text), 'the accepted answer is released after checking');
+  });
+
+test('a row write cancels further recovery instead of writing the same rows again', async t => {
   const requests = [];
   const executed = [];
   let round = 0;
@@ -2742,7 +2859,8 @@ test('an explicit same-table continuation writes once even when the row tool run
   ];
   t.mock.method(globalThis, 'fetch', async (_url, init) => {
     const body = JSON.parse(init.body);
-    if (isCompletionRequest(body)) return Response.json(selectReply('azure', verdict()));
+    if (isCompletionRequest(body))
+      return Response.json(selectReply('azure', verdict(round === 1 ? 'continue' : 'completed')));
     requests.push(body);
     assert.ok(round < replies.length);
     return Response.json(nativeReply('azure', replies[round++]));
@@ -2752,7 +2870,7 @@ test('an explicit same-table continuation writes once even when the row tool run
     [
       { role: 'user', text: 'Create the Other Ledger table with Item and Amount fields.' },
       { role: 'assistant', text: 'The table is ready.' },
-      { role: 'user', text: 'Add 2 rows to that table: Rose 3 and Pear 2.' },
+      { role: 'user', text: 'Add 2 rows to Other Ledger: Rose 3 and Pear 2.' },
     ],
     async call => {
       executed.push(call.tool);
@@ -2765,7 +2883,7 @@ test('an explicit same-table continuation writes once even when the row tool run
   );
   assert.equal(result.text, replies.at(-1).text);
   assert.deepEqual(executed, ['rows.create.batch']);
-  assert.deepEqual(requests.map(forcedTool), [undefined, 'schema_inspect', undefined]);
+  assert.deepEqual(requests.map(forcedTool), [undefined, undefined, undefined]);
 });
 
 test('a resumed row write never arms forced write recovery again', async t => {
@@ -2814,7 +2932,8 @@ for (const [model, runs] of [
       t.mock.method(globalThis, 'fetch', async (url, init) => {
         assert.ok(!String(url).includes('anthropic'), 'the selected model does the work without fallback');
         const body = JSON.parse(init.body);
-        if (isCompletionRequest(body)) return Response.json(selectReply('azure', verdict()));
+        if (isCompletionRequest(body))
+          return Response.json(selectReply('azure', verdict(round === 1 ? 'continue' : 'completed')));
         requests.push(body);
         const replies = [
           { text: refusals[run % refusals.length] },
@@ -2854,7 +2973,7 @@ for (const [model, runs] of [
         ['schema.inspect', 'rows.create.batch'],
       );
       assert.deepEqual(executed[1], { tool: 'rows.create.batch', ...twoRows });
-      assert.deepEqual(requests.map(forcedTool), [undefined, 'schema_inspect', 'rows_create_batch', undefined]);
+      assert.deepEqual(requests.map(forcedTool), [undefined, undefined, undefined, undefined]);
       assert.ok(!updates.includes(refusals[run % refusals.length]), 'unchecked replies never stream');
       t.mock.restoreAll();
     }
