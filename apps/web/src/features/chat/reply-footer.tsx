@@ -120,7 +120,11 @@ function ChatGptFailureAction({ code, slug }: { code: string | null | undefined;
   if (!action) return null;
   if (action.kind === 'manage-usage')
     return (
-      <Button size="sm" nativeButton={false} render={<a href={action.href} target="_blank" rel="noopener noreferrer" />}>
+      <Button
+        size="sm"
+        nativeButton={false}
+        render={<a href={action.href} target="_blank" rel="noopener noreferrer" />}
+      >
         {action.label}
       </Button>
     );

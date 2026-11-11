@@ -325,9 +325,9 @@ const errorSchema = z.union([
     error: { code: undefined, message: detail, type: undefined, status: undefined, param: undefined },
   })),
   // xAI reports `{ code, error: "<message>" }`.
-  z
-    .object({ error: z.string(), code: z.union([z.string(), z.number()]).optional() })
-    .transform(({ error, code }) => ({ error: { code, message: error, type: undefined, status: undefined, param: undefined } })),
+  z.object({ error: z.string(), code: z.union([z.string(), z.number()]).optional() }).transform(({ error, code }) => ({
+    error: { code, message: error, type: undefined, status: undefined, param: undefined },
+  })),
   // Azure Foundry rejects a prompt its content filter blocks with a completion whose choice carries the error.
   z
     .object({
