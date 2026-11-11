@@ -115,7 +115,7 @@ const commands = [],
 let deletes = 0;
 let browser, active;
 
-async function open(device, holdTables = false) {
+async function open(device, holdTables = false, tableResult = 'ready') {
   let releaseTables;
   const tableGate = new Promise(resolve => {
     releaseTables = resolve;
@@ -153,6 +153,9 @@ async function open(device, holdTables = false) {
     if (path.endsWith('/model-catalog')) return send({ families });
     if (path.endsWith('/tables')) {
       await tableGate;
+      if (tableResult === 'missing') return send({ tables: [], nextCursor: null });
+      if (tableResult === 'denied') return send({ code: 'access-denied' }, 403);
+      if (tableResult === 'failed') return send({ code: 'unavailable' }, 503);
       return send({
         tables: [
           {
@@ -437,6 +440,26 @@ try {
     'true',
   );
   await deniedContext.close();
+
+  for (const tableResult of ['missing', 'denied', 'failed']) {
+    const {
+      context: hiddenContext,
+      page: hiddenPage,
+      releaseTables,
+    } = await open({ width: 1440, height: 1000, theme: 'light' }, true, tableResult);
+    active = hiddenPage;
+    await hiddenPage.goto(`${origin}/acme/agents/${unreachableId}`);
+    const hiddenRegion = hiddenPage.getByRole('region', { name: 'Run agent now', exact: true });
+    await hiddenRegion.waitFor();
+    assert.equal(await hiddenRegion.getByText(/^Data this task may use:/).count(), 0);
+    assert.equal(await hiddenRegion.getByText(/This task cannot use/).count(), 0);
+    releaseTables();
+    await hiddenRegion.getByText('Data this task may use: No table access.', { exact: true }).waitFor();
+    await hiddenRegion.getByText(/This task cannot use a table you cannot see: read rows\./).waitFor();
+    assert.equal((await hiddenRegion.innerText()).includes(rid.slice(0, 8)), false);
+    if (shots) await hiddenRegion.screenshot({ path: `${shots}/table-names-${tableResult}.png` });
+    await hiddenContext.close();
+  }
 
   for (const device of [
     { width: 1440, height: 1000, theme: 'light' },

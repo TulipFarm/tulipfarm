@@ -1992,7 +1992,7 @@ async function checkTaskCompletion(
           cacheWrite5m: primary.cacheWrite5m + checkedUsage.cacheWrite5m,
           cacheWrite1h: primary.cacheWrite1h + checkedUsage.cacheWrite1h,
         }
-      : { kind: 'unknown' };
+      : primary;
   return {
     ...result,
     usage: combined,

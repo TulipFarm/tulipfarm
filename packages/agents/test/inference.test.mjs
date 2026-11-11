@@ -1851,15 +1851,17 @@ test('task completion distinguishes progress from answer content and accounts fo
     hasAnswerContent: false,
     hasToolBackedResult: false,
   };
-  let unavailable = false;
+  let failure;
   const wire = await boundary(
     t,
     (_req, res) => res.end(JSON.stringify(nativeReply('anthropic', { text: 'Finding table Customers' }))),
     (_req, res) => {
-      if (unavailable) {
+      if (failure === 'unavailable') {
         res.writeHead(503);
         return res.end('{}');
       }
+      if (failure === 'invalid-json') return res.end('{');
+      if (failure === 'timeout') return;
       res.end(JSON.stringify(selectReply('anthropic', verdict)));
     },
   );
@@ -1872,10 +1874,12 @@ test('task completion distinguishes progress from answer content and accounts fo
   verdict = { ...verdict, status: 'completed', hasAnswerContent: true };
   const answer = await inferSourceDecision(routes.anthropic, taskInput);
   assert.equal(answer.decision.incomplete, false, 'a broad prefilter is not a completion verdict');
-  unavailable = true;
-  const fallback = await inferSourceDecision(routes.anthropic, taskInput);
-  assert.equal(fallback.kind, 'success');
-  assert.equal(fallback.decision.incomplete, undefined, 'checker failure preserves the earlier behaviour');
+  for (failure of ['unavailable', 'invalid-json', 'timeout']) {
+    const fallback = await inferSourceDecision({ ...routes.anthropic, timeoutMs: 500 }, taskInput);
+    assert.equal(fallback.kind, 'success');
+    assert.equal(fallback.decision.incomplete, undefined, 'checker failure preserves the earlier behaviour');
+    assert.deepEqual(fallback.usage, known, `${failure} preserves the primary call's usage`);
+  }
 });
 
 async function respond(

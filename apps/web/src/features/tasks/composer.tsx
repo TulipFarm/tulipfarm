@@ -16,7 +16,7 @@ import { UnsavedChanges, WriteFeedback } from '@/features/tables/feedback';
 import { AgentRead } from '@/features/agents/feedback';
 import { activationLabel, scopeText } from '@/features/agents/labels';
 import { tableApi } from '@/features/tables/api';
-import { useTableNames } from '@/features/tables/hooks';
+import { useTablePicker } from '@/features/tables/hooks';
 import type { AgentDetail } from '@/features/agents/api';
 import { conversationApi } from '@/features/chat/conversation-api';
 import { taskApi, type TaskCommand, type TaskSources, type TaskSummary } from './api';
@@ -106,13 +106,19 @@ export function TaskComposer({
   const [activationId, setActivationId] = useState('latest');
   const activations = mode.kind === 'start' ? mode.detail.activations : [];
   const tables = useMemo(() => tableApi(workspaceId), [workspaceId]);
-  const tableNames = useTableNames(
-    tables,
-    activations.some(item => item.scope.length > 0),
-  );
+  const needsTableNames = activations.some(item => item.scope.length > 0);
+  const tableRead = useTablePicker(tables, needsTableNames);
+  const namesLoading = needsTableNames && tableRead.state.kind === 'loading';
   const activation = activations.find(item => item.id === activationId);
   // Activations arrive newest first, and the server runs an unpinned task under the newest one.
   const scope = activationId === 'latest' ? activations[0]?.scope : activation?.scope;
+  const tableNames = useMemo(() => {
+    const names = new Map(
+      tableRead.state.kind === 'ready' ? tableRead.state.data.map(table => [table.id, table.definition.label]) : [],
+    );
+    for (const entry of scope ?? []) if (!names.has(entry.assetId)) names.set(entry.assetId, 'a table you cannot see');
+    return names;
+  }, [tableRead.state, scope]);
   const effectiveScope =
     (activationId === 'latest' ? activations[0]?.effectiveScope : activation?.effectiveScope) ?? [];
   const unavailable = scope
@@ -287,12 +293,12 @@ export function TaskComposer({
                 </SelectContent>
               </Select>
             </Field>
-            {scope && effectiveScope.every(entry => tableNames.has(entry.assetId)) && (
+            {scope && !namesLoading && (
               <p className="break-words text-sm text-muted-foreground">
                 Data this task may use: {scopeText(effectiveScope, tableNames)}.
               </p>
             )}
-            {!!unavailable?.length && unavailable.every(entry => tableNames.has(entry.assetId)) && (
+            {!!unavailable?.length && !namesLoading && (
               <Alert>
                 <AlertDescription>
                   This task cannot use {scopeText(unavailable, tableNames)}. An agent manager must add table access from
