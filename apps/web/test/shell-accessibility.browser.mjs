@@ -33,6 +33,25 @@ after(async () => {
   await server?.close();
 });
 
+async function injectAxe(page, pathname, landmark) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await page.waitForURL(`${origin}${pathname}`);
+    await page.waitForLoadState('load');
+    await landmark.waitFor();
+    try {
+      await page.addScriptTag({ path: require.resolve('axe-core/axe.min.js') });
+      return;
+    } catch (error) {
+      if (
+        attempt === 1 ||
+        !(error instanceof Error) ||
+        !error.message.includes('Execution context was destroyed, most likely because of a navigation')
+      )
+        throw error;
+    }
+  }
+}
+
 async function accessible(page, { shellOnly = false } = {}) {
   const violations = await page.evaluate(
     async shellOnly =>
@@ -124,8 +143,7 @@ for (const mobile of [false, true])
         const toggle = page.getByRole('button', { name: 'Toggle sidebar', exact: true });
         await toggle.waitFor();
         const launcher = page.locator('aside[aria-label="Bud assistant"] button[data-slot="popover-trigger"]');
-        await launcher.waitFor();
-        await page.addScriptTag({ path: require.resolve('axe-core/axe.min.js') });
+        await injectAxe(page, '/acme/help', launcher);
         if (mobile) await toggle.click();
         await accessible(page);
         const workspaceMenu = page.getByRole('button', { name: 'Acme, workspace menu', exact: true });
@@ -164,9 +182,7 @@ for (const mobile of [false, true])
         await page.getByRole('dialog', { name: 'Bud quick chat', exact: true }).waitFor({ state: 'hidden' });
         if (mobile) await toggle.click();
         await page.getByRole('link', { name: 'Calendar', exact: true }).click();
-        await page.waitForURL('**/acme/calendar');
-        await page.locator('aside[data-corner="header"]').waitFor();
-        await page.addScriptTag({ path: require.resolve('axe-core/axe.min.js') });
+        await injectAxe(page, '/acme/calendar', page.locator('aside[data-corner="header"]'));
         assert.equal(await launcher.getAttribute('aria-label'), 'Bud. Open quick chat');
         await accessible(page, { shellOnly: true });
         await launcher.click();
