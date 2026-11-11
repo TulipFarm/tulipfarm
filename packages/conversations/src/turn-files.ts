@@ -12,7 +12,7 @@ import {
 import { textTokens } from '@tulipfarm/content-budget';
 import { qualified } from '@tulipfarm/workspace-storage/runtime';
 import { loadModelCatalog } from '@tulipfarm/config';
-import { FileError } from '@tulipfarm/files';
+import { FileError, requireReadableFile } from '@tulipfarm/files';
 import {
   ImagePreparationError,
   prepareImageForModel,
@@ -1062,7 +1062,15 @@ async function libraryFile(tx: AuthorizationTransaction, actor: HumanActor, sour
       membershipId: actor.membershipId,
     });
   } catch (error) {
-    if (error instanceof AccessDenied) return undefined;
+    if (error instanceof AccessDenied) {
+      try {
+        await requireReadableFile(tx, actor, source, { includeTrash: true });
+        return { error: 'file-trashed' as const };
+      } catch (denied) {
+        if (denied instanceof AccessDenied) return undefined;
+        throw denied;
+      }
+    }
     throw error;
   }
   return { kind: 'library', messageId: turnId, fileId: source };
@@ -1085,6 +1093,14 @@ export async function readChatFile(input: {
   /** Whether the route answering this turn reads images; a paused family's replacement may not, though the pinned family does. */
   imageInput: boolean;
 }): Promise<{ result: unknown; sources: SourceDependency[]; images?: ChatFileImages }> {
+  if (!input.call.source)
+    return {
+      result: {
+        error: 'file-source-required',
+        instruction: 'Use files.list to choose a file, then pass its ID as source. Ask which file to read if needed.',
+      },
+      sources: [],
+    };
   const found = await input.transaction(async tx => {
     const part =
       (
@@ -1123,6 +1139,7 @@ export async function readChatFile(input: {
       ).rows[0] ??
       (await libraryFile(tx, input.actor, input.call.source, input.turnId));
     if (!part) return null;
+    if (part.error === 'file-trashed') return { error: 'file-trashed' as const };
     const turn = z
       .object({ responder: z.string() })
       .parse(
@@ -1161,6 +1178,14 @@ export async function readChatFile(input: {
       },
       sources: [],
     };
+  if ('error' in found)
+    return {
+      result: {
+        error: found.error,
+        instruction: 'File is in Trash. Restore it, then try again.',
+      },
+      sources: [],
+    };
   const { part, pinned, library, api } = found;
   const family = input.turnFiles.family(pinned.familyId);
   const recognitionModel = pinned.recognitionFamilyId;
@@ -1186,6 +1211,22 @@ export async function readChatFile(input: {
       selection: input.call,
     },
   });
+  if (read.reading.kind === 'unavailable' && read.reading.cause === 'access') {
+    const item =
+      part.kind === 'file'
+        ? await input.transaction(tx => libraryFile(tx, input.actor, part.fileId, input.turnId))
+        : undefined;
+    const trashed = item && 'error' in item;
+    return {
+      result: {
+        error: trashed ? 'file-trashed' : 'file-not-found',
+        instruction: trashed
+          ? 'File is in Trash. Restore it, then try again.'
+          : 'File not found or unavailable. Use files.list to choose a file you can open.',
+      },
+      sources: [],
+    };
+  }
   const context = new TurnFileContext();
   const entry: Entry = {
     messageId: part.messageId,

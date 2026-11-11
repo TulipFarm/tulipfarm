@@ -4,6 +4,19 @@ import { googleToolActivity } from '../src/google-tool-activity.ts';
 import { deniedProposalDetail, rowReviewDetail, storedToolActivity } from '../src/tool-activity-history.ts';
 import { apiCallProblem, apiCallReceipt, executionReceipt, toolPresentation } from '../src/tool-activity.ts';
 
+for (const [error, detail] of [
+  ['file-source-required', "Couldn't tell which file to read"],
+  ['file-not-found', 'File not found or unavailable'],
+  ['file-trashed', 'File is in Trash. Restore it, then try again.'],
+])
+  test(`a failed file read retains its ${error} reason in activity`, async () => {
+    for (const output of [{ error }, { result: { error }, sources: [] }])
+      assert.deepEqual(await storedToolActivity(undefined, { tool: 'files.read', status: 'completed', output }), {
+        status: 'failed',
+        detail,
+      });
+  });
+
 test('Google activity describes the actual action without including private arguments', () => {
   assert.equal(
     googleToolActivity('google.read', {

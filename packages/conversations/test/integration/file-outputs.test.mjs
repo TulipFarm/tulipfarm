@@ -8,9 +8,63 @@ import { createConversationExecutor } from '../../src/runtime.ts';
 import { createAttachments } from '../../src/attachments.ts';
 import { createFileOutput, fileOutputId } from '../../src/file-outputs.ts';
 import { conversationFixture } from '../fixture.mjs';
+import { bindFileSources } from '../../src/file-references.ts';
+import { readChatFile } from '../../src/turn-files.ts';
+import { storedToolActivity } from '../../src/tool-activity-history.ts';
+import { commonCompatibility } from '../../../workspaces/src/storage.ts';
 
 const report = '# Q3 summary\n\nRenewal is due 9 December.\n';
 const call = { tool: 'files.create', name: 'Q3 summary', format: 'md', content: report };
+
+test(
+  'a trashed file gives a specific read result and activity without reading its bytes',
+  { timeout: 60000 },
+  async () => {
+    const f = await setup();
+    try {
+      const w = f.workspace;
+      const id = randomUUID();
+      await f.files.createDerived(
+        w.id,
+        w.userId,
+        id,
+        {
+          name: 'Notes.md',
+          parentId: null,
+          mediaType: 'text/markdown',
+        },
+        Buffer.from('# Notes'),
+      );
+      await f.files.trash(w.id, w.userId, id, true);
+      const chatId = await f.chat(w.userId);
+      const sent = await f.send(w.userId, chatId, [{ kind: 'text', text: 'Read my file.' }]);
+      const read = await readChatFile({
+        workspaceId: w.id,
+        conversationId: chatId,
+        turnId: sent.turnId,
+        actor: { kind: 'human', userId: w.userId, membershipId: w.membershipId },
+        call: { source: id },
+        transaction: operation =>
+          f.runtime.transaction(w.id, { minimum: 1, maximum: commonCompatibility.maximum }, tx =>
+            operation(bindFileSources(tx)),
+          ),
+        files: { download: () => assert.fail('Never download a trashed file') },
+      });
+      assert.equal(read.result.error, 'file-trashed');
+      assert.deepEqual(read.sources, []);
+      assert.deepEqual(
+        await storedToolActivity(undefined, {
+          tool: 'files.read',
+          status: 'completed',
+          output: { result: read.result, sources: [] },
+        }),
+        { status: 'failed', detail: 'File is in Trash. Restore it, then try again.' },
+      );
+    } finally {
+      await f.close();
+    }
+  },
+);
 
 async function setup({ quotaBytes } = {}) {
   const f = await conversationFixture();

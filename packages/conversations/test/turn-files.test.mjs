@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { MediaRecognitionFailed, MediaRecognitionUnavailable } from '@tulipfarm/memory-core/parser/media-contracts';
 import { AttachmentError } from '../src/attachments.ts';
-import { readFile, readTurnFiles, withImages } from '../src/turn-files.ts';
+import { readChatFile, readFile, readTurnFiles, withImages } from '../src/turn-files.ts';
 import { docx, officeParts, xlsx, zip } from '../../memory-core/test/fixtures/parser-documents.mjs';
 import { mediaPdf, png } from '../../memory-core/test/fixtures/parser-media.mjs';
 
@@ -11,6 +11,32 @@ const textFamily = { imageInput: false, maxImageBytes: 5 * 1024 * 1024 };
 const actor = { kind: 'human', userId: 'user-1', membershipId: 'member-1' };
 const messageId = '00000000-0000-4000-8000-000000000001';
 const attachmentId = '00000000-0000-4000-8000-000000000002';
+
+test('a read without a source names the missing ID without making any requests', async () => {
+  const read = await readChatFile({
+    call: { source: '' },
+    transaction: () => assert.fail('A missing source needs no database or provider'),
+  });
+  assert.equal(read.result.error, 'file-source-required');
+  assert.match(read.result.instruction, /files\.list/);
+  assert.deepEqual(read.sources, []);
+});
+
+test('an unknown file source is not an empty library result', async () => {
+  const read = await readChatFile({
+    conversationId: messageId,
+    turnId: messageId,
+    actor,
+    call: { source: 'not-a-file-id' },
+    transaction: operation =>
+      operation({
+        schema: 'test',
+        client: { query: async () => ({ rows: [], rowCount: 0 }) },
+      }),
+  });
+  assert.equal(read.result.error, 'file-not-found');
+  assert.match(read.result.instruction, /files\.list/);
+});
 
 /** Reads one chat attachment through the turn reader and returns the block the model sees. */
 async function attachmentBlock(download, family = { ...textFamily, maxInputTokens: 100_000, imageInputTokens: 1000 }) {

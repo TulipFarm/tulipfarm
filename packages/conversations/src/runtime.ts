@@ -327,6 +327,7 @@ export type ConversationReply = (input: {
   timeZone: string | null;
   priorCalls?: number;
   priorToolCalls?: readonly unknown[];
+  priorFileResults?: readonly { call: unknown; result: unknown }[];
   priorToolResults?: readonly { call: unknown; output: unknown }[];
   readWorkspaceDirectory?: () => Promise<unknown>;
   priorReviewCards?: readonly import('./results.ts').ReviewCardReference[];
@@ -2892,6 +2893,9 @@ export function createConversationExecutor(
             timeZone: source.timeZone,
             priorCalls: source.priorTools.length,
             priorToolCalls: source.executionSteps.map(step => step.call),
+            priorFileResults: source.executionSteps
+              .filter(step => step.tool.startsWith('files.') && step.output !== null)
+              .map(step => ({ call: step.call, result: protectedOutputSchema.parse(step.output).result })),
             priorToolResults: source.executionSteps.flatMap(step =>
               step.output === null
                 ? []
