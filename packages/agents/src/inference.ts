@@ -49,7 +49,13 @@ import {
 } from '@tulipfarm/observability';
 import { chatToolCallLimit, chatTitleSchema, shortenTitle } from '@tulipfarm/conversations/contracts';
 import { reviewCardReference, type ReviewCardReference, type ReviewCardState } from '@tulipfarm/conversations/results';
-import { rowReviewPrefilter, tableCreationRequest as tableRequest } from './row-review-request.ts';
+import {
+  mentionsTable,
+  rowReviewMatches,
+  rowReviewPrefilter,
+  tableCreationRequest as tableRequest,
+  type RowReviewTurn,
+} from './row-review-request.ts';
 import { withoutTrailingControlMarker } from '@tulipfarm/conversations/reply-text';
 import { createChatToolGuard } from './chat-tool-guard.ts';
 import { apiRefusedReply } from './api-call-guard.ts';
@@ -1109,7 +1115,7 @@ export async function inferDecision(
   });
 }
 
-export type ChatTextTurn = { role: 'user' | 'assistant'; text: string };
+export type ChatTextTurn = RowReviewTurn;
 export const chatImageMediaTypes = Object.freeze(['image/png', 'image/jpeg', 'image/webp', 'image/gif'] as const);
 export type ChatImageMediaType = (typeof chatImageMediaTypes)[number];
 /** Image `data` is raw bytes or their base64 encoding. */
@@ -3541,10 +3547,8 @@ export async function inferWithTools(
   let outputProduced = false;
   const items: LoopItem[] = messages.map(turn => ({ kind: 'turn', turn }));
   const latest = [...messages].reverse().find(turn => turn.role === 'user');
-  const rowReviewCandidate = rowReviewPrefilter(
-    sourceMessages.filter(turn => turn.role === 'user').map(turn => textTurn(turn).text),
-  );
-  const request = rowReviewCandidate ?? (latest ? textTurn(latest).text : '');
+  let rowReviewCandidate = rowReviewPrefilter(sourceMessages.map(textTurn));
+  let request = rowReviewCandidate ?? (latest ? textTurn(latest).text : '');
   let rowReviewRequested = false;
   const earlier = messages
     .filter(turn => turn !== latest)
@@ -3678,18 +3682,67 @@ export async function inferWithTools(
   const reviewReferences = new Map(
     (tools?.priorReviewCards ?? []).map(reference => [`${reference.kind}:${reference.id}`, reference]),
   );
+  const matchingRowInput = (value: unknown) => {
+    const input = z.object({ tableId: z.string() }).loose().safeParse(value);
+    if (!input.success || !rowReviewMatches(request, input.data)) return false;
+    const inspected = items
+      .flatMap(item => (item.kind === 'results' ? item.results : []))
+      .filter(result => !result.error && result.name === 'schema_inspect')
+      .flatMap(result => {
+        const table = z.object({ id: z.string(), name: z.string() }).safeParse(toolResultValue(result.output));
+        return table.success ? [table.data] : [];
+      });
+    const named = [
+      ...namedInventoryTables(request, inventory),
+      ...inspected.filter(table => mentionsTable(request, table.name)),
+    ];
+    return named.some(table => table.id === input.data.tableId);
+  };
+  const matchingRowReceipt = (result: ToolResult) => {
+    if (!rowReviewReceipt(result, items)) return false;
+    const call = items
+      .flatMap(item => (item.kind === 'model' ? item.calls : []))
+      .reverse()
+      .find(call => call.id === result.id && call.name === result.name);
+    if (!call) return false;
+    if (call.name !== proposeTool) return matchingRowInput(call.input);
+    const input = z.object({ input: z.string() }).safeParse(call.input);
+    if (!input.success) return false;
+    try {
+      const proposal = z
+        .object({
+          plans: z.array(
+            z.object({
+              kind: z.string(),
+              tableId: z.string(),
+              changes: z.array(z.unknown()).optional(),
+            }),
+          ),
+        })
+        .parse(JSON.parse(input.data.input));
+      return proposal.plans.some(
+        plan =>
+          (plan.kind === 'records' || plan.kind === 'import') &&
+          matchingRowInput({ tableId: plan.tableId, ...(plan.changes && { rows: plan.changes }) }),
+      );
+    } catch {
+      return false;
+    }
+  };
+  const resumedRowReceipt = (reference: ReviewCardReference) =>
+    tools?.priorToolResults?.some(result => {
+      const call = z.object({ tool: z.string() }).loose().safeParse(result.call);
+      if (!call.success || !call.data.tool.startsWith('rows.') || !matchingRowInput(call.data)) return false;
+      const output = z.object({ result: z.unknown() }).safeParse(result.output);
+      const saved = reviewCardReference(call.data.tool, output.success ? output.data.result : result.output);
+      return saved?.kind === reference.kind && saved.id === reference.id;
+    });
   const rowReviewMade = () =>
     items.some(
       item =>
         item.kind === 'results' &&
-        item.results.some(result => result.reviewPending === true && rowReviewReceipt(result, items)),
-    ) ||
-    reviewStates.some(
-      state =>
-        state.reference.kind === 'row' &&
-        state.status === 'pending' &&
-        tools?.priorReviewCards?.some(reference => reference.kind === 'row' && reference.id === state.reference.id),
-    );
+        item.results.some(result => result.reviewPending === true && matchingRowReceipt(result)),
+    ) || reviewStates.some(state => state.status === 'pending' && resumedRowReceipt(state.reference));
   let reviewStates: readonly ReviewCardState[] = [];
   const tableReviewReply = async () => {
     for (const item of items)
@@ -3707,12 +3760,12 @@ export async function inferWithTools(
             state.status === 'pending' &&
             state.summary &&
             (!rowReviewRequested ||
-              state.reference.kind === 'row' ||
+              resumedRowReceipt(state.reference) ||
               items.some(
                 item =>
                   item.kind === 'results' &&
                   item.results.some(
-                    result => result.reviewCard?.id === state.reference.id && rowReviewReceipt(result, items),
+                    result => result.reviewCard?.id === state.reference.id && matchingRowReceipt(result),
                   ),
               )),
         )
@@ -4473,6 +4526,16 @@ export async function inferWithTools(
           tools?.projectInstructions === undefined
             ? await observeChatDetail('inventory', async () => tools?.readWorkspaceInventory?.())
             : undefined;
+        if (!rowReviewCandidate) {
+          rowReviewCandidate = rowReviewPrefilter(
+            sourceMessages.map(textTurn),
+            inventory?.tables.map(table => table.name),
+          );
+          if (rowReviewCandidate) {
+            request = rowReviewCandidate;
+            rowReviewIntentChecked = false;
+          }
+        }
         if (
           inventory?.directoryNames &&
           !invitationLookup(sourceMessages) &&

@@ -235,7 +235,16 @@ test('a direct write is reported truthfully instead of claiming no rows changed'
 test('a structure-only card cannot replace row review but a records proposal can', async t => {
   for (const kind of ['schema', 'records']) {
     provider(t, [
-      { calls: [use('tables.propose', { input: JSON.stringify({ plans: [{ kind }] }) })] },
+      { calls: [use('schema.inspect', { tableId })] },
+      {
+        calls: [
+          use('tables.propose', {
+            input: JSON.stringify({
+              plans: [{ kind, tableId, ...(kind === 'records' && { changes: batch().input.rows }) }],
+            }),
+          }),
+        ],
+      },
       { text: 'All set.' },
       { text: 'All set.' },
       { text: 'All set.' },
@@ -243,7 +252,7 @@ test('a structure-only card cannot replace row review but a records proposal can
     const result = await inferWithTools(
       nativeRoutes.azure,
       [{ role: 'user', text: request }],
-      async () => ({ id: 'review', status: 'pending' }),
+      async call => (call.tool === 'schema.inspect' ? schema : { id: 'review', status: 'pending' }),
       undefined,
       false,
       null,
@@ -436,4 +445,160 @@ test('an unavailable checker keeps an informational answer instead of forcing ro
     context,
   );
   assert.equal(result.text, 'Review means checking the rows before a change.');
+});
+
+test('ordinary review words stream without a row-intent check', async t => {
+  for (const text of ['Review my quarterly plan.', 'Draft an email.', 'Look up the weather.', 'Check my calendar.']) {
+    let checks = 0;
+    const streamed = [];
+    t.mock.method(globalThis, 'fetch', async (_url, init) => {
+      const body = JSON.parse(init.body);
+      if (isCompletionRequest(body)) {
+        checks++;
+        return Response.json(selectReply('azure', { status: 'completed', reason: 'Done.' }));
+      }
+      return azureStreamReply(nativeReply('azure', { text: 'Here is the answer.' }));
+    });
+    const result = await inferWithTools(
+      nativeRoutes.azure,
+      [{ role: 'user', text }],
+      () => assert.fail(),
+      undefined,
+      false,
+      null,
+      { answerText: update => streamed.push(update.text) },
+    );
+    assert.equal(result.text, 'Here is the answer.');
+    assert.ok(streamed.includes(result.text), text);
+    assert.equal(checks, 0, text);
+    t.mock.restoreAll();
+  }
+});
+
+for (const retry of ['Where is the card?', 'Show me the card.', 'I still do not see the card.'])
+  test(`an unbacked preceding proposal holds streaming on "${retry}"`, async t => {
+    const claim = 'Your review card for the rows is ready below.';
+    provider(t, [{ text: claim }, { text: claim }, { text: claim }], { stream: true });
+    const streamed = [];
+    const result = await inferWithTools(
+      nativeRoutes.azure,
+      [
+        { role: 'user', text: request },
+        { role: 'assistant', text: claim },
+        { role: 'user', text: retry },
+      ],
+      () => assert.fail(),
+      undefined,
+      false,
+      null,
+      {
+        ...context,
+        answerText: update => streamed.push(update.text),
+      },
+    );
+    assert.equal(result.text, stopped);
+    assert.ok(!streamed.includes(claim), 'a fabricated card must never stream');
+  });
+
+for (const summary of [
+  'A review card for 3 rows in "Tasks" is ready in this chat.',
+  'A review card for 9 rows in "Orders" is ready in this chat.',
+])
+  test(`an earlier pending card cannot satisfy a new review request: ${summary}`, async t => {
+    provider(
+      t,
+      Array.from({ length: 3 }, () => ({ text: 'All set.' })),
+    );
+    const result = await inferWithTools(
+      nativeRoutes.azure,
+      [{ role: 'user', text: request }],
+      () => assert.fail(),
+      undefined,
+      false,
+      null,
+      {
+        ...context,
+        priorReviewCards: [{ kind: 'row', id: 'old-card' }],
+        reviewCards: async refs => refs.map(reference => ({ reference, status: 'pending', summary })),
+      },
+    );
+    assert.equal(result.text, stopped);
+  });
+
+test('a current card with the wrong row count does not satisfy the request', async t => {
+  provider(t, [
+    {
+      calls: [
+        use('rows.create.batch', {
+          ...batch().input,
+          tableId,
+          expectedAppliedRevision: revision,
+          rows: [{ values: { [fieldId]: { kind: 'text', value: 'Wrong' } } }],
+        }),
+      ],
+    },
+    { text: 'All set.' },
+    { text: 'All set.' },
+    { text: 'All set.' },
+  ]);
+  const result = await inferWithTools(
+    nativeRoutes.azure,
+    [{ role: 'user', text: request }],
+    async () => receipt,
+    undefined,
+    false,
+    null,
+    context,
+  );
+  assert.equal(result.text, stopped);
+});
+
+test('a current card for a different table cannot replace the requested review', async t => {
+  const otherTable = '00000000-0000-4000-8000-000000000003';
+  provider(t, [
+    { calls: [use('schema.inspect', { tableId })] },
+    { calls: [use('rows.create.batch', { ...batch().input, tableId: otherTable })] },
+    { text: 'All set.' },
+    { text: 'All set.' },
+    { text: 'All set.' },
+  ]);
+  const result = await inferWithTools(
+    nativeRoutes.azure,
+    [{ role: 'user', text: request }],
+    async call => (call.tool === 'schema.inspect' ? schema : receipt),
+    undefined,
+    false,
+    null,
+    context,
+  );
+  assert.equal(result.text, stopped);
+});
+
+test('a resumed receipt from the current turn must still match the requested table and row count', async t => {
+  const call = { tool: 'rows.create.batch', ...batch().input };
+  provider(t, [{ text: 'All set.' }]);
+  const result = await inferWithTools(
+    nativeRoutes.azure,
+    [{ role: 'user', text: request }],
+    () => assert.fail('A saved current-turn call must not repeat'),
+    undefined,
+    false,
+    null,
+    {
+      ...context,
+      priorCalls: 1,
+      priorToolCalls: [call],
+      priorToolResults: [{ call, output: { result: receipt } }],
+      priorReviewCards: [{ kind: 'row', id: receipt.draftId }],
+      readWorkspaceInventory: async () => ({
+        tables: [schema],
+        agents: [],
+        workflows: [],
+        skills: [],
+        visibility: 'requester-readable',
+        complete: true,
+      }),
+    },
+  );
+  assert.equal(result.text, summary);
 });
