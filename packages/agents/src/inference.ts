@@ -2708,19 +2708,33 @@ export function inventedFailure(candidate: string, items: readonly LoopItem[], w
 export const blamesFailure = (candidate: string) =>
   accessFailure.test(candidate) || (earlierFailed.test(candidate) && earlierRows.test(candidate));
 
-const toolNames = [...new Set([...toolNameSchema.options, ...nativeFrameworkToolNames, 'tools_search'])]
-  .filter(name => /[._]/.test(name))
-  .sort((a, b) => b.length - a.length);
-const toolNameMention = new RegExp(`(?<![\\w./-])(?:${toolNames.map(escaped).join('|')})(?![\\w-]|\\.\\w)`, 'i');
+const toolNames = [
+  ...toolNameSchema.options,
+  ...nativeChatTools(undefined, true, undefined, true).tools.map(tool => tool.name),
+  toolSearchName,
+];
+function toolNamePattern(offered: readonly NativeTool[] = []) {
+  const names = [
+    ...new Set(
+      [...toolNames, ...offered.map(tool => tool.name)].flatMap(name => [
+        name,
+        nativeToolName(name),
+        name.replaceAll('_', '.'),
+      ]),
+    ),
+  ].sort((a, b) => b.length - a.length);
+  return new RegExp(`(?<![\\w./-])(?:${names.map(escaped).join('|')})(?![\\w-]|\\.\\w)`, 'i');
+}
+const toolNameMention = toolNamePattern();
 const internalWording =
   /\bconcrete blocker\b|\bcompletion[- ]check\b|\b(?:tool|write) receipts?\b|\breceipts? (?:show|shows|from|in this)\b|\btool calls?\b|\bthis reply\b|\bapologi[sz]e for the confusion\b|\bstopping point\b/i;
 /**
  * Why a reply that shows the person internal wording must be rewritten: tool names, receipts, or the wording of the
  * reply checks and their corrections. A person who asked about tools may still read tool names.
  */
-export function leakedWording(candidate: string, request: string) {
+export function leakedWording(candidate: string, request: string, toolMention = toolNameMention) {
   const asksTools = /\btools?\b|\b\w+[._]\w+\b/i.test(request);
-  const leak = internalWording.exec(candidate)?.[0] ?? (asksTools ? undefined : toolNameMention.exec(candidate)?.[0]);
+  const leak = internalWording.exec(candidate)?.[0] ?? (asksTools ? undefined : toolMention.exec(candidate)?.[0]);
   return leak
     ? {
         status: 'continue' as const,
@@ -3437,6 +3451,7 @@ export async function inferWithTools(
   let directoryAttempted = false;
   let directoryRecovery = false;
   let directoryReadRequired = false;
+  let chatToolNameMention = toolNameMention;
   if (directoryExpected && tools?.readWorkspaceDirectory) {
     const retained = workspaceDirectorySchema.safeParse(await tools.readWorkspaceDirectory());
     if (retained.success && retained.data.scope !== 'filtered') {
@@ -3457,7 +3472,7 @@ export async function inferWithTools(
       : update => {
           if (
             !directoryCheckNeeded &&
-            !toolNameMention.test(update.text) &&
+            !chatToolNameMention.test(update.text) &&
             !activeBuiltinSkills.has('agent-authoring')
           )
             tools?.answerText?.(update);
@@ -4037,6 +4052,7 @@ export async function inferWithTools(
     for (const name of idle) loaded.delete(name);
     if (idle.length) {
       catalog = nativeChatTools(mcp, tools?.earlierMessages ?? false, loaded, tools?.chatFiles ?? false);
+      chatToolNameMention = toolNamePattern(catalog.tools);
       previousCatalog = catalogKey(mcp);
     }
     baseline = undefined;
@@ -4201,6 +4217,7 @@ export async function inferWithTools(
           catalog = observeChatDetailSync('tool-schemas', () =>
             nativeChatTools(mcp, tools?.earlierMessages ?? false, loaded, tools?.chatFiles ?? false),
           );
+          chatToolNameMention = toolNamePattern(catalog.tools);
           previousCatalog = currentCatalogKey;
         }
         if (!reminder || catalogChanged || previousMemory !== memoryKey || previousInventory !== inventoryKey) {
@@ -4559,7 +4576,8 @@ export async function inferWithTools(
         continue;
       }
       const candidate = rendered?.text ?? selected.text;
-      const directoryLeak = toolNameMention.test(candidate);
+      const wording = leakedWording(candidate, request, chatToolNameMention);
+      const directoryLeak = chatToolNameMention.test(candidate) && !!wording;
       directoryCheckNeeded ||= directoryLeak;
       const preview = (text: string) => {
         try {
@@ -4673,7 +4691,7 @@ export async function inferWithTools(
             waitingCardMisdescribed(candidate, rowCards, request) ??
             rowRequestSkipped(items, request, rowCards, waitingRows) ??
             inventedFailure(candidate, items, waiting) ??
-            (directoryLeak ? undefined : leakedWording(candidate, request)));
+            wording);
       if (
         !unbacked &&
         !writeUnbacked &&
@@ -4695,7 +4713,8 @@ export async function inferWithTools(
       }
       let checked: z.infer<typeof completionCheckSchema>['decision'] | undefined =
         unbacked ?? writeUnbacked ?? idAsked ?? misdescribed;
-      if (!checked) {
+      const wordingCheck = directoryLeak && checked === wording ? wording : undefined;
+      if (!checked || wordingCheck) {
         report('finishing');
         try {
           checked = await withChatModelRequest('completion', () => {
@@ -4750,13 +4769,15 @@ export async function inferWithTools(
               route,
             );
           });
+          if (wordingCheck) checked = { ...checked, status: 'continue', reason: wordingCheck.reason };
         } catch (error) {
           recordChatCompletionCheck('error');
           if (!(error instanceof ModelCallError) || signal?.aborted) {
             preview('');
             throw error;
           }
-          if (directoryCheckNeeded && !directoryExpected) {
+          const safeUnchecked = !directoryLeak && (workToolUsed || !claimsActionOutcome(candidate));
+          if (!wordingCheck && directoryCheckNeeded && !directoryExpected && safeUnchecked) {
             log('warn', 'activity', 'call_failed', {
               operation: 'chat.directory-admission',
               outcome: 'checker-unavailable',
@@ -4765,8 +4786,8 @@ export async function inferWithTools(
           }
           // A check model that fails must not discard a finished answer; admission, authorization and cancellation still end the turn.
           // An answer that reports an outcome no tool in this reply produced is never sent unchecked.
-          if (!directoryLookup && (workToolUsed || !claimsActionOutcome(candidate))) return accept();
-          checked = unverifiedOutcome;
+          if (!wordingCheck && !directoryLookup && safeUnchecked) return accept();
+          checked = wordingCheck ?? unverifiedOutcome;
         }
       }
       if (directoryCheckNeeded && checked.workspaceDirectory && checked.workspaceDirectory !== 'not-applicable') {
@@ -4882,7 +4903,7 @@ export async function inferWithTools(
             unbacked ||
             writeUnbacked ||
             cardClaimed ||
-            leakedWording(candidate, request))
+            leakedWording(candidate, request, chatToolNameMention))
         )
           return finish(heldBackReply(held, request), true);
         // A reply that keeps naming a card it did not make ends by pointing at the card that does wait, if any.
