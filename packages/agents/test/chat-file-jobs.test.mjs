@@ -29,6 +29,69 @@ const route = model => ({ ...nativeRoutes.azure, model });
 for (const model of models)
   for (const sse of [false, true]) {
     const title = `regression: ${model} ${sse ? 'SSE' : 'JSON'}`;
+    for (const scenario of [
+      {
+        request: 'Make sure the budget spreadsheet adds up.',
+        text: 'Yes, the totals add up to 42.',
+        read: true,
+      },
+      {
+        request: 'Write down what the budget spreadsheet says about revenue.',
+        text: 'The budget spreadsheet shows revenue of 42.',
+        read: true,
+      },
+      {
+        request: 'Create an agent to summarize new documents.',
+        text: 'Which folder should the agent monitor?',
+        read: false,
+      },
+      {
+        request: 'Save this to memory: my files should be named by date.',
+        text: 'What date format should I use?',
+        read: false,
+      },
+    ])
+      test(`${title} preserves a non-save direct object: ${scenario.request}`, async t => {
+        provider(t, sse, [
+          ...(scenario.read ? [nativeReply('azure', { calls: [use('files.read', { source: fileId })] })] : []),
+          nativeReply('azure', { text: scenario.text }),
+          nativeReply('azure', { calls: [use('files.create', create)] }),
+          nativeReply('azure', { text: 'Report.md is saved in Files.' }),
+        ]);
+        const calls = [];
+        const result = await inferWithTools(
+          route(model),
+          [{ role: 'user', text: scenario.request }],
+          async call => {
+            calls.push(call.tool);
+            return call.tool === 'files.create' ? saved : { file: 'Revenue and total: 42' };
+          },
+          undefined,
+          false,
+          null,
+          options,
+        );
+        assert.deepEqual(calls, scenario.read ? ['files.read'] : []);
+        assert.equal(result.text, scenario.text);
+      });
+
+    test(`${title} preserves a necessary question on a real file request without forcing a save`, async t => {
+      const text = 'Which columns would you like?';
+      provider(t, sse, [nativeReply('azure', { text })], false, body =>
+        assert.notEqual(body.tool_choice?.function?.name, 'files_create'),
+      );
+      const result = await inferWithTools(
+        route(model),
+        [{ role: 'user', text: 'Create a spreadsheet of my customers.' }],
+        () => assert.fail('A necessary clarification must not dispatch a file save'),
+        undefined,
+        false,
+        null,
+        options,
+      );
+      assert.equal(result.text, text);
+    });
+
     test(`${title} a successful read can answer with a summary without saving anything`, async t => {
       const text = "Here's a summary I made of the file: it contains rows created last month.";
       provider(t, sse, [
