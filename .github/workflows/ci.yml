@@ -153,6 +153,10 @@ jobs:
         run: pnpm --filter @tulipfarm/api exec node --experimental-test-module-mocks --test --test-concurrency=1 test/agent-tasks.integration.mjs
       - name: Check that authorization lock readers share and writers queue fairly
         run: pnpm --filter @tulipfarm/access exec node --test --test-concurrency=1 test/authorization-lock.integration.mjs
+      - name: Check workspace route admission and membership revocation
+        run: |
+          pnpm --filter @tulipfarm/api exec node --test --test-name-pattern='workspace HTTP conceals' test/governance.integration.mjs
+          pnpm --filter @tulipfarm/workspace-storage exec node --test --test-name-pattern='membership admission' test/integration/runtime.test.mjs
       - name: Check row and project review drafts
         env:
           XAI_API_KEY: synthetic-not-secret

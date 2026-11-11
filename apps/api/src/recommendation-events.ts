@@ -2,7 +2,7 @@ import { PassThrough } from 'node:stream';
 import { fromNodeHeaders } from 'better-auth/node';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { AccessDenied, lockAuthorization, resolveHuman } from '@tulipfarm/access';
+import { AccessDenied, WorkspaceMembershipDenied, lockAuthorization, resolveHuman } from '@tulipfarm/access';
 import { commonCompatibility, StorageUnavailableError } from '@tulipfarm/workspace-storage/runtime';
 import type { WorkspaceRuntime } from '@tulipfarm/workspaces/storage';
 import type { RecommendationStreamEvent } from '@tulipfarm/recommendations/contracts';
@@ -60,6 +60,8 @@ export function registerRecommendationEvents(
         if (!(await dependencies.eligible(workspaceId, userId)))
           return reply.code(404).send({ error: 'recommendations-unavailable' });
       } catch (cause) {
+        if (cause instanceof WorkspaceMembershipDenied && cause.userId === userId)
+          return reply.code(404).send({ error: 'not-found' });
         if (cause instanceof AccessDenied) return reply.code(404).send({ error: 'workspace-not-found' });
         if (!(cause instanceof StorageUnavailableError))
           app.log.error({ workspaceId }, 'Recommendation stream authorization failed');

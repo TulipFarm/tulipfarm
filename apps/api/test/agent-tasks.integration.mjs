@@ -9,6 +9,7 @@ import Fastify from 'fastify';
 import { Pool } from 'pg';
 import { authConfig, createAuth } from '../src/auth.ts';
 import { registerAgentTasks } from '../src/agent-tasks.ts';
+import { protectWorkspaceRequests } from '../src/business.ts';
 import { workspaceMcpCatalog } from '../src/workspace-mcp-catalog.ts';
 import { workspaceTableMigrations } from '@tulipfarm/workspaces/table-migrations';
 import { encryptCredential } from '../../../packages/workspaces/src/credentials.ts';
@@ -218,8 +219,8 @@ test(
       assert.equal(response.headers.get('cache-control'), 'no-store');
       return result;
     }
-    async function notFound(who, path, host = address) {
-      assert.deepEqual(await http(who, 'GET', path, undefined, 404, host), { error: 'task-not-found' });
+    async function notFound(who, path, host = address, error = 'task-not-found') {
+      assert.deepEqual(await http(who, 'GET', path, undefined, 404, host), { error });
     }
     await http(null, 'GET', base, undefined, 401);
     const input = { requestId: randomUUID(), agentId: agent.agentId, text: 'Private cleanup request' };
@@ -360,7 +361,8 @@ test(
     const attached = await http(owner, 'POST', base, { ...input, requestId: randomUUID(), sources: [source] });
     attachmentApp = Fastify();
     attachmentApp.register(
-      async routes =>
+      async routes => {
+        protectWorkspaceRequests(routes, auth, runtime);
         registerAgentTasks(routes, {
           auth,
           runtime,
@@ -369,7 +371,8 @@ test(
             runtime,
             resolveConfirmationCredential: async () => db.login(w, 'confirmation'),
           }),
-        }),
+        });
+      },
       { prefix: '/v1' },
     );
     const attachmentAddress = await attachmentApp.listen({ host: '127.0.0.1', port: 0 });
@@ -639,7 +642,7 @@ test(
       const replacementMembershipId = randomUUID();
       await db.platform.query(`UPDATE ${table('tf_memberships')} SET removed_at=now() WHERE id=$1`, [membershipId]);
       try {
-        for (const [path, host] of paths) await notFound(owner, path, host);
+        for (const [path, host] of paths) await notFound(owner, path, host, 'not-found');
         await db.platform.query(`INSERT INTO ${table('tf_memberships')} (id,user_id,role) VALUES ($1,$2,'admin')`, [
           replacementMembershipId,
           owner.id,

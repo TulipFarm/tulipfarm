@@ -1,7 +1,7 @@
 import { fromNodeHeaders } from 'better-auth/node';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { AccessDenied, lockAuthorization, resolveHuman } from '@tulipfarm/access';
+import { AccessDenied, WorkspaceMembershipDenied, lockAuthorization, resolveHuman } from '@tulipfarm/access';
 import { StorageUnavailableError, commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import type { WorkspaceRuntime } from '@tulipfarm/workspaces/storage';
 import type { registerAuth } from './auth.ts';
@@ -51,6 +51,8 @@ export function registerRecommendations(
           return readSavedRecommendations(tx, actor.membershipId);
         });
       } catch (cause) {
+        if (cause instanceof WorkspaceMembershipDenied && cause.userId === session.user.id)
+          return reply.code(404).send({ error: 'not-found' });
         if (cause instanceof AccessDenied) return reply.code(404).send({ error: 'workspace-not-found' });
         if (cause instanceof StorageUnavailableError)
           return reply.code(503).send({ error: 'recommendations-unavailable' });

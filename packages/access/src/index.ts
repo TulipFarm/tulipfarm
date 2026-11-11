@@ -64,6 +64,15 @@ export class AccessDenied extends Error {
   }
 }
 
+export class WorkspaceMembershipDenied extends AccessDenied {
+  readonly userId: string;
+
+  constructor(userId: string) {
+    super();
+    this.userId = userId;
+  }
+}
+
 export class SourceAuthorizationUnavailable extends AccessDenied {}
 export class SkillUnavailable extends AccessDenied {
   readonly code = 'skill-unavailable';
@@ -124,7 +133,7 @@ export async function resolveHuman(transaction: AuthorizationTransaction, userId
     [userId],
   );
   const member = membershipSchema.optional().parse(result.rows[0]);
-  if (!member) throw new AccessDenied();
+  if (!member) throw new WorkspaceMembershipDenied(userId);
   return { kind: 'human', userId: member.user_id, membershipId: member.id };
 }
 
@@ -134,7 +143,7 @@ export async function currentMember(transaction: AuthorizationTransaction, actor
     [actor.membershipId, actor.userId],
   );
   const member = membershipSchema.optional().parse(result.rows[0]);
-  if (!member) throw new AccessDenied();
+  if (!member) throw new WorkspaceMembershipDenied(actor.userId);
   return member;
 }
 

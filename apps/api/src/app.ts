@@ -5,7 +5,7 @@ import { registerHealth, registerRoot } from './health.ts';
 import { authConfig, registerAuth } from './auth.ts';
 import { createTemporalClient } from './temporal.ts';
 import { registerWorkspaces } from './workspaces.ts';
-import { protectBusinessRequests } from './business.ts';
+import { protectBusinessRequests, protectWorkspaceRequests } from './business.ts';
 import { registerStorageComposition } from './storage-composition.ts';
 import { registerObservability } from './observability.ts';
 import type { ModelContinuity } from '@tulipfarm/agents/chat';
@@ -108,6 +108,7 @@ export function buildApp(
       v1.register(async business => {
         protectBusinessRequests(business);
         const storage = registerWorkspaces(business, auth, temporal);
+        if (storage) protectWorkspaceRequests(business, auth.auth, storage);
         workspaceStorage = storage;
         registerFeatureFlags(
           business,
