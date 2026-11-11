@@ -3,7 +3,7 @@ import { Link } from '@tanstack/react-router';
 import { z } from 'zod';
 import { CheckCircle } from 'reicon-react/icons/CheckCircle';
 import { EnvelopeCheck } from 'reicon-react/icons/EnvelopeCheck';
-import { AgentAvatar } from '@tulipfarm/sprout/agent-avatar';
+import { MonsterAvatar } from '@tulipfarm/sprout/monster-avatar';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { Button } from '@tulipfarm/sprout/button';
 import { Field, FieldSeparator } from '@tulipfarm/sprout/field';
@@ -145,7 +145,7 @@ function AgentActivity() {
           <GradientBannerPanel>
             <div className="grid w-full gap-4 py-1">
               <div className="flex items-center gap-3">
-                <AgentAvatar agentId={agent.id} name={agent.name} size="lg" />
+                <MonsterAvatar agentId={agent.id} size={40} />
                 <div className="min-w-0 flex-1">
                   <p className="font-medium">{agent.name}</p>
                   <p className="truncate text-sm opacity-70">{agent.task}</p>
@@ -185,7 +185,7 @@ function AgentActivity() {
                 index === active ? 'transition-opacity duration-500' : 'opacity-40 transition-opacity duration-500'
               }
             >
-              <AgentAvatar agentId={item.id} name={item.name} size="sm" />
+              <MonsterAvatar agentId={item.id} size={24} />
             </span>
           ))}
         </div>

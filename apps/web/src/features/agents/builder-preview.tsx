@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { CalendarClock, Database, MessageSquare, ScrollText, ShieldCheck, Wrench } from 'lucide-react';
-import { AgentAvatar } from '@tulipfarm/sprout/agent-avatar';
+import { MonsterAvatar } from '@tulipfarm/sprout/monster-avatar';
 import { Badge } from '@tulipfarm/sprout/badge';
 import { Button } from '@tulipfarm/sprout/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@tulipfarm/sprout/tabs';
@@ -183,7 +183,7 @@ export function AgentBuilderPreview({
   return (
     <section aria-label="Draft agent" className="grid min-w-0 gap-5 rounded-xl border bg-card p-4 sm:p-5">
       <div className="flex min-w-0 items-start gap-3">
-        <AgentAvatar agentId={agentId} name={name.trim() || 'New agent'} size="lg" />
+        <MonsterAvatar agentId={agentId} size={40} />
         <div className="grid min-w-0 flex-1 gap-1">
           <h2 className="wrap-anywhere text-base font-medium text-foreground">{name.trim() || 'Your new agent'}</h2>
           <p className="text-sm text-muted-foreground">{team ?? 'Personal agent'}</p>

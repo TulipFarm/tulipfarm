@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from '@tanstack/react-router';
 import { Button, type ButtonState } from '@tulipfarm/sprout/button';
-import { AgentAvatar } from '@tulipfarm/sprout/agent-avatar';
+import { MonsterAvatar } from '@tulipfarm/sprout/monster-avatar';
 import { Input } from '@tulipfarm/sprout/input';
 import { Textarea } from '@tulipfarm/sprout/textarea';
 import { ChoiceGroup, Field } from '@tulipfarm/sprout/field';
@@ -583,7 +583,7 @@ export function AgentEditor({
               className="grid min-w-0 content-start gap-5 rounded-xl border bg-card p-4 lg:sticky lg:top-4 lg:w-68 lg:shrink-0"
             >
               <div className="flex min-w-0 items-center gap-3">
-                <AgentAvatar agentId={id} name={draft.name.trim() || 'Agent'} size="lg" />
+                <MonsterAvatar agentId={id} size={40} />
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium text-foreground">
                     {draft.name.trim() || 'Untitled agent'}
