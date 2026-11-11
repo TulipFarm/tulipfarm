@@ -1254,7 +1254,8 @@ export function createTaskRuntime(
           let persistedDecision = decision;
           let callId: string | null = null,
             proposalId: string | null = null,
-            conflicted = false;
+            conflicted = false,
+            incomplete = false;
           if (decision.kind === 'tool') {
             if (!taskReadAdmitted(c.definition, decision.call)) throw new AccessDenied();
             if ('tableId' in decision.call)
@@ -1369,12 +1370,9 @@ export function createTaskRuntime(
               ).rowCount
             )
               throw new TaskDecisionRejected(new Error('task-has-unfinished-proposal'));
-            // A reply that announces its next step without calling a tool continues once per owner request instead of ending the task.
-            continuing =
-              decision.kind === 'answer' &&
-              announcesFurtherWork(decision.text) &&
-              !(await answered(tx, taskId, c.task.generation));
-            if (!continuing) {
+            incomplete = decision.kind === 'answer' && announcesFurtherWork(decision.text);
+            continuing = incomplete && !(await answered(tx, taskId, c.task.generation));
+            if (!incomplete) {
               const status = decision.kind === 'answer' ? 'completed' : 'waiting-clarification';
               const changed = await tx.client.query(
                 `UPDATE ${relation(tx, 'tf_agent_tasks')} SET status=$2 WHERE id=$1 AND status IS DISTINCT FROM $2`,
@@ -1388,6 +1386,8 @@ export function createTaskRuntime(
           }
           // A conflicted proposal produced nothing for the owner to review; the agent reads the conflict result next step.
           if (!conflicted) await message(tx, taskId, c.task.generation, decision.text, claim.reads);
+          if (incomplete && !continuing)
+            await pause(tx, taskId, c.task.generation, recordsTaskFailure(tx) ? 'decision' : 'model', rejectedPause);
           await tx.client.query(
             `UPDATE ${relation(tx, 'tf_agent_task_steps')} SET decision=$3,call_id=$4,proposal_id=$5,completed=$6 WHERE run_id=$1 AND step=$2 AND decision IS NULL`,
             [

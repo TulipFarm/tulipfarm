@@ -13,13 +13,7 @@ import {
   type ModelContinuity,
 } from '@tulipfarm/agents/chat';
 import { chatInputSchema, chatReceiptSchema, chatStatusSchema } from '@tulipfarm/agents/chat-contracts';
-import {
-  agentDefinitionSchema,
-  executionPolicySchema,
-  maximumTaskLimits,
-  scopeSchema,
-  taskLimitsSchema,
-} from '@tulipfarm/agents/contracts';
+import { executionPolicySchema, maximumTaskLimits, scopeSchema, taskLimitsSchema } from '@tulipfarm/agents/contracts';
 import {
   AgentError,
   agentCommandStatusSchema,
@@ -29,7 +23,7 @@ import {
   agentListSchema,
   agentPolicySchema,
   saveAgentSchema,
-  savedAgentSchema,
+  agentDetailSchema,
   replaceAgentActivationSchema,
 } from '@tulipfarm/agents/saved-contracts';
 import { readVerifiedProjection } from '@tulipfarm/workspaces/soul-revisions';
@@ -386,15 +380,7 @@ export function registerAgents(
     routes.get(
       `${base}/:agentId`,
       {
-        schema: schema(
-          'getAgentV1',
-          agent,
-          savedAgentSchema.extend({
-            definition: agentDefinitionSchema,
-            capabilities: z.array(z.string()),
-            activations: z.array(z.object({ id: z.uuid(), revision: z.string(), scope: scopeSchema })),
-          }),
-        ),
+        schema: schema('getAgentV1', agent, agentDetailSchema),
       },
       request => {
         const p = agent.parse(request.params);
