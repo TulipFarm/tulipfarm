@@ -33,8 +33,8 @@ export function directoryNameMatches(text: string, names: readonly string[]) {
       for (let start = haystack.indexOf(needle); start >= 0; start = haystack.indexOf(needle, start + 1)) {
         const end = start + needle.length;
         if (
-          !/[\p{L}\p{N}_-]$/u.test(haystack.slice(0, start)) &&
-          !/^[\p{L}\p{N}_-]/u.test(haystack.slice(end)) &&
+          !/(?:\p{L}|\p{N}|_|-)$/u.test(haystack.slice(0, start)) &&
+          !/^(?:\p{L}|\p{N}|_|-)/u.test(haystack.slice(end)) &&
           !used.some(range => start < range.end && end > range.start)
         ) {
           used.push({ start, end });
