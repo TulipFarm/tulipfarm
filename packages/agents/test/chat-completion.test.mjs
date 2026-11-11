@@ -55,6 +55,254 @@ const verdict = (status = 'completed') => ({
     status === 'continue' ? 'The requested work has not been attempted.' : 'The reply accurately states the result.',
 });
 
+for (const [label, route, fallback] of [
+  ['direct Grok', { ...nativeRoutes.azure, model: 'grok-4.3' }],
+  [
+    'fallback Grok',
+    nativeRoutes.anthropic,
+    { route: { ...nativeRoutes.azure, model: 'grok-4.3' }, label: 'Grok Fast' },
+  ],
+  ['Kimi', { ...nativeRoutes.azure, model: 'Kimi-K2.6' }],
+])
+  test(`${label} recovers an ungrounded authoring refusal through context and draft`, async t => {
+    let round = 0;
+    const executed = [];
+    const streamed = [];
+    const recovery = [];
+    const write = process.stdout.write.bind(process.stdout);
+    t.mock.method(process.stdout, 'write', (chunk, ...args) => {
+      if (typeof chunk === 'string' && chunk.startsWith('{"level":')) {
+        const record = JSON.parse(chunk);
+        if (record.operation === 'chat.agent-authoring-recovery') recovery.push(record.outcome);
+        return true;
+      }
+      return write(chunk, ...args);
+    });
+    const input = {
+      expectedSoulRevision: 'a'.repeat(40),
+      owningTeamId: null,
+      definition: { name: 'Records helper', instructions: 'Read records.', tools: ['rows.list'] },
+    };
+    t.mock.method(globalThis, 'fetch', async (url, init) => {
+      if (String(url).includes('anthropic'))
+        return Response.json({ error: { type: 'api_error', message: 'Fixture unavailable' } }, { status: 500 });
+      const body = JSON.parse(init.body);
+      assert.equal(isCompletionRequest(body), false, 'authoring recovery does not need a completion model');
+      const offered = offeredTools('azure', body).map(tool => tool.name);
+      assert.ok(offered.includes('agents_context'));
+      assert.ok(offered.includes('agents_draft'));
+      const replies = [
+        { text: 'I cannot prepare an agent in this chat.' },
+        { calls: [use('agents.context')] },
+        { calls: [use('agents.draft', { agent: 'new', input })] },
+        { text: 'The Records helper draft is ready for your review.' },
+      ];
+      if (round === 1 || round === 2)
+        assert.deepEqual(body.tool_choice, {
+          type: 'function',
+          function: { name: round === 1 ? 'agents_context' : 'agents_draft' },
+        });
+      assert.ok(round < replies.length, 'recovery is bounded');
+      return stream(nativeReply('azure', replies[round++]));
+    });
+    const result = await inferWithTools(
+      route,
+      [{ role: 'user', text: 'Create a read-only agent for workspace tables.' }],
+      async call => {
+        executed.push(call.tool);
+        if (call.tool === 'agents.context') return { membershipId: 'member', currentSoulRevision: 'a'.repeat(40) };
+        assert.equal(call.tool, 'agents.draft');
+        return { draftId: 'draft', digest: 'd'.repeat(64), status: 'review-required' };
+      },
+      undefined,
+      false,
+      null,
+      {
+        builtinSkills: ['agent-authoring'],
+        agentBuilderUrl: '/test-space/agents/new',
+        answerText: update => streamed.push(update.text),
+        ...(fallback ? { fallback } : {}),
+      },
+    );
+    assert.equal(result.text, 'The Records helper draft is ready for your review.');
+    assert.deepEqual(executed, ['agents.context', 'agents.draft']);
+    assert.equal(round, 4);
+    assert.deepEqual(recovery, ['context', 'draft', 'recovered']);
+    assert.ok(!streamed.some(text => text.includes('cannot prepare')), 'the false refusal never streams');
+    assert.equal(result.fallback, fallback?.label);
+  });
+
+for (const text of [
+  'agents.context is unavailable in this chat.',
+  "`agents.draft` tool isn't available in this chat.",
+  "I don't have access to the agents.draft tool.",
+])
+  test(`authoring recovery stops when the forced context step is ignored: ${text}`, async t => {
+    let rounds = 0;
+    t.mock.method(globalThis, 'fetch', async (_url, init) => {
+      const body = JSON.parse(init.body);
+      assert.equal(isCompletionRequest(body), false);
+      assert.ok(rounds++ < 2, 'only one recovery round is attempted when the model ignores the tool choice');
+      return Response.json(nativeReply('azure', { text }));
+    });
+    const result = await inferWithTools(
+      { ...nativeRoutes.azure, model: 'grok-4.3' },
+      [{ role: 'user', text: 'Create a read-only agent.' }],
+      () => assert.fail('No helper or alternate tool should execute'),
+      undefined,
+      false,
+      null,
+      { builtinSkills: ['agent-authoring'], agentBuilderUrl: '/test-space/agents/new' },
+    );
+    assert.equal(
+      result.text,
+      "I couldn't draft this agent in chat. [Create it in the agent builder](/test-space/agents/new) instead.",
+    );
+    assert.equal(rounds, 2);
+  });
+
+test('ordinary chats do not recover an agent-authoring refusal', async t => {
+  let rounds = 0;
+  const streamed = [];
+  const text = 'I cannot prepare an agent in this chat.';
+  t.mock.method(globalThis, 'fetch', async () => {
+    rounds++;
+    return stream(nativeReply('azure', { text }));
+  });
+  const result = await inferWithTools(
+    nativeRoutes.azure,
+    [{ role: 'user', text: 'Hello.' }],
+    () => assert.fail(),
+    undefined,
+    false,
+    null,
+    { builtinSkills: [], answerText: update => streamed.push(update.text) },
+  );
+  assert.equal(result.text, text);
+  assert.equal(rounds, 1);
+  assert.ok(streamed.includes(text));
+});
+
+for (const question of [
+  'Which name should I use? The drafting tool needs the missing name field.',
+  'The name field is missing from agents.draft. What should this agent be called?',
+  'Before I call agents.draft, which missing access details should I use?',
+])
+  test(`authoring clarification is not an unavailable-tool refusal: ${question}`, async t => {
+    let rounds = 0;
+    t.mock.method(globalThis, 'fetch', async (_url, init) => {
+      const body = JSON.parse(init.body);
+      assert.equal(isCompletionRequest(body), false);
+      assert.equal(body.tool_choice, 'auto', 'a clarification does not force context or draft');
+      assert.equal(rounds++, 0, 'a clarification needs no recovery round');
+      return Response.json(nativeReply('azure', { text: question }));
+    });
+    const result = await inferWithTools(
+      { ...nativeRoutes.azure, model: 'grok-4.3' },
+      [{ role: 'user', text: 'Use the agent drafting tools to prepare a read-only agent.' }],
+      () => assert.fail('A necessary clarification must not dispatch tools'),
+      undefined,
+      false,
+      null,
+      { builtinSkills: ['agent-authoring'], agentBuilderUrl: '/test-space/agents/new' },
+    );
+    assert.equal(result.text, question);
+    assert.equal(rounds, 1);
+  });
+
+for (const failing of ['context', 'draft'])
+  test(`authoring recovery stops at a failed ${failing} prerequisite without another helper`, async t => {
+    let round = 0;
+    const executed = [];
+    t.mock.method(globalThis, 'fetch', async (_url, init) => {
+      const body = JSON.parse(init.body);
+      assert.equal(isCompletionRequest(body), false);
+      assert.ok(round < (failing === 'context' ? 2 : 3));
+      const replies = [
+        { text: 'agents.draft is not available in this chat.' },
+        { calls: [use('agents.context')] },
+        {
+          calls: [
+            use('agents.draft', {
+              agent: 'new',
+              input: {
+                expectedSoulRevision: 'a'.repeat(40),
+                owningTeamId: null,
+                definition: { name: 'Records helper', instructions: 'Read records.', tools: ['rows.list'] },
+              },
+            }),
+          ],
+        },
+      ];
+      return Response.json(nativeReply('azure', replies[round++]));
+    });
+    const result = await inferWithTools(
+      { ...nativeRoutes.azure, model: 'grok-4.3' },
+      [{ role: 'user', text: 'Create a read-only agent.' }],
+      async call => {
+        executed.push(call.tool);
+        return call.tool === `agents.${failing}`
+          ? { error: 'access-denied' }
+          : { membershipId: 'member', currentSoulRevision: 'a'.repeat(40) };
+      },
+      undefined,
+      false,
+      null,
+      { builtinSkills: ['agent-authoring'], agentBuilderUrl: '/test-space/agents/new' },
+    );
+    assert.deepEqual(executed, failing === 'context' ? ['agents.context'] : ['agents.context', 'agents.draft']);
+    assert.equal(
+      result.text,
+      failing === 'context'
+        ? "I couldn't read the setup details this agent needs, so I couldn't draft it. [Create it in the agent builder](/test-space/agents/new) instead."
+        : "I couldn't draft this agent in chat. [Create it in the agent builder](/test-space/agents/new) instead.",
+    );
+  });
+
+test('authoring recovery reuses a successful context read and forces only the draft', async t => {
+  let round = 0;
+  const executed = [];
+  t.mock.method(globalThis, 'fetch', async (_url, init) => {
+    const body = JSON.parse(init.body);
+    if (round === 2) assert.equal(body.tool_choice.function.name, 'agents_draft');
+    const replies = [
+      { calls: [use('agents.context')] },
+      { text: 'I cannot prepare an agent in this chat.' },
+      {
+        calls: [
+          use('agents.draft', {
+            agent: 'new',
+            input: {
+              expectedSoulRevision: 'a'.repeat(40),
+              owningTeamId: null,
+              definition: { name: 'Records helper', instructions: 'Read records.', tools: ['rows.list'] },
+            },
+          }),
+        ],
+      },
+      { text: 'The Records helper draft is ready for your review.' },
+    ];
+    assert.ok(round < replies.length);
+    return Response.json(nativeReply('azure', replies[round++]));
+  });
+  const result = await inferWithTools(
+    { ...nativeRoutes.azure, model: 'grok-4.3' },
+    [{ role: 'user', text: 'Create a read-only agent.' }],
+    async call => {
+      executed.push(call.tool);
+      return call.tool === 'agents.context'
+        ? { membershipId: 'member', currentSoulRevision: 'a'.repeat(40) }
+        : { draftId: 'draft', digest: 'd'.repeat(64), status: 'review-required' };
+    },
+    undefined,
+    false,
+    null,
+    { builtinSkills: ['agent-authoring'], agentBuilderUrl: '/test-space/agents/new' },
+  );
+  assert.equal(result.text, 'The Records helper draft is ready for your review.');
+  assert.deepEqual(executed, ['agents.context', 'agents.draft']);
+});
+
 for (const [model, kind, failure] of [
   ['grok-4.3', 'workflow', 'Use an HTTP request to tulipfarm.ai/api/workflows/draft.'],
   ['Kimi-K2.6', 'agent', 'agents.draft is not offered in this chat.'],
