@@ -2585,6 +2585,211 @@ function providers(t, replies) {
 const rowTable = async call =>
   call.tool === 'schema.inspect' ? ledgerStatus : { records: [{ id: 'r', values: {} }], total: null, nextCursor: null };
 
+const approvedLedger = {
+  ...ledgerStatus,
+  appliedRevision: ledgerStatus.savedRevision,
+  maintenance: false,
+};
+const ledgerInventory = {
+  visibility: 'requester-readable',
+  complete: true,
+  tables: [approvedLedger],
+  agents: [],
+  workflows: [],
+  skills: [],
+};
+const approvedHistory = [
+  { role: 'user', text: 'Create the Other Ledger table with Item and Amount fields.' },
+  { role: 'assistant', text: 'The table change is ready for approval.' },
+  { role: 'user', text: 'Table created. 1 of 1 table changes completed.' },
+];
+const twoRows = {
+  tableId: otherLedger,
+  expectedAppliedRevision: ledgerStatus.savedRevision,
+  rows: [fruit('Rose', '3'), fruit('Pear', '2')],
+};
+const approvedRowRequest = [
+  ...approvedHistory,
+  { role: 'user', text: 'Add 2 rows to Other Ledger: Rose 3 and Pear 2.' },
+];
+const approvedRowTools = {
+  preloadedTools: ['schema.inspect', 'rows.create.batch'],
+  readWorkspaceInventory: async () => ledgerInventory,
+  waitingCards: async () => 0,
+};
+
+for (const [model, runs] of [
+  ['grok-4.3', 10],
+  ['Kimi-K2.6', 5],
+])
+  test(`${model} checks an approved table and adds the requested batch without fallback across ${runs} fixture runs`, async t => {
+    const refusals = [
+      'Other Ledger does not exist yet. No rows were added.',
+      'The table is still applying. Please try again later.',
+      'I need its applied revision before I can add those rows.',
+      'I cannot do that yet.',
+      'Nothing was added.',
+    ];
+    for (let run = 0; run < runs; run++) {
+      const done = 'Rose 3 and Pear 2 were added to Other Ledger.';
+      const requests = [];
+      const executed = [];
+      const updates = [];
+      let round = 0;
+      t.mock.method(globalThis, 'fetch', async (url, init) => {
+        assert.ok(!String(url).includes('anthropic'), 'the selected model does the work without fallback');
+        const body = JSON.parse(init.body);
+        if (isCompletionRequest(body)) return Response.json(selectReply('azure', verdict()));
+        requests.push(body);
+        const replies = [
+          { text: refusals[run % refusals.length] },
+          { calls: [use('schema.inspect', { tableId: otherLedger })] },
+          { calls: [use('rows.create.batch', twoRows)] },
+          { text: done },
+        ];
+        assert.ok(round < replies.length, 'recovery is bounded');
+        return stream(nativeReply('azure', replies[round++]));
+      });
+      const result = await inferWithTools(
+        { ...nativeRoutes.azure, model },
+        approvedRowRequest,
+        async call => {
+          executed.push(call);
+          return call.tool === 'schema.inspect'
+            ? approvedLedger
+            : {
+                records: twoRows.rows.map((row, index) => ({ id: `row-${index}`, values: row.values })),
+                total: null,
+                nextCursor: null,
+              };
+        },
+        undefined,
+        false,
+        null,
+        {
+          ...approvedRowTools,
+          answerText: update => updates.push(update.text),
+          fallback: { route: nativeRoutes.anthropic, label: 'fallback' },
+        },
+      );
+      assert.equal(result.text, done);
+      assert.equal(result.fallback, undefined);
+      assert.deepEqual(
+        executed.map(call => call.tool),
+        ['schema.inspect', 'rows.create.batch'],
+      );
+      assert.deepEqual(executed[1], { tool: 'rows.create.batch', ...twoRows });
+      assert.deepEqual(requests.map(forcedTool), [undefined, 'schema_inspect', 'rows_create_batch', undefined]);
+      assert.ok(!updates.includes(refusals[run % refusals.length]), 'unchecked replies never stream');
+      t.mock.restoreAll();
+    }
+  });
+
+test('a checked not-ready table stops writes and the same chat succeeds after it becomes ready', async t => {
+  const blocked = 'Other Ledger is not ready yet. No rows were added.';
+  const calls = [];
+  let ready = false;
+  let round = 0;
+  const replies = [
+    { text: 'The table is still applying.' },
+    { calls: [use('schema.inspect', { tableId: otherLedger })] },
+    { text: blocked },
+    { text: 'I need its applied revision before I can add rows.' },
+    { calls: [use('schema.inspect', { tableId: otherLedger })] },
+    { calls: [use('rows.create.batch', twoRows)] },
+    { text: 'Rose 3 and Pear 2 were added to Other Ledger.' },
+  ];
+  t.mock.method(globalThis, 'fetch', async (_url, init) => {
+    const body = JSON.parse(init.body);
+    if (isCompletionRequest(body)) return Response.json(selectReply('azure', verdict(ready ? 'completed' : 'blocked')));
+    assert.ok(round < replies.length);
+    return Response.json(nativeReply('azure', replies[round++]));
+  });
+  const execute = async call => {
+    calls.push(call.tool);
+    if (call.tool === 'schema.inspect')
+      return ready ? approvedLedger : { error: 'table-not-ready', tableId: otherLedger };
+    assert.ok(ready, 'no write runs before the table is ready');
+    return { records: twoRows.rows.map((row, index) => ({ id: `row-${index}`, values: row.values })) };
+  };
+  const first = await inferWithTools(
+    { ...nativeRoutes.azure, model: 'grok-4.3' },
+    approvedRowRequest,
+    execute,
+    undefined,
+    false,
+    null,
+    approvedRowTools,
+  );
+  assert.equal(first.text, blocked);
+  assert.deepEqual(calls, ['schema.inspect']);
+  ready = true;
+  const second = await inferWithTools(
+    { ...nativeRoutes.azure, model: 'grok-4.3' },
+    [...approvedRowRequest, { role: 'assistant', text: first.text }, approvedRowRequest.at(-1)],
+    execute,
+    undefined,
+    false,
+    null,
+    approvedRowTools,
+  );
+  assert.equal(second.text, 'Rose 3 and Pear 2 were added to Other Ledger.');
+  assert.deepEqual(calls, ['schema.inspect', 'schema.inspect', 'rows.create.batch']);
+});
+
+test('an unchecked row refusal exhausts recovery without repeating a false table-state claim', async t => {
+  const claim = 'Other Ledger does not exist yet.';
+  let rounds = 0;
+  t.mock.method(globalThis, 'fetch', async (_url, init) => {
+    const body = JSON.parse(init.body);
+    if (isCompletionRequest(body)) return Response.json(selectReply('azure', verdict('blocked')));
+    assert.ok(rounds++ < 5, 'ignored tool choices have a bounded recovery budget');
+    return Response.json(nativeReply('azure', { text: claim }));
+  });
+  const result = await inferWithTools(
+    { ...nativeRoutes.azure, model: 'grok-4.3' },
+    approvedRowRequest,
+    () => assert.fail('The model ignored every tool choice'),
+    undefined,
+    false,
+    null,
+    approvedRowTools,
+  );
+  assert.ok(rounds > 1, 'a no-tool reply cannot end an actionable row request');
+  assert.doesNotMatch(result.text, /does not exist/);
+  assert.match(result.text, /stopped before finishing/);
+});
+
+test('a read-only missing-table claim requires a table lookup in the current turn', async t => {
+  const claim = 'The Pantry table does not exist.';
+  const executed = [];
+  let round = 0;
+  t.mock.method(globalThis, 'fetch', async (_url, init) => {
+    const body = JSON.parse(init.body);
+    if (isCompletionRequest(body)) return Response.json(selectReply('azure', verdict()));
+    const replies = [{ text: claim }, { calls: [use('tables.definitions', { name: 'Pantry' })] }, { text: claim }];
+    assert.ok(round < replies.length);
+    return Response.json(nativeReply('azure', replies[round++]));
+  });
+  const result = await inferWithTools(
+    nativeRoutes.azure,
+    [
+      { role: 'assistant', text: 'No table named Pantry was found earlier.' },
+      { role: 'user', text: 'Does the Pantry table exist now?' },
+    ],
+    async call => {
+      executed.push(call.tool);
+      return { tables: [] };
+    },
+    undefined,
+    false,
+    null,
+    { preloadedTools: ['tables.definitions'] },
+  );
+  assert.equal(result.text, claim);
+  assert.deepEqual(executed, ['tables.definitions']);
+});
+
 test('a row request answered with no tool call is sent back with the table tools it must call', async t => {
   const done = 'I added Rose 3 to Other Ledger.';
   const requests = providers(t, {

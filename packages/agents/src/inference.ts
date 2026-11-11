@@ -2767,6 +2767,22 @@ export function uncheckedTableQuestion(candidate: string, items: readonly LoopIt
   };
 }
 
+function uncheckedTableStateClaim(candidate: string, items: readonly LoopItem[], request: string) {
+  if (
+    lookedUpTable(items) ||
+    !/\btables?\b/i.test(`${request}\n${candidate}`) ||
+    !/\b(?:does(?:n't| not) exist|is(?:n't| not) ready|still applying|needs? (?:its |an? |the )?(?:applied )?revision)\b/i.test(
+      candidate,
+    )
+  )
+    return undefined;
+  return {
+    status: 'continue' as const,
+    reason:
+      'The reply claims a table is missing or not ready without a table lookup in this turn. Check the named table with tables.definitions or schema.inspect now. Earlier proposals and approval messages do not establish its current state. Continue the requested work if it is ready; report a blocker only when the current result shows it.',
+  };
+}
+
 const noInvitees =
   /\b(?:no|zero|not any)\s+(?:other\s+|more\s+)?(?:pending\s+|open\s+|outstanding\s+)?(?:invit\w*|invitees?)\b(?!\s+(?:are|is)\s+visible)|\binvit\w*[^.\n]{0,40}?\b(?:none|empty|no one|nobody)\b|\bno one is waiting to join\b|\bpendingInvitationCount\W+(?:is\s+|as\s+)?(?:0|zero)\b/i;
 // A short "There are none." answers an invitation question as surely as one that names invitations.
@@ -3444,11 +3460,26 @@ export async function inferWithTools(
       });
     }
   }
+  let inventory: WorkspaceInventory | undefined;
+  const humanText = sourceMessages
+    .filter(turn => turn.role === 'user')
+    .map(turn => textTurn(turn).text)
+    .join('\n')
+    .toLowerCase();
+  const inventoryRowRequest = () =>
+    rowRequest.test(request) &&
+    !tableRequest.test(request) &&
+    inventory?.tables.some(table => humanText.includes(table.name.toLowerCase()));
   const answerText: ToolInferenceContext['answerText'] =
     invitationLookup(sourceMessages) || !tools?.answerText
       ? undefined
       : update => {
-          if (!directoryExpected && !activeBuiltinSkills.has('agent-authoring')) tools?.answerText?.(update);
+          if (
+            !directoryExpected &&
+            !activeBuiltinSkills.has('agent-authoring') &&
+            !(inventoryRowRequest() && !workToolUsed)
+          )
+            tools?.answerText?.(update);
         };
   let calls = z
     .number()
@@ -4156,7 +4187,16 @@ export async function inferWithTools(
       rowTools = [misnamed.name];
     } else if (
       rowWriteTried(items) ||
-      (lastResults?.kind === 'results' && lastResults.results.some(result => result.error))
+      (lastResults?.kind === 'results' &&
+        lastResults.results.some(result => {
+          const value = toolResultValue(result.output);
+          return (
+            result.error ||
+            z.object({ error: z.string() }).safeParse(value).success ||
+            z.object({ appliedRevision: z.null() }).safeParse(value).success ||
+            z.object({ maintenance: z.literal(true) }).safeParse(value).success
+          );
+        }))
     )
       rowTools = [];
     const rowTool = forceTool || forceRender ? undefined : rowTools.shift();
@@ -4171,7 +4211,7 @@ export async function inferWithTools(
             ? await observeChatDetail('memory', async () => tools?.readPersonalMemory?.())
             : undefined;
         const memoryKey = observeChatDetailSync('serialize', () => JSON.stringify(personalMemory ?? null));
-        const inventory =
+        inventory =
           tools?.projectInstructions === undefined
             ? await observeChatDetail('inventory', async () => tools?.readWorkspaceInventory?.())
             : undefined;
@@ -4635,11 +4675,21 @@ export async function inferWithTools(
           : (tableIdQuestion(candidate) ??
             (activeBuiltinSkills.has('agent-authoring') ? undefined : uncheckedTableQuestion(candidate, items)) ??
             invitesUnchecked);
+      const rowsUnchecked =
+        inventoryRowRequest() && !workToolUsed
+          ? {
+              status: 'continue' as const,
+              reason:
+                'The person requested a row change in a table named in their messages and present in the current inventory, but no work tool ran in this turn. Inspect the table with schema.inspect, then make the requested row change using its current fields and applied revision. Do not stop or ask again without checking; report a missing or not-ready table only when a current tool result shows it.',
+            }
+          : undefined;
       // A held-back row write, a failure nothing reported, or internal wording gets a rewrite, never the person.
       const misdescribed =
         unbacked || writeUnbacked || idAsked
           ? undefined
-          : (otherTableSkipped ??
+          : (rowsUnchecked ??
+            uncheckedTableStateClaim(candidate, items, request) ??
+            otherTableSkipped ??
             heldBackMisdescribed(candidate, items, request) ??
             (waiting ? waitingCardStretched(candidate, items, request, earlier) : undefined) ??
             waitingCardMisdescribed(candidate, rowCards, request) ??
