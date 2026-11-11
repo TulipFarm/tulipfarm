@@ -64,8 +64,8 @@ export function WebhookDeliveries({
         </Button>
       </div>
       <p className="text-xs text-muted-foreground">
-        A test event is a sample shaped for the active trigger. It starts a real run as the sponsor without using a key,
-        and the log marks it as a test.
+        A test event is a sample shaped for the active trigger. It starts a real run, with the access of the person who
+        turned the workflow on, without using a key, and the log marks it as a test.
       </p>
       {testRun && (
         <div className="flex flex-wrap items-center gap-2">

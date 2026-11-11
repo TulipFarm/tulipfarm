@@ -16,7 +16,7 @@ import { workflowRequest, WorkflowRequestError } from './api';
 type Candidates = z.infer<typeof sharingCandidatesSchema>;
 type Workflow = z.infer<typeof workflowSchema>;
 export const recordSourceDenied =
-  'The sponsor or a history reader cannot read this workflow’s table. Grant them table read access or choose someone else.';
+  'You or someone who sees run history cannot read this workflow’s table. Grant table read access or choose someone else.';
 const denied = (error: unknown) => error instanceof WorkflowRequestError && error.code === 'record-source-denied';
 type State =
   | { kind: 'loading' }
@@ -42,7 +42,6 @@ export function WorkflowSharing({
   const [principal, setPrincipal] = useState('');
   const [permissions, setPermissions] = useState<string[]>([]);
   const [audience, setAudience] = useState<string[]>(workflow?.historyAudience ?? []);
-  const [sponsor, setSponsor] = useState(workflow?.sponsorMembershipId ?? '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
@@ -257,29 +256,9 @@ export function WorkflowSharing({
                   <div className="space-y-0.5">
                     <h2 className="font-medium">Scheduled runs</h2>
                     <p className="text-sm text-muted-foreground">
-                      Changes pause the workflow until the person it runs as accepts.
+                      Scheduled runs use the access of the person who turns the workflow on. Saving here makes that you
+                      and pauses the workflow until it is activated again.
                     </p>
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor={`sponsor-${id}`}>Runs as</Label>
-                    <Select
-                      items={state.candidates.people.map(person => ({ value: person.id, label: personName(person) }))}
-                      value={sponsor}
-                      onValueChange={value => {
-                        if (value) setSponsor(value);
-                      }}
-                    >
-                      <SelectTrigger id={`sponsor-${id}`}>
-                        <SelectValue placeholder="Choose a person" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {state.candidates.people.map(person => (
-                          <SelectItem key={person.id} value={person.id}>
-                            {personName(person)}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
                   </div>
                   <fieldset disabled={busy} className="min-w-0 space-y-2">
                     <legend className="mb-2 text-sm font-medium">Who sees scheduled runs</legend>
@@ -299,15 +278,13 @@ export function WorkflowSharing({
                   </fieldset>
                   <Button
                     variant="outline"
-                    disabled={busy || !sponsor || !audience.length}
+                    disabled={busy || !audience.length}
                     aria-busy={busy}
                     onClick={() =>
                       void save(
                         'sponsorship',
-                        { sponsorMembershipId: sponsor, historyAudience: audience },
-                        sponsor === state.candidates.membershipId
-                          ? 'Scheduled runs saved. Activate the saved revision to start scheduled runs.'
-                          : 'Scheduled runs saved. Waiting for them to accept.',
+                        { historyAudience: audience },
+                        'Scheduled runs saved. Activate the saved revision to start scheduled runs.',
                       )
                     }
                   >
@@ -342,66 +319,6 @@ export function WorkflowSharing({
             Reload access
           </Button>
         </div>
-      )}
-    </section>
-  );
-}
-
-export function AcceptWorkflowSponsorship({
-  workspaceId,
-  workflow,
-  userId,
-  changed,
-}: {
-  workspaceId: string;
-  workflow: Workflow;
-  userId: string;
-  changed: (accepted: Workflow) => Promise<void>;
-}) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-  if (!workflow.sponsorMembershipId || workflow.sponsorshipAccepted) return null;
-  return (
-    <section aria-label="Sponsorship" className="flex flex-col gap-3 sm:flex-row sm:items-center">
-      <div className="min-w-0 flex-1 space-y-0.5">
-        <h2 className="font-medium">Waiting for sponsor</h2>
-        <p className="text-sm text-muted-foreground">
-          {workflow.sponsor?.userId === userId
-            ? 'You were chosen as the sponsor. Scheduled runs start after you accept.'
-            : `Scheduled runs start after ${workflow.sponsor?.name ?? 'the sponsor'} accepts.`}
-        </p>
-      </div>
-      <Button
-        variant="outline"
-        disabled={busy}
-        aria-busy={busy}
-        onClick={async () => {
-          setBusy(true);
-          setError('');
-          try {
-            const accepted = workflowSchema.parse(
-              await workflowRequest(`/workspaces/${workspaceId}/workflows/${workflow.id}/sponsorship/accept`, 'POST', {
-                expectedGeneration: workflow.generation,
-              }),
-            );
-            await changed(accepted);
-          } catch (failure) {
-            setError(
-              denied(failure)
-                ? recordSourceDenied
-                : 'Only the named sponsor, with current run and source access, can accept.',
-            );
-          } finally {
-            setBusy(false);
-          }
-        }}
-      >
-        Accept sponsorship
-      </Button>
-      {error && (
-        <p role="alert" className="text-sm text-destructive sm:basis-full">
-          {error}
-        </p>
       )}
     </section>
   );

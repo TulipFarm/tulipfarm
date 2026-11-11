@@ -447,7 +447,9 @@ for (const width of [375, 390, 414, 768, 1440])
         await canvas.getByRole('tab', { name: /Triggers/ }).click();
         for (const recheck of await form.getByRole('button', { name: 'Recheck', exact: true }).all())
           await recheck.click();
-        await form.getByRole('checkbox', { name: /^I sponsor / }).check();
+        await form
+          .getByText('Runs on its own with your current access and creates private tasks.', { exact: true })
+          .waitFor();
         await canvas.getByRole('tab', { name: /Review/ }).click();
         const activate = form.getByRole('button', { name: 'Create and activate', exact: true });
         await activate.scrollIntoViewIfNeeded();

@@ -246,19 +246,13 @@ export const agentSetupConsentSchema = z.preprocess(
     return { ...rest, sponsor: false, sponsorTriggerIds: sponsorTriggerIds ?? sponsorScheduleIds ?? [] };
   },
   z.strictObject({
-    /** The reviewer sponsors every unattended trigger: the linked Workflow runs as, and is billed to, the reviewer. */
-    sponsor: z.boolean(),
+    /** Ignored: activating is the consent, so the linked Workflow always runs as, and is billed to, the reviewer. */
+    sponsor: z.boolean().optional(),
     replaceChannels: z.array(z.string().regex(/^[CG][A-Z0-9]{1,63}$/)),
     sponsorTriggerIds: z.array(uuidSchema).optional(),
   }),
 );
 export type AgentSetupConsent = z.infer<typeof agentSetupConsentSchema>;
-/** Whether the consent sponsors every unattended trigger of the setup. */
-export const sponsorConsented = (consent: AgentSetupConsent, triggers: readonly AgentSetupTrigger[]) =>
-  consent.sponsor ||
-  triggers
-    .filter(item => unattendedTrigger(item.trigger))
-    .every(item => consent.sponsorTriggerIds?.some(id => id.toLowerCase() === item.id.toLowerCase()) ?? false);
 export const publishAgentSetupSchema = z.strictObject({
   requestId: uuidSchema,
   version: z.number().int().positive(),

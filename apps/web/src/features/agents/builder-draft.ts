@@ -1,6 +1,5 @@
 import {
   agentSetupSchema,
-  unattendedTrigger,
   tableAccessEnrollment,
   tableAccessProblem,
   type AgentSetup,
@@ -23,7 +22,6 @@ export type BuilderDraft = {
   /** What each trigger asks the agent; set in chat, kept as is here. */
   prompt: string | undefined;
   runLimits: AgentSetup['runLimits'];
-  sponsorConsent: boolean;
   source: AgentAuthoringSource;
 };
 export type BuilderInitial = Pick<
@@ -70,7 +68,6 @@ export function builderDraft(initial?: BuilderInitial): BuilderDraft {
     triggers: setup?.triggers ?? [],
     prompt: setup?.prompt,
     runLimits: setup?.runLimits,
-    sponsorConsent: false,
   };
 }
 export function builderDefinition(draft: BuilderDraft): BuilderDraft['definition'] {
@@ -148,8 +145,6 @@ export function parseBuilder(
         message:
           'This agent has table access but no action that reads rows. Add Find rows or Read a row in the Access step, or remove its table access.',
       });
-    if (draft.triggers.some(trigger => unattendedTrigger(trigger.trigger)) && !draft.sponsorConsent)
-      problems.push({ step: 'triggers', message: 'Sponsor the triggers before activation.' });
     if (draft.channels.some(channel => !channel.detach && !channel.channelResponses))
       problems.push({
         step: 'triggers',

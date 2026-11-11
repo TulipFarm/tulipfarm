@@ -106,7 +106,6 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     digest: draft.digest,
     decision: choice,
     consent: {
-      sponsor: true,
       replaceChannels: draft.setup.slackChannels
         .filter(channel => channel.replaceAgentId)
         .map(channel => channel.channel),
@@ -522,13 +521,6 @@ for (const resume of ['new-stage', 'fresh-page'])
       resumed.publish(f.w.id, f.user, f.agentId, { ...decision, digest: '0'.repeat(64) }),
       /setup-digest-conflict/,
     );
-    await assert.rejects(
-      resumed.publish(f.w.id, f.user, f.agentId, {
-        ...decision,
-        consent: { sponsor: false, replaceChannels: [] },
-      }),
-      /trigger-sponsor-consent-required/,
-    );
     const command = await resumed.publish(f.w.id, f.user, f.agentId, decision);
     if (resume === 'new-stage') await f.accept(resumed, command);
     assert.equal((await f.state()).agent.enabled, false, 'accepting a definition alone never starts the trigger');
@@ -835,7 +827,7 @@ test('editing saves a new revision but preserves the prior live setup until conf
   assert.deepEqual((await f.state()).activations, [command.activationId]);
 });
 
-test('review versions, sponsorship, replacement and current membership are enforced', async t => {
+test('review versions, replacement and current membership are enforced', async t => {
   const f = await environment(t),
     service = createAgentSetup(f.runtime);
   const value = await f.input({
@@ -861,13 +853,6 @@ test('review versions, sponsorship, replacement and current membership are enfor
   await assert.rejects(
     service.publish(f.w.id, f.user, f.agentId, { ...f.decision(draft), digest: '0'.repeat(64) }),
     /setup-digest-conflict/,
-  );
-  await assert.rejects(
-    service.publish(f.w.id, f.user, f.agentId, {
-      ...f.decision(draft),
-      consent: { sponsor: false, replaceChannels: [] },
-    }),
-    /trigger-sponsor-consent-required/,
   );
   await assert.rejects(
     service.publish(f.w.id, f.user, f.agentId, {
@@ -981,7 +966,7 @@ test('chat full setup approves the same coordinator or continues in the builder;
     commandId: randomUUID(),
     digest: full.digest,
     decision: 'activate',
-    consent: { sponsor: false, replaceChannels: [] },
+    consent: { replaceChannels: [] },
   };
   const outcome = await drafts.decide(f.w.id, f.user, chatId, full.draftId, decision);
   assert.equal(outcome.kind, 'agent');

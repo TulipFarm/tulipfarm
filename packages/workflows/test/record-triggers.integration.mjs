@@ -390,7 +390,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         sponsorMembershipId: bob.membershipId,
         historyAudience: [bob.membershipId],
       }),
-      { message: 'record-source-denied' },
+      { message: 'sponsor-must-be-self' },
     );
     await assert.rejects(
       launch(w, { ...dateTrigger, field: { ...dateTrigger.field, timezone: 'Mars/Olympus_Mons' } }),

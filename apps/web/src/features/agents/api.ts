@@ -51,8 +51,6 @@ const rejections: Partial<Record<string, string>> = {
   'activation-version-conflict': 'A newer version was saved. Review it before activating.',
   'activation-selection-required':
     "Saved, but not activated. Some active versions have different access and TulipFarm can't tell which one is newest. In Execution, revoke the versions you no longer want, then activate again.",
-  'trigger-sponsor-consent-required':
-    'Sponsor the triggers that run on their own before activating. Your input is retained.',
   'setup-draft-outdated': 'This setup was saved before triggers were combined. Save it again before activating.',
   'task-schedule-interval': `Scheduled triggers run this agent at most once an hour. Choose an hourly-or-longer interval or calendar expression. Your input is retained.`,
   'schedule-invalid':

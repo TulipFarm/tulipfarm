@@ -365,15 +365,12 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     });
     await service.share(w.id, w.userId, intake.id, {
       principal: { kind: 'person', id: bob.membershipId },
-      permissions: ['read', 'invoke'],
+      permissions: ['read', 'manage', 'invoke'],
     });
     await assert.rejects(
-      service.sponsorship(w.id, w.userId, intake.id, {
-        sponsorMembershipId: bob.membershipId,
-        historyAudience: [bob.membershipId],
-      }),
+      activate(service, w.id, bob.userId, intake.id, intake.revision, true),
       { message: 'table-step-access-denied' },
-      'a sponsor needs every write permission the steps use',
+      'whoever turns it on needs every write permission the steps use',
     );
     await assert.rejects(
       service.checkTableSteps(w.id, bob.userId, { ...addLead, triggers: [{ id: 'webhook', kind: 'webhook' }] }),

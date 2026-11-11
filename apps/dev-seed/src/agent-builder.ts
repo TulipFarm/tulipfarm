@@ -136,7 +136,7 @@ export async function seedAgentBuilder(context: SeedContext, options: Options) {
         version: draft.version,
         digest: draft.digest,
         decision: active ? 'activate' : 'save',
-        consent: { sponsor: false, replaceChannels: [] },
+        consent: { replaceChannels: [] },
       });
       const definition = await setup.definitionCommand(workspace.id, owner.id, command.commandId);
       let status = definition.status;

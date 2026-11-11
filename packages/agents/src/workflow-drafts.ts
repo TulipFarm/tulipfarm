@@ -326,34 +326,26 @@ export function createWorkflowDrafts(
     enabled: boolean,
     commandId: string,
   ): Promise<DraftOutcome> {
-    let current = workflow;
-    if (enabled && current.definition.triggers.some(unattended) && !current.sponsorshipAccepted) {
+    // Activating unattended triggers runs them with the activator's access, so they need invoke access themselves.
+    if (enabled && workflow.definition.triggers.some(unattended) && !workflow.capabilities.invoke)
+      return outcome(workflow, 'sponsor-required');
+    let current: Workflow;
+    try {
+      current = await service.activate(workspaceId, actor.userId, workflow.id, {
+        commandId,
+        expectedGeneration: workflow.generation,
+        revision: workflow.revision,
+        enabled,
+      });
+    } catch (error) {
+      // The drafter's own table access was checked with the draft, so a denial here names someone in the kept history audience.
       if (
-        (current.sponsorMembershipId && current.sponsorMembershipId !== actor.membershipId) ||
-        !current.capabilities.invoke
+        error instanceof WorkflowConflict &&
+        (error.message === 'record-source-denied' || error.message === 'table-step-access-denied')
       )
-        return outcome(current, 'sponsor-required');
-      try {
-        current = await service.sponsorship(workspaceId, actor.userId, current.id, {
-          sponsorMembershipId: actor.membershipId,
-          historyAudience: current.historyAudience.length ? current.historyAudience : [actor.membershipId],
-        });
-      } catch (error) {
-        // The drafter's own table access was checked with the draft, so a denial here names someone in the kept history audience.
-        if (
-          error instanceof WorkflowConflict &&
-          (error.message === 'record-source-denied' || error.message === 'table-step-access-denied')
-        )
-          return outcome(current, 'audience-required');
-        throw error;
-      }
+        return outcome(workflow, 'audience-required');
+      throw error;
     }
-    current = await service.activate(workspaceId, actor.userId, current.id, {
-      commandId,
-      expectedGeneration: current.generation,
-      revision: current.revision,
-      enabled,
-    });
     return outcome(current, enabled ? 'activated' : 'disabled');
   }
   function outcome(

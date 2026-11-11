@@ -349,7 +349,10 @@ test(
         await recheck.click();
       await form.getByRole('region', { name: 'Trigger 1' }).waitFor();
       await form.getByText(prompt, { exact: true }).first().waitFor();
-      await form.getByRole('checkbox', { name: /^I sponsor / }).check();
+      await form
+        .getByText('Runs on its own with your current access and creates private tasks.', { exact: true })
+        .waitFor();
+      assert.equal(await form.getByText(/sponsor/i).count(), 0);
       await step('Review');
       await form.getByRole('region', { name: 'Reviewed triggers' }).getByText(prompt, { exact: true }).waitFor();
       await form.getByRole('button', { name: 'Create and activate', exact: true }).click();

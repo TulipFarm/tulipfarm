@@ -212,37 +212,26 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
         method: 'PUT',
         url: `${base}/${revokedId}/grants`,
         headers,
-        payload: { principal: { kind: 'person', id: operator.membershipId }, permissions: ['read', 'invoke'] },
+        payload: {
+          principal: { kind: 'person', id: operator.membershipId },
+          permissions: ['read', 'manage', 'invoke'],
+        },
       });
       assert.equal(revokedGrant.statusCode, 200, revokedGrant.body);
-      await service.sponsorship(w.id, w.userId, revokedId, {
-        sponsorMembershipId: operator.membershipId,
-        historyAudience: [w.membershipId],
-      });
-      const sponsored = (await app.inject({ method: 'GET', url: base, headers }))
-        .json()
-        .find(item => item.id === revokedId);
-      await service.acceptSponsorship(w.id, operator.id, revokedId, { expectedGeneration: sponsored.generation });
       const revokedCurrent = (await app.inject({ method: 'GET', url: base, headers }))
         .json()
         .find(item => item.id === revokedId);
-      const revokedActivate = await app.inject({
-        method: 'POST',
-        url: `${base}/${revokedId}/activation`,
-        headers,
-        payload: {
-          commandId: randomUUID(),
-          expectedGeneration: revokedCurrent.generation,
-          revision: revokedRevision,
-          enabled: true,
-        },
+      const revokedActivated = await service.activate(w.id, operator.id, revokedId, {
+        commandId: randomUUID(),
+        expectedGeneration: revokedCurrent.generation,
+        revision: revokedRevision,
+        enabled: true,
       });
-      assert.equal(revokedActivate.statusCode, 200, revokedActivate.body);
       const revokedKeySave = await app.inject({
         method: 'PUT',
         url: `${base}/${revokedId}/webhook-key`,
         headers,
-        payload: { commandId: randomUUID(), expectedGeneration: revokedActivate.json().generation, mode: 'bearer' },
+        payload: { commandId: randomUUID(), expectedGeneration: revokedActivated.generation, mode: 'bearer' },
       });
       assert.equal(revokedKeySave.statusCode, 200, revokedKeySave.body);
       const revokedKey = revokedKeySave.json().key;

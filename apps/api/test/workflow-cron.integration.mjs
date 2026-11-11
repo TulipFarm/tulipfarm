@@ -219,12 +219,14 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
 
       const revokedId = randomUUID();
       let revoked = await save(revokedId, { kind: 'interval', minutes: 10 });
-      await grant(revokedId, operator.membershipId);
-      await sponsor(revokedId, operator.membershipId, [w.membershipId]);
-      await service.acceptSponsorship(w.id, operator.id, revokedId, {
-        expectedGeneration: (await read(revokedId)).generation,
+      await grant(revokedId, operator.membershipId, ['read', 'manage', 'invoke']);
+      await service.activate(w.id, operator.id, revokedId, {
+        commandId: randomUUID(),
+        expectedGeneration: revoked.generation,
+        revision: revoked.revision,
+        enabled: true,
       });
-      revoked = await activation(await read(revokedId), true);
+      revoked = await read(revokedId);
       assert.equal(revoked.sponsorMembershipId, operator.membershipId);
       await db.databaseAdmin.query(`UPDATE ${memberships} SET removed_at=clock_timestamp() WHERE id=$1`, [
         operator.membershipId,

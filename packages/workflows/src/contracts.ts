@@ -51,10 +51,10 @@ export const sharingCandidatesSchema = z.object({
   teams: z.array(z.object({ id: idSchema, name: z.string() })),
 });
 export const sponsorshipSchema = z.strictObject({
-  sponsorMembershipId: idSchema,
+  /** Optional and only ever the caller: unattended runs use the authority of whoever shares or activates them. */
+  sponsorMembershipId: idSchema.optional(),
   historyAudience: z.array(idSchema).min(1).max(100),
 });
-export const acceptSponsorshipSchema = z.strictObject({ expectedGeneration: z.number().int().positive() });
 export const commandSchema = z.strictObject({
   commandId: idSchema,
   expectedGeneration: z.number().int().positive().max(2147483646),
