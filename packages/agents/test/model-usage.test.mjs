@@ -303,7 +303,7 @@ test('a stream with no usage is billed an estimate, counted unknown and logged w
   assert.equal(warnings[0]['gen_ai.request.model'], 'deepseek-without-usage');
 });
 
-test('a call the provider never answered settles as rejected so its hold is released', async t => {
+test('a call the provider never answered settles as rejected so its hold is released, also on its retry', async t => {
   t.mock.method(globalThis, 'fetch', async () => {
     throw new DOMException('The operation timed out.', 'TimeoutError');
   });
@@ -317,7 +317,10 @@ test('a call the provider never answered settles as rejected so its hold is rele
     ),
     { message: 'model-timeout' },
   );
-  assert.deepEqual(metered, [[{ kind: 'unknown' }, { rejected: true }]]);
+  assert.deepEqual(metered, [
+    [{ kind: 'unknown' }, { rejected: true }],
+    [{ kind: 'unknown' }, { rejected: true }],
+  ]);
 });
 
 test('usage that does not add up is logged as invalid with only its field names and counts', async t => {

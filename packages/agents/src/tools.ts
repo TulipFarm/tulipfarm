@@ -110,7 +110,7 @@ import type { createGitHubBatches } from '@tulipfarm/github/batches';
 import { proposeTableSchema, tableProposalRules, TableProposalError } from '@tulipfarm/tables/proposal-contracts';
 import { tableProposalJsonSchema } from '@tulipfarm/tables/proposal-json-schema';
 import { createChatTableProposals, tableReviewSummary } from './table-proposals.ts';
-import { chatRowReview } from './chat-row-guard.ts';
+import { chatRowReview, proposalRepeatsWaitingCard } from './chat-row-guard.ts';
 import { chatTableDefinitions, guessedChatTable } from './chat-table-lookup.ts';
 import { createTableService } from '@tulipfarm/tables/service';
 import { TableError } from '@tulipfarm/tables/service-contracts';
@@ -1542,6 +1542,15 @@ export function createChatTools(
             };
           }
         }
+        const repeated = await proposalRepeatsWaitingCard(
+          runtime,
+          workspaceId,
+          actor,
+          origin.conversationId,
+          callId,
+          input.plans,
+        );
+        if (repeated) return repeated;
         for (const plan of input.plans) {
           if (plan.kind !== 'import') continue;
           const guessed = await guessedChatTable(

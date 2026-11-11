@@ -73,7 +73,13 @@ test('a reply waiting to retry its model call after saving a proposal shows the 
   const html = footer(
     history({ status: 'queued', errorCode: 'model-rate-limit' }, { tableProposal: true, activityStatus: 'waiting' }),
   );
-  assert.ok(html.includes('Taking long to respond, retrying…'));
+  assert.ok(html.includes('The model provider returned an error. Retrying automatically…'));
   assert.ok(!html.includes('Reply failed'));
   assert.ok(!html.includes(kept));
+});
+
+test('a reply whose model retries ran out says so in an alert instead of ending silently', () => {
+  const html = footer(history({ status: 'failed', errorCode: 'model-unavailable' }, { status: 'failed' }));
+  assert.ok(html.includes('Reply failed'));
+  assert.match(html, /role="alert"[^>]*>[^<]*The model provider is unavailable, so no answer was written\./);
 });

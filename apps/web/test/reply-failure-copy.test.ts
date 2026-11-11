@@ -41,7 +41,16 @@ test('every model failure gets short, specific copy with no provider details', (
     assert.doesNotMatch(copy, /model-|http|status|deployment|error code/i, reason);
   }
   assert.match(replyFailure('model-configuration')!, /^This model isn't available\./);
-  assert.match(replyFailure('model-rate-limit')!, /^The model provider is busy\./);
+  assert.match(
+    replyFailure('model-rate-limit')!,
+    /^The model provider is limiting requests, so no answer was written\./,
+  );
+  for (const reason of ['unavailable', 'overload', 'rate-limit', 'transport', 'timeout'])
+    assert.match(
+      replyFailure(`model-${reason}`)!,
+      /no answer was written\. (TulipFarm|It) retried automatically\./,
+      reason,
+    );
   assert.match(replyFailure('model-quota')!, /Select another model/);
 });
 
@@ -81,8 +90,14 @@ test('a reply the provider would reject again offers no retry and says to reword
 });
 
 test('a queued reply after a model failure says it is retrying instead of spinning silently', () => {
-  assert.equal(replyRetrying('queued', 'model-unavailable'), 'Taking long to respond, retrying…');
-  assert.equal(replyRetrying('queued', 'model-rate-limit'), 'Taking long to respond, retrying…');
+  assert.equal(
+    replyRetrying('queued', 'model-unavailable'),
+    'The model provider returned an error. Retrying automatically…',
+  );
+  assert.equal(
+    replyRetrying('queued', 'model-rate-limit'),
+    'The model provider returned an error. Retrying automatically…',
+  );
   assert.match(replyRetrying('queued', 'transient-failure')!, /Retrying automatically/);
   assert.equal(replyRetrying('queued', null), null);
   assert.equal(replyRetrying('processing', 'model-unavailable'), null);

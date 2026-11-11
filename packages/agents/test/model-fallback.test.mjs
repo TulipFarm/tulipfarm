@@ -157,7 +157,7 @@ test('a failure after part of the reply streamed is not retried on the fallback'
   assert.equal(failed.output_started, true);
 });
 
-test('a fallback that also fails surfaces the chat model failure and is counted as failed', async t => {
+test('a fallback that also fails goes back to the chat model once, then surfaces its failure', async t => {
   const records = logs(t);
   const { calls, meter } = harness(t, {
     azure: () => azureError(429, { code: 'insufficient_quota', message: 'You exceeded your current quota.' }),
@@ -170,12 +170,50 @@ test('a fallback that also fails surfaces the chat model failure and is counted 
     inferWithTools(primary, messages, noTools, meter, false, null, { fallback }),
     error => error.message === 'model-quota' && error.code === 'quota_exceeded',
   );
-  assert.deepEqual(calls, ['azure', 'anthropic']);
+  assert.deepEqual(calls, ['azure', 'anthropic', 'azure']);
   assert.equal(fallbackLogs(records)[0].model_fallback, 'failed');
   const failures = records.filter(
     record => record.event === 'call_failed' && record.operation !== 'chat.model-fallback',
   );
-  assert.deepEqual(failures.map(record => record['error.code']).sort(), ['quota_exceeded', 'server_error']);
+  assert.deepEqual(failures.map(record => record['error.code']).sort(), [
+    'quota_exceeded',
+    'quota_exceeded',
+    'server_error',
+  ]);
+});
+
+test('a server error with no fallback is retried once on the same model within the reply', async t => {
+  const records = logs(t);
+  let failed = false;
+  const { calls } = harness(t, {
+    azure: () => {
+      if (failed) return Response.json(nativeReply('azure', { text: 'Hello after the retry' }));
+      failed = true;
+      return azureError(500, { code: 'InternalServerError', message: 'The server had an error.' });
+    },
+  });
+  const answer = await inferWithTools(primary, messages, noTools, undefined, false, null, {});
+  assert.deepEqual(answer, { text: 'Hello after the retry' });
+  assert.deepEqual(calls, ['azure', 'azure']);
+  const [retry] = records.filter(record => record.operation === 'chat.model-retry');
+  assert.equal(retry.outcome, 'recovered');
+  assert.equal(retry['error.type'], 'server_error');
+});
+
+test('a fallback that fails with a server error hands the reply back to the chat model within the turn', async t => {
+  const records = logs(t);
+  let azureCalls = 0;
+  const { calls } = harness(t, {
+    azure: () =>
+      azureCalls++
+        ? Response.json(nativeReply('azure', { text: 'Hello from the chat model' }))
+        : azureError(500, { code: 'InternalServerError', message: 'The server had an error.' }),
+    anthropic: () => azureError(500, { code: 'InternalServerError', message: 'The server had an error.' }),
+  });
+  const answer = await inferWithTools(primary, messages, noTools, undefined, false, null, { fallback });
+  assert.deepEqual(answer, { text: 'Hello from the chat model' });
+  assert.deepEqual(calls, ['azure', 'anthropic', 'azure']);
+  assert.equal(records.find(record => record.operation === 'chat.model-retry')?.outcome, 'recovered');
 });
 
 test('an unusable first response answers on the fallback without retrying the chat model', async t => {

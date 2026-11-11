@@ -742,7 +742,11 @@ export function httpFailure(
   }
   if (has('overloaded_error') || status === 529) return 'overload';
   if ([500, 502, 503, 504].includes(status)) return 'unavailable';
+  if (has('internal', 'internal_error', 'internal_server_error', 'server_error', 'api_error', 'service_unavailable'))
+    return 'unavailable';
   if ([400, 413, 422].includes(status)) return 'invalid-request';
+  // An error inside an accepted stream, such as xAI's "Internal error during token generation", failed at the provider.
+  if (status >= 200 && status < 300) return 'unavailable';
   return 'provider-error';
 }
 
@@ -2243,10 +2247,9 @@ function presentsNewCard(candidate: string, items: readonly LoopItem[]) {
  */
 export function noCardReply(waiting = 0, card?: { table: string; summary: string }) {
   if (card && waiting)
-    return `No new approval card is waiting from this reply. A card to ${card.summary} "${card.table.slice(0, 80)}" is still waiting for your approval in this chat: approve or dismiss it there first.`;
-  if (!waiting)
-    return 'No pending approval or review card is available from this reply, so nothing here is waiting for your approval. Check Tool activity for the current result.';
-  return `No new approval card is waiting from this reply. ${waiting === 1 ? 'A card' : `${waiting} cards`} from earlier in this chat ${waiting === 1 ? 'is' : 'are'} still waiting for your approval: approve or dismiss ${waiting === 1 ? 'it' : 'them'} there first.`;
+    return `No new approval card was made. An earlier card to ${card.summary} "${card.table.slice(0, 80)}" is still waiting for your approval in this chat. Approve or dismiss it there.`;
+  if (!waiting) return 'No approval card was made, and nothing in this chat is waiting for your approval.';
+  return `No new approval card was made. ${waiting === 1 ? 'An earlier card' : `${waiting} earlier cards`} in this chat ${waiting === 1 ? 'is' : 'are'} still waiting for your approval. Approve or dismiss ${waiting === 1 ? 'it' : 'them'} there.`;
 }
 
 /** A row write refused in this reply because a card for its table still waits, with what that card holds. */
@@ -2282,7 +2285,7 @@ export function heldBackWrites(items: readonly LoopItem[]): HeldBackWrite[] {
 
 /** The reply when chat keeps misdescribing a row write it held back behind a waiting card. */
 export function heldBackReply(held: HeldBackWrite, request = '') {
-  const asked = held.notAdded.length ? held.notAdded : requestedRows(request);
+  const asked = askedRows(held, request);
   return `Nothing new was added. A card to ${held.summary} "${held.table.slice(0, 80)}" is still waiting for your approval in this chat. Approve or dismiss it, then ask again for ${asked.length ? asked.join(', ') : 'this change'}.`;
 }
 
@@ -2336,6 +2339,35 @@ export function writtenRows(items: readonly LoopItem[]) {
   return sentences.join(' ');
 }
 
+const rowKey = (row: string) => row.toLowerCase().split(/\s+/).filter(Boolean).sort().join(' ');
+/**
+ * The rows a held-back write did not add, for the reply to name: those the refused call sent that the request lists,
+ * once each and never one the waiting card already holds. A call that repeated the card's rows or sent other rows falls
+ * back to the rows the request lists.
+ */
+function askedRows(held: HeldBackWrite, request: string) {
+  const requested = requestedRows(request);
+  const listed = new Set(requested.map(rowKey));
+  const onCard = new Set(held.sample.map(rowKey));
+  const seen = new Set<string>();
+  const sent = held.notAdded.filter(row => {
+    const key = rowKey(row);
+    if (!key || seen.has(key) || onCard.has(key) || (listed.size && !listed.has(key))) return false;
+    seen.add(key);
+    return true;
+  });
+  return sent.length ? sent : requested;
+}
+
+/** How many rows a row request asks for: the rows it lists, a count it names, or one for "a row" or "one more row". */
+function requestedCount(request: string, asked: readonly string[]) {
+  if (asked.length) return asked.length;
+  if (!rowRequest.test(request)) return 0;
+  const match = [...request.matchAll(rowCount)][0];
+  if (match) return Number(match[1]) || numberWords[match[1]!.toLowerCase()] || 0;
+  return /\b(?:a|an|another)\s+(?:new\s+|more\s+|extra\s+)?(?:row|item|record|entry)\b/i.test(request) ? 1 : 0;
+}
+
 /** The rows a request lists after its colon, such as "Lime 10" in "Add one more row: Lime 10." */
 export function requestedRows(request: string) {
   const listed = request.includes(':') ? request.slice(request.lastIndexOf(':') + 1) : '';
@@ -2379,9 +2411,9 @@ const reportedFailure = /access-denied|access denied|permission|"error":"(?!appr
  * new rows or a combined count, that approving it adds them, or that the earlier rows failed or were denied. Decided
  * without the completion model, which has accepted such replies. The waiting card holds only its own change.
  */
-export function heldBackMisdescribed(candidate: string, items: readonly LoopItem[]) {
+export function heldBackMisdescribed(candidate: string, items: readonly LoopItem[], request = '') {
   const held = heldBackWrites(items)[0];
-  return held ? cardMisdescribed(candidate, [held]) : undefined;
+  return held ? cardMisdescribed(candidate, [held], request) : undefined;
 }
 
 /** Undecided row cards from earlier in this chat, described as a held-back write that took nothing new. */
@@ -2405,9 +2437,9 @@ export function cardsForRequest(cards: readonly HeldBackWrite[], request: string
  * Why a reply about waiting row cards must be rewritten: it gives a card a count or rows it does not hold, says
  * approving it adds something else, blames a failure, or mentions the card without saying what it is for.
  */
-export function waitingCardMisdescribed(candidate: string, cards: readonly HeldBackWrite[]) {
+export function waitingCardMisdescribed(candidate: string, cards: readonly HeldBackWrite[], request = '') {
   if (!cards.length) return undefined;
-  const wrong = cardMisdescribed(candidate, cards);
+  const wrong = cardMisdescribed(candidate, cards, request);
   if (wrong) return wrong;
   const sentences = candidate.split(/(?<=[.!?])\s+|\n+/).filter(sentence => cardWord.test(sentence));
   if (!sentences.length) return undefined;
@@ -2429,13 +2461,18 @@ export function waitingCardMisdescribed(candidate: string, cards: readonly HeldB
       };
 }
 
-function cardMisdescribed(candidate: string, cards: readonly HeldBackWrite[]) {
+/**
+ * A reply must not let the waiting card take on the new request: by naming its rows on the card, by a count that adds
+ * them to the card's rows ("all 10 rows" for a 9-row card and one more row), or by saying approving it writes them.
+ */
+function cardMisdescribed(candidate: string, cards: readonly HeldBackWrite[], request = '') {
   const held = cards[0]!;
+  const asked = askedRows(held, request);
   const sample = cards
     .flatMap(card => card.sample)
     .join(' ')
     .toLowerCase();
-  const newWords = held.notAdded
+  const newWords = asked
     .flatMap(row => row.match(/\p{L}{3,}/gu) ?? [])
     .filter(word => !sample.includes(word.toLowerCase()) && !held.table.toLowerCase().includes(word.toLowerCase()));
   const named = (clause: string) => newWords.some(word => new RegExp(`\\b${escaped(word)}\\b`, 'i').test(clause));
@@ -2445,7 +2482,8 @@ function cardMisdescribed(candidate: string, cards: readonly HeldBackWrite[]) {
       const count = Number(match[1]) || numberWords[match[1]!.toLowerCase()];
       return !cards.some(card => card.rows === count);
     });
-  const combined = held.notAdded.length ? held.rows + held.notAdded.length : 0;
+  const count = requestedCount(request, asked);
+  const combined = held.rows > 0 && count ? held.rows + count : 0;
   for (const sentence of candidate.split(/(?<=[.!?])\s+|\n+/)) {
     const aboutCard = cardWord.test(sentence);
     for (const clause of clauses([sentence])) {
@@ -2466,7 +2504,7 @@ function cardMisdescribed(candidate: string, cards: readonly HeldBackWrite[]) {
         return {
           status: 'continue' as const,
           reason:
-            `Wrong account of the waiting card ("${clause.slice(0, 60)}"). Nothing failed and nothing was denied: the card waiting in the chat is the one to ${held.summary} "${held.table.slice(0, 60)}", and it holds only that. ${held.notAdded.length ? `The new request (${held.notAdded.join(', ').slice(0, 60)}) is on no card. Say that, and that they can approve or dismiss the card and then ask again.` : 'Say what it holds, and that they can approve or dismiss it.'}`.slice(
+            `Wrong account of the waiting card ("${clause.slice(0, 60)}"). Nothing failed and nothing was denied: the card waiting in the chat is the one to ${held.summary} "${held.table.slice(0, 60)}", and it holds only that. ${asked.length || count ? `The new request (${(asked.join(', ') || `${count} more ${count === 1 ? 'row' : 'rows'}`).slice(0, 60)}) is on no card, and approving that card adds only that card's rows. Say that, and that they can approve or dismiss the card and then ask again.` : 'Say what it holds, and that they can approve or dismiss it.'}`.slice(
               0,
               480,
             ),
@@ -3345,6 +3383,15 @@ function invitationLookup(messages: readonly ChatTurn[]) {
   return active;
 }
 
+/** Provider failures that a moment later, or another model, usually does not repeat. */
+const transientModelErrors: ReadonlySet<ModelErrorClass> = new Set([
+  'network',
+  'server_error',
+  'timeout',
+  'rate_limited',
+]);
+const transientRetryPauseMs = 1_500;
+
 export async function inferWithTools(
   route: InferenceRoute,
   messages: readonly ChatTurn[],
@@ -3624,41 +3671,128 @@ export async function inferWithTools(
       if ('error' in first) throw first.error;
       return first.value;
     };
+    const failed = first;
+    const failure = diagnostics;
     const primary = { provider: config.provider, model: config.model, errorClass: diagnostics.errorClass };
     if (!tools?.fallback) {
       recordModelFallback('not_configured', primary);
-      return giveUp();
+      return recoverInTurn(call, failed, failure, giveUp, invalid);
     }
     const fallback = inferenceRouteSchema.parse(tools.fallback.route);
     const target = { provider: fallback.provider, model: fallback.model };
     if (
       answeredBy !== undefined ||
-      outputProduced ||
+      (outputProduced && !switchable(fallback)) ||
       diagnostics.outputStarted ||
       !fallbackEligibleClasses.has(diagnostics.errorClass) ||
-      (fallback.provider === config.provider && fallback.model === config.model) ||
+      sameRoute(fallback, config) ||
       (turnImages(loopTurns(items)).length > 0 && !routeCapabilities(fallback).imageInput)
     ) {
       recordModelFallback('not_eligible', primary, target);
-      return giveUp();
+      return recoverInTurn(call, failed, failure, giveUp, invalid);
     }
     let result: T;
     try {
       result = await call(fallback);
     } catch (second) {
       recordModelFallback('failed', primary, target);
+      const secondFailure = modelCallDiagnostics(second);
       // Credit and admission failures of the retry are the turn's real outcome; another model failure is secondary.
-      if (modelCallDiagnostics(second)) return giveUp();
-      throw second;
+      if (!secondFailure) throw second;
+      if (transientModelErrors.has(secondFailure.errorClass))
+        return recoverInTurn(call, { error: second }, secondFailure, giveUp, invalid, [config, fallback]);
+      return giveUp();
     }
     if (invalid?.(result)) {
       recordModelFallback('failed', primary, target);
       return giveUp();
     }
-    config = fallback;
-    answeredBy = tools.fallback.label;
+    switchTo(fallback);
     recordModelFallback('used', primary, target);
     return result;
+  }
+  const sameRoute = (a: typeof config, b: typeof config) => a.provider === b.provider && a.model === b.model;
+  /**
+   * Whether the turn can move to `target` after earlier steps of this reply ran: their history is sent again as plain
+   * messages, except Gemini's, which carries provider-native parts only Gemini reads.
+   */
+  const switchable = (target: typeof config) =>
+    !items.some(item => item.kind === 'model') ||
+    (config.provider !== 'google' && target.provider !== 'google') ||
+    config.provider === target.provider;
+  /** Makes `target` answer the rest of the turn; the person's own model clears the fallback label. */
+  const switchTo = (target: typeof config) => {
+    const chosen = inferenceRouteSchema.parse(route);
+    config = target;
+    answeredBy = sameRoute(target, chosen) ? undefined : tools?.fallback?.label;
+  };
+  /**
+   * A step that failed with a transient provider error (connection reset, 5xx, an error inside the stream, timeout, 429)
+   * does not end the turn: the model that failed is asked once more after a short pause, then the other model of the
+   * chat's pair (the fallback, or the person's model when the fallback was answering), within the same turn. Text the
+   * failed step had streamed is cleared first; no tool of that step ran. Any other failure gives up as before.
+   */
+  async function recoverInTurn<T>(
+    call: (target: typeof config) => Promise<T>,
+    failed: { error: unknown } | { value: T },
+    failure: { errorClass: ModelErrorClass; outputStarted: boolean },
+    giveUp: () => T,
+    invalid?: (value: T) => boolean,
+    routes?: readonly (typeof config)[],
+  ): Promise<T> {
+    if (!('error' in failed) || !transientModelErrors.has(failure.errorClass)) return giveUp();
+    const clearPreview = (started: boolean) => {
+      if (!started) return;
+      try {
+        answerText?.({ step: requestStep - 1, text: '' });
+      } catch {
+        /* Progress is a preview. */
+      }
+    };
+    clearPreview(failure.outputStarted);
+    const chosen = inferenceRouteSchema.parse(route);
+    const backup = tools?.fallback ? inferenceRouteSchema.parse(tools.fallback.route) : undefined;
+    const other = answeredBy === undefined ? backup : chosen;
+    const images = turnImages(loopTurns(items)).length > 0;
+    const usable = (target: typeof config) =>
+      sameRoute(target, config) || (switchable(target) && (!images || routeCapabilities(target).imageInput));
+    const order = (routes ?? [config, ...(other && !sameRoute(other, config) ? [other] : [])]).filter(target =>
+      usable(target),
+    );
+    let errorClass = failure.errorClass;
+    for (const [index, target] of order.entries()) {
+      const from = { provider: config.provider, model: config.model, errorClass };
+      await sleep(transientRetryPauseMs * (index + 1), undefined, signal ? { signal } : undefined);
+      try {
+        const value = await call(target);
+        if (invalid?.(value) && index < order.length - 1) continue;
+        log('warn', 'activity', 'call_completed', {
+          operation: 'chat.model-retry',
+          outcome: 'recovered',
+          'error.type': failure.errorClass,
+          'gen_ai.request.model': target.model,
+          attempt: index + 1,
+        });
+        if (!sameRoute(target, config)) {
+          recordModelFallback('used', from, { provider: target.provider, model: target.model });
+          switchTo(target);
+        }
+        return value;
+      } catch (error) {
+        const again = modelCallDiagnostics(error);
+        if (!again || !transientModelErrors.has(again.errorClass)) throw error;
+        clearPreview(again.outputStarted);
+        errorClass = again.errorClass;
+        failed = { error };
+      }
+    }
+    log('warn', 'activity', 'call_failed', {
+      operation: 'chat.model-retry',
+      outcome: 'exhausted',
+      'error.type': errorClass,
+      attempt: order.length,
+    });
+    throw failed.error;
   }
   /**
    * Returns the model's rejected tool request with a correction. After the third correction in a reply the model
@@ -3917,13 +4051,15 @@ export async function inferWithTools(
   }
   const replyStart = items.length;
   const workBefore = workToolUsed;
+  // The reply starts again on the fallback at most once, even if a provider error later hands it back to the chat model.
+  let restarted = false;
   /**
    * Starts the reply again on the configured fallback model, after a row request's forced table tools still left it
    * without the change. Only reads ran so far in this reply, so its rounds are dropped and the fallback answers the
    * person's request from the start, under the same checks.
    */
   const restartOnFallback = () => {
-    if (!tools?.fallback || answeredBy !== undefined || tools.priorToolCalls?.length) return false;
+    if (!tools?.fallback || answeredBy !== undefined || restarted || tools.priorToolCalls?.length) return false;
     const fallback = inferenceRouteSchema.parse(tools.fallback.route);
     const target = { provider: fallback.provider, model: fallback.model };
     const primary = { provider: config.provider, model: config.model, errorClass: 'incomplete_response' };
@@ -3943,6 +4079,7 @@ export async function inferWithTools(
       return false;
     }
     items.length = replyStart;
+    restarted = true;
     config = fallback;
     answeredBy = tools.fallback.label;
     recordModelFallback('used', primary, target);
@@ -4473,9 +4610,9 @@ export async function inferWithTools(
         unbacked || writeUnbacked || idAsked
           ? undefined
           : (otherTableSkipped ??
-            heldBackMisdescribed(candidate, items) ??
+            heldBackMisdescribed(candidate, items, request) ??
             (waiting ? waitingCardStretched(candidate, items, request, earlier) : undefined) ??
-            waitingCardMisdescribed(candidate, rowCards) ??
+            waitingCardMisdescribed(candidate, rowCards, request) ??
             rowRequestSkipped(items, request, rowCards, waitingRows) ??
             inventedFailure(candidate, items, waiting) ??
             leakedWording(candidate, request));
@@ -4639,10 +4776,20 @@ export async function inferWithTools(
         // Corrections are spent, so the reply ends with an answer rather than failing after its tools ran.
         recordChatCompletionCheck('exhausted');
         // A row write held back behind a waiting card ends by naming that card's change and the request it did not take.
+        const heldWrite = heldBackWrites(items)[0];
         const held =
-          heldBackWrites(items)[0] ??
+          heldWrite ??
           (rowRequest.test(request) && (misdescribed || unbacked || cardClaimed) ? rowCards[0] : undefined);
-        if (held && (misdescribed || unbacked || writeUnbacked || cardClaimed || leakedWording(candidate, request)))
+        // A write held back with nothing else written is finished: approval is what it waits on.
+        if (
+          held &&
+          ((heldWrite && !writtenRows(items)) ||
+            misdescribed ||
+            unbacked ||
+            writeUnbacked ||
+            cardClaimed ||
+            leakedWording(candidate, request))
+        )
           return finish(heldBackReply(held, request), true);
         // A reply that keeps naming a card it did not make ends by pointing at the card that does wait, if any.
         if (

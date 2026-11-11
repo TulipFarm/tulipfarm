@@ -821,18 +821,17 @@ test('malformed streams take the empty-or-malformed correction path', async t =>
   );
 });
 
-test('an in-stream provider error fails like the matching HTTP error with unknown usage', async t => {
-  provider(t, [
-    () =>
-      streamed([
-        encoder.encode(
-          sse([
-            anthropic([], 'end_turn')[0],
-            { type: 'error', error: { type: 'overloaded_error', message: 'Overloaded' } },
-          ]),
-        ),
-      ]),
-  ]);
+test('an in-stream provider error fails like the matching HTTP error with unknown usage after one retry', async t => {
+  const overloaded = () =>
+    streamed([
+      encoder.encode(
+        sse([
+          anthropic([], 'end_turn')[0],
+          { type: 'error', error: { type: 'overloaded_error', message: 'Overloaded' } },
+        ]),
+      ),
+    ]);
+  const requests = provider(t, [overloaded, overloaded]);
   const metered = [];
   await assert.rejects(
     inferWithTools(
@@ -843,7 +842,36 @@ test('an in-stream provider error fails like the matching HTTP error with unknow
     ),
     { message: 'model-overload' },
   );
-  assert.deepEqual(metered, [{ kind: 'unknown' }]);
+  assert.equal(requests.length, 2);
+  assert.deepEqual(metered, [{ kind: 'unknown' }, { kind: 'unknown' }]);
+});
+
+test('an internal error inside a chat-completions stream clears its streamed text and the retry answers', async t => {
+  const base = { id: 'chatcmpl-1', object: 'chat.completion.chunk', model: 'actual-azure' };
+  const chunk = (delta, finish = null) =>
+    `data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`;
+  const internal = `data: ${JSON.stringify({ error: { code: 'internal', message: 'Internal error during token generation' } })}\n\n`;
+  const requests = provider(t, [
+    () => streamed([encoder.encode(chunk({ role: 'assistant', content: 'Adding' }) + internal)]),
+    () => streamed([encoder.encode(chunk({ content: 'Done' }) + chunk({}, 'stop') + 'data: [DONE]\n\n')]),
+  ]);
+  const plain = recorder();
+  const answer = await inferWithTools(
+    routes.azure,
+    [{ role: 'user', text: 'Hi' }],
+    () => assert.fail('No tool expected'),
+    undefined,
+    false,
+    null,
+    { answerText: plain.answerText },
+  );
+  assert.equal(answer.text, 'Done');
+  assert.equal(requests.length, 2);
+  assert.deepEqual(plain.updates.slice(0, 2), [
+    { step: 0, text: 'Adding' },
+    { step: 0, text: '' },
+  ]);
+  assert.deepEqual(plain.updates.at(-1), { step: 1, text: 'Done' });
 });
 
 test('a prompt the Azure content filter blocks fails as a refusal, not an invalid request', async t => {

@@ -344,6 +344,54 @@ test('chat row writes after untrusted content become member-approved review draf
     }
   });
 
+  await t.test('rows and table proposals that repeat a waiting row card are held back behind it', async () => {
+    const chatId = randomUUID();
+    const notes = ['Apple', 'Banana', 'Cherry', 'Date', 'Elderberry', 'Fig'];
+    const row = value => ({ values: { [note.id]: text(value) } });
+    const { result: card } = await chatTool(
+      {
+        tool: 'rows.create.batch',
+        tableId: table.tableId,
+        expectedAppliedRevision: table.revision,
+        rows: notes.map(row),
+      },
+      [],
+      { chatId, message: `Add these rows to Notes: ${notes.join(', ')}.` },
+    );
+    assert.equal(card.status, 'review-required');
+    const moved = await chatTool(
+      {
+        tool: 'rows.create.batch',
+        tableId: otherTable.tableId,
+        expectedAppliedRevision: otherTable.revision,
+        rows: [...notes, 'Lime'].map(row),
+      },
+      [],
+      { chatId, message: 'Add one more row: Lime.' },
+    );
+    assert.equal(moved.result.error, 'approval-pending');
+    assert.equal(moved.result.waitingDraftId, card.draftId);
+    assert.equal(moved.result.table, 'Notes');
+    assert.deepEqual(moved.result.notAdded, ['Lime']);
+    const propose = changes => ({
+      tool: 'tables.propose',
+      input: JSON.stringify({
+        label: 'Add rows',
+        plans: [{ kind: 'records', tableId: table.tableId, dependsOn: [], expectedRevision: table.revision, changes }],
+      }),
+    });
+    const create = value => ({ kind: 'create', recordId: randomUUID(), ...row(value) });
+    const repeated = await chatTool(propose([...notes, 'Lime'].map(create)), [], {
+      chatId,
+      message: 'Add one more row: Lime.',
+    });
+    assert.equal(repeated.result.error, 'approval-pending');
+    assert.equal(repeated.result.waitingDraftId, card.draftId);
+    assert.deepEqual(repeated.result.notAdded, ['Lime']);
+    const different = await chatTool(propose([create('Lime')]), [], { chatId, message: 'Add one more row: Lime.' });
+    assert.equal(different.result.error, undefined, JSON.stringify(different.result));
+  });
+
   await t.test('cross-turn budgets are separate for each table and reset on a table revision', async () => {
     const chatId = randomUUID();
     for (let index = 0; index < 5; index++) await chatTool(createCall(`budget-${index}`), [], { chatId });
