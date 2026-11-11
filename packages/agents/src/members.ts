@@ -159,6 +159,9 @@ export async function findMembers(tx: AgentTransaction, actor: HumanActor, query
     rosters.set(row.team_id, roster);
   }
   return {
+    scope: needle ? ('filtered' as const) : ('workspace' as const),
+    workspaceMemberCount: everyone.length,
+    workspaceTeamCount: allTeams.length,
     memberCount: members.length,
     members: members
       .slice(0, limit)

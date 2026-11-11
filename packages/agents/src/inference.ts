@@ -3,6 +3,7 @@ import { waitingCardChange } from './chat-row-guard.ts';
 import {
   directoryAnswerExpected,
   directoryCheckPrompt,
+  directoryListingExpected,
   directoryReply,
   directoryUnavailableReply,
   workspaceDirectorySchema,
@@ -3369,14 +3370,16 @@ export async function inferWithTools(
     .map(turn => textTurn(turn).text)
     .join('\n');
   // An answer about workspace invitations is held back until the invitation checks have run, so a wrong "none" never streams.
-  const directoryExpected = !invitationLookup(sourceMessages) && directoryAnswerExpected(sourceMessages.map(textTurn));
+  const directoryListing = directoryListingExpected(sourceMessages.map(textTurn));
+  const directoryExpected =
+    directoryListing || (!invitationLookup(sourceMessages) && directoryAnswerExpected(sourceMessages.map(textTurn)));
   let directory: WorkspaceDirectory | undefined;
   let directorySucceeded = false;
   let directoryAttempted = false;
   let directoryRecovery = false;
   if (directoryExpected && tools?.readWorkspaceDirectory) {
     const retained = workspaceDirectorySchema.safeParse(await tools.readWorkspaceDirectory());
-    if (retained.success) {
+    if (retained.success && retained.data.scope !== 'filtered') {
       directory = retained.data;
       directorySucceeded = true;
       items.push({
@@ -4323,6 +4326,19 @@ export async function inferWithTools(
       }
     }
     if (!selected.calls.length || rendered) {
+      if (directoryListing) {
+        if (!directory && !directoryAttempted && !finalizing && calls < chatToolCallLimit) {
+          const call = { tool: 'members.find' as const };
+          calls++;
+          directoryAttempted = true;
+          report('tool', toolDisplayName(call.tool));
+          const value = await execute(call, 'Reading workspace people and teams');
+          guard.record(call, toolOutput(call, value));
+          const found = workspaceDirectorySchema.safeParse(value);
+          if (found.success && found.data.scope !== 'filtered') directory = found.data;
+        }
+        return finish(directory ? directoryReply(directory) : directoryUnavailableReply, true);
+      }
       // Some routes accept only automatic tool choice. A skipped read still uses the normal, authorized dispatcher.
       if (directoryExpected && directoryRecovery && !directoryAttempted && !directory && !finalizing) {
         const call = { tool: 'members.find' as const };
@@ -4671,7 +4687,7 @@ export async function inferWithTools(
         const found = workspaceDirectorySchema.safeParse(value);
         if (found.success) {
           directorySucceeded = true;
-          if (call.query === undefined) directory = found.data;
+          if (call.query === undefined && found.data.scope !== 'filtered') directory = found.data;
         }
       }
       if (call.tool === 'skills.read' && value && typeof value === 'object' && !('error' in value)) {

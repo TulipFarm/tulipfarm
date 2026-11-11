@@ -2,6 +2,9 @@ import { z } from 'zod';
 
 const person = z.object({ name: z.string(), email: z.string().nullable().optional() });
 export const workspaceDirectorySchema = z.object({
+  scope: z.enum(['workspace', 'filtered']).optional(),
+  workspaceMemberCount: z.number().int().nonnegative().optional(),
+  workspaceTeamCount: z.number().int().nonnegative().optional(),
   memberCount: z.number().int().nonnegative(),
   members: z.array(person),
   teamCount: z.number().int().nonnegative(),
@@ -35,6 +38,25 @@ export function directoryAnswerExpected(messages: readonly { role: string; text:
     /^(?:please\s+)?(?:list|show|count|check|verify|confirm)\s+(?:them|those|these|their\b.*)|^(?:and\s+)?(?:their members|who is in each|are you sure|check again)[?.! ]*$/i.test(
       latest.trim(),
     ) && directoryQuestion(requests.at(-2)?.text ?? '')
+  );
+}
+
+export function directoryListingExpected(messages: readonly { role: string; text: string }[]) {
+  if (!directoryAnswerExpected(messages)) return false;
+  const requests = messages.filter(message => message.role === 'user');
+  const latest = requests.at(-1)?.text ?? '';
+  const question = directoryQuestion(latest) ? latest : (requests.at(-2)?.text ?? '');
+  if (
+    /\b(?:tables?|sets?|team|invitations?|invitees?|invites?|invited|only|except|matching|named|called|without)\b|\bwith\s+no\b/i.test(
+      question,
+    )
+  )
+    return false;
+  return (
+    /\bworkspace\b/i.test(question) ||
+    /^(?:please\s+)?(?:list|show|find|count)\s+(?:(?:all|the|our|my|current|active)\s+)*(?:teams|members|people)(?:\s+and\s+(?:their\s+)?(?:members|people))?[?.! ]*$/i.test(
+      question.trim(),
+    )
   );
 }
 

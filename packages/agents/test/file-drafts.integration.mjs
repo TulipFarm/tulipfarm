@@ -245,6 +245,11 @@ test('chat lists every team with its people, without plan documents, and hides p
   );
   assert.equal(asAdmin.pendingInvitationCount, 1);
   assert.deepEqual([asAdmin.memberCount, asAdmin.teamCount, asAdmin.truncated], [3, 3, false]);
+  const filtered = await tool({ tool: 'members.find', query: 'Ops and Sales' });
+  assert.equal(filtered.scope, 'filtered');
+  assert.deepEqual([filtered.memberCount, filtered.teamCount], [0, 2]);
+  assert.deepEqual([filtered.workspaceMemberCount, filtered.workspaceTeamCount], [3, 3]);
+  assert.equal(asAdmin.scope, 'workspace');
   const adminView = people(asAdmin);
   assert.deepEqual(
     [adminView.Ops, adminView.Sales],
