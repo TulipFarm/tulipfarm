@@ -12,7 +12,188 @@ import {
   toolResults,
   use,
   useCall,
+  azureStreamReply,
 } from './native-fixture.mjs';
+import { ownServiceRefusal } from '../src/own-service.ts';
+
+const apiCall = page => ({ tool: 'api.request', method: 'GET', url: `https://api.example.com/projects?page=${page}` });
+const failedApiReply =
+  "I couldn't finish this request because the API calls kept failing, so I stopped instead of repeating them. Ask me to try a different way.";
+const apiLimitReply =
+  'I stopped after 50 API calls, the limit for one request. Some work may not be finished. Ask me to continue.';
+
+for (const model of ['grok-4.3', 'Kimi-K2.6', 'DeepSeek-V4-Pro'])
+  for (const streaming of [false, true])
+    for (const repeated of [false, true])
+      test(`${model} stops refused API calls with ${repeated ? 'identical' : 'changing'} addresses (${streaming ? 'SSE' : 'JSON'})`, async t => {
+        let calls = 0,
+          requests = 0;
+        t.mock.method(globalThis, 'fetch', async (_url, init) => {
+          const body = JSON.parse(init.body);
+          assert.ok(body.tools, 'no final model summary is needed after refusals');
+          assert.ok(++requests <= 3, 'refusals must not start another long model loop');
+          const reply = nativeReply('azure', {
+            calls: [useCall(apiCall(repeated ? 0 : requests))],
+          });
+          return streaming ? azureStreamReply(reply) : Response.json(reply);
+        });
+        const result = await inferWithTools(
+          { ...nativeRoutes.azure, model },
+          [{ role: 'user', text: 'List my projects.' }],
+          async () => {
+            calls++;
+            return ownServiceRefusal;
+          },
+        );
+        assert.equal(result.text, failedApiReply);
+        assert.equal(calls, repeated ? 1 : 3);
+      });
+
+test('API call budget includes prior attempts and stops a parallel batch at fifty without another model request', async t => {
+  let calls = 0;
+  t.mock.method(globalThis, 'fetch', async () =>
+    Response.json(nativeReply('anthropic', { calls: Array.from({ length: 5 }, (_, i) => useCall(apiCall(i))) })),
+  );
+  const result = await inferWithTools(
+    nativeRoutes.anthropic,
+    [],
+    async () => {
+      assert.ok(++calls <= 2, 'only two API calls remain');
+      return { status: 'sent', response: { status: 200 } };
+    },
+    undefined,
+    false,
+    null,
+    { priorCalls: 48, priorToolCalls: Array.from({ length: 48 }, (_, i) => apiCall(i + 10)) },
+  );
+  assert.equal(calls, 2);
+  assert.equal(result.text, apiLimitReply);
+});
+
+test('refusal counts and denied call fingerprints survive an automatic retry', async t => {
+  const prior = apiCall(0);
+  let calls = 0;
+  t.mock.method(globalThis, 'fetch', async () => Response.json(nativeReply('anthropic', { calls: [useCall(prior)] })));
+  const result = await inferWithTools(
+    nativeRoutes.anthropic,
+    [],
+    async () => {
+      calls++;
+      return ownServiceRefusal;
+    },
+    undefined,
+    false,
+    null,
+    {
+      priorCalls: 2,
+      priorToolCalls: [prior, apiCall(1)],
+      priorToolResults: [prior, apiCall(1)].map(call => ({ call, output: ownServiceRefusal })),
+    },
+  );
+  assert.equal(calls, 0);
+  assert.equal(result.text, failedApiReply);
+});
+
+test('a batch stops after three same-code API failures even when every address differs', async t => {
+  let calls = 0;
+  t.mock.method(globalThis, 'fetch', async () =>
+    Response.json(nativeReply('anthropic', { calls: Array.from({ length: 10 }, (_, i) => useCall(apiCall(i))) })),
+  );
+  const result = await inferWithTools(nativeRoutes.anthropic, [], async () => {
+    calls++;
+    return { status: 'failed', code: 'address-denied', message: 'Address not allowed.' };
+  });
+  assert.equal(calls, 3);
+  assert.equal(result.text, failedApiReply);
+});
+
+test('a resumed turn with three refused receipts completes without asking the model again', async t => {
+  const priorToolCalls = Array.from({ length: 3 }, (_, i) => apiCall(i));
+  t.mock.method(globalThis, 'fetch', () => assert.fail('Exhausted refusals must not restart model inference'));
+  const result = await inferWithTools(
+    nativeRoutes.anthropic,
+    [],
+    () => assert.fail('Exhausted refusals must not dispatch another call'),
+    undefined,
+    false,
+    null,
+    {
+      priorCalls: 3,
+      priorToolCalls,
+      priorToolResults: priorToolCalls.map(call => ({ call, output: ownServiceRefusal })),
+    },
+  );
+  assert.equal(result.text, failedApiReply);
+});
+
+test('a resumed turn counts new failures with the same code despite different arguments', async t => {
+  let calls = 0;
+  const priorToolCalls = [apiCall(0), apiCall(1)];
+  t.mock.method(globalThis, 'fetch', async () =>
+    Response.json(nativeReply('anthropic', { calls: [useCall(apiCall(2))] })),
+  );
+  const result = await inferWithTools(
+    nativeRoutes.anthropic,
+    [],
+    async () => {
+      calls++;
+      return ownServiceRefusal;
+    },
+    undefined,
+    false,
+    null,
+    {
+      priorCalls: 2,
+      priorToolCalls,
+      priorToolResults: priorToolCalls.map(call => ({ call, output: ownServiceRefusal })),
+    },
+  );
+  assert.equal(calls, 1);
+  assert.equal(result.text, failedApiReply);
+});
+
+test('a durable API ledger limit completes the reply without another model request', async t => {
+  let requests = 0;
+  t.mock.method(globalThis, 'fetch', async () => {
+    assert.equal(++requests, 1);
+    return Response.json(nativeReply('anthropic', { calls: [useCall(apiCall(0))] }));
+  });
+  const result = await inferWithTools(nativeRoutes.anthropic, [], async () => ({
+    status: 'failed',
+    code: 'call-limit',
+    message: apiLimitReply,
+  }));
+  assert.equal(result.text, apiLimitReply);
+});
+
+test('API limit recovery needs no model or review-card service even when older cards are pending', async t => {
+  t.mock.method(globalThis, 'fetch', () => assert.fail('API limit recovery must be local'));
+  const result = await inferWithTools(
+    nativeRoutes.anthropic,
+    [],
+    () => assert.fail('The API budget is exhausted'),
+    undefined,
+    false,
+    null,
+    {
+      priorCalls: 50,
+      priorToolCalls: Array.from({ length: 50 }, (_, i) => apiCall(i)),
+      priorReviewCards: [{ kind: 'table', id: '11111111-1111-4111-8111-111111111111' }],
+      reviewCards: async () => assert.fail('Review cards must not replace the limit explanation'),
+    },
+  );
+  assert.equal(result.text, apiLimitReply);
+});
+
+test('successful repeated API reads remain refreshable and ordinary tools keep their own budget', () => {
+  const guard = createChatToolGuard();
+  for (let i = 0; i < 10; i++) {
+    guard.round();
+    assert.equal(guard.duplicate(apiCall(0)), false);
+    guard.record(apiCall(0), JSON.stringify({ status: 'sent', response: { status: 200, page: i } }));
+    assert.equal(guard.stalled, false);
+  }
+});
 
 const write = {
   tool: 'rows.create',
