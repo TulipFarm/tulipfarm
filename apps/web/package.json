@@ -52,7 +52,7 @@
     "@tulipfarm/plan-documents": "workspace:*",
     "@tulipfarm/recommendations": "workspace:*",
     "@tulipfarm/slack": "workspace:*",
-    "@tulipfarm/sprout": "https://github.com/TulipFarm/sprout/releases/download/v0.15.4/tulipfarm-sprout-0.15.4.tgz",
+    "@tulipfarm/sprout": "https://github.com/TulipFarm/sprout/releases/download/v0.16.0/tulipfarm-sprout-0.16.0.tgz",
     "@tulipfarm/tables": "workspace:*",
     "@tulipfarm/workflows": "workspace:*",
     "@tulipfarm/workspace-storage": "workspace:*",
