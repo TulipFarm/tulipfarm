@@ -45,6 +45,41 @@ for (const model of models)
       'Compare the prices, then could you please export everything as a docx.',
       'CREATE A SPREADSHEET of these prices: A 1, B 2.',
       'cReAtE a FiLe with my notes.',
+      'Make me an Excel sheet of these prices: A 1, B 2.',
+      'Turn these notes into a PowerPoint.',
+      'Put these prices in a slide deck.',
+      ...[
+        'Excel',
+        'xlsx',
+        'xls',
+        'sheet',
+        'workbook',
+        'spreadsheet',
+        'PowerPoint',
+        'pptx',
+        'slides',
+        'slide deck',
+        'deck',
+        'presentation',
+        'Word',
+        'docx',
+        'doc',
+        'document',
+        'PDF',
+        'CSV',
+        'TSV',
+        'txt',
+        'markdown',
+        'md',
+        'JSON',
+        'YAML',
+        'HTML',
+        'image',
+        'archive.zip',
+        'export',
+        'download',
+        'attachment',
+      ].map(format => `Make an output using ${format}.`),
     ])
       for (const claimsSavedFile of [false, true])
         test(`${title} structured save request ${claimsSavedFile ? 'rejects a false claim' : 'recovers a missing create'}: ${request}`, async t => {
@@ -105,6 +140,65 @@ for (const model of models)
         });
 
     for (const scenario of [
+      {
+        request: 'Make me an Excel sheet of these prices: A 1, B 2.',
+        text: 'Done! Your Excel sheet is ready.',
+      },
+      { request: 'Turn these notes into a PowerPoint.', text: 'Your PowerPoint deck is ready.' },
+      { request: 'Put these prices in a slide deck.', text: 'Done, the slide deck is ready for you.' },
+      ...[
+        'Done! Your Excel sheet is ready.',
+        'Your PowerPoint deck is ready.',
+        'Done, the slide deck is ready for you.',
+        'Your presentation is saved.',
+        'Your Word document is created.',
+        'Your PDF is attached.',
+        'Your image is downloadable.',
+        'The attachment is ready.',
+        'archive.zip is ready.',
+        "All done! It's ready.",
+        "All done! It's saved.",
+        "All done! It's created.",
+        "All done! It's attached.",
+        "All done! It's downloadable.",
+      ].map(text => ({ request: 'Compare these prices: A 1, B 2.', text })),
+    ])
+      for (const checkFails of [false, true])
+        test(`${title} checks file outcome claims ${checkFails ? 'with an unavailable checker' : 'before accepting'}: ${scenario.request} ${scenario.text}`, async t => {
+          let checks = 0;
+          const previews = [];
+          provider(
+            t,
+            sse,
+            [nativeReply('azure', { text: scenario.text })],
+            checkFails,
+            body => {
+              const names = body.tools.map(tool => tool.function?.name);
+              assert.ok(!names.includes('files_create'));
+              assert.ok(!names.includes('files_list'));
+            },
+            () => {
+              checks++;
+              assert.ok(!previews.includes(scenario.text), 'An unchecked outcome claim must not stream');
+              return { status: 'continue', fileSaveRequested: false, claimsSavedFile: true };
+            },
+          );
+          const result = await inferWithTools(
+            route(model),
+            [{ role: 'user', text: scenario.request }],
+            () => assert.fail('A false outcome claim does not authorize file creation'),
+            undefined,
+            false,
+            null,
+            { ...options, answerText: update => previews.push(update.text) },
+          );
+          assert.ok(checks > 0, 'Reply-side file claims must reach the completion checker');
+          assert.equal(result.text, "I couldn't save the file. Ask me to try again.");
+          assert.ok(!previews.includes(scenario.text));
+        });
+
+    for (const scenario of [
+      { request: 'Is this explanation ready?', text: "It's ready." },
       { request: 'Make the file names shorter.', text: "I've created file names that are shorter: Notes and Budget." },
       { request: 'Save the file id for later.', text: "I've saved the file ID to memory." },
       {
@@ -668,7 +762,24 @@ function provider(t, sse, replies, checkFails = false, inspect = () => {}, verdi
     inspect(body);
     const reply = replies.length > 1 ? replies.shift() : replies[0];
     assert.ok(reply, 'fixture exhausted');
-    return sse ? azureStreamReply(reply) : Response.json(reply);
+    if (!sse || !reply.choices[0].message.content) return sse ? azureStreamReply(reply) : Response.json(reply);
+    const text = reply.choices[0].message.content;
+    const events = [
+      ...text.split(/(?<=\s)/).map(content => ({
+        choices: [{ index: 0, delta: { content }, finish_reason: null }],
+      })),
+      { choices: [{ index: 0, delta: {}, finish_reason: reply.choices[0].finish_reason }], usage: reply.usage },
+    ].map(event => `data: ${JSON.stringify(event)}\n\n`);
+    events.push('data: [DONE]\n\n');
+    return new Response(
+      new ReadableStream({
+        pull(controller) {
+          controller.enqueue(new TextEncoder().encode(events.shift() ?? 'data: [DONE]\n\n'));
+          if (!events.length) controller.close();
+        },
+      }),
+      { headers: { 'content-type': 'text/event-stream' } },
+    );
   });
 }
 

@@ -7,9 +7,9 @@ export const fileListingEmpty = "I didn't find any files that match your search.
 const saveFailed = "I couldn't save the file. Ask me to try again.";
 const repeatedFailure = 'I stopped because the same file request kept failing.';
 const filePrefilter =
-  /\b(?:file|doc|spreadsheet|workbook|report|csv|markdown|xlsx|pptx|sav|export|download)|\S+\.[a-z0-9]+\b/i;
-// These claims are only a fallback when the structured completion check fails, never save authorization.
-const fileSubject = String.raw`(?:files?|workbooks?|spreadsheets?|documents?|\S+\.(?:md|txt|csv|json|docx|xlsx|pptx))\b`;
+  /\b(?:file|excel|xlsx|xls|sheet|workbook|spreadsheet|powerpoint|pptx|ppt|slide|deck|presentation|word|docx|doc|document|pdf|report|csv|tsv|txt|markdown|md|json|ya?ml|html|image|sav|export|download|attach)|\S+\.[a-z0-9]+\b/i;
+// Claim matches trigger checking or a safe failure reply, never save authorization.
+const fileSubject = String.raw`(?:files?|excel|xlsx|xls|sheets?|workbooks?|spreadsheets?|powerpoint|pptx|ppt|slides?|decks?|presentations?|word|docx|docs?|documents?|pdfs?|reports?|csv|tsv|txt|markdown|md|json|ya?ml|html|images?|attachments?|outputs?|\S+\.[a-z0-9]+)\b`;
 const fileSavedClaim = new RegExp(
   [
     String.raw`\b(?:saved|created|ready)\s+in\s+(?:(?:my|your)\s+)?Files\b`,
@@ -19,8 +19,10 @@ const fileSavedClaim = new RegExp(
   ].join('|'),
   'i',
 );
-const readyFileClaim =
-  /\b(?:files?|reports?|workbooks?|spreadsheets?|documents?|outputs?)\s+(?:is|are|has been|have been)\s+(?:(?:now|successfully)\s+)?(?:ready|saved|created|generated)\b/i;
+const readyFileClaim = new RegExp(
+  String.raw`\b(?:${fileSubject}|it)(?:\s+(?:is|are|has been|have been)|['’]s)\s+(?:(?:now|successfully)\s+)?(?:ready|saved|created|generated|attached|downloadable)\b`,
+  'i',
+);
 const receipt = z.object({
   file: z.object({
     id: z.uuid(),
@@ -55,7 +57,8 @@ export function createFileJobGuard(request: string, prior: readonly { call: unkn
   const failures = new Map<string, number>();
   let repeated = false;
   let needsListing = false;
-  const needsCheck = (text = '') => !saved && (attempted || filePrefilter.test(request) || filePrefilter.test(text));
+  const needsCheck = (text = '') =>
+    !saved && (attempted || filePrefilter.test(request) || filePrefilter.test(text) || readyFileClaim.test(text));
   const record = (call: { tool: string }, value: unknown) => {
     if (!call.tool.startsWith('files.')) return;
     calls++;
