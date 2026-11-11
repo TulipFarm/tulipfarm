@@ -1863,7 +1863,7 @@ const agentAuthoringRefusal = (text: string) =>
   /\b(?:i|we) (?:cannot|can't|can’t|could not|couldn't|couldn’t|am unable to|are unable to) (?:draft|prepare|create|build|set up) (?:this|the|an?|your) agent(?: draft| setup)?(?: (?:in|from|through) (?:this|the) chat)?(?:[.!](?=\s|$)|$)/i.test(
     text,
   ) ||
-  /\b(?:agents[._](?:context|draft)|(?:drafting|authoring) tools?)\b.{0,100}\b(?:unavailable|not available|not offered|not enabled|not provided|missing)\b|\b(?:unavailable|not available|not offered|do not have|don't have|missing)\b.{0,100}\b(?:agents[._](?:context|draft)|(?:drafting|authoring) tools?)\b/i.test(
+  /\b(?:agents[._](?:context|draft)|(?:drafting|authoring) tools?)\b`?(?: tool| function)?(?:\s+|:\s*)(?:(?:(?:is|are)\s+)?(?:currently\s+)?(?:unavailable|not (?:available|offered|enabled|provided))|(?:isn't|isn’t|aren't|aren’t)\s+(?:currently\s+)?(?:available|offered|enabled|provided))\b|\b(?:i|we) (?:do not|don't|don’t) have (?:access to )?(?:the )?`?(?:agents[._](?:context|draft)|(?:drafting|authoring) tools?)\b/i.test(
     text,
   );
 const writeAlone =

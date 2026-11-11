@@ -41,6 +41,12 @@ export async function requestedSkill(
       )
       SELECT "skillId",revision FROM latest
       WHERE "skillId"='agent-authoring' AND NOT EXISTS (
+        SELECT 1 FROM ${qualified(tx.schema, 'tf_conversation_turns')} t
+        JOIN ${qualified(tx.schema, 'tf_conversation_messages')} m ON m.id=t.source_message_id AND m.conversation_id=t.conversation_id
+        WHERE t.conversation_id=$1 AND m.author_kind='human'
+          AND t.accepted_sequence>latest.accepted_sequence AND t.accepted_sequence<=latest.current_sequence
+        LIMIT 1 OFFSET 2
+      ) AND NOT EXISTS (
         SELECT 1 FROM ${qualified(tx.schema, 'tf_chat_authoring_drafts')} d
         JOIN ${qualified(tx.schema, 'tf_conversation_turns')} t ON t.id=d.turn_id AND t.conversation_id=d.conversation_id
         WHERE d.conversation_id=$1 AND d.proposal->>'kind'='agent' AND t.accepted_sequence>=latest.accepted_sequence

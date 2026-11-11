@@ -132,41 +132,83 @@ for (const [label, route, fallback] of [
     assert.equal(result.fallback, fallback?.label);
   });
 
-test('authoring recovery stops when the forced context step is ignored', async t => {
-  let rounds = 0;
-  t.mock.method(globalThis, 'fetch', async (_url, init) => {
-    const body = JSON.parse(init.body);
-    assert.equal(isCompletionRequest(body), false);
-    assert.ok(rounds++ < 2, 'only one recovery round is attempted when the model ignores the tool choice');
-    return Response.json(nativeReply('azure', { text: 'agents.context is unavailable in this chat.' }));
+for (const text of [
+  'agents.context is unavailable in this chat.',
+  "`agents.draft` tool isn't available in this chat.",
+  "I don't have access to the agents.draft tool.",
+])
+  test(`authoring recovery stops when the forced context step is ignored: ${text}`, async t => {
+    let rounds = 0;
+    t.mock.method(globalThis, 'fetch', async (_url, init) => {
+      const body = JSON.parse(init.body);
+      assert.equal(isCompletionRequest(body), false);
+      assert.ok(rounds++ < 2, 'only one recovery round is attempted when the model ignores the tool choice');
+      return Response.json(nativeReply('azure', { text }));
+    });
+    const result = await inferWithTools(
+      { ...nativeRoutes.azure, model: 'grok-4.3' },
+      [{ role: 'user', text: 'Create a read-only agent.' }],
+      () => assert.fail('No helper or alternate tool should execute'),
+      undefined,
+      false,
+      null,
+      { builtinSkills: ['agent-authoring'], agentBuilderUrl: '/test-space/agents/new' },
+    );
+    assert.equal(
+      result.text,
+      "I couldn't draft this agent in chat. [Create it in the agent builder](/test-space/agents/new) instead.",
+    );
+    assert.equal(rounds, 2);
   });
-  const result = await inferWithTools(
-    { ...nativeRoutes.azure, model: 'grok-4.3' },
-    [{ role: 'user', text: 'Create a read-only agent.' }],
-    () => assert.fail('No helper or alternate tool should execute'),
-    undefined,
-    false,
-    null,
-    { builtinSkills: ['agent-authoring'], agentBuilderUrl: '/test-space/agents/new' },
-  );
-  assert.equal(
-    result.text,
-    "I couldn't draft this agent in chat. [Create it in the agent builder](/test-space/agents/new) instead.",
-  );
-  assert.equal(rounds, 2);
-});
 
 test('ordinary chats do not recover an agent-authoring refusal', async t => {
   let rounds = 0;
+  const streamed = [];
   const text = 'I cannot prepare an agent in this chat.';
   t.mock.method(globalThis, 'fetch', async () => {
     rounds++;
-    return Response.json(nativeReply('azure', { text }));
+    return stream(nativeReply('azure', { text }));
   });
-  const result = await inferWithTools(nativeRoutes.azure, [{ role: 'user', text: 'Hello.' }], () => assert.fail());
+  const result = await inferWithTools(
+    nativeRoutes.azure,
+    [{ role: 'user', text: 'Hello.' }],
+    () => assert.fail(),
+    undefined,
+    false,
+    null,
+    { builtinSkills: [], answerText: update => streamed.push(update.text) },
+  );
   assert.equal(result.text, text);
   assert.equal(rounds, 1);
+  assert.ok(streamed.includes(text));
 });
+
+for (const question of [
+  'Which name should I use? The drafting tool needs the missing name field.',
+  'The name field is missing from agents.draft. What should this agent be called?',
+  'Before I call agents.draft, which missing access details should I use?',
+])
+  test(`authoring clarification is not an unavailable-tool refusal: ${question}`, async t => {
+    let rounds = 0;
+    t.mock.method(globalThis, 'fetch', async (_url, init) => {
+      const body = JSON.parse(init.body);
+      assert.equal(isCompletionRequest(body), false);
+      assert.equal(body.tool_choice, 'auto', 'a clarification does not force context or draft');
+      assert.equal(rounds++, 0, 'a clarification needs no recovery round');
+      return Response.json(nativeReply('azure', { text: question }));
+    });
+    const result = await inferWithTools(
+      { ...nativeRoutes.azure, model: 'grok-4.3' },
+      [{ role: 'user', text: 'Use the agent drafting tools to prepare a read-only agent.' }],
+      () => assert.fail('A necessary clarification must not dispatch tools'),
+      undefined,
+      false,
+      null,
+      { builtinSkills: ['agent-authoring'], agentBuilderUrl: '/test-space/agents/new' },
+    );
+    assert.equal(result.text, question);
+    assert.equal(rounds, 1);
+  });
 
 for (const failing of ['context', 'draft'])
   test(`authoring recovery stops at a failed ${failing} prerequisite without another helper`, async t => {

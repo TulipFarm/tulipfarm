@@ -147,6 +147,28 @@ test('agent authoring stops carrying over once a draft exists', { timeout: 60000
   assert.deepEqual(active, [['agent-authoring'], []]);
 });
 
+test('agent authoring expires after two follow-up user turns without a draft', { timeout: 60000 }, async t => {
+  const f = await setup();
+  t.after(() => f.close());
+  const active = [];
+  f.hooks.reply = async input => active.push(input.builtinSkills);
+  const chatId = await f.chat();
+  for (const parts of [
+    [
+      { kind: 'skill', skillId: 'agent-authoring', revision: 'latest' },
+      { kind: 'text', text: 'Draft a support agent.' },
+    ],
+    [{ kind: 'text', text: 'Use the support records.' }],
+    [{ kind: 'text', text: 'Make it read-only.' }],
+    [{ kind: 'text', text: 'Tell me a joke instead.' }],
+    [{ kind: 'text', text: 'Tell me another.' }],
+  ]) {
+    assert.equal(await f.process(chatId, await f.send(chatId, parts)), 'completed');
+  }
+  assert.deepEqual(active, [['agent-authoring'], ['agent-authoring'], ['agent-authoring'], [], []]);
+  assert.ok(!f.replies[3].messages.some(message => message.text.includes('Skill invoked by the requester')));
+});
+
 test('cancelling an agent setup stops its authoring flow', { timeout: 60000 }, async t => {
   const f = await setup();
   t.after(() => f.close());
