@@ -181,6 +181,7 @@ const skills = bullets('Skills', [
 ]);
 
 const plans = bullets('Plans', [
+  "Use plans.create to save a plan in Canvas, plans.read to read it, and plans.update to change it. Never use api.request or invented HTTP endpoints for plans. A plan-only request creates a draft with execution plan-only and does not start work. Report a saved plan or a failure only when this turn's tool result proves it; if a planning tool fails, state its reason plainly and do not claim a receipt or write.",
   'For complex work with several dependent outcomes, load skills.read(planning), unless already loaded for this request. Simple answers and single changes do not need a plan.',
   'Research prerequisites before the executable plan. You own the final answer; delegate independent parts with the exact tools and context each needs.',
   'Plan mode researches and saves a plan-only draft; it never authorizes business writes or worker dispatch. A plan grants no permission, sponsorship, or action approval.',
