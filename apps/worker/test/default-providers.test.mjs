@@ -14,14 +14,16 @@ import { isCompletionRequest } from './native-chat-fixture.mjs';
 
 // One provider credential at a time: its families must run chat (streamed), titles and tasks against that provider's own API,
 // metered at that provider's catalog price. The provider is a local HTTP server; only the outbound origin is rewritten.
+// ChatGPT plan models run on a member's plan, not a provider credential, so they are off here.
+const planOff = { CHATGPT_PLAN: 'off' };
 const azureEndpoint = 'https://synthetic.services.ai.azure.com/';
 const providers = {
-  anthropic: { env: { ANTHROPIC_API_KEY: 'anthropic-key' }, origin: 'https://api.anthropic.com/' },
-  openai: { env: { OPENAI_API_KEY: 'openai-key' }, origin: 'https://api.openai.com/' },
-  xai: { env: { XAI_API_KEY: 'xai-key' }, origin: 'https://api.x.ai/' },
-  google: { env: { GEMINI_API_KEY: 'gemini-key' }, origin: 'https://generativelanguage.googleapis.com/' },
+  anthropic: { env: { ...planOff, ANTHROPIC_API_KEY: 'anthropic-key' }, origin: 'https://api.anthropic.com/' },
+  openai: { env: { ...planOff, OPENAI_API_KEY: 'openai-key' }, origin: 'https://api.openai.com/' },
+  xai: { env: { ...planOff, XAI_API_KEY: 'xai-key' }, origin: 'https://api.x.ai/' },
+  google: { env: { ...planOff, GEMINI_API_KEY: 'gemini-key' }, origin: 'https://generativelanguage.googleapis.com/' },
   azure: {
-    env: { AZURE_FOUNDRY_API_KEY: 'azure-key', AZURE_FOUNDRY_ENDPOINT: azureEndpoint },
+    env: { ...planOff, AZURE_FOUNDRY_API_KEY: 'azure-key', AZURE_FOUNDRY_ENDPOINT: azureEndpoint },
     origin: azureEndpoint,
   },
 };

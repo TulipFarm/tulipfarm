@@ -402,3 +402,35 @@ CLOUD_TELEMETRY_ENABLED=true
 CLOUD_TELEMETRY_OTLP_ENDPOINT=https://otlp-gateway-<zone>.grafana.net/otlp
 CLOUD_TELEMETRY_OTLP_AUTHORIZATION='Basic <base64 of instance-id:token>'
 ```
+
+## ChatGPT plan
+
+Each workspace member can use their own ChatGPT Plus or Pro plan for their own
+chats. In **Settings → Models**, a member selects **Continue with ChatGPT**,
+approves TulipFarm in ChatGPT, and then sees the catalog's ChatGPT plan models
+in their chat model menu. Those requests use the member's ChatGPT plan, not a
+provider key or workspace credits. Other members, agents, automations, projects
+and Slack can't use another member's plan. A ChatGPT plan model is never the
+default, a role model or a fallback, so the catalog still needs at least one
+provider key.
+
+It is on by default. Set `CHATGPT_PLAN=off` to remove the routes, models and
+settings card.
+
+Sign in with ChatGPT only redirects to `http://127.0.0.1:<port>/auth/callback`.
+The api listens there, on port 1455 or another free port, and completes the
+sign-in when the browser runs on the same machine as the api. In this Compose
+stack, or on any remote server, the browser can't reach that address: the
+ChatGPT tab ends on a page that can't be reached, and the member copies its full
+address into the field on the settings card to finish connecting.
+
+Limits:
+
+- Plan usage counts against the member's ChatGPT limits, which ChatGPT shares
+  across its apps. On Plus, that includes the 5-hour limit. When it runs out,
+  the chat shows "Usage limit reached" with a link to ChatGPT's usage settings.
+- Only TulipFarm's own tools work. Hosted OpenAI tools such as image
+  generation, file search, code interpreter and computer use aren't available,
+  and responses aren't stored by OpenAI.
+- OpenAI currently allows plan usage for open-source and self-hosted
+  deployments. A paid or remotely hosted service needs OpenAI's approval first.

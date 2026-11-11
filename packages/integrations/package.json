@@ -15,9 +15,17 @@
       "types": "./dist/service.d.ts",
       "default": "./dist/service.js"
     },
+    "./chatgpt": {
+      "types": "./dist/chatgpt.d.ts",
+      "default": "./dist/chatgpt.js"
+    },
     "./contracts": {
       "types": "./dist/contracts.d.ts",
       "default": "./dist/contracts.js"
+    },
+    "./subscriptions": {
+      "types": "./dist/subscriptions.d.ts",
+      "default": "./dist/subscriptions.js"
     }
   },
   "scripts": {
@@ -31,6 +39,7 @@
     "@tulipfarm/keyring": "workspace:*",
     "@tulipfarm/observability": "workspace:*",
     "@tulipfarm/workspace-storage": "workspace:*",
+    "jose": "6.2.12",
     "pg": "8.23.0",
     "zod": "4.6.6"
   },

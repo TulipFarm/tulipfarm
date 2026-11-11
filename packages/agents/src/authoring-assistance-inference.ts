@@ -51,6 +51,9 @@ function wire(config: Route, system: string, messages: readonly Message[]) {
           generationConfig: { maxOutputTokens: config.maxOutputTokens },
         },
       };
+    case 'chatgpt':
+      // Authoring assistance runs as the workspace, never on a member's ChatGPT plan.
+      throw new Error('chatgpt-member-required');
     case 'openai':
     case 'xai':
     case 'openai-compatible':

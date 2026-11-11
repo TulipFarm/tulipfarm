@@ -7,12 +7,15 @@ import { chatFallbackModel, chatReplyModel, conversationModel, roleModel } from 
 import { chatTitleRoute, meteredReply } from '../src/conversation-activities.ts';
 
 const runtime = { transaction: async () => assert.fail('An unavailable model must not reach storage') };
+// ChatGPT plan models run on a member's plan, not a provider credential, so they are off here.
+const planOff = { CHATGPT_PLAN: 'off' };
 const keys = {
+  ...planOff,
   ANTHROPIC_API_KEY: 'synthetic-key',
   AZURE_FOUNDRY_API_KEY: 'synthetic-key',
   AZURE_FOUNDRY_ENDPOINT: 'https://example.services.ai.azure.com/',
 };
-const shipped = { ANTHROPIC_API_KEY: 'synthetic-key' };
+const shipped = { ...planOff, ANTHROPIC_API_KEY: 'synthetic-key' };
 const catalogModels = JSON.parse(readFileSync(shippedModelCatalogPath, 'utf8')).models;
 const legacyModel = id => legacyModels.find(model => model.id === id);
 // A catalog of Claude Haiku and Claude Sonnet (the default) with only the `roles` given.
@@ -26,7 +29,7 @@ const claudeCatalog = roles =>
 
 function environment(t, values) {
   const previous = process.env;
-  process.env = { SLACK_OUTBOUND_ENABLED: 'false', KNOWLEDGE_EMBEDDINGS_ENABLED: 'false', ...values };
+  process.env = { ...planOff, SLACK_OUTBOUND_ENABLED: 'false', KNOWLEDGE_EMBEDDINGS_ENABLED: 'false', ...values };
   t.after(() => {
     process.env = previous;
   });
@@ -58,8 +61,11 @@ function previousModel(family) {
 }
 
 test('every enabled family keeps the route and price chat used before, and tasks use the same route', () => {
-  // Gemini families were not selectable before; their routes are covered by the default-provider tests.
-  const families = catalogModels.filter(family => family.vendor !== 'google').map(family => family.id);
+  // Gemini families were not selectable before; their routes are covered by the default-provider tests. ChatGPT plan
+  // families are newer than the previous price list.
+  const families = catalogModels
+    .filter(family => family.vendor !== 'google' && family.routes.every(route => route.provider !== 'chatgpt'))
+    .map(family => family.id);
   const env = keys;
   for (const family of families) {
     assert.deepEqual(conversationModel(family, env), previousModel(family), family);
@@ -137,11 +143,11 @@ test('chat rejects a reply when no model can serve it', async t => {
 });
 
 const providerKeys = {
-  anthropic: { ANTHROPIC_API_KEY: 'synthetic-key' },
-  openai: { OPENAI_API_KEY: 'synthetic-key' },
-  xai: { XAI_API_KEY: 'synthetic-key' },
-  google: { GEMINI_API_KEY: 'synthetic-key' },
-  azure: { AZURE_FOUNDRY_API_KEY: 'synthetic-key', AZURE_FOUNDRY_ENDPOINT: keys.AZURE_FOUNDRY_ENDPOINT },
+  anthropic: { ...planOff, ANTHROPIC_API_KEY: 'synthetic-key' },
+  openai: { ...planOff, OPENAI_API_KEY: 'synthetic-key' },
+  xai: { ...planOff, XAI_API_KEY: 'synthetic-key' },
+  google: { ...planOff, GEMINI_API_KEY: 'synthetic-key' },
+  azure: { ...planOff, AZURE_FOUNDRY_API_KEY: 'synthetic-key', AZURE_FOUNDRY_ENDPOINT: keys.AZURE_FOUNDRY_ENDPOINT },
 };
 const providerFamilies = {
   anthropic: ['claude-haiku', 'claude-sonnet', 'claude-opus', 'claude-fable'],

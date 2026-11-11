@@ -1101,6 +1101,17 @@ export const settings: readonly Setting[] = [
     selfHost: { section: 'models', example: 'gateway.example.com', commented: true },
   },
   {
+    name: 'CHATGPT_PLAN',
+    group: 'Models',
+    services: apps,
+    requirement: 'optional',
+    secret: false,
+    default: 'on',
+    description:
+      "`on` or `off`. With `on`, each workspace member can connect their own ChatGPT plan with Sign in with ChatGPT in Models settings and pick the catalog's ChatGPT plan models in their own chats; those requests use the member's plan, not a provider key. `off` removes the ChatGPT routes, models and settings card. OpenAI currently allows plan usage for open-source and self-hosted deployments; a paid or remotely hosted service needs OpenAI's approval first.",
+    selfHost: { section: 'models', example: 'on', commented: true },
+  },
+  {
     name: 'MODEL_CATALOG_FILE',
     group: 'Models',
     services: apiWorker,

@@ -39,7 +39,8 @@
               "xai",
               "google",
               "azure",
-              "openai-compatible"
+              "openai-compatible",
+              "chatgpt"
             ],
             "description": "API this provider speaks"
           },
@@ -92,7 +93,7 @@
                 "provider": {
                   "type": "string",
                   "pattern": "^[a-z][a-z0-9-]{0,49}$",
-                  "description": "A key in `providers`, or a built-in provider (anthropic, openai, xai, google, azure) with its standard variables"
+                  "description": "A key in `providers`, or a built-in provider (anthropic, openai, xai, google, azure) with its standard variables, or chatgpt for a member's own ChatGPT plan"
                 },
                 "model": {
                   "type": "string",
@@ -246,7 +247,7 @@
             "type": "object",
             "properties": {
               "api": {
-                "description": "Wire API. OpenAI, xAI, Azure and OpenAI-compatible endpoints support chat-completions and responses; Anthropic anthropic-messages; Google gemini",
+                "description": "Wire API. OpenAI, xAI, Azure and OpenAI-compatible endpoints support chat-completions and responses; Anthropic anthropic-messages; Google gemini; ChatGPT plan responses only",
                 "type": "string",
                 "enum": [
                   "chat-completions",
@@ -468,7 +469,7 @@
                 "provider": {
                   "type": "string",
                   "pattern": "^[a-z][a-z0-9-]{0,49}$",
-                  "description": "A key in `providers`, or a built-in provider (anthropic, openai, xai, google, azure) with its standard variables"
+                  "description": "A key in `providers`, or a built-in provider (anthropic, openai, xai, google, azure) with its standard variables, or chatgpt for a member's own ChatGPT plan"
                 },
                 "model": {
                   "type": "string",

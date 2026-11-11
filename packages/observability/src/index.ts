@@ -2982,6 +2982,7 @@ export async function observeInference<T>(
             ...media,
             ...spanDetails,
             ...(diagnostics?.providerCode ? { 'provider.error_code': diagnostics.providerCode } : {}),
+            ...(diagnostics?.providerRequestId ? { 'provider.request_id': diagnostics.providerRequestId } : {}),
             ...(diagnostics?.providerMessage ? { 'provider.error_message': diagnostics.providerMessage } : {}),
             ...(diagnostics?.rejection ? { 'response.rejection': diagnostics.rejection } : {}),
             ...(diagnostics?.finishReason ? { 'response.finish_reason': diagnostics.finishReason } : {}),

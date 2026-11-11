@@ -11,13 +11,21 @@ import { useModelCatalog } from '@/features/models/use-model-catalog';
 import type { ReadState } from '@/features/tables/request-state';
 import { modelApi } from '@/features/models/api';
 import { ModelRead } from '@/features/models/read';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@tulipfarm/sprout/tabs';
 import { FallbackRule } from '@/features/models/fallback-rule';
 import { CompactionPolicySection } from '@/features/models/compaction-policy';
 import { ModelAvailability } from '@/features/models/availability';
 import { ModelSetupLink } from '@/features/models/model-setup';
 import { ImageSettingsSection } from '@/features/models/image-settings';
 import { useFlag } from '@/lib/feature-flags';
+import { ChatGptPlanPane } from '@/features/models/chatgpt-plan';
+import { isChatGptFamily } from '@/features/models/chatgpt-plan-api';
+import {
+  ApiKeysPane,
+  ComingSoonPane,
+  ModelSources,
+  SharedPlanPane,
+  type ModelSource,
+} from '@/features/models/model-sources';
 
 export function ModelsPage() {
   const { workspace, user } = workspaceRoute.useRouteContext();
@@ -78,14 +86,21 @@ function WorkspaceModels({ workspaceId, userId }: { workspaceId: string; userId:
   const writable = read.state.kind === 'ready' && !read.state.refreshing && !read.state.error;
   const admin = snapshot?.membership.role === 'admin';
   const images = useFlag('images');
-  const selected = workspaceModelsRoute.useSearch({ select: search => search.tab ?? 'access' });
-  const tab = selected === 'images' && !images ? 'access' : selected;
   const navigate = useNavigate({ from: workspaceModelsRoute.fullPath });
+  const chatGptOutcome = workspaceModelsRoute.useSearch({ select: search => search.chatgpt });
+  const selected: ModelSource = workspaceModelsRoute.useSearch({ select: search => search.tab ?? 'access' });
+  // A finished ChatGPT sign-in lands here; show the ChatGPT plan so its result is visible.
+  const source: ModelSource = chatGptOutcome ? 'chatgpt' : selected === 'images' && !images ? 'access' : selected;
+  const builtIn = (snapshot?.families ?? []).filter(family => !isChatGptFamily(family));
+  const clearChatGptOutcome = useCallback(
+    () => void navigate({ search: previous => ({ ...previous, chatgpt: undefined }), replace: true }),
+    [navigate],
+  );
   return (
     <PageContent>
       <PageHeader
         title="Models"
-        description="Choose which models this workspace can use. Agents inherit these rules."
+        description="Choose the models your chats and agents use: TulipFarm’s models or your own AI plans."
       />
       <ModelRead state={read.state} refresh={read.refresh} label="workspace models">
         {({ families, membership }) => (
@@ -97,7 +112,8 @@ function WorkspaceModels({ workspaceId, userId }: { workspaceId: string; userId:
             )}
             {membership.role !== 'admin' && (
               <p className="text-sm text-muted-foreground">
-                You have read-only access. Only workspace admins can change these settings.
+                Only workspace admins can change TulipFarm model access and workspace settings. You can still connect
+                and share your own plans.
               </p>
             )}
             {!families.length && (
@@ -114,25 +130,25 @@ function WorkspaceModels({ workspaceId, userId }: { workspaceId: string; userId:
           </>
         )}
       </ModelRead>
-      <Tabs
-        value={tab}
-        onValueChange={value =>
-          void navigate({ search: { tab: value === 'access' ? undefined : value }, replace: true })
-        }
+      <ModelSources
+        workspaceId={workspaceId}
+        source={source}
+        builtInCount={snapshot ? builtIn.length : null}
+        images={images}
       >
-        <div className="max-w-full overflow-x-auto pb-1">
-          <TabsList variant="line" aria-label="Model settings">
-            <TabsTrigger value="access">Access</TabsTrigger>
-            <TabsTrigger value="compaction">Compaction</TabsTrigger>
-            {images && <TabsTrigger value="images">Images</TabsTrigger>}
-          </TabsList>
-        </div>
-        <TabsContent value="access" keepMounted>
-          <div className="pt-2">
+        {source === 'access' && (
+          <div className="grid gap-4">
+            <header>
+              <h2 className="text-lg font-medium">TulipFarm models</h2>
+              <p className="text-sm text-muted-foreground">
+                These models use workspace credits. Admins choose which teams can use each one, and agents follow the
+                same rules.
+              </p>
+            </header>
             <ModelAvailability
               userId={userId}
               workspaceId={workspaceId}
-              families={snapshot?.families ?? []}
+              families={builtIn}
               imageModels={images ? (snapshot?.imageModels ?? []) : []}
               admin={admin}
               concealed={concealed}
@@ -158,36 +174,34 @@ function WorkspaceModels({ workspaceId, userId }: { workspaceId: string; userId:
               }
             />
           </div>
-        </TabsContent>
-        <TabsContent value="compaction" keepMounted>
-          {snapshot && !concealed && (
-            <div className="pt-2">
-              <CompactionPolicySection
-                key={`${workspaceId}:${snapshot.membership.membershipId}:${snapshot.membership.role}`}
-                workspaceId={workspaceId}
-                admin={admin}
-                writable={writable}
-                accessVersion={accessVersion}
-              />
-            </div>
-          )}
-        </TabsContent>
-        {images && (
-          <TabsContent value="images" keepMounted>
-            {snapshot && !concealed && (
-              <div className="pt-2">
-                <ImageSettingsSection
-                  key={`${workspaceId}:${snapshot.membership.membershipId}:${snapshot.membership.role}`}
-                  workspaceId={workspaceId}
-                  admin={admin}
-                  writable={writable}
-                  accessVersion={accessVersion}
-                />
-              </div>
-            )}
-          </TabsContent>
         )}
-      </Tabs>
+        {source === 'chatgpt' && (
+          <ChatGptPlanPane workspaceId={workspaceId} outcome={chatGptOutcome} clearOutcome={clearChatGptOutcome} />
+        )}
+        {(source === 'claude' || source === 'copilot') && <ComingSoonPane provider={source} />}
+        {source === 'keys' && <ApiKeysPane />}
+        {source.startsWith('plan:') && (
+          <SharedPlanPane workspaceId={workspaceId} connectionId={source.slice('plan:'.length)} />
+        )}
+        {source === 'compaction' && snapshot && !concealed && (
+          <CompactionPolicySection
+            key={`${workspaceId}:${snapshot.membership.membershipId}:${snapshot.membership.role}`}
+            workspaceId={workspaceId}
+            admin={admin}
+            writable={writable}
+            accessVersion={accessVersion}
+          />
+        )}
+        {source === 'images' && snapshot && !concealed && (
+          <ImageSettingsSection
+            key={`${workspaceId}:${snapshot.membership.membershipId}:${snapshot.membership.role}`}
+            workspaceId={workspaceId}
+            admin={admin}
+            writable={writable}
+            accessVersion={accessVersion}
+          />
+        )}
+      </ModelSources>
     </PageContent>
   );
 }

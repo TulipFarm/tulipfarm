@@ -243,6 +243,15 @@ catalog`. `loadModelCatalog(env)` returns the served catalog and
   each request: built-in provider and Azure Foundry hosts are implicit, every
   other host must be in `MODEL_ENDPOINT_HOSTS`, and http is allowed only on
   loopback outside `NODE_ENV=production`.
+- **ChatGPT plan.** A `chatgpt` route runs on the requesting member's own
+  ChatGPT plan through Sign in with ChatGPT; its endpoint is always
+  `https://api.openai.com/v1` with the `responses` API and streaming. It is
+  served while `CHATGPT_PLAN` is `on` (the default) and needs no key. Its models
+  must be `"pricing": "unmetered"`, can't be the default, hold a role or be a
+  fallback, and don't count as the catalog's served model, so a provider key is
+  still required. Members see them only after connecting a plan whose ChatGPT
+  model list includes the route's `model`. See
+  [`self-host/README.md`](../../self-host/README.md#chatgpt-plan).
 - **Removed settings.** `MODEL_FAMILIES`, `MODEL_PAUSED_FAMILIES`,
   `MODEL_DEFAULT_FAMILY`, `MODEL_CATALOG_MODE` and the `*_MODEL_FAMILY` role
   settings stop startup, naming what replaces each in the catalog

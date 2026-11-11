@@ -23,6 +23,9 @@ import { registerSocialAccounts } from './social-accounts.ts';
 import { socialAccounts, socialChannels, socialPosts } from './social-composition.ts';
 import { githubAccounts } from './github-composition.ts';
 import { registerGitHubAccounts } from './github-accounts.ts';
+import { chatGptPlan, registerChatGptPlan } from './chatgpt-plan.ts';
+import { registerSubscriptions } from './subscriptions.ts';
+import { createSubscriptions } from '@tulipfarm/integrations/subscriptions';
 import { registerGitHubInvestigation } from './github-investigation.ts';
 import { createGitHubInvestigation } from '@tulipfarm/github/investigation';
 import { createGitHubBotGrants } from '@tulipfarm/github/bot';
@@ -135,6 +138,16 @@ export function buildApp(
           runtime && github ? createGitHubReads({ runtime, accounts: github }) : undefined,
           runtime && github ? createGitHubBotGrants(runtime) : undefined,
         );
+        const chatGpt = chatGptPlan(runtime, auth.pool);
+        registerChatGptPlan(business, auth.auth, chatGpt, auth.pool);
+        const subscriptions = runtime ? createSubscriptions({ runtime }) : null;
+        registerSubscriptions(
+          business,
+          auth.auth,
+          subscriptions,
+          provider =>
+            new Set(models.catalog.models.flatMap(model => (model.route.type === provider ? [model.route.model] : []))),
+        );
         if (runtime && github)
           registerGitHubInvestigation(business, auth.auth, createGitHubInvestigation({ runtime, accounts: github }));
         registerStorageComposition(
@@ -155,6 +168,12 @@ export function buildApp(
             runtime,
             compatibility: commonCompatibility,
             ...(options.modelCatalog ?? { modelCatalogSnapshot: models.modelCatalogSnapshot }),
+            ...(chatGpt && subscriptions
+              ? {
+                  chatGptModels: (workspaceId: string, userId: string) =>
+                    subscriptions.models(workspaceId, userId, 'chatgpt'),
+                }
+              : {}),
           });
       });
     },

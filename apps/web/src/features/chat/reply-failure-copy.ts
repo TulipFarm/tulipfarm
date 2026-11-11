@@ -30,7 +30,25 @@ const replyFailures: Record<string, string> = {
   'model-context-overflow':
     'This conversation exceeds the model context limit. Start a new chat with a shorter request.',
   'model-cancelled': 'The model call was cancelled before the reply finished. Retry the reply.',
+  'model-chatgpt-usage-limit':
+    "Usage limit reached. Review your ChatGPT plan or TulipFarm's limit in ChatGPT settings.",
+  'model-chatgpt-reconnect': `ChatGPT needs you to sign in again before TulipFarm can use your plan. ${switchModel}`,
+  'model-chatgpt-not-eligible': `Your ChatGPT account can't be used for requests from TulipFarm, because of its plan, workspace or a ChatGPT policy. ${switchModel}`,
+  'model-chatgpt-member-required': `ChatGPT plan models run only in your own chats, after you connect ChatGPT in Models settings. ${switchModel}`,
 };
+
+/** The ChatGPT usage page, where a member reviews their plan and TulipFarm's limit. */
+export const chatGptUsageUrl = 'https://chatgpt.com/settings/usage';
+
+/** The recovery action a failed ChatGPT plan reply offers, if any. */
+export function chatGptFailureAction(
+  code: string | null | undefined,
+): { kind: 'manage-usage'; label: string; href: string } | { kind: 'reconnect'; label: string } | null {
+  if (code === 'model-chatgpt-usage-limit')
+    return { kind: 'manage-usage', label: 'Manage usage', href: chatGptUsageUrl };
+  if (code === 'model-chatgpt-reconnect') return { kind: 'reconnect', label: 'Reconnect ChatGPT' };
+  return null;
+}
 
 const genericFailure = `The model provider could not complete the reply. Retry uses the original model. ${switchModel} Check any tool activity before requesting another action.`;
 
@@ -102,6 +120,9 @@ export function fallbackNote(
   if (status !== 'completed' || !code?.startsWith(modelFallbackPrefix)) return null;
   const family = code.slice(modelFallbackPrefix.length);
   if (!family) return null;
+  // Plan families are named after their provider in the catalog, such as `chatgpt-sol`.
+  if (chatModel?.startsWith('chatgpt-'))
+    return `Answered by ${name(family)} because every ChatGPT plan you can use had reached its limit or needed sign-in again.`;
   const replaced = chatModel && chatModel !== family ? name(chatModel) : 'the chat model';
   return `Answered by ${name(family)} because ${replaced} was unavailable.`;
 }

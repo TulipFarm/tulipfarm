@@ -49,7 +49,10 @@ function buildModelEnvironment(catalog: ServedModelCatalog, credentials: readonl
     const inference = inferenceRouteSchema.safeParse(
       model.route.type === 'azure'
         ? { ...common, provider: 'azure', auth: { kind: 'api-key', value: credential } }
-        : { ...common, provider: model.route.type, apiKey: credential },
+        : model.route.type === 'chatgpt'
+          ? // The member's access token is added per reply; see `inferenceRouteSchema`.
+            { ...common, provider: 'chatgpt' }
+          : { ...common, provider: model.route.type, apiKey: credential },
     );
     if (!inference.success)
       throw new Error(`Invalid server model configuration: model ${model.id} cannot use ${model.route.provider}`);
@@ -74,7 +77,7 @@ function buildModelEnvironment(catalog: ServedModelCatalog, credentials: readonl
       route.provider,
       route.endpoint,
       route.model,
-      route.provider === 'azure' ? route.auth : route.apiKey,
+      route.provider === 'azure' ? route.auth : route.provider === 'chatgpt' ? null : route.apiKey,
     ]);
   };
   return Object.freeze({

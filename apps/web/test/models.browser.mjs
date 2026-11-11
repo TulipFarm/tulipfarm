@@ -23,6 +23,26 @@ const workspace = {
   soulCommit: 'a'.repeat(40),
 };
 const teams = [{ id: teamId, name: 'Engineering' }];
+const graceId = '55555555-5555-4555-8555-555555555555';
+const ownPlanId = '66666666-6666-4666-8666-666666666666';
+const sharedPlanId = '77777777-7777-4777-8777-777777777777';
+const planModels = [
+  { slug: 'gpt-6-sol', label: 'GPT-6 Sol' },
+  { slug: 'gpt-6-astra', label: 'GPT-6 Astra' },
+  { slug: 'gpt-6-luna', label: 'GPT-6 Luna' },
+];
+const plan = (connectionId, ownerMembershipId, mine) => ({
+  connectionId,
+  provider: 'chatgpt',
+  ownerMembershipId,
+  account: mine ? 'ada@example.com' : 'grace@example.com',
+  state: 'connected',
+  mine,
+  models: planModels,
+  disabledModels: [],
+  canShare: mine,
+  grants: mine ? [] : null,
+});
 const definition = {
   name: 'Research assistant',
   instructions: 'Read the supplied business rows.',
@@ -128,6 +148,8 @@ function fixtureState() {
     agentCommands: new Map(),
     requests: [],
     errors: [],
+    chatGpt: { state: 'not-connected', email: null, planUsage: false, welcomePending: false, models: [] },
+    subscriptions: [],
     agent: {
       id: agentId,
       name: definition.name,
@@ -316,11 +338,26 @@ test('models in the actual Vite app through a local HTTP API fixture', { timeout
         if (path === `${base}/agents/authoring-context`)
           return send({ currentSoulRevision: current.agent.savedRevision, teams, admin: false });
         if (path === `${base}/workspace-mcp/capabilities`) return send({ enabled: false });
+        if (path === `${base}/secrets/capabilities`) return send({ enabled: true });
+        if (path === `${base}/governance/directory`)
+          return send({
+            members: current.subscriptions.length
+              ? [{ id: graceId, name: 'Grace', email: 'grace@example.com', image: null }]
+              : [],
+          });
+        if (path === `${base}/subscriptions`) return send({ subscriptions: current.subscriptions });
+        if (path === `${base}/chatgpt/connection`) return send(current.chatGpt);
         if (path === `${base}/agents/${agentId}`) return send(current.agent);
         if (path.startsWith(`${base}/agents/commands/`)) {
           const command = current.agentCommands.get(path.split('/').at(-1));
           if (command) return send(agentCommandStatusSchema.parse(command));
         }
+      }
+      if (request.method === 'PUT' && path.startsWith(`${base}/subscriptions/`) && path.endsWith('/models')) {
+        const plan = current.subscriptions.find(item => item.connectionId === path.split('/').at(-2));
+        if (!plan?.mine) return send({ error: 'subscription-access-denied' }, 403);
+        plan.disabledModels = body.disabledModels;
+        return send({ disabledModels: plan.disabledModels });
       }
       if (request.method === 'PUT' && path === `${base}/model-policy/images`) {
         if (current.role !== 'admin') return send({ error: 'agent-not-found' }, 404);
@@ -860,7 +897,7 @@ test('models in the actual Vite app through a local HTTP API fixture', { timeout
         await page.getByRole('button', { name: 'Clear search', exact: true }).last().click();
         await fallback(page).waitFor();
         if (shots) await page.screenshot({ path: `${shots}/access-${width}.png`, fullPage: true });
-        await page.getByRole('tab', { name: 'Compaction', exact: true }).click();
+        await page.getByRole('link', { name: /^Compaction/ }).click();
         await page.waitForURL(url => new URL(url).searchParams.get('tab') === 'compaction');
         if (shots) {
           await page.waitForTimeout(300);
@@ -868,10 +905,35 @@ test('models in the actual Vite app through a local HTTP API fixture', { timeout
         }
       }
       await page.reload();
-      assert.equal(
-        await page.getByRole('tab', { name: 'Compaction', exact: true }).getAttribute('aria-selected'),
-        'true',
+      assert.equal(await page.getByRole('link', { name: /^Compaction/ }).getAttribute('aria-current'), 'page');
+    });
+
+    await scenario('a connected plan turns a model off; a shared plan stays read-only', async (page, fixture) => {
+      fixture.chatGpt = {
+        state: 'connected',
+        email: 'ada@example.com',
+        planUsage: true,
+        welcomePending: false,
+        models: planModels,
+      };
+      fixture.subscriptions = [plan(ownPlanId, membershipId, true), plan(sharedPlanId, graceId, false)];
+      await models(page, 'chatgpt');
+      const sources = page.getByRole('navigation', { name: 'Model sources' });
+      await sources.getByText('ada@example.com').waitFor();
+      await sources.getByText('Grace’s plan').waitFor();
+      const luna = page.getByRole('switch', { name: 'GPT-6 Luna' });
+      await eventually(() => luna.isChecked(), true);
+      await luna.click();
+      await eventually(() => luna.isChecked(), false);
+      assert.deepEqual(
+        writes(fixture).map(({ path, body }) => [path, body]),
+        [[`${base}/subscriptions/${ownPlanId}/models`, { disabledModels: ['gpt-6-luna'] }]],
       );
+      await sources.getByText('Grace’s plan').click();
+      await page.getByText('Only Grace can turn these models on or off.').waitFor();
+      assert.equal(await page.getByRole('switch', { name: 'GPT-6 Sol' }).isDisabled(), true);
+      await sources.getByText('Add API key').click();
+      await page.getByRole('heading', { name: /API keys/ }).waitFor();
     });
 
     await scenario('loading becomes success without an empty flash', async (page, fixture) => {
@@ -960,14 +1022,14 @@ test('models in the actual Vite app through a local HTTP API fixture', { timeout
     await scenario('member reads rules and refreshes without write controls or requests', async (page, fixture) => {
       fixture.role = 'member';
       await ready(page, false);
-      await page.getByText(/You have read-only access/).waitFor();
+      await page.getByText(/Only workspace admins can change TulipFarm model access/).waitFor();
       assert.equal(await page.getByRole('combobox').count(), 0);
       assert.equal(await page.getByRole('switch').count(), 0);
       await Promise.all([
         page.waitForResponse(response => response.url().endsWith('/model-policy/rules/primary')),
         notifyChange(page, workspaceId, 'ada', 'models'),
       ]);
-      await page.getByText(/You have read-only access/).waitFor();
+      await page.getByText(/Only workspace admins can change TulipFarm model access/).waitFor();
       assert.equal(writes(fixture).length, 0);
     });
 
@@ -1180,7 +1242,8 @@ test('models in the actual Vite app through a local HTTP API fixture', { timeout
         assert.equal(writes(fixture).length, 2);
         assert.deepEqual(writes(fixture)[1].body, command);
         assert.equal(fixture.receipts.size, 0);
-        assert.equal(await fallback(page).isEnabled(), true);
+        // The rejection refreshes the catalog, which briefly locks the form.
+        await eventually(() => fallback(page).isEnabled(), true);
         assert.equal(await fallbackValue(page), 'Secondary family');
         assert.equal(await primary(page).getByRole('button', { name: 'Retry same save', exact: true }).count(), 0);
         await saveButton(page).click();
@@ -1441,7 +1504,7 @@ test('models in the actual Vite app through a local HTTP API fixture', { timeout
           page.waitForResponse(response => response.url().endsWith('/governance/me') && response.status() === 200),
           region.getByRole('button', { name: 'Reload fallback rule', exact: true }).click(),
         ]);
-        await page.getByText(/You have read-only access/).waitFor();
+        await page.getByText(/Only workspace admins can change TulipFarm model access/).waitFor();
         await region.getByText('No fallback', { exact: true }).waitFor();
         assert.equal(await page.getByRole('combobox').count(), 0);
         assert.equal(await saveButton(page).count(), 0);
@@ -1482,7 +1545,7 @@ test('models in the actual Vite app through a local HTTP API fixture', { timeout
           .getByText(/No saved result is visible/)
           .waitFor();
         assert.equal(
-          await page.getByText(/You have read-only access/).count(),
+          await page.getByText(/Only workspace admins can change TulipFarm model access/).count(),
           0,
           'Parent still holds its earlier admin membership',
         );
@@ -1504,7 +1567,7 @@ test('models in the actual Vite app through a local HTTP API fixture', { timeout
           page.waitForResponse(response => response.url().endsWith('/governance/me') && response.status() === 200),
           region.getByRole('button', { name: 'Reload fallback rule', exact: true }).click(),
         ]);
-        await page.getByText(/You have read-only access/).waitFor();
+        await page.getByText(/Only workspace admins can change TulipFarm model access/).waitFor();
         await region.getByText('Secondary family', { exact: true }).waitFor();
         assert.equal(await page.getByRole('combobox').count(), 0);
         assert.equal(await saveButton(page).count(), 0);
@@ -1577,7 +1640,7 @@ test('models in the actual Vite app through a local HTTP API fixture', { timeout
         await saved(page, fixture, 'secondary', 1);
         fixture.role = 'member';
         await notifyChange(page, workspaceId, 'ada', 'models');
-        await page.getByText(/You have read-only access/).waitFor();
+        await page.getByText(/Only workspace admins can change TulipFarm model access/).waitFor();
         await primary(page).getByText('Secondary family', { exact: true }).waitFor();
         assert.equal(await page.getByRole('combobox').count(), 0);
         assert.equal(await saveButton(page).count(), 0);

@@ -154,6 +154,8 @@ export const inferenceRouteSchema = z
     z.strictObject({ provider: z.literal('openai'), ...routeFields, apiKey: credentialSchema }),
     z.strictObject({ provider: z.literal('xai'), ...routeFields, apiKey: credentialSchema }),
     z.strictObject({ provider: z.literal('google'), ...routeFields, apiKey: credentialSchema }),
+    // A member's ChatGPT plan: the worker adds the member's OAuth access token per reply; routes without one fail.
+    z.strictObject({ provider: z.literal('chatgpt'), ...routeFields, accessToken: credentialSchema.optional() }),
     z.strictObject({
       provider: z.literal('openai-compatible'),
       ...routeFields,
@@ -188,13 +190,18 @@ type CapableRoute = Parameters<typeof routeCapabilities>[0];
 export type InferenceRoute = z.input<typeof inferenceRouteSchema>;
 type ParsedRoute = z.output<typeof inferenceRouteSchema>;
 /** Azure Foundry, OpenAI, xAI and OpenAI-compatible endpoints share the chat-completions and responses wire format. */
-export type OpenAiShapedRoute = Extract<ParsedRoute, { provider: 'azure' | 'openai' | 'xai' | 'openai-compatible' }>;
+export type OpenAiShapedRoute = Extract<
+  ParsedRoute,
+  { provider: 'azure' | 'openai' | 'xai' | 'openai-compatible' | 'chatgpt' }
+>;
 
 /**
  * Base URL of the OpenAI-shaped APIs and the credential header of the route. An endpoint without a path gets `v1/`;
  * one with a path, such as a gateway's `https://gateway.example/openai/`, is the API base itself.
  */
 export function openAiWire(config: OpenAiShapedRoute) {
+  if (config.provider === 'chatgpt')
+    return { base: config.endpoint, auth: { authorization: 'Bearer ' + (config.accessToken ?? '') } };
   if (config.provider !== 'azure')
     return {
       base: new URL(config.endpoint).pathname === '/' ? `${config.endpoint}v1/` : config.endpoint,
@@ -261,7 +268,25 @@ export type InferenceFailure =
   | 'cancelled'
   | 'timeout'
   | 'transport'
-  | 'provider-error';
+  | 'provider-error'
+  | ChatGptFailure;
+/** Failures of a member's ChatGPT plan route; the conversation shows each with its own recovery action. */
+/** Why a subscription plan could not answer, so the next plan the requester may use is tried. */
+export type PlanFailure = 'usage-limit' | 'reconnect' | 'not-eligible';
+const planFailures: Readonly<Record<string, PlanFailure>> = {
+  'model-chatgpt-usage-limit': 'usage-limit',
+  'model-chatgpt-reconnect': 'reconnect',
+  'model-chatgpt-not-eligible': 'not-eligible',
+};
+export function planFailure(error: unknown): PlanFailure | undefined {
+  return error instanceof Error ? planFailures[error.message] : undefined;
+}
+
+export type ChatGptFailure =
+  | 'chatgpt-usage-limit'
+  | 'chatgpt-reconnect'
+  | 'chatgpt-not-eligible'
+  | 'chatgpt-member-required';
 type Attribution = { actualModel: string | null; requestId: string | null; usage: InferenceUsage };
 export type InferenceResult = Attribution &
   (
@@ -303,12 +328,17 @@ const errorSchema = z.union([
       type: z.string().optional(),
       status: z.string().optional(),
       message: z.string().optional(),
+      param: z.string().nullish(),
     }),
   }),
+  // ChatGPT plan admission answers `{ detail }` before a Responses request starts.
+  z.object({ detail: z.string() }).transform(({ detail }) => ({
+    error: { code: undefined, message: detail, type: undefined, status: undefined, param: undefined },
+  })),
   // xAI reports `{ code, error: "<message>" }`.
-  z
-    .object({ error: z.string(), code: z.union([z.string(), z.number()]).optional() })
-    .transform(({ error, code }) => ({ error: { code, message: error, type: undefined, status: undefined } })),
+  z.object({ error: z.string(), code: z.union([z.string(), z.number()]).optional() }).transform(({ error, code }) => ({
+    error: { code, message: error, type: undefined, status: undefined, param: undefined },
+  })),
   // Azure Foundry rejects a prompt its content filter blocks with a completion whose choice carries the error.
   z
     .object({
@@ -323,7 +353,7 @@ const errorSchema = z.union([
         .min(1),
     })
     .transform(({ choices }) => ({
-      error: { ...choices[0]!.content_filter_results.error, type: undefined, status: undefined },
+      error: { ...choices[0]!.content_filter_results.error, type: undefined, status: undefined, param: undefined },
     })),
 ]);
 
@@ -586,6 +616,7 @@ function usage(route: CapableRoute, body: unknown): InferenceUsage {
         cacheWrite1h: ttl?.ephemeral_1h_input_tokens ?? 0,
       };
     }
+    case 'chatgpt':
     case 'openai':
     case 'xai':
     case 'openai-compatible':
@@ -668,11 +699,13 @@ function googleQuotaSignal(body: unknown, message: string): boolean {
 export function providerErrorDetail(body: unknown): { code?: string; message?: string } {
   const error = errorSchema.safeParse(body);
   if (!error.success) return {};
-  const { code, type, status, message } = error.data.error;
+  const { code, type, status, message, param } = error.data.error;
   const named = [code, type, status].find(value => value !== undefined && value !== '');
+  // `param` names the unsupported input of a ChatGPT plan request.
+  const text = param ? `${message ?? ''} (param ${param})`.trim() : message;
   return {
     ...(named === undefined ? {} : { code: String(named) }),
-    ...(message ? { message } : {}),
+    ...(text ? { message: text } : {}),
   };
 }
 
@@ -690,10 +723,25 @@ export function modelHttpError(
     status: response.status,
     retryAfterMs: retryAfterMs ?? undefined,
     providerCode: detail.code,
+    providerRequestId: response.headers.get('x-request-id') ?? undefined,
     providerMessage: detail.message,
     outputStarted,
     request,
   });
+}
+
+/** ChatGPT plan codes with their own recovery; others fall through to the general mapping. */
+function chatGptFailure(status: number, codes: readonly string[]): InferenceFailure | undefined {
+  const has = (...values: string[]) => values.some(value => codes.includes(value));
+  if (has('subscription_sharing_usage_limit_exceeded')) return 'chatgpt-usage-limit';
+  if (has('subscription_sharing_user_not_eligible')) return 'chatgpt-not-eligible';
+  if (has('subscription_sharing_usage_unavailable', 'subscription_sharing_user_unavailable')) return 'unavailable';
+  if (has('subscription_sharing_unsupported_capability')) return 'invalid-request';
+  if (has('subscription_sharing_route_not_supported') || codes.some(code => code.startsWith('chatpass_v2_')))
+    return 'permission';
+  // Admission answers `{"detail": "..."}` without a code; a 401 there is a rejected sign-in.
+  if (has('subscription_sharing_invalid_user') || status === 401) return 'chatgpt-reconnect';
+  return undefined;
 }
 
 export function httpFailure(
@@ -710,6 +758,10 @@ export function httpFailure(
     : [];
   const has = (...values: string[]) => values.some(value => codes.includes(value));
   const message = error.success ? (error.data.error.message ?? '') : '';
+  if (provider === 'chatgpt') {
+    const failure = chatGptFailure(status, codes);
+    if (failure) return failure;
+  }
   if (status === 401 || has('authentication_error', 'unauthenticated', 'invalid_api_key')) return 'authentication';
   // xAI answers a wrong key with 400 "Incorrect API key provided".
   if (provider === 'xai' && status === 400 && /api key/i.test(message)) return 'authentication';
@@ -851,6 +903,7 @@ function decision(
       if (data.stop_reason !== 'tool_use' || calls.length !== 1 || call?.name !== 'select_action') return invalid;
       return { kind: 'decision', value: call.input };
     }
+    case 'chatgpt':
     case 'openai':
     case 'xai':
     case 'openai-compatible':
@@ -952,6 +1005,9 @@ export async function inferDecision(
   if (callerSignal?.aborted) return { ...failure('cancelled', null), dispatch: 'not-started' };
   const config = inferenceRouteSchema.safeParse(route);
   if (!config.success) return { ...failure('configuration', null), dispatch: 'not-started' };
+  // Agent decisions never run for a member, so they cannot use a member's ChatGPT plan.
+  if (config.data.provider === 'chatgpt')
+    return { ...failure('chatgpt-member-required', null), dispatch: 'not-started' };
   const parsedInput = agentModelInputSchema.safeParse(input);
   if (!parsedInput.success) return { ...failure('invalid-request', null), dispatch: 'not-started' };
   return withChatModelRequest('reply', async () => {
@@ -1223,6 +1279,7 @@ function googleParts(route: CapableRoute, turn: ChatTurn) {
   return turnContent(route, turn) as object[];
 }
 function routeStreamFormat(route: CapableRoute): StreamFormat | null {
+  if (route.provider === 'chatgpt') return 'responses';
   const capabilities = routeCapabilities(route);
   if (!capabilities.streaming) return null;
   return capabilities.api === 'anthropic-messages' ? 'anthropic' : capabilities.api;
@@ -1264,6 +1321,7 @@ function chatWire(
             : {}),
         },
       };
+    case 'chatgpt':
     case 'openai':
     case 'xai':
     case 'openai-compatible':
@@ -1362,6 +1420,12 @@ export type ToolInferenceContext = {
    * another model can fix. `label` names it in the result. Absent, failures are not retried on another model.
    */
   fallback?: { route: InferenceRoute; label: string } | undefined;
+  /**
+   * For a subscription plan route: the access token of the next plan the requester may use, after the current one hit
+   * its usage limit, lost its sign-in or was refused, before the step produced output. Null when no plan is left; the
+   * configured `fallback` then answers as for any other failure.
+   */
+  nextPlanCredential?: ((failure: PlanFailure, retryAfterMs?: number) => Promise<string | null>) | undefined;
   /**
    * Counts the requester's undecided review and approval cards in this chat, read fresh from storage. A reply may point
    * to such a card without a tool call; without this read, every card claim needs a card made in the reply.
@@ -1570,6 +1634,7 @@ function nativeStep(route: CapableRoute, body: unknown): NativeStep {
       );
       return step(data.content.flatMap(block => (block.type === 'text' ? [block.text] : [])).join(''), calls, null);
     }
+    case 'chatgpt':
     case 'openai':
     case 'xai':
     case 'openai-compatible':
@@ -1731,6 +1796,7 @@ function nativeWire(
         },
       };
     }
+    case 'chatgpt':
     case 'openai':
     case 'xai':
     case 'openai-compatible':
@@ -3286,6 +3352,101 @@ async function observeProviderResponse<T>(call: () => Promise<T>, failed: (resul
   }
 }
 
+/** Responses fields a ChatGPT plan request must not send. */
+const chatGptOmittedFields = [
+  'background',
+  'conversation',
+  'max_output_tokens',
+  'max_tool_calls',
+  'metadata',
+  'moderation',
+  'multi_agent',
+  'previous_response_id',
+  'prompt',
+  'prompt_cache_retention',
+  'safety_identifier',
+  'temperature',
+  'top_logprobs',
+  'top_p',
+  'truncation',
+  'user',
+];
+/** ChatGPT plan requests group function tools in one namespace. */
+export const chatGptToolNamespace = 'tulipfarm';
+const recordOf = (value: unknown): Record<string, unknown> | undefined =>
+  value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
+function messageText(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content
+    .map(part => recordOf(part)?.text)
+    .filter((text): text is string => typeof text === 'string')
+    .join('\n');
+}
+
+/**
+ * A Responses body as a ChatGPT plan request: system text moves to `instructions`, unsupported fields go, function
+ * tools sit in the `tulipfarm` namespace, and the request is unstored and streamed. A forced function becomes the only
+ * tool with `tool_choice: "required"`, as a function choice cannot name a namespace.
+ */
+export function chatGptRequestBody(body: object): Record<string, unknown> {
+  const { input, tools, tool_choice: choice, parallel_tool_calls: parallel, ...rest } = body as Record<string, unknown>;
+  for (const field of chatGptOmittedFields) delete rest[field];
+  const items = Array.isArray(input) ? input : [];
+  const system = (item: unknown) => ['system', 'developer'].includes(String(recordOf(item)?.role));
+  const instructions = items
+    .filter(system)
+    .map(item => messageText(recordOf(item)?.content))
+    .filter(Boolean)
+    .join('\n\n');
+  const kept = items
+    .filter(item => !system(item))
+    .map(item =>
+      recordOf(item)?.type === 'function_call' ? { ...recordOf(item), namespace: chatGptToolNamespace } : item,
+    );
+  const forced = recordOf(choice)?.type === 'function' ? String(recordOf(choice)?.name) : undefined;
+  const functions = (Array.isArray(tools) ? tools : []).filter(
+    tool => recordOf(tool)?.type === 'function' && (forced === undefined || recordOf(tool)?.name === forced),
+  );
+  return {
+    ...rest,
+    ...(instructions ? { instructions } : {}),
+    input: kept,
+    ...(functions.length
+      ? {
+          tools: [
+            {
+              type: 'namespace',
+              name: chatGptToolNamespace,
+              description: 'TulipFarm workspace tools.',
+              tools: functions,
+            },
+          ],
+          tool_choice: forced === undefined ? (choice ?? 'auto') : 'required',
+          ...(parallel === undefined ? {} : { parallel_tool_calls: parallel }),
+        }
+      : {}),
+    store: false,
+    stream: true,
+  };
+}
+
+/** A ChatGPT plan response with function calls named as the tools were declared, whether or not it qualified them. */
+function chatGptResponse(body: unknown): unknown {
+  const response = recordOf(body);
+  if (!response || !Array.isArray(response.output)) return body;
+  const prefix = `${chatGptToolNamespace}.`;
+  return {
+    ...response,
+    output: response.output.map(item => {
+      const call = recordOf(item);
+      if (call?.type !== 'function_call' || typeof call.name !== 'string') return item;
+      const { namespace: _namespace, ...rest } = call;
+      return { ...rest, name: call.name.startsWith(prefix) ? call.name.slice(prefix.length) : call.name };
+    }),
+  };
+}
+
 async function sendChatRequest<T>(
   target: z.output<typeof inferenceRouteSchema>,
   step: number,
@@ -3302,9 +3463,15 @@ async function sendChatRequest<T>(
   onSettled?: (measure: RequestMeasure, usage: InferenceUsage) => void,
   signal?: AbortSignal,
 ) {
+  if (target.provider === 'chatgpt' && !target.accessToken)
+    throw new ModelCallError('chatgpt-member-required', { outputStarted: false });
   const streamFormat = routeStreamFormat(target);
   const serialized = serializeChatRequest(
-    streamFormat ? { ...wire.body, ...streamRequestFields(streamFormat) } : wire.body,
+    target.provider === 'chatgpt'
+      ? chatGptRequestBody(wire.body)
+      : streamFormat
+        ? { ...wire.body, ...streamRequestFields(streamFormat) }
+        : wire.body,
   );
   const measure = measureRequest(target, serialized, wire.turns);
   const onUsage = await observeChatDetail('reserve', async () =>
@@ -3344,7 +3511,7 @@ async function sendChatRequest<T>(
       });
     const {
       response,
-      body: json,
+      body: received,
       error,
     } = await observeProviderResponse(
       async () => {
@@ -3384,12 +3551,17 @@ async function sendChatRequest<T>(
       },
       result => !result.response.ok || result.body === null || result.error !== null,
     );
+    const json = target.provider === 'chatgpt' ? chatGptResponse(received) : received;
     const value = observeChatDetailSync('response-parse', () => usage(target, json));
     reportUsage(report, value, json);
     const billed = billedUsage(response.ok && !error, value, measure, { body: json, events });
     await observeChatDetail('settle', async () => onUsage?.(billed, { rejected: billed.kind !== 'known' }));
     onSettled?.(measure, response.ok ? value : { kind: 'unknown' });
     if (!response.ok || error) throw modelHttpError(response, error ?? json, target.provider, published, serialized);
+    // A ChatGPT plan failure can arrive mid-stream as `response.failed` with the same error codes.
+    const failed = target.provider === 'chatgpt' ? recordOf(json) : undefined;
+    if (failed?.status === 'failed')
+      throw modelHttpError(response, { error: failed.error ?? {} }, target.provider, published, serialized);
     const selected = observeChatDetailSync('decision-parse', () => select(json));
     if (selected.failed)
       report.error(
@@ -3467,6 +3639,7 @@ function contentAnswer(route: CapableRoute, body: unknown): ContentInferenceResu
       if (parsed.data.stop_reason === 'max_tokens') return { kind: 'truncated', text };
       return parsed.data.stop_reason === 'end_turn' ? { kind: 'answer', text } : undefined;
     }
+    case 'chatgpt':
     case 'openai':
     case 'xai':
     case 'openai-compatible':
@@ -4092,6 +4265,32 @@ export async function inferWithTools(
       first = { error };
       diagnostics = modelCallDiagnostics(error);
       if (!diagnostics) throw error;
+    }
+    // A plan that ran out or lost its sign-in hands the step to the next plan the requester may use, before any fallback.
+    let planFailed = 'error' in first ? planFailure(first.error) : undefined;
+    while (
+      planFailed &&
+      tools?.nextPlanCredential &&
+      !diagnostics.outputStarted &&
+      !outputProduced &&
+      answeredBy === undefined
+    ) {
+      const token = await tools.nextPlanCredential(planFailed, diagnostics.retryAfterMs);
+      if (!token || config.provider !== 'chatgpt') break;
+      config = { ...config, accessToken: token };
+      try {
+        const value = await call(config);
+        if (outputProduced || !invalid?.(value)) return value;
+        first = { value };
+        diagnostics = { errorClass: 'invalid_response', outputStarted: false };
+        planFailed = undefined;
+      } catch (error) {
+        const next = modelCallDiagnostics(error);
+        if (!next) throw error;
+        first = { error };
+        diagnostics = next;
+        planFailed = planFailure(error);
+      }
     }
     // A rate limit that asks for only a short wait is retried once on the same model; any other goes to the fallback now.
     if (
@@ -6090,6 +6289,22 @@ export async function inferSpecialist(
     const request = (config: z.infer<typeof inferenceRouteSchema>) =>
       withChatModelRequest('reply', async () => {
         const wire = observeChatDetailSync('serialize', () => nativeRequest(config, [system], items, catalog.tools));
+        // A helper of a ChatGPT plan reply uses the streamed, unstored ChatGPT request.
+        if (config.provider === 'chatgpt')
+          return sendChatRequest(
+            config,
+            step + extraRequests,
+            meter,
+            wire,
+            body => {
+              const parsed = nativeStep(config, body);
+              return { value: parsed, failed: parsed.kind === 'failure' };
+            },
+            undefined,
+            undefined,
+            undefined,
+            live?.signal,
+          );
         const serialized = serializeChatRequest(wire.body);
         const measure = measureRequest(config, serialized, wire.turns);
         const onUsage = await observeChatDetail('reserve', () =>
@@ -6351,6 +6566,7 @@ export async function inferWithSystem(
     const parsed = inferenceRouteSchema.safeParse(route);
     if (!parsed.success) throw new ModelRequestNotDispatched();
     const config = parsed.data;
+    if (config.provider === 'chatgpt') throw new ModelCallError('chatgpt-member-required', { outputStarted: false });
     const { headers, url, body } = observeChatDetailSync('serialize', () => chatRequest(config, messages, system));
     const serialized = serializeChatRequest(body);
     const onUsage = await observeChatDetail('reserve', async () =>
@@ -6409,6 +6625,7 @@ export async function inferText(
     const parsed = inferenceRouteSchema.safeParse(route);
     if (!parsed.success) throw new ModelRequestNotDispatched();
     const config = parsed.data;
+    if (config.provider === 'chatgpt') throw new ModelCallError('chatgpt-member-required', { outputStarted: false });
     const context: ChatTurn[] = [
       { role: 'user', text: observeChatDetailSync('render', () => runtimeReminder({ kind: 'text' })) },
       ...messages,
