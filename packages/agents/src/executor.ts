@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import { errorType, log, observeTool, type ToolRuntime } from '@tulipfarm/observability';
 import { denyMcpEgress, requireAgentRunHistory } from '@tulipfarm/access';
+import { createApiCallGuard, apiRefusedReply } from './api-call-guard.ts';
+import { isOwnServiceUrl, ownServiceDomains, ownServiceRefusal } from './own-service.ts';
 import {
   apiCallLedger,
   apiCallWaitingSchema,
@@ -1160,6 +1162,28 @@ export function createAgentExecutor(options: Options) {
           if (outcome.call.tool === 'api.request') {
             if (!('apiCall' in outcome) || outcome.actor.kind !== 'human') throw new AccessDenied();
             denyMcpEgress();
+            const history = await executionTransaction(ids, async tx => {
+              await taskOutputAllowed(tx, ids.workspaceId, ids.runId, true);
+              return (
+                await tx.client.query(
+                  `SELECT call,result FROM ${relation(tx, 'tf_agent_tool_calls')} WHERE run_id=$1 AND call->>'tool'='api.request' AND status='completed' AND sequence<(SELECT sequence FROM ${relation(tx, 'tf_agent_tool_calls')} WHERE id=$2) ORDER BY sequence`,
+                  [ids.runId, ids.callId],
+                )
+              ).rows;
+            });
+            const guard = createApiCallGuard(
+              history.map(row => row.call),
+              history.map(row => ({ call: row.call, output: row.result })),
+            );
+            if (guard.stoppingReply) {
+              await executionTransaction(ids, tx =>
+                tx.client.query(
+                  `UPDATE ${relation(tx, 'tf_agent_tool_calls')} SET status='blocked',result=NULL WHERE id=$1 AND status='waiting'`,
+                  [ids.callId],
+                ),
+              );
+              return 'blocked';
+            }
             const origin = { kind: 'task' as const, taskId: outcome.apiCall.taskId, runId: ids.runId };
             const membershipId = outcome.actor.membershipId;
             const access = options.taskSecrets;
@@ -1176,7 +1200,14 @@ export function createAgentExecutor(options: Options) {
                 }
               : {};
             let response: unknown;
-            if (readMethods.has(outcome.call.method))
+            if (guard.refused(outcome.call))
+              response = {
+                status: 'failed',
+                code: 'address-denied',
+                message: apiRefusedReply,
+              };
+            else if (isOwnServiceUrl(outcome.call.url, ownServiceDomains())) response = ownServiceRefusal;
+            else if (readMethods.has(outcome.call.method))
               response = await sendApiCall(outcome.call, {
                 workspaceId: ids.workspaceId,
                 calls: apiCallLedger(runtime, { workspaceId: ids.workspaceId, membershipId, origin }),
@@ -1727,12 +1758,12 @@ export function createAgentExecutor(options: Options) {
         );
       if (rows.length !== ids.length || rows.some(row => !readOnlyCall(row.call))) throw new AccessDenied();
       const binding = await taskRun(tx, runId);
-      if (!binding) return { activity: null };
+      if (!binding) return { activity: null, api: rows.some(row => row.call.tool === 'api.request') };
       await lockTask(tx, binding.task_id);
       if (await activeTaskWork(tx, binding.task_id)) return null;
       for (const row of rows) if (!(await admitTaskCall(tx, binding.task_id, row.id))) return null;
       const activity = await reserveTaskWork(tx, binding.task_id, 'tool');
-      return activity ? { activity } : null;
+      return activity ? { activity, api: rows.some(row => row.call.tool === 'api.request') } : null;
     });
     if (!admitted) return ids.map(() => 'waiting');
     return withTaskWork(
@@ -1750,15 +1781,15 @@ export function createAgentExecutor(options: Options) {
             if (status === 'blocked') blocked = true;
           }
         };
-        const settled = await Promise.allSettled([run(), run()]);
+        const settled = await Promise.allSettled(admitted.api ? [run()] : [run(), run()]);
         for (const outcome of settled) if (outcome.status === 'rejected') throw outcome.reason;
         if (blocked) {
           const unstarted = ids.filter((_item, index) => !statuses[index]);
           if (unstarted.length)
             await runtime.transaction(workspaceId, agentCompatibility, tx =>
               tx.client.query(
-                `UPDATE ${relation(tx, 'tf_agent_tool_calls')} SET status='blocked',result='{"code":"access-denied"}'::jsonb WHERE run_id=$1 AND id=ANY($2::uuid[]) AND status='pending'`,
-                [runId, unstarted.map(item => item.callId)],
+                `UPDATE ${relation(tx, 'tf_agent_tool_calls')} SET status='blocked',result=CASE WHEN $3 THEN NULL ELSE '{"code":"access-denied"}'::jsonb END WHERE run_id=$1 AND id=ANY($2::uuid[]) AND status='pending'`,
+                [runId, unstarted.map(item => item.callId), admitted.api],
               ),
             );
         }

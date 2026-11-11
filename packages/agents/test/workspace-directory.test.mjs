@@ -361,7 +361,7 @@ for (const verdict of ['omitted', 'failed', 'invalid', 'not-applicable', 'ground
     assert.equal(result.text, directoryReply(completeDirectory));
   });
 
-test('repeated failed checks on a filtered request stop after one unfiltered recovery without a roster dump', async t => {
+test('repeated failed checks on a filtered request stop after one unfiltered recovery with the completed directory', async t => {
   let requests = 0;
   const calls = [];
   t.mock.method(globalThis, 'fetch', async (_url, init) => {
@@ -384,7 +384,7 @@ test('repeated failed checks on a filtered request stop after one unfiltered rec
     },
   );
   assert.deepEqual(calls, [{ tool: 'members.find', query: 'Operations' }, { tool: 'members.find' }]);
-  assert.equal(result.text, directoryUnavailableReply);
+  assert.equal(result.text, directoryReply(completeDirectory));
 });
 
 test('only explicit directory reads and their short follow-ups hold streamed text', () => {
@@ -486,7 +486,7 @@ test('a route that ignores the forced read still runs one authorized lookup and 
   assert.equal(replies.length, 0);
 });
 
-test('an unsupported filtered rewrite reports failure without dumping an unrelated full roster', async t => {
+test('an unsupported team rewrite uses the completed roster without unrelated teams', async t => {
   const replies = [
     nativeReply('azure', { calls: [use('members.find')] }),
     nativeReply('azure', { text: invented }),
@@ -499,7 +499,7 @@ test('an unsupported filtered rewrite reports failure without dumping an unrelat
     return Response.json(replies.shift());
   });
   const result = await inferWithTools(nativeRoutes.azure, sequence, async () => directory);
-  assert.equal(result.text, directoryUnavailableReply);
+  assert.equal(result.text, '- Operations: Sam (manager)');
   assert.doesNotMatch(result.text, /Alex|Engineering|teamId|membershipId|not-visible/);
 });
 
@@ -519,7 +519,10 @@ test('a successful empty lookup is distinct from failure and cannot grow invente
     teams: [],
     truncated: false,
   }));
-  assert.equal(result.text, directoryUnavailableReply);
+  assert.equal(
+    result.text,
+    'I couldn\'t find a team called "Operations" in this workspace.\nWorkspace teams: 0. Current members: 0.',
+  );
   assert.equal(replies.length, 0);
 });
 
@@ -696,7 +699,7 @@ test('filtered lookup counts never become workspace totals when a rewrite needs 
       : directory;
   });
   assert.deepEqual(executed, [{ tool: 'members.find', query: 'Operations' }, { tool: 'members.find' }]);
-  assert.equal(result.text, directoryUnavailableReply);
+  assert.equal(result.text, '- Operations: Sam (manager)');
   assert.doesNotMatch(result.text, /Workspace teams: 1|Current members: 0/);
   assert.equal(requests, 6);
 });
@@ -721,7 +724,7 @@ test('a later failed lookup does not erase the last successful directory result'
     ++lookups === 1 ? directory : { error: 'tool-failed' },
   );
   assert.equal(lookups, 2);
-  assert.equal(result.text, directoryUnavailableReply);
+  assert.equal(result.text, '- Operations: Sam (manager)');
   assert.equal(replies.length, 0);
 });
 

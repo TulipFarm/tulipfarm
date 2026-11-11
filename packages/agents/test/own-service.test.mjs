@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { isOwnServiceUrl, ownServiceDomains } from '../dist/own-service.js';
+import { ownServiceRefusal } from '../src/own-service.ts';
+import { apiCallResultSchema } from '../../api-calls/src/contracts.ts';
+
+test('the own-service refusal uses the API error contract and explains the safe alternative', () => {
+  assert.equal(apiCallResultSchema.parse(ownServiceRefusal).code, 'address-denied');
+  assert.match(ownServiceRefusal.message, /Nothing was sent.*built-in tools/);
+});
 
 test('the deployment’s own site and its parent domain are refused, other hosts are not', () => {
   const domains = ownServiceDomains(['https://app.tulipfarm.ai', 'https://api.tulipfarm.ai', undefined]);

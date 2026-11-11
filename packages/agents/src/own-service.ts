@@ -34,7 +34,21 @@ export function isOwnServiceUrl(url: string, domains: readonly string[]): boolea
 
 export const ownServiceRefusal = {
   status: 'failed',
-  code: 'own-service',
-  message:
-    'Nothing was sent: api.request cannot call TulipFarm itself. Use the built-in tool for the job instead, such as tables.propose to create or change tables, rows tools for records, and files or knowledge tools for documents.',
+  code: 'address-denied',
+  message: "Nothing was sent. This tool can't call TulipFarm itself. Use the built-in tools for this task instead.",
 } as const;
+
+export function ownServiceCorrection(url: string, admitted: readonly string[]): string | undefined {
+  if (!URL.canParse(url)) return undefined;
+  const family = new URL(url).pathname
+    .toLowerCase()
+    .split('/')
+    .reverse()
+    .find(segment => segment && segment !== 'api' && admitted.some(tool => tool.startsWith(`${segment}.`)));
+  if (!family) return undefined;
+  const names = [...new Set(admitted)]
+    .filter(tool => tool.startsWith(`${family}.`))
+    .slice(0, 8)
+    .map(tool => tool.replaceAll('.', '_'));
+  return `Available built-in tools: ${names.join(', ')}. Call tools_search with a listed name or purpose only if the tool is not already offered, then call the loaded tool on the next step.`;
+}

@@ -16,7 +16,7 @@ import { savedTaskAgent, seedExecution } from './task-fixture.mjs';
 import { createWorkflows } from '../../workflows/src/service.ts';
 import { activate as activateWorkflow } from '../../workflows/test/commands.fixture.mjs';
 
-async function environment(t) {
+async function environment(t, { rowCount = 1, teamPolicy = false } = {}) {
   const db = await fixture();
   let runtime;
   t.after(async () => {
@@ -45,12 +45,12 @@ async function environment(t) {
     workspace: w,
     runtime,
     definition: tableDefinition({ owningTeamId: agent.teamId, label: 'Customers', fields: [field] }),
-    records: [{ values: textValues(field, 'Alice') }],
+    records: Array.from({ length: rowCount }, (_, index) => ({ values: textValues(field, `Person ${index + 1}`) })),
   });
   const scope = [{ assetId: customers.tableId, permissions: ['table.row.read'] }];
   await db.platform.query(
     `INSERT INTO ${table('tf_grants')}(team_id,asset_id,permission) VALUES($1,$2,'table.row.read')`,
-    [agent.teamId, customers.tableId],
+    [agent.teamId, teamPolicy ? agent.teamId : customers.tableId],
   );
   await db.platform.query(`UPDATE ${table('tf_agent_activations')} SET scope=$2 WHERE id=$1`, [
     agent.activationId,
@@ -259,8 +259,8 @@ test('replacement refuses different scopes tied at the newest activation time wi
   assert.equal((await current()).length, 3, 'different scopes tied below a unique default do not block replacement');
 });
 
-test('default manual and workflow tasks list and read the same table as their run form', async t => {
-  const f = await environment(t);
+test('default manual and workflow tasks read team-policy tables shown in their run form', async t => {
+  const f = await environment(t, { rowCount: 11, teamPolicy: true });
   await seedExecution(f.db, f.w, f.agent.agentId, [f.agent.teamId], f.scope);
   const preview = (await f.saved.detail(f.w.id, f.user, f.agent.agentId)).activations[0];
   assert.deepEqual(preview.effectiveScope, f.scope);
@@ -283,7 +283,7 @@ test('default manual and workflow tasks list and read the same table as their ru
       ['Customers'],
     );
     const rows = await tools.listRecords(f.w.id, actor, f.customers.tableId, f.customers.revision, {});
-    assert.equal(rows.records.length, 1);
+    assert.equal(rows.records.length, 11);
   }
   const model = syntheticContinuity(async input => {
     const { results } = JSON.parse(input.prompt);
@@ -305,17 +305,59 @@ test('default manual and workflow tasks list and read the same table as their ru
         },
       };
     const rows = results.find(item => item.call.tool === 'rows.list');
-    assert.equal(rows.result.records.length, 1);
-    return { kind: 'answer', text: 'Customers has 1 row.' };
+    assert.equal(rows.result.records.length, 11);
+    return { kind: 'answer', text: 'Customers has 11 rows.' };
   });
   const engine = createTaskRuntime(f.runtime, model);
-  for (const start of [f.tasks.start, f.tasks.startForWorkflow]) {
-    const task = await start(f.w.id, f.user, f.value());
+  async function finish(task) {
     for (let step = 0; step < 8 && (await f.tasks.read(f.w.id, f.user, task.id)).status === 'pending'; step++)
       await engine.process(f.w.id, task.id);
     assert.equal((await f.tasks.read(f.w.id, f.user, task.id)).status, 'completed');
-    assert.equal((await f.tasks.history(f.w.id, f.user, task.id)).messages.at(-1).text, 'Customers has 1 row.');
+    assert.equal((await f.tasks.history(f.w.id, f.user, task.id)).messages.at(-1).text, 'Customers has 11 rows.');
   }
+  for (const start of [f.tasks.start, f.tasks.start, f.tasks.startForWorkflow])
+    await finish(await start(f.w.id, f.user, f.value()));
+
+  const workflows = createWorkflows(f.runtime, { agentTasks: { ...f.tasks, start: f.tasks.startForWorkflow } });
+  const workflowId = randomUUID(),
+    revision = randomUUID();
+  await workflows.save(f.w.id, f.user, workflowId, {
+    revision,
+    expectedRevision: null,
+    definition: {
+      version: 1,
+      name: 'Count rows',
+      triggers: [{ id: 'hourly', kind: 'interval', minutes: 60 }],
+      steps: [
+        {
+          id: 'count',
+          kind: 'agent',
+          agentId: f.agent.agentId,
+          prompt: { kind: 'literal', value: 'Count the customer rows.' },
+          limits: { toolCalls: 12, activeMilliseconds: 60000, credits: 100 },
+        },
+      ],
+    },
+  });
+  await workflows.sponsorship(f.w.id, f.user, workflowId, {
+    sponsorMembershipId: f.member,
+    historyAudience: [f.member],
+  });
+  await activateWorkflow(workflows, f.w.id, f.user, workflowId, revision, true);
+  await f.db.platform.query(
+    `UPDATE ${f.table('tf_workflow_triggers')} SET next_run_at=clock_timestamp()-interval '1 second' WHERE workflow_id=$1`,
+    [workflowId],
+  );
+  const [scheduled] = await workflows.due(f.w.id);
+  assert.ok(scheduled, 'a due schedule starts the workflow');
+  assert.equal((await workflows.advance(scheduled)).kind, 'wait');
+  const run = (await workflows.history(f.w.id, f.user, workflowId)).runs[0];
+  assert.equal(run.source, 'schedule');
+  const scheduledTask = await f.tasks.read(f.w.id, f.user, run.steps[0].output.taskId);
+  assert.deepEqual(scheduledTask.scope, preview.effectiveScope);
+  await finish(scheduledTask);
+  await workflows.advance(scheduled);
+  assert.equal((await workflows.advance(scheduled)).kind, 'done');
 });
 
 test('unreachable selected tables are disclosed and stop manual and workflow tasks without adding enrollment', async t => {
@@ -337,6 +379,54 @@ test('unreachable selected tables are disclosed and stop manual and workflow tas
       .rowCount,
     0,
   );
+});
+
+test('plan-only replies must answer or pause manual and workflow tasks after reading rows', async t => {
+  const f = await environment(t);
+  await seedExecution(f.db, f.w, f.agent.agentId, [f.agent.teamId], f.scope);
+  for (const [start, finish] of [
+    [f.tasks.start, false],
+    [f.tasks.startForWorkflow, false],
+    [f.tasks.start, true],
+    [f.tasks.startForWorkflow, true],
+  ]) {
+    let attempts = 0;
+    const engine = createTaskRuntime(
+      f.runtime,
+      syntheticContinuity(async input => {
+        const { results, followThrough } = JSON.parse(input.prompt);
+        if (!results.length)
+          return {
+            kind: 'tool',
+            text: 'Read the customer rows.',
+            call: {
+              tool: 'rows.list',
+              tableId: f.customers.tableId,
+              expectedAppliedRevision: f.customers.revision,
+              query: {},
+            },
+          };
+        assert.equal(results[0].result.records.length, 1);
+        attempts++;
+        if (attempts === 2) {
+          assert.match(followThrough, /tool calls/);
+          if (finish) return { kind: 'answer', text: 'Customers has 1 row.' };
+        }
+        return { kind: 'answer', text: "I'll read the customer table and count its rows for you." };
+      }),
+    );
+    const task = await start(f.w.id, f.user, f.value());
+    for (let step = 0; step < 6 && (await f.tasks.read(f.w.id, f.user, task.id)).status === 'pending'; step++)
+      await engine.process(f.w.id, task.id);
+    const incomplete = await f.tasks.read(f.w.id, f.user, task.id);
+    assert.equal(incomplete.status, finish ? 'completed' : 'paused');
+    assert.equal(incomplete.pauseReason, finish ? null : 'decision');
+    assert.equal(attempts, 2);
+    assert.match(
+      (await f.tasks.history(f.w.id, f.user, task.id)).messages.at(-1).text,
+      finish ? /Customers has 1 row\./ : /before continuing/,
+    );
+  }
 });
 
 test('invocation scope and current limits narrow the run form without granting extra access', async t => {

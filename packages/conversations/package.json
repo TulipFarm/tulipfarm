@@ -216,6 +216,7 @@
   },
   "dependencies": {
     "@tulipfarm/access": "workspace:*",
+    "@tulipfarm/api-calls": "workspace:*",
     "@tulipfarm/config": "workspace:*",
     "@tulipfarm/content-budget": "workspace:*",
     "@tulipfarm/execution": "workspace:*",

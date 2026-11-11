@@ -4,11 +4,14 @@ import { relation, type AgentStorage } from './store.ts';
 import { directChatRowLimit, rowsAlreadyWrittenSchema, type rowReviewReasonSchema } from './draft-contracts.ts';
 import type { z } from 'zod';
 import { namesTable } from './chat-table-lookup.ts';
-import { requestedRowReview } from './row-review-request.ts';
+import { rowReviewPrefilter } from './row-review-request.ts';
 
 type RowReviewReason = z.infer<typeof rowReviewReasonSchema>;
 type RowsAlreadyWritten = z.infer<typeof rowsAlreadyWrittenSchema>;
 export { directChatRowLimit, namesTable };
+
+export const outsideContentBatchReply =
+  'No rows were added. Because this chat used outside content, each new row needs its own approval. Ask me to add one row at a time, or add the rows in the table yourself.';
 
 type EarlierWrite = { tool: string; call: unknown; output: unknown; drafted: boolean };
 const record = (value: unknown): Record<string, unknown> =>
@@ -206,7 +209,7 @@ export async function chatRowReview(
     const moved = named ? null : await waitingCardElsewhere(tx, origin.conversationId, callId, call.tableId, sent);
     if (moved) return moved;
     if (proposing) return { ...changing, table: label };
-    if (requestedRowReview(texts))
+    if (rowReviewPrefilter(texts))
       return {
         table: label,
         instruction:

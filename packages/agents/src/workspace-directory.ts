@@ -19,6 +19,31 @@ export const workspaceDirectorySchema = z.object({
   truncated: z.boolean(),
 });
 export type WorkspaceDirectory = z.infer<typeof workspaceDirectorySchema>;
+export const directoryNameLimit = 100;
+
+export function directoryNameMatches(text: string, names: readonly string[]) {
+  if (names.length > directoryNameLimit) return [];
+  const haystack = text.toLocaleLowerCase();
+  const used: { start: number; end: number }[] = [];
+  return [...new Set(names)]
+    .filter(name => name.trim())
+    .sort((a, b) => b.length - a.length)
+    .filter(name => {
+      const needle = name.toLocaleLowerCase();
+      for (let start = haystack.indexOf(needle); start >= 0; start = haystack.indexOf(needle, start + 1)) {
+        const end = start + needle.length;
+        if (
+          !/(?:\p{L}|\p{N}|_|-)$/u.test(haystack.slice(0, start)) &&
+          !/^(?:\p{L}|\p{N}|_|-)/u.test(haystack.slice(end)) &&
+          !used.some(range => start < range.end && end > range.start)
+        ) {
+          used.push({ start, end });
+          return true;
+        }
+      }
+      return false;
+    });
+}
 
 const listingQuestion = (text: string) => {
   const question = text
@@ -44,6 +69,7 @@ const directoryQuestion = (text: string) =>
     ) ||
     /\b(?:what|which|how many)\s+(?:teams|members|people)\b/i.test(text) ||
     /\bwho\s+(?:is|are)\s+(?:in|on)\s+(?:(?:the|our|my|this)\s+)?(?:workspace|.+?\s+team)\b/i.test(text) ||
+    !!namedTeamQuestion(text) ||
     /\b(?:teams|members)\s+(?:are\s+)?(?:in|of|belong to)\s+(?:(?:the|our|my|this)\s+)?workspace\b/i.test(text));
 
 /** Selects previews to hold, not whether an answer is true; the structured completion check decides that. */
@@ -58,7 +84,7 @@ export function directoryAnswerExpected(messages: readonly { role: string; text:
   );
 }
 
-function directoryRequest(messages: readonly { role: string; text: string }[]) {
+export function directoryRequest(messages: readonly { role: string; text: string }[]) {
   if (!directoryAnswerExpected(messages)) return '';
   const requests = messages.filter(message => message.role === 'user');
   const latest = requests.at(-1)?.text ?? '';
@@ -82,16 +108,71 @@ export const directoryTotalsClaim = (text: string) =>
 export const directoryUnavailableReply =
   "I couldn't check the workspace's people and teams just now. Please try again.";
 
+function namedTeamQuestion(text: string) {
+  const question = text
+    .trim()
+    .replace(/[?.!]+$/, '')
+    .replace(/\s+in\s+(?:this|the|our|my)\s+workspace$/i, '');
+  const match =
+    /^who\s+(?:is|are)\s+(?:in|on)\s+(?:the\s+)?team\s+(.+)$/i.exec(question) ??
+    /^who\s+manages\s+(?:the\s+)?team\s+(.+)$/i.exec(question) ??
+    /^who\s+manages\s+(?:the\s+)?(.+?)\s+team$/i.exec(question) ??
+    /^who\s+(?:is|are)\s+(?:in|on)\s+(?:the\s+)?(.+?)\s+team$/i.exec(question);
+  return match?.[1]?.replace(/^["']|["']$/g, '').trim();
+}
+
+const named = (member: z.infer<typeof person>) =>
+  member.email && member.email !== member.name ? `${member.name} (${member.email})` : member.name;
+const teamReply = (team: WorkspaceDirectory['teams'][number]) =>
+  team.people === 'not-visible'
+    ? `- ${team.name}: I can't see this team's members.`
+    : `- ${team.name}: ${team.people.map(member => `${named(member)} (${member.role})`).join(', ') || 'No members.'}${team.peopleTruncated ? ' More members are not shown.' : ''}`;
+
+export function directoryTeamMatches(directory: WorkspaceDirectory, request: string) {
+  const requested = namedTeamQuestion(request);
+  return requested
+    ? directory.teams
+        .filter(team => team.name.toLocaleLowerCase() === requested.toLocaleLowerCase())
+        .map(team => team.name)
+    : directoryNameMatches(
+        request,
+        directory.teams.map(team => team.name),
+      );
+}
+
+export function directoryAnswer(directory: WorkspaceDirectory, request: string) {
+  const requested = namedTeamQuestion(request);
+  const names = directoryTeamMatches(directory, request);
+  if (names.length)
+    return directory.teams
+      .filter(team => names.includes(team.name))
+      .map(teamReply)
+      .join('\n');
+  if (
+    requested &&
+    directory.scope !== 'filtered' &&
+    !directory.truncated &&
+    directory.teamCount === directory.teams.length
+  ) {
+    const name = requested
+      .replace(/[\p{Cc}\p{Cf}]/gu, '')
+      .trim()
+      .slice(0, 80);
+    return `I couldn't find a team called "${name}" in this workspace.\n${directoryReply(directory)}`;
+  }
+  if (directory.scope === 'filtered')
+    return [
+      ...directory.teams.map(teamReply),
+      ...(directory.members.length ? ['Members:', ...directory.members.map(member => `- ${named(member)}`)] : []),
+      ...(directory.truncated ? ['This lookup shows only part of the results.'] : []),
+    ].join('\n');
+  return directoryReply(directory);
+}
+
 export function directoryReply(directory: WorkspaceDirectory) {
-  const named = (member: z.infer<typeof person>) =>
-    member.email && member.email !== member.name ? `${member.name} (${member.email})` : member.name;
   return [
     `Workspace teams: ${directory.teamCount}. Current members: ${directory.memberCount}.`,
-    ...directory.teams.map(team =>
-      team.people === 'not-visible'
-        ? `- ${team.name}: I can't see this team's members.`
-        : `- ${team.name}: ${team.people.map(member => `${named(member)} (${member.role})`).join(', ') || 'No members.'}${team.peopleTruncated ? ' More members are not shown.' : ''}`,
-    ),
+    ...directory.teams.map(teamReply),
     ...(directory.members.length ? ['Members:', ...directory.members.map(member => `- ${named(member)}`)] : []),
     ...(directory.truncated ? ['This lookup shows only part of the results.'] : []),
   ].join('\n');

@@ -38,12 +38,18 @@ const requestsForReview = [
   'Draft 9 rows in Orders.',
 ];
 
-function provider(t, responses, { stream = false, completion = 'completed' } = {}) {
+function provider(t, responses, { stream = false, completion = 'completed', rowReviewRequested = true } = {}) {
   const requests = [];
   t.mock.method(globalThis, 'fetch', async (_url, init) => {
     const body = JSON.parse(init.body);
     if (isCompletionRequest(body))
-      return Response.json(selectReply('azure', { status: completion, reason: 'Fixture verdict.' }));
+      return Response.json(
+        selectReply('azure', {
+          status: completion,
+          reason: 'Fixture verdict.',
+          ...(rowReviewRequested !== null && { rowReviewRequested }),
+        }),
+      );
     requests.push(body);
     const response = responses.shift();
     assert.ok(response, 'recovery must be bounded');
@@ -186,6 +192,20 @@ test('a row receipt that is no longer readable cannot substantiate a ready card'
   assert.equal(result.text, stopped);
 });
 
+test('a row tool receipt without a saved-card read cannot substantiate a ready card', async t => {
+  provider(t, [{ calls: [batch()] }, { text: 'All set.' }, { text: 'All set.' }, { text: 'All set.' }]);
+  const result = await inferWithTools(
+    nativeRoutes.azure,
+    [{ role: 'user', text: request }],
+    async () => receipt,
+    undefined,
+    false,
+    null,
+    { preloadedTools: context.preloadedTools },
+  );
+  assert.equal(result.text, stopped);
+});
+
 test('a direct write is reported truthfully instead of claiming no rows changed', async t => {
   provider(t, [
     { calls: [use('schema.inspect', { tableId })] },
@@ -313,7 +333,7 @@ test('row review recovery leaves read-only turns and evidence-backed table quest
       { role: 'user', text: 'Please create the review card.' },
     ],
   ]) {
-    const requests = provider(t, [{ text: 'Which details would you like?' }]);
+    const requests = provider(t, [{ text: 'Which details would you like?' }], { rowReviewRequested: false });
     const result = await inferWithTools(
       nativeRoutes.azure,
       messages,
@@ -349,4 +369,71 @@ test('row review recovery leaves read-only turns and evidence-backed table quest
     context,
   );
   assert.equal(result.text, question);
+});
+
+test('the checker recognizes review intent outside imperative row wording', async t => {
+  for (const text of [
+    'The nine Orders entries need my approval before any are saved.',
+    'Let me check the new Orders entries before you save them.',
+    'I want a look at those Orders entries before they go in.',
+  ]) {
+    provider(t, [
+      { text: 'All set.' },
+      { calls: [use('schema.inspect', { tableId })] },
+      { calls: [batch()] },
+      { text: 'Done.' },
+    ]);
+    const calls = [];
+    const result = await inferWithTools(
+      nativeRoutes.azure,
+      [{ role: 'user', text }],
+      async call => {
+        calls.push(call.tool);
+        return call.tool === 'schema.inspect' ? schema : receipt;
+      },
+      undefined,
+      false,
+      null,
+      context,
+    );
+    assert.equal(result.text, summary);
+    assert.deepEqual(calls, ['schema.inspect', 'rows.create.batch']);
+    t.mock.restoreAll();
+  }
+});
+
+test('a broad review prefilter does not override false or missing checker intent', async t => {
+  for (const rowReviewRequested of [false, null]) {
+    provider(t, [{ text: 'The rows can be reviewed without changing them.' }], { rowReviewRequested });
+    const result = await inferWithTools(
+      nativeRoutes.azure,
+      [{ role: 'user', text: 'Review the rows in Orders, but do not change them.' }],
+      () => assert.fail('Read-only requests must not force writes'),
+      undefined,
+      false,
+      null,
+      context,
+    );
+    assert.equal(result.text, 'The rows can be reviewed without changing them.');
+    t.mock.restoreAll();
+  }
+});
+
+test('an unavailable checker keeps an informational answer instead of forcing row review', async t => {
+  t.mock.method(globalThis, 'fetch', async (_url, init) => {
+    const body = JSON.parse(init.body);
+    return isCompletionRequest(body)
+      ? new Response('unavailable', { status: 400 })
+      : Response.json(nativeReply('azure', { text: 'Review means checking the rows before a change.' }));
+  });
+  const result = await inferWithTools(
+    nativeRoutes.azure,
+    [{ role: 'user', text: 'What does review before writing mean?' }],
+    () => assert.fail('An unavailable checker must not establish intent'),
+    undefined,
+    false,
+    null,
+    context,
+  );
+  assert.equal(result.text, 'Review means checking the rows before a change.');
 });

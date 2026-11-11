@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { createApiCallGuard } from './api-call-guard.ts';
 import { z } from 'zod';
 import { imageGenerationOffered } from './image-generation.ts';
 import type { FileReadReceipt, GoogleFileReadReceipt } from '@tulipfarm/access/source-dependencies';
@@ -520,6 +521,26 @@ export function createTaskRuntime(
       const c = await context(tx, workspaceId, taskId);
       const { task, runId, local, owner } = c;
       if (materializing && JSON.stringify(c.history) !== materializing.history) return null;
+      const apiHistory = (
+        await tx.client.query(
+          `SELECT call,result FROM ${relation(tx, 'tf_agent_tool_calls')} WHERE run_id=$1 AND call->>'tool'='api.request' AND status='completed' ORDER BY sequence`,
+          [runId],
+        )
+      ).rows;
+      const api = createApiCallGuard(
+        apiHistory.map(row => row.call),
+        apiHistory.map(row => ({ call: row.call, output: row.result })),
+      );
+      if (api.stoppingReply) {
+        await message(tx, taskId, task.generation, api.stoppingReply);
+        const changed = await tx.client.query(
+          `UPDATE ${relation(tx, 'tf_agent_tasks')} SET status='completed',pause_reason=NULL WHERE id=$1`,
+          [taskId],
+        );
+        await secrets?.tools.endRun(tx, { kind: 'task', taskId, runId });
+        taskTransition(tx, 'completed', changed.rowCount, taskId);
+        return null;
+      }
       // The Drive read checked its binding; this recheck commits with the model claim, so a disconnect during extraction withholds the text.
       if (materializing && !materializing.stop)
         for (const read of materializing.reads)
@@ -1254,7 +1275,8 @@ export function createTaskRuntime(
           let persistedDecision = decision;
           let callId: string | null = null,
             proposalId: string | null = null,
-            conflicted = false;
+            conflicted = false,
+            incomplete = false;
           if (decision.kind === 'tool') {
             if (!taskReadAdmitted(c.definition, decision.call)) throw new AccessDenied();
             if ('tableId' in decision.call)
@@ -1369,12 +1391,9 @@ export function createTaskRuntime(
               ).rowCount
             )
               throw new TaskDecisionRejected(new Error('task-has-unfinished-proposal'));
-            // A reply that announces its next step without calling a tool continues once per owner request instead of ending the task.
-            continuing =
-              decision.kind === 'answer' &&
-              announcesFurtherWork(decision.text) &&
-              !(await answered(tx, taskId, c.task.generation));
-            if (!continuing) {
+            incomplete = decision.kind === 'answer' && announcesFurtherWork(decision.text);
+            continuing = incomplete && !(await answered(tx, taskId, c.task.generation));
+            if (!incomplete) {
               const status = decision.kind === 'answer' ? 'completed' : 'waiting-clarification';
               const changed = await tx.client.query(
                 `UPDATE ${relation(tx, 'tf_agent_tasks')} SET status=$2 WHERE id=$1 AND status IS DISTINCT FROM $2`,
@@ -1388,6 +1407,8 @@ export function createTaskRuntime(
           }
           // A conflicted proposal produced nothing for the owner to review; the agent reads the conflict result next step.
           if (!conflicted) await message(tx, taskId, c.task.generation, decision.text, claim.reads);
+          if (incomplete && !continuing)
+            await pause(tx, taskId, c.task.generation, recordsTaskFailure(tx) ? 'decision' : 'model', rejectedPause);
           await tx.client.query(
             `UPDATE ${relation(tx, 'tf_agent_task_steps')} SET decision=$3,call_id=$4,proposal_id=$5,completed=$6 WHERE run_id=$1 AND step=$2 AND decision IS NULL`,
             [
