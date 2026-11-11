@@ -413,7 +413,7 @@ async function canAgentAccess(
   const permits = (scope: z.infer<typeof scopeSchema>) =>
     scope.some(entry => entry.assetId === assetId && entry.permissions.includes(permission));
   if (![authority.scope, authority.activation_scope, authority.limit_scope].every(permits)) return false;
-  return canUseAgentEnrollment(transaction, owner, authority.agent_id, assetId, permission);
+  return canUseAgentEnrollment(transaction, owner, authority.agent_id, assetId, permission, authority.activation_id);
 }
 
 /** Enrollment and the person's current access; callers must also apply the agent's three scope bounds. */
@@ -423,6 +423,7 @@ export async function canUseAgentEnrollment(
   agentId: string,
   assetId: string,
   permission: AssetPermission,
+  activationId?: string,
 ) {
   const target = grantTarget(permission);
   // Table permissions may also come from a policy on every table the owning team owns.
@@ -434,6 +435,19 @@ export async function canUseAgentEnrollment(
     `SELECT 1 FROM ${table(transaction, 'tf_agent_teams')} t JOIN ${table(transaction, target.name)} g ON g.team_id = t.team_id WHERE t.agent_id = $1 AND (g.${target.column} = $2${owned}) AND g.permission = $3 LIMIT 1`,
     [agentId, assetId, target.permission],
   );
-  if (!grant.rowCount) return false;
+  if (!grant.rowCount) {
+    if (!permission.startsWith('table.') || !activationId) return false;
+    const admin = await transaction.client.query(
+      `SELECT 1 FROM ${table(transaction, 'tf_agent_teams')} enrolled
+       JOIN ${table(transaction, 'tf_teams')} team ON team.id=enrolled.team_id AND team.name='_admin'
+       JOIN ${table(transaction, 'tf_agent_activations')} activation ON activation.agent_id=enrolled.agent_id
+       JOIN ${table(transaction, 'tf_memberships')} activator
+         ON activator.id::text=to_jsonb(activation)->>'activated_by_membership_id'
+       WHERE enrolled.agent_id=$1 AND activation.id=$2 AND activation.revoked_at IS NULL
+         AND activator.role='admin' AND activator.removed_at IS NULL`,
+      [agentId, activationId],
+    );
+    if (!admin.rowCount) return false;
+  }
   return canAccessAsset(transaction, owner, assetId, permission);
 }

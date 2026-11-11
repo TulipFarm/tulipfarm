@@ -1809,7 +1809,7 @@ function reply(provider, decision = answer) {
   return nativeReply(provider, selected);
 }
 
-async function boundary(t, handler) {
+async function boundary(t, handler, completion) {
   const received = [];
   const server = createServer(async (req, res) => {
     const chunks = [];
@@ -1817,10 +1817,12 @@ async function boundary(t, handler) {
     received.push({ path: req.url, headers: req.headers, body: JSON.parse(Buffer.concat(chunks).toString()) });
     const body = received.at(-1).body;
     if (isCompletionRequest(body)) {
+      if (completion) return completion(req, res);
       const format = body.contents ? 'google' : body.input ? 'responses' : body.system ? 'anthropic' : 'azure';
       res.end(JSON.stringify(completionReply(format)));
       return;
     }
+
     handler(req, res);
   });
   server.listen(0, '127.0.0.1');
@@ -1841,6 +1843,44 @@ async function boundary(t, handler) {
   });
   return { received, origins };
 }
+
+test('task completion distinguishes progress from answer content and accounts for its check', async t => {
+  let verdict = {
+    status: 'continue',
+    reason: 'Only progress, with no answer.',
+    hasAnswerContent: false,
+    hasToolBackedResult: false,
+  };
+  let failure;
+  const wire = await boundary(
+    t,
+    (_req, res) => res.end(JSON.stringify(nativeReply('anthropic', { text: 'Finding table Customers' }))),
+    (_req, res) => {
+      if (failure === 'unavailable') {
+        res.writeHead(503);
+        return res.end('{}');
+      }
+      if (failure === 'invalid-json') return res.end('{');
+      if (failure === 'timeout') return;
+      res.end(JSON.stringify(selectReply('anthropic', verdict)));
+    },
+  );
+  const taskInput = { ...input, task: true };
+  const progress = await inferSourceDecision(routes.anthropic, taskInput);
+  assert.equal(progress.kind, 'success');
+  assert.equal(progress.decision.incomplete, true);
+  assert.equal(wire.received.length, 2);
+  assert.equal(progress.usage.input, 20);
+  verdict = { ...verdict, status: 'completed', hasAnswerContent: true };
+  const answer = await inferSourceDecision(routes.anthropic, taskInput);
+  assert.equal(answer.decision.incomplete, false, 'a broad prefilter is not a completion verdict');
+  for (failure of ['unavailable', 'invalid-json', 'timeout']) {
+    const fallback = await inferSourceDecision({ ...routes.anthropic, timeoutMs: 500 }, taskInput);
+    assert.equal(fallback.kind, 'success');
+    assert.equal(fallback.decision.incomplete, undefined, 'checker failure preserves the earlier behaviour');
+    assert.deepEqual(fallback.usage, known, `${failure} preserves the primary call's usage`);
+  }
+});
 
 async function respond(
   t,

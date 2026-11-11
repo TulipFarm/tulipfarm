@@ -331,6 +331,7 @@ export function createTaskRuntime(
       task.agentId,
       scopeSchema.parse(activation.scope),
       task.scope,
+      task.activationId,
     );
     const unavailable = await unavailableTableMessage(tx, owner, task.scope, effective);
     if (unavailable) throw new TaskTableAccessDenied(unavailable);
@@ -1391,7 +1392,7 @@ export function createTaskRuntime(
               ).rowCount
             )
               throw new TaskDecisionRejected(new Error('task-has-unfinished-proposal'));
-            incomplete = decision.kind === 'answer' && announcesFurtherWork(decision.text);
+            incomplete = decision.kind === 'answer' && (decision.incomplete ?? announcesFurtherWork(decision.text));
             continuing = incomplete && !(await answered(tx, taskId, c.task.generation));
             if (!incomplete) {
               const status = decision.kind === 'answer' ? 'completed' : 'waiting-clarification';
