@@ -6,10 +6,9 @@ export const fileListingFailed = "I couldn't list your files. Ask me to try agai
 export const fileListingEmpty = "I didn't find any files that match your search.";
 const saveFailed = "I couldn't save the file. Ask me to try again.";
 const repeatedFailure = 'I stopped because the same file request kept failing.';
-const fileObject =
-  /^(?:(?:a|an|the|my|your|this|that|new|one|two|three|\d+|Excel|Word|PowerPoint)\s+)*(?:files?|workbooks?|spreadsheets?|documents?|md|xlsx|docx|pptx|markdown|\S+\.(?:md|txt|csv|json|docx|xlsx|pptx))\b/i;
-const saveRequest =
-  /(?:^|[.!?;\n]\s*|\b(?:and|then|also)\s+)(?:please\s+)?(?:(?:can|could|would) you (?:please )?)?(?:create|make|save|generate|write|export)\s+(.+?)(?=$|[!?;\n]|\.(?:\s|$)|\b(?:and|then|also)\b)/gi;
+const filePrefilter =
+  /\b(?:file|document|spreadsheet|workbook|report|csv|markdown|xlsx|docx|pptx|sav|export|download)|\S+\.[a-z0-9]+\b/i;
+// These claims are only a fallback when the structured completion check fails, never save authorization.
 const fileSubject = String.raw`(?:files?|workbooks?|spreadsheets?|documents?|\S+\.(?:md|txt|csv|json|docx|xlsx|pptx))\b`;
 const fileSavedClaim = new RegExp(
   [
@@ -20,16 +19,8 @@ const fileSavedClaim = new RegExp(
   ].join('|'),
   'i',
 );
-const requestedFileSavedClaim =
+const readyFileClaim =
   /\b(?:files?|reports?|workbooks?|spreadsheets?|documents?|outputs?)\s+(?:is|are|has been|have been)\s+(?:(?:now|successfully)\s+)?(?:ready|saved|created|generated)\b/i;
-function fileSaveRequested(request: string) {
-  for (const match of request.matchAll(saveRequest)) {
-    if (/\bto memory\b/i.test(match[1]!)) continue;
-    const object = match[1]!.split(/\b(?:from|using|based on|of|about|that|for)\b/i)[0]!.trim();
-    if (fileObject.test(object)) return true;
-  }
-  return false;
-}
 const receipt = z.object({
   file: z.object({
     id: z.uuid(),
@@ -57,7 +48,6 @@ export function fileListingQuery(request: string): string | undefined {
 }
 
 export function createFileJobGuard(request: string, prior: readonly { call: unknown; result: unknown }[] = []) {
-  const requestedSave = fileSaveRequested(request);
   let calls = 0;
   let attempted = false;
   let saved = false;
@@ -65,6 +55,7 @@ export function createFileJobGuard(request: string, prior: readonly { call: unkn
   const failures = new Map<string, number>();
   let repeated = false;
   let needsListing = false;
+  const needsCheck = (text = '') => !saved && (attempted || filePrefilter.test(request) || filePrefilter.test(text));
   const record = (call: { tool: string }, value: unknown) => {
     if (!call.tool.startsWith('files.')) return;
     calls++;
@@ -97,11 +88,11 @@ export function createFileJobGuard(request: string, prior: readonly { call: unkn
     get saved() {
       return saved;
     },
-    get requestedSave() {
-      return requestedSave;
+    get attempted() {
+      return attempted;
     },
     get holdPreview() {
-      return !saved && (attempted || requestedSave || fileListingQuery(request) !== undefined);
+      return needsCheck() || (!saved && fileListingQuery(request) !== undefined);
     },
     get stopped() {
       return repeated;
@@ -113,15 +104,15 @@ export function createFileJobGuard(request: string, prior: readonly { call: unkn
       attempted ||= names.includes('files_create');
     },
     record,
-    unbacked(text: string) {
+    needsCheck,
+    checkerFailedReply(text: string) {
       const claimed = text
         .split(/(?<=[.!?])\s+|\n+/)
         .some(
           sentence =>
-            !sentence.trim().endsWith('?') &&
-            (fileSavedClaim.test(sentence) || (requestedSave && requestedFileSavedClaim.test(sentence))),
+            !sentence.trim().endsWith('?') && (fileSavedClaim.test(sentence) || readyFileClaim.test(sentence)),
         );
-      return !saved && (claimed || (requestedSave && attempted));
+      return !saved && claimed ? saveFailed : undefined;
     },
     reply() {
       if (saved) return undefined;

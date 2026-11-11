@@ -1686,9 +1686,10 @@ for (const model of ['grok-4.3', 'Kimi-K2.6'])
       t.mock.restoreAll();
       const failed = [
         nativeReply('azure', { calls: [use('tables.propose', { input: '{"plans":[]}' })] }),
-        ...Array.from({ length: 3 }, () =>
+        ...Array.from({ length: 3 }, () => [
           nativeReply('azure', { text: 'The import review card for Orders is ready below.' }),
-        ),
+          selectReply('azure', { ...verdict('continue'), fileSaveRequested: false, claimsSavedFile: false }),
+        ]).flat(),
       ];
       t.mock.method(globalThis, 'fetch', async () => {
         const reply = failed.shift();
@@ -1704,12 +1705,14 @@ for (const model of ['grok-4.3', 'Kimi-K2.6'])
       assert.equal(failed.length, 0);
     });
 
-test('an unbacked import review is sent back until a proposal exists, and the new card ends the reply unchecked', async t => {
+test('an unbacked import review continues until a proposal exists and file checking accepts the card', async t => {
   const outcomes = checkOutcomes(t);
   const replies = [
     nativeReply('azure', { text: 'Here is the import review. Do you confirm this import?' }),
+    selectReply('azure', { ...verdict('continue'), fileSaveRequested: false, claimsSavedFile: false }),
     nativeReply('azure', { calls: [use('tables.propose', { input: '{"plans":[]}' })] }),
     nativeReply('azure', { text: 'The import review card is ready below.' }),
+    selectReply('azure', { ...verdict('completed'), fileSaveRequested: false, claimsSavedFile: false }),
   ];
   const requests = [],
     executed = [];
@@ -1729,9 +1732,9 @@ test('an unbacked import review is sent back until a proposal exists, and the ne
   assert.deepEqual(executed, ['tables.propose']);
   assert.deepEqual(
     requests.map(request => isCompletionRequest(request)),
-    [false, false, false],
+    [false, true, false, false, true],
   );
-  assert.match(JSON.stringify(requests[1].messages), /no tables\.propose call in this reply returned a pending review/);
+  assert.match(JSON.stringify(requests[2].messages), /no tables\.propose call in this reply returned a pending review/);
   assert.deepEqual(outcomes, ['continue', 'done']);
   assert.equal(replies.length, 0);
 });

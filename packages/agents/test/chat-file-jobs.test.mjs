@@ -5,10 +5,10 @@ import { inferWithTools } from '../src/inference.ts';
 import { nativeChatTools } from '../src/native-tools.ts';
 import {
   azureStreamReply,
-  completionReply,
   isCompletionRequest,
   nativeReply,
   nativeRoutes,
+  selectReply,
   use,
 } from './native-fixture.mjs';
 
@@ -29,6 +29,220 @@ const route = model => ({ ...nativeRoutes.azure, model });
 for (const model of models)
   for (const sse of [false, true]) {
     const title = `regression: ${model} ${sse ? 'SSE' : 'JSON'}`;
+    for (const request of [
+      'Save it as notes.md.',
+      'Write it to a file called notes.md.',
+      'Save this as a file.',
+      'Make me a spreadsheet of these prices: A 1, B 2.',
+      'Compare these prices: A 1, B 2.\n\nExplain the difference.\n\nWhen you are done, save it as a markdown file.',
+      'Export the table as a CSV file.',
+      'Export it as an Excel spreadsheet.',
+      'Create a Word doc with these notes.',
+      'Create a report.',
+      'Please make me a spreadsheet of these prices.',
+      'Summarise the CSV, then save it as a markdown file.',
+      'Compare the prices, then could you please export everything as a docx.',
+    ])
+      test(`${title} structured save request recovers a missing create: ${request}`, async t => {
+        const claim = 'Your file is ready.';
+        const text = 'Report.md is saved in Files.';
+        let checks = 0;
+        const previews = [];
+        provider(
+          t,
+          sse,
+          [
+            nativeReply('azure', { text: claim }),
+            nativeReply('azure', { calls: [use('files.create', create)] }),
+            nativeReply('azure', { text }),
+          ],
+          false,
+          () => {},
+          body => {
+            checks++;
+            assert.ok(!previews.includes(claim), 'The unchecked claim must not stream before classification');
+            return {
+              status: JSON.parse(body.messages.at(-1).content).candidate === claim ? 'continue' : 'completed',
+              fileSaveRequested: true,
+              claimsSavedFile: true,
+            };
+          },
+        );
+        const calls = [];
+        const result = await inferWithTools(
+          route(model),
+          [{ role: 'user', text: request }],
+          async call => {
+            calls.push(call.tool);
+            return saved;
+          },
+          undefined,
+          false,
+          null,
+          { ...options, answerText: update => previews.push(update.text) },
+        );
+        assert.ok(checks > 0, 'File intent must be classified by the completion checker');
+        assert.deepEqual(calls, ['files.create']);
+        assert.equal(result.text, text);
+        assert.ok(!previews.includes(claim));
+      });
+
+    for (const scenario of [
+      { request: 'Make the file names shorter.', text: "I've created file names that are shorter: Notes and Budget." },
+      { request: 'Save the file id for later.', text: "I've saved the file ID to memory." },
+      {
+        request: 'Write a file parser in Python that converts CSV to JSON.',
+        text: 'When it runs, the output file is created next to the input.',
+      },
+      { request: 'Write the file summary here.', text: "I've generated the file summary below." },
+      {
+        request: 'Create the file structure for a React app in chat.',
+        text: "I've created the file structure below in chat.",
+      },
+      { request: 'Generate a file name for my report.', text: "I've created a file name for the report: Quarterly." },
+      { request: 'Remember that my main file id is X.', text: "I've saved the file ID to memory." },
+      {
+        request: 'Read the document and explain its source.',
+        text: 'These documents are created by the finance team each week.',
+      },
+      { request: 'Save me time and summarise the CSV.', text: 'The CSV has two prices.' },
+      { request: 'Export this as a table in chat.', text: '| Price |\n| --- |\n| 42 |' },
+      { request: 'Make a note to create the report later.', text: 'The reminder is to create the report later.' },
+      {
+        request: 'Can you create a doc?',
+        text: 'Yes, I can create a document when you tell me what it should contain.',
+      },
+      { request: 'Save to memory that the report file is weekly.', text: 'The report file is weekly.' },
+      { request: 'Remember this: my file names use dates.', text: 'Your file names use dates.' },
+    ])
+      test(`${title} structured non-save verdict preserves the answer: ${scenario.request}`, async t => {
+        let checks = 0;
+        const previews = [];
+        provider(
+          t,
+          sse,
+          [
+            nativeReply('azure', { text: scenario.text }),
+            nativeReply('azure', { calls: [use('files.create', create)] }),
+            nativeReply('azure', { text: 'Report.md is saved in Files.' }),
+          ],
+          false,
+          body => assert.notEqual(body.tool_choice?.function?.name, 'files_create'),
+          () => {
+            checks++;
+            assert.ok(!previews.includes(scenario.text), 'File-related text must wait for classification');
+            return { fileSaveRequested: false, claimsSavedFile: false };
+          },
+        );
+        const result = await inferWithTools(
+          route(model),
+          [{ role: 'user', text: scenario.request }],
+          () => assert.fail('A non-save verdict must not dispatch a file create'),
+          undefined,
+          false,
+          null,
+          { ...options, answerText: update => previews.push(update.text) },
+        );
+        assert.ok(checks > 0);
+        assert.equal(result.text, scenario.text);
+      });
+
+    for (const verdict of [
+      {},
+      { fileSaveRequested: 'true', claimsSavedFile: 'true' },
+      { fileSaveRequested: 1, claimsSavedFile: null },
+    ])
+      test(`${title} missing or invalid file verdicts do not authorize a save: ${JSON.stringify(verdict)}`, async t => {
+        const text = "I've created file names that are shorter: Notes and Budget.";
+        provider(t, sse, [nativeReply('azure', { text })], false, () => {}, verdict);
+        const result = await inferWithTools(
+          route(model),
+          [{ role: 'user', text: 'Make the file names shorter.' }],
+          () => assert.fail('Only explicit true booleans can authorize save recovery'),
+          undefined,
+          false,
+          null,
+          options,
+        );
+        assert.equal(result.text, text);
+      });
+
+    for (const scenario of [
+      {
+        request: 'Save it as notes.md.',
+        text: 'Your file is ready.',
+        expected: "I couldn't save the file. Ask me to try again.",
+      },
+      {
+        request: 'Make sure the budget spreadsheet adds up.',
+        text: 'The totals add up to 42.',
+        expected: 'The totals add up to 42.',
+      },
+    ])
+      test(`${title} a failed checker never authorizes a save: ${scenario.text}`, async t => {
+        let checks = 0;
+        const previews = [];
+        provider(
+          t,
+          sse,
+          [nativeReply('azure', { text: scenario.text })],
+          true,
+          () => {},
+          () => {
+            checks++;
+            return {};
+          },
+        );
+        const result = await inferWithTools(
+          route(model),
+          [{ role: 'user', text: scenario.request }],
+          () => assert.fail('A failed check must never create a file'),
+          undefined,
+          false,
+          null,
+          { ...options, answerText: update => previews.push(update.text) },
+        );
+        assert.ok(checks > 0);
+        assert.equal(result.text, scenario.expected);
+        if (scenario.text !== scenario.expected) assert.ok(!previews.includes(scenario.text));
+      });
+
+    test(`${title} a requested save can recover without a false success claim`, async t => {
+      const text = 'Report.md is saved in Files.';
+      provider(
+        t,
+        sse,
+        [
+          nativeReply('azure', { text: 'Here is the comparison of the two prices.' }),
+          nativeReply('azure', { calls: [use('files.create', create)] }),
+          nativeReply('azure', { text }),
+        ],
+        false,
+        () => {},
+        body => ({
+          status: JSON.parse(body.messages.at(-1).content).candidate === text ? 'completed' : 'continue',
+          fileSaveRequested: true,
+          claimsSavedFile: JSON.parse(body.messages.at(-1).content).candidate === text,
+        }),
+      );
+      let saves = 0;
+      const result = await inferWithTools(
+        route(model),
+        [{ role: 'user', text: 'Create a spreadsheet comparing the two prices.' }],
+        async call => {
+          assert.equal(call.tool, 'files.create');
+          saves++;
+          return saved;
+        },
+        undefined,
+        false,
+        null,
+        options,
+      );
+      assert.equal(saves, 1);
+      assert.equal(result.text, text);
+    });
+
     for (const scenario of [
       {
         request: 'Make sure the budget spreadsheet adds up.',
@@ -77,8 +291,13 @@ for (const model of models)
 
     test(`${title} preserves a necessary question on a real file request without forcing a save`, async t => {
       const text = 'Which columns would you like?';
-      provider(t, sse, [nativeReply('azure', { text })], false, body =>
-        assert.notEqual(body.tool_choice?.function?.name, 'files_create'),
+      provider(
+        t,
+        sse,
+        [nativeReply('azure', { text })],
+        false,
+        body => assert.notEqual(body.tool_choice?.function?.name, 'files_create'),
+        { status: 'waiting', fileSaveRequested: true, claimsSavedFile: false },
       );
       const result = await inferWithTools(
         route(model),
@@ -262,7 +481,11 @@ for (const model of models)
     });
 
     test(`${title} a requested markdown report needs a receipt even for a vague ready claim`, async t => {
-      provider(t, sse, [nativeReply('azure', { text: 'Your report is ready.' })]);
+      provider(t, sse, [nativeReply('azure', { text: 'Your report is ready.' })], false, () => {}, {
+        status: 'continue',
+        fileSaveRequested: true,
+        claimsSavedFile: true,
+      });
       const result = await inferWithTools(
         route(model),
         [{ role: 'user', text: 'Create a markdown report.' }],
@@ -277,10 +500,17 @@ for (const model of models)
 
     test(`${title} research followed by a requested spreadsheet holds an unbacked claim out of streamed text`, async t => {
       const claim = "I've created a spreadsheet comparing the three CRMs.";
-      provider(t, sse, [
-        nativeReply('azure', { calls: [use('web.search', { query: 'top three CRMs' })] }),
-        nativeReply('azure', { text: claim }),
-      ]);
+      provider(
+        t,
+        sse,
+        [
+          nativeReply('azure', { calls: [use('web.search', { query: 'top three CRMs' })] }),
+          nativeReply('azure', { text: claim }),
+        ],
+        false,
+        () => {},
+        { status: 'continue', fileSaveRequested: true, claimsSavedFile: true },
+      );
       const previews = [];
       const result = await inferWithTools(
         route(model),
@@ -344,6 +574,10 @@ for (const model of models)
           ],
           false,
           body => assert.notEqual(body.tool_choice?.function?.name, 'files_create'),
+          body => ({
+            fileSaveRequested: false,
+            claimsSavedFile: JSON.parse(body.messages.at(-1).content).candidate === claim,
+          }),
         );
         const previews = [];
         const result = await inferWithTools(
@@ -365,10 +599,14 @@ for (const model of models)
 
 test('an unsolicited repeated save claim exhausts normal correction without a save-failure reply', async t => {
   const claim = "I've saved a new file in Files.";
-  provider(t, true, [
-    nativeReply('azure', { calls: [use('files.read', { source: fileId })] }),
-    nativeReply('azure', { text: claim }),
-  ]);
+  provider(
+    t,
+    true,
+    [nativeReply('azure', { calls: [use('files.read', { source: fileId })] }), nativeReply('azure', { text: claim })],
+    false,
+    () => {},
+    { status: 'continue', fileSaveRequested: false, claimsSavedFile: true },
+  );
   let calls = 0;
   const result = await inferWithTools(
     route(models[0]),
@@ -387,13 +625,23 @@ test('an unsolicited repeated save claim exhausts normal correction without a sa
   assert.doesNotMatch(result.text, /saved a new file|couldn't save/i);
 });
 
-function provider(t, sse, replies, checkFails = false, inspect = () => {}) {
+function provider(t, sse, replies, checkFails = false, inspect = () => {}, verdict = {}) {
   t.mock.method(globalThis, 'fetch', async (_url, init) => {
     const body = JSON.parse(init.body);
-    if (isCompletionRequest(body))
+    if (isCompletionRequest(body)) {
+      const checked = typeof verdict === 'function' ? verdict(body) : verdict;
       return checkFails
         ? Response.json({ error: { code: 'BadRequest' } }, { status: 400 })
-        : Response.json(completionReply('azure'));
+        : Response.json(
+            selectReply('azure', {
+              status: 'completed',
+              reason: 'The fixture answer satisfies the request.',
+              fileSaveRequested: false,
+              claimsSavedFile: false,
+              ...checked,
+            }),
+          );
+    }
     inspect(body);
     const reply = replies.length > 1 ? replies.shift() : replies[0];
     assert.ok(reply, 'fixture exhausted');
@@ -641,7 +889,15 @@ for (const model of models)
       t.mock.method(globalThis, 'fetch', async (url, init) => {
         if (String(url).includes('anthropic'))
           return Response.json({ error: { type: 'api_error', message: 'Fixture unavailable' } }, { status: 500 });
-        if (isCompletionRequest(JSON.parse(init.body))) return Response.json(completionReply('azure'));
+        if (isCompletionRequest(JSON.parse(init.body)))
+          return Response.json(
+            selectReply('azure', {
+              status: 'continue',
+              reason: 'No file save succeeded.',
+              fileSaveRequested: true,
+              claimsSavedFile: true,
+            }),
+          );
         const reply = nativeReply(
           'azure',
           ++round === 1 ? { calls: [use('files.create', create)] } : { text: 'Your workbook is ready in Files.' },
