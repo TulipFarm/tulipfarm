@@ -2426,6 +2426,27 @@ test('a row write held back behind a waiting card is explained with what that ca
   assert.match(heldBackReply(unnamed, 'Add one more row'), /then ask again for this change\.$/);
 });
 
+test('the ask-again reply names only the new rows, once each, never the rows on the waiting card', () => {
+  const request = 'Add one more row to Fruit ledger: Lime 10.';
+  const [repeated] = heldBackWrites(heldBack(['Apple 1', 'Lime 10', '10 Lime']));
+  assert.match(heldBackReply(repeated, request), /then ask again for Lime 10\.$/);
+  const [cardOnly] = heldBackWrites(heldBack(['Banana 2']));
+  assert.match(heldBackReply(cardOnly, request), /then ask again for Lime 10\.$/);
+});
+
+test('a reply that adds the new request to the count on the waiting card is rewritten even when the call named no rows', () => {
+  const request = 'Add one more row: Lime 10.';
+  for (const text of [
+    'Once you approve or dismiss the waiting card, I can add all 10 rows including Lime.',
+    'Approving the card adds 10 rows.',
+  ])
+    assert.equal(heldBackMisdescribed(text, heldBack([]), request)?.status, 'continue', text);
+  assert.equal(
+    heldBackMisdescribed('The card to add 9 rows is still waiting. Lime 10 is on no card.', heldBack([]), request),
+    undefined,
+  );
+});
+
 test('a reply that merges a held-back row into the waiting card or blames a failure is rewritten', () => {
   for (const text of [
     'I added Lime 10 to the approval card, so the card now has 10 rows.',
@@ -2523,8 +2544,10 @@ test('a reply that blames access or a failure while a card waits and nothing fai
 test('the fixed reply for an invented card names the waiting card when one is known', () => {
   assert.equal(
     noCardReply(1, { table: 'Fruit ledger', summary: 'add 9 rows (Apple 1, Banana 2, Cherry 3, …) to' }),
-    'No new approval card is waiting from this reply. A card to add 9 rows (Apple 1, Banana 2, Cherry 3, …) to "Fruit ledger" is still waiting for your approval in this chat: approve or dismiss it there first.',
+    'No new approval card was made. An earlier card to add 9 rows (Apple 1, Banana 2, Cherry 3, …) to "Fruit ledger" is still waiting for your approval in this chat. Approve or dismiss it there.',
   );
+  assert.equal(noCardReply(0), 'No approval card was made, and nothing in this chat is waiting for your approval.');
+  assert.match(noCardReply(2), /^No new approval card was made\. 2 earlier cards in this chat are still waiting/);
 });
 
 const otherLedger = '00000000-0000-4000-8000-0000000000aa';
@@ -2685,7 +2708,7 @@ test('the fixed reply about a waiting card first states the rows this reply did 
     null,
     waitingFruit,
   );
-  assert.match(result.text, /^Rose 3 was added to "Other Ledger"\. No new approval card is waiting/);
+  assert.match(result.text, /^Rose 3 was added to "Other Ledger"\. No new approval card was made\./);
 });
 
 test('written rows are named per table, counted when many, and changes are counted', () => {

@@ -114,6 +114,14 @@ export function rowSummaries(rows: readonly unknown[], limit = 5) {
     .filter(Boolean);
 }
 
+/** A row's shown values, lowercased and sorted, so the same row matches whatever order its fields were sent in. */
+const rowKey = (row: unknown) =>
+  Object.values(fieldValues(record(row).values))
+    .map(value => shownValue(value).toLowerCase())
+    .filter(Boolean)
+    .sort()
+    .join('\u0000');
+
 /** The change a waiting row card holds, read from its saved call. */
 export function waitingCardChange(input: unknown): WaitingCardChange {
   const call = record(input);
@@ -177,44 +185,23 @@ export async function chatRowReview(
         [origin.conversationId],
       )
     ).rows.map(row => row.text);
-    const waiting = (
-      await tx.client.query<{ id: string; input: unknown }>(
-        `SELECT d.id,d.proposal->'input' AS input FROM ${relation(tx, 'tf_chat_authoring_drafts')} d WHERE d.conversation_id=$1 AND d.id<>$2 AND d.proposal->>'kind'='row' AND d.proposal->'input'->>'tableId'=$3 AND d.proposal->'input'->>'expectedAppliedRevision'=$4
-          AND NOT EXISTS (SELECT 1 FROM ${relation(tx, 'tf_chat_authoring_decisions')} c WHERE c.draft_id=d.id) ORDER BY d.created_at DESC LIMIT 1`,
-        [origin.conversationId, callId, call.tableId, call.expectedAppliedRevision],
-      )
-    ).rows[0];
-    if (waiting) {
-      const card = waitingCardChange(waiting.input);
-      const onCard = new Set(
-        rowSummaries(
-          card.tool === 'rows.create.batch' || card.tool === 'rows.update.batch'
-            ? (record(waiting.input).rows as unknown[])
-            : [record(waiting.input)],
-        ),
-      );
-      const sent =
-        call.tool === 'rows.create' ? rowSummaries([{ values: call.values }]) : rowSummaries(call.rows ?? []);
-      const asked = sent.filter(row => !onCard.has(row));
-      if (sent.length && !asked.length)
-        return {
-          error: 'approval-pending',
-          table: label,
-          waitingDraftId: waiting.id,
-          waitingCard: card,
-          instruction: `Nothing from this call was written: these rows are already on the card earlier in this chat that is still waiting to ${card.summary} "${label}", and the chat shows the person a link to it. Tell the person plainly that this card is still waiting and that they can approve or dismiss it. Never say anything was denied, failed or not allowed, and do not draft or write these rows again in this reply.`,
-        };
-      return {
-        error: 'approval-pending',
-        table: label,
-        waitingDraftId: waiting.id,
-        waitingCard: card,
-        ...(asked.length && { notAdded: asked }),
-        instruction: `Nothing from this call was written, and it is on no card. A card earlier in this chat is still waiting to ${card.summary} "${label}", and the chat shows the person a link to it. That card holds only that change, not the rows or changes from this call. Tell the person plainly: nothing new was added; the waiting card is the one to ${card.summary} "${label}"; approve or dismiss it, then ask again for ${asked.length ? asked.join(', ') : 'this change'}. Never say the waiting card holds this call's rows, never add their counts together, never say anything was denied, failed or not allowed, and do not draft or write these rows again in this reply.`,
-      };
-    }
+    const sent = call.tool === 'rows.create' ? [{ values: call.values }] : (call.rows ?? []);
+    const held = await waitingCardRefusal(
+      tx,
+      origin.conversationId,
+      callId,
+      call.tableId,
+      call.expectedAppliedRevision,
+      label,
+      sent,
+    );
+    if (held) return held;
+    const named = namesTable(texts, label);
+    // Rows of a waiting card sent to a table the person never named are that card's request, not a new table's.
+    const moved = named ? null : await waitingCardElsewhere(tx, origin.conversationId, callId, call.tableId, sent);
+    if (moved) return moved;
     if (proposing) return { ...changing, table: label };
-    if (!namesTable(texts, label))
+    if (!named)
       return {
         reason: 'table-not-named',
         table: label,
@@ -259,6 +246,145 @@ export async function chatRowReview(
         table: label,
         instruction: `This row was not created. Several new rows go in one rows.create.batch call, never one rows.create call per row. Call rows.create.batch once with every remaining row the person asked for in "${label}". If those rows and the ones already added in this reply are more than ${directChatRowLimit}, it returns one approval card for the batch instead of writing.`,
       };
+    return null;
+  });
+}
+
+type GuardTransaction = Parameters<Parameters<typeof withHuman>[4]>[0];
+/**
+ * Refuses a row change on a table whose earlier row card in this chat still waits, naming that card's change and
+ * the sent rows that are on no card. Null when no card waits.
+ */
+async function waitingCardRefusal(
+  tx: GuardTransaction,
+  conversationId: string,
+  excludeId: string,
+  tableId: string,
+  revision: string,
+  label: string,
+  sent: readonly unknown[],
+  onlyRepeats = false,
+): Promise<ChatRowRefusal | null> {
+  const waiting = (
+    await tx.client.query<{ id: string; input: unknown }>(
+      `SELECT d.id,d.proposal->'input' AS input FROM ${relation(tx, 'tf_chat_authoring_drafts')} d WHERE d.conversation_id=$1 AND d.id<>$2 AND d.proposal->>'kind'='row' AND d.proposal->'input'->>'tableId'=$3 AND d.proposal->'input'->>'expectedAppliedRevision'=$4
+        AND NOT EXISTS (SELECT 1 FROM ${relation(tx, 'tf_chat_authoring_decisions')} c WHERE c.draft_id=d.id) ORDER BY d.created_at DESC LIMIT 1`,
+      [conversationId, excludeId, tableId, revision],
+    )
+  ).rows[0];
+  if (!waiting) return null;
+  const card = waitingCardChange(waiting.input);
+  const cardRows =
+    (card.tool === 'rows.create.batch' || card.tool === 'rows.update.batch') &&
+    Array.isArray(record(waiting.input).rows)
+      ? (record(waiting.input).rows as unknown[])
+      : [record(waiting.input)];
+  // Rows compare by their values in any field order, so a call that repeats the card's rows names none of them.
+  const onCard = new Set(cardRows.map(rowKey));
+  if (
+    onlyRepeats &&
+    !sent.some(row => {
+      const key = rowKey(row);
+      return key && onCard.has(key);
+    })
+  )
+    return null;
+  const seen = new Set<string>();
+  const asked = rowSummaries(
+    sent.filter(row => {
+      const key = rowKey(row);
+      if (!key || onCard.has(key) || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    }),
+  );
+  if (sent.some(row => rowKey(row)) && !asked.length)
+    return {
+      error: 'approval-pending',
+      table: label,
+      waitingDraftId: waiting.id,
+      waitingCard: card,
+      instruction: `Nothing from this call was written: these rows are already on the card earlier in this chat that is still waiting to ${card.summary} "${label}", and the chat shows the person a link to it. Tell the person plainly that this card is still waiting and that they can approve or dismiss it. Never say anything was denied, failed or not allowed, and do not draft or write these rows again in this reply.`,
+    };
+  return {
+    error: 'approval-pending',
+    table: label,
+    waitingDraftId: waiting.id,
+    waitingCard: card,
+    ...(asked.length && { notAdded: asked }),
+    instruction: `Nothing from this call was written, and it is on no card. A card earlier in this chat is still waiting to ${card.summary} "${label}", and the chat shows the person a link to it. That card holds only that change, not the rows or changes from this call. Tell the person plainly: nothing new was added; the waiting card is the one to ${card.summary} "${label}"; approve or dismiss it, then ask again for ${asked.length ? asked.join(', ') : 'this change'}. Never say the waiting card holds this call's rows, never add their counts together, never say anything was denied, failed or not allowed, and do not draft or write these rows again in this reply.`,
+  };
+}
+
+/** Refuses rows that repeat a row card still waiting in this chat on another table, naming that card. */
+async function waitingCardElsewhere(
+  tx: GuardTransaction,
+  conversationId: string,
+  excludeId: string,
+  tableId: string,
+  sent: readonly unknown[],
+): Promise<ChatRowRefusal | null> {
+  const cards = (
+    await tx.client.query<{ tableId: string; revision: string; label: string }>(
+      `SELECT DISTINCT ON (d.proposal->'input'->>'tableId') d.proposal->'input'->>'tableId' AS "tableId",d.proposal->'input'->>'expectedAppliedRevision' AS revision,g.definition->>'label' AS label
+        FROM ${relation(tx, 'tf_chat_authoring_drafts')} d JOIN ${relation(tx, 'tf_table_generations')} g ON g.table_id::text=d.proposal->'input'->>'tableId' AND g.state='active'
+        WHERE d.conversation_id=$1 AND d.id<>$2 AND d.proposal->>'kind'='row' AND d.proposal->'input'->>'tableId'<>$3
+        AND NOT EXISTS (SELECT 1 FROM ${relation(tx, 'tf_chat_authoring_decisions')} c WHERE c.draft_id=d.id)
+        ORDER BY d.proposal->'input'->>'tableId',d.created_at DESC LIMIT 5`,
+      [conversationId, excludeId, tableId],
+    )
+  ).rows;
+  for (const card of cards) {
+    const refused = await waitingCardRefusal(
+      tx,
+      conversationId,
+      excludeId,
+      card.tableId,
+      card.revision,
+      card.label,
+      sent,
+      true,
+    );
+    if (refused) return refused;
+  }
+  return null;
+}
+
+/**
+ * A table change proposal that repeats rows of a row card still waiting in this chat would make a second card for
+ * the same rows, so it is refused like a row call. A proposal with no row from the waiting card is not affected.
+ */
+export async function proposalRepeatsWaitingCard(
+  runtime: AgentStorage,
+  workspaceId: string,
+  actor: HumanActor,
+  conversationId: string,
+  callId: string,
+  plans: readonly { kind: string; tableId: string; expectedRevision?: string | null; changes?: readonly unknown[] }[],
+): Promise<ChatRowRefusal | null> {
+  const records = plans.filter(plan => plan.kind === 'records' && plan.expectedRevision && plan.changes?.length);
+  if (!records.length) return null;
+  return withHuman(runtime, workspaceId, actor, 'read', async tx => {
+    for (const plan of records) {
+      const label = (
+        await tx.client.query<{ label: string | null }>(
+          `SELECT definition->>'label' AS label FROM ${relation(tx, 'tf_table_generations')} WHERE table_id=$1 AND state='active'`,
+          [plan.tableId],
+        )
+      ).rows[0]?.label;
+      if (!label) continue;
+      const refused = await waitingCardRefusal(
+        tx,
+        conversationId,
+        callId,
+        plan.tableId,
+        plan.expectedRevision ?? '',
+        label,
+        plan.changes ?? [],
+        true,
+      );
+      if (refused) return refused;
+    }
     return null;
   });
 }

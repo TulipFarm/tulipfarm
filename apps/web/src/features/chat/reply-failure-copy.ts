@@ -15,13 +15,15 @@ const replyFailures: Record<string, string> = {
   'model-configuration': "This model isn't available. Select another model and send your message again.",
   'model-authentication': `This model is unavailable right now because its provider rejected TulipFarm's credentials. ${switchModel} A workspace admin can check the model setup.`,
   'model-permission': `This model is unavailable right now because its provider denied access. ${switchModel} A workspace admin can check the model setup.`,
-  'model-rate-limit': 'The model provider is busy. Wait a moment, then retry the reply.',
+  'model-rate-limit':
+    'The model provider is limiting requests, so no answer was written. TulipFarm retried automatically. Wait a minute, then retry the reply.',
   'model-quota':
     'The model provider has no available quota. Select another model and send a new message, or contact your workspace administrator.',
-  'model-overload': `The model provider is overloaded. Retry the reply shortly. ${switchModel}`,
-  'model-unavailable': `The model provider is unavailable right now. Retry the reply shortly. ${switchModel}`,
-  'model-timeout': `The model took too long to respond. Retry the reply. ${switchModel}`,
-  'model-transport': 'TulipFarm could not reach the model provider. Retry the reply shortly.',
+  'model-overload': `The model provider is overloaded, so no answer was written. TulipFarm retried automatically. Retry the reply later. ${switchModel}`,
+  'model-unavailable': `The model provider is unavailable, so no answer was written. TulipFarm retried automatically. Retry the reply later. ${switchModel}`,
+  'model-timeout': `The model took too long to respond, so no answer was written. TulipFarm retried automatically. Retry the reply. ${switchModel}`,
+  'model-transport':
+    'TulipFarm could not reach the model provider, so no answer was written. It retried automatically. Retry the reply later.',
   'model-refusal':
     "The model declined this request, or its provider's safety filter blocked it. Reword your message and send it again.",
   'model-invalid-request': `The model provider rejected this request. ${switchModel}`,
@@ -38,7 +40,7 @@ const stopReasons: Record<string, string> = {
   'transient-failure': unknownStop,
   'reply-interrupted': `The reply stopped before it finished. ${kept}`,
   'database-conflict': `The reply stopped because another change was saving at the same time. ${kept}`,
-  'attempts-exhausted': `The reply kept hitting a temporary problem and stopped. ${kept}`,
+  'attempts-exhausted': `The reply kept hitting a temporary problem, so no answer was written. TulipFarm retried automatically. ${kept} Continue or retry the reply.`,
   'github-rate-limited': `GitHub is limiting requests. Wait a minute, then retry. ${kept}`,
   'access-denied': `The reply stopped because access to something it needed was denied. ${kept}`,
   'tool-unavailable': `The reply stopped because it asked for a tool that isn't available. ${kept}`,
@@ -83,7 +85,8 @@ export function retryLabel(code: string | null | undefined, resumes: boolean, co
 /** Shown while a reply whose model call failed waits for its automatic retry, so it is never a silent spinner. */
 export function replyRetrying(status: string, code: string | null | undefined): string | null {
   if (status !== 'queued' || !code) return null;
-  if (code.startsWith('model-') && !code.startsWith(modelFallbackPrefix)) return 'Taking long to respond, retrying…';
+  if (code.startsWith('model-') && !code.startsWith(modelFallbackPrefix))
+    return 'The model provider returned an error. Retrying automatically…';
   if (code === 'transient-failure' || code === 'database-conflict')
     return 'The reply hit a temporary problem. Retrying automatically…';
   return null;
