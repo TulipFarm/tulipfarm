@@ -6,7 +6,6 @@ import { Check } from 'reicon-react/icons/Check';
 import { ChevronUp } from 'reicon-react/icons/ChevronUp';
 import { Copy } from 'reicon-react/icons/Copy';
 import { MoreH } from 'reicon-react/icons/MoreH';
-import { X } from 'reicon-react/icons/X';
 import { workspaceRoute } from '@/router';
 import { editListed, useFeatureScope, useOptimisticUpdate } from '@/lib/query';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
@@ -40,6 +39,7 @@ import { ToggleGroup, ToggleGroupItem } from '@tulipfarm/sprout/toggle-group';
 import { UnsavedChanges } from '@/features/tables/feedback';
 import { TableRequestError } from '@/features/tables/request-state';
 import { useOwnMembership } from '@/features/governance/queries';
+import { GrantsEditor, canManage, roleOptions, type People } from '@/features/secrets/grants-editor';
 import { secretErrorMessage } from '@/features/secrets/api';
 import {
   MAX_DESTINATIONS,
@@ -88,13 +88,6 @@ type Action =
       kind: 'details' | 'rename' | 'replace' | 'take' | 'destinations' | 'sharing' | 'expiry' | 'save' | 'delete';
       secret: SecretSummary;
     };
-
-type People = {
-  you: string;
-  name: (membershipId: string) => string;
-  members: { id: string; name: string }[];
-  teams: { id: string; name: string }[];
-};
 
 export function SecretsSettingsPage() {
   const { workspace } = workspaceRoute.useRouteContext();
@@ -418,16 +411,8 @@ function destinationsError(list: string[]) {
   return null;
 }
 
-/** The server lets only individual people manage a secret; teams and everyone can only use it. */
-const canManage = (grant: SecretGrant) => grant.grantee.kind === 'member';
-
 /** Kinds offered for a single value. Agents match saved secrets to requests by kind. */
 const keyKinds = ['api-key', 'token', 'password', 'header'] as const satisfies readonly SecretKind[];
-
-const roleOptions = {
-  use: { label: 'Use it', hint: 'In their chats and tasks' },
-  manage: { label: 'Use and manage it', hint: 'Also replace, change or delete it' },
-} as const;
 
 function hasValue(value: SecretValue) {
   return 'value' in value ? !!value.value : !!(value.username || value.password);
@@ -987,145 +972,6 @@ function DestinationsDialog({
         />
       </DialogForm>
     </FormDialog>
-  );
-}
-
-function granteeKey(grant: SecretGrant) {
-  return grant.grantee.kind === 'workspace'
-    ? 'workspace'
-    : grant.grantee.kind === 'team'
-      ? `team:${grant.grantee.teamId}`
-      : `member:${grant.grantee.membershipId}`;
-}
-
-function GrantsEditor({
-  value,
-  owner,
-  people,
-  disabled,
-  onChange,
-}: {
-  value: SecretGrant[];
-  owner: string;
-  people: People;
-  disabled: boolean;
-  onChange: (value: SecretGrant[]) => void;
-}) {
-  const id = useId();
-  const granted = new Set(value.map(granteeKey));
-  const candidates: { key: string; label: string; hint: string; grant: SecretGrant }[] = [
-    {
-      key: 'workspace',
-      label: 'Everyone',
-      hint: 'Everyone in the workspace',
-      grant: { grantee: { kind: 'workspace' }, role: 'use' } satisfies SecretGrant,
-    },
-    ...people.teams.map(team => ({
-      key: `team:${team.id}`,
-      label: team.name,
-      hint: 'Team',
-      grant: { grantee: { kind: 'team', teamId: team.id }, role: 'use' } satisfies SecretGrant,
-    })),
-    ...people.members
-      .filter(member => member.id !== owner)
-      .map(member => ({
-        key: `member:${member.id}`,
-        label: member.name,
-        hint: 'Person',
-        grant: { grantee: { kind: 'member', membershipId: member.id }, role: 'use' } satisfies SecretGrant,
-      })),
-  ].filter(candidate => !granted.has(candidate.key));
-  const label = (grant: SecretGrant) =>
-    grant.grantee.kind === 'workspace'
-      ? 'Everyone'
-      : grant.grantee.kind === 'team'
-        ? (people.teams.find(team => team.id === (grant.grantee.kind === 'team' ? grant.grantee.teamId : ''))?.name ??
-          'A team')
-        : people.name(grant.grantee.membershipId);
-  return (
-    <div className="space-y-3">
-      <p className="text-sm text-muted-foreground">
-        They can use it in their chats and tasks. Nobody can read it back.
-      </p>
-      <ul className="space-y-2" aria-label="Who can use it">
-        <li className="flex items-center gap-2 text-sm">
-          <span className="min-w-0 flex-1 truncate">{owner === people.you ? 'You' : people.name(owner)}</span>
-          <span className="text-muted-foreground">Owner</span>
-        </li>
-        {value.map((grant, index) => (
-          <li key={granteeKey(grant)} className="flex items-center gap-2">
-            <span className="min-w-0 flex-1 truncate text-sm">{label(grant)}</span>
-            <div className="w-44">
-              {!canManage(grant) ? (
-                <span className="text-sm text-muted-foreground">{roleOptions.use.label}</span>
-              ) : (
-                <Labelled id={`${id}-${index}`} label={`What ${label(grant)} can do`} hidden>
-                  <Select
-                    value={grant.role}
-                    disabled={disabled}
-                    onValueChange={role => {
-                      if (role)
-                        onChange(
-                          value.map((current, position) => (position === index ? { ...current, role } : current)),
-                        );
-                    }}
-                  >
-                    <SelectTrigger id={`${id}-${index}`} width="full" size="sm">
-                      <SelectValue>{roleOptions[grant.role].label}</SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      {(['use', 'manage'] as const).map(option => (
-                        <SelectItem key={option} value={option}>
-                          <span className="flex flex-col">
-                            <span>{roleOptions[option].label}</span>
-                            <span className="text-xs text-muted-foreground">{roleOptions[option].hint}</span>
-                          </span>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </Labelled>
-              )}
-            </div>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label={`Stop sharing with ${label(grant)}`}
-              disabled={disabled}
-              onClick={() => onChange(value.filter((_, position) => position !== index))}
-            >
-              <X size={16} aria-hidden="true" />
-            </Button>
-          </li>
-        ))}
-      </ul>
-      {candidates.length > 0 && (
-        <Labelled id={`${id}-add`} label="Add someone">
-          <Select
-            value=""
-            disabled={disabled}
-            onValueChange={key => {
-              const candidate = candidates.find(item => item.key === key);
-              if (candidate) onChange([...value, candidate.grant]);
-            }}
-          >
-            <SelectTrigger id={`${id}-add`} width="full">
-              <SelectValue>Choose a person or team</SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              {candidates.map(candidate => (
-                <SelectItem key={candidate.key} value={candidate.key}>
-                  <span className="flex flex-col">
-                    <span>{candidate.label}</span>
-                    <span className="text-xs text-muted-foreground">{candidate.hint}</span>
-                  </span>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </Labelled>
-      )}
-    </div>
   );
 }
 

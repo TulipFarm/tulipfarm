@@ -27,6 +27,7 @@ import {
   type ChatGptConnectionMode,
 } from './chatgpt-plan-api';
 import { modelKeys } from './queries';
+import { PlanSharing, subscriptionsKey } from './subscription-sharing';
 
 const connectionKey = ['models', 'chatgpt-connection'] as const;
 const pollMs = 2000;
@@ -44,8 +45,8 @@ function failure(error: unknown) {
 }
 
 /**
- * The member's own "Sign in with ChatGPT" connection. It is personal: each member connects their own plan,
- * and only their own chats use it. `outcome` is the result flag the loopback sign-in page sends back.
+ * The member's own "Sign in with ChatGPT" connection. Each member connects their own plan; it stays private
+ * until they share it with people, teams or the whole workspace. `outcome` is the result flag the loopback sign-in page sends back.
  */
 export function ChatGptPlanSection({
   workspaceId,
@@ -63,7 +64,10 @@ export function ChatGptPlanSection({
   const [message, setMessage] = useState<{ tone: 'error' | 'success' | 'warning'; text: string } | null>(null);
   const [pasted, setPasted] = useState('');
   const [welcomeSaving, setWelcomeSaving] = useState(false);
-  const refreshAll = useCallback(() => change({ keys: [connectionKey, modelKeys.catalog()] }), [change]);
+  const refreshAll = useCallback(
+    () => change({ keys: [connectionKey, subscriptionsKey, modelKeys.catalog()] }),
+    [change],
+  );
 
   useEffect(() => {
     if (!outcome) return;
@@ -208,12 +212,12 @@ export function ChatGptPlanSection({
     <FormSection
       title="Use your ChatGPT plan"
       description="Complete eligible AI requests in TulipFarm with usage included in your ChatGPT plan or credits balance."
-      meta="Only you"
     >
       <div className="grid gap-3">
         <p className="text-sm text-muted-foreground">
-          This is separate from TulipFarm credits. Requests you make with a ChatGPT plan model use your ChatGPT usage
-          and are not charged to this workspace.
+          This is separate from TulipFarm credits. Requests made with a ChatGPT plan model use the plan's ChatGPT usage
+          and are not charged to this workspace. If the plan reaches its limit, the workspace's fallback model answers
+          instead.
         </p>
         {state.kind === 'loading' && (
           <div role="status" aria-label="Checking your ChatGPT connection" className="grid gap-2">
@@ -258,6 +262,9 @@ export function ChatGptPlanSection({
             begin={mode => void begin(mode)}
             disconnect={() => void disconnect()}
           />
+        )}
+        {connection && connection.state !== 'not-connected' && connection.state !== 'signed-out' && (
+          <PlanSharing workspaceId={workspaceId} provider="chatgpt" />
         )}
       </div>
       {connection?.planUsage && connection.welcomePending && (

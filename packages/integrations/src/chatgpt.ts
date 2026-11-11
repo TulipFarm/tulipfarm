@@ -85,6 +85,7 @@ const uuid = z.uuid();
 const redirectPattern = /^http:\/\/127\.0\.0\.1:[0-9]{1,5}\/auth\/callback$/;
 const clientIdSchema = z.string().regex(/^[A-Za-z0-9._:-]{1,200}$/);
 const connectionRow = z.object({
+  id: z.uuid(),
   owner_membership_id: z.uuid(),
   generation: z.number().int().positive(),
   state: z.enum(['connected', 'plan-disabled', 'reconnect-required', 'signed-out']),
@@ -244,7 +245,7 @@ export function createChatGptPlan(options: {
   const attemptBinding = (workspaceId: string, attempt: { id: string; membership_id: string }) =>
     ['attempt', workspaceId, attempt.membership_id, attempt.id] as const;
   const table = (tx: AuthorizationTransaction, name: 'connections' | 'connection_attempts') =>
-    qualified(tx.schema, `tf_chatgpt_${name}`);
+    qualified(tx.schema, `tf_subscription_${name}`);
 
   function openIdConfiguration() {
     discovery ??= (async () => {
@@ -334,7 +335,7 @@ export function createChatGptPlan(options: {
       .parse(
         (
           await tx.client.query(
-            `SELECT * FROM ${table(tx, 'connections')} WHERE owner_membership_id=$1 ${lock ? 'FOR UPDATE' : ''}`,
+            `SELECT * FROM ${table(tx, 'connections')} WHERE owner_membership_id=$1 AND provider='chatgpt' ${lock ? 'FOR UPDATE' : ''}`,
             [membershipId],
           )
         ).rows[0],
@@ -385,7 +386,7 @@ export function createChatGptPlan(options: {
       if (!refreshed.ok) {
         if (refreshed.error && terminalRefreshErrors.has(refreshed.error)) {
           await tx.client.query(
-            `UPDATE ${table(tx, 'connections')} SET state='reconnect-required',credential=NULL,expires_at=NULL,scopes='{}',updated_at=clock_timestamp() WHERE owner_membership_id=$1`,
+            `UPDATE ${table(tx, 'connections')} SET state='reconnect-required',credential=NULL,expires_at=NULL,scopes='{}',updated_at=clock_timestamp() WHERE owner_membership_id=$1 AND provider='chatgpt'`,
             [membershipId],
           );
           return { error: 'reconnect-required' as const };
@@ -400,7 +401,7 @@ export function createChatGptPlan(options: {
       const scopes = refreshed.token.scope ? refreshed.token.scope.split(' ').filter(Boolean) : row.scopes;
       const planUsage = scopes.includes(planScope);
       await tx.client.query(
-        `UPDATE ${table(tx, 'connections')} SET state=$2,credential=$3,scopes=$4,expires_at=clock_timestamp()+$5*interval '1 second',updated_at=clock_timestamp() WHERE owner_membership_id=$1`,
+        `UPDATE ${table(tx, 'connections')} SET state=$2,credential=$3,scopes=$4,expires_at=clock_timestamp()+$5*interval '1 second',updated_at=clock_timestamp() WHERE owner_membership_id=$1 AND provider='chatgpt'`,
         [
           membershipId,
           planUsage ? 'connected' : 'plan-disabled',
@@ -422,7 +423,7 @@ export function createChatGptPlan(options: {
     if (!models) return null;
     await options.runtime.transaction(workspaceId, commonCompatibility, async tx => {
       await tx.client.query(
-        `UPDATE ${table(tx, 'connections')} SET models=$2,models_fetched_at=clock_timestamp() WHERE owner_membership_id=$1 AND state='connected'`,
+        `UPDATE ${table(tx, 'connections')} SET models=$2,models_fetched_at=clock_timestamp() WHERE owner_membership_id=$1 AND provider='chatgpt' AND state='connected'`,
         [membershipId, JSON.stringify(models)],
       );
     });
@@ -469,7 +470,7 @@ export function createChatGptPlan(options: {
             .parse(
               (
                 await tx.client.query(
-                  `SELECT count(*)::integer AS count FROM ${table(tx, 'connection_attempts')} WHERE membership_id=$1 AND created_at>clock_timestamp()-interval '10 minutes'`,
+                  `SELECT count(*)::integer AS count FROM ${table(tx, 'connection_attempts')} WHERE membership_id=$1 AND provider='chatgpt' AND created_at>clock_timestamp()-interval '10 minutes'`,
                   [actor.membershipId],
                 )
               ).rows[0],
@@ -479,8 +480,8 @@ export function createChatGptPlan(options: {
           if (mode !== 'connect' && !row?.client_id) throw new ChatGptPlanError('not-connected');
           const clientId = row?.client_id ?? dynamicClient;
           await tx.client.query(
-            `INSERT INTO ${table(tx, 'connection_attempts')} (id,membership_id,state_hash,mode,client_id,redirect_uri,secret,status,expires_at)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,'pending',clock_timestamp()+$8*interval '1 minute')`,
+            `INSERT INTO ${table(tx, 'connection_attempts')} (id,provider,membership_id,state_hash,mode,client_id,redirect_uri,secret,status,expires_at)
+             VALUES ($1,'chatgpt',$2,$3,$4,$5,$6,$7,'pending',clock_timestamp()+$8*interval '1 minute')`,
             [
               attemptId,
               actor.membershipId,
@@ -524,7 +525,7 @@ export function createChatGptPlan(options: {
           .parse(
             (
               await tx.client.query(
-                `SELECT * FROM ${table(tx, 'connection_attempts')} WHERE id=$1 AND membership_id=$2`,
+                `SELECT * FROM ${table(tx, 'connection_attempts')} WHERE id=$1 AND membership_id=$2 AND provider='chatgpt'`,
                 [uuid.parse(attemptId), actor.membershipId],
               )
             ).rows[0],
@@ -557,7 +558,7 @@ export function createChatGptPlan(options: {
           .parse(
             (
               await tx.client.query(
-                `SELECT * FROM ${table(tx, 'connection_attempts')} WHERE state_hash=$1 FOR UPDATE`,
+                `SELECT * FROM ${table(tx, 'connection_attempts')} WHERE state_hash=$1 AND provider='chatgpt' FOR UPDATE`,
                 [sha256(callback.state)],
               )
             ).rows[0],
@@ -587,10 +588,10 @@ export function createChatGptPlan(options: {
         const secret = cipher.decrypt(attemptBinding(workspaceId, attempt), attempt.secret, attemptSecretSchema);
         // The issued client id is saved before the exchange so a retry after a failed exchange reuses it.
         await tx.client.query(
-          `INSERT INTO ${table(tx, 'connections')} (owner_membership_id,state,client_id) VALUES ($1,'signed-out',$2)
-           ON CONFLICT (owner_membership_id) DO UPDATE SET client_id=EXCLUDED.client_id,updated_at=clock_timestamp()
+          `INSERT INTO ${table(tx, 'connections')} (id,provider,owner_membership_id,state,client_id) VALUES ($3,'chatgpt',$1,'signed-out',$2)
+           ON CONFLICT (owner_membership_id,provider) DO UPDATE SET client_id=EXCLUDED.client_id,updated_at=clock_timestamp()
            WHERE ${table(tx, 'connections')}.client_id IS NULL OR ${table(tx, 'connections')}.client_id=EXCLUDED.client_id OR ${table(tx, 'connections')}.state IN ('signed-out','reconnect-required')`,
-          [attempt.membership_id, clientId],
+          [attempt.membership_id, clientId, randomUUID()],
         );
         await tx.client.query(
           `UPDATE ${table(tx, 'connection_attempts')} SET status='exchanging',secret=NULL,client_id=$2 WHERE id=$1`,
@@ -643,7 +644,7 @@ export function createChatGptPlan(options: {
              expires_at=clock_timestamp()+$8*interval '1 second',models=NULL,models_fetched_at=NULL,
              welcome_acknowledged_at=CASE WHEN subject IS DISTINCT FROM $4 THEN NULL ELSE welcome_acknowledged_at END,
              updated_at=clock_timestamp()
-           WHERE owner_membership_id=$1`,
+           WHERE owner_membership_id=$1 AND provider='chatgpt'`,
           [
             attempt.membership_id,
             generation,
@@ -674,7 +675,7 @@ export function createChatGptPlan(options: {
         userId,
         async (tx, actor) => {
           await tx.client.query(
-            `UPDATE ${table(tx, 'connections')} SET welcome_acknowledged_at=clock_timestamp() WHERE owner_membership_id=$1 AND welcome_acknowledged_at IS NULL`,
+            `UPDATE ${table(tx, 'connections')} SET welcome_acknowledged_at=clock_timestamp() WHERE owner_membership_id=$1 AND provider='chatgpt' AND welcome_acknowledged_at IS NULL`,
             [actor.membershipId],
           );
         },
@@ -724,7 +725,12 @@ export function createChatGptPlan(options: {
         userId,
         async tx => {
           await tx.client.query(
-            `UPDATE ${table(tx, 'connections')} SET state='signed-out',credential=NULL,expires_at=NULL,scopes='{}',models=NULL,models_fetched_at=NULL,updated_at=clock_timestamp() WHERE owner_membership_id=$1`,
+            `UPDATE ${table(tx, 'connections')} SET state='signed-out',credential=NULL,expires_at=NULL,scopes='{}',models=NULL,models_fetched_at=NULL,updated_at=clock_timestamp() WHERE owner_membership_id=$1 AND provider='chatgpt'`,
+            [found.membershipId],
+          );
+          // Signing out ends every share: a later sign-in starts private again.
+          await tx.client.query(
+            `DELETE FROM ${qualified(tx.schema, 'tf_subscription_grants')} WHERE connection_id IN (SELECT id FROM ${table(tx, 'connections')} WHERE owner_membership_id=$1 AND provider='chatgpt')`,
             [found.membershipId],
           );
         },
@@ -753,7 +759,7 @@ export function createChatGptPlan(options: {
     async requireReconnect(workspaceId: string, membershipId: string) {
       await options.runtime.transaction(uuid.parse(workspaceId), commonCompatibility, async tx => {
         await tx.client.query(
-          `UPDATE ${table(tx, 'connections')} SET state='reconnect-required',credential=NULL,expires_at=NULL,scopes='{}',updated_at=clock_timestamp() WHERE owner_membership_id=$1 AND state='connected'`,
+          `UPDATE ${table(tx, 'connections')} SET state='reconnect-required',credential=NULL,expires_at=NULL,scopes='{}',updated_at=clock_timestamp() WHERE owner_membership_id=$1 AND provider='chatgpt' AND state='connected'`,
           [uuid.parse(membershipId)],
         );
       });

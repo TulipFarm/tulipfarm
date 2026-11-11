@@ -271,6 +271,17 @@ export type InferenceFailure =
   | 'provider-error'
   | ChatGptFailure;
 /** Failures of a member's ChatGPT plan route; the conversation shows each with its own recovery action. */
+/** Why a subscription plan could not answer, so the next plan the requester may use is tried. */
+export type PlanFailure = 'usage-limit' | 'reconnect' | 'not-eligible';
+const planFailures: Readonly<Record<string, PlanFailure>> = {
+  'model-chatgpt-usage-limit': 'usage-limit',
+  'model-chatgpt-reconnect': 'reconnect',
+  'model-chatgpt-not-eligible': 'not-eligible',
+};
+export function planFailure(error: unknown): PlanFailure | undefined {
+  return error instanceof Error ? planFailures[error.message] : undefined;
+}
+
 export type ChatGptFailure =
   | 'chatgpt-usage-limit'
   | 'chatgpt-reconnect'
@@ -1409,6 +1420,12 @@ export type ToolInferenceContext = {
    * another model can fix. `label` names it in the result. Absent, failures are not retried on another model.
    */
   fallback?: { route: InferenceRoute; label: string } | undefined;
+  /**
+   * For a subscription plan route: the access token of the next plan the requester may use, after the current one hit
+   * its usage limit, lost its sign-in or was refused, before the step produced output. Null when no plan is left; the
+   * configured `fallback` then answers as for any other failure.
+   */
+  nextPlanCredential?: ((failure: PlanFailure, retryAfterMs?: number) => Promise<string | null>) | undefined;
   /**
    * Counts the requester's undecided review and approval cards in this chat, read fresh from storage. A reply may point
    * to such a card without a tool call; without this read, every card claim needs a card made in the reply.
@@ -4248,6 +4265,32 @@ export async function inferWithTools(
       first = { error };
       diagnostics = modelCallDiagnostics(error);
       if (!diagnostics) throw error;
+    }
+    // A plan that ran out or lost its sign-in hands the step to the next plan the requester may use, before any fallback.
+    let planFailed = 'error' in first ? planFailure(first.error) : undefined;
+    while (
+      planFailed &&
+      tools?.nextPlanCredential &&
+      !diagnostics.outputStarted &&
+      !outputProduced &&
+      answeredBy === undefined
+    ) {
+      const token = await tools.nextPlanCredential(planFailed, diagnostics.retryAfterMs);
+      if (!token || config.provider !== 'chatgpt') break;
+      config = { ...config, accessToken: token };
+      try {
+        const value = await call(config);
+        if (outputProduced || !invalid?.(value)) return value;
+        first = { value };
+        diagnostics = { errorClass: 'invalid_response', outputStarted: false };
+        planFailed = undefined;
+      } catch (error) {
+        const next = modelCallDiagnostics(error);
+        if (!next) throw error;
+        first = { error };
+        diagnostics = next;
+        planFailed = planFailure(error);
+      }
     }
     // A rate limit that asks for only a short wait is retried once on the same model; any other goes to the fallback now.
     if (

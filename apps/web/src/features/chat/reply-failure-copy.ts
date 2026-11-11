@@ -120,6 +120,9 @@ export function fallbackNote(
   if (status !== 'completed' || !code?.startsWith(modelFallbackPrefix)) return null;
   const family = code.slice(modelFallbackPrefix.length);
   if (!family) return null;
+  // Plan families are named after their provider in the catalog, such as `chatgpt-sol`.
+  if (chatModel?.startsWith('chatgpt-'))
+    return `Answered by ${name(family)} because every ChatGPT plan you can use had reached its limit or needed sign-in again.`;
   const replaced = chatModel && chatModel !== family ? name(chatModel) : 'the chat model';
   return `Answered by ${name(family)} because ${replaced} was unavailable.`;
 }

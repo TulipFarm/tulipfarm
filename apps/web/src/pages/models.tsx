@@ -19,6 +19,7 @@ import { ModelSetupLink } from '@/features/models/model-setup';
 import { ImageSettingsSection } from '@/features/models/image-settings';
 import { useFlag } from '@/lib/feature-flags';
 import { ChatGptPlanSection } from '@/features/models/chatgpt-plan';
+import { SharedPlansSection } from '@/features/models/subscription-sharing';
 import { isChatGptFamily } from '@/features/models/chatgpt-plan-api';
 
 export function ModelsPage() {
@@ -122,6 +123,7 @@ function WorkspaceModels({ workspaceId, userId }: { workspaceId: string; userId:
         )}
       </ModelRead>
       <ChatGptPlanSection workspaceId={workspaceId} outcome={chatGptOutcome} clearOutcome={clearChatGptOutcome} />
+      <SharedPlansSection workspaceId={workspaceId} />
       <Tabs
         value={tab}
         onValueChange={value =>
