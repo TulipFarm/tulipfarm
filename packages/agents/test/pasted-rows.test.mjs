@@ -115,38 +115,38 @@ test('a repeated file question gets only one corrective retry and no tool or ext
 test('a legitimate clarification and a file import without pasted rows are untouched', async t => {
   for (const [request, answer, expectedRequests] of [
     [`Import these rows:\n${csv}`, 'Should each date use the Paris or Tokyo time zone?', 1],
-    [`Import these rows:\n${csv}`, 'No need to attach a CSV file; the pasted data is already available.', 2],
+    [`Import these rows:\n${csv}`, 'No need to attach a CSV file; the pasted data is already available.', 1],
     ['Import the spreadsheet into Tasks.', 'Please attach the spreadsheet file.', 2],
     [
       'Can you import my customer list into Leads, please?\nIt has Name, Email and Phone columns.',
       'Please attach the CSV file.',
-      2,
+      1,
     ],
     [
       'Import this list into Tasks:\n- Name, Status\n- sample-golf, done\n- sample-hotel, done',
       'Please attach the CSV file.',
-      2,
+      1,
     ],
     [
       'Import this list into Tasks:\n1. Name, Status\n2. sample-golf, done\n3. sample-hotel, done',
       'Please attach the CSV file.',
-      2,
+      1,
     ],
     [
       'Import this address into Contacts:\n12 Rose Lane, Apartment 3\nSpringfield, IL 62704\nUnited States, North America',
       'Please attach the CSV file.',
-      2,
+      1,
     ],
-    ['Import these rows into Tasks:\nName,Status,Due\nsample-golf,done,', 'Please attach the CSV file.', 2],
+    ['Import these rows into Tasks:\nName,Status,Due\nsample-golf,done,', 'Please attach the CSV file.', 1],
     [
       'Import these rows into Tasks:\nName,Status,Due\nsample-golf,done\nsample-hotel,done,',
       'Please attach the CSV file.',
-      2,
+      1,
     ],
     [
       'Import these rows into Tasks:\nName,Status,Due\nsample-golf,done,\nsample-hotel,done,\nsample-india,done',
       'Please attach the CSV file.',
-      2,
+      1,
     ],
   ]) {
     let requests = 0;

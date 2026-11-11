@@ -58,7 +58,7 @@ export function createFileJobGuard(request: string, prior: readonly { call: unkn
   let repeated = false;
   let needsListing = false;
   const needsCheck = (text = '') =>
-    !saved && (attempted || filePrefilter.test(request) || filePrefilter.test(text) || readyFileClaim.test(text));
+    !saved && (attempted || filePrefilter.test(request) || fileSavedClaim.test(text) || readyFileClaim.test(text));
   const record = (call: { tool: string }, value: unknown) => {
     if (!call.tool.startsWith('files.')) return;
     calls++;

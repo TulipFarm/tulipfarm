@@ -30,6 +30,34 @@ const route = model => ({ ...nativeRoutes.azure, model });
 for (const model of models)
   for (const sse of [false, true]) {
     const title = `regression: ${model} ${sse ? 'SSE' : 'JSON'}`;
+    for (const text of ['Hi!', 'JSON.', 'YAML.', 'archive.zip.'])
+      test(`${title} ordinary replies keep one model call and native previews: ${text}`, async t => {
+        let requests = 0;
+        const settlements = [];
+        const previews = [];
+        provider(
+          t,
+          sse,
+          [nativeReply('azure', { text })],
+          false,
+          () => requests++,
+          () => assert.fail('An ordinary reply must not need a completion check'),
+        );
+        const result = await inferWithTools(
+          route(model),
+          [{ role: 'user', text: 'Hi' }],
+          () => assert.fail('An ordinary reply must not use tools'),
+          async () => async usage => settlements.push(usage),
+          false,
+          null,
+          { ...options, answerText: update => previews.push(update.text) },
+        );
+        assert.equal(result.text, text);
+        assert.equal(requests, 1);
+        assert.deepEqual(settlements, [knownUsage]);
+        assert.deepEqual(previews, sse ? [text] : []);
+      });
+
     for (const request of [
       'Save it as notes.md.',
       'Write it to a file called notes.md.',
@@ -156,6 +184,8 @@ for (const model of models)
         'Your image is downloadable.',
         'The attachment is ready.',
         'archive.zip is ready.',
+        "I've saved a CSV.",
+        'I created notes.md.',
         "All done! It's ready.",
         "All done! It's saved.",
         "All done! It's created.",
