@@ -2517,6 +2517,34 @@ function cardMisdescribed(candidate: string, cards: readonly HeldBackWrite[], re
 
 const rowRequest =
   /\b(?:add|insert|append|put|include|create|change|update|edit|set|delete|remove)\b[^.?!]*\b(?:rows?|items?|records?|entr(?:y|ies)|lines?)\b/i;
+function imperativeRowRequest(request: string) {
+  return (
+    rowRequest.test(request) &&
+    /^(?:(?:please|now)[,\s]+|go ahead and\s+|(?:can|could|would|will) you (?:please )?)*(?:add|insert|append|put|include|create|change|update|edit|set|delete|remove)\b/i.test(
+      request.trim(),
+    ) &&
+    !/\b(?:do not|don't|never|no rows?|zero rows?|0 rows?|if|unless|before|until|hypothetically|suppose|imagine)\b/i.test(
+      request,
+    ) &&
+    !/\b(?:first|just|only)\b[^.!?]*\b(?:show|tell|preview|explain|describe|list|inspect|review)\b/i.test(request) &&
+    (!request.includes('?') || /^(?:can|could|would|will) you\b/i.test(request.trim()))
+  );
+}
+
+function rowRequestTables(request: string, previous: string, inventory?: WorkspaceInventory) {
+  if (!imperativeRowRequest(request) || tableRequest.test(request)) return [];
+  const named = (text: string) =>
+    inventory?.tables.filter(table =>
+      new RegExp(`(?<![\\p{L}\\p{N}_])${escaped(table.name)}(?![\\p{L}\\p{N}_])`, 'iu').test(text),
+    ) ?? [];
+  const current = named(request);
+  if (current.length) return current;
+  return /\b(?:to|in|from|on) (?:it|(?:that|this|the same) table)\b/i.test(request) &&
+    (imperativeRowRequest(previous) || tableRequest.test(previous))
+    ? named(previous)
+    : [];
+}
+
 const commonWords = new Set(
   'add insert append put include create change update edit set delete remove one two three more another new extra row rows item items record records entry entries line lines please can could would you the and with for that this then too also table into from its it'.split(
     ' ',
@@ -2604,7 +2632,7 @@ const rowVerbs = [
  * first, since it needs their tokens. Only offered tools are listed.
  */
 export function forcedRowTools(request: string, offered: readonly string[]) {
-  if (!rowRequest.test(request) || tableRequest.test(request)) return [];
+  if (!imperativeRowRequest(request) || tableRequest.test(request)) return [];
   const first = rowVerbs
     .map(entry => ({ ...entry, at: request.search(entry.verb) }))
     .filter(entry => entry.at >= 0)
@@ -3461,15 +3489,10 @@ export async function inferWithTools(
     }
   }
   let inventory: WorkspaceInventory | undefined;
-  const humanText = sourceMessages
-    .filter(turn => turn.role === 'user')
-    .map(turn => textTurn(turn).text)
-    .join('\n')
-    .toLowerCase();
-  const inventoryRowRequest = () =>
-    rowRequest.test(request) &&
-    !tableRequest.test(request) &&
-    inventory?.tables.some(table => humanText.includes(table.name.toLowerCase()));
+  const humanMessages = sourceMessages.filter(turn => turn.role === 'user').map(turn => textTurn(turn).text);
+  const latestHuman = humanMessages.at(-1) ?? '';
+  const requestedTables = () => rowRequestTables(latestHuman, humanMessages.at(-2) ?? '', inventory);
+  const inventoryRowRequest = () => requestedTables().length === 1;
   const answerText: ToolInferenceContext['answerText'] =
     invitationLookup(sourceMessages) || !tools?.answerText
       ? undefined
@@ -3496,6 +3519,9 @@ export async function inferWithTools(
   let cardClaimed = false;
   // Receipts from an earlier attempt of this same turn count as work in this reply.
   let workToolUsed = calls > 0 || Boolean(tools?.priorToolCalls?.length);
+  const priorRowWrite = tools?.priorToolCalls?.some(
+    call => z.object({ tool: z.string().regex(/^rows\.(?:create|update|delete)/) }).safeParse(call).success,
+  );
   // Text from steps that ran no work tool waits here and is saved with the next work tool call.
   let carried = '';
   let requestStep = 0;
@@ -4179,7 +4205,7 @@ export async function inferWithTools(
     // A forced change that used a wrong table ID is forced once more, with the ID its result names.
     const lastResults = [...items].reverse().find(item => item.kind === 'results');
     const misnamed =
-      rowToolsForced && !rowWriteRetried && lastResults?.kind === 'results'
+      rowToolsForced && !rowWriteRetried && !priorRowWrite && !wroteInReply(items) && lastResults?.kind === 'results'
         ? lastResults.results.find(result => rowWriteName.test(result.name) && tableIdCorrected(result.output))
         : undefined;
     if (misnamed) {
@@ -4187,6 +4213,7 @@ export async function inferWithTools(
       rowTools = [misnamed.name];
     } else if (
       rowWriteTried(items) ||
+      priorRowWrite ||
       (lastResults?.kind === 'results' &&
         lastResults.results.some(result => {
           const value = toolResultValue(result.output);
@@ -4669,11 +4696,14 @@ export async function inferWithTools(
       const invitesUnchecked = unbacked || writeUnbacked ? undefined : uncheckedInvitationClaim(candidate, items);
       if (directoryExpected && directoryAttempted && !directorySucceeded)
         return finish(directoryUnavailableReply, true);
+      const rowAmbiguous = requestedTables().length > 1;
       const idAsked =
         unbacked || writeUnbacked || otherTableSkipped
           ? undefined
           : (tableIdQuestion(candidate) ??
-            (activeBuiltinSkills.has('agent-authoring') ? undefined : uncheckedTableQuestion(candidate, items)) ??
+            (rowAmbiguous || activeBuiltinSkills.has('agent-authoring')
+              ? undefined
+              : uncheckedTableQuestion(candidate, items)) ??
             invitesUnchecked);
       const rowsUnchecked =
         inventoryRowRequest() && !workToolUsed
@@ -4688,6 +4718,13 @@ export async function inferWithTools(
         unbacked || writeUnbacked || idAsked
           ? undefined
           : (rowsUnchecked ??
+            (rowAmbiguous && !asksAboutTable(candidate) && !rowWriteTried(items)
+              ? {
+                  status: 'continue' as const,
+                  reason:
+                    'The latest human row request names more than one table in the current inventory. Ask which table they mean before changing rows. Do not select one or force a write.',
+                }
+              : undefined) ??
             uncheckedTableStateClaim(candidate, items, request) ??
             otherTableSkipped ??
             heldBackMisdescribed(candidate, items, request) ??
@@ -4848,7 +4885,12 @@ export async function inferWithTools(
         );
       // A row request whose reply made no tool call is sent back with table tools it must call. If the reply still
       // makes no row change, the fallback model answers the request before the reply gives up.
-      const rowUntried = rowRequest.test(request) && !tableRequest.test(request) && !rowWriteTried(items);
+      const rowUntried =
+        imperativeRowRequest(latestHuman) &&
+        (!inventory || requestedTables().length === 1) &&
+        !tableRequest.test(latestHuman) &&
+        !priorRowWrite &&
+        !rowWriteTried(items);
       if (rowUntried && rowToolsForced && restartOnFallback()) continue;
       if (
         rowUntried &&

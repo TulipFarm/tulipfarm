@@ -2618,6 +2618,181 @@ const approvedRowTools = {
   waitingCards: async () => 0,
 };
 
+for (const request of [
+  'Do not add any rows to Other Ledger yet, I will send them later.',
+  'Did you add the rows to Other Ledger?',
+  'Before you add rows to Other Ledger, just tell me what fields it has.',
+  'Should I add a row for each fruit in Other Ledger, or keep one total?',
+  'If I add rows to Other Ledger, what fields would I need?',
+  'Add no rows to Other Ledger yet.',
+  'Add 2 rows to Other Ledger, but first just show me the fields.',
+])
+  test(`non-actionable latest messages neither force row writes nor hold the answer stream: ${request}`, async t => {
+    const executed = [];
+    const updates = [];
+    let rounds = 0;
+    t.mock.method(globalThis, 'fetch', async (_url, init) => {
+      const body = JSON.parse(init.body);
+      if (isCompletionRequest(body)) return Response.json(selectReply('azure', verdict()));
+      assert.ok(rounds++ < 5);
+      const forced = forcedTool(body);
+      const reply =
+        forced === 'schema_inspect'
+          ? { calls: [use('schema.inspect', { tableId: otherLedger })] }
+          : forced === 'rows_create_batch'
+            ? { calls: [use('rows.create.batch', twoRows)] }
+            : { text: 'Understood.' };
+      return stream(nativeReply('azure', reply));
+    });
+    const result = await inferWithTools(
+      { ...nativeRoutes.azure, model: 'grok-4.3' },
+      [
+        ...approvedHistory,
+        { role: 'assistant', text: 'Rose 3 and Pear 2 were added to Other Ledger.' },
+        { role: 'user', text: request },
+      ],
+      async call => {
+        executed.push(call.tool);
+        return call.tool === 'schema.inspect'
+          ? approvedLedger
+          : { records: twoRows.rows.map((row, index) => ({ id: `row-${index}`, values: row.values })) };
+      },
+      undefined,
+      false,
+      null,
+      { ...approvedRowTools, answerText: update => updates.push(update.text) },
+    );
+    assert.equal(result.text, 'Understood.');
+    assert.deepEqual(executed, [], 'no write or preparatory read is forced');
+    assert.equal(rounds, 1);
+    assert.ok(updates.includes('Understood.'), 'an ordinary answer streams without an armed row gate');
+  });
+
+for (const [request, tables] of [
+  ['Add 2 rows to New Ledger: Rose 3 and Pear 2.', [approvedLedger]],
+  ['Add 2 rows to footnotes: Rose 3 and Pear 2.', [{ ...approvedLedger, name: 'Notes' }]],
+  ['Add 2 rows: Rose 3 and Pear 2.', [approvedLedger]],
+])
+  test(`only a whole table name in the current request arms row recovery: ${request}`, async t => {
+    const forced = [];
+    let round = 0;
+    t.mock.method(globalThis, 'fetch', async (_url, init) => {
+      const body = JSON.parse(init.body);
+      if (isCompletionRequest(body)) return Response.json(selectReply('azure', verdict('waiting')));
+      forced.push(forcedTool(body));
+      assert.ok(round++ < 5);
+      return stream(nativeReply('azure', { text: 'Which destination do you mean?' }));
+    });
+    const result = await inferWithTools(
+      nativeRoutes.azure,
+      [...approvedHistory, { role: 'user', text: request }],
+      () => assert.fail('an unrelated historical name cannot force a tool call'),
+      undefined,
+      false,
+      null,
+      {
+        ...approvedRowTools,
+        readWorkspaceInventory: async () => ({ ...ledgerInventory, tables }),
+      },
+    );
+    assert.equal(result.text, 'Which destination do you mean?');
+    assert.deepEqual(forced, [undefined]);
+  });
+
+test('multiple named tables ask for a destination instead of forcing a row write', async t => {
+  const question = 'Which table should I use: Other Ledger or Fruit ledger?';
+  const forced = [];
+  t.mock.method(globalThis, 'fetch', async (_url, init) => {
+    const body = JSON.parse(init.body);
+    if (isCompletionRequest(body)) return Response.json(selectReply('azure', verdict('waiting')));
+    forced.push(forcedTool(body));
+    assert.ok(forced.length < 5);
+    return Response.json(nativeReply('azure', { text: question }));
+  });
+  const result = await inferWithTools(
+    nativeRoutes.azure,
+    [...approvedHistory, { role: 'user', text: 'Add 2 rows to Other Ledger or Fruit ledger: Rose 3 and Pear 2.' }],
+    () => assert.fail('no table may be chosen by forced write recovery'),
+    undefined,
+    false,
+    null,
+    {
+      ...approvedRowTools,
+      readWorkspaceInventory: async () => ({
+        ...ledgerInventory,
+        tables: [
+          approvedLedger,
+          { ...approvedLedger, id: '00000000-0000-4000-8000-0000000000bb', name: 'Fruit ledger' },
+        ],
+      }),
+    },
+  );
+  assert.equal(result.text, question);
+  assert.deepEqual(forced, [undefined]);
+});
+
+test('an explicit same-table continuation writes once even when the row tool runs before its queued recovery', async t => {
+  const requests = [];
+  const executed = [];
+  let round = 0;
+  const replies = [
+    { text: 'I cannot do that yet.' },
+    { calls: [use('rows.create.batch', twoRows)] },
+    { text: 'Rose 3 and Pear 2 were added to Other Ledger.' },
+  ];
+  t.mock.method(globalThis, 'fetch', async (_url, init) => {
+    const body = JSON.parse(init.body);
+    if (isCompletionRequest(body)) return Response.json(selectReply('azure', verdict()));
+    requests.push(body);
+    assert.ok(round < replies.length);
+    return Response.json(nativeReply('azure', replies[round++]));
+  });
+  const result = await inferWithTools(
+    nativeRoutes.azure,
+    [
+      { role: 'user', text: 'Create the Other Ledger table with Item and Amount fields.' },
+      { role: 'assistant', text: 'The table is ready.' },
+      { role: 'user', text: 'Add 2 rows to that table: Rose 3 and Pear 2.' },
+    ],
+    async call => {
+      executed.push(call.tool);
+      return { records: twoRows.rows.map((row, index) => ({ id: `row-${index}`, values: row.values })) };
+    },
+    undefined,
+    false,
+    null,
+    approvedRowTools,
+  );
+  assert.equal(result.text, replies.at(-1).text);
+  assert.deepEqual(executed, ['rows.create.batch']);
+  assert.deepEqual(requests.map(forcedTool), [undefined, 'schema_inspect', undefined]);
+});
+
+test('a resumed row write never arms forced write recovery again', async t => {
+  const requests = [];
+  t.mock.method(globalThis, 'fetch', async (_url, init) => {
+    const body = JSON.parse(init.body);
+    if (isCompletionRequest(body)) return Response.json(selectReply('azure', verdict()));
+    requests.push(body);
+    return stream(nativeReply('azure', { text: 'Rose 3 and Pear 2 were added to Other Ledger.' }));
+  });
+  const result = await inferWithTools(
+    nativeRoutes.azure,
+    approvedRowRequest,
+    () => assert.fail('the earlier write of this turn must not run again'),
+    undefined,
+    false,
+    null,
+    {
+      ...approvedRowTools,
+      priorCalls: 1,
+      priorToolCalls: [{ tool: 'rows.create.batch', ...twoRows }],
+    },
+  );
+  assert.equal(result.text, 'Rose 3 and Pear 2 were added to Other Ledger.');
+  assert.deepEqual(requests.map(forcedTool), [undefined]);
+});
+
 for (const [model, runs] of [
   ['grok-4.3', 10],
   ['Kimi-K2.6', 5],
