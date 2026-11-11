@@ -9,7 +9,15 @@ import { routes, server } from '../../../api-calls/test/https-fixture.mjs';
 import { createConversationExecutor } from '../../src/runtime.ts';
 import { conversationFixture } from '../fixture.mjs';
 import { inferWithTools } from '../../../agents/src/inference.ts';
-import { nativeReply, nativeRoutes, useCall } from '../../../agents/test/native-fixture.mjs';
+import { ownServiceRefusal } from '../../../agents/src/own-service.ts';
+import {
+  completionReply,
+  isCompletionRequest,
+  nativeReply,
+  nativeRoutes,
+  toolResults,
+  useCall,
+} from '../../../agents/test/native-fixture.mjs';
 
 const change = {
   tool: 'api.request',
@@ -17,6 +25,85 @@ const change = {
   url: 'https://api.example.test/created',
   body: { kind: 'json', value: { email: 'ana@example.test' } },
 };
+
+test(
+  'own-service recovery instructions stay out of saved activity and visible refusal text',
+  { timeout: 60000 },
+  async t => {
+    const previous = process.env.WEB_ORIGIN;
+    process.env.WEB_ORIGIN = 'https://app.tulipfarm.ai';
+    t.after(() => {
+      if (previous === undefined) delete process.env.WEB_ORIGIN;
+      else process.env.WEB_ORIGIN = previous;
+    });
+    const f = await conversationFixture();
+    t.after(() => f.close());
+    const w = f.workspace;
+    const chatId = randomUUID();
+    await f.store.create(w.id, w.userId, { chatId, commandId: randomUUID() });
+    const sent = await f.store.send(w.id, w.userId, chatId, {
+      commandId: randomUUID(),
+      messageId: randomUUID(),
+      parts: [{ kind: 'text', text: 'Read my current plan.' }],
+    });
+    const call = frameworkCallSchema.parse({
+      tool: 'api.request',
+      method: 'GET',
+      url: 'https://api.tulipfarm.ai/v1/plans',
+    });
+    let rounds = 0;
+    let modelResult;
+    t.mock.method(globalThis, 'fetch', async (_url, init) => {
+      const body = JSON.parse(init.body);
+      if (isCompletionRequest(body)) return Response.json(completionReply('azure'));
+      if (rounds++ === 0) return Response.json(nativeReply('azure', { calls: [useCall(call)] }));
+      modelResult = toolResults('azure', body)[0].output;
+      return Response.json(nativeReply('azure', { text: ownServiceRefusal.message }));
+    });
+    const executor = createConversationExecutor(f.runtime, async input => {
+      const answer = await inferWithTools(
+        { ...nativeRoutes.azure, model: 'grok-4.3' },
+        input.messages,
+        async (call, activity) =>
+          (
+            await input.executeTool(
+              call.tool,
+              true,
+              async () => ({ result: structuredClone(ownServiceRefusal), sources: [] }),
+              [],
+              call,
+              activity,
+            )
+          ).result,
+      );
+      return { text: answer.text, sources: [] };
+    });
+    assert.equal(
+      await executor.process({ workspaceId: w.id, conversationId: chatId, turnId: sent.turnId, generation: 0 }),
+      'completed',
+    );
+    assert.equal(rounds, 2);
+    assert.match(modelResult, /Available built-in tools: plans_create/);
+    assert.match(modelResult, /Call tools_search/);
+    const [saved] = (
+      await f.db.platform.query(`SELECT output FROM ${f.table('tf_conversation_execution_steps')} WHERE turn_id=$1`, [
+        sent.turnId,
+      ])
+    ).rows;
+    assert.deepEqual(saved.output.result, ownServiceRefusal);
+    const history = await f.store.history(w.id, w.userId, chatId);
+    assert.equal(history.messages.at(-1).parts[0].text, ownServiceRefusal.message);
+    assert.equal(history.messages.flatMap(message => message.tools).length, 1);
+    const visible = history.messages.flatMap(message => [
+      ...message.parts.filter(part => part.kind === 'text').map(part => part.text),
+      ...message.tools.flatMap(tool => [tool.presentation.label, tool.detail ?? '']),
+    ]);
+    assert.doesNotMatch(
+      visible.join('\n'),
+      /plans_create|plans_read|plans_update|tools_search|Available built-in tools/,
+    );
+  },
+);
 
 test('a chat change waits for approval, is sent once and resumes the reply', { timeout: 60000 }, async t => {
   const f = await conversationFixture();
