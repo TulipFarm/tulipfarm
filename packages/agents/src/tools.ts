@@ -110,7 +110,7 @@ import type { createGitHubBatches } from '@tulipfarm/github/batches';
 import { proposeTableSchema, tableProposalRules, TableProposalError } from '@tulipfarm/tables/proposal-contracts';
 import { tableProposalJsonSchema } from '@tulipfarm/tables/proposal-json-schema';
 import { createChatTableProposals, tableReviewSummary } from './table-proposals.ts';
-import { chatRowReview, proposalRepeatsWaitingCard } from './chat-row-guard.ts';
+import { chatRowReview, outsideContentBatchReply, proposalRepeatsWaitingCard } from './chat-row-guard.ts';
 import { chatTableDefinitions, guessedChatTable } from './chat-table-lookup.ts';
 import { createTableService } from '@tulipfarm/tables/service';
 import { TableError } from '@tulipfarm/tables/service-contracts';
@@ -731,7 +731,7 @@ const descriptions: Record<ToolName, string> = {
   'rows.create':
     'Create one row with field-ID keyed typed values at the specified applied revision; use rows.update for an existing row. Returns the created row/token or a permission/error result; after untrusted content such as web pages, knowledge, files or connected apps in a chat it returns a review draft instead. It changes data and requires read/create permission, so do not retry after an uncertain result without first finding the row.',
   'rows.create.batch':
-    'Create 1–100 rows in one atomic write after schema.inspect supplies the field IDs and applied revision. Prefer this tool for any 2 or more new rows, including fake/sample tickets, and pass them all in one call. In chat, more than 5 rows in one reply, or rows for a table the person did not name, return one approval card for the whole batch instead of writing. Pass every row together; either all rows commit or none do. Returns created rows/tokens and total. Uses the same read/create and source permissions as rows.create; unavailable after untrusted content such as web pages, knowledge, files or connected apps in a chat. Do not repeat an uncertain batch without checking its existing receipt or rows.',
+    'Create 1–100 rows in one atomic write after schema.inspect supplies the field IDs and applied revision. Prefer this tool for any 2 or more new rows, including fake/sample tickets, and pass them all in one call. In chat, more than 5 rows in one reply, or rows for a table the person did not name, return one approval card for the whole batch instead of writing. Pass every row together; either all rows commit or none do. Returns created rows/tokens and total. Uses the same read/create and source permissions as rows.create. If this chat has used untrusted content, such as web pages, knowledge, files or connected apps, adding one row returns a draft that the user must review and approve. Requests to add two or more rows are refused and create no rows. Add one row at a time instead. Do not repeat an uncertain batch without checking its existing receipt or rows.',
   'rows.update':
     'Update specified fields of one row after rows.get or rows.list supplies its current token; use rows.create for new rows. Returns the updated row/token or record-conflict; after untrusted content such as web pages, knowledge, files or connected apps in a chat it returns a review draft instead. It changes data and requires read/update permission; on conflict reread first, and never blindly retry an uncertain update.',
   'rows.update.batch':
@@ -2646,12 +2646,21 @@ export function createChatTools(
           (!turnAudience && sources.some(source => source.kind === 'shared-slack-turn'))
         )
           return rowReviewUnavailable;
-        if (call.tool === 'rows.create.batch' && !review)
+        if (call.tool === 'rows.create.batch' && call.rows.length > 1 && !review)
           return {
             error: 'review-required',
-            instruction:
-              'No rows have been created. This chat used untrusted content, so batch writes are unavailable. Call rows.create for one row; it returns a review draft the member approves on the chat card.',
+            reason: 'untrusted-content',
+            instruction: outsideContentBatchReply,
           };
+        const input =
+          call.tool === 'rows.create.batch' && call.rows.length === 1 && !review
+            ? {
+                tool: 'rows.create' as const,
+                tableId: call.tableId,
+                expectedAppliedRevision: call.expectedAppliedRevision,
+                values: call.rows[0]!.values,
+              }
+            : call;
         const drafts = createAuthoringDrafts(runtime, undefined, undefined, undefined, turnAudience);
         const draft = await drafts.propose(
           workspaceId,
@@ -2660,7 +2669,7 @@ export function createChatTools(
           { ...origin, sources },
           {
             kind: 'row',
-            input: call,
+            input,
             ...(review && { reason: review.reason }),
             ...(written && { written }),
           },

@@ -1395,6 +1395,139 @@ test('a reply that keeps claiming a card no tool made ends with a plain account 
   assert.deepEqual(outcomes, ['continue', 'continue', 'continue', 'exhausted']);
 });
 
+for (const model of ['grok-4.3', 'Kimi-K2.6'])
+  for (const sse of [false, true])
+    test(`${model} ${sse ? 'SSE' : 'JSON'} keeps the page answer beside the receipt-based row outcome`, async t => {
+      const summary =
+        'A review card for 1 row in "Notes" is ready in this chat. No rows from this card have been written. Review and approve it to create these rows.';
+      const refused =
+        'No rows were added. Because this chat used outside content, each new row needs its own approval. Ask me to add one row at a time, or add the rows in the table yourself.';
+      for (const draft of [true, false])
+        for (const [claim, rewrite] of [
+          ['The page heading is Example Domain. The approval card is ready. Approve it to add X.', 'safe'],
+          ['The page heading is Example Domain, and I added the rows. You can approve them now.', 'safe'],
+          ['The page heading is Example Domain. No rows were added and no card was made.', 'safe'],
+          ['The page heading is Example Domain. The approval card is ready.', 'failure'],
+          ['The page heading is Example Domain. The approval card is ready.', 'row-claim'],
+          ['The page heading is Example Domain. The approval card is ready.', 'card-claim'],
+          ['The page heading is Example Domain. X now appears in Notes.', 'flagged'],
+          ['The page heading is Example Domain. The approval card is ready.', 'ungrounded'],
+          ['The approval card is ready.', 'safe'],
+          ['The page heading is Example Domain. The approval card is ready.', 'invalid'],
+        ]) {
+          let rounds = 0;
+          let checks = 0;
+          const previews = [];
+          t.mock.method(globalThis, 'fetch', async (_url, init) => {
+            const body = JSON.parse(init.body);
+            if (body.tools?.[0]?.function?.name === 'select_action') {
+              checks++;
+              assert.match(JSON.stringify(body), /Keep only the informational answer/);
+              assert.match(JSON.stringify(body), /Example Domain/);
+              if (rewrite === 'failure') return Response.json({ error: 'Fixture unavailable' }, { status: 500 });
+              if (rewrite === 'invalid') return Response.json(selectReply('azure', { answer: 'Unchecked text' }));
+              return Response.json(
+                selectReply('azure', {
+                  answer:
+                    rewrite === 'row-claim'
+                      ? 'The page heading is Example Domain. I added X.'
+                      : rewrite === 'card-claim'
+                        ? 'The page heading is Example Domain. Please approve it.'
+                        : rewrite === 'flagged'
+                          ? 'The page heading is Example Domain. X now appears in Notes.'
+                          : 'The page heading is Example Domain.',
+                  grounded: rewrite !== 'ungrounded',
+                  rowOrCardClaim: rewrite === 'flagged',
+                }),
+              );
+            }
+            assert.ok(rounds < 6, 'recovery is bounded');
+            const replies = [
+              { calls: [use('web.fetch', { url: 'https://example.com' })] },
+              {
+                calls: [
+                  use('rows.create.batch', {
+                    tableId: '00000000-0000-4000-8000-000000000001',
+                    expectedAppliedRevision: 'a'.repeat(40),
+                    rows: Array.from({ length: draft ? 1 : 2 }, () => ({
+                      values: { '00000000-0000-4000-8000-000000000002': { kind: 'text', value: 'X' } },
+                    })),
+                  }),
+                ],
+              },
+            ];
+            const reply = nativeReply('azure', replies[rounds++] ?? { text: claim });
+            return sse ? stream(reply) : Response.json(reply);
+          });
+          const result = await inferWithTools(
+            { ...nativeRoutes.azure, model },
+            [
+              {
+                role: 'user',
+                text: `Read https://example.com and tell me its page heading, then add ${draft ? 'one row' : 'two rows'} to Notes with Name X.`,
+              },
+            ],
+            async call =>
+              call.tool === 'web.fetch'
+                ? { title: 'Example Domain', content: '# Example Domain' }
+                : draft
+                  ? { draftId: 'draft', status: 'review-required', operation: 'create', reviewSummary: summary }
+                  : { error: 'review-required', reason: 'untrusted-content', instruction: refused },
+            undefined,
+            false,
+            null,
+            {
+              preloadedTools: ['web.fetch', 'rows.create.batch'],
+              reviewCards: async references => references.map(reference => ({ reference, status: 'pending', summary })),
+              answerText: update => previews.push(update.text),
+            },
+          );
+          if (rewrite === 'safe') assert.match(result.text, /The page heading is Example Domain/);
+          else assert.equal(result.text, draft ? summary : refused);
+          assert.ok(result.text.endsWith(draft ? summary : refused), result.text);
+          assert.doesNotMatch(result.text, /I added|You can approve|No approval card was made/);
+          assert.ok(previews.every(text => !/I added|You can approve/.test(text)));
+          if (!draft) assert.doesNotMatch(result.text, /card is ready|Approve it/);
+          assert.equal(rounds, 3);
+          assert.equal(checks, 1, 'one bounded rewrite check');
+          t.mock.restoreAll();
+        }
+    });
+
+test('a refused batch without a read receipt ends with its row outcome, not a nonexistent card', async t => {
+  const refusal =
+    'No rows were added. Because this chat used outside content, each new row needs its own approval. Ask me to add one row at a time, or add the rows in the table yourself.';
+  const replies = [
+    {
+      calls: [
+        use('rows.create.batch', {
+          tableId: '00000000-0000-4000-8000-000000000001',
+          expectedAppliedRevision: 'a'.repeat(40),
+          rows: [{ values: {} }, { values: {} }],
+        }),
+      ],
+    },
+    { text: 'The approval card is ready. Please approve it.' },
+  ];
+  t.mock.method(globalThis, 'fetch', async (_url, init) => {
+    assert.ok(!isCompletionRequest(JSON.parse(init.body)));
+    const reply = replies.shift();
+    assert.ok(reply, 'no rewrite or retries without read evidence');
+    return Response.json(nativeReply('azure', reply));
+  });
+  const result = await inferWithTools(
+    nativeRoutes.azure,
+    [{ role: 'user', text: 'Add two rows to Notes.' }],
+    async () => ({ error: 'review-required', reason: 'untrusted-content', instruction: refusal }),
+    undefined,
+    false,
+    null,
+    { preloadedTools: ['rows.create.batch'] },
+  );
+  assert.equal(result.text, refusal);
+  assert.equal(replies.length, 0);
+});
+
 test('successful work and nested pending data are not review-card receipts', () => {
   for (const [name, output] of [
     ['projects_create', { id: 'project', name: 'Orders' }],
