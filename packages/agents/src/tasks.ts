@@ -449,7 +449,7 @@ export function createAgentTasks(
       await sourcesAllowed(tx, actor, sources);
       await referencesFit(tx, own);
       const requested = useActivationScope ? activation.scope : (input.scope ?? activation.scope);
-      const scope = await effectiveAgentScope(tx, actor, input.agentId, activation.scope, requested);
+      const scope = await effectiveAgentScope(tx, actor, input.agentId, activation.scope, requested, activation.id);
       const unavailable = await unavailableTableMessage(tx, actor, requested, scope);
       const task = await insert(tx, actor, activation, {
         ...input,

@@ -69,8 +69,8 @@ export function TableStepSummary({
         </ul>
       )}
       <p className="text-sm text-muted-foreground">
-        {names ? `${names} ` : ''}Runs act with the table access of the person who starts them, or the sponsor for
-        unattended runs. Change table steps in the full definition.
+        {names ? `${names} ` : ''}Runs act with the table access of the person who starts them, or of the person who
+        turned the workflow on for unattended runs. Change table steps in the full definition.
       </p>
     </div>
   );

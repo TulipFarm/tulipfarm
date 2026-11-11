@@ -25,7 +25,11 @@ const modelToolSchema = z.strictObject({
 });
 
 export const modelDecisionSchema = z.discriminatedUnion('kind', [
-  z.strictObject({ kind: z.literal('answer'), text: z.string().min(1).max(4000) }),
+  z.strictObject({
+    kind: z.literal('answer'),
+    text: z.string().min(1).max(4000),
+    incomplete: z.boolean().optional(),
+  }),
   z.strictObject({ kind: z.literal('tool'), text: z.string().min(1).max(4000), call: chatToolSchema }),
   z.strictObject({
     kind: z.literal('tools'),

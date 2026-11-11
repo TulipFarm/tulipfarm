@@ -34,7 +34,6 @@ import type { Generation } from '@tulipfarm/tables/store';
 import {
   isSecretHeader,
   activationSchema,
-  acceptSponsorshipSchema,
   commandSchema,
   isTableStep,
   webhookKeySchema,
@@ -1106,18 +1105,23 @@ export function createWorkflows(
           }
           const triggers = current.definition.triggers;
           if (enabled && triggers.some(isUnattendedTrigger)) {
-            // The caller manages this workflow, so a missing sponsorship or sponsor grant is a conflict, not lost access.
-            const sponsor = await workflowSponsor(tx, id, revision).catch((error: unknown) => {
-              throw error instanceof AccessDenied ? new WorkflowConflict('sponsorship-required') : error;
-            });
-            if (!(await hasGrant(tx, sponsor.sponsor_membership_id, id, 'invoke')))
-              throw new WorkflowConflict('sponsor-access-lost');
             const audience = (
               await tx.client.query(
                 `SELECT membership_id FROM ${table(tx, 'tf_workflow_history_audience')} WHERE workflow_id=$1`,
                 [id],
               )
             ).rows.map(row => idSchema.parse(row.membership_id));
+            // Turning on unattended triggers is the activator's consent: their access runs it from now on.
+            await assignSponsor(
+              tx,
+              { ...current, historyAudience: audience },
+              actor.membershipId,
+              audience.length ? audience : [actor.membershipId],
+              woken,
+            ).catch((error: unknown) => {
+              throw error instanceof AccessDenied ? new WorkflowConflict('sponsor-access-lost') : error;
+            });
+            const sponsor = await workflowSponsor(tx, id, revision);
             await requireTableStepAuthority(tx, current.definition, sponsor.sponsor_membership_id, audience);
             await requireAgentStepAuthority(tx, current.definition, sponsor.sponsor_membership_id, audience);
           }
@@ -1863,51 +1867,50 @@ export function createWorkflows(
     await authorizeSources(tx, definition, membershipId);
     if (mutate) await authorizeSources(tx, definition, idSchema.parse(row.membership_id));
   }
+  // Unattended runs always use the authority of the member who last activated or shared the workflow; nobody else can be named.
   async function sponsorship(workspaceId: string, user: string, id: string, value: unknown) {
     const input = sponsorshipSchema.parse(value);
     return wakeAfter(workspaceId, async (tx, woken) => {
       const actor = await workflowMember(tx, user);
       await requireGrant(tx, actor.membershipId, id, 'manage');
-      await requireGrant(tx, input.sponsorMembershipId, id, 'invoke');
+      if (input.sponsorMembershipId !== undefined && input.sponsorMembershipId !== actor.membershipId)
+        throw new WorkflowConflict('sponsor-must-be-self');
       await requireUnarchived(tx, id);
       const current = await read(tx, id, actor.membershipId);
-      for (const trigger of current.definition.triggers)
-        if (trigger.kind === 'record' || trigger.kind === 'row')
-          await requireRecordAudience(tx, trigger, [input.sponsorMembershipId, ...input.historyAudience]);
-      await requireTableStepAuthority(tx, current.definition, input.sponsorMembershipId, input.historyAudience);
-      await authorizeSources(tx, current.definition, input.sponsorMembershipId);
-      for (const recipient of input.historyAudience) {
-        await requireGrant(tx, recipient, id, 'read');
-        await authorizeSources(tx, current.definition, recipient);
-      }
-      if (
-        current.sponsorMembershipId === input.sponsorMembershipId &&
-        current.sponsorshipAccepted &&
-        canonical([...current.historyAudience].sort()) === canonical([...new Set(input.historyAudience)].sort())
-      )
-        return current;
-      await tx.client.query(`DELETE FROM ${table(tx, 'tf_workflow_history_audience')} WHERE workflow_id=$1`, [id]);
-      for (const recipient of new Set(input.historyAudience))
-        await tx.client.query(`INSERT INTO ${table(tx, 'tf_workflow_history_audience')} VALUES ($1,$2)`, [
-          id,
-          recipient,
-        ]);
-      await tx.client.query(
-        `UPDATE ${table(tx, 'tf_workflows')} SET sponsor_membership_id=$2,sponsorship_id=$3,sponsorship_revision=revision,enabled=false,generation=generation+1 WHERE id=$1`,
-        [id, input.sponsorMembershipId, input.sponsorMembershipId === actor.membershipId ? randomUUID() : null],
-      );
-      await setTriggerTimes(tx, id, []);
-      await liveRuns(tx, id, woken);
-      await tx.client.query(`UPDATE ${table(tx, 'tf_provider_polls')} SET fence=$2 WHERE workflow_id=$1`, [
-        id,
-        randomUUID(),
-      ]);
-      await tx.client.query(`DELETE FROM ${table(tx, 'tf_provider_events')} WHERE workflow_id=$1 AND NOT admitted`, [
-        id,
-      ]);
-      await auditWorkflow(tx, actor.membershipId, 'workflow.sponsor', id);
+      await assignSponsor(tx, current, actor.membershipId, input.historyAudience, woken);
       return read(tx, id, actor.membershipId);
     });
+  }
+  async function assignSponsor(
+    tx: WorkflowTransaction,
+    current: z.infer<typeof workflowSchema>,
+    membershipId: string,
+    historyAudience: string[],
+    woken: Set<string>,
+  ) {
+    const id = current.id;
+    await requireSponsorshipAuthority(tx, { ...current, historyAudience }, membershipId);
+    if (
+      current.sponsorMembershipId === membershipId &&
+      current.sponsorshipAccepted &&
+      canonical([...current.historyAudience].sort()) === canonical([...new Set(historyAudience)].sort())
+    )
+      return;
+    await tx.client.query(`DELETE FROM ${table(tx, 'tf_workflow_history_audience')} WHERE workflow_id=$1`, [id]);
+    for (const recipient of new Set(historyAudience))
+      await tx.client.query(`INSERT INTO ${table(tx, 'tf_workflow_history_audience')} VALUES ($1,$2)`, [id, recipient]);
+    await tx.client.query(
+      `UPDATE ${table(tx, 'tf_workflows')} SET sponsor_membership_id=$2,sponsorship_id=$3,sponsorship_revision=revision,enabled=false,generation=generation+1 WHERE id=$1`,
+      [id, membershipId, randomUUID()],
+    );
+    await setTriggerTimes(tx, id, []);
+    await liveRuns(tx, id, woken);
+    await tx.client.query(`UPDATE ${table(tx, 'tf_provider_polls')} SET fence=$2 WHERE workflow_id=$1`, [
+      id,
+      randomUUID(),
+    ]);
+    await tx.client.query(`DELETE FROM ${table(tx, 'tf_provider_events')} WHERE workflow_id=$1 AND NOT admitted`, [id]);
+    await auditWorkflow(tx, membershipId, 'workflow.sponsor', id);
   }
   async function requireSponsorshipAuthority(
     tx: WorkflowTransaction,
@@ -1924,27 +1927,6 @@ export function createWorkflows(
       await requireGrant(tx, recipient, current.id, 'read');
       await authorizeSources(tx, current.definition, recipient);
     }
-  }
-  async function acceptSponsorship(workspaceId: string, user: string, id: string, value: unknown) {
-    const input = acceptSponsorshipSchema.parse(value);
-    return transaction(workspaceId, async tx => {
-      const actor = await workflowMember(tx, user);
-      await requireGrant(tx, actor.membershipId, id, 'invoke');
-      await requireUnarchived(tx, id);
-      const current = await read(tx, id, actor.membershipId);
-      if (current.sponsorMembershipId !== actor.membershipId || !current.historyAudience.length)
-        throw new AccessDenied();
-      await requireSponsorshipAuthority(tx, current, actor.membershipId);
-      if (!current.sponsorshipAccepted) {
-        if (input.expectedGeneration !== current.generation) throw new WorkflowConflict('stale-generation');
-        await tx.client.query(
-          `UPDATE ${table(tx, 'tf_workflows')} SET sponsorship_id=$2,sponsorship_revision=revision,generation=generation+1 WHERE id=$1`,
-          [id, randomUUID()],
-        );
-        await auditWorkflow(tx, actor.membershipId, 'workflow.sponsor.accept', id);
-      }
-      return read(tx, id, actor.membershipId);
-    });
   }
   async function respond(workspaceId: string, user: string, workflowId: string, runId: string, value: unknown) {
     const input = z
@@ -3627,7 +3609,6 @@ export function createWorkflows(
     grants,
     share,
     sponsorship,
-    acceptSponsorship,
     slackOrigin,
     slackSender,
     slackSources,

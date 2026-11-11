@@ -1109,6 +1109,13 @@ export async function inferDecision(
             ),
           );
         }
+        if (
+          parsedInput.data.task &&
+          result.kind === 'success' &&
+          result.decision.kind === 'answer' &&
+          /\b(?:\w+ing|will|shall|next|let me|about to)\b|(?::|\.{3}|…)\s*$/i.test(result.decision.text)
+        )
+          return checkTaskCompletion(config.data, parsedInput.data, result, callerSignal);
         return result;
       },
     );
@@ -1904,6 +1911,9 @@ const completionCheckSchema = z.strictObject({
     status: z.enum(['completed', 'waiting', 'refused', 'blocked', 'continue']),
     reason: z.string().min(1).max(240),
     rowWriteRequested: z.boolean().catch(false).optional(),
+    planSavedClaim: z.boolean().catch(false).optional(),
+    hasAnswerContent: z.boolean().catch(false).optional(),
+    hasToolBackedResult: z.boolean().catch(false).optional(),
     rowReviewRequested: z.boolean().catch(false).optional(),
     smallRowBatchRequested: z.boolean().catch(false).optional(),
     tableLookupRequired: z.boolean().catch(false).optional(),
@@ -1932,6 +1942,7 @@ Compare the original request and latest human clarification with actual complete
 reviewCards, when present, is the server's count of validated pending review receipts by tool in this reply, preserved even when tool output is truncated or compacted. It proves those review cards exist, not that their changes were applied.
 tableInventory, when present, is the server's current inventory for whole table names in the latest human message. It establishes existence and readiness, never completed row changes. Treat the latest human message as the request: negation, questions about past actions, hypotheticals, requests to inspect before making changes and deferred actions do not request an immediate write. For an immediate row request, use continue unless a matching write or review receipt exists. Do not accept missing or not-ready claims contradicted by this inventory; require a current table lookup before reporting such a blocker. If distinct table names leave the destination ambiguous, ask which one rather than choosing.
 Set rowWriteRequested to true only when the latest human message requests an immediate row change, not a negation, past-action question, hypothetical, request to inspect first or deferral. It classifies the request, never approves an action. Otherwise set it to false.
+Set planSavedClaim to true when the candidate says a plan or plan-only draft was saved, created or is ready. This classifies the candidate's claim, not whether it is true. Otherwise set it to false. A failed planning call is not a saved draft, a workspace policy or a Plan mode restriction. Plan mode allows saving a plan-only draft. A blocker must match the actual failure.
 Set rowReviewRequested to true only when the human explicitly requests preparing row changes for review before writing, including a retry asking for the card for their preceding row request. Read-only inspection, negations, hypotheticals, deferred changes, and questions about past actions are false. This classifies intent, never proves a card exists. Reading the table schema needs no extra approval.
 Set smallRowBatchRequested to true only for an immediate request to create one to five explicit rows in one unambiguous named table, with all row values supplied in the human message. Never set it for generated or inferred rows, larger or unspecified batches, updates, deletions, negation, hypotheticals, inspect-first requests or deferrals. A request to review these explicit rows first still requests a batch; the normal review rules apply. Otherwise set it to false.
 Set tableLookupRequired to true when the reply makes a table-state claim without a current table lookup in this turn, contradicts the current table inventory or lookup, or asks the person for table revisions, IDs, field definitions or other details the system can look up. A lookup must support the specific table's claim, not merely concern another table. Never ask a person for internal revisions or IDs, even after a lookup fails. A necessary question about which named table or which business values to use is not a lookup requirement. Otherwise set it to false.
@@ -1940,6 +1951,72 @@ For a question, use waiting only when required user input stops the requested wo
 Use continue when the reply merely promises, narrates, or plans work that remains possible, or claims outcomes unsupported by receipts. A reply that reports a new review card, proposal or proposal version, approval, denial, or created, imported or changed data needs a matching successful receipt among this reply's own tool results; it may restate an earlier outcome only as earlier and only when an earlier receipt in the conversation shows it. Without that receipt use continue, even when the reply asks the person to review or approve. waitingCards, when present, is the server's count of the person's review or approval cards from earlier in this chat that are still undecided: a reply may say such a card is ready or still waiting, and ask the person to approve or dismiss it, without a receipt in this reply, but it may not say this reply made a new one. While one waits, a reply that says the person must approve or dismiss it before more changes to that table can be made states what stops the work. Saying an incomplete action will not be activated does not itself establish a blocker. Asking whether to go ahead with work the person already asked for is not a necessary question, so use continue: a review or approval card is itself the person's confirmation step, and a request to see the review first means create that card.
 Judge the content and the work, not the presentation: never use continue only because the reply lacks a layout, render tool, buttons, form, chart or table, or because a presentation tool failed; the reply is laid out separately.
 Do not demand tools for ordinary answers, questions, or refusals. Do not mistake a clarification answer for action approval. Explain the evidence gap in one short sentence, at most 240 characters.`;
+
+async function checkTaskCompletion(
+  route: z.output<typeof inferenceRouteSchema>,
+  input: Parameters<AgentModel>[0],
+  result: Extract<InferenceResult, { kind: 'success' }>,
+  signal?: AbortSignal,
+): Promise<InferenceResult> {
+  const accounting: { usage: InferenceUsage } = { usage: { kind: 'unknown' } };
+  let incomplete: boolean | undefined;
+  await withChatModelRequest('completion', () =>
+    observeInference({ provider: route.provider, model: route.model, operation: 'chat' }, async report => {
+      try {
+        const wire = chatRequest(
+          route,
+          [{ role: 'user', text: JSON.stringify({ task: input.prompt, candidate: result.decision.text }) }],
+          completionCheckPrompt +
+            '\nFor this private task, set hasAnswerContent to true only if the candidate gives a substantive answer, a necessary question, or a clear blocker with recovery. Set hasToolBackedResult to true only if the candidate reports an outcome supported by completed tool receipts. Earlier tool activity alone does not make a progress message an answer. Otherwise both flags are false.',
+          z.toJSONSchema(completionCheckSchema),
+        );
+        const response = await providerFetch(wire.url, {
+          method: 'POST',
+          headers: wire.headers,
+          body: serializeChatRequest(wire.body),
+          redirect: 'manual',
+          signal: signal
+            ? AbortSignal.any([signal, AbortSignal.timeout(route.timeoutMs)])
+            : AbortSignal.timeout(route.timeoutMs),
+        });
+        const body: unknown = await response.json();
+        accounting.usage = usage(route, body);
+        reportUsage(report, accounting.usage, body);
+        if (!response.ok) return;
+        const selected = decision(route, body);
+        const parsed =
+          selected.kind === 'decision' ? completionCheckSchema.safeParse(unwrapDecision(selected.value)) : null;
+        if (!parsed?.success) return;
+        const checked = parsed.data.decision;
+        incomplete = checked.status === 'continue' && !checked.hasAnswerContent && !checked.hasToolBackedResult;
+      } catch {
+        // A failed check must not replace the primary result or bypass the runtime's existing fallback.
+      }
+    }),
+  );
+  const primary = result.usage;
+  const checkedUsage = accounting.usage;
+  const combined: InferenceUsage =
+    primary.kind === 'known' && checkedUsage.kind === 'known'
+      ? {
+          kind: 'known',
+          input: primary.input + checkedUsage.input,
+          output: primary.output + checkedUsage.output,
+          cacheRead: primary.cacheRead + checkedUsage.cacheRead,
+          cacheWrite: primary.cacheWrite + checkedUsage.cacheWrite,
+          cacheWrite5m: primary.cacheWrite5m + checkedUsage.cacheWrite5m,
+          cacheWrite1h: primary.cacheWrite1h + checkedUsage.cacheWrite1h,
+        }
+      : primary;
+  return {
+    ...result,
+    usage: combined,
+    decision:
+      result.decision.kind === 'answer' && incomplete !== undefined
+        ? { ...result.decision, incomplete }
+        : result.decision,
+  };
+}
 
 const outcomeVerb = String.raw`(?:denied|refused|rejected|approved|created|added|imported|saved|updated|deleted|archived|restored|sent|posted|scheduled|proposed|applied)`;
 const writeVerb = String.raw`(?:created|added|imported|saved|updated|deleted|archived|restored)`;
@@ -3625,6 +3702,8 @@ export async function inferWithTools(
   let cardClaimed = false;
   // Receipts from an earlier attempt of this same turn count as work in this reply.
   let workToolUsed = calls > 0 || Boolean(tools?.priorToolCalls?.length);
+  let planCreationAttempted = false;
+  let planCreated = false;
   const priorRowWrite = tools?.priorToolCalls?.some(
     call => z.object({ tool: z.string().regex(/^rows\.(?:create|update|delete)/) }).safeParse(call).success,
   );
@@ -4462,6 +4541,7 @@ export async function inferWithTools(
       }
     }
     const stoppingReply = rejectionsSpent ? toolRejectedReply : guard.stalled ? toolLoopReply : toolLimitReply;
+    if (finalizing && planCreationAttempted && !planCreated) return finish(unfinishedReply, true);
     // A forced table tool runs only while no row change has been tried, and the change only after a schema that read.
     // A forced change that used a wrong table ID is forced once more, with the ID its result names.
     const lastResults = [...items].reverse().find(item => item.kind === 'results');
@@ -5181,6 +5261,7 @@ export async function inferWithTools(
             preview('');
             throw error;
           }
+          if (planCreationAttempted && !planCreated) return finish(unfinishedReply, true);
           const safeUnchecked =
             !directoryLeak &&
             (!rowReviewCheckNeeded || !localCorrection) &&
@@ -5284,6 +5365,13 @@ export async function inferWithTools(
         );
         continue;
       }
+      if (planCreationAttempted && checked.planSavedClaim === true && !planCreated)
+        checked = {
+          ...checked,
+          status: 'continue',
+          reason:
+            'The plan was not saved. Repair the failed plans.create arguments using its validation path and instruction, or state the actual failure without claiming a save.',
+        };
       if (checked !== unverifiedOutcome)
         recordChatCompletionCheck(
           checked.status === 'continue' ? 'continue' : 'done',
@@ -5375,6 +5463,7 @@ export async function inferWithTools(
       if (completionCorrections++ >= 2) {
         // Corrections are spent, so the reply ends with an answer rather than failing after its tools ran.
         recordChatCompletionCheck('exhausted');
+        if (planCreationAttempted && !planCreated) return finish(unfinishedReply, true);
         if (rowReviewMissing) return finish(rowReviewStoppedReply, true);
         // A row write held back behind a waiting card ends by naming that card's change and the request it did not take.
         const heldWrite = heldBackWrites(items)[0];
@@ -5432,6 +5521,7 @@ export async function inferWithTools(
       continue;
     }
     if (finalizing) return finish(stoppingReply);
+    if (selected.calls.some(call => call.name === nativeToolName('plans.create'))) planCreationAttempted = true;
     for (const call of selected.calls) if (loaded.has(call.name)) lastUsed.set(call.name, step);
     if (selected.calls.some(call => isWorkTool(call.name))) workToolUsed = true;
     items.push({ kind: 'model', text: selected.text, calls: selected.calls, raw: selected.raw });
@@ -5447,6 +5537,10 @@ export async function inferWithTools(
       providerId: call.providerId,
     });
     const executedResult = (native: NativeCall, call: FrameworkCall, value: unknown): ToolResult => {
+      if (call.tool === 'plans.create')
+        planCreated ||=
+          z.object({ planId: z.uuid(), version: z.number().int().nonnegative() }).safeParse(value).success &&
+          !z.object({ error: z.unknown() }).safeParse(value).success;
       if (
         call.tool === 'api.request' &&
         isOwnServiceUrl(call.url, ownServiceDomains()) &&

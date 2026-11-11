@@ -7,10 +7,14 @@ import { chromium } from 'playwright';
 const port = Number(process.env.TASK_COMPOSER_BROWSER_PORT ?? 5271);
 const origin = `http://127.0.0.1:${port}`;
 const shots = process.env.TASK_COMPOSER_SCREENSHOTS;
-const server = spawn('pnpm', ['exec', 'vite', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
-  cwd: new URL('..', import.meta.url),
-  stdio: 'ignore',
-});
+const server = spawn(
+  process.execPath,
+  ['node_modules/vite/bin/vite.js', '--host', '127.0.0.1', '--port', String(port), '--strictPort'],
+  {
+    cwd: new URL('..', import.meta.url),
+    stdio: 'ignore',
+  },
+);
 const uuid = digit =>
   `${digit.repeat(8)}-${digit.repeat(4)}-4${digit.repeat(3)}-8${digit.repeat(3)}-${digit.repeat(12)}`;
 const [wid, mid, tid, aid, idleId, scopedId, rid, taskId, pausedId, activationId, otherActivationId] = [
@@ -111,7 +115,12 @@ const commands = [],
 let deletes = 0;
 let browser, active;
 
-async function open(device) {
+async function open(device, holdTables = false, tableResult = 'ready') {
+  let releaseTables;
+  const tableGate = new Promise(resolve => {
+    releaseTables = resolve;
+  });
+  if (!holdTables) releaseTables();
   const context = await browser.newContext({
     viewport: { width: device.width, height: device.height },
     colorScheme: device.theme,
@@ -142,6 +151,31 @@ async function open(device) {
         capabilities: { manageGovernance: false, canLeave: true },
       });
     if (path.endsWith('/model-catalog')) return send({ families });
+    if (path.endsWith('/tables')) {
+      await tableGate;
+      if (tableResult === 'missing') return send({ tables: [], nextCursor: null });
+      if (tableResult === 'denied') return send({ code: 'access-denied' }, 403);
+      if (tableResult === 'failed') return send({ code: 'unavailable' }, 503);
+      return send({
+        tables: [
+          {
+            id: rid,
+            revision: 'a'.repeat(40),
+            appliedAt: at,
+            recordCount: '1',
+            definition: {
+              formatVersion: 2,
+              id: rid,
+              owningTeamId: tid,
+              label: 'Customers',
+              fields: [{ id: uuid('e'), label: 'Name', kind: 'text', required: false, maxLength: 10000 }],
+              uniqueKeys: [],
+            },
+          },
+        ],
+        nextCursor: null,
+      });
+    }
     if (path.endsWith('/agents/authoring-context'))
       return send({ currentSoulRevision: 'a'.repeat(40), teams, admin: false });
     if (path.endsWith(`/agents/${unreachableId}/policy`))
@@ -202,7 +236,7 @@ async function open(device) {
     if (task) return send(task);
     return send({ error: 'fixture-unavailable' }, 404);
   });
-  return { context, page };
+  return { context, page, releaseTables };
 }
 const describedBy = (locator, page) =>
   locator.getAttribute('aria-describedby').then(ids =>
@@ -229,7 +263,7 @@ try {
     await delay(100);
   }
   browser = await chromium.launch({ headless: true });
-  const { context, page } = await open({ width: 1440, height: 1000, theme: 'light' });
+  const { context, page, releaseTables } = await open({ width: 1440, height: 1000, theme: 'light' }, true);
   active = page;
 
   await page.goto(`${origin}/acme/agents/${aid}`);
@@ -237,7 +271,20 @@ try {
   const region = page.getByRole('region', { name: 'Run agent now', exact: true });
   const message = region.getByRole('textbox', { name: 'What should this agent do?', exact: true });
   const start = region.getByRole('button', { name: 'Start task', exact: true });
+  await region.waitFor();
+  if (shots) {
+    await mkdir(shots, { recursive: true });
+    await region.screenshot({ path: `${shots}/table-names-loading.png` });
+  }
+  assert.equal(
+    await region.getByText(/^Data this task may use:/).count(),
+    0,
+    'unresolved names never expose table IDs',
+  );
+  releaseTables();
+  await region.getByText('Data this task may use: Customers: read rows.', { exact: true }).waitFor();
   await message.waitFor();
+  if (shots) await region.screenshot({ path: `${shots}/table-names-loaded.png` });
   assert.equal(await message.getAttribute('aria-required'), 'true');
   assert.notEqual(await start.getAttribute('aria-disabled'), 'true', 'an empty message does not disable Start task');
   await start.click();
@@ -393,6 +440,26 @@ try {
     'true',
   );
   await deniedContext.close();
+
+  for (const tableResult of ['missing', 'denied', 'failed']) {
+    const {
+      context: hiddenContext,
+      page: hiddenPage,
+      releaseTables,
+    } = await open({ width: 1440, height: 1000, theme: 'light' }, true, tableResult);
+    active = hiddenPage;
+    await hiddenPage.goto(`${origin}/acme/agents/${unreachableId}`);
+    const hiddenRegion = hiddenPage.getByRole('region', { name: 'Run agent now', exact: true });
+    await hiddenRegion.waitFor();
+    assert.equal(await hiddenRegion.getByText(/^Data this task may use:/).count(), 0);
+    assert.equal(await hiddenRegion.getByText(/This task cannot use/).count(), 0);
+    releaseTables();
+    await hiddenRegion.getByText('Data this task may use: No table access.', { exact: true }).waitFor();
+    await hiddenRegion.getByText(/This task cannot use a table you cannot see: read rows\./).waitFor();
+    assert.equal((await hiddenRegion.innerText()).includes(rid.slice(0, 8)), false);
+    if (shots) await hiddenRegion.screenshot({ path: `${shots}/table-names-${tableResult}.png` });
+    await hiddenContext.close();
+  }
 
   for (const device of [
     { width: 1440, height: 1000, theme: 'light' },

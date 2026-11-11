@@ -668,7 +668,7 @@ function workflowResult(outcome: Extract<DraftOutcome, { kind: 'workflow' }>, pr
     case 'disabled':
       return 'Workflow disabled. It will not start new runs.';
     case 'sponsor-required':
-      return `Workflow saved, but not activated. Another member sponsors this workflow. Ask them to accept this revision before activating.${outcome.enabled ? ' Runs still use the active revision.' : ''}`;
+      return `Workflow saved, but not activated. You need access to run this workflow first.${outcome.enabled ? ' Runs still use the active revision.' : ''}`;
     case 'audience-required':
       return `Workflow saved, but not activated. Someone who sees its run history cannot read the table. Change who sees run history on the Workflows page, then activate it.${outcome.enabled ? ' Runs still use the active revision.' : ''}`;
   }
@@ -680,7 +680,7 @@ function workflowNote(proposal: WorkflowProposal) {
     return 'Disabling stops new runs and blocks runs in progress.';
   const activates = proposal.kind === 'workflow-activation' || proposal.input.activate;
   return activates
-    ? 'Scheduled, record-date and webhook runs start without you and run with your access as the sponsor. Webhook keys are created only on the Workflows page.'
+    ? 'Scheduled, record-date and webhook runs start without you and run with your access. Webhook keys are created only on the Workflows page.'
     : 'Saving creates a revision you manage. It does not change which revision is active.';
 }
 

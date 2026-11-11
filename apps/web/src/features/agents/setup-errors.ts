@@ -14,8 +14,8 @@ const reasons: Record<string, string> = {
   'workflow-github-repository-not-connected':
     'The trigger’s GitHub repository isn’t connected. Connect it, then retry setup.',
   'workflow-sponsor-access-lost':
-    'The trigger’s sponsor no longer has the access it needs. Restore that access, then retry setup.',
-  'workflow-sponsor-required': `This trigger needs a sponsor before it can run. ${review}`,
+    'You no longer have the access this trigger needs to run on its own. Ask for that access, then retry setup.',
+  'workflow-sponsor-required': `You need access to run this trigger before it can turn on. ${review}`,
   'task-schedule-interval': `Schedules can run at most once an hour. ${review}`,
   'schedule-invalid': `The schedule is not valid. ${review}`,
   'linked-workflow-changed': `This agent’s workflow changed after review. ${review}`,

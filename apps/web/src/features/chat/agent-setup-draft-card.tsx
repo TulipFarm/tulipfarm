@@ -17,7 +17,7 @@ import { ReviewCard } from '@tulipfarm/sprout/review-card';
 import { UnsavedChanges } from '@/features/tables/feedback';
 import { agentApi } from '@/features/agents/api';
 import { setupErrorText, setupRetryable } from '@/features/agents/setup-errors';
-import { AgentSetupReview, useSetupTriggerNames } from '@/features/agents/setup-review';
+import { AgentSetupReview } from '@/features/agents/setup-review';
 import { workspaceRoute } from '@/router';
 import type { ConversationCommand } from './conversation-api';
 
@@ -47,11 +47,10 @@ export function AgentSetupDraftCard({
 }) {
   const { workspace } = workspaceRoute.useRouteContext();
   const agents = useMemo(() => agentApi(workspace.id), [workspace.id]);
-  const [consent, setConsent] = useState<PublishAgentSetup['consent']>({ sponsor: false, replaceChannels: [] });
+  const [consent, setConsent] = useState<PublishAgentSetup['consent']>({ replaceChannels: [] });
   const [retry, setRetry] = useState<{ kind: 'idle' | 'sending' } | { kind: 'error'; message: string }>({
     kind: 'idle',
   });
-  const triggerName = useSetupTriggerNames(workspace.id, proposal.input.setup?.triggers ?? []);
   if (!proposal.input.setup) return null;
   const setup = {
     ...proposal.input.setup,
@@ -77,10 +76,8 @@ export function AgentSetupDraftCard({
   const replacements = setup.slackChannels.filter(
     channel => channel.replaceAgentId && channel.replaceAgentId !== proposal.targetId,
   );
-  const sponsored = setup.triggers.filter(item => unattendedTrigger(item.trigger));
-  const ready =
-    (!sponsored.length || consent.sponsor) &&
-    replacements.every(channel => consent.replaceChannels.includes(channel.channel));
+  const unattended = setup.triggers.some(item => unattendedTrigger(item.trigger));
+  const ready = replacements.every(channel => consent.replaceChannels.includes(channel.channel));
   const updating = proposal.input.expectedSavedRevision !== null;
   // A new agent exists only once its definition is saved, so a failed first save has no agent page.
   const agentPage = receipt?.status === 'blocked' || (receipt?.status === 'failed' && updating);
@@ -227,14 +224,10 @@ export function AgentSetupDraftCard({
       {draft.status === 'pending' && (
         <fieldset disabled={locked} className="grid gap-3">
           <legend className="sr-only">Activation consent</legend>
-          {sponsored.length > 0 && (
-            <CheckboxField
-              id={`draft-${draft.id}-sponsor`}
-              label={`I sponsor ${sponsored.length === 1 ? triggerName(sponsored[0]!) : `these ${sponsored.length} triggers`}`}
-              helper="Runs use your current permissions and create private tasks."
-              checked={consent.sponsor}
-              onCheckedChange={sponsor => setConsent(previous => ({ ...previous, sponsor }))}
-            />
+          {unattended && (
+            <p className="text-sm text-muted-foreground">
+              Runs on its own with your current access and creates private tasks.
+            </p>
           )}
           {replacements.map((channel, index) => (
             <CheckboxField

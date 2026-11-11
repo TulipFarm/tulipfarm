@@ -104,7 +104,7 @@ export function SlackStepControls({
         <p className="text-sm text-muted-foreground">
           {step.sender === 'app'
             ? 'Posts as the TulipFarm app. Add the app to the channel first.'
-            : 'Posts under the Slack account of the person who starts the run, or its sponsor.'}
+            : 'Posts under the Slack account of the person who starts the run, or who turned the workflow on.'}
         </p>
       </>
       <Label>Message text</Label>
