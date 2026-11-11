@@ -22,6 +22,8 @@ import { builderDraft, parseBuilder } from '../../../apps/web/src/features/agent
 import { createAgentTasks } from '../src/tasks.ts';
 import { createTaskRuntime } from '../src/task-runtime.ts';
 import { syntheticContinuity } from './continuity-fixture.mjs';
+import { nativeChatTools } from '../src/native-tools.ts';
+import { use } from './native-fixture.mjs';
 
 const limits = { toolCalls: 10, activeMilliseconds: 60000, credits: 10 };
 async function environment(t) {
@@ -928,7 +930,7 @@ test('chat full setup approves the same coordinator or continues in the builder;
     });
     let result;
     const { definition, owningTeamId, ...setup } = f.setup();
-    const call = {
+    let call = {
       tool: 'agents.draft',
       agent: 'new',
       input: {
@@ -940,13 +942,24 @@ test('chat full setup approves the same coordinator or continues in the builder;
               setup,
               expectedPolicyVersion: 0,
               expectedActivationIds: [],
-              expectedWorkflowRevision: null,
-              expectedWorkflowGeneration: null,
             }
           : {}),
       },
     };
     await createConversationExecutor(f.runtime, async ({ executeTool }) => {
+      if (full) {
+        const context = await executeTool('agents.context', false, context =>
+          createChatTools(context.runtime).invoke(context, { tool: 'agents.context' }),
+        );
+        const resolved = nativeChatTools().resolve(
+          { ...use('agents.draft', { agent: 'new', input: call.input }), id: 'draft', providerId: true },
+          context,
+        );
+        assert.ok(resolved.ok);
+        assert.equal(resolved.call.input.expectedWorkflowRevision, null);
+        assert.equal(resolved.call.input.expectedWorkflowGeneration, null);
+        call = resolved.call;
+      }
       result = await executeTool('agents.draft', false, context =>
         createChatTools(context.runtime).invoke(context, call),
       );

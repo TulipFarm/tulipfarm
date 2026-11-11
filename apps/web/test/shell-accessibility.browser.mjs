@@ -17,6 +17,20 @@ before(async () => {
   server = await createServer({
     root: fileURLToPath(new URL('..', import.meta.url)),
     server: { host: '127.0.0.1', port: 0 },
+    // Lazy route dependencies must share the initial bundle, not reload a page with axe already injected.
+    optimizeDeps: {
+      include: [
+        '@tulipfarm/sprout/accordion',
+        '@tulipfarm/sprout/brand-icon',
+        '@tulipfarm/sprout/calendar',
+        '@tulipfarm/sprout/chart',
+        '@tulipfarm/sprout/combobox',
+        '@tulipfarm/sprout/file-viewer',
+        '@tulipfarm/sprout/hover-card',
+        '@tulipfarm/sprout/tabs',
+        '@tulipfarm/sprout/tooltip',
+      ],
+    },
     logLevel: 'error',
   });
   await server.listen();
@@ -53,26 +67,103 @@ async function injectAxe(page, pathname, landmark) {
 }
 
 async function accessible(page, { shellOnly = false } = {}) {
-  const violations = await page.evaluate(
-    async shellOnly =>
-      (await window.axe.run(document, { runOnly: ['label-content-name-mismatch'] })).violations
-        .map(item => ({
-          id: item.id,
-          nodes: item.nodes
-            .filter(
-              node =>
-                !shellOnly ||
-                document
-                  .querySelector(node.target[0])
-                  ?.closest('[data-sprout-sidebar], aside[aria-label="Bud assistant"]'),
-            )
-            .map(node => ({ target: node.target, summary: node.failureSummary })),
-        }))
-        .filter(item => item.nodes.length),
-    shellOnly,
-  );
-  assert.deepEqual(violations, []);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    let violations;
+    try {
+      violations = await page.evaluate(
+        async shellOnly =>
+          window.axe
+            ? (await window.axe.run(document, { runOnly: ['label-content-name-mismatch'] })).violations
+                .map(item => ({
+                  id: item.id,
+                  nodes: item.nodes
+                    .filter(
+                      node =>
+                        !shellOnly ||
+                        document
+                          .querySelector(node.target[0])
+                          ?.closest('[data-sprout-sidebar], aside[aria-label="Bud assistant"]'),
+                    )
+                    .map(node => ({ target: node.target, summary: node.failureSummary })),
+                }))
+                .filter(item => item.nodes.length)
+            : null,
+        shellOnly,
+      );
+    } catch (error) {
+      if (
+        attempt === 1 ||
+        !(error instanceof Error) ||
+        !error.message.includes('Execution context was destroyed, most likely because of a navigation')
+      )
+        throw error;
+    }
+    if (violations) {
+      assert.deepEqual(violations, []);
+      return;
+    }
+    assert.equal(attempt, 0, 'axe is unavailable after one re-injection');
+    await page.waitForLoadState('load');
+    await page.locator('aside[aria-label="Bud assistant"]').waitFor();
+    await page.addScriptTag({ path: require.resolve('axe-core/axe.min.js') });
+  }
 }
+
+async function accessibilityFixture(run) {
+  const context = await browser.newContext();
+  try {
+    const page = await context.newPage();
+    await page.route(`${origin}/accessibility-fixture`, route =>
+      route.fulfill({
+        contentType: 'text/html',
+        body: '<aside aria-label="Bud assistant"><button>Save</button></aside>',
+      }),
+    );
+    await page.goto(`${origin}/accessibility-fixture`);
+    await run(page);
+  } finally {
+    await context.close();
+  }
+}
+
+test('accessibility checks restore axe after a document reload interrupts a scan', async () => {
+  await accessibilityFixture(async page => {
+    await page.addScriptTag({ path: require.resolve('axe-core/axe.min.js') });
+    await page.evaluate(() => {
+      window.axe.run = () =>
+        new Promise(() => {
+          setTimeout(() => location.reload(), 0);
+        });
+    });
+    await accessible(page);
+    assert.equal(await page.evaluate(() => typeof window.axe?.run), 'function');
+  });
+});
+
+test('accessibility checks still reject real label mismatches after restoring missing axe', async () => {
+  await accessibilityFixture(async page => {
+    await page.getByRole('button', { name: 'Save', exact: true }).evaluate(button => {
+      button.setAttribute('aria-label', 'Delete');
+    });
+    await assert.rejects(() => accessible(page), { name: 'AssertionError' });
+    assert.equal(await page.evaluate(() => typeof window.axe?.run), 'function');
+  });
+});
+
+test('accessibility checks stop after one failed axe restoration', async () => {
+  await accessibilityFixture(async page => {
+    let injections = 0;
+    const addScriptTag = page.addScriptTag.bind(page);
+    page.addScriptTag = async options => {
+      injections++;
+      const script = await addScriptTag(options);
+      await page.evaluate(() => delete window.axe);
+      return script;
+    };
+    await assert.rejects(() => accessible(page), /axe is unavailable after one re-injection/);
+    assert.equal(injections, 1);
+  });
+});
 
 for (const mobile of [false, true])
   for (const avatar of ['initial', 'image', 'failed-image'])

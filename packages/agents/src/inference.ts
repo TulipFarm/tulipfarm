@@ -71,6 +71,7 @@ import {
 } from './prompts.ts';
 import {
   nativeChatTools,
+  agentDraftContextSchema,
   nativeToolName,
   toolSearchName,
   type NativeCall,
@@ -3834,6 +3835,9 @@ export async function inferWithTools(
   let authoringRecovering = false;
   let authoringRecoveryAttempted = false;
   let authoringRecoveryRounds = 0;
+  const authoringContexts = new Map<string, z.infer<typeof agentDraftContextSchema>>();
+  let authoringRepairAttempted = false;
+  let authoringRepairPending = false;
   const authoringRecoveryLog = (outcome: string) =>
     log('info', 'inference', 'call_completed', {
       operation: 'chat.agent-authoring-recovery',
@@ -3909,7 +3913,11 @@ export async function inferWithTools(
       ? []
       : [
           // Slack asks with buttons and choices in slack_render; the web-only choice bar is not shown there.
-          ...(slackLayout ? active.tools.filter(tool => tool.name !== presentChoiceName) : active.tools),
+          ...active.tools.filter(
+            tool =>
+              (!slackLayout || tool.name !== presentChoiceName) &&
+              (!activeBuiltinSkills.has('agent-authoring') || tool.name !== 'agents_delegate'),
+          ),
           ...(rereadOffered ? [toolResultReadTool] : []),
           ...(tools?.avatar && expressionCalls < 6 ? [budTool] : []),
           ...(renderer ? [renderer.tool] : []),
@@ -4117,7 +4125,15 @@ export async function inferWithTools(
     }
     const finalizing = calls >= chatToolCallLimit || guard.stalled || rejectionsSpent;
     let authoringTool: string | undefined;
-    if (authoringRecovering) {
+    if (activeBuiltinSkills.has('agent-authoring') && (authoringFailure || (!authoringDraftMade && finalizing)))
+      return finish(authoringStoppedReply(), true);
+    if (authoringRepairPending) {
+      if (finalizing) return finish(authoringStoppedReply(), true);
+      authoringRepairPending = false;
+      authoringTool = 'agents_draft';
+      forceTool = authoringTool;
+      lastUsed.set(authoringTool, step);
+    } else if (authoringRecovering) {
       if (authoringDraftMade) {
         authoringRecoveryLog('recovered');
         authoringRecovering = false;
@@ -4542,7 +4558,7 @@ export async function inferWithTools(
       if (
         activeBuiltinSkills.has('agent-authoring') &&
         !authoringDraftMade &&
-        agentAuthoringRefusal(candidate) &&
+        (agentAuthoringRefusal(candidate) || (!candidate.includes('?') && promisesWork(candidate))) &&
         ['agents_context', 'agents_draft'].every(name => activeCatalog.tools.some(tool => tool.name === name))
       ) {
         preview('');
@@ -4558,7 +4574,7 @@ export async function inferWithTools(
             kind: 'turn',
             turn: {
               role: 'user',
-              text: 'Agent authoring is available in the offered catalog. The last reply claimed otherwise without a failed prerequisite. Call agents_context to read the current setup, then agents_draft to prepare the requested agent for human review. If the context has already been read successfully, use that result without repeating it. Do not delegate, invent endpoints, broaden permissions, or approve any action.',
+              text: "Agent authoring is available in the offered catalog. The requested draft has not been prepared. Call agents_context to read the current setup, then agents_draft to prepare the requested agent for human review. If the context has already been read successfully for this agent in this turn, use that result without repeating it. Reuse the person's earlier choices and latest clarification. Do not delegate, invent endpoints, broaden permissions, or approve any action.",
             },
           },
         );
@@ -4622,7 +4638,9 @@ export async function inferWithTools(
       const idAsked =
         unbacked || writeUnbacked || otherTableSkipped
           ? undefined
-          : (tableIdQuestion(candidate) ?? uncheckedTableQuestion(candidate, items) ?? invitesUnchecked);
+          : (tableIdQuestion(candidate) ??
+            (activeBuiltinSkills.has('agent-authoring') ? undefined : uncheckedTableQuestion(candidate, items)) ??
+            invitesUnchecked);
       // A held-back row write, a failure nothing reported, or internal wording gets a rewrite, never the person.
       const misdescribed =
         unbacked || writeUnbacked || idAsked
@@ -4641,6 +4659,7 @@ export async function inferWithTools(
         !misdescribed &&
         !directoryExpected &&
         !workToolUsed &&
+        !(activeBuiltinSkills.has('agent-authoring') && sourceMessages.some(turn => turn.role === 'assistant')) &&
         !finalizing &&
         (pointsToWaitingCard(candidate, waiting) ||
           (!corrections && !completionCorrections && !claimsActionOutcome(candidate) && !promisesWork(candidate)))
@@ -4762,6 +4781,19 @@ export async function inferWithTools(
         );
       if (checked.status !== 'continue') return accept();
       preview('');
+      if (activeBuiltinSkills.has('agent-authoring') && !authoringDraftMade) {
+        if (authoringRecoveryAttempted || finalizing) return finish(authoringStoppedReply(), true);
+        authoringRecoveryAttempted = true;
+        authoringRecovering = true;
+        items.push({
+          kind: 'turn',
+          turn: {
+            role: 'user',
+            text: 'Prepare the requested agent draft now using agents_context and agents_draft. Reuse the choices already given, including the latest answer. Do not delegate or ask again about optional teams, skills, channels or triggers.',
+          },
+        });
+        continue;
+      }
       // Asked to confirm invitations, the next round must look them up again rather than restate the earlier answer.
       if (invitesUnchecked && invitationRecheckAsked(items)) forceTool = membersFindName;
       if (finalizing)
@@ -4876,11 +4908,27 @@ export async function inferWithTools(
       const cardReceipt = reviewCardReceipt(native.name, value);
       if (call.tool === 'agents.context') {
         if (!value || typeof value !== 'object' || 'error' in value) authoringFailure = 'context';
-        else authoringContextRead = true;
+        else {
+          authoringContextRead = true;
+          const snapshot = agentDraftContextSchema.safeParse(value);
+          if (snapshot.success) authoringContexts.set(call.agentId ?? 'new', snapshot.data);
+        }
       }
       if (call.tool === 'agents.draft') {
         if (cardReceipt) authoringDraftMade = true;
-        else authoringFailure = 'draft';
+        else {
+          const invalid = z
+            .object({
+              error: z.literal('invalid-arguments'),
+              issues: z.array(z.object({ path: z.array(z.union([z.string(), z.number()])), code: z.string() })).min(1),
+            })
+            .safeParse(value);
+          if (invalid.success && !authoringRepairAttempted) {
+            authoringRepairAttempted = true;
+            authoringRepairPending = true;
+            authoringRecovering = false;
+          } else authoringFailure = 'draft';
+        }
       }
       const reviewCard = reviewCardReference(call.tool, value);
       return {
@@ -4966,8 +5014,59 @@ export async function inferWithTools(
       });
       continue;
     }
-    const resolved = selected.calls.map(call => ({ native: call, resolved: active.resolve(call) }));
+    if (activeBuiltinSkills.has('agent-authoring') && selected.calls.some(call => call.name === 'agents_delegate')) {
+      if (authoringRecoveryAttempted) return finish(authoringStoppedReply(), true);
+      authoringRecoveryAttempted = true;
+      authoringRecovering = true;
+      items.push({
+        kind: 'results',
+        results: selected.calls.map(call =>
+          result(
+            call,
+            'Not run. Prepare this agent yourself with agents_context and agents_draft. Do not delegate setup.',
+            true,
+          ),
+        ),
+      });
+      continue;
+    }
+    const resolved = selected.calls.map(call => {
+      const target = z.object({ agent: z.union([z.literal('new'), z.object({ id: z.uuid() })]) }).safeParse(call.input);
+      const context =
+        call.name === 'agents_draft' && target.success
+          ? authoringContexts.get(target.data.agent === 'new' ? 'new' : target.data.agent.id)
+          : undefined;
+      return { native: call, resolved: active.resolve(call, context) };
+    });
     if (resolved.some(entry => !entry.resolved.ok)) {
+      const invalidDraft = resolved.find(entry => entry.native.name === 'agents_draft' && !entry.resolved.ok);
+      if (invalidDraft && !invalidDraft.resolved.ok && activeBuiltinSkills.has('agent-authoring')) {
+        if (!invalidDraft.resolved.issues?.length) return finish(authoringStoppedReply(), true);
+        log('warn', 'activity', 'call_failed', {
+          operation: 'chat.tool-rejected',
+          'error.type': 'invalid-arguments',
+          tool: 'agents_draft',
+          'error.issues': invalidDraft.resolved.issues?.map(issue => `${issue.path.join('.')}:${issue.code}`) ?? [],
+          attempt: authoringRepairAttempted ? 2 : 1,
+        });
+        if (authoringRepairAttempted) return finish(authoringStoppedReply(), true);
+        authoringRepairAttempted = true;
+        authoringRepairPending = true;
+        authoringRecovering = false;
+        items.push({
+          kind: 'results',
+          results: resolved.map(({ native, resolved }) =>
+            result(
+              native,
+              resolved.ok
+                ? notRun
+                : `${resolved.error} Correct only the invalid fields and retry agents_draft once. Do not delegate or repeat completed reads.`,
+              true,
+            ),
+          ),
+        });
+        continue;
+      }
       const unresolved = resolved.filter(entry => !entry.resolved.ok).map(entry => entry.native.name);
       // Only a real tool's name is logged, never a name the model made up.
       const offered = unresolved.filter(

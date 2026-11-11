@@ -2664,6 +2664,12 @@ export function createConversationExecutor(
               return false;
             }),
           );
+          if (name === 'agents.draft' && error instanceof z.ZodError)
+            log('warn', 'tool', 'call_failed', {
+              operation: 'chat.agent-draft-validation',
+              'error.type': 'invalid-arguments',
+              'error.issues': error.issues.map(issue => `${issue.path.join('.')}:${issue.code}`),
+            });
           // Dispatch failures were already logged by observeTool; this logs only failures in the receipt and source checks around it.
           if (!toolFailureLogged(error))
             log('error', 'tool', 'call_failed', {
@@ -2699,7 +2705,15 @@ export function createConversationExecutor(
           const output = {
             result: planningFailure
               ? { error: planningFailure.code, instruction: planningFailure.instruction }
-              : (skillFailure(name, error) ??
+              : ((name === 'agents.draft' && error instanceof z.ZodError
+                  ? {
+                      error: 'invalid-arguments',
+                      issues: error.issues.map(({ path, code }) => ({ path, code })),
+                      instruction:
+                        'The draft was not created. Repair only these invalid fields and retry once. Do not repeat completed reads, delegate setup, or broaden permissions.',
+                    }
+                  : null) ??
+                skillFailure(name, error) ??
                 (error instanceof SourceAuthorizationUnavailable
                   ? {
                       error: 'source-unavailable',

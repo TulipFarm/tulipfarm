@@ -9,7 +9,7 @@ tools: agents.context agents.draft agents.list agents.read agents.status agents.
 
 An agent has a role and bounded authority. Prepare one shared setup. The person reviews the exact card and chooses **Save draft** or **Create and activate**. Your prose and tool calls never provide approval, sponsorship or replacement consent.
 
-Prepare the draft yourself in the main chat. Helpers cannot draft agents. Do not delegate this setup; at most one helper may research a necessary independent source. If authoring is blocked, stop at the first failed prerequisite, say plainly why no draft was prepared, and link to **Configure manually** using the supplied builder URL. Do not claim a tool is unavailable or try repeated helpers.
+Prepare the draft yourself in the main chat. Helpers cannot draft agents. Delegation is disabled during this setup. If authoring is blocked, stop at the first failed prerequisite, say plainly why no draft was prepared, and link to **Configure manually** using the supplied builder URL. Do not claim a tool is unavailable or try repeated helpers.
 
 For a larger request spanning tables, agents, and automation, use Planning in the default chat first. Keep this setup as a deliverable in that same plan; do not replace the plan with a separate agent interview. Planning itself is not a selectable capability for the saved agent.
 
@@ -58,7 +58,7 @@ Agents have no schedules of their own. Each item in `setup.triggers` becomes its
 
 - New agent: pass agent `"new"`. The server assigns a fresh identity.
 - Existing agent: pass agent `{id, savedRevision}` from `agents.read`.
-- In `input`, keep `definition`, `owningTeamId` and `expectedSoulRevision`. Add `setup:{policy,enrollment,scope,limits,taskLimits,slackSender,slackChannels,triggers}` and the context's `expectedPolicyVersion` and `expectedActivationIds`. The full setup uses the same validation and publication path as the manual builder.
+- In `input`, keep `definition`, `owningTeamId` and `expectedSoulRevision`. Add `setup:{policy,enrollment,scope,limits,taskLimits,slackSender,slackChannels,triggers}` and the context's `expectedPolicyVersion`, `expectedActivationIds`, `expectedWorkflowRevision` and `expectedWorkflowGeneration`. Copy all four exactly, including null workflow values for a new agent. Omit unused optional fields rather than sending null. The full setup uses the same validation and publication path as the manual builder.
 - Do not put consent in model input. The human decision carries exact digest/version and explicit sponsorship/replacement choices.
 - If the person wants only a saved definition, historical definition-only input is still supported, but it cannot activate anything.
 
