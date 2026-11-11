@@ -49,6 +49,13 @@ import {
 } from '@tulipfarm/observability';
 import { chatToolCallLimit, chatTitleSchema, shortenTitle } from '@tulipfarm/conversations/contracts';
 import { reviewCardReference, type ReviewCardReference, type ReviewCardState } from '@tulipfarm/conversations/results';
+import {
+  mentionsTable,
+  rowReviewMatches,
+  rowReviewPrefilter,
+  tableCreationRequest as tableRequest,
+  type RowReviewTurn,
+} from './row-review-request.ts';
 import { withoutTrailingControlMarker } from '@tulipfarm/conversations/reply-text';
 import { createChatToolGuard } from './chat-tool-guard.ts';
 import { createFileJobGuard, fileListingEmpty, fileListingFailed, fileListingQuery } from './chat-file-jobs.ts';
@@ -1109,7 +1116,7 @@ export async function inferDecision(
   });
 }
 
-export type ChatTextTurn = { role: 'user' | 'assistant'; text: string };
+export type ChatTextTurn = RowReviewTurn;
 export const chatImageMediaTypes = Object.freeze(['image/png', 'image/jpeg', 'image/webp', 'image/gif'] as const);
 export type ChatImageMediaType = (typeof chatImageMediaTypes)[number];
 /** Image `data` is raw bytes or their base64 encoding. */
@@ -1901,6 +1908,7 @@ const completionCheckSchema = z.strictObject({
     fileSaveRequested: z.boolean().catch(false).optional(),
     claimsSavedFile: z.boolean().catch(false).optional(),
     rowWriteRequested: z.boolean().catch(false).optional(),
+    rowReviewRequested: z.boolean().catch(false).optional(),
     workspaceDirectory: z
       .enum(['not-applicable', 'lookup-required', 'grounded', 'matches-grounded', 'unsupported'])
       .optional(),
@@ -1928,6 +1936,7 @@ Set fileSaveRequested to true only when the human asks for an immediate file cre
 Set claimsSavedFile to true only when the candidate reply claims that this turn saved or created a file, or that its file output is ready. Descriptions of existing files, code that creates files when run, file names or IDs, memory changes and necessary clarification questions are not saved-file claims. A claim requires a successful files.create receipt in this turn; otherwise use continue. A necessary question about a genuine file request is waiting with fileSaveRequested true and claimsSavedFile false.
 tableInventory, when present, is the server's current inventory for whole table names in the latest human message. It establishes existence and readiness, never completed row changes. Treat the latest human message as the request: negation, questions about past actions, hypotheticals, requests to inspect before making changes and deferred actions do not request an immediate write. For an immediate row request, use continue unless a matching write or review receipt exists. Do not accept missing or not-ready claims contradicted by this inventory; require a current table lookup before reporting such a blocker. If distinct table names leave the destination ambiguous, ask which one rather than choosing.
 Set rowWriteRequested to true only when the latest human message requests an immediate row change, not a negation, past-action question, hypothetical, request to inspect first or deferral. It classifies the request, never approves an action. Otherwise set it to false.
+Set rowReviewRequested to true only when the human explicitly requests preparing row changes for review before writing, including a retry asking for the card for their preceding row request. Read-only inspection, negations, hypotheticals, deferred changes, and questions about past actions are false. This classifies intent, never proves a card exists. Reading the table schema needs no extra approval.
 Use completed for a sufficient informational answer or an action result supported by receipts; waiting for a necessary human question or approval; refused for a refusal; blocked for an explicit, accurate account of incomplete work and what stops it or an exhausted budget.
 For a question, use waiting only when required user input stops the requested work and no safe default exists; name the specific missing input in reason. Generic closers such as "Would you like me to try again?", "What else can I help you with?" or "Would you like me to do anything else?" are not required input. Use continue for those when requested work remains incomplete, even if they are the reply's only sentence.
 Use continue when the reply merely promises, narrates, or plans work that remains possible, or claims outcomes unsupported by receipts. A reply that reports a new review card, proposal or proposal version, approval, denial, or created, imported or changed data needs a matching successful receipt among this reply's own tool results; it may restate an earlier outcome only as earlier and only when an earlier receipt in the conversation shows it. Without that receipt use continue, even when the reply asks the person to review or approve. waitingCards, when present, is the server's count of the person's review or approval cards from earlier in this chat that are still undecided: a reply may say such a card is ready or still waiting, and ask the person to approve or dismiss it, without a receipt in this reply, but it may not say this reply made a new one. While one waits, a reply that says the person must approve or dismiss it before more changes to that table can be made states what stops the work. Saying an incomplete action will not be activated does not itself establish a blocker. Asking whether to go ahead with work the person already asked for is not a necessary question, so use continue: a review or approval card is itself the person's confirmation step, and a request to see the review first means create that card.
@@ -2566,7 +2575,40 @@ function cardMisdescribed(candidate: string, cards: readonly HeldBackWrite[], re
 }
 
 const rowRequest =
-  /\b(?:add|insert|append|put|include|create|change|update|edit|set|delete|remove)\b[^.?!]*\b(?:rows?|items?|records?|entr(?:y|ies)|lines?)\b/i;
+  /\b(?:add|insert|append|put|include|create|prepare|draft|propose|generate|change|update|edit|set|delete|remove)\b[^.?!]*\b(?:rows?|items?|records?|entr(?:y|ies)|lines?)\b/i;
+const rowReviewStoppedReply = "I couldn't prepare the review card, so no rows were changed. Ask me to try again.";
+
+function rowReviewReceipt(result: ToolResult, items: readonly LoopItem[]) {
+  if (!madeCard(result)) return false;
+  if (rowWriteName.test(result.name)) return true;
+  if (result.name !== proposeTool) return false;
+  const call = items
+    .flatMap(item => (item.kind === 'model' ? item.calls : []))
+    .reverse()
+    .find(call => call.id === result.id && call.name === proposeTool);
+  const input = z.object({ input: z.string() }).safeParse(call?.input);
+  if (!input.success) return false;
+  try {
+    const proposal = z.object({ plans: z.array(z.object({ kind: z.string() })) }).parse(JSON.parse(input.data.input));
+    return proposal.plans.some(plan => plan.kind === 'records' || plan.kind === 'import');
+  } catch {
+    return false;
+  }
+}
+
+function rowReviewClarification(candidate: string, items: readonly LoopItem[]) {
+  if (!asksAboutTable(candidate) || !/\bwhich\b/i.test(candidate) || tableIdQuestion(candidate)) return false;
+  if (/\b(?:permission|allow|read|inspect|schema)\b/i.test(candidate)) return false;
+  return items.some(
+    item =>
+      item.kind === 'results' &&
+      item.results.some(result => {
+        if (result.error || !tableLookupTools.has(result.name)) return false;
+        const found = z.object({ tables: z.array(z.object({})).min(2) }).safeParse(toolResultValue(result.output));
+        return found.success;
+      }),
+  );
+}
 function namedInventoryTables(request: string, inventory?: WorkspaceInventory) {
   const matches = (inventory?.tables ?? []).flatMap(table =>
     [...request.matchAll(new RegExp(`(?<![\\p{L}\\p{N}_])${escaped(table.name)}(?![\\p{L}\\p{N}_])`, 'giu'))].map(
@@ -2628,7 +2670,6 @@ export function waitingCardStretched(candidate: string, items: readonly LoopItem
 }
 
 const rowWriteName = /^rows_(?:create|update|delete)/;
-const tableRequest = /\b(?:new|create|make|build|set up)\b[^.?!]{0,30}\btables?\b/i;
 /** Whether this reply tried a row change, whatever its result. */
 const rowWriteTried = (items: readonly LoopItem[]) =>
   items.some(item => item.kind === 'results' && item.results.some(result => rowWriteName.test(result.name)));
@@ -2664,7 +2705,10 @@ export function rowRequestSkipped(
 const rowVerbs = [
   { verb: /\b(?:delete|remove)\b/i, tools: ['rows.list', 'rows.delete'] },
   { verb: /\b(?:change|update|edit|set)\b/i, tools: ['rows.list', 'rows.update.batch', 'rows.update'] },
-  { verb: /\b(?:add|insert|append|put|include|create)\b/i, tools: ['rows.create.batch', 'rows.create'] },
+  {
+    verb: /\b(?:add|insert|append|put|include|create|prepare|draft|propose|generate)\b/i,
+    tools: ['rows.create.batch', 'rows.create'],
+  },
 ];
 /**
  * The table tools a row request's next rounds must call, one per round, after its reply made no tool call and was sent
@@ -3514,9 +3558,12 @@ export async function inferWithTools(
   let outputProduced = false;
   const items: LoopItem[] = messages.map(turn => ({ kind: 'turn', turn }));
   const latest = [...messages].reverse().find(turn => turn.role === 'user');
-  const request = latest ? textTurn(latest).text : '';
-  const fileJob = createFileJobGuard(request, tools?.priorFileResults);
-  const fileQuery = fileListingQuery(request);
+  let rowReviewCandidate = rowReviewPrefilter(sourceMessages.map(textTurn));
+  let request = rowReviewCandidate ?? (latest ? textTurn(latest).text : '');
+  let rowReviewRequested = false;
+  const fileRequest = latest ? textTurn(latest).text : '';
+  const fileJob = createFileJobGuard(fileRequest, tools?.priorFileResults);
+  const fileQuery = fileListingQuery(fileRequest);
   const earlier = messages
     .filter(turn => turn !== latest)
     .map(turn => textTurn(turn).text)
@@ -3553,12 +3600,14 @@ export async function inferWithTools(
   const requestedTables = () => namedInventoryTables(latestHuman ? textTurn(latestHuman).text : '', inventory);
   const inventoryCheckNeeded = () => requestedTables().length > 0 && !workToolUsed;
   let inventoryAnswerChecked = false;
+  let rowReviewIntentChecked = !rowReviewCandidate;
   const answerText: ToolInferenceContext['answerText'] =
     invitationLookup(sourceMessages) || !tools?.answerText
       ? undefined
       : update => {
           if (
             !directoryCheckNeeded &&
+            (!update.text || rowReviewIntentChecked) &&
             !chatToolNameMention.test(update.text) &&
             !activeBuiltinSkills.has('agent-authoring') &&
             !(inventoryCheckNeeded() && !inventoryAnswerChecked) &&
@@ -3651,6 +3700,67 @@ export async function inferWithTools(
   const reviewReferences = new Map(
     (tools?.priorReviewCards ?? []).map(reference => [`${reference.kind}:${reference.id}`, reference]),
   );
+  const matchingRowInput = (value: unknown) => {
+    const input = z.object({ tableId: z.string() }).loose().safeParse(value);
+    if (!input.success || !rowReviewMatches(request, input.data)) return false;
+    const inspected = items
+      .flatMap(item => (item.kind === 'results' ? item.results : []))
+      .filter(result => !result.error && result.name === 'schema_inspect')
+      .flatMap(result => {
+        const table = z.object({ id: z.string(), name: z.string() }).safeParse(toolResultValue(result.output));
+        return table.success ? [table.data] : [];
+      });
+    const named = [
+      ...namedInventoryTables(request, inventory),
+      ...inspected.filter(table => mentionsTable(request, table.name)),
+    ];
+    return named.some(table => table.id === input.data.tableId);
+  };
+  const matchingRowReceipt = (result: ToolResult) => {
+    if (!rowReviewReceipt(result, items)) return false;
+    const call = items
+      .flatMap(item => (item.kind === 'model' ? item.calls : []))
+      .reverse()
+      .find(call => call.id === result.id && call.name === result.name);
+    if (!call) return false;
+    if (call.name !== proposeTool) return matchingRowInput(call.input);
+    const input = z.object({ input: z.string() }).safeParse(call.input);
+    if (!input.success) return false;
+    try {
+      const proposal = z
+        .object({
+          plans: z.array(
+            z.object({
+              kind: z.string(),
+              tableId: z.string(),
+              changes: z.array(z.unknown()).optional(),
+            }),
+          ),
+        })
+        .parse(JSON.parse(input.data.input));
+      return proposal.plans.some(
+        plan =>
+          (plan.kind === 'records' || plan.kind === 'import') &&
+          matchingRowInput({ tableId: plan.tableId, ...(plan.changes && { rows: plan.changes }) }),
+      );
+    } catch {
+      return false;
+    }
+  };
+  const resumedRowReceipt = (reference: ReviewCardReference) =>
+    tools?.priorToolResults?.some(result => {
+      const call = z.object({ tool: z.string() }).loose().safeParse(result.call);
+      if (!call.success || !call.data.tool.startsWith('rows.') || !matchingRowInput(call.data)) return false;
+      const output = z.object({ result: z.unknown() }).safeParse(result.output);
+      const saved = reviewCardReference(call.data.tool, output.success ? output.data.result : result.output);
+      return saved?.kind === reference.kind && saved.id === reference.id;
+    });
+  const rowReviewMade = () =>
+    items.some(
+      item =>
+        item.kind === 'results' &&
+        item.results.some(result => result.reviewPending === true && matchingRowReceipt(result)),
+    ) || reviewStates.some(state => state.status === 'pending' && resumedRowReceipt(state.reference));
   let reviewStates: readonly ReviewCardState[] = [];
   const tableReviewReply = async () => {
     for (const item of items)
@@ -3663,7 +3773,20 @@ export async function inferWithTools(
     reviewStates = states;
     const pending = new Map(
       states
-        .filter(state => state.status === 'pending' && state.summary)
+        .filter(
+          state =>
+            state.status === 'pending' &&
+            state.summary &&
+            (!rowReviewRequested ||
+              resumedRowReceipt(state.reference) ||
+              items.some(
+                item =>
+                  item.kind === 'results' &&
+                  item.results.some(
+                    result => result.reviewCard?.id === state.reference.id && matchingRowReceipt(result),
+                  ),
+              )),
+        )
         .map(state => [`${state.reference.kind}:${state.reference.id}`, state.summary!]),
     );
     for (const item of items)
@@ -3715,7 +3838,19 @@ export async function inferWithTools(
   ) => {
     const fileFailure = fileJob.reply();
     if (fileFailure) return completeReply(fileFailure, true);
-    const reviewReply = (await tableReviewReply()) ?? skillReviewReply();
+    const reviewReply = (await tableReviewReply()) ?? (rowReviewRequested ? undefined : skillReviewReply());
+    if (rowReviewRequested && !rowReviewMade() && !rowReviewClarification(text, items)) {
+      const written = writtenRows(items);
+      const held = heldBackWrites(items)[0];
+      return completeReply(
+        held
+          ? [written, heldBackReply(held, request)].filter(Boolean).join(' ')
+          : written
+            ? `${written} ${noCardReply((await tools?.waitingCards?.()) ?? 0)}`
+            : rowReviewStoppedReply,
+        true,
+      );
+    }
     return completeReply(reviewReply ?? text, checked || Boolean(reviewReply), reviewReply ? undefined : layout);
   };
   const listFiles = async (query: string) => {
@@ -4461,6 +4596,16 @@ export async function inferWithTools(
           tools?.projectInstructions === undefined
             ? await observeChatDetail('inventory', async () => tools?.readWorkspaceInventory?.())
             : undefined;
+        if (!rowReviewCandidate) {
+          rowReviewCandidate = rowReviewPrefilter(
+            sourceMessages.map(textTurn),
+            inventory?.tables.map(table => table.name),
+          );
+          if (rowReviewCandidate) {
+            request = rowReviewCandidate;
+            rowReviewIntentChecked = false;
+          }
+        }
         if (
           inventory?.directoryNames &&
           !invitationLookup(sourceMessages) &&
@@ -4848,6 +4993,10 @@ export async function inferWithTools(
         }
       };
       const accept = () => {
+        if (rowReviewCandidate && !rowReviewRequested) {
+          rowReviewIntentChecked = true;
+          preview(candidate);
+        }
         if (inventoryCheckNeeded()) {
           inventoryAnswerChecked = true;
           preview(candidate);
@@ -4902,9 +5051,10 @@ export async function inferWithTools(
         );
         continue;
       }
-      const reviewReply = (await tableReviewReply()) ?? skillReviewReply();
+      const reviewReply = (await tableReviewReply()) ?? (rowReviewRequested ? undefined : skillReviewReply());
       const refusedBatch = refusedSourceBatch(items);
-      if (reviewReply || refusedBatch) {
+      const rowReviewCheckNeeded: boolean = Boolean(rowReviewCandidate) && !rowReviewRequested && !rowReviewMade();
+      if ((!rowReviewCheckNeeded && reviewReply) || refusedBatch) {
         const outcome = [reviewReply, refusedBatch ? outsideContentBatchReply : undefined].filter(Boolean).join('\n\n');
         const rowOutcome =
           refusedBatch || reviewStates.some(state => state.reference.kind === 'row' && state.status === 'pending');
@@ -4976,7 +5126,10 @@ export async function inferWithTools(
             rowRequestSkipped(items, request, rowCards, waitingRows) ??
             inventedFailure(candidate, items, waiting) ??
             wording);
+      let rowReviewMissing = rowReviewRequested && !rowReviewMade() && !rowReviewClarification(candidate, items);
       if (
+        !rowReviewCheckNeeded &&
+        !rowReviewMissing &&
         !unbacked &&
         !writeUnbacked &&
         !idAsked &&
@@ -4994,6 +5147,8 @@ export async function inferWithTools(
         return accept();
       }
       if (
+        !rowReviewCheckNeeded &&
+        !rowReviewMissing &&
         !unbacked &&
         !writeUnbacked &&
         !idAsked &&
@@ -5006,7 +5161,7 @@ export async function inferWithTools(
       }
       const localCorrection = unbacked ?? writeUnbacked ?? idAsked ?? misdescribed;
       let checked: z.infer<typeof completionCheckSchema>['decision'] | undefined =
-        fileCheckNeeded || tableCheckNeeded ? undefined : localCorrection;
+        fileCheckNeeded || tableCheckNeeded || rowReviewCheckNeeded ? undefined : localCorrection;
       const wordingCheck = directoryLeak && localCorrection === wording ? wording : undefined;
       if (!checked || wordingCheck) {
         report('finishing');
@@ -5087,6 +5242,7 @@ export async function inferWithTools(
           }
           const safeUnchecked =
             !directoryLeak &&
+            (!rowReviewCheckNeeded || !localCorrection) &&
             (workToolUsed || !claimsActionOutcome(candidate)) &&
             (!tableCheckNeeded || (!localCorrection && !tableStateUnchecked));
           if (!wordingCheck && directoryCheckNeeded && !directoryExpected && safeUnchecked) {
@@ -5099,7 +5255,10 @@ export async function inferWithTools(
           // A check model that fails must not discard a finished answer; admission, authorization and cancellation still end the turn.
           // An answer that reports an outcome no tool in this reply produced is never sent unchecked.
           if (!wordingCheck && !directoryLookup && safeUnchecked) return accept();
-          checked = wordingCheck ?? (fileCheckNeeded ? localCorrection : undefined) ?? unverifiedOutcome;
+          checked =
+            wordingCheck ??
+            (fileCheckNeeded || rowReviewCheckNeeded ? localCorrection : undefined) ??
+            unverifiedOutcome;
         }
       }
       if (fileCheckNeeded) {
@@ -5128,6 +5287,20 @@ export async function inferWithTools(
         readOnlyFileRecovery ||= !fileSaveRequested && checked.status === 'continue';
         if (localCorrection) checked = { ...checked, ...localCorrection };
       }
+      if (rowReviewCheckNeeded) {
+        rowReviewRequested = checked.rowReviewRequested === true;
+        rowReviewIntentChecked = !rowReviewRequested;
+        if (localCorrection) checked = { ...checked, ...localCorrection };
+      }
+      if (checked.rowReviewRequested === true) rowReviewRequested = true;
+      rowReviewMissing = rowReviewRequested && !rowReviewMade() && !rowReviewClarification(candidate, items);
+      if (rowReviewMissing)
+        checked = {
+          ...checked,
+          status: 'continue',
+          reason:
+            'The person explicitly requested rows for review, but this turn has no saved readable row-review receipt. Inspect the table and prepare the requested rows now. Reading the schema needs no extra approval. An unrelated card cannot replace the row review.',
+        };
       if (tableCheckNeeded) {
         rowWriteRequested = checked.rowWriteRequested === true;
         const correction = localCorrection ?? tableStateUnchecked;
@@ -5216,7 +5389,7 @@ export async function inferWithTools(
       const rowUntried =
         !tableCheckNeeded &&
         (!inventoryRecovery || rowWriteRequested) &&
-        rowRequest.test(request) &&
+        (rowReviewRequested || rowRequest.test(request)) &&
         !tableRequest.test(request) &&
         !priorRowWrite &&
         !rowWriteTried(items);
@@ -5230,13 +5403,29 @@ export async function inferWithTools(
       if (
         rowUntried &&
         !rowToolsForced &&
-        !items.slice(replyStart).some(item => item.kind === 'model' && item.calls.some(call => isWorkTool(call.name)))
+        (rowReviewRequested ||
+          !items
+            .slice(replyStart)
+            .some(item => item.kind === 'model' && item.calls.some(call => isWorkTool(call.name))))
       ) {
         rowToolsForced = true;
-        rowTools = forcedRowTools(
-          request,
-          activeCatalog.tools.map(tool => tool.name),
+        const reads = items.flatMap(item =>
+          item.kind === 'results'
+            ? item.results.filter(result => result.name === 'schema_inspect' || result.name === 'rows_list')
+            : [],
         );
+        const readFailed = reads.some(
+          result =>
+            result.error || !!z.object({ error: z.unknown() }).safeParse(toolResultValue(result.output)).success,
+        );
+        rowTools =
+          rowReviewRequested && readFailed
+            ? []
+            : forcedRowTools(
+                request,
+                activeCatalog.tools.map(tool => tool.name),
+              );
+        if (rowReviewRequested) rowTools = rowTools.filter(name => !reads.some(result => result.name === name));
         log('info', 'activity', 'call_completed', {
           operation: 'chat.row-tools-forced',
           outcome: routeCapabilities(config).toolChoice === 'auto' ? 'asked' : 'forced',
@@ -5246,6 +5435,7 @@ export async function inferWithTools(
       if (completionCorrections++ >= 2) {
         // Corrections are spent, so the reply ends with an answer rather than failing after its tools ran.
         recordChatCompletionCheck('exhausted');
+        if (rowReviewMissing) return finish(rowReviewStoppedReply, true);
         // A row write held back behind a waiting card ends by naming that card's change and the request it did not take.
         const heldWrite = heldBackWrites(items)[0];
         const held =

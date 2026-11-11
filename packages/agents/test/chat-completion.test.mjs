@@ -1380,7 +1380,10 @@ test('a reply that keeps claiming a card no tool made ends with a plain account 
   ];
   const requests = [];
   t.mock.method(globalThis, 'fetch', async (_url, init) => {
-    requests.push(JSON.parse(init.body));
+    const body = JSON.parse(init.body);
+    if (isCompletionRequest(body))
+      return Response.json(selectReply('azure', { ...verdict(), rowReviewRequested: true }));
+    requests.push(body);
     return Response.json(replies.shift());
   });
   const result = await inferWithTools(
@@ -1388,10 +1391,10 @@ test('a reply that keeps claiming a card no tool made ends with a plain account 
     [{ role: 'user', text: 'Create the approval card for all 9 rows.' }],
     () => assert.fail('No tool expected'),
   );
-  assert.equal(result.text, noCardReply());
+  assert.equal(result.text, "I couldn't prepare the review card, so no rows were changed. Ask me to try again.");
   assert.equal(replies.length, 0);
   assert.ok(!requests.some(isCompletionRequest));
-  assert.match(JSON.stringify(requests[1].messages), /no tool call in this reply created one/);
+  assert.match(JSON.stringify(requests[1].messages), /no saved readable row-review receipt/);
   assert.deepEqual(outcomes, ['continue', 'continue', 'continue', 'exhausted']);
 });
 
