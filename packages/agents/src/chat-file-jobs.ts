@@ -7,7 +7,7 @@ export const fileListingEmpty = "I didn't find any files that match your search.
 const saveFailed = "I couldn't save the file. Ask me to try again.";
 const repeatedFailure = 'I stopped because the same file request kept failing.';
 const filePrefilter =
-  /\b(?:file|document|spreadsheet|workbook|report|csv|markdown|xlsx|docx|pptx|sav|export|download)|\S+\.[a-z0-9]+\b/i;
+  /\b(?:file|doc|spreadsheet|workbook|report|csv|markdown|xlsx|pptx|sav|export|download)|\S+\.[a-z0-9]+\b/i;
 // These claims are only a fallback when the structured completion check fails, never save authorization.
 const fileSubject = String.raw`(?:files?|workbooks?|spreadsheets?|documents?|\S+\.(?:md|txt|csv|json|docx|xlsx|pptx))\b`;
 const fileSavedClaim = new RegExp(

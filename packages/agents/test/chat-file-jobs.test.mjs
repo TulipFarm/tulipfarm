@@ -207,41 +207,42 @@ for (const model of models)
         if (scenario.text !== scenario.expected) assert.ok(!previews.includes(scenario.text));
       });
 
-    test(`${title} a requested save can recover without a false success claim`, async t => {
-      const text = 'Report.md is saved in Files.';
-      provider(
-        t,
-        sse,
-        [
-          nativeReply('azure', { text: 'Here is the comparison of the two prices.' }),
-          nativeReply('azure', { calls: [use('files.create', create)] }),
-          nativeReply('azure', { text }),
-        ],
-        false,
-        () => {},
-        body => ({
-          status: JSON.parse(body.messages.at(-1).content).candidate === text ? 'completed' : 'continue',
-          fileSaveRequested: true,
-          claimsSavedFile: JSON.parse(body.messages.at(-1).content).candidate === text,
-        }),
-      );
-      let saves = 0;
-      const result = await inferWithTools(
-        route(model),
-        [{ role: 'user', text: 'Create a spreadsheet comparing the two prices.' }],
-        async call => {
-          assert.equal(call.tool, 'files.create');
-          saves++;
-          return saved;
-        },
-        undefined,
-        false,
-        null,
-        options,
-      );
-      assert.equal(saves, 1);
-      assert.equal(result.text, text);
-    });
+    for (const request of ['Create a spreadsheet comparing the two prices.', 'Create a Word doc.'])
+      test(`${title} a requested save can recover without a false success claim: ${request}`, async t => {
+        const text = 'Report.md is saved in Files.';
+        provider(
+          t,
+          sse,
+          [
+            nativeReply('azure', { text: 'Here is the comparison of the two prices.' }),
+            nativeReply('azure', { calls: [use('files.create', create)] }),
+            nativeReply('azure', { text }),
+          ],
+          false,
+          () => {},
+          body => ({
+            status: JSON.parse(body.messages.at(-1).content).candidate === text ? 'completed' : 'continue',
+            fileSaveRequested: true,
+            claimsSavedFile: JSON.parse(body.messages.at(-1).content).candidate === text,
+          }),
+        );
+        let saves = 0;
+        const result = await inferWithTools(
+          route(model),
+          [{ role: 'user', text: request }],
+          async call => {
+            assert.equal(call.tool, 'files.create');
+            saves++;
+            return saved;
+          },
+          undefined,
+          false,
+          null,
+          options,
+        );
+        assert.equal(saves, 1);
+        assert.equal(result.text, text);
+      });
 
     for (const scenario of [
       {
