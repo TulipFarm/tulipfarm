@@ -114,6 +114,7 @@ test('chat row writes after untrusted content become member-approved review draf
       before = [],
       memory = false,
       invoke,
+      reply = 'Done.',
       chatId = randomUUID(),
       message = 'Summarize the page and keep the result in Notes.',
     } = {},
@@ -125,10 +126,11 @@ test('chat row writes after untrusted content become member-approved review draf
       commandId: randomUUID(),
       parts: [{ kind: 'text', text: message }, ...parts],
     });
-    let output, waitingCards;
+    let output, waitingCards, sourceMessages;
     const executor = createConversationExecutor(
       runtime,
-      async ({ executeTool, readPersonalMemory, waitingCards: countCards }) => {
+      async ({ executeTool, readPersonalMemory, waitingCards: countCards, sourceMessages: history }) => {
+        sourceMessages = history;
         waitingCards = countCards;
         if (memory) assert.notEqual((await readPersonalMemory()).content, '');
         for (const tool of before)
@@ -140,7 +142,7 @@ test('chat row writes after untrusted content become member-approved review draf
           sources,
           call,
         );
-        return { text: 'Done.', sources: [] };
+        return { text: reply, sources: [] };
       },
       undefined,
       undefined,
@@ -151,7 +153,7 @@ test('chat row writes after untrusted content become member-approved review draf
       await executor.process({ workspaceId: w.id, conversationId: chatId, turnId: sent.turnId, generation: 0 }),
       'completed',
     );
-    return { chatId, result: output.result, waitingCards };
+    return { chatId, result: output.result, waitingCards, sourceMessages };
   }
   const decide = (actor, chatId, draft, decision, commandId = randomUUID()) =>
     drafts.decide(w.id, actor.userId, chatId, draft.draftId, { commandId, digest: draft.digest, decision });
@@ -179,6 +181,7 @@ test('chat row writes after untrusted content become member-approved review draf
       labelFieldIds: [note.id],
       fields: [{ id: note.id, label: 'Note', kind: 'text' }],
     });
+
     assert.equal(view.rowCurrent, null);
     const reference = { kind: 'row', id: draft.draftId };
     const cards = createChatTools(runtime);
@@ -285,6 +288,108 @@ test('chat row writes after untrusted content become member-approved review draf
     const readable = await drafts.read(w.id, owner.userId, chatId, result.draftId);
     assert.equal(readable.status, 'pending');
     assert.deepEqual(readable.proposal.input, call);
+  });
+
+  for (const [count, message] of [
+    [1, 'Add 1 row to Notes for review before writing anything.'],
+    [5, 'Add 5 rows to Notes for review before writing anything.'],
+    [1, 'The new Notes entry needs my approval before it is saved.'],
+    [1, 'Let me check the new Notes entry before you save it.'],
+    [5, 'I want a look at those Notes entries before they go in.'],
+  ])
+    await t.test(`an explicit review request for ${count} rows saves a card without writing`, async () => {
+      const before = await live();
+      const call =
+        count === 1
+          ? createCall('Review first')
+          : {
+              tool: 'rows.create.batch',
+              tableId: table.tableId,
+              expectedAppliedRevision: table.revision,
+              rows: Array.from({ length: count }, (_, index) => ({
+                values: { [note.id]: text(`Review ${index + 1}`) },
+              })),
+            };
+      const { chatId, result } = await chatTool(call, [], {
+        message,
+      });
+      assert.equal(result.status, 'review-required', JSON.stringify(result));
+      assert.deepEqual(await live(), before);
+      const readable = await drafts.read(w.id, owner.userId, chatId, result.draftId);
+      assert.equal(readable.status, 'pending');
+      assert.deepEqual(readable.proposal.input, call);
+      const tools = (await f.store.history(w.id, owner.userId, chatId)).messages.flatMap(
+        message => message.tools ?? [],
+      );
+      assert.equal(tools.find(tool => tool.tool === call.tool)?.rowDraftId, result.draftId);
+    });
+
+  await t.test('an explicit review-card retry inherits the human row request without a direct write', async () => {
+    const before = await live();
+    const { chatId } = await chatTool({ tool: 'schema.inspect', tableId: table.tableId }, [], {
+      message: 'Add one row to Notes for review before writing anything.',
+      reply: 'Your review card for the row is ready below.',
+    });
+    const call = createCall('Review retry');
+    const { result } = await chatTool(call, [], { chatId, message: 'Please create the review card.' });
+    assert.equal(result.status, 'review-required');
+    assert.deepEqual(await live(), before);
+    const readable = await drafts.read(w.id, owner.userId, chatId, result.draftId);
+    assert.equal(readable.status, 'pending');
+    assert.deepEqual(readable.proposal.input, call);
+  });
+
+  for (const count of [1, 8])
+    for (const message of ['Where is the card?', 'Show me the card.'])
+      await t.test(`a plain card retry after an unbacked ${count}-row proposal writes nothing`, async () => {
+        const before = await live();
+        const { chatId } = await chatTool({ tool: 'schema.inspect', tableId: table.tableId }, [], {
+          message: `Propose ${count} ${count === 1 ? 'row' : 'rows'} for Notes for my review.`,
+          reply: 'Your review card for the rows is ready below.',
+        });
+        const call =
+          count === 1
+            ? createCall('Retry')
+            : {
+                tool: 'rows.create.batch',
+                tableId: table.tableId,
+                expectedAppliedRevision: table.revision,
+                rows: Array.from({ length: count }, (_, index) => ({
+                  values: { [note.id]: text(`Retry ${index + 1}`) },
+                })),
+              };
+        const { result } = await chatTool(call, [], { chatId, message });
+        assert.equal(result.status, 'review-required', JSON.stringify(result));
+        assert.deepEqual(await live(), before);
+        const readable = await drafts.read(w.id, owner.userId, chatId, result.draftId);
+        assert.equal(readable.status, 'pending');
+        assert.deepEqual(readable.proposal.input, call);
+      });
+
+  await t.test('a saved row receipt stays attached to its assistant turn, not an earlier claim', async () => {
+    const { chatId, result } = await chatTool(createCall('Saved review'), [], {
+      message: 'Propose 1 row for Notes for my review.',
+      reply: 'Your review card for the row is ready below.',
+    });
+    const { sourceMessages } = await chatTool({ tool: 'schema.inspect', tableId: table.tableId }, [], {
+      chatId,
+      message: 'Where is the card?',
+    });
+    assert.deepEqual(sourceMessages.find(turn => turn.role === 'assistant').rowReviews, [
+      {
+        table: 'Notes',
+        input: createCall('Saved review'),
+      },
+    ]);
+    await decide(owner, chatId, result, 'dismiss');
+    const before = await live();
+    const next = await chatTool(createCall('Direct after dismissal'), [], {
+      chatId,
+      message: 'Add a row to Notes.',
+    });
+    assert.ok(next.result.id, JSON.stringify(next.result));
+    assert.equal(next.result.draftId, undefined);
+    assert.deepEqual(await live(), [...before, next.result.id].sort());
   });
 
   await t.test('archived row reviews retain only currently readable table labels and remain unapprovable', async () => {

@@ -1,6 +1,74 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { earlierRowWrites, namesTable, waitingCardChange } from '../src/chat-row-guard.ts';
+import { rowReviewPrefilter } from '../src/row-review-request.ts';
+
+test('row review prefilter needs row context, including a known table name', () => {
+  for (const text of ['Review my quarterly plan.', 'Draft an email.', 'Look up the weather.', 'Check my calendar.'])
+    assert.equal(rowReviewPrefilter([{ role: 'user', text }]), undefined);
+  for (const text of ['Let me review Contacts first.', 'Draft an entry.', 'Check before you insert these.'])
+    assert.equal(rowReviewPrefilter([{ role: 'user', text }], ['Contacts']), text);
+});
+
+test('only the immediately preceding unbacked assistant proposal continues a row review', () => {
+  const request = { role: 'user', text: 'Propose 1 row for Notes for my review.' };
+  const claim = { role: 'assistant', text: 'Your review card for the row is ready below.' };
+  const retry = { role: 'user', text: 'Where is the card?' };
+  assert.equal(rowReviewPrefilter([request, claim, retry]), `${request.text}\n${retry.text}`);
+  assert.equal(
+    rowReviewPrefilter([
+      request,
+      claim,
+      retry,
+      { role: 'assistant', text: 'I could not prepare the review card.' },
+      { role: 'user', text: 'Tell me the time.' },
+    ]),
+    undefined,
+  );
+  assert.equal(
+    rowReviewPrefilter([request, { role: 'assistant', text: 'May I prepare the review card?' }, retry]),
+    undefined,
+  );
+  assert.equal(
+    rowReviewPrefilter([
+      request,
+      { role: 'assistant', text: 'Done.' },
+      { role: 'user', text: 'Please create the review card.' },
+    ]),
+    undefined,
+  );
+  assert.equal(
+    rowReviewPrefilter([
+      request,
+      {
+        ...claim,
+        rowReviews: [{ table: 'Notes', input: { tool: 'rows.create' } }],
+      },
+      retry,
+    ]),
+    undefined,
+  );
+  assert.ok(
+    rowReviewPrefilter([
+      request,
+      {
+        ...claim,
+        rowReviews: [{ table: 'Tasks', input: { tool: 'rows.create' } }],
+      },
+      retry,
+    ]),
+  );
+  assert.ok(
+    rowReviewPrefilter([
+      request,
+      {
+        ...claim,
+        rowReviews: [{ table: 'Notes', input: { rows: [{}, {}] } }],
+      },
+      retry,
+    ]),
+  );
+});
 
 test('a chat names a table by its title, ignoring case, punctuation and a plural s', () => {
   assert.equal(namesTable(['Add these rows to qa-rv3-mig.'], 'qa-rv3-mig'), true);
