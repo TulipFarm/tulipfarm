@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { canonicalJson } from '@tulipfarm/tables/canonical';
-import { API_CALL_LIMITS } from '@tulipfarm/api-calls/contracts';
+import { createApiCallGuard } from './api-call-guard.ts';
 import { readOnlyCall, type FrameworkCall } from './tools.ts';
 
 // These reads are serialized by the dispatcher, but can still be refreshed safely.
@@ -29,30 +29,20 @@ export function createChatToolGuard(
     }),
   );
   const reads = new Set<string>();
-  const refused = new Set<string>();
-  const failures = new Map<string, number>();
-  let apiCalls = priorCalls.filter(call => z.object({ tool: z.literal('api.request') }).safeParse(call).success).length;
-  const recordFailure = (call: { tool: string }, value: unknown) => {
-    if (call.tool !== 'api.request') return false;
-    const failure = z.object({ status: z.literal('failed'), code: z.string() }).safeParse(value);
-    if (!failure.success) return false;
-    if (failure.data.code === 'call-limit') apiCalls = API_CALL_LIMITS.callsPerScope;
-    const key = `${call.tool}:${failure.data.code}`;
-    failures.set(key, (failures.get(key) ?? 0) + 1);
-    if (failure.data.code === 'address-denied' || failure.data.code === 'own-service') refused.add(fingerprint(call));
-    return true;
-  };
-  for (const { call, output } of priorResults) {
-    const parsed = z.object({ tool: z.string() }).passthrough().safeParse(call);
-    if (parsed.success) recordFailure(parsed.data, output);
-  }
+  const api = createApiCallGuard(priorCalls, priorResults);
   let idleRounds = 0;
   return {
     get apiLimitReached() {
-      return apiCalls >= API_CALL_LIMITS.callsPerScope;
+      return api.limitReached;
     },
     get apiFailuresSpent() {
-      return [...failures.values()].some(count => count >= 3);
+      return api.failuresSpent;
+    },
+    get apiStoppingReply() {
+      return api.stoppingReply;
+    },
+    refused(call: FrameworkCall) {
+      return api.refused(call);
     },
     get stalled() {
       return idleRounds >= 3;
@@ -64,16 +54,16 @@ export function createChatToolGuard(
       idleRounds = 0;
     },
     duplicate(call: FrameworkCall) {
-      return refused.has(fingerprint(call)) || (!repeatable(call) && writes.has(fingerprint(call)));
+      return api.refused(call) || (!repeatable(call) && writes.has(fingerprint(call)));
     },
     record(call: FrameworkCall, output: string) {
-      if (call.tool === 'api.request') apiCalls++;
       let failed = false;
-      try {
-        failed = recordFailure(call, JSON.parse(output.slice(output.indexOf('{'))));
-      } catch {
-        /* A non-JSON result still participates in the progress guard. */
-      }
+      if (call.tool === 'api.request')
+        try {
+          failed = api.record(call, JSON.parse(output.slice(output.indexOf('{'))));
+        } catch {
+          api.record(call, undefined);
+        }
       if (failed) {
         if (!repeatable(call)) writes.add(fingerprint(call));
         return;

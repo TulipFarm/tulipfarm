@@ -21,6 +21,8 @@ const failedApiReply =
   "I couldn't finish this request because the API calls kept failing, so I stopped instead of repeating them. Ask me to try a different way.";
 const apiLimitReply =
   'I stopped after 50 API calls, the limit for one request. Some work may not be finished. Ask me to continue.';
+const refusedApiReply =
+  'Nothing was sent. This same call was already refused. Use a different allowed address or the built-in tools instead.';
 
 for (const model of ['grok-4.3', 'Kimi-K2.6', 'DeepSeek-V4-Pro'])
   for (const streaming of [false, true])
@@ -45,7 +47,7 @@ for (const model of ['grok-4.3', 'Kimi-K2.6', 'DeepSeek-V4-Pro'])
             return ownServiceRefusal;
           },
         );
-        assert.equal(result.text, failedApiReply);
+        assert.equal(result.text, repeated ? refusedApiReply : failedApiReply);
         assert.equal(calls, repeated ? 1 : 3);
       });
 
@@ -91,7 +93,76 @@ test('refusal counts and denied call fingerprints survive an automatic retry', a
     },
   );
   assert.equal(calls, 0);
-  assert.equal(result.text, failedApiReply);
+  assert.equal(result.text, refusedApiReply);
+});
+
+test('successful API pagination resets earlier timeout failures', async t => {
+  let page = 0,
+    calls = 0;
+  const timedOut = new Set();
+  t.mock.method(globalThis, 'fetch', async (_url, init) => {
+    const body = JSON.parse(init.body);
+    if (isCompletionRequest(body)) return Response.json(completionReply('anthropic'));
+    assert.ok(calls <= 23, 'three isolated timeouts may each recover');
+    return Response.json(
+      nativeReply('anthropic', page === 20 ? { text: 'Read all 20 pages.' } : { calls: [useCall(apiCall(page))] }),
+    );
+  });
+  const result = await inferWithTools(nativeRoutes.anthropic, [], async () => {
+    calls++;
+    if ([3, 9, 15].includes(page) && !timedOut.has(page)) {
+      timedOut.add(page);
+      return { status: 'failed', code: 'timeout', message: 'No complete response.' };
+    }
+    return { status: 'sent', response: { status: 200, page: page++ } };
+  });
+  assert.equal(calls, 23);
+  assert.equal(result.text, 'Read all 20 pages.');
+});
+
+test('successful external reads do not reopen the own-address refusal allowance', t => {
+  const previous = process.env.WEB_ORIGIN;
+  process.env.WEB_ORIGIN = 'https://app.example.com';
+  t.after(() => {
+    if (previous === undefined) delete process.env.WEB_ORIGIN;
+    else process.env.WEB_ORIGIN = previous;
+  });
+  const guard = createChatToolGuard();
+  for (let i = 0; i < 3; i++) {
+    guard.record(apiCall(i), JSON.stringify(ownServiceRefusal));
+    if (i < 2)
+      guard.record(
+        { tool: 'api.request', method: 'GET', url: `https://external.test/page/${i}` },
+        JSON.stringify({ status: 'sent', response: { status: 200 } }),
+      );
+  }
+  assert.equal(guard.apiFailuresSpent, true);
+});
+
+test('a successfully sent API change gets a duplicate receipt, never a failure reply', async t => {
+  const call = { ...apiCall(0), method: 'POST' };
+  let requests = 0;
+  t.mock.method(globalThis, 'fetch', async (_url, init) => {
+    const body = JSON.parse(init.body);
+    if (isCompletionRequest(body)) return Response.json(completionReply('anthropic'));
+    if (++requests === 1) return Response.json(nativeReply('anthropic', { calls: [useCall(call)] }));
+    assert.match(toolResults('anthropic', body).at(-1).output, /already has a receipt/);
+    return Response.json(nativeReply('anthropic', { text: 'The earlier request was sent once.' }));
+  });
+  const result = await inferWithTools(
+    nativeRoutes.anthropic,
+    [],
+    () => assert.fail('A sent change must not be repeated'),
+    undefined,
+    false,
+    null,
+    {
+      priorCalls: 1,
+      priorToolCalls: [call],
+      priorToolResults: [{ call, output: { status: 'sent', response: { status: 201 } } }],
+    },
+  );
+  assert.equal(result.text, 'The earlier request was sent once.');
 });
 
 test('a batch stops after three same-code API failures even when every address differs', async t => {

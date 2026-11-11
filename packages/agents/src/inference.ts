@@ -47,6 +47,7 @@ import { chatToolCallLimit, chatTitleSchema, shortenTitle } from '@tulipfarm/con
 import { reviewCardReference, type ReviewCardReference, type ReviewCardState } from '@tulipfarm/conversations/results';
 import { withoutTrailingControlMarker } from '@tulipfarm/conversations/reply-text';
 import { createChatToolGuard } from './chat-tool-guard.ts';
+import { apiRefusedReply } from './api-call-guard.ts';
 import {
   agentModelInputSchema,
   modelDecisionSchema,
@@ -1858,10 +1859,6 @@ const notRun =
   'Not run because another call in the same response was invalid. Request it again if it is still necessary.';
 const layoutFailedReply = 'The answer could not be laid out. Ask again to see it.';
 const toolLimitReply = 'The tool limit was reached. Review the completed actions before asking me to continue.';
-const apiLimitReply =
-  'I stopped after 50 API calls, the limit for one request. Some work may not be finished. Ask me to continue.';
-const apiFailureReply =
-  "I couldn't finish this request because the API calls kept failing, so I stopped instead of repeating them. Ask me to try a different way.";
 const toolRejectedReply =
   "I stopped after three tries because I couldn't make a valid change, so nothing more was changed. Check anything I already finished, then ask again and name the table or fields if you can.";
 const toolLoopReply =
@@ -4057,7 +4054,7 @@ export async function inferWithTools(
       outcome: summarised ? 'summarised' : 'stubbed',
     });
   };
-  if (!guard.apiLimitReached && !guard.apiFailuresSpent && tools?.priorReviewCards?.length && tools.reviewCards) {
+  if (!guard.apiStoppingReply && tools?.priorReviewCards?.length && tools.reviewCards) {
     await tableReviewReply();
     items.push({
       kind: 'turn',
@@ -4114,9 +4111,9 @@ export async function inferWithTools(
     return true;
   };
   for (let step = 0; ; step++) {
-    if (apiStopped || guard.apiFailuresSpent || guard.apiLimitReached) {
+    if (apiStopped || guard.apiStoppingReply) {
       toolBudgetSpent(guard.apiLimitReached ? 'tool-limit' : 'tool-rejections');
-      return completeReply(guard.apiLimitReached ? apiLimitReply : apiFailureReply, true);
+      return completeReply(apiStopped ? apiRefusedReply : guard.apiStoppingReply!, true);
     }
     const finalizing = calls >= chatToolCallLimit || guard.stalled || rejectionsSpent;
     let authoringTool: string | undefined;
@@ -5036,7 +5033,7 @@ export async function inferWithTools(
     }
     const [only] = valid;
     if (only && valid.length === 1 && guard.duplicate(only.call)) {
-      if (only.call.tool === 'api.request') {
+      if (only.call.tool === 'api.request' && guard.refused(only.call)) {
         apiStopped = true;
         continue;
       }
@@ -5116,9 +5113,19 @@ export async function inferWithTools(
     if (valid.some(entry => entry.call.tool === 'api.request')) {
       for (const entry of valid) {
         if (guard.apiLimitReached || guard.apiFailuresSpent) break;
-        if (entry.call.tool === 'api.request' && guard.duplicate(entry.call)) {
+        if (entry.call.tool === 'api.request' && guard.refused(entry.call)) {
           apiStopped = true;
           break;
+        }
+        if (guard.duplicate(entry.call)) {
+          outputs.push(
+            result(
+              entry.native,
+              'Not run. This exact action already has a receipt in this turn. Use its existing result or a read-only status tool. A receipt is not proof of success; do not repeat a pending, failed, or uncertain action.',
+              true,
+            ),
+          );
+          continue;
         }
         const { value, shown } = toolResultImages(
           await execute(entry.call, entry.activity, entry === narrated ? narration : undefined),
