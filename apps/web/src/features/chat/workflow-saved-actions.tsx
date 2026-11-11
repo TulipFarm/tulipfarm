@@ -5,7 +5,7 @@ import type { DraftOutcome } from '@tulipfarm/agents/draft-contracts';
 import { workflowSchema } from '@tulipfarm/workflows/contracts';
 import { workflowRequest, WorkflowRequestError } from '@/features/workflows/api';
 import { useWorkflows, useWorkflowChanges } from '@/features/workflows/queries';
-import { activationFailureMessage, workflowLiveMessage } from '@/features/workflows/activation-feedback';
+import { activationFailureMessage } from '@/features/workflows/activation-feedback';
 import { workspaceRoute } from '@/router';
 
 export function WorkflowSavedActions({
@@ -15,7 +15,8 @@ export function WorkflowSavedActions({
 }: {
   outcome: Extract<DraftOutcome, { kind: 'workflow' }>;
   activateOnSave: boolean;
-  onActive: (active: boolean) => void;
+  /** Reports whether the saved revision is active and, once this card activates it, its next run. */
+  onActive: (active: boolean, nextRunAt?: string | null) => void;
 }) {
   const { workspace } = workspaceRoute.useRouteContext();
   const read = useWorkflows(workspace.id);
@@ -23,8 +24,7 @@ export function WorkflowSavedActions({
   const workflow = read.state.kind === 'ready' ? read.state.data.find(item => item.id === outcome.workflowId) : null;
   const [busy, setBusy] = useState(false),
     [automatic, setAutomatic] = useState(false),
-    [error, setError] = useState(''),
-    [message, setMessage] = useState('');
+    [error, setError] = useState('');
   const attempted = useRef(false);
   const command = useRef<{ commandId: string; expectedGeneration: number; revision: string; enabled: true } | null>(
     null,
@@ -37,7 +37,7 @@ export function WorkflowSavedActions({
         ? 'Your access changed. Open the workflow to check your access.'
         : "TulipFarm couldn't confirm whether the workflow is active. Open the workflow to check."
     : workflow.revision !== outcome.revision
-      ? 'A newer revision of this workflow was saved. Open the workflow to review it before activating.'
+      ? 'A newer version of this workflow was saved. Open it to review before activating.'
       : !workflow.capabilities.manage
         ? 'Workflow saved. Ask a workflow manager to activate it.'
         : null;
@@ -62,8 +62,7 @@ export function WorkflowSavedActions({
         ),
       );
       await changes.saved(workflow.id);
-      onActive(true);
-      setMessage(workflowLiveMessage(result));
+      onActive(true, result.nextRunAt);
       command.current = null;
     } catch (failure) {
       setError(activationFailureMessage(failure, workflow, 'card'));
@@ -131,11 +130,6 @@ export function WorkflowSavedActions({
           </Button>
         )}
       </div>
-      {message && (
-        <p role="status" className="text-sm">
-          {message}
-        </p>
-      )}
       {error && (
         <p role="status" className="text-sm text-destructive">
           {error}

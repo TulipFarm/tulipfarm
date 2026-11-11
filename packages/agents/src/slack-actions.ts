@@ -1101,9 +1101,9 @@ export function createSlackActions(options: Options) {
           matches,
           instruction:
             found.status === 'ambiguous'
-              ? 'Ask which channel the requester means.'
+              ? 'Ask which channel the requester means: offer the matching channels as present.choice options, at most four, and wait. Never choose one or drop the Slack action.'
               : found.status === 'not-found'
-                ? 'No visible Slack channel matched. Check the name and your channel access.'
+                ? 'No visible Slack channel matched. Ask the requester for the exact channel name, and wait. Never drop the Slack action.'
                 : matches[0]?.destinationId
                   ? 'Use destinationId to send.'
                   : 'This channel is disabled for sending. Ask a workspace admin to re-enable it.',

@@ -592,10 +592,7 @@ test('agent flows resolve permitted names without changing commands or approvals
       agentDelay = width === 1440 ? 1000 : 0;
       await page.goto(`${origin}/agent-proof/chat/${chatId}`);
       const review = page.getByRole('region', { name: 'Review workflow draft', exact: true });
-      await review
-        .getByRole('region', { name: 'Workflow: View workflow draft', exact: true })
-        .getByRole('button', { name: 'View workflow', exact: true })
-        .click();
+      await review.getByRole('button', { name: 'View diagram', exact: true }).click();
       await page.getByRole('region', { name: 'Canvas', exact: true }).waitFor();
       const workflow = page.getByRole('region', { name: 'Review customers workflow', exact: true });
       if (width === 1440) await workflow.getByText('Loading connected names...', { exact: false }).waitFor();

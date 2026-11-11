@@ -2,7 +2,6 @@ import { createHash } from 'node:crypto';
 import { CronExpressionParser } from 'cron-parser';
 import { AccessDenied, type HumanActor } from '@tulipfarm/access';
 import { createWorkflows, WorkflowConflict, workflowCodeStepsEnabled } from '@tulipfarm/workflows';
-import { slackTextFromUnverifiedSource } from '@tulipfarm/workflows/contracts';
 import type { z } from 'zod';
 import type {
   Definition,
@@ -168,16 +167,6 @@ export function workflowDefinitionProblem(
       error: 'code-steps-unavailable',
       instruction:
         'No execution backend is configured, so code steps cannot run. Draft the workflow without code steps, and tell the human why.',
-    };
-  if (
-    definition.steps.some(
-      step => step.kind === 'slack-message' && slackTextFromUnverifiedSource(definition.steps, step.text),
-    )
-  )
-    return {
-      error: 'slack-text-source-unsupported',
-      instruction:
-        'Slack message text cannot come from an agent or HTTP step, including through a transform or code step, because such a message is refused when the run sends it. Use literal text, run input, table step output, or a template of them, and tell the human what is not possible.',
     };
   for (const trigger of definition.triggers) {
     try {

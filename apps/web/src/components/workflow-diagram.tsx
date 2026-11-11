@@ -29,6 +29,7 @@ import { Users } from 'reicon-react/icons/Users';
 import { Badge } from '@tulipfarm/sprout/badge';
 import { BrandIcon, type Brand } from '@tulipfarm/sprout/brand-icon';
 import { MonsterAvatar } from '@tulipfarm/sprout/monster-avatar';
+import { LanguageLogo, type LogoLanguage } from './language-logo';
 
 export type WorkflowNodeKind =
   | 'trigger'
@@ -55,7 +56,10 @@ export type WorkflowStepState =
   | 'failed'
   | 'unknown'
   | 'withheld';
-type WorkflowIdentity = { kind: 'app'; brand: Brand } | { kind: 'agent'; agentId: string; name: string };
+type WorkflowIdentity =
+  | { kind: 'app'; brand: Brand }
+  | { kind: 'agent'; agentId: string; name: string }
+  | { kind: 'language'; language: LogoLanguage };
 export type WorkflowDiagramNode = {
   id: string;
   kind: WorkflowNodeKind;
@@ -154,6 +158,12 @@ export function WorkflowStepIcon({
         <BrandIcon brand={identity.brand} size="glyph" />
       </span>
     );
+  if (identity?.kind === 'language')
+    return (
+      <span className="workflow-step-identity" aria-hidden="true">
+        <LanguageLogo language={identity.language} />
+      </span>
+    );
   const Icon = icons[kind];
   return (
     <span className="workflow-step-icon" data-kind={kind} aria-hidden="true">
@@ -195,6 +205,23 @@ export function WorkflowStepList({
               <Badge variant={badges[step.state]}>{workflowStepLabels[step.state]}</Badge>
             )}
           </button>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+/** A read-only outline of a workflow, from its trigger to its last step, for small spaces such as a chat card. */
+export function WorkflowStepOutline({ nodes }: { nodes: readonly WorkflowDiagramNode[] }) {
+  return (
+    <ol className="workflow-step-outline" aria-label="Workflow steps">
+      {nodes.map(step => (
+        <li key={step.id}>
+          <WorkflowStepIcon kind={step.kind} identity={step.identity} />
+          <span className="workflow-step-copy">
+            <span className="workflow-step-row-title">{step.title}</span>
+            <span className="workflow-step-row-summary">{step.summary}</span>
+          </span>
         </li>
       ))}
     </ol>

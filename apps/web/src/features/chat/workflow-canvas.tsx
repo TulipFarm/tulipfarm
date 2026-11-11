@@ -188,14 +188,24 @@ export function WorkflowCanvasButton({
   reference,
   name = 'View workflow',
   status,
+  compact = false,
 }: {
   workspaceId: string;
   reference: WorkflowReference;
   name?: string;
   status?: string;
+  /** A plain button for cards that already show the steps. */
+  compact?: boolean;
 }) {
   const { show } = useCanvas();
   const item = workflowCanvasItem(workspaceId, reference);
+  if (compact)
+    return (
+      <Button size="sm" variant="outline" onClick={() => show(item)}>
+        <BranchDown size={16} aria-hidden="true" />
+        {name}
+      </Button>
+    );
   return (
     <div className="w-full">
       <ResultCard

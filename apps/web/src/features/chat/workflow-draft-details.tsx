@@ -185,13 +185,11 @@ export function workflowChange(proposal: WorkflowProposal) {
   if (proposal.kind === 'workflow-activation')
     return proposal.input.enabled ? 'Activates the current revision' : 'Disables the workflow';
   const saved =
-    proposal.input.expectedRevision === null
-      ? 'Creates a new workflow'
-      : 'Saves a new revision of an existing workflow';
+    proposal.input.expectedRevision === null ? 'Creates a new workflow' : 'Saves a new version of this workflow';
   if (proposal.input.activate || handStartedDraft(proposal)) return `${saved} and activates it`;
   return proposal.input.expectedRevision === null
     ? `${saved}. It stays inactive.`
-    : `${saved}. The active revision does not change.`;
+    : `${saved}. The live version doesn’t change.`;
 }
 
 function describeTrigger(trigger: Trigger, recordSource: RecordSource, rowSource: RowSource, github: GitHubNames) {
