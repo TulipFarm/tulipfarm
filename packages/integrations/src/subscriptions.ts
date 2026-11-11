@@ -32,8 +32,13 @@ export type SubscriptionGrant = z.infer<typeof subscriptionGrantSchema>;
 export type SubscriptionCandidate = {
   connectionId: string;
   ownerMembershipId: string;
+  /** The plan's models the owner left on; empty when the provider did not list them. */
   models: readonly string[];
+  /** Models the owner turned off. They are skipped even when `models` is empty. */
+  disabled: readonly string[];
 };
+
+export type SubscriptionModel = { slug: string; label: string };
 
 export type SharedSubscription = {
   connectionId: string;
@@ -41,6 +46,12 @@ export type SharedSubscription = {
   ownerMembershipId: string;
   account: string | null;
   state: 'connected' | 'plan-disabled' | 'reconnect-required' | 'signed-out';
+  /** The caller owns it and may turn its models on or off. */
+  mine: boolean;
+  /** The models the provider lists for the plan. */
+  models: SubscriptionModel[];
+  /** Model slugs the owner turned off, for everyone who uses the plan. */
+  disabledModels: string[];
   /** The caller owns it, administers the workspace, or holds a manage grant. */
   canShare: boolean;
   /** Present only when `canShare`. */
@@ -48,7 +59,7 @@ export type SharedSubscription = {
 };
 
 export class SubscriptionError extends Error {
-  constructor(readonly code: 'not-found' | 'not-connected' | 'invalid-grant') {
+  constructor(readonly code: 'not-found' | 'not-connected' | 'invalid-grant' | 'invalid-model') {
     super(`subscription-${code}`);
     this.name = 'SubscriptionError';
   }
@@ -58,16 +69,25 @@ type Runtime = Pick<ReturnType<typeof createWorkspaceRuntime>, 'transaction'>;
 const uuid = z.uuid();
 const defaultCooldownMs = 15 * 60_000;
 const maxCooldownMs = 24 * 60 * 60_000;
-const storedModels = z.array(z.object({ slug: z.string() }).loose()).max(200);
-const candidateRow = z.object({ id: z.uuid(), owner_membership_id: z.uuid(), models: z.unknown() });
+const storedModels = z.array(z.object({ slug: z.string(), label: z.string() }).loose()).max(200);
+const candidateRow = z.object({
+  id: z.uuid(),
+  owner_membership_id: z.uuid(),
+  models: z.unknown(),
+  disabled_models: z.array(z.string()),
+});
 const connectionRow = z.object({
   id: z.uuid(),
   provider: z.enum(subscriptionProviders),
   owner_membership_id: z.uuid(),
   email: z.string().nullable(),
   state: z.enum(['connected', 'plan-disabled', 'reconnect-required', 'signed-out']),
+  models: z.unknown(),
+  disabled_models: z.array(z.string()),
+  mine: z.boolean(),
   manage: z.boolean(),
 });
+const slugSchema = z.string().min(1).max(200);
 const grantRow = z.object({
   connection_id: z.uuid(),
   membership_id: z.uuid().nullable(),
@@ -129,7 +149,7 @@ export function createSubscriptions(options: { runtime: Runtime }) {
   /** Connected plans of `provider` that `caller` may use, in the order they are tried. */
   async function eligibleIn(tx: AuthorizationTransaction, provider: SubscriptionProvider, caller: string | null) {
     const rows = await tx.client.query(
-      `SELECT c.id, c.owner_membership_id, c.models, ${rankSql(tx)} AS rank
+      `SELECT c.id, c.owner_membership_id, c.models, c.disabled_models, ${rankSql(tx)} AS rank
          FROM ${connections(tx)} c
          JOIN ${memberships(tx)} m ON m.id = c.owner_membership_id AND m.removed_at IS NULL
          LEFT JOIN ${grants(tx)} g ON g.connection_id = c.id
@@ -140,20 +160,28 @@ export function createSubscriptions(options: { runtime: Runtime }) {
         ORDER BY rank, c.last_used_at NULLS FIRST, c.id`,
       [provider, caller === null ? null : uuid.parse(caller)],
     );
-    return rows.rows.map(raw => {
+    return rows.rows.flatMap(raw => {
       const row = candidateRow.parse(raw);
-      return {
-        connectionId: row.id,
-        ownerMembershipId: row.owner_membership_id,
-        models: (storedModels.safeParse(row.models).data ?? []).map(model => model.slug),
-      } satisfies SubscriptionCandidate;
+      const listed = (storedModels.safeParse(row.models).data ?? []).map(model => model.slug);
+      const models = listed.filter(slug => !row.disabled_models.includes(slug));
+      // A plan whose owner turned every listed model off is not used at all.
+      if (listed.length && !models.length) return [];
+      return [
+        {
+          connectionId: row.id,
+          ownerMembershipId: row.owner_membership_id,
+          models,
+          disabled: row.disabled_models,
+        } satisfies SubscriptionCandidate,
+      ];
     });
   }
 
   /** The connections visible to the actor: their own, and every one shared with them, their teams or the workspace. */
   async function visible(tx: AuthorizationTransaction, actor: HumanActor, admin: boolean) {
     const rows = await tx.client.query(
-      `SELECT c.id, c.provider, c.owner_membership_id, c.email, c.state,
+      `SELECT c.id, c.provider, c.owner_membership_id, c.email, c.state, c.models, c.disabled_models,
+              c.owner_membership_id = $1::uuid AS mine,
               (c.owner_membership_id = $1::uuid OR $2::boolean
                 OR bool_or(g.role = 'manage' AND g.membership_id = $1::uuid)) AS manage
          FROM ${connections(tx)} c
@@ -225,6 +253,15 @@ export function createSubscriptions(options: { runtime: Runtime }) {
           ownerMembershipId: row.owner_membership_id,
           account: row.email,
           state: row.state,
+          mine: row.mine,
+          models:
+            row.state === 'signed-out'
+              ? []
+              : (storedModels.safeParse(row.models).data ?? []).map(model => ({
+                  slug: model.slug,
+                  label: model.label,
+                })),
+          disabledModels: row.disabled_models,
           canShare: row.manage,
           grants: row.manage ? (shared.get(row.id) ?? []) : null,
         }));
@@ -241,6 +278,24 @@ export function createSubscriptions(options: { runtime: Runtime }) {
         if (error instanceof AccessDenied) return [];
         throw error;
       }
+    },
+
+    /** Sets which of the owner's plan models are off, for the owner and everyone it is shared with. Owner only. */
+    async setDisabledModels(workspaceId: string, userId: string, connectionId: string, disabled: readonly string[]) {
+      const parsed = [...new Set(z.array(slugSchema).max(200).parse(disabled))];
+      return authorized(workspaceId, userId, 'write', async (tx, actor, admin) => {
+        const row = (await visible(tx, actor, admin)).find(item => item.id === uuid.parse(connectionId));
+        if (!row) throw new SubscriptionError('not-found');
+        if (!row.mine) throw new AccessDenied();
+        if (row.state === 'signed-out') throw new SubscriptionError('not-connected');
+        const listed = new Set((storedModels.safeParse(row.models).data ?? []).map(model => model.slug));
+        if (parsed.some(slug => !listed.has(slug))) throw new SubscriptionError('invalid-model');
+        await tx.client.query(
+          `UPDATE ${connections(tx)} SET disabled_models = $2::text[], updated_at = clock_timestamp() WHERE id = $1`,
+          [row.id, parsed],
+        );
+        return parsed;
+      });
     },
 
     /**

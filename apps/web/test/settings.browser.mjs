@@ -139,6 +139,12 @@ test('workspace settings in the real Vite app with HTTP fixtures', { timeout: 24
             preferences: [],
           });
         if (path === `${base}/workspace-mcp/capabilities`) return send({ enabled: false });
+        if (path === `${base}/secrets/capabilities`) return send({ enabled: false });
+        if (path === `${base}/knowledge/settings`) return send({ mediaRecognition: false, canManage: false });
+        if (path === `${base}/governance/directory`) return send({ members: [] });
+        if (path === `${base}/subscriptions`) return send({ subscriptions: [] });
+        if (path === `${base}/chatgpt/connection`)
+          return send({ state: 'not-connected', email: null, planUsage: false, welcomePending: false, models: [] });
         if (path === `${base}/recommendations/events`) {
           response.writeHead(204);
           response.end();

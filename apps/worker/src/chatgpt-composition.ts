@@ -51,7 +51,9 @@ export async function chatGptPlans(input: {
   const { chatGpt, subscriptions, workspaceId } = input;
   const candidates: SubscriptionCandidate[] = chatGpt
     ? (await subscriptions.eligible(workspaceId, 'chatgpt', input.caller)).filter(
-        candidate => !candidate.models.length || candidate.models.includes(input.model),
+        candidate =>
+          !candidate.disabled.includes(input.model) &&
+          (!candidate.models.length || candidate.models.includes(input.model)),
       )
     : [];
   let current: { candidate: SubscriptionCandidate; token: string } | null = null;

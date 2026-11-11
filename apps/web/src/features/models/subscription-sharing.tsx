@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
-import { Badge } from '@tulipfarm/sprout/badge';
+import { BrandIcon } from '@tulipfarm/sprout/brand-icon';
 import { Button } from '@tulipfarm/sprout/button';
 import {
   Dialog,
@@ -10,7 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@tulipfarm/sprout/dialog';
-import { FormSection } from '@tulipfarm/sprout/form';
+import { Switch } from '@tulipfarm/sprout/switch';
 import { z } from 'zod';
 import { apiOrigin } from '@/lib/auth';
 import { jsonResponse, readJson, responseError } from '@/lib/http';
@@ -24,8 +24,7 @@ import { modelKeys } from './queries';
 
 export const subscriptionsKey = ['models', 'subscriptions'] as const;
 
-const providerLabels = { chatgpt: 'ChatGPT', claude: 'Claude', copilot: 'GitHub Copilot' } as const;
-type Provider = keyof typeof providerLabels;
+export const providerLabels = { chatgpt: 'ChatGPT', claude: 'Claude', copilot: 'GitHub Copilot' } as const;
 
 const grantSchema = z.object({
   grantee: z.discriminatedUnion('kind', [
@@ -41,6 +40,9 @@ const subscriptionSchema = z.object({
   ownerMembershipId: z.uuid(),
   account: z.string().nullable(),
   state: z.enum(['connected', 'plan-disabled', 'reconnect-required', 'signed-out']),
+  mine: z.boolean(),
+  models: z.array(z.object({ slug: z.string(), label: z.string() })),
+  disabledModels: z.array(z.string()),
   canShare: z.boolean(),
   grants: z.array(grantSchema).nullable(),
 });
@@ -48,12 +50,17 @@ export type Subscription = z.infer<typeof subscriptionSchema>;
 
 const errors: Record<string, string> = {
   'subscription-not-found': 'This plan is no longer connected. Reload to see the current plans.',
-  'subscription-not-connected': 'This plan needs sign-in again before it can be shared.',
+  'subscription-not-connected': 'This plan needs sign-in again before you can change it.',
   'subscription-invalid-grant':
     'This plan can’t be shared with one of the people or teams you chose. Check that they’re still in this workspace, then try again.',
   'subscription-access-denied': 'You can’t change who uses this plan. Ask its owner to change who it’s shared with.',
+  'subscription-invalid-model': 'This plan no longer lists that model. Reload to see its current models.',
 };
 const errorMessage = (code: string) => errors[code] ?? 'Sharing couldn’t be saved. Try again.';
+const modelsErrorMessage = (code: string) =>
+  code === 'subscription-access-denied'
+    ? 'Only the plan’s owner can turn its models on or off.'
+    : (errors[code] ?? 'The change couldn’t be saved. Try again.');
 
 function subscriptionsApi(workspaceId: string) {
   const base = `${apiOrigin}/v1/workspaces/${encodeURIComponent(workspaceId)}/subscriptions`;
@@ -72,6 +79,9 @@ function subscriptionsApi(workspaceId: string) {
     share: async (connectionId: string, grants: SecretGrant[], signal: AbortSignal) => {
       await request(`/${encodeURIComponent(connectionId)}/grants`, signal, 'PUT', { grants });
     },
+    setModels: async (connectionId: string, disabledModels: string[], signal: AbortSignal) => {
+      await request(`/${encodeURIComponent(connectionId)}/models`, signal, 'PUT', { disabledModels });
+    },
   };
 }
 
@@ -80,7 +90,7 @@ const planRoles = {
   manage: { label: 'Use and share it', hint: 'Also change who it’s shared with' },
 } as const satisfies RoleOptions;
 
-function usePeople(workspaceId: string): People {
+export function usePeople(workspaceId: string): People {
   const scope = useFeatureScope();
   const you = scope.kind === 'workspace' ? scope.membershipId : '';
   const directory = useMemberDirectory(workspaceId);
@@ -99,12 +109,12 @@ export function useSubscriptions(workspaceId: string) {
   return { api, read: useFeatureRead({ key: subscriptionsKey, load: api.list }) };
 }
 
-function audience(grants: readonly SecretGrant[], people: People) {
-  if (!grants.length) return 'No one';
+export function audience(grants: readonly SecretGrant[], people: People) {
+  if (!grants.length) return 'No one else';
   return grants
     .map(grant =>
       grant.grantee.kind === 'workspace'
-        ? 'Everyone'
+        ? 'Everyone in the workspace'
         : grant.grantee.kind === 'team'
           ? (people.teams.find(team => grant.grantee.kind === 'team' && team.id === grant.grantee.teamId)?.name ??
             'Another team')
@@ -113,7 +123,7 @@ function audience(grants: readonly SecretGrant[], people: People) {
     .join(', ');
 }
 
-function ShareDialog({
+export function ShareDialog({
   workspaceId,
   subscription,
   people,
@@ -150,7 +160,7 @@ function ShareDialog({
     <Dialog open onOpenChange={open => !open && close()}>
       <DialogContent size="form">
         <DialogHeader>
-          <DialogTitle>Who can use this {provider} plan</DialogTitle>
+          <DialogTitle>Share this {provider} plan</DialogTitle>
           <DialogDescription>
             People you share with can pick its models in their chats and agents. No one can see its sign-in details.
           </DialogDescription>
@@ -162,7 +172,7 @@ function ShareDialog({
             people={people}
             disabled={sending}
             roles={planRoles}
-            description="Requests use the asker’s own plan first, then plans shared with them, then with their teams, then with everyone. If none can answer, the workspace’s fallback model does when one is set."
+            description="If someone can use more than one plan, TulipFarm tries their own first, then plans shared with them, then with their teams, then with everyone. If none can answer, the workspace’s fallback model does, if one is set."
             onChange={next => {
               setError(null);
               setGrants(next);
@@ -176,7 +186,8 @@ function ShareDialog({
                   : subscription.ownerMembershipId === people.you
                     ? 'This is your plan.'
                     : `This plan belongs to ${people.name(subscription.ownerMembershipId)}.`}{' '}
-                {provider} may limit or close accounts that are shared. Everyone you share with uses this plan’s limits.
+                {provider} may limit or close accounts that are shared. Everyone you share with draws on this plan’s
+                usage limits.
               </AlertDescription>
             </Alert>
           )}
@@ -199,70 +210,95 @@ function ShareDialog({
   );
 }
 
-/** Who a member's own plan is shared with, and a Share button. */
-export function PlanSharing({ workspaceId, provider }: { workspaceId: string; provider: Provider }) {
-  const { read } = useSubscriptions(workspaceId);
-  const people = usePeople(workspaceId);
-  const [open, setOpen] = useState(false);
-  if (read.state.kind !== 'ready') return null;
-  const own = read.state.data.find(item => item.provider === provider && item.ownerMembershipId === people.you);
-  if (!own?.canShare) return null;
-  return (
-    <div className="flex flex-wrap items-center gap-2">
-      <p className="text-sm text-muted-foreground">
-        Shared with: <span className="text-foreground">{audience(own.grants ?? [], people)}</span>
-      </p>
-      <Button size="sm" variant="outline" onClick={() => setOpen(true)} disabled={own.state === 'signed-out'}>
-        Share
-      </Button>
-      {open && (
-        <ShareDialog workspaceId={workspaceId} subscription={own} people={people} close={() => setOpen(false)} />
-      )}
-    </div>
-  );
-}
-
-const states: Record<Subscription['state'], { label: string; variant: 'success' | 'warning' | 'secondary' }> = {
+export const planStates: Record<
+  Subscription['state'],
+  { label: string; variant: 'success' | 'warning' | 'secondary' }
+> = {
   connected: { label: 'Connected', variant: 'success' },
   'reconnect-required': { label: 'Needs sign-in again', variant: 'warning' },
-  'plan-disabled': { label: 'Turned off', variant: 'secondary' },
+  'plan-disabled': { label: 'Plan usage off', variant: 'secondary' },
   'signed-out': { label: 'Signed out', variant: 'secondary' },
 };
 
-/** Plans other members connected that this member may use or, as an admin or manager, share. */
-export function SharedPlansSection({ workspaceId }: { workspaceId: string }) {
-  const { read } = useSubscriptions(workspaceId);
-  const people = usePeople(workspaceId);
-  const [sharing, setSharing] = useState<Subscription | null>(null);
-  if (read.state.kind !== 'ready') return null;
-  const others = read.state.data.filter(item => item.ownerMembershipId !== people.you && item.state !== 'signed-out');
-  if (!others.length) return null;
+/**
+ * A plan's models with on/off switches. The owner's choice applies to everyone the plan is shared with; others see the
+ * switches read-only.
+ */
+export function PlanModels({
+  workspaceId,
+  subscription,
+  people,
+}: {
+  workspaceId: string;
+  subscription: Subscription;
+  people: People;
+}) {
+  const { api } = useSubscriptions(workspaceId);
+  const { change } = useFeatureChanges();
+  const [saving, setSaving] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const editable = subscription.mine && subscription.state !== 'signed-out';
+  async function toggle(slug: string, on: boolean) {
+    const disabled = on
+      ? subscription.disabledModels.filter(item => item !== slug)
+      : [...subscription.disabledModels, slug];
+    setSaving(slug);
+    setError(null);
+    try {
+      await api.setModels(subscription.connectionId, disabled, AbortSignal.timeout(30_000));
+      await change({ keys: [subscriptionsKey, modelKeys.catalog()] });
+    } catch (failure) {
+      setError(
+        failure instanceof TableRequestError ? modelsErrorMessage(failure.code) : modelsErrorMessage('unavailable'),
+      );
+    } finally {
+      setSaving(null);
+    }
+  }
   return (
-    <FormSection
-      title="Plans from other members"
-      description="Plans other members connected that you can use or share. Their models appear in chats and agents."
-    >
-      <ul className="grid gap-3">
-        {others.map(item => (
-          <li key={item.connectionId} className="flex flex-wrap items-center gap-2 text-sm">
-            <span className="font-medium">{providerLabels[item.provider]}</span>
-            <span className="text-muted-foreground">
-              {people.name(item.ownerMembershipId)}
-              {item.account ? ` · ${item.account}` : ''}
-            </span>
-            <Badge variant={states[item.state].variant}>{states[item.state].label}</Badge>
-            {item.grants && <span className="text-muted-foreground">Shared with: {audience(item.grants, people)}</span>}
-            {item.canShare && (
-              <Button size="sm" variant="outline" onClick={() => setSharing(item)}>
-                Share
-              </Button>
-            )}
-          </li>
-        ))}
-      </ul>
-      {sharing && (
-        <ShareDialog workspaceId={workspaceId} subscription={sharing} people={people} close={() => setSharing(null)} />
+    <section className="grid gap-2" aria-labelledby={`plan-models-${subscription.connectionId}`}>
+      <div>
+        <h3 id={`plan-models-${subscription.connectionId}`} className="text-sm font-medium">
+          Models
+        </h3>
+        <p className="text-sm text-muted-foreground">
+          {editable
+            ? 'No one, including you, can pick a model you turn off.'
+            : subscription.mine
+              ? 'Reconnect to turn these models on or off.'
+              : `Only ${people.name(subscription.ownerMembershipId)} can turn these models on or off.`}
+        </p>
+      </div>
+      {subscription.models.length ? (
+        <ul className="divide-y rounded-md border px-3">
+          {subscription.models.map(model => {
+            const on = !subscription.disabledModels.includes(model.slug);
+            return (
+              <li key={model.slug} className="flex items-center gap-3 py-2.5 text-sm">
+                <BrandIcon brand="openai" size="inline" />
+                <span className="flex-1">{model.label}</span>
+                <Switch
+                  aria-label={model.label}
+                  checked={on}
+                  disabled={!editable || saving !== null}
+                  onCheckedChange={checked => void toggle(model.slug, checked)}
+                />
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          {subscription.state === 'connected'
+            ? `${providerLabels[subscription.provider]} lists no models TulipFarm can use with this plan right now.`
+            : 'Models appear here once the plan is connected.'}
+        </p>
       )}
-    </FormSection>
+      {error && (
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+    </section>
   );
 }

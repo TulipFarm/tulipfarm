@@ -1330,7 +1330,14 @@ export const workspaceModelsRoute = createRoute({
   validateSearch: search =>
     z
       .object({
-        tab: z.enum(['access', 'compaction', 'images']).optional().catch(undefined),
+        // The model source or setting shown: a plan shared with the member is `plan:<connection id>`.
+        tab: z
+          .union([
+            z.enum(['access', 'chatgpt', 'claude', 'copilot', 'keys', 'compaction', 'images']),
+            z.templateLiteral(['plan:', z.uuid()]),
+          ])
+          .optional()
+          .catch(undefined),
         // The outcome of a ChatGPT sign-in that finished on this server's loopback address.
         chatgpt: z.string().max(64).optional().catch(undefined),
       })

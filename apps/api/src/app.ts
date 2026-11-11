@@ -141,7 +141,13 @@ export function buildApp(
         const chatGpt = chatGptPlan(runtime, auth.pool);
         registerChatGptPlan(business, auth.auth, chatGpt, auth.pool);
         const subscriptions = runtime ? createSubscriptions({ runtime }) : null;
-        registerSubscriptions(business, auth.auth, subscriptions);
+        registerSubscriptions(
+          business,
+          auth.auth,
+          subscriptions,
+          provider =>
+            new Set(models.catalog.models.flatMap(model => (model.route.type === provider ? [model.route.model] : []))),
+        );
         if (runtime && github)
           registerGitHubInvestigation(business, auth.auth, createGitHubInvestigation({ runtime, accounts: github }));
         registerStorageComposition(

@@ -5,6 +5,7 @@ import {
   SubscriptionError,
   subscriptionGrantSchema,
   subscriptionProviders,
+  type SubscriptionProvider,
   type Subscriptions,
 } from '@tulipfarm/integrations/subscriptions';
 import { authenticateRoutes } from './authenticated-routes.ts';
@@ -20,11 +21,15 @@ const subscriptionSchema = z.object({
   ownerMembershipId: z.uuid(),
   account: z.string().nullable(),
   state: z.enum(['connected', 'plan-disabled', 'reconnect-required', 'signed-out']),
+  mine: z.boolean(),
+  models: z.array(z.object({ slug: z.string(), label: z.string() })),
+  disabledModels: z.array(z.string()),
   canShare: z.boolean(),
   grants: z.array(subscriptionGrantSchema).nullable(),
 });
 const listSchema = z.object({ subscriptions: z.array(subscriptionSchema) });
 const grantsBody = z.strictObject({ grants: z.array(subscriptionGrantSchema).max(200) });
+const modelsBody = z.strictObject({ disabledModels: z.array(z.string().min(1).max(200)).max(200) });
 const validation = routeValidation({
   target: 'openapi-3.0',
   missing: 'Missing subscription validator',
@@ -35,6 +40,7 @@ const statuses: Record<SubscriptionError['code'], number> = {
   'not-found': 404,
   'not-connected': 409,
   'invalid-grant': 400,
+  'invalid-model': 400,
 };
 function schema(operationId: string, response: z.ZodType) {
   const error = json(errorSchema);
@@ -45,11 +51,15 @@ function schema(operationId: string, response: z.ZodType) {
   };
 }
 
-/** Routes for listing the AI plans a member can see and sharing them with members, teams or the workspace. */
+/**
+ * Routes for listing the AI plans a member can see, sharing them with members, teams or the workspace, and turning
+ * their models on or off. `offered` lists the plan models this server can run per provider; others are not shown.
+ */
 export function registerSubscriptions(
   app: FastifyInstance,
   auth: { api: Pick<ReturnType<typeof registerAuth>['auth']['api'], 'getSession'> },
   subscriptions: Subscriptions | null,
+  offered: (provider: SubscriptionProvider) => ReadonlySet<string>,
 ) {
   if (!subscriptions) return;
   app.register(async routes => {
@@ -67,8 +77,32 @@ export function registerSubscriptions(
       '/workspaces/:workspaceId/subscriptions',
       { schema: { ...schema('listSubscriptionsV1', listSchema), params: json(workspaceParams) } },
       async request => ({
-        subscriptions: await subscriptions.list(workspaceParams.parse(request.params).workspaceId, user(request)),
+        subscriptions: (await subscriptions.list(workspaceParams.parse(request.params).workspaceId, user(request))).map(
+          item => ({ ...item, models: item.models.filter(model => offered(item.provider).has(model.slug)) }),
+        ),
       }),
+    );
+    routes.put(
+      '/workspaces/:workspaceId/subscriptions/:connectionId/models',
+      {
+        schema: {
+          ...schema('setSubscriptionModelsV1', modelsBody),
+          params: json(connectionParams),
+          body: json(modelsBody),
+        },
+      },
+      async request => {
+        const { workspaceId, connectionId } = connectionParams.parse(request.params);
+        const { disabledModels } = modelsBody.parse(request.body);
+        return {
+          disabledModels: await subscriptions.setDisabledModels(
+            workspaceId,
+            user(request),
+            connectionId,
+            disabledModels,
+          ),
+        };
+      },
     );
     routes.put(
       '/workspaces/:workspaceId/subscriptions/:connectionId/grants',

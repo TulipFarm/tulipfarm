@@ -12,7 +12,6 @@ import {
   DialogTitle,
 } from '@tulipfarm/sprout/dialog';
 import { Field } from '@tulipfarm/sprout/field';
-import { FormSection } from '@tulipfarm/sprout/form';
 import { Input } from '@tulipfarm/sprout/input';
 import { Skeleton } from '@tulipfarm/sprout/skeleton';
 import { ArrowUpRight } from 'reicon-react/icons/ArrowUpRight';
@@ -27,9 +26,16 @@ import {
   type ChatGptConnectionMode,
 } from './chatgpt-plan-api';
 import { modelKeys } from './queries';
-import { PlanSharing, subscriptionsKey } from './subscription-sharing';
+import {
+  PlanModels,
+  ShareDialog,
+  audience,
+  subscriptionsKey,
+  usePeople,
+  useSubscriptions,
+} from './subscription-sharing';
 
-const connectionKey = ['models', 'chatgpt-connection'] as const;
+export const chatGptConnectionKey = ['models', 'chatgpt-connection'] as const;
 const pollMs = 2000;
 
 type Phase =
@@ -44,11 +50,18 @@ function failure(error: unknown) {
   return chatGptErrorMessage('unavailable');
 }
 
+/** The member's own ChatGPT connection, or null when this server doesn't offer ChatGPT plans. */
+export function useChatGptConnection(workspaceId: string) {
+  const api = useMemo(() => chatGptPlanApi(workspaceId), [workspaceId]);
+  return useFeatureRead({ key: chatGptConnectionKey, load: api.connection });
+}
+
 /**
- * The member's own "Sign in with ChatGPT" connection. Each member connects their own plan; it stays private
- * until they share it with people, teams or the whole workspace. `outcome` is the result flag the loopback sign-in page sends back.
+ * The member's own "Sign in with ChatGPT" connection: sign-in, its models and who it's shared with. Each member
+ * connects their own plan; it stays private until they share it with people, teams or the whole workspace. `outcome`
+ * is the result flag the loopback sign-in page sends back.
  */
-export function ChatGptPlanSection({
+export function ChatGptPlanPane({
   workspaceId,
   outcome,
   clearOutcome,
@@ -58,14 +71,18 @@ export function ChatGptPlanSection({
   clearOutcome: () => void;
 }) {
   const api = useMemo(() => chatGptPlanApi(workspaceId), [workspaceId]);
-  const read = useFeatureRead({ key: connectionKey, load: api.connection });
+  const read = useChatGptConnection(workspaceId);
+  const subscriptions = useSubscriptions(workspaceId);
+  const people = usePeople(workspaceId);
+  const [sharing, setSharing] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const { change } = useFeatureChanges();
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' });
   const [message, setMessage] = useState<{ tone: 'error' | 'success' | 'warning'; text: string } | null>(null);
   const [pasted, setPasted] = useState('');
   const [welcomeSaving, setWelcomeSaving] = useState(false);
   const refreshAll = useCallback(
-    () => change({ keys: [connectionKey, subscriptionsKey, modelKeys.catalog()] }),
+    () => change({ keys: [chatGptConnectionKey, subscriptionsKey, modelKeys.catalog()] }),
     [change],
   );
 
@@ -179,7 +196,7 @@ export function ChatGptPlanSection({
           ? { tone: 'success', text: 'ChatGPT is disconnected.' }
           : {
               tone: 'warning',
-              text: 'TulipFarm forgot your ChatGPT sign-in, but ChatGPT did not confirm the disconnect. To be sure, disconnect TulipFarm in your ChatGPT settings.',
+              text: 'TulipFarm removed your ChatGPT sign-in, but ChatGPT didn’t confirm the disconnect. To be sure, remove TulipFarm in your ChatGPT settings.',
             },
       );
       void refreshAll();
@@ -203,78 +220,126 @@ export function ChatGptPlanSection({
   }
 
   const { state } = read;
-  // The deployment turned ChatGPT plan usage off, or this member has no access: show nothing.
   if (state.kind === 'unavailable' || (state.kind === 'ready' && state.data === null)) return null;
   const connection = state.kind === 'ready' ? state.data : null;
   const busy = phase.kind !== 'idle' && phase.kind !== 'pending';
+  const own =
+    subscriptions.read.state.kind === 'ready'
+      ? subscriptions.read.state.data.find(item => item.provider === 'chatgpt' && item.mine)
+      : undefined;
+  const live = connection && connection.state !== 'not-connected' && connection.state !== 'signed-out';
 
   return (
-    <FormSection
-      title="Use your ChatGPT plan"
-      description="Complete eligible AI requests in TulipFarm with usage included in your ChatGPT plan or credits balance."
-    >
-      <div className="grid gap-3">
-        <p className="text-sm text-muted-foreground">
-          This is separate from TulipFarm credits. Requests made with a ChatGPT plan model use the plan's ChatGPT usage
-          and are not charged to this workspace. If the plan reaches its limit, the workspace's fallback model answers
-          instead.
-        </p>
-        {state.kind === 'loading' && (
-          <div role="status" aria-label="Checking your ChatGPT connection" className="grid gap-2">
-            <Skeleton />
-            <Skeleton shape="action" />
-          </div>
-        )}
-        {state.kind === 'error' && (
-          <Alert variant="destructive">
-            <AlertDescription>Couldn’t check your ChatGPT connection. {state.message}</AlertDescription>
-            <Button size="sm" variant="outline" onClick={() => void read.refresh()}>
-              Retry
-            </Button>
-          </Alert>
-        )}
-        {state.kind === 'ready' && state.error && (
-          <p role="status" className="text-sm text-muted-foreground">
-            This status may be out of date. Reload to check again.
+    <div className="grid gap-5">
+      <header className="flex flex-wrap items-start gap-3">
+        <BrandIcon brand="openai" size="sm" />
+        <div className="min-w-0 flex-1">
+          <h2 className="flex flex-wrap items-center gap-2 text-lg font-medium">
+            ChatGPT plan
+            {connection?.state === 'connected' && <Badge variant="success">Connected</Badge>}
+            {connection?.state === 'reconnect-required' && <Badge variant="warning">Needs sign-in again</Badge>}
+            {connection?.state === 'plan-disabled' && <Badge variant="secondary">Plan usage off</Badge>}
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            {live && connection.email
+              ? `Signed in as ${connection.email}`
+              : 'Use your ChatGPT Plus, Pro, Business or Enterprise plan. Requests use your ChatGPT usage, not workspace credits.'}
           </p>
+          {live && own?.grants && (
+            <p className="text-sm text-muted-foreground">Shared with: {audience(own.grants, people)}</p>
+          )}
+        </div>
+        {live && own?.canShare && (
+          <Button size="sm" variant="outline" onClick={() => setSharing(true)}>
+            Share
+          </Button>
         )}
-        {message && (
-          <Alert variant={message.tone === 'error' ? 'destructive' : 'default'}>
-            <AlertDescription>{message.text}</AlertDescription>
-          </Alert>
-        )}
-        {connection && (phase.kind === 'pending' || phase.kind === 'finishing') && (
-          <PendingSignIn
-            phase={phase}
-            pasted={pasted}
-            setPasted={setPasted}
-            finish={() => void finish()}
-            cancel={() => {
-              setPhase({ kind: 'idle' });
-              setPasted('');
-            }}
-          />
-        )}
-        {connection && phase.kind !== 'pending' && phase.kind !== 'finishing' && (
-          <ConnectionState
-            connection={connection}
-            busy={busy}
-            begin={mode => void begin(mode)}
-            disconnect={() => void disconnect()}
-          />
-        )}
-        {connection && connection.state !== 'not-connected' && connection.state !== 'signed-out' && (
-          <PlanSharing workspaceId={workspaceId} provider="chatgpt" />
-        )}
-      </div>
+        {connection?.state === 'connected' && <ManageUsageLink />}
+      </header>
+      {state.kind === 'loading' && (
+        <div role="status" aria-label="Checking your ChatGPT connection" className="grid gap-2">
+          <Skeleton />
+          <Skeleton shape="action" />
+        </div>
+      )}
+      {state.kind === 'error' && (
+        <Alert variant="destructive">
+          <AlertDescription>Couldn’t check your ChatGPT connection. {state.message}</AlertDescription>
+          <Button size="sm" variant="outline" onClick={() => void read.refresh()}>
+            Retry
+          </Button>
+        </Alert>
+      )}
+      {state.kind === 'ready' && state.error && (
+        <p role="status" className="text-sm text-muted-foreground">
+          This status may be out of date. Reload to check again.
+        </p>
+      )}
+      {message && (
+        <Alert variant={message.tone === 'error' ? 'destructive' : 'default'}>
+          <AlertDescription>{message.text}</AlertDescription>
+        </Alert>
+      )}
+      {connection && (phase.kind === 'pending' || phase.kind === 'finishing') && (
+        <PendingSignIn
+          phase={phase}
+          pasted={pasted}
+          setPasted={setPasted}
+          finish={() => void finish()}
+          cancel={() => {
+            setPhase({ kind: 'idle' });
+            setPasted('');
+          }}
+        />
+      )}
+      {connection && phase.kind !== 'pending' && phase.kind !== 'finishing' && (
+        <ConnectionState connection={connection} busy={busy} begin={mode => void begin(mode)} />
+      )}
+      {live && own && <PlanModels workspaceId={workspaceId} subscription={own} people={people} />}
+      {live && phase.kind !== 'pending' && phase.kind !== 'finishing' && (
+        <div>
+          <Button size="sm" variant="ghost-destructive" onClick={() => setConfirming(true)} disabled={busy}>
+            {phase.kind === 'disconnecting' ? 'Disconnecting…' : 'Disconnect'}
+          </Button>
+        </div>
+      )}
+      {confirming && (
+        <Dialog open onOpenChange={open => !open && setConfirming(false)}>
+          <DialogContent size="form">
+            <DialogHeader>
+              <DialogTitle>Disconnect ChatGPT?</DialogTitle>
+              <DialogDescription>
+                TulipFarm will stop using your ChatGPT plan, and people you shared it with will lose its models.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setConfirming(false)}>
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={() => {
+                  setConfirming(false);
+                  void disconnect();
+                }}
+              >
+                Disconnect
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+      {sharing && own && (
+        <ShareDialog workspaceId={workspaceId} subscription={own} people={people} close={() => setSharing(false)} />
+      )}
       {connection?.planUsage && connection.welcomePending && (
         <Dialog open>
           <DialogContent size="form" showCloseButton={false}>
             <DialogHeader>
-              <DialogTitle>You're using your ChatGPT plan</DialogTitle>
+              <DialogTitle>You’re now using your ChatGPT plan</DialogTitle>
               <DialogDescription>
-                Eligible AI requests you make in TulipFarm will use your ChatGPT plan. You can manage usage in ChatGPT
-                settings.
+                When you pick a ChatGPT plan model in a chat or agent, requests use your ChatGPT usage, not workspace
+                credits. You can see your usage in ChatGPT settings.
               </DialogDescription>
             </DialogHeader>
             <DialogFooter>
@@ -285,7 +350,7 @@ export function ChatGptPlanSection({
           </DialogContent>
         </Dialog>
       )}
-    </FormSection>
+    </div>
   );
 }
 
@@ -307,58 +372,32 @@ function ConnectionState({
   connection,
   busy,
   begin,
-  disconnect,
 }: {
   connection: ChatGptConnection;
   busy: boolean;
   begin: (mode: ChatGptConnectionMode) => void;
-  disconnect: () => void;
 }) {
-  const account = connection.email ? (
-    <p className="text-sm">
-      Signed in as <span className="font-medium">{connection.email}</span>
-    </p>
-  ) : null;
   if (connection.state === 'connected')
     return (
-      <div className="grid gap-3">
-        <div className="flex flex-wrap items-center gap-2">
-          {account}
-          <Badge variant="success">Using ChatGPT plan</Badge>
-        </div>
-        <p className="text-sm text-muted-foreground">
-          {connection.models.length
-            ? `Your chats can use ${connection.models.map(model => model.label).join(', ')}. Pick one in the chat model menu, under ChatGPT plan.`
-            : 'ChatGPT lists no models TulipFarm can offer for your plan right now.'}
-        </p>
-        <div className="flex flex-wrap gap-2">
-          <ManageUsageLink />
-          <Button size="sm" variant="outline" onClick={disconnect} disabled={busy}>
-            {busy ? 'Disconnecting…' : 'Disconnect'}
-          </Button>
-        </div>
-      </div>
+      <p className="text-sm text-muted-foreground">
+        Pick these models from the model menu in chats and agents, under ChatGPT plan. If the plan hits its limit and
+        the workspace has a fallback model, that model answers instead.
+      </p>
     );
   if (connection.state === 'plan-disabled')
     return (
-      <div className="grid gap-3">
-        {account}
+      <div className="grid justify-items-start gap-3">
         <p className="text-sm text-muted-foreground">
-          You signed in without allowing plan usage, so TulipFarm can't use your ChatGPT plan yet.
+          You signed in without allowing plan usage, so TulipFarm can’t use your ChatGPT plan yet.
         </p>
-        <div className="flex flex-wrap gap-2">
-          <Button size="sm" onClick={() => begin('enable-plan')} disabled={busy}>
-            Enable ChatGPT plan usage
-          </Button>
-          <Button size="sm" variant="outline" onClick={disconnect} disabled={busy}>
-            Disconnect
-          </Button>
-        </div>
+        <Button size="sm" onClick={() => begin('enable-plan')} disabled={busy}>
+          Allow plan usage
+        </Button>
       </div>
     );
   if (connection.state === 'reconnect-required')
     return (
-      <div className="grid gap-3">
+      <div className="grid justify-items-start gap-3">
         <Alert>
           <AlertTitle>Reconnect ChatGPT</AlertTitle>
           <AlertDescription>
@@ -366,27 +405,28 @@ function ConnectionState({
             plan in TulipFarm.
           </AlertDescription>
         </Alert>
-        <div className="flex flex-wrap gap-2">
-          <Button size="sm" onClick={() => begin('reconnect')} disabled={busy}>
-            Reconnect
-          </Button>
-          <Button size="sm" variant="outline" onClick={disconnect} disabled={busy}>
-            Disconnect
-          </Button>
-        </div>
+        <Button size="sm" onClick={() => begin('reconnect')} disabled={busy}>
+          Reconnect
+        </Button>
       </div>
     );
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      <Button size="sm" onClick={() => begin('connect')} disabled={busy}>
-        <BrandIcon brand="openai" size="inline" />
-        Continue with ChatGPT
-      </Button>
-      {busy && (
-        <p role="status" className="text-sm text-muted-foreground">
-          Starting sign-in…
-        </p>
-      )}
+    <div className="grid justify-items-start gap-3">
+      <ol className="grid list-decimal gap-1 pl-5 text-sm text-muted-foreground">
+        <li>Select Continue with ChatGPT and approve TulipFarm in the new tab.</li>
+        <li>Share it with others if you like. Until you do, only you can use it.</li>
+      </ol>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button size="sm" onClick={() => begin('connect')} disabled={busy}>
+          <BrandIcon brand="openai" size="inline" />
+          Continue with ChatGPT
+        </Button>
+        {busy && (
+          <p role="status" className="text-sm text-muted-foreground">
+            Starting sign-in…
+          </p>
+        )}
+      </div>
     </div>
   );
 }
@@ -408,7 +448,7 @@ function PendingSignIn({
   return (
     <div className="grid gap-3">
       <p role="status" className="text-sm">
-        Approve TulipFarm in the ChatGPT tab. If that tab ends on a page that can't be reached, copy its full address
+        Approve TulipFarm in the ChatGPT tab. If that tab ends on a page that can’t be reached, copy its full address
         and paste it here.
       </p>
       {!phase.opened && (

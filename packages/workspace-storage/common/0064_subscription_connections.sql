@@ -2,7 +2,8 @@
 -- for the owner and for anyone it is shared with in tf_subscription_grants. `credential` holds the encrypted
 -- provider tokens; `generation` is part of its encryption context and grows with every sign-in. Signing out clears the
 -- tokens but keeps the issued client id and account, so the next sign-in reuses the registration and must return the
--- same account. `cooldown_until` skips a plan that reported a usage limit; `last_used_at` spreads use across shares.
+-- same account. `disabled_models` lists model slugs the owner turned off, for themselves and everyone it is shared with.
+-- `cooldown_until` skips a plan that reported a usage limit; `last_used_at` spreads use across shares.
 CREATE TABLE {{schema}}.tf_subscription_connections (
   id uuid PRIMARY KEY,
   provider text NOT NULL CHECK (provider IN ('chatgpt', 'claude', 'copilot')),
@@ -19,6 +20,7 @@ CREATE TABLE {{schema}}.tf_subscription_connections (
   welcome_acknowledged_at timestamptz,
   models jsonb CHECK (models IS NULL OR (jsonb_typeof(models) = 'array' AND octet_length(models::text) <= 65536)),
   models_fetched_at timestamptz,
+  disabled_models text[] NOT NULL DEFAULT '{}' CHECK (cardinality(disabled_models) <= 200),
   cooldown_until timestamptz,
   last_used_at timestamptz,
   created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
@@ -74,5 +76,5 @@ REVOKE ALL ON {{schema}}.tf_subscription_connections, {{schema}}.tf_subscription
 GRANT SELECT, INSERT ON {{schema}}.tf_subscription_connections, {{schema}}.tf_subscription_connection_attempts TO {{runtime}};
 GRANT SELECT, INSERT, DELETE ON {{schema}}.tf_subscription_grants TO {{runtime}};
 GRANT UPDATE (generation, state, client_id, subject, email, plan, scopes, credential, expires_at, welcome_acknowledged_at,
-  models, models_fetched_at, cooldown_until, last_used_at, updated_at) ON {{schema}}.tf_subscription_connections TO {{runtime}};
+  models, models_fetched_at, disabled_models, cooldown_until, last_used_at, updated_at) ON {{schema}}.tf_subscription_connections TO {{runtime}};
 GRANT UPDATE (client_id, secret, status, error_code) ON {{schema}}.tf_subscription_connection_attempts TO {{runtime}};
