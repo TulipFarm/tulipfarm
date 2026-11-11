@@ -186,7 +186,7 @@ export const toolCallSchema = z.discriminatedUnion('tool', [
   secretsListCallSchema,
   z.strictObject({
     tool: z.literal('files.read'),
-    source: z.string().trim().min(1).max(256),
+    source: z.string().trim().max(256).default(''),
     pages: z
       .strictObject({ from: z.number().int().min(1), to: z.number().int().min(1) })
       .refine(pages => pages.to >= pages.from, 'to must not be before from')

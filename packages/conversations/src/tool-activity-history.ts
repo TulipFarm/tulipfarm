@@ -312,6 +312,17 @@ export async function storedToolActivity(
     if (failure.success) return { status: 'failed', detail: failure.data.reason.slice(0, 400) };
   }
   const status = await savedToolStatus(tx, row);
+  if (row.tool === 'files.read') {
+    const wrapped = z.object({ result: z.unknown() }).safeParse(row.output);
+    const result = z.object({ error: z.string() }).safeParse(wrapped.success ? wrapped.data.result : row.output);
+    const details: Record<string, string> = {
+      'file-source-required': "Couldn't tell which file to read",
+      'file-not-found': 'File not found or unavailable',
+      'file-trashed': 'File is in Trash. Restore it, then try again.',
+    };
+    const detail = result.success ? details[result.data.error] : undefined;
+    if (detail) return { status, detail };
+  }
   const detail = row.status === 'completed' ? rowReviewDetail(row.tool, row.output) : undefined;
   return detail ? { status, detail } : { status };
 }

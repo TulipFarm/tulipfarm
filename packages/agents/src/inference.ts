@@ -48,6 +48,14 @@ import { reviewCardReference, type ReviewCardReference, type ReviewCardState } f
 import { withoutTrailingControlMarker } from '@tulipfarm/conversations/reply-text';
 import { createChatToolGuard } from './chat-tool-guard.ts';
 import {
+  createFileJobGuard,
+  fileJobCallLimit,
+  fileListingEmpty,
+  fileListingFailed,
+  fileListingQuery,
+  newFileRequested,
+} from './chat-file-jobs.ts';
+import {
   agentModelInputSchema,
   modelDecisionSchema,
   modelNativeTools,
@@ -1305,6 +1313,7 @@ export type ToolInferenceContext = {
   catalog?: () => Promise<McpModelCatalog | undefined>;
   priorCalls?: number;
   priorToolCalls?: readonly unknown[];
+  priorFileResults?: readonly { call: unknown; result: unknown }[];
   /** Loads a reauthorized people-and-teams receipt from this chat, never from message text. */
   readWorkspaceDirectory?: (() => Promise<unknown>) | undefined;
   priorReviewCards?: readonly ReviewCardReference[];
@@ -3417,6 +3426,12 @@ export async function inferWithTools(
   const items: LoopItem[] = messages.map(turn => ({ kind: 'turn', turn }));
   const latest = [...messages].reverse().find(turn => turn.role === 'user');
   const request = latest ? textTurn(latest).text : '';
+  const fileJob = createFileJobGuard(request, tools?.priorFileResults);
+  const fileQuery = fileListingQuery(request);
+  const newFileOnly =
+    newFileRequested(request) &&
+    !messages.some(turn => /(?:attachment-id|file-id|google-file-id)=/.test(textTurn(turn).text));
+  const callLimit = () => Math.min(chatToolCallLimit, fileJob.active ? fileJobCallLimit : chatToolCallLimit);
   const earlier = messages
     .filter(turn => turn !== latest)
     .map(turn => textTurn(turn).text)
@@ -3448,7 +3463,8 @@ export async function inferWithTools(
     invitationLookup(sourceMessages) || !tools?.answerText
       ? undefined
       : update => {
-          if (!directoryExpected && !activeBuiltinSkills.has('agent-authoring')) tools?.answerText?.(update);
+          if (!directoryExpected && !activeBuiltinSkills.has('agent-authoring') && !fileJob.holdPreview)
+            tools?.answerText?.(update);
         };
   let calls = z
     .number()
@@ -3521,6 +3537,13 @@ export async function inferWithTools(
     const parsed = renderer.parse(input);
     return parsed.ok ? parsed : undefined;
   };
+  const fileAuthoringTools = new Set([
+    'files_create',
+    'skills_read',
+    budToolName,
+    toolResultReadName,
+    ...(renderer ? [renderer.name] : []),
+  ]);
   // A canvas report is sent back once for a visual redesign; a second text-heavy one is kept.
   let designAsked = false;
   const reviewReferences = new Map(
@@ -3588,8 +3611,43 @@ export async function inferWithTools(
     checked = false,
     layout?: { layout: ReplyRenderInput } | { layoutFailed: true },
   ) => {
+    const fileFailure = fileJob.reply();
+    if (fileFailure) return completeReply(fileFailure, true);
+    if (fileJob.unbacked(text)) return completeReply(fileJob.missingSaveReply, true);
     const reviewReply = (await tableReviewReply()) ?? skillReviewReply();
     return completeReply(reviewReply ?? text, checked || Boolean(reviewReply), reviewReply ? undefined : layout);
+  };
+  const listFiles = async (query: string) => {
+    fileJob.admit(['files_list']);
+    const pageSchema = z.object({
+      items: z.array(z.object({ id: z.string(), kind: z.string(), name: z.string() })),
+      next: z.string().nullable(),
+    });
+    const names = new Map<string, string>();
+    const cursors = new Set<string>();
+    let characters = 0;
+    let after: string | undefined;
+    do {
+      if (calls >= callLimit()) return finish([...names.values(), toolLimitReply].join('\n'), true);
+      const call = { tool: 'files.list' as const, query, ...(after ? { after } : {}) };
+      calls++;
+      report('tool', toolDisplayName(call.tool));
+      const value = await execute(call, 'Looking through Files');
+      fileJob.record(call, value);
+      const page = pageSchema.safeParse(value);
+      if (!page.success) return finish(fileListingFailed, true);
+      for (const item of page.data.items) {
+        if (item.kind !== 'file' || names.has(item.id)) continue;
+        if (names.size >= 1000 || characters + item.name.length > 48_000)
+          return finish([...names.values(), fileListingFailed].join('\n'), true);
+        names.set(item.id, item.name);
+        characters += item.name.length + 1;
+      }
+      after = page.data.next ?? undefined;
+      if (after && cursors.has(after)) return finish(fileListingFailed, true);
+      if (after) cursors.add(after);
+    } while (after);
+    return finish(names.size ? [...names.values()].join('\n') : fileListingEmpty, true);
   };
   const updateAvatar = () => tools?.avatar?.update({ step: Math.max(0, requestStep - 1), avatar });
   if (tools?.avatar) tools.avatar.update({ step: 0, avatar });
@@ -3913,7 +3971,8 @@ export async function inferWithTools(
           ...active.tools.filter(
             tool =>
               (!slackLayout || tool.name !== presentChoiceName) &&
-              (!activeBuiltinSkills.has('agent-authoring') || tool.name !== 'agents_delegate'),
+              (!activeBuiltinSkills.has('agent-authoring') || tool.name !== 'agents_delegate') &&
+              (!newFileOnly || fileJob.saved || fileAuthoringTools.has(tool.name)),
           ),
           ...(rereadOffered ? [toolResultReadTool] : []),
           ...(tools?.avatar && expressionCalls < 6 ? [budTool] : []),
@@ -4117,7 +4176,9 @@ export async function inferWithTools(
     return true;
   };
   for (let step = 0; ; step++) {
-    const finalizing = calls >= chatToolCallLimit || guard.stalled || rejectionsSpent;
+    if (fileJob.stopped && !fileJob.saved) return finish(fileJob.reply()!, true);
+    if (fileJob.needsListing && !fileJob.saved) return listFiles('');
+    const finalizing = calls >= callLimit() || fileJob.stopped || guard.stalled || rejectionsSpent;
     let authoringTool: string | undefined;
     if (activeBuiltinSkills.has('agent-authoring') && (authoringFailure || (!authoringDraftMade && finalizing)))
       return finish(authoringStoppedReply(), true);
@@ -4213,7 +4274,7 @@ export async function inferWithTools(
           kind: 'turn',
           turn: {
             role: 'user',
-            text: `${rejectionsSpent ? 'Your tool requests were rejected three times because their arguments were invalid.' : guard.stalled ? 'Repeated tool requests made no progress for three rounds.' : `The ${chatToolCallLimit}-call work budget for this turn has ended.`} Do not call tools. Give a short plain-text summary using only completed results. State any remaining or unconfirmed work and why you stopped. Never claim the whole request succeeded unless the results prove it.`,
+            text: `${rejectionsSpent ? 'Your tool requests were rejected three times because their arguments were invalid.' : guard.stalled ? 'Repeated tool requests made no progress for three rounds.' : `The ${callLimit()}-call work budget for this turn has ended.`} Do not call tools. Give a short plain-text summary using only completed results. State any remaining or unconfirmed work and why you stopped. Never claim the whole request succeeded unless the results prove it.`,
           },
         });
       if (limits) {
@@ -4325,6 +4386,30 @@ export async function inferWithTools(
         activeCatalog,
       };
     });
+    if (fileQuery !== undefined) return listFiles(fileQuery);
+    if (
+      newFileOnly &&
+      !fileJob.saved &&
+      selected.kind === 'step' &&
+      selected.calls.some(call => !fileAuthoringTools.has(call.name))
+    ) {
+      if (finalizing) return finish(fileJob.missingSaveReply, true);
+      items.push({ kind: 'model', text: '', calls: selected.calls, raw: selected.raw });
+      reject(
+        selected.calls.map(call => ({
+          id: call.id,
+          name: call.name,
+          output:
+            'Not run. Creating a new file needs files.create with its name, format and content. Read an Office authoring skill if needed. No file read or external API call is needed for this request.',
+          error: true,
+          providerId: call.providerId,
+        })),
+        'invalid-arguments',
+        [],
+      );
+      forceTool = nativeToolName('files.create');
+      continue;
+    }
     if (
       authoringTool &&
       (selected.kind !== 'step' || selected.calls.length !== 1 || selected.calls[0]?.name !== authoringTool)
@@ -4533,6 +4618,22 @@ export async function inferWithTools(
         continue;
       }
       const candidate = rendered?.text ?? selected.text;
+      if (fileJob.reply()) return finish(candidate, true);
+      if (fileJob.unbacked(candidate)) {
+        if (finalizing || completionCorrections++ >= 2) return finish(fileJob.missingSaveReply, true);
+        forceTool = nativeToolName('files.create');
+        items.push(
+          { kind: 'turn', turn: { role: 'assistant', text: candidate } },
+          {
+            kind: 'turn',
+            turn: {
+              role: 'user',
+              text: 'No file save in this turn has succeeded. Use files.create to save the requested file, or explain what prevents saving it. Do not claim a file is ready, created or saved without a successful files.create result.',
+            },
+          },
+        );
+        continue;
+      }
       const preview = (text: string) => {
         try {
           answerText?.({ step: answerStep, text });
@@ -4687,7 +4788,7 @@ export async function inferWithTools(
               completionCheckEvidence(
                 items,
                 candidate,
-                finalizing ? 0 : Math.max(0, chatToolCallLimit - calls),
+                finalizing ? 0 : Math.max(0, callLimit() - calls),
                 maxBytes,
                 waiting,
               ),
@@ -4887,6 +4988,7 @@ export async function inferWithTools(
       providerId: call.providerId,
     });
     const executedResult = (native: NativeCall, call: FrameworkCall, value: unknown): ToolResult => {
+      fileJob.record(call, value);
       if (call.tool === 'members.find') {
         if (call.query === undefined) directoryAttempted = true;
         const found = workspaceDirectorySchema.safeParse(value);
@@ -5111,13 +5213,14 @@ export async function inferWithTools(
       );
       continue;
     }
-    if (calls + valid.length > chatToolCallLimit) {
+    fileJob.admit(valid.map(entry => entry.native.name));
+    if (calls + valid.length > callLimit()) {
       items.push({
         kind: 'results',
         results: valid.map(({ native }) =>
           result(
             native,
-            `Not run. Only ${chatToolCallLimit - calls} tool calls remain in this turn. Request a smaller batch or summarize completed results.`,
+            `Not run. Only ${Math.max(0, callLimit() - calls)} tool calls remain in this turn. Request a smaller batch or summarize completed results.`,
             true,
           ),
         ),
@@ -5195,7 +5298,7 @@ export async function inferWithTools(
     const work = valid.filter(({ native }) => isWorkTool(native.name));
     if (work[0]) report('tool', toolDisplayName(work[0].call.tool));
     const narrated = work[0];
-    const narration = narrated && carried && !directoryExpected ? carried : undefined;
+    const narration = narrated && carried && !directoryExpected && !fileJob.holdPreview ? carried : undefined;
     if (narration) carried = '';
     const outputs: ToolResult[] = [];
     const images: ToolResultImages[] = [];
