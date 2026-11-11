@@ -6,25 +6,25 @@ export const fileListingFailed = "I couldn't list your files. Ask me to try agai
 export const fileListingEmpty = "I didn't find any files that match your search.";
 const saveFailed = "I couldn't save the file. Ask me to try again.";
 const repeatedFailure = 'I stopped because the same file request kept failing.';
-const fileRequest = /\b(?:files?|workbooks?|spreadsheets?|documents?|xlsx|docx|pptx|markdown)\b/i;
-const saveRequest = /\b(?:create|make|save|generate|write|export)\b/i;
+const fileRequest = /\b(?:files?|workbooks?|spreadsheets?|documents?|md|xlsx|docx|pptx|markdown)\b/i;
+const saveRequest =
+  /(?:^|[.!?;\n]\s*|\b(?:and|then|also)\s+)(?:please\s+)?(?:(?:can|could|would) you (?:please )?)?(?:create|make|save|generate|write|export)\s+(.+?)(?=$|[!?;\n]|\.(?:\s|$)|\b(?:and|then|also)\b)/gi;
 const fileSubject = String.raw`(?:files?|workbooks?|spreadsheets?|documents?|\S+\.(?:md|txt|csv|json|docx|xlsx|pptx))\b`;
 const fileSavedClaim = new RegExp(
   [
-    String.raw`\b(?:saved|ready)\s+in\s+(?:(?:my|your)\s+)?Files\b`,
-    String.raw`(?:\b(?:I|we)(?:'ve| have)?\s+|^)(?:(?:just|successfully|now)\s+)?(?:saved|created|generated|made|exported)\s+(?:(?:a|an|the|your|my|new|Excel|markdown)\s+)*${fileSubject}`,
-    String.raw`\b${fileSubject}\s+(?:is|are|has been|have been)\s+(?:(?:now|successfully)\s+)?(?:saved|created|generated|ready)\b`,
+    String.raw`\b(?:saved|created|ready)\s+in\s+(?:(?:my|your)\s+)?Files\b`,
+    String.raw`\b(?:saved|created)\b[^.!?\n]*\b(?:in|to)\s+(?:(?:my|your|the)\s+)?Files\b`,
+    String.raw`(?:\b(?:I|we)(?:['’]ve| have)?\s+|^)(?:(?:just|successfully|now)\s+)?(?:saved|created|generated|made|exported)\s+(?:(?:a|an|the|your|my|new|Excel|markdown)\s+)*${fileSubject}`,
+    String.raw`\b${fileSubject}\s+(?:is|are|has been|have been)\s+(?:(?:now|successfully)\s+)?(?:saved|created)\b`,
   ].join('|'),
   'i',
 );
-export function newFileRequested(request: string) {
-  return (
-    fileRequest.test(request) &&
-    saveRequest.test(request) &&
-    !/\b(?:from|using|based on|attached|attachment|existing|read|copy|folder|rename|and|then|also|table|agent|workflow|skill|images?|photos?|pictures?|how|explain)\b/i.test(
-      request,
-    )
-  );
+function fileSaveRequested(request: string) {
+  for (const match of request.matchAll(saveRequest)) {
+    const object = match[1]!.split(/\b(?:from|using|based on|of|about|that|for)\b/i)[0]!;
+    if (fileRequest.test(object)) return true;
+  }
+  return false;
 }
 const receipt = z.object({
   file: z.object({
@@ -40,29 +40,20 @@ const failure = z.object({ error: z.string(), instruction: z.string().optional()
 /** Only standalone library lookups are routed here; requests to read or change their contents stay with the model. */
 export function fileListingQuery(request: string): string | undefined {
   const match =
-    /\b(?:names?\s+(?:contains?|includes?|matches?)|named?|called|matching|search(?:\s+(?:my\s+)?files)?\s+for)\s+["'“]?(.+?)["'”]?[.!?]?\s*$/i.exec(
-      request,
-    );
-  const intent = match ? request.slice(0, request.lastIndexOf(match[1]!)) : request;
-  const quotedQuery = match && /^["'“].*["'”][.!?]?\s*$/.test(request.slice(request.lastIndexOf(match[1]!) - 1));
-  if (
-    (match && !quotedQuery && /\b(?:and|then|also)\b/i.test(match[1]!)) ||
-    !/\b(?:list|show|find|search)\b/i.test(intent) ||
-    !/\b(?:files?|library)\b/i.test(intent) ||
-    /\b(?:create|make|save|write|summari[sz]e|read|delete|move|rename|restore|trash|explain|how to|tables?|rows?|records?|fields?|people|teams?|members?|and|then|also|tell|what|open|compare|analy[sz]e)\b/i.test(
-      intent,
-    )
-  )
-    return undefined;
-  return match
-    ? match[1]!
-        .replace(/["'”]$/, '')
+    /^(?:please\s+)?(?:list|show(?:\s+me)?|find|search(?:\s+for)?)\s+(?:(?:all|the|my)\s+)*(?:files|library)(?:\s+in\s+(?:my\s+)?(?:files|library))?(?:\s+(?:(?:whose\s+)?names?\s+(?:contains?|includes?|matches?)|named|called|matching|for)\s+(.+))?$/i.exec(
+      request
         .trim()
-        .slice(0, 255)
-    : '';
+        .replace(/[.!?]$/, '')
+        .trim(),
+    );
+  if (!match) return undefined;
+  if (!match[1]) return '';
+  const query = /^(?:"([^"]+)"|'([^']+)'|“([^”]+)”|([^\s"'“”]+))$/.exec(match[1].trim());
+  return query?.slice(1).find(Boolean)?.slice(0, 255);
 }
 
 export function createFileJobGuard(request: string, prior: readonly { call: unknown; result: unknown }[] = []) {
+  const requestedSave = fileSaveRequested(request);
   let calls = 0;
   let attempted = false;
   let saved = false;
@@ -102,8 +93,11 @@ export function createFileJobGuard(request: string, prior: readonly { call: unkn
     get saved() {
       return saved;
     },
+    get requestedSave() {
+      return requestedSave;
+    },
     get holdPreview() {
-      return !saved && (attempted || newFileRequested(request) || fileListingQuery(request) !== undefined);
+      return !saved && (attempted || requestedSave || fileListingQuery(request) !== undefined);
     },
     get stopped() {
       return repeated;
@@ -116,11 +110,7 @@ export function createFileJobGuard(request: string, prior: readonly { call: unkn
     },
     record,
     unbacked(text: string) {
-      return (
-        !saved &&
-        (attempted || calls > 0 || newFileRequested(request)) &&
-        (fileSavedClaim.test(text) || (newFileRequested(request) && /^(?:done|ready)[.!]?$/i.test(text.trim())))
-      );
+      return !saved && (requestedSave || fileSavedClaim.test(text));
     },
     reply() {
       if (saved) return undefined;

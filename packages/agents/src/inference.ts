@@ -3452,7 +3452,12 @@ export async function inferWithTools(
     invitationLookup(sourceMessages) || !tools?.answerText
       ? undefined
       : update => {
-          if (!directoryExpected && !activeBuiltinSkills.has('agent-authoring') && !fileJob.holdPreview)
+          if (
+            !directoryExpected &&
+            !activeBuiltinSkills.has('agent-authoring') &&
+            !fileJob.holdPreview &&
+            !fileJob.unbacked(update.text)
+          )
             tools?.answerText?.(update);
         };
   let calls = z
@@ -3466,6 +3471,7 @@ export async function inferWithTools(
   // Three rejected tool requests end tool use for the reply; the model then answers in plain text.
   let rejectionsSpent = false;
   let completionCorrections = 0;
+  let readOnlyFileRecovery = false;
   // Whether any answer in this reply named a card that no tool call in it made.
   let cardClaimed = false;
   // Receipts from an earlier attempt of this same turn count as work in this reply.
@@ -3595,7 +3601,8 @@ export async function inferWithTools(
   ) => {
     const fileFailure = fileJob.reply();
     if (fileFailure) return completeReply(fileFailure, true);
-    if (fileJob.unbacked(text)) return completeReply(fileJob.missingSaveReply, true);
+    if (fileJob.unbacked(text))
+      return completeReply(fileJob.requestedSave ? fileJob.missingSaveReply : unfinishedReply, true);
     const reviewReply = (await tableReviewReply()) ?? skillReviewReply();
     return completeReply(reviewReply ?? text, checked || Boolean(reviewReply), reviewReply ? undefined : layout);
   };
@@ -3610,26 +3617,26 @@ export async function inferWithTools(
     let after: string | undefined;
     do {
       if (calls >= chatToolCallLimit || fileJob.remainingCalls === 0)
-        return finish([...names.values(), toolLimitReply].join('\n'), true);
+        return completeReply([...names.values(), toolLimitReply].join('\n'), true);
       const call = { tool: 'files.list' as const, query, ...(after ? { after } : {}) };
       calls++;
       report('tool', toolDisplayName(call.tool));
       const value = await execute(call, 'Looking through Files');
       fileJob.record(call, value);
       const page = pageSchema.safeParse(value);
-      if (!page.success) return finish(fileListingFailed, true);
+      if (!page.success) return completeReply(fileListingFailed, true);
       for (const item of page.data.items) {
         if (item.kind !== 'file' || names.has(item.id)) continue;
         if (names.size >= 1000 || characters + item.name.length > 48_000)
-          return finish([...names.values(), fileListingFailed].join('\n'), true);
+          return completeReply([...names.values(), fileListingFailed].join('\n'), true);
         names.set(item.id, item.name);
         characters += item.name.length + 1;
       }
       after = page.data.next ?? undefined;
-      if (after && cursors.has(after)) return finish(fileListingFailed, true);
+      if (after && cursors.has(after)) return completeReply(fileListingFailed, true);
       if (after) cursors.add(after);
     } while (after);
-    return finish(names.size ? [...names.values()].join('\n') : fileListingEmpty, true);
+    return completeReply(names.size ? [...names.values()].join('\n') : fileListingEmpty, true);
   };
   const updateAvatar = () => tools?.avatar?.update({ step: Math.max(0, requestStep - 1), avatar });
   if (tools?.avatar) tools.avatar.update({ step: 0, avatar });
@@ -4593,7 +4600,7 @@ export async function inferWithTools(
       }
       const candidate = rendered?.text ?? selected.text;
       if (fileJob.reply()) return finish(candidate, true);
-      if (fileJob.unbacked(candidate)) {
+      if (fileJob.requestedSave && fileJob.unbacked(candidate)) {
         if (finalizing || completionCorrections++ >= 2) return finish(fileJob.missingSaveReply, true);
         forceTool = nativeToolName('files.create');
         items.push(
@@ -4697,8 +4704,15 @@ export async function inferWithTools(
       const otherTableSkipped = rowCards.length ? undefined : rowRequestSkipped(items, request, rowCards, waitingRows);
       const unbacked = otherTableSkipped ? undefined : (importUnbacked ?? unbackedCardClaim(candidate, items, waiting));
       // A resumed turn's earlier receipts are in its history, not in this reply's items.
-      const writeUnbacked =
-        otherTableSkipped || tools?.priorCalls || tools?.priorToolCalls?.length
+      const fileClaimUnbacked = fileJob.unbacked(candidate);
+      readOnlyFileRecovery ||= fileClaimUnbacked;
+      const writeUnbacked = fileClaimUnbacked
+        ? {
+            status: 'continue' as const,
+            reason:
+              'No file was requested or saved. Remove the unsupported saved-file claim and answer the original request from completed results. Do not create a file or describe a failed save.',
+          }
+        : otherTableSkipped || tools?.priorCalls || tools?.priorToolCalls?.length
           ? undefined
           : unbackedWriteClaim(candidate, wroteInReply(items));
       const invitesUnchecked = unbacked || writeUnbacked ? undefined : uncheckedInvitationClaim(candidate, items);
@@ -4947,6 +4961,25 @@ export async function inferWithTools(
       continue;
     }
     if (finalizing) return finish(stoppingReply);
+    if (
+      readOnlyFileRecovery &&
+      !fileJob.requestedSave &&
+      selected.calls.some(call => call.name === nativeToolName('files.create'))
+    ) {
+      items.push({ kind: 'model', text: '', calls: selected.calls, raw: selected.raw });
+      reject(
+        selected.calls.map(call => ({
+          id: call.id,
+          name: call.name,
+          output: 'Not run. No file was requested. Correct the unsupported save claim without creating a file.',
+          error: true,
+          providerId: call.providerId,
+        })),
+        'invalid-arguments',
+        [],
+      );
+      continue;
+    }
     for (const call of selected.calls) if (loaded.has(call.name)) lastUsed.set(call.name, step);
     if (selected.calls.some(call => isWorkTool(call.name))) workToolUsed = true;
     items.push({ kind: 'model', text: selected.text, calls: selected.calls, raw: selected.raw });

@@ -172,7 +172,157 @@ for (const model of models)
       assert.deepEqual(calls, ['files.list', 'files.read']);
       assert.equal(result.text, text);
     });
+
+    test(`${title} describing existing spreadsheets never creates an unrequested file`, async t => {
+      const text = 'These spreadsheets are generated weekly by the finance team.';
+      provider(t, sse, [
+        nativeReply('azure', { calls: [use('files.read', { source: fileId })] }),
+        nativeReply('azure', { text }),
+        nativeReply('azure', { calls: [use('files.create', create)] }),
+        nativeReply('azure', { text: 'Report.md is saved in Files.' }),
+      ]);
+      const calls = [];
+      const result = await inferWithTools(
+        route(model),
+        [{ role: 'user', text: `Read file-id=${fileId} and tell me what it is.` }],
+        async call => {
+          calls.push(call.tool);
+          return call.tool === 'files.create' ? saved : { file: text };
+        },
+        undefined,
+        false,
+        null,
+        options,
+      );
+      assert.deepEqual(calls, ['files.read']);
+      assert.equal(result.text, text);
+    });
+
+    test(`${title} a requested markdown report needs a receipt even for a vague ready claim`, async t => {
+      provider(t, sse, [nativeReply('azure', { text: 'Your report is ready.' })]);
+      const result = await inferWithTools(
+        route(model),
+        [{ role: 'user', text: 'Create a markdown report.' }],
+        () => assert.fail('The model never requested a save'),
+        undefined,
+        false,
+        null,
+        options,
+      );
+      assert.equal(result.text, "I couldn't save the file. Ask me to try again.");
+    });
+
+    test(`${title} research followed by a requested spreadsheet holds an unbacked claim out of streamed text`, async t => {
+      const claim = "I've created a spreadsheet comparing the three CRMs.";
+      provider(t, sse, [
+        nativeReply('azure', { calls: [use('web.search', { query: 'top three CRMs' })] }),
+        nativeReply('azure', { text: claim }),
+      ]);
+      const previews = [];
+      const result = await inferWithTools(
+        route(model),
+        [{ role: 'user', text: 'Research the top 3 CRMs and create a spreadsheet comparing them.' }],
+        async call => {
+          assert.equal(call.tool, 'web.search');
+          return { results: [{ title: 'Three CRMs', text: 'A, B and C' }] };
+        },
+        undefined,
+        false,
+        null,
+        { ...options, answerText: update => previews.push(update.text) },
+      );
+      assert.equal(result.text, "I couldn't save the file. Ask me to try again.");
+      assert.ok(!previews.some(text => text.includes(claim)), 'An unbacked claim must not stream');
+    });
+
+    test(`${title} showing numbers inside a file continues beyond discovery`, async t => {
+      const text = 'Revenue in Budget.xlsx is 42.';
+      provider(t, sse, [
+        nativeReply('azure', { calls: [use('files.list', { query: 'budget' })] }),
+        nativeReply('azure', { calls: [use('files.read', { source: fileId })] }),
+        nativeReply('azure', { text }),
+      ]);
+      const calls = [];
+      const result = await inferWithTools(
+        route(model),
+        [{ role: 'user', text: 'Show me the revenue numbers in the budget file.' }],
+        async call => {
+          calls.push(call.tool);
+          return call.tool === 'files.list'
+            ? {
+                items: [
+                  { id: fileId, kind: 'file', name: 'Budget.xlsx' },
+                  { id: secondId, kind: 'file', name: 'Other.md' },
+                ],
+                next: null,
+              }
+            : { file: 'Revenue: 42' };
+        },
+        undefined,
+        false,
+        null,
+        options,
+      );
+      assert.deepEqual(calls, ['files.list', 'files.read']);
+      assert.equal(result.text, text);
+    });
+
+    for (const claim of ["I've saved a new file in Files.", "I've saved the report to your Files."])
+      test(`${title} an unsolicited save claim is corrected without forcing a save or reporting save failure: ${claim}`, async t => {
+        const text = 'The budget file contains revenue of 42.';
+        provider(
+          t,
+          sse,
+          [
+            nativeReply('azure', { calls: [use('files.read', { source: fileId })] }),
+            nativeReply('azure', { text: claim }),
+            nativeReply('azure', { calls: [use('files.create', create)] }),
+            nativeReply('azure', { text }),
+          ],
+          false,
+          body => assert.notEqual(body.tool_choice?.function?.name, 'files_create'),
+        );
+        const previews = [];
+        const result = await inferWithTools(
+          route(model),
+          [{ role: 'user', text: `Read file-id=${fileId} and tell me the revenue.` }],
+          async call => {
+            assert.equal(call.tool, 'files.read');
+            return { file: 'Revenue: 42' };
+          },
+          undefined,
+          false,
+          null,
+          { ...options, answerText: update => previews.push(update.text) },
+        );
+        assert.equal(result.text, text);
+        assert.ok(!previews.some(text => text.includes(claim)));
+      });
   }
+
+test('an unsolicited repeated save claim exhausts normal correction without a save-failure reply', async t => {
+  const claim = "I've saved a new file in Files.";
+  provider(t, true, [
+    nativeReply('azure', { calls: [use('files.read', { source: fileId })] }),
+    nativeReply('azure', { text: claim }),
+  ]);
+  let calls = 0;
+  const result = await inferWithTools(
+    route(models[0]),
+    [{ role: 'user', text: `Read file-id=${fileId} and tell me the revenue.` }],
+    async call => {
+      calls++;
+      assert.equal(call.tool, 'files.read');
+      return { file: 'Revenue: 42' };
+    },
+    undefined,
+    false,
+    null,
+    options,
+  );
+  assert.equal(calls, 1);
+  assert.doesNotMatch(result.text, /saved a new file|couldn't save/i);
+});
 
 function provider(t, sse, replies, checkFails = false, inspect = () => {}) {
   t.mock.method(globalThis, 'fetch', async (_url, init) => {
@@ -210,6 +360,49 @@ test('a search phrase is data, even when it contains action words', async t => {
   );
   assert.equal(result.text, 'read table.md');
 });
+
+test('a listed filename containing save wording remains data, not a save claim', async t => {
+  const name = 'ready in Files.md';
+  provider(t, true, [nativeReply('azure', { text: 'No matching files.' })]);
+  const result = await inferWithTools(
+    nativeRoutes.azure,
+    [{ role: 'user', text: 'List my files.' }],
+    async call => {
+      assert.equal(call.tool, 'files.list');
+      return { items: [{ id: fileId, kind: 'file', name }], next: null };
+    },
+    undefined,
+    false,
+    null,
+    options,
+  );
+  assert.equal(result.text, name);
+});
+
+for (const request of [
+  'Make a comparison table and read the budget file.',
+  'Write a short summary of the budget file.',
+])
+  test(`text work referencing an existing file does not request a save: ${request}`, async t => {
+    const text = 'Budget revenue is 42.';
+    provider(t, true, [
+      nativeReply('azure', { calls: [use('files.read', { source: fileId })] }),
+      nativeReply('azure', { text }),
+    ]);
+    const result = await inferWithTools(
+      nativeRoutes.azure,
+      [{ role: 'user', text: request }],
+      async call => {
+        assert.equal(call.tool, 'files.read');
+        return { file: 'Revenue: 42' };
+      },
+      undefined,
+      false,
+      null,
+      options,
+    );
+    assert.equal(result.text, text);
+  });
 
 for (const model of models)
   for (const sse of [false, true]) {
