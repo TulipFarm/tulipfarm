@@ -1919,6 +1919,8 @@ const completionCheckSchema = z.strictObject({
     hasAnswerContent: z.boolean().catch(false).optional(),
     hasToolBackedResult: z.boolean().catch(false).optional(),
     rowReviewRequested: z.boolean().catch(false).optional(),
+    smallRowBatchRequested: z.boolean().catch(false).optional(),
+    tableLookupRequired: z.boolean().catch(false).optional(),
     workspaceDirectory: z
       .enum(['not-applicable', 'lookup-required', 'grounded', 'matches-grounded', 'unsupported'])
       .optional(),
@@ -1948,6 +1950,8 @@ tableInventory, when present, is the server's current inventory for whole table 
 Set rowWriteRequested to true only when the latest human message requests an immediate row change, not a negation, past-action question, hypothetical, request to inspect first or deferral. It classifies the request, never approves an action. Otherwise set it to false.
 Set planSavedClaim to true when the candidate says a plan or plan-only draft was saved, created or is ready. This classifies the candidate's claim, not whether it is true. Otherwise set it to false. A failed planning call is not a saved draft, a workspace policy or a Plan mode restriction. Plan mode allows saving a plan-only draft. A blocker must match the actual failure.
 Set rowReviewRequested to true only when the human explicitly requests preparing row changes for review before writing, including a retry asking for the card for their preceding row request. Read-only inspection, negations, hypotheticals, deferred changes, and questions about past actions are false. This classifies intent, never proves a card exists. Reading the table schema needs no extra approval.
+Set smallRowBatchRequested to true only for an immediate request to create one to five explicit rows in one unambiguous named table, with all row values supplied in the human message. Never set it for generated or inferred rows, larger or unspecified batches, updates, deletions, negation, hypotheticals, inspect-first requests or deferrals. A request to review these explicit rows first still requests a batch; the normal review rules apply. Otherwise set it to false.
+Set tableLookupRequired to true when the reply makes a table-state claim without a current table lookup in this turn, contradicts the current table inventory or lookup, or asks the person for table revisions, IDs, field definitions or other details the system can look up. A lookup must support the specific table's claim, not merely concern another table. Never ask a person for internal revisions or IDs, even after a lookup fails. A necessary question about which named table or which business values to use is not a lookup requirement. Otherwise set it to false.
 Use completed for a sufficient informational answer or an action result supported by receipts; waiting for a necessary human question or approval; refused for a refusal; blocked for an explicit, accurate account of incomplete work and what stops it or an exhausted budget.
 For a question, use waiting only when required user input stops the requested work and no safe default exists; name the specific missing input in reason. Generic closers such as "Would you like me to try again?", "What else can I help you with?" or "Would you like me to do anything else?" are not required input. Use continue for those when requested work remains incomplete, even if they are the reply's only sentence.
 Use continue when the reply merely promises, narrates, or plans work that remains possible, or claims outcomes unsupported by receipts. A reply that reports a new review card, proposal or proposal version, approval, denial, or created, imported or changed data needs a matching successful receipt among this reply's own tool results; it may restate an earlier outcome only as earlier and only when an earlier receipt in the conversation shows it. Without that receipt use continue, even when the reply asks the person to review or approve. waitingCards, when present, is the server's count of the person's review or approval cards from earlier in this chat that are still undecided: a reply may say such a card is ready or still waiting, and ask the person to approve or dismiss it, without a receipt in this reply, but it may not say this reply made a new one. While one waits, a reply that says the person must approve or dismiss it before more changes to that table can be made states what stops the work. Saying an incomplete action will not be activated does not itself establish a blocker. Asking whether to go ahead with work the person already asked for is not a necessary question, so use continue: a review or approval card is itself the person's confirmation step, and a request to see the review first means create that card.
@@ -2957,6 +2961,9 @@ const lookedUpTable = (items: readonly LoopItem[]) =>
 const tableLookupTools = new Set(
   ['tables.definitions', 'tables.list', 'schema.inspect', 'schema.context'].map(nativeToolName),
 );
+const tableReplyPrefilter =
+  /\b(?:tables?|schema|revisions?|versions?|definitions?|fields?|columns?|applying|ready|exist\w*|missing|found|available|provision\w*)\b/i;
+const rowRecoveryPrefilter = /\b(?:rows?|records?|add|insert|append|put|include|create)\b/i;
 /**
  * Why a reply that asks the person about a table must do more work: no tool in this reply looked any table up, so the
  * question may be about a table chat could have found by the name the person used.
@@ -3676,6 +3683,8 @@ export async function inferWithTools(
   const latestHuman = [...sourceMessages].reverse().find(turn => turn.role === 'user');
   const requestedTables = () => namedInventoryTables(latestHuman ? textTurn(latestHuman).text : '', inventory);
   const inventoryCheckNeeded = () => requestedTables().length > 0 && !workToolUsed;
+  const tableRecoveryCheckNeeded = () =>
+    requestedTables().length > 0 && (rowRecoveryPrefilter.test(request) || tableReplyPrefilter.test(request));
   let inventoryAnswerChecked = false;
   let rowReviewIntentChecked = !rowReviewCandidate;
   const answerText: ToolInferenceContext['answerText'] =
@@ -3687,7 +3696,7 @@ export async function inferWithTools(
             (!update.text || rowReviewIntentChecked) &&
             !chatToolNameMention.test(update.text) &&
             !activeBuiltinSkills.has('agent-authoring') &&
-            !(inventoryCheckNeeded() && !inventoryAnswerChecked) &&
+            !((inventoryCheckNeeded() || rowWriteRequested) && !inventoryAnswerChecked) &&
             !fileJob.holdPreview &&
             !fileJob.needsCheck(update.text)
           )
@@ -3736,6 +3745,7 @@ export async function inferWithTools(
   let rowToolsForced = false;
   let inventoryRecovery = false;
   let rowWriteRequested = false;
+  let smallRowBatchRequested = false;
   let rowWriteRetried = false;
   let pastedFileRetried = false;
   const slackLayout = typeof tools?.layout === 'object' ? tools.layout.slack : undefined;
@@ -4617,9 +4627,6 @@ export async function inferWithTools(
         );
       });
     const readyInspection =
-      inventoryRecovery &&
-      rowToolsForced &&
-      rowWriteRequested &&
       !readBlocked &&
       lastResults?.kind === 'results' &&
       lastResults.results.some(result => {
@@ -4633,7 +4640,13 @@ export async function inferWithTools(
           })
           .safeParse(toolResultValue(result.output));
         const targets = requestedTables();
-        return found.success && targets.length === 1 && found.data.id === targets[0]!.id;
+        return (
+          found.success &&
+          targets.length === 1 &&
+          found.data.id === targets[0]!.id &&
+          found.data.appliedRevision === targets[0]!.appliedRevision &&
+          !targets[0]!.maintenance
+        );
       });
     const misnamed =
       !inventoryCheckNeeded() &&
@@ -4657,9 +4670,13 @@ export async function inferWithTools(
       !priorRowWrite &&
       !rowWriteTried(items)
     )
-      rowTools = forcedRowTools(request, catalog?.tools.map(tool => tool.name) ?? []).filter(
-        name => name !== nativeToolName('schema.inspect'),
-      );
+      rowTools = (
+        smallRowBatchRequested
+          ? [nativeToolName('rows.create.batch')]
+          : forcedRowTools(request, catalog?.tools.map(tool => tool.name) ?? []).filter(
+              name => name !== nativeToolName('schema.inspect') && !name.startsWith(nativeToolName('rows.create')),
+            )
+      ).filter(name => catalog?.tools.some(tool => tool.name === name));
     const rowTool = forceTool || forceRender ? undefined : rowTools.shift();
     if (rowTool) forceTool = rowTool;
     const { selected, mcp, answerStep, activeCatalog } = await withChatModelRequest('reply', async () => {
@@ -5077,7 +5094,7 @@ export async function inferWithTools(
           rowReviewIntentChecked = true;
           preview(candidate);
         }
-        if (inventoryCheckNeeded()) {
+        if (inventoryCheckNeeded() || tableRecoveryCheckNeeded()) {
           inventoryAnswerChecked = true;
           preview(candidate);
         }
@@ -5176,7 +5193,11 @@ export async function inferWithTools(
       const invitesUnchecked = unbacked || writeUnbacked ? undefined : uncheckedInvitationClaim(candidate, items);
       if (directoryExpected && directoryAttempted && !directorySucceeded)
         return finish(directoryUnavailableReply, true);
-      const tableCheckNeeded = inventoryCheckNeeded();
+      const tableCheckNeeded: boolean =
+        inventoryCheckNeeded() ||
+        (tableRecoveryCheckNeeded() &&
+          (tableReplyPrefilter.test(candidate) ||
+            (inventoryRecovery && rowWriteRequested && smallRowBatchRequested && !rowWriteTried(items))));
       const tableInventory = requestedTables().map(table => ({
         id: table.id,
         name: table.name,
@@ -5186,7 +5207,7 @@ export async function inferWithTools(
         maintenance: table.maintenance,
       }));
       const tableStateUnchecked = uncheckedTableStateClaim(candidate, items, request, tableInventory.length > 0);
-      const idAsked =
+      const idAsked: ReturnType<typeof tableIdQuestion> =
         unbacked || writeUnbacked || otherTableSkipped
           ? undefined
           : (tableIdQuestion(candidate) ??
@@ -5195,7 +5216,7 @@ export async function inferWithTools(
               : uncheckedTableQuestion(candidate, items)) ??
             invitesUnchecked);
       // A held-back row write, a failure nothing reported, or internal wording gets a rewrite, never the person.
-      const misdescribed =
+      const misdescribed: ReturnType<typeof tableIdQuestion> =
         unbacked || writeUnbacked || idAsked
           ? undefined
           : ((tableCheckNeeded ? undefined : tableStateUnchecked) ??
@@ -5239,10 +5260,12 @@ export async function inferWithTools(
         recordChatCompletionCheck('done', 'review card receipt');
         return accept();
       }
-      const localCorrection = unbacked ?? writeUnbacked ?? idAsked ?? misdescribed;
+      const localCorrection: z.infer<typeof completionCheckSchema>['decision'] | undefined =
+        unbacked ?? writeUnbacked ?? idAsked ?? misdescribed;
       let checked: z.infer<typeof completionCheckSchema>['decision'] | undefined =
-        fileCheckNeeded || tableCheckNeeded || rowReviewCheckNeeded ? undefined : localCorrection;
-      const wordingCheck = directoryLeak && localCorrection === wording ? wording : undefined;
+        fileCheckNeeded || inventoryCheckNeeded() || rowReviewCheckNeeded ? undefined : localCorrection;
+      const wordingCheck: ReturnType<typeof leakedWording> =
+        directoryLeak && localCorrection === wording ? wording : undefined;
       if (!checked || wordingCheck) {
         report('finishing');
         try {
@@ -5271,10 +5294,10 @@ export async function inferWithTools(
                 waiting,
               ),
             );
-            const inventoryEvidence = tableCheckNeeded
+            const inventoryEvidence: string = tableCheckNeeded
               ? JSON.stringify({ ...JSON.parse(evidence), tableInventory })
               : evidence;
-            const directoryEvidence = directoryCheckNeeded
+            const directoryEvidence: string = directoryCheckNeeded
               ? JSON.stringify({
                   evidence: JSON.parse(inventoryEvidence),
                   retainedWorkspaceDirectory: directory ?? null,
@@ -5384,8 +5407,25 @@ export async function inferWithTools(
         };
       if (tableCheckNeeded) {
         rowWriteRequested = checked.rowWriteRequested === true;
+        smallRowBatchRequested = checked.smallRowBatchRequested === true;
         const correction = localCorrection ?? tableStateUnchecked;
         if (correction) checked = { ...checked, ...correction };
+        const target = tableInventory.length === 1 ? tableInventory[0] : undefined;
+        if (
+          checked.tableLookupRequired === true ||
+          (rowWriteRequested &&
+            smallRowBatchRequested &&
+            target?.ready &&
+            !priorRowWrite &&
+            !rowWriteTried(items) &&
+            (!lookedUpTable(items) || readyInspection))
+        )
+          checked = {
+            ...checked,
+            status: 'continue',
+            reason:
+              'Inspect the named table and continue the requested work from its current fields and revision. Do not ask the person for internal revisions or IDs.',
+          };
       }
       if (directoryCheckNeeded && checked.workspaceDirectory && checked.workspaceDirectory !== 'not-applicable') {
         directoryExpected = true;
@@ -5482,11 +5522,22 @@ export async function inferWithTools(
         !priorRowWrite &&
         !rowWriteTried(items);
       if (rowUntried && rowToolsForced && restartOnFallback()) continue;
-      if (tableCheckNeeded && tableInventory.length === 1 && completionCorrections >= 1 && !rowToolsForced) {
+      if (
+        tableCheckNeeded &&
+        tableInventory.length === 1 &&
+        (completionCorrections >= 1 ||
+          checked.tableLookupRequired === true ||
+          (rowWriteRequested && smallRowBatchRequested && tableInventory[0]!.ready)) &&
+        !rowToolsForced
+      ) {
         rowToolsForced = true;
-        rowTools = [nativeToolName('schema.inspect')].filter(name =>
-          activeCatalog.tools.some(tool => tool.name === name),
-        );
+        rowTools = [
+          nativeToolName(
+            readyInspection && rowWriteRequested && smallRowBatchRequested && !priorRowWrite && !rowWriteTried(items)
+              ? 'rows.create.batch'
+              : 'schema.inspect',
+          ),
+        ].filter(name => activeCatalog.tools.some(tool => tool.name === name));
       }
       if (
         rowUntried &&
@@ -5552,7 +5603,8 @@ export async function inferWithTools(
           );
         if (invitesUnchecked) return finish(invitationFallback(items), true);
         // Asking the person which table, after looking tables up, writes nothing and is a safe place to stop.
-        if (idAsked || (asksAboutTable(candidate) && lookedUpTable(items))) return accept();
+        if (checked.tableLookupRequired !== true && (idAsked || (asksAboutTable(candidate) && lookedUpTable(items))))
+          return accept();
         // The last answer is kept only when it neither promises work nor reports an outcome no tool produced.
         const answer = candidate.trim();
         const grounded =
@@ -5560,6 +5612,7 @@ export async function inferWithTools(
           !writeUnbacked &&
           !misdescribed &&
           !tableStateUnchecked &&
+          checked.tableLookupRequired !== true &&
           !promisesWork(answer) &&
           (workToolUsed || !claimsActionOutcome(answer));
         // Tool activity is only shown once a tool ran in this turn.
