@@ -2859,6 +2859,7 @@ export function createConversationExecutor(
                     JOIN ${table(tx, 'tf_conversation_messages')} m ON m.id=t.source_message_id AND m.conversation_id=t.conversation_id
                     WHERE t.conversation_id=$1 AND c.tool='members.find' AND c.status='completed'
                     AND m.membership_id=$2 AND s.output IS NOT NULL AND NOT (s.call ? 'query')
+                    AND COALESCE(s.output->'result'->>'scope','workspace')='workspace'
                     ORDER BY t.accepted_sequence DESC,c.sequence DESC LIMIT 1`,
                     [fence.conversationId, actor.membershipId],
                   )

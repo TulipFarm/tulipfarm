@@ -11,6 +11,9 @@ test('directory reuse stays in the same chat and rechecks roster visibility', { 
     const teamId = randomUUID();
     await f.db.platform.query(`INSERT INTO ${f.table('tf_teams')} (id,name) VALUES ($1,'Operations')`, [teamId]);
     const directory = {
+      scope: 'workspace',
+      workspaceMemberCount: 1,
+      workspaceTeamCount: 1,
       memberCount: 1,
       members: [{ name: 'Sam', email: 'sam@example.com' }],
       teamCount: 1,
@@ -62,6 +65,26 @@ test('directory reuse stays in the same chat and rechecks roster visibility', { 
     );
     assert.equal(
       await run(otherChatId, async ({ executeTool }) => {
+        await executeTool(
+          'members.find',
+          false,
+          async () => ({ result: { ...directory, scope: 'filtered' }, sources: [] }),
+          [],
+          { tool: 'members.find' },
+        );
+        return { text: 'Operations.', sources: [] };
+      }),
+      'completed',
+    );
+    assert.equal(
+      await run(otherChatId, async ({ readWorkspaceDirectory }) => {
+        assert.equal(await readWorkspaceDirectory(), undefined, 'explicitly filtered output is not a full receipt');
+        return { text: 'A new lookup is needed.', sources: [] };
+      }),
+      'completed',
+    );
+    assert.equal(
+      await run(otherChatId, async ({ executeTool }) => {
         await executeTool('members.find', false, async () => ({ result: directory, sources: [] }), [], {
           tool: 'members.find',
           query: 'Operations',
@@ -80,6 +103,26 @@ test('directory reuse stays in the same chat and rechecks roster visibility', { 
     assert.equal(
       await run(chatId, async ({ readWorkspaceDirectory }) => {
         assert.deepEqual(await readWorkspaceDirectory(), directory);
+        return { text: 'Operations.', sources: [] };
+      }),
+      'completed',
+    );
+    assert.equal(
+      await run(chatId, async ({ executeTool }) => {
+        await executeTool(
+          'members.find',
+          false,
+          async () => ({ result: { ...directory, scope: 'filtered', teamCount: 0, teams: [] }, sources: [] }),
+          [],
+          { tool: 'members.find', query: 'No matches' },
+        );
+        return { text: 'No matching teams.', sources: [] };
+      }),
+      'completed',
+    );
+    assert.equal(
+      await run(chatId, async ({ readWorkspaceDirectory }) => {
+        assert.deepEqual(await readWorkspaceDirectory(), directory, 'a newer partial read does not replace a full one');
         return { text: 'Operations.', sources: [] };
       }),
       'completed',
