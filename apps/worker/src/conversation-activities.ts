@@ -171,11 +171,14 @@ export function meteredReply(
     compactor,
     chatFiles,
     workspaceSlug,
-    chatGpt = chatGptPlanFromEnvironment(runtime),
+    chatGpt,
     subscriptions = subscriptionsFromEnvironment(runtime),
   }: MeteredReplyOptions = {},
 ): ConversationReply {
   const secretServices = secretsServices(runtime);
+  // Built on the first plan reply, so deployments without a credential keyring still construct replies.
+  let plan: ChatGptPlan | null | undefined = chatGpt;
+  const chatGptPlan = () => (plan === undefined ? (plan = chatGptPlanFromEnvironment(runtime)) : plan);
   const webOrigin = URL.canParse(process.env.WEB_ORIGIN ?? '') ? process.env.WEB_ORIGIN : undefined;
   return async ({
     model,
@@ -218,7 +221,7 @@ export function meteredReply(
     const plans =
       chat.route.provider === 'chatgpt'
         ? await chatGptPlans({
-            chatGpt,
+            chatGpt: chatGptPlan(),
             subscriptions,
             workspaceId: fence.workspaceId,
             caller: externalContext || project ? null : await turnCaller(runtime, fence),

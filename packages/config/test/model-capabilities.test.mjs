@@ -30,6 +30,10 @@ const shipped = {
   'kimi-code': { reasoningEffort: 'none', imageInput: true },
   'gemini-flash': { imageInput: true },
   'gemini-pro': { imageInput: true },
+  // ChatGPT plan models are newer than the catalog file; they use the Responses API and read images.
+  'chatgpt-sol': { imageInput: true },
+  'chatgpt-astra': { imageInput: true },
+  'chatgpt-luna': { imageInput: true },
 };
 
 test('every shipped model resolves the capabilities that reproduce its previous wire behaviour', () => {
@@ -142,6 +146,9 @@ test('shipped models reserve the per-image token bound their provider documents'
     'kimi-code': [true, 1600, 5242880],
     'gemini-flash': [true, 2240, 5242880],
     'gemini-pro': [true, 2240, 5242880],
+    'chatgpt-sol': [true, 3000, 5242880],
+    'chatgpt-astra': [true, 3000, 5242880],
+    'chatgpt-luna': [true, 3000, 5242880],
   });
 });
 
