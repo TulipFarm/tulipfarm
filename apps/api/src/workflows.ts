@@ -39,7 +39,6 @@ import {
   providerSharingSchema,
   sharingCandidatesSchema,
   sponsorshipSchema,
-  acceptSponsorshipSchema,
 } from '@tulipfarm/workflows/contracts';
 import { StorageUnavailableError } from '@tulipfarm/workspace-storage/runtime';
 import { authConfig, type registerAuth } from './auth.ts';
@@ -290,7 +289,7 @@ export function registerWorkflows(
       {
         schema: schema(
           'sponsorWorkflowV1',
-          'Sponsor unattended runs and select their history audience',
+          'Run unattended triggers with your access and select their history audience',
           workflow,
           workflowSchema,
           sponsorshipSchema,
@@ -299,22 +298,6 @@ export function registerWorkflows(
       request => {
         const { workspaceId, workflowId } = workflow.parse(request.params);
         return service.sponsorship(workspaceId, user(request), workflowId, request.body);
-      },
-    );
-    routes.post(
-      `${base}/:workflowId/sponsorship/accept`,
-      {
-        schema: schema(
-          'acceptWorkflowSponsorshipV1',
-          'Accept named workflow sponsorship',
-          workflow,
-          workflowSchema,
-          acceptSponsorshipSchema,
-        ),
-      },
-      request => {
-        const { workspaceId, workflowId } = workflow.parse(request.params);
-        return service.acceptSponsorship(workspaceId, user(request), workflowId, request.body);
       },
     );
     routes.get(

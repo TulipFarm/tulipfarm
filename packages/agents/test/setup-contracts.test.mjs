@@ -7,7 +7,6 @@ import {
   agentSetupSchema,
   publishAgentSetupSchema,
   saveAgentSetupDraftSchema,
-  sponsorConsented,
 } from '../src/setup-contracts.ts';
 import { agentLinkedDefinition, previewAgentTriggerCadence } from '../src/agent-trigger-workflows.ts';
 import { agentSetupDigest } from '../src/setup.ts';
@@ -103,13 +102,12 @@ test('setups and consent stored before triggers moved to Workflows read as trigg
   });
 });
 
-test('activation needs sponsor consent only for unattended triggers', () => {
-  const cron = { id: randomUUID(), trigger: { kind: 'cron', expression: '0 9 * * 1', timezone: 'Asia/Kolkata' } };
-  const declined = { sponsor: false, replaceChannels: [] };
-  assert.equal(sponsorConsented(declined, []), true);
-  assert.equal(sponsorConsented(declined, [cron]), false);
-  assert.equal(sponsorConsented({ ...declined, sponsor: true }, [cron]), true);
-  assert.equal(sponsorConsented({ ...declined, sponsorTriggerIds: [cron.id] }, [cron]), true);
+test('activation consent no longer needs a sponsor flag', () => {
+  assert.deepEqual(agentSetupConsentSchema.parse({ sponsor: false, replaceChannels: [] }), {
+    sponsor: false,
+    replaceChannels: [],
+  });
+  assert.equal(agentSetupConsentSchema.safeParse({ replaceChannels: [] }).success, true);
 });
 
 test('setups with a prompt on each trigger read as one prompt, without manual entries', () => {

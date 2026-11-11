@@ -187,7 +187,14 @@ export function createSavedAgentService(runtime: AgentStorage, readProjection?: 
         activations: await Promise.all(
           activations.map(async activation => ({
             ...activation,
-            effectiveScope: await effectiveAgentScope(transaction, actor, agentId, activation.scope),
+            effectiveScope: await effectiveAgentScope(
+              transaction,
+              actor,
+              agentId,
+              activation.scope,
+              activation.scope,
+              activation.id,
+            ),
           })),
         ),
       };

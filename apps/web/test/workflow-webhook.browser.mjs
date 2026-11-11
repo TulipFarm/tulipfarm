@@ -184,8 +184,6 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       let viewer = await openWorkflow(page, workflow);
       await assertConfiguration(viewer, 0, workflow.definition.triggers);
       await showWorkflowSettings(page);
-      if (await page.getByRole('button', { name: 'Accept sponsorship' }).count())
-        await page.getByRole('button', { name: 'Accept sponsorship' }).click();
       await page.getByRole('button', { name: 'Activate saved revision' }).click();
       await page.getByRole('button', { name: 'Disable workflow' }).waitFor();
       assert.deepEqual((await service.list(w.id, w.userId)).find(item => item.id === id).activeTriggers[0].payload, {
@@ -258,8 +256,6 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       viewer = await openWorkflow(page, workflow);
       await assertConfiguration(viewer, 0, workflow.definition.triggers);
       await showWorkflowSettings(page);
-      if (await page.getByRole('button', { name: 'Accept sponsorship' }).count())
-        await page.getByRole('button', { name: 'Accept sponsorship' }).click();
       await page.getByRole('button', { name: 'Activate saved revision' }).click();
       await page.getByRole('button', { name: 'Disable workflow' }).waitFor();
       assert.deepEqual(
@@ -316,9 +312,6 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       await showWorkflowSettings(page);
       await keyStatus.getByText('Not configured', { exact: true }).waitFor();
       await endpointStatus.getByText('Not receiving requests. Activate the saved revision to accept calls.').waitFor();
-      // A webhook revision runs unattended, so its named sponsor accepts the new revision before activation.
-      await page.getByRole('button', { name: 'Accept sponsorship' }).click();
-      await page.getByRole('button', { name: 'Accept sponsorship' }).waitFor({ state: 'detached' });
       await page.getByRole('button', { name: 'Activate saved revision' }).click();
       await page.getByRole('button', { name: 'Disable workflow' }).waitFor();
       await endpointStatus.getByText('Not receiving requests. Create a key to start accepting calls.').waitFor();

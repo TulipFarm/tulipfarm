@@ -56,6 +56,19 @@ const supportsReplacement = (transaction: AgentTransaction) =>
   'commonVersion' in transaction && Number(transaction.commonVersion) >= 59;
 export const currentActivation = (transaction: AgentTransaction, alias = 'a') =>
   supportsReplacement(transaction) ? `${alias}.superseded_by_activation_id IS NULL` : 'true';
+const supportsActivationActor = (transaction: AgentTransaction) =>
+  'commonVersion' in transaction && Number(transaction.commonVersion) >= 63;
+
+async function requireActivationAuthority(transaction: AgentTransaction, actor: HumanActor, agentId: string) {
+  const adminEnrollment = (
+    await transaction.client.query(
+      `SELECT 1 FROM ${relation(transaction, 'tf_agent_teams')} enrolled JOIN ${relation(transaction, 'tf_teams')} team ON team.id=enrolled.team_id WHERE enrolled.agent_id=$1 AND team.name='_admin'`,
+      [agentId],
+    )
+  ).rowCount;
+  if (adminEnrollment && (await currentMember(transaction, actor)).role !== 'admin')
+    throw new AgentError('agent-team-assignment-required', 403);
+}
 
 export async function resolveActivationId(transaction: AgentTransaction, id: string) {
   if (!supportsReplacement(transaction)) return id;
@@ -108,6 +121,7 @@ export function createAgentStore(storage: AgentStorage, externalGuard?: External
       .parse(input);
     return mutation(workspaceId, actor, async transaction => {
       await requireAgentPermission(transaction, actor, value.agentId, 'manage');
+      await requireActivationAuthority(transaction, actor, value.agentId);
       const item = (
         await transaction.client.query(
           `SELECT saved_revision, deleted_at FROM ${relation(transaction, 'tf_agents')} WHERE id = $1`,
@@ -143,9 +157,10 @@ export function createAgentStore(storage: AgentStorage, externalGuard?: External
         return { activationId: id };
       }
       const before = await definitionRecommendationAudience(transaction, 'agent', value.agentId);
+      const attributed = supportsActivationActor(transaction);
       await transaction.client.query(
-        `INSERT INTO ${relation(transaction, 'tf_agent_activations')} (id, agent_id, definition_revision, scope) VALUES ($1, $2, $3, $4)`,
-        [id, value.agentId, value.revision, JSON.stringify(value.scope)],
+        `INSERT INTO ${relation(transaction, 'tf_agent_activations')} (id, agent_id, definition_revision, scope${attributed ? ', activated_by_membership_id' : ''}) VALUES ($1, $2, $3, $4${attributed ? ', $5' : ''})`,
+        [id, value.agentId, value.revision, JSON.stringify(value.scope), ...(attributed ? [actor.membershipId] : [])],
       );
       await transaction.client.query(
         `INSERT INTO ${relation(transaction, 'tf_audit_events')} (id, actor_id, operation, subject_id) VALUES ($1,$2,'agent.activate',$3)`,
@@ -173,7 +188,16 @@ export function createAgentStore(storage: AgentStorage, externalGuard?: External
         )
         .map(row => row.team_id);
       for (const teamId of value.teamIds)
-        if (!existingTeams.includes(teamId)) await requireTeamAssignment(transaction, actor, teamId);
+        if (
+          !existingTeams.includes(teamId) ||
+          (
+            await transaction.client.query(
+              `SELECT 1 FROM ${relation(transaction, 'tf_teams')} WHERE id=$1 AND name='_admin'`,
+              [teamId],
+            )
+          ).rowCount
+        )
+          await requireTeamAssignment(transaction, actor, teamId);
       if (
         !(
           await transaction.client.query(
@@ -223,6 +247,7 @@ export function createAgentStore(storage: AgentStorage, externalGuard?: External
     return mutation(workspaceId, actor, async transaction => {
       if (!supportsReplacement(transaction)) throw new AgentError('activation-replacement-unavailable', 503);
       await requireAgentPermission(transaction, actor, value.agentId, 'manage');
+      await requireActivationAuthority(transaction, actor, value.agentId);
       const previous = (
         await transaction.client.query(
           `SELECT agent_id,definition_revision,scope,revoked_at FROM ${relation(transaction, 'tf_agent_activations')} WHERE id=$1`,
@@ -297,13 +322,21 @@ export function createAgentStore(storage: AgentStorage, externalGuard?: External
       await resolveDefinitionProcedures(transaction, value.agentId, value.revision, actor);
       const before = await definitionRecommendationAudience(transaction, 'agent', value.agentId);
       // Replacing instructions must not change the default scope or resolve genuinely tied activation times.
+      const attributed = supportsActivationActor(transaction);
       for (const original of active.length ? [...active].reverse() : [{ id: null, scope }]) {
         const id = original.id === active[0]?.id || original.id === null ? value.requestId : randomUUID();
         await transaction.client.query(
-          `INSERT INTO ${relation(transaction, 'tf_agent_activations')}(id,agent_id,definition_revision,scope,activated_at)
+          `INSERT INTO ${relation(transaction, 'tf_agent_activations')}(id,agent_id,definition_revision,scope,activated_at${attributed ? ',activated_by_membership_id' : ''})
           VALUES($1,$2,$3,$4,CASE WHEN $5::uuid IS NULL THEN clock_timestamp()
-            ELSE (SELECT activated_at FROM ${relation(transaction, 'tf_agent_activations')} WHERE id=$5) END)`,
-          [id, value.agentId, value.revision, JSON.stringify(original.scope), original.id],
+            ELSE (SELECT activated_at FROM ${relation(transaction, 'tf_agent_activations')} WHERE id=$5) END${attributed ? ',$6' : ''})`,
+          [
+            id,
+            value.agentId,
+            value.revision,
+            JSON.stringify(original.scope),
+            original.id,
+            ...(attributed ? [actor.membershipId] : []),
+          ],
         );
         if (original.id)
           await transaction.client.query(
@@ -332,6 +365,7 @@ export function createAgentStore(storage: AgentStorage, externalGuard?: External
       .parse(input);
     return mutation(workspaceId, actor, async transaction => {
       await requireAgentPermission(transaction, actor, value.agentId, 'manage');
+      await requireActivationAuthority(transaction, actor, value.agentId);
       if (
         !(
           await transaction.client.query(
@@ -390,9 +424,16 @@ export function createAgentStore(storage: AgentStorage, externalGuard?: External
       const reactivated = !!active && canonicalJson(active.scope) !== canonicalJson(value.scope);
       if (active && reactivated) {
         await resolveDefinitionProcedures(transaction, value.agentId, active.definition_revision);
+        const attributed = supportsActivationActor(transaction);
         await transaction.client.query(
-          `INSERT INTO ${relation(transaction, 'tf_agent_activations')} (id, agent_id, definition_revision, scope) VALUES ($1, $2, $3, $4)`,
-          [randomUUID(), value.agentId, active.definition_revision, JSON.stringify(value.scope)],
+          `INSERT INTO ${relation(transaction, 'tf_agent_activations')} (id, agent_id, definition_revision, scope${attributed ? ',activated_by_membership_id' : ''}) VALUES ($1, $2, $3, $4${attributed ? ',$5' : ''})`,
+          [
+            randomUUID(),
+            value.agentId,
+            active.definition_revision,
+            JSON.stringify(value.scope),
+            ...(attributed ? [actor.membershipId] : []),
+          ],
         );
         await transaction.client.query(
           `INSERT INTO ${relation(transaction, 'tf_audit_events')} (id, actor_id, operation, subject_id) VALUES ($1,$2,'agent.activate',$3)`,

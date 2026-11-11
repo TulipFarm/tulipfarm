@@ -22,7 +22,7 @@ Code steps need a configured execution backend. A human step asks for input; it 
 
 `{"id","kind":"agent","agentId","prompt":value,"limits"?:{"toolCalls","activeMilliseconds","credits"}}` starts a task for an existing saved agent and waits for its result. The prompt must resolve to a nonempty string of at most 8000 characters. Its output is `{"taskId","result":text}`.
 
-Use `agents.list` and `agents.read` to inspect a saved agent before selecting its exact ID. The person starting the run, or the sponsor of an unattended run, and the workflow history audience must have permission to invoke it. The agent still needs its own active configuration, scope, tools, integrations, and credits. A workflow or skill grants none of these.
+Use `agents.list` and `agents.read` to inspect a saved agent before selecting its exact ID. The person starting the run, or the person who turned on an unattended run, and the workflow history audience must have permission to invoke it. The agent still needs its own active configuration, scope, tools, integrations, and credits. A workflow or skill grants none of these.
 
 Limits default to 100 tool calls, 300000 active milliseconds, and 100 credits. Their allowed ranges are 1 to 1000 tool calls, 1000 to 3600000 active milliseconds, and 1 to 10000 credits.
 
@@ -79,8 +79,8 @@ entire row or typed value object. A Tickets row-created trigger can read its tit
 from `values / <title field UUID> / value`.
 
 Before drafting a Slack step, ask the user whether it should post as the
-TulipFarm app (`"sender":"app"`) or as the requester's or sponsor's personal
-Slack account (`"sender":"user"`). Do not choose for them. The app must already
+TulipFarm app (`"sender":"app"`) or as the personal
+Slack account of the requester, or of the person who turned the workflow on (`"sender":"user"`). Do not choose for them. The app must already
 be a member of the channel. Omitting `sender` posts from the personal account.
 Chat sends outside a workflow always use the person's own account.
 
@@ -107,7 +107,7 @@ create-row and update-row output `{"operation","tableId","recordId","token","fie
 
 Get table and field IDs from `tables.definitions`; field IDs are lowercase. A mapped value may be a typed value copied from a found row, or plain JSON: a string for text, date, timestamp or an option ID or label, a number or decimal string for numbers, true or false, a record ID for a relationship, an array for several options, or null. File fields cannot be written or read.
 
-Table steps act with the table permissions of the person who starts the run, or the sponsor for scheduled, record, row and webhook runs. The sponsor needs read and create or update permission, and everyone who sees run history needs read permission.
+Table steps act with the table permissions of the person who starts the run, or of the person who turned the workflow on for scheduled, record, row and webhook runs. That person needs read and create or update permission, and everyone who sees run history needs read permission.
 
 An update with a token older than the row fails instead of overwriting a newer change.
 

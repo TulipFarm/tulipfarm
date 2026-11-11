@@ -56,6 +56,24 @@ test(
     }
     const chat = await conversation(),
       other = await conversation();
+    const defaultsChat = await conversation();
+    const defaultsRequest = randomUUID();
+    const defaultsInput = {
+      title: 'Release outline',
+      execution: 'plan-only',
+      planning: { requirements: [{ key: 'prepare', description: 'Prepare release', tasks: ['prepare'] }] },
+      tasks: [
+        { key: 'prepare', title: 'Prepare release' },
+        { key: 'review', title: 'Review release' },
+      ],
+    };
+    const defaults = await plans.create(w.id, w.userId, defaultsChat.chatId, defaultsRequest, defaultsInput);
+    assert.deepEqual(defaults.added, ['prepare', 'review', 'verify-request']);
+    assert.deepEqual(await plans.create(w.id, w.userId, defaultsChat.chatId, defaultsRequest, defaultsInput), defaults);
+    const normalized = await plans.read(w.id, w.userId, defaults.id);
+    assert.equal(normalized.planning.requirements.length, 2);
+    assert.equal(normalized.planning.verificationTask, 'verify-request');
+    assert.equal(normalized.lifecycle, 'draft');
     async function receipt(origin, sequence, result, tool = 'slack.resolve', sources = []) {
       const id = randomUUID();
       await db.platform.query(

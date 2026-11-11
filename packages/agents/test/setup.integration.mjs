@@ -24,6 +24,8 @@ import { createTaskRuntime } from '../src/task-runtime.ts';
 import { syntheticContinuity } from './continuity-fixture.mjs';
 import { nativeChatTools } from '../src/native-tools.ts';
 import { use } from './native-fixture.mjs';
+import { createAgentStore } from '../src/store.ts';
+import { AccessDenied, canAccessAsset, canUseAgentEnrollment } from '@tulipfarm/access';
 
 const limits = { toolCalls: 10, activeMilliseconds: 60000, credits: 10 };
 async function environment(t) {
@@ -106,7 +108,6 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     digest: draft.digest,
     decision: choice,
     consent: {
-      sponsor: true,
       replaceChannels: draft.setup.slackChannels
         .filter(channel => channel.replaceAgentId)
         .map(channel => channel.channel),
@@ -198,6 +199,231 @@ test('table enrollment requires current author membership and grants at save and
   );
   assert.deepEqual((await f.state()).activations, []);
   assert.equal((await service.readDraft(f.w.id, f.user, f.agentId)).setup.enrollment[0], teamId);
+});
+
+test('admin team enrollment supplies bounded table authority and keeps the activating admin current', async t => {
+  const f = await environment(t),
+    service = createAgentSetup(f.runtime);
+  const adminTeam = (await f.db.platform.query(`SELECT id FROM ${f.table('tf_teams')} WHERE name='_admin'`)).rows[0].id;
+  await f.db.platform.query(`UPDATE ${f.table('tf_memberships')} SET role='admin' WHERE id=$1`, [f.member]);
+  await f.db.platform.query(`INSERT INTO ${f.table('tf_member_teams')}(membership_id,team_id) VALUES($1,$2)`, [
+    f.member,
+    adminTeam,
+  ]);
+  const field = textField();
+  const customers = await createTableWithRows({
+    db: f.db,
+    workspace: f.w,
+    runtime: f.runtime,
+    definition: tableDefinition({ owningTeamId: adminTeam, label: 'Customers', fields: [field] }),
+    records: [{ values: textValues(field, 'Alice') }],
+  });
+  const scope = [{ assetId: customers.tableId, permissions: ['table.row.read', 'table.row.update'] }];
+  const context = await createSavedAgentService(f.runtime).context(f.w.id, f.user);
+  const team = context.teams.find(team => team.id === adminTeam);
+  for (const permission of scope[0].permissions)
+    assert.ok(
+      team.tableScope.some(entry => entry.assetId === customers.tableId && entry.permissions.includes(permission)),
+    );
+  const draft = builderDraft();
+  draft.definition = {
+    name: 'Customer assistant',
+    instructions: 'Count customers.',
+    tools: ['rows.list', 'rows.update'],
+  };
+  draft.owningTeamId = adminTeam;
+  draft.access.scope = scope;
+  draft.access.limits = scope;
+  draft.access.enrollment = [adminTeam];
+  const ready = parseBuilder(draft, f.member, true, f.agentId, { teams: context.teams });
+  assert.ok(ready.setup, JSON.stringify(ready.problems));
+  const staged = await service.saveDraft(f.w.id, f.user, f.agentId, await f.input({ setup: ready.setup }));
+  const command = await service.publish(f.w.id, f.user, f.agentId, f.decision(staged));
+  await f.accept(service, command);
+  const receipt = await service.advance(f.w.id, f.user, command.commandId);
+  assert.equal(receipt.status, 'active');
+  const actor = { kind: 'human', userId: f.user, membershipId: f.member };
+  const admin = { kind: 'human', userId: f.w.userId, membershipId: f.w.membershipId };
+  const allowed = (who = admin, permission = 'table.row.read') =>
+    f.runtime.transaction(f.w.id, { minimum: 1, maximum: 100 }, tx =>
+      canUseAgentEnrollment(tx, who, f.agentId, customers.tableId, permission, receipt.activationId),
+    );
+  assert.equal(await allowed(), true);
+  assert.equal(await allowed(admin, 'table.row.update'), true);
+  const revision = (
+    await f.db.platform.query(`SELECT definition_revision FROM ${f.table('tf_agent_activations')} WHERE id=$1`, [
+      receipt.activationId,
+    ])
+  ).rows[0].definition_revision;
+  const store = createAgentStore(f.runtime);
+  const tasks = createAgentTasks(f.runtime);
+  const task = await tasks.start(f.w.id, f.user, {
+    requestId: randomUUID(),
+    agentId: f.agentId,
+    text: 'Count customers.',
+  });
+  const engine = createTaskRuntime(
+    f.runtime,
+    syntheticContinuity(async input => {
+      const { results } = JSON.parse(input.prompt);
+      if (!results.length)
+        return {
+          kind: 'tool',
+          text: 'Read customers.',
+          call: {
+            tool: 'rows.list',
+            tableId: customers.tableId,
+            expectedAppliedRevision: customers.revision,
+            query: {},
+          },
+        };
+      assert.equal(results[0].result.records.length, 1);
+      return { kind: 'answer', text: 'Customers has 1 row.' };
+    }),
+  );
+  await engine.process(f.w.id, task.id);
+  const runId = (
+    await f.db.platform.query(`SELECT run_id FROM ${f.table('tf_agent_task_runs')} WHERE task_id=$1`, [task.id])
+  ).rows[0].run_id;
+  const runAllows = (assetId, permission) =>
+    f.runtime.transaction(f.w.id, { minimum: 1, maximum: 100 }, tx =>
+      canAccessAsset(tx, { kind: 'agent', runId }, assetId, permission),
+    );
+  assert.equal(await runAllows(customers.tableId, 'table.row.update'), true);
+  assert.equal(
+    await runAllows(randomUUID(), 'table.row.read'),
+    false,
+    'admin enrollment cannot widen activation scope',
+  );
+  await f.db.platform.query(`UPDATE ${f.table('tf_agent_limits')} SET scope='[]' WHERE agent_id=$1`, [f.agentId]);
+  assert.equal(await runAllows(customers.tableId, 'table.row.read'), false, 'current limits still apply');
+  await f.db.platform.query(`UPDATE ${f.table('tf_agent_limits')} SET scope=$2 WHERE agent_id=$1`, [
+    f.agentId,
+    JSON.stringify(scope),
+  ]);
+  await f.db.platform.query(
+    `UPDATE ${f.table('tf_agent_activations')} SET activated_by_membership_id=NULL WHERE id=$1`,
+    [receipt.activationId],
+  );
+  assert.equal(await allowed(), false, 'legacy activations cannot gain implicit admin authority');
+  await f.db.platform.query(
+    `INSERT INTO ${f.table('tf_grants')}(team_id,asset_id,permission) VALUES($1,$2,'table.row.read')`,
+    [adminTeam, customers.tableId],
+  );
+  assert.equal(await allowed(), true, 'explicit grants continue working for legacy activations');
+  await f.db.platform.query(`DELETE FROM ${f.table('tf_grants')} WHERE team_id=$1`, [adminTeam]);
+  await f.db.platform.query(`UPDATE ${f.table('tf_agent_activations')} SET activated_by_membership_id=$2 WHERE id=$1`, [
+    receipt.activationId,
+    f.member,
+  ]);
+  for (let step = 0; step < 5 && (await tasks.read(f.w.id, f.user, task.id)).status === 'pending'; step++)
+    await engine.process(f.w.id, task.id);
+  assert.equal((await tasks.read(f.w.id, f.user, task.id)).status, 'completed');
+  await f.db.platform.query(`UPDATE ${f.table('tf_memberships')} SET role='member' WHERE id=$1`, [f.member]);
+  assert.equal(await allowed(), false, 'a different admin invoker cannot replace the activating admin');
+  assert.equal(await allowed(actor), false);
+  const state = await f.state();
+  await assert.rejects(
+    service.saveDraft(
+      f.w.id,
+      f.user,
+      f.agentId,
+      await f.input({
+        setup: ready.setup,
+        expectedVersion: staged.version,
+        expectedSavedRevision: state.agent.saved_revision,
+        expectedPolicyVersion: state.agent.policy_version,
+        expectedActivationIds: state.activations,
+      }),
+    ),
+    error => error.code === 'agent-team-assignment-required',
+  );
+  await assert.rejects(
+    store.configure(f.w.id, actor, {
+      agentId: f.agentId,
+      version: (await f.state()).agent.policy_version,
+      enabled: true,
+      teamIds: [adminTeam],
+      limits: scope,
+      taskLimits: limits,
+    }),
+    AccessDenied,
+  );
+  await assert.rejects(
+    store.activate(f.w.id, actor, {
+      agentId: f.agentId,
+      revision,
+      scope,
+    }),
+    error => error.code === 'agent-team-assignment-required',
+  );
+  await assert.rejects(
+    store.changeDataScope(f.w.id, actor, {
+      agentId: f.agentId,
+      version: (await f.state()).agent.policy_version,
+      scope: [],
+    }),
+    error => error.code === 'agent-team-assignment-required',
+  );
+  await assert.rejects(
+    store.replaceActivation(f.w.id, actor, {
+      agentId: f.agentId,
+      requestId: randomUUID(),
+      revision,
+      scope,
+      expectedSavedRevision: (await f.state()).agent.saved_revision,
+      expectedPolicyVersion: (await f.state()).agent.policy_version,
+      expectedActivationIds: [receipt.activationId],
+    }),
+    error => error.code === 'agent-team-assignment-required',
+  );
+  await f.db.platform.query(`UPDATE ${f.table('tf_memberships')} SET role='admin' WHERE id=$1`, [f.member]);
+  assert.equal(await allowed(), true);
+  const anotherTeam = randomUUID();
+  await f.db.platform.query(`INSERT INTO ${f.table('tf_teams')}(id,name) VALUES($1,'Readers')`, [anotherTeam]);
+  await f.db.platform.query(
+    `INSERT INTO ${f.table('tf_grants')}(team_id,asset_id,permission) VALUES($1,$2,'table.row.read')`,
+    [anotherTeam, customers.tableId],
+  );
+  assert.equal(await allowed(), true, 'admin authority also applies to tables shared with other teams');
+  const replaced = await store.replaceActivation(f.w.id, actor, {
+    agentId: f.agentId,
+    requestId: randomUUID(),
+    revision,
+    scope,
+    expectedSavedRevision: state.agent.saved_revision,
+    expectedPolicyVersion: state.agent.policy_version,
+    expectedActivationIds: [receipt.activationId],
+  });
+  assert.equal(
+    (
+      await f.db.platform.query(
+        `SELECT activated_by_membership_id FROM ${f.table('tf_agent_activations')} WHERE id=$1`,
+        [replaced.activationId],
+      )
+    ).rows[0].activated_by_membership_id,
+    f.member,
+  );
+  assert.equal(
+    (
+      await store.changeDataScope(f.w.id, actor, {
+        agentId: f.agentId,
+        version: state.agent.policy_version,
+        scope: [{ assetId: customers.tableId, permissions: ['table.row.read'] }],
+      })
+    ).reactivated,
+    true,
+  );
+  const activationActors = (
+    await f.db.platform.query(
+      `SELECT activated_by_membership_id FROM ${f.table('tf_agent_activations')} WHERE agent_id=$1`,
+      [f.agentId],
+    )
+  ).rows;
+  assert.equal(activationActors.length, 3);
+  assert.ok(activationActors.every(row => row.activated_by_membership_id === f.member));
+  await f.db.platform.query(`DELETE FROM ${f.table('tf_agent_teams')} WHERE agent_id=$1`, [f.agentId]);
+  assert.equal(await allowed(), false, 'admin invokers cannot bypass agent enrollment');
 });
 
 async function tableSetup(f, role = 'manager') {
@@ -522,13 +748,6 @@ for (const resume of ['new-stage', 'fresh-page'])
       resumed.publish(f.w.id, f.user, f.agentId, { ...decision, digest: '0'.repeat(64) }),
       /setup-digest-conflict/,
     );
-    await assert.rejects(
-      resumed.publish(f.w.id, f.user, f.agentId, {
-        ...decision,
-        consent: { sponsor: false, replaceChannels: [] },
-      }),
-      /trigger-sponsor-consent-required/,
-    );
     const command = await resumed.publish(f.w.id, f.user, f.agentId, decision);
     if (resume === 'new-stage') await f.accept(resumed, command);
     assert.equal((await f.state()).agent.enabled, false, 'accepting a definition alone never starts the trigger');
@@ -835,7 +1054,7 @@ test('editing saves a new revision but preserves the prior live setup until conf
   assert.deepEqual((await f.state()).activations, [command.activationId]);
 });
 
-test('review versions, sponsorship, replacement and current membership are enforced', async t => {
+test('review versions, replacement and current membership are enforced', async t => {
   const f = await environment(t),
     service = createAgentSetup(f.runtime);
   const value = await f.input({
@@ -861,13 +1080,6 @@ test('review versions, sponsorship, replacement and current membership are enfor
   await assert.rejects(
     service.publish(f.w.id, f.user, f.agentId, { ...f.decision(draft), digest: '0'.repeat(64) }),
     /setup-digest-conflict/,
-  );
-  await assert.rejects(
-    service.publish(f.w.id, f.user, f.agentId, {
-      ...f.decision(draft),
-      consent: { sponsor: false, replaceChannels: [] },
-    }),
-    /trigger-sponsor-consent-required/,
   );
   await assert.rejects(
     service.publish(f.w.id, f.user, f.agentId, {
@@ -981,7 +1193,7 @@ test('chat full setup approves the same coordinator or continues in the builder;
     commandId: randomUUID(),
     digest: full.digest,
     decision: 'activate',
-    consent: { sponsor: false, replaceChannels: [] },
+    consent: { replaceChannels: [] },
   };
   const outcome = await drafts.decide(f.w.id, f.user, chatId, full.draftId, decision);
   assert.equal(outcome.kind, 'agent');

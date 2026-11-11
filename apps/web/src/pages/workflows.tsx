@@ -3,12 +3,7 @@ import { Link, useNavigate, useParams } from '@tanstack/react-router';
 import { BranchDown } from 'reicon-react/icons/BranchDown';
 import { RefreshCwIcon } from 'lucide-react';
 import { z } from 'zod';
-import {
-  isUnattendedTrigger,
-  statusSchema,
-  webhookKeyIssuedSchema,
-  workflowSchema,
-} from '@tulipfarm/workflows/contracts';
+import { statusSchema, webhookKeyIssuedSchema, workflowSchema } from '@tulipfarm/workflows/contracts';
 import { PageContent } from '@tulipfarm/sprout/page-content';
 import { PageHeader } from '@tulipfarm/sprout/page-header';
 import { SearchField } from '@tulipfarm/sprout/search-field';
@@ -70,7 +65,7 @@ import { workflowLiveMessage } from '@/features/workflows/activation-feedback';
 import { WebhookSetup, type IssuedWebhookKey } from '@/features/workflows/webhook-setup';
 import { WebhookDeliveries } from '@/features/workflows/webhook-deliveries';
 import { RowEventQueue } from '@/features/workflows/row-event-queue';
-import { WorkflowSharing, AcceptWorkflowSponsorship, recordSourceDenied } from '@/features/workflows/sharing';
+import { WorkflowSharing, recordSourceDenied } from '@/features/workflows/sharing';
 import { TriggerIcon, WorkflowRow, disabledReasons, workflowState } from '@/features/workflows/workflow-summary';
 
 type Workflow = z.infer<typeof workflowSchema>;
@@ -119,7 +114,6 @@ function WorkflowPage({
   const base = `/workspaces/${workspaceId}/workflows`;
   const {
     workspace: { slug: workspaceSlug },
-    user,
   } = workspaceRoute.useRouteContext();
   const navigate = useNavigate(),
     read = useWorkflows(workspaceId),
@@ -625,14 +619,7 @@ function WorkflowPage({
                         state={
                           blocked
                             ? { kind: 'blocked', reason: 'Finish or retry the current request first.' }
-                            : activationNeedsSponsor(selected)
-                              ? {
-                                  kind: 'blocked',
-                                  reason: selected.sponsorMembershipId
-                                    ? 'The sponsor must accept this revision before it can be activated.'
-                                    : 'Choose who it runs as in Settings, under Scheduled runs, before activating.',
-                                }
-                              : { kind: 'ready' }
+                            : { kind: 'ready' }
                         }
                         onClick={() =>
                           void execute({
@@ -704,18 +691,6 @@ function WorkflowPage({
                         <AlertDescription>{disabledExplanation(selected)}</AlertDescription>
                       </Alert>
                     ))}
-                  <div className="rounded-xl border border-border bg-card p-4 empty:hidden">
-                    <AcceptWorkflowSponsorship
-                      workspaceId={workspaceId}
-                      workflow={selected}
-                      userId={user.id}
-                      changed={async accepted => {
-                        await refresh();
-                        if (accepted.sponsorshipAccepted && accepted.sponsor?.userId === user.id)
-                          setMessage('You now sponsor this workflow. Runs started by its triggers use your access.');
-                      }}
-                    />
-                  </div>
                 </>
               )}
               <Tabs
@@ -1287,17 +1262,11 @@ function WorkflowPage({
     </PageContent>
   );
 }
-/** Whether activating would start unattended runs that no sponsor has accepted yet. */
-function activationNeedsSponsor(workflow: Workflow) {
-  const enabling = !workflow.enabled || workflow.activeRevision !== workflow.revision;
-  return enabling && workflow.definition.triggers.some(isUnattendedTrigger) && !workflow.sponsorshipAccepted;
-}
 function commandError(error: RequestError) {
   const errors: Record<string, string> = {
-    'sponsorship-required':
-      'The sponsor must accept this revision before it can be activated. Once they accept, try again.',
+    'sponsorship-required': 'You need access to run this workflow before it can be activated.',
     'sponsor-access-lost':
-      'The sponsor can no longer run this workflow. Choose another sponsor in Settings, under Scheduled runs, or restore their access.',
+      'You don’t have the access this workflow needs to run on its own. Ask for that access, then activate again.',
     'schedule-in-past': 'A one-time trigger is in the past. Change or remove it before activating.',
     'invalid-schedule': 'The schedule is invalid. Check its expression and time zone in chat.',
     'record-trigger-unavailable': 'Record date triggers are unavailable until this workspace finishes updating.',
@@ -1315,7 +1284,8 @@ function commandError(error: RequestError) {
     'trigger-not-found': 'The active revision has no such trigger. Refresh workflows.',
     'too-many-triggers': 'A workflow can have at most 20 triggers.',
     'trigger-kind-changed': 'A trigger cannot change kind. Remove it and add a new one.',
-    'sponsor-required': 'This trigger runs without you. Accept sponsorship before switching it on.',
+    'sponsor-required': 'This trigger runs on its own. Turn the workflow on first.',
+    'sponsor-must-be-self': 'Scheduled runs always use the access of the person who turns the workflow on.',
     'stale-generation': 'This workflow changed. Refresh workflows and try again.',
     'github-repository-not-connected':
       'This GitHub repository is not in your GitHub Knowledge. Connect it in the GitHub Knowledge picker, then try again.',

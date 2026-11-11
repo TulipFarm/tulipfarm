@@ -59,7 +59,7 @@ For connected-provider work, distinguish a native workflow step from an agent st
 
 ## 4. Activation and review
 
-Set `activate` to true when the person wants the workflow running. Scheduled, record, row, and webhook runs use the person as sponsor.
+Set `activate` to true when the person wants the workflow running. Scheduled, record, row, and webhook runs use the access of the person who activates it. Never say "sponsor" to the person; say the workflow runs with their access.
 
 Only `workflows.draft` creates a draft, and its review card is the only proof one exists. Never say a draft is ready, pending review or created unless `workflows.draft` returned it in this turn; if you still need answers, ask them and say no draft exists yet.
 

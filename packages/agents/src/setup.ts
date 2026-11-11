@@ -38,7 +38,6 @@ import {
   legacySetupState,
   publishAgentSetupSchema,
   saveAgentSetupDraftSchema,
-  sponsorConsented,
   storedAgentSetupDraftSchema,
   type AgentSetupDraft,
   type AgentSetupReceipt,
@@ -321,8 +320,6 @@ export function createAgentSetup(
       // A draft from before one linked Workflow per agent did not review that Workflow; saving it again does.
       if (draftLegacy(draft) !== 'current') throw new AgentError('setup-draft-outdated');
       if (input.decision === 'activate') {
-        if (!sponsorConsented(input.consent, draft.input.setup.triggers))
-          throw new AgentError('trigger-sponsor-consent-required', 400);
         for (const channel of draft.input.setup.slackChannels) {
           if (channel.detach && channel.replaceAgentId !== agentId) throw new AgentError('slack-detachment-conflict');
           if (

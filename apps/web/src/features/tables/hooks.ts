@@ -161,8 +161,8 @@ export function useTableReceipt(api: TableApi) {
   return (input: Parameters<typeof tableQueries.receipt>[1]) =>
     runtime.client.fetchQuery(featureReadOptions(runtime, scope, tableQueries.receipt(api, input), current));
 }
-export function useTablePicker(...args: Parameters<typeof tableQueries.picker>) {
-  return useTableQuery(tableQueries.picker(...args));
+export function useTablePicker(api: TableApi, enabled = true) {
+  return useTableQuery({ ...tableQueries.picker(api), enabled });
 }
 export function useTableProposal(api: ProposalApi, identity: ProposalIdentity) {
   const read = useTableQuery(tableQueries.proposal(api, identity));
