@@ -39,6 +39,127 @@ const bundle = modelBundleSchema.parse({
   routes: [route],
 });
 
+for (const [ownService, repeated, batch = false] of [
+  [true, false],
+  [false, false],
+  [true, true],
+  [true, false, true],
+])
+  test(
+    `task API ${ownService ? 'own-service' : 'address'} refusals stop with ${batch ? 'batched' : repeated ? 'repeated' : 'changing'} URLs`,
+    { timeout: 60000 },
+    async t => {
+      const previousOrigin = process.env.WEB_ORIGIN;
+      process.env.WEB_ORIGIN = 'https://app.example.test';
+      t.after(() => {
+        if (previousOrigin === undefined) delete process.env.WEB_ORIGIN;
+        else process.env.WEB_ORIGIN = previousOrigin;
+      });
+      const db = await fixture();
+      let runtime;
+      t.after(async () => {
+        await runtime?.close();
+        await db.close();
+      });
+      await db.platform.query('DROP TABLE app.accounts; SET search_path TO app');
+      await db.platform.query(
+        await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', import.meta.url), 'utf8'),
+      );
+      const w = await db.create(await workspaceTableMigrations()),
+        table = name => `"${w.names.schema}"."${name}"`;
+      runtime = createWorkspaceRuntime({
+        replicaCount: 1,
+        reservedConnections: 2,
+        databaseConnectionBudget: 20,
+        resolveCredential: async id => ({ workspaceId: id, generation: 1, connectionString: db.login(w) }),
+      });
+      await db.platform.query(`UPDATE ${table('tf_credit_account')} SET available=$1,granted=$1`, ['100000000000000']);
+      const agent = await savedTaskAgent(db, w, runtime, w.userId, w.membershipId, [], ['rows.list']);
+      await createAgentExecutor({ runtime }).configure(
+        w.id,
+        { kind: 'human', userId: w.userId, membershipId: w.membershipId },
+        { agentId: agent.agentId, version: 0, enabled: true, teamIds: [agent.teamId], limits: [] },
+      );
+      let calls = 0;
+      const model = {
+        activeBundle: () => ({ bundle, activationRevision: 1 }),
+        trustedBundle: () => bundle,
+        restrictions: () => ({ allowedProviders: ['anthropic'], allowedLocations: ['test'] }),
+        allowed: () => true,
+        actualModelIds: () => [route.modelId],
+        defaultFamily: () => 'claude-opus',
+        budgetPicoUsd: () => '10000000000000',
+        health: createModelRouteHealth(db.platform, () => 'api-task'),
+        infer: async () => {
+          assert.ok(++calls <= 4, 'failed API calls must not restart task inference');
+          return {
+            kind: 'success',
+            decision: batch
+              ? {
+                  kind: 'tools',
+                  text: 'Reading projects.',
+                  calls: Array.from({ length: 8 }, (_, i) => ({
+                    activity: 'Reading projects',
+                    call: { tool: 'api.request', method: 'GET', url: `https://api.example.test/projects/${i}` },
+                  })),
+                }
+              : {
+                  kind: 'tool',
+                  text: 'Reading projects.',
+                  call: {
+                    tool: 'api.request',
+                    method: 'GET',
+                    url: `https://${ownService ? 'api.example.test' : 'localhost'}/projects/${repeated ? 0 : calls}`,
+                  },
+                },
+            actualModel: route.modelId,
+            requestId: randomUUID(),
+            usage: {
+              kind: 'known',
+              input: 10,
+              output: 2,
+              cacheRead: 0,
+              cacheWrite: 0,
+              cacheWrite5m: 0,
+              cacheWrite1h: 0,
+            },
+          };
+        },
+      };
+      const tasks = createAgentTasks(runtime),
+        engine = createTaskRuntime(runtime, model);
+      const task = await tasks.start(w.id, w.userId, {
+        requestId: randomUUID(),
+        agentId: agent.agentId,
+        scope: [],
+        text: 'List my projects.',
+        limits: { toolCalls: 10, credits: 100, activeMilliseconds: 120000 },
+      });
+      for (let i = 0; i < 10 && (await tasks.read(w.id, w.userId, task.id)).status === 'pending'; i++)
+        await engine.process(w.id, task.id);
+      const rows = (
+        await db.platform.query(
+          `SELECT c.result FROM ${table('tf_agent_tool_calls')} c JOIN ${table('tf_agent_task_runs')} b ON b.run_id=c.run_id WHERE b.task_id=$1 AND c.status='completed' ORDER BY c.sequence`,
+          [task.id],
+        )
+      ).rows;
+      assert.ok(
+        rows.every(row => row.result.code === 'address-denied'),
+        'all calls use the documented address refusal',
+      );
+      assert.equal(rows.length, repeated ? 2 : 3);
+      assert.equal(calls, batch ? 1 : repeated ? 2 : 3);
+      const detail = await tasks.read(w.id, w.userId, task.id);
+      assert.equal(detail.status, 'completed');
+      assert.equal(
+        (await tasks.history(w.id, w.userId, task.id)).messages.at(-1).text,
+        repeated
+          ? 'Nothing was sent. This same call was already refused. Use a different allowed address or the built-in tools instead.'
+          : "I couldn't finish this request because the API calls kept failing, so I stopped instead of repeating them. Ask me to try a different way.",
+      );
+      assert.equal((await db.platform.query(`SELECT 1 FROM ${table('tf_api_calls')}`)).rowCount, 0);
+    },
+  );
 test('a task change waits for its owner and continues once it is decided', { timeout: 180000 }, async t => {
   const db = await fixture();
   let runtime;

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { createApiCallGuard } from './api-call-guard.ts';
 import { z } from 'zod';
 import { imageGenerationOffered } from './image-generation.ts';
 import type { FileReadReceipt, GoogleFileReadReceipt } from '@tulipfarm/access/source-dependencies';
@@ -520,6 +521,26 @@ export function createTaskRuntime(
       const c = await context(tx, workspaceId, taskId);
       const { task, runId, local, owner } = c;
       if (materializing && JSON.stringify(c.history) !== materializing.history) return null;
+      const apiHistory = (
+        await tx.client.query(
+          `SELECT call,result FROM ${relation(tx, 'tf_agent_tool_calls')} WHERE run_id=$1 AND call->>'tool'='api.request' AND status='completed' ORDER BY sequence`,
+          [runId],
+        )
+      ).rows;
+      const api = createApiCallGuard(
+        apiHistory.map(row => row.call),
+        apiHistory.map(row => ({ call: row.call, output: row.result })),
+      );
+      if (api.stoppingReply) {
+        await message(tx, taskId, task.generation, api.stoppingReply);
+        const changed = await tx.client.query(
+          `UPDATE ${relation(tx, 'tf_agent_tasks')} SET status='completed',pause_reason=NULL WHERE id=$1`,
+          [taskId],
+        );
+        await secrets?.tools.endRun(tx, { kind: 'task', taskId, runId });
+        taskTransition(tx, 'completed', changed.rowCount, taskId);
+        return null;
+      }
       // The Drive read checked its binding; this recheck commits with the model claim, so a disconnect during extraction withholds the text.
       if (materializing && !materializing.stop)
         for (const read of materializing.reads)

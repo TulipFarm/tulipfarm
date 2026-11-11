@@ -2,12 +2,138 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
 import { chatSkills } from '../../../agents/src/chat-skills.ts';
-import { conversationPlanning } from '../../../agents/src/tools.ts';
+import { conversationPlanning, createChatTools } from '../../../agents/src/tools.ts';
+import { inferWithTools } from '../../../agents/src/inference.ts';
+import {
+  isCompletionRequest,
+  nativeReply,
+  nativeRoutes,
+  offeredTools,
+  selectReply,
+  use,
+} from '../../../agents/test/native-fixture.mjs';
 import { createAgentPlans } from '../../../agents/src/plans.ts';
 import { createPlanRuntime } from '../../../agents/src/plan-runtime.ts';
 import { createConversations } from '../../src/index.ts';
 import { createConversationExecutor } from '../../src/runtime.ts';
 import { conversationFixture } from '../fixture.mjs';
+
+test(
+  'native planning creates a three-step draft and records only the planning activity',
+  { timeout: 60000 },
+  async t => {
+    const f = await conversationFixture();
+    try {
+      const w = f.workspace;
+      const store = createConversations(f.runtime, chatSkills);
+      const plans = createAgentPlans(f.runtime);
+      const tasks = [
+        { key: 'prepare', title: 'Prepare the release' },
+        { key: 'review', title: 'Review the release' },
+        { key: 'publish', title: 'Publish the release' },
+      ];
+      let round = 0;
+      t.mock.method(globalThis, 'fetch', async (_url, init) => {
+        const body = JSON.parse(init.body);
+        if (isCompletionRequest(body))
+          return Response.json(selectReply('azure', { status: 'completed', reason: 'The plan draft was saved.' }));
+        assert.ok(offeredTools('azure', body).some(tool => tool.name === 'plans_create'));
+        return Response.json(
+          nativeReply(
+            'azure',
+            round++ % 2 === 0
+              ? {
+                  calls: [
+                    use(
+                      'plans.create',
+                      { title: 'Launch checklist', execution: 'plan-only', tasks },
+                      'Saving your plan draft',
+                    ),
+                  ],
+                }
+              : { text: 'Your plan draft is ready. No work has started.' },
+          ),
+        );
+      });
+      for (const [model, mode] of [
+        ['grok-4.3', 'plan'],
+        ['Kimi-K2.6', 'plan'],
+        ['grok-4.3', undefined],
+      ]) {
+        const chatId = randomUUID();
+        await store.create(w.id, w.userId, { chatId, commandId: randomUUID() });
+        const sent = await store.send(w.id, w.userId, chatId, {
+          commandId: randomUUID(),
+          messageId: randomUUID(),
+          ...(mode ? { mode } : {}),
+          parts: [{ kind: 'text', text: 'Save a Launch checklist plan-only draft with Prepare, Review, Publish.' }],
+        });
+        const executor = createConversationExecutor(
+          f.runtime,
+          async input => {
+            const result = await inferWithTools(
+              { ...nativeRoutes.azure, model },
+              input.messages,
+              async (call, activity, narration) => {
+                const output = await input.executeTool(
+                  call.tool,
+                  false,
+                  context => createChatTools(context.runtime).invokeWithSources(context, call),
+                  [],
+                  call,
+                  activity,
+                  narration,
+                );
+                return output.result;
+              },
+              undefined,
+              false,
+              null,
+              { builtinSkills: input.builtinSkills },
+            );
+            return { text: result.text, sources: [] };
+          },
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          chatSkills,
+          undefined,
+          conversationPlanning,
+        );
+        assert.equal(
+          await executor.process({ workspaceId: w.id, conversationId: chatId, turnId: sent.turnId, generation: 0 }),
+          'completed',
+        );
+        const [saved] = await plans.list(w.id, w.userId, chatId);
+        const view = await plans.read(w.id, w.userId, saved.id);
+        assert.equal(view.title, 'Launch checklist');
+        assert.equal(view.lifecycle, 'draft');
+        const persisted = await f.db.platform.query(`SELECT execution FROM ${f.table('tf_agent_plans')} WHERE id=$1`, [
+          saved.id,
+        ]);
+        assert.equal(persisted.rows[0].execution, 'plan-only');
+        assert.equal(view.canControl, true);
+        assert.deepEqual(
+          view.tasks.map(({ key, title }) => ({ key, title })),
+          tasks,
+        );
+        assert.deepEqual(await createPlanRuntime(f.runtime).step(w.id, saved.id), {
+          kind: 'terminal',
+          specialists: [],
+        });
+        const activity = await f.db.platform.query(
+          `SELECT tool,status FROM ${f.table('tf_conversation_tool_calls')} WHERE turn_id=$1 ORDER BY sequence`,
+          [sent.turnId],
+        );
+        assert.deepEqual(activity.rows, [{ tool: 'plans.create', status: 'completed' }]);
+      }
+    } finally {
+      await f.close();
+    }
+  },
+);
 
 test(
   'Plan mode survives retry, loads Planning alongside a domain skill, and refuses writes at the executor',

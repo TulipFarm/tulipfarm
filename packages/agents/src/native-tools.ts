@@ -214,6 +214,7 @@ const coreChatTools = new Set(
     'images.generate',
     'agents.delegate',
     'followups.schedule',
+    'plans.create',
   ].map(nativeToolName),
 );
 export const toolSearchName = 'tools_search';

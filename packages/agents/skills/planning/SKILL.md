@@ -2,6 +2,7 @@
 name: planning
 title: Plan, execute, and verify work
 description: Research prerequisites, build a visible deliverable plan, carry out a complex request, and verify every original requirement. Use for work with several dependent outcomes, not a simple answer or single action. Plan mode researches and saves without executing.
+tools: plans.create plans.read plans.update plans.claim plans.report plans.start
 ---
 
 # Planning
