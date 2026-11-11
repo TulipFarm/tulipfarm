@@ -64,7 +64,15 @@ const withinJsonBytes = (value: unknown, maximum: number) =>
 export const planSpecificationSchema = z
   .strictObject({
     requirements: z
-      .array(z.strictObject({ key: planKeySchema, description: reason, tasks: uniqueKeys }))
+      .array(
+        z.strictObject({
+          key: planKeySchema,
+          description: reason,
+          tasks: uniqueKeys.describe(
+            'Deliverable work task keys from tasks[].key, not titles or stored IDs. Exclude the final verification task.',
+          ),
+        }),
+      )
       .min(1)
       .max(planLimits.tasks),
     prerequisites: z
@@ -85,7 +93,9 @@ export const planSpecificationSchema = z
         }),
       )
       .max(planLimits.tasks),
-    verificationTask: planKeySchema,
+    verificationTask: planKeySchema.describe(
+      'Key of a coordinator-owned final check that depends on every other work task. Do not include this key in requirement task lists.',
+    ),
   })
   .refine(value => withinJsonBytes(value, 262144), 'Planning evidence must fit within 256 KiB of formatted JSON.');
 export type PlanSpecification = z.infer<typeof planSpecificationSchema>;
@@ -266,7 +276,14 @@ export const createPlanSchema = z.strictObject({
   title,
   brief: brief.default(''),
   execution: z.enum(['plan-only', 'execute']).default('execute'),
-  planning: planSpecificationSchema.optional(),
+  planning: z
+    .strictObject({
+      ...planSpecificationSchema.shape,
+      prerequisites: planSpecificationSchema.shape.prerequisites.default([]),
+      verificationTask: planSpecificationSchema.shape.verificationTask.default('verify-request'),
+    })
+    .refine(value => withinJsonBytes(value, 262144), 'Planning evidence must fit within 256 KiB of formatted JSON.')
+    .optional(),
   tasks: z.array(planTaskInputSchema).min(1).max(planLimits.tasks),
   specialists: z.array(specialistInputSchema).max(planLimits.specialists).default([]),
   budget: planBudgetSchema.default({ toolCalls: 300, activeMilliseconds: 1800000, credits: 300 }),
@@ -403,11 +420,13 @@ export class PlanGraphError extends Error {
   readonly code: PlanGraphErrorCode;
   readonly key: string | undefined;
   readonly instruction: string;
-  constructor(code: PlanGraphErrorCode, key?: string) {
+  readonly path: readonly (string | number)[] | undefined;
+  constructor(code: PlanGraphErrorCode, key?: string, path?: readonly (string | number)[], instruction?: string) {
     super(key ? `${code}: ${key}` : code);
     this.code = code;
     this.key = key;
-    this.instruction = instructions[code];
+    this.instruction = instruction ?? instructions[code];
+    this.path = path;
   }
 }
 
@@ -813,19 +832,71 @@ export function buildInitialPlan(input: z.infer<typeof createPlanSchema>) {
     if (specialists.has(specialist.key)) throw new PlanGraphError('duplicate-key', specialist.key);
     specialists.add(specialist.key);
   }
+  const tasks = input.tasks.map(task =>
+    input.planning && task.kind === 'work'
+      ? {
+          ...task,
+          assignee: task.assignee ?? { kind: 'coordinator' as const },
+          criteria: task.criteria.length ? task.criteria : [task.title],
+        }
+      : task,
+  );
+  let planning = input.planning;
+  if (planning) {
+    if (!planning.requirements.length)
+      throw new PlanGraphError('planning-coverage', undefined, ['planning', 'requirements']);
+    if (!tasks.some(task => task.key === planning!.verificationTask)) {
+      const dependencies = tasks.filter(task => task.kind === 'work').map(task => task.key);
+      if (dependencies.length > planLimits.dependencies)
+        throw new PlanGraphError('too-many-dependencies', planning.verificationTask);
+      tasks.push(
+        planTaskInputSchema.parse({
+          key: planning.verificationTask,
+          title: 'Check the work is done',
+          criteria: ['Every other task in this plan is confirmed done.'],
+          assignee: { kind: 'coordinator' },
+          dependsOn: dependencies,
+        }),
+      );
+    }
+    const covered = new Set(planning.requirements.flatMap(requirement => requirement.tasks));
+    const keys = new Set(planning.requirements.map(requirement => requirement.key));
+    const requirements = [...planning.requirements];
+    for (const task of tasks) {
+      if (task.kind !== 'work' || task.key === planning.verificationTask || covered.has(task.key)) continue;
+      let key = task.key;
+      for (let suffix = 1; keys.has(key); suffix++) key = `${task.key.slice(0, 43)}-${suffix}`;
+      keys.add(key);
+      requirements.push({ key, description: task.title, tasks: [task.key] });
+    }
+    const normalized = planSpecificationSchema.safeParse({ ...planning, requirements });
+    if (!normalized.success) {
+      const issue = normalized.error.issues[0]!;
+      throw new PlanGraphError(
+        'planning-coverage',
+        undefined,
+        [
+          'planning',
+          ...issue.path.filter((part): part is string | number => typeof part === 'string' || typeof part === 'number'),
+        ],
+        issue.message,
+      );
+    }
+    planning = normalized.data;
+  }
   const built = applyPlanMutations(
     [],
-    input.tasks.map(task => ({ op: 'add' as const, task })),
+    tasks.map(task => ({ op: 'add' as const, task })),
     { actor: { kind: 'coordinator' }, specialists },
   );
-  validatePlanning(built.nodes, input.planning);
-  const nodes = applyPlanningPrerequisites(built.nodes, input.planning);
+  validatePlanning(built.nodes, planning);
+  const nodes = applyPlanningPrerequisites(built.nodes, planning);
   for (const change of advancePlan(nodes))
     Object.assign(
       nodes.find(node => node.key === change.key)!,
       { state: change.to, reason: change.reason },
     );
-  return { ...built, nodes };
+  return { ...built, nodes, planning };
 }
 
 export function validatePlanning(
@@ -858,15 +929,46 @@ export function validatePlanning(
   }
   const work = new Map(nodes.filter(node => node.kind === 'work').map(node => [node.key, node]));
   const verification = work.get(specification.verificationTask);
-  if (!verification || verification.assignee?.kind !== 'coordinator') throw new PlanGraphError('planning-verification');
-  if ([...work.values()].some(node => !node.assignee || !node.criteria?.length))
-    throw new PlanGraphError('planning-coverage');
+  if (!verification || verification.assignee?.kind !== 'coordinator')
+    throw new PlanGraphError(
+      'planning-verification',
+      specification.verificationTask,
+      ['planning', 'verificationTask'],
+      `Set planning.verificationTask to an existing work task assigned to {"kind":"coordinator"}.`,
+    );
+  for (const [position, node] of nodes.entries()) {
+    if (node.kind !== 'work') continue;
+    if (!node.assignee || !node.criteria?.length) {
+      const field = !node.assignee ? 'assignee' : 'criteria';
+      throw new PlanGraphError(
+        'planning-coverage',
+        node.key,
+        ['tasks', position, field],
+        field === 'assignee'
+          ? `Set tasks[${position}].assignee to {"kind":"coordinator"} or a valid delegate.`
+          : `Add at least one acceptance criterion to tasks[${position}].criteria.`,
+      );
+    }
+  }
+  for (const [position, requirement] of specification.requirements.entries()) {
+    const invalid = requirement.tasks.find(key => !work.has(key) || key === verification.key);
+    if (invalid)
+      throw new PlanGraphError(
+        'planning-coverage',
+        invalid,
+        ['planning', 'requirements', position, 'tasks'],
+        `Map planning.requirements[${position}].tasks only to deliverable work keys: ${[...work.keys()].filter(key => key !== verification.key).join(', ')}. Exclude the final verification task ${verification.key}.`,
+      );
+  }
   const covered = new Set(specification.requirements.flatMap(item => item.tasks));
-  if (
-    [...covered].some(key => !work.has(key) || key === verification.key) ||
-    [...work.keys()].some(key => key !== verification.key && !covered.has(key))
-  )
-    throw new PlanGraphError('planning-coverage');
+  const uncovered = [...work.keys()].find(key => key !== verification.key && !covered.has(key));
+  if (uncovered)
+    throw new PlanGraphError(
+      'planning-coverage',
+      uncovered,
+      ['planning', 'requirements'],
+      `Include the deliverable task ${uncovered} in planning.requirements[].tasks.`,
+    );
   const prerequisites = compilePlan(nodes).prerequisites;
   const ancestors = new Set<string>();
   const collect = (key: string) => {
@@ -877,8 +979,14 @@ export function validatePlanning(
     }
   };
   collect(verification.key);
-  if ([...work.keys()].some(key => key !== verification.key && !ancestors.has(key)))
-    throw new PlanGraphError('planning-verification');
+  const unchecked = [...work.keys()].filter(key => key !== verification.key && !ancestors.has(key));
+  if (unchecked.length)
+    throw new PlanGraphError(
+      'planning-verification',
+      verification.key,
+      ['tasks', nodes.indexOf(verification), 'dependsOn'],
+      `Make the final verification task ${verification.key} depend on every deliverable, including: ${unchecked.join(', ')}.`,
+    );
   const keys = new Set<string>();
   for (const check of specification.prerequisites) {
     if (

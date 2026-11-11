@@ -44,10 +44,40 @@ test('Planning keeps the main agent as owner and requires complete request cover
     () => buildInitialPlan({ ...plan, planning: { ...plan.planning, requirements: [] } }),
     /planning-coverage/,
   );
-  assert.throws(
-    () => buildInitialPlan({ ...plan, tasks: [...plan.tasks, { ...plan.tasks[0], key: 'unrequested' }] }),
-    /planning-coverage/,
-  );
+  const uncovered = buildInitialPlan({
+    ...plan,
+    tasks: [
+      ...plan.tasks.map(task => (task.key === 'verify' ? { ...task, dependsOn: ['agent', 'unrequested'] } : task)),
+      { ...plan.tasks[0], key: 'unrequested' },
+    ],
+  });
+  assert.doesNotThrow(() => validatePlanning(uncovered.nodes, uncovered.planning));
+});
+
+test('creating a structured draft fills omitted work criteria and ownership', () => {
+  const plan = input();
+  const minimal = createPlanSchema.parse({
+    ...plan,
+    execution: 'plan-only',
+    tasks: [{ key: 'agent', title: 'Create the agent' }, plan.tasks[1]],
+  });
+  const built = buildInitialPlan(minimal);
+  assert.deepEqual(built.nodes[0].assignee, owner);
+  assert.deepEqual(built.nodes[0].criteria, ['Create the agent']);
+  assert.doesNotThrow(() => validatePlanning(built.nodes, plan.planning));
+  assert.deepEqual(minimal.tasks[0].criteria, [], 'normalization does not mutate the supplied command');
+  assert.equal(minimal.tasks[0].assignee, null);
+});
+
+test('creating a structured draft preserves explicit criteria and delegated ownership', () => {
+  const plan = input();
+  const assigned = { kind: 'agent', agentId: '00000000-0000-4000-8000-000000000001' };
+  const built = buildInitialPlan({
+    ...plan,
+    tasks: [{ ...plan.tasks[0], assignee: assigned }, plan.tasks[1]],
+  });
+  assert.deepEqual(built.nodes[0].assignee, assigned);
+  assert.deepEqual(built.nodes[0].criteria, plan.tasks[0].criteria);
 });
 
 test('final verification must wait for every deliverable and remain coordinator-owned', () => {
@@ -56,14 +86,53 @@ test('final verification must wait for every deliverable and remain coordinator-
     () => buildInitialPlan({ ...plan, tasks: [plan.tasks[0], { ...plan.tasks[1], dependsOn: [] }] }),
     /planning-verification/,
   );
+  const automatic = buildInitialPlan({ ...plan, planning: { ...plan.planning, verificationTask: 'missing' } });
+  assert.equal(automatic.planning.verificationTask, 'missing');
+  assert.deepEqual(automatic.nodes.at(-1).dependsOn, ['agent', 'verify']);
   assert.throws(
-    () => buildInitialPlan({ ...plan, planning: { ...plan.planning, verificationTask: 'missing' } }),
+    () =>
+      buildInitialPlan({
+        ...plan,
+        tasks: [
+          plan.tasks[0],
+          {
+            ...plan.tasks[1],
+            assignee: { kind: 'agent', agentId: '00000000-0000-4000-8000-000000000001' },
+          },
+        ],
+      }),
     /planning-verification/,
   );
+});
+
+test('creation supplies a final coordinator check and coverage without relaxing updates', () => {
+  const plan = createPlanSchema.parse({
+    title: 'Release outline',
+    execution: 'plan-only',
+    planning: {
+      requirements: [{ key: 'prepare', description: 'Prepare release', tasks: ['prepare'] }],
+    },
+    tasks: [
+      { key: 'prepare', title: 'Prepare release' },
+      { key: 'review', title: 'Review release' },
+    ],
+  });
+  const built = buildInitialPlan(plan);
+  const verification = built.nodes.find(node => node.key === built.planning.verificationTask);
+  assert.equal(verification.title, 'Check the work is done');
+  assert.deepEqual(verification.criteria, ['Every other task in this plan is confirmed done.']);
+  assert.deepEqual(verification.assignee, owner);
+  assert.deepEqual(verification.dependsOn, ['prepare', 'review']);
+  assert.deepEqual(built.planning.requirements, [
+    { key: 'prepare', description: 'Prepare release', tasks: ['prepare'] },
+    { key: 'review', description: 'Review release', tasks: ['review'] },
+  ]);
+  assert.doesNotThrow(() => validatePlanning(built.nodes, built.planning));
   assert.throws(
-    () => buildInitialPlan({ ...plan, tasks: [plan.tasks[0], { ...plan.tasks[1], assignee: null }] }),
-    /planning-verification/,
+    () => validatePlanning(built.nodes, { ...built.planning, requirements: [built.planning.requirements[0]] }),
+    /planning-coverage/,
   );
+  assert.equal(updatePlanSchema.safeParse({ expectedVersion: 0, planning: { requirements: [] } }).success, false);
 });
 
 test('updating a plan cannot silently remove or rewrite an original requirement', () => {

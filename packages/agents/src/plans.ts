@@ -802,7 +802,7 @@ export function createAgentPlans(
           return planReceiptSchema.parse({
             id: prior.plan_id,
             version: 0,
-            added: command.tasks.map(task => task.key),
+            added: buildInitialPlan(command).added,
             yielded: false,
           });
         }
@@ -851,7 +851,7 @@ export function createAgentPlans(
             command.brief,
             command.budget,
             command.execution,
-            command.planning ?? null,
+            built.planning ?? null,
             command.execution === 'plan-only' ? 'draft' : 'active',
           ],
         );
