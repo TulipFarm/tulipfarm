@@ -2618,6 +2618,211 @@ const approvedRowTools = {
   waitingCards: async () => 0,
 };
 
+for (const mode of ['forced-write', 'wrong-id', 'fallback'])
+  test(`loaded inventory preserves ${mode} recovery when the latest request names no table`, async t => {
+    const executed = [];
+    const requests = [];
+    let incorrect = mode === 'wrong-id';
+    let fallbackRounds = 0;
+    t.mock.method(globalThis, 'fetch', async (url, init) => {
+      const provider = String(url).includes('anthropic') ? 'anthropic' : 'azure';
+      const body = JSON.parse(init.body);
+      if (isCompletionRequest(body)) return Response.json(selectReply(provider, verdict()));
+      requests.push({ provider, forced: forcedTool(body) });
+      assert.ok(requests.length < 9, 'row recovery is bounded');
+      let reply = { text: refusal };
+      if (provider === 'anthropic')
+        reply = fallbackRounds++
+          ? { text: 'Rose 3 and Pear 2 were added.' }
+          : { calls: [use('rows.create.batch', twoRows)] };
+      else if (executed.some(call => call.tool === 'rows.create.batch' && call.tableId === otherLedger))
+        reply = { text: 'Rose 3 and Pear 2 were added.' };
+      else if (mode !== 'fallback' && forcedTool(body) === 'schema_inspect')
+        reply = { calls: [use('schema.inspect', { tableId: otherLedger })] };
+      else if (mode !== 'fallback' && forcedTool(body) === 'rows_create_batch') {
+        reply = {
+          calls: [
+            use('rows.create.batch', {
+              ...twoRows,
+              tableId: incorrect ? '00000000-0000-4000-8000-0000000000bb' : otherLedger,
+            }),
+          ],
+        };
+        incorrect = false;
+      }
+      return Response.json(nativeReply(provider, reply));
+    });
+    const result = await inferWithTools(
+      nativeRoutes.azure,
+      [...approvedHistory, { role: 'user', text: 'Add 2 rows: Rose 3 and Pear 2.' }],
+      async call => {
+        executed.push(call);
+        if (call.tool === 'schema.inspect') return approvedLedger;
+        if (call.tableId !== otherLedger)
+          return { error: 'table-not-found', tables: [{ id: otherLedger, name: 'Other Ledger' }] };
+        return { records: twoRows.rows.map((row, index) => ({ id: `row-${index}`, values: row.values })) };
+      },
+      undefined,
+      false,
+      null,
+      {
+        ...waitingFruit,
+        readWorkspaceInventory: async () => ledgerInventory,
+        ...(mode === 'fallback' ? { fallback: { route: nativeRoutes.anthropic, label: 'fallback' } } : {}),
+      },
+    );
+    assert.equal(result.text, 'Rose 3 and Pear 2 were added.');
+    assert.equal(result.fallback, mode === 'fallback' ? 'fallback' : undefined);
+    assert.equal(executed.filter(call => call.tool === 'rows.create.batch' && call.tableId === otherLedger).length, 1);
+    if (mode !== 'fallback')
+      assert.deepEqual(
+        requests.map(request => request.forced),
+        [
+          undefined,
+          'schema_inspect',
+          'rows_create_batch',
+          ...(mode === 'wrong-id' ? ['rows_create_batch'] : []),
+          undefined,
+        ],
+      );
+  });
+
+test('one completion-check error releases an informational table answer without extra reply rounds', async t => {
+  const outcomes = checkOutcomes(t);
+  const text = 'It tracks item names and amounts.';
+  let replies = 0;
+  let checks = 0;
+  const updates = [];
+  t.mock.method(globalThis, 'fetch', async (_url, init) => {
+    const body = JSON.parse(init.body);
+    if (isCompletionRequest(body)) {
+      checks++;
+      return Response.json(selectReply('azure', { status: 'invalid', reason: 'Unreadable check.' }));
+    }
+    assert.equal(replies++, 0, 'a checker error must not restart an informational reply');
+    return stream(nativeReply('azure', { text }));
+  });
+  const result = await inferWithTools(
+    nativeRoutes.azure,
+    [{ role: 'user', text: 'What is the Other Ledger table for?' }],
+    () => assert.fail('an informational answer does not need a recovery tool'),
+    undefined,
+    false,
+    null,
+    { ...approvedRowTools, answerText: update => updates.push(update.text) },
+  );
+  assert.equal(result.text, text);
+  assert.equal(replies, 1);
+  assert.equal(checks, 1);
+  assert.deepEqual(outcomes, ['error']);
+  assert.ok(updates.includes(text), 'the held informational answer is released');
+});
+
+for (const [label, flag, inspection, writes, name = approvedLedger.name] of [
+  ['explicit true and ready', true, approvedLedger, 1],
+  ['hyphenated name', true, { ...approvedLedger, name: 'Other-Ledger' }, 1, 'Other-Ledger'],
+  ['explicit false', false, approvedLedger, 0],
+  ['missing value', undefined, approvedLedger, 0],
+  ['invalid value', 'yes', approvedLedger, 0],
+  ['maintenance', true, { ...approvedLedger, maintenance: true }, 0],
+  ['not applied', true, { ...approvedLedger, appliedRevision: null }, 0],
+  ['failed inspection', true, { error: 'table-not-ready' }, 0],
+  ['another table inspected', true, { ...approvedLedger, id: '00000000-0000-4000-8000-0000000000bb' }, 0],
+])
+  test(`named-table waiting-card recovery forces a batch only with checked intent and a ready schema: ${label}`, async t => {
+    const outcomes = checkOutcomes(t);
+    const executed = [];
+    const forced = [];
+    t.mock.method(globalThis, 'fetch', async (_url, init) => {
+      const body = JSON.parse(init.body);
+      if (isCompletionRequest(body))
+        return Response.json(
+          selectReply('azure', {
+            ...verdict(),
+            ...(flag === undefined ? {} : { rowWriteRequested: flag }),
+          }),
+        );
+      forced.push(forcedTool(body));
+      assert.ok(forced.length < 8);
+      const reply = executed.includes('rows.create.batch')
+        ? { text: 'Rose 3 and Pear 2 were added.' }
+        : forcedTool(body) === 'schema_inspect'
+          ? { calls: [use('schema.inspect', { tableId: otherLedger })] }
+          : forcedTool(body) === 'rows_create_batch'
+            ? { calls: [use('rows.create.batch', twoRows)] }
+            : { text: refusal };
+      return Response.json(nativeReply('azure', reply));
+    });
+    const result = await inferWithTools(
+      nativeRoutes.azure,
+      approvedRowRequest.map(message => ({ ...message, text: message.text.replaceAll(approvedLedger.name, name) })),
+      async call => {
+        executed.push(call.tool);
+        return call.tool === 'schema.inspect'
+          ? inspection
+          : { records: twoRows.rows.map((row, index) => ({ id: `row-${index}`, values: row.values })) };
+      },
+      undefined,
+      false,
+      null,
+      {
+        ...waitingFruit,
+        readWorkspaceInventory: async () => ({ ...ledgerInventory, tables: [{ ...approvedLedger, name }] }),
+      },
+    );
+    assert.equal(executed.filter(tool => tool === 'rows.create.batch').length, writes);
+    assert.equal(executed.filter(tool => tool === 'schema.inspect').length, 1);
+    assert.ok(!outcomes.includes('error'), 'a missing or invalid intent value is false, not a checker failure');
+    if (writes) {
+      assert.equal(result.text, 'Rose 3 and Pear 2 were added.');
+      assert.deepEqual(forced, [undefined, undefined, 'schema_inspect', 'rows_create_batch', undefined]);
+    } else assert.ok(!forced.includes('rows_create_batch'));
+  });
+
+for (const request of [
+  'Do not add any rows to Other Ledger yet, I will send them later.',
+  'Did you add the rows to Other Ledger?',
+  'Should I add a row for each fruit in Other Ledger, or keep one total?',
+  'If I add rows to Other Ledger, what fields would I need?',
+  'Before you add rows to Other Ledger, just tell me what fields it has.',
+  'Add the rows to Other Ledger later, not now.',
+])
+  test(`a continue verdict without write intent never forces a write: ${request}`, async t => {
+    const forced = [];
+    const executed = [];
+    t.mock.method(globalThis, 'fetch', async (_url, init) => {
+      const body = JSON.parse(init.body);
+      if (isCompletionRequest(body))
+        return Response.json(selectReply('azure', { ...verdict('continue'), rowWriteRequested: false }));
+      forced.push(forcedTool(body));
+      assert.ok(forced.length < 6);
+      assert.notEqual(forcedTool(body), 'rows_create_batch');
+      return Response.json(
+        nativeReply(
+          'azure',
+          forcedTool(body) === 'schema_inspect'
+            ? { calls: [use('schema.inspect', { tableId: otherLedger })] }
+            : { text: 'Understood.' },
+        ),
+      );
+    });
+    await inferWithTools(
+      nativeRoutes.azure,
+      [...approvedHistory, { role: 'user', text: request }],
+      async call => {
+        executed.push(call.tool);
+        assert.equal(call.tool, 'schema.inspect');
+        return approvedLedger;
+      },
+      undefined,
+      false,
+      null,
+      approvedRowTools,
+    );
+    assert.ok(executed.length <= 1);
+    assert.ok(forced.includes('schema_inspect'), 'bounded recovery can read but cannot write');
+  });
+
 for (const request of [
   'Do not add any rows to Other Ledger yet, I will send them later.',
   'Did you add the rows to Other Ledger?',
