@@ -2,12 +2,51 @@ import assert from 'node:assert/strict';
 import { after, mock, test } from 'node:test';
 import dns from 'node:dns/promises';
 import { syncBuiltinESMExports } from 'node:module';
+import Fastify from 'fastify';
 import { Pool } from 'pg';
 import * as authModule from '../src/auth.ts';
-import { sessionIndependentOperations } from '../src/authenticated-routes.ts';
+import {
+  protectExpectedSession,
+  sessionIndependentOperations,
+  sessionIndependentRoutes,
+} from '../src/authenticated-routes.ts';
 
 const id = '22222222-2222-4222-8222-222222222222';
 const session = { user: { id, email: 'reader@example.test' }, session: { id: 'current-session' } };
+const expectedSessionIndependentOperations = [
+  'getApiIndex',
+  'getWorkspaceMcpClientMetadata',
+  'getLivenessV1',
+  'getHealthV1',
+  'publicGuideOptionsV1',
+  'publicGuideSessionV1',
+  'publicGuideMessageV1',
+  'publicGuideSignupV1',
+  'publicGuideGoogleV1',
+  'checkOnboardingUrlV1',
+  'saveOnboardingV1',
+  'completeSlackOAuthV1',
+  'completeAtlassianAccountV1',
+  'completeSocialAccountV1',
+  'completeGitHubAccountV1',
+  'completeGoogleWorkspaceOAuthV1',
+  'completeWorkspaceMcpOAuthV1',
+  'proveSlackMemberIdentityQueryV1',
+  'proveSlackMemberIdentityV1',
+  'receiveSlackEventV1',
+  'receiveSlackActionV1',
+  'receiveGitHubKnowledgeEventV1',
+  'receiveGitHubEventV1',
+  'receiveWorkflowWebhookV1',
+  'receiveWorkflowTriggerWebhookV1',
+];
+const expectedSessionIndependentRoutes = [
+  '/v1/auth/*',
+  '/v1/auth/options',
+  '/v1/dev/sign-in-link',
+  '/v1/dev/session',
+  '/v1/viewer',
+];
 const signedInWithoutUnauthorizedResponse = new Set([
   'retiredSaveWorkspaceSkillV1',
   'readSkillHistoryV1',
@@ -65,6 +104,43 @@ const { buildApp } = await import('../src/app.ts');
 after(() => {
   mock.restoreAll();
   syncBuiltinESMExports();
+});
+
+test('session-independent operations and routes bypass the expected-session boundary', async t => {
+  let boundarySessionReads = 0;
+  const app = Fastify();
+  t.after(() => app.close());
+  protectExpectedSession(app, {
+    api: {
+      getSession: async () => {
+        boundarySessionReads++;
+        return session;
+      },
+    },
+  });
+  const routes = [
+    ...expectedSessionIndependentOperations.map(operationId => ({
+      url: `/operations/${operationId}`,
+      schema: { operationId, response: { 401: { type: 'object', additionalProperties: true } } },
+    })),
+    ...expectedSessionIndependentRoutes.map(url => ({ url })),
+  ];
+  for (const route of routes) app.route({ method: 'GET', ...route, handler: async () => ({ reachedHandler: true }) });
+  for (const route of routes) {
+    await t.test(route.schema?.operationId ?? route.url, async () => {
+      const before = boundarySessionReads;
+      const response = await app.inject({
+        url: route.url.replace('*', 'callback/google'),
+        headers: { 'x-tulipfarm-expected-session': 'old-session' },
+      });
+      assert.notDeepEqual(response.json(), { error: 'session-changed' });
+      assert.equal(boundarySessionReads, before);
+      assert.equal(response.statusCode, 200, response.body);
+      assert.deepEqual(response.json(), { reachedHandler: true });
+    });
+  }
+  assert.deepEqual(sessionIndependentOperations, new Set(expectedSessionIndependentOperations));
+  assert.deepEqual(sessionIndependentRoutes, new Set(expectedSessionIndependentRoutes));
 });
 
 for (const isolated of [false, true]) {

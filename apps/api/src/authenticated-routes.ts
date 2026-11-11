@@ -31,7 +31,7 @@ export const sessionIndependentOperations: ReadonlySet<string> = new Set([
   'receiveWorkflowTriggerWebhookV1',
 ]);
 
-const sessionIndependentRoutes = new Set([
+export const sessionIndependentRoutes: ReadonlySet<string> = new Set([
   '/v1/auth/*',
   '/v1/auth/options',
   '/v1/dev/sign-in-link',
