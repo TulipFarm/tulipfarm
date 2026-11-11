@@ -41,7 +41,7 @@ export async function canAssignTeam(transaction: AuthorizationTransaction, actor
   const membership = await teamMembership(transaction, actor, teamId);
   return (
     !!membership &&
-    (membership.role === 'manager' || (membership.name === '_admin' && membership.workspaceRole === 'admin'))
+    (membership.name === '_admin' ? membership.workspaceRole === 'admin' : membership.role === 'manager')
   );
 }
 

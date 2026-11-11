@@ -287,12 +287,12 @@ export function TaskComposer({
                 </SelectContent>
               </Select>
             </Field>
-            {scope && (
+            {scope && effectiveScope.every(entry => tableNames.has(entry.assetId)) && (
               <p className="break-words text-sm text-muted-foreground">
                 Data this task may use: {scopeText(effectiveScope, tableNames)}.
               </p>
             )}
-            {!!unavailable?.length && (
+            {!!unavailable?.length && unavailable.every(entry => tableNames.has(entry.assetId)) && (
               <Alert>
                 <AlertDescription>
                   This task cannot use {scopeText(unavailable, tableNames)}. An agent manager must add table access from
