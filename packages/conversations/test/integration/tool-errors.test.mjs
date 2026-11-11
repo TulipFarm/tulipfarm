@@ -8,6 +8,51 @@ import { StorageUnavailableError } from '@tulipfarm/workspace-storage/runtime';
 import { createConversationExecutor } from '../../src/runtime.ts';
 import { conversationFixture } from '../fixture.mjs';
 
+test('agent draft validation returns only field paths and codes for repair', async t => {
+  const f = await conversationFixture();
+  t.after(() => f.close());
+  const w = f.workspace;
+  const chatId = randomUUID();
+  await f.store.create(w.id, w.userId, { chatId, commandId: randomUUID() });
+  const sent = await f.store.send(w.id, w.userId, chatId, {
+    commandId: randomUUID(),
+    messageId: randomUUID(),
+    parts: [{ kind: 'text', text: 'Prepare a read-only agent.' }],
+  });
+  const logs = [];
+  const write = process.stdout.write.bind(process.stdout);
+  t.mock.method(process.stdout, 'write', (line, ...rest) => {
+    if (String(line).includes('"chat.agent-draft-validation"')) logs.push(JSON.parse(line));
+    return write(line, ...rest);
+  });
+  let result;
+  const executor = createConversationExecutor(f.runtime, async ({ executeTool }) => {
+    result = await executeTool('agents.draft', false, () =>
+      observeTool('agents.draft', 'chat', async () => {
+        throw new z.ZodError([
+          { code: 'custom', path: ['setup', 'enrollment'], message: 'private-value must never leave the validator' },
+        ]);
+      }),
+    );
+    return 'Review the agent setup.';
+  });
+  assert.equal(
+    await executor.process({ workspaceId: w.id, conversationId: chatId, turnId: sent.turnId, generation: 0 }),
+    'completed',
+  );
+  assert.deepEqual(result.result, {
+    error: 'invalid-arguments',
+    issues: [{ path: ['setup', 'enrollment'], code: 'custom' }],
+    instruction:
+      'The draft was not created. Repair only these invalid fields and retry once. Do not repeat completed reads, delegate setup, or broaden permissions.',
+  });
+  assert.deepEqual(
+    logs.map(record => record['error.issues']),
+    [['setup.enrollment:custom']],
+  );
+  assert.doesNotMatch(JSON.stringify([result, logs]), /private-value|must never leave/);
+});
+
 test('skill failures name safe causes, offer recovery, and retain failed activity', async () => {
   const f = await conversationFixture();
   try {
