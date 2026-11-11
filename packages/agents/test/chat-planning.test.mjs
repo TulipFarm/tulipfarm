@@ -36,8 +36,8 @@ for (const [model, planning] of [
       if (isCompletionRequest(body))
         return Response.json(selectReply('azure', { status: 'completed', reason: 'The draft has a tool receipt.' }));
       const names = offeredTools('azure', body).map(tool => tool.name);
-      for (const name of ['plans_create', 'plans_read', 'plans_update']) assert.ok(names.includes(name), name);
-      for (const name of ['plans_claim', 'plans_report', 'plans_start'])
+      assert.ok(names.includes('plans_create'));
+      for (const name of ['plans_read', 'plans_update', 'plans_claim', 'plans_report', 'plans_start'])
         assert.equal(names.includes(name), planning, name);
       const reply =
         round++ % 2 === 0
