@@ -3696,7 +3696,7 @@ export async function inferWithTools(
             (!update.text || rowReviewIntentChecked) &&
             !chatToolNameMention.test(update.text) &&
             !activeBuiltinSkills.has('agent-authoring') &&
-            !((inventoryCheckNeeded() || tableRecoveryCheckNeeded()) && !inventoryAnswerChecked) &&
+            !((inventoryCheckNeeded() || rowWriteRequested) && !inventoryAnswerChecked) &&
             !fileJob.holdPreview &&
             !fileJob.needsCheck(update.text)
           )
@@ -5263,7 +5263,7 @@ export async function inferWithTools(
       const localCorrection: z.infer<typeof completionCheckSchema>['decision'] | undefined =
         unbacked ?? writeUnbacked ?? idAsked ?? misdescribed;
       let checked: z.infer<typeof completionCheckSchema>['decision'] | undefined =
-        fileCheckNeeded || tableCheckNeeded || rowReviewCheckNeeded ? undefined : localCorrection;
+        fileCheckNeeded || inventoryCheckNeeded() || rowReviewCheckNeeded ? undefined : localCorrection;
       const wordingCheck: ReturnType<typeof leakedWording> =
         directoryLeak && localCorrection === wording ? wording : undefined;
       if (!checked || wordingCheck) {

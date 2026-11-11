@@ -2757,6 +2757,71 @@ const approvedRowTools = {
   waitingCards: async () => 0,
 };
 
+for (const localCorrection of [false, true])
+  test(`a named-table read streams after its tool without an extra check: local correction ${localCorrection}`, async t => {
+    const text = 'Other Ledger rows: Rose 3 and Pear 2.';
+    const previews = [];
+    const checkedCandidates = [];
+    const streamedBeforeCheck = [];
+    const executed = [];
+    let replies = 0;
+    let checks = 0;
+    t.mock.method(globalThis, 'fetch', async (_url, init) => {
+      const body = JSON.parse(init.body);
+      if (isCompletionRequest(body)) {
+        checks++;
+        checkedCandidates.push(JSON.parse(body.messages.at(-1).content).candidate);
+        streamedBeforeCheck.push(previews.includes(text));
+        return Response.json(selectReply('azure', { ...verdict('completed'), rowWriteRequested: false }));
+      }
+      const round = replies++;
+      assert.ok(replies <= (localCorrection ? 3 : 2), 'no extra reply round');
+      return stream(
+        nativeReply(
+          'azure',
+          round === 0
+            ? {
+                calls: [
+                  use('rows.list', {
+                    tableId: otherLedger,
+                    expectedAppliedRevision: approvedLedger.appliedRevision,
+                    query: { version: 2, mode: 'rows' },
+                  }),
+                ],
+              }
+            : { text: localCorrection && round === 1 ? 'I added 2 rows to the Other Ledger table.' : text },
+        ),
+      );
+    });
+    const result = await inferWithTools(
+      nativeRoutes.azure,
+      [{ role: 'user', text: 'Show rows in Other Ledger.' }],
+      async call => {
+        executed.push(call.tool);
+        assert.equal(call.tool, 'rows.list');
+        return {
+          records: twoRows.rows.map((row, index) => ({ id: `row-${index}`, values: row.values })),
+          total: 2,
+          nextCursor: null,
+        };
+      },
+      undefined,
+      false,
+      null,
+      {
+        ...approvedRowTools,
+        preloadedTools: ['rows.list'],
+        answerText: update => previews.push(update.text),
+      },
+    );
+    assert.equal(result.text, text);
+    assert.deepEqual(executed, ['rows.list']);
+    assert.deepEqual(checkedCandidates, [text], 'local corrections need no model check');
+    assert.deepEqual(streamedBeforeCheck, [true], 'read text streams before the one completion check');
+    assert.equal(checks, 1, 'only the existing final completion check runs');
+    assert.equal(replies, localCorrection ? 3 : 2);
+  });
+
 for (const [model, runs] of [
   ['grok-4.3', 10],
   ['Kimi-K2.6', 5],
@@ -2886,7 +2951,11 @@ for (const mode of ['after-lookup', 'review-first', 'untrusted-content', 'permis
           ? blocked
           : 'Rose 3 and Pear 2 were added.',
     );
-    assert.ok(!previews.some(text => text.includes('current fields and applied revision')));
+    assert.equal(
+      previews.some(text => text.includes('current fields and applied revision')),
+      mode === 'after-lookup',
+      'post-tool text is held only after the checker establishes row-write intent',
+    );
   });
 
 test('exhausted table recovery never releases a checked internal revision question', async t => {
