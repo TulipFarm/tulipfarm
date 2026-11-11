@@ -7,7 +7,15 @@ import { type McpModelCatalog } from './mcp-contracts.ts';
 export type NativeTool = { name: string; description: string; parameters: Record<string, unknown> };
 /** One tool call that a model returned. `providerId` is false when the provider gave no call ID and the adapter made one. */
 export type NativeCall = { id: string; name: string; input: unknown; providerId: boolean };
-export type ResolvedCall = { ok: true; call: FrameworkCall; activity: string } | { ok: false; error: string };
+export type ResolvedCall =
+  | { ok: true; call: FrameworkCall; activity: string }
+  | { ok: false; error: string; issues?: { path: PropertyKey[]; code: string }[] };
+
+export const agentDraftContextSchema = z.object({
+  expectedWorkflowRevision: z.uuid().nullable(),
+  expectedWorkflowGeneration: z.number().int().positive().nullable(),
+});
+type AgentDraftContext = z.infer<typeof agentDraftContextSchema>;
 
 const activitySchema = z
   .string()
@@ -68,7 +76,27 @@ function rowParameters(tool: string, schema: Record<string, unknown>) {
 export const nativeToolName = (tool: string) => tool.replaceAll('.', '_');
 const mcpToolName = (handle: string) => `mcp_${createHash('sha256').update(handle).digest('hex').slice(0, 24)}`;
 
-type NativeCatalog = { tools: NativeTool[]; resolve(call: NativeCall): ResolvedCall };
+type NativeCatalog = { tools: NativeTool[]; resolve(call: NativeCall, context?: AgentDraftContext): ResolvedCall };
+
+const object = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === 'object' && !Array.isArray(value);
+function draftArguments(value: unknown, context?: AgentDraftContext) {
+  if (!object(value) || !object(value.input)) return value;
+  const input = { ...value.input };
+  if (object(input.definition)) {
+    const definition = { ...input.definition };
+    for (const key of ['modelFamilyId', 'skills']) if (definition[key] === null) delete definition[key];
+    input.definition = definition;
+  }
+  if (object(input.setup)) {
+    const setup = { ...input.setup };
+    for (const key of ['prompt', 'runLimits']) if (setup[key] === null) delete setup[key];
+    input.setup = setup;
+    for (const key of ['expectedWorkflowRevision', 'expectedWorkflowGeneration'] as const)
+      if (input[key] === undefined && context) input[key] = context[key];
+  }
+  return { ...value, input };
+}
 
 function nativeTools(
   access: Parameters<typeof discoverTools>[0],
@@ -76,7 +104,7 @@ function nativeTools(
 ): NativeCatalog {
   const admitted = discoverTools(access);
   const tools: NativeTool[] = [];
-  const resolvers = new Map<string, (input: unknown) => ResolvedCall>();
+  const resolvers = new Map<string, (input: unknown, context?: AgentDraftContext) => ResolvedCall>();
   for (const entry of admitted) {
     const tool = entry.name;
     if (tool === 'mcp.call') {
@@ -111,20 +139,43 @@ function nativeTools(
       description: entry.description,
       parameters: rowParameters(tool, withActivity(entry.inputSchema, tool)),
     });
-    resolvers.set(name, input => {
+    resolvers.set(name, (input, context) => {
+      if (tool === 'agents.draft') input = draftArguments(input, context);
       const fields = activityFieldsSchema.safeParse(input);
-      if (!fields.success) return { ok: false, error: issues(fields.error) };
+      if (!fields.success)
+        return {
+          ok: false,
+          error: issues(fields.error),
+          issues: fields.error.issues.map(({ path, code }) => ({ path, code })),
+        };
       const { activity, ...rest } = fields.data;
       const call = callSchema.safeParse({ ...rest, tool });
-      return call.success ? { ok: true, activity, call: call.data } : { ok: false, error: issues(call.error) };
+      if (!call.success)
+        return {
+          ok: false,
+          error: issues(call.error),
+          issues: call.error.issues.map(({ path, code }) => ({ path, code })),
+        };
+      if (call.data.tool === 'agents.draft' && call.data.input.setup) {
+        const missing = (['expectedWorkflowRevision', 'expectedWorkflowGeneration'] as const)
+          .filter(key => call.data.tool === 'agents.draft' && call.data.input[key] === undefined)
+          .map(key => ({ path: ['input', key], code: 'invalid_type' }));
+        if (missing.length)
+          return {
+            ok: false,
+            error: `Invalid arguments: ${JSON.stringify(missing)}. Copy these fields from agents_context for this agent; read it first if needed. Never guess revision values.`,
+            issues: missing,
+          };
+      }
+      return { ok: true, activity, call: call.data };
     });
   }
   return {
     tools,
-    resolve(call) {
+    resolve(call, context) {
       const resolver = resolvers.get(call.name);
       return resolver
-        ? resolver(call.input)
+        ? resolver(call.input, context)
         : { ok: false, error: `Unknown tool ${JSON.stringify(call.name)}. Use only the offered tools.` };
     },
   };
@@ -244,8 +295,8 @@ export function nativeChatTools(
       for (const tool of added) loaded.add(tool.name);
       return added.map(tool => tool.name);
     },
-    resolve(call) {
-      const resolved = full.resolve(call);
+    resolve(call, context) {
+      const resolved = full.resolve(call, context);
       const unloaded = deferred.some(tool => tool.name === call.name && !loaded.has(tool.name));
       return !resolved.ok && unloaded
         ? { ok: false, error: `${resolved.error} Its schema is not loaded. Call ${toolSearchName} first.` }

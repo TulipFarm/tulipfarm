@@ -19,8 +19,19 @@ export const agentDraftInputSchema = saveAgentSchema.omit({ requestId: true }).e
   expectedPolicyVersion: z.number().int().nonnegative().optional(),
   expectedActivationIds: z.array(uuidSchema).optional(),
   /** The agent's linked Workflow as reviewed: null when it has none, absent on drafts from before that binding. */
-  expectedWorkflowRevision: uuidSchema.nullable().optional(),
-  expectedWorkflowGeneration: z.number().int().positive().nullable().optional(),
+  expectedWorkflowRevision: uuidSchema
+    .nullable()
+    .optional()
+    .describe('Required with setup. Copy expectedWorkflowRevision from agents.context for this agent, including null.'),
+  expectedWorkflowGeneration: z
+    .number()
+    .int()
+    .positive()
+    .nullable()
+    .optional()
+    .describe(
+      'Required with setup. Copy expectedWorkflowGeneration from agents.context for this agent, including null.',
+    ),
 });
 const workflowLifecycleInput = z.strictObject({
   workflows: z
