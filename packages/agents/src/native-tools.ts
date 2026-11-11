@@ -163,6 +163,9 @@ const coreChatTools = new Set(
     'images.generate',
     'agents.delegate',
     'followups.schedule',
+    'plans.create',
+    'plans.read',
+    'plans.update',
   ].map(nativeToolName),
 );
 export const toolSearchName = 'tools_search';
