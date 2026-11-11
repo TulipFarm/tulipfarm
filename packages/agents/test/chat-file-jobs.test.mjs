@@ -26,13 +26,162 @@ const options = { chatFiles: true };
 const models = ['grok-4.3', 'Kimi-K2.6', 'DeepSeek-V4-Pro'];
 const route = model => ({ ...nativeRoutes.azure, model });
 
-function provider(t, sse, replies, checkFails = false) {
+for (const model of models)
+  for (const sse of [false, true]) {
+    const title = `regression: ${model} ${sse ? 'SSE' : 'JSON'}`;
+    test(`${title} a successful read can answer with a summary without saving anything`, async t => {
+      const text = "Here's a summary I made of the file: it contains rows created last month.";
+      provider(t, sse, [
+        nativeReply('azure', { calls: [use('files.read', { source: fileId })] }),
+        nativeReply('azure', { text }),
+      ]);
+      const result = await inferWithTools(
+        route(model),
+        [{ role: 'user', text: `Read file-id=${fileId} and write a short summary.` }],
+        async () => ({ file: 'Rows created last month.' }),
+        undefined,
+        false,
+        null,
+        options,
+      );
+      assert.equal(result.text, text);
+    });
+
+    test(`${title} one file read does not reduce a mixed turn to fifty total calls`, async t => {
+      provider(t, sse, [
+        nativeReply('azure', { calls: [use('files.read', { source: fileId })] }),
+        ...Array.from({ length: 60 }, (_, index) =>
+          nativeReply('azure', { calls: [use('web.fetch', { url: `https://example.com/${index}` })] }),
+        ),
+        nativeReply('azure', { text: 'Read the file and all sixty public pages.' }),
+      ]);
+      let calls = 0;
+      const result = await inferWithTools(
+        route(model),
+        [{ role: 'user', text: 'Read the attached file, then fetch sixty public pages.' }],
+        async () => {
+          calls++;
+          return { text: 'Source text' };
+        },
+        undefined,
+        false,
+        null,
+        options,
+      );
+      assert.equal(calls, 61);
+      assert.equal(result.text, 'Read the file and all sixty public pages.');
+    });
+
+    test(`${title} creating a spreadsheet can fetch the prices it needs`, async t => {
+      const calls = [];
+      provider(
+        t,
+        sse,
+        [
+          nativeReply('azure', { calls: [use('web.fetch', { url: 'https://example.com/pricing' })] }),
+          nativeReply('azure', {
+            calls: [
+              use('files.create', {
+                name: 'Prices',
+                format: 'xlsx',
+                content: JSON.stringify({ sheets: [{ name: 'Prices', rows: [['Enterprise', 42]] }] }),
+              }),
+            ],
+          }),
+          nativeReply('azure', { text: 'Prices.xlsx is saved in Files.' }),
+        ],
+        false,
+        body => {
+          if (!calls.length) assert.ok(body.tools.some(tool => tool.function?.name === 'web_fetch'));
+        },
+      );
+      const result = await inferWithTools(
+        route(model),
+        [{ role: 'user', text: 'Create a spreadsheet of the current prices on https://example.com/pricing' }],
+        async call => {
+          calls.push(call.tool);
+          return call.tool === 'files.create'
+            ? {
+                ...saved,
+                file: {
+                  ...saved.file,
+                  name: 'Prices.xlsx',
+                  mediaType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                },
+              }
+            : { text: 'Enterprise: 42' };
+        },
+        undefined,
+        false,
+        null,
+        options,
+      );
+      assert.deepEqual(calls, ['web.fetch', 'files.create']);
+      assert.equal(result.text, 'Prices.xlsx is saved in Files.');
+    });
+
+    test(`${title} an oversized file lets the model explain the reason without listing the library`, async t => {
+      const text = 'The file is too large to read. Send a smaller file.';
+      provider(t, sse, [
+        nativeReply('azure', { calls: [use('files.read', { source: fileId })] }),
+        nativeReply('azure', { text }),
+      ]);
+      const result = await inferWithTools(
+        route(model),
+        [{ role: 'user', text: 'Read this file.' }],
+        async call => {
+          assert.equal(call.tool, 'files.read', 'A size error must not trigger a library listing');
+          return { error: 'too-large', instruction: 'The file is too large to read.' };
+        },
+        undefined,
+        false,
+        null,
+        options,
+      );
+      assert.equal(result.text, text);
+    });
+
+    test(`${title} finding a file and answering a question continues beyond the listing`, async t => {
+      const text = 'The enterprise tier costs 42.';
+      provider(t, sse, [
+        nativeReply('azure', { calls: [use('files.list', { query: 'pricing' })] }),
+        nativeReply('azure', { calls: [use('files.read', { source: fileId })] }),
+        nativeReply('azure', { text }),
+      ]);
+      const calls = [];
+      const result = await inferWithTools(
+        route(model),
+        [{ role: 'user', text: 'Find the pricing file and tell me what the enterprise tier costs.' }],
+        async call => {
+          calls.push(call.tool);
+          return call.tool === 'files.list'
+            ? {
+                items: [
+                  { id: fileId, kind: 'file', name: 'Pricing.md' },
+                  { id: secondId, kind: 'file', name: 'Other.md' },
+                ],
+                next: null,
+              }
+            : { file: 'Enterprise tier: 42' };
+        },
+        undefined,
+        false,
+        null,
+        options,
+      );
+      assert.deepEqual(calls, ['files.list', 'files.read']);
+      assert.equal(result.text, text);
+    });
+  }
+
+function provider(t, sse, replies, checkFails = false, inspect = () => {}) {
   t.mock.method(globalThis, 'fetch', async (_url, init) => {
     const body = JSON.parse(init.body);
     if (isCompletionRequest(body))
       return checkFails
         ? Response.json({ error: { code: 'BadRequest' } }, { status: 400 })
         : Response.json(completionReply('azure'));
+    inspect(body);
     const reply = replies.length > 1 ? replies.shift() : replies[0];
     assert.ok(reply, 'fixture exhausted');
     return sse ? azureStreamReply(reply) : Response.json(reply);
@@ -93,9 +242,9 @@ for (const model of models)
       assert.doesNotMatch(result.text, /No files/);
     });
 
-    test(`${title} creates a new file without dispatching an unrelated read or API request`, async t => {
+    test(`${title} creating a new file keeps file reads and API tools available`, async t => {
       provider(t, sse, [
-        nativeReply('azure', { calls: [use('files.read', {})] }),
+        nativeReply('azure', { calls: [use('files.read', { source: fileId })] }),
         nativeReply('azure', { calls: [use('api.request', { method: 'GET', url: 'https://example.com' })] }),
         nativeReply('azure', { calls: [use('files.create', create)] }),
         nativeReply('azure', { text: 'Report.md is saved in Files.' }),
@@ -103,17 +252,17 @@ for (const model of models)
       const calls = [];
       const result = await inferWithTools(
         route(model),
-        [{ role: 'user', text: 'Create a markdown file.' }],
+        [{ role: 'user', text: 'Create a markdown file based on my source and public pricing data.' }],
         async call => {
           calls.push(call.tool);
-          return saved;
+          return call.tool === 'files.create' ? saved : { text: 'Source data' };
         },
         undefined,
         false,
         null,
         options,
       );
-      assert.deepEqual(calls, ['files.create']);
+      assert.deepEqual(calls, ['files.read', 'api.request', 'files.create']);
       assert.equal(result.text, 'Report.md is saved in Files.');
     });
 
@@ -279,7 +428,11 @@ test('a resumed successful save keeps its reply without repeating the save', asy
 
 for (const source of [undefined, 'unknown', fileId])
   test(`a failed read of ${source ?? 'no ID'} recovers with a listing, not an empty-library claim`, async t => {
-    provider(t, true, [nativeReply('azure', { calls: [use('files.read', source ? { source } : {})] })]);
+    const text = 'Report.md is available. Which file should I read?';
+    provider(t, true, [
+      nativeReply('azure', { calls: [use('files.read', source ? { source } : {})] }),
+      nativeReply('azure', { text }),
+    ]);
     const calls = [];
     const result = await inferWithTools(
       nativeRoutes.azure,
@@ -299,7 +452,7 @@ for (const source of [undefined, 'unknown', fileId])
       calls.map(call => call.tool),
       ['files.read', 'files.list'],
     );
-    assert.equal(result.text, 'Report.md');
+    assert.equal(result.text, text);
   });
 
 for (const failure of [
@@ -390,7 +543,7 @@ test('a later read failure does not replace a successful file reply with a listi
   assert.equal(result.text, text);
 });
 
-test('file work shares a 50-call turn allowance without changing unrelated work', async t => {
+test('file work counts only file calls toward its 50-call allowance, including resumed turns', async t => {
   let calls = 0;
   provider(t, false, [
     nativeReply('azure', { calls: [use('files.read', { source: fileId })] }),
@@ -407,7 +560,14 @@ test('file work shares a 50-call turn allowance without changing unrelated work'
     undefined,
     false,
     null,
-    { ...options, priorCalls: 49 },
+    {
+      ...options,
+      priorCalls: 100,
+      priorFileResults: Array.from({ length: 49 }, () => ({
+        call: { tool: 'files.read', source: fileId },
+        result: { file: 'contents' },
+      })),
+    },
   );
   assert.equal(calls, 1);
 });

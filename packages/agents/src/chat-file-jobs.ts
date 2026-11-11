@@ -8,7 +8,15 @@ const saveFailed = "I couldn't save the file. Ask me to try again.";
 const repeatedFailure = 'I stopped because the same file request kept failing.';
 const fileRequest = /\b(?:files?|workbooks?|spreadsheets?|documents?|xlsx|docx|pptx|markdown)\b/i;
 const saveRequest = /\b(?:create|make|save|generate|write|export)\b/i;
-const fileSavedClaim = /\b(?:ready|saved|created|generated|made|download)\b|\bhere(?:'s| is| are)\b/i;
+const fileSubject = String.raw`(?:files?|workbooks?|spreadsheets?|documents?|\S+\.(?:md|txt|csv|json|docx|xlsx|pptx))\b`;
+const fileSavedClaim = new RegExp(
+  [
+    String.raw`\b(?:saved|ready)\s+in\s+(?:(?:my|your)\s+)?Files\b`,
+    String.raw`(?:\b(?:I|we)(?:'ve| have)?\s+|^)(?:(?:just|successfully|now)\s+)?(?:saved|created|generated|made|exported)\s+(?:(?:a|an|the|your|my|new|Excel|markdown)\s+)*${fileSubject}`,
+    String.raw`\b${fileSubject}\s+(?:is|are|has been|have been)\s+(?:(?:now|successfully)\s+)?(?:saved|created|generated|ready)\b`,
+  ].join('|'),
+  'i',
+);
 export function newFileRequested(request: string) {
   return (
     fileRequest.test(request) &&
@@ -36,10 +44,12 @@ export function fileListingQuery(request: string): string | undefined {
       request,
     );
   const intent = match ? request.slice(0, request.lastIndexOf(match[1]!)) : request;
+  const quotedQuery = match && /^["'“].*["'”][.!?]?\s*$/.test(request.slice(request.lastIndexOf(match[1]!) - 1));
   if (
+    (match && !quotedQuery && /\b(?:and|then|also)\b/i.test(match[1]!)) ||
     !/\b(?:list|show|find|search)\b/i.test(intent) ||
     !/\b(?:files?|library)\b/i.test(intent) ||
-    /\b(?:create|make|save|write|summari[sz]e|read|delete|move|rename|restore|trash|explain|how to|tables?|rows?|records?|fields?|people|teams?|members?)\b/i.test(
+    /\b(?:create|make|save|write|summari[sz]e|read|delete|move|rename|restore|trash|explain|how to|tables?|rows?|records?|fields?|people|teams?|members?|and|then|also|tell|what|open|compare|analy[sz]e)\b/i.test(
       intent,
     )
   )
@@ -53,7 +63,7 @@ export function fileListingQuery(request: string): string | undefined {
 }
 
 export function createFileJobGuard(request: string, prior: readonly { call: unknown; result: unknown }[] = []) {
-  let active = false;
+  let calls = 0;
   let attempted = false;
   let saved = false;
   let lastFailure: z.infer<typeof failure> | undefined;
@@ -62,16 +72,18 @@ export function createFileJobGuard(request: string, prior: readonly { call: unkn
   let needsListing = false;
   const record = (call: { tool: string }, value: unknown) => {
     if (!call.tool.startsWith('files.')) return;
-    active = true;
-    if (call.tool === 'files.read') needsListing = failure.safeParse(value).success;
-    if (call.tool === 'files.list' && !failure.safeParse(value).success) needsListing = false;
+    calls++;
+    const parsed = failure.safeParse(value);
+    if (call.tool === 'files.read') {
+      needsListing =
+        parsed.success && (parsed.data.error === 'file-source-required' || parsed.data.error === 'file-not-found');
+    }
+    if (call.tool === 'files.list' && !parsed.success) needsListing = false;
     if (call.tool === 'files.create') {
       attempted = true;
       if (receipt.safeParse(value).success) saved = true;
-      const parsed = failure.safeParse(value);
       if (parsed.success) lastFailure = parsed.data;
     }
-    const parsed = failure.safeParse(value);
     if (parsed.success) {
       const key = canonicalJson([call, parsed.data.error]);
       const count = (failures.get(key) ?? 0) + 1;
@@ -84,14 +96,14 @@ export function createFileJobGuard(request: string, prior: readonly { call: unkn
     if (call.success) record(call.data, entry.result);
   }
   return {
-    get active() {
-      return active;
+    get remainingCalls() {
+      return Math.max(0, fileJobCallLimit - calls);
     },
     get saved() {
       return saved;
     },
     get holdPreview() {
-      return !saved && (active || newFileRequested(request) || fileListingQuery(request) !== undefined);
+      return !saved && (attempted || newFileRequested(request) || fileListingQuery(request) !== undefined);
     },
     get stopped() {
       return repeated;
@@ -99,12 +111,16 @@ export function createFileJobGuard(request: string, prior: readonly { call: unkn
     get needsListing() {
       return needsListing;
     },
-    admit(names: readonly string[]) {
-      active ||= names.some(name => name.startsWith('files_'));
+    prepare(names: readonly string[]) {
+      attempted ||= names.includes('files_create');
     },
     record,
     unbacked(text: string) {
-      return !saved && (active || newFileRequested(request)) && saveRequest.test(request) && fileSavedClaim.test(text);
+      return (
+        !saved &&
+        (attempted || calls > 0 || newFileRequested(request)) &&
+        (fileSavedClaim.test(text) || (newFileRequested(request) && /^(?:done|ready)[.!]?$/i.test(text.trim())))
+      );
     },
     reply() {
       if (saved) return undefined;
