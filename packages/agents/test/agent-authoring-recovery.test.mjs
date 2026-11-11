@@ -286,6 +286,32 @@ test('a carried-over authoring promise forces preparation without completion-mod
   assert.equal(result.text, ready);
 });
 
+for (const refusal of [
+  "I can't create this agent. Shall I just give you the builder link?",
+  'agents_draft tool is unavailable. Want the builder link?',
+])
+  test(`a builder-link question does not excuse a drafting refusal: ${refusal}`, async t => {
+    const executed = [];
+    const { result } = await replay(
+      t,
+      [
+        { text: refusal },
+        body => {
+          assert.equal(body.tool_choice.function.name, 'agents_context');
+          return { calls: [use('agents.context')] };
+        },
+        { calls: [use('agents.draft', { agent: 'new', input: draftInput() })] },
+        { text: ready },
+      ],
+      async call => {
+        executed.push(call.tool);
+        return call.tool === 'agents.context' ? context : receipt;
+      },
+    );
+    assert.equal(result.text, ready);
+    assert.deepEqual(executed, ['agents.context', 'agents.draft']);
+  });
+
 test('answering the setup question does not start another optional-team interview', async t => {
   const { result } = await replay(
     t,
@@ -334,7 +360,7 @@ test('a necessary channel follow-up after an earlier question ends cleanly when 
 });
 
 test('a two-question setup waits for the required table choice and then produces its draft', async t => {
-  const question = "I couldn't draft this agent. Which payroll table should it read?";
+  const question = 'Which payroll table should it read?';
   const messages = [
     { role: 'user', text: 'Create a read-only payroll agent. No team, skills, channels or triggers.' },
     { role: 'assistant', text: 'What should it be called?' },

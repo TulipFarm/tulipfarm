@@ -4552,8 +4552,7 @@ export async function inferWithTools(
       if (
         activeBuiltinSkills.has('agent-authoring') &&
         !authoringDraftMade &&
-        !candidate.includes('?') &&
-        (agentAuthoringRefusal(candidate) || promisesWork(candidate)) &&
+        (agentAuthoringRefusal(candidate) || (!candidate.includes('?') && promisesWork(candidate))) &&
         ['agents_context', 'agents_draft'].every(name => activeCatalog.tools.some(tool => tool.name === name))
       ) {
         preview('');
