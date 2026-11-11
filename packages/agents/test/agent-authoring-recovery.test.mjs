@@ -36,7 +36,7 @@ const ready = 'The Records helper draft is ready for your review.';
 const stopped = "I couldn't draft this agent in chat. [Create it in the agent builder](/sample/agents/new) instead.";
 const options = { builtinSkills: ['agent-authoring'], agentBuilderUrl: '/sample/agents/new' };
 
-async function replay(t, replies, execute, { model = 'grok-4.3', messages, ...extra } = {}) {
+async function replay(t, replies, execute, { model = 'grok-4.3', messages, completion, ...extra } = {}) {
   const requests = [];
   const failures = [];
   t.after(() => assert.deepEqual(failures, [], 'all model request assertions must pass'));
@@ -44,6 +44,7 @@ async function replay(t, replies, execute, { model = 'grok-4.3', messages, ...ex
     try {
       const body = JSON.parse(init.body);
       requests.push(body);
+      if (completion && isCompletionRequest(body)) return Response.json(selectReply('azure', completion));
       const reply = replies.shift();
       assert.ok(reply, 'the preparation and repair rounds are bounded');
       return Response.json(nativeReply('azure', typeof reply === 'function' ? reply(body) : reply));
@@ -296,6 +297,7 @@ test('answering the setup question does not start another optional-team intervie
     ],
     async call => (call.tool === 'agents.context' ? context : receipt),
     {
+      completion: { status: 'continue', reason: 'The person already declined a team; prepare the requested draft.' },
       messages: [
         { role: 'user', text: 'Create a read-only table agent. No team or triggers.' },
         { role: 'assistant', text: 'What should it be called?' },
@@ -304,6 +306,75 @@ test('answering the setup question does not start another optional-team intervie
     },
   );
   assert.equal(result.text, ready);
+});
+
+test('a necessary channel follow-up after an earlier question ends cleanly when the completion check is waiting', async t => {
+  const question = 'There are two sales channels, #sales-us and #sales-eu. Which one should it post to?';
+  const executed = [];
+  const { result, requests } = await replay(
+    t,
+    [{ calls: [use('agents.context')] }, { text: question }, { text: question }],
+    async call => {
+      executed.push(call.tool);
+      assert.equal(call.tool, 'agents.context');
+      return context;
+    },
+    {
+      completion: { status: 'waiting', reason: 'The two sales channels need a specific channel choice.' },
+      messages: [
+        { role: 'user', text: 'Set up an agent that posts daily sales summaries to Slack.' },
+        { role: 'assistant', text: 'Which Slack channel should it post to?' },
+        { role: 'user', text: 'The sales one.' },
+      ],
+    },
+  );
+  assert.equal(result.text, question);
+  assert.deepEqual(executed, ['agents.context']);
+  assert.equal(requests.filter(isCompletionRequest).length, 1);
+});
+
+test('a two-question setup waits for the required table choice and then produces its draft', async t => {
+  const question = "I couldn't draft this agent. Which payroll table should it read?";
+  const messages = [
+    { role: 'user', text: 'Create a read-only payroll agent. No team, skills, channels or triggers.' },
+    { role: 'assistant', text: 'What should it be called?' },
+    { role: 'user', text: 'Records helper.' },
+  ];
+  const { result: waiting } = await replay(
+    t,
+    [{ calls: [use('agents.context')] }, { text: question }, { text: question }],
+    async call => {
+      assert.equal(call.tool, 'agents.context');
+      return context;
+    },
+    {
+      messages,
+      completion: { status: 'waiting', reason: 'The payroll table cannot be safely chosen without the person.' },
+    },
+  );
+  assert.equal(waiting.text, question);
+  const executed = [];
+  const { result } = await replay(
+    t,
+    [
+      { calls: [use('agents.context')] },
+      { calls: [use('agents.draft', { agent: 'new', input: draftInput() })] },
+      { text: ready },
+    ],
+    async call => {
+      executed.push(call.tool);
+      return call.tool === 'agents.context' ? context : receipt;
+    },
+    {
+      messages: [
+        ...messages,
+        { role: 'assistant', text: waiting.text },
+        { role: 'user', text: 'Use employee payroll.' },
+      ],
+    },
+  );
+  assert.equal(result.text, ready);
+  assert.deepEqual(executed, ['agents.context', 'agents.draft']);
 });
 
 test('a workflow changed after context leaves the pinned guard stale and is never repaired', async t => {

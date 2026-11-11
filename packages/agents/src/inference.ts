@@ -3421,7 +3421,6 @@ export async function inferWithTools(
     .filter(turn => turn !== latest)
     .map(turn => textTurn(turn).text)
     .join('\n');
-  const previousAuthoringReply = [...sourceMessages].reverse().find(turn => turn.role === 'assistant');
   // An answer about workspace invitations is held back until the invitation checks have run, so a wrong "none" never streams.
   const directoryListing = directoryListingExpected(sourceMessages.map(textTurn));
   const directoryExpected =
@@ -4553,11 +4552,8 @@ export async function inferWithTools(
       if (
         activeBuiltinSkills.has('agent-authoring') &&
         !authoringDraftMade &&
-        (agentAuthoringRefusal(candidate) ||
-          (!candidate.trim().endsWith('?') && promisesWork(candidate)) ||
-          (candidate.trim().endsWith('?') &&
-            previousAuthoringReply &&
-            textTurn(previousAuthoringReply).text.trim().endsWith('?'))) &&
+        !candidate.includes('?') &&
+        (agentAuthoringRefusal(candidate) || promisesWork(candidate)) &&
         ['agents_context', 'agents_draft'].every(name => activeCatalog.tools.some(tool => tool.name === name))
       ) {
         preview('');
@@ -4658,6 +4654,7 @@ export async function inferWithTools(
         !misdescribed &&
         !directoryExpected &&
         !workToolUsed &&
+        !(activeBuiltinSkills.has('agent-authoring') && sourceMessages.some(turn => turn.role === 'assistant')) &&
         !finalizing &&
         (pointsToWaitingCard(candidate, waiting) ||
           (!corrections && !completionCorrections && !claimsActionOutcome(candidate) && !promisesWork(candidate)))
