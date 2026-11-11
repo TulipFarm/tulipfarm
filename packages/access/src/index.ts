@@ -112,6 +112,7 @@ async function retryLockWait<T>(transaction: AuthorizationTransaction, take: () 
       const code = (error as { code?: unknown } | null)?.code;
       if (attempt >= lockAttempts || (code !== '55P03' && code !== '40P01')) throw error;
       await transaction.client.query('ROLLBACK TO SAVEPOINT tf_authorization_lock');
+      await transaction.client.query('RELEASE SAVEPOINT tf_authorization_lock');
       await delay(50 * attempt * (0.5 + Math.random()));
     }
   }

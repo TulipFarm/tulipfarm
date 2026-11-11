@@ -1359,6 +1359,35 @@ test('safe diagnostics traverse bounded causes and aggregates without leaking ra
   );
 });
 
+test('activation diagnostics accept numeric transaction evidence without table identities', t => {
+  const lines = [];
+  t.mock.method(process.stdout, 'write', line => {
+    lines.push(JSON.parse(line));
+    return true;
+  });
+  log('warn', 'activity', 'call_failed', {
+    operation: 'tables.execution',
+    'table.generation_xmin': 124,
+    'table.catalog_xmin': 124,
+    'table.current_xid': 123,
+    attempt: 2,
+    'table.id': 'PRIVATE',
+  });
+  assert.equal(lines[0]['table.generation_xmin'], 124);
+  assert.equal(lines[0]['table.catalog_xmin'], 124);
+  assert.equal(lines[0]['table.current_xid'], 123);
+  assert.equal(lines[0].attempt, 2);
+  assert.equal(lines[0]['table.id'], undefined);
+  log('warn', 'activity', 'call_failed', {
+    'table.generation_xmin': 'PRIVATE',
+    'table.catalog_xmin': -1,
+    'table.current_xid': Number.MAX_SAFE_INTEGER + 1,
+  });
+  for (const key of ['table.generation_xmin', 'table.catalog_xmin', 'table.current_xid'])
+    assert.equal(lines[1][key], undefined);
+  assert.doesNotMatch(JSON.stringify(lines), /PRIVATE/);
+});
+
 test('observeTool logs one rich failure record and marks thrown errors as logged', async t => {
   const lines = [];
   t.mock.method(process.stdout, 'write', line => {

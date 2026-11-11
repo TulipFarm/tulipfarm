@@ -66,6 +66,7 @@ const codes = new Set<string>([
   'table-creation-definition-changed',
   'table-creation-generation-superseded',
   'table-creation-xmin-mismatch',
+  'table-activation-unavailable',
   'compaction-paused',
   'compaction-unavailable',
   'compaction-not-found',

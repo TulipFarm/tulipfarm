@@ -150,7 +150,9 @@ jobs:
           XAI_API_KEY: synthetic-not-secret
         run: pnpm --filter @tulipfarm/agents exec node --test --test-concurrency=1 test/row-drafts.integration.mjs test/project-drafts.integration.mjs
       - name: Check table approvals and workspace skill sources
-        run: pnpm --filter @tulipfarm/agents exec node --test --test-concurrency=1 test/table-approval.integration.mjs
+        run: |
+          pnpm --filter @tulipfarm/agents exec node --test --test-concurrency=1 test/table-approval.integration.mjs
+          pnpm --filter @tulipfarm/tables exec node --test --test-concurrency=1 test/integration/activation-retry.test.mjs
       - name: Check agent table access
         run: |
           pnpm --filter @tulipfarm/agents exec node --test --test-concurrency=1 test/task-data-scope.integration.mjs

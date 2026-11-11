@@ -24,7 +24,7 @@ import {
   useTableProposalCommand,
 } from '@/features/tables/hooks';
 import { proposalProgressing as progressing, type ProposalIdentity } from '@/features/tables/queries';
-import { proposalApi, type ProposalApi } from '@/features/tables/proposal-api';
+import { proposalApi, proposalMessages, type ProposalApi } from '@/features/tables/proposal-api';
 import { memberMessages, tableApi, type TableApi, type TableDataRow } from '@/features/tables/api';
 import { transformErrorHelp } from '@/features/tables/transform-errors';
 import { formatTableValue, rowLabel, rowTitle } from '@/features/tables/definition-view';
@@ -97,7 +97,7 @@ function planOutcome({ receipt, importProgress }: ProposalView['plans'][number])
   if (receipt?.status === 'completed') return `Applied${receipt.revision ? ` at revision ${receipt.revision}` : ''}`;
   const imported = importProgress?.applied ? importedRecords(importProgress) : null;
   if (receipt?.status === 'failed')
-    return `Failed. ${memberMessages[receipt.code] ?? `Reference ${receipt.code}.`} ${importProgress ? (imported ?? 'No rows were imported.') : 'Completed tables are unchanged.'}`;
+    return `Failed. ${proposalMessages[receipt.code] ?? memberMessages[receipt.code] ?? `Reference ${receipt.code}.`} ${importProgress ? (imported ?? 'No rows were imported.') : 'Completed tables are unchanged.'}`;
   return imported ?? 'Not yet completed';
 }
 

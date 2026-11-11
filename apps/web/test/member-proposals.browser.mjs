@@ -27,7 +27,8 @@ test('table reviews keep history with disabled skills and failed resumes', { tim
     attached = false,
     view,
     effect,
-    role = 'admin';
+    role = 'admin',
+    resumeSucceeds = false;
   try {
     browser = await chromium.launch({ args: cdp ? [`--remote-debugging-port=${cdp}`] : [] });
     page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, reducedMotion: 'reduce' });
@@ -70,6 +71,11 @@ test('table reviews keep history with disabled skills and failed resumes', { tim
           assert.equal(command.digest, view.digest);
           assert.equal(command.operation, 'resume');
           commands.push(command);
+          if (resumeSucceeds) {
+            view.status = 'approved';
+            view.plans[0].receipt = null;
+            return route.fulfill({ json: view });
+          }
           return route.fulfill({ status: 409, json: { error: view.plans[0].receipt.code } });
         }
         if (path.endsWith('/outcome')) return route.fulfill({ json: { kind: 'proposal' } });
@@ -285,6 +291,45 @@ test('table reviews keep history with disabled skills and failed resumes', { tim
       assert.equal(await page.getByText(/details have been cleared/).count(), 0);
       await page.setViewportSize({ width: 1440, height: 1000 });
     }
+    resumeSucceeds = true;
+    view.status = 'failed';
+    view.plans[0].receipt = { status: 'failed', executionId: id(64), code: 'table-activation-unavailable' };
+    await page.goto(`${origin}/members-table-mock/chat/${chatId}`, { timeout: 60000 });
+    await page.getByRole('button', { name: 'Review changes', exact: true }).click();
+    const card = page.getByRole('region', { name: 'Table change proposal' });
+    await card
+      .getByText("This table change couldn't be applied, and your table hasn't changed.", { exact: false })
+      .waitFor();
+    if (cdp) {
+      attached = true;
+      await promisify(execFile)('agent-browser', [
+        '--session',
+        session,
+        '--no-auto-dialog',
+        '--cdp',
+        cdp,
+        'screenshot',
+        '/tmp/table-proposal-activation-blocked.png',
+      ]);
+    }
+    await card.getByRole('button', { name: 'Resume unfinished work' }).click();
+    await card.getByRole('heading', { name: 'Approval recorded', exact: true }).waitFor();
+    view.status = 'running';
+    await card.getByText('Applying changes', { exact: true }).waitFor();
+    view.status = 'completed';
+    view.plans[0].receipt = { status: 'completed', executionId: id(64), revision: 'a'.repeat(40) };
+    await card.getByRole('heading', { name: 'Changes applied', exact: true }).waitFor();
+    assert.equal(await card.getByText('Execution failed', { exact: true }).count(), 0);
+    if (cdp)
+      await promisify(execFile)('agent-browser', [
+        '--session',
+        session,
+        '--no-auto-dialog',
+        '--cdp',
+        cdp,
+        'screenshot',
+        '/tmp/table-proposal-resumed-applied.png',
+      ]);
     assert.deepEqual(errors, []);
     assert.deepEqual(external, [], 'all browser requests stay in the local fixture');
   } catch (error) {

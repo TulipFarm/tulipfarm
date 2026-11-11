@@ -281,6 +281,9 @@ const logOnlyAttributes = new Set([
   'table',
   'workspace.version',
   'source.kinds',
+  'table.generation_xmin',
+  'table.catalog_xmin',
+  'table.current_xid',
 ]);
 // Where an error was thrown: up to eight "function@file:line" frames from TulipFarm's own code, innermost first.
 const errorSitePattern = /^[\w$.<>-]{1,80}@[\w.-]{1,80}:\d{1,6}( < [\w$.<>-]{1,80}@[\w.-]{1,80}:\d{1,6}){0,7}$/;
@@ -331,6 +334,7 @@ function safeAttribute(key: string, value: unknown, logLine = false): boolean {
     // A TulipFarm table's fixed name; customer tables are logged only as "custom".
     if (key === 'table') return typeof value === 'string' && /^(tf_[a-z0-9_]{1,60}|custom|other)$/.test(value);
     if (key === 'workspace.version') return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+    if (key.startsWith('table.')) return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
     // Distinct source kinds, comma-joined: a fixed vocabulary of kebab-case names.
     if (key === 'source.kinds')
       return typeof value === 'string' && /^[a-z][a-z-]{0,40}(,[a-z][a-z-]{0,40}){0,63}$/.test(value);
