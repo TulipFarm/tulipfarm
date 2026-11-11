@@ -2,10 +2,14 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { waitingCardChange } from './chat-row-guard.ts';
 import {
   directoryAnswerExpected,
+  directoryAnswer,
   directoryCheckPrompt,
   directoryListingExpected,
   directoryLookupExpected,
+  directoryNameMatches,
   directoryReply,
+  directoryRequest,
+  directoryTeamMatches,
   directoryTotalsClaim,
   directoryUnavailableReply,
   workspaceDirectorySchema,
@@ -2704,7 +2708,7 @@ export function inventedFailure(candidate: string, items: readonly LoopItem[], w
 export const blamesFailure = (candidate: string) =>
   accessFailure.test(candidate) || (earlierFailed.test(candidate) && earlierRows.test(candidate));
 
-const toolNames = [...new Set([...toolNameSchema.options, ...nativeFrameworkToolNames])]
+const toolNames = [...new Set([...toolNameSchema.options, ...nativeFrameworkToolNames, 'tools_search'])]
   .filter(name => /[._]/.test(name))
   .sort((a, b) => b.length - a.length);
 const toolNameMention = new RegExp(`(?<![\\w./-])(?:${toolNames.map(escaped).join('|')})(?![\\w-]|\\.\\w)`, 'i');
@@ -3423,13 +3427,16 @@ export async function inferWithTools(
     .join('\n');
   // An answer about workspace invitations is held back until the invitation checks have run, so a wrong "none" never streams.
   const directoryListing = directoryListingExpected(sourceMessages.map(textTurn));
-  const directoryExpected =
+  let directoryExpected =
     directoryListing || (!invitationLookup(sourceMessages) && directoryAnswerExpected(sourceMessages.map(textTurn)));
-  const directoryLookup = directoryExpected && directoryLookupExpected(sourceMessages.map(textTurn));
+  let directoryLookup = directoryExpected && directoryLookupExpected(sourceMessages.map(textTurn));
+  let directoryCheckNeeded = directoryExpected;
   let directory: WorkspaceDirectory | undefined;
+  let directoryMatches: WorkspaceDirectory | undefined;
   let directorySucceeded = false;
   let directoryAttempted = false;
   let directoryRecovery = false;
+  let directoryReadRequired = false;
   if (directoryExpected && tools?.readWorkspaceDirectory) {
     const retained = workspaceDirectorySchema.safeParse(await tools.readWorkspaceDirectory());
     if (retained.success && retained.data.scope !== 'filtered') {
@@ -3448,7 +3455,12 @@ export async function inferWithTools(
     invitationLookup(sourceMessages) || !tools?.answerText
       ? undefined
       : update => {
-          if (!directoryExpected && !activeBuiltinSkills.has('agent-authoring')) tools?.answerText?.(update);
+          if (
+            !directoryCheckNeeded &&
+            !toolNameMention.test(update.text) &&
+            !activeBuiltinSkills.has('agent-authoring')
+          )
+            tools?.answerText?.(update);
         };
   let calls = z
     .number()
@@ -4175,6 +4187,13 @@ export async function inferWithTools(
           tools?.projectInstructions === undefined
             ? await observeChatDetail('inventory', async () => tools?.readWorkspaceInventory?.())
             : undefined;
+        if (
+          inventory?.directoryNames &&
+          !invitationLookup(sourceMessages) &&
+          (directoryNameMatches(request, inventory.directoryNames.teams).length ||
+            directoryNameMatches(request, inventory.directoryNames.members).length)
+        )
+          directoryCheckNeeded = true;
         const inventoryKey = observeChatDetailSync('serialize', () => JSON.stringify(inventory ?? null));
         let catalogChanged = false;
         if (!catalog || previousCatalog !== currentCatalogKey) {
@@ -4510,7 +4529,14 @@ export async function inferWithTools(
         return finish(directory ? directoryReply(directory) : directoryUnavailableReply, true);
       }
       // Some routes accept only automatic tool choice. A skipped read still uses the normal, authorized dispatcher.
-      if (directoryExpected && directoryRecovery && !directoryAttempted && !directory && !finalizing) {
+      if (
+        directoryExpected &&
+        directoryRecovery &&
+        !directoryAttempted &&
+        (!directorySucceeded || directoryReadRequired) &&
+        !directory &&
+        !finalizing
+      ) {
         const call = { tool: 'members.find' as const };
         calls++;
         workToolUsed = true;
@@ -4533,6 +4559,8 @@ export async function inferWithTools(
         continue;
       }
       const candidate = rendered?.text ?? selected.text;
+      const directoryLeak = toolNameMention.test(candidate);
+      directoryCheckNeeded ||= directoryLeak;
       const preview = (text: string) => {
         try {
           answerText?.({ step: answerStep, text });
@@ -4645,13 +4673,13 @@ export async function inferWithTools(
             waitingCardMisdescribed(candidate, rowCards, request) ??
             rowRequestSkipped(items, request, rowCards, waitingRows) ??
             inventedFailure(candidate, items, waiting) ??
-            leakedWording(candidate, request));
+            (directoryLeak ? undefined : leakedWording(candidate, request)));
       if (
         !unbacked &&
         !writeUnbacked &&
         !idAsked &&
         !misdescribed &&
-        !directoryExpected &&
+        !directoryCheckNeeded &&
         !workToolUsed &&
         !(activeBuiltinSkills.has('agent-authoring') && sourceMessages.some(turn => turn.role === 'assistant')) &&
         !finalizing &&
@@ -4692,7 +4720,7 @@ export async function inferWithTools(
                 waiting,
               ),
             );
-            const directoryEvidence = directoryExpected
+            const directoryEvidence = directoryCheckNeeded
               ? JSON.stringify({ evidence: JSON.parse(evidence), retainedWorkspaceDirectory: directory ?? null })
               : evidence;
             recordChatRequestSizes({
@@ -4704,7 +4732,7 @@ export async function inferWithTools(
                 chatRequest(
                   route,
                   [{ role: 'user', text: directoryEvidence }],
-                  completionCheckPrompt + (directoryExpected ? directoryCheckPrompt : ''),
+                  completionCheckPrompt + (directoryCheckNeeded ? directoryCheckPrompt : ''),
                   z.toJSONSchema(completionCheckSchema),
                 ),
               ),
@@ -4728,14 +4756,26 @@ export async function inferWithTools(
             preview('');
             throw error;
           }
+          if (directoryCheckNeeded && !directoryExpected) {
+            log('warn', 'activity', 'call_failed', {
+              operation: 'chat.directory-admission',
+              outcome: 'checker-unavailable',
+            });
+            return accept();
+          }
           // A check model that fails must not discard a finished answer; admission, authorization and cancellation still end the turn.
           // An answer that reports an outcome no tool in this reply produced is never sent unchecked.
           if (!directoryLookup && (workToolUsed || !claimsActionOutcome(candidate))) return accept();
           checked = unverifiedOutcome;
         }
       }
+      if (directoryCheckNeeded && checked.workspaceDirectory && checked.workspaceDirectory !== 'not-applicable') {
+        directoryExpected = true;
+        directoryLookup = true;
+      }
       const directoryGrounded =
         checked.status === 'completed' &&
+        !directoryLeak &&
         ((checked.workspaceDirectory === 'grounded' && !!directory) ||
           (checked.workspaceDirectory === 'matches-grounded' &&
             directorySucceeded &&
@@ -4751,16 +4791,26 @@ export async function inferWithTools(
           ((checked.workspaceDirectory === 'grounded' || checked.workspaceDirectory === 'matches-grounded') &&
             !directoryGrounded))
       ) {
-        if (directoryRecovery || finalizing) return finish(directoryUnavailableReply, true);
+        if (directoryRecovery || finalizing) {
+          const found = directory ?? directoryMatches;
+          return finish(
+            found
+              ? directoryAnswer(found, directoryRequest(sourceMessages.map(textTurn)) || request)
+              : directoryUnavailableReply,
+            true,
+          );
+        }
         directoryRecovery = true;
-        if (!directory) forceTool = membersFindName;
+        directoryReadRequired =
+          !directory && (!directoryMatches || !directoryTeamMatches(directoryMatches, request).length);
+        if (directoryReadRequired) forceTool = membersFindName;
         items.push(
           { kind: 'turn', turn: { role: 'assistant', text: candidate } },
           {
             kind: 'turn',
             turn: {
               role: 'user',
-              text: directory
+              text: !directoryReadRequired
                 ? 'Answer using only the people, teams, counts and visible rosters in the people-and-teams lookup. Do not invent names or expose hidden rosters.'
                 : 'Look up the workspace people and teams now by calling members_find with no query. Then answer only from its result. Do not repeat the unchecked names or counts.',
             },
@@ -4891,7 +4941,9 @@ export async function inferWithTools(
         if (call.query === undefined) directoryAttempted = true;
         const found = workspaceDirectorySchema.safeParse(value);
         if (found.success) {
+          directoryCheckNeeded ||= !invitationLookup(sourceMessages);
           directorySucceeded = true;
+          directoryMatches = { ...found.data, scope: call.query === undefined ? found.data.scope : 'filtered' };
           if (call.query === undefined && found.data.scope !== 'filtered') directory = found.data;
         }
       }

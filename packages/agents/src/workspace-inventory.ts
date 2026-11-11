@@ -8,6 +8,10 @@ import { personalDefinitionSources } from './personal-definition-sources.ts';
 import { requireDraftSources } from './draft-sources.ts';
 import { withHuman } from './saved-policy.ts';
 import type { AgentStorage } from './store.ts';
+import { relation } from './store.ts';
+import { activeMembers } from './members.ts';
+import { directoryNameLimit } from './workspace-directory.ts';
+import { z } from 'zod';
 
 async function allPages<T>(read: (after?: string) => Promise<{ items: T[]; nextCursor: string | null }>): Promise<T[]> {
   const items: T[] = [];
@@ -94,6 +98,41 @@ async function listWorkspaceInventory(runtime: AgentStorage, workspaceId: string
   const readable = await withHuman(runtime, workspaceId, actor, 'read', async tx => {
     // Only an item's own sources may leave it out; a requester who is no longer a member still fails.
     await currentMember(tx, actor);
+    const memberIds = z
+      .array(z.object({ id: z.uuid() }))
+      .parse(
+        (
+          await tx.client.query(
+            `SELECT id FROM ${relation(tx, 'tf_memberships')} WHERE removed_at IS NULL ORDER BY id LIMIT $1`,
+            [directoryNameLimit + 1],
+          )
+        ).rows,
+      );
+    const teamNames = z
+      .array(z.object({ name: z.string() }))
+      .parse(
+        (
+          await tx.client.query(`SELECT name FROM ${relation(tx, 'tf_teams')} ORDER BY id LIMIT $1`, [
+            directoryNameLimit + 1,
+          ])
+        ).rows,
+      );
+    const members =
+      memberIds.length && memberIds.length <= directoryNameLimit
+        ? await activeMembers(
+            tx,
+            memberIds.map(member => member.id),
+          )
+        : [];
+    const directoryNames = {
+      members: members
+        .filter(member => !member.name.includes('@') && member.name !== 'Unnamed member')
+        .map(member => member.name),
+      teams:
+        teamNames.length <= directoryNameLimit
+          ? teamNames.map(team => (team.name === '_admin' ? 'Workspace admins' : team.name))
+          : [],
+    };
     const inherited: SourceDependency[] = [];
     async function keep<T>(items: readonly T[], sourceOf: (item: T) => SourceDependency) {
       const kept: T[] = [];
@@ -115,6 +154,7 @@ async function listWorkspaceInventory(runtime: AgentStorage, workspaceId: string
       agents: await keep(agents, agentSource),
       skills: await keep(skills, skillSource),
       inherited,
+      directoryNames,
     };
   });
   return {
@@ -125,6 +165,7 @@ async function listWorkspaceInventory(runtime: AgentStorage, workspaceId: string
       agents: readable.agents,
       workflows,
       skills: readable.skills,
+      directoryNames: readable.directoryNames,
     },
     sources: [
       ...readable.tables.map(tableSource),
