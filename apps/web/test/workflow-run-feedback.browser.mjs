@@ -120,7 +120,7 @@ async function open(
     if (path === '/v1/user/visit') return route.fulfill({ json: { firstSession: false } });
     if (reads.has(path)) return route.fulfill({ json: reads.get(path) });
     if (path === `${base}/${current.id}/sponsorship` && request.method() === 'PUT') {
-      assert.deepEqual(request.postDataJSON(), { sponsorMembershipId: membershipId, historyAudience: [membershipId] });
+      assert.deepEqual(request.postDataJSON(), { historyAudience: [membershipId] });
       if (saveFails) return route.fulfill({ status: 503, json: { error: 'unavailable' } });
       saved = true;
       return route.fulfill({ json: current });

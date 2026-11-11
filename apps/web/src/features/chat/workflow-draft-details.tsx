@@ -295,13 +295,14 @@ function describeStep(step: Step, sources: TableStepSources, workspaceId: string
                   : []),
                 {
                   name: 'Posts as',
-                  value: step.sender === 'app' ? 'TulipFarm app' : 'Slack account of the requester or sponsor',
+                  value:
+                    step.sender === 'app' ? 'TulipFarm app' : 'Slack account of the requester or of who turned it on',
                 },
               ]}
             />
             <p>
-              Saving this workflow does not approve a send. Each run asks its requester or sponsor to approve the exact
-              message. Approval expires after 24 hours.
+              Saving this workflow does not approve a send. Each run asks its requester, or whoever turned it on, to
+              approve the exact message. Approval expires after 24 hours.
             </p>
           </>
         ),

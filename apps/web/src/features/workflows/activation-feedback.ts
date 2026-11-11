@@ -30,10 +30,10 @@ export function workflowLiveMessage(workflow: Workflow) {
 
 export function activationFailureMessage(error: unknown, workflow: Workflow, surface: 'editor' | 'card') {
   const reasons: Record<string, string> = {
-    'sponsorship-required': 'The sponsor must accept this revision before it can be activated.',
-    'sponsor-required': 'Another member sponsors this workflow. Ask them to accept this revision before activating.',
+    'sponsorship-required': 'You need access to run this workflow before it can be activated.',
+    'sponsor-required': 'You need access to run this workflow before it can be activated.',
     'sponsor-access-lost':
-      'The sponsor can no longer run this workflow. Open Settings to choose another sponsor or restore their access.',
+      'You don’t have the access this workflow needs to run on its own. Ask for that access, then activate again.',
     'audience-required':
       'Someone who sees its run history cannot read the table. Change who sees run history, then activate it.',
     'stale-generation': 'This workflow changed. Open the workflow to review its current state before activating.',

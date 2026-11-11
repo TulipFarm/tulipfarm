@@ -96,8 +96,6 @@ test('restored setup preserves distinct scopes and needs explicit consent for un
     trigger: { kind: 'cron', expression: '0 9 * * 1', timezone: 'UTC' },
   });
   assert.equal(saved.prompt, 'Prepare the weekly update.');
-  assert.equal(parseBuilder(draft, member, true, agent).problems[0]?.step, 'triggers');
-  draft.sponsorConsent = true;
   assert.equal(parseBuilder(draft, member, true, agent).setup?.triggers.length, 2);
   draft.prompt = undefined;
   assert.deepEqual(parseBuilder(draft, member, false, agent).problems, [

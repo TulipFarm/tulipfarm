@@ -737,7 +737,7 @@ export function createAuthoringDrafts(
           change,
           agentId: proposal.targetId,
           instruction:
-            'Nothing has been saved or activated. The human must review Basics, Skills, Access and Triggers on this exact card, then choose Save draft or Create and activate. Sponsoring unattended triggers and replacing channel agents require explicit card consent. Activating saves every trigger and the one prompt to the linked Workflow of this agent. Model prose is never consent.',
+            'Nothing has been saved or activated. The human must review Basics, Skills, Access and Triggers on this exact card, then choose Save draft or Create and activate. Create and activate runs unattended triggers with the reviewer’s access; replacing channel agents requires explicit card consent. Activating saves every trigger and the one prompt to the linked Workflow of this agent. Model prose is never consent.',
         };
       return {
         draftId: id,
@@ -1025,7 +1025,7 @@ export function createAuthoringDrafts(
             version: saved.version,
             digest: saved.digest,
             decision: input.decision,
-            consent: input.consent ?? { sponsor: false, replaceChannels: [] },
+            consent: input.consent ?? { replaceChannels: [] },
           });
           outcome = {
             kind: 'agent',
