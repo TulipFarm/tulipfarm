@@ -313,7 +313,7 @@ export type ConversationReply = (input: {
   model: string;
   /** User messages carry images as content only when the `images` flag is on and the turn's family reads images. */
   messages: ({ role: 'user' | 'assistant'; text: string } | { role: 'user'; content: ReplyContent })[];
-  sourceMessages?: { role: 'user' | 'assistant'; text: string }[];
+  sourceMessages?: { role: 'user' | 'assistant'; text: string; rowReviews?: { table: string; input: unknown }[] }[];
   fence: ReplyFence;
   /** Fresh, runtime-authorized preference context, excluded from snapshots and history. */
   readPersonalMemory: () => Promise<{ content: string; revision: number } | undefined>;
@@ -365,6 +365,7 @@ const historySchema = z.array(
     role: z.enum(['user', 'assistant']),
     text: z.string(),
     acceptedSequence: z.number().int(),
+    rowReviews: z.array(z.object({ table: z.string(), input: z.unknown() })).optional(),
   }),
 );
 const priorHistorySchema = z.array(historySchema.element.extend({ stopped: z.boolean() }));
@@ -1576,7 +1577,12 @@ export function createConversationExecutor(
           JOIN ${table(tx, 'tf_conversation_approval_requests')} r ON r.turn_id = t.id AND r.conversation_id = $1
           JOIN ${table(tx, 'tf_conversation_parts')} p ON p.conversation_id = $1 AND p.approval_id = r.id
       ) SELECT m.id, CASE m.author_kind WHEN 'human' THEN 'user' ELSE 'assistant' END AS role, e.accepted_sequence AS "acceptedSequence",
-        COALESCE(string_agg(p.text, '' ORDER BY p.ordinal) FILTER (WHERE p.kind IN ('text', 'layout')), '') AS text, bool_or(e.stopped) AS stopped
+        COALESCE(string_agg(p.text, '' ORDER BY p.ordinal) FILTER (WHERE p.kind IN ('text', 'layout')), '') AS text, bool_or(e.stopped) AS stopped,
+        COALESCE((SELECT jsonb_agg(jsonb_build_object('table',g.definition->>'label','input',d.proposal->'input'))
+          FROM ${table(tx, 'tf_chat_authoring_drafts')} d
+          JOIN ${table(tx, 'tf_conversation_turns')} t ON t.id=d.turn_id AND t.response_message_id=m.id
+          JOIN ${table(tx, 'tf_table_generations')} g ON g.table_id::text=d.proposal->'input'->>'tableId' AND g.state='active'
+          WHERE d.conversation_id=m.conversation_id AND d.proposal->>'kind'='row'), '[]'::jsonb) AS "rowReviews"
         FROM exchanges e JOIN ${table(tx, 'tf_conversation_messages')} m ON m.id = e.message_id AND m.conversation_id = $1
         LEFT JOIN ${table(tx, 'tf_conversation_parts')} p ON p.message_id = m.id
         GROUP BY m.id, e.accepted_sequence ORDER BY e.accepted_sequence DESC, m.sequence DESC LIMIT ${compaction ? 2000 : 39}`,
@@ -2785,7 +2791,7 @@ export function createConversationExecutor(
           .slice(-1);
         const sourceMessages = source.messages
           .filter(message => message.text)
-          .map(({ role, text }) => ({ role, text }));
+          .map(({ role, text, rowReviews }) => ({ role, text, ...(rowReviews?.length && { rowReviews }) }));
         const cleanedNote = (id: string, cleanedNow: boolean) => {
           const parts = [...source.unloadedFiles, ...(cleanedNow ? source.turnFileParts : [])];
           if (images) {
