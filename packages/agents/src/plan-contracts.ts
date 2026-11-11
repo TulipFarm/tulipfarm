@@ -280,7 +280,7 @@ export const createPlanSchema = z.strictObject({
     .strictObject({
       ...planSpecificationSchema.shape,
       prerequisites: planSpecificationSchema.shape.prerequisites.default([]),
-      verificationTask: planSpecificationSchema.shape.verificationTask.default('verify-request'),
+      verificationTask: planSpecificationSchema.shape.verificationTask.optional(),
     })
     .refine(value => withinJsonBytes(value, 262144), 'Planning evidence must fit within 256 KiB of formatted JSON.')
     .optional(),
@@ -841,11 +841,38 @@ export function buildInitialPlan(input: z.infer<typeof createPlanSchema>) {
         }
       : task,
   );
-  let planning = input.planning;
-  if (planning) {
+  let planning: PlanSpecification | undefined;
+  if (input.planning) {
+    let verificationTask = input.planning.verificationTask;
+    if (verificationTask === undefined) {
+      const work = tasks.filter(task => task.kind === 'work');
+      const covered = new Set(input.planning.requirements.flatMap(requirement => requirement.tasks));
+      const prerequisites = compilePlan(
+        tasks.map((task, position) => ({ ...task, position, state: 'pending' as const })),
+      ).prerequisites;
+      const candidates = work.filter(task => {
+        if (work.length < 2 || task.assignee?.kind !== 'coordinator' || covered.has(task.key)) return false;
+        const ancestors = new Set<string>();
+        const remaining = [...(prerequisites.get(task.key) ?? [])];
+        while (remaining.length) {
+          const key = remaining.pop()!;
+          if (ancestors.has(key)) continue;
+          ancestors.add(key);
+          remaining.push(...(prerequisites.get(key) ?? []));
+        }
+        return work.every(other => other.key === task.key || ancestors.has(other.key));
+      });
+      if (candidates.length === 1) verificationTask = candidates[0]!.key;
+      else {
+        const reserved = new Set([...tasks.map(task => task.key), ...specialists]);
+        verificationTask = 'verify-request';
+        for (let suffix = 1; reserved.has(verificationTask); suffix++) verificationTask = `verify-request-${suffix}`;
+      }
+    }
+    planning = { ...input.planning, verificationTask };
     if (!planning.requirements.length)
       throw new PlanGraphError('planning-coverage', undefined, ['planning', 'requirements']);
-    if (!tasks.some(task => task.key === planning!.verificationTask)) {
+    if (!tasks.some(task => task.key === verificationTask)) {
       const dependencies = tasks.filter(task => task.kind === 'work').map(task => task.key);
       if (dependencies.length > planLimits.dependencies)
         throw new PlanGraphError('too-many-dependencies', planning.verificationTask);

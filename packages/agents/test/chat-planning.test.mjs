@@ -194,8 +194,56 @@ test('a requirement mapping error can be corrected in one retry', async t => {
   assert.equal(executions, 2);
 });
 
+test('an unbacked saved-plan claim gets a repair round before stopping', async t => {
+  let round = 0;
+  let executions = 0;
+  t.mock.method(globalThis, 'fetch', async (_url, init) => {
+    const body = JSON.parse(init.body);
+    if (isCompletionRequest(body))
+      return Response.json(
+        selectReply('azure', {
+          status: 'completed',
+          reason: 'The candidate says the draft was saved.',
+          planSavedClaim: true,
+        }),
+      );
+    const replies = [
+      { calls: [use('plans.create', draft)] },
+      { text: 'Your plan is saved.' },
+      { calls: [use('plans.create', { ...draft, brief: 'Prepare and review the release.' })] },
+      { text: 'Your plan draft is ready. No work has started.' },
+    ];
+    assert.ok(round < replies.length, 'creation repair stays bounded');
+    if (round === 2) {
+      assert.ok(
+        body.messages.some(message => message.role === 'tool' && message.content.includes('planning-coverage')),
+      );
+    }
+    return Response.json(nativeReply('azure', replies[round++]));
+  });
+  const result = await inferWithTools(
+    { ...nativeRoutes.azure, model: 'grok-4.3' },
+    [{ role: 'user', text: 'Save a plan-only release draft.' }],
+    async () =>
+      ++executions === 1
+        ? {
+            error: 'planning-coverage',
+            path: ['planning', 'requirements', 0, 'tasks'],
+            instruction: 'Use only deliverable task keys.',
+          }
+        : { planId: randomUUID(), version: 0, added: ['prepare', 'review', 'publish'] },
+    undefined,
+    false,
+    null,
+    { builtinSkills: ['planning'] },
+  );
+  assert.equal(result.text, 'Your plan draft is ready. No work has started.');
+  assert.equal(executions, 2);
+  assert.equal(round, 4);
+});
+
 for (const error of ['planning-coverage', 'access-denied'])
-  test(`a saved-plan claim cannot override a failed creation receipt: ${error}`, async t => {
+  test(`unbacked saved-plan claims stop only after correction retries are exhausted: ${error}`, async t => {
     let round = 0;
     t.mock.method(globalThis, 'fetch', async (_url, init) => {
       const body = JSON.parse(init.body);
@@ -230,6 +278,7 @@ for (const error of ['planning-coverage', 'access-denied'])
       result.text,
       'I stopped before finishing this request. Check Tool activity for what ran, then ask me to continue.',
     );
+    assert.equal(round, 4, 'the model receives both available correction rounds before stopping');
   });
 
 test('a failed completion check cannot approve a plan creation failure', async t => {

@@ -135,6 +135,36 @@ test('creation supplies a final coordinator check and coverage without relaxing 
   assert.equal(updatePlanSchema.safeParse({ expectedVersion: 0, planning: { requirements: [] } }).success, false);
 });
 
+test('creation adopts a supplied coordinator final check when its key is omitted', () => {
+  const plan = input();
+  const { verificationTask: _verificationTask, ...planning } = plan.planning;
+  const built = buildInitialPlan(createPlanSchema.parse({ ...plan, planning }));
+  assert.equal(built.planning.verificationTask, 'verify');
+  assert.deepEqual(
+    built.nodes.map(task => task.key),
+    ['agent', 'verify'],
+  );
+  assert.deepEqual(built.planning.requirements, plan.planning.requirements);
+  assert.deepEqual(built.nodes[1].criteria, plan.tasks[1].criteria);
+});
+
+test('an omitted final check key does not steal a deliverable key', () => {
+  const plan = createPlanSchema.parse({
+    title: 'Release outline',
+    planning: {
+      requirements: [{ key: 'release', description: 'Prepare and review', tasks: ['verify-request', 'review'] }],
+    },
+    tasks: [
+      { key: 'verify-request', title: 'Prepare release' },
+      { key: 'review', title: 'Review release' },
+    ],
+  });
+  const built = buildInitialPlan(plan);
+  assert.equal(built.planning.verificationTask, 'verify-request-1');
+  assert.deepEqual(built.nodes.at(-1).dependsOn, ['verify-request', 'review']);
+  assert.deepEqual(built.planning.requirements, plan.planning.requirements);
+});
+
 test('updating a plan cannot silently remove or rewrite an original requirement', () => {
   const plan = input();
   const { nodes } = buildInitialPlan(plan);

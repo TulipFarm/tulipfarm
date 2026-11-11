@@ -5076,13 +5076,18 @@ export async function inferWithTools(
         );
         continue;
       }
+      if (planCreationAttempted && checked.planSavedClaim === true && !planCreated)
+        checked = {
+          ...checked,
+          status: 'continue',
+          reason:
+            'The plan was not saved. Repair the failed plans.create arguments using its validation path and instruction, or state the actual failure without claiming a save.',
+        };
       if (checked !== unverifiedOutcome)
         recordChatCompletionCheck(
           checked.status === 'continue' ? 'continue' : 'done',
           checked.status === 'continue' ? checked.reason : undefined,
         );
-      if (planCreationAttempted && checked.planSavedClaim === true && !planCreated)
-        return finish(unfinishedReply, true);
       if (checked.status !== 'continue') return accept();
       if (tableCheckNeeded) inventoryRecovery = true;
       preview('');
