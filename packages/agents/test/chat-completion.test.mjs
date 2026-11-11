@@ -2754,6 +2754,165 @@ const approvedRowTools = {
   waitingCards: async () => 0,
 };
 
+for (const [model, runs] of [
+  ['grok-4.3', 10],
+  ['Kimi-K2.6', 5],
+])
+  for (let run = 0; run < runs; run++)
+    test(`${model} recovers a checked tool-less table reply into one explicit batch, run ${run + 1}`, async t => {
+      const candidate = [
+        'What is the exact applied revision for Other Ledger?',
+        'Other Ledger does not exist yet.',
+        'Other Ledger is still applying.',
+        'I need its current fields and revision.',
+      ][run % 4];
+      const executed = [];
+      const forced = [];
+      const updates = [];
+      t.mock.method(globalThis, 'fetch', async (_url, init) => {
+        const body = JSON.parse(init.body);
+        if (isCompletionRequest(body))
+          return Response.json(
+            selectReply('azure', {
+              ...verdict(candidate.includes('?') ? 'waiting' : 'blocked'),
+              rowWriteRequested: true,
+              smallRowBatchRequested: true,
+              tableLookupRequired: !executed.length,
+            }),
+          );
+        const tool = forcedTool(body);
+        forced.push(tool);
+        assert.ok(forced.length <= 4, 'recovery does not spend extra correction rounds');
+        return stream(
+          nativeReply(
+            'azure',
+            executed.includes('rows.create.batch')
+              ? { text: 'Rose 3 and Pear 2 were added to Other Ledger.' }
+              : tool === 'schema_inspect'
+                ? { calls: [use('schema.inspect', { tableId: otherLedger })] }
+                : tool === 'rows_create_batch'
+                  ? { calls: [use('rows.create.batch', twoRows)] }
+                  : { text: candidate },
+          ),
+        );
+      });
+      const result = await inferWithTools(
+        { ...nativeRoutes.azure, model },
+        approvedRowRequest,
+        async call => {
+          executed.push(call.tool);
+          return call.tool === 'schema.inspect'
+            ? approvedLedger
+            : { records: twoRows.rows.map((row, index) => ({ id: `row-${index}`, values: row.values })) };
+        },
+        undefined,
+        false,
+        null,
+        { ...approvedRowTools, answerText: update => updates.push(update.text) },
+      );
+      assert.deepEqual(executed, ['schema.inspect', 'rows.create.batch']);
+      assert.deepEqual(forced, [undefined, 'schema_inspect', 'rows_create_batch', undefined]);
+      assert.equal(result.text, 'Rose 3 and Pear 2 were added to Other Ledger.');
+      assert.ok(!updates.includes(candidate), 'unchecked table replies never stream');
+    });
+
+for (const mode of ['after-lookup', 'review-first', 'untrusted-content', 'permission-denied'])
+  test(`checked table recovery preserves ${mode} safeguards`, async t => {
+    const executed = [];
+    const previews = [];
+    const summary = 'A review card for 2 rows in "Other Ledger" is ready in this chat. No rows have been written.';
+    const blocked = 'You do not have permission to add rows to Other Ledger.';
+    let replies = 0;
+    t.mock.method(globalThis, 'fetch', async (_url, init) => {
+      const body = JSON.parse(init.body);
+      if (isCompletionRequest(body))
+        return Response.json(
+          selectReply('azure', {
+            ...verdict(executed.includes('rows.create.batch') ? 'completed' : 'waiting'),
+            rowWriteRequested: true,
+            smallRowBatchRequested: true,
+            tableLookupRequired: !executed.includes('rows.create.batch'),
+          }),
+        );
+      assert.ok(++replies <= 5, 'recovery remains bounded');
+      const tool = forcedTool(body);
+      return stream(
+        nativeReply(
+          'azure',
+          (mode === 'after-lookup' && !executed.length) || tool === 'schema_inspect'
+            ? { calls: [use('schema.inspect', { tableId: otherLedger })] }
+            : tool === 'rows_create_batch'
+              ? { calls: [use('rows.create.batch', twoRows)] }
+              : executed.includes('rows.create.batch')
+                ? { text: mode === 'permission-denied' ? blocked : 'Rose 3 and Pear 2 were added.' }
+                : { text: 'What are the current fields and applied revision for Other Ledger?' },
+        ),
+      );
+    });
+    const result = await inferWithTools(
+      { ...nativeRoutes.azure, model: 'grok-4.3' },
+      mode === 'review-first'
+        ? [
+            ...approvedRowRequest.slice(0, -1),
+            { role: 'user', text: `${approvedRowRequest.at(-1).text} Show a review first.` },
+          ]
+        : approvedRowRequest,
+      async call => {
+        executed.push(call.tool);
+        if (call.tool === 'schema.inspect') return approvedLedger;
+        if (mode === 'permission-denied') return { error: 'access-denied' };
+        if (mode === 'review-first' || mode === 'untrusted-content')
+          return { draftId: 'draft', status: 'review-required', operation: 'create', reviewSummary: summary };
+        return { records: twoRows.rows.map((row, index) => ({ id: `row-${index}`, values: row.values })) };
+      },
+      undefined,
+      false,
+      null,
+      {
+        ...approvedRowTools,
+        answerText: update => previews.push(update.text),
+        reviewCards: async refs => refs.map(reference => ({ reference, status: 'pending', summary })),
+      },
+    );
+    assert.equal(executed.filter(tool => tool === 'rows.create.batch').length, 1, 'never retry a row outcome');
+    assert.equal(
+      result.text,
+      mode === 'review-first' || mode === 'untrusted-content'
+        ? summary
+        : mode === 'permission-denied'
+          ? blocked
+          : 'Rose 3 and Pear 2 were added.',
+    );
+    assert.ok(!previews.some(text => text.includes('current fields and applied revision')));
+  });
+
+test('exhausted table recovery never releases a checked internal revision question', async t => {
+  const candidate = 'What is the exact applied revision for Other Ledger?';
+  let rounds = 0;
+  t.mock.method(globalThis, 'fetch', async (_url, init) => {
+    const body = JSON.parse(init.body);
+    if (isCompletionRequest(body))
+      return Response.json(
+        selectReply('azure', {
+          ...verdict('waiting'),
+          tableLookupRequired: true,
+        }),
+      );
+    assert.ok(++rounds <= 3, 'the global correction budget is unchanged');
+    return Response.json(nativeReply('azure', { text: candidate }));
+  });
+  const result = await inferWithTools(
+    nativeRoutes.azure,
+    approvedRowRequest,
+    () => assert.fail('the fixture never returns a tool call'),
+    undefined,
+    false,
+    null,
+    approvedRowTools,
+  );
+  assert.ok(!result.text.includes('applied revision'));
+});
+
 for (const mode of ['forced-write', 'wrong-id', 'fallback'])
   test(`loaded inventory preserves ${mode} recovery when the latest request names no table`, async t => {
     const executed = [];
@@ -2854,7 +3013,7 @@ test('one completion-check error releases an informational table answer without 
   assert.ok(updates.includes(text), 'the held informational answer is released');
 });
 
-for (const [label, flag, inspection, writes, name = approvedLedger.name] of [
+for (const [label, flag, inspection, writes, name = approvedLedger.name, small = true] of [
   ['explicit true and ready', true, approvedLedger, 1],
   ['hyphenated name', true, { ...approvedLedger, name: 'Other-Ledger' }, 1, 'Other-Ledger'],
   ['explicit false', false, approvedLedger, 0],
@@ -2864,6 +3023,10 @@ for (const [label, flag, inspection, writes, name = approvedLedger.name] of [
   ['not applied', true, { ...approvedLedger, appliedRevision: null }, 0],
   ['failed inspection', true, { error: 'table-not-ready' }, 0],
   ['another table inspected', true, { ...approvedLedger, id: '00000000-0000-4000-8000-0000000000bb' }, 0],
+  ['revision changed', true, { ...approvedLedger, appliedRevision: 'b'.repeat(40) }, 0],
+  ['batch not explicit or too large', true, approvedLedger, 0, approvedLedger.name, false],
+  ['missing batch classification', true, approvedLedger, 0, approvedLedger.name, null],
+  ['invalid batch classification', true, approvedLedger, 0, approvedLedger.name, 'yes'],
 ])
   test(`named-table waiting-card recovery forces a batch only with checked intent and a ready schema: ${label}`, async t => {
     const outcomes = checkOutcomes(t);
@@ -2876,6 +3039,7 @@ for (const [label, flag, inspection, writes, name = approvedLedger.name] of [
           selectReply('azure', {
             ...verdict(),
             ...(flag === undefined ? {} : { rowWriteRequested: flag }),
+            ...(small === null ? {} : { smallRowBatchRequested: small }),
           }),
         );
       forced.push(forcedTool(body));
@@ -2911,7 +3075,7 @@ for (const [label, flag, inspection, writes, name = approvedLedger.name] of [
     assert.ok(!outcomes.includes('error'), 'a missing or invalid intent value is false, not a checker failure');
     if (writes) {
       assert.equal(result.text, 'Rose 3 and Pear 2 were added.');
-      assert.deepEqual(forced, [undefined, undefined, 'schema_inspect', 'rows_create_batch', undefined]);
+      assert.deepEqual(forced, [undefined, 'schema_inspect', 'rows_create_batch', undefined]);
     } else assert.ok(!forced.includes('rows_create_batch'));
   });
 
@@ -3231,7 +3395,10 @@ test('a resumed row write never arms forced write recovery again', async t => {
   const requests = [];
   t.mock.method(globalThis, 'fetch', async (_url, init) => {
     const body = JSON.parse(init.body);
-    if (isCompletionRequest(body)) return Response.json(selectReply('azure', verdict()));
+    if (isCompletionRequest(body))
+      return Response.json(
+        selectReply('azure', { ...verdict(), rowWriteRequested: true, smallRowBatchRequested: true }),
+      );
     requests.push(body);
     return stream(nativeReply('azure', { text: 'Rose 3 and Pear 2 were added to Other Ledger.' }));
   });
