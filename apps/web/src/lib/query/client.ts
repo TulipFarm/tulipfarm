@@ -27,6 +27,7 @@ export function createFeatureClient(
     environment.online ??
     (() => typeof navigator === 'undefined' || typeof navigator.onLine !== 'boolean' || navigator.onLine);
   let active = true;
+  const canRetry = () => active && visible() && online();
   let generation = 0;
   let authorityRevision = 0;
   const authorityListeners = new Set<() => void>();
@@ -79,7 +80,7 @@ export function createFeatureClient(
         gcTime: 30 * 60_000,
         refetchOnWindowFocus: false,
         refetchOnReconnect: false,
-        retry: (count, error) => active && visible() && online() && retryRead(count, error),
+        retry: (count, error) => canRetry() && retryRead(count, error),
         retryDelay,
         networkMode: 'always',
       },
@@ -226,6 +227,7 @@ export function createFeatureClient(
     polling,
     catalog,
     identity,
+    canRetry,
     isCurrent,
     revoke,
     receive,

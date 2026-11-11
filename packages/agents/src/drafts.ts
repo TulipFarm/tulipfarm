@@ -194,8 +194,8 @@ export function createAuthoringDrafts(
       return operation(tx, actor, bound);
     });
   }
-  async function owned(tx: AgentTransaction, actor: HumanActor, chatId: string) {
-    if (!(await chatAccess(tx, actor, chatId, 'read', true)).owner) throw new AccessDenied();
+  async function owned(tx: AgentTransaction, actor: HumanActor, chatId: string, lock = true) {
+    if (!(await chatAccess(tx, actor, chatId, 'read', lock)).owner) throw new AccessDenied();
   }
   async function writable(
     tx: AgentTransaction,
@@ -526,8 +526,15 @@ export function createAuthoringDrafts(
       true,
     );
   }
-  async function load(tx: AgentTransaction, workspaceId: string, actor: HumanActor, chatId: string, id: string) {
-    await owned(tx, actor, chatId);
+  async function load(
+    tx: AgentTransaction,
+    workspaceId: string,
+    actor: HumanActor,
+    chatId: string,
+    id: string,
+    lock = true,
+  ) {
+    await owned(tx, actor, chatId, lock);
     const row = rowSchema
       .optional()
       .parse(
@@ -545,6 +552,7 @@ export function createAuthoringDrafts(
       if (error instanceof SourceAuthorizationUnavailable) throw error;
       if (!(error instanceof AccessDenied)) throw error;
       if (row.proposal.kind === 'row' && row.sources.some(source => source.kind === 'shared-slack-turn')) throw error;
+      if (!lock) await owned(tx, actor, chatId);
       const origin = (
         await tx.client.query(`SELECT turn_id FROM ${relation(tx, 'tf_chat_authoring_drafts')} WHERE id=$1`, [id])
       ).rows[0];
@@ -760,8 +768,8 @@ export function createAuthoringDrafts(
       ? createAgentSetup(bound, eligible, setupOptions).readCommand(workspaceId, actor, uuidSchema.parse(command.id))
       : undefined;
   }
-  async function knowledgeReceipt(tx: AgentTransaction, actor: HumanActor, chatId: string, id: string) {
-    await owned(tx, actor, chatId);
+  async function knowledgeReceipt(tx: AgentTransaction, actor: HumanActor, chatId: string, id: string, lock = true) {
+    await owned(tx, actor, chatId, lock);
     return z
       .object({
         digest: draftDecisionSchema.shape.digest,
@@ -789,7 +797,7 @@ export function createAuthoringDrafts(
     chatId = uuidSchema.parse(chatId);
     id = uuidSchema.parse(id);
     const result = await transaction(workspaceId, user, id, async (tx, actor, bound) => {
-      const receipt = await knowledgeReceipt(tx, actor, chatId, id);
+      const receipt = await knowledgeReceipt(tx, actor, chatId, id, false);
       if (receipt) {
         const outcome = draftOutcomeSchema.parse(receipt.outcome);
         if (outcome.kind !== 'knowledge') throw new AccessDenied();
@@ -805,7 +813,7 @@ export function createAuthoringDrafts(
           },
         });
       }
-      const row = await load(tx, workspaceId, actor, chatId, id);
+      const row = await load(tx, workspaceId, actor, chatId, id, false);
       if (!row) return null;
       const saved = (
         await tx.client.query(`SELECT outcome FROM ${relation(tx, 'tf_chat_authoring_decisions')} WHERE draft_id=$1`, [

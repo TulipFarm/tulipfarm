@@ -26,6 +26,7 @@ import { createPageReuse } from './page-reuse';
 import { interactionPending, type InteractionReference } from './interaction-contracts';
 import type { ConversationStreamSnapshot } from './conversation-stream';
 import { useReplyResync } from './reply-resync';
+import { draftRetryDelay, retryDraftRead, scheduleDraftRead } from './draft-reads';
 
 export const conversationKeys = {
   lists: () => ['conversations', 'list'] as const,
@@ -273,17 +274,23 @@ export function useAuthoringDraft(api: ConversationApi, chatId: string, id: stri
     pollWhile: draftPending,
     interval: draftBackoff,
     maxChecks: 90,
+    schedule: scheduleDraftRead,
+    retry: retryDraftRead,
+    retryDelay: draftRetryDelay,
     enabled,
   });
   const changes = useConversationChanges();
-  const saved = useRef(false);
+  const observed = useRef<{ chatId: string; id: string; status: string } | null>(null);
   useEffect(() => {
-    if (read.state.kind === 'ready' && read.state.data.status === 'saved' && !saved.current) {
-      saved.current = true;
-      const kind = read.state.data.proposal.kind;
+    if (read.state.kind !== 'ready') return;
+    const draft = read.state.data;
+    const previous = observed.current;
+    observed.current = { chatId, id, status: draft.status };
+    if (previous?.chatId === chatId && previous.id === id && previous.status !== draft.status && !draftPending(draft)) {
+      const kind = draft.proposal.kind;
       void changes.savedDraft(chatId, kind === 'knowledge-receipt' ? 'knowledge' : kind);
     }
-  }, [read.state, changes, chatId]);
+  }, [read.state, changes, chatId, id]);
   return read;
 }
 
