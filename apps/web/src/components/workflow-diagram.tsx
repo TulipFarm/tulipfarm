@@ -28,7 +28,7 @@ import { Sparkle } from 'reicon-react/icons/Sparkle';
 import { Users } from 'reicon-react/icons/Users';
 import { Badge } from '@tulipfarm/sprout/badge';
 import { BrandIcon, type Brand } from '@tulipfarm/sprout/brand-icon';
-import { AgentAvatar } from '@tulipfarm/sprout/agent-avatar';
+import { MonsterAvatar } from '@tulipfarm/sprout/monster-avatar';
 
 export type WorkflowNodeKind =
   | 'trigger'
@@ -145,7 +145,7 @@ export function WorkflowStepIcon({
   if (identity?.kind === 'agent')
     return (
       <span className="workflow-step-identity" aria-hidden="true">
-        <AgentAvatar agentId={identity.agentId} name={identity.name} />
+        <MonsterAvatar agentId={identity.agentId} size={32} />
       </span>
     );
   if (identity?.kind === 'app')
