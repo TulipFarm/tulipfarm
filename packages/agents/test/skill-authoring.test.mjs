@@ -57,7 +57,7 @@ for (const model of ['grok-4.3', 'Kimi-K2.6'])
   });
 
 for (const model of ['grok-4.3', 'Kimi-K2.6'])
-  for (const status of ['pending-review', 'ready'])
+  for (const status of ['pending-review', 'reviewing', 'ready'])
     test(`${model} keeps its final reply consistent with a ${status} skill card`, async t => {
       for (let run = 0; run < 3; run++) {
         let step = 0;

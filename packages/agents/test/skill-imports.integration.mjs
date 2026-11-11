@@ -293,6 +293,29 @@ test('imports preserve exact bytes, review only selected skills, and atomically 
     const drafted = await imports.read(w.id, actor, draftId);
     assert.ok(drafted.candidates[0].definition.package.manifest.files.some(file => file.path === 'assets/binary.dat'));
     await tools.draft(w.id, actor, draftId, receipts[0].id, input, []);
+    for (const [status, open] of [
+      ['pending', true],
+      ['pending-review', true],
+      ['reviewing', true],
+      ['ready', true],
+      ['failed', false],
+      ['cancelled', false],
+      ['expired', false],
+      ['unchanged', false],
+    ]) {
+      await db.platform.query(
+        `UPDATE ${qualified(w.names.schema, 'tf_skill_imports')} SET status=$2,expires_at=now()+$3::interval WHERE id=$1`,
+        [draftId, status === 'expired' ? 'pending-review' : status, status === 'expired' ? '-1 minute' : '1 day'],
+      );
+      const replay = await tools.draft(w.id, actor, draftId, receipts[0].id, input, []);
+      assert.equal(replay.status, status);
+      if (open) assert.match(replay.instruction, /The skill review card is open/);
+      else assert.equal(replay.instruction, undefined, status);
+    }
+    await db.platform.query(
+      `UPDATE ${qualified(w.names.schema, 'tf_skill_imports')} SET status='pending-review' WHERE id=$1`,
+      [draftId],
+    );
     await assert.rejects(
       tools.draft(
         w.id,

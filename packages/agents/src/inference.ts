@@ -2139,7 +2139,7 @@ export function reviewCardReceipt(name: string, value: unknown): CardReceipt | u
     return metadata(undefined, receipt.status);
   if (
     skillImportReviewTools.has(name) &&
-    (receipt.status === 'ready' || receipt.status === 'pending-review') &&
+    (receipt.status === 'ready' || receipt.status === 'pending-review' || receipt.status === 'reviewing') &&
     typeof receipt.importId === 'string' &&
     receipt.importId
   )
@@ -3493,7 +3493,7 @@ export async function inferWithTools(
     const status = draft && cardResult(draft)?.status;
     return status === 'ready'
       ? "I've drafted the skill, and it's ready for your review. Check the card, then select **Install and enable**."
-      : status === 'pending-review'
+      : status === 'pending-review' || status === 'reviewing'
         ? "I've drafted the skill. When its safety review finishes, select **Install and enable** on the card."
         : undefined;
   };

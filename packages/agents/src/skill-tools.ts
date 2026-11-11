@@ -50,7 +50,9 @@ export function createSkillTools(runtime: AgentStorage, bytes?: Pick<FileBytes, 
     instruction:
       view.status === 'installed'
         ? 'The exact package was installed by the human. Use the saved receipts; do not prepare it again.'
-        : 'The skill review card is open. Its safety review may still be running. Tell the person to review this card when it is ready; do not say that no card was created. Only the human can install and enable it; chat text is not approval.',
+        : ['pending', 'pending-review', 'reviewing', 'ready'].includes(view.status)
+          ? 'The skill review card is open. Its safety review may still be running. Tell the person to review this card when it is ready; do not say that no card was created. Only the human can install and enable it; chat text is not approval.'
+          : undefined,
   });
   async function draft(
     workspaceId: string,
