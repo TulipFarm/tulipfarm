@@ -984,6 +984,28 @@
   left: 12px;
   border-left: 1px solid var(--input);
 }
+.workflow-step-outline li {
+  position: relative;
+  display: flex;
+  align-items: start;
+  gap: 10px;
+  padding-bottom: 10px;
+}
+.workflow-step-outline li:last-child {
+  padding-bottom: 0;
+}
+.workflow-step-outline li:not(:last-child)::before {
+  content: '';
+  position: absolute;
+  top: 32px;
+  bottom: 2px;
+  left: 14px;
+  border-left: 1px solid var(--input);
+}
+.workflow-step-outline .workflow-step-copy {
+  gap: 2px;
+  padding-top: 4px;
+}
 .workflow-step-number {
   display: grid;
   place-items: center;

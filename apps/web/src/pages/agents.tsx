@@ -6,7 +6,7 @@ import { PageContent } from '@tulipfarm/sprout/page-content';
 import { PageHeader } from '@tulipfarm/sprout/page-header';
 import { SearchField } from '@tulipfarm/sprout/search-field';
 import { AgentsSample, StatePanel } from '@tulipfarm/sprout/state-panel';
-import { AgentAvatar } from '@tulipfarm/sprout/agent-avatar';
+import { MonsterAvatar } from '@tulipfarm/sprout/monster-avatar';
 import {
   DataList,
   DataListActions,
@@ -171,7 +171,7 @@ export function AgentsPage() {
                 {page.agents.map(agent => (
                   <DataListRow key={agent.id}>
                     <DataListCell>
-                      <AgentAvatar agentId={agent.id} name={agent.name} />
+                      <MonsterAvatar agentId={agent.id} size={32} />
                       <DataListLink
                         render={
                           <Link
@@ -239,7 +239,7 @@ function ArchivedAgentRow({
   return (
     <DataListRow>
       <DataListCell>
-        <AgentAvatar agentId={id} name={name} />
+        <MonsterAvatar agentId={id} size={32} />
         {name}
       </DataListCell>
       <DataListActions>

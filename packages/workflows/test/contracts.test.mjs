@@ -11,7 +11,7 @@ import {
   resolveSlackText,
   runCondition,
   saveSchema,
-  slackTextFromUnverifiedSource,
+  slackTextOrigin,
   transform,
   triggerSummary,
   waitUntilInstant,
@@ -251,24 +251,27 @@ test('a Slack message template fills each placeholder from run values and names 
   );
 });
 
-test('a Slack message template is unverified when any of its values comes from agent output', () => {
-  const steps = [
-    {
-      id: 'ask',
-      kind: 'agent',
-      agentId: '7c0b8c7e-4f0e-4e3b-9a52-0d3f1f2b6a12',
-      prompt: { kind: 'literal', value: 'x' },
-    },
-  ];
-  const template = values => ({ kind: 'template', template: 'Hi', values });
-  assert.equal(slackTextFromUnverifiedSource(steps, template({ who: { kind: 'input', path: ['sender'] } })), false);
+test('Slack text from code or HTTP output is reviewed unless an agent reply flows into it', () => {
+  const agentId = '7c0b8c7e-4f0e-4e3b-9a52-0d3f1f2b6a12';
+  const ask = { id: 'ask', kind: 'agent', agentId, prompt: { kind: 'literal', value: 'x' } };
+  const fetch = { id: 'fetch', kind: 'http', method: 'GET', url: 'https://example.com/status' };
+  const code = input => ({ id: 'format', kind: 'code', language: 'python', source: 'return input', input });
+  const origin = (steps, text) =>
+    slackTextOrigin(definitionSchema.parse({ version: 1, name: 'Check', triggers: [], steps }), text);
+  const from = step => ({ kind: 'step', step, path: [] });
+  assert.equal(origin([fetch], from('fetch')), 'reviewed');
+  assert.equal(origin([fetch, code(from('fetch'))], from('format')), 'reviewed');
+  assert.equal(origin([ask], from('ask')), 'generated');
+  assert.equal(origin([ask, code(from('ask'))], from('format')), 'generated');
   assert.equal(
-    slackTextFromUnverifiedSource(
-      steps,
-      template({ who: { kind: 'input', path: ['sender'] }, answer: { kind: 'step', step: 'ask', path: ['result'] } }),
-    ),
-    true,
+    origin([ask], {
+      kind: 'template',
+      template: 'Hi {who} {answer}',
+      values: { who: { kind: 'input', path: ['sender'] }, answer: from('ask') },
+    }),
+    'generated',
   );
+  assert.equal(origin([fetch], from('missing')), null);
 });
 
 test('agent steps use a prior value as a bounded task prompt', () => {

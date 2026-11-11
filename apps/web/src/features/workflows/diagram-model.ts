@@ -5,7 +5,7 @@ import type {
   WorkflowStepState,
 } from '../../components/workflow-diagram.tsx';
 import type { Brand } from '@tulipfarm/sprout/brand-icon';
-import { runTime } from './calendar-schedule.ts';
+import { cronSummary, ordinaryCron, runTime } from './calendar-schedule.ts';
 import { workflowLayout } from './diagram-layout.ts';
 import {
   comparisonWords,
@@ -139,7 +139,9 @@ function triggerText(trigger: Trigger, labels: WorkflowLabels) {
     case 'interval':
       return `Every ${workflowDuration(trigger.minutes * 60)}`;
     case 'cron':
-      return `${trigger.expression} / ${trigger.timezone}`;
+      return ordinaryCron(trigger.expression)
+        ? cronSummary(trigger).replace(/\.$/, '')
+        : `${trigger.expression} / ${trigger.timezone}`;
     case 'record':
     case 'row':
       return labels.tables?.[trigger.tableId] ?? 'Table name unavailable';
@@ -356,9 +358,11 @@ export function workflowGraph(
       position: { x: 0, y: 0 },
       ...(brand
         ? { identity: { kind: 'app', brand } as const }
-        : step.kind === 'agent' && labels.agents?.[step.agentId]
-          ? { identity: { kind: 'agent', agentId: step.agentId, name: actor } as const }
-          : {}),
+        : step.kind === 'code'
+          ? { identity: { kind: 'language', language: step.language } as const }
+          : step.kind === 'agent' && labels.agents?.[step.agentId]
+            ? { identity: { kind: 'agent', agentId: step.agentId, name: actor } as const }
+            : {}),
     });
     details[step.id] = {
       facts: [

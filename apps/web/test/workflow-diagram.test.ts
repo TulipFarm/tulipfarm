@@ -56,7 +56,7 @@ test('a workflow with several triggers shows each one, and none means a person s
   const facts = graph.details.$trigger?.facts ?? [];
   assert.deepEqual(
     facts.find(fact => fact.label === 'Weekday digest'),
-    { label: 'Weekday digest', value: '0 9 * * 1-5 / Asia/Kolkata' },
+    { label: 'Weekday digest', value: 'Every weekday at 09:00 in Asia/Kolkata' },
   );
   assert.ok(
     facts.some(fact => fact.label.startsWith('Webhook received: ')),

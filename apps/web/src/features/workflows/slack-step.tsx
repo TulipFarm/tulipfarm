@@ -167,12 +167,7 @@ export function WorkflowSlackCheck({
     onReady(id, ready);
     return () => onReady(id, false);
   }, [id, ready, onReady]);
-  if (ready)
-    return (
-      <Button size="sm" variant="ghost" onClick={() => void read.refresh()}>
-        Check Slack destination
-      </Button>
-    );
+  if (ready) return null;
   if (read.state.kind === 'loading' || (read.state.kind === 'ready' && read.state.refreshing))
     return (
       <p role="status" className="text-sm">

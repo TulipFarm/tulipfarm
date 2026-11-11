@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { AgentAvatar } from '@tulipfarm/sprout/agent-avatar';
+import { MonsterAvatar } from '@tulipfarm/sprout/monster-avatar';
 import { AgentFanout } from '@tulipfarm/sprout/agent-fanout';
 import { Button } from '@tulipfarm/sprout/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@tulipfarm/sprout/collapsible';
@@ -15,7 +15,7 @@ import {
   type FanoutMarks,
 } from './subagent-fanout-state';
 
-const avatar: FanoutMarks['avatar'] = (agentId, name) => <AgentAvatar agentId={agentId} name={name} size="sm" />;
+const avatar: FanoutMarks['avatar'] = agentId => <MonsterAvatar agentId={agentId} size={24} />;
 
 /**
  * The sub-agents of one `agents.delegate` call, live while they run. AgentFanout draws the agents; the list under it

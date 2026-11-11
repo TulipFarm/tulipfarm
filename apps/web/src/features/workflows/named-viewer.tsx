@@ -24,7 +24,7 @@ const providerBrands: Record<z.infer<typeof providerSourceSchema>['provider'], B
   jira: 'jira',
   hubspot: 'hubspot',
 };
-function useWorkflowLabels(workspaceId: string, definition: Definition) {
+export function useWorkflowLabels(workspaceId: string, definition: Definition) {
   const { runtime, scope, current } = useFeatureContext();
   useSyncExternalStore(runtime.subscribeAuthority, runtime.authoritySnapshot, runtime.authoritySnapshot);
   const agentIds = [...new Set(definition.steps.flatMap(step => (step.kind === 'agent' ? [step.agentId] : [])))];

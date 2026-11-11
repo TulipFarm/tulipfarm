@@ -1,4 +1,3 @@
-import { triggersLine } from '@/features/workflows/triggers';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { BookOpen } from 'reicon-react/icons/BookOpen';
@@ -26,6 +25,7 @@ import { KnowledgeDraftCard, KnowledgeReceiptCard } from './knowledge-draft-card
 import { MemoryDraftCard } from './memory-draft-card';
 import { formatRun, handStartedDraft, workflowChange, workflowSaveLabel } from './workflow-draft-details';
 import { WorkflowSavedActions } from './workflow-saved-actions';
+import { WorkflowDraftPreview } from './workflow-draft-preview';
 import { WorkflowCanvasButton } from './workflow-canvas';
 import { GitHubInstallNote } from '@/features/workflows/github-install-note';
 import { WorkflowSlackCheck } from '@/features/workflows/slack-step';
@@ -63,6 +63,12 @@ export function AuthoringDraftCard({
   const submitted = useRef(false);
   const [activateOnSave, setActivateOnSave] = useState(false);
   const [savedWorkflowActive, setSavedWorkflowActive] = useState<boolean | null>(null);
+  // Set when this card activates the saved revision, so its status names the next run.
+  const [activatedNextRun, setActivatedNextRun] = useState<string | null | undefined>(undefined);
+  const onWorkflowActive = useCallback((active: boolean, nextRunAt?: string | null) => {
+    setSavedWorkflowActive(active);
+    if (nextRunAt !== undefined) setActivatedNextRun(nextRunAt);
+  }, []);
   const [slackReady, setSlackReady] = useState<Record<string, boolean>>({});
   const onSlackReady = useCallback(
     (id: string, ready: boolean) =>
@@ -321,12 +327,6 @@ export function AuthoringDraftCard({
   const definition = proposal.input.definition;
   const workflow: WorkflowProposal | null =
     proposal.kind === 'workflow' || proposal.kind === 'workflow-activation' ? proposal : null;
-  // The draft names the table of its first row trigger, as the server resolves only that one.
-  const rowTrigger = workflow?.input.definition.triggers.find(trigger => trigger.kind === 'row');
-  const tableNames =
-    rowTrigger?.kind === 'row' && draft.workflowRowSource
-      ? new Map([[rowTrigger.tableId, draft.workflowRowSource.table]])
-      : undefined;
   const noun = workflow ? 'workflow' : proposal.kind === 'agent' ? 'agent' : 'skill';
   const brands = proposal.kind === 'agent' ? toolBrands(proposal.input.definition.tools) : [];
   // Only a new agent starts off. Saving over an existing agent leaves its on or off state and active revision as they were.
@@ -402,28 +402,40 @@ export function AuthoringDraftCard({
                 Your review is recorded. The definition is being saved. You can leave this chat and return later.
               </p>
             )}
-            {draft.status === 'saved' && activeWorkflow && draft.outcome?.kind === 'workflow' && workflow && (
+            {draft.status === 'saved' && workflow && draft.outcome?.kind === 'workflow' && (
               <div role="status" className="flex items-start gap-2">
-                <span aria-hidden="true" className="mt-0.5 shrink-0 text-success">
-                  <CheckCircle size={18} />
-                </span>
-                <div>
-                  <p className="font-medium">Saved and active</p>
-                  {(!savedWorkflowActive || draft.outcome.activation === 'activated') && (
-                    <p className="text-muted-foreground">{workflowResult(draft.outcome, workflow)}</p>
-                  )}
-                </div>
+                {activeWorkflow && (
+                  <span aria-hidden="true" className="mt-0.5 shrink-0 text-success">
+                    <CheckCircle size={18} />
+                  </span>
+                )}
+                <p>
+                  {activeWorkflow
+                    ? activeLine(
+                        activatedNextRun !== undefined
+                          ? activatedNextRun
+                          : draft.outcome.activation === 'activated'
+                            ? draft.outcome.nextRunAt
+                            : null,
+                        workflow,
+                      )
+                    : workflowResult(draft.outcome)}
+                </p>
               </div>
             )}
-            {draft.status === 'saved' && !activeWorkflow && (
+            {draft.status === 'saved' && !workflow && (
               <p role="status">
-                {workflow && draft.outcome?.kind === 'workflow'
-                  ? workflowResult(draft.outcome, workflow)
-                  : proposal.kind === 'agent'
-                    ? updating
-                      ? 'Agent saved. These changes stay inactive until an agent manager activates this revision.'
-                      : 'Agent saved. It stays off until an agent manager activates this revision.'
-                    : 'Skill saved. Agents use it only after a skill manager reviews this revision.'}
+                {proposal.kind === 'agent'
+                  ? updating
+                    ? 'Agent saved. These changes stay inactive until an agent manager activates this revision.'
+                    : 'Agent saved. It stays off until an agent manager activates this revision.'
+                  : 'Skill saved. Agents use it only after a skill manager reviews this revision.'}
+              </p>
+            )}
+            {draft.status === 'pending' && workflow && draft.workflowNextRunAt && (
+              <p className="text-muted-foreground">
+                {workflowSaveLabel(workflow) === 'Save and activate' ? 'First run' : 'Once active, it first runs'}{' '}
+                {formatRun(draft.workflowNextRunAt, workflow.input.definition.triggers)}.
               </p>
             )}
             {draft.status === 'dismissed' && (
@@ -437,7 +449,7 @@ export function AuthoringDraftCard({
               <WorkflowSavedActions
                 outcome={draft.outcome}
                 activateOnSave={activateOnSave}
-                onActive={setSavedWorkflowActive}
+                onActive={onWorkflowActive}
               />
             )}
           </div>
@@ -470,14 +482,8 @@ export function AuthoringDraftCard({
       )}
       {workflow ? (
         <div className="space-y-3">
-          <p className="text-sm">{workflowChange(workflow)}</p>
-          <p className="text-sm">
-            {triggersLine(workflow.input.definition.triggers, tableNames)}. {workflow.input.definition.steps.length}{' '}
-            {workflow.input.definition.steps.length === 1 ? 'step' : 'steps'}.{' '}
-            {draft.workflowNextRunAt
-              ? `Next run ${formatRun(draft.workflowNextRunAt, workflow.input.definition.triggers)}.`
-              : 'Review the trigger, actors, and steps in Canvas.'}
-          </p>
+          {draft.status === 'pending' && <p className="text-sm text-muted-foreground">{workflowChange(workflow)}</p>}
+          <WorkflowDraftPreview workspaceId={workspace.id} definition={workflow.input.definition} />
           {workflow.input.definition.triggers.some(trigger => trigger.kind === 'github') && (
             <p className="text-sm">
               <GitHubInstallNote workspaceId={workspace.id} />
@@ -488,7 +494,8 @@ export function AuthoringDraftCard({
               <WorkflowCanvasButton
                 workspaceId={workspace.id}
                 reference={{ kind: 'draft', chatId, draftId: id }}
-                name="View workflow draft"
+                name="View diagram"
+                compact
               />
             )}
             {draft.outcome?.kind === 'workflow' && (
@@ -499,8 +506,8 @@ export function AuthoringDraftCard({
                   workflowId: draft.outcome.workflowId,
                   revision: draft.outcome.revision,
                 }}
-                name="View saved workflow"
-                status={activeWorkflow ? 'Active' : 'Saved · Not active'}
+                name="View diagram"
+                compact
               />
             )}
           </div>
@@ -538,40 +545,48 @@ export function AuthoringDraftCard({
           brands={brands}
         />
       )}
-      <p className="text-xs text-muted-foreground">
-        {workflow
-          ? workflowNote(workflow)
-          : proposal.kind === 'agent'
-            ? updating
-              ? 'Saving does not activate these changes. An agent manager must activate the exact saved revision separately.'
-              : 'Saving does not activate this agent. An agent manager must turn on execution and activate its exact saved revision separately.'
-            : 'Saving creates a workspace skill draft. A skill manager must review its exact revision separately. Skills grant no authority.'}
-      </p>
-      <Disclosure title="Technical details">
-        <dl aria-label="Technical details" className="grid gap-2 text-xs text-muted-foreground">
-          {draft.agentChange?.kind === 'update' && (
-            <TechnicalDetail term="Agent ID">{draft.agentChange.agentId}</TechnicalDetail>
-          )}
-          {proposal.kind === 'agent' && (
-            <>
-              <TechnicalDetail term="Team ID">{proposal.input.owningTeamId ?? 'None (personal agent)'}</TechnicalDetail>
-              {proposal.input.definition.modelFamilyId && (
-                <TechnicalDetail term="Model family ID">{proposal.input.definition.modelFamilyId}</TechnicalDetail>
-              )}
-              <TechnicalDetail term="Tool IDs">{proposal.input.definition.tools.join(', ') || 'None'}</TechnicalDetail>
-              <TechnicalDetail term="Skill revisions">
-                {proposal.input.definition.skills
-                  ?.map(skill => `${skill.id} · Revision ${skill.revision}`)
-                  .join(', ') || 'None'}
-              </TechnicalDetail>
-            </>
-          )}
-          {workflow && <TechnicalDetail term="Workflow ID">{workflow.targetId}</TechnicalDetail>}
-          <TechnicalDetail term="Draft ID">{id}</TechnicalDetail>
-          <TechnicalDetail term="SHA-256">{draft.digest}</TechnicalDetail>
-        </dl>
-      </Disclosure>
-      {checkStatus}
+      {(!workflow || (draft.status === 'pending' && workflowNote(workflow))) && (
+        <p className="text-xs text-muted-foreground">
+          {workflow
+            ? workflowNote(workflow)
+            : proposal.kind === 'agent'
+              ? updating
+                ? 'Saving does not activate these changes. An agent manager must activate the exact saved revision separately.'
+                : 'Saving does not activate this agent. An agent manager must turn on execution and activate its exact saved revision separately.'
+              : 'Saving creates a workspace skill draft. A skill manager must review its exact revision separately. Skills grant no authority.'}
+        </p>
+      )}
+      {(!workflow || draft.status === 'pending') && (
+        <Disclosure title="Technical details">
+          <dl aria-label="Technical details" className="grid gap-2 text-xs text-muted-foreground">
+            {draft.agentChange?.kind === 'update' && (
+              <TechnicalDetail term="Agent ID">{draft.agentChange.agentId}</TechnicalDetail>
+            )}
+            {proposal.kind === 'agent' && (
+              <>
+                <TechnicalDetail term="Team ID">
+                  {proposal.input.owningTeamId ?? 'None (personal agent)'}
+                </TechnicalDetail>
+                {proposal.input.definition.modelFamilyId && (
+                  <TechnicalDetail term="Model family ID">{proposal.input.definition.modelFamilyId}</TechnicalDetail>
+                )}
+                <TechnicalDetail term="Tool IDs">
+                  {proposal.input.definition.tools.join(', ') || 'None'}
+                </TechnicalDetail>
+                <TechnicalDetail term="Skill revisions">
+                  {proposal.input.definition.skills
+                    ?.map(skill => `${skill.id} · Revision ${skill.revision}`)
+                    .join(', ') || 'None'}
+                </TechnicalDetail>
+              </>
+            )}
+            {workflow && <TechnicalDetail term="Workflow ID">{workflow.targetId}</TechnicalDetail>}
+            <TechnicalDetail term="Draft ID">{id}</TechnicalDetail>
+            <TechnicalDetail term="SHA-256">{draft.digest}</TechnicalDetail>
+          </dl>
+        </Disclosure>
+      )}
+      {(!workflow || draft.status === 'pending' || draft.status === 'preparing') && checkStatus}
     </ReviewCard>
   );
 }
@@ -649,28 +664,31 @@ function AgentDraftRows({
 const hasTrigger = (proposal: WorkflowProposal, kind: string) =>
   proposal.input.definition.triggers.some(trigger => trigger.kind === kind);
 
-function workflowResult(outcome: Extract<DraftOutcome, { kind: 'workflow' }>, proposal: WorkflowProposal) {
+function activeLine(nextRunAt: string | null, proposal: WorkflowProposal) {
+  return nextRunAt
+    ? `Active. Next run ${formatRun(nextRunAt, proposal.input.definition.triggers)}.`
+    : hasTrigger(proposal, 'record')
+      ? 'Active. Upcoming runs appear on the Workflows page within a minute.'
+      : hasTrigger(proposal, 'row')
+        ? 'Active. Runs start within about a minute of a matching row change.'
+        : hasTrigger(proposal, 'github')
+          ? 'Active. Runs start when GitHub sends a matching event.'
+          : 'Active.';
+}
+
+/** The one status line for a saved workflow revision that is not active. */
+function workflowResult(outcome: Extract<DraftOutcome, { kind: 'workflow' }>) {
+  const previous = outcome.enabled ? ' The previous version keeps running until then.' : '';
   switch (outcome.activation) {
     case 'not-requested':
-      return outcome.enabled
-        ? 'Workflow saved. The previously active revision keeps running until this one is activated.'
-        : 'Workflow saved. It is not active. Activate it from chat or the Workflows page.';
     case 'activated':
-      return outcome.nextRunAt
-        ? `Workflow active. Next run ${formatRun(outcome.nextRunAt, proposal.input.definition.triggers)}.`
-        : hasTrigger(proposal, 'record')
-          ? 'Workflow active. Upcoming record dates appear on the Workflows page within a minute.'
-          : hasTrigger(proposal, 'row')
-            ? 'Workflow active. Runs start within about a minute of each matching row change.'
-            : hasTrigger(proposal, 'github')
-              ? 'Workflow active. Runs start when GitHub sends a matching event.'
-              : 'Workflow active.';
+      return `Saved. Activate it to start running.${previous}`;
     case 'disabled':
-      return 'Workflow disabled. It will not start new runs.';
+      return 'Turned off. It won’t start new runs.';
     case 'sponsor-required':
-      return `Workflow saved, but not activated. You need access to run this workflow first.${outcome.enabled ? ' Runs still use the active revision.' : ''}`;
+      return `Saved. You need access to run this workflow first.${previous}`;
     case 'audience-required':
-      return `Workflow saved, but not activated. Someone who sees its run history cannot read the table. Change who sees run history on the Workflows page, then activate it.${outcome.enabled ? ' Runs still use the active revision.' : ''}`;
+      return `Saved. Some people who see its run history can’t open the table it uses. Change who sees run history, then activate it.${previous}`;
   }
 }
 
@@ -679,9 +697,8 @@ function workflowNote(proposal: WorkflowProposal) {
   if (proposal.kind === 'workflow-activation' && !proposal.input.enabled)
     return 'Disabling stops new runs and blocks runs in progress.';
   const activates = proposal.kind === 'workflow-activation' || proposal.input.activate;
-  return activates
-    ? 'Scheduled, record-date and webhook runs start without you and run with your access. Webhook keys are created only on the Workflows page.'
-    : 'Saving creates a revision you manage. It does not change which revision is active.';
+  if (!activates) return null;
+  return `Automatic runs start without you and use your access.${hasTrigger(proposal, 'webhook') ? ' Create webhook keys on the Workflows page.' : ''}`;
 }
 
 const agentFieldLabels: Record<AgentDefinitionField, string> = {

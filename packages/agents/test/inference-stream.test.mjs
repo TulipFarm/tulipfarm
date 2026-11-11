@@ -551,7 +551,7 @@ test('reasoning tags a chat-completions model leaks never reach streamed text, s
     () =>
       streamed(
         lines([
-          ...content(['Send a new `tables.propose` call with the updated plan.<', '/thi', 'nk>']),
+          ...content(['Send a new proposal with the updated plan.<', '/thi', 'nk>']),
           {
             ...base,
             choices: [
@@ -592,7 +592,7 @@ test('reasoning tags a chat-completions model leaks never reach streamed text, s
     { answerText },
   );
   assert.deepEqual(result, { text: 'Done now.' });
-  assert.deepEqual(narrations, ['Send a new `tables.propose` call with the updated plan.']);
+  assert.deepEqual(narrations, ['Send a new proposal with the updated plan.']);
   assert.equal(
     updates.some(update => /think|Hidden|<$/.test(update.text)),
     false,
