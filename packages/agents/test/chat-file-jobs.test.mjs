@@ -31,7 +31,7 @@ for (const model of models)
   for (const sse of [false, true]) {
     const title = `regression: ${model} ${sse ? 'SSE' : 'JSON'}`;
     for (const text of ['Hi!', 'JSON.', 'YAML.', 'archive.zip.'])
-      test(`${title} ordinary replies keep one model call and native previews: ${text}`, async t => {
+      test(`${title} ordinary replies keep one model call and native streaming: ${text}`, async t => {
         let requests = 0;
         const settlements = [];
         const previews = [];
