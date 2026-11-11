@@ -1109,6 +1109,13 @@ export async function inferDecision(
             ),
           );
         }
+        if (
+          parsedInput.data.task &&
+          result.kind === 'success' &&
+          result.decision.kind === 'answer' &&
+          /\b(?:\w+ing|will|shall|next|let me|about to)\b|(?::|\.{3}|…)\s*$/i.test(result.decision.text)
+        )
+          return checkTaskCompletion(config.data, parsedInput.data, result, callerSignal);
         return result;
       },
     );
@@ -1905,6 +1912,8 @@ const completionCheckSchema = z.strictObject({
     reason: z.string().min(1).max(240),
     rowWriteRequested: z.boolean().catch(false).optional(),
     planSavedClaim: z.boolean().catch(false).optional(),
+    hasAnswerContent: z.boolean().catch(false).optional(),
+    hasToolBackedResult: z.boolean().catch(false).optional(),
     rowReviewRequested: z.boolean().catch(false).optional(),
     workspaceDirectory: z
       .enum(['not-applicable', 'lookup-required', 'grounded', 'matches-grounded', 'unsupported'])
@@ -1938,6 +1947,72 @@ For a question, use waiting only when required user input stops the requested wo
 Use continue when the reply merely promises, narrates, or plans work that remains possible, or claims outcomes unsupported by receipts. A reply that reports a new review card, proposal or proposal version, approval, denial, or created, imported or changed data needs a matching successful receipt among this reply's own tool results; it may restate an earlier outcome only as earlier and only when an earlier receipt in the conversation shows it. Without that receipt use continue, even when the reply asks the person to review or approve. waitingCards, when present, is the server's count of the person's review or approval cards from earlier in this chat that are still undecided: a reply may say such a card is ready or still waiting, and ask the person to approve or dismiss it, without a receipt in this reply, but it may not say this reply made a new one. While one waits, a reply that says the person must approve or dismiss it before more changes to that table can be made states what stops the work. Saying an incomplete action will not be activated does not itself establish a blocker. Asking whether to go ahead with work the person already asked for is not a necessary question, so use continue: a review or approval card is itself the person's confirmation step, and a request to see the review first means create that card.
 Judge the content and the work, not the presentation: never use continue only because the reply lacks a layout, render tool, buttons, form, chart or table, or because a presentation tool failed; the reply is laid out separately.
 Do not demand tools for ordinary answers, questions, or refusals. Do not mistake a clarification answer for action approval. Explain the evidence gap in one short sentence, at most 240 characters.`;
+
+async function checkTaskCompletion(
+  route: z.output<typeof inferenceRouteSchema>,
+  input: Parameters<AgentModel>[0],
+  result: Extract<InferenceResult, { kind: 'success' }>,
+  signal?: AbortSignal,
+): Promise<InferenceResult> {
+  const accounting: { usage: InferenceUsage } = { usage: { kind: 'unknown' } };
+  let incomplete: boolean | undefined;
+  await withChatModelRequest('completion', () =>
+    observeInference({ provider: route.provider, model: route.model, operation: 'chat' }, async report => {
+      try {
+        const wire = chatRequest(
+          route,
+          [{ role: 'user', text: JSON.stringify({ task: input.prompt, candidate: result.decision.text }) }],
+          completionCheckPrompt +
+            '\nFor this private task, set hasAnswerContent to true only if the candidate gives a substantive answer, a necessary question, or a clear blocker with recovery. Set hasToolBackedResult to true only if the candidate reports an outcome supported by completed tool receipts. Earlier tool activity alone does not make a progress message an answer. Otherwise both flags are false.',
+          z.toJSONSchema(completionCheckSchema),
+        );
+        const response = await providerFetch(wire.url, {
+          method: 'POST',
+          headers: wire.headers,
+          body: serializeChatRequest(wire.body),
+          redirect: 'manual',
+          signal: signal
+            ? AbortSignal.any([signal, AbortSignal.timeout(route.timeoutMs)])
+            : AbortSignal.timeout(route.timeoutMs),
+        });
+        const body: unknown = await response.json();
+        accounting.usage = usage(route, body);
+        reportUsage(report, accounting.usage, body);
+        if (!response.ok) return;
+        const selected = decision(route, body);
+        const parsed =
+          selected.kind === 'decision' ? completionCheckSchema.safeParse(unwrapDecision(selected.value)) : null;
+        if (!parsed?.success) return;
+        const checked = parsed.data.decision;
+        incomplete = checked.status === 'continue' && !checked.hasAnswerContent && !checked.hasToolBackedResult;
+      } catch {
+        // A failed check must not replace the primary result or bypass the runtime's existing fallback.
+      }
+    }),
+  );
+  const primary = result.usage;
+  const checkedUsage = accounting.usage;
+  const combined: InferenceUsage =
+    primary.kind === 'known' && checkedUsage.kind === 'known'
+      ? {
+          kind: 'known',
+          input: primary.input + checkedUsage.input,
+          output: primary.output + checkedUsage.output,
+          cacheRead: primary.cacheRead + checkedUsage.cacheRead,
+          cacheWrite: primary.cacheWrite + checkedUsage.cacheWrite,
+          cacheWrite5m: primary.cacheWrite5m + checkedUsage.cacheWrite5m,
+          cacheWrite1h: primary.cacheWrite1h + checkedUsage.cacheWrite1h,
+        }
+      : primary;
+  return {
+    ...result,
+    usage: combined,
+    decision:
+      result.decision.kind === 'answer' && incomplete !== undefined
+        ? { ...result.decision, incomplete }
+        : result.decision,
+  };
+}
 
 const outcomeVerb = String.raw`(?:denied|refused|rejected|approved|created|added|imported|saved|updated|deleted|archived|restored|sent|posted|scheduled|proposed|applied)`;
 const writeVerb = String.raw`(?:created|added|imported|saved|updated|deleted|archived|restored)`;

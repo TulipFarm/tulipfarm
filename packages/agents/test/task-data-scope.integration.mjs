@@ -429,6 +429,30 @@ test('plan-only replies must answer or pause manual and workflow tasks after rea
   }
 });
 
+test('structured progress-only verdicts use the bounded follow-through for manual and workflow tasks', async t => {
+  const f = await environment(t);
+  await seedExecution(f.db, f.w, f.agent.agentId, [f.agent.teamId], f.scope);
+  for (const start of [f.tasks.start, f.tasks.startForWorkflow]) {
+    let attempts = 0;
+    const engine = createTaskRuntime(
+      f.runtime,
+      syntheticContinuity(async input => {
+        attempts++;
+        if (attempts === 2) assert.match(JSON.parse(input.prompt).followThrough, /tool calls/);
+        return { kind: 'answer', text: 'Finding table Customers', incomplete: true };
+      }),
+    );
+    const task = await start(f.w.id, f.user, f.value());
+    for (let step = 0; step < 5 && (await f.tasks.read(f.w.id, f.user, task.id)).status === 'pending'; step++)
+      await engine.process(f.w.id, task.id);
+    const stopped = await f.tasks.read(f.w.id, f.user, task.id);
+    assert.equal(stopped.status, 'paused');
+    assert.equal(stopped.pauseReason, 'decision');
+    assert.equal(attempts, 2);
+    assert.match((await f.tasks.history(f.w.id, f.user, task.id)).messages.at(-1).text, /before continuing/);
+  }
+});
+
 test('invocation scope and current limits narrow the run form without granting extra access', async t => {
   const f = await environment(t);
   await seedExecution(f.db, f.w, f.agent.agentId, [f.agent.teamId], f.scope);

@@ -543,8 +543,7 @@ function saveFailure(
 function switchFailure(error: unknown) {
   if (!(error instanceof WorkflowRequestError) || error.status >= 500)
     return 'The switch may not have changed. Refresh workflows to check.';
-  if (error.code === 'sponsor-required')
-    return 'This trigger runs without a person. Turn the workflow on with an accepted sponsor first.';
+  if (error.code === 'sponsor-required') return 'This trigger runs on its own. Turn the workflow on first.';
   if (error.code === 'stale-generation') return 'This workflow changed. Refresh workflows and try again.';
   return 'The trigger couldn’t be switched. Refresh workflows and try again.';
 }

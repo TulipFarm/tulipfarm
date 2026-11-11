@@ -283,7 +283,6 @@ export function AgentBuilder({
       publicationId: crypto.randomUUID(),
       decision,
       consent: {
-        sponsor: draft.sponsorConsent,
         replaceChannels: draft.channels.filter(channel => channel.replaceConsent).map(channel => channel.channel),
       },
     });
@@ -504,12 +503,8 @@ export function AgentBuilder({
           workspaceId={workspaceId}
           value={draft.triggers}
           prompt={draft.prompt}
-          sponsor={draft.sponsorConsent}
           onChange={triggers => update({ triggers })}
-          onSponsor={sponsorConsent => update({ sponsorConsent })}
           disabled={locked}
-          showErrors={showErrors}
-          activating={activating}
         />
       </>
     ),

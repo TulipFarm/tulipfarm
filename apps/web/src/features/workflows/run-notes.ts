@@ -40,7 +40,7 @@ export function runNote(run: Pick<z.infer<typeof runSchema>, 'source' | 'status'
   if (run.source === 'row') return rowNote(run);
   if (run.source === 'github')
     return run.status === 'skipped' && run.error === 'github-repository-not-connected'
-      ? "Skipped because this private repository isn't connected in the sponsor's GitHub Knowledge. Connect it there to run on its events."
+      ? "Skipped because this private repository isn't connected in GitHub Knowledge for the person who turned this workflow on. Connect it there to run on its events."
       : null;
   const input = run.source === 'schedule' || run.source === 'record' ? scheduledInput.safeParse(run.input) : null;
   if (!input?.success) return null;

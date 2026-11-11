@@ -223,34 +223,24 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         expectedRevision: null,
         definition: { ...definition, triggers: [{ id: 'interval', kind: 'interval', minutes: 1 }] },
       });
-      await assert.rejects(activate(service, w.id, creator.userId, scheduled, scheduledRevision, true), {
-        message: 'sponsorship-required',
-      });
       await service.share(w.id, creator.userId, scheduled, {
         principal: { kind: 'person', id: requester.membershipId },
-        permissions: ['invoke'],
+        permissions: ['manage', 'invoke'],
       });
       await service.share(w.id, creator.userId, scheduled, {
         principal: { kind: 'person', id: manager.membershipId },
         permissions: ['manage'],
       });
-      await service.sponsorship(w.id, creator.userId, scheduled, {
-        sponsorMembershipId: requester.membershipId,
-        historyAudience: [requester.membershipId],
-      });
-      await assert.rejects(activate(service, w.id, creator.userId, scheduled, scheduledRevision, true), {
-        message: 'sponsorship-required',
-      });
       await assert.rejects(
-        service.acceptSponsorship(w.id, creator.userId, scheduled, { expectedGeneration: 2 }),
-        AccessDenied,
+        service.sponsorship(w.id, creator.userId, scheduled, {
+          sponsorMembershipId: requester.membershipId,
+          historyAudience: [requester.membershipId],
+        }),
+        { message: 'sponsor-must-be-self' },
+        'nobody can make another member run the workflow',
       );
-      await assert.rejects(
-        service.acceptSponsorship(w.id, requester.userId, scheduled, { expectedGeneration: 1 }),
-        /stale-generation/,
-      );
-      await service.acceptSponsorship(w.id, requester.userId, scheduled, { expectedGeneration: 2 });
-      await activate(service, w.id, creator.userId, scheduled, scheduledRevision, true);
+      const turnedOn = await activate(service, w.id, requester.userId, scheduled, scheduledRevision, true);
+      assert.equal(turnedOn.sponsorMembershipId, requester.membershipId, 'whoever turns it on runs it');
       await db.platform.query(
         `UPDATE ${table('tf_workflow_triggers')} SET next_run_at=clock_timestamp()-interval '1 minute' WHERE workflow_id=$1`,
         [scheduled],

@@ -134,14 +134,14 @@ export const disabledReasons: Record<
   { status: string; explanation: (workflow: Workflow) => string; recovery: string }
 > = {
   'sponsor-access-lost': {
-    status: 'sponsor lost access',
-    explanation: workflow => `its sponsor lost access needed to run it${sponsorNeeds(workflow)}`,
-    recovery: 'Restore that access or choose a sponsor who has it, then activate the saved revision.',
+    status: 'access lost',
+    explanation: workflow => `the person who turned it on lost access needed to run it${sponsorNeeds(workflow)}`,
+    recovery: 'Restore that access, or have someone with it activate the saved revision.',
   },
   'record-field-unavailable': {
     status: 'record field unavailable',
     explanation: () => 'the table, watched fields, or filter its trigger uses is no longer available',
-    recovery: 'Edit the trigger in chat. Once its sponsor accepts the new revision, activate it.',
+    recovery: 'Edit the trigger in chat, then activate the new revision.',
   },
   'provider-backlog': {
     status: 'connected app backlog',

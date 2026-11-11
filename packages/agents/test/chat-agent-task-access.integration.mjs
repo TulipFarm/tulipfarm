@@ -108,7 +108,7 @@ async function environment(t) {
       commandId: randomUUID(),
       digest: draft.digest,
       decision: 'activate',
-      consent: { sponsor: true, replaceChannels: [] },
+      consent: { replaceChannels: [] },
     });
     assert.equal((await writer.prepare(w.id, outcome.receipt.commandId)).status, 'accepted');
     const active = await setup.advance(w.id, admin.userId, outcome.setupReceipt.commandId);
@@ -149,7 +149,7 @@ async function environment(t) {
       version: draft.version,
       digest: draft.digest,
       decision: 'activate',
-      consent: { sponsor: false, replaceChannels: [] },
+      consent: { replaceChannels: [] },
     });
     const definition = await setup.definitionCommand(w.id, admin.userId, command.commandId);
     assert.equal((await writer.prepare(w.id, definition.commandId)).status, 'accepted');

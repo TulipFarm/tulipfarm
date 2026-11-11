@@ -2,7 +2,6 @@ import { Link } from '@tanstack/react-router';
 import { Trash2, Workflow } from 'lucide-react';
 import { unattendedTrigger, type AgentSetup } from '@tulipfarm/agents/setup-contracts';
 import { Button } from '@tulipfarm/sprout/button';
-import { CheckboxField } from '@tulipfarm/sprout/field';
 import { FormSection } from '@tulipfarm/sprout/form';
 import { TriggerIcon } from '@/features/workflows/workflow-summary';
 import { useSetupTriggerNames } from './setup-review';
@@ -14,26 +13,18 @@ export function BuilderTriggers({
   slug,
   value,
   prompt,
-  sponsor,
   onChange,
-  onSponsor,
   disabled,
-  showErrors,
-  activating,
 }: {
   workspaceId: string;
   slug: string;
   value: BuilderTrigger[];
   prompt: string | undefined;
-  sponsor: boolean;
   onChange: (value: BuilderTrigger[]) => void;
-  onSponsor: (value: boolean) => void;
   disabled: boolean;
-  showErrors: boolean;
-  activating: boolean;
 }) {
   const name = useSetupTriggerNames(workspaceId, value);
-  const unattended = value.filter(item => unattendedTrigger(item.trigger));
+  const unattended = value.some(item => unattendedTrigger(item.trigger));
   return (
     <FormSection
       title="Triggers"
@@ -77,16 +68,10 @@ export function BuilderTriggers({
           <p className="whitespace-pre-wrap wrap-anywhere">{prompt}</p>
         </div>
       )}
-      {unattended.length > 0 && (
-        <CheckboxField
-          id="builder-trigger-sponsor"
-          label={`I sponsor ${unattended.length === 1 ? name(unattended[0]!) : `these ${unattended.length} triggers`}`}
-          helper="Runs use your current permissions and create private tasks."
-          disabled={disabled}
-          checked={sponsor}
-          error={showErrors && activating && !sponsor ? 'Sponsor the triggers to activate them.' : undefined}
-          onCheckedChange={onSponsor}
-        />
+      {unattended && (
+        <p className="text-sm text-muted-foreground">
+          Runs on its own with your current access and creates private tasks.
+        </p>
       )}
     </FormSection>
   );

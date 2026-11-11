@@ -1,5 +1,12 @@
 import { z } from 'zod';
-import { canAccessAsset, canAssignTeam, canUseAgentEnrollment, type HumanActor } from '@tulipfarm/access';
+import {
+  canAccessAsset,
+  canAssignTeam,
+  canUseAgentEnrollment,
+  currentMember,
+  type HumanActor,
+} from '@tulipfarm/access';
+import { tablePermissionSchema } from '@tulipfarm/access/contracts';
 import { scopeSchema } from './contracts.ts';
 import { relation, type AgentTransaction } from './store.ts';
 import { AgentError } from './saved-contracts.ts';
@@ -32,13 +39,25 @@ export async function tableAccessTeams(tx: AgentTransaction, actor: HumanActor) 
         )
       ).rows,
     );
+  const adminTables =
+    teams.some(team => team.name === '_admin') && (await currentMember(tx, actor)).role === 'admin'
+      ? (
+          await tx.client.query(`SELECT id FROM ${relation(tx, 'tf_table_catalog')} WHERE archived_at IS NULL`)
+        ).rows.map(row => ({
+          assetId: z.uuid().parse(row.id),
+          permissions: tablePermissionSchema.options.filter(permission => permission !== 'table.create'),
+        }))
+      : [];
   return Promise.all(
     teams.map(async team => ({
       ...team,
       canAssign: await canAssignTeam(tx, actor, team.id),
-      tableScope: grants
-        .filter(grant => grant.teamId === team.id)
-        .map(({ assetId, permissions }) => ({ assetId, permissions })),
+      tableScope:
+        team.name === '_admin' && adminTables.length
+          ? adminTables
+          : grants
+              .filter(grant => grant.teamId === team.id)
+              .map(({ assetId, permissions }) => ({ assetId, permissions })),
     })),
   );
 }
@@ -64,6 +83,13 @@ export async function requireTableEnrollment(
     )
   ).rows.map(row => scopeSchema.parse(row.scope));
   const teams = await tableAccessTeams(tx, actor);
+  const adminEnrollment = (
+    await tx.client.query(`SELECT 1 FROM ${relation(tx, 'tf_teams')} WHERE id=ANY($1::uuid[]) AND name='_admin'`, [
+      enrollment,
+    ])
+  ).rowCount;
+  if (adminEnrollment && (await currentMember(tx, actor)).role !== 'admin')
+    throw new AgentError('agent-team-assignment-required', 403);
   if (enrollment.some(id => !previousTeams.includes(id) && !teams.some(team => team.id === id && team.canAssign)))
     throw new AgentError('agent-team-assignment-required', 403);
   for (const entry of scope)
@@ -74,13 +100,16 @@ export async function requireTableEnrollment(
       if (
         !(await canAccessAsset(tx, actor, entry.assetId, permission)) ||
         !(
-          await tx.client.query(
-            `SELECT 1 FROM ${relation(tx, 'tf_grants')} g JOIN ${relation(tx, 'tf_table_catalog')} c ON c.id=$2
+          adminEnrollment ||
+          (
+            await tx.client.query(
+              `SELECT 1 FROM ${relation(tx, 'tf_grants')} g JOIN ${relation(tx, 'tf_table_catalog')} c ON c.id=$2
            WHERE g.team_id=ANY($1::uuid[]) AND (g.asset_id=c.id OR g.asset_id=c.owning_team_id)
            AND g.permission=$3 AND c.archived_at IS NULL LIMIT 1`,
-            [enrollment, entry.assetId, permission],
-          )
-        ).rowCount
+              [enrollment, entry.assetId, permission],
+            )
+          ).rowCount
+        )
       )
         throw new AgentError('agent-table-access-unavailable', 403);
     }
@@ -92,6 +121,7 @@ export async function effectiveAgentScope(
   agentId: string,
   activation: Scope,
   invocation: Scope = activation,
+  activationId?: string,
 ): Promise<Scope> {
   if (!invocation.length) return [];
   const limits = scopeSchema.parse(
@@ -105,7 +135,7 @@ export async function effectiveAgentScope(
       if (
         activation.some(bound => bound.assetId === entry.assetId && bound.permissions.includes(permission)) &&
         limits.some(bound => bound.assetId === entry.assetId && bound.permissions.includes(permission)) &&
-        (await canUseAgentEnrollment(tx, actor, agentId, entry.assetId, permission))
+        (await canUseAgentEnrollment(tx, actor, agentId, entry.assetId, permission, activationId))
       ) {
         if (
           permission.startsWith('table.') &&

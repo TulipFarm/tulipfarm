@@ -211,8 +211,6 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       await openWorkflow(page, scheduled);
       await showWorkflowSettings(page);
       const scheduledRuns = page.getByRole('region', { name: 'Scheduled runs', exact: true });
-      await scheduledRuns.getByLabel('Runs as', { exact: true }).click();
-      await page.getByRole('option', { name: 'You', exact: true }).click();
       await scheduledRuns.getByRole('checkbox', { name: 'You', exact: true }).check();
       await page.getByRole('button', { name: 'Save scheduled runs', exact: true }).click();
       await page.getByText('Saved. Activate the saved revision to start scheduled runs.', { exact: true }).waitFor();
