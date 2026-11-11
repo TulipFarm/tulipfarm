@@ -48,6 +48,7 @@ import { reviewCardReference, type ReviewCardReference, type ReviewCardState } f
 import { withoutTrailingControlMarker } from '@tulipfarm/conversations/reply-text';
 import { createChatToolGuard } from './chat-tool-guard.ts';
 import { apiRefusedReply } from './api-call-guard.ts';
+import { isOwnServiceUrl, ownServiceCorrection, ownServiceDomains, ownServiceRefusal } from './own-service.ts';
 import {
   agentModelInputSchema,
   modelDecisionSchema,
@@ -55,7 +56,7 @@ import {
   parseNativeAgentDecision,
   type AgentModel,
 } from './model.ts';
-import { readOnlyCall, readOnlyTools, type FrameworkCall } from './tools.ts';
+import { discoverToolNames, readOnlyCall, readOnlyTools, type FrameworkCall } from './tools.ts';
 import { toolNameSchema } from './tool-capabilities.ts';
 import { builtinSkillTools } from './skills.ts';
 import { providerFetch } from './provider-fetch.ts';
@@ -5040,6 +5041,28 @@ export async function inferWithTools(
       providerId: call.providerId,
     });
     const executedResult = (native: NativeCall, call: FrameworkCall, value: unknown): ToolResult => {
+      if (
+        call.tool === 'api.request' &&
+        isOwnServiceUrl(call.url, ownServiceDomains()) &&
+        z
+          .object({
+            status: z.literal(ownServiceRefusal.status),
+            code: z.literal(ownServiceRefusal.code),
+            message: z.literal(ownServiceRefusal.message),
+          })
+          .safeParse(value).success
+      ) {
+        const instruction = ownServiceCorrection(
+          call.url,
+          discoverToolNames({
+            kind: 'chat',
+            mcp,
+            earlierMessages: tools?.earlierMessages ?? false,
+            chatFiles: tools?.chatFiles ?? false,
+          }),
+        );
+        if (instruction && value && typeof value === 'object') value = { ...value, instruction };
+      }
       if (call.tool === 'members.find') {
         if (call.query === undefined) directoryAttempted = true;
         const found = workspaceDirectorySchema.safeParse(value);
