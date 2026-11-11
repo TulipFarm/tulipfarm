@@ -256,6 +256,8 @@ export const tableQueries = {
     key: tableKeys.proposalView(identity),
     load: api.read,
     pollWhile: proposalProgressing,
+    maxChecks: 150,
+    maxDuration: 5 * 60_000,
   }),
   outcome: (api: ProposalApi, identity: ProposalIdentity) => ({
     key: tableKeys.proposalOutcome(identity),

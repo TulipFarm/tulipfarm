@@ -82,11 +82,32 @@ test('a write that times out waiting for the lock tries again without losing its
   const locks = await lockFixture();
   try {
     let release = await locks.share();
-    setTimeout(() => void release(), 150);
     const kept = await inTransaction(locks.waiter, async client => {
       await client.query(`SET LOCAL lock_timeout = '100ms'`);
       await client.query(`SELECT set_config('tf.earlier_work', 'kept', true)`);
-      await lockAuthorization({ client, schema: locks.schema }, 'write');
+      await lockAuthorization(
+        {
+          client: {
+            query: async (...args) => {
+              const result = await client.query(...args);
+              if (args[0] === 'ROLLBACK TO SAVEPOINT tf_authorization_lock') await release();
+              return result;
+            },
+          },
+          schema: locks.schema,
+        },
+        'write',
+      );
+      assert.equal(
+        (
+          await client.query(
+            `INSERT INTO "${locks.schema}".tf_teams(id,name) VALUES(gen_random_uuid(),'Lock retry probe')
+           RETURNING xmin=pg_current_xact_id()::xid AS top_level`,
+          )
+        ).rows[0].top_level,
+        true,
+        'Work after a lock retry must not remain inside a leaked savepoint',
+      );
       return (await client.query(`SELECT current_setting('tf.earlier_work') AS value`)).rows[0].value;
     });
     assert.equal(kept, 'kept');

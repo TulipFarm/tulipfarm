@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto';
+import { setTimeout as delay } from 'node:timers/promises';
 import { escapeIdentifier } from 'pg';
 import { z } from 'zod';
 import {
   AccessDenied,
+  SkillUnavailable,
   currentMember,
   lockAuthorization,
   requireTablePermission,
@@ -111,7 +113,7 @@ async function load(tx: TableTransaction, proposalId: string, writeCreationAcces
         [proposalId],
       )
     ).rowCount;
-  await lockAuthorization(tx, createsTable ? 'write' : 'read');
+  await lockAuthorization(tx, createsTable ? 'write' : 'read', { retry: false });
   await tx.client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,761031))', [
     `${tx.schema}:${z.uuid().parse(proposalId)}`,
   ]);
@@ -508,6 +510,7 @@ async function switchGeneration(
   job: Execution,
   target: store.Generation,
   source: store.Generation | null,
+  diagnostics: Record<string, number>,
 ) {
   await store.requireUniqueGeneration(tx, target);
   await store.activateReverseFields(tx, target);
@@ -520,17 +523,19 @@ async function switchGeneration(
       `REVOKE ALL ON ${table(tx, source.physical_table)} FROM ${escapeIdentifier(`${tx.schema}_runtime`)}`,
     );
   }
-  await tx.client.query(
-    `UPDATE ${table(tx, 'tf_table_generations')} SET state='active',activated_at=clock_timestamp() WHERE id=$1`,
+  const activated = await tx.client.query(
+    `UPDATE ${table(tx, 'tf_table_generations')} SET state='active',activated_at=clock_timestamp() WHERE id=$1 RETURNING xmin::text`,
     [target.id],
   );
   await tx.client.query(
     `GRANT SELECT,INSERT,UPDATE,DELETE ON ${table(tx, target.physical_table)} TO ${escapeIdentifier(`${tx.schema}_runtime`)}`,
   );
-  await tx.client.query(
-    `UPDATE ${table(tx, 'tf_table_catalog')} SET physical_table=$2,display_name=$3,target_revision=$4,applied_revision=$4,applied_definition=$5 WHERE id=$1`,
+  const catalog = await tx.client.query(
+    `UPDATE ${table(tx, 'tf_table_catalog')} SET physical_table=$2,display_name=$3,target_revision=$4,applied_revision=$4,applied_definition=$5 WHERE id=$1 RETURNING xmin::text`,
     [job.table_id, target.physical_table, target.definition.label, target.revision, target.definition],
   );
+  diagnostics['table.generation_xmin'] = Number(activated.rows[0]?.xmin);
+  diagnostics['table.catalog_xmin'] = Number(catalog.rows[0]?.xmin);
   if (!source && tx.commonVersion >= tableCreationAccessVersion)
     await tx.client.query(`SELECT ${table(tx, 'tf_table_creation_access')}($1)`, [job.id]);
   await recordTableRecommendationChange(tx, job.table_id, 'definition', job.source_generation !== null);
@@ -557,8 +562,10 @@ export function createTableExecution(
   const attempt = async (
     workspaceId: string,
     proposalId: string,
+    activationAttempt = 1,
   ): Promise<'more' | 'wait' | 'publish' | 'completed' | 'blocked'> => {
-    let recovery: { xid: string; job: Execution } | undefined;
+    let recovery: { xid: string; job: Execution | null } | undefined;
+    const diagnostics: Record<string, number> = { attempt: activationAttempt };
     try {
       return await withMaintenanceTransaction({
         workspaceId,
@@ -579,6 +586,7 @@ export function createTableExecution(
             ).rows[0],
           );
           tx.commonVersion = clock.common_version;
+          diagnostics['table.current_xid'] = Number(clock.xid);
           const deadline = performance.now() + 2000 - clock.elapsed;
           let slowestWorkMs = 25;
           const hasBudget = () => performance.now() + 300 + Math.max(100, slowestWorkMs * 2) < deadline;
@@ -603,7 +611,7 @@ export function createTableExecution(
                 )
               ).rows[0],
             );
-          if (previous) recovery = { xid: clock.xid, job: previous };
+          recovery = { xid: clock.xid, job: previous ?? null };
           await admit(tx, manifest, plan, options);
           const job = await execution(tx, manifest, plan);
           const limit = Math.min(batchRows, job.batch_limit);
@@ -1002,7 +1010,7 @@ export function createTableExecution(
               ]);
             return 'more';
           }
-          await switchGeneration(tx, job, target, source);
+          await switchGeneration(tx, job, target, source, diagnostics);
           return 'more';
         },
       });
@@ -1032,10 +1040,19 @@ export function createTableExecution(
           'error.code': `table-creation-${creationGuardReason}`,
           'error.reason': `table-creation-${creationGuardReason}`,
           'error.site': errorSite(cause),
+          ...diagnostics,
         });
+      if (creationGuardReason === 'xmin-mismatch' && activationAttempt < 4) {
+        await delay(25 + Math.random() * 75);
+        return attempt(workspaceId, proposalId, activationAttempt + 1);
+      }
       const error = creationGuardReason
         ? new TableProposalError(
-            creationGuardReason === 'receipt-unattributed' ? 'proposal-conflict' : 'proposal-stale',
+            creationGuardReason === 'xmin-mismatch'
+              ? 'table-activation-unavailable'
+              : creationGuardReason === 'receipt-unattributed'
+                ? 'proposal-conflict'
+                : 'proposal-stale',
           )
         : cause instanceof Error &&
             'code' in cause &&
@@ -1052,8 +1069,8 @@ export function createTableExecution(
           error !== null &&
           'code' in error &&
           ['25P03', '25P04', '57014'].includes(String(error.code)));
-      if (timeout && recovery) {
-        const failed = recovery;
+      if (timeout && recovery?.job) {
+        const failed = { xid: recovery.xid, job: recovery.job };
         return withMaintenanceTransaction({
           workspaceId,
           connectionString: await options.resolveMigrationCredential(workspaceId),
@@ -1141,7 +1158,7 @@ export function createTableExecution(
             ...errorAttributes(error),
             'error.site': errorSite(error),
           });
-        await withMaintenanceTransaction({
+        const blocked = await withMaintenanceTransaction({
           workspaceId,
           connectionString: await options.resolveMigrationCredential(workspaceId),
           capability: 'migration',
@@ -1149,7 +1166,7 @@ export function createTableExecution(
             const tx = { ...transaction, workspaceId, commonVersion: executionCompatibility.minimum };
             const manifest = await load(tx, proposalId),
               plan = await selected(tx, manifest);
-            if (!plan) return;
+            if (!plan) return false;
             let existing = (
               await tx.client.query(
                 `SELECT * FROM ${table(tx, 'tf_table_executions')} WHERE proposal_id=$1 AND table_id=$2 FOR UPDATE`,
@@ -1157,10 +1174,17 @@ export function createTableExecution(
               )
             ).rows[0];
             if (
+              recovery &&
+              ((await tx.client.query('SELECT pg_xact_status($1::xid8) status', [recovery.xid])).rows[0]?.status !==
+                'aborted' ||
+                canonicalJson(existing ? executionSchema.parse(existing) : null) !== canonicalJson(recovery.job))
+            )
+              return false;
+            if (
               existing?.phase === 'blocked' &&
               !(await pendingResume(tx, proposalId, executionSchema.parse(existing).resumed_sequence))
             )
-              return;
+              return true;
             if (!existing)
               existing = (
                 await tx.client.query(
@@ -1170,15 +1194,17 @@ export function createTableExecution(
               ).rows[0];
             const job = executionSchema.parse(existing);
             const code =
-              error instanceof AccessDenied
-                ? 'access-denied'
-                : error instanceof TableProposalError ||
-                    error instanceof store.GenerationError ||
-                    error instanceof WorkspaceMemberError
-                  ? error.code
-                  : storageFault
-                    ? 'storage-fault'
-                    : 'invalid-transform';
+              error instanceof SkillUnavailable
+                ? 'skill-unavailable'
+                : error instanceof AccessDenied
+                  ? 'access-denied'
+                  : error instanceof TableProposalError ||
+                      error instanceof store.GenerationError ||
+                      error instanceof WorkspaceMemberError
+                    ? error.code
+                    : storageFault
+                      ? 'storage-fault'
+                      : 'invalid-transform';
             await tx.client.query(
               `UPDATE ${table(tx, 'tf_table_executions')} SET phase='blocked',error_code=$2,timeout_failures=0,resumed_sequence=COALESCE((SELECT max(sequence) FROM ${table(tx, 'tf_table_proposal_controls')} WHERE proposal_id=$3),-1) WHERE id=$1`,
               [job.id, code, proposalId],
@@ -1187,9 +1213,10 @@ export function createTableExecution(
               `INSERT INTO ${table(tx, 'tf_table_proposal_receipts')}(proposal_id,table_id,attempt,receipt) SELECT $1,$2,COALESCE(max(attempt)+1,0),$3 FROM ${table(tx, 'tf_table_proposal_receipts')} WHERE proposal_id=$1 AND table_id=$2`,
               [proposalId, job.table_id, { status: 'failed', executionId: job.id, code }],
             );
+            return true;
           },
         });
-        return 'blocked';
+        return blocked ? 'blocked' : 'wait';
       }
       throw error;
     }

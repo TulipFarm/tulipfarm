@@ -296,6 +296,7 @@ export class TableProposalError extends Error {
     | 'import-adapter-required'
     | 'import-reference-unknown'
     | 'proposal-storage-unavailable'
+    | 'table-activation-unavailable'
     | 'proposal-too-large'
     | 'unsupported-definition'
     | 'table-linked'

@@ -290,17 +290,34 @@ function operations(options: TableProposalOptions) {
         ).rows[0]?.decision ?? null,
       );
     const control = z
-      .enum(['cancel', 'resume'])
+      .object({ operation: z.enum(['cancel', 'resume']), sequence: z.int() })
       .nullable()
       .parse(
         (
           await tx.client.query(
-            `SELECT operation FROM ${table(tx, 'tf_table_proposal_controls')} WHERE proposal_id=$1 ORDER BY sequence DESC LIMIT 1`,
+            `SELECT operation,sequence FROM ${table(tx, 'tf_table_proposal_controls')} WHERE proposal_id=$1 ORDER BY sequence DESC LIMIT 1`,
             [id],
           )
-        ).rows[0]?.operation ?? null,
+        ).rows[0] ?? null,
       );
-    const saved = await receipts(tx, id);
+    const executions = z
+      .array(z.object({ table_id: z.uuid(), phase: z.string(), resumed_sequence: z.int() }))
+      .parse(
+        (
+          await tx.client.query(
+            `SELECT table_id,phase,resumed_sequence FROM ${table(tx, 'tf_table_executions')} WHERE proposal_id=$1`,
+            [id],
+          )
+        ).rows,
+      );
+    const resuming = (job: (typeof executions)[number]) =>
+      control?.operation === 'resume' && control.sequence > job.resumed_sequence;
+    const active = (job: (typeof executions)[number]) => !['blocked', 'completed'].includes(job.phase);
+    const saved = (await receipts(tx, id)).filter(
+      item =>
+        item.receipt.status !== 'failed' ||
+        !executions.some(job => job.table_id === item.table_id && (active(job) || resuming(job))),
+    );
     const imported = await importsApplied(tx, id);
     const completed = saved.filter(item => item.receipt.status === 'completed').length;
     const status =
@@ -308,7 +325,7 @@ function operations(options: TableProposalOptions) {
         ? 'completed'
         : decision === 'reject'
           ? 'rejected'
-          : control === 'cancel'
+          : control?.operation === 'cancel'
             ? 'cancelled'
             : row.expired
               ? 'expired'
@@ -325,12 +342,7 @@ function operations(options: TableProposalOptions) {
                       ).rowCount
                       ? 'superseded'
                       : 'pending'
-                    : (
-                          await tx.client.query(
-                            `SELECT 1 FROM ${table(tx, 'tf_table_executions')} WHERE proposal_id=$1`,
-                            [id],
-                          )
-                        ).rowCount
+                    : executions.some(active)
                       ? 'running'
                       : 'approved';
     return {
@@ -338,7 +350,7 @@ function operations(options: TableProposalOptions) {
       digest: row.digest,
       status,
       decision,
-      cancelled: control === 'cancel',
+      cancelled: control?.operation === 'cancel',
       expired: row.expired,
       plans: row.manifest.plans.map(plan => {
         const applied = imported.get(plan.input.tableId) ?? 0;

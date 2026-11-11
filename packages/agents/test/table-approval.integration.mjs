@@ -235,7 +235,7 @@ test('chat table approvals recheck workspace skill access under storage roles', 
     const proposal = await propose([skill]);
     await db.platform.query(`UPDATE ${s}.tf_workspace_skills SET enabled=false WHERE id=$1`, [skillId]);
     try {
-      await expectBlocked(proposal);
+      await expectBlocked(proposal, 'skill-unavailable');
     } finally {
       await db.platform.query(`UPDATE ${s}.tf_workspace_skills SET enabled=true WHERE id=$1`, [skillId]);
     }
@@ -280,7 +280,7 @@ test('chat table approvals recheck workspace skill access under storage roles', 
     ];
     await db.platform.query(`UPDATE ${s}.tf_workspace_skills SET enabled=false WHERE id=$1`, [skillId]);
     try {
-      await expectBlocked(failed);
+      await expectBlocked(failed, 'skill-unavailable');
       for (const [proposal, status, blockedReason] of history) {
         assert.deepEqual(await proposals.outcome(ws.id, actor.userId, conversationId, proposal.id), {
           kind: 'proposal',
@@ -464,9 +464,12 @@ test('chat table approvals recheck workspace skill access under storage roles', 
               [team, proposal.tableId],
             );
           mode = reason;
-          const code = ['receipt-unattributed', 'grant-collision'].includes(reason)
-            ? 'proposal-conflict'
-            : 'proposal-stale';
+          const code =
+            reason === 'xmin-mismatch'
+              ? 'table-activation-unavailable'
+              : ['receipt-unattributed', 'grant-collision'].includes(reason)
+                ? 'proposal-conflict'
+                : 'proposal-stale';
           for (let attempt = 0; attempt < 2; attempt++) {
             if (attempt && reason === 'receipt-unattributed') {
               await db.platform.query(

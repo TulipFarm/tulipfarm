@@ -10,7 +10,9 @@ import {
   type ProposalCommand,
 } from './review-contracts';
 
-const messages: Record<string, string> = {
+export const proposalMessages: Readonly<Record<string, string>> = {
+  'table-activation-unavailable':
+    "This table change couldn't be applied, and your table hasn't changed. Select Resume unfinished work to try again.",
   'skill-unavailable':
     'This change uses a skill that is disabled or that you no longer have access to. Ask a workspace admin to enable it or give you access, then try again.',
   'proposal-stale':
@@ -42,7 +44,7 @@ export function proposalApi(workspaceId: string, chatId: string, proposalId: str
         code,
         (admin && code === 'skill-unavailable'
           ? 'Enable the skill or give yourself access in Skills, then try again.'
-          : messages[code]) ??
+          : proposalMessages[code]) ??
           memberMessages[code] ??
           (response.status === 401
             ? 'Your session expired. Sign in to continue.'
