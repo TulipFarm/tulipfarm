@@ -1,4 +1,5 @@
 import { loadModelCatalog } from '@tulipfarm/config';
+import { API_CALL_LIMITS } from '@tulipfarm/api-calls/contracts';
 import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { closeUnavailableDraft, recordConversationActivity } from './activity.ts';
@@ -327,6 +328,7 @@ export type ConversationReply = (input: {
   priorCalls?: number;
   priorToolCalls?: readonly unknown[];
   priorFileResults?: readonly { call: unknown; result: unknown }[];
+  priorToolResults?: readonly { call: unknown; output: unknown }[];
   readWorkspaceDirectory?: () => Promise<unknown>;
   priorReviewCards?: readonly import('./results.ts').ReviewCardReference[];
   /** The working context holds a compaction summary, so earlier messages may be reread by id. */
@@ -2086,6 +2088,7 @@ export function createConversationExecutor(
         fileContext = read.context;
       }
       let calls = source.priorTools.length;
+      let apiCalls = source.priorTools.filter(call => call.tool === 'api.request').length;
       let memoryUsed = false;
       const preloadedPersonalMemory = async () => {
         if (source.personalMemory?.content && !memoryUsed) {
@@ -2155,6 +2158,16 @@ export function createConversationExecutor(
         activity,
         narration,
       ) => {
+        if (name === 'api.request' && apiCalls++ >= API_CALL_LIMITS.callsPerScope)
+          return {
+            result: {
+              status: 'failed',
+              code: 'call-limit',
+              message:
+                'I stopped after 50 API calls, the limit for one request. Some work may not be finished. Ask me to continue.',
+            },
+            sources: [],
+          };
         // Keep the claim alive through a full knowledge call and its final receipt.
         const leaseMs = name.startsWith('knowledge.') ? defaultCallTimeoutMs + 60_000 : 60_000;
         const captureOutput =
@@ -2877,6 +2890,11 @@ export function createConversationExecutor(
             priorFileResults: source.executionSteps
               .filter(step => step.tool.startsWith('files.') && step.output !== null)
               .map(step => ({ call: step.call, result: protectedOutputSchema.parse(step.output).result })),
+            priorToolResults: source.executionSteps.flatMap(step =>
+              step.output === null
+                ? []
+                : [{ call: step.call, output: protectedOutputSchema.parse(step.output).result }],
+            ),
             readWorkspaceDirectory: async () => {
               if (!interactiveChat) return undefined;
               let directory: unknown;

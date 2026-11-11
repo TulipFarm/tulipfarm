@@ -6,6 +6,7 @@ import { nativeChatTools } from '../src/native-tools.ts';
 import {
   azureStreamReply,
   isCompletionRequest,
+  knownUsage,
   nativeReply,
   nativeRoutes,
   selectReply,
@@ -42,50 +43,66 @@ for (const model of models)
       'Please make me a spreadsheet of these prices.',
       'Summarise the CSV, then save it as a markdown file.',
       'Compare the prices, then could you please export everything as a docx.',
+      'CREATE A SPREADSHEET of these prices: A 1, B 2.',
+      'cReAtE a FiLe with my notes.',
     ])
-      test(`${title} structured save request recovers a missing create: ${request}`, async t => {
-        const claim = 'Your file is ready.';
-        const text = 'Report.md is saved in Files.';
-        let checks = 0;
-        const previews = [];
-        provider(
-          t,
-          sse,
-          [
-            nativeReply('azure', { text: claim }),
-            nativeReply('azure', { calls: [use('files.create', create)] }),
-            nativeReply('azure', { text }),
-          ],
-          false,
-          () => {},
-          body => {
-            checks++;
-            assert.ok(!previews.includes(claim), 'The unchecked claim must not stream before classification');
-            return {
-              status: JSON.parse(body.messages.at(-1).content).candidate === claim ? 'continue' : 'completed',
-              fileSaveRequested: true,
-              claimsSavedFile: true,
-            };
-          },
-        );
-        const calls = [];
-        const result = await inferWithTools(
-          route(model),
-          [{ role: 'user', text: request }],
-          async call => {
-            calls.push(call.tool);
-            return saved;
-          },
-          undefined,
-          false,
-          null,
-          { ...options, answerText: update => previews.push(update.text) },
-        );
-        assert.ok(checks > 0, 'File intent must be classified by the completion checker');
-        assert.deepEqual(calls, ['files.create']);
-        assert.equal(result.text, text);
-        assert.ok(!previews.includes(claim));
-      });
+      for (const claimsSavedFile of [false, true])
+        test(`${title} structured save request ${claimsSavedFile ? 'rejects a false claim' : 'recovers a missing create'}: ${request}`, async t => {
+          const claim = claimsSavedFile ? 'Your file is ready.' : 'Here is the comparison of the two prices.';
+          const text = 'Report.md is saved in Files.';
+          let checks = 0;
+          let modelRequests = 0;
+          const settlements = [];
+          const previews = [];
+          provider(
+            t,
+            sse,
+            [
+              nativeReply('azure', { text: claim }),
+              nativeReply('azure', { calls: [use('files.create', create)] }),
+              nativeReply('azure', { text }),
+            ],
+            false,
+            body => {
+              modelRequests++;
+              const names = body.tools.map(tool => tool.function?.name);
+              assert.ok(!names.includes('files_list'), 'Save recovery must not preload listing schemas');
+              if (body.tool_choice?.function?.name === 'files_create')
+                assert.ok(names.includes('files_create'), 'Forced save recovery needs the create schema');
+              else if (!checks) assert.ok(!names.includes('files_create'), 'Create stays lazy until classified');
+            },
+            body => {
+              checks++;
+              assert.ok(!previews.includes(claim), 'The unchecked claim must not stream before classification');
+              return {
+                status: JSON.parse(body.messages.at(-1).content).candidate === claim ? 'continue' : 'completed',
+                fileSaveRequested: true,
+                claimsSavedFile,
+              };
+            },
+          );
+          const calls = [];
+          const result = await inferWithTools(
+            route(model),
+            [{ role: 'user', text: request }],
+            async call => {
+              calls.push(call.tool);
+              return saved;
+            },
+            async () => async usage => settlements.push(usage),
+            false,
+            null,
+            { ...options, answerText: update => previews.push(update.text) },
+          );
+          assert.ok(checks > 0, 'File intent must be classified by the completion checker');
+          assert.deepEqual(calls, claimsSavedFile ? [] : ['files.create']);
+          assert.equal(result.text, claimsSavedFile ? "I couldn't save the file. Ask me to try again." : text);
+          assert.deepEqual(
+            settlements,
+            Array.from({ length: modelRequests + checks }, () => knownUsage),
+          );
+          assert.ok(!previews.includes(claim));
+        });
 
     for (const scenario of [
       { request: 'Make the file names shorter.', text: "I've created file names that are shorter: Notes and Budget." },
@@ -562,8 +579,9 @@ for (const model of models)
     });
 
     for (const claim of ["I've saved a new file in Files.", "I've saved the report to your Files."])
-      test(`${title} an unsolicited save claim is corrected without forcing a save or reporting save failure: ${claim}`, async t => {
+      test(`${title} an unsolicited save claim gets the exact failure reply without further model calls: ${claim}`, async t => {
         const text = 'The budget file contains revenue of 42.';
+        let modelCalls = 0;
         provider(
           t,
           sse,
@@ -574,7 +592,10 @@ for (const model of models)
             nativeReply('azure', { text }),
           ],
           false,
-          body => assert.notEqual(body.tool_choice?.function?.name, 'files_create'),
+          body => {
+            modelCalls++;
+            assert.notEqual(body.tool_choice?.function?.name, 'files_create');
+          },
           body => ({
             fileSaveRequested: false,
             claimsSavedFile: JSON.parse(body.messages.at(-1).content).candidate === claim,
@@ -593,12 +614,13 @@ for (const model of models)
           null,
           { ...options, answerText: update => previews.push(update.text) },
         );
-        assert.equal(result.text, text);
+        assert.equal(result.text, "I couldn't save the file. Ask me to try again.");
+        assert.equal(modelCalls, 2);
         assert.ok(!previews.some(text => text.includes(claim)));
       });
   }
 
-test('an unsolicited repeated save claim exhausts normal correction without a save-failure reply', async t => {
+test('an unsolicited repeated save claim returns the save-failed reply without correction', async t => {
   const claim = "I've saved a new file in Files.";
   provider(
     t,
@@ -623,7 +645,7 @@ test('an unsolicited repeated save claim exhausts normal correction without a sa
     options,
   );
   assert.equal(calls, 1);
-  assert.doesNotMatch(result.text, /saved a new file|couldn't save/i);
+  assert.equal(result.text, "I couldn't save the file. Ask me to try again.");
 });
 
 function provider(t, sse, replies, checkFails = false, inspect = () => {}, verdict = {}) {
@@ -650,9 +672,19 @@ function provider(t, sse, replies, checkFails = false, inspect = () => {}, verdi
   });
 }
 
-test('listing and saving are offered beside file reading without discovery', () => {
-  const names = nativeChatTools(undefined, false, new Set(), true).tools.map(tool => tool.name);
-  for (const name of ['files_list', 'files_create', 'files_read']) assert.ok(names.includes(name), name);
+test('listing and saving stay discoverable without loading their schemas on every turn', () => {
+  const loaded = new Set();
+  const catalog = nativeChatTools(undefined, false, loaded, true);
+  const names = catalog.tools.map(tool => tool.name);
+  assert.ok(names.includes('files_read'));
+  for (const name of ['files_list', 'files_create']) {
+    assert.ok(!names.includes(name));
+    assert.ok(catalog.discovery.includes(name));
+  }
+  assert.deepEqual(catalog.load(['files_create']), ['files_create']);
+  const recovered = nativeChatTools(undefined, false, loaded, true).tools.map(tool => tool.name);
+  assert.ok(recovered.includes('files_create'));
+  assert.ok(!recovered.includes('files_list'));
 });
 
 test('a search phrase is data, even when it contains action words', async t => {
@@ -719,6 +751,28 @@ for (const request of [
 for (const model of models)
   for (const sse of [false, true]) {
     const title = `${model} ${sse ? 'SSE' : 'JSON'}`;
+    test(`${title} lists my files with listing schemas still deferred`, async t => {
+      provider(t, sse, [nativeReply('azure', { text: 'No files exist.' })], false, body => {
+        assert.ok(!body.tools.some(tool => tool.function?.name === 'files_list'));
+        assert.ok(body.messages.some(message => String(message.content).includes('files_list')));
+      });
+      const calls = [];
+      const result = await inferWithTools(
+        route(model),
+        [{ role: 'user', text: 'List my files.' }],
+        async call => {
+          calls.push(call);
+          return { items: [{ id: fileId, kind: 'file', name: 'Notes.md' }], next: null };
+        },
+        undefined,
+        false,
+        null,
+        options,
+      );
+      assert.deepEqual(calls, [{ tool: 'files.list', query: '' }]);
+      assert.equal(result.text, 'Notes.md');
+    });
+
     test(`${title} lists every matching name across pages without attempting the model's unrelated read`, async t => {
       provider(t, sse, [
         nativeReply('azure', { calls: [use('files.read', { source: 'invented-id' })] }),

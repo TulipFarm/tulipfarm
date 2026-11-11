@@ -12,9 +12,163 @@ import { registerWorkflows } from '../src/workflows.ts';
 import { registerCredits } from '../src/credits.ts';
 import { registerRecommendations } from '../src/recommendations.ts';
 import { registerRecommendationEvents } from '../src/recommendation-events.ts';
+import {
+  authenticateRoutes,
+  protectExpectedSession,
+  sessionIndependentOperations,
+} from '../src/authenticated-routes.ts';
+import { registerSecrets } from '../src/secrets.ts';
+import { registerGitHubAccounts } from '../src/github-accounts.ts';
+import { registerWorkspaces } from '../src/workspaces.ts';
+import { authConfig } from '../src/auth.ts';
+import { createSecretBody } from '../src/secrets-contracts.ts';
 
 // The app serves the shipped model catalog, which needs a provider key.
 process.env.ANTHROPIC_API_KEY ??= 'test-key';
+
+test('expected-session admission stops legacy reads and writes before validation or services', async t => {
+  const id = '22222222-2222-4222-8222-222222222222';
+  const session = { user: { id }, session: { id: 'current-session' } };
+  let sessionReads = 0;
+  const auth = {
+    api: {
+      getSession: async () => {
+        sessionReads++;
+        return session;
+      },
+    },
+  };
+  const app = Fastify();
+  t.after(() => app.close());
+  protectExpectedSession(app, auth);
+  protectBusinessRequests(app);
+  registerWorkspaces(app, { auth, pool: {} }, {});
+  registerGitHubAccounts(app, auth, null);
+  let writes = 0;
+  registerSecrets(app, auth, {
+    secrets: {
+      list: async () => [],
+      create: async () => {
+        writes++;
+        assert.fail('A stale request must not create a secret');
+      },
+    },
+    requests: {},
+  });
+  const secret = createSecretBody.parse({
+    requestId: id,
+    name: 'Example token',
+    variableName: 'EXAMPLE_TOKEN',
+    kind: 'token',
+    value: 'synthetic-value',
+    placement: { kind: 'bearer' },
+    destinations: [{ kind: 'host', host: 'example.com' }],
+    grants: [],
+  });
+  for (const request of [
+    { url: '/workspaces' },
+    { url: '/workspaces/example' },
+    { url: `/workspaces/${id}/github/accounts` },
+    { url: `/workspaces/${id}/secrets` },
+    { method: 'POST', url: `/workspaces/${id}/secrets`, payload: secret },
+    { method: 'POST', url: '/workspaces/invalid/secrets', payload: {} },
+    {
+      method: 'POST',
+      url: `/workspaces/${id}/secrets`,
+      payload: '{"',
+      headers: { 'content-type': 'application/json' },
+    },
+  ]) {
+    const before = sessionReads;
+    const response = await app.inject({
+      ...request,
+      headers: {
+        origin: authConfig().webOrigin,
+        ...request.headers,
+        'x-tulipfarm-expected-session': 'old-session',
+      },
+    });
+    assert.equal(response.statusCode, 401, `${request.url}: ${response.body}`);
+    assert.deepEqual(response.json(), { error: 'session-changed' });
+    assert.equal(response.headers['cache-control'], 'no-store');
+    assert.equal(sessionReads, before + 1);
+  }
+  assert.equal(writes, 0);
+  for (const headers of [{}, { 'x-tulipfarm-expected-session': 'current-session' }]) {
+    const before = sessionReads;
+    const response = await app.inject({ url: `/workspaces/${id}/secrets`, headers });
+    assert.equal(response.statusCode, 200, response.body);
+    assert.deepEqual(response.json(), { secrets: [] });
+    assert.equal(sessionReads, before + (Object.keys(headers).length ? 2 : 1));
+  }
+});
+
+test('expected-session admission wins before workspace admission and fails closed on session errors', async t => {
+  const id = '22222222-2222-4222-8222-222222222222';
+  const app = Fastify();
+  t.after(() => app.close());
+  let reads = 0;
+  let session = { user: { id }, session: { id: 'current-session' } };
+  let failure;
+  const auth = {
+    api: {
+      getSession: async () => {
+        reads++;
+        if (failure) throw failure;
+        return session;
+      },
+    },
+  };
+  protectExpectedSession(app, auth);
+  protectWorkspaceRequests(app, auth, {
+    hasCurrentMember: async () => assert.fail('A stale request must not read workspace membership'),
+    transaction: async () => assert.fail('A stale request must not access workspace storage'),
+  });
+  app.register(async routes => {
+    authenticateRoutes(routes, auth);
+    routes.post('/workspaces/:workspaceId/resource', () => assert.fail('A refused request must not run'));
+  });
+  const request = () =>
+    app.inject({
+      method: 'POST',
+      url: `/workspaces/${id}/resource`,
+      headers: { 'x-tulipfarm-expected-session': 'old-session' },
+      payload: {},
+    });
+  assert.deepEqual((await request()).json(), { error: 'session-changed' });
+  assert.equal(reads, 1, 'the outer boundary stops the request before either inner auth hook');
+  session = null;
+  const guest = await request();
+  assert.equal(guest.statusCode, 401);
+  assert.deepEqual(guest.json(), { error: 'sign-in-required' });
+  failure = new Error('Session store unavailable');
+  assert.equal((await request()).statusCode, 500);
+  assert.equal(reads, 3);
+});
+
+test('expected-session admission leaves public operations and hidden entry routes untouched', async t => {
+  const app = Fastify();
+  t.after(() => app.close());
+  protectExpectedSession(app, {
+    api: { getSession: async () => assert.fail('Public requests must not look up browser sessions') },
+  });
+  for (const [index, operationId] of [...sessionIndependentOperations].entries())
+    app.get(`/public/${index}`, { schema: { operationId } }, () => ({ public: true }));
+  for (const url of ['/v1/auth/*', '/v1/auth/options', '/v1/dev/sign-in-link', '/v1/dev/session', '/v1/viewer'])
+    app.get(url, { schema: { hide: true } }, () => ({ public: true }));
+  for (const url of [
+    ...[...sessionIndependentOperations].map((_, index) => `/public/${index}`),
+    '/v1/auth/get-session',
+    '/v1/auth/options',
+    '/v1/dev/sign-in-link',
+    '/v1/dev/session',
+    '/v1/viewer',
+  ]) {
+    const response = await app.inject({ url, headers: { 'x-tulipfarm-expected-session': 'old-session' } });
+    assert.equal(response.statusCode, 200, `${url}: ${response.body}`);
+    assert.deepEqual(response.json(), { public: true });
+  }
+});
 
 for (const path of ['credits', 'recommendations', 'recommendations/events']) {
   test(`workspace admission conceals removal caught inline by ${path}`, async t => {

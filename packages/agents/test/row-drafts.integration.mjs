@@ -212,6 +212,64 @@ test('chat row writes after untrusted content become member-approved review draf
     assert.deepEqual(await cards.reviewCards(w.id, owner, chatId, [reference]), [{ reference, status: 'saved' }]);
   });
 
+  await t.test(
+    'a one-row batch after web content has the same review payload and permission checks as create',
+    async () => {
+      const before = await live();
+      const input = createCall('X');
+      const batch = {
+        tool: 'rows.create.batch',
+        tableId: input.tableId,
+        expectedAppliedRevision: input.expectedAppliedRevision,
+        rows: [{ values: input.values }],
+      };
+      const single = await chatTool(input);
+      const { chatId, result } = await chatTool(batch);
+      assert.equal(result.status, 'review-required');
+      assert.equal(result.operation, single.result.operation);
+      assert.equal(result.instruction, single.result.instruction);
+      assert.equal(result.reviewSummary, single.result.reviewSummary);
+      assert.deepEqual(await live(), before);
+      const singleView = await drafts.read(w.id, owner.userId, single.chatId, single.result.draftId);
+      const batchView = await drafts.read(w.id, owner.userId, chatId, result.draftId);
+      assert.deepEqual(batchView.proposal, singleView.proposal);
+      assert.deepEqual(batchView.proposal, { kind: 'row', input });
+      const tools = (await f.store.history(w.id, owner.userId, chatId)).messages.flatMap(
+        message => message.tools ?? [],
+      );
+      assert.equal(tools.find(tool => tool.tool === 'rows.create.batch')?.rowDraftId, result.draftId);
+      await assert.rejects(decide(other, chatId, result, 'save'), AccessDenied);
+      await decide(owner, single.chatId, single.result, 'dismiss');
+      assert.deepEqual(await decide(owner, chatId, result, 'save'), {
+        kind: 'row',
+        operation: 'create',
+        recordId: result.draftId,
+      });
+      assert.deepEqual(await live(), [...before, result.draftId].sort());
+      assert.deepEqual(
+        (await records.getRecord(w.id, owner, table.tableId, table.revision, result.draftId)).values,
+        input.values,
+      );
+      await f.db.platform.query(
+        `DELETE FROM ${f.table('tf_grants')} WHERE team_id=$1 AND asset_id=$2 AND permission='table.row.create'`,
+        [team, table.tableId],
+      );
+      try {
+        for (const call of [input, batch]) {
+          const denied = await chatTool(call);
+          assert.equal(denied.result.error, 'access-denied');
+          assert.equal(denied.result.draftId, undefined);
+        }
+      } finally {
+        await f.db.platform.query(
+          `INSERT INTO ${f.table('tf_grants')} (team_id,asset_id,permission) VALUES ($1,$2,'table.row.create')`,
+          [team, table.tableId],
+        );
+      }
+      assert.deepEqual(await live(), [...before, result.draftId].sort());
+    },
+  );
+
   await t.test('a nine-row batch has a readable review summary and writes nothing before approval', async () => {
     const before = await live();
     const call = {
@@ -574,12 +632,20 @@ test('chat row writes after untrusted content become member-approved review draf
           tool: 'rows.create.batch',
           tableId: table.tableId,
           expectedAppliedRevision: table.revision,
-          rows: [{ values: { [note.id]: text('batch') } }],
+          rows: [{ values: { [note.id]: text('first') } }, { values: { [note.id]: text('second') } }],
         },
         read.sources,
       );
       assert.equal(batch.result.error, 'review-required');
-      const { chatId, result: draft } = await chatTool(createCall('from knowledge'), read.sources);
+      const { chatId, result: draft } = await chatTool(
+        {
+          tool: 'rows.create.batch',
+          tableId: table.tableId,
+          expectedAppliedRevision: table.revision,
+          rows: [{ values: { [note.id]: text('from knowledge') } }],
+        },
+        read.sources,
+      );
       assert.equal(draft.status, 'review-required');
       assert.deepEqual(await live(), before);
       assert.equal((await drafts.read(w.id, owner.userId, chatId, draft.draftId)).status, 'pending');
@@ -805,20 +871,30 @@ test('chat row writes after untrusted content become member-approved review draf
       // Without Slack action settings nothing can recheck the thread, so a Slack draft could never be decided.
       [web, { kind: 'shared-slack-turn', eventId: randomUUID() }],
     ]) {
-      const { chatId, result } = await chatTool(createCall('unreviewable'), sources);
-      assert.equal(result.error, 'review-unavailable');
-      assert.match(result.instruction, /^No row has been changed\./);
-      assert.equal(
-        Number(
-          (
-            await f.db.platform.query(
-              `SELECT count(*) FROM ${f.table('tf_chat_authoring_drafts')} WHERE conversation_id=$1`,
-              [chatId],
-            )
-          ).rows[0].count,
-        ),
-        0,
-      );
+      for (const call of [
+        createCall('unreviewable'),
+        {
+          tool: 'rows.create.batch',
+          tableId: table.tableId,
+          expectedAppliedRevision: table.revision,
+          rows: [{ values: { [note.id]: text('unreviewable') } }],
+        },
+      ]) {
+        const { chatId, result } = await chatTool(call, sources);
+        assert.equal(result.error, 'review-unavailable');
+        assert.match(result.instruction, /^No row has been changed\./);
+        assert.equal(
+          Number(
+            (
+              await f.db.platform.query(
+                `SELECT count(*) FROM ${f.table('tf_chat_authoring_drafts')} WHERE conversation_id=$1`,
+                [chatId],
+              )
+            ).rows[0].count,
+          ),
+          0,
+        );
+      }
     }
     const chatId = randomUUID();
     await f.store.create(w.id, owner.userId, { chatId, commandId: randomUUID() });
@@ -896,16 +972,27 @@ test('chat row writes after untrusted content become member-approved review draf
     assert.deepEqual(await live(), [...before, draft.draftId].sort());
   });
 
-  await t.test('batch creates are refused after public web content', async () => {
+  await t.test('two or more row creates are refused after public web content without a card or write', async () => {
     const before = await live();
-    const { result } = await chatTool({
-      tool: 'rows.create.batch',
-      tableId: table.tableId,
-      expectedAppliedRevision: table.revision,
-      rows: [{ values: { [note.id]: text('batch') } }],
-    });
-    assert.equal(result.error, 'review-required');
-    assert.deepEqual(await live(), before);
+    for (const count of [2, 6]) {
+      const { chatId, result } = await chatTool({
+        tool: 'rows.create.batch',
+        tableId: table.tableId,
+        expectedAppliedRevision: table.revision,
+        rows: Array.from({ length: count }, (_, index) => ({ values: { [note.id]: text(`Row ${index + 1}`) } })),
+      });
+      assert.equal(result.error, 'review-required');
+      assert.equal(result.draftId, undefined);
+      assert.equal(
+        (
+          await f.db.platform.query(`SELECT 1 FROM ${f.table('tf_chat_authoring_drafts')} WHERE conversation_id=$1`, [
+            chatId,
+          ])
+        ).rowCount,
+        0,
+      );
+      assert.deepEqual(await live(), before);
+    }
   });
 
   await t.test('MCP-derived context is still refused before any draft exists', async () => {

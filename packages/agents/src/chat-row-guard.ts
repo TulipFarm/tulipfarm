@@ -9,6 +9,9 @@ type RowReviewReason = z.infer<typeof rowReviewReasonSchema>;
 type RowsAlreadyWritten = z.infer<typeof rowsAlreadyWrittenSchema>;
 export { directChatRowLimit, namesTable };
 
+export const outsideContentBatchReply =
+  'No rows were added. Because this chat used outside content, each new row needs its own approval. Ask me to add one row at a time, or add the rows in the table yourself.';
+
 type EarlierWrite = { tool: string; call: unknown; output: unknown; drafted: boolean };
 const record = (value: unknown): Record<string, unknown> =>
   typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {};
