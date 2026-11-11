@@ -3,6 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import {
   AccessDenied,
+  WorkspaceMembershipDenied,
   currentMember,
   definitionGrantPredicate,
   lockAuthorization,
@@ -143,6 +144,8 @@ export function registerCredits(
           );
         });
       } catch (cause) {
+        if (cause instanceof WorkspaceMembershipDenied && cause.userId === session.user.id)
+          return reply.code(404).send({ error: 'not-found' });
         if (cause instanceof AccessDenied) return reply.code(404).send({ error: 'workspace-not-found' });
         if (cause instanceof StorageUnavailableError) return reply.code(503).send({ error: 'credits-unavailable' });
         return reply.code(500).send({ error: 'credits-read-failed' });

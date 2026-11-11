@@ -5,13 +5,72 @@ import { test } from 'node:test';
 import Fastify from 'fastify';
 import { protectBusinessRequests, protectWorkspaceRequests } from '../src/business.ts';
 import { buildApp } from '../src/app.ts';
-import { resolveHuman } from '@tulipfarm/access';
+import { AccessDenied, resolveHuman, WorkspaceMembershipDenied } from '@tulipfarm/access';
 import { StorageUnavailableError } from '@tulipfarm/workspace-storage/runtime';
 import { workflowWebhookOperations } from '../src/abuse.ts';
 import { registerWorkflows } from '../src/workflows.ts';
+import { registerCredits } from '../src/credits.ts';
+import { registerRecommendations } from '../src/recommendations.ts';
+import { registerRecommendationEvents } from '../src/recommendation-events.ts';
 
 // The app serves the shipped model catalog, which needs a provider key.
 process.env.ANTHROPIC_API_KEY ??= 'test-key';
+
+for (const path of ['credits', 'recommendations', 'recommendations/events']) {
+  test(`workspace admission conceals removal caught inline by ${path}`, async t => {
+    const workspaceId = '22222222-2222-4222-8222-222222222222';
+    const userId = '33333333-3333-4333-8333-333333333333';
+    const app = Fastify();
+    t.after(() => app.close());
+    const auth = { api: { getSession: async () => ({ user: { id: userId } }) } };
+    let admitted = false;
+    let transactionError;
+    let transactions = 0;
+    const runtime = {
+      hasCurrentMember: async () => admitted,
+      transaction: async (_id, _compatibility, operation) => {
+        transactions++;
+        if (transactionError) throw transactionError;
+        return operation({
+          schema: 'workspace',
+          client: {
+            query: async sql => {
+              if (sql.includes('tf_authorization_lock')) return { rows: [{ id: 1 }], rowCount: 1 };
+              assert.match(sql, /tf_memberships.*WHERE user_id = \$1 AND removed_at IS NULL/);
+              return { rows: [], rowCount: 0 };
+            },
+          },
+        });
+      },
+    };
+    protectWorkspaceRequests(app, auth, runtime);
+    registerCredits(app, { runtime, auth });
+    registerRecommendations(app, { runtime, auth });
+    registerRecommendationEvents(app, {
+      runtime,
+      auth,
+      eligible: async () => assert.fail('Removed members cannot reach stream eligibility'),
+      events: { healthy: () => assert.fail('Removed members cannot open a stream') },
+    });
+    const url = `/workspaces/${workspaceId}/${path}`;
+    const denied = await app.inject(url);
+    assert.equal(denied.statusCode, 404);
+    assert.equal(denied.body, '{"error":"not-found"}');
+    assert.equal(transactions, 0);
+    admitted = true;
+    const removed = await app.inject(url);
+    assert.equal(transactions, 1, 'membership is rechecked after admission');
+    assert.equal(removed.statusCode, denied.statusCode);
+    assert.equal(removed.body, denied.body);
+    assert.equal(removed.headers['cache-control'], 'no-store');
+    for (const error of [new AccessDenied(), new WorkspaceMembershipDenied('44444444-4444-4444-8444-444444444444')]) {
+      transactionError = error;
+      const resourceDenied = await app.inject(url);
+      assert.equal(resourceDenied.statusCode, 404);
+      assert.equal(resourceDenied.body, '{"error":"workspace-not-found"}');
+    }
+  });
+}
 
 test('workspace admission hides membership before parsing and preserves public receivers', async t => {
   const workspaceId = '22222222-2222-4222-8222-222222222222';
