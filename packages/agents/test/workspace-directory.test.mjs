@@ -36,6 +36,15 @@ const wholeWorkspaceSequence = [
   { role: 'assistant', text: 'Operations has Sam. Finance has Lee.' },
   { role: 'user', text: 'List all teams in this workspace and their members.' },
 ];
+const fullRosterPhrasings = [
+  'Can you list all teams and members?',
+  'list all teams with their members',
+  'list all members and teams',
+  'What teams do we have and who is on each?',
+  'show me all teams and members',
+  'list every team and its members',
+  'give me a list of all teams and members',
+];
 const completeDirectory = {
   ...directory,
   scope: 'workspace',
@@ -186,6 +195,7 @@ test('only clear workspace-wide directory requests use the full-list answer', ()
     'What teams are in this workspace?',
     'List all teams.',
     'Show workspace members.',
+    ...fullRosterPhrasings,
   ])
     assert.equal(directoryListingExpected([{ role: 'user', text }]), true, text);
   for (const text of [
@@ -197,8 +207,142 @@ test('only clear workspace-wide directory requests use the full-list answer', ()
     'List only teams without members in this workspace.',
     'Write a note to my team.',
     'List pending invitations in this workspace.',
+    'If the workspace has 4 teams of 5 members, how many members are in the workspace?',
+    'Which members of the workspace are admins?',
+    'list the members of the workspace who joined this week',
+    'what teams are in the workspace, excluding Sales?',
   ])
     assert.equal(directoryListingExpected([{ role: 'user', text }]), false, text);
+});
+
+test('common full-roster phrasings all execute the complete lookup instead of using partial history', async t => {
+  for (const question of fullRosterPhrasings) {
+    let lookups = 0;
+    t.mock.method(globalThis, 'fetch', async (_url, init) => {
+      assert.equal(isCompletionRequest(JSON.parse(init.body)), false);
+      return Response.json(nativeReply('azure', { text: 'Operations and Finance are the only teams.' }));
+    });
+    const result = await inferWithTools(
+      nativeRoutes.azure,
+      [...wholeWorkspaceSequence.slice(0, -1), { role: 'user', text: question }],
+      async call => {
+        assert.deepEqual(call, { tool: 'members.find' });
+        lookups++;
+        return completeDirectory;
+      },
+    );
+    assert.equal(result.text, directoryReply(completeDirectory), question);
+    assert.equal(lookups, 1, question);
+    t.mock.restoreAll();
+  }
+});
+
+for (const question of [
+  'If the workspace has 4 teams of 5 members, how many members are in the workspace?',
+  'Show the members table in this workspace.',
+])
+  for (const verdict of ['omitted', 'failed'])
+    test(`${verdict} checks do not turn ${JSON.stringify(question)} into a roster dump`, async t => {
+      const text = question.startsWith('If') ? 'There would be 20 members.' : 'The Members table is available.';
+      t.mock.method(globalThis, 'fetch', async (_url, init) => {
+        if (!isCompletionRequest(JSON.parse(init.body))) return Response.json(nativeReply('azure', { text }));
+        return verdict === 'failed'
+          ? Response.json({ error: { code: 'invalid_request' } }, { status: 400 })
+          : Response.json(selectReply('azure', { status: 'completed', reason: 'The question is answered.' }));
+      });
+      const result = await inferWithTools(nativeRoutes.azure, [{ role: 'user', text: question }], () =>
+        assert.fail('This is not a workspace roster request'),
+      );
+      assert.equal(result.text, text);
+    });
+
+for (const question of [
+  'Which members of the workspace are admins?',
+  'list the members of the workspace who joined this week',
+  'what teams are in the workspace, excluding Sales?',
+])
+  test(`filtered request stays on the checked model path: ${question}`, async t => {
+    const text = 'Operations has Sam as manager.';
+    const replies = [
+      nativeReply('azure', { calls: [use('members.find', { query: 'Operations' })] }),
+      nativeReply('azure', { text }),
+      checked('matches-grounded'),
+    ];
+    t.mock.method(globalThis, 'fetch', async () => {
+      assert.ok(replies.length, 'the filtered answer needs no full-directory fallback');
+      return Response.json(replies.shift());
+    });
+    const result = await inferWithTools(nativeRoutes.azure, [{ role: 'user', text: question }], async call => {
+      assert.equal(call.query, 'Operations');
+      return partialDirectory;
+    });
+    assert.equal(result.text, text);
+    assert.equal(replies.length, 0);
+  });
+
+for (const verdict of ['omitted', 'failed', 'invalid', 'not-applicable', 'grounded', 'matches-grounded'])
+  test(`the model path cannot pass a ${verdict} check from partial data into workspace totals`, async t => {
+    const question = 'List teams, and include every team in the answer.';
+    const text = 'The workspace has 2 teams: Operations and Finance. No other teams are visible.';
+    let ordinaryRequests = 0;
+    let checks = 0;
+    const calls = [];
+    t.mock.method(globalThis, 'fetch', async (_url, init) => {
+      const body = JSON.parse(init.body);
+      if (isCompletionRequest(body)) {
+        checks++;
+        if (checks > 1) return Response.json(checked('grounded'));
+        if (verdict === 'failed') return Response.json({ error: { code: 'invalid_request' } }, { status: 400 });
+        if (verdict === 'invalid') return Response.json(checked('unknown'));
+        if (['not-applicable', 'grounded', 'matches-grounded'].includes(verdict))
+          return Response.json(checked(verdict));
+        return Response.json(selectReply('azure', { status: 'completed', reason: 'The earlier teams are listed.' }));
+      }
+      ordinaryRequests++;
+      assert.ok(ordinaryRequests <= 4, 'one bounded unfiltered recovery');
+      return Response.json(
+        nativeReply(
+          'azure',
+          ordinaryRequests === 1
+            ? { calls: [use('members.find', { query: 'Operations and Finance' })] }
+            : ordinaryRequests === 3
+              ? { calls: [use('members.find')] }
+              : { text: ordinaryRequests === 2 ? text : directoryReply(completeDirectory) },
+        ),
+      );
+    });
+    const result = await inferWithTools(nativeRoutes.azure, [{ role: 'user', text: question }], async call => {
+      calls.push(call);
+      return call.query ? partialDirectory : completeDirectory;
+    });
+    assert.deepEqual(calls, [{ tool: 'members.find', query: 'Operations and Finance' }, { tool: 'members.find' }]);
+    assert.equal(result.text, directoryReply(completeDirectory));
+  });
+
+test('repeated failed checks on a filtered request stop after one unfiltered recovery without a roster dump', async t => {
+  let requests = 0;
+  const calls = [];
+  t.mock.method(globalThis, 'fetch', async (_url, init) => {
+    assert.ok(++requests <= 6, 'checks and recovery are bounded');
+    const body = JSON.parse(init.body);
+    if (isCompletionRequest(body)) return Response.json({ error: { code: 'invalid_request' } }, { status: 400 });
+    return Response.json(
+      nativeReply(
+        'azure',
+        requests === 1 ? { calls: [use('members.find', { query: 'Operations' })] } : { text: 'Operations has Sam.' },
+      ),
+    );
+  });
+  const result = await inferWithTools(
+    nativeRoutes.azure,
+    [{ role: 'user', text: 'Which members of the workspace are admins?' }],
+    async call => {
+      calls.push(call);
+      return call.query ? partialDirectory : completeDirectory;
+    },
+  );
+  assert.deepEqual(calls, [{ tool: 'members.find', query: 'Operations' }, { tool: 'members.find' }]);
+  assert.equal(result.text, directoryUnavailableReply);
 });
 
 test('only explicit directory reads and their short follow-ups hold streamed text', () => {
@@ -300,7 +444,7 @@ test('a route that ignores the forced read still runs one authorized lookup and 
   assert.equal(replies.length, 0);
 });
 
-test('an unsupported rewrite falls back to actual data without exposing a hidden roster or IDs', async t => {
+test('an unsupported filtered rewrite reports failure without dumping an unrelated full roster', async t => {
   const replies = [
     nativeReply('azure', { calls: [use('members.find')] }),
     nativeReply('azure', { text: invented }),
@@ -313,9 +457,7 @@ test('an unsupported rewrite falls back to actual data without exposing a hidden
     return Response.json(replies.shift());
   });
   const result = await inferWithTools(nativeRoutes.azure, sequence, async () => directory);
-  assert.equal(result.text, directoryReply(directory));
-  assert.match(result.text, /Finance: I can't see this team's members/);
-  assert.match(result.text, /Operations: Sam \(manager\)/);
+  assert.equal(result.text, directoryUnavailableReply);
   assert.doesNotMatch(result.text, /Alex|Engineering|teamId|membershipId|not-visible/);
 });
 
@@ -335,7 +477,7 @@ test('a successful empty lookup is distinct from failure and cannot grow invente
     teams: [],
     truncated: false,
   }));
-  assert.equal(result.text, 'Workspace teams: 0. Current members: 0.');
+  assert.equal(result.text, directoryUnavailableReply);
   assert.equal(replies.length, 0);
 });
 
@@ -470,7 +612,7 @@ test('filtered results support matching names without requiring a workspace-wide
   const replies = [
     nativeReply('azure', { calls: [use('members.find', { query: 'Operations' })] }),
     nativeReply('azure', { text: 'Sam is the Operations manager.' }),
-    checked('grounded'),
+    checked('matches-grounded'),
   ];
   let lookups = 0;
   t.mock.method(globalThis, 'fetch', async () => {
@@ -512,7 +654,7 @@ test('filtered lookup counts never become workspace totals when a rewrite needs 
       : directory;
   });
   assert.deepEqual(executed, [{ tool: 'members.find', query: 'Operations' }, { tool: 'members.find' }]);
-  assert.equal(result.text, directoryReply(directory));
+  assert.equal(result.text, directoryUnavailableReply);
   assert.doesNotMatch(result.text, /Workspace teams: 1|Current members: 0/);
   assert.equal(requests, 6);
 });
@@ -527,15 +669,17 @@ test('a later failed lookup does not erase the last successful directory result'
     checked('unsupported', 'continue'),
   ];
   let lookups = 0;
-  t.mock.method(globalThis, 'fetch', async () => {
+  t.mock.method(globalThis, 'fetch', async (_url, init) => {
     assert.ok(replies.length, 'the earlier successful read is retained');
+    if (isCompletionRequest(JSON.parse(init.body)))
+      assert.deepEqual(JSON.parse(JSON.parse(init.body).messages.at(-1).content).retainedWorkspaceDirectory, directory);
     return Response.json(replies.shift());
   });
   const result = await inferWithTools(nativeRoutes.azure, sequence, async () =>
     ++lookups === 1 ? directory : { error: 'tool-failed' },
   );
   assert.equal(lookups, 2);
-  assert.equal(result.text, directoryReply(directory));
+  assert.equal(result.text, directoryUnavailableReply);
   assert.equal(replies.length, 0);
 });
 
