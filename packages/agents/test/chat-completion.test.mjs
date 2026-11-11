@@ -416,7 +416,7 @@ for (const model of ['grok-4.3', 'Kimi-K2.6'])
         if (step) {
           assert.ok(offered.includes('agents_context'));
           assert.ok(offered.includes('agents_draft'));
-          assert.ok(offered.includes('agents_delegate'), 'other work can still use delegation');
+          assert.ok(!offered.includes('agents_delegate'), 'agent setup stays in the main chat');
         }
         return Response.json(
           nativeReply(
@@ -514,7 +514,10 @@ test('blocked authoring has a manual builder link and needs no repeated helper',
     null,
     { builtinSkills: ['agent-authoring'], agentBuilderUrl: '/test-space/agents/new' },
   );
-  assert.equal(result.text, answer);
+  assert.equal(
+    result.text,
+    "I couldn't read the setup details this agent needs, so I couldn't draft it. [Create it in the agent builder](/test-space/agents/new) instead.",
+  );
   assert.deepEqual(executed, ['agents.context']);
 });
 
