@@ -26,7 +26,7 @@ const listingQuestion = (text: string) => {
     .replace(/[?.!]+$/, '')
     .replace(/^(?:(?:can|could|would)\s+you\s+(?:please\s+)?|please\s+)/i, '');
   return (
-    /^(?:list|show(?:\s+me)?|find|count|give me a list of)\s+(?:(?:all|the|our|my|current|workspace|active|every)\s+)*(?:teams|members|people|team)(?:\s+(?:in|of|for)\s+(?:(?:the|this|our|my|current)\s+)?workspace)?(?:\s+(?:and|with)\s+(?:(?:all|their|its|the)\s+)*(?:members|people|teams))?(?:\s+(?:in|of|for)\s+(?:(?:the|this|our|my|current)\s+)?workspace)?$/i.test(
+    /^(?:list|show(?:\s+me)?|find|count|give me a list of)\s+(?:(?:(?:all|the|our|my|current|workspace|active)\s+)*(?:teams|members|people)|every\s+team)(?:\s+(?:in|of|for)\s+(?:(?:the|this|our|my|current)\s+)?workspace)?(?:\s+(?:and|with)\s+(?:(?:all|their|its|the)\s+)*(?:members|people|teams))?(?:\s+(?:in|of|for)\s+(?:(?:the|this|our|my|current)\s+)?workspace)?$/i.test(
       question,
     ) ||
     /^(?:what|which|how many)\s+(?:teams|members|people)\s+(?:(?:are\s+(?:there\s+)?)?(?:in|of)\s+(?:(?:the|this|our|my|current)\s+)?workspace|do we have)(?:\s+and\s+who\s+is\s+(?:in|on)\s+each)?$/i.test(
@@ -39,7 +39,7 @@ const listingQuestion = (text: string) => {
 const directoryQuestion = (text: string) =>
   !/\b(?:example|sample|template|write|draft|create|design|explain|translate)\b/i.test(text) &&
   (listingQuestion(text) ||
-    /\b(?:list|show|find|count)\s+(?:(?:all|the|our|my|current|workspace|active)\s+)*(?:teams|members|people)\b/i.test(
+    /\b(?:list|show|find|count)\s+(?:(?:all|the|our|my|current|workspace|active)\s+)*(?:teams?|members|people)\b/i.test(
       text,
     ) ||
     /\b(?:what|which|how many)\s+(?:teams|members|people)\b/i.test(text) ||

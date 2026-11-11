@@ -211,9 +211,51 @@ test('only clear workspace-wide directory requests use the full-list answer', ()
     'Which members of the workspace are admins?',
     'list the members of the workspace who joined this week',
     'what teams are in the workspace, excluding Sales?',
+    'list my team',
+    'list our team',
   ])
     assert.equal(directoryListingExpected([{ role: 'user', text }]), false, text);
 });
+
+for (const [question, text] of [
+  ['How many members should a scrum team have?', 'A scrum team typically has ten or fewer people.'],
+  ['What teams won the World Cup in the 2010s?', 'Spain, Germany, and France won in the 2010s.'],
+  ['list the members of the Beatles', 'John Lennon, Paul McCartney, George Harrison, and Ringo Starr.'],
+])
+  test(`not-applicable keeps the general-knowledge answer to ${JSON.stringify(question)}`, async t => {
+    let requests = 0;
+    t.mock.method(globalThis, 'fetch', async (_url, init) => {
+      assert.ok(++requests <= 2, 'general knowledge needs no recovery');
+      return Response.json(
+        isCompletionRequest(JSON.parse(init.body)) ? checked('not-applicable') : nativeReply('azure', { text }),
+      );
+    });
+    const result = await inferWithTools(nativeRoutes.azure, [{ role: 'user', text: question }], () =>
+      assert.fail('General knowledge does not read the workspace directory'),
+    );
+    assert.equal(result.text, text);
+    assert.equal(requests, 2);
+  });
+
+for (const question of ['list my team', 'list our team'])
+  test(`${question} stays on the filtered path instead of dumping the workspace roster`, async t => {
+    const text = 'Operations: Sam (manager).';
+    const replies = [
+      nativeReply('azure', { calls: [use('members.find', { query: 'Operations' })] }),
+      nativeReply('azure', { text }),
+      checked('matches-grounded'),
+    ];
+    t.mock.method(globalThis, 'fetch', async () => {
+      assert.ok(replies.length, 'only the requested team is needed');
+      return Response.json(replies.shift());
+    });
+    const result = await inferWithTools(nativeRoutes.azure, [{ role: 'user', text: question }], async call => {
+      assert.equal(call.query, 'Operations');
+      return { ...partialDirectory, teamCount: 1, teams: [completeDirectory.teams[1]] };
+    });
+    assert.equal(result.text, text);
+    assert.equal(replies.length, 0);
+  });
 
 test('common full-roster phrasings all execute the complete lookup instead of using partial history', async t => {
   for (const question of fullRosterPhrasings) {

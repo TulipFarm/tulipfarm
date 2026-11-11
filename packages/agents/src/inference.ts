@@ -4572,10 +4572,12 @@ export async function inferWithTools(
           (checked.workspaceDirectory === 'matches-grounded' &&
             directorySucceeded &&
             !directoryTotalsClaim(candidate)));
+      const directoryNotApplicable =
+        checked.workspaceDirectory === 'not-applicable' && !directoryTotalsClaim(candidate);
       if (directoryExpected && directoryGrounded) return accept();
       if (
         directoryExpected &&
-        ((directoryLookup && !directoryGrounded) ||
+        ((directoryLookup && !directoryGrounded && !directoryNotApplicable) ||
           checked.workspaceDirectory === 'lookup-required' ||
           checked.workspaceDirectory === 'unsupported' ||
           ((checked.workspaceDirectory === 'grounded' || checked.workspaceDirectory === 'matches-grounded') &&
