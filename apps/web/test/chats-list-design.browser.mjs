@@ -74,10 +74,10 @@ test('chat list keeps clear columns, responsive actions, filters, and recovery',
     await open('chats');
     const lastMenu = menu('Review the customer handoff process');
     await lastMenu.waitFor();
-    await page.getByRole('button', { name: 'Open Bud', exact: true }).waitFor();
+    await page.getByRole('button', { name: /Open quick chat$/ }).waitFor();
     await lastMenu.scrollIntoViewIfNeeded();
     const lastBox = await lastMenu.boundingBox();
-    const budBox = await page.getByRole('button', { name: 'Open Bud', exact: true }).boundingBox();
+    const budBox = await page.getByRole('button', { name: /Open quick chat$/ }).boundingBox();
     assert.ok(lastBox.y + lastBox.height <= budBox.y, 'Last action can scroll clear of Bud');
     await menu(firstTitle).scrollIntoViewIfNeeded();
     await menu(firstTitle).click();

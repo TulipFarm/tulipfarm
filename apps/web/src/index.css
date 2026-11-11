@@ -16,6 +16,22 @@
   }
 }
 
+/* Decorative initials must not become part of a menu button's visible text label. */
+.menu-avatar .sprout-entity-avatar-fallback {
+  visibility: hidden;
+}
+
+.menu-avatar .sprout-entity-avatar-fallback::after {
+  content: var(--menu-avatar-initial);
+  visibility: visible;
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  border-radius: inherit;
+  background-image: inherit;
+}
+
 /* Data list rows become columns at the sm viewport, or by the list's own width when the list sets data-stack="container". */
 @custom-variant list-wide {
   @media (width >= 40rem) {

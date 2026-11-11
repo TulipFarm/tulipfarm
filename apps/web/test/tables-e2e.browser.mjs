@@ -52,7 +52,7 @@ export async function proveTableBrowser(input) {
       }
     });
     await page.goto(`${origin}/acceptance/chat/${input.chatId}`);
-    await page.getByRole('button', { name: 'Workspace menu, Acceptance support' }).waitFor();
+    await page.getByRole('button', { name: 'Acceptance support, workspace menu' }).waitFor();
     const card = page.getByRole('region', { name: 'Table change proposal' }).last();
     await card.getByRole('heading', { name: 'Ready for your approval', exact: true }).waitFor();
     await card.getByRole('button', { name: /^Approve/ }).click();

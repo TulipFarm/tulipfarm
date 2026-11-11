@@ -131,20 +131,21 @@ export function TulipAvatar({
         className={cn('size-full touch-pan-y', status !== 'ready' && 'invisible')}
       />
       {status === 'loading' && (
-        <span aria-hidden="true" className="absolute">
-          {label.charAt(0).toUpperCase()}
-        </span>
+        <span
+          aria-hidden="true"
+          data-initial={label.charAt(0).toUpperCase()}
+          className="absolute before:content-[attr(data-initial)]"
+        />
       )}
       {status === 'error' && (
         <button
           type="button"
-          className="absolute inset-0 flex items-center justify-center focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
+          className="absolute inset-0 flex items-center justify-center before:content-[attr(data-initial)] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
+          data-initial={label.charAt(0).toUpperCase()}
           aria-label={`${label} avatar unavailable. Retry avatar`}
           title="Could not show the 3D avatar. Enable hardware acceleration, then retry."
           onClick={() => setAttempt(value => value + 1)}
-        >
-          {label.charAt(0).toUpperCase()}
-        </button>
+        />
       )}
     </span>
   );

@@ -21,6 +21,7 @@
     "test:table-search": "node test/table-search-drafts.browser.mjs",
     "test:settings": "node --test test/settings.browser.mjs",
     "test:shell": "node test/shell.browser.mjs",
+    "test:shell-accessibility": "node --test test/shell-accessibility.browser.mjs",
     "test:atlassian": "node test/atlassian.browser.mjs",
     "test:connections": "node --test test/connection-state.browser.mjs",
     "test:google": "node --test test/google.browser.mjs",

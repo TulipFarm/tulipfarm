@@ -199,7 +199,7 @@ try {
       if (!(await link.isVisible()) && mobile)
         await page.getByRole('button', { name: 'Toggle Sidebar', exact: true }).first().click();
       if (!(await link.isVisible()))
-        await page.getByRole('button', { name: `Workspace menu, ${workspace.name}`, exact: true }).click();
+        await page.getByRole('button', { name: `${workspace.name}, workspace menu`, exact: true }).click();
       await link.click();
     }
     try {

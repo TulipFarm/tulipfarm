@@ -69,7 +69,7 @@ test(
       const brandBounds = await moreSetup.getByRole('img', { name: 'Slack' }).boundingBox();
       assert.ok(brandBounds.x - labelBounds.x - labelBounds.width <= 16, 'Provider icon stays beside its label');
 
-      await page.getByRole('button', { name: 'Open Bud', exact: true }).click();
+      await page.getByRole('button', { name: /Open quick chat$/ }).click();
       const popup = page.getByRole('dialog');
       await popup.getByText('Your separate private chat', { exact: true }).waitFor();
       const budEditor = popup.getByRole('textbox', { name: 'Message' });
@@ -77,7 +77,7 @@ test(
       await budEditor.fill('Keep this private draft');
       await page.getByRole('button', { name: 'Minimize chat', exact: true }).click();
       await composer.locator('[data-placeholder="What would you like to get done?"]').waitFor();
-      await page.getByRole('button', { name: 'Open Bud', exact: true }).click();
+      await page.getByRole('button', { name: /Open quick chat$/ }).click();
       assert.equal(await budEditor.innerText(), 'Keep this private draft');
       await page.getByRole('button', { name: 'Minimize chat', exact: true }).click();
 
@@ -92,7 +92,7 @@ test(
       assert.equal(await tasks.getByRole('button').first().isEnabled(), true);
       const warning = page.getByRole('region', { name: 'Integration authorization', exact: true });
       assert.match(await warning.innerText(), /GitHub reads and actions with this account need renewed access/);
-      const launcher = page.getByRole('button', { name: 'Open Bud', exact: true });
+      const launcher = page.getByRole('button', { name: /Open quick chat$/ });
       assert.equal(await launcher.getByText('Bud quick chat', { exact: true }).count(), 1);
       assert.equal(await launcher.getByText('Separate private chat', { exact: true }).count(), 1);
 
@@ -118,7 +118,7 @@ test(
             true,
             `${colorScheme} composer fits ${width}px`,
           );
-          assert.equal(await page.getByRole('button', { name: 'Open Bud', exact: true }).isVisible(), true);
+          assert.equal(await page.getByRole('button', { name: /Open quick chat$/ }).isVisible(), true);
         }
         await page.setViewportSize({ width: 1440, height: 1000 });
         assert.equal(
@@ -229,7 +229,7 @@ test(
         .getByRole('region', { name: 'Personal conversations' })
         .evaluate(element => element.querySelector('.overflow-y-auto')?.scrollTo({ top: 1e6, behavior: 'instant' }));
       const lastBounds = await lastControl.boundingBox();
-      const launcherBounds = await page.getByRole('button', { name: 'Open Bud', exact: true }).boundingBox();
+      const launcherBounds = await page.getByRole('button', { name: /Open quick chat$/ }).boundingBox();
       assert.ok(
         lastBounds.y + lastBounds.height <= launcherBounds.y,
         'Bud quick chat never covers the last setup control',

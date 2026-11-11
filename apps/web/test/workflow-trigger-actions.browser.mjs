@@ -195,17 +195,8 @@ async function shot(page, name) {
 }
 async function accessible(page) {
   await page.addScriptTag({ path: require.resolve('axe-core/axe.min.js') });
-  // These existing shell controls are outside the workflow editor; keep every rule enabled for the workflow content.
   const violations = await page.evaluate(async () =>
-    (
-      await window.axe.run({
-        exclude: [
-          ['button[aria-label^="Workspace menu,"]'],
-          ['button[aria-label="Account menu"]'],
-          ['button[aria-label="Open Bud"]'],
-        ],
-      })
-    ).violations.filter(item => ['serious', 'critical'].includes(item.impact)),
+    (await window.axe.run(document)).violations.filter(item => ['serious', 'critical'].includes(item.impact)),
   );
   assert.deepEqual(
     violations.map(item => ({

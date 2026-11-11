@@ -327,7 +327,7 @@ test('private workspace views respect revocation across concurrent refreshes', {
               await delay(350);
               if ((await f.approve.isVisible()) && (await f.approve.isEnabled())) await f.approve.click();
               await f.concealed();
-              assert.equal(await f.page.getByRole('button', { name: 'Account menu', exact: true }).count(), 0);
+              assert.equal(await f.page.getByRole('button', { name: /, account menu$/ }).count(), 0);
               await delay(2500);
               await f.concealed();
             }),
@@ -392,17 +392,17 @@ test('private workspace views respect revocation across concurrent refreshes', {
           .click();
         const agents = f.page.getByRole('heading', { name: 'Agents', exact: true });
         await agents.waitFor();
-        assert.equal(await f.page.getByRole('button', { name: 'Account menu', exact: true }).innerText(), 'A\nA');
+        assert.equal(await f.page.getByRole('button', { name: 'A, account menu', exact: true }).innerText(), 'A');
         f.faults.session = 401;
         await f.refreshSession(identity('A'));
         await delay(350);
         assert.equal(await agents.count(), 0, 'Shared shell must conceal sibling pages on session denial');
-        assert.equal(await f.page.getByRole('button', { name: 'Account menu', exact: true }).count(), 0);
+        assert.equal(await f.page.getByRole('button', { name: /, account menu$/ }).count(), 0);
         await f.page.getByRole('heading', { name: 'Sign in to continue', exact: true }).waitFor();
         f.faults.session = 200;
         await f.refreshSession(identity('A'));
         await agents.waitFor();
-        assert.equal(await f.page.getByRole('button', { name: 'Account menu', exact: true }).innerText(), 'A\nA');
+        assert.equal(await f.page.getByRole('button', { name: 'A, account menu', exact: true }).innerText(), 'A');
       }),
     );
   } finally {

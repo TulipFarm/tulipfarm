@@ -345,7 +345,15 @@ export function BudProvider({ children, headerActions }: { children: ReactNode; 
       <PopoverTrigger
         ref={launcher}
         render={<BudLauncher docked={docked} variant={docked ? 'ghost' : 'outline'} />}
-        aria-label={open ? 'Minimize Bud' : 'Open Bud'}
+        aria-label={
+          docked
+            ? open
+              ? 'Bud. Minimize quick chat'
+              : 'Bud. Open quick chat'
+            : open
+              ? 'Minimize quick chat. Separate private chat'
+              : 'Bud quick chat. Separate private chat. Open quick chat'
+        }
         aria-haspopup="dialog"
         aria-expanded={open}
         title={
@@ -388,7 +396,7 @@ export function BudProvider({ children, headerActions }: { children: ReactNode; 
           <span className="hidden md:inline">Bud</span>
         ) : (
           <span className="flex flex-col items-start">
-            <span>{open ? 'Close quick chat' : 'Bud quick chat'}</span>
+            <span>{open ? 'Minimize quick chat' : 'Bud quick chat'}</span>{' '}
             <span className="text-xs font-normal text-muted-foreground">Separate private chat</span>
           </span>
         )}
