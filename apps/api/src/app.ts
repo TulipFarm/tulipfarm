@@ -38,6 +38,7 @@ import { getLastWorkspace, getWorkspace } from '@tulipfarm/workspaces/store';
 import { registerFlagSubjectResolver } from '@tulipfarm/observability';
 import { apiFlagSubjects } from './flag-subjects.ts';
 import { registerFeatureFlags } from './feature-flags.ts';
+import { protectExpectedSession } from './authenticated-routes.ts';
 
 export function buildApp(
   options: {
@@ -94,6 +95,7 @@ export function buildApp(
     async v1 => {
       registerHealth(v1, temporal);
       const auth = registerAuth(v1);
+      protectExpectedSession(v1, auth.auth);
       registerFlagSubjectResolver(apiFlagSubjects(auth.pool));
       let workspaceStorage: ReturnType<typeof registerWorkspaces>;
       registerViewer(v1, auth.auth, userId => {

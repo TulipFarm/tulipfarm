@@ -5,7 +5,7 @@ import { WorkspaceMembershipDenied } from '@tulipfarm/access';
 import { commonCompatibility, qualified, type createWorkspaceRuntime } from '@tulipfarm/workspace-storage/runtime';
 import { workflowWebhookOperations } from './abuse.ts';
 import { authConfig } from './auth.ts';
-import type { authenticateRoutes } from './authenticated-routes.ts';
+import { rejectChangedSession, type authenticateRoutes } from './authenticated-routes.ts';
 import { requestBoundaryError } from './security.ts';
 
 const workspaceParams = z.object({ workspaceId: z.uuid() });
@@ -41,9 +41,7 @@ export function protectWorkspaceRequests(
     reply.header('Cache-Control', 'no-store');
     const session = await auth.api.getSession({ headers: fromNodeHeaders(request.headers) });
     if (!session) return reply.code(401).send({ error: 'sign-in-required' });
-    const expectedSession = request.headers['x-tulipfarm-expected-session'];
-    if (typeof expectedSession === 'string' && expectedSession !== session.session.id)
-      return reply.code(401).send({ error: 'session-changed' });
+    if (rejectChangedSession(request, reply, session)) return reply;
     const params = workspaceParams.safeParse(request.params);
     if (!params.success) return reply.code(404).send({ error: 'not-found' });
     try {
