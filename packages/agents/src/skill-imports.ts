@@ -30,7 +30,7 @@ import {
 } from './skill-import-contracts.ts';
 import { createSkillSourceReader, resolveSkillSource } from './skill-import-sources.ts';
 import { isSkillScript, reviewSkillPackage, type SkillSafetyReviewer } from './skill-package-review.ts';
-import { requireDraftSources } from './draft-sources.ts';
+import { requireOwnDefinitionSources } from './draft-sources.ts';
 import { workspaceSkillReceiptSchema } from './workspace-skill-contracts.ts';
 import { requireSavedSkillSources } from './skill-sources.ts';
 import { skillHistoryPageSchema, skillHistoryQuerySchema } from './skill-import-contracts.ts';
@@ -112,7 +112,7 @@ export function createSkillImports(
       )
     ).rows[0];
     if (!row) throw new AccessDenied();
-    await requireDraftSources(tx, actor, sourceDependenciesSchema.parse(row.sources));
+    await requireOwnDefinitionSources(tx, actor, sourceDependenciesSchema.parse(row.sources), true);
     return row;
   }
   async function begin(
@@ -129,7 +129,7 @@ export function createSkillImports(
     const sources = sourceDependenciesSchema.parse(origin);
     await transaction(workspaceId, user, async (tx, actor) => {
       await requireNoMcpDerived(tx, sources);
-      await requireDraftSources(tx, actor, sources);
+      await requireOwnDefinitionSources(tx, actor, sources, true);
       if (input.target) await requireSkillGrant(tx, actor, input.target.id, 'manage');
       const previous = (
         await tx.client.query(
@@ -203,7 +203,7 @@ export function createSkillImports(
     const sources = sourceDependenciesSchema.parse(origin);
     const prepare = await transaction(workspaceId, actor, async (tx, human, bound) => {
       await requireNoMcpDerived(tx, sources);
-      await requireDraftSources(tx, human, sources);
+      await requireOwnDefinitionSources(tx, human, sources, true);
       const previous = (
         await tx.client.query(
           `SELECT membership_id,input,sources,status,expires_at>now() AS live FROM ${relation(tx, 'tf_skill_imports')} WHERE id=$1`,
@@ -245,7 +245,7 @@ export function createSkillImports(
     if (!prepare) return read(workspaceId, actor, id);
     const prepared = await objects.stage(workspaceId, actor, id, files, sources);
     await transaction(workspaceId, actor, async (tx, human, bound) => {
-      await requireDraftSources(tx, human, sources);
+      await requireOwnDefinitionSources(tx, human, sources, true);
       let changes: ReturnType<typeof packageChanges> | undefined;
       if (target) {
         const detail = await createWorkspaceSkills(bound).read(workspaceId, human, target.id);
@@ -401,7 +401,7 @@ export function createSkillImports(
         membershipId: uuidSchema.parse(row.membership_id),
         userId: z.string().parse(row.user_id),
       };
-      await requireDraftSources(tx, actor, sourceDependenciesSchema.parse(row.sources));
+      await requireOwnDefinitionSources(tx, actor, sourceDependenciesSchema.parse(row.sources), true);
       await requireNoMcpDerived(tx, sourceDependenciesSchema.parse(row.sources));
       const phase = row.status === 'pending' ? 'preparing' : 'reviewing';
       await tx.client.query(`UPDATE ${relation(tx, 'tf_skill_imports')} SET status=$2,started_at=now() WHERE id=$1`, [

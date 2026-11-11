@@ -33,7 +33,7 @@ import {
 } from './workspace-skill-contracts.ts';
 import { agentDefinitionSchema } from './contracts.ts';
 import { requireSavedSkillSources, savedSkillSources } from './skill-sources.ts';
-import { requireDraftSources } from './draft-sources.ts';
+import { requireOwnDefinitionSources } from './draft-sources.ts';
 import { requireNoMcpDerived } from '@tulipfarm/access';
 import { personalDefinitionSources, requirePersonalDefinitionSources } from './personal-definition-sources.ts';
 import { visiblePage } from './visible-page.ts';
@@ -278,7 +278,7 @@ export function createWorkspaceSkills(storage: AgentStorage) {
         ).values(),
       ]);
       await requireNoMcpDerived(tx, sources);
-      await requireDraftSources(tx, actor, sources);
+      await requireOwnDefinitionSources(tx, actor, sources, true);
       const stored = (await personalDefinitionSources(tx, sources)).length
         ? { ...input.definition, sources }
         : input.definition;

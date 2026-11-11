@@ -1471,6 +1471,9 @@ test('every pending review-card family has an explicit receipt and excludes comp
     ['skills.import.status', { importId: 'import', status: 'ready' }],
     ['skills.import.select', { importId: 'import', status: 'ready' }],
     ['skills.draft', { importId: 'import', status: 'ready' }],
+    ['skills.draft', { importId: 'import', status: 'pending-review' }],
+    ['skills.draft', { importId: 'import', status: 'reviewing' }],
+    ['skills.import.status', { importId: 'import', status: 'reviewing' }],
   ];
   const items = (tool, output) => [
     {
@@ -1492,7 +1495,7 @@ test('every pending review-card family has an explicit receipt and excludes comp
     ['github.personal.propose', { batchId: 'batch', decision: 'reject', statuses: ['rejected'] }],
     ['api.request', { provider: 'api-call', kind: 'sent', callId: 'call', status: 'sent' }],
     ['skills.import', { importId: 'import', status: 'installed' }],
-    ['skills.import.status', { importId: 'import', status: 'reviewing' }],
+    ['skills.import.status', { importId: 'import', status: 'failed' }],
     ['plans.create', { planId: 'plan', version: 1, added: [] }],
     ['memory.forget', { draftId: 'undo', revision: 'revision' }],
     ['memory.forget', { status: 'forgotten', draftId: '' }],

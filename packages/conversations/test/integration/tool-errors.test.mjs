@@ -38,13 +38,19 @@ test('skill failures name safe causes, offer recovery, and retain failed activit
         ],
         [new Error('private diagnostic'), 'tool-failed', /could not/i],
         [z.string().safeParse(42).error, 'invalid-arguments', /invalid fields/],
+        [new AccessDenied(), 'access-denied', /uses a source that skills can't include/],
+        [
+          new SourceAuthorizationUnavailable(),
+          'source-unavailable',
+          /access to one of its sources can't be checked right now/,
+        ],
       ]) {
         const output = await executeTool('skills.draft', false, async () => {
           throw failure;
         });
         assert.equal(output.result.error, code);
         assert.match(output.result.instruction, words);
-        assert.match(output.result.instruction, /try again/);
+        assert.match(output.result.instruction, /try again/i);
         assert.match(output.result.instruction, /Create manually/);
         assert.doesNotMatch(JSON.stringify(output), /private diagnostic|private-value|unconfirmed reason/);
       }
@@ -56,7 +62,7 @@ test('skill failures name safe causes, offer recovery, and retain failed activit
     );
     assert.deepEqual(
       (await f.store.history(w.id, w.userId, chatId)).messages[0].tools.map(tool => tool.status),
-      Array(5).fill('failed'),
+      [...Array(5).fill('failed'), 'blocked', 'blocked'],
     );
   } finally {
     await f.close();

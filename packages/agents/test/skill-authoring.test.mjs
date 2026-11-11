@@ -52,9 +52,54 @@ for (const model of ['grok-4.3', 'Kimi-K2.6'])
       },
     );
     assert.deepEqual(executed, ['skills.read', 'skills.workspace', 'skills.draft']);
-    assert.match(result.text, /Review the proposed/);
+    assert.match(result.text, /drafted the skill/);
     assert.equal(step, 4);
   });
+
+for (const model of ['grok-4.3', 'Kimi-K2.6'])
+  for (const status of ['pending-review', 'reviewing', 'ready'])
+    test(`${model} keeps its final reply consistent with a ${status} skill card`, async t => {
+      for (let run = 0; run < 3; run++) {
+        let step = 0;
+        const definition = {
+          name: 'Weekly summary',
+          description: 'Summarize weekly work.',
+          instructions: 'List completed work and next actions.',
+        };
+        t.mock.method(globalThis, 'fetch', async (_url, init) => {
+          const body = JSON.parse(init.body);
+          if (isCompletionRequest(body))
+            return Response.json(selectReply('azure', { status: 'completed', reason: 'The model stopped.' }));
+          return Response.json(
+            nativeReply(
+              'azure',
+              [
+                { calls: [use('skills.read', { skillId: 'workspace-skill-authoring' })] },
+                { calls: [use('skills.draft', { skillId: 'new', input: { expectedVersion: 0, definition } })] },
+                { text: 'I could not open a review card for this skill.' },
+              ][step++] ?? { text: 'No review card was created.' },
+            ),
+          );
+        });
+        const result = await inferWithTools(
+          { ...nativeRoutes.azure, model },
+          [{ role: 'user', text: 'Create a weekly summary skill that lists completed work and next actions.' }],
+          async call => {
+            if (call.tool === 'skills.read') return readSkill(call.skillId);
+            assert.equal(call.tool, 'skills.draft');
+            return { importId: '00000000-0000-4000-8000-000000000001', status, receipts: [] };
+          },
+        );
+        assert.equal(
+          result.text,
+          status === 'ready'
+            ? "I've drafted the skill, and it's ready for your review. Check the card, then select **Install and enable**."
+            : "I've drafted the skill. When its safety review finishes, select **Install and enable** on the card.",
+        );
+        assert.equal(step, 3, 'A saved review must not cause another drafting or correction loop.');
+        t.mock.restoreAll();
+      }
+    });
 
 test('the chat creator can load pinned writing and example guides on demand', async () => {
   const creator = readSkill('workspace-skill-authoring');

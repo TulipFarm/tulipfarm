@@ -13,7 +13,7 @@ import {
 import { chargedBytes, type FileBytes } from '@tulipfarm/files';
 import { canonicalJson } from '@tulipfarm/tables/canonical';
 import { relation, type AgentStorage, type AgentTransaction } from './store.ts';
-import { requireDraftSources } from './draft-sources.ts';
+import { requireOwnDefinitionSources } from './draft-sources.ts';
 import {
   SkillPackageError,
   skillDigestSchema,
@@ -54,7 +54,7 @@ export async function requireStoredSkillPackage(
     throw new SkillPackageError('package-unavailable');
   const sources = sourceDependenciesSchema.parse(row.sources);
   await requireNoMcpDerived(tx, sources);
-  await requireDraftSources(tx, actor, sources);
+  await requireOwnDefinitionSources(tx, actor, sources, true);
   return { id: uuidSchema.parse(row.id), instructions: z.string().parse(row.instructions), sources };
 }
 
@@ -92,7 +92,7 @@ export function createSkillObjects(
     const sources = sourceDependenciesSchema.parse(origin);
     await transaction(workspaceId, actor, async tx => {
       await requireNoMcpDerived(tx, sources);
-      await requireDraftSources(tx, actor, sources);
+      await requireOwnDefinitionSources(tx, actor, sources, true);
       await lockQuota(tx);
       const previous = (
         await tx.client.query(
@@ -146,7 +146,7 @@ export function createSkillObjects(
     for (const file of files) {
       const digest = skillBytesDigest(file.bytes);
       await transaction(workspaceId, actor, async tx => {
-        await requireDraftSources(tx, actor, sources);
+        await requireOwnDefinitionSources(tx, actor, sources, true);
         if (
           !(
             await tx.client.query(
@@ -164,7 +164,7 @@ export function createSkillObjects(
     }
     await transaction(workspaceId, actor, async tx => {
       await requireNoMcpDerived(tx, sources);
-      await requireDraftSources(tx, actor, sources);
+      await requireOwnDefinitionSources(tx, actor, sources, true);
       const changed = await tx.client.query(
         `UPDATE ${relation(tx, 'tf_skill_packages')} SET ready=true WHERE id=$1 AND membership_id=$2 AND digest=$3 AND expires_at>now()`,
         [id, actor.membershipId, pkg.digest],
@@ -195,7 +195,7 @@ export function createSkillObjects(
         )
       ).rows[0];
       if (!row) throw new AccessDenied();
-      await requireDraftSources(tx, actor, sourceDependenciesSchema.parse(row.sources));
+      await requireOwnDefinitionSources(tx, actor, sourceDependenciesSchema.parse(row.sources), true);
       return skillPackageSchema.parse({ digest: row.digest, manifest: row.manifest });
     });
     const files = await readFiles(workspaceId, pkg);
