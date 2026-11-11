@@ -83,7 +83,7 @@ async function setup(admission) {
 }
 
 test(
-  'only server-resolved built-in skills are passed to tool discovery for their own reply',
+  'agent authoring stays resolved across clarification until another skill is selected',
   { timeout: 60000 },
   async t => {
     const f = await setup();
@@ -102,12 +102,68 @@ test(
         { kind: 'skill', ...skill },
         { kind: 'text', text: 'Qualify this lead.' },
       ],
+      [{ kind: 'text', text: 'Continue.' }],
     ]) {
       assert.equal(await f.process(chatId, await f.send(chatId, parts)), 'completed');
     }
-    assert.deepEqual(active, [['agent-authoring'], [], []]);
+    assert.deepEqual(active, [['agent-authoring'], ['agent-authoring'], [], []]);
+    const reminder = f.replies[1].messages.find(message => message.text.includes('Skill invoked by the requester'));
+    assert.equal(JSON.parse(reminder.text.split('\n')[2]).procedure, readSkill('agent-authoring').instructions);
   },
 );
+
+test('agent authoring stops carrying over once a draft exists', { timeout: 60000 }, async t => {
+  const f = await setup();
+  t.after(() => f.close());
+  const active = [];
+  f.hooks.reply = async input => active.push(input.builtinSkills);
+  const chatId = await f.chat();
+  const sent = await f.send(chatId, [
+    { kind: 'skill', skillId: 'agent-authoring', revision: 'latest' },
+    { kind: 'text', text: 'Draft a support agent.' },
+  ]);
+  assert.equal(await f.process(chatId, sent), 'completed');
+  const draftId = randomUUID();
+  await f.db.platform.query(
+    `INSERT INTO ${f.table('tf_conversation_tool_calls')} (id,conversation_id,turn_id,sequence,tool,status)
+     VALUES ($1,$2,$3,1,'agents.draft','completed')`,
+    [draftId, chatId, sent.turnId],
+  );
+  await f.db.platform.query(
+    `INSERT INTO ${f.table('tf_chat_authoring_drafts')}
+     (id,conversation_id,turn_id,membership_id,user_id,proposal,digest,sources)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,'[]')`,
+    [
+      draftId,
+      chatId,
+      sent.turnId,
+      f.w.membershipId,
+      f.w.userId,
+      { kind: 'agent', targetId: randomUUID(), input: {} },
+      'd'.repeat(64),
+    ],
+  );
+  assert.equal(await f.process(chatId, await f.send(chatId, [{ kind: 'text', text: 'Thanks.' }])), 'completed');
+  assert.deepEqual(active, [['agent-authoring'], []]);
+});
+
+test('cancelling an agent setup stops its authoring flow', { timeout: 60000 }, async t => {
+  const f = await setup();
+  t.after(() => f.close());
+  const active = [];
+  f.hooks.reply = async input => active.push(input.builtinSkills);
+  const chatId = await f.chat();
+  const sent = await f.send(chatId, [
+    { kind: 'skill', skillId: 'agent-authoring', revision: 'latest' },
+    { kind: 'text', text: 'Draft a support agent.' },
+  ]);
+  await f.conversations.cancel(f.w.id, f.w.userId, chatId, sent.turnId, {
+    commandId: randomUUID(),
+    expectedGeneration: 0,
+  });
+  assert.equal(await f.process(chatId, await f.send(chatId, [{ kind: 'text', text: 'Hello.' }])), 'completed');
+  assert.deepEqual(active, [[]]);
+});
 
 test('exact Install handoff works without any configured model provider', { timeout: 60000 }, async t => {
   const keys = ['MODEL_CATALOG', 'MODEL_CATALOG_FILE', ...modelCatalogEnvNames(readModelCatalog({}).catalog)];

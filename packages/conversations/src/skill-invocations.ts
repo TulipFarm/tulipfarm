@@ -26,7 +26,33 @@ export async function requestedSkill(
       [conversationId, messageId],
     )
   ).rows[0];
-  return row ? invocationSchema.parse(row) : null;
+  if (row) return invocationSchema.parse(row);
+  const continued = (
+    await tx.client.query(
+      `WITH latest AS (
+        SELECT p.skill_id AS "skillId",p.skill_revision AS revision,t.accepted_sequence,active.accepted_sequence AS current_sequence
+        FROM ${qualified(tx.schema, 'tf_conversation_parts')} p
+        JOIN ${qualified(tx.schema, 'tf_conversation_turns')} t ON t.source_message_id=p.message_id AND t.conversation_id=p.conversation_id
+        JOIN ${qualified(tx.schema, 'tf_conversation_messages')} m ON m.id=p.message_id AND m.conversation_id=p.conversation_id
+        JOIN ${qualified(tx.schema, 'tf_conversation_messages')} current ON current.id=$2 AND current.conversation_id=p.conversation_id AND current.membership_id=m.membership_id
+        JOIN ${qualified(tx.schema, 'tf_conversation_turns')} active ON active.source_message_id=current.id AND active.conversation_id=current.conversation_id
+        WHERE p.conversation_id=$1 AND p.kind='skill' AND t.accepted_sequence<active.accepted_sequence
+        ORDER BY t.accepted_sequence DESC LIMIT 1
+      )
+      SELECT "skillId",revision FROM latest
+      WHERE "skillId"='agent-authoring' AND NOT EXISTS (
+        SELECT 1 FROM ${qualified(tx.schema, 'tf_chat_authoring_drafts')} d
+        JOIN ${qualified(tx.schema, 'tf_conversation_turns')} t ON t.id=d.turn_id AND t.conversation_id=d.conversation_id
+        WHERE d.conversation_id=$1 AND d.proposal->>'kind'='agent' AND t.accepted_sequence>=latest.accepted_sequence
+      ) AND NOT EXISTS (
+        SELECT 1 FROM ${qualified(tx.schema, 'tf_conversation_turns')} t
+        WHERE t.conversation_id=$1 AND t.status='cancelled'
+          AND t.accepted_sequence>=latest.accepted_sequence AND t.accepted_sequence<latest.current_sequence
+      )`,
+      [conversationId, messageId],
+    )
+  ).rows[0];
+  return continued ? invocationSchema.parse(continued) : null;
 }
 
 export async function insertSkillPart(

@@ -1859,6 +1859,13 @@ const unfinishedNote =
 const unfinishedReply =
   'I stopped before finishing this request. Check Tool activity for what ran, then ask me to continue.';
 const unfinishedNoToolsReply = "I stopped before finishing this request. Ask me to continue when you're ready.";
+const agentAuthoringRefusal = (text: string) =>
+  /\b(?:i|we) (?:cannot|can't|can’t|could not|couldn't|couldn’t|am unable to|are unable to) (?:draft|prepare|create|build|set up) (?:this|the|an?|your) agent(?: draft| setup)?(?: (?:in|from|through) (?:this|the) chat)?(?:[.!](?=\s|$)|$)/i.test(
+    text,
+  ) ||
+  /\b(?:agents[._](?:context|draft)|(?:drafting|authoring) tools?)\b.{0,100}\b(?:unavailable|not available|not offered|not enabled|not provided|missing)\b|\b(?:unavailable|not available|not offered|do not have|don't have|missing)\b.{0,100}\b(?:agents[._](?:context|draft)|(?:drafting|authoring) tools?)\b/i.test(
+    text,
+  );
 const writeAlone =
   'Not run. Request a tool that changes data alone, in its own response. Read-only tools can run together.';
 const chatSystemBlocks = (projectInstructions?: string, images = false) => {
@@ -3385,7 +3392,7 @@ export async function inferWithTools(
     invitationLookup(sourceMessages) || !tools?.answerText
       ? undefined
       : update => {
-          if (!directoryExpected) tools?.answerText?.(update);
+          if (!directoryExpected && !activeBuiltinSkills.has('agent-authoring')) tools?.answerText?.(update);
         };
   let calls = z
     .number()
@@ -3664,6 +3671,27 @@ export async function inferWithTools(
   let previousInventory: string | undefined;
   let catalog: ReturnType<typeof nativeChatTools> | undefined;
   const activeBuiltinSkills = new Set(tools?.builtinSkills);
+  let authoringContextRead = false;
+  let authoringDraftMade = false;
+  let authoringFailure: 'context' | 'draft' | undefined;
+  let authoringRecovering = false;
+  let authoringRecoveryAttempted = false;
+  let authoringRecoveryRounds = 0;
+  const authoringRecoveryLog = (outcome: string) =>
+    log('info', 'inference', 'call_completed', {
+      operation: 'chat.agent-authoring-recovery',
+      outcome,
+      attempt: authoringRecoveryRounds,
+    });
+  const authoringStoppedReply = () => {
+    const text =
+      authoringFailure === 'context'
+        ? "I couldn't read the setup details this agent needs, so I couldn't draft it."
+        : "I couldn't draft this agent in chat.";
+    return tools?.agentBuilderUrl
+      ? `${text} [Create it in the agent builder](${tools.agentBuilderUrl}) instead.`
+      : text;
+  };
   const loaded = new Set(
     [...(tools?.preloadedTools ?? []), ...[...activeBuiltinSkills].flatMap(builtinSkillTools)].map(nativeToolName),
   );
@@ -3925,6 +3953,23 @@ export async function inferWithTools(
   };
   for (let step = 0; ; step++) {
     const finalizing = calls >= chatToolCallLimit || guard.stalled || rejectionsSpent;
+    let authoringTool: string | undefined;
+    if (authoringRecovering) {
+      if (authoringDraftMade) {
+        authoringRecoveryLog('recovered');
+        authoringRecovering = false;
+      } else {
+        if (authoringFailure || authoringRecoveryRounds >= 2 || finalizing) {
+          authoringRecoveryLog(authoringFailure ? `${authoringFailure}-failed` : 'exhausted');
+          return finish(authoringStoppedReply(), true);
+        }
+        authoringTool = authoringContextRead ? 'agents_draft' : 'agents_context';
+        forceTool = authoringTool;
+        lastUsed.set(authoringTool, step);
+        authoringRecoveryRounds++;
+        authoringRecoveryLog(authoringContextRead ? 'draft' : 'context');
+      }
+    }
     const stoppingReply = rejectionsSpent ? toolRejectedReply : guard.stalled ? toolLoopReply : toolLimitReply;
     // A forced table tool runs only while no row change has been tried, and the change only after a schema that read.
     // A forced change that used a wrong table ID is forced once more, with the ID its result names.
@@ -4107,6 +4152,13 @@ export async function inferWithTools(
         activeCatalog,
       };
     });
+    if (
+      authoringTool &&
+      (selected.kind !== 'step' || selected.calls.length !== 1 || selected.calls[0]?.name !== authoringTool)
+    ) {
+      authoringRecoveryLog('exhausted');
+      return finish(authoringStoppedReply(), true);
+    }
     if (selected.kind === 'failure') {
       // A forced table tool round that ran away or came back unreadable goes to the fallback, else back to the model.
       if (rowTool && (selected.reason === 'output-limit' || selected.reason === 'invalid-decision')) {
@@ -4311,6 +4363,31 @@ export async function inferWithTools(
           ? finish(rendered.input.summary, true, { layout: rendered.input })
           : finish(selected.text, true);
       };
+      if (
+        activeBuiltinSkills.has('agent-authoring') &&
+        !authoringDraftMade &&
+        agentAuthoringRefusal(candidate) &&
+        ['agents_context', 'agents_draft'].every(name => activeCatalog.tools.some(tool => tool.name === name))
+      ) {
+        preview('');
+        if (authoringFailure || authoringRecoveryAttempted || finalizing) {
+          authoringRecoveryLog(authoringFailure ? `${authoringFailure}-failed` : 'exhausted');
+          return finish(authoringStoppedReply(), true);
+        }
+        authoringRecoveryAttempted = true;
+        authoringRecovering = true;
+        items.push(
+          { kind: 'turn', turn: { role: 'assistant', text: candidate } },
+          {
+            kind: 'turn',
+            turn: {
+              role: 'user',
+              text: 'Agent authoring is available in the offered catalog. The last reply claimed otherwise without a failed prerequisite. Call agents_context to read the current setup, then agents_draft to prepare the requested agent for human review. If the context has already been read successfully, use that result without repeating it. Do not delegate, invent endpoints, broaden permissions, or approve any action.',
+            },
+          },
+        );
+        continue;
+      }
       if (await pastedCsvFileQuestion(request, candidate)) {
         if (pastedFileRetried || finalizing) return finish(candidate, true);
         pastedFileRetried = true;
@@ -4577,7 +4654,10 @@ export async function inferWithTools(
     for (const call of selected.calls) if (loaded.has(call.name)) lastUsed.set(call.name, step);
     if (selected.calls.some(call => isWorkTool(call.name))) workToolUsed = true;
     items.push({ kind: 'model', text: selected.text, calls: selected.calls, raw: selected.raw });
-    carried = [carried, selected.text.trim()].filter(Boolean).join('\n\n').slice(-narrationLimit);
+    carried = [carried, authoringRecovering ? '' : selected.text.trim()]
+      .filter(Boolean)
+      .join('\n\n')
+      .slice(-narrationLimit);
     const result = (call: NativeCall, output: string, error: boolean): ToolResult => ({
       id: call.id,
       name: call.name,
@@ -4599,6 +4679,14 @@ export async function inferWithTools(
         for (const name of activeCatalog.load(builtinSkillTools(call.skillId))) lastUsed.set(name, step);
       }
       const cardReceipt = reviewCardReceipt(native.name, value);
+      if (call.tool === 'agents.context') {
+        if (!value || typeof value !== 'object' || 'error' in value) authoringFailure = 'context';
+        else authoringContextRead = true;
+      }
+      if (call.tool === 'agents.draft') {
+        if (cardReceipt) authoringDraftMade = true;
+        else authoringFailure = 'draft';
+      }
       const reviewCard = reviewCardReference(call.tool, value);
       return {
         ...result(native, toolOutput(call, value), false),
