@@ -328,6 +328,7 @@ test('chat row writes after untrusted content become member-approved review draf
     const before = await live();
     const { chatId } = await chatTool({ tool: 'schema.inspect', tableId: table.tableId }, [], {
       message: 'Add one row to Notes for review before writing anything.',
+      reply: 'Your review card for the row is ready below.',
     });
     const call = createCall('Review retry');
     const { result } = await chatTool(call, [], { chatId, message: 'Please create the review card.' });

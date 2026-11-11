@@ -32,6 +32,14 @@ test('only the immediately preceding unbacked assistant proposal continues a row
   assert.equal(
     rowReviewPrefilter([
       request,
+      { role: 'assistant', text: 'Done.' },
+      { role: 'user', text: 'Please create the review card.' },
+    ]),
+    undefined,
+  );
+  assert.equal(
+    rowReviewPrefilter([
+      request,
       {
         ...claim,
         rowReviews: [{ table: 'Notes', input: { tool: 'rows.create' } }],

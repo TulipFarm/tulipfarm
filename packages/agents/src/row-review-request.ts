@@ -25,10 +25,9 @@ export function rowReviewPrefilter(turns: readonly RowReviewTurn[], tables: read
   if (
     human &&
     rowContext(human) &&
-    ((review.test(latest) && card.test(latest)) ||
-      (previous?.role === 'assistant' &&
-        reviewClaim(previous.text) &&
-        !previous.rowReviews?.some(receipt => rowReviewMatches(human, receipt.input, receipt.table))))
+    previous?.role === 'assistant' &&
+    reviewClaim(previous.text) &&
+    !previous.rowReviews?.some(receipt => rowReviewMatches(human, receipt.input, receipt.table))
   )
     return `${human}\n${latest}`;
   return review.test(latest) && rowContext(latest) ? latest : undefined;
