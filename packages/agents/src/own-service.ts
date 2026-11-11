@@ -34,7 +34,6 @@ export function isOwnServiceUrl(url: string, domains: readonly string[]): boolea
 
 export const ownServiceRefusal = {
   status: 'failed',
-  code: 'own-service',
-  message:
-    'Nothing was sent: api.request cannot call TulipFarm itself. Use the built-in tool for the job instead, such as tables.propose to create or change tables, rows tools for records, and files or knowledge tools for documents.',
+  code: 'address-denied',
+  message: "Nothing was sent. This tool can't call TulipFarm itself. Use the built-in tools for this task instead.",
 } as const;

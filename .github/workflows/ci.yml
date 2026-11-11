@@ -210,6 +210,12 @@ jobs:
         env:
           XAI_API_KEY: synthetic-not-secret
         run: pnpm --filter @tulipfarm/agents exec node --test --test-concurrency=1 test/row-drafts.integration.mjs test/project-drafts.integration.mjs
+      - name: Check API call approvals and per-turn limits
+        env:
+          XAI_API_KEY: synthetic-not-secret
+        run: |
+          pnpm --filter @tulipfarm/conversations exec node --test --test-concurrency=1 test/integration/api-calls.test.mjs
+          pnpm --filter @tulipfarm/agents exec node --test --test-concurrency=1 test/api-calls-task.integration.mjs
       - name: Check table approvals and workspace skill sources
         run: |
           pnpm --filter @tulipfarm/agents exec node --test --test-concurrency=1 test/table-approval.integration.mjs

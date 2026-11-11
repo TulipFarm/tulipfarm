@@ -47,6 +47,7 @@ import { chatToolCallLimit, chatTitleSchema, shortenTitle } from '@tulipfarm/con
 import { reviewCardReference, type ReviewCardReference, type ReviewCardState } from '@tulipfarm/conversations/results';
 import { withoutTrailingControlMarker } from '@tulipfarm/conversations/reply-text';
 import { createChatToolGuard } from './chat-tool-guard.ts';
+import { apiRefusedReply } from './api-call-guard.ts';
 import {
   agentModelInputSchema,
   modelDecisionSchema,
@@ -1305,6 +1306,7 @@ export type ToolInferenceContext = {
   catalog?: () => Promise<McpModelCatalog | undefined>;
   priorCalls?: number;
   priorToolCalls?: readonly unknown[];
+  priorToolResults?: readonly { call: unknown; output: unknown }[];
   /** Loads a reauthorized people-and-teams receipt from this chat, never from message text. */
   readWorkspaceDirectory?: (() => Promise<unknown>) | undefined;
   priorReviewCards?: readonly ReviewCardReference[];
@@ -3456,7 +3458,8 @@ export async function inferWithTools(
     .min(0)
     .max(chatToolCallLimit)
     .parse(tools?.priorCalls ?? 0);
-  let guard = createChatToolGuard(tools?.priorToolCalls);
+  const guard = createChatToolGuard(tools?.priorToolCalls, tools?.priorToolResults);
+  let apiStopped = false;
   let corrections = 0;
   // Three rejected tool requests end tool use for the reply; the model then answers in plain text.
   let rejectionsSpent = false;
@@ -4059,7 +4062,7 @@ export async function inferWithTools(
       outcome: summarised ? 'summarised' : 'stubbed',
     });
   };
-  if (tools?.priorReviewCards?.length && tools.reviewCards) {
+  if (!guard.apiStoppingReply && tools?.priorReviewCards?.length && tools.reviewCards) {
     await tableReviewReply();
     items.push({
       kind: 'turn',
@@ -4103,7 +4106,6 @@ export async function inferWithTools(
     config = fallback;
     answeredBy = tools.fallback.label;
     recordModelFallback('used', primary, target);
-    guard = createChatToolGuard(tools.priorToolCalls);
     corrections = 0;
     completionCorrections = 0;
     cardClaimed = false;
@@ -4117,6 +4119,10 @@ export async function inferWithTools(
     return true;
   };
   for (let step = 0; ; step++) {
+    if (apiStopped || guard.apiStoppingReply) {
+      toolBudgetSpent(guard.apiLimitReached ? 'tool-limit' : 'tool-rejections');
+      return completeReply(apiStopped ? apiRefusedReply : guard.apiStoppingReply!, true);
+    }
     const finalizing = calls >= chatToolCallLimit || guard.stalled || rejectionsSpent;
     let authoringTool: string | undefined;
     if (activeBuiltinSkills.has('agent-authoring') && (authoringFailure || (!authoringDraftMade && finalizing)))
@@ -5126,6 +5132,10 @@ export async function inferWithTools(
     }
     const [only] = valid;
     if (only && valid.length === 1 && guard.duplicate(only.call)) {
+      if (only.call.tool === 'api.request' && guard.refused(only.call)) {
+        apiStopped = true;
+        continue;
+      }
       log('warn', 'activity', 'call_failed', { operation: 'chat.tool-budget', 'error.type': 'duplicate-tool' });
       items.push({
         kind: 'results',
@@ -5199,7 +5209,34 @@ export async function inferWithTools(
     if (narration) carried = '';
     const outputs: ToolResult[] = [];
     const images: ToolResultImages[] = [];
-    if (valid.length === 1 && only) {
+    if (valid.some(entry => entry.call.tool === 'api.request')) {
+      for (const entry of valid) {
+        if (guard.apiLimitReached || guard.apiFailuresSpent) break;
+        if (entry.call.tool === 'api.request' && guard.refused(entry.call)) {
+          apiStopped = true;
+          break;
+        }
+        if (guard.duplicate(entry.call)) {
+          outputs.push(
+            result(
+              entry.native,
+              'Not run. This exact action already has a receipt in this turn. Use its existing result or a read-only status tool. A receipt is not proof of success; do not repeat a pending, failed, or uncertain action.',
+              true,
+            ),
+          );
+          continue;
+        }
+        const { value, shown } = toolResultImages(
+          await execute(entry.call, entry.activity, entry === narrated ? narration : undefined),
+        );
+        const waiting = mcpExecutionResultSchema.safeParse(value);
+        if (waiting.success && waiting.data.kind === 'waiting') throw new Error('mcp-wait-not-persisted');
+        const output = executedResult(entry.native, entry.call, value);
+        outputs.push(output);
+        guard.record(entry.call, output.output);
+        if (shown) images.push(shown);
+      }
+    } else if (valid.length === 1 && only) {
       const { value, shown } = toolResultImages(
         await execute(only.call, only.activity, only === narrated ? narration : undefined),
       );
@@ -5228,7 +5265,8 @@ export async function inferWithTools(
       const settled = await Promise.allSettled([run(), run()]);
       for (const outcome of settled) if (outcome.status === 'rejected') throw outcome.reason;
     }
-    for (const [index, entry] of valid.entries()) guard.record(entry.call, outputs[index]!.output);
+    if (!valid.some(entry => entry.call.tool === 'api.request'))
+      for (const [index, entry] of valid.entries()) guard.record(entry.call, outputs[index]!.output);
     items.push({ kind: 'results', results: cap(outputs, step) }, ...imagesTurn(images));
     if (work.length) toolRounds++;
   }
