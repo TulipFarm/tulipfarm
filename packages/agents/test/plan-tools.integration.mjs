@@ -72,6 +72,20 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     const chatSource = { kind: 'private-conversation', conversationId: chat };
 
     assert.deepEqual((await call(chat, { tool: 'plans.read' })).result.plan, null);
+    const invalidMapping = await call(chat, {
+      tool: 'plans.create',
+      title: 'Release outline',
+      execution: 'plan-only',
+      planning: {
+        requirements: [{ key: 'prepare', description: 'Prepare release', tasks: ['wrong-key'] }],
+      },
+      tasks: [{ key: 'prepare', title: 'Prepare release' }],
+    });
+    assert.equal(invalidMapping.result.error, 'planning-coverage');
+    assert.deepEqual(invalidMapping.result.path, ['planning', 'requirements', 0, 'tasks']);
+    assert.match(invalidMapping.result.instruction, /only to deliverable work keys: prepare/);
+    assert.equal((await call(chat, { tool: 'plans.read' })).result.plan, null);
+    assert.equal(wakes.length, 0);
     await assert.rejects(
       tools.invokeWithSources({ workspaceId: w.id, actor, callId: randomUUID() }, { tool: 'plans.read' }),
       AccessDenied,
