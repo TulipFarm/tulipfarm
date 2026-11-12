@@ -11,6 +11,7 @@ import {
   type HumanActor,
 } from '@tulipfarm/access';
 import type { IntegrationKeyring } from '@tulipfarm/integrations';
+import { TokenPlanError } from '@tulipfarm/integrations/token-plans';
 import { qualified, type createWorkspaceRuntime, commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import {
   accountSchema,
@@ -364,6 +365,16 @@ export function createGitHubAccounts(options: {
             `UPDATE ${relation(tx, 'account_attempts')} SET state='consumed',verifier=NULL WHERE account_id=$1`,
             [row.id],
           );
+          // A Copilot connection that uses this account signs out with it, and its shares end.
+          const connections = qualified(tx.schema, 'tf_subscription_connections');
+          await tx.client.query(
+            `DELETE FROM ${qualified(tx.schema, 'tf_subscription_grants')} WHERE connection_id IN (SELECT id FROM ${connections} WHERE github_account_id=$1)`,
+            [row.id],
+          );
+          await tx.client.query(
+            `UPDATE ${connections} SET state='signed-out',github_account_id=NULL,models=NULL,models_fetched_at=NULL,updated_at=clock_timestamp() WHERE github_account_id=$1`,
+            [row.id],
+          );
           await audit(tx, actor, row.id, 'disconnect');
           await recommendations();
         }
@@ -533,6 +544,49 @@ export function createGitHubAccounts(options: {
           true,
         );
         if (result !== replaced) return result as T;
+      }
+    },
+    /**
+     * The current token of the member's account, for a Copilot connection that uses it. Replies run without a signed-in
+     * user, so the member is found by membership.
+     */
+    async memberAccessToken(workspaceId: string, membershipId: string, id: string) {
+      try {
+        const actor = await options.runtime.transaction(
+          uuidSchema.parse(workspaceId),
+          githubCompatibility,
+          async tx => {
+            const member = z
+              .object({ user_id: z.string() })
+              .optional()
+              .parse(
+                (
+                  await tx.client.query(
+                    `SELECT user_id FROM ${qualified(tx.schema, 'tf_memberships')} WHERE id=$1 AND removed_at IS NULL`,
+                    [uuidSchema.parse(membershipId)],
+                  )
+                ).rows[0],
+              );
+            if (!member) throw new GitHubAccountError('account-reconnect-required');
+            return { kind: 'human' as const, userId: member.user_id, membershipId };
+          },
+        );
+        return await accounts.withCredential(
+          workspaceId,
+          actor,
+          id,
+          async credential => credential.accessToken,
+          undefined,
+          undefined,
+          true,
+        );
+      } catch (error) {
+        if (
+          error instanceof AccessDenied ||
+          (error instanceof GitHubAccountError && error.code === 'account-reconnect-required')
+        )
+          throw new TokenPlanError('copilot', 'reconnect-required');
+        throw new TokenPlanError('copilot', 'unavailable');
       }
     },
     /** Checks, without a row lock or a provider call, that the account can still serve `expectedGeneration`. */

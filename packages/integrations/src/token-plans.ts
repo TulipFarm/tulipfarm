@@ -51,6 +51,8 @@ export type TokenPlanStatus = {
   state: 'not-connected' | 'connected' | 'reconnect-required' | 'signed-out';
   /** The account the token belongs to when the vendor names it, such as a GitHub login. */
   account: string | null;
+  /** For Copilot, the personal GitHub account the connection uses instead of a token of its own. */
+  githubAccountId?: string | null;
   planUsage: boolean;
   models: TokenPlanModel[];
 };
@@ -85,6 +87,10 @@ const connectionRow = z.object({
   credential: z.unknown(),
   models: z.unknown(),
   models_fetched_at: z.date().nullable(),
+  github_account_id: z.uuid().nullable(),
+  account_state: z.string().nullable(),
+  account_login: z.string().nullable(),
+  account_expired: z.boolean().nullable(),
 });
 type ConnectionRow = z.infer<typeof connectionRow>;
 const attemptRow = z.object({
@@ -151,6 +157,11 @@ export function createTokenPlan(options: {
   githubClientId?: string;
   /** Renews tokens from a GitHub App sign-in, which expire; an OAuth app's tokens don't. */
   githubClientSecret?: string;
+  /**
+   * For Copilot: reads the current token of a member's personal GitHub account, renewing it when needed. It throws a
+   * `TokenPlanError` with `reconnect-required` when the account needs signing in again.
+   */
+  githubAccountToken?: (workspaceId: string, membershipId: string, accountId: string) => Promise<string>;
   fetcher?: typeof fetch;
 }) {
   const { provider } = options;
@@ -181,24 +192,35 @@ export function createTokenPlan(options: {
   }
 
   async function loadConnection(tx: AuthorizationTransaction, membershipId: string, lock = false) {
-    return connectionRow
-      .optional()
-      .parse(
-        (
-          await tx.client.query(
-            `SELECT id,owner_membership_id,generation,state,email,credential,models,models_fetched_at FROM ${table(tx, 'connections')} WHERE owner_membership_id=$1 AND provider=$2 ${lock ? 'FOR UPDATE' : ''}`,
-            [membershipId, provider],
-          )
-        ).rows[0],
-      );
+    return connectionRow.optional().parse(
+      (
+        await tx.client.query(
+          `SELECT c.id,c.owner_membership_id,c.generation,c.state,c.email,c.credential,c.models,c.models_fetched_at,c.github_account_id,
+              a.state AS account_state,a.identity->>'login' AS account_login,COALESCE(a.expires_at<=clock_timestamp(),false) AS account_expired
+            FROM ${table(tx, 'connections')} c LEFT JOIN ${qualified(tx.schema, 'tf_github_accounts')} a ON a.id=c.github_account_id
+            WHERE c.owner_membership_id=$1 AND c.provider=$2 ${lock ? 'FOR UPDATE OF c' : ''}`,
+          [membershipId, provider],
+        )
+      ).rows[0],
+    );
+  }
+
+  /** A connection that uses a personal GitHub account follows that account: signed out with it, reconnecting with it. */
+  function effectiveState(row: ConnectionRow): ConnectionRow['state'] {
+    if (!row.github_account_id || row.state !== 'connected') return row.state;
+    if (row.account_state === 'disconnected' || row.account_state === null) return 'signed-out';
+    if (row.account_state !== 'active' || row.account_expired) return 'reconnect-required';
+    return 'connected';
   }
 
   function statusOf(row: ConnectionRow | undefined): TokenPlanStatus {
     if (!row) return { state: 'not-connected', account: null, planUsage: false, models: [] };
-    const planUsage = row.state === 'connected';
+    const state = effectiveState(row);
+    const planUsage = state === 'connected';
     return {
-      state: row.state === 'plan-disabled' ? 'reconnect-required' : row.state,
-      account: row.email,
+      state: state === 'plan-disabled' ? 'reconnect-required' : state,
+      account: row.account_login ?? row.email,
+      ...(row.github_account_id ? { githubAccountId: row.github_account_id } : {}),
       planUsage,
       models: planUsage ? (storedModels.safeParse(row.models).data ?? []) : [],
     };
@@ -212,28 +234,56 @@ export function createTokenPlan(options: {
     const models = storedModels.parse(
       checked.models.filter(model => model.slug.length <= 200 && model.label.length <= 200).slice(0, 200),
     );
+    // A Copilot token that lists no models can't run anything, most often because the account has no Copilot plan.
+    if (provider === 'copilot' && !models.length) throw failure('not-eligible');
     const account = checked.account && checked.account.length <= 320 ? checked.account : null;
     return { models, account };
   }
 
-  /** Verifies `token` and stores it as the member's connection, starting a new credential generation. */
-  async function store(workspaceId: string, membershipId: string, token: string, renewal?: Omit<Credential, 'token'>) {
+  /**
+   * Verifies `token` and stores it as the member's connection, starting a new credential generation. With
+   * `githubAccountId`, the connection uses that personal GitHub account and stores no token of its own.
+   */
+  async function store(
+    workspaceId: string,
+    membershipId: string,
+    token: string,
+    renewal?: Omit<Credential, 'token'>,
+    githubAccountId: string | null = null,
+  ) {
     const { models, account } = await verified(token);
     await options.runtime.transaction(uuid.parse(workspaceId), commonCompatibility, async tx => {
       const row = await loadConnection(tx, membershipId, true);
       const generation = row ? row.generation + 1 : 1;
       const binding = credentialBinding(workspaceId, { owner_membership_id: membershipId, generation });
-      const credential = cipher.encrypt(binding, { token, ...renewal });
+      const credential = githubAccountId ? null : cipher.encrypt(binding, { token, ...renewal });
       if (row)
         await tx.client.query(
-          `UPDATE ${table(tx, 'connections')} SET generation=$3,state='connected',email=$4,credential=$5,models=$6,models_fetched_at=clock_timestamp(),cooldown_until=NULL,updated_at=clock_timestamp() WHERE owner_membership_id=$1 AND provider=$2`,
-          [membershipId, provider, generation, account, credential, JSON.stringify(models)],
+          `UPDATE ${table(tx, 'connections')} SET generation=$3,state='connected',email=$4,credential=$5,models=$6,github_account_id=$7,models_fetched_at=clock_timestamp(),cooldown_until=NULL,updated_at=clock_timestamp() WHERE owner_membership_id=$1 AND provider=$2`,
+          [membershipId, provider, generation, account, credential, JSON.stringify(models), githubAccountId],
         );
       else
         await tx.client.query(
-          `INSERT INTO ${table(tx, 'connections')} (id,provider,owner_membership_id,generation,state,email,credential,models,models_fetched_at) VALUES ($1,$2,$3,$4,'connected',$5,$6,$7,clock_timestamp())`,
-          [randomUUID(), provider, membershipId, generation, account, credential, JSON.stringify(models)],
+          `INSERT INTO ${table(tx, 'connections')} (id,provider,owner_membership_id,generation,state,email,credential,models,github_account_id,models_fetched_at) VALUES ($1,$2,$3,$4,'connected',$5,$6,$7,$8,clock_timestamp())`,
+          [
+            randomUUID(),
+            provider,
+            membershipId,
+            generation,
+            account,
+            credential,
+            JSON.stringify(models),
+            githubAccountId,
+          ],
         );
+    });
+  }
+
+  async function accountToken(workspaceId: string, membershipId: string, accountId: string) {
+    if (!options.githubAccountToken) throw failure('unavailable');
+    return options.githubAccountToken(workspaceId, membershipId, accountId).catch((error: unknown) => {
+      if (error instanceof TokenPlanError) throw failure(error.code);
+      throw failure('unavailable');
     });
   }
 
@@ -244,8 +294,10 @@ export function createTokenPlan(options: {
     const outcome = await options.runtime.transaction(uuid.parse(workspaceId), commonCompatibility, async tx => {
       // A refresh token is single-use, so a renewal holds the row lock and checks again whether it is still needed.
       const row = await loadConnection(tx, membershipId, renew);
-      if (!row || row.state === 'signed-out') return { error: 'not-connected' as const };
-      if (row.state !== 'connected') return { error: 'reconnect-required' as const };
+      const state = row && effectiveState(row);
+      if (!row || state === 'signed-out') return { error: 'not-connected' as const };
+      if (state !== 'connected') return { error: 'reconnect-required' as const };
+      if (row.github_account_id) return { account: row.github_account_id, row };
       const binding = credentialBinding(workspaceId, row);
       const credential = cipher.decrypt(binding, row.credential, credentialSchema);
       if (!stale(credential)) return { token: credential.token, row };
@@ -285,6 +337,8 @@ export function createTokenPlan(options: {
     });
     if ('error' in outcome) throw failure(outcome.error);
     if ('renew' in outcome) return storedToken(workspaceId, membershipId, true);
+    if ('account' in outcome)
+      return { token: await accountToken(workspaceId, membershipId, outcome.account), row: outcome.row };
     return outcome;
   }
 
@@ -354,7 +408,8 @@ export function createTokenPlan(options: {
       }));
       const status = statusOf(row);
       const stale =
-        row?.state === 'connected' &&
+        !!row &&
+        effectiveState(row) === 'connected' &&
         (!row.models_fetched_at || Date.now() - row.models_fetched_at.getTime() > modelsMaxAgeMs);
       if (!stale) return status;
       try {
@@ -523,6 +578,33 @@ export function createTokenPlan(options: {
       return { status: 'completed', errorCode: null };
     },
 
+    /**
+     * Connects Copilot with the member's personal GitHub account `accountId`, sharing its sign-in. With `onlyIfFree`, it
+     * leaves a working connection that uses another credential alone and reports whether it connected.
+     */
+    async useGitHubAccount(workspaceId: string, userId: string, accountId: string, onlyIfFree = false) {
+      if (provider !== 'copilot') throw failure('unavailable');
+      const { membershipId, free } = await authorized(
+        workspaceId,
+        userId,
+        async (tx, actor) => {
+          const row = await loadConnection(tx, actor.membershipId);
+          const free = !row || effectiveState(row) !== 'connected' || row.github_account_id === uuid.parse(accountId);
+          return { membershipId: actor.membershipId, free };
+        },
+        'write',
+      );
+      if (onlyIfFree && !free) return false;
+      await store(
+        workspaceId,
+        membershipId,
+        await accountToken(workspaceId, membershipId, accountId),
+        undefined,
+        accountId,
+      );
+      return true;
+    },
+
     /** Clears the stored token and ends every share; a later connection starts private again. */
     async disconnect(workspaceId: string, userId: string) {
       await authorized(
@@ -530,7 +612,7 @@ export function createTokenPlan(options: {
         userId,
         async (tx, actor) => {
           await tx.client.query(
-            `UPDATE ${table(tx, 'connections')} SET state='signed-out',credential=NULL,expires_at=NULL,models=NULL,models_fetched_at=NULL,updated_at=clock_timestamp() WHERE owner_membership_id=$1 AND provider=$2`,
+            `UPDATE ${table(tx, 'connections')} SET state='signed-out',credential=NULL,github_account_id=NULL,expires_at=NULL,models=NULL,models_fetched_at=NULL,updated_at=clock_timestamp() WHERE owner_membership_id=$1 AND provider=$2`,
             [actor.membershipId, provider],
           );
           await tx.client.query(

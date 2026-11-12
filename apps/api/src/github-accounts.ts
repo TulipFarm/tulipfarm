@@ -58,6 +58,8 @@ export function registerGitHubAccounts(
   accounts: ReturnType<typeof createGitHubAccounts> | null,
   reads?: ReturnType<typeof createGitHubReads>,
   botGrants?: ReturnType<typeof createGitHubBotGrants>,
+  /** Runs after a member connects an account, so the same sign-in can also connect Copilot. Failures are ignored. */
+  onConnected?: (workspaceId: string, userId: string, accountId: string) => Promise<unknown>,
 ) {
   app.register(async routes => {
     validation.install(routes, true);
@@ -254,7 +256,10 @@ export function registerGitHubAccounts(
       },
       async request => {
         const { accounts, userId, sessionId } = context(request);
-        return accounts.complete(request.body, sessionId, userId);
+        const completed = await accounts.complete(request.body, sessionId, userId);
+        if (onConnected && completed.account.state === 'active')
+          await onConnected(completed.workspaceId, userId, completed.account.id).catch(() => undefined);
+        return completed;
       },
     );
   });

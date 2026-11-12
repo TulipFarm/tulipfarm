@@ -2,6 +2,7 @@ import { turnRequester } from '@tulipfarm/conversations/turn-requester';
 import type { ConversationRuntime, ReplyFence } from '@tulipfarm/conversations/runtime';
 import { AccessDenied } from '@tulipfarm/access';
 import { planProviders, type PlanProvider } from '@tulipfarm/config';
+import { createGitHubAccounts, githubConfiguration } from '@tulipfarm/github';
 import { integrationCredentialKeyring } from '@tulipfarm/integrations';
 import { ChatGptPlanError, createChatGptPlan } from '@tulipfarm/integrations/chatgpt';
 import { copilotGitHubClient, createTokenPlan, TokenPlanError } from '@tulipfarm/integrations/token-plans';
@@ -28,11 +29,22 @@ export function planCredentialsFromEnvironment(
 ): PlanCredentials {
   const keyring = integrationCredentialKeyring(env);
   if (provider === 'chatgpt') return createChatGptPlan({ runtime, keyring });
+  const github = provider === 'copilot' ? githubConfiguration(env) : null;
   return createTokenPlan({
     provider,
     runtime,
     keyring,
-    ...(provider === 'copilot' ? copilotGitHubClient(env) : {}),
+    ...(provider === 'copilot'
+      ? {
+          ...copilotGitHubClient(env),
+          // A Copilot connection can use the member's personal GitHub account, whose token is read from there.
+          ...(github
+            ? {
+                githubAccountToken: createGitHubAccounts({ runtime, configuration: github, keyring }).memberAccessToken,
+              }
+            : {}),
+        }
+      : {}),
     // Replies only read tokens; members connect through the API, which checks them.
     verify: async () => {
       throw new TokenPlanError(provider, 'unavailable');

@@ -17,6 +17,8 @@ import { Skeleton } from '@tulipfarm/sprout/skeleton';
 import { ArrowUpRight } from 'reicon-react/icons/ArrowUpRight';
 import { Check } from 'reicon-react/icons/Check';
 import { useFeatureChanges, useFeatureRead } from '@/lib/query';
+import { githubApi, githubConsent, githubError } from '@/lib/github';
+import { startGitHub } from '@/features/integrations/connect';
 import { planUsageUrls } from '@/features/chat/reply-failure-copy';
 import { TableRequestError } from '@/features/tables/request-state';
 import {
@@ -37,6 +39,7 @@ import {
 } from './subscription-sharing';
 
 export const tokenConnectionKey = (provider: TokenPlanProvider) => ['models', `${provider}-connection`] as const;
+const githubAccountsKey = (provider: TokenPlanProvider) => ['models', `${provider}-github-accounts`] as const;
 
 const copy = {
   claude: {
@@ -65,6 +68,7 @@ type Phase =
   | { kind: 'idle' }
   | { kind: 'connecting' }
   | { kind: 'starting' }
+  | { kind: 'linking'; accountId: string }
   | { kind: 'device'; device: DeviceSignIn; deadline: number }
   | { kind: 'disconnecting' };
 
@@ -121,6 +125,12 @@ export function TokenPlanPane({ workspaceId, provider }: { workspaceId: string; 
   const text = copy[provider];
   const api = useMemo(() => tokenPlanApi(workspaceId, provider), [workspaceId, provider]);
   const read = useTokenConnection(workspaceId, provider);
+  // Copilot shares the member's personal GitHub sign-in, so the card offers the accounts they already connected.
+  const githubAccounts = useFeatureRead({
+    key: githubAccountsKey(provider),
+    load: (signal: AbortSignal) =>
+      provider === 'copilot' ? githubApi.list(workspaceId, signal) : Promise.resolve(null),
+  });
   const subscriptions = useSubscriptions(workspaceId);
   const people = usePeople(workspaceId);
   const { change } = useFeatureChanges();
@@ -131,7 +141,10 @@ export function TokenPlanPane({ workspaceId, provider }: { workspaceId: string; 
   const [sharing, setSharing] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const refreshAll = useCallback(
-    () => change({ keys: [tokenConnectionKey(provider), subscriptionsKey, modelKeys.catalog()] }),
+    () =>
+      change({
+        keys: [tokenConnectionKey(provider), subscriptionsKey, modelKeys.catalog(), githubAccountsKey(provider)],
+      }),
     [change, provider],
   );
   const fail = useCallback(
@@ -219,6 +232,35 @@ export function TokenPlanPane({ workspaceId, provider }: { workspaceId: string; 
     }
   }
 
+  async function connectWithAccount(accountId: string, login: string) {
+    setPhase({ kind: 'linking', accountId });
+    setMessage(null);
+    try {
+      await api.useGitHubAccount(accountId, freshSignal());
+      setMessage({ tone: 'success', text: `${text.name} is connected with @${login}.` });
+      void refreshAll();
+    } catch (error) {
+      if (error instanceof TableRequestError && error.code === 'not-eligible')
+        setMessage({ tone: 'error', text: `@${login} has no GitHub Copilot plan.` });
+      else fail(error);
+    } finally {
+      setPhase({ kind: 'idle' });
+    }
+  }
+
+  /** Signs in through the personal GitHub connection; coming back connects Copilot with the same account. */
+  async function signInWithGitHub(accountId?: string) {
+    setPhase({ kind: 'starting' });
+    setMessage(null);
+    try {
+      if (accountId) githubConsent((await githubApi.reconnect(workspaceId, accountId)).url);
+      else await startGitHub(workspaceId);
+    } catch (error) {
+      setPhase({ kind: 'idle' });
+      setMessage({ tone: 'error', text: githubError(error) });
+    }
+  }
+
   async function disconnect() {
     setPhase({ kind: 'disconnecting' });
     setMessage(null);
@@ -243,6 +285,13 @@ export function TokenPlanPane({ workspaceId, provider }: { workspaceId: string; 
       : undefined;
   const live = connection && (connection.state === 'connected' || connection.state === 'reconnect-required');
   const signIn = !!connection && connection.state !== 'connected';
+  const github = githubAccounts.state.kind === 'ready' ? githubAccounts.state.data : null;
+  // The web sign-in through the personal GitHub connection replaces the device code when this server offers it.
+  const githubSignIn = provider === 'copilot' && !!github?.configured;
+  const usable = (github?.accounts ?? []).flatMap(account =>
+    account.state === 'active' && account.identity ? [{ id: account.id, login: account.identity.login }] : [],
+  );
+  const linked = connection?.githubAccountId ?? null;
 
   return (
     <div className="grid gap-5">
@@ -305,7 +354,16 @@ export function TokenPlanPane({ workspaceId, provider }: { workspaceId: string; 
       {connection?.state === 'reconnect-required' && (
         <Alert>
           <AlertTitle>Reconnect {text.name}</AlertTitle>
-          <AlertDescription>{tokenPlanErrorMessage(provider, 'reconnect-required')}</AlertDescription>
+          <AlertDescription>
+            {linked
+              ? 'Your GitHub sign-in needs renewing. Reconnecting fixes GitHub and Copilot together.'
+              : tokenPlanErrorMessage(provider, 'reconnect-required')}
+          </AlertDescription>
+          {linked && githubSignIn && (
+            <Button size="sm" onClick={() => void signInWithGitHub(linked)} disabled={busy}>
+              {phase.kind === 'starting' ? 'Opening GitHub…' : 'Reconnect'}
+            </Button>
+          )}
         </Alert>
       )}
       {signIn && provider === 'claude' && (
@@ -362,7 +420,52 @@ export function TokenPlanPane({ workspaceId, provider }: { workspaceId: string; 
           </div>
         </div>
       )}
-      {signIn && provider === 'copilot' && !device && connection.deviceSignIn && (
+      {signIn && githubSignIn && !device && (
+        <div className="grid justify-items-start gap-3">
+          <ol className="grid list-decimal gap-1 pl-5 text-sm text-muted-foreground">
+            <li>
+              {usable.length
+                ? 'Use a GitHub account you already connected, or sign in with another.'
+                : 'Select Sign in with GitHub and approve TulipFarm. It connects your GitHub account too.'}
+            </li>
+            <li>Share it with others if you like. Until you do, only you can use it.</li>
+          </ol>
+          <div className="flex flex-wrap items-center gap-2">
+            {usable.map(account => (
+              <Button
+                key={account.id}
+                size="sm"
+                onClick={() => void connectWithAccount(account.id, account.login)}
+                disabled={busy}
+              >
+                <BrandIcon brand="github" size="inline" />
+                {phase.kind === 'linking' && phase.accountId === account.id
+                  ? `Checking @${account.login}…`
+                  : `Use @${account.login}`}
+              </Button>
+            ))}
+            <Button
+              size="sm"
+              variant={usable.length ? 'outline' : 'default'}
+              onClick={() => void signInWithGitHub()}
+              disabled={busy}
+            >
+              {!usable.length && <BrandIcon brand="github" size="inline" />}
+              {phase.kind === 'starting'
+                ? 'Opening GitHub…'
+                : usable.length
+                  ? 'Sign in with another account'
+                  : 'Sign in with GitHub'}
+            </Button>
+            {!pasting && (
+              <Button size="sm" variant="ghost" onClick={() => setPasting(true)} disabled={busy}>
+                Use a personal access token instead
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
+      {signIn && !githubSignIn && provider === 'copilot' && !device && connection.deviceSignIn && (
         <div className="grid justify-items-start gap-3">
           <ol className="grid list-decimal gap-1 pl-5 text-sm text-muted-foreground">
             <li>Select Sign in with GitHub, then enter the code on GitHub and approve TulipFarm.</li>
@@ -381,7 +484,7 @@ export function TokenPlanPane({ workspaceId, provider }: { workspaceId: string; 
           </div>
         </div>
       )}
-      {signIn && !device && (pasting || (provider === 'copilot' && !connection.deviceSignIn)) && (
+      {signIn && !device && (pasting || (provider === 'copilot' && !githubSignIn && !connection.deviceSignIn)) && (
         <form
           className="grid gap-2"
           onSubmit={event => {
@@ -391,9 +494,9 @@ export function TokenPlanPane({ workspaceId, provider }: { workspaceId: string; 
         >
           {provider === 'copilot' && (
             <p className="text-sm text-muted-foreground">
-              {connection.deviceSignIn ? '' : 'This server can’t use GitHub sign-in. '}Create a fine-grained personal
-              access token with the Copilot Requests permission, then paste it here. Classic tokens, which start with
-              ghp_, don’t work.{' '}
+              {connection.deviceSignIn || githubSignIn ? '' : 'This server can’t use GitHub sign-in. '}Create a
+              fine-grained personal access token with the Copilot Requests permission, then paste it here. Classic
+              tokens, which start with ghp_, don’t work.{' '}
               <ExternalLink href="https://github.com/settings/personal-access-tokens/new">
                 Create a token on GitHub
               </ExternalLink>
@@ -431,8 +534,9 @@ export function TokenPlanPane({ workspaceId, provider }: { workspaceId: string; 
             <DialogHeader>
               <DialogTitle>Disconnect {text.name}?</DialogTitle>
               <DialogDescription>
-                TulipFarm will remove your token and stop using your {text.name} plan, and people you shared it with
-                will lose its models.
+                {linked
+                  ? `TulipFarm will stop using your ${text.name} plan, and people you shared it with will lose its models. Your GitHub connection stays.`
+                  : `TulipFarm will remove your token and stop using your ${text.name} plan, and people you shared it with will lose its models.`}
               </DialogDescription>
             </DialogHeader>
             <DialogFooter>
