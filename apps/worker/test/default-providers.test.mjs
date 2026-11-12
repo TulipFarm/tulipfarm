@@ -3,7 +3,7 @@ import { once } from 'node:events';
 import { createServer } from 'node:http';
 import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
-import { calculateUsageCost, legacyModels, shippedModelCatalogPath } from '@tulipfarm/config';
+import { calculateUsageCost, isPlanProvider, legacyModels, shippedModelCatalogPath } from '@tulipfarm/config';
 import { createMemoryRouteHealth } from '@tulipfarm/agents/chat';
 import { modelEnvironment } from '@tulipfarm/agents/model-environment';
 import { conversationModel } from '../src/conversation-model.ts';
@@ -15,7 +15,14 @@ import { isCompletionRequest } from './native-chat-fixture.mjs';
 // One provider credential at a time: its families must run chat (streamed), titles and tasks against that provider's own API,
 // metered at that provider's catalog price. The provider is a local HTTP server; only the outbound origin is rewritten.
 // ChatGPT plan models run on a member's plan, not a provider credential, so they are off here.
-const planOff = { CHATGPT_PLAN: 'off', CLAUDE_PLAN: 'off', COPILOT_PLAN: 'off' };
+// Plan models are always served; these provider cases predate them, so they use the shipped catalog without them.
+const shippedCatalog = JSON.parse(readFileSync(shippedModelCatalogPath, 'utf8'));
+const planOff = {
+  MODEL_CATALOG: JSON.stringify({
+    ...shippedCatalog,
+    models: shippedCatalog.models.filter(model => !model.routes.some(route => isPlanProvider(route.provider))),
+  }),
+};
 const azureEndpoint = 'https://synthetic.services.ai.azure.com/';
 const providers = {
   anthropic: { env: { ...planOff, ANTHROPIC_API_KEY: 'anthropic-key' }, origin: 'https://api.anthropic.com/' },

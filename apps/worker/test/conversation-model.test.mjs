@@ -8,7 +8,14 @@ import { chatTitleRoute, meteredReply } from '../src/conversation-activities.ts'
 
 const runtime = { transaction: async () => assert.fail('An unavailable model must not reach storage') };
 // ChatGPT plan models run on a member's plan, not a provider credential, so they are off here.
-const planOff = { CHATGPT_PLAN: 'off', CLAUDE_PLAN: 'off', COPILOT_PLAN: 'off' };
+// Plan models are always served; these provider cases predate them, so they use the shipped catalog without them.
+const shippedCatalog = JSON.parse(readFileSync(shippedModelCatalogPath, 'utf8'));
+const planOff = {
+  MODEL_CATALOG: JSON.stringify({
+    ...shippedCatalog,
+    models: shippedCatalog.models.filter(model => !model.routes.some(route => isPlanProvider(route.provider))),
+  }),
+};
 const keys = {
   ...planOff,
   ANTHROPIC_API_KEY: 'synthetic-key',

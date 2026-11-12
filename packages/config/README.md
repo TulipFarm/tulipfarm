@@ -246,7 +246,9 @@ catalog`. `loadModelCatalog(env)` returns the served catalog and
 - **ChatGPT plan.** A `chatgpt` route runs on the requesting member's own
   ChatGPT plan through Sign in with ChatGPT; its endpoint is always
   `https://api.openai.com/v1` with the `responses` API and streaming. It is
-  served while `CHATGPT_PLAN` is `on` (the default) and needs no key. Its models
+  offered while the workspace's `chatgpt-plan` feature flag is on (the
+  default) and needs no key. `claude` and `copilot` routes work the same way
+  with the `claude-plan` and `copilot-plan` flags. Its models
   must be `"pricing": "unmetered"`, can't be the default, hold a role or be a
   fallback, and don't count as the catalog's served model, so a provider key is
   still required. Members see them only after connecting a plan whose ChatGPT

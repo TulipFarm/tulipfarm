@@ -1,7 +1,7 @@
 import { turnRequester } from '@tulipfarm/conversations/turn-requester';
 import type { ConversationRuntime, ReplyFence } from '@tulipfarm/conversations/runtime';
 import { AccessDenied } from '@tulipfarm/access';
-import { planEnabled, type PlanProvider } from '@tulipfarm/config';
+import { planProviders, type PlanProvider } from '@tulipfarm/config';
 import { integrationCredentialKeyring } from '@tulipfarm/integrations';
 import { ChatGptPlanError, createChatGptPlan } from '@tulipfarm/integrations/chatgpt';
 import { copilotGitHubClient, createTokenPlan, TokenPlanError } from '@tulipfarm/integrations/token-plans';
@@ -11,7 +11,7 @@ import {
   type Subscriptions,
 } from '@tulipfarm/integrations/subscriptions';
 import type { PlanFailure } from '@tulipfarm/agents/inference';
-import { log } from '@tulipfarm/observability';
+import { isFeatureEnabled, log } from '@tulipfarm/observability';
 import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 
 /** What a reply needs from a member's plan connection: a current token, and a way to ask the member to reconnect. */
@@ -20,13 +20,12 @@ export type PlanCredentials = {
   requireReconnect(workspaceId: string, membershipId: string): Promise<unknown>;
 };
 
-/** The connections for `provider`'s plan, or null when the deployment turned that plan off. */
+/** The connections for `provider`'s plan. */
 export function planCredentialsFromEnvironment(
   runtime: ConversationRuntime,
   provider: PlanProvider,
   env: NodeJS.ProcessEnv = process.env,
-): PlanCredentials | null {
-  if (!planEnabled(provider, env)) return null;
+): PlanCredentials {
   const keyring = integrationCredentialKeyring(env);
   if (provider === 'chatgpt') return createChatGptPlan({ runtime, keyring });
   return createTokenPlan({
@@ -75,7 +74,10 @@ export async function memberPlans(input: {
   model: string;
 }) {
   const { credentials, subscriptions, workspaceId } = input;
-  const candidates: SubscriptionCandidate[] = credentials
+  // While the workspace's flag for the plan is off, no plan answers and the workspace's fallback model does.
+  const offered =
+    credentials && (await isFeatureEnabled(planProviders[input.provider].flag, null, { id: workspaceId }));
+  const candidates: SubscriptionCandidate[] = offered
     ? (await subscriptions.eligible(workspaceId, input.provider, input.caller)).filter(
         candidate =>
           !candidate.disabled.includes(input.model) &&

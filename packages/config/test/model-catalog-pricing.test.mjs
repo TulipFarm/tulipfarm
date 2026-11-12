@@ -24,9 +24,16 @@ const tokens = {
 const usage = { kind: 'known', tokens };
 
 // Bundles the served catalog of `env` and meters `tokens` for `familyId` through it.
-// Plan models are unmetered and change the price revision, so metering cases turn them off unless they set it.
-function meter(env, familyId, metered = usage) {
-  const served = loadModelCatalog({ CHATGPT_PLAN: 'off', CLAUDE_PLAN: 'off', COPILOT_PLAN: 'off', ...env });
+// Plan models are unmetered and change the price revision, so metering cases leave them out unless `plans` is set.
+const withoutPlans = JSON.stringify({
+  ...shipped,
+  models: shipped.models.filter(
+    item => !item.routes.some(route => ['chatgpt', 'claude', 'copilot'].includes(route.provider)),
+  ),
+});
+function meter(env, familyId, metered = usage, plans = false) {
+  const catalogSet = env.MODEL_CATALOG || env.MODEL_CATALOG_FILE;
+  const served = loadModelCatalog(plans || catalogSet ? env : { MODEL_CATALOG: withoutPlans, ...env });
   const { bundle } = servedModelBundle(served);
   const resolution = resolveModelBundle({
     bundle,
@@ -66,7 +73,7 @@ test('the shipped catalog keeps its prices, revisions and costs', () => {
   assert.equal(output.pricingRevision, initialModelMapping.pricingRevision);
   assert.equal(output.pricingRevision, 'prices-2026-10-19.1');
   // Plan models add to the served prices, so the revision moves on while every cost stays the same.
-  const withPlans = meter({ ANTHROPIC_API_KEY: 'test-key', CHATGPT_PLAN: 'on' }, 'claude-haiku');
+  const withPlans = meter({ ANTHROPIC_API_KEY: 'test-key' }, 'claude-haiku', usage, true);
   assert.equal(withPlans.cost, output.cost);
   assert.notEqual(withPlans.pricingRevision, initialModelMapping.pricingRevision);
 });

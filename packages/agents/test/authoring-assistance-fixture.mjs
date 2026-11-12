@@ -122,7 +122,7 @@ export function authoringFixture() {
       assert.equal(values[2], 'use');
       return rows(state.skillAllowed ? [{ allowed: 1 }] : []);
     }
-    if (sql.includes('JOIN "fixture"."tf_workspace_skill_reviews"'))
+    if (sql.includes('JOIN "ws_11111111111141118111111111111111"."tf_workspace_skill_reviews"'))
       return rows(
         state.skillReviewed
           ? [{ definition: { name: 'Reviewed skill', instructions: state.skillInstructions, sources: state.sources } }]
@@ -217,7 +217,12 @@ export function authoringFixture() {
       const saved = structuredClone(state.ledger),
         available = state.available;
       try {
-        return await operation({ client: { query }, schema: 'fixture', workspaceId, commonVersion: 41 });
+        return await operation({
+          client: { query },
+          schema: 'ws_11111111111141118111111111111111',
+          workspaceId,
+          commonVersion: 41,
+        });
       } catch (error) {
         state.ledger = saved;
         state.available = available;

@@ -58,7 +58,7 @@ The shipped catalog ([`packages/config/catalog/models.json`](packages/config/cat
 skips models whose key is unset; `MODEL_CATALOG_FILE` or `MODEL_CATALOG`
 replaces it. See [`packages/config/README.md`](packages/config/README.md#configuration).
 
-`CHATGPT_PLAN` (default `on`) lets each member connect their own ChatGPT plan
+The `chatgpt-plan` feature flag (default on) lets each member connect their own ChatGPT plan
 in Models settings. Local development completes the sign-in on
 `http://127.0.0.1:1455/auth/callback`; see
 [`self-host/README.md`](self-host/README.md#chatgpt-plan).

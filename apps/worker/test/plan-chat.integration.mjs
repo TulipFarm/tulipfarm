@@ -30,7 +30,7 @@ test(
   async t => {
     t.after(
       useEnv({
-        CLAUDE_PLAN: 'on',
+        FEATURE_FLAG_CLAUDE_PLAN: 'true',
         INTEGRATION_CREDENTIAL_KEY: randomBytes(32).toString('hex'),
         INTEGRATION_CREDENTIAL_KEY_ID: 'plan-chat',
       }),

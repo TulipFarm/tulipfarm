@@ -402,7 +402,7 @@
       },
       "pricing": "unmetered",
       "notes": [
-        "Runs on the requesting member's own Claude plan through the Claude Agent SDK; offered only with CLAUDE_PLAN on. Model claude-sonnet-5."
+        "Runs on the requesting member's own Claude plan through the Claude Agent SDK; offered only while the workspace's claude-plan feature flag is on. Model claude-sonnet-5."
       ]
     },
     {
@@ -423,7 +423,7 @@
       },
       "pricing": "unmetered",
       "notes": [
-        "Runs on the requesting member's own Claude plan through the Claude Agent SDK; offered only with CLAUDE_PLAN on. Model claude-opus-5-5."
+        "Runs on the requesting member's own Claude plan through the Claude Agent SDK; offered only while the workspace's claude-plan feature flag is on. Model claude-opus-5-5."
       ]
     },
     {
@@ -444,7 +444,7 @@
       },
       "pricing": "unmetered",
       "notes": [
-        "Runs on the requesting member's own Claude plan through the Claude Agent SDK; offered only with CLAUDE_PLAN on. Model claude-haiku-4-5."
+        "Runs on the requesting member's own Claude plan through the Claude Agent SDK; offered only while the workspace's claude-plan feature flag is on. Model claude-haiku-4-5."
       ]
     },
     {

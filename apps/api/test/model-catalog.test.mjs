@@ -85,7 +85,7 @@ function fixture(t, eligible, resolve = trustedResolution, snapshot) {
         if (state.brokenStorage) throw new Error('postgres://private-password');
         state.checked = false;
         return operation({
-          schema: 'catalog_test',
+          schema: 'ws_11111111111141118111111111111111',
           client: {
             async query(sql, values) {
               if (sql.includes('tf_model_availability')) return { rows: [], rowCount: 0 };
@@ -93,7 +93,7 @@ function fixture(t, eligible, resolve = trustedResolution, snapshot) {
                 assert.match(sql, /FOR SHARE OF authorization_lock$/);
                 return { rows: [{ id: 1 }], rowCount: 1 };
               }
-              assert.match(sql, /"catalog_test"\."tf_memberships"/);
+              assert.match(sql, /"ws_11111111111141118111111111111111"\."tf_memberships"/);
               assert.match(sql, /removed_at IS NULL/);
               const checkingCurrent = sql.includes('WHERE id = $1');
               assert.deepEqual(values, checkingCurrent ? [membershipId, userId] : [userId]);
