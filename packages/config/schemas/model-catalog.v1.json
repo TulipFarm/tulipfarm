@@ -172,7 +172,8 @@
                   "slack-reactions",
                   "chatgpt-plan",
                   "claude-plan",
-                  "copilot-plan"
+                  "copilot-plan",
+                  "coding-runs"
                 ]
               },
               {
@@ -529,7 +530,8 @@
                   "slack-reactions",
                   "chatgpt-plan",
                   "claude-plan",
-                  "copilot-plan"
+                  "copilot-plan",
+                  "coding-runs"
                 ]
               },
               {

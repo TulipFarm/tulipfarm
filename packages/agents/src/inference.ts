@@ -1415,6 +1415,8 @@ export type ToolInferenceContext = {
   earlierMessages?: boolean;
   /** The workspace reads chat files with the images reader, so the model may call `files.read`. */
   chatFiles?: boolean;
+  /** The person may run coding agents here, so the model may call `coding.run`. */
+  codingRuns?: boolean;
   /** Deferred chat tools, by framework name, offered from the first round without a `tools_search`. */
   preloadedTools?: readonly string[];
   /** Built-in procedures resolved by the server for this request, not names extracted from message text. */
@@ -4677,7 +4679,13 @@ export async function inferWithTools(
     if (older.length) rereadOffered = true;
     for (const name of idle) loaded.delete(name);
     if (idle.length) {
-      catalog = nativeChatTools(mcp, tools?.earlierMessages ?? false, loaded, tools?.chatFiles ?? false);
+      catalog = nativeChatTools(
+        mcp,
+        tools?.earlierMessages ?? false,
+        loaded,
+        tools?.chatFiles ?? false,
+        tools?.codingRuns ?? false,
+      );
       chatToolNameMention = toolNamePattern(catalog.tools);
       previousCatalog = catalogKey(mcp);
     }
@@ -4916,7 +4924,13 @@ export async function inferWithTools(
         if (!catalog || previousCatalog !== currentCatalogKey) {
           catalogChanged = true;
           catalog = observeChatDetailSync('tool-schemas', () =>
-            nativeChatTools(mcp, tools?.earlierMessages ?? false, loaded, tools?.chatFiles ?? false),
+            nativeChatTools(
+              mcp,
+              tools?.earlierMessages ?? false,
+              loaded,
+              tools?.chatFiles ?? false,
+              tools?.codingRuns ?? false,
+            ),
           );
           chatToolNameMention = toolNamePattern(catalog.tools);
           previousCatalog = currentCatalogKey;
@@ -4933,6 +4947,7 @@ export async function inferWithTools(
                   mcp,
                   earlierMessages: tools?.earlierMessages ?? false,
                   chatFiles: tools?.chatFiles ?? false,
+                  codingRuns: tools?.codingRuns ?? false,
                   personalMemory,
                   inventory,
                 },
@@ -5870,6 +5885,7 @@ export async function inferWithTools(
             mcp,
             earlierMessages: tools?.earlierMessages ?? false,
             chatFiles: tools?.chatFiles ?? false,
+            codingRuns: tools?.codingRuns ?? false,
           }),
         );
         if (instruction && value && typeof value === 'object') value = { ...value, instruction };

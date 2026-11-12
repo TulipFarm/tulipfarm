@@ -310,6 +310,10 @@
     "./chat-execution": {
       "types": "./dist/chat-execution.d.ts",
       "default": "./dist/chat-execution.js"
+    },
+    "./coding-runs": {
+      "types": "./dist/coding-runs.d.ts",
+      "default": "./dist/coding-runs.js"
     }
   },
   "scripts": {

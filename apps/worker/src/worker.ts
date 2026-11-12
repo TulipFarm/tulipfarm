@@ -58,6 +58,7 @@ import { createWorkspaceMcpDiscoveryActivities } from './workspace-mcp-compositi
 import { configuredSkillClient } from '@tulipfarm/workflow-snippets/client';
 import { createSkillExecutionFactory } from '@tulipfarm/agents/skill-execution';
 import { createChatExecution, type ChatExecution } from '@tulipfarm/agents/chat-execution';
+import { codingRunsFactory, type CodingRunsFactory } from './coding-runs.ts';
 import { slackActionsFromEnvironment } from '@tulipfarm/agents/slack-environment';
 import { createRecommendationComposition } from './recommendation-activities.ts';
 import { createMemberProfileComposition } from './member-profile-composition.ts';
@@ -71,6 +72,7 @@ const service = workerTelemetryService(role);
 // Bare package names in TULIPFARM_EXTENSIONS resolve from this app.
 await startExtensions('worker', { resolve: specifier => import.meta.resolve(specifier), service });
 let chatExecution: ChatExecution | undefined;
+let codingRuns: CodingRunsFactory | undefined;
 let snippets: SnippetClient | undefined;
 if (role !== 'knowledge') {
   try {
@@ -78,6 +80,8 @@ if (role !== 'knowledge') {
     const backend = configuredExecutionBackend(configuration);
     if (backend && configuration.mode !== 'off') {
       chatExecution = createChatExecution(backend, configuration);
+      // Coding runs stay off until each run has a durable approval the member decides in the app.
+      codingRuns = codingRunsFactory(backend, configuration, undefined);
       snippets = createExecutionSnippetClient(backend, configuration);
     }
   } catch (error) {
@@ -287,6 +291,7 @@ async function run() {
           (workspaceId, taskId) => taskDispatch?.wake(workspaceId, taskId) ?? Promise.resolve(),
           async workspaceId => (await coreResources.flagContext({ workspaceId })).workspace?.slug,
           chatExecution,
+          codingRuns,
         )
       : undefined;
     const gmail = coreResources ? createGoogleHeartbeatActivities(coreResources.runtime) : undefined;

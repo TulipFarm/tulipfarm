@@ -269,8 +269,9 @@ export function nativeChatTools(
   earlierMessages = false,
   loaded?: Set<string>,
   chatFiles = false,
+  codingRuns = false,
 ): ChatCatalog {
-  const full = nativeTools({ kind: 'chat', mcp, earlierMessages, chatFiles }, chatCallSchema);
+  const full = nativeTools({ kind: 'chat', mcp, earlierMessages, chatFiles, codingRuns }, chatCallSchema);
   if (!full.tools.length) throw new Error('tool-catalog-empty');
   if (!loaded) return { ...full, discovery: '', load: () => [], search: () => [] };
   const deferred = full.tools.filter(tool => !coreChatTools.has(tool.name) && !tool.name.startsWith('mcp_'));

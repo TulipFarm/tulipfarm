@@ -67,6 +67,7 @@ export const toolActivityLabels = {
   'skills.files.read': 'Reading a skill resource',
   'skills.execute': 'Running an isolated skill script',
   'execution.run': 'Running code in an isolated machine',
+  'coding.run': 'Running a coding agent on a repository',
   'skills.import': 'Preparing skill packages from a link',
   'skills.import.status': 'Checking a skill package review',
   'skills.import.select': 'Preparing selected skills for safety review',

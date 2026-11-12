@@ -126,6 +126,13 @@ export const featureFlags = {
     scope: 'workspace',
     env: 'FEATURE_FLAG_COPILOT_PLAN',
   },
+  'coding-runs': {
+    description:
+      "Chat offers Run coding agent: Claude Code, Codex or Copilot CLI works on a GitHub repository in a fresh sandbox on the member's own plan, after the member approves. Needs an execution backend with held secrets and the agent templates.",
+    default: false,
+    scope: 'workspace',
+    env: 'FEATURE_FLAG_CODING_RUNS',
+  },
 } as const satisfies Record<string, FeatureFlagDefinition>;
 
 export type FeatureFlag = keyof typeof featureFlags;

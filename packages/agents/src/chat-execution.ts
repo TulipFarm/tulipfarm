@@ -6,6 +6,7 @@ import type {
   ExecutionConfiguration,
   ExecutionJob,
   ExecutionJobState,
+  ExecutionSecret,
 } from '@tulipfarm/execution-contract';
 
 export type ChatExecutionLanguage = 'python' | 'javascript' | 'typescript' | 'bash';
@@ -28,7 +29,7 @@ const commands: Record<ChatExecutionLanguage, (code: string) => ExecutionCommand
   typescript: code => ({ program: 'node', args: ['--input-type=module-typescript', '-e', code] }),
   bash: code => ({ program: 'bash', args: ['-c', code] }),
 };
-const outputLimit = 65536;
+const chatOutputLimit = 65536;
 const poll = 200;
 // Waits between checks double up to this, so many long runs do not flood the backend.
 const longestPoll = 2000;
@@ -38,17 +39,28 @@ type RunnableConfiguration = Exclude<ExecutionConfiguration, { mode: 'off' }>;
 
 /**
  * Runs one command in a fresh allocation and destroys the allocation afterwards.
- * `timeoutMs` shortens the policy's job timeout for callers with a tighter budget.
+ * `timeoutMs` shortens the policy's job timeout for callers with a tighter budget. `template` starts the default
+ * profile from another backend image, `secrets` are held by the backend for the allocation's life, and `outputBytes`
+ * raises the 64 KiB output cap.
  */
 export async function runIsolated(
   backend: ExecutionBackend,
   configuration: RunnableConfiguration,
-  input: { areaId: string; command: ExecutionCommand; timeoutMs?: number },
+  input: {
+    areaId: string;
+    command: ExecutionCommand;
+    timeoutMs?: number;
+    template?: string;
+    secrets?: readonly ExecutionSecret[];
+    outputBytes?: number;
+  },
   outer?: AbortSignal,
 ): Promise<ChatExecutionResult> {
   const { policy, policyRevision } = configuration;
-  const profile = policy.profiles.find(item => item.id === policy.defaultProfile);
-  if (!profile) throw new Error('execution-profile-missing');
+  const defaultProfile = policy.profiles.find(item => item.id === policy.defaultProfile);
+  if (!defaultProfile) throw new Error('execution-profile-missing');
+  const profile = input.template ? { ...defaultProfile, template: input.template } : defaultProfile;
+  const outputLimit = input.outputBytes ?? chatOutputLimit;
   const timeout = Math.min(policy.limits.jobTimeoutSeconds * 1000, input.timeoutMs ?? Infinity);
   const margin = input.timeoutMs === undefined ? slack : Math.min(slack, 5000);
   const signal = AbortSignal.any([AbortSignal.timeout(timeout + margin), ...(outer ? [outer] : [])]);
@@ -57,7 +69,14 @@ export async function runIsolated(
   try {
     const allocationDeadline = new Date(Date.now() + timeout + margin).toISOString();
     let prepared = await backend.prepare(
-      { ...allocation, profile, baseRevision: policy.baseRevision, policyRevision, deadline: allocationDeadline },
+      {
+        ...allocation,
+        profile,
+        baseRevision: policy.baseRevision,
+        policyRevision,
+        deadline: allocationDeadline,
+        ...(input.secrets?.length ? { secrets: input.secrets } : {}),
+      },
       { signal },
     );
     let wait = poll;

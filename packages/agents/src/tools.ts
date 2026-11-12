@@ -99,6 +99,7 @@ import type { SlackActionsFactory } from './slack-actions.ts';
 import { slackResolveSchema, slackThreadReactionSchema, SlackChannelAccessError } from '@tulipfarm/slack';
 import { slackOutboundEnabled } from './slack-outbound.ts';
 import type { ChatExecution } from './chat-execution.ts';
+import { codingRunCallSchema, type CodingRuns } from './coding-runs.ts';
 import { GitHubReadError } from '@tulipfarm/github/read-contracts';
 import { GitHubSourceDenied } from '@tulipfarm/github/source-runtime';
 import { GitHubAccountError } from '@tulipfarm/github';
@@ -226,6 +227,7 @@ export const frameworkCallSchema = z.discriminatedUnion('tool', [
     language: z.enum(['python', 'javascript', 'typescript', 'bash']),
     code: z.string().min(1).max(32768),
   }),
+  codingRunCallSchema,
   z.strictObject({ tool: z.literal('tables.propose'), input: tableProposalInput }),
   z.strictObject({ tool: z.literal('tables.import.attachments') }),
   z.strictObject({
@@ -794,6 +796,8 @@ const descriptions: Record<ToolName, string> = {
     'Run a Bash, Python, or Node file from an exact reviewed package. No network, secrets, or installs. Outputs support text, JSON, CSV, Markdown, PNG, and JPEG. If pending, reuse its invocationId with the exact same arguments; never rerun an unknown outcome with a new ID. Tests run only when requested.',
   'execution.run':
     'Run a short Python, JavaScript (Node.js), TypeScript (Node.js, ES module), or Bash program in a fresh isolated machine and return its exit code, stdout, and stderr. Use it to calculate, check, or transform data exactly instead of guessing. Print the answer. Each call starts empty: no files persist, and no secrets are available.',
+  'coding.run':
+    "Run a coding agent (Claude Code, Codex or Copilot CLI) on a GitHub repository in a fresh isolated machine, on the person's own plan for that agent. Clones with their selected personal GitHub account, makes the requested change and returns the agent's final message, the changed files and the diff, with the full diff saved as a chat file. Nothing is pushed. Always waits for the person to approve the exact run. Give the full task; the agent sees nothing from this chat. Takes up to 30 minutes.",
   'skills.import':
     'Prepare public skills.sh, GitHub, or website skill packages from one URL. Returns the discovered packages. Nothing is installed. The human selects packages and approves the exact safety review.',
   'skills.import.status':
@@ -891,6 +895,8 @@ export type ToolAccess = (
       kind: 'chat';
       earlierMessages?: boolean;
       chatFiles?: boolean;
+      /** Offers `coding.run`: the workspace turned coding runs on and the person has a plan for an agent. */
+      codingRuns?: boolean;
       /** Offers `slack.*` tools. Defaults to whether this deployment enables Slack actions. */
       slack?: boolean;
     }
@@ -928,6 +934,9 @@ function admittedToolSchemas(access: ToolAccess) {
       .filter(schema => schema.shape.tool.value !== 'agents.delegate' || access.kind === 'chat')
       // Code runs only in a chat reply, and only when this deployment configures an execution backend.
       .filter(schema => schema.shape.tool.value !== 'execution.run' || (access.kind === 'chat' && executionAvailable()))
+      .filter(
+        schema => schema.shape.tool.value !== 'coding.run' || (access.kind === 'chat' && access.codingRuns === true),
+      )
       // Follow-ups belong to the chat or Slack thread a person asked in, so only a chat reply offers them.
       .filter(schema => !schema.shape.tool.value.startsWith('followups.') || access.kind === 'chat')
       // Projects belong to the person in this chat; saved agent runs cannot cite project sources.
@@ -992,6 +1001,7 @@ export function isExternalTool(tool: ToolName) {
   return (
     tool === 'skills.execute' ||
     tool === 'execution.run' ||
+    tool === 'coding.run' ||
     tool === 'skills.draft' ||
     tool === 'skills.files.read' ||
     tool === 'mcp.call' ||
@@ -1034,6 +1044,8 @@ export type ChatToolsOptions = {
   skillExecution?: SkillExecutionFactory | undefined;
   /** Runs `execution.run` code in an isolated machine; without it, the tool is refused. */
   chatExecution?: ChatExecution | undefined;
+  /** Runs `coding.run` agents; without it, the tool is refused. */
+  codingRuns?: CodingRuns | undefined;
   telemetryRuntime?: ToolRuntime | undefined;
   wakePlan?: ((workspaceId: string, planId: string) => Promise<unknown>) | undefined;
   agentSetup?: AgentSetupOptions | undefined;
@@ -1125,6 +1137,7 @@ export function createChatTools(
     outputs,
     skillExecution,
     chatExecution,
+    codingRuns,
     telemetryRuntime = 'chat',
     wakePlan,
     agentSetup,
@@ -1851,6 +1864,34 @@ export function createChatTools(
           { conversationId: context.origin.conversationId, language: call.language, code: call.code },
           context.signal,
         );
+      case 'coding.run': {
+        if (!codingRuns || !context.origin || outputs?.autonomous !== false) throw new AccessDenied();
+        const result = await codingRuns.run(
+          {
+            workspaceId,
+            actor,
+            conversationId: context.origin.conversationId,
+            turnId: context.origin.turnId,
+            callId,
+            signal: context.signal,
+          },
+          call,
+        );
+        if (!('fullDiff' in result)) return result;
+        const { fullDiff, ...shown } = result;
+        if (!fullDiff) return shown;
+        const saved = await createFileOutput(
+          outputs.files,
+          { workspaceId, actor, autonomous: false, origin: context.origin },
+          {
+            tool: 'files.create',
+            name: `${call.repository.replace('/', '-')}-diff-${callId.slice(0, 8)}`,
+            format: 'txt',
+            content: fullDiff,
+          },
+        );
+        return { ...shown, diffFile: 'file' in saved ? saved.file : saved };
+      }
       case 'skills.import': {
         if (!context.origin) throw new AccessDenied();
         const view = await createSkillImports(runtime).begin(workspaceId, actor, callId, call.input, [

@@ -119,6 +119,8 @@ export type MeteredReplyOptions = {
   outputs?: (FileOutputStore & Partial<Pick<ImageOutputStore, 'read'>>) | undefined;
   skillExecution?: SkillExecutionFactory | undefined;
   chatExecution?: ChatExecution | undefined;
+  /** Runs `coding.run` agents; without it, chat does not offer the tool. */
+  codingRuns?: CodingRuns | undefined;
   wakePlan?: PlanWake | undefined;
   wakeTask?: TaskWake | undefined;
   /** Delivers per-card Stop requests to running sub-agents. */
@@ -165,6 +167,7 @@ export function meteredReply(
     outputs,
     skillExecution,
     chatExecution,
+    codingRuns,
     wakePlan,
     wakeTask,
     subagentStops = (sharedSubagentStops ??= createSubagentStops()),
@@ -202,6 +205,7 @@ export function meteredReply(
     priorReviewCards = [],
     earlierMessages = false,
     chatFiles: chatFilesOffered = false,
+    codingRuns: codingRunsOffered = false,
     builtinSkills,
     waitingCards,
     waitingRowCards,
@@ -342,6 +346,8 @@ export function meteredReply(
       project || layout !== true ? undefined : ({ step, json }) => publisher.layout(step, json);
     const subagentPool = observeChatDetailSync('subagent-pool', () => createSubagentPool());
     let delegations = 0;
+    // A coding run uses the member's own plan and GitHub account, so only in their own chat in the app.
+    const codingRunTools = requester && !externalContext && !project ? codingRuns : undefined;
     const chatToolOptions = (
       toolRuntime: Parameters<typeof createChatTools>[0],
       tool?: string,
@@ -364,6 +370,7 @@ export function meteredReply(
       outputs: outputs ? { files: outputs, autonomous: !requester } : undefined,
       skillExecution,
       chatExecution,
+      codingRuns: codingRunTools,
       telemetryRuntime: externalContext ? 'slack' : 'chat',
       wakePlan,
       agentSetup: slackAgentSetupFromEnvironment(toolRuntime),
@@ -512,6 +519,7 @@ export function meteredReply(
               waitingCards,
               waitingRowCards,
               chatFiles: chatFilesOffered && Boolean(chatFiles),
+              codingRuns: codingRunsOffered && Boolean(codingRunTools),
               ...(answerText ? { answerText } : {}),
               ...(layoutPreview ? { layoutPreview } : {}),
               progress,
@@ -547,6 +555,7 @@ export function meteredReply(
               waitingCards,
               waitingRowCards,
               chatFiles: chatFilesOffered && Boolean(chatFiles),
+              codingRuns: codingRunsOffered && Boolean(codingRunTools),
               ...(externalContext ? { preloadedTools: ['slack.thread.react'] } : {}),
               ...(answerText ? { answerText } : {}),
               ...(layoutPreview ? { layoutPreview } : {}),
@@ -598,6 +607,7 @@ export function createConversationActivities(
   wakeTask?: TaskWake,
   workspaceSlug?: (workspaceId: string) => Promise<string | undefined>,
   chatExecution?: ChatExecution,
+  codingRuns?: CodingRunsFactory,
 ) {
   const runtime = withFileSources(withKnowledgeSourceAuthorization(withGitHubSourceAuthorization(storage)));
   const slack = slackActionsFromEnvironment()?.(runtime);
@@ -609,6 +619,7 @@ export function createConversationActivities(
     fileDocument: (...args) => (google ??= googleOperations(runtime)).fileDocument(...args),
   };
   const turnFiles = objects ? chatTurnFiles(runtime, objects) : undefined;
+  const coding = codingRuns?.(runtime);
   const generateTitle = conversationTitleActivity(storage);
   const run = <T>(
     work: unknown,
@@ -631,6 +642,7 @@ export function createConversationActivities(
             outputs: files,
             skillExecution,
             chatExecution,
+            codingRuns: coding,
             wakePlan,
             wakeTask,
             inventory,
@@ -704,6 +716,7 @@ export function createConversationActivities(
           if (resumed.state === 'waiting') return resumed;
           return { ...resumed, sources: apiCallSources(resumed.result, context.conversationId) };
         },
+        coding,
       );
       return process(executor, parsed);
     });
@@ -721,3 +734,5 @@ export function createConversationActivities(
 }
 import type { SkillExecutionFactory } from '@tulipfarm/agents/skill-execution';
 import type { ChatExecution } from '@tulipfarm/agents/chat-execution';
+import type { CodingRuns } from '@tulipfarm/agents/coding-runs';
+import type { CodingRunsFactory } from './coding-runs.ts';

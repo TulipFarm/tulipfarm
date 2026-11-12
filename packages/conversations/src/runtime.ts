@@ -344,6 +344,8 @@ export type ConversationReply = (input: {
   earlierMessages?: boolean;
   /** The images reader read this turn's files, so the model may call `files.read`. */
   chatFiles?: boolean;
+  /** The person may run coding agents here, so the model may call `coding.run`. */
+  codingRuns?: boolean;
   builtinSkills?: readonly string[];
   /** Counts the requester's undecided review and approval cards in this chat, so a reply may point to one. */
   waitingCards?: () => Promise<number>;
@@ -694,6 +696,7 @@ export function createConversationExecutor(
   turnFiles?: TurnFiles,
   secrets?: ConversationSecrets,
   resumeApiCall?: ResumeApiCall,
+  codingRuns?: { offered(workspaceId: string, membershipId: string): Promise<boolean> },
 ) {
   // Matches the durable replay rule in prepare: these chats store every tool receipt, so a turn can resume its model.
   const replayable = (chat: { slack: unknown; context: unknown }) =>
@@ -2928,6 +2931,10 @@ export function createConversationExecutor(
               ...tail,
             ]);
       if (prepared === 'stale') return 'stale';
+      const coding =
+        interactiveChat && codingRuns
+          ? await codingRuns.offered(fence.workspaceId, source.requester.membershipId)
+          : false;
       const answer = conversationResult(
         await staged('model', () =>
           reply({
@@ -3027,6 +3034,7 @@ export function createConversationExecutor(
             }),
             earlierMessages: refersToEarlierMessages(prepared),
             ...(images ? { chatFiles: true } : {}),
+            ...(coding ? { codingRuns: true } : {}),
             builtinSkills: [source.invoked, source.planningSkill, source.packageSkill].flatMap(skill =>
               skill?.origin === 'built-in' ? [skill.skillId] : [],
             ),
