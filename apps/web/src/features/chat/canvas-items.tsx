@@ -9,36 +9,40 @@ import { Database } from 'reicon-react/icons/Database';
 import { Tasks } from 'reicon-react/icons/Tasks';
 import { Button } from '@tulipfarm/sprout/button';
 import { CanvasFrame, CanvasPanel, CanvasSection, CanvasToggle, ChatSplit } from '@tulipfarm/sprout/canvas';
-import { CategoryChart } from '@tulipfarm/sprout/chart';
 import { ChatPlan } from '@tulipfarm/sprout/chat-plan';
 import { CodeBlock } from '@tulipfarm/sprout/code-block';
 import { FileContent, FileError, LoadingFile, ViewableFileContent } from '@tulipfarm/sprout/file-viewer';
 import { Skeleton } from '@tulipfarm/sprout/skeleton';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
-import { Table } from '@tulipfarm/sprout/table';
 import { useFilesApi } from '@/features/files/api';
 import { fileRenderers } from '@/features/files/viewer/renderers';
 import { renderableType } from '@/lib/file-viewer';
 import { useCanvas, type CanvasContent, type CanvasItem } from './canvas-state';
 import { PlanCanvas } from './plans';
-import { SchemaCanvas } from './schema-canvas';
-import { RecordChangesCanvas, RecordsCanvas } from './records-canvas';
-import { CalendarReadCanvas } from './calendar-canvas';
 import { Calendar } from 'reicon-react/icons/Calendar';
-import { GoogleProposalReview } from '@/features/google/proposals';
-import { WorkflowCanvas } from './workflow-canvas';
-import { AgentDraftCanvas } from './agent-draft-canvas';
 import { Users } from 'reicon-react/icons/Users';
 import { BranchDown } from 'reicon-react/icons/BranchDown';
 import { workspaceRoute } from '@/router';
-import { GoogleFileCanvas } from '@/features/google/file-canvas';
 import { ActivityResultDetails } from './activity-result-card';
-import { GitHubBatches } from './github-batches';
-import { SlackActionCanvas } from '@/features/agents/slack-action';
 import { Sparkle } from 'reicon-react/icons/Sparkle';
-import { LayoutCanvas } from './layout-reply';
-import { PackageInstallationCanvas } from '@/features/packages/package-canvas';
-import { PackagePlanOutline } from '@/features/packages/progress';
+
+import { lazyCard } from '@/components/lazy-card';
+
+const CategoryChart = lazyCard(() => import('@tulipfarm/sprout/chart').then(module => module.CategoryChart));
+const Table = lazyCard(() => import('@tulipfarm/sprout/table').then(module => module.Table));
+const RecordChangesCanvas = lazyCard(() => import('./records-canvas').then(module => module.RecordChangesCanvas));
+const RecordsCanvas = lazyCard(() => import('./records-canvas').then(module => module.RecordsCanvas));
+const WorkflowCanvas = lazyCard(() => import('./workflow-canvas').then(module => module.WorkflowCanvas));
+const GitHubBatches = lazyCard(() => import('./github-batches').then(module => module.GitHubBatches));
+const LayoutCanvas = lazyCard(() => import('./layout-reply').then(module => module.LayoutCanvas));
+const PackageInstallationCanvas = lazyCard(() => import('@/features/packages/package-canvas').then(module => module.PackageInstallationCanvas));
+const PackagePlanOutline = lazyCard(() => import('@/features/packages/progress').then(module => module.PackagePlanOutline));
+const SchemaCanvas = lazyCard(() => import('./schema-canvas').then(module => module.SchemaCanvas));
+const CalendarReadCanvas = lazyCard(() => import('./calendar-canvas').then(module => module.CalendarReadCanvas));
+const GoogleProposalReview = lazyCard(() => import('@/features/google/proposals').then(module => module.GoogleProposalReview));
+const AgentDraftCanvas = lazyCard(() => import('./agent-draft-canvas').then(module => module.AgentDraftCanvas));
+const GoogleFileCanvas = lazyCard(() => import('@/features/google/file-canvas').then(module => module.GoogleFileCanvas));
+const SlackActionCanvas = lazyCard(() => import('@/features/agents/slack-action').then(module => module.SlackActionCanvas));
 
 const icons: Record<CanvasContent['kind'], ComponentType<{ size?: number }>> = {
   'package-plan': Tasks,

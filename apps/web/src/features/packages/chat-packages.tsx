@@ -13,11 +13,15 @@ import { ReadFeedback, ReadError } from '@/components/read-feedback';
 import { useFeatureRead } from '@/lib/query';
 import { workspaceChatRoute } from '@/router';
 import { bundledPackage } from './catalog';
-import { Installation, PackageOffer } from './installation-panel';
-import { PackageCanvasButton } from './package-canvas';
 import { usePackageInstallations } from './queries';
 import { loadPublicPackage } from './public-catalog';
 import type { CanvasItem } from '@/features/chat/canvas-state';
+import { lazyCard } from '@/components/lazy-card';
+
+// The install panel brings charts and tables; chats without a package offer should not download them.
+const Installation = lazyCard(() => import('./installation-panel').then(module => module.Installation));
+const PackageOffer = lazyCard(() => import('./installation-panel').then(module => module.PackageOffer));
+const PackageCanvasButton = lazyCard(() => import('./package-canvas').then(module => module.PackageCanvasButton));
 
 export function useChatPackages(
   workspaceId: string,

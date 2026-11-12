@@ -9,6 +9,7 @@ import type {
   TulipAvatarView,
 } from './tulip-avatar/catalog';
 import type { AvatarHandle } from './tulip-avatar/runtime';
+import { whenCodeQuiet } from '@/lib/code-quiet';
 
 export { tulipAvatarCharacters, tulipAvatarColors, tulipAvatarStates } from './tulip-avatar/catalog';
 export type {
@@ -89,7 +90,9 @@ export function TulipAvatar({
       setStatus('error');
       errorCallback.current?.(error);
     };
-    void import('./tulip-avatar/runtime')
+    // The 3D runtime is the largest file on the first load; the initial shows until it arrives.
+    void whenCodeQuiet()
+      .then(() => import('./tulip-avatar/runtime'))
       .then(({ mountAvatar }) => {
         if (disposed) return;
         handle.current = mountAvatar(

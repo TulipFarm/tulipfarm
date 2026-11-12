@@ -36,8 +36,8 @@ export function useFeatureRead<T>(input: FeatureReadOptions<T>) {
     [runtime, key, current, input.interval, input.maxChecks, input.maxDuration],
   );
   useEffect(() => {
-    runtime.polling.sync();
-  }, [runtime, result.data, result.error, result.fetchStatus, input.enabled]);
+    runtime.polling.touch(hash);
+  }, [runtime, hash, result.data, result.error, result.fetchStatus, input.enabled]);
   const delayed = useSyncExternalStore(
     runtime.polling.subscribe,
     () => runtime.polling.delayed(key),

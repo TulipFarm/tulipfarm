@@ -34,6 +34,7 @@ export function createFeatureClient(
   const authorityChanged = () => {
     authorityRevision++;
     for (const listener of authorityListeners) listener();
+    polling.sync();
   };
   const denied = new Set<string>();
   const revisions = new Map<string, number>();
@@ -323,7 +324,7 @@ export function createFeatureClient(
           // Values a feature writes into the cache itself are not server reads, so only fetched ones persist.
           if (!event.action.manual) persist(event.query.queryHash, event.query.queryKey);
         }
-        polling.sync();
+        polling.touch(event.query.queryHash);
       });
       notifications = queryNotifications(receive, identity.sessionId);
       if (typeof window !== 'undefined') {

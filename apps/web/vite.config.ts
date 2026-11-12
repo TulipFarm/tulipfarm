@@ -103,6 +103,9 @@ export default defineConfig(({ command }) => {
         },
       },
     ],
+    // Lazy chunks can import each other in a cycle (recharts split across `chart` and `surface`).
+    // Without strict order, the chunk loaded first runs before its dependency and throws.
+    build: { rolldownOptions: { output: { strictExecutionOrder: true } } },
     resolve: {
       alias: {
         '@': fileURLToPath(new URL('./src', import.meta.url)),
