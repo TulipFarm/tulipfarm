@@ -25,7 +25,12 @@
         display: flex;
         background: var(--c);
         color: var(--t);
-        font: 15px/1.5 'Inter Variable', Inter, ui-sans-serif, system-ui, sans-serif;
+        font:
+          15px/1.5 'Inter Variable',
+          Inter,
+          ui-sans-serif,
+          system-ui,
+          sans-serif;
       }
       #tf-early.light {
         --c: oklch(98.24% 0.0013 286.38);
@@ -38,20 +43,98 @@
         --h: oklch(0% 0 0 / 0.06);
         --p: oklch(52.7% 0.141 148.39);
       }
-      #tf-early * { box-sizing: border-box; }
-      #tf-early aside { width: 244px; flex: none; background: var(--n); border-right: 1px solid var(--l); padding: 12px 8px; }
-      #tf-early main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-      #tf-early header { height: 44px; flex: none; display: flex; align-items: center; padding: 0 20px; border-bottom: 1px solid var(--l); font-size: 13px; }
-      #tf-early .col { width: 100%; max-width: 800px; margin: 102px auto 0; padding: 0 16px; }
-      #tf-early i { display: block; height: 12px; border-radius: 6px; background: var(--h); margin: 14px 10px; }
-      #tf-early form { border: 1px solid var(--i); border-radius: 12px; background: var(--s); margin: 0; }
-      #tf-early textarea { display: block; width: 100%; min-height: 80px; resize: none; border: 0; outline: 0; background: none; color: inherit; font: inherit; padding: 12px 14px; }
-      #tf-early textarea::placeholder { color: var(--m); }
-      #tf-early form div { display: flex; align-items: center; height: 38px; padding: 0 10px; border-top: 1px solid var(--l); }
-      #tf-early button { margin-left: auto; width: 22px; height: 22px; border: 0; border-radius: 50%; background: var(--i); padding: 0; }
-      #tf-early form.ready button { background: var(--p); }
-      #tf-early p { color: var(--m); font-size: 13px; margin: 12px 0 0; min-height: 20px; }
-      @media (max-width: 767px) { #tf-early aside { display: none; } #tf-early .col { margin-top: 48px; } }
+      #tf-early * {
+        box-sizing: border-box;
+      }
+      #tf-early aside {
+        width: 244px;
+        flex: none;
+        background: var(--n);
+        border-right: 1px solid var(--l);
+        padding: 12px 8px;
+      }
+      #tf-early main {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+      }
+      #tf-early header {
+        height: 44px;
+        flex: none;
+        display: flex;
+        align-items: center;
+        padding: 0 20px;
+        border-bottom: 1px solid var(--l);
+        font-size: 13px;
+      }
+      #tf-early .col {
+        width: 100%;
+        max-width: 800px;
+        margin: 102px auto 0;
+        padding: 0 16px;
+      }
+      #tf-early i {
+        display: block;
+        height: 12px;
+        border-radius: 6px;
+        background: var(--h);
+        margin: 14px 10px;
+      }
+      #tf-early form {
+        border: 1px solid var(--i);
+        border-radius: 12px;
+        background: var(--s);
+        margin: 0;
+      }
+      #tf-early textarea {
+        display: block;
+        width: 100%;
+        min-height: 80px;
+        resize: none;
+        border: 0;
+        outline: 0;
+        background: none;
+        color: inherit;
+        font: inherit;
+        padding: 12px 14px;
+      }
+      #tf-early textarea::placeholder {
+        color: var(--m);
+      }
+      #tf-early form div {
+        display: flex;
+        align-items: center;
+        height: 38px;
+        padding: 0 10px;
+        border-top: 1px solid var(--l);
+      }
+      #tf-early button {
+        margin-left: auto;
+        width: 22px;
+        height: 22px;
+        border: 0;
+        border-radius: 50%;
+        background: var(--i);
+        padding: 0;
+      }
+      #tf-early form.ready button {
+        background: var(--p);
+      }
+      #tf-early p {
+        color: var(--m);
+        font-size: 13px;
+        margin: 12px 0 0;
+        min-height: 20px;
+      }
+      @media (max-width: 767px) {
+        #tf-early aside {
+          display: none;
+        }
+        #tf-early .col {
+          margin-top: 48px;
+        }
+      }
     </style>
   </head>
   <body>
@@ -72,7 +155,9 @@
           var bars = '';
           for (var n = 0; n < 14; n++) bars += '<i style="width:' + (50 + ((n * 37) % 40)) + '%"></i>';
           shell.innerHTML =
-            '<aside aria-hidden="true"><i style="margin:6px 6px 20px;height:20px"></i>' + bars + '</aside>' +
+            '<aside aria-hidden="true"><i style="margin:6px 6px 20px;height:20px"></i>' +
+            bars +
+            '</aside>' +
             '<main><header>New chat</header><div class="col">' +
             '<i style="width:260px;height:20px;margin:0 0 12px"></i><i style="width:320px;margin:0 0 28px"></i>' +
             '<form><textarea aria-label="Message" placeholder="What would you like to get done?"></textarea>' +
