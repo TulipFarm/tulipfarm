@@ -338,6 +338,8 @@ export function meteredReply(
       : ({ step, text }: { step: number; text: string }) => publisher.update(step, text);
     const progress: ToolInferenceContext['progress'] = update => publisher.progress(update);
     const layout = generativeUi ? (externalContext ? { slack: { interactive: true } } : true) : undefined;
+    const layoutPreview: ToolInferenceContext['layoutPreview'] =
+      project || layout !== true ? undefined : ({ step, json }) => publisher.layout(step, json);
     const subagentPool = observeChatDetailSync('subagent-pool', () => createSubagentPool());
     let delegations = 0;
     const chatToolOptions = (
@@ -511,6 +513,7 @@ export function meteredReply(
               waitingRowCards,
               chatFiles: chatFilesOffered && Boolean(chatFiles),
               ...(answerText ? { answerText } : {}),
+              ...(layoutPreview ? { layoutPreview } : {}),
               progress,
               ...replyContext,
               completionCheck: completionCheck?.route,
@@ -546,6 +549,7 @@ export function meteredReply(
               chatFiles: chatFilesOffered && Boolean(chatFiles),
               ...(externalContext ? { preloadedTools: ['slack.thread.react'] } : {}),
               ...(answerText ? { answerText } : {}),
+              ...(layoutPreview ? { layoutPreview } : {}),
               progress,
               ...replyContext,
               completionCheck: completionCheck?.route,
