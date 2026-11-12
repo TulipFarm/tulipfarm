@@ -290,10 +290,7 @@ test('a text-heavy canvas report is sent back for a redesign once, then accepted
 test('reply_render must be called alone', async t => {
   const { result, requests } = await layoutTurn(t, 'anthropic', [
     {
-      calls: [
-        { name: 'reply_render', input: chatReply },
-        { name: 'bud_state', input: { name: 'Bud', state: 'Waving' } },
-      ],
+      calls: [{ name: 'reply_render', input: chatReply }, use('web.search', { query: 'tulips' })],
     },
     render(chatReply),
   ]);

@@ -478,6 +478,11 @@ One version identifies all apps and images of a release.
 
 ### Removed
 
+- Bud's 3D face, its animated expressions and three.js. Bud now shows a
+  monster avatar like the other agents. The `bud-avatar` feature flag
+  (`FEATURE_FLAG_BUD_AVATAR`), the model's `bud_state` tool and the chat
+  stream's `avatar` event are gone. The face loaded a 145 KB script and kept
+  drawing frames while idle.
 - `AUTH_EMAIL_PASSWORD`. Set `AUTH_METHODS=password` (with any other methods)
   instead; the api refuses to start while the old variable is set.
 - The unused `AGENT_MODEL_ENDPOINT`, `AGENT_MODEL_DEPLOYMENT`, `AGENT_MODEL_AUTH`,

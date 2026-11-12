@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { avatarSnapshotSchema } from './avatar.ts';
 import { toolPresentationSchema } from './tool-activity.ts';
 
 /** PostgreSQL channel that carries conversation notifications from every writer to every API replica. */
@@ -44,8 +43,6 @@ export const streamProgressSchema = streamIdentitySchema.extend({
   seq: count.optional(),
 });
 export type StreamProgress = z.infer<typeof streamProgressSchema>;
-export const streamAvatarSchema = streamIdentitySchema.extend({ seq: count, avatar: avatarSnapshotSchema });
-export type StreamAvatar = z.infer<typeof streamAvatarSchema>;
 
 /**
  * Something visible in the conversation changed. `settled` marks a turn that reached a final or waiting state.
@@ -123,7 +120,6 @@ export const conversationNotificationSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('text'), ...address, ...streamTextSchema.shape }),
   z.strictObject({ kind: z.literal('changed'), ...address, ...streamChangeSchema.shape }),
   z.strictObject({ kind: z.literal('progress'), ...address, ...streamProgressSchema.shape }),
-  z.strictObject({ kind: z.literal('avatar'), ...address, ...streamAvatarSchema.shape }),
   z.strictObject({ kind: z.literal('tool'), ...address, ...streamToolSchema.shape }),
   z.strictObject({ kind: z.literal('subagents'), ...address, ...streamSubagentsSchema.shape }),
   /** Asks the worker running `id`'s sub-agents to stop one of them. API replicas ignore it. */
@@ -145,7 +141,6 @@ export const conversationStreamEvents = {
   changed: 'changed',
   /** `streamProgressSchema` data. Sent live, and as a snapshot when a client connects during a reply. */
   progress: 'progress',
-  avatar: 'avatar',
   tool: 'tool',
   /** `streamSubagentsSchema` data. Live sub-agent cards of a running `agents.delegate` call. */
   subagents: 'subagents',
@@ -164,11 +159,6 @@ export function applyStreamProgress(state: StreamProgress | undefined, update: S
   if (!state) return update;
   const order = compareStreamIdentity(update, state) || (update.seq ?? 0) - (state.seq ?? 0);
   return order <= 0 ? state : update;
-}
-
-export function applyStreamAvatar(state: StreamAvatar | undefined, update: StreamAvatar): StreamAvatar {
-  const order = state ? compareStreamIdentity(update, state) : 1;
-  return state && (order < 0 || (order === 0 && update.seq <= state.seq)) ? state : update;
 }
 
 /**

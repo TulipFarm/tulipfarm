@@ -58,11 +58,3 @@ test('configured flags resolve env override, then FEATURE_FLAGS_OFF, then defaul
   for (const [name, value] of Object.entries(configuredFeatureFlags({ NODE_ENV: 'production' })))
     assert.equal(value, featureFlags[name].default === true, name);
 });
-
-test('Bud avatar is off for every environment unless its variable turns it on', () => {
-  assert.equal(featureFlags['bud-avatar'].default, false);
-  assert.equal(configuredFeatureFlag('bud-avatar', {}), false);
-  assert.equal(configuredFeatureFlag('bud-avatar', { NODE_ENV: 'development' }), false);
-  assert.equal(configuredFeatureFlag('bud-avatar', { NODE_ENV: 'production' }), false);
-  assert.equal(configuredFeatureFlag('bud-avatar', { FEATURE_FLAG_BUD_AVATAR: 'true' }), true);
-});

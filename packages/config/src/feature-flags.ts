@@ -57,13 +57,6 @@ export const featureFlags = {
     scope: 'workspace',
     env: 'FEATURE_FLAG_DEFAULT_CONNECTION_KNOWLEDGE',
   },
-  'bud-avatar': {
-    description:
-      'Animated Bud expressions in personal chats. The model sets them with the bud_state tool, which costs extra model rounds.',
-    default: false,
-    scope: 'user',
-    env: 'FEATURE_FLAG_BUD_AVATAR',
-  },
   'social-publishing': {
     description: 'Social account connections, approved social posts, scheduling, engagement and analytics.',
     default: 'development',
