@@ -36,6 +36,7 @@ import { workflowResults } from './workflow-results';
 import type { RowView } from '@tulipfarm/conversations/row-view';
 
 import { ChatHeaderContext } from './header-context';
+import { takeEarlyComposer } from '@/lib/early-composer';
 import { Input } from '@tulipfarm/sprout/input';
 import {
   DropdownMenu,
@@ -229,6 +230,8 @@ type NewChatPrefill = {
   prompt: string;
   placeholder?: string;
   autoSend?: boolean;
+  /** Typed by the person before the app loaded, so it keeps the caret instead of being selected. */
+  typed?: boolean;
   skill?: { id: string; revision: string };
   workflow?: WorkflowReference;
 };
@@ -264,6 +267,7 @@ function ConversationWorkspace({ api }: { api: ConversationApi }) {
     searchIntent.tableId ?? null,
   );
   const workflowHandoff = useWorkflowHandoff(workspace.id, intent === 'edit-workflow', searchIntent.workflowId ?? null);
+  const [early, setEarly] = useState(takeEarlyComposer);
   const prefill: NewChatPrefill | null =
     intent === 'install-package' && searchIntent.packageName && searchIntent.packageVersion
       ? {
@@ -299,7 +303,9 @@ function ConversationWorkspace({ api }: { api: ConversationApi }) {
                     ? { prompt: workflowHandoff.prompt, workflow: workflowHandoff.reference }
                     : tableHandoff?.kind === 'ready'
                       ? { prompt: tableHandoff.prompt }
-                      : null;
+                      : early
+                        ? { prompt: early.text, autoSend: early.send, typed: true }
+                        : null;
   const consumePrefill = () => {
     // Dropping the handled request from the link keeps this draft mounted, so the draft's leave guard does not apply.
     void navigate({
@@ -329,6 +335,9 @@ function ConversationWorkspace({ api }: { api: ConversationApi }) {
     [api, changes, draftChatId, project],
   );
   const draft = !chatId;
+  useEffect(() => {
+    if (chatId) setEarly(null);
+  }, [chatId]);
   const activeChatId = chatId ?? draftChatId;
   const activeApi = chatId && chatId !== draftChatId ? api : draftApi;
   useLayoutEffect(() => {
@@ -381,7 +390,7 @@ function ConversationWorkspace({ api }: { api: ConversationApi }) {
                 draftProjectId={project}
                 scope={draft ? scope : undefined}
                 prefill={draft ? prefill : null}
-                onPrefillApplied={consumePrefill}
+                onPrefillApplied={prefill?.typed ? () => setEarly(null) : consumePrefill}
                 notice={
                   draft && tableHandoff ? (
                     <TableHandoffNotice handoff={tableHandoff} workspaceSlug={workspaceSlug} />
@@ -504,11 +513,12 @@ function ConversationDetail({
   const appliedPrefill = useRef(false);
   // A link can open a new chat before its editor shows the prompt, so wait for it. Selecting the prompt lets the
   // person send it as is, or type their own message over it instead of after it.
-  const selectPrefill = (prompt: string, frames = 10) =>
+  const selectPrefill = (prompt: string, typed = false, frames = 10) =>
     requestAnimationFrame(() => {
       const editor = composerInput.current?.editor();
-      if (editor && editor.state.doc.textContent === prompt) editor.chain().focus().selectAll().run();
-      else if (frames > 1) selectPrefill(prompt, frames - 1);
+      if (editor && editor.state.doc.textContent === prompt)
+        (typed ? editor.chain().focus('end') : editor.chain().focus().selectAll()).run();
+      else if (frames > 1) selectPrefill(prompt, typed, frames - 1);
       else composerInput.current?.focus();
     });
   const [skillHandoffError, setSkillHandoffError] = useState('');
@@ -523,7 +533,7 @@ function ConversationDetail({
       // A link's request that arrives after the person started typing, such as a slow table handoff, never joins their text.
       if (!text.trim()) {
         setContent(textDocument(prefill.prompt));
-        selectPrefill(prefill.prompt);
+        selectPrefill(prefill.prompt, prefill.typed);
       }
       onPrefillApplied?.();
       if (prefill.workflow) canvas.show(workflowCanvasItem(workspace.id, prefill.workflow));

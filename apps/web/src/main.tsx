@@ -18,7 +18,8 @@ if (import.meta.env.DEV) {
 import { createRoot } from 'react-dom/client';
 import './index.css';
 import { RouterProvider } from '@tanstack/react-router';
-import { router } from './router';
+import { router, workspaceHomeRoute } from './router';
+import { takeEarlyComposer } from './lib/early-composer';
 import { applyTheme, readTheme } from './lib/theme';
 import { reportBuild } from './build-info';
 import { trackAssetLoadErrors } from './lib/asset-recovery';
@@ -27,6 +28,10 @@ import { AnalyticsConsent } from './components/analytics-consent';
 
 startAnalytics();
 router.subscribe('onResolved', trackPage);
+router.subscribe('onResolved', () => {
+  if (!router.state.matches.some(match => match.routeId === workspaceHomeRoute.id && match.status === 'success'))
+    takeEarlyComposer();
+});
 trackAssetLoadErrors();
 applyTheme(readTheme());
 reportBuild();

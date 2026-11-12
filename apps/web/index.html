@@ -8,9 +8,100 @@
     <link rel="icon" href="/favicon.ico" sizes="32x32" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <title>TulipFarm</title>
+    <style>
+      #tf-early {
+        --c: oklch(18.26% 0.002 264.5);
+        --s: oklch(20.06% 0.002 264.5);
+        --n: oklch(14.03% 0.002 264.5);
+        --l: oklch(26.01% 0.0045 272);
+        --i: oklch(33.5% 0.006 271);
+        --t: #fff;
+        --m: oklch(67.05% 0.003 264.5);
+        --h: oklch(100% 0 0 / 0.05);
+        --p: oklch(77.88% 0.1259 151.59);
+        position: fixed;
+        inset: 0;
+        z-index: 2147483000;
+        display: flex;
+        background: var(--c);
+        color: var(--t);
+        font: 15px/1.5 'Inter Variable', Inter, ui-sans-serif, system-ui, sans-serif;
+      }
+      #tf-early.light {
+        --c: oklch(98.24% 0.0013 286.38);
+        --s: #fff;
+        --n: oklch(95.24% 0.0013 286.37);
+        --l: oklch(90.06% 0 0);
+        --i: oklch(86.5% 0 0);
+        --t: oklch(22.21% 0 0);
+        --m: oklch(47.55% 0.0032 286.3);
+        --h: oklch(0% 0 0 / 0.06);
+        --p: oklch(52.7% 0.141 148.39);
+      }
+      #tf-early * { box-sizing: border-box; }
+      #tf-early aside { width: 244px; flex: none; background: var(--n); border-right: 1px solid var(--l); padding: 12px 8px; }
+      #tf-early main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+      #tf-early header { height: 44px; flex: none; display: flex; align-items: center; padding: 0 20px; border-bottom: 1px solid var(--l); font-size: 13px; }
+      #tf-early .col { width: 100%; max-width: 800px; margin: 102px auto 0; padding: 0 16px; }
+      #tf-early i { display: block; height: 12px; border-radius: 6px; background: var(--h); margin: 14px 10px; }
+      #tf-early form { border: 1px solid var(--i); border-radius: 12px; background: var(--s); margin: 0; }
+      #tf-early textarea { display: block; width: 100%; min-height: 80px; resize: none; border: 0; outline: 0; background: none; color: inherit; font: inherit; padding: 12px 14px; }
+      #tf-early textarea::placeholder { color: var(--m); }
+      #tf-early form div { display: flex; align-items: center; height: 38px; padding: 0 10px; border-top: 1px solid var(--l); }
+      #tf-early button { margin-left: auto; width: 22px; height: 22px; border: 0; border-radius: 50%; background: var(--i); padding: 0; }
+      #tf-early form.ready button { background: var(--p); }
+      #tf-early p { color: var(--m); font-size: 13px; margin: 12px 0 0; min-height: 20px; }
+      @media (max-width: 767px) { #tf-early aside { display: none; } #tf-early .col { margin-top: 48px; } }
+    </style>
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      // Paints the workspace home before the app's scripts arrive; the chat takes over its text (early-composer.ts).
+      try {
+        var session = JSON.parse(localStorage.getItem('tulipfarm:last-session') || 'null');
+        var slug = location.pathname.split('/')[1];
+        var ids = session && JSON.parse(localStorage.getItem('tulipfarm:workspace-ids:' + session.userId) || '{}');
+        if (ids && slug && location.pathname.replace(/\/+$/, '') === '/' + slug && !location.search && ids[slug]) {
+          var theme = localStorage.getItem('tulipfarm.theme');
+          var light = theme === 'light' || (theme !== 'dark' && matchMedia('(prefers-color-scheme: light)').matches);
+          var shell = document.createElement('div');
+          shell.id = 'tf-early';
+          shell.className = light ? 'light' : '';
+          shell.dataset.path = location.pathname;
+          var bars = '';
+          for (var n = 0; n < 14; n++) bars += '<i style="width:' + (50 + ((n * 37) % 40)) + '%"></i>';
+          shell.innerHTML =
+            '<aside aria-hidden="true"><i style="margin:6px 6px 20px;height:20px"></i>' + bars + '</aside>' +
+            '<main><header>New chat</header><div class="col">' +
+            '<i style="width:260px;height:20px;margin:0 0 12px"></i><i style="width:320px;margin:0 0 28px"></i>' +
+            '<form><textarea aria-label="Message" placeholder="What would you like to get done?"></textarea>' +
+            '<div><button type="submit" aria-label="Send"></button></div></form><p role="status"></p></div></main>';
+          document.body.appendChild(shell);
+          var form = shell.querySelector('form');
+          var input = shell.querySelector('textarea');
+          var queue = function () {
+            if (!input.value.trim()) return;
+            shell.dataset.send = 'true';
+            shell.querySelector('p').textContent = 'Sending as soon as TulipFarm is ready…';
+          };
+          input.addEventListener('input', function () {
+            form.classList.toggle('ready', !!input.value.trim());
+          });
+          input.addEventListener('keydown', function (event) {
+            if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+              event.preventDefault();
+              queue();
+            }
+          });
+          form.addEventListener('submit', function (event) {
+            event.preventDefault();
+            queue();
+          });
+          input.focus();
+        }
+      } catch (error) {}
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
