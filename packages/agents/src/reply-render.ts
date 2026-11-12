@@ -15,6 +15,7 @@ import type { NativeTool } from './native-tools.ts';
 export const replyRenderToolName = 'reply_render';
 /** Checks run on a placeholder surface ID; the runtime sets the reply's message ID when it saves the layout. */
 const checkSurfaceId = '00000000-0000-4000-8000-000000000000';
+const asciiIdentifierPattern = '^[A-Za-z_][A-Za-z0-9_]*$';
 const maxCanvasText = 300;
 const maxListItem = 90;
 const maxTableCell = 80;
@@ -35,10 +36,16 @@ export const replyRenderTool: NativeTool = {
   name: replyRenderToolName,
   description:
     'Give your final answer as a layout of approved components, when it needs more than Markdown text. Call it alone, once all other work is done. It ends your reply.',
-  parameters: z.toJSONSchema(replyRenderInputSchema, { io: 'input', unrepresentable: 'any' }) as Record<
-    string,
-    unknown
-  >,
+  parameters: z.toJSONSchema(replyRenderInputSchema, {
+    io: 'input',
+    unrepresentable: 'any',
+    // Providers such as Grok reject Unicode property escapes in tool schemas. The ASCII form is a subset of the
+    // A2UI identifier rule, and the layout check still validates the full rule.
+    override: ({ jsonSchema }) => {
+      if (typeof jsonSchema.pattern === 'string' && jsonSchema.pattern.includes('\\p{'))
+        jsonSchema.pattern = asciiIdentifierPattern;
+    },
+  }) as Record<string, unknown>,
 };
 
 /** The generative-UI rules. The text is fixed, so provider prompt caches still hit. */
