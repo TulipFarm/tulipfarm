@@ -105,6 +105,27 @@ export const featureFlags = {
     scope: 'workspace',
     env: 'FEATURE_FLAG_SLACK_REACTIONS',
   },
+  'chatgpt-plan': {
+    description:
+      "Members connect their own ChatGPT plan with Sign in with ChatGPT and chat on its models; those requests use the member's plan, not a provider key. Off hides the plan's models and connection and refuses replies on them. OpenAI allows plan usage for open-source and self-hosted deployments; a paid or remotely hosted service needs OpenAI's approval first.",
+    default: true,
+    scope: 'workspace',
+    env: 'FEATURE_FLAG_CHATGPT_PLAN',
+  },
+  'claude-plan': {
+    description:
+      "Members connect their own Claude Pro or Max plan with a `claude setup-token` token and chat on its models through the Claude Agent SDK. Off hides the plan's models and connection and refuses replies on them. Anthropic's terms allow plan credentials only in Claude Code and Anthropic's own products, so turn this on only for your own use; a shared or hosted service should use Claude API keys.",
+    default: false,
+    scope: 'workspace',
+    env: 'FEATURE_FLAG_CLAUDE_PLAN',
+  },
+  'copilot-plan': {
+    description:
+      "Members connect their own GitHub Copilot plan (GitHub device sign-in with COPILOT_GITHUB_CLIENT_ID or GITHUB_OAUTH_CLIENT_ID, or a pasted fine-grained token) and chat on its models through the GitHub Copilot SDK. Off hides the plan's models and connection and refuses replies on them.",
+    default: true,
+    scope: 'workspace',
+    env: 'FEATURE_FLAG_COPILOT_PLAN',
+  },
 } as const satisfies Record<string, FeatureFlagDefinition>;
 
 export type FeatureFlag = keyof typeof featureFlags;

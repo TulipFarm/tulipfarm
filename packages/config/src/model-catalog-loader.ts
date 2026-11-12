@@ -11,8 +11,6 @@ import {
   type ModelCatalogFileImageModel,
   type ModelCatalogFileModel,
   type ModelCatalogRole,
-  planEnabled,
-  planProviders,
 } from './model-catalog-file.ts';
 import { resolveModelCapabilities, type ModelCapabilityOverrides, type ModelProvider } from './model-capabilities.ts';
 import {
@@ -164,11 +162,8 @@ const unmeteredRates: readonly ModelPrice[] = Object.freeze([
 ]);
 
 function providerOf(catalog: ModelCatalogFile, key: string) {
-  // Plan routes have no key; their setting, such as CHATGPT_PLAN, switches them, and the cache key and env checks read it.
-  if (isPlanProvider(key)) {
-    const { setting } = planProviders[key];
-    return { type: key as ModelProvider, apiKeyEnv: setting, endpointEnv: setting };
-  }
+  // Plan routes read no variable: each workspace's feature flag for the plan switches them.
+  if (isPlanProvider(key)) return { type: key as ModelProvider, apiKeyEnv: '', endpointEnv: '' };
   const declared = catalog.providers[key];
   const type = (declared?.type ?? key) as ModelProvider;
   const defaults =
@@ -185,10 +180,12 @@ export function modelCatalogEnvNames(catalog: ModelCatalogFile): readonly string
   const providers = new Set(
     [...catalog.models, ...catalog.imageModels].flatMap(model => model.routes.map(route => route.provider)),
   );
-  return [...providers].flatMap(key => {
-    const provider = providerOf(catalog, key);
-    return [provider.apiKeyEnv, provider.endpointEnv];
-  });
+  return [...providers]
+    .filter(key => !isPlanProvider(key))
+    .flatMap(key => {
+      const provider = providerOf(catalog, key);
+      return [provider.apiKeyEnv, provider.endpointEnv];
+    });
 }
 
 const publicPrefix = /^(VITE_|NEXT_PUBLIC_|PUBLIC_)/;
@@ -238,8 +235,7 @@ export function loadModelCatalog(env: Env = process.env): ServedModelCatalog {
       const provider = providerOf(catalog, key);
       if (isPlanProvider(provider.type)) {
         const plan = provider.type;
-        needed.push(`${planProviders[plan].setting} on`);
-        if (!planEnabled(plan, env) || route) continue;
+        if (route) continue;
         route = Object.freeze({ provider: key, ...provider, model: name, endpoint: defaultModelEndpoints[plan] });
         routeIndex = index;
         continue;
@@ -283,8 +279,6 @@ export function loadModelCatalog(env: Env = process.env): ServedModelCatalog {
             model.pricing === 'unmetered' ? unmeteredRates : model.pricing.map(rate => modelPriceSchema.parse(rate)),
         }),
       );
-    // With its setting off, a plan model is left out quietly.
-    else if (model.routes.every(candidate => isPlanProvider(candidate.provider))) continue;
     else if (catalog.missingKeys === 'skip') skipped.push(model.id);
     else throw missing(`models.${index}`, model.id, needed);
   }

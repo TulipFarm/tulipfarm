@@ -414,8 +414,10 @@ and Slack can't use another member's plan. A ChatGPT plan model is never the
 default, a role model or a fallback, so the catalog still needs at least one
 provider key.
 
-It is on by default. Set `CHATGPT_PLAN=off` to remove the routes, models and
-settings card.
+It is on by default. Set `FEATURE_FLAG_CHATGPT_PLAN=false`, or turn off the
+`chatgpt-plan` flag in your feature flag provider, to remove the routes, models
+and settings card. The Claude and GitHub Copilot plans work the same way with
+the `claude-plan` (off by default) and `copilot-plan` (on by default) flags.
 
 Sign in with ChatGPT only redirects to `http://127.0.0.1:<port>/auth/callback`.
 The api listens there, on port 1455 or another free port, and completes the

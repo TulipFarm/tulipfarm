@@ -169,7 +169,10 @@
                   "anthropic-models",
                   "openai-image-models",
                   "generative-ui",
-                  "slack-reactions"
+                  "slack-reactions",
+                  "chatgpt-plan",
+                  "claude-plan",
+                  "copilot-plan"
                 ]
               },
               {
@@ -523,7 +526,10 @@
                   "anthropic-models",
                   "openai-image-models",
                   "generative-ui",
-                  "slack-reactions"
+                  "slack-reactions",
+                  "chatgpt-plan",
+                  "claude-plan",
+                  "copilot-plan"
                 ]
               },
               {

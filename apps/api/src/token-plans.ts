@@ -1,7 +1,8 @@
 import type { FastifyError, FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { AccessDenied, uuidSchema } from '@tulipfarm/access';
-import { loadModelCatalog, planEnabled } from '@tulipfarm/config';
+import { loadModelCatalog, planProviders } from '@tulipfarm/config';
+import { isFeatureEnabled } from '@tulipfarm/observability';
 import { integrationCredentialKeyring } from '@tulipfarm/integrations';
 import {
   copilotGitHubClient,
@@ -68,14 +69,14 @@ export function copilotVerifier(
   };
 }
 
-/** The member-facing connection for `provider`, or null when the deployment turned its plan setting off. */
+/** The member-facing connection for `provider`, or null without a workspace runtime. */
 export function tokenPlan(
   provider: TokenPlanProvider,
   runtime: TokenPlanRuntime | undefined,
   env: NodeJS.ProcessEnv = process.env,
   verify: TokenPlanVerifier = provider === 'claude' ? claudeVerifier() : copilotVerifier(),
 ): TokenPlan | null {
-  if (!runtime || !planEnabled(provider, env)) return null;
+  if (!runtime) return null;
   return createTokenPlan({
     provider,
     runtime,
@@ -126,7 +127,7 @@ const statuses: Record<string, number> = {
 
 /**
  * Routes for a member's own Claude or GitHub Copilot connection, under `/workspaces/:workspaceId/<provider>/connection`.
- * With the plan setting off, only the status read exists and it answers 404 `<provider>-plan-disabled`.
+ * Without a service, or while the workspace's feature flag for the plan is off, they answer 404 `<provider>-plan-disabled`.
  */
 export function registerTokenPlan(
   app: FastifyInstance,
@@ -182,6 +183,13 @@ export function registerTokenPlan(
       );
       return;
     }
+    // Members can still disconnect, so turning the plan off never strands a stored token.
+    routes.addHook('preHandler', async (request, reply) => {
+      if (request.routeOptions.url?.endsWith('/disconnect')) return;
+      const { workspaceId } = request.params as { workspaceId: string };
+      if (!(await isFeatureEnabled(planProviders[provider].flag, null, { id: workspaceId })))
+        return reply.code(404).send({ error: `${provider}-plan-disabled` });
+    });
     const withDevice = <T extends object>(status: T) => ({ ...status, deviceSignIn: plan.deviceSignIn });
     routes.get(base, statusRoute, async request =>
       withDevice(await plan.status(workspaceParams.parse(request.params).workspaceId, user(request))),

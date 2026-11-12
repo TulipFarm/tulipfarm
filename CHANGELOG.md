@@ -10,6 +10,13 @@ One version identifies all apps and images of a release.
 
 ### Changed
 
+- Member plans are switched by workspace feature flags instead of deployment
+  settings: `chatgpt-plan` and `copilot-plan` (on by default) and
+  `claude-plan` (off by default). `CHATGPT_PLAN`, `CLAUDE_PLAN` and
+  `COPILOT_PLAN` are removed; use `FEATURE_FLAG_CHATGPT_PLAN`,
+  `FEATURE_FLAG_CLAUDE_PLAN` and `FEATURE_FLAG_COPILOT_PLAN` to override a
+  flag without a flag provider. Members can still disconnect a plan while its
+  flag is off.
 - The web app keeps its page shell in a service worker, so a return visit
   starts without waiting for the server. The shell refreshes in the background
   and the next visit uses the new release.

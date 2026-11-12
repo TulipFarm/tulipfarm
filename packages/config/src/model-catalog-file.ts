@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { modelApiSupported, modelCapabilitiesSchema, modelProviderSchema } from './model-capabilities.ts';
-import { featureFlagNames, featureFlags } from './feature-flags.ts';
+import { featureFlagNames, featureFlags, type FeatureFlag } from './feature-flags.ts';
 import { modelFamilyIdSchema, modelIdentifierSchema } from './model-identifier.ts';
 
 // The model catalog file: every model a deployment serves, how each is reached, what it costs, and which one is the
@@ -40,35 +40,23 @@ type BuiltInProvider = keyof typeof modelProviderDefaults;
 const builtInProviders = Object.keys(modelProviderDefaults) as BuiltInProvider[];
 
 /**
- * The built-in route provider for a member's own ChatGPT plan. It has no key: the deployment serves its models while
- * CHATGPT_PLAN is on, and each request uses the credential of the member who connected ChatGPT.
+ * The built-in route provider for a member's own ChatGPT plan. It has no key: each request uses the credential of the
+ * member who connected ChatGPT, and the workspace's `chatgpt-plan` feature flag decides whether its models are offered.
  */
 export const chatGptProvider = 'chatgpt';
-/** The setting that turns ChatGPT plan models on or off for the deployment. */
-export const chatGptPlanSetting = 'CHATGPT_PLAN';
-/** Whether the deployment offers members their ChatGPT plan: on unless CHATGPT_PLAN is `off`. */
-export function chatGptPlanEnabled(env: Record<string, string | undefined> = process.env) {
-  return planEnabled('chatgpt', env);
-}
 
 /**
- * Built-in route providers that run on a member's own plan. Each has no key: its setting turns the deployment's models
- * for it on or off, and each request uses the credential of a member who connected that plan.
+ * Built-in route providers that run on a member's own plan. Each has no key: each request uses the credential of a member
+ * who connected that plan, and the workspace's feature flag for the plan decides whether its models are offered.
  */
 export const planProviders = Object.freeze({
-  chatgpt: { setting: 'CHATGPT_PLAN', label: 'ChatGPT', default: 'on' },
-  claude: { setting: 'CLAUDE_PLAN', label: 'Claude', default: 'off' },
-  copilot: { setting: 'COPILOT_PLAN', label: 'GitHub Copilot', default: 'on' },
-} as const);
+  chatgpt: { flag: 'chatgpt-plan', label: 'ChatGPT' },
+  claude: { flag: 'claude-plan', label: 'Claude' },
+  copilot: { flag: 'copilot-plan', label: 'GitHub Copilot' },
+} as const satisfies Record<string, { flag: FeatureFlag; label: string }>);
 export type PlanProvider = keyof typeof planProviders;
 export const planProviderNames = Object.keys(planProviders) as PlanProvider[];
 export const isPlanProvider = (provider: string): provider is PlanProvider => Object.hasOwn(planProviders, provider);
-/** Whether the deployment offers members their plan from `provider`. Claude is off unless CLAUDE_PLAN is `on`. */
-export function planEnabled(provider: PlanProvider, env: Record<string, string | undefined> = process.env) {
-  const { setting, default: fallback } = planProviders[provider];
-  const value = env[setting]?.trim().toLowerCase() || fallback;
-  return fallback === 'on' ? value !== 'off' : value === 'on';
-}
 
 const envName = z
   .string()

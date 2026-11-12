@@ -119,3 +119,21 @@ test('agent model choices list enabled chat models with their price and mark the
   );
   assert.deepEqual(choices[0].usdPerMillionTokens, { input: 3, output: 15 });
 });
+
+test("a plan model is offered only while its plan's workspace flag is on", async t => {
+  const plans = JSON.stringify({
+    ...JSON.parse(catalog),
+    models: [
+      ...JSON.parse(catalog).models,
+      model('chatgpt-luna', {
+        vendor: 'openai',
+        routes: [{ provider: 'chatgpt', model: 'gpt-6-luna' }],
+        pricing: 'unmetered',
+      }),
+    ],
+  });
+  withEnv(t, { MODEL_CATALOG: plans, FEATURE_FLAG_CHATGPT_PLAN: 'false' });
+  assert.equal(await modelFamilyEnabled(tx, 'chatgpt-luna'), false);
+  process.env.FEATURE_FLAG_CHATGPT_PLAN = 'true';
+  assert.equal(await modelFamilyEnabled(tx, 'chatgpt-luna'), true);
+});

@@ -1101,39 +1101,6 @@ export const settings: readonly Setting[] = [
     selfHost: { section: 'models', example: 'gateway.example.com', commented: true },
   },
   {
-    name: 'CHATGPT_PLAN',
-    group: 'Models',
-    services: apps,
-    requirement: 'optional',
-    secret: false,
-    default: 'on',
-    description:
-      "`on` or `off`. With `on`, each workspace member can connect their own ChatGPT plan with Sign in with ChatGPT in Models settings and pick the catalog's ChatGPT plan models in their own chats; those requests use the member's plan, not a provider key. `off` removes the ChatGPT routes, models and settings card. OpenAI currently allows plan usage for open-source and self-hosted deployments; a paid or remotely hosted service needs OpenAI's approval first.",
-    selfHost: { section: 'models', example: 'on', commented: true },
-  },
-  {
-    name: 'CLAUDE_PLAN',
-    group: 'Models',
-    services: apps,
-    requirement: 'optional',
-    secret: false,
-    default: 'off',
-    description:
-      "`on` or `off`. With `on`, each workspace member can connect their own Claude Pro or Max plan in Models settings by pasting a token from `claude setup-token`, and pick the catalog's Claude plan models; those requests run through the Claude Agent SDK on the member's plan, not a provider key. Anthropic's terms allow plan credentials only in Claude Code and Anthropic's own products, so turn this on only for your own use; a shared or hosted service should use Claude API keys instead.",
-    selfHost: { section: 'models', example: 'off', commented: true },
-  },
-  {
-    name: 'COPILOT_PLAN',
-    group: 'Models',
-    services: apps,
-    requirement: 'optional',
-    secret: false,
-    default: 'on',
-    description:
-      "`on` or `off`. With `on`, each workspace member can connect their own GitHub Copilot plan in Models settings and pick the catalog's Copilot plan models; those requests run through the GitHub Copilot SDK on the member's plan, not a provider key. Sign-in uses GitHub's device flow with COPILOT_GITHUB_CLIENT_ID, or else the GitHub App in GITHUB_OAUTH_CLIENT_ID; members can also paste a fine-grained token with the Copilot Requests permission. `off` removes the Copilot routes, models and settings card.",
-    selfHost: { section: 'models', example: 'on', commented: true },
-  },
-  {
     name: 'COPILOT_GITHUB_CLIENT_ID',
     group: 'Models',
     services: apps,
