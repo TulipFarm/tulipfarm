@@ -755,6 +755,7 @@ export function registerConversations(
               let visible = update;
               if (
                 (update.event === 'text' ||
+                  update.event === 'layout' ||
                   update.event === 'tool' ||
                   update.event === 'subagents' ||
                   update.event === 'progress') &&

@@ -25,6 +25,10 @@ import { pinTurnImageModels, recognitionAvailability } from '@tulipfarm/agents/i
 import { isFeatureEnabled } from '@tulipfarm/observability';
 import { registerConversations } from './conversations.ts';
 import { registerFollowUps } from './follow-ups.ts';
+import { registerLayoutInteractions } from './layout-interactions.ts';
+import { humanReadableTableFiles } from '@tulipfarm/agents/table-sources';
+import { executionCompatibility } from '@tulipfarm/tables/execution';
+import { createTableService } from '@tulipfarm/tables/service';
 import { createFollowUps } from '@tulipfarm/agents/follow-ups';
 import { createConversationEventHub } from './conversation-events.ts';
 import { registerProjects } from './projects.ts';
@@ -320,6 +324,12 @@ export function registerStorageComposition(
     attachments,
     identity: dependencies.pool,
     events,
+    replies,
+  });
+  registerLayoutInteractions(app, {
+    auth: dependencies.auth,
+    service: conversations,
+    tables: createTableService(runtime, { readableFiles: humanReadableTableFiles }, executionCompatibility),
     replies,
   });
   registerProjects(app, {
