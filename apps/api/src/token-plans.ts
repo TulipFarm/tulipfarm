@@ -75,6 +75,7 @@ export function tokenPlan(
   runtime: TokenPlanRuntime | undefined,
   env: NodeJS.ProcessEnv = process.env,
   verify: TokenPlanVerifier = provider === 'claude' ? claudeVerifier() : copilotVerifier(),
+  githubAccountToken?: (workspaceId: string, membershipId: string, accountId: string) => Promise<string>,
 ): TokenPlan | null {
   if (!runtime) return null;
   return createTokenPlan({
@@ -82,7 +83,9 @@ export function tokenPlan(
     runtime,
     keyring: integrationCredentialKeyring(env),
     verify,
-    ...(provider === 'copilot' ? copilotGitHubClient(env) : {}),
+    ...(provider === 'copilot'
+      ? { ...copilotGitHubClient(env), ...(githubAccountToken ? { githubAccountToken } : {}) }
+      : {}),
   });
 }
 
@@ -92,12 +95,15 @@ const attemptParams = workspaceParams.extend({ attemptId: uuidSchema });
 const connectionSchema = z.object({
   state: z.enum(['not-connected', 'connected', 'reconnect-required', 'signed-out']),
   account: z.string().nullable(),
+  /** For Copilot, the personal GitHub account the connection uses instead of a token of its own. */
+  githubAccountId: z.uuid().nullable().optional(),
   planUsage: z.boolean(),
   /** Whether members can sign in through GitHub instead of pasting a token. Always false for Claude. */
   deviceSignIn: z.boolean(),
   models: z.array(z.object({ slug: z.string(), label: z.string() })),
 });
 const tokenBody = z.strictObject({ token: z.string().min(1).max(1000) });
+const githubAccountBody = z.strictObject({ accountId: uuidSchema });
 const deviceSchema = z.object({
   attemptId: z.uuid(),
   userCode: z.string(),
@@ -209,6 +215,22 @@ export function registerTokenPlan(
       },
     );
     if (provider === 'copilot') {
+      routes.post(
+        `${base}/github-account`,
+        {
+          schema: {
+            ...schema('use$GitHubAccount', connectionSchema),
+            params: json(workspaceParams),
+            body: json(githubAccountBody),
+          },
+        },
+        async request => {
+          const { workspaceId } = workspaceParams.parse(request.params);
+          const { accountId } = githubAccountBody.parse(request.body);
+          await plan.useGitHubAccount(workspaceId, user(request), accountId);
+          return withDevice(await plan.status(workspaceId, user(request)));
+        },
+      );
       routes.post(
         `${base}/device`,
         { schema: { ...schema('begin$DeviceSignIn', deviceSchema), params: json(workspaceParams) } },

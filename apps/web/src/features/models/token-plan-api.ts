@@ -9,6 +9,8 @@ export type TokenPlanProvider = 'claude' | 'copilot';
 export const tokenConnectionSchema = z.object({
   state: z.enum(['not-connected', 'connected', 'reconnect-required', 'signed-out']),
   account: z.string().nullable(),
+  /** For Copilot, the personal GitHub account the connection uses instead of a token of its own. */
+  githubAccountId: z.uuid().nullable().optional(),
   planUsage: z.boolean(),
   deviceSignIn: z.boolean(),
   models: z.array(z.object({ slug: z.string(), label: z.string() })),
@@ -97,6 +99,8 @@ export function tokenPlanApi(workspaceId: string, provider: TokenPlanProvider) {
     },
     connectToken: async (token: string, signal: AbortSignal) =>
       tokenConnectionSchema.parse(await request('/token', signal, { token })),
+    useGitHubAccount: async (accountId: string, signal: AbortSignal) =>
+      tokenConnectionSchema.parse(await request('/github-account', signal, { accountId })),
     beginDevice: async (signal: AbortSignal) => deviceSchema.parse(await request('/device', signal, {})),
     attempt: async (attemptId: string, signal: AbortSignal) =>
       attemptSchema.parse(await request(`/attempts/${encodeURIComponent(attemptId)}`, signal)),
