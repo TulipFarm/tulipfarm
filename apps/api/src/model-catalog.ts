@@ -3,7 +3,10 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { AccessDenied, currentMember, lockAuthorization, resolveHuman, uuidSchema } from '@tulipfarm/access';
 import {
+  isPlanProvider,
   loadModelCatalog,
+  planProviderNames,
+  type PlanProvider,
   modelFamilyIdSchema,
   modelIdentifierSchema,
   modelPriceSchema,
@@ -73,8 +76,11 @@ export type ModelCatalogDependencies = {
   modelFamilyEligibility?: ModelCatalogEligibility;
   modelFamilyResolution?: ModelFamilyResolution;
   modelCatalogSnapshot?: (workspaceId: string) => Promise<ModelCatalogSnapshot>;
-  /** The ChatGPT model slugs the member may use on their own ChatGPT plan; absent when the deployment turned it off. */
-  chatGptModels?: (workspaceId: string, userId: string) => Promise<readonly string[]>;
+  /**
+   * The model slugs of `provider` the member may use on their own or a shared plan; absent when no plan provider is on.
+   * A plan model is offered only when its slug is listed here.
+   */
+  planModels?: (workspaceId: string, userId: string, provider: PlanProvider) => Promise<readonly string[]>;
 };
 
 function projectCatalog(
@@ -86,16 +92,16 @@ function projectCatalog(
   paused: (familyId: string) => boolean,
   disabled: Set<string>,
   hidden: ReadonlySet<string> = new Set(),
-  chatGptModels: ReadonlySet<string> = new Set(),
+  planModels: ReadonlySet<string> = new Set(),
 ): ModelCatalog {
   // Models that are not selectable serve their roles and existing chats, but are never offered. Hidden models are
-  // behind a workspace feature flag that is off. ChatGPT plan models are offered only to a member whose connected
-  // ChatGPT account lists them.
+  // behind a workspace feature flag that is off. Plan models are offered only to a member who may use a connected
+  // plan that lists them; `planModels` holds `provider:slug` pairs.
   const selectable = catalog.models.filter(
     model =>
       model.selectable &&
       !hidden.has(model.id) &&
-      (model.route.type !== 'chatgpt' || chatGptModels.has(model.route.model)),
+      (!isPlanProvider(model.route.type) || planModels.has(`${model.route.type}:${model.route.model}`)),
   );
   const resolutions = new Map(
     selectable.map(family => {
@@ -239,8 +245,16 @@ export function registerModelCatalog(app: FastifyInstance, dependencies: ModelCa
       async request => {
         const { workspaceId } = params.parse(request.params);
         const userId = user(request);
-        const chatGptModels = new Set(
-          dependencies.chatGptModels ? await dependencies.chatGptModels(workspaceId, userId) : [],
+        const planModels = new Set(
+          dependencies.planModels
+            ? (
+                await Promise.all(
+                  planProviderNames.map(async provider =>
+                    (await dependencies.planModels!(workspaceId, userId, provider)).map(slug => `${provider}:${slug}`),
+                  ),
+                )
+              ).flat()
+            : [],
         );
         return dependencies.runtime.transaction(workspaceId, dependencies.compatibility, async transaction => {
           await lockAuthorization(transaction, 'read');
@@ -261,7 +275,7 @@ export function registerModelCatalog(app: FastifyInstance, dependencies: ModelCa
             snapshot.modelFamilyPaused ?? (() => false),
             disabled,
             await flaggedOffModels(transaction),
-            chatGptModels,
+            planModels,
           );
         });
       },

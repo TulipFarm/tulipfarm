@@ -115,6 +115,11 @@ const computedReads = {
     sites: 1,
     names: ['ANTHROPIC_API_KEY', 'AZURE_FOUNDRY_API_KEY', 'GEMINI_API_KEY', 'OPENAI_API_KEY', 'XAI_API_KEY'],
   },
+  // Reads the setting that turns each member plan provider (ChatGPT, Claude, Copilot) on or off.
+  'packages/config/src/model-catalog-file.ts': {
+    sites: 1,
+    names: ['CHATGPT_PLAN', 'CLAUDE_PLAN', 'COPILOT_PLAN'],
+  },
   // Reads the key and endpoint variables the model catalog names (the built-in providers' by default), and checks that no
   // removed model setting is set and no model variable has a public prefix; those names are deliberately undeclared.
   'packages/config/src/model-catalog-loader.ts': {

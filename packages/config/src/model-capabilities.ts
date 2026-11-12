@@ -8,6 +8,8 @@ export const modelProviderSchema = z.enum([
   'azure',
   'openai-compatible',
   'chatgpt',
+  'claude',
+  'copilot',
 ]);
 export type ModelProvider = z.infer<typeof modelProviderSchema>;
 
@@ -73,6 +75,10 @@ export const providerModelCapabilities: Readonly<Record<ModelProvider, ModelCapa
   'openai-compatible': Object.freeze({ ...base, api: 'chat-completions', streaming: true }),
   // A member's ChatGPT plan: the OpenAI Responses API, always streamed.
   chatgpt: Object.freeze({ ...base, api: 'responses', streaming: true }),
+  // A member's Claude or GitHub Copilot plan runs through the vendor's agent SDK, one tool round at a time. The SDK
+  // cannot force a tool; the adapter streams each round's words as the model writes them.
+  claude: Object.freeze({ ...base, api: 'anthropic-messages', toolChoice: 'auto', streaming: true }),
+  copilot: Object.freeze({ ...base, api: 'chat-completions', toolChoice: 'auto', streaming: true }),
 });
 const providerApis: Readonly<Record<ModelProvider, readonly ModelCapabilities['api'][]>> = {
   anthropic: ['anthropic-messages'],
@@ -82,6 +88,8 @@ const providerApis: Readonly<Record<ModelProvider, readonly ModelCapabilities['a
   azure: ['chat-completions', 'responses'],
   'openai-compatible': ['chat-completions', 'responses'],
   chatgpt: ['responses'],
+  claude: ['anthropic-messages'],
+  copilot: ['chat-completions'],
 };
 
 export function modelApiSupported(provider: ModelProvider, api: ModelCapabilities['api'] | undefined) {

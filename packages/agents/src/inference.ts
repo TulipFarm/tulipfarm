@@ -72,6 +72,7 @@ import { discoverToolNames, readOnlyCall, readOnlyTools, type FrameworkCall } fr
 import { toolNameSchema } from './tool-capabilities.ts';
 import { builtinSkillTools } from './skills.ts';
 import { providerFetch } from './provider-fetch.ts';
+import { planSessionFetch, type PlanSessionProvider } from './plan-sessions.ts';
 import {
   agentInstructionsPrompt,
   getSystemPrompt,
@@ -154,6 +155,9 @@ export const inferenceRouteSchema = z
     z.strictObject({ provider: z.literal('google'), ...routeFields, apiKey: credentialSchema }),
     // A member's ChatGPT plan: the worker adds the member's OAuth access token per reply; routes without one fail.
     z.strictObject({ provider: z.literal('chatgpt'), ...routeFields, accessToken: credentialSchema.optional() }),
+    // A member's Claude or GitHub Copilot plan, answered through the vendor's agent SDK with the member's token.
+    z.strictObject({ provider: z.literal('claude'), ...routeFields, accessToken: credentialSchema.optional() }),
+    z.strictObject({ provider: z.literal('copilot'), ...routeFields, accessToken: credentialSchema.optional() }),
     z.strictObject({
       provider: z.literal('openai-compatible'),
       ...routeFields,
@@ -190,15 +194,28 @@ type ParsedRoute = z.output<typeof inferenceRouteSchema>;
 /** Azure Foundry, OpenAI, xAI and OpenAI-compatible endpoints share the chat-completions and responses wire format. */
 export type OpenAiShapedRoute = Extract<
   ParsedRoute,
-  { provider: 'azure' | 'openai' | 'xai' | 'openai-compatible' | 'chatgpt' }
+  { provider: 'azure' | 'openai' | 'xai' | 'openai-compatible' | 'chatgpt' | 'copilot' }
 >;
+/** Routes that run on a member's own plan and carry that member's token per reply. */
+export const planRouteProviders = ['chatgpt', 'claude', 'copilot'] as const;
+export type PlanRouteProvider = (typeof planRouteProviders)[number];
+export function isPlanRoute<T extends { provider: string }>(
+  route: T,
+): route is Extract<T, { provider: PlanRouteProvider }> {
+  return (planRouteProviders as readonly string[]).includes(route.provider);
+}
+const planSessionRoute = (route: { provider: string }): route is { provider: PlanSessionProvider } =>
+  route.provider === 'claude' || route.provider === 'copilot';
+/** The Anthropic key header; a Claude plan route answers through the SDK and sends none. */
+const anthropicKey = (config: Extract<ParsedRoute, { provider: 'anthropic' | 'claude' }>) =>
+  config.provider === 'claude' ? {} : { 'x-api-key': config.apiKey };
 
 /**
  * Base URL of the OpenAI-shaped APIs and the credential header of the route. An endpoint without a path gets `v1/`;
  * one with a path, such as a gateway's `https://gateway.example/openai/`, is the API base itself.
  */
 export function openAiWire(config: OpenAiShapedRoute) {
-  if (config.provider === 'chatgpt')
+  if (config.provider === 'chatgpt' || config.provider === 'copilot')
     return { base: config.endpoint, auth: { authorization: 'Bearer ' + (config.accessToken ?? '') } };
   if (config.provider !== 'azure')
     return {
@@ -267,24 +284,18 @@ export type InferenceFailure =
   | 'timeout'
   | 'transport'
   | 'provider-error'
-  | ChatGptFailure;
-/** Failures of a member's ChatGPT plan route; the conversation shows each with its own recovery action. */
+  | PlanRouteFailure;
 /** Why a subscription plan could not answer, so the next plan the requester may use is tried. */
 export type PlanFailure = 'usage-limit' | 'reconnect' | 'not-eligible';
-const planFailures: Readonly<Record<string, PlanFailure>> = {
-  'model-chatgpt-usage-limit': 'usage-limit',
-  'model-chatgpt-reconnect': 'reconnect',
-  'model-chatgpt-not-eligible': 'not-eligible',
-};
+const planFailurePattern = /^model-(?:chatgpt|claude|copilot)-(usage-limit|reconnect|not-eligible)$/;
 export function planFailure(error: unknown): PlanFailure | undefined {
-  return error instanceof Error ? planFailures[error.message] : undefined;
+  return error instanceof Error ? (planFailurePattern.exec(error.message)?.[1] as PlanFailure | undefined) : undefined;
 }
 
-export type ChatGptFailure =
-  | 'chatgpt-usage-limit'
-  | 'chatgpt-reconnect'
-  | 'chatgpt-not-eligible'
-  | 'chatgpt-member-required';
+/** Failures of a member's plan route; the conversation shows each with its own recovery action. */
+export type PlanRouteFailure = `${PlanRouteProvider}-${PlanFailure | 'member-required'}`;
+export type ChatGptFailure = Extract<PlanRouteFailure, `chatgpt-${string}`>;
+const memberRequired = (provider: PlanRouteProvider): PlanRouteFailure => `${provider}-member-required`;
 type Attribution = { actualModel: string | null; requestId: string | null; usage: InferenceUsage };
 export type InferenceResult = Attribution &
   (
@@ -597,7 +608,8 @@ function usage(route: CapableRoute, body: unknown): InferenceUsage {
     cacheWrite1h: 0,
   } satisfies InferenceUsage;
   switch (route.provider) {
-    case 'anthropic': {
+    case 'anthropic':
+    case 'claude': {
       const parsed = anthropicUsageSchema.safeParse(body);
       if (!parsed.success) return unknown;
       const u = parsed.data.usage;
@@ -615,6 +627,7 @@ function usage(route: CapableRoute, body: unknown): InferenceUsage {
       };
     }
     case 'chatgpt':
+    case 'copilot':
     case 'openai':
     case 'xai':
     case 'openai-compatible':
@@ -760,6 +773,13 @@ export function httpFailure(
     const failure = chatGptFailure(status, codes);
     if (failure) return failure;
   }
+  // Claude and Copilot plan sessions answer their failures with these codes.
+  if (provider === 'claude' || provider === 'copilot') {
+    if (has('plan_usage_limit')) return `${provider}-usage-limit`;
+    if (has('plan_reconnect')) return `${provider}-reconnect`;
+    if (has('plan_not_eligible')) return `${provider}-not-eligible`;
+    if (has('plan_unavailable')) return 'unavailable';
+  }
   if (status === 401 || has('authentication_error', 'unauthenticated', 'invalid_api_key')) return 'authentication';
   // xAI answers a wrong key with 400 "Incorrect API key provided".
   if (provider === 'xai' && status === 400 && /api key/i.test(message)) return 'authentication';
@@ -887,7 +907,8 @@ function decision(
   const answer = (text: string) =>
     text.trim() ? { kind: 'decision' as const, value: { decision: { kind: 'answer', text } } } : invalid;
   switch (route.provider) {
-    case 'anthropic': {
+    case 'anthropic':
+    case 'claude': {
       const parsed = anthropicResponseSchema.safeParse(body);
       if (!parsed.success) return invalid;
       const data = parsed.data;
@@ -902,6 +923,7 @@ function decision(
       return { kind: 'decision', value: call.input };
     }
     case 'chatgpt':
+    case 'copilot':
     case 'openai':
     case 'xai':
     case 'openai-compatible':
@@ -1003,9 +1025,9 @@ export async function inferDecision(
   if (callerSignal?.aborted) return { ...failure('cancelled', null), dispatch: 'not-started' };
   const config = inferenceRouteSchema.safeParse(route);
   if (!config.success) return { ...failure('configuration', null), dispatch: 'not-started' };
-  // Agent decisions never run for a member, so they cannot use a member's ChatGPT plan.
-  if (config.data.provider === 'chatgpt')
-    return { ...failure('chatgpt-member-required', null), dispatch: 'not-started' };
+  // Agent decisions never run for a member, so they cannot use a member's plan.
+  if (isPlanRoute(config.data))
+    return { ...failure(memberRequired(config.data.provider), null), dispatch: 'not-started' };
   const parsedInput = agentModelInputSchema.safeParse(input);
   if (!parsedInput.success) return { ...failure('invalid-request', null), dispatch: 'not-started' };
   return withChatModelRequest('reply', async () => {
@@ -1300,9 +1322,10 @@ function chatWire(
   const description = 'Answer or select a tool for server execution.';
   switch (config.provider) {
     case 'anthropic':
+    case 'claude':
       return {
         url: `${config.endpoint}v1/messages`,
-        headers: { ...headers, 'x-api-key': config.apiKey, 'anthropic-version': '2023-06-01' },
+        headers: { ...headers, ...anthropicKey(config), 'anthropic-version': '2023-06-01' },
         body: {
           model: config.model,
           max_tokens: config.maxOutputTokens,
@@ -1320,6 +1343,7 @@ function chatWire(
         },
       };
     case 'chatgpt':
+    case 'copilot':
     case 'openai':
     case 'xai':
     case 'openai-compatible':
@@ -1601,7 +1625,8 @@ function nativeStep(route: CapableRoute, body: unknown): NativeStep {
     return cleaned.trim() || calls.length ? { kind: 'step', text: cleaned, calls, raw } : invalid('empty');
   };
   switch (route.provider) {
-    case 'anthropic': {
+    case 'anthropic':
+    case 'claude': {
       const parsed = anthropicNativeSchema.safeParse(body);
       if (!parsed.success) return invalid('schema');
       const data = parsed.data;
@@ -1615,6 +1640,7 @@ function nativeStep(route: CapableRoute, body: unknown): NativeStep {
       return step(data.content.flatMap(block => (block.type === 'text' ? [block.text] : [])).join(''), calls, null);
     }
     case 'chatgpt':
+    case 'copilot':
     case 'openai':
     case 'xai':
     case 'openai-compatible':
@@ -1732,7 +1758,8 @@ function nativeWire(
   const headers: Record<string, string> = { 'content-type': 'application/json' };
   const system = blocks.join('\n\n');
   switch (config.provider) {
-    case 'anthropic': {
+    case 'anthropic':
+    case 'claude': {
       const messages = items.map(item => {
         if (item.kind === 'turn') return { role: item.turn.role, content: turnContent(config, item.turn) };
         if (item.kind === 'model')
@@ -1755,7 +1782,7 @@ function nativeWire(
       });
       return {
         url: `${config.endpoint}v1/messages`,
-        headers: { ...headers, 'x-api-key': config.apiKey, 'anthropic-version': '2023-06-01' },
+        headers: { ...headers, ...anthropicKey(config), 'anthropic-version': '2023-06-01' },
         body: {
           model: config.model,
           max_tokens: config.maxOutputTokens,
@@ -1777,6 +1804,7 @@ function nativeWire(
       };
     }
     case 'chatgpt':
+    case 'copilot':
     case 'openai':
     case 'xai':
     case 'openai-compatible':
@@ -3443,8 +3471,8 @@ async function sendChatRequest<T>(
   onSettled?: (measure: RequestMeasure, usage: InferenceUsage) => void,
   signal?: AbortSignal,
 ) {
-  if (target.provider === 'chatgpt' && !target.accessToken)
-    throw new ModelCallError('chatgpt-member-required', { outputStarted: false });
+  if (isPlanRoute(target) && !target.accessToken)
+    throw new ModelCallError(memberRequired(target.provider), { outputStarted: false });
   const streamFormat = routeStreamFormat(target);
   const serialized = serializeChatRequest(
     target.provider === 'chatgpt'
@@ -3495,15 +3523,20 @@ async function sendChatRequest<T>(
       error,
     } = await observeProviderResponse(
       async () => {
-        const response = await providerFetch(streamFormat ? streamUrl(streamFormat, wire.url) : wire.url, {
-          method: 'POST',
-          headers: wire.headers,
-          body: serialized,
-          redirect: 'manual',
-          signal: signal
-            ? AbortSignal.any([AbortSignal.timeout(target.timeoutMs), signal])
-            : AbortSignal.timeout(target.timeoutMs),
-        }).catch(async (error: unknown) => {
+        const deadline = signal
+          ? AbortSignal.any([AbortSignal.timeout(target.timeoutMs), signal])
+          : AbortSignal.timeout(target.timeoutMs);
+        const response = await (
+          planSessionRoute(target)
+            ? planSessionFetch(target.provider, target.accessToken ?? '', serialized, deadline)
+            : providerFetch(streamFormat ? streamUrl(streamFormat, wire.url) : wire.url, {
+                method: 'POST',
+                headers: wire.headers,
+                body: serialized,
+                redirect: 'manual',
+                signal: deadline,
+              })
+        ).catch(async (error: unknown) => {
           await observeChatDetail('settle', async () => onUsage?.({ kind: 'unknown' }, { rejected: true })).catch(
             () => undefined,
           );
@@ -3611,7 +3644,8 @@ export type ContentInferenceResult =
 
 function contentAnswer(route: CapableRoute, body: unknown): ContentInferenceResult | undefined {
   switch (route.provider) {
-    case 'anthropic': {
+    case 'anthropic':
+    case 'claude': {
       const parsed = anthropicResponseSchema.safeParse(body);
       if (!parsed.success) return undefined;
       const text = parsed.data.content.flatMap(block => (block.type === 'text' ? [block.text] : [])).join('');
@@ -3620,6 +3654,7 @@ function contentAnswer(route: CapableRoute, body: unknown): ContentInferenceResu
       return parsed.data.stop_reason === 'end_turn' ? { kind: 'answer', text } : undefined;
     }
     case 'chatgpt':
+    case 'copilot':
     case 'openai':
     case 'xai':
     case 'openai-compatible':
@@ -4250,7 +4285,7 @@ export async function inferWithTools(
       answeredBy === undefined
     ) {
       const token = await tools.nextPlanCredential(planFailed, diagnostics.retryAfterMs);
-      if (!token || config.provider !== 'chatgpt') break;
+      if (!token || !isPlanRoute(config)) break;
       config = { ...config, accessToken: token };
       try {
         const value = await call(config);
@@ -6230,8 +6265,8 @@ export async function inferSpecialist(
     const request = (config: z.infer<typeof inferenceRouteSchema>) =>
       withChatModelRequest('reply', async () => {
         const wire = observeChatDetailSync('serialize', () => nativeRequest(config, [system], items, catalog.tools));
-        // A helper of a ChatGPT plan reply uses the streamed, unstored ChatGPT request.
-        if (config.provider === 'chatgpt')
+        // A helper of a plan reply sends its request the way the plan's main loop does.
+        if (isPlanRoute(config))
           return sendChatRequest(
             config,
             step + extraRequests,
@@ -6507,7 +6542,7 @@ export async function inferWithSystem(
     const parsed = inferenceRouteSchema.safeParse(route);
     if (!parsed.success) throw new ModelRequestNotDispatched();
     const config = parsed.data;
-    if (config.provider === 'chatgpt') throw new ModelCallError('chatgpt-member-required', { outputStarted: false });
+    if (isPlanRoute(config)) throw new ModelCallError(memberRequired(config.provider), { outputStarted: false });
     const { headers, url, body } = observeChatDetailSync('serialize', () => chatRequest(config, messages, system));
     const serialized = serializeChatRequest(body);
     const onUsage = await observeChatDetail('reserve', async () =>
@@ -6566,7 +6601,7 @@ export async function inferText(
     const parsed = inferenceRouteSchema.safeParse(route);
     if (!parsed.success) throw new ModelRequestNotDispatched();
     const config = parsed.data;
-    if (config.provider === 'chatgpt') throw new ModelCallError('chatgpt-member-required', { outputStarted: false });
+    if (isPlanRoute(config)) throw new ModelCallError(memberRequired(config.provider), { outputStarted: false });
     const context: ChatTurn[] = [
       { role: 'user', text: observeChatDetailSync('render', () => runtimeReminder({ kind: 'text' })) },
       ...messages,

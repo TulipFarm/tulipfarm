@@ -444,6 +444,14 @@ const modelFailureSchema = z.enum([
   'model-chatgpt-reconnect',
   'model-chatgpt-not-eligible',
   'model-chatgpt-member-required',
+  'model-claude-usage-limit',
+  'model-claude-reconnect',
+  'model-claude-not-eligible',
+  'model-claude-member-required',
+  'model-copilot-usage-limit',
+  'model-copilot-reconnect',
+  'model-copilot-not-eligible',
+  'model-copilot-member-required',
 ]);
 type ModelFailure = z.infer<typeof modelFailureSchema>;
 // A retry repeats the same request, so failures caused by the model's setup or the request itself end the turn.
@@ -463,6 +471,14 @@ const terminalModelFailures = new Set<ModelFailure>([
   'model-chatgpt-reconnect',
   'model-chatgpt-not-eligible',
   'model-chatgpt-member-required',
+  'model-claude-usage-limit',
+  'model-claude-reconnect',
+  'model-claude-not-eligible',
+  'model-claude-member-required',
+  'model-copilot-usage-limit',
+  'model-copilot-reconnect',
+  'model-copilot-not-eligible',
+  'model-copilot-member-required',
 ]);
 /** A non-model cause a failed attempt records, so a reply that cannot resume after tool calls can say why it stopped. */
 function replyFailureCause(error: unknown): string | undefined {

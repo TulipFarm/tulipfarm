@@ -416,9 +416,14 @@ export async function beginReplySession(input: {
     const need = units(needCost.toString());
     const overPlan =
       plan !== null && (plan.remainingUnits < consumed() + need || plan.remainingMilliseconds <= unflushed());
-    if (!hold || hold.held - consumed() < need + 1n || overPlan) await topUp(attempt.step, model, needCost, inputBound);
+    // A call on a member's own plan costs no credits, so any open hold funds it.
+    const short = need > 0n && hold !== undefined && hold.held - consumed() < need + 1n;
+    if (!hold || short || overPlan) await topUp(attempt.step, model, needCost, inputBound);
+    const stepId = chatId(attempt.step);
+    // The first call of a hold opened for its step settles into the hold's own row, which may carry a suffix.
+    const ownsHold = !hold!.calls.length && (hold!.id === stepId || hold!.id.startsWith(`${stepId}:`));
     const call: Call = {
-      id: chatId(attempt.step),
+      id: ownsHold ? hold!.id : stepId,
       modelId: model.price.modelId,
       pricingRevision: model.price.pricingRevision,
       worst: need,

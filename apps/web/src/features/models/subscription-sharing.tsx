@@ -1,6 +1,5 @@
 import { useMemo, useState } from 'react';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
-import { BrandIcon } from '@tulipfarm/sprout/brand-icon';
 import { Button } from '@tulipfarm/sprout/button';
 import {
   Dialog,
@@ -20,6 +19,8 @@ import type { SecretGrant } from '@/features/secrets/contracts';
 import { GrantsEditor, granteeKey, type People, type RoleOptions } from '@/features/secrets/grants-editor';
 import { useMemberDirectory } from '@/features/secrets/queries';
 import { TableRequestError } from '@/features/tables/request-state';
+import { planModelVendor } from './model-brand';
+import { ModelLogo } from './model-logo';
 import { modelKeys } from './queries';
 
 export const subscriptionsKey = ['models', 'subscriptions'] as const;
@@ -86,7 +87,7 @@ function subscriptionsApi(workspaceId: string) {
 }
 
 const planRoles = {
-  use: { label: 'Use it', hint: 'Pick its models in chats and agents' },
+  use: { label: 'Use it', hint: 'Pick its models in chats' },
   manage: { label: 'Use and share it', hint: 'Also change who it’s shared with' },
 } as const satisfies RoleOptions;
 
@@ -162,7 +163,7 @@ export function ShareDialog({
         <DialogHeader>
           <DialogTitle>Share this {provider} plan</DialogTitle>
           <DialogDescription>
-            People you share with can pick its models in their chats and agents. No one can see its sign-in details.
+            People you share with can pick its models in their chats. No one can see its sign-in details.
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-4">
@@ -275,7 +276,7 @@ export function PlanModels({
             const on = !subscription.disabledModels.includes(model.slug);
             return (
               <li key={model.slug} className="flex items-center gap-3 py-2.5 text-sm">
-                <BrandIcon brand="openai" size="inline" />
+                <ModelLogo vendor={planModelVendor(model.slug)} />
                 <span className="flex-1">{model.label}</span>
                 <Switch
                   aria-label={model.label}

@@ -18,14 +18,9 @@ import { ModelSetupLink } from '@/features/models/model-setup';
 import { ImageSettingsSection } from '@/features/models/image-settings';
 import { useFlag } from '@/lib/feature-flags';
 import { ChatGptPlanPane } from '@/features/models/chatgpt-plan';
-import { isChatGptFamily } from '@/features/models/chatgpt-plan-api';
-import {
-  ApiKeysPane,
-  ComingSoonPane,
-  ModelSources,
-  SharedPlanPane,
-  type ModelSource,
-} from '@/features/models/model-sources';
+import { TokenPlanPane } from '@/features/models/token-plan';
+import { familyPlan } from '@/features/models/chatgpt-plan-api';
+import { ApiKeysPane, ModelSources, SharedPlanPane, type ModelSource } from '@/features/models/model-sources';
 
 export function ModelsPage() {
   const { workspace, user } = workspaceRoute.useRouteContext();
@@ -91,7 +86,7 @@ function WorkspaceModels({ workspaceId, userId }: { workspaceId: string; userId:
   const selected: ModelSource = workspaceModelsRoute.useSearch({ select: search => search.tab ?? 'access' });
   // A finished ChatGPT sign-in lands here; show the ChatGPT plan so its result is visible.
   const source: ModelSource = chatGptOutcome ? 'chatgpt' : selected === 'images' && !images ? 'access' : selected;
-  const builtIn = (snapshot?.families ?? []).filter(family => !isChatGptFamily(family));
+  const builtIn = (snapshot?.families ?? []).filter(family => !familyPlan(family));
   const clearChatGptOutcome = useCallback(
     () => void navigate({ search: previous => ({ ...previous, chatgpt: undefined }), replace: true }),
     [navigate],
@@ -178,7 +173,9 @@ function WorkspaceModels({ workspaceId, userId }: { workspaceId: string; userId:
         {source === 'chatgpt' && (
           <ChatGptPlanPane workspaceId={workspaceId} outcome={chatGptOutcome} clearOutcome={clearChatGptOutcome} />
         )}
-        {(source === 'claude' || source === 'copilot') && <ComingSoonPane provider={source} />}
+        {(source === 'claude' || source === 'copilot') && (
+          <TokenPlanPane key={source} workspaceId={workspaceId} provider={source} />
+        )}
         {source === 'keys' && <ApiKeysPane />}
         {source.startsWith('plan:') && (
           <SharedPlanPane workspaceId={workspaceId} connectionId={source.slice('plan:'.length)} />

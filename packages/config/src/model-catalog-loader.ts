@@ -2,10 +2,8 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import type { z } from 'zod';
 import {
-  chatGptPlanEnabled,
-  chatGptPlanSetting,
-  chatGptProvider,
   defaultImageInputLimits,
+  isPlanProvider,
   modelCatalogFileSchema,
   modelProviderDefaults,
   type ImageModelApi,
@@ -13,6 +11,8 @@ import {
   type ModelCatalogFileImageModel,
   type ModelCatalogFileModel,
   type ModelCatalogRole,
+  planEnabled,
+  planProviders,
 } from './model-catalog-file.ts';
 import { resolveModelCapabilities, type ModelCapabilityOverrides, type ModelProvider } from './model-capabilities.ts';
 import {
@@ -102,6 +102,7 @@ export function readModelCatalog(env: Env = process.env): ReadCatalog {
 }
 
 type BaseUrlProvider = keyof typeof defaultModelEndpoints;
+type BuiltInType = keyof typeof modelProviderDefaults;
 // Paths the request URLs append to these base URLs; a base URL that already ends in one would double it.
 const appendedPaths: Partial<Record<BaseUrlProvider, string>> = { anthropic: '/v1/', google: '/v1beta/' };
 
@@ -163,12 +164,15 @@ const unmeteredRates: readonly ModelPrice[] = Object.freeze([
 ]);
 
 function providerOf(catalog: ModelCatalogFile, key: string) {
-  // ChatGPT plan routes have no key; CHATGPT_PLAN switches them, and the cache key and env checks read it.
-  if (key === chatGptProvider)
-    return { type: chatGptProvider as ModelProvider, apiKeyEnv: chatGptPlanSetting, endpointEnv: chatGptPlanSetting };
+  // Plan routes have no key; their setting, such as CHATGPT_PLAN, switches them, and the cache key and env checks read it.
+  if (isPlanProvider(key)) {
+    const { setting } = planProviders[key];
+    return { type: key as ModelProvider, apiKeyEnv: setting, endpointEnv: setting };
+  }
   const declared = catalog.providers[key];
   const type = (declared?.type ?? key) as ModelProvider;
-  const defaults = type === 'openai-compatible' || type === 'chatgpt' ? undefined : modelProviderDefaults[type];
+  const defaults =
+    type === 'openai-compatible' || isPlanProvider(type) ? undefined : modelProviderDefaults[type as BuiltInType];
   return {
     type,
     apiKeyEnv: declared?.apiKeyEnv ?? defaults!.apiKeyEnv,
@@ -232,10 +236,11 @@ export function loadModelCatalog(env: Env = process.env): ServedModelCatalog {
     const needed: string[] = [];
     for (const [index, { provider: key, model: name }] of routes.entries()) {
       const provider = providerOf(catalog, key);
-      if (provider.type === chatGptProvider) {
-        needed.push(`${chatGptPlanSetting} on`);
-        if (!chatGptPlanEnabled(env) || route) continue;
-        route = Object.freeze({ provider: key, ...provider, model: name, endpoint: defaultModelEndpoints.chatgpt });
+      if (isPlanProvider(provider.type)) {
+        const plan = provider.type;
+        needed.push(`${planProviders[plan].setting} on`);
+        if (!planEnabled(plan, env) || route) continue;
+        route = Object.freeze({ provider: key, ...provider, model: name, endpoint: defaultModelEndpoints[plan] });
         routeIndex = index;
         continue;
       }
@@ -278,8 +283,8 @@ export function loadModelCatalog(env: Env = process.env): ServedModelCatalog {
             model.pricing === 'unmetered' ? unmeteredRates : model.pricing.map(rate => modelPriceSchema.parse(rate)),
         }),
       );
-    // With CHATGPT_PLAN off, ChatGPT plan models are left out quietly.
-    else if (model.routes.every(candidate => candidate.provider === chatGptProvider)) continue;
+    // With its setting off, a plan model is left out quietly.
+    else if (model.routes.every(candidate => isPlanProvider(candidate.provider))) continue;
     else if (catalog.missingKeys === 'skip') skipped.push(model.id);
     else throw missing(`models.${index}`, model.id, needed);
   }
@@ -293,17 +298,17 @@ export function loadModelCatalog(env: Env = process.env): ServedModelCatalog {
     else if (catalog.missingKeys === 'skip') skipped.push(image.id);
     else throw missing(`imageModels.${index}`, image.id, needed);
   }
-  // A ChatGPT plan model runs only for a member who connected ChatGPT, so it cannot be the only model.
-  if (!served.some(model => model.route.type !== chatGptProvider))
+  // A plan model runs only for a member who connected that plan, so it cannot be the only model.
+  if (!served.some(model => !isPlanProvider(model.route.type)))
     throw fail(
-      `no model has a route with its key set; set a provider key such as ${[...new Set(catalog.models.flatMap(model => model.routes.filter(route => route.provider !== chatGptProvider).map(route => providerOf(catalog, route.provider).apiKeyEnv)))].join(', ')}`,
+      `no model has a route with its key set; set a provider key such as ${[...new Set(catalog.models.flatMap(model => model.routes.filter(route => !isPlanProvider(route.provider)).map(route => providerOf(catalog, route.provider).apiKeyEnv)))].join(', ')}`,
     );
   const warnings = skipped.length ? [`Models without a provider key are not served: ${skipped.join(', ')}.`] : [];
   const declared = catalog.models.find(model => model.default)!;
   let defaultModel = served.find(model => model.id === declared.id);
   if (!defaultModel) {
     defaultModel = served.find(
-      model => model.selectable && !model.paused && !model.featureFlag && model.route.type !== chatGptProvider,
+      model => model.selectable && !model.paused && !model.featureFlag && !isPlanProvider(model.route.type),
     );
     if (!defaultModel) throw fail(`the default model "${declared.id}" is not served and no other model can replace it`);
     warnings.push(`The default model ${declared.id} is not served; ${defaultModel.id} is the default.`);

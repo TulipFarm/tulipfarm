@@ -15,7 +15,7 @@ import { isCompletionRequest } from './native-chat-fixture.mjs';
 // One provider credential at a time: its families must run chat (streamed), titles and tasks against that provider's own API,
 // metered at that provider's catalog price. The provider is a local HTTP server; only the outbound origin is rewritten.
 // ChatGPT plan models run on a member's plan, not a provider credential, so they are off here.
-const planOff = { CHATGPT_PLAN: 'off' };
+const planOff = { CHATGPT_PLAN: 'off', CLAUDE_PLAN: 'off', COPILOT_PLAN: 'off' };
 const azureEndpoint = 'https://synthetic.services.ai.azure.com/';
 const providers = {
   anthropic: { env: { ...planOff, ANTHROPIC_API_KEY: 'anthropic-key' }, origin: 'https://api.anthropic.com/' },

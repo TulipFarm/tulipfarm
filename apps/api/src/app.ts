@@ -24,6 +24,9 @@ import { socialAccounts, socialChannels, socialPosts } from './social-compositio
 import { githubAccounts } from './github-composition.ts';
 import { registerGitHubAccounts } from './github-accounts.ts';
 import { chatGptPlan, registerChatGptPlan } from './chatgpt-plan.ts';
+import { registerTokenPlan, tokenPlan } from './token-plans.ts';
+import type { TokenPlan, TokenPlanProvider } from '@tulipfarm/integrations/token-plans';
+import type { PlanProvider } from '@tulipfarm/config';
 import { registerSubscriptions } from './subscriptions.ts';
 import { createSubscriptions } from '@tulipfarm/integrations/subscriptions';
 import { registerGitHubInvestigation } from './github-investigation.ts';
@@ -51,6 +54,8 @@ export function buildApp(
       ModelCatalogDependencies,
       'modelFamilyEligibility' | 'modelFamilyResolution' | 'modelCatalogSnapshot'
     >;
+    /** Replaces the Claude and Copilot connections, for tests that must not reach the vendors. */
+    tokenPlans?: Partial<Record<TokenPlanProvider, TokenPlan | null>>;
   } = {},
 ) {
   const app = Fastify({
@@ -140,6 +145,13 @@ export function buildApp(
         );
         const chatGpt = chatGptPlan(runtime, auth.pool);
         registerChatGptPlan(business, auth.auth, chatGpt, auth.pool);
+        const planFor = (provider: TokenPlanProvider) =>
+          options.tokenPlans && provider in options.tokenPlans
+            ? (options.tokenPlans[provider] ?? null)
+            : tokenPlan(provider, runtime);
+        const tokenPlans = { claude: planFor('claude'), copilot: planFor('copilot') };
+        registerTokenPlan(business, auth.auth, 'claude', tokenPlans.claude);
+        registerTokenPlan(business, auth.auth, 'copilot', tokenPlans.copilot);
         const subscriptions = runtime ? createSubscriptions({ runtime }) : null;
         registerSubscriptions(
           business,
@@ -168,10 +180,12 @@ export function buildApp(
             runtime,
             compatibility: commonCompatibility,
             ...(options.modelCatalog ?? { modelCatalogSnapshot: models.modelCatalogSnapshot }),
-            ...(chatGpt && subscriptions
+            ...(subscriptions && (chatGpt || tokenPlans.claude || tokenPlans.copilot)
               ? {
-                  chatGptModels: (workspaceId: string, userId: string) =>
-                    subscriptions.models(workspaceId, userId, 'chatgpt'),
+                  planModels: async (workspaceId: string, userId: string, provider: PlanProvider) =>
+                    (provider === 'chatgpt' ? chatGpt : tokenPlans[provider])
+                      ? subscriptions.models(workspaceId, userId, provider)
+                      : [],
                 }
               : {}),
           });

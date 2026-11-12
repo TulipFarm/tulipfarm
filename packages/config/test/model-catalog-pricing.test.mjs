@@ -24,9 +24,9 @@ const tokens = {
 const usage = { kind: 'known', tokens };
 
 // Bundles the served catalog of `env` and meters `tokens` for `familyId` through it.
-// ChatGPT plan models are unmetered and change the price revision, so metering cases turn them off unless they set it.
+// Plan models are unmetered and change the price revision, so metering cases turn them off unless they set it.
 function meter(env, familyId, metered = usage) {
-  const served = loadModelCatalog({ CHATGPT_PLAN: 'off', ...env });
+  const served = loadModelCatalog({ CHATGPT_PLAN: 'off', CLAUDE_PLAN: 'off', COPILOT_PLAN: 'off', ...env });
   const { bundle } = servedModelBundle(served);
   const resolution = resolveModelBundle({
     bundle,
@@ -65,7 +65,7 @@ test('the shipped catalog keeps its prices, revisions and costs', () => {
   assert.equal(output.usage, output.cost);
   assert.equal(output.pricingRevision, initialModelMapping.pricingRevision);
   assert.equal(output.pricingRevision, 'prices-2026-10-19.1');
-  // ChatGPT plan models add to the served prices, so the revision moves on while every cost stays the same.
+  // Plan models add to the served prices, so the revision moves on while every cost stays the same.
   const withPlans = meter({ ANTHROPIC_API_KEY: 'test-key', CHATGPT_PLAN: 'on' }, 'claude-haiku');
   assert.equal(withPlans.cost, output.cost);
   assert.notEqual(withPlans.pricingRevision, initialModelMapping.pricingRevision);

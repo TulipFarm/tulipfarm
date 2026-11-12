@@ -1,8 +1,8 @@
 import { z } from 'zod';
 import {
-  chatGptPlanEnabled,
-  chatGptProvider,
+  isPlanProvider,
   loadModelCatalog,
+  planEnabled,
   readModelCatalog,
   type ServedModelCatalog,
 } from '@tulipfarm/config';
@@ -24,14 +24,12 @@ export async function modelAvailability(tx: AgentTransaction) {
   // Every catalog model and image model, served or not, so workspace choices survive a missing key.
   const { catalog } = readModelCatalog();
   const flaggedOff = await flaggedOffModels(tx);
-  const chatGpt = chatGptPlanEnabled(process.env);
+  const offered = (provider: string) => !isPlanProvider(provider) || planEnabled(provider, process.env);
   return (
     [...catalog.models, ...catalog.imageModels]
       .filter(family => !flaggedOff.has(family.id))
-      // With CHATGPT_PLAN off, ChatGPT plan models are not offered at all.
-      .filter(
-        family => chatGpt || !('routes' in family && family.routes.some(route => route.provider === chatGptProvider)),
-      )
+      // A plan model whose setting, such as CHATGPT_PLAN, is off is not offered at all.
+      .filter(family => !('routes' in family) || family.routes.every(route => offered(route.provider)))
       .map(
         family =>
           rows.find(row => row.familyId === family.id) ?? {
@@ -101,8 +99,8 @@ export async function stepFamilyAvailable(
   catalog: Pick<ServedModelCatalog, 'model'> = loadModelCatalog(),
 ) {
   const served = catalog.model(familyId);
-  // Plan steps do not run for a member, so a ChatGPT plan model cannot serve them.
-  if (served?.route.type === chatGptProvider) return false;
+  // Plan steps do not run for a member, so a model on a member's plan cannot serve them.
+  if (served && isPlanProvider(served.route.type)) return false;
   return Boolean(served && !served.paused) && (await modelFamilyEnabled(tx, familyId));
 }
 

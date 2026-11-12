@@ -385,6 +385,153 @@
       ]
     },
     {
+      "id": "claude-plan-sonnet",
+      "name": "Claude Sonnet (Claude plan)",
+      "vendor": "anthropic",
+      "speed": 84.5,
+      "quality": 38,
+      "routes": [
+        {
+          "provider": "claude",
+          "model": "claude-sonnet-5"
+        }
+      ],
+      "limits": {
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 64000
+      },
+      "pricing": "unmetered",
+      "notes": [
+        "Runs on the requesting member's own Claude plan through the Claude Agent SDK; offered only with CLAUDE_PLAN on. Model claude-sonnet-5."
+      ]
+    },
+    {
+      "id": "claude-plan-opus",
+      "name": "Claude Opus (Claude plan)",
+      "vendor": "anthropic",
+      "speed": 98.3,
+      "quality": 58,
+      "routes": [
+        {
+          "provider": "claude",
+          "model": "claude-opus-5-5"
+        }
+      ],
+      "limits": {
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 64000
+      },
+      "pricing": "unmetered",
+      "notes": [
+        "Runs on the requesting member's own Claude plan through the Claude Agent SDK; offered only with CLAUDE_PLAN on. Model claude-opus-5-5."
+      ]
+    },
+    {
+      "id": "claude-plan-haiku",
+      "name": "Claude Haiku (Claude plan)",
+      "vendor": "anthropic",
+      "speed": 94.9,
+      "quality": 17,
+      "routes": [
+        {
+          "provider": "claude",
+          "model": "claude-haiku-4-5"
+        }
+      ],
+      "limits": {
+        "maxInputTokens": 200000,
+        "maxOutputTokens": 64000
+      },
+      "pricing": "unmetered",
+      "notes": [
+        "Runs on the requesting member's own Claude plan through the Claude Agent SDK; offered only with CLAUDE_PLAN on. Model claude-haiku-4-5."
+      ]
+    },
+    {
+      "id": "copilot-claude-sonnet",
+      "name": "Claude Sonnet (Copilot plan)",
+      "vendor": "anthropic",
+      "speed": 84.5,
+      "quality": 38,
+      "routes": [
+        {
+          "provider": "copilot",
+          "model": "claude-sonnet-5.5"
+        }
+      ],
+      "limits": {
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 32000
+      },
+      "pricing": "unmetered",
+      "notes": [
+        "Runs on the requesting member's own GitHub Copilot plan through the GitHub Copilot SDK; shown only to members whose Copilot model list includes claude-sonnet-5.5. Copilot caps the context below the vendor's own limit."
+      ]
+    },
+    {
+      "id": "copilot-claude-opus",
+      "name": "Claude Opus (Copilot plan)",
+      "vendor": "anthropic",
+      "speed": 98.3,
+      "quality": 58,
+      "routes": [
+        {
+          "provider": "copilot",
+          "model": "claude-opus-5.5"
+        }
+      ],
+      "limits": {
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 32000
+      },
+      "pricing": "unmetered",
+      "notes": [
+        "Runs on the requesting member's own GitHub Copilot plan through the GitHub Copilot SDK; shown only to members whose Copilot model list includes claude-opus-5.5. Copilot caps the context below the vendor's own limit."
+      ]
+    },
+    {
+      "id": "copilot-gpt-sol",
+      "name": "GPT Sol (Copilot plan)",
+      "vendor": "openai",
+      "speed": 117.7,
+      "quality": 48,
+      "routes": [
+        {
+          "provider": "copilot",
+          "model": "gpt-6.1-sol"
+        }
+      ],
+      "limits": {
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 32000
+      },
+      "pricing": "unmetered",
+      "notes": [
+        "Runs on the requesting member's own GitHub Copilot plan through the GitHub Copilot SDK; shown only to members whose Copilot model list includes gpt-6.1-sol. Copilot caps the context below the vendor's own limit."
+      ]
+    },
+    {
+      "id": "copilot-gpt-luna",
+      "name": "GPT Luna (Copilot plan)",
+      "vendor": "openai",
+      "speed": 120.2,
+      "quality": 38,
+      "routes": [
+        {
+          "provider": "copilot",
+          "model": "gpt-6-luna"
+        }
+      ],
+      "limits": {
+        "maxInputTokens": 128000,
+        "maxOutputTokens": 32000
+      },
+      "pricing": "unmetered",
+      "notes": [
+        "Runs on the requesting member's own GitHub Copilot plan through the GitHub Copilot SDK; shown only to members whose Copilot model list includes gpt-6-luna. Copilot caps the context below the vendor's own limit."
+      ]
+    },
+    {
       "id": "deepseek-pro",
       "name": "DeepSeek Pro",
       "vendor": "deepseek",

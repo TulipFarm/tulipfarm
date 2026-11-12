@@ -1,14 +1,14 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
-import { initialModelMapping, legacyModels, shippedModelCatalogPath } from '@tulipfarm/config';
+import { initialModelMapping, isPlanProvider, legacyModels, shippedModelCatalogPath } from '@tulipfarm/config';
 import { modelEnvironment } from '@tulipfarm/agents/model-environment';
 import { chatFallbackModel, chatReplyModel, conversationModel, roleModel } from '../src/conversation-model.ts';
 import { chatTitleRoute, meteredReply } from '../src/conversation-activities.ts';
 
 const runtime = { transaction: async () => assert.fail('An unavailable model must not reach storage') };
 // ChatGPT plan models run on a member's plan, not a provider credential, so they are off here.
-const planOff = { CHATGPT_PLAN: 'off' };
+const planOff = { CHATGPT_PLAN: 'off', CLAUDE_PLAN: 'off', COPILOT_PLAN: 'off' };
 const keys = {
   ...planOff,
   ANTHROPIC_API_KEY: 'synthetic-key',
@@ -61,10 +61,10 @@ function previousModel(family) {
 }
 
 test('every enabled family keeps the route and price chat used before, and tasks use the same route', () => {
-  // Gemini families were not selectable before; their routes are covered by the default-provider tests. ChatGPT plan
-  // families are newer than the previous price list.
+  // Gemini families were not selectable before; their routes are covered by the default-provider tests. ChatGPT,
+  // Claude and Copilot plan families are newer than the previous price list.
   const families = catalogModels
-    .filter(family => family.vendor !== 'google' && family.routes.every(route => route.provider !== 'chatgpt'))
+    .filter(family => family.vendor !== 'google' && family.routes.every(route => !isPlanProvider(route.provider)))
     .map(family => family.id);
   const env = keys;
   for (const family of families) {

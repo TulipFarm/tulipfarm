@@ -10,7 +10,7 @@ import { ModelRead } from './read';
 import { useModelCatalog } from './use-model-catalog';
 import { ModelOption } from './model-option';
 import { ModelSetupLink, noModelsConfigured } from './model-setup';
-import { isChatGptFamily } from './chatgpt-plan-api';
+import { familyPlan } from './chatgpt-plan-api';
 
 export function AgentModelPicker({
   workspaceId,
@@ -31,8 +31,8 @@ export function AgentModelPicker({
     >
       <ModelRead state={catalog.state} refresh={catalog.refresh} label="model catalog">
         {({ families: listed, imageModels }) => {
-          // Agents never run on a member's ChatGPT plan.
-          const families = listed.filter(family => !isChatGptFamily(family));
+          // Agents never run on a member's own plan.
+          const families = listed.filter(family => !familyPlan(family));
           const selected = families.find(family => family.id === value);
           return (
             <div className="grid gap-3">

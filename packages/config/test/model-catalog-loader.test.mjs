@@ -17,10 +17,11 @@ const file = catalog => {
 };
 test.after(() => rmSync(scratch, { recursive: true, force: true }));
 
-// ChatGPT plan models need no key; these provider-key cases turn them off, and the ChatGPT plan test covers them.
-const anthropic = { CHATGPT_PLAN: 'off', ANTHROPIC_API_KEY: 'test-key' };
+// Plan models need no key; these provider-key cases turn them off, and the plan test covers them.
+const plansOff = { CHATGPT_PLAN: 'off', CLAUDE_PLAN: 'off', COPILOT_PLAN: 'off' };
+const anthropic = { ...plansOff, ANTHROPIC_API_KEY: 'test-key' };
 const azure = {
-  CHATGPT_PLAN: 'off',
+  ...plansOff,
   AZURE_FOUNDRY_API_KEY: 'test-key',
   AZURE_FOUNDRY_ENDPOINT: 'https://example.services.ai.azure.com',
 };
@@ -59,18 +60,27 @@ test('the shipped catalog is the default source and serves the models whose keys
   assert.equal(served.model('gpt-luna'), undefined);
 });
 
-test('ChatGPT plan models are served unless CHATGPT_PLAN is off, and never become the default', () => {
-  const plans = ['chatgpt-sol', 'chatgpt-astra', 'chatgpt-luna'];
+test('plan models follow their setting, Claude plans are off by default, and none becomes the default', () => {
+  const planIds = served =>
+    served.models.filter(item => ['chatgpt', 'claude', 'copilot'].includes(item.route.type)).map(item => item.id);
   const served = loadModelCatalog({ ANTHROPIC_API_KEY: 'test-key' });
-  assert.deepEqual(
-    served.models.filter(item => item.route.type === 'chatgpt').map(item => item.id),
-    plans,
-  );
+  assert.deepEqual(planIds(served), [
+    'chatgpt-sol',
+    'chatgpt-astra',
+    'chatgpt-luna',
+    'copilot-claude-sonnet',
+    'copilot-claude-opus',
+    'copilot-gpt-sol',
+    'copilot-gpt-luna',
+  ]);
   assert.equal(served.defaultModel.id, 'claude-sonnet');
-  assert.equal(
-    loadModelCatalog({ ...anthropic }).models.some(item => item.route.type === 'chatgpt'),
-    false,
+  const claude = loadModelCatalog({ ...anthropic, CLAUDE_PLAN: 'on' });
+  assert.deepEqual(planIds(claude), ['claude-plan-sonnet', 'claude-plan-opus', 'claude-plan-haiku']);
+  assert.deepEqual(
+    claude.models.filter(item => item.route.type === 'claude').map(item => item.route.model),
+    ['claude-sonnet-5', 'claude-opus-5-5', 'claude-haiku-4-5'],
   );
+  assert.deepEqual(planIds(loadModelCatalog(anthropic)), []);
   assert.throws(() => loadModelCatalog({}), /no model has a route with its key set/);
 });
 
@@ -94,7 +104,7 @@ test('shipped bundles keep the ids and contents the previous configuration produ
     'server-df252f852c308e4b4cbf30d9bfcd9493d6ba5d96aea8b3ab0fe8dbdf7ceff75c': anthropic,
     'server-32997cfa52952018391f4bbce8fd0aad1cb3e6dcdcd4d5b285abbad585fe8773': azure,
     'server-213b84957e410b090951a6a1cd90e3c74c835b327acf7b7c4a1c428fb6c32ab5': {
-      CHATGPT_PLAN: 'off',
+      ...plansOff,
       OPENAI_API_KEY: 'test-key',
       XAI_API_KEY: 'test-key',
     },

@@ -5,7 +5,7 @@ import { MessageFooter } from '@tulipfarm/sprout/message';
 import type { ConversationMessage } from './conversation-api';
 import { compactsOnRetry, contextFailure } from './compaction-copy';
 import {
-  chatGptFailureAction,
+  planFailureAction,
   fallbackNote,
   proposalKeptNote,
   replyFailure,
@@ -88,7 +88,7 @@ export function ReplyFooter({
           {turn.status === 'failed' && !contextFailure(turn.errorCode) && replyFailure(turn.errorCode) && (
             <p role="alert">{replyFailure(turn.errorCode)}</p>
           )}
-          {turn.status === 'failed' && <ChatGptFailureAction code={turn.errorCode} slug={workspaceSlug} />}
+          {turn.status === 'failed' && <PlanFailureAction code={turn.errorCode} slug={workspaceSlug} />}
           {turn.status === 'failed' && turn.errorCode === 'skill-unavailable' && (
             <p role="alert">
               {skillName ? `“${skillName}”` : 'The skill'} is no longer available, so this reply didn’t run. Ask a
@@ -115,8 +115,8 @@ export function ReplyFooter({
   );
 }
 
-function ChatGptFailureAction({ code, slug }: { code: string | null | undefined; slug: string | undefined }) {
-  const action = chatGptFailureAction(code);
+function PlanFailureAction({ code, slug }: { code: string | null | undefined; slug: string | undefined }) {
+  const action = planFailureAction(code);
   if (!action) return null;
   if (action.kind === 'manage-usage')
     return (

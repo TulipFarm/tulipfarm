@@ -9,8 +9,8 @@ import { familyCost } from '@/features/models/family-cost';
 import { modelBrand } from '@/features/models/model-brand';
 import { modelLogo } from '@/features/models/model-logo';
 import { ModelSetupLink, noModelsConfigured } from '@/features/models/model-setup';
-import { isChatGptFamily } from '@/features/models/chatgpt-plan-api';
-import { chatGptUsageUrl } from './reply-failure-copy';
+import { familyPlan } from '@/features/models/chatgpt-plan-api';
+import { planLabels, planUsageUrls } from './reply-failure-copy';
 
 function composerModel(family: ModelCatalogFamily): ComposerModel {
   return {
@@ -21,7 +21,7 @@ function composerModel(family: ModelCatalogFamily): ComposerModel {
     speed: family.speed ?? undefined,
     quality: family.quality ?? undefined,
     cost: familyCost(family),
-    ...(isChatGptFamily(family) ? { plan: 'chatgpt' as const } : {}),
+    ...(familyPlan(family) ? { plan: familyPlan(family)! } : {}),
     disabled: !family.available,
     ...(!family.available
       ? {
@@ -43,14 +43,14 @@ function dismissedNotice(workspaceId: string) {
 }
 
 /**
- * ChatGPT plan models run only for members who can use a connected plan, so shared surfaces such as projects pass
- * `{ chatGpt: false }` to leave them out.
+ * Plan models (ChatGPT, Claude, Copilot) run only for members who can use a connected plan, so shared surfaces such as
+ * projects pass `{ plans: false }` to leave them out.
  */
 export function useChatModels(
   workspaceId: string,
   user: Pick<typeof authClient.$Infer.Session.user, 'lastModelFamilyId'>,
   preferWorkspaceDefault = false,
-  options: { chatGpt?: boolean } = {},
+  options: { plans?: boolean } = {},
 ) {
   const catalog = useModelCatalog(workspaceId);
   const [selected, setSelected] = useState<ComposerModel | null>(null);
@@ -61,10 +61,10 @@ export function useChatModels(
   const defaultRequested = useRef(false);
   const defaultApplied = useRef(false);
   const { state } = catalog;
-  const chatGpt = options.chatGpt ?? true;
+  const plans = options.plans ?? true;
   const families = useMemo(
-    () => (state.kind === 'ready' ? state.data.families.filter(family => chatGpt || !isChatGptFamily(family)) : []),
-    [state, chatGpt],
+    () => (state.kind === 'ready' ? state.data.families.filter(family => plans || !familyPlan(family)) : []),
+    [state, plans],
   );
   const saved = user.lastModelFamilyId ?? null;
   useEffect(() => {
@@ -177,7 +177,7 @@ export function ChatModelStatus({
   const failed = state.kind === 'error' || (state.kind === 'ready' && !!state.error);
   const family = state.kind === 'ready' ? state.data.families.find(item => item.id === model?.id) : undefined;
   const empty = state.kind === 'ready' && !state.data.families.length;
-  const planUsage = !!family?.available && isChatGptFamily(family);
+  const planUsage = family?.available ? familyPlan(family) : null;
   const message = busy
     ? 'Checking available models…'
     : failed
@@ -203,8 +203,13 @@ export function ChatModelStatus({
     <>
       {planUsage && !message && (
         <p className="text-xs text-muted-foreground">
-          Using ChatGPT plan ·{' '}
-          <a className="underline underline-offset-2" href={chatGptUsageUrl} target="_blank" rel="noopener noreferrer">
+          Using {planLabels[planUsage]} plan ·{' '}
+          <a
+            className="underline underline-offset-2"
+            href={planUsageUrls[planUsage]}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
             Manage usage
           </a>
         </p>

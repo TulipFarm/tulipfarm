@@ -58,6 +58,31 @@ for (const model of models)
         assert.deepEqual(previews, sse ? [text] : []);
       });
 
+    for (const request of ['Write a 500 word story.', 'Write a 300-word story.', 'Summarise it in 50 words.'])
+      test(`${title} a word count is not a file request and streams: ${request}`, async t => {
+        const text = 'Once upon a time.';
+        const previews = [];
+        provider(
+          t,
+          sse,
+          [nativeReply('azure', { text })],
+          false,
+          () => {},
+          () => assert.fail('A word count must not need a completion check'),
+        );
+        const result = await inferWithTools(
+          route(model),
+          [{ role: 'user', text: request }],
+          () => assert.fail('A story must not use tools'),
+          async () => async () => {},
+          false,
+          null,
+          { ...options, answerText: update => previews.push(update.text) },
+        );
+        assert.equal(result.text, text);
+        assert.equal(previews.length > 0, sse);
+      });
+
     for (const request of [
       'Save it as notes.md.',
       'Write it to a file called notes.md.',
