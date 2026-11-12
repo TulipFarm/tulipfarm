@@ -16,6 +16,7 @@ const delay = (poll: Poll, checks: number) =>
   typeof poll.interval === 'number' ? poll.interval : poll.interval(checks);
 type Entry = {
   key: QueryKey;
+  hash: string;
   readers: Set<Poll>;
   checks: number;
   startedAt?: number | undefined;
@@ -33,7 +34,7 @@ export function createPolling(client: QueryClient, visible: () => boolean, onlin
   };
   const policy = (entry: Entry) =>
     [...entry.readers]
-      .filter(reader => reader.enabled?.() !== false && (revalidations.has(hashKey(entry.key)) || reader.pending()))
+      .filter(reader => reader.enabled?.() !== false && (revalidations.has(entry.hash) || reader.pending()))
       .sort((a, b) => delay(a, entry.checks) - delay(b, entry.checks))[0];
   const clear = (entry: Entry) => {
     clearTimeout(entry.timer);
@@ -45,9 +46,9 @@ export function createPolling(client: QueryClient, visible: () => boolean, onlin
       : poll.maxDuration - (Date.now() - entry.startedAt);
   const exhausted = (entry: Entry, poll: Poll) => entry.checks >= poll.maxChecks || remaining(entry, poll) <= 0;
   const schedule = (entry: Entry) => {
-    const query = client.getQueryCache().find({ queryKey: entry.key, exact: true });
+    const query = client.getQueryCache().get(entry.hash);
     const poll = policy(entry);
-    const revalidate = revalidations.has(hashKey(entry.key));
+    const revalidate = revalidations.has(entry.hash);
     if (
       !visible() ||
       !online() ||
@@ -67,7 +68,7 @@ export function createPolling(client: QueryClient, visible: () => boolean, onlin
         entry.timer = undefined;
         const current = policy(entry);
         if (!visible() || !online() || !current) return;
-        const revalidate = revalidations.has(hashKey(entry.key));
+        const revalidate = revalidations.has(entry.hash);
         if (!revalidate && exhausted(entry, current)) {
           notify();
           return;
@@ -85,6 +86,10 @@ export function createPolling(client: QueryClient, visible: () => boolean, onlin
       revalidate ? delay(poll, entry.checks) : Math.min(delay(poll, entry.checks), remaining(entry, poll)),
     );
   };
+  const delayed = (entry: Entry) => {
+    const poll = policy(entry);
+    return !!poll && exhausted(entry, poll);
+  };
   return {
     revalidate(key: QueryKey) {
       revalidations.add(hashKey(key));
@@ -101,7 +106,7 @@ export function createPolling(client: QueryClient, visible: () => boolean, onlin
       const hash = hashKey(key);
       let entry = entries.get(hash);
       if (!entry) {
-        entry = { key, readers: new Set(), checks: 0, timer: undefined };
+        entry = { key, hash, readers: new Set(), checks: 0, timer: undefined };
         entries.set(hash, entry);
       }
       entry.readers.add(poll);
@@ -114,6 +119,14 @@ export function createPolling(client: QueryClient, visible: () => boolean, onlin
     sync: () => {
       for (const entry of entries.values()) schedule(entry);
       notify();
+    },
+    /** Reschedules the one entry a cache event concerns; a full sync costs every entry on every event. */
+    touch(queryHash: string) {
+      const entry = entries.get(queryHash);
+      if (!entry) return;
+      const before = delayed(entry);
+      schedule(entry);
+      if (delayed(entry) !== before) notify();
     },
     pause: () => {
       for (const entry of entries.values()) clear(entry);
@@ -134,8 +147,7 @@ export function createPolling(client: QueryClient, visible: () => boolean, onlin
     },
     delayed(key: QueryKey) {
       const entry = entries.get(hashKey(key));
-      const poll = entry && policy(entry);
-      return !!entry && !!poll && exhausted(entry, poll);
+      return !!entry && delayed(entry);
     },
     remove(key: QueryKey) {
       const hash = hashKey(key);

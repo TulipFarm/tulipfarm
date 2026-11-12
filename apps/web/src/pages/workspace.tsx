@@ -42,7 +42,8 @@ import { ChatRound } from 'reicon-react/icons/ChatRound';
 import { Search3 } from 'reicon-react/icons/Search3';
 import { Sun } from 'reicon-react/icons/Sun';
 import { Users } from 'reicon-react/icons/Users';
-import { workspaceRoute } from '@/router';
+import { preloadRouteCode, workspaceRoute } from '@/router';
+import { whenCodeQuiet } from '@/lib/code-quiet';
 import { WorkspaceSetup } from './workspace-setup';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
 import { Spinner } from '@tulipfarm/sprout/spinner';
@@ -141,9 +142,6 @@ const SidebarMockPage = import.meta.env.DEV
 
 const newChat: Page = { label: 'New chat', to: '/$workspaceSlug', icon: PenSquare };
 const chats: Page = { label: 'Chats', to: '/$workspaceSlug/chat', icon: ChatRound, recent: 'chat' };
-function preloadChatsCode() {
-  void import('./workspace-chats').catch(() => {});
-}
 const inbox: Page = { label: 'Inbox', to: '/$workspaceSlug/inbox', icon: Inbox };
 const settings: Page = { label: 'Settings', to: '/$workspaceSlug/settings', icon: Setting2 };
 const account: Page = { label: 'Account', to: '/$workspaceSlug/settings/account', icon: UserCircle };
@@ -179,6 +177,31 @@ const workspaceGroups: { label: string; pages: Page[] }[] = [
   },
 ];
 const workspacePages = workspaceGroups.flatMap(group => group.pages);
+const preloadPageCode = (page: Page, slug: string) => preloadRouteCode(page.to.replace('$workspaceSlug', slug));
+// Pages split out of the first download would each cost a round of chunk requests on first
+// visit. Once the open page has stopped downloading code, fetch the sidebar pages' code one at a time while idle.
+function usePreloadSidebarCode(slug: string) {
+  useEffect(() => {
+    let stopped = false;
+    const idle = () =>
+      new Promise<void>(resolve =>
+        'requestIdleCallback' in window
+          ? requestIdleCallback(() => resolve(), { timeout: 2000 })
+          : setTimeout(resolve, 200),
+      );
+    const run = async () => {
+      for (const page of [chats, ...workspacePages]) {
+        await idle();
+        if (stopped) return;
+        await preloadPageCode(page, slug);
+      }
+    };
+    void whenCodeQuiet().then(run);
+    return () => {
+      stopped = true;
+    };
+  }, [slug]);
+}
 const models: Page = { label: 'Models', to: '/$workspaceSlug/settings/models', icon: Cpu };
 // Usage exists only when a web extension supplies the page.
 const usage: Page[] = overrides.get('usage')
@@ -276,7 +299,7 @@ function NavItem({ page }: { page: Page }) {
           section={page.recent}
           workspaceId={workspace.id}
           slug={workspace.slug}
-          onIntent={page === chats ? preloadChatsCode : undefined}
+          onIntent={() => void preloadPageCode(page, workspace.slug)}
         />
       </Suspense>
     );
@@ -302,8 +325,8 @@ function StandardNavItem({ page }: { page: Page }) {
             params={{ workspaceSlug: workspace.slug }}
             activeOptions={{ exact: page === newChat }}
             preload={false}
-            onPointerEnter={page === chats ? preloadChatsCode : undefined}
-            onFocus={page === chats ? preloadChatsCode : undefined}
+            onPointerEnter={() => void preloadPageCode(page, workspace.slug)}
+            onFocus={() => void preloadPageCode(page, workspace.slug)}
           />
         }
         onClick={() => setOpenMobile(false)}
@@ -554,6 +577,7 @@ function WorkspaceNavigation({ onSearch }: { onSearch: () => void }) {
   const { workspace } = workspaceRoute.useRouteContext();
   const { setOpenMobile } = useSidebar();
   const settingsMode = useSettingsMode();
+  usePreloadSidebarCode(workspace.slug);
   return (
     <Sidebar collapsible="icon" label="Workspace sidebar">
       <>

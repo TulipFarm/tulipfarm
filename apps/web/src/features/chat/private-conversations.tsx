@@ -1,4 +1,3 @@
-import { ApiCallReviewCard } from '@/features/api-calls/review-card';
 import { emptyChatIntro } from './bud-state';
 import {
   lazy,
@@ -32,7 +31,6 @@ import { CanvasProvider, useCanvas, useResultAttention } from './canvas-state';
 import { NewChatDrafts, WorkflowCanvasButton, workflowCanvasItem } from './workflow-canvas';
 import { useWorkflowHandoff, WorkflowHandoffNotice } from './workflow-handoff';
 import type { WorkflowReference } from '@/features/workflows/workflow-detail';
-import { RecordChangesCard, RowViewCard, RowViewResponse } from './records-canvas';
 import { recordChangesForTools } from './record-changes';
 import { workflowResults } from './workflow-results';
 import type { RowView } from '@tulipfarm/conversations/row-view';
@@ -49,11 +47,8 @@ import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from '@tulipfar
 import { Label } from '@tulipfarm/sprout/label';
 import { Message, MessageBubble, MessageContent } from '@tulipfarm/sprout/message';
 import { useSidebar } from '@tulipfarm/sprout/sidebar';
-import { GitHubChatResponse } from './github-download';
 import { MessageActions, type MessageActionsStats } from '@tulipfarm/sprout/message-actions';
-import { LayoutReply } from './layout-reply';
 import { ToolActivity } from '@tulipfarm/sprout/tool-activity';
-import { SubagentFanout } from './subagent-fanout';
 import { toolActivityItems, visibleActivityTools } from './tool-labels';
 import { StepNarration } from './step-details';
 import { newestTools, reconcileLiveTools, succeeded, unclaimedToolTurns } from './live-tools';
@@ -79,7 +74,6 @@ import { useConversationStream } from './use-conversation-stream';
 import { ConversationAttachment, StagedAttachments, useConversationAttachments } from './conversation-attachments';
 import { Composer } from './composer';
 import { ConversationFileReference, ConversationGoogleFileReference, useRichFileMentions } from './file-mentions';
-import { ImageCards } from './image-cards';
 import { SentSkill, SkillUse, StagedSkill, useRichSkillPicker } from './skill-picker';
 import { keywordAccounts, type RichTextEditorHandle, type RichTextValue } from '@tulipfarm/sprout/rich-text-editor';
 import { emptyChatDocument } from './editor-extensions';
@@ -95,23 +89,11 @@ import {
   useChatPackages,
   type PackageChatContextValue,
 } from '@/features/packages/chat-packages';
-import { InteractionCard } from './interaction-card';
-import { AuthoringDraftCard } from './authoring-draft-card';
-import { WaitingRowDraft } from './waiting-row-draft';
-import { AgentDraftLink } from './agent-draft-canvas';
-import { FollowUpCard } from './follow-up-card';
 import { Welcome } from './welcome';
 import { agentApi } from '@/features/agents/api';
 import { skillApi } from '@/features/skills/api';
 import { TableHandoffNotice, useTableHandoff } from './table-handoff';
 import { SlackAction } from '@/features/agents/slack-action';
-import { PendingGoogleActions } from './pending-google-actions';
-import { CalendarReadCard, ChatGoogleProposal } from './calendar-canvas';
-import { IntegrationCard } from './integration-card';
-import { GitHubAccountCard } from './github-account-card';
-import { GitHubInvestigationCard } from './github-investigation-card';
-import { GitHubBatches } from './github-batches';
-import { TableProposalCard } from './table-proposal-card';
 import { ApprovalDock, ApprovalDockProvider } from './approval-dock';
 import { PendingQuestionsProvider, usePendingQuestion } from './pending-question';
 import { McpChatActions } from '@/features/workspace-mcp/selection';
@@ -127,6 +109,35 @@ import { Bud, BudWelcome, budState } from './bud';
 import { useBud } from './bud-context';
 import { BudPreferences } from './bud-preferences';
 import './conversation.css';
+import { lazyCard } from '@/components/lazy-card';
+
+const LayoutReply = lazyCard(() => import('./layout-reply').then(module => module.LayoutReply));
+const RecordChangesCard = lazyCard(() => import('./records-canvas').then(module => module.RecordChangesCard));
+const RowViewCard = lazyCard(() => import('./records-canvas').then(module => module.RowViewCard));
+const RowViewResponse = lazyCard(() => import('./records-canvas').then(module => module.RowViewResponse));
+const GitHubChatResponse = lazyCard(() => import('./github-download').then(module => module.GitHubChatResponse));
+const SubagentFanout = lazyCard(() => import('./subagent-fanout').then(module => module.SubagentFanout));
+const InteractionCard = lazyCard(() => import('./interaction-card').then(module => module.InteractionCard));
+const AuthoringDraftCard = lazyCard(() => import('./authoring-draft-card').then(module => module.AuthoringDraftCard));
+const WaitingRowDraft = lazyCard(() => import('./waiting-row-draft').then(module => module.WaitingRowDraft));
+const AgentDraftLink = lazyCard(() => import('./agent-draft-canvas').then(module => module.AgentDraftLink));
+const FollowUpCard = lazyCard(() => import('./follow-up-card').then(module => module.FollowUpCard));
+const PendingGoogleActions = lazyCard(() =>
+  import('./pending-google-actions').then(module => module.PendingGoogleActions),
+);
+const CalendarReadCard = lazyCard(() => import('./calendar-canvas').then(module => module.CalendarReadCard));
+const ChatGoogleProposal = lazyCard(() => import('./calendar-canvas').then(module => module.ChatGoogleProposal));
+const IntegrationCard = lazyCard(() => import('./integration-card').then(module => module.IntegrationCard));
+const GitHubAccountCard = lazyCard(() => import('./github-account-card').then(module => module.GitHubAccountCard));
+const GitHubInvestigationCard = lazyCard(() =>
+  import('./github-investigation-card').then(module => module.GitHubInvestigationCard),
+);
+const GitHubBatches = lazyCard(() => import('./github-batches').then(module => module.GitHubBatches));
+const TableProposalCard = lazyCard(() => import('./table-proposal-card').then(module => module.TableProposalCard));
+const ApiCallReviewCard = lazyCard(() =>
+  import('@/features/api-calls/review-card').then(module => module.ApiCallReviewCard),
+);
+const ImageCards = lazyCard(() => import('./image-cards').then(module => module.ImageCards));
 
 const ApprovalPreview = import.meta.env.DEV ? lazy(() => import('./approval-mock')) : null;
 const CanvasMockControls = import.meta.env.DEV ? lazy(() => import('./canvas-mock')) : null;

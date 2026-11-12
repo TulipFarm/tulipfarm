@@ -407,8 +407,10 @@ export const googleCallbackRoute = createRoute({
 // TanStack Router preloads route components only after every beforeLoad settles. Session
 // gates start the matched routes' code at once so it downloads during the session check.
 // This fetches public bundle code only; private data still waits for the guards.
-function preloadRouteCode(pathname: string): void {
-  for (const route of router.getMatchedRoutes(pathname)[0]) void route.options.component?.preload?.();
+export function preloadRouteCode(pathname: string): Promise<unknown> {
+  return Promise.all(
+    router.getMatchedRoutes(pathname)[0].map(route => route.options.component?.preload?.()?.catch(() => {})),
+  );
 }
 type PageReadModule = typeof import('@/features/chat/early-reads');
 let pageReadModule: Promise<PageReadModule> | null = null;
@@ -981,6 +983,62 @@ export const workspaceRoute = createRoute({
           if (!signal.aborted && !temporaryAdmissionError(error)) context.workspaceAccess.clear();
           throw error;
         });
+
+      // Moving between pages of an admitted workspace shows the next page at once with the last
+      // admission. The full check runs behind it, writes wait for it, and any change re-runs this load.
+      const shown =
+        earlyReads && !verified && loadCause === 'stay'
+          ? (router.state.matches.find(match => match.routeId === workspaceRoute.id)?.context as
+              | Partial<WorkspaceContext>
+              | undefined)
+          : undefined;
+      if (
+        earlyReads &&
+        shown?.workspace?.slug === params.workspaceSlug &&
+        shown.workspace.id === previousWorkspace?.id &&
+        shown.user?.id === earlyReads.userId &&
+        shown.sessionId === earlyReads.sessionId &&
+        shown.workspaceProvisional === false &&
+        shown.workspaceStale === false
+      ) {
+        const shownContext = shown as WorkspaceContext;
+        const check = new AbortController();
+        const verification = retryAdmission(
+          fresh => profile(check.signal).then(session => admit(session, check.signal, fresh)),
+          check.signal,
+        );
+        const fingerprint = (result: WorkspaceContext) =>
+          JSON.stringify([
+            result.user,
+            result.sessionId,
+            result.accessRevision,
+            result.membership,
+            result.workspace,
+            result.workspaces,
+          ]);
+        holdWrites(
+          verification.then(result => {
+            if (result.workspace.id !== shownContext.workspace.id || result.membershipId !== shownContext.membershipId)
+              throw new Error('Workspace access changed');
+          }),
+        );
+        void verification
+          .then(
+            result => (fingerprint(result) === fingerprint(shownContext) ? undefined : { context: result }),
+            () => ({ context: null }),
+          )
+          .then(outcome => {
+            if (!outcome) return;
+            verifiedAdmissions.set(context.workspaceAccess, {
+              ...outcome,
+              slug: params.workspaceSlug,
+              pathname: location.pathname,
+              revision: context.workspaceAccess.getSnapshot().revision,
+            });
+            void router.invalidate();
+          });
+        return shownContext;
+      }
 
       const provisional =
         last && !verified && !earlyReads && cause !== 'stay' && snapshot.kind !== 'admitted'
