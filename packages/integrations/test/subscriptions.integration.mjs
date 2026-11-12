@@ -49,3 +49,22 @@ test('only a plan owner turns its models off, and everyone who uses it follows',
     await db.close();
   }
 });
+
+test('a sign-in attempt stores its callback or device page address', { timeout: 300000 }, async () => {
+  const db = await fixture();
+  try {
+    const insert = (redirect, state) =>
+      db.owner.query(
+        `INSERT INTO ${db.table('tf_subscription_connection_attempts')}
+           (id, provider, membership_id, state_hash, mode, client_id, redirect_uri, secret, status, expires_at)
+         VALUES ($1, 'copilot', $2, $3, 'connect', 'client', $4, '{}', 'pending', now() + interval '10 minutes')`,
+        [randomUUID(), db.actor.membershipId, state.repeat(64), redirect],
+      );
+    await insert('https://github.com/login/device', 'a');
+    await insert('http://127.0.0.1:1455/auth/callback', 'b');
+    await assert.rejects(insert(`https://${'x'.repeat(501)}`, 'c'), /redirect_uri_check/);
+    await assert.rejects(insert('http://example.com/auth/callback', 'd'), /redirect_uri_check/);
+  } finally {
+    await db.close();
+  }
+});
