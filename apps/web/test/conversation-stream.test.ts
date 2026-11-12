@@ -173,38 +173,6 @@ test('progress statuses of one step apply in seq order, and unknown statuses are
   stream.stop();
 });
 
-test('avatar updates are ordered, generation-bound, and reject invalid expressions', t => {
-  const { stream, latest } = harness();
-  const errors: unknown[] = [];
-  t.mock.method(console, 'error', (...args) => {
-    errors.push(args);
-  });
-  stream.start();
-  latest().open();
-  const avatar = (update: object = {}) =>
-    latest().emit(
-      'avatar',
-      JSON.stringify({
-        turnId,
-        generation: 0,
-        epoch: 1,
-        step: 0,
-        seq: 0,
-        avatar: { name: 'Bud', state: 'Thinking' },
-        ...update,
-      }),
-    );
-  avatar({ seq: 2, avatar: { name: 'Bud', state: 'Solving' } });
-  avatar({ seq: 1 });
-  assert.equal(stream.snapshot().avatars?.get(turnId)?.avatar.state, 'Solving');
-  avatar({ seq: 3, avatar: { name: 'Bud', state: 'Unknown' } });
-  assert.equal(errors.length, 1);
-  assert.equal(stream.snapshot().avatars?.get(turnId)?.avatar.state, 'Solving');
-  avatar({ generation: 1 });
-  assert.equal(stream.snapshot().avatars?.get(turnId)?.generation, 1);
-  stream.stop();
-});
-
 test('a plan-only change rereads plans without history, and a burst merges what it needs', t => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const { stream, latest, changes } = harness();

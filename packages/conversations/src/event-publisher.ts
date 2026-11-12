@@ -9,7 +9,6 @@ import {
 } from './events.ts';
 import type { ConversationRuntime, ReplyFence } from './runtime.ts';
 import { commonCompatibility, qualified } from '@tulipfarm/workspace-storage/runtime';
-import { avatarSnapshotSchema, type AvatarSnapshot } from './avatar.ts';
 import { log } from '@tulipfarm/observability';
 import type { SourceDependency } from '@tulipfarm/access';
 
@@ -85,7 +84,6 @@ export type ReplyProgress = Pick<StreamProgress, 'step' | 'round' | 'status' | '
 export type ReplyTextPublisher = {
   update(step: number, text: string): void;
   progress(update: ReplyProgress): void;
-  avatar(step: number, avatar: AvatarSnapshot): void;
   /** Live sub-agent cards of the `agents.delegate` call `id`. Bursts coalesce into the latest cards. */
   subagents(id: string, cards: readonly SubagentCard[]): void;
   close(): Promise<void>;
@@ -112,7 +110,6 @@ export function createReplyTextPublisher(
   let startedAt = -Infinity;
   let closed = false;
   let progressed: Promise<void> = Promise.resolve();
-  let avatarSeq = 0;
   let progressSeq = 0;
   const subagentCards = new Map<string, { seq: number; cards: readonly SubagentCard[] | null }>();
   let subagentTimer: ReturnType<typeof setTimeout> | null = null;
@@ -204,28 +201,6 @@ export function createReplyTextPublisher(
   }
 
   return {
-    avatar(step, avatar) {
-      if (closed) return;
-      const payload: ConversationNotification = {
-        kind: 'avatar',
-        ...address,
-        turnId: fence.turnId,
-        generation: fence.generation,
-        epoch: fence.epoch,
-        step,
-        seq: avatarSeq++,
-        avatar: avatarSnapshotSchema.parse(avatar),
-      };
-      progressed = progressed
-        .then(() =>
-          runtime.transaction(fence.workspaceId, commonCompatibility, async tx => {
-            await tx.client.query('SELECT pg_notify($1, $2)', [conversationEventChannel, JSON.stringify(payload)]);
-          }),
-        )
-        .catch(() => {
-          log('warn', 'activity', 'call_failed', { operation: 'chat.avatar-stream', 'error.type': 'publish-failed' });
-        });
-    },
     subagents(id, cards) {
       if (closed) return;
       const entry = subagentCards.get(id) ?? { seq: 0, cards: null };

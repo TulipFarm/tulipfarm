@@ -1,4 +1,4 @@
-import { emptyChatIntro } from './bud-state';
+import { emptyChatIntro } from './empty-chat';
 import {
   lazy,
   memo,
@@ -105,7 +105,7 @@ import { compactCommand, compactCommandError } from './compaction-copy';
 import { ReplyFooter, turnLabels } from './reply-footer';
 import { replyStats } from './reply-stats';
 import { MoveToProjectDialog, ProjectScopeSelect, useWorkspaceProjects } from '@/features/projects/project-scope';
-import { Bud, BudWelcome, budState } from './bud';
+import { Bud } from './bud';
 import { useBud } from './bud-context';
 import { BudPreferences } from './bud-preferences';
 import './conversation.css';
@@ -970,7 +970,7 @@ function ConversationDetail({
           headerElement &&
           createPortal(
             <>
-              {!empty && !sharedChat && (draft || data) && <Bud state={budState(data?.messages, !!pending, stream)} />}
+              {!empty && !sharedChat && (draft || data) && <Bud />}
               {data ? (
                 <>
                   <h1
@@ -1161,7 +1161,7 @@ function ConversationDetail({
                       <p className="text-sm text-muted-foreground">What can I help you with?</p>
                     ) : (
                       <div className="flex items-center gap-4">
-                        {sharedChat ? <Sparkle size={28} aria-hidden="true" /> : <BudWelcome />}
+                        {sharedChat ? <Sparkle size={28} aria-hidden="true" /> : <Bud size={64} />}
                         <div className="min-w-0 space-y-1">
                           <h2 className="text-2xl font-medium tracking-tight">
                             <Greeting />

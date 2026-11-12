@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto';
 import { createBackgroundJob } from '@tulipfarm/observability';
-import { applyStreamAvatar, type StreamAvatar } from '@tulipfarm/conversations/events';
 import {
   applyStreamProgress,
   applyStreamText,
@@ -29,7 +28,6 @@ export type ConversationStreamEvent =
   | { event: typeof conversationStreamEvents.text; data: StreamText }
   | { event: typeof conversationStreamEvents.changed; data: StreamChange }
   | { event: typeof conversationStreamEvents.progress; data: StreamProgress }
-  | { event: typeof conversationStreamEvents.avatar; data: StreamAvatar }
   | { event: typeof conversationStreamEvents.tool; data: StreamTool }
   | { event: typeof conversationStreamEvents.subagents; data: StreamSubagents }
   | { event: typeof conversationStreamEvents.resync; data: Record<string, never> };
@@ -97,7 +95,6 @@ type Preview = {
   address: string;
   state?: StreamTextState;
   progress?: StreamProgress;
-  avatar?: StreamAvatar;
   touched: number;
 };
 type Status = 'connecting' | 'healthy' | 'closed';
@@ -163,19 +160,6 @@ export function createConversationEventHub(options: ConversationEventHubOptions)
     if (result.data.kind === 'tool') {
       const { kind: _kind, workspaceId: _workspaceId, conversationId: _conversationId, ...update } = result.data;
       broadcast({ event: conversationStreamEvents.tool, data: update }, target);
-      return;
-    }
-    if (result.data.kind === 'avatar') {
-      const { kind: _kind, workspaceId: _workspaceId, conversationId: _conversationId, ...update } = result.data;
-      const key = `${target}:${update.turnId}`;
-      const previous = previews.get(key);
-      touch(key, {
-        ...previous,
-        address: target,
-        avatar: applyStreamAvatar(previous?.avatar, update),
-        touched: Date.now(),
-      });
-      broadcast({ event: conversationStreamEvents.avatar, data: update }, target);
       return;
     }
     if (result.data.kind === 'text') {
@@ -318,9 +302,8 @@ export function createConversationEventHub(options: ConversationEventHubOptions)
       const target = address(workspaceId, conversationId);
       return [...previews.values()]
         .filter(preview => preview.address === target)
-        .flatMap(({ state, progress, avatar }): ConversationStreamEvent[] => [
+        .flatMap(({ state, progress }): ConversationStreamEvent[] => [
           ...(progress ? [{ event: conversationStreamEvents.progress, data: progress }] : []),
-          ...(avatar ? [{ event: conversationStreamEvents.avatar, data: avatar }] : []),
           ...(state?.complete
             ? [
                 {

@@ -15,7 +15,6 @@ if (!files.length)
     'apps/web/README.md',
     'apps/web/DESIGN.md',
     'apps/web/src/lib/query/README.md',
-    'apps/web/src/components/tulip-avatar/README.md',
     'packages/extensions/README.md',
   );
 const failures = [];

@@ -39,10 +39,6 @@
       "types": "./dist/bud-assistant.d.ts",
       "default": "./dist/bud-assistant.js"
     },
-    "./avatar": {
-      "types": "./dist/avatar.d.ts",
-      "default": "./dist/avatar.js"
-    },
     "./layout-contracts": {
       "types": "./dist/layout-contracts.d.ts",
       "default": "./dist/layout-contracts.js"

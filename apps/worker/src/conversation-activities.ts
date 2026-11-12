@@ -333,24 +333,6 @@ export function meteredReply(
       ? undefined
       : ({ step, text }: { step: number; text: string }) => publisher.update(step, text);
     const progress: ToolInferenceContext['progress'] = update => publisher.progress(update);
-    // Bud's expressions cost extra model rounds, so the avatar runs only where the bud-avatar flag is on.
-    const budUser = externalContext || project ? null : requester;
-    const budAvatar =
-      !!budUser &&
-      (await observeChatDetail('feature-flag', () =>
-        isFeatureEnabled('bud-avatar', { id: budUser.userId }, { id: fence.workspaceId }),
-      ));
-    const avatar = budAvatar
-      ? {
-          update: ({
-            step,
-            avatar,
-          }: {
-            step: number;
-            avatar: import('@tulipfarm/conversations/results').AvatarSnapshot;
-          }) => publisher.avatar(step, avatar),
-        }
-      : undefined;
     const layout = generativeUi ? (externalContext ? { slack: { interactive: true } } : true) : undefined;
     const subagentPool = observeChatDetailSync('subagent-pool', () => createSubagentPool());
     let delegations = 0;
@@ -512,7 +494,6 @@ export function meteredReply(
         timeZone,
         mcp && requester && !externalContext
           ? {
-              ...(avatar ? { avatar } : {}),
               ...(layout ? { layout } : {}),
               priorCalls,
               priorToolCalls,
@@ -547,7 +528,6 @@ export function meteredReply(
               ...(session.catalog ? { catalog: session.catalog } : {}),
             }
           : {
-              ...(avatar ? { avatar } : {}),
               ...(layout ? { layout } : {}),
               priorCalls,
               priorToolCalls,

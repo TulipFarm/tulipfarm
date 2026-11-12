@@ -106,7 +106,6 @@ import {
   type CalendarTextBinding,
 } from './calendar-text-check.ts';
 import type { WorkspaceInventory } from './workspace-inventory.ts';
-import { budReminder, budTool, budToolName, parseBudState } from './bud.ts';
 import { generativeUiPrompt, parseReplyRender, replyRenderTool, replyRenderToolName } from './reply-render.ts';
 import {
   parseSlackRender,
@@ -134,7 +133,6 @@ import {
   toolResultReadTool,
   type ReplyContextLimits,
 } from './reply-context.ts';
-import type { AvatarSnapshot } from '@tulipfarm/conversations/results';
 import type { ReplyStatus } from '@tulipfarm/conversations/events';
 import { toolDisplayName } from '@tulipfarm/conversations/tool-activity';
 import { modelCallTimeoutMs } from '@tulipfarm/config/timeouts';
@@ -1372,7 +1370,6 @@ export type ToolModelMeter = (attempt: {
   model: string;
 }) => Promise<(usage: InferenceUsage, outcome?: { rejected: boolean }) => Promise<void>>;
 export type ToolInferenceContext = {
-  avatar?: { update: (update: { step: number; avatar: AvatarSnapshot }) => void };
   /**
    * The model answers with a layout (the generative-ui flag): `reply_render` A2UI for the web, or `slack_render` Block
    * Kit for a Slack reply. `interactive` allows follow-up buttons, choices and forms, which only the default agent handles.
@@ -1490,15 +1487,7 @@ const rowAnswerReadTools = new Set(
   ),
 );
 /** Why the reply loop returned a tool request unrun, as logged. */
-type ToolRejection =
-  | 'bud-batch'
-  | 'bud-limit'
-  | 'bud-invalid'
-  | 'render-batch'
-  | 'unknown-tool'
-  | 'invalid-arguments'
-  | 'write-batch'
-  | 'mcp-invalid';
+type ToolRejection = 'render-batch' | 'unknown-tool' | 'invalid-arguments' | 'write-batch' | 'mcp-invalid';
 type NativeStep =
   | { kind: 'step'; text: string; calls: NativeCall[]; raw: unknown }
   | { kind: 'failure'; reason: InferenceFailure; rejection?: ResponseRejection };
@@ -1506,15 +1495,6 @@ type NativeStep =
 /** A successful response the reply loop cannot use: malformed or empty, or tool requests written as text. */
 const unusableStep = (step: NativeStep) =>
   step.kind === 'failure' ? step.reason === 'invalid-decision' : containsToolEnvelope(step.text);
-
-// Without Bud, bud_state is never offered. A request for it alone is dropped so avatar state cannot cost a round:
-// any text is the answer, and an otherwise empty reply is malformed.
-function withoutBudOnlyCalls(step: NativeStep): NativeStep {
-  if (step.kind !== 'step' || !step.calls.length || step.calls.some(call => call.name !== budToolName)) return step;
-  return step.text.trim()
-    ? { kind: 'step', text: step.text, calls: [], raw: step.raw }
-    : { kind: 'failure', reason: 'invalid-decision' };
-}
 
 const anthropicNativeSchema = z.object({
   stop_reason: z.string(),
@@ -3796,7 +3776,6 @@ export async function inferWithTools(
   sourceMessages: readonly ChatTurn[] = messages,
 ): Promise<{
   text: string;
-  avatar?: AvatarSnapshot;
   fallback?: string;
   layout?: ReplyRenderInput;
   layoutFailed?: true;
@@ -3893,8 +3872,6 @@ export async function inferWithTools(
   let carried = '';
   let requestStep = 0;
   let budgetSpent = false;
-  let avatar: AvatarSnapshot = { name: 'Bud', state: 'Thinking' };
-  let expressionCalls = 0;
   let layoutFailures = 0;
   let layoutAsked = false;
   // The next request must call the layout tool, after an answer came back as text instead of a layout call.
@@ -4079,7 +4056,6 @@ export async function inferWithTools(
     return {
       text,
       ...layout,
-      ...(tools?.avatar ? { avatar } : {}),
       ...(answeredBy ? { fallback: answeredBy } : {}),
     };
   };
@@ -4137,8 +4113,6 @@ export async function inferWithTools(
     } while (after);
     return completeReply(names.size ? [...names.values()].join('\n') : fileListingEmpty, true);
   };
-  const updateAvatar = () => tools?.avatar?.update({ step: Math.max(0, requestStep - 1), avatar });
-  if (tools?.avatar) tools.avatar.update({ step: 0, avatar });
   // Reaching the budget ends the turn with a reply. It is expected, so it logs one warning rather than a failed reply.
   const toolBudgetSpent = (reason: 'tool-limit' | 'tool-loop' | 'tool-rejections') => {
     if (budgetSpent) return;
@@ -4550,7 +4524,6 @@ export async function inferWithTools(
               (!activeBuiltinSkills.has('agent-authoring') || tool.name !== 'agents_delegate'),
           ),
           ...(rereadOffered ? [toolResultReadTool] : []),
-          ...(tools?.avatar && expressionCalls < 6 ? [budTool] : []),
           ...(renderer ? [renderer.tool] : []),
         ];
   const roundBlocks = () => [
@@ -4562,7 +4535,6 @@ export async function inferWithTools(
         ]
       : []),
     ...(renderer ? [renderer.prompt] : []),
-    ...(tools?.avatar ? [budReminder(avatar)] : []),
   ];
   /**
    * Estimated input tokens: the last round's reported prompt plus a quarter of the text bytes and the image bounds
@@ -5037,7 +5009,7 @@ export async function inferWithTools(
       const selected = await sendRound();
       outputProduced = true;
       return {
-        selected: tools?.avatar ? selected : withoutBudOnlyCalls(selected),
+        selected,
         mcp,
         answerStep,
         activeCatalog,
@@ -5279,10 +5251,6 @@ export async function inferWithTools(
         if (inventoryCheckNeeded()) {
           inventoryAnswerChecked = true;
           preview(candidate);
-        }
-        if (tools?.avatar && avatar.state === 'Thinking') {
-          avatar = { name: 'Bud', state: 'Idle' };
-          updateAvatar();
         }
         if (fileCheckNeeded) preview(candidate, true);
         return rendered
@@ -5886,33 +5854,6 @@ export async function inferWithTools(
         ...(reviewCard ? { reviewCard } : {}),
       };
     };
-    if (tools?.avatar && selected.calls.some(call => call.name === budToolName)) {
-      const only = selected.calls.length === 1 && selected.calls[0];
-      if (!only || expressionCalls >= 6) {
-        reject(
-          selected.calls.map(call =>
-            result(
-              call,
-              'Not run. Update Bud once on its own, within the six-update limit, then continue with business tools or your answer.',
-              true,
-            ),
-          ),
-          only ? 'bud-limit' : 'bud-batch',
-          [budToolName],
-        );
-        continue;
-      }
-      const parsed = parseBudState(only.input);
-      if (!parsed.ok) {
-        reject([result(only, parsed.error, true)], 'bud-invalid', [budToolName]);
-        continue;
-      }
-      expressionCalls++;
-      avatar = parsed.avatar;
-      updateAvatar();
-      items.push({ kind: 'results', results: [result(only, JSON.stringify(avatar), false)] });
-      continue;
-    }
     guard.round();
     const active = activeCatalog;
     if (selected.calls.some(call => call.name === toolSearchName)) {

@@ -113,7 +113,7 @@ export async function beginReplySession(input: {
   slack: SlackActionsFactory | undefined;
   mcp: McpExecutionFactory | null | undefined;
   outputs: boolean;
-  /** Whether a caller needs the requester for something other than Slack, MCP or outputs (the bud-avatar flag). */
+  /** Whether a caller needs the requester for something other than Slack, MCP or outputs (API approvals and secrets). */
   requester: boolean;
   inventory: boolean;
   /** This attempt's inventory read from context measurement. Without one, the start transaction reads it. */
