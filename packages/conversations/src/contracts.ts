@@ -17,7 +17,7 @@ import { googleFileBindingSchema, googleFileIdSchema } from '@tulipfarm/google-w
 import { chatDocumentReferences, chatDocumentSchema, chatDocumentText } from './rich-content.ts';
 import { rowChangeSchema, rowViewSchema } from './row-view.ts';
 import { subagentCardSchema, subagentResultSchema } from './events.ts';
-import { layoutSchema } from './layout-contracts.ts';
+import { layoutActionSchema, layoutSchema } from './layout-contracts.ts';
 
 const unicodeText = z
   .string()
@@ -307,6 +307,8 @@ export const displayPartSchema = z.discriminatedUnion('kind', [
   compactionPartSchema,
   /** An assistant reply drawn as an A2UI layout. `text` is its plain-text form. */
   z.strictObject({ kind: z.literal('layout'), text: z.string(), layout: layoutSchema }),
+  /** A person's message sent by a button in an assistant layout, beside the text part with its words. */
+  z.strictObject({ kind: z.literal('layout-action'), action: layoutActionSchema }),
 ]);
 export const imageReceiptSchema = z.array(
   z.object({
@@ -414,7 +416,9 @@ export class ConversationConflict extends Error {
     | 'google-integration-changed'
     | 'skill-unavailable'
     | 'compaction-not-found'
-    | 'maintenance-not-resumable';
+    | 'maintenance-not-resumable'
+    | 'layout-action-unavailable'
+    | 'layout-action-sent';
   constructor(code: ConversationConflict['code']) {
     super(code);
     this.code = code;
