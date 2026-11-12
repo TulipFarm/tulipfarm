@@ -1422,6 +1422,8 @@ export type ToolInferenceContext = {
   agentBuilderUrl?: string;
   /** Receives the full visible answer so far whenever it changes while a step streams. `step` matches the meter's step. */
   answerText?: (update: { step: number; text: string }) => void;
+  /** Receives the `reply_render` arguments streamed so far, as incomplete JSON, whenever they grow. */
+  layoutPreview?: (update: { step: number; json: string }) => void;
   /**
    * Reports what the reply is doing: before each model decision (`thinking`), while work tools run (`tool`, with the
    * tool's display name), after an answer (`finishing`), and once the checked answer is final (`done`). `round` counts
@@ -3470,6 +3472,7 @@ async function sendChatRequest<T>(
   onOutput?: () => void,
   onSettled?: (measure: RequestMeasure, usage: InferenceUsage) => void,
   signal?: AbortSignal,
+  layoutPreview?: ToolInferenceContext['layoutPreview'],
 ) {
   if (isPlanRoute(target) && !target.accessToken)
     throw new ModelCallError(memberRequired(target.provider), { outputStarted: false });
@@ -3550,6 +3553,13 @@ async function sendChatRequest<T>(
           onText,
           onFirstToken: report.firstToken,
           onEvent: () => events++,
+          ...(layoutPreview
+            ? {
+                onToolInput: (_id: string, name: string, json: string) => {
+                  if (name === replyRenderToolName) layoutPreview({ step, json });
+                },
+              }
+            : {}),
         }).catch((error: unknown) => {
           report.error(
             new ModelCallError(
@@ -4185,6 +4195,7 @@ export async function inferWithTools(
         },
         settled,
         signal,
+        renderer?.name === replyRenderToolName ? tools?.layoutPreview : undefined,
       );
     } catch (error) {
       // An aborted request fails as a transport error; the reply ends with the reason it was stopped instead.

@@ -3,7 +3,9 @@ import {
   layoutFromReply,
   layoutText,
   slackLayoutSchema,
-  tulipfarmCatalogId,
+  followUpAction,
+  layoutSurfaceCatalogId,
+  layoutVersion,
   type ReplyRenderInput,
 } from '@tulipfarm/conversations/layout-contracts';
 import { slackModalView } from '@tulipfarm/slack';
@@ -382,7 +384,7 @@ function slackBlocksToA2ui(input: SlackRenderInput) {
       const label = textOf(item.text) || 'Open';
       if (typeof item.url === 'string') return text(`[${label}](${item.url})`);
       if (action.startsWith('tf_followup:') && typeof item.value === 'string')
-        return add({ component: 'Button', label, message: item.value });
+        return add({ component: 'Button', label, action: followUpAction(item.value) });
       return text(`${label} (in Slack)`, true);
     }
     if (Array.isArray(item.options))
@@ -399,8 +401,10 @@ function slackBlocksToA2ui(input: SlackRenderInput) {
   if (!children.length) children.push(add({ component: 'Text', text: input.summary }));
   components.push({ id: 'root', component: 'Column', children });
   return [
-    { version: 'v0.9.1', createSurface: { surfaceId: checkSurfaceId, catalogId: tulipfarmCatalogId } },
-    { version: 'v0.9.1', updateComponents: { surfaceId: checkSurfaceId, components } },
+    {
+      version: layoutVersion,
+      createSurface: { surfaceId: checkSurfaceId, catalogId: layoutSurfaceCatalogId, components },
+    },
   ] as ReplyRenderInput['messages'];
 }
 

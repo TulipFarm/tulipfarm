@@ -1,7 +1,11 @@
 import { z } from 'zod';
 import {
+  followUpActionName,
+  layoutComponents,
   layoutFromReply,
   layoutPromptSnippet,
+  layoutSurfaceCatalogId,
+  tulipfarmCatalogId,
   layoutText,
   replyRenderInputSchema,
   type ReplyRenderInput,
@@ -53,6 +57,24 @@ export const generativeUiPrompt = [
   '- When a Chart plots values on a fixed scale, set its max to the top of that scale, such as 10 for scores out of 10 or 100 for percentages.',
   '- If the tool returns errors, fix them and call it again.',
   '',
+  '# Layout messages',
+  `- Send one createSurface message with every component in its \`components\` and any data in its \`dataModel\`. Its catalog is "${layoutSurfaceCatalogId}"; the surface ID is set for you.`,
+  '- Component IDs are identifiers made of letters, digits and _, such as revenue_chart. One component has the ID "root".',
+  '- Bind a value to the data model with {"@path": "/pointer"}. Escape a literal key that starts with @ as @@.',
+  `- An Embed names its catalog: {"id": "plan_card", "component": "Embed", "@catalogId": "${tulipfarmCatalogId}", "ref": {...}}.`,
+  '- Add "@accessibility" with a label when a component\'s purpose is not clear from its text, and "@checks" to form fields that need a value.',
+  `- A follow-up button sends {"event": {"name": "${followUpActionName}", "userMessage": "the next question"}}; the person sees userMessage as their message.`,
+  '',
+  '# Forms',
+  '- When you need several values from the person, such as choices, dates, amounts or names, give a short form instead of asking in prose. Keep the form to the fields you need.',
+  '- Each field has a visible label and binds `value` to the data model, such as {"@path": "/form/start_date"}. Put starting values in `dataModel`.',
+  '- End the form with one primary Button whose action is {"event": {"name": "submit_<what>", "userMessage": "one sentence of what is sent", "context": {"start_date": {"@path": "/form/start_date"}}}}. Its values reach you as the person\'s next message.',
+  `- To let the person pick a table row or a member, fill a ChoicePicker's options with {"@call": "searchRows", "catalogId": "${tulipfarmCatalogId}", "args": {"tableId": "<table ID>"}} or {"@call": "listMembers", "catalogId": "${tulipfarmCatalogId}", "args": {}}.`,
+  '- Never ask for passwords, API keys, tokens, one-time codes or card numbers in a form.',
+  '',
+  '# Screen actions',
+  '- `screenActions` asks the browser to act on your reply while the person watches: "openInCanvas" opens it in Canvas, and "focusComponent" with a componentId moves focus to that component. Use them only when they help, such as focusing the first field of a form.',
+  '',
   '# Canvas reports',
   'A canvas report is a designed one-page brief that a busy reader scans in under a minute, not an essay. Lead with the answer, then the evidence.',
   'Build it in this order:',
@@ -78,9 +100,7 @@ export type ReplyRender = { ok: true; input: ReplyRenderInput; text: string } | 
 /** Report design problems in a canvas layout: text walls, long lists and cells, Markdown headings and too few visual components. */
 export function canvasDesignErrors(input: ReplyRenderInput): string[] {
   if (input.placement !== 'canvas') return [];
-  const components = input.messages.flatMap(message =>
-    'updateComponents' in message ? (message.updateComponents.components as Record<string, unknown>[]) : [],
-  );
+  const components = layoutComponents(input.messages) as Record<string, unknown>[];
   const errors: string[] = [];
   for (const component of components) {
     if (component.component !== 'Text' || typeof component.text !== 'string') continue;

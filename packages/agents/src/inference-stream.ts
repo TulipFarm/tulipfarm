@@ -69,8 +69,11 @@ type Assembler = {
   push(event: ServerSentEvent): boolean | void;
   /** The plain answer text so far, '' once the model starts a tool call, or undefined while there is nothing to show. */
   visible(): string | undefined;
+  /** Tool calls so far, each with its arguments as received, which may be incomplete JSON. */
+  toolInputs(): ToolInput[];
   result(): StreamedResponse;
 };
+export type ToolInput = { id: string; name: string; json: string };
 
 function eventJson(data: string): { ok: true; value: unknown } | { ok: false } {
   try {
@@ -181,6 +184,13 @@ function anthropicAssembler(): Assembler {
           break;
       }
     },
+    toolInputs() {
+      return blocks.flatMap(block =>
+        block.start.type === 'tool_use'
+          ? [{ id: String(block.start.id ?? ''), name: String(block.start.name ?? ''), json: block.json }]
+          : [],
+      );
+    },
     visible() {
       if (blocks.some(block => block.start.type === 'tool_use')) return '';
       return blocks.flatMap(block => (block.start.type === 'text' ? [block.text] : [])).join('') || undefined;
@@ -284,6 +294,9 @@ function chatAssembler(): Assembler {
           ),
       );
     },
+    toolInputs() {
+      return ordered().map(call => ({ id: call.id, name: call.name, json: call.arguments }));
+    },
     visible() {
       if (calls.size) return '';
       return content === null ? undefined : withoutReasoningMarkup(content, true);
@@ -315,7 +328,15 @@ function chatAssembler(): Assembler {
 const responsesEventSchema = z.object({
   type: z.string(),
   response: record.optional(),
-  item: z.object({ type: z.string(), id: z.string().optional() }).loose().optional(),
+  item: z
+    .object({
+      type: z.string(),
+      id: z.string().optional(),
+      call_id: z.string().optional(),
+      name: z.string().optional(),
+    })
+    .loose()
+    .optional(),
   item_id: z.string().optional(),
   delta: z.string().optional(),
   code: z.string().nullish(),
@@ -328,6 +349,7 @@ function responsesAssembler(): Assembler {
   let broken = false;
   let calling = false;
   let text = '';
+  const calls = new Map<string, ToolInput>();
   return {
     push({ data }) {
       const json = eventJson(data);
@@ -339,8 +361,14 @@ function responsesAssembler(): Assembler {
       const event = parsed.data;
       if (['response.completed', 'response.incomplete', 'response.failed'].includes(event.type))
         final = event.response ?? null;
-      else if (event.type === 'response.output_item.added' && event.item?.type === 'function_call') calling = true;
-      else if (event.type === 'response.output_text.delta') text += event.delta ?? '';
+      else if (event.type === 'response.output_item.added' && event.item?.type === 'function_call') {
+        calling = true;
+        if (event.item.id)
+          calls.set(event.item.id, { id: event.item.call_id ?? event.item.id, name: event.item.name ?? '', json: '' });
+      } else if (event.type === 'response.function_call_arguments.delta' && event.item_id) {
+        const call = calls.get(event.item_id);
+        if (call) call.json += event.delta ?? '';
+      } else if (event.type === 'response.output_text.delta') text += event.delta ?? '';
       else if (event.type === 'error')
         error = { error: { type: 'error', code: event.code ?? undefined, message: event.message } };
       return (
@@ -352,6 +380,9 @@ function responsesAssembler(): Assembler {
           'response.reasoning_summary_text.delta',
         ].includes(event.type) && Boolean(event.delta)
       );
+    },
+    toolInputs() {
+      return [...calls.values()];
     },
     visible() {
       if (calling) return '';
@@ -423,6 +454,20 @@ function geminiAssembler(): Assembler {
       }
       return changed;
     },
+    toolInputs() {
+      return parts.flatMap((part, index) => {
+        const call = record.safeParse(part.functionCall).data;
+        return call
+          ? [
+              {
+                id: typeof call.id === 'string' ? call.id : `call_${index}`,
+                name: String(call.name ?? ''),
+                json: JSON.stringify(call.args ?? {}),
+              },
+            ]
+          : [];
+      });
+    },
     visible() {
       if (parts.some(part => 'functionCall' in part)) return '';
       return (
@@ -489,6 +534,8 @@ export async function readModelResponse(
     onText: ((text: string) => void) | undefined;
     onFirstToken?: () => void;
     onEvent?: () => void;
+    /** Each change of a tool call's arguments while they stream, as possibly incomplete JSON. */
+    onToolInput?: (callId: string, name: string, partialJson: string) => void;
   },
 ): Promise<StreamedResponse> {
   if (!response.ok) return { body: await rejectionBody(response), error: null };
@@ -497,12 +544,24 @@ export async function readModelResponse(
   const assembler = assemblers[format]();
   let shown = '';
   let firstToken = false;
+  const inputs = new Map<string, string>();
   for await (const event of serverSentEvents(response.body)) {
     options.onEvent?.();
     if (assembler.push(event) && !firstToken) {
       firstToken = true;
       options.onFirstToken?.();
     }
+    if (options.onToolInput)
+      for (const [index, input] of assembler.toolInputs().entries()) {
+        const key = `${index}:${input.id}`;
+        if (!input.name || inputs.get(key) === input.json) continue;
+        inputs.set(key, input.json);
+        try {
+          options.onToolInput(input.id, input.name, input.json);
+        } catch {
+          /* Tool input previews never fail the response. */
+        }
+      }
     if (!options.onText) continue;
     const raw = assembler.visible();
     if (raw === undefined) continue;
