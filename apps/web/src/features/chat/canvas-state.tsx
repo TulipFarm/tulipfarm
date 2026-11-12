@@ -58,7 +58,20 @@ export type CanvasItem = {
   content: CanvasContent;
 };
 
+/** What a reply layout's buttons and lookups go through: the chat that shows them. */
+export type LayoutHost = {
+  send: (
+    replyId: string,
+    action: { name: string; sourceComponentId: string; context: Record<string, unknown>; userMessage: string },
+  ) => void;
+  lookup: (replyId: string, call: unknown) => Promise<unknown>;
+  /** True when the reply's controls can't send: it was answered, a reply is running, or the chat can't send. */
+  readOnly: (replyId: string) => boolean;
+};
+
 type Canvas = {
+  layoutHost: LayoutHost | null;
+  setLayoutHost: (host: LayoutHost | null) => void;
   actionMutations: Record<string, 'pending' | 'uncertain' | undefined>;
   setActionMutation: (id: string, state: 'pending' | 'uncertain' | undefined) => void;
   googleMutations: Readonly<Record<string, GoogleMutation>>;
@@ -108,6 +121,7 @@ export function CanvasProvider({
   const setActionMutation = useCallback((id: string, state: 'pending' | 'uncertain' | undefined) => {
     setActionMutations(current => ({ ...current, [id]: state }));
   }, []);
+  const [layoutHost, setLayoutHost] = useState<LayoutHost | null>(null);
   const [googleMutations, setGoogleMutations] = useState<Record<string, GoogleMutation>>({});
   const setGoogleMutation = useCallback((proposalId: string, mutation: GoogleMutation) => {
     setGoogleMutations(current => ({ ...current, [proposalId]: mutation }));
@@ -205,6 +219,8 @@ export function CanvasProvider({
   );
   const value = useMemo<Canvas>(
     () => ({
+      layoutHost,
+      setLayoutHost,
       actionMutations,
       setActionMutation,
       googleMutations,
@@ -242,6 +258,7 @@ export function CanvasProvider({
       setGoogleMutation,
       actionMutations,
       setActionMutation,
+      layoutHost,
     ],
   );
   return (

@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef } from 'react';
-import { A2uiSurface, sproutAdapters, type A2uiAction, type A2uiAdapterProps } from '@tulipfarm/sprout/a2ui';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { A2uiSurface, sproutAdapters, type A2uiAdapterProps, type A2uiOutgoingMessage } from '@tulipfarm/sprout/a2ui';
+import { sproutCatalog } from '@tulipfarm/sprout/a2ui/catalog';
 import { PanelRightIcon } from 'lucide-react';
 import { Button } from '@tulipfarm/sprout/button';
 import { MessageBubble } from '@tulipfarm/sprout/message';
@@ -8,7 +9,11 @@ import { canvasSplitMinWidth } from '@tulipfarm/sprout/canvas';
 import {
   checkLayout,
   layoutAllowUrl,
-  tulipfarmCatalog,
+  layoutCatalogs,
+  layoutComponentMap,
+  layoutPreview,
+  layoutVersion,
+  tulipfarmCatalogId,
   type EmbedReference,
   type Layout,
 } from '@tulipfarm/conversations/layout-contracts';
@@ -21,6 +26,7 @@ import { schemaCanvasItem } from './schema-canvas';
 import { proposalTitle } from './table-proposal-card';
 import { useTableProposal } from '@/features/tables/hooks';
 import { proposalApi } from '@/features/tables/proposal-api';
+import { settleRendererCall, useRendererCalls } from './layout-calls';
 
 const embedNames: Record<EmbedReference['kind'], { title: string; kind: ResultCardKind }> = {
   plan: { title: 'Plan', kind: 'Plan' },
@@ -117,17 +123,49 @@ function SchemaEmbed({ workspaceId, chatId, id }: { workspaceId: string; chatId:
   );
 }
 
-function useLayoutActions(layout: Layout, messageId: string, chatId: string) {
-  const canvas = useOptionalCanvas();
-  return (action: A2uiAction) => {
-    if (!canvas) return;
-    if (action.type === 'send') canvas.requestComposer(action.text);
-    else canvas.show(layoutCanvasItem(layout, messageId, chatId));
-  };
-}
-
 export function layoutCanvasItem(layout: Layout, messageId: string, chatId: string): CanvasItem {
   return { id: `layout:${messageId}`, title: layout.title, content: { kind: 'layout', layout, messageId, chatId } };
+}
+
+const catalogs = [...layoutCatalogs];
+const words = (value: unknown) => (typeof value === 'string' && value.trim() ? [value.trim()] : []);
+
+/** Scrolls to a component and focuses it. Components have no DOM IDs, so it is found by its label or text. */
+function focusComponent(root: HTMLElement | null, layout: Layout, componentId: string) {
+  if (!root) return;
+  const component = layoutComponentMap(layout).get(componentId) as Record<string, unknown> | undefined;
+  const accessibility = component?.['@accessibility'] as { label?: unknown } | undefined;
+  const names = [accessibility?.label, component?.label, component?.title, component?.text].flatMap(words);
+  const candidates = [
+    ...root.querySelectorAll<HTMLElement>('button, input, textarea, select, [role], h1, h2, h3, h4, label'),
+  ];
+  const found =
+    candidates.find(element =>
+      names.some(name => element.getAttribute('aria-label') === name || element.textContent?.trim() === name),
+    ) ?? root;
+  const target = found.tagName === 'LABEL' ? ((found as HTMLLabelElement).control ?? found) : found;
+  if (target.tabIndex < 0 && !target.hasAttribute('tabindex')) target.setAttribute('tabindex', '-1');
+  target.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  target.focus({ preventScroll: true });
+}
+
+function useLayoutAdapters(chatId: string) {
+  return useMemo(
+    () => ({
+      [sproutCatalog.id]: sproutAdapters,
+      [tulipfarmCatalogId]: {
+        Embed: (props: A2uiAdapterProps<{ ref: EmbedReference }>) => (
+          <EmbedAdapter props={props.props} context={props.context} chatId={chatId} />
+        ),
+      },
+    }),
+    [chatId],
+  );
+}
+
+function actionText(name: string) {
+  const text = name.replace(/[_-]+/g, ' ').trim();
+  return text ? text[0]!.toUpperCase() + text.slice(1) : 'Continue';
 }
 
 function LayoutSurface({
@@ -143,26 +181,81 @@ function LayoutSurface({
   messageId: string;
   streaming?: boolean;
 }) {
-  const onAction = useLayoutActions(layout, messageId, chatId);
-  const adapters = useMemo(
+  const canvas = useOptionalCanvas();
+  const host = canvas?.layoutHost ?? null;
+  const root = useRef<HTMLDivElement>(null);
+  const [responses, setResponses] = useState<{ messageId: string; list: unknown[] }>({ messageId, list: [] });
+  const answered = responses.messageId === messageId ? responses.list : [];
+  const live = useRendererCalls(messageId);
+  const messages = useMemo(() => [...layout.messages, ...live, ...answered], [layout.messages, live, answered]);
+  const adapters = useLayoutAdapters(chatId);
+  const functions = useMemo(
     () => ({
-      ...sproutAdapters,
-      Embed: (props: A2uiAdapterProps<{ ref: EmbedReference }>) => (
-        <EmbedAdapter props={props.props} context={props.context} chatId={chatId} />
-      ),
+      [tulipfarmCatalogId]: {
+        openInCanvas: () => canvas?.show(layoutCanvasItem(layout, messageId, chatId)),
+        focusComponent: ({ componentId }: Record<string, unknown>) => {
+          if (typeof componentId === 'string')
+            requestAnimationFrame(() => focusComponent(root.current, layout, componentId));
+        },
+      },
     }),
-    [chatId],
+    [canvas, layout, messageId, chatId],
   );
+  const append = (message: unknown) =>
+    setResponses(current => ({
+      messageId,
+      list: [...(current.messageId === messageId ? current.list : []), message],
+    }));
+  const onMessage = (message: A2uiOutgoingMessage) => {
+    if ('type' in message) {
+      canvas?.show(layoutCanvasItem(layout, messageId, chatId));
+      return;
+    }
+    if ('action' in message) {
+      const { name, sourceComponentId, context, userMessage } = message.action;
+      host?.send(messageId, { name, sourceComponentId, context, userMessage: userMessage?.trim() || actionText(name) });
+      return;
+    }
+    if ('callAgentFunction' in message) {
+      const { functionCallId } = message.callAgentFunction;
+      if (!host) {
+        append({
+          version: layoutVersion,
+          agentFunctionResponse: {
+            functionCallId,
+            error: { code: 'EXECUTION_ERROR', message: 'Lookups are unavailable here.' },
+          },
+        });
+        return;
+      }
+      host.lookup(messageId, message).then(append, () =>
+        append({
+          version: layoutVersion,
+          agentFunctionResponse: { functionCallId, error: { code: 'EXECUTION_ERROR', message: 'The lookup failed.' } },
+        }),
+      );
+      return;
+    }
+    if ('rendererFunctionResponse' in message) {
+      settleRendererCall(messageId, message.rendererFunctionResponse.functionCallId);
+      return;
+    }
+    if ('error' in message) console.warn('Layout error', message.error.code);
+  };
   return (
-    <A2uiSurface
-      messages={layout.messages}
-      catalog={tulipfarmCatalog}
-      adapters={adapters}
-      size={size}
-      streaming={streaming}
-      onAction={onAction}
-      allowUrl={layoutAllowUrl}
-    />
+    <div ref={root} className="min-w-0 outline-none">
+      <A2uiSurface
+        messages={messages}
+        catalogs={catalogs}
+        adapters={adapters}
+        functions={functions}
+        size={size}
+        streaming={streaming}
+        readOnly={streaming || !host || host.readOnly(messageId)}
+        onMessage={onMessage}
+        allowUrl={layoutAllowUrl}
+      />
+    </div>
   );
 }
 
@@ -184,6 +277,15 @@ export function LayoutReply({
   const canvas = useOptionalCanvas();
   const opened = useRef(false);
   const layout = checked.ok ? checked.layout : null;
+  const live = useRendererCalls(messageId);
+  // A Canvas reply draws no surface in the chat, so its request to open Canvas runs here.
+  useEffect(() => {
+    if (!layout || layout.placement !== 'canvas' || !canvas) return;
+    const call = live.find(call => call.callRendererFunction.callFunction['@call'] === 'openInCanvas');
+    if (!call) return;
+    settleRendererCall(messageId, call.callRendererFunction.functionCallId);
+    canvas.show(layoutCanvasItem(layout, messageId, chatId));
+  }, [live, layout, canvas, messageId, chatId]);
   useEffect(() => {
     if (!latest || !layout || layout.placement !== 'canvas' || !canvas || opened.current) return;
     opened.current = true;
@@ -235,6 +337,32 @@ export function LayoutCanvas({ layout, messageId, chatId }: { layout: Layout; me
   return (
     <div className="min-h-0 flex-1 overflow-auto p-6">
       <LayoutSurface layout={layout} chatId={chatId} size="full" messageId={messageId} />
+    </div>
+  );
+}
+
+/** The layout of a reply that is still streaming. A Canvas reply names its report until it is saved and opens in Canvas. */
+export function LayoutPreview({ chatId, turnId, json }: { chatId: string; turnId: string; json: string }) {
+  const preview = useMemo(() => layoutPreview(json, `preview_${turnId}`), [json, turnId]);
+  const adapters = useLayoutAdapters(chatId);
+  if (!preview?.placement) return null;
+  if (preview.placement === 'canvas')
+    return (
+      <p role="status" className="px-3 py-2 text-sm text-muted-foreground">
+        {preview.title ? `Preparing ${preview.title} for Canvas…` : 'Preparing a report for Canvas…'}
+      </p>
+    );
+  return (
+    <div data-layout="chat" aria-busy="true" className="w-full min-w-0 px-3 py-2">
+      <A2uiSurface
+        messages={preview.messages}
+        catalogs={catalogs}
+        adapters={adapters}
+        size="compact"
+        streaming
+        readOnly
+        allowUrl={layoutAllowUrl}
+      />
     </div>
   );
 }

@@ -27,7 +27,7 @@ import { Sparkle } from 'reicon-react/icons/Sparkle';
 import { Alert, AlertDescription, AlertTitle } from '@tulipfarm/sprout/alert';
 import { Button } from '@tulipfarm/sprout/button';
 import { ChatCanvasToggle, ChatWithCanvas } from './canvas-items';
-import { CanvasProvider, useCanvas, useResultAttention } from './canvas-state';
+import { CanvasProvider, useCanvas, useResultAttention, type LayoutHost } from './canvas-state';
 import { NewChatDrafts, WorkflowCanvasButton, workflowCanvasItem } from './workflow-canvas';
 import { useWorkflowHandoff, WorkflowHandoffNotice } from './workflow-handoff';
 import type { WorkflowReference } from '@/features/workflows/workflow-detail';
@@ -72,6 +72,7 @@ import { CommandFeedback, ConversationRead } from './conversation-feedback';
 import { useConversationCommand } from './conversation-state';
 import { useConversationChanges, useConversationHistory } from './queries';
 import { useConversationStream } from './use-conversation-stream';
+import { queueRendererCalls } from './layout-calls';
 import { ConversationAttachment, StagedAttachments, useConversationAttachments } from './conversation-attachments';
 import { Composer } from './composer';
 import { ConversationFileReference, ConversationGoogleFileReference, useRichFileMentions } from './file-mentions';
@@ -113,6 +114,7 @@ import './conversation.css';
 import { lazyCard } from '@/components/lazy-card';
 
 const LayoutReply = lazyCard(() => import('./layout-reply').then(module => module.LayoutReply));
+const LayoutPreview = lazyCard(() => import('./layout-reply').then(module => module.LayoutPreview));
 const RecordChangesCard = lazyCard(() => import('./records-canvas').then(module => module.RecordChangesCard));
 const RowViewCard = lazyCard(() => import('./records-canvas').then(module => module.RowViewCard));
 const RowViewResponse = lazyCard(() => import('./records-canvas').then(module => module.RowViewResponse));
@@ -452,6 +454,9 @@ function ConversationDetail({
   });
   const [pages, setPages] = useState(1);
   const stream = useConversationStream(api, chatId, !draft);
+  useEffect(() => {
+    for (const [messageId, calls] of stream.layoutCalls ?? []) queueRendererCalls(messageId, calls);
+  }, [stream.layoutCalls]);
   const modelFamilies = workspaceModels.state.kind === 'ready' ? workspaceModels.state.data.families : [];
   const imagesReader = useFlag('images');
   const read = useConversationHistory(api, chatId, pages, stream);
@@ -783,6 +788,69 @@ function ConversationDetail({
     const reply = `I selected GitHub account ${login}. Continue my previous GitHub request with it.`;
     if (!locked && models.usable) post(textDocument(reply), [{ kind: 'text', text: reply }]);
   }
+  function sendLayoutAction(replyId: string, action: Parameters<LayoutHost['send']>[1]) {
+    if (draft || locked || posting.current || !models.usable) return;
+    posting.current = true;
+    const sentMessageId = crypto.randomUUID();
+    setOutgoing({
+      id: sentMessageId,
+      content: textDocument(action.userMessage),
+      references: [],
+      skill: null,
+      at: Date.now(),
+    });
+    followLatest.current = 'following';
+    setRefreshed(false);
+    void write
+      .submit({
+        kind: 'layout-action',
+        chatId,
+        commandId: crypto.randomUUID(),
+        replyId,
+        sentMessageId,
+        surfaceId: replyId,
+        ...action,
+      })
+      .finally(() => {
+        posting.current = false;
+      });
+  }
+  const layoutActions = useRef({ send: sendLayoutAction, api, chatId });
+  layoutActions.current = { send: sendLayoutAction, api, chatId };
+  const answeredLayouts = (data?.messages ?? [])
+    .flatMap(message => message.parts.flatMap(part => (part.kind === 'layout-action' ? [part.action.messageId] : [])))
+    .join(',');
+  const replyRunning = !!data?.messages.some(
+    message => message.turn && ['queued', 'processing', 'waiting', 'reconciling'].includes(message.turn.status),
+  );
+  const layoutsLocked =
+    draft ||
+    locked ||
+    replyRunning ||
+    !models.usable ||
+    !data ||
+    data.chat.isClosed ||
+    !!(
+      data.chat.projectId &&
+      projects.state.kind === 'ready' &&
+      projects.state.data.find(item => item.id === data.chat.projectId)?.archived
+    );
+  const { setLayoutHost } = canvas;
+  useEffect(() => {
+    const answered = new Set(answeredLayouts.split(','));
+    setLayoutHost({
+      send: (replyId, action) => layoutActions.current.send(replyId, action),
+      lookup: (replyId, call) =>
+        layoutActions.current.api.layoutFunction(
+          layoutActions.current.chatId,
+          replyId,
+          call,
+          AbortSignal.timeout(15000),
+        ),
+      readOnly: replyId => layoutsLocked || answered.has(replyId),
+    });
+  }, [answeredLayouts, layoutsLocked, setLayoutHost]);
+  useEffect(() => () => setLayoutHost(null), [setLayoutHost]);
   function post(
     shown: ChatDocument,
     parts: ConversationPart[],
@@ -900,6 +968,7 @@ function ConversationDetail({
     thinking,
     narration,
     answerText,
+    layoutJson,
     activity,
     status,
     stalledTurn,
@@ -1391,7 +1460,12 @@ function ConversationDetail({
                           />
                         </li>
                       )}
-                      {answerText ? (
+                      {layoutJson && turn ? (
+                        <li aria-busy={!read.uncertain}>
+                          <span className="sr-only">TulipFarm said</span>
+                          <LayoutPreview chatId={chatId} turnId={turn.id} json={layoutJson} />
+                        </li>
+                      ) : answerText ? (
                         <li aria-busy={!read.uncertain}>
                           <Message align="start">
                             <MessageContent>
@@ -1815,6 +1889,31 @@ const EntryActions = memo(function EntryActions({
   );
 });
 
+function layoutValue(value: unknown): string {
+  if (value === null || value === undefined || value === '') return '—';
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+  if (typeof value === 'number') return value.toLocaleString();
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) return value.map(layoutValue).join(', ');
+  return JSON.stringify(value);
+}
+
+/** The values a person sent with a button in a reply's layout, listed under the words the button sent. */
+function SentLayoutValues({ context }: { context: Record<string, unknown> }) {
+  const entries = Object.entries(context);
+  if (!entries.length) return null;
+  return (
+    <dl className="space-y-1 text-xs text-muted-foreground">
+      {entries.map(([key, value]) => (
+        <div key={key} className="flex min-w-0 gap-3">
+          <dt className="shrink-0 font-medium">{key.replace(/[_-]+/g, ' ')}</dt>
+          <dd className="min-w-0 break-words">{layoutValue(value)}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
 function ConversationEntry({
   api,
   chatId,
@@ -1924,6 +2023,8 @@ function ConversationEntry({
                     />
                   </PackageChatContext>
                 );
+              case 'layout-action':
+                return <SentLayoutValues key={index} context={part.action.context} />;
               case 'text':
                 return message.followUp ? (
                   <MessageBubble key={index} variant="secondary">
