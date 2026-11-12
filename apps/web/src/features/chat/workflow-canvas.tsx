@@ -14,10 +14,14 @@ import { workspaceRoute } from '@/router';
 
 import { lazyCard } from '@/components/lazy-card';
 
-const WorkflowDefinition = lazyCard(() => import('@/features/workflows/workflow-detail').then(module => module.WorkflowDefinition));
+const WorkflowDefinition = lazyCard(() =>
+  import('@/features/workflows/workflow-detail').then(module => module.WorkflowDefinition),
+);
 const WorkflowRead = lazyCard(() => import('@/features/workflows/workflow-detail').then(module => module.WorkflowRead));
 const WorkflowRun = lazyCard(() => import('@/features/workflows/workflow-detail').then(module => module.WorkflowRun));
-const NamedWorkflowViewer = lazyCard(() => import('@/features/workflows/named-viewer').then(module => module.NamedWorkflowViewer));
+const NamedWorkflowViewer = lazyCard(() =>
+  import('@/features/workflows/named-viewer').then(module => module.NamedWorkflowViewer),
+);
 
 // Opens a workflow or agent draft made while this chat is open; drafts already in the chat when it loads stay closed.
 export function NewChatDrafts({

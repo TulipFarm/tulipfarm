@@ -35,14 +35,24 @@ const RecordsCanvas = lazyCard(() => import('./records-canvas').then(module => m
 const WorkflowCanvas = lazyCard(() => import('./workflow-canvas').then(module => module.WorkflowCanvas));
 const GitHubBatches = lazyCard(() => import('./github-batches').then(module => module.GitHubBatches));
 const LayoutCanvas = lazyCard(() => import('./layout-reply').then(module => module.LayoutCanvas));
-const PackageInstallationCanvas = lazyCard(() => import('@/features/packages/package-canvas').then(module => module.PackageInstallationCanvas));
-const PackagePlanOutline = lazyCard(() => import('@/features/packages/progress').then(module => module.PackagePlanOutline));
+const PackageInstallationCanvas = lazyCard(() =>
+  import('@/features/packages/package-canvas').then(module => module.PackageInstallationCanvas),
+);
+const PackagePlanOutline = lazyCard(() =>
+  import('@/features/packages/progress').then(module => module.PackagePlanOutline),
+);
 const SchemaCanvas = lazyCard(() => import('./schema-canvas').then(module => module.SchemaCanvas));
 const CalendarReadCanvas = lazyCard(() => import('./calendar-canvas').then(module => module.CalendarReadCanvas));
-const GoogleProposalReview = lazyCard(() => import('@/features/google/proposals').then(module => module.GoogleProposalReview));
+const GoogleProposalReview = lazyCard(() =>
+  import('@/features/google/proposals').then(module => module.GoogleProposalReview),
+);
 const AgentDraftCanvas = lazyCard(() => import('./agent-draft-canvas').then(module => module.AgentDraftCanvas));
-const GoogleFileCanvas = lazyCard(() => import('@/features/google/file-canvas').then(module => module.GoogleFileCanvas));
-const SlackActionCanvas = lazyCard(() => import('@/features/agents/slack-action').then(module => module.SlackActionCanvas));
+const GoogleFileCanvas = lazyCard(() =>
+  import('@/features/google/file-canvas').then(module => module.GoogleFileCanvas),
+);
+const SlackActionCanvas = lazyCard(() =>
+  import('@/features/agents/slack-action').then(module => module.SlackActionCanvas),
+);
 
 const icons: Record<CanvasContent['kind'], ComponentType<{ size?: number }>> = {
   'package-plan': Tasks,

@@ -21,7 +21,13 @@ export function WorkspaceHomePage() {
     );
   }
   return (
-    <Suspense fallback={<p role="status" className="sr-only">Loading chat…</p>}>
+    <Suspense
+      fallback={
+        <p role="status" className="sr-only">
+          Loading chat…
+        </p>
+      }
+    >
       <PrivateConversations key={`${sessionId}:${user.id}:${workspace.id}`} workspaceId={workspace.id} />
     </Suspense>
   );

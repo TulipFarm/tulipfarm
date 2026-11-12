@@ -185,7 +185,9 @@ function usePreloadSidebarCode(slug: string) {
     let stopped = false;
     const idle = () =>
       new Promise<void>(resolve =>
-        'requestIdleCallback' in window ? requestIdleCallback(() => resolve(), { timeout: 2000 }) : setTimeout(resolve, 200),
+        'requestIdleCallback' in window
+          ? requestIdleCallback(() => resolve(), { timeout: 2000 })
+          : setTimeout(resolve, 200),
       );
     const run = async () => {
       for (const page of [chats, ...workspacePages]) {

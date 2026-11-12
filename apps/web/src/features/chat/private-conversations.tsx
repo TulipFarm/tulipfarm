@@ -122,15 +122,21 @@ const AuthoringDraftCard = lazyCard(() => import('./authoring-draft-card').then(
 const WaitingRowDraft = lazyCard(() => import('./waiting-row-draft').then(module => module.WaitingRowDraft));
 const AgentDraftLink = lazyCard(() => import('./agent-draft-canvas').then(module => module.AgentDraftLink));
 const FollowUpCard = lazyCard(() => import('./follow-up-card').then(module => module.FollowUpCard));
-const PendingGoogleActions = lazyCard(() => import('./pending-google-actions').then(module => module.PendingGoogleActions));
+const PendingGoogleActions = lazyCard(() =>
+  import('./pending-google-actions').then(module => module.PendingGoogleActions),
+);
 const CalendarReadCard = lazyCard(() => import('./calendar-canvas').then(module => module.CalendarReadCard));
 const ChatGoogleProposal = lazyCard(() => import('./calendar-canvas').then(module => module.ChatGoogleProposal));
 const IntegrationCard = lazyCard(() => import('./integration-card').then(module => module.IntegrationCard));
 const GitHubAccountCard = lazyCard(() => import('./github-account-card').then(module => module.GitHubAccountCard));
-const GitHubInvestigationCard = lazyCard(() => import('./github-investigation-card').then(module => module.GitHubInvestigationCard));
+const GitHubInvestigationCard = lazyCard(() =>
+  import('./github-investigation-card').then(module => module.GitHubInvestigationCard),
+);
 const GitHubBatches = lazyCard(() => import('./github-batches').then(module => module.GitHubBatches));
 const TableProposalCard = lazyCard(() => import('./table-proposal-card').then(module => module.TableProposalCard));
-const ApiCallReviewCard = lazyCard(() => import('@/features/api-calls/review-card').then(module => module.ApiCallReviewCard));
+const ApiCallReviewCard = lazyCard(() =>
+  import('@/features/api-calls/review-card').then(module => module.ApiCallReviewCard),
+);
 const ImageCards = lazyCard(() => import('./image-cards').then(module => module.ImageCards));
 
 const ApprovalPreview = import.meta.env.DEV ? lazy(() => import('./approval-mock')) : null;
