@@ -52,8 +52,10 @@ function wire(config: Route, system: string, messages: readonly Message[]) {
         },
       };
     case 'chatgpt':
-      // Authoring assistance runs as the workspace, never on a member's ChatGPT plan.
-      throw new Error('chatgpt-member-required');
+    case 'claude':
+    case 'copilot':
+      // Authoring assistance runs as the workspace, never on a member's plan.
+      throw new Error(`${config.provider}-member-required`);
     case 'openai':
     case 'xai':
     case 'openai-compatible':

@@ -40,7 +40,9 @@
               "google",
               "azure",
               "openai-compatible",
-              "chatgpt"
+              "chatgpt",
+              "claude",
+              "copilot"
             ],
             "description": "API this provider speaks"
           },
@@ -93,7 +95,7 @@
                 "provider": {
                   "type": "string",
                   "pattern": "^[a-z][a-z0-9-]{0,49}$",
-                  "description": "A key in `providers`, or a built-in provider (anthropic, openai, xai, google, azure) with its standard variables, or chatgpt for a member's own ChatGPT plan"
+                  "description": "A key in `providers`, or a built-in provider (anthropic, openai, xai, google, azure) with its standard variables, or chatgpt, claude or copilot for a member's own plan"
                 },
                 "model": {
                   "type": "string",
@@ -469,7 +471,7 @@
                 "provider": {
                   "type": "string",
                   "pattern": "^[a-z][a-z0-9-]{0,49}$",
-                  "description": "A key in `providers`, or a built-in provider (anthropic, openai, xai, google, azure) with its standard variables, or chatgpt for a member's own ChatGPT plan"
+                  "description": "A key in `providers`, or a built-in provider (anthropic, openai, xai, google, azure) with its standard variables, or chatgpt, claude or copilot for a member's own plan"
                 },
                 "model": {
                   "type": "string",

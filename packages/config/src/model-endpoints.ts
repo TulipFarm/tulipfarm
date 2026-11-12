@@ -2,6 +2,9 @@ import type { ModelProvider } from './model-capabilities.ts';
 
 /** The only API base a member's ChatGPT plan credential is sent to. It cannot be overridden. */
 export const chatGptEndpoint = 'https://api.openai.com/v1/';
+/** Claude and GitHub Copilot plans run through the vendor's agent SDK, which owns its endpoint; these name the vendor. */
+export const claudePlanEndpoint = 'https://api.anthropic.com/';
+export const copilotPlanEndpoint = 'https://api.githubcopilot.com/';
 
 /** Built-in API origins. They are always allowed, with any path, so they need no MODEL_ENDPOINT_HOSTS entry. */
 export const defaultModelEndpoints = Object.freeze({
@@ -10,6 +13,8 @@ export const defaultModelEndpoints = Object.freeze({
   xai: 'https://api.x.ai/',
   google: 'https://generativelanguage.googleapis.com/',
   chatgpt: chatGptEndpoint,
+  claude: claudePlanEndpoint,
+  copilot: copilotPlanEndpoint,
 } as const satisfies Partial<Record<ModelProvider, string>>);
 
 const azureHost =
@@ -62,7 +67,8 @@ export function modelEndpointProblem(
 ): string | null {
   const shape = modelEndpointShapeProblem(endpoint);
   if (shape) return shape;
-  if (provider === 'chatgpt') return endpoint === chatGptEndpoint ? null : `must be ${chatGptEndpoint}`;
+  if (provider === 'chatgpt' || provider === 'claude' || provider === 'copilot')
+    return endpoint === defaultModelEndpoints[provider] ? null : `must be ${defaultModelEndpoints[provider]}`;
   const url = new URL(endpoint);
   if (endpoint !== normalizeModelEndpoint(endpoint)) return 'must be normalized with a trailing slash';
   const host = bare(url.hostname);

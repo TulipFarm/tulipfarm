@@ -150,6 +150,7 @@ function fixtureState() {
     errors: [],
     chatGpt: { state: 'not-connected', email: null, planUsage: false, welcomePending: false, models: [] },
     subscriptions: [],
+    tokenPlans: { claude: null, copilot: null },
     agent: {
       id: agentId,
       name: definition.name,
@@ -182,7 +183,7 @@ async function eventually(read, expected, message = 'Observed value must reach t
   assert.equal(await read(), expected, message);
 }
 
-test('models in the actual Vite app through a local HTTP API fixture', { timeout: 240_000 }, async t => {
+test('models in the actual Vite app through a local HTTP API fixture', { timeout: 300_000 }, async t => {
   let contracts;
   try {
     contracts = await import('@tulipfarm/agents/model-policy-contracts');
@@ -347,11 +348,26 @@ test('models in the actual Vite app through a local HTTP API fixture', { timeout
           });
         if (path === `${base}/subscriptions`) return send({ subscriptions: current.subscriptions });
         if (path === `${base}/chatgpt/connection`) return send(current.chatGpt);
+        for (const provider of ['claude', 'copilot'])
+          if (path === `${base}/${provider}/connection`)
+            return current.tokenPlans[provider]
+              ? send(current.tokenPlans[provider])
+              : send({ error: `${provider}-plan-disabled` }, 404);
         if (path === `${base}/agents/${agentId}`) return send(current.agent);
         if (path.startsWith(`${base}/agents/commands/`)) {
           const command = current.agentCommands.get(path.split('/').at(-1));
           if (command) return send(agentCommandStatusSchema.parse(command));
         }
+      }
+      if (request.method === 'POST' && path === `${base}/claude/connection/token`) {
+        if (!body.token.startsWith('sk-ant-oat')) return send({ error: 'token-invalid' }, 400);
+        current.tokenPlans.claude = {
+          ...current.tokenPlans.claude,
+          state: 'connected',
+          planUsage: true,
+          models: [{ slug: 'claude-sonnet-5', label: 'Claude Sonnet 5' }],
+        };
+        return send(current.tokenPlans.claude);
       }
       if (request.method === 'PUT' && path.startsWith(`${base}/subscriptions/`) && path.endsWith('/models')) {
         const plan = current.subscriptions.find(item => item.connectionId === path.split('/').at(-2));
@@ -935,6 +951,39 @@ test('models in the actual Vite app through a local HTTP API fixture', { timeout
       await sources.getByText('Add API key').click();
       await page.getByRole('heading', { name: /API keys/ }).waitFor();
     });
+
+    await scenario(
+      'members connect a Claude plan with a token; Copilot falls back to a token',
+      async (page, fixture) => {
+        const empty = { state: 'not-connected', account: null, planUsage: false, deviceSignIn: false, models: [] };
+        fixture.tokenPlans = { claude: { ...empty }, copilot: { ...empty } };
+        await models(page, 'claude');
+        const sources = page.getByRole('navigation', { name: 'Model sources' });
+        await sources.getByText('GitHub Copilot').waitFor();
+        await page.getByText('Check Anthropic’s terms').waitFor();
+        const token = page.getByLabel('Claude Code token');
+        await token.fill('sk-ant-api-key');
+        await page.getByRole('button', { name: 'Connect', exact: true }).click();
+        await page.getByText('That does not look like a Claude Code token.', { exact: false }).waitFor();
+        await token.fill('sk-ant-oat-token');
+        await page.getByRole('button', { name: 'Connect', exact: true }).click();
+        await page
+          .getByText('Pick these models in chats, from the model menu under Claude plan.', { exact: false })
+          .waitFor();
+        assert.equal(await page.getByText('Check Anthropic’s terms').count(), 0);
+        assert.deepEqual(
+          writes(fixture).map(({ path, body }) => [path, body]),
+          [
+            [`${base}/claude/connection/token`, { token: 'sk-ant-api-key' }],
+            [`${base}/claude/connection/token`, { token: 'sk-ant-oat-token' }],
+          ],
+        );
+        await sources.getByText('GitHub Copilot').click();
+        await page.getByText('This server can’t use GitHub sign-in.', { exact: false }).waitFor();
+        await page.getByLabel('Personal access token').waitFor();
+        assert.equal(await page.getByRole('button', { name: 'Sign in with GitHub' }).count(), 0);
+      },
+    );
 
     await scenario('loading becomes success without an empty flash', async (page, fixture) => {
       fixture.catalogGate = gate();

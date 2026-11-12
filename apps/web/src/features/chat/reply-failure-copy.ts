@@ -35,19 +35,36 @@ const replyFailures: Record<string, string> = {
   'model-chatgpt-reconnect': `ChatGPT needs you to sign in again before TulipFarm can use your plan. ${switchModel}`,
   'model-chatgpt-not-eligible': `Your ChatGPT account can't be used for requests from TulipFarm, because of its plan, workspace or a ChatGPT policy. ${switchModel}`,
   'model-chatgpt-member-required': `ChatGPT plan models run only in your own chats, after you connect ChatGPT in Models settings. ${switchModel}`,
+  'model-claude-usage-limit': "Usage limit reached. Review your Claude plan's usage in Claude settings.",
+  'model-claude-reconnect': `Claude needs you to connect again before TulipFarm can use your plan. ${switchModel}`,
+  'model-claude-not-eligible': `Your Claude account can't be used for requests from TulipFarm, because of its plan or a Claude policy. ${switchModel}`,
+  'model-claude-member-required': `Claude plan models run only in your own chats, after you connect Claude in Models settings. ${switchModel}`,
+  'model-copilot-usage-limit': 'Usage limit reached. Review your GitHub Copilot premium requests in GitHub settings.',
+  'model-copilot-reconnect': `GitHub Copilot needs you to sign in again before TulipFarm can use your plan. ${switchModel}`,
+  'model-copilot-not-eligible': `Your GitHub Copilot plan can't run this model, or a Copilot policy blocks it. ${switchModel}`,
+  'model-copilot-member-required': `Copilot plan models run only in your own chats, after you connect GitHub Copilot in Models settings. ${switchModel}`,
 };
 
 /** The ChatGPT usage page, where a member reviews their plan and TulipFarm's limit. */
 export const chatGptUsageUrl = 'https://chatgpt.com/settings/usage';
 
-/** The recovery action a failed ChatGPT plan reply offers, if any. */
-export function chatGptFailureAction(
+/** Where a member reviews each plan's usage. */
+export const planUsageUrls = {
+  chatgpt: chatGptUsageUrl,
+  claude: 'https://claude.ai/settings/usage',
+  copilot: 'https://github.com/settings/copilot/features',
+} as const;
+export const planLabels = { chatgpt: 'ChatGPT', claude: 'Claude', copilot: 'GitHub Copilot' } as const;
+
+/** The recovery action a failed plan reply offers, if any. */
+export function planFailureAction(
   code: string | null | undefined,
 ): { kind: 'manage-usage'; label: string; href: string } | { kind: 'reconnect'; label: string } | null {
-  if (code === 'model-chatgpt-usage-limit')
-    return { kind: 'manage-usage', label: 'Manage usage', href: chatGptUsageUrl };
-  if (code === 'model-chatgpt-reconnect') return { kind: 'reconnect', label: 'Reconnect ChatGPT' };
-  return null;
+  const match = /^model-(chatgpt|claude|copilot)-(usage-limit|reconnect)$/.exec(code ?? '');
+  if (!match) return null;
+  const provider = match[1] as keyof typeof planLabels;
+  if (match[2] === 'usage-limit') return { kind: 'manage-usage', label: 'Manage usage', href: planUsageUrls[provider] };
+  return { kind: 'reconnect', label: `Reconnect ${planLabels[provider]}` };
 }
 
 const genericFailure = `The model provider could not complete the reply. Retry uses the original model. ${switchModel} Check any tool activity before requesting another action.`;
@@ -120,9 +137,11 @@ export function fallbackNote(
   if (status !== 'completed' || !code?.startsWith(modelFallbackPrefix)) return null;
   const family = code.slice(modelFallbackPrefix.length);
   if (!family) return null;
-  // Plan families are named after their provider in the catalog, such as `chatgpt-sol`.
-  if (chatModel?.startsWith('chatgpt-'))
-    return `Answered by ${name(family)} because every ChatGPT plan you can use had reached its limit or needed sign-in again.`;
+  // Plan families are named after their provider in the catalog, such as `chatgpt-sol` or `claude-plan-opus`.
+  const prefix = /^(chatgpt|claude-plan|copilot)-/.exec(chatModel ?? '')?.[1];
+  const plan = prefix === 'claude-plan' ? 'claude' : (prefix as keyof typeof planLabels | undefined);
+  if (plan)
+    return `Answered by ${name(family)} because every ${planLabels[plan]} plan you can use had reached its limit or needed sign-in again.`;
   const replaced = chatModel && chatModel !== family ? name(chatModel) : 'the chat model';
   return `Answered by ${name(family)} because ${replaced} was unavailable.`;
 }

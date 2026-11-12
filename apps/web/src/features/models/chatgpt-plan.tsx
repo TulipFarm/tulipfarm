@@ -380,8 +380,8 @@ function ConnectionState({
   if (connection.state === 'connected')
     return (
       <p className="text-sm text-muted-foreground">
-        Pick these models from the model menu in chats and agents, under ChatGPT plan. If the plan hits its limit and
-        the workspace has a fallback model, that model answers instead.
+        Pick these models in chats, from the model menu under ChatGPT plan. Agents can’t use them. If your plan hits its
+        limit and the workspace has a fallback model, that model answers instead and uses workspace credits.
       </p>
     );
   if (connection.state === 'plan-disabled')

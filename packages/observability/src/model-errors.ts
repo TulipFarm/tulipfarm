@@ -46,6 +46,14 @@ export const modelFailureClasses = Object.freeze({
   'chatgpt-reconnect': 'auth',
   'chatgpt-not-eligible': 'auth',
   'chatgpt-member-required': 'not_found',
+  'claude-usage-limit': 'quota_exceeded',
+  'claude-reconnect': 'auth',
+  'claude-not-eligible': 'auth',
+  'claude-member-required': 'not_found',
+  'copilot-usage-limit': 'quota_exceeded',
+  'copilot-reconnect': 'auth',
+  'copilot-not-eligible': 'auth',
+  'copilot-member-required': 'not_found',
 } as const satisfies Record<string, ModelErrorClass>);
 export type ModelFailureReason = keyof typeof modelFailureClasses;
 

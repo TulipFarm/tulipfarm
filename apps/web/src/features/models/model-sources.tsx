@@ -9,6 +9,8 @@ import { Compress } from 'reicon-react/icons/Compress';
 import { Image } from 'reicon-react/icons/Image';
 import { Key } from 'reicon-react/icons/Key';
 import { useChatGptConnection } from './chatgpt-plan';
+import { useTokenConnection } from './token-plan';
+import type { TokenConnection } from './token-plan-api';
 import {
   PlanModels,
   ShareDialog,
@@ -122,6 +124,32 @@ export function ModelSources({
         : connection.state === 'plan-disabled'
           ? 'Plan usage off'
           : (connection.email ?? 'Connected');
+  const claude = useTokenConnection(workspaceId, 'claude');
+  const copilot = useTokenConnection(workspaceId, 'copilot');
+  const tokenRail = (
+    id: 'claude' | 'copilot',
+    read: typeof claude,
+    brand: Brand,
+    label: string,
+    account: (connection: TokenConnection) => string,
+  ) => {
+    if (read.state.kind === 'unavailable' || (read.state.kind === 'ready' && !read.state.data)) return null;
+    const connection = read.state.kind === 'ready' ? read.state.data : null;
+    const detail =
+      !connection || connection.state === 'not-connected' || connection.state === 'signed-out'
+        ? 'Not connected'
+        : connection.state === 'reconnect-required'
+          ? 'Needs reconnecting'
+          : account(connection);
+    return item(
+      id,
+      <Tile muted={detail === 'Not connected'}>
+        <BrandIcon brand={brand} size="inline" />
+      </Tile>,
+      label,
+      detail,
+    );
+  };
   const item = (id: ModelSource, icon: ReactNode, label: string, detail: ReactNode) => (
     <RailItem key={id} id={id} selected={source === id} icon={icon} label={label} detail={detail} />
   );
@@ -151,21 +179,9 @@ export function ModelSources({
               'ChatGPT',
               chatGptDetail,
             )}
-          {item(
-            'claude',
-            <Tile muted>
-              <BrandIcon brand="claude" size="inline" />
-            </Tile>,
-            'Claude',
-            'Coming soon',
-          )}
-          {item(
-            'copilot',
-            <Tile muted>
-              <BrandIcon brand="github" size="inline" />
-            </Tile>,
-            'GitHub Copilot',
-            'Coming soon',
+          {tokenRail('claude', claude, 'claude', 'Claude', () => 'Connected')}
+          {tokenRail('copilot', copilot, 'github', 'GitHub Copilot', connection =>
+            connection.account ? `@${connection.account}` : 'Connected',
           )}
         </RailGroup>
         {shared.length > 0 && (
@@ -249,41 +265,13 @@ export function SharedPlanPane({ workspaceId, connectionId }: { workspaceId: str
         )}
       </header>
       <p className="text-sm text-muted-foreground">
-        Your chats and agents can pick this plan’s models. Requests use {people.name(plan.ownerMembershipId)}’s{' '}
-        {provider} usage, not workspace credits.
+        Use this plan’s models in your chats. Usage counts against {people.name(plan.ownerMembershipId)}’s {provider}{' '}
+        plan, not workspace credits.
       </p>
       <PlanModels workspaceId={workspaceId} subscription={plan} people={people} />
       {sharing && (
         <ShareDialog workspaceId={workspaceId} subscription={plan} people={people} close={() => setSharing(false)} />
       )}
-    </div>
-  );
-}
-
-const comingSoon = {
-  claude: {
-    brand: 'claude',
-    title: 'Claude plan',
-    detail: 'Use your Claude plan for chats and agents. Requests will use your Claude usage, not workspace credits.',
-  },
-  copilot: {
-    brand: 'github',
-    title: 'GitHub Copilot plan',
-    detail:
-      'Use your GitHub Copilot plan’s models for chats and agents. Requests will use your Copilot usage, not workspace credits.',
-  },
-} as const satisfies Record<string, { brand: Brand; title: string; detail: string }>;
-
-/** A plan provider TulipFarm doesn't support yet. */
-export function ComingSoonPane({ provider }: { provider: keyof typeof comingSoon }) {
-  const plan = comingSoon[provider];
-  return (
-    <div className="mx-auto grid max-w-md justify-items-center gap-3 py-12 text-center">
-      <BrandIcon brand={plan.brand} size="lg" />
-      <h2 className="flex items-center gap-2 text-lg font-medium">
-        {plan.title} <Badge variant="secondary">Coming soon</Badge>
-      </h2>
-      <p className="text-sm text-muted-foreground">{plan.detail}</p>
     </div>
   );
 }
@@ -306,8 +294,8 @@ export function ApiKeysPane() {
           API keys <Badge variant="secondary">Coming soon</Badge>
         </h2>
         <p className="text-sm text-muted-foreground">
-          Soon you’ll be able to add your own key from an AI provider. Its models will appear in chats and agents, and
-          requests will be billed to your provider account, not workspace credits.
+          Soon you’ll be able to add your own API key from an AI provider. Requests will be billed to your provider
+          account, not workspace credits.
         </p>
       </header>
       <ul className="divide-y rounded-md border px-3">

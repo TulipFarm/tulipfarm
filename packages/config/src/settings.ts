@@ -1112,6 +1112,38 @@ export const settings: readonly Setting[] = [
     selfHost: { section: 'models', example: 'on', commented: true },
   },
   {
+    name: 'CLAUDE_PLAN',
+    group: 'Models',
+    services: apps,
+    requirement: 'optional',
+    secret: false,
+    default: 'off',
+    description:
+      "`on` or `off`. With `on`, each workspace member can connect their own Claude Pro or Max plan in Models settings by pasting a token from `claude setup-token`, and pick the catalog's Claude plan models; those requests run through the Claude Agent SDK on the member's plan, not a provider key. Anthropic's terms allow plan credentials only in Claude Code and Anthropic's own products, so turn this on only for your own use; a shared or hosted service should use Claude API keys instead.",
+    selfHost: { section: 'models', example: 'off', commented: true },
+  },
+  {
+    name: 'COPILOT_PLAN',
+    group: 'Models',
+    services: apps,
+    requirement: 'optional',
+    secret: false,
+    default: 'on',
+    description:
+      "`on` or `off`. With `on`, each workspace member can connect their own GitHub Copilot plan in Models settings and pick the catalog's Copilot plan models; those requests run through the GitHub Copilot SDK on the member's plan, not a provider key. Sign-in uses GitHub's device flow with COPILOT_GITHUB_CLIENT_ID, or else the GitHub App in GITHUB_OAUTH_CLIENT_ID; members can also paste a fine-grained token with the Copilot Requests permission. `off` removes the Copilot routes, models and settings card.",
+    selfHost: { section: 'models', example: 'on', commented: true },
+  },
+  {
+    name: 'COPILOT_GITHUB_CLIENT_ID',
+    group: 'Models',
+    services: apps,
+    requirement: 'optional',
+    secret: false,
+    description:
+      'Client ID of a GitHub OAuth app with device flow turned on. Members sign in to their GitHub Copilot plan with it. Unset uses the GitHub App in GITHUB_OAUTH_CLIENT_ID and GITHUB_OAUTH_CLIENT_SECRET, which also needs device flow turned on and renews its expiring tokens. With neither, members paste a fine-grained token instead.',
+    selfHost: { section: 'models', example: 'Ov23li0000000000000', commented: true },
+  },
+  {
     name: 'MODEL_CATALOG_FILE',
     group: 'Models',
     services: apiWorker,

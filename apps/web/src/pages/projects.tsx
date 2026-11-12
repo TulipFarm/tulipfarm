@@ -597,7 +597,7 @@ function ProjectComposer({ project }: { project: Project }) {
   const { workspace, user } = workspaceRoute.useRouteContext();
   const navigate = useNavigate();
   const changes = useConversationChanges();
-  const models = useChatModels(workspace.id, user, false, { chatGpt: false });
+  const models = useChatModels(workspace.id, user, false, { plans: false });
   const integrations = useIntegrationKeywords(workspace.id, workspace.slug);
   const read = useProject(useProjectApi(workspace.id), project.id);
   const base = useMemo(() => conversationApi(workspace.id, () => {}), [workspace.id]);

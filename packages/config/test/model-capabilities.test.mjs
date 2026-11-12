@@ -149,6 +149,14 @@ test('shipped models reserve the per-image token bound their provider documents'
     'chatgpt-sol': [true, 3000, 5242880],
     'chatgpt-astra': [true, 3000, 5242880],
     'chatgpt-luna': [true, 3000, 5242880],
+    // Plan sessions carry text and tool calls only.
+    'claude-plan-sonnet': [false, 1600, 5242880],
+    'claude-plan-opus': [false, 1600, 5242880],
+    'claude-plan-haiku': [false, 1600, 5242880],
+    'copilot-claude-sonnet': [false, 1600, 5242880],
+    'copilot-claude-opus': [false, 1600, 5242880],
+    'copilot-gpt-sol': [false, 1600, 5242880],
+    'copilot-gpt-luna': [false, 1600, 5242880],
   });
 });
 

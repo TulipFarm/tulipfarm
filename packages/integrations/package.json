@@ -19,6 +19,10 @@
       "types": "./dist/chatgpt.d.ts",
       "default": "./dist/chatgpt.js"
     },
+    "./token-plans": {
+      "types": "./dist/token-plans.d.ts",
+      "default": "./dist/token-plans.js"
+    },
     "./contracts": {
       "types": "./dist/contracts.d.ts",
       "default": "./dist/contracts.js"

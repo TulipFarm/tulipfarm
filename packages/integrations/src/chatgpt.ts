@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { createRemoteJWKSet, jwtVerify, type JWTVerifyGetKey } from 'jose';
 import { z } from 'zod';
 import {
@@ -11,6 +11,7 @@ import {
 } from '@tulipfarm/access';
 import { commonCompatibility, qualified, type createWorkspaceRuntime } from '@tulipfarm/workspace-storage/runtime';
 import type { IntegrationKeyring } from './credentials.ts';
+import { planTokenCipher } from './plan-cipher.ts';
 
 /** Sign in with ChatGPT: each member connects their own ChatGPT account so their own chats can run on their plan. */
 export const chatGptIssuer = 'https://auth.openai.com';
@@ -115,12 +116,6 @@ const storedModels = z.array(z.object({ slug: z.string(), label: z.string() })).
 const credentialSchema = z.object({ accessToken: z.string(), refreshToken: z.string(), idToken: z.string() });
 type Credential = z.infer<typeof credentialSchema>;
 const attemptSecretSchema = z.object({ verifier: z.string(), nonce: z.string() });
-const envelopeSchema = z.strictObject({
-  keyId: z.string(),
-  nonce: z.string(),
-  tag: z.string(),
-  ciphertext: z.string().max(65536),
-});
 const tokenResponse = z.object({
   access_token: z.string().min(1),
   refresh_token: z.string().min(1).optional(),
@@ -147,48 +142,8 @@ const modelsResponse = z.union([
 ]);
 
 const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');
-const keyPattern = z.string().regex(/^[a-f0-9]{64}$/i);
-
-function tokenCipher(ring: IntegrationKeyring) {
-  const aad = (binding: readonly (string | number)[]) => Buffer.from(JSON.stringify(['chatgpt-plan', ...binding]));
-  return {
-    encrypt(binding: readonly (string | number)[], value: unknown) {
-      const nonce = randomBytes(12);
-      const cipher = createCipheriv(
-        'aes-256-gcm',
-        Buffer.from(keyPattern.parse(ring.keys[ring.activeKeyId]), 'hex'),
-        nonce,
-      );
-      cipher.setAAD(aad(binding));
-      const ciphertext = Buffer.concat([cipher.update(JSON.stringify(value), 'utf8'), cipher.final()]);
-      return {
-        keyId: ring.activeKeyId,
-        nonce: nonce.toString('base64'),
-        tag: cipher.getAuthTag().toString('base64'),
-        ciphertext: ciphertext.toString('base64'),
-      };
-    },
-    decrypt<T>(binding: readonly (string | number)[], input: unknown, schema: z.ZodType<T>): T {
-      try {
-        const value = envelopeSchema.parse(input);
-        const nonce = Buffer.from(value.nonce, 'base64');
-        const tag = Buffer.from(value.tag, 'base64');
-        if (nonce.length !== 12 || tag.length !== 16) throw new Error('envelope');
-        const cipher = createDecipheriv(
-          'aes-256-gcm',
-          Buffer.from(keyPattern.parse(ring.keys[value.keyId]), 'hex'),
-          nonce,
-        );
-        cipher.setAAD(aad(binding));
-        cipher.setAuthTag(tag);
-        const plain = Buffer.concat([cipher.update(Buffer.from(value.ciphertext, 'base64')), cipher.final()]);
-        return schema.parse(JSON.parse(plain.toString('utf8')));
-      } catch {
-        throw new ChatGptPlanError('unavailable');
-      }
-    },
-  };
-}
+const tokenCipher = (ring: IntegrationKeyring) =>
+  planTokenCipher(ring, 'chatgpt-plan', () => new ChatGptPlanError('unavailable'));
 
 function oauthErrorCode(body: unknown) {
   const parsed = oauthError.safeParse(body);

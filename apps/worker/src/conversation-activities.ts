@@ -68,6 +68,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { conversationCompactor, projectReminder } from './conversation-compactor.ts';
 import type { ConversationCompactor } from '@tulipfarm/conversations/compaction';
 import { compactionDefaults } from '@tulipfarm/config/compaction';
+import { isPlanProvider, type PlanProvider } from '@tulipfarm/config';
 import { withFileSources, type FileContent, type GoogleFileReader } from '@tulipfarm/conversations/file-references';
 import type { FileOutputStore } from '@tulipfarm/conversations/file-outputs';
 import type { ImageOutputStore } from '@tulipfarm/conversations/image-outputs';
@@ -78,12 +79,12 @@ import { createReplyTextPublisher } from '@tulipfarm/conversations/event-publish
 import { isFeatureEnabled } from '@tulipfarm/observability';
 import { beginReplySession } from './reply-session.ts';
 import {
-  chatGptPlanFromEnvironment,
-  chatGptPlans,
+  memberPlans,
+  planCredentialsFromEnvironment,
+  type PlanCredentials,
   subscriptionsFromEnvironment,
   turnCaller,
-} from './chatgpt-composition.ts';
-import type { ChatGptPlan } from '@tulipfarm/integrations/chatgpt';
+} from './member-plans.ts';
 import type { Subscriptions } from '@tulipfarm/integrations/subscriptions';
 import { conversationTitleActivity } from './conversation-title.ts';
 import type { ConversationTitleWork } from '@tulipfarm/conversations/titles';
@@ -130,8 +131,8 @@ export type MeteredReplyOptions = {
   chatFiles?: Omit<ChatFiles, 'imageInput'> | undefined;
   /** Reads a workspace's web address so replies can link to its workflows. */
   workspaceSlug?: ((workspaceId: string) => Promise<string | undefined>) | undefined;
-  /** Members' ChatGPT connections; null when the deployment turned `CHATGPT_PLAN` off. */
-  chatGpt?: ChatGptPlan | null | undefined;
+  /** Members' plan connections by provider; null when the deployment turned that plan off. Read from the environment when left out. */
+  planCredentials?: Partial<Record<PlanProvider, PlanCredentials | null>> | undefined;
   /** Who may use which members' plans. */
   subscriptions?: Subscriptions | undefined;
 };
@@ -171,14 +172,17 @@ export function meteredReply(
     compactor,
     chatFiles,
     workspaceSlug,
-    chatGpt,
+    planCredentials,
     subscriptions = subscriptionsFromEnvironment(runtime),
   }: MeteredReplyOptions = {},
 ): ConversationReply {
   const secretServices = secretsServices(runtime);
   // Built on the first plan reply, so deployments without a credential keyring still construct replies.
-  let plan: ChatGptPlan | null | undefined = chatGpt;
-  const chatGptPlan = () => (plan === undefined ? (plan = chatGptPlanFromEnvironment(runtime)) : plan);
+  const credentials: Partial<Record<PlanProvider, PlanCredentials | null>> = { ...planCredentials };
+  const credentialsFor = (provider: PlanProvider) =>
+    provider in credentials
+      ? (credentials[provider] ?? null)
+      : (credentials[provider] = planCredentialsFromEnvironment(runtime, provider));
   const webOrigin = URL.canParse(process.env.WEB_ORIGIN ?? '') ? process.env.WEB_ORIGIN : undefined;
   return async ({
     model,
@@ -215,19 +219,19 @@ export function meteredReply(
       : null;
     const chat = chatReplyModel(replacement ?? model);
     if (!chat) throw new Error('conversation-model-unavailable');
-    // A ChatGPT plan model runs on the first plan the requester may use: their own, then one shared with them, their
+    // A plan model (ChatGPT, Claude or Copilot) runs on the first plan the requester may use: their own, then one shared with them, their
     // teams or the workspace. Slack and project chats use workspace shares only. When every plan is spent, the
     // workspace's fallback model answers. Tokens are read here, inside the activity, so they never enter workflow history.
-    const plans =
-      chat.route.provider === 'chatgpt'
-        ? await chatGptPlans({
-            chatGpt: chatGptPlan(),
-            subscriptions,
-            workspaceId: fence.workspaceId,
-            caller: externalContext || project ? null : await turnCaller(runtime, fence),
-            model: chat.route.model,
-          })
-        : null;
+    const plans = isPlanProvider(chat.route.provider)
+      ? await memberPlans({
+          provider: chat.route.provider,
+          credentials: credentialsFor(chat.route.provider),
+          subscriptions,
+          workspaceId: fence.workspaceId,
+          caller: externalContext || project ? null : await turnCaller(runtime, fence),
+          model: chat.route.model,
+        })
+      : null;
     const validatedRoute = inferenceRouteSchema.parse(
       plans?.token ? { ...chat.route, accessToken: plans.token } : chat.route,
     );
@@ -566,7 +570,8 @@ export function meteredReply(
       );
       // A lost lease ends the reply with its storage failure at once, even while a model call is still pending.
       return await session.whileLeased(reply).catch(async (error: unknown) => {
-        if (error instanceof Error && error.message === 'model-chatgpt-reconnect') await plans?.retire('reconnect');
+        if (error instanceof Error && /^model-(chatgpt|claude|copilot)-reconnect$/.test(error.message))
+          await plans?.retire('reconnect');
         throw error;
       });
     } finally {

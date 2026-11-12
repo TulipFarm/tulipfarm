@@ -48,7 +48,26 @@ export const chatGptProvider = 'chatgpt';
 export const chatGptPlanSetting = 'CHATGPT_PLAN';
 /** Whether the deployment offers members their ChatGPT plan: on unless CHATGPT_PLAN is `off`. */
 export function chatGptPlanEnabled(env: Record<string, string | undefined> = process.env) {
-  return (env.CHATGPT_PLAN?.trim().toLowerCase() || 'on') !== 'off';
+  return planEnabled('chatgpt', env);
+}
+
+/**
+ * Built-in route providers that run on a member's own plan. Each has no key: its setting turns the deployment's models
+ * for it on or off, and each request uses the credential of a member who connected that plan.
+ */
+export const planProviders = Object.freeze({
+  chatgpt: { setting: 'CHATGPT_PLAN', label: 'ChatGPT', default: 'on' },
+  claude: { setting: 'CLAUDE_PLAN', label: 'Claude', default: 'off' },
+  copilot: { setting: 'COPILOT_PLAN', label: 'GitHub Copilot', default: 'on' },
+} as const);
+export type PlanProvider = keyof typeof planProviders;
+export const planProviderNames = Object.keys(planProviders) as PlanProvider[];
+export const isPlanProvider = (provider: string): provider is PlanProvider => Object.hasOwn(planProviders, provider);
+/** Whether the deployment offers members their plan from `provider`. Claude is off unless CLAUDE_PLAN is `on`. */
+export function planEnabled(provider: PlanProvider, env: Record<string, string | undefined> = process.env) {
+  const { setting, default: fallback } = planProviders[provider];
+  const value = env[setting]?.trim().toLowerCase() || fallback;
+  return fallback === 'on' ? value !== 'off' : value === 'on';
 }
 
 const envName = z
@@ -112,7 +131,7 @@ const routeSchema = z
       .string()
       .regex(/^[a-z][a-z0-9-]{0,49}$/)
       .describe(
-        "A key in `providers`, or a built-in provider (anthropic, openai, xai, google, azure) with its standard variables, or chatgpt for a member's own ChatGPT plan",
+        "A key in `providers`, or a built-in provider (anthropic, openai, xai, google, azure) with its standard variables, or chatgpt, claude or copilot for a member's own plan",
       ),
     model: z
       .string()
@@ -347,9 +366,7 @@ function rateProblems(rates: readonly z.infer<typeof rateSchema>[]): Issue[] {
 }
 
 const providerType = (catalog: CatalogShape, key: string) =>
-  key === chatGptProvider
-    ? chatGptProvider
-    : (catalog.providers[key]?.type ?? builtInProviders.find(name => name === key));
+  isPlanProvider(key) ? key : (catalog.providers[key]?.type ?? builtInProviders.find(name => name === key));
 
 /** A model's `fallback` names another chat model, offered to every workspace, and following them never loops. */
 function fallbackProblems(catalog: CatalogShape): Issue[] {
@@ -398,10 +415,10 @@ function catalogProblems(catalog: CatalogShape): Issue[] {
   for (const [key, provider] of Object.entries(catalog.providers)) {
     if ((builtInProviders as string[]).includes(key) && provider.type !== key)
       issues.push({ path: ['providers', key, 'type'], message: `Provider "${key}" must have type "${key}"` });
-    if (key === chatGptProvider || provider.type === 'chatgpt')
+    if (isPlanProvider(key) || isPlanProvider(provider.type))
       issues.push({
         path: ['providers', key, 'type'],
-        message: 'ChatGPT plan routes use the built-in "chatgpt" provider; do not declare it',
+        message: `Plan routes use the built-in "${isPlanProvider(key) ? key : provider.type}" provider; do not declare it`,
       });
     if (provider.type === 'openai-compatible')
       for (const field of ['apiKeyEnv', 'endpointEnv'] as const)
@@ -430,21 +447,23 @@ function catalogProblems(catalog: CatalogShape): Issue[] {
         });
       return type;
     });
-    if (types.includes(chatGptProvider)) {
+    const plan = types.find(type => type && isPlanProvider(type)) as PlanProvider | undefined;
+    if (plan) {
+      const label = planProviders[plan].label;
       if (model.routes.length !== 1)
-        issues.push({ path: at('routes'), message: 'A ChatGPT plan model has only its "chatgpt" route' });
+        issues.push({ path: at('routes'), message: `A ${label} plan model has only its "${plan}" route` });
       if (model.default)
         issues.push({
           path: at('default'),
-          message: "A ChatGPT plan model runs on a member's plan; it cannot be the default",
+          message: `A ${label} plan model runs on a member's plan; it cannot be the default`,
         });
       if (model.roles.length)
         issues.push({
           path: at('roles'),
-          message: "A ChatGPT plan model runs on a member's plan; it cannot hold roles",
+          message: `A ${label} plan model runs on a member's plan; it cannot hold roles`,
         });
       if (model.pricing !== 'unmetered')
-        issues.push({ path: at('pricing'), message: 'A ChatGPT plan model is "unmetered"' });
+        issues.push({ path: at('pricing'), message: `A ${label} plan model is "unmetered"` });
     }
     if (model.default && model.paused)
       issues.push({ path: at('paused'), message: 'The default model cannot be paused' });

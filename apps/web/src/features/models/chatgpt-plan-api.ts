@@ -4,9 +4,13 @@ import { apiOrigin } from '@/lib/auth';
 import { jsonResponse, readJson, responseError } from '@/lib/http';
 import { TableRequestError } from '@/features/tables/request-state';
 
-/** Whether a catalog family runs on the requesting member's own ChatGPT plan. */
-export function isChatGptFamily(family: Pick<ModelCatalogFamily, 'provider'>) {
-  return family.provider === 'chatgpt';
+export type PlanProvider = 'chatgpt' | 'claude' | 'copilot';
+
+/** The member plan a catalog family runs on, or null for a model the workspace pays for. */
+export function familyPlan(family: Pick<ModelCatalogFamily, 'provider'>): PlanProvider | null {
+  return family.provider === 'chatgpt' || family.provider === 'claude' || family.provider === 'copilot'
+    ? family.provider
+    : null;
 }
 
 export const chatGptConnectionSchema = z.object({
