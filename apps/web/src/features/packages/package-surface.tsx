@@ -31,7 +31,6 @@ type PackageControls = {
 const Controls = createContext<PackageControls>({ actions: {} });
 const catalog = defineCatalog({
   id: 'tulipfarm/package-install@1',
-  extends: sproutCatalog,
   components: {
     PackageResource: defineComponent({
       description: 'A package resource or count with its standard resource-type icon.',
@@ -98,7 +97,6 @@ function ResourceAdapter({
 }
 
 const adapters = {
-  ...sproutAdapters,
   PackageResource: ResourceAdapter,
   PackageAction: ActionAdapter,
   PackageQuestion: () => use(Controls).question,
@@ -149,12 +147,22 @@ export function PackageSurface({
     <Controls value={{ actions, question, plan, definitions, feedback }}>
       <div className="max-w-2xl" data-package-surface={id}>
         <A2uiSurface
-          catalog={catalog}
-          adapters={adapters}
+          catalogs={[sproutCatalog, catalog]}
+          adapters={{ [sproutCatalog.id]: sproutAdapters, [catalog.id]: adapters }}
           size="compact"
           messages={[
-            { version: 'v0.9.1', createSurface: { surfaceId: id, catalogId: catalog.id } },
-            { version: 'v0.9.1', updateComponents: { surfaceId: id, components } },
+            { version: '1.0', createSurface: { surfaceId: id, catalogId: sproutCatalog.id } },
+            {
+              version: '1.0',
+              updateComponents: {
+                surfaceId: id,
+                components: components.map(component =>
+                  Object.hasOwn(catalog.components, component.component)
+                    ? { ...component, '@catalogId': catalog.id }
+                    : component,
+                ),
+              },
+            },
           ]}
         />
       </div>

@@ -288,25 +288,27 @@ export function PackageOffer({
     }
   }
   const resourceDetails: A2uiComponent[] = document.resources.map((resource, index) => ({
-    id: `resource-${index}`,
+    id: `resource_${index}`,
     component: 'PackageResource',
     kind: resource.kind,
     text: `${resourceTitle(resource, document.resources, document.assets)}${'requestedState' in resource ? ` — requested ${resource.requestedState}` : ''}`,
   }));
-  const counts = [
-    ['table', 'table', 'tables'],
-    ['seed-row', 'starter record', 'starter records'],
-    ['skill', 'skill', 'skills'],
-    ['agent', 'agent', 'agents'],
-    ['workflow', 'workflow', 'workflows'],
-    ['integration', 'integration binding', 'integration bindings'],
-    ['file', 'file', 'files'],
-  ].flatMap(([kind, singular, plural]) => {
+  const counts = (
+    [
+      ['table', 'table', 'tables'],
+      ['seed-row', 'starter record', 'starter records'],
+      ['skill', 'skill', 'skills'],
+      ['agent', 'agent', 'agents'],
+      ['workflow', 'workflow', 'workflows'],
+      ['integration', 'integration binding', 'integration bindings'],
+      ['file', 'file', 'files'],
+    ] as const
+  ).flatMap(([kind, singular, plural]) => {
     const count = document.resources.filter(resource => resource.kind === kind).length;
     return count
       ? [
           {
-            id: `count-${kind}`,
+            id: `count_${kind.replaceAll('-', '_')}`,
             component: 'PackageResource',
             kind,
             badge: true,
@@ -346,10 +348,10 @@ export function PackageOffer({
     };
   }
   if (stage === 'questions' && currentInput) {
-    children.push('question-count', 'question', 'next');
+    children.push('question_count', 'question', 'next');
     components.push(
       {
-        id: 'question-count',
+        id: 'question_count',
         component: 'Text',
         variant: 'caption',
         text: editing ? 'Update your answer' : `Question ${answered.length + 1} of ${questions.length}`,
@@ -362,7 +364,7 @@ export function PackageOffer({
   if (stage === 'review') {
     children.push('answers', 'validation', 'install');
     components.push(
-      { id: 'answers', component: 'Column', children: document.inputs.map((_, index) => `answer-${index}`) },
+      { id: 'answers', component: 'Column', children: document.inputs.map((_, index) => `answer_${index}`) },
       {
         id: 'validation',
         component: 'Callout',
@@ -384,14 +386,14 @@ export function PackageOffer({
       const fixed = implied(input);
       components.push(
         {
-          id: `answer-${index}`,
+          id: `answer_${index}`,
           component: 'Row',
-          children: fixed ? [`answer-text-${index}`] : [`answer-text-${index}`, `edit-${index}`],
+          children: fixed ? [`answer_text_${index}`] : [`answer_text_${index}`, `edit_${index}`],
         },
-        { id: `answer-text-${index}`, component: 'Text', text: `${input.title}: ${allLabels[input.key] ?? ''}` },
+        { id: `answer_text_${index}`, component: 'Text', text: `${input.title}: ${allLabels[input.key] ?? ''}` },
       );
       if (fixed) return;
-      components.push({ id: `edit-${index}`, component: 'PackageAction', action: `edit-${input.key}` });
+      components.push({ id: `edit_${index}`, component: 'PackageAction', action: `edit-${input.key}` });
       actions[`edit-${input.key}`] = {
         label: `Change ${input.title}`,
         secondary: true,
@@ -428,9 +430,9 @@ export function PackageOffer({
     children.push('error');
     components.push({ id: 'error', component: 'Callout', tone: 'error', text: error });
   }
-  children.push('write-status');
+  children.push('write_status');
   components.push(
-    { id: 'write-status', component: 'PackageWriteStatus' },
+    { id: 'write_status', component: 'PackageWriteStatus' },
     { id: 'root', component: 'Card', title: document.package.title, children },
   );
   return (
@@ -539,25 +541,25 @@ export function Installation({
   }
   for (const [index, node] of view.nodes.entries()) {
     if (!node.error) continue;
-    const id = `error-${index}`;
+    const id = `error_${index}`;
     children.push(id);
     components.push({ id, component: 'Callout', tone: 'error', title: node.title, text: node.error });
   }
   if (!view.packageApproved && !completed) {
-    children.push('approval-scope', 'definitions', 'approve');
+    children.push('approval_scope', 'definitions', 'approve');
     components.push(
       {
-        id: 'approval-scope',
+        id: 'approval_scope',
         component: 'Text',
         text: 'This installation was started without a whole-package approval. Approve the exact package and selected inputs once to install the remaining resources without individual prompts.',
       },
       {
         id: 'definitions',
         component: 'Details',
-        items: [{ title: 'Exact package definitions and files', child: 'definitions-content' }],
+        items: [{ title: 'Exact package definitions and files', child: 'definitions_content' }],
       },
       {
-        id: 'definitions-content',
+        id: 'definitions_content',
         component: 'PackageDefinitions',
       },
       { id: 'approve', component: 'PackageAction', action: 'approve' },
@@ -576,19 +578,19 @@ export function Installation({
   ) {
     children.push('resume');
   }
-  children.push('write-status', ...(completed ? ['identity-content', 'refresh'] : ['identity']));
+  children.push('write_status', ...(completed ? ['identity_content', 'refresh'] : ['identity']));
   components.push(
     { id: 'refresh', component: 'PackageAction', action: 'refresh' },
     { id: 'resume', component: 'PackageAction', action: 'resume' },
-    { id: 'write-status', component: 'PackageWriteStatus' },
+    { id: 'write_status', component: 'PackageWriteStatus' },
     {
       id: 'identity',
       component: 'Details',
       items: [{ title: 'Installation details', child: 'details' }],
     },
-    { id: 'details', component: 'Column', children: ['identity-content', 'refresh'] },
+    { id: 'details', component: 'Column', children: ['identity_content', 'refresh'] },
     {
-      id: 'identity-content',
+      id: 'identity_content',
       component: 'Code',
       language: 'json',
       code: JSON.stringify({ packageDigest: view.packageDigest, bindings: view.bindings }, null, 2),

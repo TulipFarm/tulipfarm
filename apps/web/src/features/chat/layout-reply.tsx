@@ -1,5 +1,11 @@
 import { useEffect, useMemo, useRef } from 'react';
-import { A2uiSurface, sproutAdapters, type A2uiAction, type A2uiAdapterProps } from '@tulipfarm/sprout/a2ui';
+import {
+  A2uiSurface,
+  A2uiUnavailable,
+  sproutAdapters,
+  type A2uiOutgoingMessage,
+  type A2uiAdapterProps,
+} from '@tulipfarm/sprout/a2ui';
 import { PanelRightIcon } from 'lucide-react';
 import { Button } from '@tulipfarm/sprout/button';
 import { MessageBubble } from '@tulipfarm/sprout/message';
@@ -8,7 +14,6 @@ import { canvasSplitMinWidth } from '@tulipfarm/sprout/canvas';
 import {
   checkLayout,
   layoutAllowUrl,
-  tulipfarmCatalog,
   type EmbedReference,
   type Layout,
 } from '@tulipfarm/conversations/layout-contracts';
@@ -21,6 +26,7 @@ import { schemaCanvasItem } from './schema-canvas';
 import { proposalTitle } from './table-proposal-card';
 import { useTableProposal } from '@/features/tables/hooks';
 import { proposalApi } from '@/features/tables/proposal-api';
+import { chatCatalog, layoutSurface } from './layout-surface';
 
 const embedNames: Record<EmbedReference['kind'], { title: string; kind: ResultCardKind }> = {
   plan: { title: 'Plan', kind: 'Plan' },
@@ -119,10 +125,10 @@ function SchemaEmbed({ workspaceId, chatId, id }: { workspaceId: string; chatId:
 
 function useLayoutActions(layout: Layout, messageId: string, chatId: string) {
   const canvas = useOptionalCanvas();
-  return (action: A2uiAction) => {
+  return (message: A2uiOutgoingMessage) => {
     if (!canvas) return;
-    if (action.type === 'send') canvas.requestComposer(action.text);
-    else canvas.show(layoutCanvasItem(layout, messageId, chatId));
+    if ('type' in message) canvas.show(layoutCanvasItem(layout, messageId, chatId));
+    else if ('action' in message && message.action.userMessage) canvas.requestComposer(message.action.userMessage);
   };
 }
 
@@ -143,7 +149,8 @@ function LayoutSurface({
   messageId: string;
   streaming?: boolean;
 }) {
-  const onAction = useLayoutActions(layout, messageId, chatId);
+  const onMessage = useLayoutActions(layout, messageId, chatId);
+  const surface = useMemo(() => layoutSurface(layout), [layout]);
   const adapters = useMemo(
     () => ({
       ...sproutAdapters,
@@ -153,14 +160,15 @@ function LayoutSurface({
     }),
     [chatId],
   );
+  if (!surface) return <A2uiUnavailable />;
   return (
     <A2uiSurface
-      messages={layout.messages}
-      catalog={tulipfarmCatalog}
-      adapters={adapters}
+      surface={surface}
+      catalogs={[chatCatalog]}
+      adapters={{ [chatCatalog.id]: adapters }}
       size={size}
       streaming={streaming}
-      onAction={onAction}
+      onMessage={onMessage}
       allowUrl={layoutAllowUrl}
     />
   );

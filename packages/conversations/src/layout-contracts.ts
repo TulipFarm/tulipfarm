@@ -259,5 +259,10 @@ export function layoutText(layout: Layout): string {
   return `${text.slice(0, end)}…`;
 }
 
+/** Reads the saved protocol with the same Sprout version that validates it. */
+export function readLayoutSurface(layout: Layout) {
+  return readSurface(layout.messages);
+}
+
 /** The catalog description for the model. */
 export const layoutPromptSnippet = () => promptSnippet(tulipfarmCatalog);
