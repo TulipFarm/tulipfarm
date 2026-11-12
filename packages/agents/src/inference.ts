@@ -116,7 +116,7 @@ import {
   slackRenderTool,
   slackRenderToolName,
 } from './slack-render.ts';
-import type { ReplyRenderInput } from '@tulipfarm/conversations/layout-contracts';
+import { layoutAwaitsInput, type ReplyRenderInput } from '@tulipfarm/conversations/layout-contracts';
 import { isWorkTool } from './non-work-tools.ts';
 import {
   cappedOutput,
@@ -2027,6 +2027,7 @@ Set rowReviewRequested to true only when the human explicitly requests preparing
 Use completed for a sufficient informational answer or an action result supported by receipts; waiting for a necessary human question or approval; refused for a refusal; blocked for an explicit, accurate account of incomplete work and what stops it or an exhausted budget.
 For a question, use waiting only when required user input stops the requested work and no safe default exists; name the specific missing input in reason. Generic closers such as "Would you like me to try again?", "What else can I help you with?" or "Would you like me to do anything else?" are not required input. Use continue for those when requested work remains incomplete, even if they are the reply's only sentence.
 Use continue when the reply merely promises, narrates, or plans work that remains possible, or claims outcomes unsupported by receipts. A reply that reports a new review card, proposal or proposal version, approval, denial, or created, imported or changed data needs a matching successful receipt among this reply's own tool results; it may restate an earlier outcome only as earlier and only when an earlier receipt in the conversation shows it. Without that receipt use continue, even when the reply asks the person to review or approve. waitingCards, when present, is the server's count of the person's review or approval cards from earlier in this chat that are still undecided: a reply may say such a card is ready or still waiting, and ask the person to approve or dismiss it, without a receipt in this reply, but it may not say this reply made a new one. While one waits, a reply that says the person must approve or dismiss it before more changes to that table can be made states what stops the work. Saying an incomplete action will not be activated does not itself establish a blocker. Asking whether to go ahead with work the person already asked for is not a necessary question, so use continue: a review or approval card is itself the person's confirmation step, and a request to see the review first means create that card.
+layoutAwaitingInput, when true, means the candidate renders a form whose buttons send the person's entries back in a later turn. A request for a form asks for the form, not an immediate row change or row review: set rowWriteRequested and rowReviewRequested to false for it, and use waiting when the form is what was requested.
 Judge the content and the work, not the presentation: never use continue only because the reply lacks a layout, render tool, buttons, form, chart or table, or because a presentation tool failed; the reply is laid out separately.
 Do not demand tools for ordinary answers, questions, or refusals. Do not mistake a clarification answer for action approval. Explain the evidence gap in one short sentence, at most 240 characters.`;
 
@@ -5452,6 +5453,21 @@ export async function inferWithTools(
         recordChatCompletionCheck('done', 'review card receipt');
         return accept();
       }
+      // A form whose buttons send the person's input back is waiting for that input, like a review card.
+      if (
+        rendered &&
+        !rowReviewCheckNeeded &&
+        !rowReviewMissing &&
+        !unbacked &&
+        !writeUnbacked &&
+        !idAsked &&
+        !misdescribed &&
+        !fileCheckNeeded &&
+        layoutAwaitsInput(rendered.input.messages)
+      ) {
+        recordChatCompletionCheck('done', 'layout form awaiting input');
+        return accept();
+      }
       const localCorrection = unbacked ?? writeUnbacked ?? idAsked ?? misdescribed;
       let checked: z.infer<typeof completionCheckSchema>['decision'] | undefined =
         fileCheckNeeded || tableCheckNeeded || rowReviewCheckNeeded ? undefined : localCorrection;
@@ -5484,9 +5500,13 @@ export async function inferWithTools(
                 waiting,
               ),
             );
+            const formEvidence =
+              rendered && layoutAwaitsInput(rendered.input.messages)
+                ? JSON.stringify({ ...JSON.parse(evidence), layoutAwaitingInput: true })
+                : evidence;
             const inventoryEvidence = tableCheckNeeded
-              ? JSON.stringify({ ...JSON.parse(evidence), tableInventory })
-              : evidence;
+              ? JSON.stringify({ ...JSON.parse(formEvidence), tableInventory })
+              : formEvidence;
             const directoryEvidence = directoryCheckNeeded
               ? JSON.stringify({
                   evidence: JSON.parse(inventoryEvidence),

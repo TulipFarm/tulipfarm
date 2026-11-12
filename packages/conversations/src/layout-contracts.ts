@@ -420,6 +420,16 @@ export function layoutComponents(messages: readonly SurfaceMessage[]): A2uiCompo
   );
 }
 
+/** Whether a button sends the person's input back to the agent as an action, other than a follow-up message. */
+export function layoutAwaitsInput(messages: readonly SurfaceMessage[]): boolean {
+  return layoutComponents(messages).some(component => {
+    const action = (component as { action?: unknown }).action;
+    if (typeof action !== 'object' || action === null || !('event' in action)) return false;
+    const event = (action as { event?: { name?: unknown } }).event;
+    return typeof event?.name === 'string' && event.name !== followUpActionName;
+  });
+}
+
 /** The components of a layout's surface, by ID, after every update. */
 export function layoutComponentMap(layout: Layout) {
   return readSurface(layout.messages)?.components ?? new Map<string, A2uiComponent>();
