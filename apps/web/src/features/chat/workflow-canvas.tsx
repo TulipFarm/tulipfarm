@@ -9,7 +9,6 @@ import { conversationApi, type ConversationMessage } from './conversation-api';
 import { succeeded } from './live-tools';
 import { useAuthoringDraft } from './queries';
 import { useCanvas, type CanvasItem } from './canvas-state';
-import { agentDraftCanvasItem } from './agent-draft-canvas';
 import { workspaceRoute } from '@/router';
 
 import { lazyCard } from '@/components/lazy-card';
@@ -67,6 +66,13 @@ export function NewChatDrafts({
   return null;
 }
 
+export function agentDraftCanvasItem(workspaceId: string, chatId: string, draftId: string): CanvasItem {
+  return {
+    id: `agent:draft:${chatId}:${draftId}`,
+    title: 'Agent draft',
+    content: { kind: 'agent-draft', workspaceId, chatId, draftId },
+  };
+}
 export function workflowCanvasItem(workspaceId: string, reference: WorkflowReference): CanvasItem {
   const key =
     reference.kind === 'draft'
