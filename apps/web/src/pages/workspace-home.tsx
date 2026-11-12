@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { workspaceRoute } from '@/router';
+import { takeEarlyComposer } from '@/lib/early-composer';
 
 type Chat = typeof import('@/features/chat/private-conversations');
 
@@ -29,7 +30,10 @@ export function WorkspaceHomePage() {
       stopped = true;
     };
   }, [loaded]);
-  if (failure) throw failure;
+  if (failure) {
+    takeEarlyComposer();
+    throw failure;
+  }
   if (
     ResultCardsMock &&
     workspace.slug === 'bud-mock' &&
