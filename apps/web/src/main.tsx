@@ -30,6 +30,8 @@ router.subscribe('onResolved', trackPage);
 trackAssetLoadErrors();
 applyTheme(readTheme());
 reportBuild();
+if (import.meta.env.PROD && 'serviceWorker' in navigator)
+  void navigator.serviceWorker.register('/sw.js').catch(() => {});
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {

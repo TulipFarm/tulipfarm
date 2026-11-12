@@ -10,6 +10,9 @@ One version identifies all apps and images of a release.
 
 ### Changed
 
+- The web app keeps its page shell in a service worker, so a return visit
+  starts without waiting for the server. The shell refreshes in the background
+  and the next visit uses the new release.
 - When TulipFarm refuses a Slack send from chat, the warning log now records
   where the refusal came from (`error.site`: function, file and line only), so
   the failing access check can be found without guessing.
