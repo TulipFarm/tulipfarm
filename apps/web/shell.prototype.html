@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TulipFarm shell prototype</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --canvas: oklch(18.26% 0.002 264.5);
+        --surface: oklch(20.06% 0.002 264.5);
+        --sidebar: oklch(14.03% 0.002 264.5);
+        --line: oklch(26.01% 0.0045 272);
+        --input: oklch(33.5% 0.006 271);
+        --text: oklch(100% 0 0);
+        --muted: oklch(67.05% 0.003 264.5);
+        --faint: oklch(45.66% 0.0035 264.53);
+        --hover: oklch(100% 0 0 / 0.05);
+        --primary: oklch(77.88% 0.1259 151.59);
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; background: var(--canvas); color: var(--text);
+        font: 15px/1.5 "Inter Variable", Inter, ui-sans-serif, system-ui, sans-serif; }
+      #root, .app { height: 100%; }
+      .app { display: flex; }
+      .side { width: 244px; flex: none; background: var(--sidebar); border-right: 1px solid var(--line); padding: 12px 8px; }
+      .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+      .head { height: 44px; border-bottom: 1px solid var(--line); display: flex; align-items: center; padding: 0 20px; font-size: 13px; }
+      .body { flex: 1; display: flex; flex-direction: column; align-items: center; padding: 96px 16px 0; }
+      .col { width: 100%; max-width: 768px; }
+      .bar { height: 12px; border-radius: 6px; background: var(--hover); margin: 14px 10px; }
+      .ws { display: flex; align-items: center; gap: 10px; padding: 4px 6px 16px; }
+      .dot { width: 22px; height: 22px; border-radius: 6px; background: var(--input); }
+      .box { border: 1px solid var(--input); border-radius: 12px; background: var(--surface); }
+      textarea { display: block; width: 100%; min-height: 80px; resize: none; border: 0; outline: 0; background: transparent;
+        color: var(--text); font: inherit; padding: 12px 14px; }
+      textarea::placeholder { color: var(--muted); }
+      .foot { display: flex; align-items: center; gap: 8px; border-top: 1px solid var(--line); padding: 8px 10px; height: 38px; }
+      .chip { height: 10px; width: 60px; border-radius: 5px; background: var(--hover); }
+      .send { margin-left: auto; width: 22px; height: 22px; border-radius: 50%; background: var(--input); }
+      .send.on { background: var(--primary); }
+      h1 { font-size: 24px; font-weight: 500; margin: 0 0 4px; }
+      .sub { color: var(--muted); margin: 0 0 24px; }
+      .note { color: var(--muted); font-size: 13px; margin-top: 12px; display: flex; gap: 8px; align-items: center; }
+      .spin { width: 12px; height: 12px; border: 2px solid var(--input); border-top-color: var(--muted); border-radius: 50%; animation: s 0.8s linear infinite; }
+      @keyframes s { to { transform: rotate(360deg); } }
+      .queued { color: var(--primary); }
+      .center { flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 16px; }
+      .mark { font-weight: 600; margin-bottom: 20px; color: var(--muted); }
+      @media (max-width: 700px) { .side { display: none; } .body { padding-top: 48px; } }
+      #switcher { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); display: flex; gap: 4px; padding: 4px;
+        background: #000c; border: 1px solid var(--line); border-radius: 999px; font-size: 12px; z-index: 9; }
+      #switcher a { color: var(--muted); text-decoration: none; padding: 4px 12px; border-radius: 999px; }
+      #switcher a[aria-current] { background: var(--input); color: var(--text); }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <nav id="switcher"></nav>
+    <script>
+      const sidebar = `<aside class="side"><div class="ws"><span class="dot"></span><span class="bar" style="flex:1;margin:0"></span></div>
+        ${Array.from({ length: 14 }, (_, i) => `<div class="bar" style="width:${50 + ((i * 37) % 40)}%"></div>`).join('')}</aside>`;
+      const composer = (extra = '') => `<div class="box"><textarea id="t" autofocus placeholder="What would you like to get done?"></textarea>
+        <div class="foot"><span class="chip"></span><span class="chip" style="width:90px"></span><span class="send" id="send"></span></div></div>${extra}`;
+      const variants = {
+        a: {
+          name: 'A · Same layout',
+          html: `<div class="app">${sidebar}<main class="main"><div class="head">New chat</div><div class="body"><div class="col">
+            <div class="bar" style="width:260px;height:20px;margin:0 0 12px"></div><div class="bar" style="width:320px;margin:0 0 28px"></div>
+            ${composer()}</div></div></main></div>`,
+        },
+        b: {
+          name: 'B · Just the box',
+          html: `<div class="app"><main class="main"><div class="center"><div class="col"><div class="mark">TulipFarm</div>
+            ${composer('<div class="note"><span class="spin"></span>Opening your workspace…</div>')}</div></div></main></div>`,
+        },
+        c: {
+          name: 'C · Box + send early',
+          html: `<div class="app"><aside class="side"></aside><main class="main"><div class="head">New chat</div><div class="body"><div class="col">
+            <h1>Welcome back</h1><p class="sub">Ask anything. Press Enter to send it as soon as TulipFarm is ready.</p>
+            ${composer('<div class="note" id="n"></div>')}</div></div></main></div>`,
+        },
+      };
+      const keys = Object.keys(variants);
+      const params = new URLSearchParams(location.search);
+      const current = keys.includes(params.get('variant')) ? params.get('variant') : 'a';
+      document.getElementById('root').innerHTML = variants[current].html;
+      document.getElementById('switcher').innerHTML = keys
+        .map(k => `<a href="?variant=${k}" ${k === current ? 'aria-current="page"' : ''}>${variants[k].name}</a>`)
+        .join('');
+      const t = document.getElementById('t');
+      t.addEventListener('input', () => document.getElementById('send').classList.toggle('on', !!t.value.trim()));
+      t.addEventListener('keydown', e => {
+        if (current !== 'c' || e.key !== 'Enter' || e.shiftKey || !t.value.trim()) return;
+        e.preventDefault();
+        document.getElementById('n').innerHTML = '<span class="spin"></span><span class="queued">Sending as soon as TulipFarm is ready…</span>';
+      });
+      addEventListener('keydown', e => {
+        if (document.activeElement === t && t.value) return;
+        const i = keys.indexOf(current);
+        const next = e.key === 'ArrowRight' ? keys[(i + 1) % keys.length] : e.key === 'ArrowLeft' ? keys[(i + keys.length - 1) % keys.length] : null;
+        if (next) location.search = `?variant=${next}`;
+      });
+    </script>
+  </body>
+</html>
