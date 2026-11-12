@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { inferWithTools } from '../src/inference.ts';
-import { canvasDesignErrors, parseReplyRender } from '../src/reply-render.ts';
+import { canvasDesignErrors, parseReplyRender, replyRenderTool } from '../src/reply-render.ts';
 import {
   completionReply,
   formats,
@@ -19,8 +19,8 @@ const reply = (components, placement = 'canvas') => ({
   title: 'Cache choice',
   summary: 'Valkey is the best default.',
   messages: [
-    { version: 'v0.9.1', createSurface: { surfaceId: 'report', catalogId: 'tulipfarm/chat@1' } },
-    { version: 'v0.9.1', updateComponents: { surfaceId: 'report', components } },
+    { version: '1.0', createSurface: { surfaceId: 'report', catalogId: 'sprout/basic@2' } },
+    { version: '1.0', updateComponents: { surfaceId: 'report', components } },
   ],
 });
 // A report with Callout, Metric, Chart, Card, Badge and List: no design problems.
@@ -325,3 +325,94 @@ test('Slack: a layout call written as text on the tool-free final step is read b
   assert.doesNotMatch(result.text, /call slack_render/);
   assert.equal(finals, 1);
 });
+
+test('the reply_render tool schema avoids Unicode property escapes, while the layout check keeps the full rule', () => {
+  const patterns = [];
+  const walk = value => {
+    if (Array.isArray(value)) value.forEach(walk);
+    else if (value && typeof value === 'object')
+      for (const [key, child] of Object.entries(value))
+        if (key === 'pattern' && typeof child === 'string') patterns.push(child);
+        else walk(child);
+  };
+  walk(replyRenderTool.parameters);
+  assert.ok(patterns.includes('^[A-Za-z_][A-Za-z0-9_]*$'));
+  assert.deepEqual(
+    patterns.filter(pattern => pattern.includes('\\p{')),
+    [],
+  );
+  const unicode = parseReplyRender(
+    reply(
+      [
+        { id: 'root', component: 'Column', children: ['überblick'] },
+        { id: 'überblick', component: 'Text', text: 'Valkey.' },
+      ],
+      'chat',
+    ),
+  );
+  assert.equal(unicode.ok, true, unicode.error);
+  assert.equal(parseReplyRender(reply([{ id: 'root', component: 'Text', text: 'x', '@catalogId': 'nope' }])).ok, false);
+});
+
+const form = reply(
+  [
+    { id: 'root', component: 'Column', children: ['name', 'send'] },
+    { id: 'name', component: 'TextField', label: 'Cache name', value: { '@path': '/form/name' } },
+    {
+      id: 'send',
+      component: 'Button',
+      label: 'Send',
+      variant: 'primary',
+      action: {
+        event: {
+          name: 'submit_cache',
+          userMessage: 'Use this cache',
+          context: { name: { '@path': '/form/name' } },
+        },
+      },
+    },
+  ],
+  'chat',
+);
+const followUp = reply(
+  [
+    { id: 'root', component: 'Column', children: ['text', 'more'] },
+    { id: 'text', component: 'Text', text: 'Valkey.' },
+    {
+      id: 'more',
+      component: 'Button',
+      label: 'Compare',
+      action: { event: { name: 'follow_up', userMessage: 'Compare it with Redis' } },
+    },
+  ],
+  'chat',
+);
+
+for (const [label, layout, checks] of [
+  ['a form whose button sends input back is kept without a completion check', form, 0],
+  ['a layout with only follow-up buttons still gets the completion check', followUp, 1],
+])
+  test(`after work, ${label}`, async t => {
+    const replies = [{ calls: [use('web.search', { query: 'cache' })] }, render(layout)];
+    let completions = 0;
+    t.mock.method(globalThis, 'fetch', async (_url, options) => {
+      const body = JSON.parse(options.body);
+      if (isCompletionRequest(body)) {
+        completions++;
+        return Response.json(completionReply('anthropic'));
+      }
+      assert.ok(replies.length, 'no further model round expected');
+      return Response.json(nativeReply('anthropic', replies.shift()));
+    });
+    const result = await inferWithTools(
+      nativeRoutes.anthropic,
+      [{ role: 'user', text: 'Ask me which cache to use.' }],
+      async () => ({ results: [] }),
+      undefined,
+      false,
+      null,
+      { layout: true },
+    );
+    assert.deepEqual(result, { text: layout.summary, layout });
+    assert.equal(completions, checks);
+  });
