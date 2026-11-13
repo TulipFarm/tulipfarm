@@ -72,6 +72,26 @@ export async function reserveCredits(
   return true;
 }
 
+/**
+ * Records a charge already priced in credit units, such as an app build or an hour of app hosting, and debits the
+ * gate for it. The work has already happened, so the charge is never refused for lack of credits. Returns false
+ * when a charge with this id was already recorded, so a retried charge debits once.
+ */
+export async function chargeCredits(
+  tx: Transaction,
+  input: { id: string; flowId: string; activity: 'app-build' | 'app-hosting'; units: bigint },
+) {
+  if (input.units < 0n) throw new Error('credit-charge-negative');
+  await lockCredits(tx);
+  const inserted = await tx.client.query(
+    `INSERT INTO ${table(tx, 'tf_credit_usage')} (id,flow_id,model_id,agent_id,activity,reserved,charged,pricing_revision) VALUES ($1,$2,$3,NULL,$3,$4,$4,'units') ON CONFLICT (id) DO NOTHING`,
+    [input.id, input.flowId, input.activity, input.units.toString()],
+  );
+  if (!inserted.rowCount) return false;
+  await creditGate().debit(tx, input.units, { id: input.id, activity: input.activity });
+  return true;
+}
+
 /** Settles a reservation at its provider cost. Returns the settled attempt, or null when it was missing or already settled. */
 export async function settleCredits(tx: Transaction, id: string, providerPicoUsd: string) {
   await lockCredits(tx);
