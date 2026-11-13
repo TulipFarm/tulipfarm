@@ -63,3 +63,44 @@ test('saved commits restore from their bundles alone into an empty cache', { tim
   const other = appRepositories({ root: join(root, 'other'), storage: store.storage });
   await assert.rejects(other.open(workspaceId, appId, second.commit, tampered), /checksum mismatch/);
 });
+
+test('concurrent saves from one head each store a bundle of their own commit', { timeout: 60000 }, async t => {
+  const root = await mkdtemp(join(tmpdir(), 'app-source-'));
+  const store = await startObjectStore();
+  t.after(async () => {
+    await store.close();
+    await rm(root, { recursive: true, force: true });
+  });
+  const writer = appRepositories({ root: join(root, 'writer'), storage: store.storage });
+  const repository = await writer.open(workspaceId, appId, null, []);
+  const base = await writer.commit(repository, {
+    head: null,
+    changes: [{ path: 'index.html', content: text('<h1>Orders</h1>') }],
+    coAuthor,
+    message: 'Save app draft',
+  });
+  const first = {
+    seq: 1,
+    baseCommit: null,
+    headCommit: base.commit,
+    ...(await writer.upload(workspaceId, appId, 1, base.bundle)),
+  };
+
+  const saves = await Promise.all(
+    Array.from({ length: 8 }, (_, n) =>
+      writer.commit(repository, {
+        head: base.commit,
+        changes: [{ path: 'app.js', content: text(`render(${n})`) }],
+        coAuthor,
+        message: 'Save app draft',
+      }),
+    ),
+  );
+  for (const [n, saved] of saves.entries()) {
+    const stored = await writer.upload(workspaceId, appId, 2, saved.bundle);
+    const bundles = [first, { seq: 2, baseCommit: base.commit, headCommit: saved.commit, ...stored }];
+    const reader = appRepositories({ root: join(root, `reader-${n}`), storage: store.storage });
+    const restored = await reader.open(workspaceId, appId, saved.commit, bundles);
+    assert.equal(await git(restored, ['show', 'refs/heads/main:app.js']), `render(${n})`);
+  }
+});

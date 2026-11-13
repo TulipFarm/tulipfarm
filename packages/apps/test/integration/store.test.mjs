@@ -21,6 +21,7 @@ import {
   readApp,
   readDraft,
   readSourceBundles,
+  readStagedChanges,
   requestBuild,
   saveDraft,
   setPreviewBuild,
@@ -468,4 +469,133 @@ test('roles come from the strongest grant a current member holds', { timeout: 12
     createApp(tx, { id: randomUUID(), kind: 'public', slug: 'orders', title: 'Other', createdBy: admin }),
   );
   assert.equal(clash.failure.code, 'name-taken');
+});
+
+async function editor(t) {
+  const context = await setup(t);
+  const { workspace, root, store, transact, repositories, admin, conversation, publicApp } = context;
+  const app = await publicApp();
+  const chat = await conversation(admin);
+  async function stage(path, content) {
+    const draft = await transact(tx => readDraft(tx, app.id));
+    const bundles = await transact(tx => readSourceBundles(tx, app.id));
+    const repository = await repositories.open(workspace.id, app.id, draft.headCommit, bundles);
+    const tree = await repositories.tree(repository, draft.headCommit);
+    return transact(tx =>
+      stageDraftChange(
+        tx,
+        { appId: app.id, conversationId: chat, membershipId: admin, path, content: content && text(content) },
+        tree,
+      ),
+    );
+  }
+  const save = staged =>
+    saveDraft(transact, repositories, {
+      workspaceId: workspace.id,
+      appId: app.id,
+      leaseId: staged.leaseId,
+      expectedRevision: staged.revision,
+      coAuthor,
+      endLease: true,
+    });
+  /** The saved tree, read from a cache restored from the stored bundles alone. */
+  async function restoredFiles(commit) {
+    const bundles = await transact(tx => readSourceBundles(tx, app.id));
+    const fresh = appRepositories({ root: join(root, `fresh-${randomUUID()}`), storage: store.storage });
+    const restored = await fresh.open(workspace.id, app.id, commit, bundles);
+    const files = {};
+    for (const path of (await git(restored, ['ls-tree', '-r', '--name-only', commit])).split('\n'))
+      files[path] = await git(restored, ['show', `${commit}:${path}`]);
+    return files;
+  }
+  return { ...context, app, chat, stage, save, restoredFiles };
+}
+
+test('a save can turn a directory into a file and a file into a directory', { timeout: 120000 }, async t => {
+  const { stage, save, restoredFiles } = await editor(t);
+  assert.equal((await save(await stage('a/b', 'nested'))).ok, true);
+
+  await stage('a/b', null);
+  const file = await save(await stage('a', 'flat'));
+  assert.equal(file.ok, true);
+  assert.deepEqual(await restoredFiles(file.commit), { a: 'flat' });
+
+  const directory = await save(await stage('a/c', 'nested again'));
+  assert.equal(directory.ok, true);
+  assert.deepEqual(await restoredFiles(directory.commit), { 'a/c': 'nested again' });
+});
+
+test('no staged path can reach into a Git directory', { timeout: 120000 }, async t => {
+  const { stage } = await editor(t);
+  for (const path of ['.git/config', 'x/.git/config', 'X/.GIT/y', '.Git']) {
+    const staged = await stage(path, 'x');
+    assert.deepEqual(staged.failure, {
+      code: 'limit-exceeded',
+      message: `${path}: Path must stay inside the app`,
+      retryable: false,
+    });
+  }
+  assert.equal((await stage('x/.github/config', 'x')).ok, true);
+});
+
+test('ending an expired lease with nothing staged leaves the next holder in place', { timeout: 120000 }, async t => {
+  const { workspace, session, transact, repositories, admin, conversation, app, chat, schema } = await editor(t);
+  const late = await transact(tx => takeLease(tx, { appId: app.id, conversationId: chat, membershipId: admin }));
+  await transact(({ client }) =>
+    client.query(
+      `UPDATE "${schema}".tf_app_drafts SET lease_expires_at = clock_timestamp() - interval '1 minute' WHERE app_id = $1`,
+      [app.id],
+    ),
+  );
+  const next = await conversation(admin);
+  const other = await session();
+  let taken;
+  const racing = action =>
+    transact(tx =>
+      action({
+        ...tx,
+        client: {
+          async query(sql, values) {
+            if (!taken && /SET lease_id = NULL/.test(sql))
+              taken = await other(otherTx =>
+                stageDraftChange(
+                  otherTx,
+                  { appId: app.id, conversationId: next, membershipId: admin, path: 'b.txt', content: text('b') },
+                  new Map(),
+                ),
+              );
+            return tx.client.query(sql, values);
+          },
+        },
+      }),
+    );
+  const ended = await saveDraft(racing, repositories, {
+    workspaceId: workspace.id,
+    appId: app.id,
+    leaseId: late.leaseId,
+    expectedRevision: late.revision,
+    coAuthor,
+    endLease: true,
+  });
+  assert.equal(ended.ok, true);
+  assert.equal(taken.ok, true);
+  const draft = await transact(tx => readDraft(tx, app.id));
+  assert.equal(draft.lease?.id, taken.leaseId);
+  assert.equal(draft.lease?.conversationId, next);
+  const staged = await transact(tx => readStagedChanges(tx, app.id, taken.leaseId));
+  assert.deepEqual(
+    staged.map(change => [change.path, Buffer.from(change.content).toString()]),
+    [['b.txt', 'b']],
+  );
+});
+
+test('two apps building the same commit and recipe each get their own build', { timeout: 120000 }, async t => {
+  const { transact, admin, publicApp } = await setup(t);
+  const [orders, invoices] = [await publicApp('orders'), await publicApp('invoices')];
+  const commit = 'c'.repeat(40);
+  const recipe = { kind: 'copy', root: '.' };
+  const request = appId => transact(tx => requestBuild(tx, { appId, commit, recipe, builder, requestedBy: admin }));
+  const [first, second] = [await request(orders.id), await request(invoices.id)];
+  assert.deepEqual([first.appId, second.appId], [orders.id, invoices.id]);
+  assert.notEqual(first.id, second.id);
 });
