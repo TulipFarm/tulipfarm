@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { AppFailure } from './app.ts';
-import { buildIdSchema, type AppBuildId, type GitCommit } from './ids.ts';
+import { buildIdSchema, type AppBuildId, type AppId, type GitCommit } from './ids.ts';
 
 // A recipe path names a directory inside the app's own tree, so a build can never read or write outside it.
 const treePathSchema = z
@@ -49,11 +49,16 @@ function recipeInvalid(message: string): AppFailure {
 }
 
 /**
- * The same commit and recipe on the same builder is the same build, so requesting a build is idempotent by
+ * The same app, commit and recipe on the same builder is the same build, so requesting a build is idempotent by
  * construction.
  */
-export async function appBuildId(commit: GitCommit, recipe: AppRecipe, builder: string): Promise<AppBuildId> {
-  const input = `${commit}\n${canonicalRecipe(recipe)}\n${builder}`;
+export async function appBuildId(
+  appId: AppId,
+  commit: GitCommit,
+  recipe: AppRecipe,
+  builder: string,
+): Promise<AppBuildId> {
+  const input = `${appId}\n${commit}\n${canonicalRecipe(recipe)}\n${builder}`;
   const digest = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(input));
   return buildIdSchema.parse(Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join(''));
 }

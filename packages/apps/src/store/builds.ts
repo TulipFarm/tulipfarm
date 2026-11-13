@@ -57,7 +57,7 @@ export async function readBuild(tx: AppTransaction, id: AppBuildId): Promise<App
   return row ? buildOf(row) : null;
 }
 
-/** Records a queued build of a commit. Requesting the same commit, recipe and builder again returns the same build. */
+/** Records a queued build of a commit. Requesting the same app, commit, recipe and builder again returns the same build. */
 export async function requestBuild(
   tx: AppTransaction,
   input: {
@@ -68,13 +68,15 @@ export async function requestBuild(
     readonly requestedBy: MembershipId;
   },
 ): Promise<AppBuild> {
-  const id = await appBuildId(input.commit, input.recipe, input.builder);
+  const id = await appBuildId(input.appId, input.commit, input.recipe, input.builder);
   await tx.client.query(
     `INSERT INTO ${table(tx, 'tf_app_builds')} (id, app_id, commit, recipe, builder, status, requested_by)
      VALUES ($1, $2, $3, $4, $5, 'queued', $6) ON CONFLICT (id) DO NOTHING`,
     [id, input.appId, input.commit, JSON.stringify(input.recipe), input.builder, input.requestedBy],
   );
-  return (await readBuild(tx, id))!;
+  const build = (await readBuild(tx, id))!;
+  if (build.appId !== input.appId) throw new Error(`Build ${id} belongs to another app`);
+  return build;
 }
 
 /** Moves a queued build to running. A finished build stays finished. */
