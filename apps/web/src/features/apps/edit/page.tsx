@@ -7,10 +7,17 @@ import { PageHeader } from '@tulipfarm/sprout/page-header';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
 import { useConfirmation } from '@/features/access/confirm';
 import { workspaceRoute } from '@/router';
-import { appFailureMessage, failureMessage, type AppDetail, type AppOperation } from '../api';
+import {
+  appFailureMessage,
+  AppRequestError,
+  failureMessage,
+  type AppDetail,
+  type AppIssue,
+  type AppOperation,
+} from '../api';
 import { AppGate, LoadFailed, Loading } from '../app-page';
 import { approvalLabel, canEdit, draftLabels, servingStatus } from '../labels';
-import { useAppApi, useAppChanges, useAppChat, useAppOperation, useWatchedApp } from '../queries';
+import { useAppApi, useAppChanges, useAppChat, useAppOperation, useAppReleases, useWatchedApp } from '../queries';
 import { AppPageView } from '../pages/page-view';
 import { DraftPreview } from './preview';
 
@@ -135,40 +142,107 @@ function ChatPanel({ appId }: { appId: string }) {
 // A private draft is a saved definition with no code or builds, so revision 0 is the only sign nothing is saved yet.
 const unsaved = (draft: Draft) => draft.revision === 0;
 
-function privateDraftNote(draft: Draft, ownChat: string | null) {
+/** `hasCurrentVersion` is null until the versions load, so the note never claims who sees what before it knows. */
+function privateDraftNote(draft: Draft, ownChat: string | null, hasCurrentVersion: boolean | null) {
   if (draft.state === 'editing')
     return draft.conversationId === ownChat
-      ? 'Chat is changing the draft. It updates here when chat saves it.'
+      ? 'Chat is changing the draft. Changes show here when it finishes.'
       : draftNote(draft, ownChat, false);
   if (unsaved(draft)) return 'Describe the app you want in chat. Nothing goes live until you publish it.';
-  return 'This is the saved draft. People you share the app with still see the published version.';
+  if (hasCurrentVersion === null) return null;
+  return hasCurrentVersion
+    ? 'This is the saved draft. People you share the app with still see the current version.'
+    : 'This is the saved draft. Nobody else sees it until you publish.';
 }
+
+/** The answer to publishing one draft revision; a newer revision makes it stale, so it stops showing. */
+type PrivatePublish = { revision: number; issues: AppIssue[] };
 
 /** A private app's chat beside its draft pages, which run with the editor's own permissions. */
 function PrivateEditor({ app, appLink }: { app: AppDetail; appLink: ReactElement }) {
   const { workspace } = workspaceRoute.useRouteContext();
   const { page, row } = useSearch({ strict: false }) as { page?: string; row?: string };
+  const api = useAppApi(workspace.id);
+  const changes = useAppChanges();
+  const confirm = useConfirmation();
   useWatchedApp(workspace.id, app.id);
   const chat = useAppChat(workspace.id, app.id);
   const chatId = chat.state.kind === 'ready' ? chat.state.data : null;
+  const releases = useAppReleases(workspace.id, app.id, true);
+  const hasCurrentVersion = releases.state.kind === 'ready' ? releases.state.data.some(release => release.live) : null;
+  const [published, setPublished] = useState<PrivatePublish | null>(null);
+  const draft = app.draft;
+  const outcome = published?.revision === draft.revision ? published : null;
+
+  const publish = () =>
+    confirm.open({
+      title: 'Publish this draft?',
+      description: hasCurrentVersion === false ? 'It becomes the current version.' : 'It replaces the current version.',
+      action: 'Publish',
+      destructive: false,
+      run: async () => {
+        try {
+          await api.publishDraft(app.id, draft.revision);
+          setPublished({ revision: draft.revision, issues: [] });
+          await changes.app(app.id);
+          return null;
+        } catch (error) {
+          if (error instanceof AppRequestError && error.code === 'definition-invalid') {
+            setPublished({ revision: draft.revision, issues: error.issues });
+            return null;
+          }
+          return failureMessage(error);
+        }
+      },
+    });
+
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4">
-      <PageHeader titleId="app-edit-heading" title="Edit" parent={{ label: app.title, link: appLink }} />
+      <PageHeader
+        titleId="app-edit-heading"
+        title="Edit"
+        parent={{ label: app.title, link: appLink }}
+        actions={
+          !unsaved(draft) && (
+            <Button disabled={draft.state === 'editing' || releases.state.kind === 'loading'} onClick={publish}>
+              Publish
+            </Button>
+          )
+        }
+      />
+      {confirm.element}
       <p role="status" className="text-sm text-muted-foreground">
-        {privateDraftNote(app.draft, chatId)}
+        {privateDraftNote(draft, chatId, hasCurrentVersion)}
       </p>
+      {outcome &&
+        (outcome.issues.length ? (
+          <Alert variant="destructive">
+            <AlertTitle>{appFailureMessage('definition-invalid')}</AlertTitle>
+            <AlertDescription>
+              <ul className="list-disc space-y-1 pl-5">
+                {outcome.issues.map(issue => (
+                  <li key={`${issue.path}:${issue.message}`}>{issue.message}</li>
+                ))}
+              </ul>
+            </AlertDescription>
+          </Alert>
+        ) : (
+          <Alert>
+            <AlertDescription>Published. The draft is now the current version.</AlertDescription>
+          </Alert>
+        ))}
       <div className="flex min-h-0 flex-1 flex-col gap-4 lg:flex-row">
         <ChatPanel appId={app.id} />
         <section aria-label="Draft" className="flex min-h-96 min-w-0 flex-1 flex-col overflow-auto">
-          {unsaved(app.draft) ? (
+          {unsaved(draft) ? (
             <StatePanel
               kind="empty"
               heading="h2"
               title="No pages yet"
-              description="Describe the app you want in chat, and its pages show here."
+              description="Pages show here after chat saves the draft."
             />
           ) : (
-            <AppPageView app={app} slug={page} row={row} draft revision={app.draft.revision} />
+            <AppPageView app={app} slug={page} row={row} draft revision={draft.revision} />
           )}
         </section>
       </div>
