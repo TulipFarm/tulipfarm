@@ -1,5 +1,6 @@
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createAppPages, type AppPages } from '@tulipfarm/agents/app-page-tools';
 import { createAppEditing, type AppEditing, type AppTurnOutcome } from '@tulipfarm/agents/app-tools';
 import { readAppRecipe, type AppBuildId, type AppFailure } from '@tulipfarm/apps';
 import {
@@ -20,6 +21,7 @@ type AppRepositories = ReturnType<typeof appRepositories>;
 export type AppBuildStart = (workspaceId: string, buildId: AppBuildId) => Promise<unknown>;
 
 const copyBuilder = 'copy@1';
+const appHosting = (workspaceId: string) => isFeatureEnabled('app-hosting', null, { id: workspaceId });
 
 /** The app tools of an app's own chat, on when the workspace has the `app-hosting` flag. */
 export function workerAppEditing(
@@ -31,7 +33,7 @@ export function workerAppEditing(
     runtime.transaction(workspaceId, commonCompatibility, tx => action({ client: tx.client, schema: tx.schema }));
   return createAppEditing(runtime, {
     repositories,
-    enabled: workspaceId => isFeatureEnabled('app-hosting', null, { id: workspaceId }),
+    enabled: appHosting,
     async requestBuild({ workspaceId, appId, commit, requestedBy }) {
       const repository = await repositories.open(
         workspaceId,
@@ -63,6 +65,11 @@ export function workerAppEditing(
   });
 }
 
+/** The page tools of a private app's own chat, on when the workspace has the `app-hosting` flag. */
+export function workerAppPages(runtime: ConversationRuntime): AppPages {
+  return createAppPages(runtime, { enabled: appHosting });
+}
+
 /** App editing for a worker whose apps bucket is configured. */
 export function appEditingFromEnvironment(runtime: ConversationRuntime, env: NodeJS.ProcessEnv = process.env) {
   const bucket = env.TULIPFARM_OBJECT_STORAGE_APPS_BUCKET;
@@ -85,15 +92,18 @@ const turnEndings: Partial<Record<string, AppTurnOutcome>> = {
 };
 
 /**
- * Saves or drops what a turn staged in its app chat once the turn has settled. Never throws: the turn already settled,
- * and an edit left behind lapses with its lease.
+ * Saves or drops what a turn staged in its app chat and frees the chat's hold on the draft once the turn has settled.
+ * Never throws: the turn already settled, and an edit left behind lapses with its lease.
  */
 export async function finishAppTurn(
   runtime: ConversationRuntime,
-  apps: AppEditing,
+  editing: { readonly apps?: AppEditing | undefined; readonly pages?: AppPages | undefined },
   work: { readonly workspaceId: string; readonly conversationId: string; readonly turnId: string },
 ) {
   try {
+    // Page tools are only offered with app hosting on, so without it a turn holds no page lease to free.
+    const pages = editing.pages && (await appHosting(work.workspaceId)) ? editing.pages : undefined;
+    if (!editing.apps && !pages) return;
     const settled = await runtime.transaction(work.workspaceId, commonCompatibility, async tx => {
       const [turn] = (
         await tx.client.query(
@@ -107,12 +117,11 @@ export async function finishAppTurn(
       return outcome ? { outcome, actor: await turnRequester(tx, work.conversationId, work.turnId) } : null;
     });
     if (!settled) return;
-    const finished = await apps.finishTurn(
-      { workspaceId: work.workspaceId, actor: settled.actor, conversationId: work.conversationId },
-      settled.outcome,
-    );
-    if ('error' in finished)
+    const chat = { workspaceId: work.workspaceId, actor: settled.actor, conversationId: work.conversationId };
+    const finished = await editing.apps?.finishTurn(chat, settled.outcome);
+    if (finished && 'error' in finished)
       log('warn', 'activity', 'call_failed', { operation: 'app.finish-turn', 'error.code': finished.error });
+    await pages?.finishTurn(chat);
   } catch (error) {
     log('warn', 'activity', 'call_failed', { ...errorAttributes(error), operation: 'app.finish-turn' });
   }
