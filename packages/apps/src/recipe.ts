@@ -8,7 +8,7 @@ const treePathSchema = z
   .min(1)
   .max(512)
   .refine(path => !path.startsWith('/') && !path.includes('\\'), { error: 'Use a relative path with / separators' })
-  .refine(path => path.split('/').every(segment => segment !== '..' && segment !== '.git'), {
+  .refine(path => path.split('/').every(segment => segment !== '..' && segment.toLowerCase() !== '.git'), {
     error: 'Path must stay inside the app',
   });
 

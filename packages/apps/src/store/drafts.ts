@@ -17,7 +17,9 @@ export const appFilePathSchema = z
   .refine(path => path.split('/').every(segment => segment !== '' && segment !== '.' && segment !== '..'), {
     error: 'Path must stay inside the app',
   })
-  .refine(path => path !== '.git' && !path.startsWith('.git/'), { error: 'Path must stay inside the app' });
+  .refine(path => path.split('/').every(segment => segment.toLowerCase() !== '.git'), {
+    error: 'Path must stay inside the app',
+  });
 
 export type AppDraft = {
   readonly appId: AppId;

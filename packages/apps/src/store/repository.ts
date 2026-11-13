@@ -148,7 +148,10 @@ export function appRepositories(options: { readonly root: string; readonly stora
         // stands in and is never read.
         const index = { GIT_INDEX_FILE: join(scratch, 'index'), GIT_WORK_TREE: scratch };
         if (input.head) await git(repository, ['read-tree', input.head], index);
-        for (const change of input.changes) {
+        // Deletes go first so a file can take the place of a directory it empties; `--replace` lets a new file or
+        // directory displace whatever the other occupies.
+        const ordered = input.changes.toSorted((a, b) => Number(a.content !== null) - Number(b.content !== null));
+        for (const change of ordered) {
           if (change.content === null) {
             await git(repository, ['update-index', '--force-remove', '--', change.path], index);
             continue;
@@ -156,7 +159,11 @@ export function appRepositories(options: { readonly root: string; readonly stora
           const file = join(scratch, 'blob');
           await writeFile(file, change.content);
           const blob = await git(repository, ['hash-object', '-w', '--no-filters', file]);
-          await git(repository, ['update-index', '--add', '--cacheinfo', `100644,${blob},${change.path}`], index);
+          await git(
+            repository,
+            ['update-index', '--add', '--replace', '--cacheinfo', `100644,${blob},${change.path}`],
+            index,
+          );
         }
         const tree = await git(repository, ['write-tree'], index);
         const sizes = await treeSizes(repository, tree);
