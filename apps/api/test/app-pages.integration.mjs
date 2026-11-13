@@ -244,6 +244,8 @@ test(
         actions: [{ id: 'openDeal', label: 'Open', availability: 'available' }],
       },
     });
+    assert.deepEqual((await http(viewer, 'GET', '')).body, page.body);
+    assert.equal((await http(outsider, 'GET', '')).status, 404);
     assert.equal((await http(viewer, 'GET', '/deals?draft=true')).status, 403);
 
     const sellerData = await http(seller, 'POST', '/deals/data', {});

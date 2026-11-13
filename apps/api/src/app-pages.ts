@@ -64,7 +64,8 @@ export type AppPageDependencies = {
   ) => Promise<{ taskId: string }>;
 };
 
-const pageParams = z.strictObject({ workspaceId: z.uuid(), appId: appIdSchema, page: z.string().max(80) });
+const appParams = z.strictObject({ workspaceId: z.uuid(), appId: appIdSchema });
+const pageParams = appParams.extend({ page: z.string().max(80) });
 const actionParams = pageParams.extend({ action: z.string().max(80) });
 const pageQuery = z.strictObject({ draft: z.enum(['true', 'false']).optional() });
 const dataBody = z.strictObject({ row: z.uuid().optional() });
@@ -144,8 +145,17 @@ export function registerAppPages(app: FastifyInstance, dependencies: AppPageDepe
     return { membershipId: row.id, userId, admin: row.role === 'admin' };
   };
 
-  /** The live pages for anyone the app is shared with, or the saved draft for its editors. */
-  const load = async (tx: Tx, member: Member, appId: AppId, slug: string, draft: boolean): Promise<Loaded> => {
+  /**
+   * The live pages for anyone the app is shared with, or the saved draft for its editors. With no slug it is the home
+   * page, the first one.
+   */
+  const load = async (
+    tx: Tx,
+    member: Member,
+    appId: AppId,
+    slug: string | undefined,
+    draft: boolean,
+  ): Promise<Loaded> => {
     const found = await readApp(tx, appId);
     if (!found || found.kind !== 'private' || found.archivedAt || found.stops.disabledAt) throw new AccessDenied();
     const role = await appRole(tx, appId, member.membershipId as MembershipId);
@@ -163,7 +173,7 @@ export function registerAppPages(app: FastifyInstance, dependencies: AppPageDepe
       definition = live.definition;
       versionId = live.versionId;
     }
-    const page = definition.pages.find(candidate => candidate.slug === slug);
+    const page = slug === undefined ? definition.pages[0] : definition.pages.find(candidate => candidate.slug === slug);
     if (!page) throw new AccessDenied();
     return { appId, draft, versionId, definition, page };
   };
@@ -327,7 +337,8 @@ export function registerAppPages(app: FastifyInstance, dependencies: AppPageDepe
     });
 
     // oxlint-disable-next-line tulipfarm/product-copy -- A stable route, not user-facing copy.
-    const base = '/workspaces/:workspaceId/apps/:appId/pages/:page';
+    const pages = '/workspaces/:workspaceId/apps/:appId/pages';
+    const base = `${pages}/:page`;
     const context = (request: FastifyRequest) => {
       const params = request.params as z.infer<typeof actionParams>;
       return {
@@ -337,6 +348,40 @@ export function registerAppPages(app: FastifyInstance, dependencies: AppPageDepe
         draft: (request.query as z.infer<typeof pageQuery>).draft === 'true',
       };
     };
+
+    const readPage = async (request: FastifyRequest) => {
+      const { workspaceId, userId, params, draft } = context(request);
+      return transaction(workspaceId, async tx => {
+        const member = await memberOf(tx, userId);
+        const loaded = await load(tx, member, params.appId, params.page, draft);
+        const absent = await absentReferences(tx, pageReferences(loaded.page));
+        const actions = [];
+        for (const action of loaded.page.actions)
+          actions.push({
+            id: action.id,
+            label: action.label,
+            availability: await availability(tx, member, action, absent),
+          });
+        return {
+          draft,
+          navigation: loaded.definition.pages.map(({ slug, title }) => ({ slug, title })),
+          page: { slug: loaded.page.slug, title: loaded.page.title, surface: loaded.page.surface, actions },
+        };
+      });
+    };
+
+    routes.get(
+      pages,
+      {
+        schema: {
+          operationId: 'getAppHomePageV1',
+          hide: true,
+          params: validation.json(appParams),
+          querystring: validation.json(pageQuery),
+        },
+      },
+      readPage,
+    );
 
     routes.get(
       base,
@@ -348,26 +393,7 @@ export function registerAppPages(app: FastifyInstance, dependencies: AppPageDepe
           querystring: validation.json(pageQuery),
         },
       },
-      async request => {
-        const { workspaceId, userId, params, draft } = context(request);
-        return transaction(workspaceId, async tx => {
-          const member = await memberOf(tx, userId);
-          const loaded = await load(tx, member, params.appId, params.page, draft);
-          const absent = await absentReferences(tx, pageReferences(loaded.page));
-          const actions = [];
-          for (const action of loaded.page.actions)
-            actions.push({
-              id: action.id,
-              label: action.label,
-              availability: await availability(tx, member, action, absent),
-            });
-          return {
-            draft,
-            navigation: loaded.definition.pages.map(({ slug, title }) => ({ slug, title })),
-            page: { slug: loaded.page.slug, title: loaded.page.title, surface: loaded.page.surface, actions },
-          };
-        });
-      },
+      readPage,
     );
 
     routes.post(
