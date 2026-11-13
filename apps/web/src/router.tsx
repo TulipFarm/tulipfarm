@@ -1382,6 +1382,31 @@ const workspaceSoulRoute = createRoute({
   path: 'settings/soul',
   component: lazyRouteComponent(() => import('@/pages/soul-explorer'), 'SoulExplorerPage'),
 });
+const appsRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  path: 'apps',
+  component: lazyRouteComponent(() => import('@/features/apps/list'), 'AppsPage'),
+});
+const newAppRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  path: 'apps/new',
+  component: lazyRouteComponent(() => import('@/features/apps/new'), 'NewAppPage'),
+});
+const appRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  path: 'apps/$appSlug',
+  component: lazyRouteComponent(() => import('@/features/apps/overview'), 'AppOverviewPage'),
+});
+const appVersionsRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  path: 'apps/$appSlug/versions',
+  component: lazyRouteComponent(() => import('@/features/apps/versions'), 'AppVersionsPage'),
+});
+const appSettingsRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  path: 'apps/$appSlug/settings',
+  component: lazyRouteComponent(() => import('@/features/apps/settings'), 'AppSettingsPage'),
+});
 export const workspaceModelsRoute = createRoute({
   getParentRoute: () => workspaceRoute,
   path: 'settings/models',
@@ -1590,6 +1615,11 @@ export const router = createRouter({
       newTableRoute,
       tableDetailRoute,
       tableEditRoute,
+      appsRoute,
+      newAppRoute,
+      appRoute,
+      appVersionsRoute,
+      appSettingsRoute,
     ]),
   ]),
   defaultNotFoundComponent: NotFoundPage,
