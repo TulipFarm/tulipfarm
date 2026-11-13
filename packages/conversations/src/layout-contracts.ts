@@ -28,7 +28,7 @@ import type { inputPartSchema } from './contracts.ts';
 
 const id = z.uuid();
 
-export const layoutCompatibility = Object.freeze({ minimum: 65 });
+export const layoutCompatibility = Object.freeze({ minimum: 67 });
 
 /** An existing TulipFarm card, referenced by the ID of the record that owns it. The viewer's own permissions apply. */
 export const embedReferenceSchema = z.discriminatedUnion('kind', [
