@@ -3,7 +3,11 @@ export type SourceStatus = 'loading' | 'ready' | 'empty' | 'restricted' | 'unava
 export type LoadedSource = { status: Exclude<SourceStatus, 'loading'>; loadedAt: string };
 
 export type ActionAvailability = 'available' | 'restricted' | 'unavailable';
-export type PageAction = { id: string; label: string; availability: ActionAvailability };
+export type ActionKind = 'open-page' | 'open-record' | 'run-workflow' | 'ask-agent';
+export type PageAction = { id: string; label: string; kind: ActionKind; availability: ActionAvailability };
+
+/** In a draft, only these act on real data, so only these ask the editor to confirm first. */
+const confirmedKinds = new Set<ActionKind>(['run-workflow', 'ask-agent']);
 export type PageContent = {
   draft: boolean;
   navigation: { slug: string; title: string }[];
@@ -117,6 +121,8 @@ export function pageReducer(view: PageView, event: PageEvent): PageView {
       const current = view.presses[event.actionId];
       if (current?.state === 'sent' || current?.state === 'confirming') return view;
       const retry = current?.state === 'failed' && same(current.context, event.context);
+      const kind = view.content.page.actions.find(action => action.id === event.actionId)?.kind;
+      const confirm = view.content.draft && (kind === undefined || confirmedKinds.has(kind));
       return {
         ...view,
         presses: {
@@ -126,7 +132,7 @@ export function pageReducer(view: PageView, event: PageEvent): PageView {
             actionId: event.actionId,
             context: event.context,
             labels: event.labels,
-            state: view.content.draft ? 'confirming' : 'sent',
+            state: confirm ? 'confirming' : 'sent',
           },
         },
       };

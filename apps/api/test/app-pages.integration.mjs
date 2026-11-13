@@ -55,15 +55,18 @@ test(
     const admin = await signIn('Admin'),
       seller = await signIn('Seller'),
       viewer = await signIn('Viewer'),
+      editor = await signIn('Editor'),
       outsider = await signIn('Outsider');
     const workspace = await db.create(db.baseline, { userId: admin.id });
     await markWorkspaceReady(db.platform, workspace.id);
     const schema = `"${workspace.names.schema}"`;
     const sellerMembership = randomUUID(),
-      viewerMembership = randomUUID();
+      viewerMembership = randomUUID(),
+      editorMembership = randomUUID();
     for (const [id, user] of [
       [sellerMembership, seller.id],
       [viewerMembership, viewer.id],
+      [editorMembership, editor.id],
     ])
       await db.platform.query(`INSERT INTO ${schema}.tf_memberships(id,user_id,role) VALUES($1,$2,'member')`, [
         id,
@@ -103,7 +106,9 @@ test(
 
     const transact = action => runtime.transaction(workspace.id, commonCompatibility, action);
     const appId = randomUUID(),
-      chatId = randomUUID();
+      chatId = randomUUID(),
+      editorChatId = randomUUID(),
+      viewerChatId = randomUUID();
     await transact(async tx => {
       await createApp(tx, {
         id: appId,
@@ -117,13 +122,27 @@ test(
          VALUES($1,$2,$3,'Pipeline',true,$4)`,
         [chatId, admin.id, workspace.membershipId, appId],
       );
-      for (const membershipId of [sellerMembership, viewerMembership])
+      for (const [membershipId, role] of [
+        [sellerMembership, 'use'],
+        [viewerMembership, 'use'],
+        [editorMembership, 'edit'],
+      ])
         await putAppGrant(tx, {
           appId,
           grantee: { kind: 'member', membershipId },
-          role: 'use',
+          role,
           grantedBy: workspace.membershipId,
         });
+      // A chat left from when the viewer could edit; a viewer is not told about the app's references.
+      for (const [id, user, membershipId] of [
+        [editorChatId, editor.id, editorMembership],
+        [viewerChatId, viewer.id, viewerMembership],
+      ])
+        await tx.client.query(
+          `INSERT INTO ${schema}.tf_conversations(id,owner_user_id,owner_membership_id,title,title_manual,app_id)
+           VALUES($1,$2,$3,'Pipeline',true,$4)`,
+          [id, user, membershipId, appId],
+        );
     });
     const surface = (id, components) => [
       { version: '1.0', createSurface: { surfaceId: id, catalogId: 'tulipfarm/apps@1', components } },
@@ -241,7 +260,7 @@ test(
         slug: 'deals',
         title: 'Deals',
         surface: definition.pages[0].surface,
-        actions: [{ id: 'openDeal', label: 'Open', availability: 'available' }],
+        actions: [{ id: 'openDeal', label: 'Open', kind: 'open-page', availability: 'available' }],
       },
     });
     assert.deepEqual((await http(viewer, 'GET', '')).body, page.body);
@@ -292,12 +311,10 @@ test(
     assert.equal((await http(admin, 'GET', '/deals?draft=true')).body.draft, true);
     const preview = { requestId: randomUUID(), context: { row: acme } };
     assert.deepEqual((await http(admin, 'POST', '/deals/actions/openDeal?draft=true', preview)).body, {
-      error: 'confirmation-required',
+      kind: 'open-page',
+      page: 'deal',
+      row: acme,
     });
-    assert.deepEqual(
-      (await http(admin, 'POST', '/deals/actions/openDeal?draft=true', { ...preview, confirmed: true })).body,
-      { kind: 'open-page', page: 'deal', row: acme },
-    );
 
     const untrusted = await fetch(`${address}/v1/workspaces/${workspace.id}/apps/${appId}/pages/deals/data`, {
       method: 'POST',
@@ -316,16 +333,19 @@ test(
       count: { status: 'unavailable', value: null },
     });
     const notices = await db.platform.query(
-      `SELECT p.text FROM ${schema}.tf_conversation_messages m
+      `SELECT m.conversation_id, p.text FROM ${schema}.tf_conversation_messages m
        JOIN ${schema}.tf_conversation_parts p ON p.message_id = m.id
-       WHERE m.conversation_id = $1 AND m.author_kind = 'assistant'`,
-      [chatId],
+       WHERE m.conversation_id = ANY($1::uuid[]) AND m.author_kind = 'assistant'`,
+      [[chatId, editorChatId, viewerChatId]],
     );
+    const notice =
+      'The current version of this app uses a table and a field that no longer exist. People you share the app with see that part of “Deals” as no longer available. Other pages that use them show the same. Reply here to fix it, then publish.';
     assert.deepEqual(
-      notices.rows.map(row => row.text),
+      notices.rows.map(row => [row.conversation_id, row.text]).sort(),
       [
-        `The live version of this app names something that no longer exists: field ${name.id}, table ${deals.tableId}. Members see that part of "Deals" as unavailable until you fix it and publish again.`,
-      ],
+        [chatId, notice],
+        [editorChatId, notice],
+      ].sort(),
     );
 
     process.env.FEATURE_FLAG_APP_HOSTING = 'false';

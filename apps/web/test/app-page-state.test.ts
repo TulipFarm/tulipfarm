@@ -19,15 +19,24 @@ const content = (draft = false): PageContent => ({
     slug: 'deals',
     title: 'Deals',
     surface: [],
-    actions: [{ id: 'save', label: 'Save', availability: 'available' }],
+    actions: [
+      { id: 'save', label: 'Save', kind: 'run-workflow', availability: 'available' },
+      { id: 'open', label: 'Open', kind: 'open-page', availability: 'available' },
+      { id: 'record', label: 'Record', kind: 'open-record', availability: 'available' },
+      { id: 'ask', label: 'Ask', kind: 'ask-agent', availability: 'available' },
+    ],
   },
 });
 
 const run = (events: PageEvent[], view: PageView = initialPage('a')) => events.reduce(pageReducer, view);
 const opened = (draft = false) => run([{ type: 'opened', key: 'a', content: content(draft) }]);
-const press = (requestId: string, context: Record<string, unknown> = { name: 'Acme' }): PageEvent => ({
+const press = (
+  requestId: string,
+  context: Record<string, unknown> = { name: 'Acme' },
+  actionId = 'save',
+): PageEvent => ({
   type: 'press',
-  actionId: 'save',
+  actionId,
   context,
   requestId,
 });
@@ -129,6 +138,15 @@ test('in a draft a press waits for the editor to confirm, and cancelling leaves 
   assert.equal(cancelled.kind, 'open');
   if (cancelled.kind !== 'open') return;
   assert.deepEqual(cancelled.presses, {});
+});
+
+test('in a draft only workflow and agent actions ask to confirm; opening a page or record goes straight through', () => {
+  const states = (view: PageView) =>
+    view.kind === 'open' ? Object.fromEntries(Object.values(view.presses).map(p => [p.actionId, p.state])) : null;
+  const draft = run([press('r1', {}, 'open'), press('r2', {}, 'record'), press('r3', {}, 'ask')], opened(true));
+  assert.deepEqual(states(draft), { open: 'sent', record: 'sent', ask: 'confirming' });
+  assert.deepEqual(states(run([press('r4', {}, 'save')], opened(true))), { save: 'confirming' });
+  assert.deepEqual(states(run([press('r5', {}, 'ask')], opened(false))), { ask: 'sent' });
 });
 
 test('a component reads the sources its own bindings name, including a list template', () => {
