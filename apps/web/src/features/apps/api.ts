@@ -96,6 +96,42 @@ const nameAvailabilitySchema = z.object({
   reason: z.enum(['name-taken', 'name-reserved', 'name-invalid']).optional(),
 });
 
+const pageContentSchema = z.object({
+  draft: z.boolean(),
+  navigation: z.array(z.object({ slug: z.string(), title: z.string() })),
+  page: z.object({
+    slug: z.string(),
+    title: z.string(),
+    surface: z.array(z.unknown()),
+    actions: z.array(
+      z.object({ id: z.string(), label: z.string(), availability: z.enum(['available', 'restricted', 'unavailable']) }),
+    ),
+  }),
+});
+
+const pageDataSchema = z.object({
+  version: z.string(),
+  updateDataModel: z.object({
+    surfaceId: z.string(),
+    path: z.literal('/sources'),
+    value: z.record(
+      z.string(),
+      z.object({
+        status: z.enum(['ready', 'empty', 'restricted', 'unavailable', 'failed']),
+        loadedAt: z.string(),
+        value: z.unknown(),
+      }),
+    ),
+  }),
+});
+
+const actionResultSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('open-page'), page: z.string(), row: z.uuid().optional() }),
+  z.object({ kind: z.literal('open-record'), tableId: z.uuid(), recordId: z.uuid() }),
+  z.object({ kind: z.literal('run-workflow'), runId: z.string() }),
+  z.object({ kind: z.literal('ask-agent'), taskId: z.uuid() }),
+]);
+
 /** The address inside the workspace, `/<workspace>/apps/<slug>`; the server applies the same rule. */
 export const appSlugPattern = /^[a-z0-9](?:[a-z0-9-]{0,46}[a-z0-9])?$/;
 
@@ -169,6 +205,38 @@ export function appApi(workspaceId: string) {
     enable: stop('enable'),
     requestApproval: async (appId: string) =>
       appSummarySchema.parse(await request(`/${appId}/approval-request`, 'POST', withRequestId())),
+    /** A private app's page, or its home page when `slug` is null. Editors read the draft with `draft`. */
+    page: async (appId: string, slug: string | null, draft: boolean, signal: AbortSignal) =>
+      pageContentSchema.parse(
+        await request(
+          `/${appId}/pages${slug === null ? '' : `/${encodeURIComponent(slug)}`}${draft ? '?draft=true' : ''}`,
+          'GET',
+          undefined,
+          signal,
+        ),
+      ),
+    pageData: async (appId: string, slug: string, draft: boolean, row: string | undefined) =>
+      pageDataSchema.parse(
+        await request(
+          `/${appId}/pages/${encodeURIComponent(slug)}/data${draft ? '?draft=true' : ''}`,
+          'POST',
+          row ? { row } : {},
+        ),
+      ),
+    pageAction: async (
+      appId: string,
+      slug: string,
+      draft: boolean,
+      actionId: string,
+      body: { requestId: string; context: Record<string, unknown>; labels?: Record<string, string>; confirmed?: true },
+    ) =>
+      actionResultSchema.parse(
+        await request(
+          `/${appId}/pages/${encodeURIComponent(slug)}/actions/${encodeURIComponent(actionId)}${draft ? '?draft=true' : ''}`,
+          'POST',
+          body,
+        ),
+      ),
     decideApproval: async (appId: string, decision: 'approve' | 'reject', monthlyLimitUnits: string | null) =>
       appSummarySchema.parse(
         await request(
@@ -205,6 +273,10 @@ const failureMessages: Record<string, string> = {
   'recipe-invalid': 'The app’s build settings aren’t valid.',
   'build-failed': 'Something in the app’s code stopped the build.',
   'build-timeout': 'The build took too long and was stopped.',
+  'action-unavailable': 'This action is no longer available.',
+  'confirmation-required': 'Confirm the action to run it from the draft.',
+  'definition-invalid': 'This draft has problems. Ask chat to fix them.',
+  'invalid-context': 'Check the details and try again.',
 };
 
 export const appFailureMessage = (code: string) => failureMessages[code] ?? unavailable;

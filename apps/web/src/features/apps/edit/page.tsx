@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useState, type ReactElement } from 'react';
-import { Link } from '@tanstack/react-router';
+import { Link, useSearch } from '@tanstack/react-router';
 import { Alert, AlertDescription, AlertTitle } from '@tulipfarm/sprout/alert';
 import { Badge, type BadgeVariant } from '@tulipfarm/sprout/badge';
 import { Button } from '@tulipfarm/sprout/button';
@@ -11,6 +11,7 @@ import { appFailureMessage, failureMessage, type AppDetail, type AppOperation } 
 import { AppGate, LoadFailed, Loading } from '../app-page';
 import { approvalLabel, canEdit, draftLabels, servingStatus } from '../labels';
 import { useAppApi, useAppChanges, useAppChat, useAppOperation, useWatchedApp } from '../queries';
+import { AppPageView } from '../pages/page-view';
 import { DraftPreview } from './preview';
 
 const AppChat = lazy(() =>
@@ -86,24 +87,89 @@ function Editor({ app }: { app: AppDetail }) {
   const appLink = (
     <Link to="/$workspaceSlug/apps/$appSlug" params={{ workspaceSlug: workspace.slug, appSlug: app.slug }} />
   );
-  if (app.kind !== 'public' || !canEdit(app))
+  if (!canEdit(app))
     return (
       <StatePanel
         kind="unavailable"
         heading="h2"
-        title={app.kind === 'public' ? 'Only editors can change this app' : 'This page is for public apps'}
-        description={
-          app.kind === 'public'
-            ? 'Ask an editor of this app for edit access.'
-            : 'Private apps are changed in their chat. Go back to the app to see its details and settings.'
-        }
+        title="Only editors can change this app"
+        description="Ask an editor of this app for edit access."
       >
         <Button variant="outline" nativeButton={false} render={appLink}>
           Back to app
         </Button>
       </StatePanel>
     );
-  return <PublicEditor app={app} appLink={appLink} />;
+  return app.kind === 'public' ? (
+    <PublicEditor app={app} appLink={appLink} />
+  ) : (
+    <PrivateEditor app={app} appLink={appLink} />
+  );
+}
+
+function ChatPanel({ appId }: { appId: string }) {
+  const { workspace } = workspaceRoute.useRouteContext();
+  const chat = useAppChat(workspace.id, appId);
+  return (
+    <section
+      aria-label="Chat"
+      className="flex min-h-96 flex-col overflow-hidden rounded-lg border lg:w-md lg:min-h-0 lg:shrink-0"
+    >
+      {chat.state.kind === 'ready' ? (
+        <Suspense fallback={<Loading label="Opening chat" />}>
+          <AppChat workspaceId={workspace.id} chatId={chat.state.data} headerElement={null} visible compact />
+        </Suspense>
+      ) : chat.state.kind === 'error' || chat.state.kind === 'unavailable' ? (
+        <LoadFailed
+          title="Could not open chat"
+          message={chat.state.kind === 'error' ? chat.state.message : 'You no longer have edit access to this app.'}
+          retry={() => void chat.refresh()}
+        />
+      ) : (
+        <Loading label="Opening chat" />
+      )}
+    </section>
+  );
+}
+
+function privateDraftNote(draft: Draft, ownChat: string | null) {
+  if (draft.state === 'empty') return draftNote(draft, ownChat, false);
+  if (draft.state === 'editing' && draft.conversationId !== ownChat) return draftNote(draft, ownChat, false);
+  if (draft.state === 'editing') return 'Chat is changing the draft. It updates here when chat saves it.';
+  return 'This is the saved draft. People you share the app with still see the published version.';
+}
+
+/** A private app's chat beside its draft pages, which run with the editor's own permissions. */
+function PrivateEditor({ app, appLink }: { app: AppDetail; appLink: ReactElement }) {
+  const { workspace } = workspaceRoute.useRouteContext();
+  const { page, row } = useSearch({ strict: false }) as { page?: string; row?: string };
+  useWatchedApp(workspace.id, app.id);
+  const chat = useAppChat(workspace.id, app.id);
+  const chatId = chat.state.kind === 'ready' ? chat.state.data : null;
+  return (
+    <div className="flex min-h-0 flex-1 flex-col gap-4">
+      <PageHeader titleId="app-edit-heading" title="Edit" parent={{ label: app.title, link: appLink }} />
+      <div role="status" className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+        <Badge variant={draftTones[app.draft.state]}>{draftLabels[app.draft.state]}</Badge>
+        <span className="text-muted-foreground">{privateDraftNote(app.draft, chatId)}</span>
+      </div>
+      <div className="flex min-h-0 flex-1 flex-col gap-4 lg:flex-row">
+        <ChatPanel appId={app.id} />
+        <section aria-label="Draft" className="flex min-h-96 min-w-0 flex-1 flex-col overflow-auto">
+          {app.draft.state === 'empty' ? (
+            <StatePanel
+              kind="empty"
+              heading="h2"
+              title="No pages yet"
+              description="Describe the app you want in chat, and its pages show here."
+            />
+          ) : (
+            <AppPageView app={app} slug={page} row={row} draft revision={app.draft.revision} />
+          )}
+        </section>
+      </div>
+    </div>
+  );
 }
 
 function PublicEditor({ app, appLink }: { app: AppDetail; appLink: ReactElement }) {
@@ -244,24 +310,7 @@ function PublicEditor({ app, appLink }: { app: AppDetail; appLink: ReactElement 
         </Alert>
       )}
       <div className="flex min-h-0 flex-1 flex-col gap-4 lg:flex-row">
-        <section
-          aria-label="Chat"
-          className="flex min-h-96 flex-col overflow-hidden rounded-lg border lg:w-md lg:min-h-0 lg:shrink-0"
-        >
-          {chat.state.kind === 'ready' ? (
-            <Suspense fallback={<Loading label="Opening chat" />}>
-              <AppChat workspaceId={workspace.id} chatId={chat.state.data} headerElement={null} visible compact />
-            </Suspense>
-          ) : chat.state.kind === 'error' || chat.state.kind === 'unavailable' ? (
-            <LoadFailed
-              title="Could not open chat"
-              message={chat.state.kind === 'error' ? chat.state.message : 'You no longer have edit access to this app.'}
-              retry={() => void chat.refresh()}
-            />
-          ) : (
-            <Loading label="Opening chat" />
-          )}
-        </section>
+        <ChatPanel appId={app.id} />
         <div className="flex min-h-96 min-w-0 flex-1 flex-col">
           <DraftPreview api={api} appId={app.id} appTitle={app.title} buildId={draft.previewBuildId} />
         </div>

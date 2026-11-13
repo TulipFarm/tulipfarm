@@ -3,12 +3,11 @@ import { Link } from '@tanstack/react-router';
 import { Alert, AlertDescription, AlertTitle } from '@tulipfarm/sprout/alert';
 import { Badge } from '@tulipfarm/sprout/badge';
 import { Button } from '@tulipfarm/sprout/button';
-import { PageContent } from '@tulipfarm/sprout/page-content';
 import { PageHeader } from '@tulipfarm/sprout/page-header';
 import { SettingsGroup, SettingsRow } from '@tulipfarm/sprout/settings-list';
 import { workspaceRoute } from '@/router';
 import { appFailureMessage, type AppDetail } from './api';
-import { AppGate, useWorkspaceAdmin } from './app-page';
+import { useWorkspaceAdmin } from './app-page';
 import {
   approvalLabel,
   canEdit,
@@ -27,7 +26,7 @@ export function AppActions({ app, admin }: { app: AppDetail; admin: boolean }) {
   const params = { workspaceSlug: workspace.slug, appSlug: app.slug };
   return (
     <>
-      {canEdit(app) && app.kind === 'public' && (
+      {canEdit(app) && (
         <Button nativeButton={false} render={<Link to="/$workspaceSlug/apps/$appSlug/edit" params={params} />}>
           Edit in chat
         </Button>
@@ -54,15 +53,8 @@ export function AppActions({ app, admin }: { app: AppDetail; admin: boolean }) {
   );
 }
 
-export function AppOverviewPage() {
-  return (
-    <PageContent>
-      <AppGate>{app => <Overview app={app} />}</AppGate>
-    </PageContent>
-  );
-}
-
-function Overview({ app }: { app: AppDetail }) {
+/** The app's details, with links to edit, versions and settings for those who may open them. */
+export function AppOverview({ app }: { app: AppDetail }) {
   const { workspace } = workspaceRoute.useRouteContext();
   const admin = useWorkspaceAdmin(workspace.id);
   const serving = servingStatus(app);

@@ -1392,10 +1392,12 @@ const newAppRoute = createRoute({
   path: 'apps/new',
   component: lazyRouteComponent(() => import('@/features/apps/new'), 'NewAppPage'),
 });
+const appPageSearch = z.object({ row: z.uuid().optional().catch(undefined) });
 const appRoute = createRoute({
   getParentRoute: () => workspaceRoute,
   path: 'apps/$appSlug',
-  component: lazyRouteComponent(() => import('@/features/apps/overview'), 'AppOverviewPage'),
+  validateSearch: search => appPageSearch.parse(search),
+  component: lazyRouteComponent(() => import('@/features/apps/pages/route'), 'AppHomePage'),
 });
 const appVersionsRoute = createRoute({
   getParentRoute: () => workspaceRoute,
@@ -1405,12 +1407,20 @@ const appVersionsRoute = createRoute({
 const appEditRoute = createRoute({
   getParentRoute: () => workspaceRoute,
   path: 'apps/$appSlug/edit',
+  validateSearch: search =>
+    appPageSearch.extend({ page: z.string().max(80).optional().catch(undefined) }).parse(search),
   component: lazyRouteComponent(() => import('@/features/apps/edit/page'), 'AppEditPage'),
 });
 const appSettingsRoute = createRoute({
   getParentRoute: () => workspaceRoute,
   path: 'apps/$appSlug/settings',
   component: lazyRouteComponent(() => import('@/features/apps/settings'), 'AppSettingsPage'),
+});
+const appPageRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  path: 'apps/$appSlug/$page',
+  validateSearch: search => appPageSearch.parse(search),
+  component: lazyRouteComponent(() => import('@/features/apps/pages/route'), 'AppPagePage'),
 });
 export const workspaceModelsRoute = createRoute({
   getParentRoute: () => workspaceRoute,
@@ -1626,6 +1636,7 @@ export const router = createRouter({
       appVersionsRoute,
       appEditRoute,
       appSettingsRoute,
+      appPageRoute,
     ]),
   ]),
   defaultNotFoundComponent: NotFoundPage,
