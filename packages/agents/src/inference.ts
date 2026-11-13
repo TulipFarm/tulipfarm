@@ -135,6 +135,7 @@ import {
   type ReplyContextLimits,
 } from './reply-context.ts';
 import type { ReplyStatus } from '@tulipfarm/conversations/events';
+import type { AppKind } from '@tulipfarm/apps';
 import { toolDisplayName } from '@tulipfarm/conversations/tool-activity';
 import { modelCallTimeoutMs } from '@tulipfarm/config/timeouts';
 export { serverSentEvents } from './inference-stream.ts';
@@ -1417,8 +1418,8 @@ export type ToolInferenceContext = {
   chatFiles?: boolean;
   /** The person may run coding agents here, so the model may call `coding.run`. */
   codingRuns?: boolean;
-  /** This chat edits an app the person may edit, so the model may call `apps.*`. */
-  apps?: boolean;
+  /** The kind of app this chat edits, when the person may edit it, so the model may call that kind's `apps.*` tools. */
+  apps?: AppKind | undefined;
   /** Deferred chat tools, by framework name, offered from the first round without a `tools_search`. */
   preloadedTools?: readonly string[];
   /** Built-in procedures resolved by the server for this request, not names extracted from message text. */
@@ -4687,7 +4688,7 @@ export async function inferWithTools(
         loaded,
         tools?.chatFiles ?? false,
         tools?.codingRuns ?? false,
-        tools?.apps ?? false,
+        tools?.apps,
       );
       chatToolNameMention = toolNamePattern(catalog.tools);
       previousCatalog = catalogKey(mcp);
@@ -4933,7 +4934,7 @@ export async function inferWithTools(
               loaded,
               tools?.chatFiles ?? false,
               tools?.codingRuns ?? false,
-              tools?.apps ?? false,
+              tools?.apps,
             ),
           );
           chatToolNameMention = toolNamePattern(catalog.tools);

@@ -498,6 +498,9 @@ export async function resultSources(
     case 'apps.files.delete':
     // eslint-disable-next-line tulipfarm/product-copy -- A tool name, not user-facing copy.
     case 'apps.preview.build':
+    case 'apps.page.read':
+    case 'apps.page.replace':
+    case 'apps.page.check':
       return [];
     case 'bud.preference.ask':
     case 'bud.preference.propose':

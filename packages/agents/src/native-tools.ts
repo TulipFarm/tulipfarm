@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { chatCallSchema, discoverTools, frameworkCallSchema, type FrameworkCall, type ToolName } from './tools.ts';
+import type { AppKind } from '@tulipfarm/apps';
 import { type McpModelCatalog } from './mcp-contracts.ts';
 
 /** One provider-native function definition. Provider names allow only letters, digits, `_`, and `-`. */
@@ -223,6 +224,9 @@ const coreChatTools = new Set(
     'apps.files.delete',
     // eslint-disable-next-line tulipfarm/product-copy -- A tool name, not user-facing copy.
     'apps.preview.build',
+    'apps.page.read',
+    'apps.page.replace',
+    'apps.page.check',
   ].map(nativeToolName),
 );
 export const toolSearchName = 'tools_search';
@@ -278,7 +282,7 @@ export function nativeChatTools(
   loaded?: Set<string>,
   chatFiles = false,
   codingRuns = false,
-  apps = false,
+  apps?: AppKind,
 ): ChatCatalog {
   const full = nativeTools({ kind: 'chat', mcp, earlierMessages, chatFiles, codingRuns, apps }, chatCallSchema);
   if (!full.tools.length) throw new Error('tool-catalog-empty');

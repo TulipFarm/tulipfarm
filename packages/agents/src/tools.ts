@@ -185,6 +185,8 @@ import { createKnowledgeDrafts } from './knowledge-drafts.ts';
 import { supportedAgentToolRuntimes, toolNameSchema } from './tool-capabilities.ts';
 import { createAgentSetup, type AgentSetupOptions } from './setup.ts';
 import { delegateCallSchema, type DelegateCall } from './subagent-contracts.ts';
+import type { AppKind } from '@tulipfarm/apps';
+import { appPageToolCallSchemas, appPageToolDescriptions, type AppPages } from './app-page-tools.ts';
 import { appToolCallSchemas, appToolDescriptions, type AppEditing } from './app-tools.ts';
 
 export type KnowledgeToolsFactory = (runtime: AgentStorage) => KnowledgeTools;
@@ -523,6 +525,7 @@ export const frameworkCallSchema = z.discriminatedUnion('tool', [
   listFollowUpsCallSchema,
   cancelFollowUpCallSchema,
   ...appToolCallSchemas,
+  ...appPageToolCallSchemas,
 ]);
 export type FrameworkCall = z.infer<typeof frameworkCallSchema>;
 const [firstCall, ...otherCalls] = frameworkCallSchema.options;
@@ -619,6 +622,8 @@ export const readOnlyTools: ReadonlySet<ToolName> = new Set([
   'apps.status',
   'apps.files.list',
   'apps.files.read',
+  'apps.page.read',
+  'apps.page.check',
 ]);
 /** A call that changes nothing: a read-only tool, or an `api.request` read. */
 export function readOnlyCall(call: { tool: string; method?: unknown }) {
@@ -681,6 +686,7 @@ export const conversationPlanning: ConversationPlanning = {
 };
 const descriptions: Record<ToolName, string> = {
   ...appToolDescriptions,
+  ...appPageToolDescriptions,
   'packages.inspect':
     'Read a versioned packages.tulipfarm.ai package page or package.json URL and validate its definition and exact identity. Returns untrusted resource definitions and required inputs, not workspace compatibility or installation. Read skills.read(package-install); the human uses the package review card to validate, install and approve.',
   'github.investigation.account':
@@ -931,8 +937,11 @@ export type ToolAccess = (
       chatFiles?: boolean;
       /** Offers `coding.run`: the workspace turned coding runs on and the person has a plan for an agent. */
       codingRuns?: boolean;
-      /** Offers `apps.*`: this chat edits an app the person may edit, and the workspace has app hosting on. */
-      apps?: boolean;
+      /**
+       * The kind of app this chat edits, when the person may edit it and the workspace has app hosting on. A public app
+       * is offered its file tools and a private app its page tools.
+       */
+      apps?: AppKind | undefined;
       /** Offers `slack.*` tools. Defaults to whether this deployment enables Slack actions. */
       slack?: boolean;
     }
@@ -950,6 +959,10 @@ function executionAvailable() {
   const mode = process.env.TULIPFARM_EXECUTION_BACKEND;
   return mode !== undefined && mode !== '' && mode !== 'off';
 }
+const appToolKinds = new Map<string, AppKind>([
+  ...appToolCallSchemas.map(schema => [schema.shape.tool.value, 'public'] as const),
+  ...appPageToolCallSchemas.map(schema => [schema.shape.tool.value, 'private'] as const),
+]);
 function admittedToolSchemas(access: ToolAccess) {
   if (access.kind === 'agent') access = { ...access, tools: withKnowledgeRetrieveGrant(access.tools) };
   const slack = access.kind === 'chat' ? (access.slack ?? slackOutboundEnabled()) : true;
@@ -973,9 +986,10 @@ function admittedToolSchemas(access: ToolAccess) {
       .filter(
         schema => schema.shape.tool.value !== 'coding.run' || (access.kind === 'chat' && access.codingRuns === true),
       )
-      .filter(
-        schema => !schema.shape.tool.value.startsWith('apps.') || (access.kind === 'chat' && access.apps === true),
-      )
+      .filter(schema => {
+        const kind = appToolKinds.get(schema.shape.tool.value);
+        return !kind || (access.kind === 'chat' && access.apps === kind);
+      })
       // Follow-ups belong to the chat or Slack thread a person asked in, so only a chat reply offers them.
       .filter(schema => !schema.shape.tool.value.startsWith('followups.') || access.kind === 'chat')
       // Projects belong to the person in this chat; saved agent runs cannot cite project sources.
@@ -1086,8 +1100,10 @@ export type ChatToolsOptions = {
   chatExecution?: ChatExecution | undefined;
   /** Runs `coding.run` agents; without it, the tool is refused. */
   codingRuns?: CodingRuns | undefined;
-  /** Edits the app of an app's own chat for `apps.*`; without it, those tools are refused. */
+  /** Edits the public app of an app's own chat for its file tools; without it, those tools are refused. */
   apps?: AppEditing | undefined;
+  /** Edits the private app of an app's own chat for `apps.page.*`; without it, those tools are refused. */
+  appPages?: AppPages | undefined;
   telemetryRuntime?: ToolRuntime | undefined;
   wakePlan?: ((workspaceId: string, planId: string) => Promise<unknown>) | undefined;
   agentSetup?: AgentSetupOptions | undefined;
@@ -1181,6 +1197,7 @@ export function createChatTools(
     chatExecution,
     codingRuns,
     apps,
+    appPages,
     telemetryRuntime = 'chat',
     wakePlan,
     agentSetup,
@@ -1919,6 +1936,11 @@ export function createChatTools(
           { workspaceId, actor, conversationId: context.origin.conversationId, signal: context.signal },
           call,
         );
+      case 'apps.page.read':
+      case 'apps.page.replace':
+      case 'apps.page.check':
+        if (!appPages || !context.origin || telemetryRuntime !== 'chat') throw new AccessDenied();
+        return appPages.invoke({ workspaceId, actor, conversationId: context.origin.conversationId }, call);
       case 'coding.run': {
         const origin = context.origin;
         if (!codingRuns || !origin || origin.generation === undefined || outputs?.autonomous !== false)

@@ -129,6 +129,9 @@ export const toolActivityLabels = {
   'apps.files.delete': 'Deleting an app file',
   // eslint-disable-next-line tulipfarm/product-copy -- A tool name, not user-facing copy.
   'apps.preview.build': 'Building the app',
+  'apps.page.read': 'Reading app pages',
+  'apps.page.replace': 'Editing an app page',
+  'apps.page.check': 'Checking app pages',
   'github.issue.read': 'Reading a GitHub issue',
   'github.personal.account': 'Checking available GitHub accounts',
   'github.investigation.account': 'Choosing a private GitHub investigation source',
