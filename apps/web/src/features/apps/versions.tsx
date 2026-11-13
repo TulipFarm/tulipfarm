@@ -94,11 +94,15 @@ function Versions({ app }: { app: AppDetail }) {
             badges={release => <VersionBadge release={release} />}
             values={release => [
               { label: 'Created', value: formatDay(release.createdAt) },
-              {
-                label: 'Code ID',
-                value: <span className="font-mono">{shortCommit(release.commit)}</span>,
-                text: release.commit,
-              },
+              ...(release.commit
+                ? [
+                    {
+                      label: 'Code ID',
+                      value: <span className="font-mono">{shortCommit(release.commit)}</span>,
+                      text: release.commit,
+                    },
+                  ]
+                : []),
             ]}
             renderActions={release =>
               release.live || !release.staged ? null : (

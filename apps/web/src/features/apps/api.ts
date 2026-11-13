@@ -65,7 +65,8 @@ export type AppDetail = z.infer<typeof appDetailSchema>;
 const releaseSchema = z.object({
   id: z.uuid(),
   number: z.number(),
-  commit: z.string(),
+  /** The public app's code; private apps have no code, only a definition. */
+  commit: z.string().optional(),
   staged: z.boolean(),
   live: z.boolean(),
   createdAt: z.string(),
