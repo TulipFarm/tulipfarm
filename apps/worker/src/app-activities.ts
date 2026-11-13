@@ -280,6 +280,25 @@ export function createAppActivities(work: AppWork) {
     return BigInt((rows[0] as { units: string }).units) > limit;
   }
 
+  /** Clears the credit pause of each app whose cause is gone as of the newest settled hour, and serves it again. */
+  async function liftBudgetPauses(workspaceId: string, appIds: readonly string[], now: number, signal: AbortSignal) {
+    const at = new Date(settledBefore(now) - hour).toISOString();
+    const lifted = await transact(workspaceId, async tx => {
+      const ids: string[] = [];
+      for (const id of appIds) {
+        const app = await readApp(tx, id as AppId, true);
+        if (!app?.stops.budgetPausedAt || (await overBudget(tx, app, at))) continue;
+        await tx.client.query(
+          `UPDATE ${table(tx, 'tf_apps')} SET budget_paused_at = NULL, edge_version = edge_version + 1 WHERE id = $1`,
+          [id],
+        );
+        ids.push(id);
+      }
+      return ids;
+    });
+    for (const appId of lifted) await projectEdge({ workspaceId, appId }, signal);
+  }
+
   async function readTraffic(window: UsageWindow, signal: AbortSignal) {
     const traffic: Traffic = new Map();
     for await (const used of publisher!.usage(window, signal)) {
@@ -489,7 +508,7 @@ export function createAppActivities(work: AppWork) {
     },
 
     /** Repairs publisher routes, edge projections, stale name claims and staged releases nothing refers to. */
-    async reconcileApps(signal: AbortSignal) {
+    async reconcileApps(signal: AbortSignal, now = Date.now()) {
       type NameRow = {
         name: string;
         workspace_id: string;
@@ -540,8 +559,16 @@ export function createAppActivities(work: AppWork) {
           byWorkspace.set(row.workspace_id, [...(byWorkspace.get(row.workspace_id) ?? []), row]);
       for (const [workspaceId, rows] of byWorkspace) {
         signal.throwIfAborted();
-        if (!(await isEnabled(workspaceId))) continue;
         try {
+          const paused = rows.filter(row => row.state === 'current' && row.status === 'paused');
+          if (paused.length)
+            await liftBudgetPauses(
+              workspaceId,
+              paused.map(row => row.app_id),
+              now,
+              signal,
+            );
+          if (!(await isEnabled(workspaceId))) continue;
           const apps = await transact(workspaceId, async tx => {
             const { rows: found } = await tx.client.query(
               `SELECT id, public_name, edge_version FROM ${table(tx, 'tf_apps')} WHERE id = ANY($1::uuid[])`,

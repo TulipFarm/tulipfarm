@@ -8,6 +8,7 @@ import { test } from 'node:test';
 import {
   admitPublish,
   admitRollback,
+  changeAppStop,
   claimAppName,
   createApp,
   promoteAppName,
@@ -595,5 +596,119 @@ test('app builds, publishes, reconciles and meters converge however often they r
         ['2026-11-14T11:00:00.000Z', '2'],
       ],
     );
+  });
+
+  const served = async () => {
+    const live = await transact(tx => readApp(tx, app.id));
+    const { rows } = await db.platform.query(`SELECT status FROM app.app_hostnames WHERE name = 'acme-shop'`);
+    return {
+      budgetPaused: live.stops.budgetPausedAt !== null,
+      editorPaused: live.stops.editorPausedAt !== null,
+      edgeVersion: live.edgeVersion,
+      name: rows[0].status,
+      route: publisher.routes.get('acme-shop')?.status,
+    };
+  };
+  const reconcileTwice = async now => {
+    await work.reconcileApps(signal(), now);
+    const once = await served();
+    await work.reconcileApps(signal(), now);
+    assert.deepEqual(await served(), once);
+    return once;
+  };
+
+  await t.test('an app over its monthly limit resumes when an admin raises the limit', async () => {
+    const now = Date.parse('2026-11-14T15:05:00.000Z');
+    const before = await reconcileTwice(now);
+    assert.deepEqual(before, {
+      budgetPaused: true,
+      editorPaused: false,
+      edgeVersion: before.edgeVersion,
+      name: 'paused',
+      route: 'paused',
+    });
+
+    await db.platform.query(`UPDATE "${schema}".tf_apps SET monthly_limit_units = 100000 WHERE id = $1`, [app.id]);
+    assert.deepEqual(await reconcileTwice(now), {
+      budgetPaused: false,
+      editorPaused: false,
+      edgeVersion: before.edgeVersion + 1,
+      name: 'active',
+      route: 'active',
+    });
+  });
+
+  await t.test('a workspace that runs out of credits serves its app again once credit is added', async () => {
+    await db.platform.query(`INSERT INTO "${schema}".test_credit_entries VALUES ('spent-elsewhere', 5000)`);
+    publisher.traffic = [{ name: 'acme-shop', requests: 1, bytes: 16, units: 1n }];
+    const now = Date.parse('2026-11-14T15:05:00.000Z');
+    await work.meterAppTraffic(now, signal());
+    const before = await reconcileTwice(now);
+    assert.deepEqual(before, {
+      budgetPaused: true,
+      editorPaused: false,
+      edgeVersion: before.edgeVersion,
+      name: 'paused',
+      route: 'paused',
+    });
+
+    await db.platform.query(`DELETE FROM "${schema}".test_credit_entries WHERE id = 'spent-elsewhere'`);
+    assert.deepEqual(await reconcileTwice(now), {
+      budgetPaused: false,
+      editorPaused: false,
+      edgeVersion: before.edgeVersion + 1,
+      name: 'active',
+      route: 'active',
+    });
+  });
+
+  await t.test('an app over its monthly limit resumes when the next month starts', async () => {
+    await db.platform.query(`UPDATE "${schema}".tf_apps SET monthly_limit_units = 100 WHERE id = $1`, [app.id]);
+    await work.meterAppTraffic(Date.parse('2026-11-14T16:05:00.000Z'), signal());
+    const before = await reconcileTwice(Date.parse('2026-11-30T23:05:00.000Z'));
+    assert.deepEqual(before, {
+      budgetPaused: true,
+      editorPaused: false,
+      edgeVersion: before.edgeVersion,
+      name: 'paused',
+      route: 'paused',
+    });
+
+    assert.deepEqual(await reconcileTwice(Date.parse('2026-12-01T03:05:00.000Z')), {
+      budgetPaused: false,
+      editorPaused: false,
+      edgeVersion: before.edgeVersion + 1,
+      name: 'active',
+      route: 'active',
+    });
+  });
+
+  await t.test('lifting a credit pause leaves an editor pause in place', async () => {
+    await work.meterAppTraffic(Date.parse('2026-11-14T17:05:00.000Z'), signal());
+    const paused = await transact(tx =>
+      changeAppStop(tx, {
+        appId: app.id,
+        kind: 'pause',
+        requestId: randomUUID(),
+        requestedBy: workspace.membershipId,
+      }),
+    );
+    assert.equal(paused.ok, true);
+    const before = await served();
+    assert.deepEqual(
+      { budgetPaused: before.budgetPaused, editorPaused: before.editorPaused },
+      {
+        budgetPaused: true,
+        editorPaused: true,
+      },
+    );
+
+    assert.deepEqual(await reconcileTwice(Date.parse('2026-12-01T03:05:00.000Z')), {
+      budgetPaused: false,
+      editorPaused: true,
+      edgeVersion: before.edgeVersion + 1,
+      name: 'paused',
+      route: 'paused',
+    });
   });
 });
