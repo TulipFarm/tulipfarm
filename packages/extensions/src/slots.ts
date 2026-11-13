@@ -25,7 +25,9 @@ export type CreditActivity =
   | 'table-search'
   | 'knowledge-ingestion'
   | 'knowledge-query'
-  | 'knowledge-reindex';
+  | 'knowledge-reindex'
+  | 'app-build'
+  | 'app-hosting';
 
 /** The metered attempt a credit-account change belongs to. */
 export type CreditEntry = {
@@ -294,6 +296,100 @@ export type McpHost = {
   ): AsyncIterable<{ workspaceId: string; integrationId: string; sandboxId: string; generation: number }>;
 };
 
+/** One released file. `path` is relative to the release root and uses `/` separators. */
+export type AppFile = {
+  readonly path: string;
+  readonly sha256: string;
+  readonly bytes: number;
+  readonly contentType: string;
+};
+
+/** The `command` build recipe from an app's `app.json`, as parsed by @tulipfarm/apps. */
+export type AppCommandRecipe = {
+  readonly kind: 'command';
+  readonly runtime: 'node22';
+  readonly install?: string | undefined;
+  readonly command: string;
+  readonly output: string;
+};
+
+export type AppBuildInput = {
+  readonly workspaceId: string;
+  readonly appId: string;
+  readonly buildId: string;
+  readonly recipe: AppCommandRecipe;
+  /** A tar stream of the commit tree, without the .git directory. */
+  readonly source: () => AsyncIterable<Uint8Array>;
+  readonly limits: { readonly seconds: number; readonly outputBytes: number; readonly outputFiles: number };
+};
+
+export type AppBuildResult =
+  | {
+      readonly ok: true;
+      /** A tar stream of the output directory. TulipFarm unpacks it, checks limits and stores it. */
+      readonly output: () => AsyncIterable<Uint8Array>;
+      readonly log: string;
+      readonly units: bigint;
+    }
+  | {
+      readonly ok: false;
+      readonly code: 'build-failed' | 'build-timeout';
+      readonly log: string;
+      readonly units: bigint;
+    };
+
+/**
+ * Turns an exact commit into static files. It never receives Git history or storage credentials. Without a
+ * registered builder, `copy` recipes still build and `command` recipes fail.
+ */
+export type AppBuilder = {
+  /** Stable identifier folded into the build id, such as `sandbox-node22-v1`. Changing it rebuilds every app. */
+  readonly id: string;
+  build(input: AppBuildInput, signal: AbortSignal): Promise<AppBuildResult>;
+};
+
+export type AppEdgeStatus = 'active' | 'paused' | 'disabled';
+
+/** The delivery state for one public name. `version` only ever grows. */
+export type AppRoute = {
+  readonly name: string;
+  readonly releaseId: string | null;
+  readonly status: AppEdgeStatus;
+  readonly version: number;
+};
+
+export type AppTraffic = {
+  readonly name: string;
+  readonly requests: number;
+  readonly bytes: number;
+  readonly units: bigint;
+};
+
+/** Delivers released files to `<name>.<sites domain>`. Holds no billing logic. */
+export type AppPublisher = {
+  /** Copies every file of a release into delivery. Idempotent per release; files already staged are skipped. */
+  stage(
+    input: {
+      readonly releaseId: string;
+      readonly files: readonly AppFile[];
+      readonly read: (file: AppFile) => AsyncIterable<Uint8Array>;
+    },
+    signal: AbortSignal,
+  ): Promise<void>;
+  /** Writes the route unless the stored version is greater or equal. Returns the route stored after the call. */
+  apply(route: AppRoute, signal: AbortSignal): Promise<{ readonly stored: AppRoute | null }>;
+  /** Removes the route for a name only if its stored version is below `version`. A removed name serves 404. */
+  remove(input: { readonly name: string; readonly version: number }, signal: AbortSignal): Promise<void>;
+  /** Deletes the staged files of a release that no route points at. */
+  discard(input: { readonly releaseId: string }, signal: AbortSignal): Promise<void>;
+  /** Every route the publisher holds, for reconciliation. */
+  list(signal: AbortSignal): AsyncIterable<AppRoute>;
+  /** Every staged release, for orphan cleanup. */
+  releases(signal: AbortSignal): AsyncIterable<{ readonly releaseId: string }>;
+  /** Delivered traffic per name in a closed window of ISO 8601 instants, priced in credit units. */
+  usage(window: { readonly start: string; readonly end: string }, signal: AbortSignal): AsyncIterable<AppTraffic>;
+};
+
 export type ExtensionMigration = { readonly name: string; readonly sql: string };
 
 /**
@@ -317,6 +413,10 @@ export type ExtensionRegistrar = {
   socialPlatformApps(resolver: SocialPlatformApps): void;
   /** Single slot: a second extension setting it fails startup. Register it in the API and the worker alike. */
   mcpHost(host: McpHost): void;
+  /** Single slot: a second extension setting it fails startup. Register it in the API and the worker alike. */
+  appBuilder(builder: AppBuilder): void;
+  /** Single slot: a second extension setting it fails startup. Register it in the API and the worker alike. */
+  appPublisher(publisher: AppPublisher): void;
   usageSink(sink: UsageSink): void;
   analytics(analytics: ProductAnalytics): void;
   errorReporter(reporter: ErrorReporter): void;

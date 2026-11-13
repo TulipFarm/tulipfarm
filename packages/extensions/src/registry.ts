@@ -6,6 +6,8 @@ import {
 } from '@tulipfarm/execution-contract';
 import type {
   AnalyticsEvent,
+  AppBuilder,
+  AppPublisher,
   AnalyticsGroup,
   AnalyticsPerson,
   CreditGate,
@@ -50,6 +52,8 @@ type State = {
   flagProvider?: Registered<FlagProvider>;
   socialPlatformApps?: Registered<SocialPlatformApps>;
   mcpHost?: Registered<McpHost>;
+  appBuilder?: Registered<AppBuilder>;
+  appPublisher?: Registered<AppPublisher>;
   executionBackend?: Registered<ExecutionBackend>;
   usageSinks: Registered<UsageSink>[];
   analytics: Registered<ProductAnalytics>[];
@@ -94,6 +98,9 @@ function validateMigrations(extension: string, set: ExtensionMigrations, taken: 
   }
 }
 
+const hasFunctions = (value: unknown, methods: readonly string[]) =>
+  methods.every(method => typeof (value as Record<string, unknown> | undefined)?.[method] === 'function');
+
 /**
  * Runs one extension's register() and commits its slots only if it succeeds, so a
  * failing extension leaves the registry unchanged.
@@ -115,7 +122,15 @@ export async function registerExtension(extension: ServerExtension, context: Ext
   };
   const wrap = <T>(value: T): Registered<T> => ({ extension: extension.name, value });
   const single = (
-    slot: 'creditGate' | 'creditPricing' | 'flagProvider' | 'socialPlatformApps' | 'executionBackend' | 'mcpHost',
+    slot:
+      | 'creditGate'
+      | 'creditPricing'
+      | 'flagProvider'
+      | 'socialPlatformApps'
+      | 'executionBackend'
+      | 'mcpHost'
+      | 'appBuilder'
+      | 'appPublisher',
     label: string,
   ) => {
     const owner = current[slot]?.extension ?? staged[slot]?.extension;
@@ -171,15 +186,27 @@ export async function registerExtension(extension: ServerExtension, context: Ext
     }),
     mcpHost: guard(host => {
       single('mcpHost', 'MCP host');
-      if (
-        !['provision', 'connect', 'remove', 'list'].every(
-          method => typeof (host as Record<string, unknown> | undefined)?.[method] === 'function',
-        )
-      )
+      if (!hasFunctions(host, ['provision', 'connect', 'remove', 'list']))
         throw new ExtensionRegistrationError(
           `Extension "${extension.name}" MCP host needs provision, connect, remove and list functions`,
         );
       staged.mcpHost = wrap(host);
+    }),
+    appBuilder: guard(builder => {
+      single('appBuilder', 'app builder');
+      if (!hasFunctions(builder, ['build']) || typeof builder.id !== 'string' || !builder.id)
+        throw new ExtensionRegistrationError(
+          `Extension "${extension.name}" app builder needs an id and a build function`,
+        );
+      staged.appBuilder = wrap(builder);
+    }),
+    appPublisher: guard(publisher => {
+      single('appPublisher', 'app publisher');
+      if (!hasFunctions(publisher, ['stage', 'apply', 'remove', 'discard', 'list', 'releases', 'usage']))
+        throw new ExtensionRegistrationError(
+          `Extension "${extension.name}" app publisher needs stage, apply, remove, discard, list, releases and usage functions`,
+        );
+      staged.appPublisher = wrap(publisher);
     }),
     usageSink: guard(sink => {
       staged.usageSinks.push(wrap(sink));
@@ -214,6 +241,8 @@ export async function registerExtension(extension: ServerExtension, context: Ext
   if (staged.socialPlatformApps) current.socialPlatformApps = staged.socialPlatformApps;
   if (staged.executionBackend) current.executionBackend = staged.executionBackend;
   if (staged.mcpHost) current.mcpHost = staged.mcpHost;
+  if (staged.appBuilder) current.appBuilder = staged.appBuilder;
+  if (staged.appPublisher) current.appPublisher = staged.appPublisher;
   current.usageSinks.push(...staged.usageSinks);
   current.analytics.push(...staged.analytics);
   current.errorReporters.push(...staged.errorReporters);
@@ -253,6 +282,16 @@ export function socialPlatformApps(): SocialPlatformApps | undefined {
 /** The registered MCP package host, or undefined when hosted MCP integrations are unavailable. */
 export function mcpHost(): McpHost | undefined {
   return state().mcpHost?.value;
+}
+
+/** The registered app builder, or undefined when only `copy` recipes can build. */
+export function appBuilder(): AppBuilder | undefined {
+  return state().appBuilder?.value;
+}
+
+/** The registered app publisher, or undefined to use the built-in one, if the operator configured it. */
+export function appPublisher(): AppPublisher | undefined {
+  return state().appPublisher?.value;
 }
 
 export function executionBackend(): ExecutionBackend | undefined {
