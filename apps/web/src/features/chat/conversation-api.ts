@@ -86,6 +86,7 @@ const partSchema = z.discriminatedUnion('kind', [
       name: z.string(),
       sourceComponentId: z.string(),
       context: z.record(z.string(), z.unknown()).default({}),
+      labels: z.record(z.string(), z.string()).optional(),
     }),
   }),
   z.object({ kind: z.literal('attachment'), attachmentId: z.uuid() }),

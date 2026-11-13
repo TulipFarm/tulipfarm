@@ -734,6 +734,7 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
             name: request.name,
             sourceComponentId: request.sourceComponentId,
             context: request.context,
+            ...(request.labels && Object.keys(request.labels).length ? { labels: request.labels } : {}),
           },
         ),
       'write',

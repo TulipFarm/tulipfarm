@@ -27,6 +27,7 @@ import { proposalTitle } from './table-proposal-card';
 import { useTableProposal } from '@/features/tables/hooks';
 import { proposalApi } from '@/features/tables/proposal-api';
 import { settleRendererCall, useRendererCalls } from './layout-calls';
+import { chosenLabels, optionLabels } from './layout-labels';
 
 const embedNames: Record<EmbedReference['kind'], { title: string; kind: ResultCardKind }> = {
   plan: { title: 'Plan', kind: 'Plan' },
@@ -213,7 +214,14 @@ function LayoutSurface({
     }
     if ('action' in message) {
       const { name, sourceComponentId, context, userMessage } = message.action;
-      host?.send(messageId, { name, sourceComponentId, context, userMessage: userMessage?.trim() || actionText(name) });
+      const labels = chosenLabels(context, optionLabels(messages));
+      host?.send(messageId, {
+        name,
+        sourceComponentId,
+        context,
+        ...(labels ? { labels } : {}),
+        userMessage: userMessage?.trim() || actionText(name),
+      });
       return;
     }
     if ('callAgentFunction' in message) {
