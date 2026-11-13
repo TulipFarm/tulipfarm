@@ -147,7 +147,7 @@ export function registerAppPages(app: FastifyInstance, dependencies: AppPageDepe
   /** The live pages for anyone the app is shared with, or the saved draft for its editors. */
   const load = async (tx: Tx, member: Member, appId: AppId, slug: string, draft: boolean): Promise<Loaded> => {
     const found = await readApp(tx, appId);
-    if (!found || found.kind !== 'private' || found.archivedAt) throw new AccessDenied();
+    if (!found || found.kind !== 'private' || found.archivedAt || found.stops.disabledAt) throw new AccessDenied();
     const role = await appRole(tx, appId, member.membershipId as MembershipId);
     if (!role && !member.admin) throw new AccessDenied();
     let definition: AppDefinition;
@@ -158,7 +158,6 @@ export function registerAppPages(app: FastifyInstance, dependencies: AppPageDepe
       if (!checked.ok) throw new PageFailure(422, 'definition-invalid');
       definition = checked.definition;
     } else {
-      if (found.stops.disabledAt) throw new AccessDenied();
       const live = await readLiveVersion(tx, appId);
       if (!live) throw new AccessDenied();
       definition = live.definition;

@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 import { Pool } from 'pg';
 import Fastify from 'fastify';
-import { createApp, listAppVersions, publishAppVersion, putAppGrant } from '@tulipfarm/apps/store';
+import { changeAppStop, createApp, listAppVersions, publishAppVersion, putAppGrant } from '@tulipfarm/apps/store';
 import { humanReadableTableFiles } from '@tulipfarm/agents/table-sources';
 import { createTableService } from '@tulipfarm/tables/service';
 import { commonCompatibility, createWorkspaceRuntime } from '@tulipfarm/workspace-storage/runtime';
@@ -329,6 +329,22 @@ test(
     process.env.FEATURE_FLAG_APP_HOSTING = 'false';
     assert.equal((await http(seller, 'GET', '/deals')).status, 404);
     process.env.FEATURE_FLAG_APP_HOSTING = 'true';
+
+    const disabled = await transact(tx =>
+      changeAppStop(tx, { appId, requestId: randomUUID(), requestedBy: workspace.membershipId, kind: 'disable' }),
+    );
+    assert.equal(disabled.ok, true);
+    const confirmed = { requestId: randomUUID(), context: { row: acme }, confirmed: true };
+    assert.deepEqual(
+      [
+        await http(seller, 'GET', '/deals'),
+        await http(admin, 'GET', '/deals'),
+        await http(admin, 'GET', '/deals?draft=true'),
+        await http(admin, 'POST', '/deals/data?draft=true', {}),
+        await http(admin, 'POST', '/deals/actions/openDeal?draft=true', confirmed),
+      ].map(({ status }) => status),
+      [404, 404, 404, 404, 404],
+    );
     assert.deepEqual(started, []);
   },
 );
