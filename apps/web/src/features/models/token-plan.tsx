@@ -32,6 +32,8 @@ import { modelKeys } from './queries';
 import {
   PlanModels,
   ShareDialog,
+  expectNewPlan,
+  useAskToShare,
   audience,
   subscriptionsKey,
   usePeople,
@@ -140,6 +142,11 @@ export function TokenPlanPane({ workspaceId, provider }: { workspaceId: string; 
   const [pasting, setPasting] = useState(provider === 'claude');
   const [sharing, setSharing] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const own =
+    subscriptions.read.state.kind === 'ready'
+      ? subscriptions.read.state.data.find(item => item.provider === provider && item.mine)
+      : undefined;
+  const [asking, stopAsking] = useAskToShare(workspaceId, provider, own);
   const refreshAll = useCallback(
     () =>
       change({
@@ -201,6 +208,7 @@ export function TokenPlanPane({ workspaceId, provider }: { workspaceId: string; 
   }, [api, device, deadline, provider, refreshAll, text.name]);
 
   async function connect() {
+    expectNewPlan(workspaceId, provider, own);
     const value = token.replace(/\s+/g, '');
     if (!value) {
       setMessage({ tone: 'error', text: tokenPlanErrorMessage(provider, 'token-invalid') });
@@ -221,6 +229,7 @@ export function TokenPlanPane({ workspaceId, provider }: { workspaceId: string; 
   }
 
   async function beginDevice() {
+    expectNewPlan(workspaceId, provider, own);
     setPhase({ kind: 'starting' });
     setMessage(null);
     try {
@@ -233,6 +242,7 @@ export function TokenPlanPane({ workspaceId, provider }: { workspaceId: string; 
   }
 
   async function connectWithAccount(accountId: string, login: string) {
+    expectNewPlan(workspaceId, provider, own);
     setPhase({ kind: 'linking', accountId });
     setMessage(null);
     try {
@@ -250,6 +260,7 @@ export function TokenPlanPane({ workspaceId, provider }: { workspaceId: string; 
 
   /** Signs in through the personal GitHub connection; coming back connects Copilot with the same account. */
   async function signInWithGitHub(accountId?: string) {
+    expectNewPlan(workspaceId, provider, own);
     setPhase({ kind: 'starting' });
     setMessage(null);
     try {
@@ -279,10 +290,6 @@ export function TokenPlanPane({ workspaceId, provider }: { workspaceId: string; 
   if (state.kind === 'unavailable' || (state.kind === 'ready' && state.data === null)) return null;
   const connection: TokenConnection | null = state.kind === 'ready' ? state.data : null;
   const busy = phase.kind !== 'idle' && phase.kind !== 'device';
-  const own =
-    subscriptions.read.state.kind === 'ready'
-      ? subscriptions.read.state.data.find(item => item.provider === provider && item.mine)
-      : undefined;
   const live = connection && (connection.state === 'connected' || connection.state === 'reconnect-required');
   const signIn = !!connection && connection.state !== 'connected';
   const github = githubAccounts.state.kind === 'ready' ? githubAccounts.state.data : null;
@@ -556,8 +563,17 @@ export function TokenPlanPane({ workspaceId, provider }: { workspaceId: string; 
           </DialogContent>
         </Dialog>
       )}
-      {sharing && own && (
-        <ShareDialog workspaceId={workspaceId} subscription={own} people={people} close={() => setSharing(false)} />
+      {(sharing || asking) && own && (
+        <ShareDialog
+          workspaceId={workspaceId}
+          subscription={own}
+          people={people}
+          asking={asking && !sharing}
+          close={() => {
+            setSharing(false);
+            stopAsking();
+          }}
+        />
       )}
     </div>
   );
