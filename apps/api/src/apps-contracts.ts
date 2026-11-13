@@ -6,7 +6,9 @@ import {
   edgeStatus,
   operationIdSchema,
   releaseIdSchema,
+  versionIdSchema,
   type AppApproval,
+  type AppDefinitionIssue,
   type AppDraftState,
   type AppFailure,
   type AppFailureCode,
@@ -20,6 +22,7 @@ import {
   type AppRecord,
   type AppRelease,
   type AppRole,
+  type AppVersion,
 } from '@tulipfarm/apps/store';
 
 const requestId = z.uuid();
@@ -48,8 +51,14 @@ export const updateBody = z
   .refine(body => body.title !== undefined || body.slug !== undefined, { error: 'Change the title or the slug' });
 export const grantBody = z.strictObject({ role: z.enum(['use', 'edit']) });
 export const filesQuery = z.strictObject({ path: appFilePathSchema.optional() });
-export const publishBody = z.strictObject({ requestId, buildId: buildIdSchema });
-export const rollbackBody = z.strictObject({ requestId, releaseId: releaseIdSchema });
+/** From a private app's version list. When given, a publish or restore that another one overtook fails. */
+const generation = z.int().min(0).optional();
+export const publicPublishBody = z.strictObject({ requestId, buildId: buildIdSchema });
+export const privatePublishBody = z.strictObject({ requestId, revision: z.int().min(0), generation });
+export const publishBody = z.union([publicPublishBody, privatePublishBody]);
+export const publicRollbackBody = z.strictObject({ requestId, releaseId: releaseIdSchema });
+export const privateRollbackBody = z.strictObject({ requestId, releaseId: versionIdSchema, generation });
+export const rollbackBody = z.union([publicRollbackBody, privateRollbackBody]);
 export const nameBody = z.strictObject({ requestId, name: z.string().max(80) });
 export const approvalBody = z.strictObject({
   requestId,
@@ -75,9 +84,12 @@ export function parseGrantee(key: string): AppGrantee | null {
 /** A failure the route answers with instead of throwing a server error. */
 export class AppRouteFailure extends Error {
   readonly failure: Pick<AppFailure, 'code' | 'message'>;
-  constructor(failure: Pick<AppFailure, 'code' | 'message'>) {
+  /** What to fix in a private app's pages before it can publish. */
+  readonly issues: AppDefinitionIssue[];
+  constructor(failure: Pick<AppFailure, 'code' | 'message'>, issues: AppDefinitionIssue[] = []) {
     super(failure.message);
     this.failure = failure;
+    this.issues = issues;
   }
 }
 
@@ -181,4 +193,15 @@ export const buildView = (build: AppBuild) => ({
   recipe: build.recipe,
   builder: build.builder,
   ...build.status,
+});
+
+/** A private app's version in the release list's shape. A version is ready the moment it is published. */
+export const versionView = (version: AppVersion) => ({
+  id: version.id,
+  number: version.number,
+  digest: version.digest,
+  publishedBy: version.publishedBy,
+  staged: true,
+  live: version.live,
+  createdAt: version.publishedAt,
 });
