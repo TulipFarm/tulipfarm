@@ -991,6 +991,38 @@ export function recordAgentSetup(status: string, errorCode: string | null, error
   }
 }
 
+/** What an app reconcile repaired: a route, an edge projection, a stale name claim or an unreferenced release. */
+export const appReconcileRepairs = [
+  'route-applied',
+  'route-removed',
+  'edge-projected',
+  'claim-retired',
+  'release-discarded',
+] as const;
+export type AppReconcileRepair = (typeof appReconcileRepairs)[number];
+
+/** Counts one repair of drift the app reconcile found. A reconcile that finds no drift adds nothing. */
+export function recordAppReconcileRepair(kind: AppReconcileRepair) {
+  metrics
+    .getMeter(scope)
+    .createCounter('cloud_app_reconcile_repairs', { description: 'Drift the app reconcile repaired, by kind' })
+    .add(1, { ...dimensions, kind });
+}
+
+/**
+ * Counts a build that settled, with its failure code when it failed, and marks the active span with the same outcome.
+ * A failed build is the app's outcome, not a server error, so the span status stays unset.
+ */
+export function recordAppBuild(failureCode: string | null) {
+  const outcome = failureCode === null ? 'succeeded' : 'failed';
+  const code = failureCode === null ? 'none' : safeFailureCode(failureCode) ? failureCode : 'unknown';
+  metrics
+    .getMeter(scope)
+    .createCounter('cloud_app_builds', { description: 'App builds that settled, by outcome and failure code' })
+    .add(1, { ...dimensions, outcome, failure_code: code });
+  trace.getActiveSpan()?.setAttributes({ outcome, ...(failureCode === null ? {} : { failure_code: code }) });
+}
+
 export interface KnowledgeSyncSnapshot {
   failedItems: number;
   failedSources: number;
