@@ -210,6 +210,7 @@ jobs:
         run: |
           pnpm --filter @tulipfarm/workspace-storage exec node --test --test-concurrency=1 test/integration/apps.test.mjs
           pnpm --filter @tulipfarm/database exec node --test test/integration/app-hostnames.test.mjs
+          pnpm --filter @tulipfarm/apps run test:integration
       - name: Check row and project review drafts
         env:
           XAI_API_KEY: synthetic-not-secret
