@@ -128,6 +128,7 @@ export async function grantApplicationAccess(
       privileges: 'SELECT, INSERT, UPDATE (state, release_id, status, edge_version, retired_at)',
     },
     { table: 'app_preview_hosts', privileges: 'SELECT, INSERT, DELETE' },
+    { table: 'app_preview_sessions', privileges: 'SELECT, INSERT, UPDATE (token_sha256, redeemed_at), DELETE' },
     {
       table: 'github_event_dispatches',
       privileges: 'SELECT, INSERT, UPDATE (status, reason, lease_id, lease_until, completed_lease_id, next_attempt_at)',
