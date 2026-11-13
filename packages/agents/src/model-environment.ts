@@ -15,6 +15,7 @@ import type { ModelRouteHealth } from './model-health.ts';
 import type { ModelBundleStore } from './model-bundles.ts';
 
 const runBudgetPicoUsd = '10000000000000';
+const maxPlanBundles = 1000;
 
 type Environment = ReturnType<typeof buildModelEnvironment>;
 const environments = new WeakMap<ServedModelCatalog, Map<string, Environment>>();
@@ -40,8 +41,7 @@ export function modelEnvironment(env: NodeJS.ProcessEnv = process.env): Environm
 
 function buildModelEnvironment(catalog: ServedModelCatalog, credentials: readonly (string | undefined)[]) {
   const { bundle, entries } = servedModelBundle(catalog);
-  const configured = entries.map(({ model, route }, index) => {
-    const credential = credentials[index];
+  const configure = ({ model, route }: (typeof entries)[number], credential: string | undefined) => {
     const common = {
       endpoint: model.route.endpoint,
       model: model.route.model,
@@ -59,7 +59,22 @@ function buildModelEnvironment(catalog: ServedModelCatalog, credentials: readonl
       throw new Error(`Invalid server model configuration: model ${model.id} cannot use ${model.route.provider}`);
     if ('auth' in inference.data) Object.freeze(inference.data.auth);
     return { familyId: model.id, route, inference: Object.freeze(inference.data) };
-  });
+  };
+  const configured = entries.map((entry, index) => configure(entry, credentials[index]));
+  // Models a member's plan lists that the catalog does not name each get a bundle of their own, built on first use.
+  const planBundles = new Map<string, { bundle: typeof bundle; item: (typeof configured)[number] }>();
+  const planBundle = (familyId: string) => {
+    const cached = planBundles.get(familyId);
+    if (cached) return cached;
+    const model = configured.some(item => item.familyId === familyId) ? undefined : catalog.model(familyId);
+    if (!model || !isPlanProvider(model.route.type)) return null;
+    const served = servedModelBundle({ models: [model] });
+    const built = { bundle: served.bundle, item: configure(served.entries[0]!, undefined) };
+    if (planBundles.size >= maxPlanBundles) planBundles.delete(planBundles.keys().next().value!);
+    planBundles.set(familyId, built);
+    return built;
+  };
+  const planItems = () => [...planBundles.values()].map(built => built.item);
   const restrictions = Object.freeze({
     allowedProviders: Object.freeze([...new Set(configured.map(item => item.route.provider))]),
     allowedLocations: Object.freeze([serverRouteLocation]),
@@ -67,7 +82,7 @@ function buildModelEnvironment(catalog: ServedModelCatalog, credentials: readonl
   const defaultFamily = catalog.defaultModel.id;
   const paused = (familyId: string) => catalog.model(familyId)?.paused ?? false;
   const binding = (resolution: ResolvedModel) =>
-    configured.find(
+    [...configured, ...planItems()].find(
       item => item.route.id === resolution.route.id && JSON.stringify(item.route) === JSON.stringify(resolution.route),
     ) ?? null;
   const inference = (resolution: ResolvedModel): InferenceRoute | null => binding(resolution)?.inference ?? null;
@@ -88,10 +103,11 @@ function buildModelEnvironment(catalog: ServedModelCatalog, credentials: readonl
     defaultFamily,
     inference,
     paused,
-    route: (familyId: string) => configured.find(item => item.familyId === familyId)?.inference ?? null,
+    route: (familyId: string) =>
+      (configured.find(item => item.familyId === familyId) ?? planBundle(familyId)?.item)?.inference ?? null,
     resolve(familyId: string) {
       try {
-        return resolveModelBundle({ bundle, familyId, ...restrictions });
+        return resolveModelBundle({ bundle: planBundle(familyId)?.bundle ?? bundle, familyId, ...restrictions });
       } catch (error) {
         if (
           error instanceof ModelResolutionError &&
@@ -110,6 +126,8 @@ function buildModelEnvironment(catalog: ServedModelCatalog, credentials: readonl
         activeBundle: () => ({ bundle, activationRevision: 0 }),
         trustedBundle: bundleId => {
           if (bundleId === bundle.id) return bundle;
+          const plan = [...planBundles.values()].find(built => built.bundle.id === bundleId);
+          if (plan) return plan.bundle;
           if (!bundles) throw new Error('Model configuration changed');
           return bundles.read(bundleId);
         },

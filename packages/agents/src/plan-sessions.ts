@@ -691,8 +691,11 @@ async function copilot() {
   return copilotClient;
 }
 
-/** Signs in to Copilot with `token` and lists the models its plan offers. Throws a PlanSessionError if it cannot. */
-export async function copilotPlanModels(token: string): Promise<string[]> {
+/**
+ * Signs in to Copilot with `token` and lists the models its plan offers, with Copilot's names. Leaves out `auto`, which
+ * picks a model per request. Throws a PlanSessionError if it cannot.
+ */
+export async function copilotPlanModels(token: string): Promise<{ id: string; name: string }[]> {
   const sdk = await import('@github/copilot-sdk');
   const baseDirectory = join(tmpdir(), 'tulipfarm-copilot-check', hash(token));
   mkdirSync(baseDirectory, { recursive: true });
@@ -707,7 +710,7 @@ export async function copilotPlanModels(token: string): Promise<string[]> {
   try {
     await client.start();
     const models = await client.listModels();
-    return models.map(model => model.id);
+    return models.filter(model => model.id !== 'auto').map(model => ({ id: model.id, name: model.name }));
   } catch (error) {
     throw copilotError({ message: error instanceof Error ? error.message : String(error) });
   } finally {

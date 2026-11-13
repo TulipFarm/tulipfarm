@@ -1,6 +1,7 @@
 import type { FastifyError, FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { AccessDenied, uuidSchema } from '@tulipfarm/access';
+import { planModelName } from '@tulipfarm/config';
 import {
   SubscriptionError,
   subscriptionGrantSchema,
@@ -53,13 +54,13 @@ function schema(operationId: string, response: z.ZodType) {
 
 /**
  * Routes for listing the AI plans a member can see, sharing them with members, teams or the workspace, and turning
- * their models on or off. `offered` lists the plan models this server can run per provider; others are not shown.
+ * their models on or off. `offered` says whether this server can run a plan model; others are not shown.
  */
 export function registerSubscriptions(
   app: FastifyInstance,
   auth: { api: Pick<ReturnType<typeof registerAuth>['auth']['api'], 'getSession'> },
   subscriptions: Subscriptions | null,
-  offered: (provider: SubscriptionProvider) => ReadonlySet<string>,
+  offered: (provider: SubscriptionProvider, slug: string) => boolean,
 ) {
   if (!subscriptions) return;
   app.register(async routes => {
@@ -78,7 +79,12 @@ export function registerSubscriptions(
       { schema: { ...schema('listSubscriptionsV1', listSchema), params: json(workspaceParams) } },
       async request => ({
         subscriptions: (await subscriptions.list(workspaceParams.parse(request.params).workspaceId, user(request))).map(
-          item => ({ ...item, models: item.models.filter(model => offered(item.provider).has(model.slug)) }),
+          item => ({
+            ...item,
+            models: item.models
+              .filter(model => offered(item.provider, model.slug))
+              .map(model => ({ slug: model.slug, label: planModelName(model.slug, model.label) })),
+          }),
         ),
       }),
     );

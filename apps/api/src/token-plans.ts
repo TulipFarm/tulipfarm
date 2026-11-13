@@ -1,7 +1,7 @@
 import type { FastifyError, FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { AccessDenied, uuidSchema } from '@tulipfarm/access';
-import { loadModelCatalog, planProviders } from '@tulipfarm/config';
+import { loadModelCatalog, planModelName, planProviders } from '@tulipfarm/config';
 import { isFeatureEnabled } from '@tulipfarm/observability';
 import { integrationCredentialKeyring } from '@tulipfarm/integrations';
 import {
@@ -30,35 +30,38 @@ function vendorFailure(provider: TokenPlanProvider, error: unknown): 'limited' {
   throw new TokenPlanError(provider, 'unavailable');
 }
 
-/** The catalog's model slugs for `provider`, named as the catalog names them. */
+/** The catalog's model slugs for `provider`, with versioned names. */
 function catalogModels(provider: TokenPlanProvider) {
   const families = loadModelCatalog().catalog.models;
   return families.flatMap(family =>
     family.routes
       .filter(route => route.provider === provider)
-      .map(route => ({ slug: route.model, label: family.name })),
+      .map(route => ({ slug: route.model, label: planModelName(route.model, family.name) })),
   );
 }
 
 export function claudeVerifier(check: (token: string) => Promise<void> = checkClaudePlan): TokenPlanVerifier {
   return async token => {
     await check(token).catch(error => vendorFailure('claude', error));
-    // Every Claude plan runs the same models, so the catalog lists them.
+    // Every Claude plan runs the same models, and its token cannot list them, so the catalog lists them.
     return { models: catalogModels('claude') };
   };
 }
 
 export function copilotVerifier(
-  list: (token: string) => Promise<string[]> = copilotPlanModels,
+  list: (token: string) => Promise<readonly (string | { id: string; name: string })[]> = copilotPlanModels,
   fetcher: typeof fetch = fetch,
 ): TokenPlanVerifier {
   return async token => {
-    const slugs = await list(token).catch(error => vendorFailure('copilot', error));
-    const named = new Map(catalogModels('copilot').map(model => [model.slug, model.label]));
-    const models = (slugs === 'limited' ? [...named.keys()] : slugs).map(slug => ({
-      slug,
-      label: named.get(slug) ?? slug,
-    }));
+    const listed = await list(token).catch(error => vendorFailure('copilot', error));
+    // Copilot names each model; a plan at its usage limit can't list them, so it keeps the catalog's.
+    const models =
+      listed === 'limited'
+        ? catalogModels('copilot')
+        : listed
+            .map(model => (typeof model === 'string' ? { id: model, name: '' } : model))
+            .filter(model => model.id !== 'auto')
+            .map(model => ({ slug: model.id, label: planModelName(model.id, model.name) }));
     const account = await fetcher('https://api.github.com/user', {
       headers: { authorization: `Bearer ${token}`, accept: 'application/vnd.github+json' },
       signal: AbortSignal.timeout(10_000),

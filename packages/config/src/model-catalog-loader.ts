@@ -21,6 +21,7 @@ import {
   normalizeModelEndpoint,
 } from './model-endpoints.ts';
 import { modelPriceSchema, type ModelPrice } from './model-continuity.ts';
+import { planCatalogModel, planModelOfFamily } from './plan-models.ts';
 
 // Reads the model catalog (MODEL_CATALOG_FILE, MODEL_CATALOG, or the shipped catalog) and works out which of its
 // models this deployment serves with the provider keys it has.
@@ -135,6 +136,10 @@ export type ServedModelCatalog = {
   readonly skipped: readonly string[];
   /** New chats, new agents and features without a model of their own use this model. */
   readonly defaultModel: ServedModel;
+  /**
+   * The served model `id`: a catalog model, or a model a member's plan lists under the id `planModelFamilyId` derives
+   * (served when the catalog lists a route for that plan; whether the member has it is checked when it runs).
+   */
   model(id: string): ServedModel | undefined;
   /** The served model with `role`, or null when none has it. */
   role(role: ModelCatalogRole): ServedModel | null;
@@ -282,6 +287,22 @@ export function loadModelCatalog(env: Env = process.env): ServedModelCatalog {
     else if (catalog.missingKeys === 'skip') skipped.push(model.id);
     else throw missing(`models.${index}`, model.id, needed);
   }
+  const servedPlanModels = new Map<string, ServedModel>();
+  const planModel = (id: string) => {
+    const cached = servedPlanModels.get(id);
+    if (cached) return cached;
+    const plan = planModelOfFamily(id);
+    const model = plan && planCatalogModel(catalog, plan.provider, plan.model);
+    if (!model) return undefined;
+    const served: ServedModel = Object.freeze({
+      ...model,
+      route: firstRoute(`plan model ${id}`, model.routes).route!,
+      rates: unmeteredRates,
+    });
+    if (servedPlanModels.size >= 1000) servedPlanModels.delete(servedPlanModels.keys().next().value!);
+    servedPlanModels.set(id, served);
+    return served;
+  };
   const servedImages: ServedImageModel[] = [];
   for (const [index, image] of catalog.imageModels.entries()) {
     const { route, routeIndex, needed } = firstRoute(`imageModels.${index}`, image.routes);
@@ -313,7 +334,7 @@ export function loadModelCatalog(env: Env = process.env): ServedModelCatalog {
     models: Object.freeze(served),
     skipped: Object.freeze(skipped),
     defaultModel,
-    model: (id: string) => served.find(model => model.id === id),
+    model: (id: string) => served.find(model => model.id === id) ?? planModel(id),
     role: (role: ModelCatalogRole) => served.find(model => model.roles.includes(role)) ?? null,
     fallbacks: (id: string) => {
       const chain: string[] = [];
@@ -360,9 +381,11 @@ export function modelImageLimits(provider: ModelProvider, providerModelId: strin
 
 function catalogModel(provider: ModelProvider, providerModelId: string) {
   const { catalog } = readModelCatalog(process.env);
-  return catalog.models.find(candidate =>
-    candidate.routes.some(
-      route => route.model === providerModelId && providerOf(catalog, route.provider).type === provider,
-    ),
+  return (
+    catalog.models.find(candidate =>
+      candidate.routes.some(
+        route => route.model === providerModelId && providerOf(catalog, route.provider).type === provider,
+      ),
+    ) ?? (isPlanProvider(provider) ? (planCatalogModel(catalog, provider, providerModelId) ?? undefined) : undefined)
   );
 }

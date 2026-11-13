@@ -11,6 +11,8 @@ import {
   modelIdentifierSchema,
   modelPriceSchema,
   modelProviderSchema,
+  planModelFamilyId,
+  planModelName,
   resolveModelCapabilities,
   type ResolvedModel,
   type ServedModelCatalog,
@@ -26,7 +28,7 @@ import type { WorkspaceRuntime } from '@tulipfarm/workspaces/storage';
 import type { registerAuth } from './auth.ts';
 import { requestBoundaryError } from './security.ts';
 import { modelAvailability } from '@tulipfarm/agents/model-policy';
-import { flaggedOffModels } from '@tulipfarm/agents/model-availability';
+import { flaggedOffModels, plansOn } from '@tulipfarm/agents/model-availability';
 import { creditPricing } from '@tulipfarm/extensions';
 
 export type ModelCatalogEligibility = (input: {
@@ -77,11 +79,25 @@ export type ModelCatalogDependencies = {
   modelFamilyResolution?: ModelFamilyResolution;
   modelCatalogSnapshot?: (workspaceId: string) => Promise<ModelCatalogSnapshot>;
   /**
-   * The model slugs of `provider` the member may use on their own or a shared plan; absent when no plan provider is on.
-   * A plan model is offered only when its slug is listed here.
+   * The models of `provider` the member may use on their own or a shared plan, with the provider's names; absent when
+   * no plan provider is on. Every model listed here is offered, whether or not the catalog names it.
    */
-  planModels?: (workspaceId: string, userId: string, provider: PlanProvider) => Promise<readonly string[]>;
+  planModels?: (
+    workspaceId: string,
+    userId: string,
+    provider: PlanProvider,
+  ) => Promise<readonly { slug: string; label: string }[]>;
 };
+
+/** The plan models of plans whose feature flag, such as `copilot-plan`, is on for the workspace. */
+async function offeredPlanModels(
+  transaction: Parameters<typeof plansOn>[0],
+  planModels: Map<string, { provider: PlanProvider; slug: string; label: string }>,
+) {
+  if (!planModels.size) return planModels;
+  const on = await plansOn(transaction);
+  return new Map([...planModels].filter(([, model]) => on.has(model.provider)));
+}
 
 function projectCatalog(
   workspaceId: string,
@@ -92,17 +108,31 @@ function projectCatalog(
   paused: (familyId: string) => boolean,
   disabled: Set<string>,
   hidden: ReadonlySet<string> = new Set(),
-  planModels: ReadonlySet<string> = new Set(),
+  planModels: ReadonlyMap<string, { provider: PlanProvider; slug: string; label: string }> = new Map(),
 ): ModelCatalog {
   // Models that are not selectable serve their roles and existing chats, but are never offered. Hidden models are
   // behind a workspace feature flag that is off. Plan models are offered only to a member who may use a connected
-  // plan that lists them; `planModels` holds `provider:slug` pairs.
-  const selectable = catalog.models.filter(
+  // plan that lists them; `planModels` is keyed by `provider:slug`.
+  const listed = catalog.models.filter(
     model =>
       model.selectable &&
       !hidden.has(model.id) &&
       (!isPlanProvider(model.route.type) || planModels.has(`${model.route.type}:${model.route.model}`)),
   );
+  // Every other model a plan lists is offered under the id derived from its plan and slug, named by the provider.
+  const named = new Set(
+    catalog.models.flatMap(model =>
+      isPlanProvider(model.route.type) ? [`${model.route.type}:${model.route.model}`] : [],
+    ),
+  );
+  const selectable = [
+    ...listed,
+    ...[...planModels.entries()].flatMap(([key, { provider, slug, label }]) => {
+      const id = named.has(key) ? null : planModelFamilyId(provider, slug);
+      const model = id ? catalog.model(id) : undefined;
+      return model && !hidden.has(model.id) ? [{ ...model, name: planModelName(slug, label) }] : [];
+    }),
+  ];
   const resolutions = new Map(
     selectable.map(family => {
       const input = { workspaceId, modelFamilyId: family.id };
@@ -245,12 +275,14 @@ export function registerModelCatalog(app: FastifyInstance, dependencies: ModelCa
       async request => {
         const { workspaceId } = params.parse(request.params);
         const userId = user(request);
-        const planModels = new Set(
+        const planModels = new Map(
           dependencies.planModels
             ? (
                 await Promise.all(
                   planProviderNames.map(async provider =>
-                    (await dependencies.planModels!(workspaceId, userId, provider)).map(slug => `${provider}:${slug}`),
+                    (await dependencies.planModels!(workspaceId, userId, provider)).map(
+                      ({ slug, label }) => [`${provider}:${slug}`, { provider, slug, label }] as const,
+                    ),
                   ),
                 )
               ).flat()
@@ -275,7 +307,7 @@ export function registerModelCatalog(app: FastifyInstance, dependencies: ModelCa
             snapshot.modelFamilyPaused ?? (() => false),
             disabled,
             await flaggedOffModels(transaction),
-            planModels,
+            await offeredPlanModels(transaction, planModels),
           );
         });
       },
