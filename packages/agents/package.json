@@ -311,6 +311,10 @@
       "types": "./dist/chat-execution.d.ts",
       "default": "./dist/chat-execution.js"
     },
+    "./app-tools": {
+      "types": "./dist/app-tools.d.ts",
+      "default": "./dist/app-tools.js"
+    },
     "./coding-runs": {
       "types": "./dist/coding-runs.d.ts",
       "default": "./dist/coding-runs.js"
