@@ -108,18 +108,18 @@ export function DraftPreview({
         heading="h2"
         icon={Window}
         title="Nothing built yet"
-        description="Describe the app in chat. The draft appears here after its first build."
+        description="The draft appears here after its first build."
       />
     );
 
   const notice =
     preview.kind === 'blocked'
       ? {
-          title: 'Your browser blocked the draft here',
-          body: 'It blocks the sign-in cookie the draft needs inside this page. Open the draft in a new tab instead. Only people who can edit this app can open it.',
+          title: 'Your browser can’t show the draft here',
+          body: 'Your browser blocks the sign-in the draft needs inside this page. Open it in a new tab instead. Only people who can edit this app can open it.',
         }
       : preview.kind === 'expired'
-        ? { title: 'The draft link expired', body: 'Reload to sign in again.' }
+        ? { title: 'Your sign-in to the draft expired', body: 'Reload to sign in again.' }
         : preview.kind === 'failed'
           ? { title: 'Could not open the draft', body: preview.message }
           : null;
@@ -152,7 +152,7 @@ export function DraftPreview({
             <div className="mt-3">
               {preview.kind === 'blocked' ? (
                 <Button size="sm" onClick={() => void newTab()}>
-                  Open draft in a new tab
+                  Open in new tab
                 </Button>
               ) : (
                 <Button size="sm" variant="outline" onClick={open}>

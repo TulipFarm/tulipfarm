@@ -9,7 +9,7 @@ import { useConfirmation } from '@/features/access/confirm';
 import { workspaceRoute } from '@/router';
 import { appFailureMessage, failureMessage, type AppDetail, type AppOperation } from '../api';
 import { AppGate, LoadFailed, Loading } from '../app-page';
-import { canEdit, draftLabels } from '../labels';
+import { approvalLabel, canEdit, draftLabels, servingStatus } from '../labels';
 import { useAppApi, useAppChanges, useAppChat, useAppOperation, useWatchedApp } from '../queries';
 import { DraftPreview } from './preview';
 
@@ -33,21 +33,21 @@ const draftTones: Record<Draft['state'], BadgeVariant> = {
   saved: 'secondary',
 };
 
-function draftNote(draft: Draft, ownChat: string | null) {
+function draftNote(draft: Draft, ownChat: string | null, canBuild: boolean) {
   switch (draft.state) {
     case 'empty':
-      return 'Describe the app you want in chat. Nothing goes live until you publish it.';
+      return 'Describe what you want in chat. Nothing goes live until you publish it.';
     case 'editing':
       return draft.conversationId === ownChat
-        ? 'Chat is changing the draft. It updates here after the next build.'
-        : 'Someone else is changing this app in chat. You can change it when they finish.';
+        ? 'Changes from your chat appear here after the next build.'
+        : 'Another chat is changing this app. You can make changes when it finishes.';
     case 'building':
       return 'Building the latest changes.';
     // oxlint-disable-next-line tulipfarm/product-copy -- A draft state identifier, not user-facing copy.
     case 'preview-ready':
-      return 'This is the latest build. Visitors still see the published version.';
+      return 'This is the latest build. Only editors can see it until you publish it.';
     case 'failed':
-      return `${appFailureMessage(draft.failure.code)} ${draft.failure.retryable ? 'Build again, or ask chat to fix it.' : 'Ask chat to fix it.'}`;
+      return `${appFailureMessage(draft.failure.code)} ${canBuild ? 'Build again, or ask in chat for a fix.' : 'Ask in chat for a fix.'}`;
     case 'saved':
       return 'Changes are saved. Build them to see them here.';
   }
@@ -56,16 +56,18 @@ function draftNote(draft: Draft, ownChat: string | null) {
 const publishing = (operation: AppOperation | null) =>
   operation !== null && (operation.status === 'admitted' || operation.status === 'staging');
 
-function publishOutcome(operation: AppOperation) {
+function publishOutcome(operation: AppOperation, hasCurrentVersion: boolean) {
   if (operation.status === 'switched')
-    return { tone: 'default', text: 'Published. Visitors now see this version.' } as const;
+    return { tone: 'default', text: 'Published. The draft is now the current version.' } as const;
   if (operation.status === 'superseded')
     return { tone: 'default', text: 'A newer change finished first, so this publish wasn’t applied.' } as const;
   return {
     tone: 'destructive',
     text: operation.failure
       ? appFailureMessage(operation.failure.code)
-      : 'Publishing failed. The published version hasn’t changed.',
+      : hasCurrentVersion
+        ? 'Publishing failed. The current version hasn’t changed.'
+        : 'Publishing failed. Try publishing again.',
   } as const;
 }
 
@@ -87,11 +89,11 @@ function Editor({ app }: { app: AppDetail }) {
       <StatePanel
         kind="unavailable"
         heading="h2"
-        title={app.kind === 'public' ? 'Only editors can change this app' : 'Private apps aren’t changed here'}
+        title={app.kind === 'public' ? 'Only editors can change this app' : 'This page is for public apps'}
         description={
           app.kind === 'public'
             ? 'Ask an editor of this app for edit access.'
-            : 'This page is for public apps, which you build in chat.'
+            : 'Private apps are changed in their chat. Go back to the app to see its details and settings.'
         }
       >
         <Button variant="outline" nativeButton={false} render={appLink}>
@@ -138,6 +140,10 @@ function PublicEditor({ app, appLink }: { app: AppDetail; appLink: ReactElement 
     ? { label: 'Publishing', tone: 'info' as const }
     : { label: draftLabels[draft.state], tone: draftTones[draft.state] };
   const canBuild = draft.headCommit !== null && (draft.state === 'saved' || draft.state === 'failed');
+  const turnedOff = app.stops.disabledAt !== null;
+  const serving = servingStatus(app);
+  const stopped = turnedOff || app.stops.budgetPausedAt !== null || app.stops.editorPausedAt !== null;
+  const outcomeNotice = outcome && !publishing(outcome) ? publishOutcome(outcome, app.liveRelease !== null) : null;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4">
@@ -153,15 +159,15 @@ function PublicEditor({ app, appLink }: { app: AppDetail; appLink: ReactElement 
                 Build
               </Button>
             )}
-            {isBuilt(draft) && approved && (
+            {isBuilt(draft) && approved && !turnedOff && (
               <Button
                 disabled={publishing(outcome)}
                 onClick={() =>
                   confirm.open({
                     title: 'Publish this draft?',
                     description: app.liveRelease
-                      ? 'Visitors see it once it’s ready. The current version keeps running until then.'
-                      : 'Visitors see it once it’s ready.',
+                      ? 'It replaces the current version once it’s ready.'
+                      : 'It becomes the current version once it’s ready.',
                     action: 'Publish',
                     destructive: false,
                     run: async () => {
@@ -184,17 +190,29 @@ function PublicEditor({ app, appLink }: { app: AppDetail; appLink: ReactElement 
       {confirm.element}
       <div role="status" className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
         <Badge variant={status.tone}>{status.label}</Badge>
+        {stopped && serving && <Badge variant={serving.tone}>{serving.label}</Badge>}
         <span className="text-muted-foreground">
           {publishing(outcome)
-            ? 'The published version keeps running until this one is ready.'
-            : draftNote(draft, chatId)}
+            ? app.liveRelease
+              ? 'The current version keeps running until this one is ready.'
+              : 'The draft becomes the current version when publishing finishes.'
+            : draftNote(draft, chatId, canBuild)}
         </span>
       </div>
       {isBuilt(draft) && !approved && (
         <Alert>
           <AlertTitle>This app needs approval before it can go live</AlertTitle>
           <AlertDescription>
-            <p>A workspace admin must approve it. Ask for approval in this app’s settings.</p>
+            {app.approval.state === 'not-requested' ? (
+              <p>A workspace admin must approve it. Ask for approval in this app’s settings.</p>
+            ) : (
+              <p className="flex flex-wrap items-center gap-2">
+                <Badge variant={approvalLabel(app.approval).tone}>{approvalLabel(app.approval).label}</Badge>
+                {app.approval.state === 'rejected'
+                  ? 'A workspace admin must approve it. Ask again in this app’s settings.'
+                  : 'A workspace admin must approve it.'}
+              </p>
+            )}
             <div className="mt-3">
               <Button
                 size="sm"
@@ -218,9 +236,9 @@ function PublicEditor({ app, appLink }: { app: AppDetail; appLink: ReactElement 
           <AlertDescription>{buildFailure}</AlertDescription>
         </Alert>
       )}
-      {outcome && !publishing(outcome) && (
-        <Alert variant={publishOutcome(outcome).tone}>
-          <AlertDescription>{publishOutcome(outcome).text}</AlertDescription>
+      {outcomeNotice && (
+        <Alert variant={outcomeNotice.tone}>
+          <AlertDescription>{outcomeNotice.text}</AlertDescription>
         </Alert>
       )}
       <div className="flex min-h-0 flex-1 flex-col gap-4 lg:flex-row">
