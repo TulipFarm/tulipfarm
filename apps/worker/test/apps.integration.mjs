@@ -421,6 +421,86 @@ test('app builds, publishes, reconciles and meters converge however often they r
     });
   });
 
+  await t.test('a rollback admitted while reconcile discards old releases never points at deleted files', async () => {
+    const releases = async () =>
+      (
+        await db.platform.query(`SELECT id, number FROM "${schema}".tf_app_releases WHERE app_id = $1`, [app.id])
+      ).rows.reduce((byNumber, row) => ({ ...byNumber, [row.number]: row.id }), {});
+    const rollbackTo = (tx, releaseId) =>
+      admitRollback(tx, { appId: app.id, requestId: randomUUID(), requestedBy: workspace.membershipId, releaseId });
+    const files = { 'app.js': 'console.log("orders")', 'index.html': '<h1>Orders</h1>' };
+    const { rows: waiting } = await db.platform.query(
+      `SELECT id FROM "${schema}".tf_app_operations WHERE app_id = $1 AND status = 'admitted'`,
+      [app.id],
+    );
+    for (const { id } of waiting) await work.failAppOperation({ ...input, operationId: id, message: 'Cancelled' });
+    const live = (await transact(tx => readApp(tx, app.id))).liveReleaseId;
+    const first = (await releases())[1];
+
+    let late;
+    const racing = createAppActivities({
+      ...options(true),
+      async *workspaces() {
+        yield workspace.id;
+        late = await transact(tx => rollbackTo(tx, first));
+      },
+    });
+    await racing.reconcileApps(signal());
+
+    assert.deepEqual(late, {
+      ok: false,
+      failure: { code: 'not-found', message: 'Release not found', retryable: false },
+    });
+    assert.equal(publisher.staged.has(first), false);
+    assert.equal((await transact(tx => readRelease(tx, first))).staged, false);
+    assert.equal((await transact(tx => readApp(tx, app.id))).liveReleaseId, live);
+
+    const { rows: built } = await db.platform.query(
+      `SELECT build_id FROM "${schema}".tf_app_releases WHERE id = $1`,
+      [live],
+    );
+    const published = await transact(tx =>
+      admitPublish(tx, {
+        appId: app.id,
+        requestId: randomUUID(),
+        requestedBy: workspace.membershipId,
+        buildId: built[0].build_id,
+      }),
+    );
+    assert.equal(await work.stageAppRelease({ ...input, operationId: published.operation.id }), true);
+    assert.equal((await work.switchAppRelease({ ...input, operationId: published.operation.id })).status, 'switched');
+    await db.platform.query(
+      `UPDATE "${schema}".tf_app_releases SET created_at = clock_timestamp() - interval '2 hours' WHERE app_id = $1`,
+      [app.id],
+    );
+    const second = (await releases())[2];
+    const other = await connect(db.login(workspace));
+    const watcher = await connect(db.login(workspace));
+    await other.query('BEGIN');
+    const held = await rollbackTo({ client: other, schema }, second);
+    assert.equal(held.operation.status, 'admitted');
+    const reconciling = work.reconcileApps(signal());
+    const blocked = (async () => {
+      for (let attempt = 0; attempt < 250; attempt++) {
+        const { rowCount } = await watcher.query(
+          `SELECT 1 FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND query LIKE '%tf_app_releases%FOR UPDATE%'`,
+        );
+        if (rowCount) return;
+        await new Promise(resolve => setTimeout(resolve, 20));
+      }
+    })();
+    await Promise.race([reconciling, blocked]);
+    await other.query('COMMIT');
+    await reconciling;
+    await other.end();
+    await watcher.end();
+
+    assert.deepEqual(Object.fromEntries(publisher.staged.get(second) ?? []), files);
+    const operation = { ...input, operationId: held.operation.id };
+    assert.equal(await work.stageAppRelease(operation), true);
+    assert.deepEqual(await work.switchAppRelease(operation), { appId: app.id, status: 'switched', switched: true });
+  });
+
   await t.test('metering charges a served app whose workspace has the app-hosting flag off', async () => {
     const off = createAppActivities(options(false));
     publisher.traffic = [{ name: 'acme-shop', requests: 10, bytes: 512, units: 5n }];
