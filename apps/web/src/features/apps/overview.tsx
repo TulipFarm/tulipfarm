@@ -27,6 +27,11 @@ export function AppActions({ app, admin }: { app: AppDetail; admin: boolean }) {
   const params = { workspaceSlug: workspace.slug, appSlug: app.slug };
   return (
     <>
+      {canEdit(app) && app.kind === 'public' && (
+        <Button nativeButton={false} render={<Link to="/$workspaceSlug/apps/$appSlug/edit" params={params} />}>
+          Edit in chat
+        </Button>
+      )}
       {canEdit(app) && (
         <Button
           variant="outline"

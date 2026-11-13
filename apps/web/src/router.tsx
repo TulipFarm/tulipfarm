@@ -1402,6 +1402,11 @@ const appVersionsRoute = createRoute({
   path: 'apps/$appSlug/versions',
   component: lazyRouteComponent(() => import('@/features/apps/versions'), 'AppVersionsPage'),
 });
+const appEditRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  path: 'apps/$appSlug/edit',
+  component: lazyRouteComponent(() => import('@/features/apps/edit/page'), 'AppEditPage'),
+});
 const appSettingsRoute = createRoute({
   getParentRoute: () => workspaceRoute,
   path: 'apps/$appSlug/settings',
@@ -1619,6 +1624,7 @@ export const router = createRouter({
       newAppRoute,
       appRoute,
       appVersionsRoute,
+      appEditRoute,
       appSettingsRoute,
     ]),
   ]),
