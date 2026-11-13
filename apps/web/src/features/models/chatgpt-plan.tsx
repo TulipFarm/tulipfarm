@@ -29,6 +29,8 @@ import { modelKeys } from './queries';
 import {
   PlanModels,
   ShareDialog,
+  expectNewPlan,
+  useAskToShare,
   audience,
   subscriptionsKey,
   usePeople,
@@ -76,6 +78,12 @@ export function ChatGptPlanPane({
   const people = usePeople(workspaceId);
   const [sharing, setSharing] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const own =
+    subscriptions.read.state.kind === 'ready'
+      ? subscriptions.read.state.data.find(item => item.provider === 'chatgpt' && item.mine)
+      : undefined;
+  const welcoming = read.state.kind === 'ready' && !!read.state.data?.planUsage && !!read.state.data.welcomePending;
+  const [asking, stopAsking] = useAskToShare(workspaceId, 'chatgpt', own, !welcoming);
   const { change } = useFeatureChanges();
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' });
   const [message, setMessage] = useState<{ tone: 'error' | 'success' | 'warning'; text: string } | null>(null);
@@ -139,6 +147,7 @@ export function ChatGptPlanPane({
   }
 
   async function begin(mode: ChatGptConnectionMode) {
+    expectNewPlan(workspaceId, 'chatgpt', own);
     setMessage(null);
     setPasted('');
     // Open the tab during the click so the browser does not block it, then point it at ChatGPT.
@@ -223,10 +232,6 @@ export function ChatGptPlanPane({
   if (state.kind === 'unavailable' || (state.kind === 'ready' && state.data === null)) return null;
   const connection = state.kind === 'ready' ? state.data : null;
   const busy = phase.kind !== 'idle' && phase.kind !== 'pending';
-  const own =
-    subscriptions.read.state.kind === 'ready'
-      ? subscriptions.read.state.data.find(item => item.provider === 'chatgpt' && item.mine)
-      : undefined;
   const live = connection && connection.state !== 'not-connected' && connection.state !== 'signed-out';
 
   return (
@@ -329,8 +334,17 @@ export function ChatGptPlanPane({
           </DialogContent>
         </Dialog>
       )}
-      {sharing && own && (
-        <ShareDialog workspaceId={workspaceId} subscription={own} people={people} close={() => setSharing(false)} />
+      {(sharing || asking) && own && (
+        <ShareDialog
+          workspaceId={workspaceId}
+          subscription={own}
+          people={people}
+          asking={asking && !sharing}
+          close={() => {
+            setSharing(false);
+            stopAsking();
+          }}
+        />
       )}
       {connection?.planUsage && connection.welcomePending && (
         <Dialog open>

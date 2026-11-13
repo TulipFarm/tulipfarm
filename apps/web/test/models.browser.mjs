@@ -367,6 +367,7 @@ test('models in the actual Vite app through a local HTTP API fixture', { timeout
           planUsage: true,
           models: [{ slug: 'claude-sonnet-5', label: 'Claude Sonnet 5' }],
         };
+        current.subscriptions = [{ ...plan(ownPlanId, membershipId, true), provider: 'claude' }];
         return send(current.tokenPlans.claude);
       }
       if (request.method === 'PUT' && path.startsWith(`${base}/subscriptions/`) && path.endsWith('/models')) {
@@ -953,7 +954,7 @@ test('models in the actual Vite app through a local HTTP API fixture', { timeout
     });
 
     await scenario(
-      'members connect a Claude plan with a token; Copilot falls back to a token',
+      'members connect a Claude plan with a token, are asked who can use it; Copilot falls back to a token',
       async (page, fixture) => {
         const empty = { state: 'not-connected', account: null, planUsage: false, deviceSignIn: false, models: [] };
         fixture.tokenPlans = { claude: { ...empty }, copilot: { ...empty } };
@@ -967,9 +968,15 @@ test('models in the actual Vite app through a local HTTP API fixture', { timeout
         await page.getByText('That does not look like a Claude Code token.', { exact: false }).waitFor();
         await token.fill('sk-ant-oat-token');
         await page.getByRole('button', { name: 'Connect', exact: true }).click();
+        const ask = page.getByRole('dialog', { name: 'Who can use your Claude plan?' });
+        await ask.waitFor();
+        assert.equal(await ask.getByRole('button', { name: 'Share', exact: true }).isDisabled(), true);
+        await ask.getByRole('button', { name: 'Only me' }).click();
+        await ask.waitFor({ state: 'hidden' });
         await page
           .getByText('Pick these models in chats, from the model menu under Claude plan.', { exact: false })
           .waitFor();
+        await page.getByText('Shared with: No one else').waitFor();
         assert.equal(await page.getByText('Check Anthropic’s terms').count(), 0);
         assert.deepEqual(
           writes(fixture).map(({ path, body }) => [path, body]),

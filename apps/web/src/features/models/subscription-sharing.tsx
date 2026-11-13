@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { Button } from '@tulipfarm/sprout/button';
 import {
@@ -124,16 +124,57 @@ export function audience(grants: readonly SecretGrant[], people: People) {
     .join(', ');
 }
 
+const askKey = (workspaceId: string, provider: Subscription['provider']) =>
+  `tulipfarm:ask-to-share:${workspaceId}:${provider}`;
+
+/**
+ * Remembers that the member started connecting a plan, so the share question opens once it connects. Sign-in can leave
+ * the page, so the note lives in session storage.
+ */
+export function expectNewPlan(workspaceId: string, provider: Subscription['provider'], own: Subscription | undefined) {
+  if (own?.state === 'connected') return;
+  try {
+    sessionStorage.setItem(askKey(workspaceId, provider), '1');
+  } catch {
+    // Without storage the member can still share from the Share button.
+  }
+}
+
+/** Whether to ask who can use a plan the member just connected. `ready` holds the question back, such as behind a welcome. */
+export function useAskToShare(
+  workspaceId: string,
+  provider: Subscription['provider'],
+  own: Subscription | undefined,
+  ready = true,
+) {
+  const [asking, setAsking] = useState(false);
+  useEffect(() => {
+    if (!ready || own?.state !== 'connected') return;
+    const key = askKey(workspaceId, provider);
+    try {
+      if (!sessionStorage.getItem(key)) return;
+      sessionStorage.removeItem(key);
+    } catch {
+      return;
+    }
+    if (own.mine && own.canShare && !own.grants?.length) setAsking(true);
+  }, [workspaceId, provider, own, ready]);
+  return [asking, () => setAsking(false)] as const;
+}
+
 export function ShareDialog({
   workspaceId,
   subscription,
   people,
   close,
+  asking = false,
 }: {
   workspaceId: string;
   subscription: Subscription;
   people: People;
   close: () => void;
+  /** Asked right after the plan connects: keeping it private is a choice, not a cancel. */
+  asking?: boolean;
 }) {
   const { api } = useSubscriptions(workspaceId);
   const { change } = useFeatureChanges();
@@ -161,9 +202,11 @@ export function ShareDialog({
     <Dialog open onOpenChange={open => !open && close()}>
       <DialogContent size="form">
         <DialogHeader>
-          <DialogTitle>Share this {provider} plan</DialogTitle>
+          <DialogTitle>{asking ? `Who can use your ${provider} plan?` : `Share this ${provider} plan`}</DialogTitle>
           <DialogDescription>
-            People you share with can pick its models in their chats. No one can see its sign-in details.
+            {asking
+              ? 'Your plan is connected. People you share with can pick its models in their chats. No one can see its sign-in details. You can change this later with Share.'
+              : 'People you share with can pick its models in their chats. No one can see its sign-in details.'}
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-4">
@@ -199,11 +242,11 @@ export function ShareDialog({
           )}
         </div>
         <DialogFooter>
-          <Button variant="ghost" disabled={sending} onClick={close}>
-            Cancel
+          <Button variant={asking ? 'outline' : 'ghost'} disabled={sending} onClick={close}>
+            {asking ? 'Only me' : 'Cancel'}
           </Button>
           <Button disabled={sending || unchanged} aria-busy={sending} onClick={() => void save()}>
-            {sending ? 'Saving…' : firstShare ? 'Share anyway' : 'Save'}
+            {sending ? (asking ? 'Sharing…' : 'Saving…') : firstShare ? 'Share anyway' : asking ? 'Share' : 'Save'}
           </Button>
         </DialogFooter>
       </DialogContent>
