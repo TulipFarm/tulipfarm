@@ -455,10 +455,9 @@ test('app builds, publishes, reconciles and meters converge however often they r
     assert.equal((await transact(tx => readRelease(tx, first))).staged, false);
     assert.equal((await transact(tx => readApp(tx, app.id))).liveReleaseId, live);
 
-    const { rows: built } = await db.platform.query(
-      `SELECT build_id FROM "${schema}".tf_app_releases WHERE id = $1`,
-      [live],
-    );
+    const { rows: built } = await db.platform.query(`SELECT build_id FROM "${schema}".tf_app_releases WHERE id = $1`, [
+      live,
+    ]);
     const published = await transact(tx =>
       admitPublish(tx, {
         appId: app.id,
