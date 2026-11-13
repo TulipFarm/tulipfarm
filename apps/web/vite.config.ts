@@ -124,7 +124,10 @@ export default defineConfig(({ command }) => {
     // Lazy chunks can import each other in a cycle (recharts split across `chart` and `surface`).
     // Without strict order, the chunk loaded first runs before its dependency and throws.
     build: { rolldownOptions: { output: { strictExecutionOrder: true } } },
+    // Web extensions live in other packages, where pnpm can install a second Sprout or React
+    // copy. A second copy has its own React contexts, so its sidebar parts crash outside <Sidebar>.
     resolve: {
+      dedupe: ['@tulipfarm/sprout', 'react', 'react-dom'],
       alias: {
         '@': fileURLToPath(new URL('./src', import.meta.url)),
       },
