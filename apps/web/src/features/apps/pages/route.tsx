@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { Link, useParams, useSearch } from '@tanstack/react-router';
 import { Button } from '@tulipfarm/sprout/button';
 import { PageContent } from '@tulipfarm/sprout/page-content';
@@ -10,12 +11,8 @@ import { AppGate, AppsUnavailable, useWorkspaceAdmin } from '../app-page';
 import { AppActions, AppOverview } from '../overview';
 import { AppPageView } from './page-view';
 
-/** Whether the app's address opens its pages: a private app with a published version that is running. */
-export const opensPages = (app: AppDetail) =>
-  app.kind === 'private' && app.liveRelease !== null && !app.stops.disabledAt;
-
 /** A private app page at `/<workspace>/apps/<app>/<page>`, or its home page at the app's own address. */
-export function LivePage({ app, slug }: { app: AppDetail; slug: string | undefined }) {
+export function LivePage({ app, slug, missing }: { app: AppDetail; slug: string | undefined; missing?: ReactNode }) {
   const { workspace } = workspaceRoute.useRouteContext();
   const admin = useWorkspaceAdmin(workspace.id);
   const { row } = useSearch({ strict: false }) as { row?: string };
@@ -39,16 +36,34 @@ export function LivePage({ app, slug }: { app: AppDetail; slug: string | undefin
         </Button>
       </StatePanel>
     );
-  return <AppPageView app={app} slug={slug} row={row} draft={false} actions={<AppActions app={app} admin={admin} />} />;
+  return (
+    <AppPageView
+      app={app}
+      slug={slug}
+      row={row}
+      draft={false}
+      actions={<AppActions app={app} admin={admin} />}
+      missing={missing}
+    />
+  );
 }
 
-/** The app's own address: a running private app opens its home page, and any other app shows its details. */
+/**
+ * The app's own address. A private app opens its home page, or shows its details while it has no published version
+ * or is turned off. A public app shows its details.
+ */
 export function AppHomePage() {
   const enabled = useFlag('app-hosting');
   return (
     <PageContent>
       <AppGate>
-        {app => (enabled && opensPages(app) ? <LivePage app={app} slug={undefined} /> : <AppOverview app={app} />)}
+        {app =>
+          enabled && app.kind === 'private' ? (
+            <LivePage app={app} slug={undefined} missing={<AppOverview app={app} />} />
+          ) : (
+            <AppOverview app={app} />
+          )
+        }
       </AppGate>
     </PageContent>
   );

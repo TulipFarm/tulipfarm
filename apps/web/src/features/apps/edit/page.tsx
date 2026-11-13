@@ -132,10 +132,15 @@ function ChatPanel({ appId }: { appId: string }) {
   );
 }
 
+// A private draft is a saved definition with no code or builds, so revision 0 is the only sign nothing is saved yet.
+const unsaved = (draft: Draft) => draft.revision === 0;
+
 function privateDraftNote(draft: Draft, ownChat: string | null) {
-  if (draft.state === 'empty') return draftNote(draft, ownChat, false);
-  if (draft.state === 'editing' && draft.conversationId !== ownChat) return draftNote(draft, ownChat, false);
-  if (draft.state === 'editing') return 'Chat is changing the draft. It updates here when chat saves it.';
+  if (draft.state === 'editing')
+    return draft.conversationId === ownChat
+      ? 'Chat is changing the draft. It updates here when chat saves it.'
+      : draftNote(draft, ownChat, false);
+  if (unsaved(draft)) return 'Describe the app you want in chat. Nothing goes live until you publish it.';
   return 'This is the saved draft. People you share the app with still see the published version.';
 }
 
@@ -149,14 +154,13 @@ function PrivateEditor({ app, appLink }: { app: AppDetail; appLink: ReactElement
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4">
       <PageHeader titleId="app-edit-heading" title="Edit" parent={{ label: app.title, link: appLink }} />
-      <div role="status" className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
-        <Badge variant={draftTones[app.draft.state]}>{draftLabels[app.draft.state]}</Badge>
-        <span className="text-muted-foreground">{privateDraftNote(app.draft, chatId)}</span>
-      </div>
+      <p role="status" className="text-sm text-muted-foreground">
+        {privateDraftNote(app.draft, chatId)}
+      </p>
       <div className="flex min-h-0 flex-1 flex-col gap-4 lg:flex-row">
         <ChatPanel appId={app.id} />
         <section aria-label="Draft" className="flex min-h-96 min-w-0 flex-1 flex-col overflow-auto">
-          {app.draft.state === 'empty' ? (
+          {unsaved(app.draft) ? (
             <StatePanel
               kind="empty"
               heading="h2"

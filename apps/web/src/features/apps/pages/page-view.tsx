@@ -36,6 +36,7 @@ export function AppPageView({
   draft,
   revision,
   actions,
+  missing,
 }: {
   app: AppDetail;
   slug: string | undefined;
@@ -43,6 +44,8 @@ export function AppPageView({
   draft: boolean;
   revision?: number | undefined;
   actions?: ReactNode;
+  /** Shown instead of the not-found message, such as the app's details when it has no published pages. */
+  missing?: ReactNode;
 }) {
   const { workspace } = workspaceRoute.useRouteContext();
   const api = useAppApi(workspace.id);
@@ -181,6 +184,7 @@ export function AppPageView({
         </Button>
       </StatePanel>
     );
+  if (view.kind === 'not-found' && missing) return missing;
   if (view.kind === 'not-found')
     return (
       <StatePanel
@@ -224,34 +228,37 @@ export function AppPageView({
   const waiting = confirming(view);
   const { data } = view;
   const page = view.content.page;
+  const refresh = (
+    <Button
+      variant="outline"
+      size="sm"
+      disabled={data.phase === 'loading'}
+      aria-busy={data.phase === 'loading'}
+      onClick={() => void load()}
+    >
+      Refresh
+    </Button>
+  );
   return (
     <div className="space-y-4">
-      <PageHeader
-        titleRef={heading}
-        focusable
-        title={page.title}
-        parent={
-          draft
-            ? undefined
-            : {
-                label: app.title,
-                link: <Link to="/$workspaceSlug/apps" params={{ workspaceSlug: workspace.slug }} />,
-              }
-        }
-        actions={
-          <>
-            <Button
-              variant="outline"
-              disabled={data.phase === 'loading'}
-              aria-busy={data.phase === 'loading'}
-              onClick={() => void load()}
-            >
-              Refresh
-            </Button>
-            {actions}
-          </>
-        }
-      />
+      {draft ? (
+        <h2 ref={heading} tabIndex={-1} className="text-lg font-semibold outline-none">
+          {page.title}
+        </h2>
+      ) : (
+        <PageHeader
+          titleRef={heading}
+          focusable
+          title={page.title}
+          parent={{
+            label: app.title,
+            link: (
+              <Link to="/$workspaceSlug/apps/$appSlug" params={{ workspaceSlug: workspace.slug, appSlug: app.slug }} />
+            ),
+          }}
+          actions={actions}
+        />
+      )}
       {view.content.navigation.length > 1 && (
         <nav aria-label="App pages" className="flex flex-wrap gap-1 border-b pb-2">
           {view.content.navigation.map(item => (
@@ -281,15 +288,18 @@ export function AppPageView({
           ))}
         </nav>
       )}
-      <p role="status" className="text-sm text-muted-foreground">
-        {data.phase === 'loading'
-          ? 'Loading…'
-          : data.phase === 'failed'
-            ? 'This page’s data couldn’t load.'
-            : data.loadedAt
-              ? `Loaded at ${new Date(data.loadedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}. Refresh to see changes.`
-              : null}
-      </p>
+      <div className="flex flex-wrap items-center gap-3">
+        <p role="status" className="text-sm text-muted-foreground">
+          {data.phase === 'loading'
+            ? 'Loading…'
+            : data.phase === 'failed'
+              ? 'This page’s data couldn’t load.'
+              : data.loadedAt
+                ? `Loaded at ${new Date(data.loadedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}. Refresh to see changes.`
+                : null}
+        </p>
+        {refresh}
+      </div>
       {data.phase === 'failed' && (
         <Alert variant="destructive">
           <AlertDescription>Check your connection, then refresh.</AlertDescription>
