@@ -154,7 +154,7 @@ export function registerAppPages(app: FastifyInstance, dependencies: AppPageDepe
     let versionId: string | null = null;
     if (draft) {
       if (role !== 'edit') throw new PageFailure(403, 'forbidden');
-      const checked = checkAppDefinition(await readDraftDefinition(tx, appId));
+      const checked = checkAppDefinition((await readDraftDefinition(tx, appId))?.definition ?? null);
       if (!checked.ok) throw new PageFailure(422, 'definition-invalid');
       definition = checked.definition;
     } else {
