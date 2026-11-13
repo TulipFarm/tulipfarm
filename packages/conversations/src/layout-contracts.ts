@@ -5,23 +5,30 @@ import {
   type MarketplacePackage,
 } from '@tulipfarm/config/package-links';
 import {
+  a2uiProtocol,
+  a2uiVersion,
   checkSurface,
   defaultSurfaceLimits,
   defineCatalog,
   defineComponent,
+  defineFunction,
+  dynamicStringSchema,
+  identifierSchema,
   promptSnippet,
   readSurface,
-  sproutComponents,
+  sproutCatalog,
   surfaceMessageSchema,
   surfaceText,
+  type A2uiComponent,
   type SurfaceError,
+  type SurfaceMessage,
 } from '@tulipfarm/sprout/a2ui/catalog';
 import { workflowReferenceSchema } from './tool-activity.ts';
 import type { inputPartSchema } from './contracts.ts';
 
 const id = z.uuid();
 
-export const layoutCompatibility = Object.freeze({ minimum: 20 });
+export const layoutCompatibility = Object.freeze({ minimum: 67 });
 
 /** An existing TulipFarm card, referenced by the ID of the record that owns it. The viewer's own permissions apply. */
 export const embedReferenceSchema = z.discriminatedUnion('kind', [
@@ -48,12 +55,97 @@ const Embed = defineComponent({
   text: ({ ref }) => `[${ref.kind}]`,
 });
 
-export const tulipfarmCatalogId = 'tulipfarm/chat@1';
-// Image is left out: files are shown through Embed, which loads them with the viewer's permissions.
-const { Image: _image, ...components } = sproutComponents;
-export const tulipfarmCatalog = defineCatalog({ id: tulipfarmCatalogId, components: { ...components, Embed } });
+export const tulipfarmCatalogId = 'tulipfarm/chat@2';
+/** The catalog of every layout surface. TulipFarm's own parts come from `tulipfarmCatalog` and name it with `@catalogId`. */
+export const layoutSurfaceCatalogId = sproutCatalog.id;
 
-export const layoutProtocol = 'a2ui/0.9';
+/** Functions the agent runs for the browser, answered by the layout function endpoint. */
+export const agentFunctionNames = ['searchRows', 'listMembers'] as const;
+export type AgentFunctionName = (typeof agentFunctionNames)[number];
+/** Functions the agent asks the browser to run on the live reply. */
+export const screenActionNames = ['openInCanvas', 'focusComponent'] as const;
+export type ScreenActionName = (typeof screenActionNames)[number];
+/** Most items a lookup function returns. */
+export const agentFunctionItemLimit = 50;
+
+export const searchRowsArgsSchema = z.strictObject({
+  tableId: dynamicStringSchema,
+  query: dynamicStringSchema.optional(),
+});
+export const listMembersArgsSchema = z.strictObject({ query: dynamicStringSchema.optional() });
+/** Resolved arguments, as the browser sends them in `callAgentFunction`. */
+export const agentFunctionArgsSchemas = {
+  searchRows: z.strictObject({ tableId: id, query: z.string().max(200).optional() }),
+  listMembers: z.strictObject({ query: z.string().max(200).optional() }),
+} satisfies Record<AgentFunctionName, z.ZodType>;
+export const lookupItemSchema = z.strictObject({ value: z.string(), label: z.string() });
+export type LookupItem = z.infer<typeof lookupItemSchema>;
+
+export const tulipfarmCatalog = defineCatalog({
+  id: tulipfarmCatalogId,
+  title: 'TulipFarm',
+  description: 'TulipFarm cards and workspace lookups.',
+  instructions: `Name this catalog on each Embed: {"id": "plan_card", "component": "Embed", "@catalogId": "${tulipfarmCatalogId}", "ref": {...}}. searchRows and listMembers return [{value, label}] lists, for example as ChoicePicker options.`,
+  components: { Embed },
+  functions: {
+    searchRows: defineFunction({
+      description: `Rows of a workspace table the person can read, as at most ${agentFunctionItemLimit} {value: row ID, label} items, filtered by an optional search text.`,
+      args: searchRowsArgsSchema,
+      returnType: 'array',
+    }),
+    listMembers: defineFunction({
+      description: `Workspace members, as at most ${agentFunctionItemLimit} {value: membership ID, label: name} items, filtered by an optional search text.`,
+      args: listMembersArgsSchema,
+      returnType: 'array',
+    }),
+    openInCanvas: defineFunction({
+      description: 'Opens this reply in Canvas.',
+      returnType: 'void',
+      allowedCallers: 'agentOnly',
+    }),
+    focusComponent: defineFunction({
+      description: 'Scrolls to a component of this reply and moves focus to it.',
+      args: z.strictObject({ componentId: identifierSchema }),
+      returnType: 'void',
+      allowedCallers: 'agentOnly',
+    }),
+  },
+});
+/** Every catalog a layout may use, for checking and drawing. */
+export const layoutCatalogs = [sproutCatalog, tulipfarmCatalog] as const;
+
+export const layoutProtocol = a2uiProtocol;
+export const layoutVersion = a2uiVersion;
+/** The event a follow-up button sends: its `userMessage` becomes the person's next message. */
+export const followUpActionName = 'follow_up';
+export const followUpAction = (userMessage: string) => ({ event: { name: followUpActionName, userMessage } });
+
+export const layoutActionContextLimit = 8192;
+const actionContextSchema = z
+  .record(z.string(), z.unknown())
+  .refine(value => bytes(JSON.stringify(value)) <= layoutActionContextLimit, 'Action values exceed 8 KiB');
+/** A person's use of a button in an assistant reply. The reply's surface ID is its message ID. */
+export const layoutActionRequestSchema = z.strictObject({
+  commandId: id,
+  /** The ID of the person's message the action sends. */
+  sentMessageId: id,
+  surfaceId: id,
+  name: z.string().trim().min(1).max(100),
+  sourceComponentId: identifierSchema,
+  context: actionContextSchema.default({}),
+  userMessage: z.string().trim().min(1).max(2000),
+});
+export type LayoutActionRequest = z.infer<typeof layoutActionRequestSchema>;
+/** The stored action, beside the `userMessage` text it sent. `messageId` is the reply that drew the button. */
+export const layoutActionSchema = z.strictObject({
+  messageId: id,
+  name: z.string(),
+  sourceComponentId: z.string(),
+  context: z.record(z.string(), z.unknown()).default({}),
+});
+export type LayoutAction = z.infer<typeof layoutActionSchema>;
+export const layoutActionResultSchema = z.object({ messageId: id, turnId: id, sequence: z.number().int() });
+
 export const layoutPlacementSchema = z.enum(['chat', 'canvas']);
 export type LayoutPlacement = z.infer<typeof layoutPlacementSchema>;
 /** Layout limits (PRODUCT 7). */
@@ -85,6 +177,13 @@ export const slackLayoutSchema = z.strictObject({
 });
 export type SlackLayout = z.infer<typeof slackLayoutSchema>;
 
+/** One function the browser runs on the live reply, such as opening it in Canvas. */
+export const screenActionSchema = z.strictObject({
+  name: z.enum(screenActionNames),
+  componentId: identifierSchema.optional(),
+});
+export type ScreenAction = z.infer<typeof screenActionSchema>;
+
 /** What the model sends as `reply.render` arguments. The worker adds the protocol, catalog and surface ID. */
 export const replyRenderInputSchema = z.strictObject({
   placement: layoutPlacementSchema,
@@ -92,12 +191,12 @@ export const replyRenderInputSchema = z.strictObject({
   summary: z.string().trim().min(1).max(maxSummary),
   messages: z.array(surfaceMessageSchema).min(1).max(64),
   slack: slackLayoutSchema.optional(),
+  screenActions: z.array(screenActionSchema).max(4).optional(),
 });
 export type ReplyRenderInput = z.infer<typeof replyRenderInputSchema>;
 
 export const layoutSchema = z.strictObject({
   protocol: z.literal(layoutProtocol),
-  catalogId: z.literal(tulipfarmCatalogId),
   placement: layoutPlacementSchema,
   title: z.string().min(1).max(120),
   summary: z.string().min(1).max(maxSummary),
@@ -134,7 +233,7 @@ export function checkLayout(value: unknown, surfaceId?: string): LayoutCheck {
       })),
     };
   const surface = checkSurface(parsed.data.messages, {
-    catalog: tulipfarmCatalog,
+    catalogs: [...layoutCatalogs],
     limits: layoutLimits,
     allowUrl: layoutAllowUrl,
   });
@@ -142,7 +241,8 @@ export function checkLayout(value: unknown, surfaceId?: string): LayoutCheck {
   const errors: SurfaceError[] = [];
   const report = (message: string) =>
     errors.push({ code: 'VALIDATION_FAILED', surfaceId: surface.surface.surfaceId, path: '/messages', message });
-  if (surface.surface.catalogId !== tulipfarmCatalogId) report(`The surface must use catalog ${tulipfarmCatalogId}`);
+  if (surface.surface.catalogId !== layoutSurfaceCatalogId)
+    report(`The surface must use catalog ${layoutSurfaceCatalogId}`);
   if (surfaceId && surface.surface.surfaceId !== surfaceId) report(`The surface ID must be ${surfaceId}`);
   if (surface.surface.deleted) report('The surface must not be deleted');
   return errors.length ? { ok: false, errors } : { ok: true, layout: parsed.data };
@@ -150,16 +250,86 @@ export function checkLayout(value: unknown, surfaceId?: string): LayoutCheck {
 
 /** Builds a checked layout from `reply.render` arguments for the reply with this message ID. */
 export function layoutFromReply(input: ReplyRenderInput, surfaceId: string): LayoutCheck {
+  const { screenActions: _screenActions, ...rest } = input;
   const messages = input.messages.map(message =>
     'createSurface' in message
-      ? { ...message, createSurface: { ...message.createSurface, surfaceId, catalogId: tulipfarmCatalogId } }
+      ? { ...message, createSurface: { ...message.createSurface, surfaceId, catalogId: layoutSurfaceCatalogId } }
       : 'updateComponents' in message
         ? { ...message, updateComponents: { ...message.updateComponents, surfaceId } }
         : 'updateDataModel' in message
           ? { ...message, updateDataModel: { ...message.updateDataModel, surfaceId } }
           : message,
   );
-  return checkLayout({ protocol: layoutProtocol, catalogId: tulipfarmCatalogId, ...input, messages }, surfaceId);
+  return checkLayout({ protocol: layoutProtocol, ...rest, messages }, surfaceId);
+}
+
+/**
+ * The value of JSON text cut off mid-stream: everything up to the last closed object, array or string value, with the
+ * open containers closed. Unfinished keys, numbers and strings are dropped. Returns `undefined` when nothing is complete.
+ */
+export function partialJson(text: string): unknown {
+  const stack: string[] = [];
+  let inString = false;
+  let escaped = false;
+  let key = false;
+  let previous = '';
+  let cut = 0;
+  let closers = '';
+  const mark = (index: number) => {
+    cut = index + 1;
+    closers = [...stack].reverse().join('');
+  };
+  for (let index = 0; index < text.length; index++) {
+    const character = text[index]!;
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (character === '\\') escaped = true;
+      else if (character === '"') {
+        inString = false;
+        previous = '"';
+        if (!key) mark(index);
+      }
+      continue;
+    }
+    if (character === '"') {
+      inString = true;
+      key = stack.at(-1) === '}' && (previous === '{' || previous === ',');
+    } else if (character === '{' || character === '[') stack.push(character === '{' ? '}' : ']');
+    else if (character === '}' || character === ']') {
+      stack.pop();
+      mark(index);
+    }
+    if (!/\s/.test(character)) previous = character;
+  }
+  if (!cut) return undefined;
+  try {
+    return JSON.parse(text.slice(0, cut) + closers);
+  } catch {
+    return undefined;
+  }
+}
+
+export type LayoutPreview = { placement?: LayoutPlacement; title?: string; messages: unknown[] };
+
+/** What streamed `reply.render` arguments show so far, drawn on `surfaceId` while the reply has no message ID yet. */
+export function layoutPreview(json: string, surfaceId: string): LayoutPreview | undefined {
+  const value = partialJson(json);
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const input = value as Record<string, unknown>;
+  const placement = layoutPlacementSchema.safeParse(input.placement);
+  const title = typeof input.title === 'string' && input.title.trim() ? input.title.trim().slice(0, 120) : undefined;
+  const messages = (Array.isArray(input.messages) ? input.messages : []).flatMap((message): unknown[] => {
+    if (!message || typeof message !== 'object') return [];
+    const { createSurface, updateComponents, updateDataModel } = message as Record<string, unknown>;
+    const body = (value: unknown) => (value && typeof value === 'object' ? { ...value, surfaceId } : undefined);
+    if (!body(createSurface ?? updateComponents ?? updateDataModel)) return [];
+    if (createSurface)
+      return [{ version: layoutVersion, createSurface: { ...body(createSurface), catalogId: layoutSurfaceCatalogId } }];
+    if (updateComponents) return [{ version: layoutVersion, updateComponents: body(updateComponents) }];
+    if (updateDataModel) return [{ version: layoutVersion, updateDataModel: body(updateDataModel) }];
+    return [];
+  });
+  return { ...(placement.success ? { placement: placement.data } : {}), ...(title ? { title } : {}), messages };
 }
 
 /** A layout with one Text component, for replies written as plain text and for layouts that failed their checks. */
@@ -172,15 +342,17 @@ export function textLayout(
   const summary = text.length > maxSummary ? `${text.slice(0, end)}…` : text;
   return {
     protocol: layoutProtocol,
-    catalogId: tulipfarmCatalogId,
     placement: 'chat',
     title: options.title ?? 'Reply',
     summary,
     messages: [
-      { version: 'v0.9.1', createSurface: { surfaceId, catalogId: tulipfarmCatalogId } },
       {
-        version: 'v0.9.1',
-        updateComponents: { surfaceId, components: [{ id: 'root', component: 'Text', text }] },
+        version: a2uiVersion,
+        createSurface: {
+          surfaceId,
+          catalogId: layoutSurfaceCatalogId,
+          components: [{ id: 'root', component: 'Text', text }],
+        },
       },
     ],
     ...(options.notice ? { notice: options.notice } : {}),
@@ -214,43 +386,71 @@ export function packageInstallRequest(
 export function packageInstallationLayout(link: MarketplacePackage, surfaceId: string): Layout {
   return {
     protocol: layoutProtocol,
-    catalogId: tulipfarmCatalogId,
     placement: 'chat',
     title: 'Package installation',
     summary: `Review ${link.url}, choose its workspace inputs, and approve the whole package once to install it. Opening this form does not install anything.`,
     messages: [
-      { version: 'v0.9.1', createSurface: { surfaceId, catalogId: tulipfarmCatalogId } },
       {
-        version: 'v0.9.1',
-        updateComponents: {
+        version: a2uiVersion,
+        createSurface: {
           surfaceId,
-          components: [{ id: 'root', component: 'Embed', ref: { kind: 'package-install', url: link.url } }],
+          catalogId: layoutSurfaceCatalogId,
+          components: [
+            {
+              id: 'root',
+              component: 'Embed',
+              '@catalogId': tulipfarmCatalogId,
+              ref: { kind: 'package-install', url: link.url },
+            },
+          ],
         },
       },
     ],
   };
 }
 
+/** Every component a layout's messages define, in message order. */
+export function layoutComponents(messages: readonly SurfaceMessage[]): A2uiComponent[] {
+  return messages.flatMap(message =>
+    'createSurface' in message
+      ? (message.createSurface.components ?? [])
+      : 'updateComponents' in message
+        ? message.updateComponents.components
+        : [],
+  );
+}
+
+/** Whether a button sends the person's input back to the agent as an action, other than a follow-up message. */
+export function layoutAwaitsInput(messages: readonly SurfaceMessage[]): boolean {
+  return layoutComponents(messages).some(component => {
+    const action = (component as { action?: unknown }).action;
+    if (typeof action !== 'object' || action === null || !('event' in action)) return false;
+    const event = (action as { event?: { name?: unknown } }).event;
+    return typeof event?.name === 'string' && event.name !== followUpActionName;
+  });
+}
+
+/** The components of a layout's surface, by ID, after every update. */
+export function layoutComponentMap(layout: Layout) {
+  return readSurface(layout.messages)?.components ?? new Map<string, A2uiComponent>();
+}
+
 export function packagesInLayout(value: unknown): MarketplacePackage[] {
   const checked = checkLayout(value);
   if (!checked.ok) return [];
-  return checked.layout.messages.flatMap(message =>
-    'updateComponents' in message
-      ? message.updateComponents.components.flatMap(component => {
-          if (component.component !== 'Embed') return [];
-          const parsed = embedReferenceSchema.safeParse(component.ref);
-          if (!parsed.success || parsed.data.kind !== 'package-install') return [];
-          const link = marketplacePackage(parsed.data.url);
-          return link ? [link] : [];
-        })
-      : [],
-  );
+  return layoutComponents(checked.layout.messages).flatMap(component => {
+    if (component.component !== 'Embed') return [];
+    const parsed = embedReferenceSchema.safeParse(component.ref);
+    if (!parsed.success || parsed.data.kind !== 'package-install') return [];
+    const link = marketplacePackage(parsed.data.url);
+    return link ? [link] : [];
+  });
 }
 
 /** The layout as plain text: the summary, then the surface. It is the copy, search and model-history text. */
 export function layoutText(layout: Layout): string {
   const surface = readSurface(layout.messages);
-  const body = surface ? surfaceText(surface, tulipfarmCatalog).trim() : '';
+  const body = surface ? surfaceText(surface, [...layoutCatalogs]).trim() : '';
   const text = body && body !== layout.summary ? `${layout.summary}\n\n${body}` : layout.summary;
   if (bytes(text) <= maxText) return text;
   let end = Math.min(text.length, maxText);
@@ -260,4 +460,4 @@ export function layoutText(layout: Layout): string {
 }
 
 /** The catalog description for the model. */
-export const layoutPromptSnippet = () => promptSnippet(tulipfarmCatalog);
+export const layoutPromptSnippet = () => layoutCatalogs.map(catalog => promptSnippet(catalog)).join('\n\n');

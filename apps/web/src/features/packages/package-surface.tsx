@@ -1,14 +1,14 @@
 import { createContext, use, type ReactNode } from 'react';
 import { z } from 'zod';
+import { A2uiSurface, sproutAdapters, type A2uiAdapterProps } from '@tulipfarm/sprout/a2ui';
 import {
-  A2uiSurface,
+  a2uiVersion,
   defineCatalog,
   defineComponent,
-  sproutAdapters,
+  isIdentifier,
   sproutCatalog,
-  type A2uiAdapterProps,
   type A2uiComponent,
-} from '@tulipfarm/sprout/a2ui';
+} from '@tulipfarm/sprout/a2ui/catalog';
 import { Button } from '@tulipfarm/sprout/button';
 import { Badge } from '@tulipfarm/sprout/badge';
 import { resourceTypes } from './progress';
@@ -30,8 +30,7 @@ type PackageControls = {
 
 const Controls = createContext<PackageControls>({ actions: {} });
 const catalog = defineCatalog({
-  id: 'tulipfarm/package-install@1',
-  extends: sproutCatalog,
+  id: 'tulipfarm/package-install@2',
   components: {
     PackageResource: defineComponent({
       description: 'A package resource or count with its standard resource-type icon.',
@@ -97,15 +96,42 @@ function ResourceAdapter({
   );
 }
 
+const catalogs = [sproutCatalog, catalog];
 const adapters = {
-  ...sproutAdapters,
-  PackageResource: ResourceAdapter,
-  PackageAction: ActionAdapter,
-  PackageQuestion: () => use(Controls).question,
-  PackagePlan: () => use(Controls).plan,
-  PackageDefinitions: () => use(Controls).definitions,
-  PackageWriteStatus: () => use(Controls).feedback,
+  [sproutCatalog.id]: sproutAdapters,
+  [catalog.id]: {
+    PackageResource: ResourceAdapter,
+    PackageAction: ActionAdapter,
+    PackageQuestion: () => use(Controls).question,
+    PackagePlan: () => use(Controls).plan,
+    PackageDefinitions: () => use(Controls).definitions,
+    PackageWriteStatus: () => use(Controls).feedback,
+  },
 };
+
+const identifier = (id: string) => {
+  const clean = id.replace(/[^\p{XID_Continue}]/gu, '_');
+  return isIdentifier(clean) ? clean : `c_${clean}`;
+};
+
+/** Names this catalog on its own components and turns readable IDs such as `write-status` into identifiers. */
+function surfaceComponents(components: A2uiComponent[]): A2uiComponent[] {
+  const ids = new Map(components.map(component => [component.id, identifier(component.id)]));
+  const rename = (value: unknown): unknown =>
+    typeof value === 'string'
+      ? (ids.get(value) ?? value)
+      : Array.isArray(value)
+        ? value.map(rename)
+        : value && typeof value === 'object'
+          ? Object.fromEntries(Object.entries(value).map(([key, item]) => [key, rename(item)]))
+          : value;
+  return components.map(({ id, component, ...props }) => ({
+    ...(rename(props) as Record<string, unknown>),
+    id: identifier(id),
+    component,
+    ...(Object.hasOwn(catalog.components, component) ? { '@catalogId': catalog.id } : {}),
+  }));
+}
 
 export function PackageSuccess({ id, title, details }: { id: string; title: string; details: ReactNode }) {
   return (
@@ -149,12 +175,12 @@ export function PackageSurface({
     <Controls value={{ actions, question, plan, definitions, feedback }}>
       <div className="max-w-2xl" data-package-surface={id}>
         <A2uiSurface
-          catalog={catalog}
+          catalogs={catalogs}
           adapters={adapters}
           size="compact"
           messages={[
-            { version: 'v0.9.1', createSurface: { surfaceId: id, catalogId: catalog.id } },
-            { version: 'v0.9.1', updateComponents: { surfaceId: id, components } },
+            { version: a2uiVersion, createSurface: { surfaceId: id, catalogId: sproutCatalog.id } },
+            { version: a2uiVersion, updateComponents: { surfaceId: id, components: surfaceComponents(components) } },
           ]}
         />
       </div>

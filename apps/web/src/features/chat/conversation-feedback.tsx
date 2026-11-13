@@ -52,7 +52,7 @@ export function ConversationRead<T>({
 }
 
 // The timeline already shows the result of these commands.
-const quietCommands = new Set(['send', 'retry', 'cancel', 'resume-maintenance']);
+const quietCommands = new Set(['send', 'layout-action', 'retry', 'cancel', 'resume-maintenance']);
 
 export function CommandFeedback({
   write,

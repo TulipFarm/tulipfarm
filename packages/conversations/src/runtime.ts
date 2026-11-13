@@ -36,7 +36,12 @@ import {
   timeZoneSchema,
 } from './contracts.ts';
 import { interruptToolReceipts } from './tool-receipts.ts';
-import { notifyConversationChange, notifyConversationTool, stoppedReplyVersion } from './event-publisher.ts';
+import {
+  notifyConversationChange,
+  notifyConversationTool,
+  notifyLayoutCalls,
+  stoppedReplyVersion,
+} from './event-publisher.ts';
 import { replyParts } from './stopped-replies.ts';
 import {
   conversationResult,
@@ -151,9 +156,11 @@ import {
   layoutFromReply,
   layoutText,
   textLayout,
+  tulipfarmCatalogId,
   type Layout,
   type ReplyRenderInput,
 } from './layout-contracts.ts';
+import type { RendererCall } from './events.ts';
 export { layoutCompatibility } from './layout-contracts.ts';
 import { linkNotice, linkReadsInstalled, messageLinkReads, messageLinks, readMessageLinks } from './links.ts';
 
@@ -195,6 +202,8 @@ async function staged<T>(
   }
 }
 const table = (tx: AuthorizationTransaction, name: string) => qualified(tx.schema, name);
+// A button press reaches the model as data beside the words it sent. to_jsonb reads the column on older schemas too.
+const modelPartText = `CASE p.kind WHEN 'layout-action' THEN E'\\n\\n[Layout action] The person used a control in your reply instead of typing: ' || (to_jsonb(p)->'layout_action')::text ELSE p.text END`;
 // Where the requester can see for themselves what a failed read would have returned.
 const failureFallbacks: Readonly<Record<string, string>> = {
   'members.find': 'Point them to the Members and Teams pages instead.',
@@ -381,6 +390,22 @@ function replyLayout(answer: AnswerLayout, text: string, messageId: string): Lay
   if (text !== answer.input.summary) return null;
   const checked = layoutFromReply(answer.input, messageId);
   return checked.ok ? checked.layout : textLayout(text, messageId, { notice: 'layout-failed' });
+}
+
+/** The reply's screen actions as A2UI renderer calls on its surface. */
+function rendererCalls(input: ReplyRenderInput, messageId: string): RendererCall[] {
+  return (input.screenActions ?? []).map(action => ({
+    version: '1.0',
+    callRendererFunction: {
+      surfaceId: messageId,
+      functionCallId: randomUUID(),
+      callFunction: {
+        '@call': action.name,
+        ...(action.componentId ? { args: { componentId: action.componentId } } : {}),
+        catalogId: tulipfarmCatalogId,
+      },
+    },
+  }));
 }
 
 export type ExternalConversationContext = (
@@ -1486,8 +1511,8 @@ export function createConversationExecutor(
             (
               await tx.client.query(
                 `SELECT $2::uuid AS id, 'user' AS role, $3::integer AS "acceptedSequence",
-        COALESCE(string_agg(text, '' ORDER BY ordinal) FILTER (WHERE kind = 'text'), '') AS text
-        FROM ${table(tx, 'tf_conversation_parts')} WHERE conversation_id = $1 AND message_id = $2`,
+        COALESCE(string_agg(${modelPartText}, '' ORDER BY p.ordinal) FILTER (WHERE p.kind IN ('text', 'layout-action')), '') AS text
+        FROM ${table(tx, 'tf_conversation_parts')} p WHERE p.conversation_id = $1 AND p.message_id = $2`,
                 [fence.conversationId, turn.source_message_id, turn.accepted_sequence],
               )
             ).rows[0],
@@ -1602,7 +1627,7 @@ export function createConversationExecutor(
           JOIN ${table(tx, 'tf_conversation_approval_requests')} r ON r.turn_id = t.id AND r.conversation_id = $1
           JOIN ${table(tx, 'tf_conversation_parts')} p ON p.conversation_id = $1 AND p.approval_id = r.id
       ) SELECT m.id, CASE m.author_kind WHEN 'human' THEN 'user' ELSE 'assistant' END AS role, e.accepted_sequence AS "acceptedSequence",
-        COALESCE(string_agg(p.text, '' ORDER BY p.ordinal) FILTER (WHERE p.kind IN ('text', 'layout')), '') AS text, bool_or(e.stopped) AS stopped,
+        COALESCE(string_agg(${modelPartText}, '' ORDER BY p.ordinal) FILTER (WHERE p.kind IN ('text', 'layout', 'layout-action')), '') AS text, bool_or(e.stopped) AS stopped,
         COALESCE((SELECT jsonb_agg(jsonb_build_object('table',g.definition->>'label','input',d.proposal->'input'))
           FROM ${table(tx, 'tf_chat_authoring_drafts')} d
           JOIN ${table(tx, 'tf_conversation_turns')} t ON t.id=d.turn_id AND t.response_message_id=m.id
@@ -3127,6 +3152,16 @@ export function createConversationExecutor(
           [fence.turnId, messageId, fallback ? `${modelFallbackCodePrefix}${fallback}` : null],
         );
         await interruptToolReceipts(tx, fence.turnId, 'failed');
+        const calls =
+          layout && answerLayout && 'input' in answerLayout ? rendererCalls(answerLayout.input, messageId) : [];
+        if (calls.length)
+          await notifyLayoutCalls(tx, {
+            workspaceId: fence.workspaceId,
+            conversationId: fence.conversationId,
+            turnId: fence.turnId,
+            messageId,
+            calls,
+          });
         await changed(tx, fence, true);
         await tx.client.query(
           `UPDATE ${table(tx, 'tf_conversations')} SET next_message_sequence = next_message_sequence + 1, activity_at = clock_timestamp() WHERE id = $1`,

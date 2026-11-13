@@ -1,7 +1,11 @@
 import { loadModelCatalog } from '@tulipfarm/config';
 import {
+  checkLayout,
+  layoutActionRequestSchema,
   layoutCompatibility,
+  layoutComponentMap,
   layoutText,
+  type LayoutAction,
   packageInstallationLayout,
   packageInstallRequest,
 } from './layout-contracts.ts';
@@ -420,205 +424,301 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
     value: unknown,
     recorded?: () => void,
     arrivedAt?: number,
+    action?: LayoutAction,
   ) {
     const chatId = uuidSchema.parse(chatIdInput);
     const input = sendMessageSchema.parse(value);
     if (input.mode === 'plan' && tx.commonVersion < 1) throw new StorageUnavailableError('incompatible_version');
-    return command(tx, actor, chatId, input.commandId, 'send', input, sentSchema, async () => {
-      await allowance(tx);
-      const chat = await owned(tx, actor, chatId, true, 'turn');
-      const packageInstall =
-        tx.commonVersion >= layoutCompatibility.minimum
-          ? packageInstallRequest(input.parts, input.mode, chat.projectId)
-          : null;
-      const attachments = input.parts.flatMap(part => (part.kind === 'attachment' ? [part.attachmentId] : [])).sort();
-      if (attachments.length) {
-        for (const id of attachments) {
-          const row = (
-            await tx.client.query(
-              `SELECT id FROM ${table(tx, 'tf_conversation_attachments')} WHERE id = $1 AND conversation_id = $2 AND membership_id = $3 AND state = 'ready' AND expires_at > clock_timestamp() FOR UPDATE`,
-              [id, chatId, actor.membershipId],
-            )
-          ).rows[0];
-          if (!row) throw new AttachmentError('attachment-conflict');
+    if (action && tx.commonVersion < layoutCompatibility.minimum)
+      throw new StorageUnavailableError('incompatible_version');
+    return command(
+      tx,
+      actor,
+      chatId,
+      input.commandId,
+      'send',
+      action ? { ...input, action } : input,
+      sentSchema,
+      async () => {
+        await allowance(tx);
+        const chat = await owned(tx, actor, chatId, true, 'turn');
+        if (action) await admitLayoutAction(tx, chatId, action);
+        const packageInstall =
+          tx.commonVersion >= layoutCompatibility.minimum
+            ? packageInstallRequest(input.parts, input.mode, chat.projectId)
+            : null;
+        const attachments = input.parts.flatMap(part => (part.kind === 'attachment' ? [part.attachmentId] : [])).sort();
+        if (attachments.length) {
+          for (const id of attachments) {
+            const row = (
+              await tx.client.query(
+                `SELECT id FROM ${table(tx, 'tf_conversation_attachments')} WHERE id = $1 AND conversation_id = $2 AND membership_id = $3 AND state = 'ready' AND expires_at > clock_timestamp() FOR UPDATE`,
+                [id, chatId, actor.membershipId],
+              )
+            ).rows[0];
+            if (!row) throw new AttachmentError('attachment-conflict');
+          }
         }
-      }
-      const files = input.parts.flatMap(part => (part.kind === 'file' ? [part.fileId] : []));
-      if (files.length) {
-        await admitFileReferences(tx, actor, chat.projectId, files);
-        for (const fileId of files) await recordFileUse(tx, actor, fileId);
-      }
-      const google = input.parts.flatMap(part => (part.kind === 'google-file' ? [part] : []));
-      if (google.length) {
-        await admitGoogleFileReferences(
-          tx,
-          actor,
-          chat.projectId,
-          google.map(part => part.expectedIntegration),
+        const files = input.parts.flatMap(part => (part.kind === 'file' ? [part.fileId] : []));
+        if (files.length) {
+          await admitFileReferences(tx, actor, chat.projectId, files);
+          for (const fileId of files) await recordFileUse(tx, actor, fileId);
+        }
+        const google = input.parts.flatMap(part => (part.kind === 'google-file' ? [part] : []));
+        if (google.length) {
+          await admitGoogleFileReferences(
+            tx,
+            actor,
+            chat.projectId,
+            google.map(part => part.expectedIntegration),
+          );
+        }
+        const invocation = input.parts.find(part => part.kind === 'skill');
+        let skill: InvokedSkill | null = null;
+        if (invocation) {
+          if (!skills) throw new StorageUnavailableError('incompatible_version');
+          skill = chat.projectId ? null : await skills.resolve(tx, actor, invocation);
+          if (!skill) throw new ConversationConflict('skill-unavailable');
+        }
+        const compact = input.parts.find(part => part.kind === 'compact');
+        if (compact) {
+          if (
+            compact.compactionId &&
+            !(
+              await tx.client.query(
+                `SELECT 1 FROM ${table(tx, 'tf_conversation_compactions')} WHERE conversation_id=$1 AND id=$2`,
+                [chatId, compact.compactionId],
+              )
+            ).rowCount
+          )
+            throw new ConversationConflict('compaction-not-found');
+        }
+        const inserted = await tx.client.query(
+          `INSERT INTO ${table(tx, 'tf_conversation_messages')} (id, conversation_id, sequence, author_kind, membership_id) VALUES ($1,$2,$3,'human',$4) ON CONFLICT (id) DO NOTHING RETURNING id`,
+          [input.messageId, chatId, chat.nextSequence, actor.membershipId],
         );
-      }
-      const invocation = input.parts.find(part => part.kind === 'skill');
-      let skill: InvokedSkill | null = null;
-      if (invocation) {
-        if (!skills) throw new StorageUnavailableError('incompatible_version');
-        skill = chat.projectId ? null : await skills.resolve(tx, actor, invocation);
-        if (!skill) throw new ConversationConflict('skill-unavailable');
-      }
-      const compact = input.parts.find(part => part.kind === 'compact');
-      if (compact) {
-        if (
-          compact.compactionId &&
-          !(
+        if (!inserted.rowCount) throw new ConversationConflict('identity-conflict');
+        for (const [ordinal, part] of input.parts.entries()) {
+          if (part.kind === 'text') {
             await tx.client.query(
-              `SELECT 1 FROM ${table(tx, 'tf_conversation_compactions')} WHERE conversation_id=$1 AND id=$2`,
-              [chatId, compact.compactionId],
-            )
-          ).rowCount
-        )
-          throw new ConversationConflict('compaction-not-found');
-      }
-      const inserted = await tx.client.query(
-        `INSERT INTO ${table(tx, 'tf_conversation_messages')} (id, conversation_id, sequence, author_kind, membership_id) VALUES ($1,$2,$3,'human',$4) ON CONFLICT (id) DO NOTHING RETURNING id`,
-        [input.messageId, chatId, chat.nextSequence, actor.membershipId],
-      );
-      if (!inserted.rowCount) throw new ConversationConflict('identity-conflict');
-      for (const [ordinal, part] of input.parts.entries()) {
-        if (part.kind === 'text') {
+              `INSERT INTO ${table(tx, 'tf_conversation_parts')} (conversation_id, message_id, ordinal, kind, text, rich_content) VALUES ($1,$2,$3,'text',$4,$5)`,
+              [chatId, input.messageId, ordinal, part.text, part.content ? JSON.stringify(part.content) : null],
+            );
+          } else if (part.kind === 'file')
+            await tx.client.query(
+              `INSERT INTO ${table(tx, 'tf_conversation_parts')} (conversation_id, message_id, ordinal, kind, file_id) VALUES ($1,$2,$3,'file',$4)`,
+              [chatId, input.messageId, ordinal, part.fileId],
+            );
+          else if (part.kind === 'compact')
+            await tx.client.query(
+              `INSERT INTO ${table(tx, 'tf_conversation_parts')} (conversation_id, message_id, ordinal, kind, text, compaction_id) VALUES ($1,$2,$3,'compact',$4,$5)`,
+              [chatId, input.messageId, ordinal, part.prompt ?? null, part.compactionId ?? null],
+            );
+          else if (part.kind === 'google-file')
+            await tx.client.query(
+              `INSERT INTO ${table(tx, 'tf_conversation_parts')} (conversation_id, message_id, ordinal, kind, google_file) VALUES ($1,$2,$3,'google-file',$4)`,
+              [
+                chatId,
+                input.messageId,
+                ordinal,
+                JSON.stringify({
+                  fileId: part.fileId,
+                  ...part.expectedIntegration,
+                  name: part.name,
+                  mimeType: part.mimeType,
+                }),
+              ],
+            );
+          else if (part.kind === 'attachment') {
+            await tx.client.query(
+              `INSERT INTO ${table(tx, 'tf_conversation_parts')} (conversation_id, message_id, ordinal, kind, attachment_id) VALUES ($1,$2,$3,'attachment',$4)`,
+              [chatId, input.messageId, ordinal, part.attachmentId],
+            );
+            await tx.client.query(
+              `UPDATE ${table(tx, 'tf_conversation_attachments')} SET state = 'bound', message_id = $2 WHERE id = $1`,
+              [part.attachmentId, input.messageId],
+            );
+          } else if (skill) await insertSkillPart(tx, chatId, input.messageId, ordinal, 'skill', skill);
+        }
+        if (action)
           await tx.client.query(
-            `INSERT INTO ${table(tx, 'tf_conversation_parts')} (conversation_id, message_id, ordinal, kind, text, rich_content) VALUES ($1,$2,$3,'text',$4,$5)`,
-            [chatId, input.messageId, ordinal, part.text, part.content ? JSON.stringify(part.content) : null],
+            `INSERT INTO ${table(tx, 'tf_conversation_parts')} (conversation_id, message_id, ordinal, kind, layout_action) VALUES ($1,$2,$3,'layout-action',$4)`,
+            [chatId, input.messageId, input.parts.length, JSON.stringify(action)],
           );
-        } else if (part.kind === 'file')
-          await tx.client.query(
-            `INSERT INTO ${table(tx, 'tf_conversation_parts')} (conversation_id, message_id, ordinal, kind, file_id) VALUES ($1,$2,$3,'file',$4)`,
-            [chatId, input.messageId, ordinal, part.fileId],
-          );
-        else if (part.kind === 'compact')
-          await tx.client.query(
-            `INSERT INTO ${table(tx, 'tf_conversation_parts')} (conversation_id, message_id, ordinal, kind, text, compaction_id) VALUES ($1,$2,$3,'compact',$4,$5)`,
-            [chatId, input.messageId, ordinal, part.prompt ?? null, part.compactionId ?? null],
-          );
-        else if (part.kind === 'google-file')
-          await tx.client.query(
-            `INSERT INTO ${table(tx, 'tf_conversation_parts')} (conversation_id, message_id, ordinal, kind, google_file) VALUES ($1,$2,$3,'google-file',$4)`,
-            [
-              chatId,
-              input.messageId,
-              ordinal,
-              JSON.stringify({
-                fileId: part.fileId,
-                ...part.expectedIntegration,
-                name: part.name,
-                mimeType: part.mimeType,
-              }),
-            ],
-          );
-        else if (part.kind === 'attachment') {
-          await tx.client.query(
-            `INSERT INTO ${table(tx, 'tf_conversation_parts')} (conversation_id, message_id, ordinal, kind, attachment_id) VALUES ($1,$2,$3,'attachment',$4)`,
-            [chatId, input.messageId, ordinal, part.attachmentId],
-          );
-          await tx.client.query(
-            `UPDATE ${table(tx, 'tf_conversation_attachments')} SET state = 'bound', message_id = $2 WHERE id = $1`,
-            [part.attachmentId, input.messageId],
-          );
-        } else if (skill) await insertSkillPart(tx, chatId, input.messageId, ordinal, 'skill', skill);
-      }
-      const responder = packageInstall ? 'package-install-v1' : (input.model ?? chatModel(chat.model));
-      const turnId = randomUUID();
-      // Measured on this process's monotonic clock and anchored to the database clock that stamps the saved message.
-      const requested = arrivedAt !== undefined && tx.commonVersion >= 3;
-      await tx.client.query(
-        `INSERT INTO ${table(tx, 'tf_conversation_turns')} (id, conversation_id, source_message_id, accepted_sequence, responder${input.mode === 'plan' ? ', planning_mode' : ''}${requested ? ', timing_requested_at' : ''}) VALUES ($1,$2,$3,$4,$5${input.mode === 'plan' ? ', true' : ''}${requested ? ', clock_timestamp() - make_interval(secs => $6::double precision / 1000)' : ''})`,
-        [
-          turnId,
-          chatId,
-          input.messageId,
-          chat.nextSequence,
-          responder,
-          ...(requested ? [Math.max(0, performance.now() - arrivedAt)] : []),
-        ],
-      );
-      if (!packageInstall && admission.pinTurn && tx.commonVersion >= turnImageModelsVersion) {
-        const pinned = await admission.pinTurn(
-          tx,
-          workspaceId,
-          responder === 'reverse-text-v1' ? loadModelCatalog().defaultModel.id : responder,
-        );
-        if (pinned)
-          await tx.client.query(`UPDATE ${table(tx, 'tf_conversation_turns')} SET image_models=$2 WHERE id=$1`, [
+        const responder = packageInstall ? 'package-install-v1' : (input.model ?? chatModel(chat.model));
+        const turnId = randomUUID();
+        // Measured on this process's monotonic clock and anchored to the database clock that stamps the saved message.
+        const requested = arrivedAt !== undefined && tx.commonVersion >= 3;
+        await tx.client.query(
+          `INSERT INTO ${table(tx, 'tf_conversation_turns')} (id, conversation_id, source_message_id, accepted_sequence, responder${input.mode === 'plan' ? ', planning_mode' : ''}${requested ? ', timing_requested_at' : ''}) VALUES ($1,$2,$3,$4,$5${input.mode === 'plan' ? ', true' : ''}${requested ? ', clock_timestamp() - make_interval(secs => $6::double precision / 1000)' : ''})`,
+          [
             turnId,
-            JSON.stringify(pinned),
-          ]);
-      }
-      if (packageInstall) {
-        const responseId = randomUUID();
-        const layout = packageInstallationLayout(packageInstall, responseId);
-        await tx.client.query(
-          `INSERT INTO ${table(tx, 'tf_conversation_messages')} (id, conversation_id, sequence, author_kind) VALUES ($1,$2,$3,'assistant')`,
-          [responseId, chatId, chat.nextSequence + 1],
+            chatId,
+            input.messageId,
+            chat.nextSequence,
+            responder,
+            ...(requested ? [Math.max(0, performance.now() - arrivedAt)] : []),
+          ],
         );
-        await tx.client.query(
-          `INSERT INTO ${table(tx, 'tf_conversation_parts')} (conversation_id, message_id, ordinal, kind, text, layout) VALUES ($1,$2,0,'layout',$3,$4)`,
-          [chatId, responseId, layoutText(layout), JSON.stringify(layout)],
-        );
-        await tx.client.query(
-          `INSERT INTO ${table(tx, 'tf_conversation_results')} (conversation_id, turn_id, message_id, sources) VALUES ($1,$2,$3,$4)`,
-          [chatId, turnId, responseId, JSON.stringify([{ kind: 'private-conversation', conversationId: chatId }])],
-        );
-        await tx.client.query(
-          `UPDATE ${table(tx, 'tf_conversation_turns')} SET status='completed',response_message_id=$2 WHERE id=$1`,
-          [turnId, responseId],
-        );
-      } else {
-        await tx.client.query(
-          `INSERT INTO ${table(tx, 'tf_conversation_outbox')} (turn_id, conversation_id, generation) VALUES ($1,$2,0)`,
-          [turnId, chatId],
-        );
-      }
-      if (!packageInstall && tx.commonVersion >= 1) {
-        await tx.client.query(
-          `WITH interrupted AS (
+        if (!packageInstall && admission.pinTurn && tx.commonVersion >= turnImageModelsVersion) {
+          const pinned = await admission.pinTurn(
+            tx,
+            workspaceId,
+            responder === 'reverse-text-v1' ? loadModelCatalog().defaultModel.id : responder,
+          );
+          if (pinned)
+            await tx.client.query(`UPDATE ${table(tx, 'tf_conversation_turns')} SET image_models=$2 WHERE id=$1`, [
+              turnId,
+              JSON.stringify(pinned),
+            ]);
+        }
+        if (packageInstall) {
+          const responseId = randomUUID();
+          const layout = packageInstallationLayout(packageInstall, responseId);
+          await tx.client.query(
+            `INSERT INTO ${table(tx, 'tf_conversation_messages')} (id, conversation_id, sequence, author_kind) VALUES ($1,$2,$3,'assistant')`,
+            [responseId, chatId, chat.nextSequence + 1],
+          );
+          await tx.client.query(
+            `INSERT INTO ${table(tx, 'tf_conversation_parts')} (conversation_id, message_id, ordinal, kind, text, layout) VALUES ($1,$2,0,'layout',$3,$4)`,
+            [chatId, responseId, layoutText(layout), JSON.stringify(layout)],
+          );
+          await tx.client.query(
+            `INSERT INTO ${table(tx, 'tf_conversation_results')} (conversation_id, turn_id, message_id, sources) VALUES ($1,$2,$3,$4)`,
+            [chatId, turnId, responseId, JSON.stringify([{ kind: 'private-conversation', conversationId: chatId }])],
+          );
+          await tx.client.query(
+            `UPDATE ${table(tx, 'tf_conversation_turns')} SET status='completed',response_message_id=$2 WHERE id=$1`,
+            [turnId, responseId],
+          );
+        } else {
+          await tx.client.query(
+            `INSERT INTO ${table(tx, 'tf_conversation_outbox')} (turn_id, conversation_id, generation) VALUES ($1,$2,0)`,
+            [turnId, chatId],
+          );
+        }
+        if (!packageInstall && tx.commonVersion >= 1) {
+          await tx.client.query(
+            `WITH interrupted AS (
           UPDATE ${table(tx, 'tf_conversation_turns')} SET status='queued',generation=generation+1,error_code=NULL,retry_at=NULL
           WHERE conversation_id=$1 AND status='waiting' AND error_code='plan-worker-waiting'
           RETURNING id,conversation_id,generation)
           INSERT INTO ${table(tx, 'tf_conversation_outbox')} (turn_id,conversation_id,generation)
           SELECT id,conversation_id,generation FROM interrupted`,
-          [chatId],
-        );
-      }
-      const title =
-        chat.nextSequence === 1 && !chat.titleManual
-          ? packageInstall
-            ? `Install ${packageInstall.name.replaceAll('-', ' ')}`
-            : initialTitle(input.parts, skill?.name)
-          : null;
-      await tx.client.query(
-        `UPDATE ${table(tx, 'tf_conversations')} SET next_message_sequence = next_message_sequence + $3, activity_at = clock_timestamp(), title = COALESCE($2, title), title_revision = title_revision + CASE WHEN $2::text IS NULL THEN 0 ELSE 1 END WHERE id = $1`,
-        [chatId, title, packageInstall ? 2 : 1],
-      );
-      await recordConversationActivity(tx, chatId);
-      if (tx.commonVersion >= budCompatibility.minimum) {
+            [chatId],
+          );
+        }
+        const title =
+          chat.nextSequence === 1 && !chat.titleManual
+            ? packageInstall
+              ? `Install ${packageInstall.name.replaceAll('-', ' ')}`
+              : initialTitle(input.parts, skill?.name)
+            : null;
         await tx.client.query(
-          `UPDATE ${table(tx, 'tf_bud_nudges')} SET status='answered'
+          `UPDATE ${table(tx, 'tf_conversations')} SET next_message_sequence = next_message_sequence + $3, activity_at = clock_timestamp(), title = COALESCE($2, title), title_revision = title_revision + CASE WHEN $2::text IS NULL THEN 0 ELSE 1 END WHERE id = $1`,
+          [chatId, title, packageInstall ? 2 : 1],
+        );
+        await recordConversationActivity(tx, chatId);
+        if (tx.commonVersion >= budCompatibility.minimum) {
+          await tx.client.query(
+            `UPDATE ${table(tx, 'tf_bud_nudges')} SET status='answered'
           WHERE membership_id=$1 AND status='opened' AND fingerprint=(SELECT active_nudge FROM ${table(tx, 'tf_bud_state')} WHERE membership_id=$1 AND conversation_id=$2)`,
-          [actor.membershipId, chatId],
-        );
+            [actor.membershipId, chatId],
+          );
+          await tx.client.query(
+            `UPDATE ${table(tx, 'tf_bud_state')} SET active_nudge=NULL WHERE membership_id=$1 AND conversation_id=$2`,
+            [actor.membershipId, chatId],
+          );
+        }
+        await notifyConversationChange(tx, { workspaceId, conversationId: chatId, turnId });
+        recorded?.();
+        afterCommit(tx.client, () => trackEvent('message_sent', { userId: actor.userId, workspaceId }));
+        return {
+          messageId: input.messageId,
+          turnId,
+          sequence: chat.nextSequence,
+          ...(input.timeZone ? { timeZone: input.timeZone } : {}),
+        };
+      },
+    );
+  }
+
+  /** The reply must be an assistant layout in this chat that draws the pressed component, and must not have been answered by a button before. */
+  async function admitLayoutAction(tx: AuthorizationTransaction, chatId: string, action: LayoutAction) {
+    const row = (
+      await tx.client.query(
+        `SELECT p.layout FROM ${table(tx, 'tf_conversation_parts')} p
+        JOIN ${table(tx, 'tf_conversation_messages')} m ON m.id = p.message_id AND m.conversation_id = p.conversation_id
+        WHERE p.conversation_id = $1 AND p.message_id = $2 AND p.kind = 'layout' AND m.author_kind = 'assistant' LIMIT 1`,
+        [chatId, action.messageId],
+      )
+    ).rows[0] as { layout: unknown } | undefined;
+    const checked = row ? checkLayout(row.layout, action.messageId) : undefined;
+    if (!checked?.ok || !layoutComponentMap(checked.layout).has(action.sourceComponentId))
+      throw new ConversationConflict('layout-action-unavailable');
+    const sent = await tx.client.query(
+      `SELECT 1 FROM ${table(tx, 'tf_conversation_parts')} WHERE conversation_id = $1 AND kind = 'layout-action' AND layout_action->>'messageId' = $2 LIMIT 1`,
+      [chatId, action.messageId],
+    );
+    if (sent.rowCount) throw new ConversationConflict('layout-action-sent');
+  }
+
+  /** The saved layout of an assistant reply in a chat the person owns, or null when it has none. */
+  async function readLayout(workspaceId: string, userId: string, chatIdInput: string, messageIdInput: string) {
+    const chatId = uuidSchema.parse(chatIdInput);
+    const messageId = uuidSchema.parse(messageIdInput);
+    return human(workspaceId, userId, async (tx, actor) => {
+      await owned(tx, actor, chatId);
+      const row = (
         await tx.client.query(
-          `UPDATE ${table(tx, 'tf_bud_state')} SET active_nudge=NULL WHERE membership_id=$1 AND conversation_id=$2`,
-          [actor.membershipId, chatId],
-        );
-      }
-      await notifyConversationChange(tx, { workspaceId, conversationId: chatId, turnId });
-      recorded?.();
-      afterCommit(tx.client, () => trackEvent('message_sent', { userId: actor.userId, workspaceId }));
-      return {
-        messageId: input.messageId,
-        turnId,
-        sequence: chat.nextSequence,
-        ...(input.timeZone ? { timeZone: input.timeZone } : {}),
-      };
+          `SELECT p.layout FROM ${table(tx, 'tf_conversation_parts')} p
+          JOIN ${table(tx, 'tf_conversation_messages')} m ON m.id = p.message_id AND m.conversation_id = p.conversation_id
+          WHERE p.conversation_id = $1 AND p.message_id = $2 AND p.kind = 'layout' AND m.author_kind = 'assistant' LIMIT 1`,
+          [chatId, messageId],
+        )
+      ).rows[0] as { layout: unknown } | undefined;
+      const checked = row ? checkLayout(row.layout, messageId) : undefined;
+      return checked?.ok ? checked.layout : null;
     });
+  }
+
+  /** Sends the words of a layout button as the person's next message, with the action beside them. */
+  async function sendLayoutAction(
+    workspaceId: string,
+    userId: string,
+    chatIdInput: string,
+    replyMessageIdInput: string,
+    value: unknown,
+    arrivedAt?: number,
+  ) {
+    const replyMessageId = uuidSchema.parse(replyMessageIdInput);
+    const request = layoutActionRequestSchema.parse(value);
+    if (request.surfaceId !== replyMessageId) throw new ConversationConflict('layout-action-unavailable');
+    return human(
+      workspaceId,
+      userId,
+      (tx, actor) =>
+        sendInTransaction(
+          tx,
+          actor,
+          workspaceId,
+          chatIdInput,
+          {
+            commandId: request.commandId,
+            messageId: request.sentMessageId,
+            parts: [{ kind: 'text', text: request.userMessage }],
+          },
+          undefined,
+          arrivedAt,
+          {
+            messageId: replyMessageId,
+            name: request.name,
+            sourceComponentId: request.sourceComponentId,
+            context: request.context,
+          },
+        ),
+      'write',
+    );
   }
 
   async function read(workspaceId: string, userId: string, chatId: string) {
@@ -671,7 +771,7 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
         (
           await tx.client.query(
             `SELECT m.id, m.sequence, m.author_kind AS author, m.created_at AS "createdAt",
-        (SELECT jsonb_agg(CASE p.kind WHEN 'text' THEN jsonb_strip_nulls(jsonb_build_object('kind', p.kind, 'text', p.text, 'content', p.rich_content)) WHEN 'attachment' THEN jsonb_build_object('kind', p.kind, 'attachmentId', to_jsonb(p)->>'attachment_id') WHEN 'file' THEN jsonb_build_object('kind', p.kind, 'fileId', to_jsonb(p)->>'file_id') WHEN 'google-file' THEN jsonb_build_object('kind', p.kind, 'fileId', to_jsonb(p)->'google_file'->>'fileId', 'name', to_jsonb(p)->'google_file'->>'name', 'mimeType', to_jsonb(p)->'google_file'->>'mimeType') WHEN 'request' THEN jsonb_build_object('kind', p.kind, 'requestId', to_jsonb(p)->>'request_id') WHEN 'response' THEN jsonb_build_object('kind', p.kind, 'responseId', to_jsonb(p)->>'response_id') WHEN 'layout' THEN jsonb_build_object('kind', p.kind, 'text', p.text, 'layout', to_jsonb(p)->'layout') WHEN 'skill' THEN ${skillReference} WHEN 'skill-use' THEN ${skillReference} ${compactionParts(tx)} ELSE jsonb_build_object('kind', p.kind, 'approvalId', to_jsonb(p)->>'approval_id') END ORDER BY p.ordinal) FROM ${table(tx, 'tf_conversation_parts')} p WHERE p.message_id = m.id) AS parts,
+        (SELECT jsonb_agg(CASE p.kind WHEN 'text' THEN jsonb_strip_nulls(jsonb_build_object('kind', p.kind, 'text', p.text, 'content', p.rich_content)) WHEN 'attachment' THEN jsonb_build_object('kind', p.kind, 'attachmentId', to_jsonb(p)->>'attachment_id') WHEN 'file' THEN jsonb_build_object('kind', p.kind, 'fileId', to_jsonb(p)->>'file_id') WHEN 'google-file' THEN jsonb_build_object('kind', p.kind, 'fileId', to_jsonb(p)->'google_file'->>'fileId', 'name', to_jsonb(p)->'google_file'->>'name', 'mimeType', to_jsonb(p)->'google_file'->>'mimeType') WHEN 'request' THEN jsonb_build_object('kind', p.kind, 'requestId', to_jsonb(p)->>'request_id') WHEN 'response' THEN jsonb_build_object('kind', p.kind, 'responseId', to_jsonb(p)->>'response_id') WHEN 'layout' THEN jsonb_build_object('kind', p.kind, 'text', p.text, 'layout', to_jsonb(p)->'layout') WHEN 'layout-action' THEN jsonb_build_object('kind', p.kind, 'action', to_jsonb(p)->'layout_action') WHEN 'skill' THEN ${skillReference} WHEN 'skill-use' THEN ${skillReference} ${compactionParts(tx)} ELSE jsonb_build_object('kind', p.kind, 'approvalId', to_jsonb(p)->>'approval_id') END ORDER BY p.ordinal) FROM ${table(tx, 'tf_conversation_parts')} p WHERE p.message_id = m.id) AS parts,
         CASE WHEN t.id IS NULL THEN NULL ELSE jsonb_strip_nulls(jsonb_build_object('id', t.id, 'status', t.status, 'generation', t.generation, 'epoch', t.attempt_epoch, 'errorCode', t.error_code, 'mode', CASE WHEN (to_jsonb(t)->>'planning_mode')::boolean THEN 'plan' END, 'stats', ${turnStats})) END AS turn
         ${tx.commonVersion >= followUpsVersion ? `,(SELECT jsonb_build_object('id', f.id, 'instruction', f.instruction, 'requestedAt', to_char(f.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')) FROM ${table(tx, 'tf_follow_ups')} f WHERE f.fired_message_id = m.id) AS "followUp"` : ''}
         ,(SELECT st.id FROM ${table(tx, 'tf_conversation_results')} r JOIN ${table(tx, 'tf_conversation_turns')} st ON st.id = r.turn_id WHERE r.message_id = m.id AND st.status = 'cancelled' AND m.author_kind = 'assistant') AS "stoppedTurnId"
@@ -954,7 +1054,7 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
   async function canReadStream(workspaceId: string, userId: string, chatId: string, value: unknown) {
     const input = z
       .object({
-        kind: z.enum(['text', 'tool', 'subagents', 'progress']),
+        kind: z.enum(['text', 'layout', 'tool', 'subagents', 'progress']),
         turnId: uuidSchema,
         generation: z.number().int().nonnegative(),
         epoch: z.number().int().nonnegative(),
@@ -1389,6 +1489,8 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
   return {
     create,
     send,
+    sendLayoutAction,
+    readLayout,
     sendInTransaction,
     stopSubagent,
     read,
