@@ -1417,6 +1417,8 @@ export type ToolInferenceContext = {
   chatFiles?: boolean;
   /** The person may run coding agents here, so the model may call `coding.run`. */
   codingRuns?: boolean;
+  /** This chat edits an app the person may edit, so the model may call `apps.*`. */
+  apps?: boolean;
   /** Deferred chat tools, by framework name, offered from the first round without a `tools_search`. */
   preloadedTools?: readonly string[];
   /** Built-in procedures resolved by the server for this request, not names extracted from message text. */
@@ -4685,6 +4687,7 @@ export async function inferWithTools(
         loaded,
         tools?.chatFiles ?? false,
         tools?.codingRuns ?? false,
+        tools?.apps ?? false,
       );
       chatToolNameMention = toolNamePattern(catalog.tools);
       previousCatalog = catalogKey(mcp);
@@ -4930,6 +4933,7 @@ export async function inferWithTools(
               loaded,
               tools?.chatFiles ?? false,
               tools?.codingRuns ?? false,
+              tools?.apps ?? false,
             ),
           );
           chatToolNameMention = toolNamePattern(catalog.tools);

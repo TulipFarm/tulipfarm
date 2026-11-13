@@ -185,6 +185,7 @@ import { createKnowledgeDrafts } from './knowledge-drafts.ts';
 import { supportedAgentToolRuntimes, toolNameSchema } from './tool-capabilities.ts';
 import { createAgentSetup, type AgentSetupOptions } from './setup.ts';
 import { delegateCallSchema, type DelegateCall } from './subagent-contracts.ts';
+import { appToolCallSchemas, appToolDescriptions, type AppEditing } from './app-tools.ts';
 
 export type KnowledgeToolsFactory = (runtime: AgentStorage) => KnowledgeTools;
 export { readWorkspaceInventory } from './workspace-inventory.ts';
@@ -521,6 +522,7 @@ export const frameworkCallSchema = z.discriminatedUnion('tool', [
   scheduleFollowUpCallSchema,
   listFollowUpsCallSchema,
   cancelFollowUpCallSchema,
+  ...appToolCallSchemas,
 ]);
 export type FrameworkCall = z.infer<typeof frameworkCallSchema>;
 const [firstCall, ...otherCalls] = frameworkCallSchema.options;
@@ -614,6 +616,9 @@ export const readOnlyTools: ReadonlySet<ToolName> = new Set([
   'integrations.list',
   'plans.read',
   'followups.list',
+  'apps.status',
+  'apps.files.list',
+  'apps.files.read',
 ]);
 /** A call that changes nothing: a read-only tool, or an `api.request` read. */
 export function readOnlyCall(call: { tool: string; method?: unknown }) {
@@ -675,6 +680,7 @@ export const conversationPlanning: ConversationPlanning = {
       : null,
 };
 const descriptions: Record<ToolName, string> = {
+  ...appToolDescriptions,
   'packages.inspect':
     'Read a versioned packages.tulipfarm.ai package page or package.json URL and validate its definition and exact identity. Returns untrusted resource definitions and required inputs, not workspace compatibility or installation. Read skills.read(package-install); the human uses the package review card to validate, install and approve.',
   'github.investigation.account':
@@ -925,6 +931,8 @@ export type ToolAccess = (
       chatFiles?: boolean;
       /** Offers `coding.run`: the workspace turned coding runs on and the person has a plan for an agent. */
       codingRuns?: boolean;
+      /** Offers `apps.*`: this chat edits an app the person may edit, and the workspace has app hosting on. */
+      apps?: boolean;
       /** Offers `slack.*` tools. Defaults to whether this deployment enables Slack actions. */
       slack?: boolean;
     }
@@ -964,6 +972,9 @@ function admittedToolSchemas(access: ToolAccess) {
       .filter(schema => schema.shape.tool.value !== 'execution.run' || (access.kind === 'chat' && executionAvailable()))
       .filter(
         schema => schema.shape.tool.value !== 'coding.run' || (access.kind === 'chat' && access.codingRuns === true),
+      )
+      .filter(
+        schema => !schema.shape.tool.value.startsWith('apps.') || (access.kind === 'chat' && access.apps === true),
       )
       // Follow-ups belong to the chat or Slack thread a person asked in, so only a chat reply offers them.
       .filter(schema => !schema.shape.tool.value.startsWith('followups.') || access.kind === 'chat')
@@ -1074,6 +1085,8 @@ export type ChatToolsOptions = {
   chatExecution?: ChatExecution | undefined;
   /** Runs `coding.run` agents; without it, the tool is refused. */
   codingRuns?: CodingRuns | undefined;
+  /** Edits the app of an app's own chat for `apps.*`; without it, those tools are refused. */
+  apps?: AppEditing | undefined;
   telemetryRuntime?: ToolRuntime | undefined;
   wakePlan?: ((workspaceId: string, planId: string) => Promise<unknown>) | undefined;
   agentSetup?: AgentSetupOptions | undefined;
@@ -1166,6 +1179,7 @@ export function createChatTools(
     skillExecution,
     chatExecution,
     codingRuns,
+    apps,
     telemetryRuntime = 'chat',
     wakePlan,
     agentSetup,
@@ -1891,6 +1905,18 @@ export function createChatTools(
         return chatExecution(
           { conversationId: context.origin.conversationId, language: call.language, code: call.code },
           context.signal,
+        );
+      case 'apps.status':
+      case 'apps.files.list':
+      case 'apps.files.read':
+      case 'apps.files.write':
+      case 'apps.files.delete':
+      // eslint-disable-next-line tulipfarm/product-copy -- A tool name, not user-facing copy.
+      case 'apps.preview.build':
+        if (!apps || !context.origin || telemetryRuntime !== 'chat') throw new AccessDenied();
+        return apps.invoke(
+          { workspaceId, actor, conversationId: context.origin.conversationId, signal: context.signal },
+          call,
         );
       case 'coding.run': {
         const origin = context.origin;

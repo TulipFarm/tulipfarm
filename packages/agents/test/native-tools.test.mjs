@@ -86,7 +86,7 @@ test('native tool names and descriptions follow the registered chat tools', t =>
       else process.env[name] = previous;
     });
   }
-  const { tools } = nativeChatTools(undefined, true, undefined, true, true);
+  const { tools } = nativeChatTools(undefined, true, undefined, true, true, true);
   const registered = chatCallSchema.options
     .map(option => option.shape.tool.value)
     .filter(tool => !tool.startsWith('mcp.'));

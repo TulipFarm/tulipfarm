@@ -715,6 +715,9 @@ importers:
       '@tulipfarm/api-calls':
         specifier: workspace:*
         version: link:../api-calls
+      '@tulipfarm/apps':
+        specifier: workspace:*
+        version: link:../apps
       '@tulipfarm/atlassian':
         specifier: workspace:*
         version: link:../atlassian
