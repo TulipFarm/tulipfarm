@@ -26,6 +26,14 @@ export type AppRecipe = z.infer<typeof appRecipeSchema>;
 
 export const defaultAppRecipe: AppRecipe = Object.freeze({ kind: 'copy', root: '.' });
 
+/** The builder folded into a build's id. A command needs the server's builder, so without one it has none. */
+export function recipeBuilder(recipe: AppRecipe, commandBuilder: string | undefined) {
+  return recipe.kind === 'copy' ? 'copy' : commandBuilder;
+}
+
+/** The one workflow that builds a build, whichever service starts it. */
+export const appBuildWorkflowId = (buildId: string) => `app-build-${buildId}`;
+
 /** Reads the optional `app.json` at the commit root. A tree without one is copied as is. */
 export function readAppRecipe(
   appJson: string | null,

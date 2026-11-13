@@ -4,9 +4,11 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Pool } from 'pg';
 import { z } from 'zod';
 import {
+  appBuildWorkflowId,
   appNameSchema,
   appSlugSchema,
   readAppRecipe,
+  recipeBuilder,
   type AppBuildId,
   type AppId,
   type AppName,
@@ -129,7 +131,7 @@ function slugFrom(title: string) {
 }
 
 const workflowIds = {
-  build: (buildId: string) => `app-build-${buildId}`,
+  build: appBuildWorkflowId,
   release: (operation: AppOperation) => `app-${operation.kind}-${operation.appId}-${operation.id}`,
   edge: (app: AppRecord) => `app-edge-${app.id}-${app.edgeVersion}`,
 };
@@ -487,7 +489,7 @@ export function registerApps(app: FastifyInstance, dependencies: AppRouteDepende
           const appJson = await source.repositories.file(source.repository, head, 'app.json');
           const recipe = readAppRecipe(appJson === null ? null : Buffer.from(appJson).toString('utf8'));
           if (!recipe.ok) throw new AppRouteFailure(recipe.failure);
-          const builder = recipe.recipe.kind === 'copy' ? 'copy' : dependencies.builderId();
+          const builder = recipeBuilder(recipe.recipe, dependencies.builderId());
           if (!builder) throw failure('builder-unavailable', 'This server cannot run build commands');
           return requestBuild(tx, {
             appId: params.appId,

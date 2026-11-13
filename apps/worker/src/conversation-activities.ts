@@ -94,7 +94,7 @@ import { heldSecrets } from '@tulipfarm/secrets/send';
 import { resumeApiCall, type ApiCallFiles } from '@tulipfarm/api-calls';
 import type { AppPages } from '@tulipfarm/agents/app-page-tools';
 import type { AppEditing } from '@tulipfarm/agents/app-tools';
-import { appEditingFromEnvironment, finishAppTurn, workerAppPages } from './app-editing-composition.ts';
+import { finishAppTurn, workerAppPages } from './app-editing-composition.ts';
 
 /** The first-turn title is short, so it uses the title role's family. Without a model for it, the title uses the chat model. */
 export function chatTitleModel(env: NodeJS.ProcessEnv = process.env): ConversationModel | undefined {
@@ -628,7 +628,7 @@ export function createConversationActivities(
   workspaceSlug?: (workspaceId: string) => Promise<string | undefined>,
   chatExecution?: ChatExecution,
   codingRuns?: CodingRunsFactory,
-  apps: AppEditing | undefined = appEditingFromEnvironment(storage),
+  apps?: AppEditing,
   appPages: AppPages | undefined = workerAppPages(storage),
 ) {
   const runtime = withFileSources(withKnowledgeSourceAuthorization(withGitHubSourceAuthorization(storage)));

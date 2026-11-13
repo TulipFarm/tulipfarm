@@ -1,8 +1,9 @@
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Client, Connection } from '@temporalio/client';
 import { createAppPages, type AppPages } from '@tulipfarm/agents/app-page-tools';
 import { createAppEditing, type AppEditing, type AppTurnOutcome } from '@tulipfarm/agents/app-tools';
-import { readAppRecipe, type AppBuildId, type AppFailure } from '@tulipfarm/apps';
+import { appBuildWorkflowId, readAppRecipe, recipeBuilder, type AppBuildId, type AppFailure } from '@tulipfarm/apps';
 import {
   appRepositories,
   finishBuild,
@@ -10,6 +11,7 @@ import {
   requestBuild,
   type AppTransaction,
 } from '@tulipfarm/apps/store';
+import { temporalConnectionOptions } from '@tulipfarm/config/temporal';
 import type { ConversationRuntime } from '@tulipfarm/conversations/runtime';
 import { turnRequester } from '@tulipfarm/conversations/turn-requester';
 import { errorAttributes, isFeatureEnabled, log } from '@tulipfarm/observability';
@@ -17,17 +19,37 @@ import { objectStorageClient } from '@tulipfarm/workspaces/object-storage';
 import { commonCompatibility, qualified } from '@tulipfarm/workspace-storage/runtime';
 
 type AppRepositories = ReturnType<typeof appRepositories>;
-/** Starts building a queued build. Without it the build stays queued until something else builds it. */
-export type AppBuildStart = (workspaceId: string, buildId: AppBuildId) => Promise<unknown>;
 
-const copyBuilder = 'copy@1';
 const appHosting = (workspaceId: string) => isFeatureEnabled('app-hosting', null, { id: workspaceId });
+
+/** How this worker builds apps: starting a queued build, and the builder that runs build commands, if it has one. */
+export type AppBuilds = {
+  readonly start: (workspaceId: string, buildId: AppBuildId) => Promise<unknown>;
+  readonly commandBuilder: () => string | undefined;
+};
+
+/** Starts the `appBuild` workflow, the same one the API starts for the same build. */
+export function createAppBuildDispatcher() {
+  const connection = Connection.lazy(temporalConnectionOptions());
+  const client = new Client({ connection, namespace: process.env.TEMPORAL_NAMESPACE ?? 'default' });
+  const taskQueue = process.env.TEMPORAL_TASK_QUEUE ?? 'tulipfarm';
+  const start: AppBuilds['start'] = (workspaceId, buildId) =>
+    connection.withDeadline(Date.now() + 5000, () =>
+      client.workflow.start('appBuild', {
+        workflowId: appBuildWorkflowId(buildId),
+        taskQueue,
+        args: [{ workspaceId, buildId }],
+        workflowIdConflictPolicy: 'USE_EXISTING',
+      }),
+    );
+  return { start, close: () => connection.close() };
+}
 
 /** The app tools of an app's own chat, on when the workspace has the `app-hosting` flag. */
 export function workerAppEditing(
   runtime: ConversationRuntime,
   repositories: AppRepositories,
-  start?: AppBuildStart,
+  builds: AppBuilds,
 ): AppEditing {
   const transact = <T>(workspaceId: string, action: (tx: AppTransaction) => Promise<T>) =>
     runtime.transaction(workspaceId, commonCompatibility, tx => action({ client: tx.client, schema: tx.schema }));
@@ -43,23 +65,25 @@ export function workerAppEditing(
       );
       const appJson = await repositories.file(repository, commit, 'app.json');
       const read = readAppRecipe(appJson && new TextDecoder().decode(appJson));
+      const builder = read.ok ? recipeBuilder(read.recipe, builds.commandBuilder()) : undefined;
       // The recipe follows from the commit, so a commit that cannot build records one failed build the editor can see.
       const refused: AppFailure | null = !read.ok
         ? read.failure
-        : read.recipe.kind === 'command'
-          ? { code: 'builder-unavailable', message: 'This server cannot run build commands', retryable: false }
-          : null;
+        : builder
+          ? null
+          : { code: 'builder-unavailable', message: 'This server cannot run build commands', retryable: false };
       const build = await transact(workspaceId, async tx => {
         const queued = await requestBuild(tx, {
           appId,
           commit,
           recipe: read.ok ? read.recipe : { kind: 'copy', root: '.' },
-          builder: copyBuilder,
+          builder: builder ?? 'none',
           requestedBy,
         });
         return refused ? finishBuild(tx, queued.id, { ok: false, failure: refused }) : queued;
       });
-      if (build.status.status === 'queued') await start?.(workspaceId, build.id);
+      if (build.status.status === 'queued' || build.status.status === 'running')
+        await builds.start(workspaceId, build.id);
       return build.id;
     },
   });
@@ -71,12 +95,20 @@ export function workerAppPages(runtime: ConversationRuntime): AppPages {
 }
 
 /** App editing for a worker whose apps bucket is configured. */
-export function appEditingFromEnvironment(runtime: ConversationRuntime, env: NodeJS.ProcessEnv = process.env) {
+export function appEditingFromEnvironment(
+  runtime: ConversationRuntime,
+  builds: AppBuilds,
+  env: NodeJS.ProcessEnv = process.env,
+) {
   const bucket = env.TULIPFARM_OBJECT_STORAGE_APPS_BUCKET;
   if (!bucket) return undefined;
   // A cache of its own: app builds keep theirs, so the two never write one repository at once.
   const root = join(tmpdir(), 'tulipfarm-app-drafts');
-  return workerAppEditing(runtime, appRepositories({ root, storage: { client: objectStorageClient(env), bucket } }));
+  return workerAppEditing(
+    runtime,
+    appRepositories({ root, storage: { client: objectStorageClient(env), bucket } }),
+    builds,
+  );
 }
 
 /**
