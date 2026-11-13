@@ -39,7 +39,8 @@ type RunnableConfiguration = Exclude<ExecutionConfiguration, { mode: 'off' }>;
 
 /**
  * Runs one command in a fresh allocation and destroys the allocation afterwards.
- * `timeoutMs` shortens the policy's job timeout for callers with a tighter budget. `template` starts the default
+ * `timeoutMs` shortens the policy's job timeout for callers with a tighter budget. `limitMs` replaces that job timeout
+ * for work with a limit of its own, such as a coding run; ordinary jobs keep the policy's. `template` starts the default
  * profile from another backend image, `secrets` are held by the backend for the allocation's life, and `outputBytes`
  * raises the 64 KiB output cap.
  */
@@ -50,6 +51,7 @@ export async function runIsolated(
     areaId: string;
     command: ExecutionCommand;
     timeoutMs?: number;
+    limitMs?: number;
     template?: string;
     secrets?: readonly ExecutionSecret[];
     outputBytes?: number;
@@ -61,8 +63,8 @@ export async function runIsolated(
   if (!defaultProfile) throw new Error('execution-profile-missing');
   const profile = input.template ? { ...defaultProfile, template: input.template } : defaultProfile;
   const outputLimit = input.outputBytes ?? chatOutputLimit;
-  const timeout = Math.min(policy.limits.jobTimeoutSeconds * 1000, input.timeoutMs ?? Infinity);
-  const margin = input.timeoutMs === undefined ? slack : Math.min(slack, 5000);
+  const timeout = Math.min(input.limitMs ?? policy.limits.jobTimeoutSeconds * 1000, input.timeoutMs ?? Infinity);
+  const margin = input.timeoutMs === undefined && input.limitMs === undefined ? slack : Math.min(slack, 5000);
   const signal = AbortSignal.any([AbortSignal.timeout(timeout + margin), ...(outer ? [outer] : [])]);
   const allocation = { areaId: input.areaId, allocationId: randomUUID(), generation: 1 };
   const job: ExecutionJob = { ...allocation, jobId: randomUUID() };

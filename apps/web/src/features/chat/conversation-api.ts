@@ -150,6 +150,7 @@ const messageSchema = z.object({
         followUpId: z.uuid().optional(),
         googleProposalId: z.uuid().optional(),
         tableProposal: z.literal(true).optional(),
+        codingRun: z.literal(true).optional(),
         integration: integrationCardSchema.optional(),
         rowDraftId: z.uuid().optional(),
         waitingRowDraft: z.object({ id: z.uuid(), table: z.string().optional() }).optional(),

@@ -14,6 +14,7 @@ import { recommendationEligibility } from '@tulipfarm/recommendations/configurat
 import { registerTableDispatch } from './table-dispatch.ts';
 import { createReplyDispatch, registerConversationDispatch } from './conversation-dispatch.ts';
 import { createApiCallReviews, registerApiCalls } from './api-calls.ts';
+import { createCodingRunReviews, registerCodingRuns } from './coding-runs.ts';
 import { registerIntegrations } from './integrations.ts';
 import { integrationCredentialKeyring, createIntegrationService } from '@tulipfarm/integrations';
 import type { registerAuth } from './auth.ts';
@@ -307,6 +308,15 @@ export function registerStorageComposition(
       resolveConfirmationCredential: confirmation.resolveConfirmationCredential,
       wakeChat: replies.sent,
       wakeTask,
+    }),
+  );
+  registerCodingRuns(
+    app,
+    dependencies.auth,
+    createCodingRunReviews({
+      runtime,
+      resolveConfirmationCredential: confirmation.resolveConfirmationCredential,
+      wakeChat: replies.sent,
     }),
   );
   const conversations = createConversations(runtime, chatSkills, {

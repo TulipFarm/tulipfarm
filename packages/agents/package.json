@@ -314,6 +314,14 @@
     "./coding-runs": {
       "types": "./dist/coding-runs.d.ts",
       "default": "./dist/coding-runs.js"
+    },
+    "./coding-run-contracts": {
+      "types": "./dist/coding-run-contracts.d.ts",
+      "default": "./dist/coding-run-contracts.js"
+    },
+    "./coding-run-store": {
+      "types": "./dist/coding-run-store.d.ts",
+      "default": "./dist/coding-run-store.js"
     }
   },
   "scripts": {

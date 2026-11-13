@@ -140,6 +140,9 @@ const TableProposalCard = lazyCard(() => import('./table-proposal-card').then(mo
 const ApiCallReviewCard = lazyCard(() =>
   import('@/features/api-calls/review-card').then(module => module.ApiCallReviewCard),
 );
+const CodingRunReviewCard = lazyCard(() =>
+  import('@/features/coding-runs/review-card').then(module => module.CodingRunReviewCard),
+);
 const ImageCards = lazyCard(() => import('./image-cards').then(module => module.ImageCards));
 
 const ApprovalPreview = import.meta.env.DEV ? lazy(() => import('./approval-mock')) : null;
@@ -2127,6 +2130,7 @@ function ConversationTools({
   const { workspace, user, membershipId } = workspaceRoute.useRouteContext();
   const slack = useMemo(() => agentApi(workspace.id), [workspace.id]);
   const recordChanges = useMemo(() => recordChangesForTools(message.id, message.tools), [message.id, message.tools]);
+  const codingRuns = useFlag('coding-runs');
   return (
     <section aria-label={`Activity for message ${message.sequence}`} className="space-y-3">
       {message.tools
@@ -2264,6 +2268,17 @@ function ConversationTools({
         .map(tool => (
           <ApiCallReviewCard key={`api:${tool.id}`} workspaceId={workspace.id} callId={tool.id} />
         ))}
+      {codingRuns &&
+        message.tools
+          .filter(tool => tool.tool === 'coding.run' && tool.codingRun)
+          .map(tool => (
+            <CodingRunReviewCard
+              key={`coding:${tool.id}`}
+              workspaceId={workspace.id}
+              runId={tool.id}
+              onSettled={changed}
+            />
+          ))}
       {message.tools
         .filter(tool => tool.images?.length)
         .map(tool => (

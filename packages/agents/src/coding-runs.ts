@@ -3,9 +3,10 @@ import { z } from 'zod';
 import type { HumanActor } from '@tulipfarm/access';
 import type { ExecutionBackend, ExecutionConfiguration, ExecutionSecret } from '@tulipfarm/execution-contract';
 import { runIsolated } from './chat-execution.ts';
+import { codingAgentLabels, codingAgents, type CodingAgent } from './coding-run-contracts.ts';
+import type { CodingRunRecord } from './coding-run-store.ts';
 
-export const codingAgents = ['claude-code', 'codex', 'copilot'] as const;
-export type CodingAgent = (typeof codingAgents)[number];
+export { codingAgents, type CodingAgent };
 export type CodingPlanProvider = 'claude' | 'chatgpt' | 'copilot';
 
 /** Each agent runs only on its vendor's plan, from the backend image of the same name. */
@@ -13,11 +14,6 @@ export const codingAgentProviders: Record<CodingAgent, CodingPlanProvider> = {
   'claude-code': 'claude',
   codex: 'chatgpt',
   copilot: 'copilot',
-};
-const agentLabels: Record<CodingAgent, string> = {
-  'claude-code': 'Claude Code',
-  codex: 'Codex',
-  copilot: 'Copilot CLI',
 };
 const providerLabels: Record<CodingPlanProvider, string> = {
   claude: 'Claude',
@@ -61,21 +57,6 @@ export type CodingRunCall = z.infer<typeof codingRunCallSchema>;
 
 /** A plan connection the member may use, with a current token. */
 export type CodingRunPlan = { connectionId: string; ownerMembershipId: string; token: string };
-export type CodingRunApproval = {
-  workspaceId: string;
-  actor: HumanActor;
-  conversationId: string;
-  turnId: string;
-  callId: string;
-  repository: string;
-  branch: string | null;
-  agent: CodingAgent;
-  task: string;
-  /** Whose plan pays for the agent's model use. */
-  planOwnerMembershipId: string;
-  /** Digest of the exact run the member approves. */
-  digest: string;
-};
 export type CodingRunServices = {
   /** The first eligible plan of `provider` for the member, in the subscription resolver's order, or null. */
   plan(workspaceId: string, membershipId: string, provider: CodingPlanProvider): Promise<CodingRunPlan | null>;
@@ -87,8 +68,8 @@ export type CodingRunServices = {
     actor: HumanActor,
     origin: { conversationId: string; turnId: string },
   ): Promise<string | null>;
-  /** The member's decision on the exact run; `waiting` until they decide. */
-  approve(request: CodingRunApproval): Promise<'approved' | 'rejected' | 'waiting'>;
+  /** Records the exact run for the member's decision; proposing the same run again changes nothing. */
+  propose(workspaceId: string, run: CodingRunRecord): Promise<void>;
   /** Whether the workspace's `coding-runs` flag is on. */
   enabled(workspaceId: string): Promise<boolean>;
 };
@@ -98,13 +79,15 @@ export type CodingRunContext = {
   actor: HumanActor;
   conversationId: string;
   turnId: string;
+  generation: number;
   callId: string;
-  signal?: AbortSignal | undefined;
 };
+/** The tool's result while the member decides; the chat continues once the run ends. */
+export type CodingRunWaiting = { provider: 'coding-run'; kind: 'waiting'; runId: string };
 export type CodingRunResult =
   | { status: 'plan-required'; message: string }
   | { status: 'github-account-required'; instruction: string }
-  | { status: 'awaiting-approval' | 'rejected' }
+  | { status: 'plan-changed'; message: string }
   | {
       status: 'completed' | 'failed' | 'timed-out' | 'cancelled' | 'clone-failed';
       exitCode?: number;
@@ -233,7 +216,13 @@ export function codingRunDigest(call: CodingRunCall, planOwnerMembershipId: stri
 
 /** What the member is told when no plan of the agent's provider is theirs to use. */
 export const planRequiredMessage = (agent: CodingAgent) =>
-  `Connect your ${providerLabels[codingAgentProviders[agent]]} plan in Settings → Models to use ${agentLabels[agent]}.`;
+  `Connect your ${providerLabels[codingAgentProviders[agent]]} plan in Settings → Models to use ${codingAgentLabels[agent]}.`;
+
+const githubRequired = {
+  status: 'github-account-required',
+  instruction:
+    'Ask the person to choose a personal GitHub account for this chat with github.personal.account, then run again.',
+} as const;
 
 type RunnableConfiguration = Exclude<ExecutionConfiguration, { mode: 'off' }>;
 
@@ -260,19 +249,24 @@ export function createCodingRuns(
         if (await services.hasPlan(workspaceId, membershipId, codingAgentProviders[agent])) return true;
       return false;
     },
-    async run(context: CodingRunContext, call: CodingRunCall): Promise<CodingRunResult> {
-      const { workspaceId, actor, conversationId } = context;
+    /** Checks the run can start and records it for the member's approval. Nothing runs yet. */
+    async run(
+      context: CodingRunContext,
+      call: CodingRunCall,
+    ): Promise<CodingRunWaiting | Extract<CodingRunResult, { status: 'plan-required' | 'github-account-required' }>> {
+      const { workspaceId, actor, conversationId, turnId } = context;
       if (!agents.includes(call.agent) || !(await services.enabled(workspaceId)))
         throw new Error('coding-run-unavailable');
       const provider = codingAgentProviders[call.agent];
       const plan = await services.plan(workspaceId, actor.membershipId, provider);
       if (!plan) return { status: 'plan-required', message: planRequiredMessage(call.agent) };
-      const decision = await services.approve({
-        workspaceId,
+      if (!(await services.github(workspaceId, actor, { conversationId, turnId }))) return githubRequired;
+      await services.propose(workspaceId, {
+        id: context.callId,
         actor,
         conversationId,
-        turnId: context.turnId,
-        callId: context.callId,
+        turnId,
+        generation: context.generation,
         repository: call.repository,
         branch: call.branch ?? null,
         agent: call.agent,
@@ -280,17 +274,34 @@ export function createCodingRuns(
         planOwnerMembershipId: plan.ownerMembershipId,
         digest: codingRunDigest(call, plan.ownerMembershipId),
       });
-      if (decision !== 'approved') return { status: decision === 'waiting' ? 'awaiting-approval' : 'rejected' };
-      const github = await services.github(workspaceId, actor, { conversationId, turnId: context.turnId });
-      if (!github)
+      return { provider: 'coding-run', kind: 'waiting', runId: context.callId };
+    },
+    /** Runs an approved run, if its plan is still the one the member approved. */
+    async execute(workspaceId: string, run: CodingRunRecord, signal?: AbortSignal): Promise<CodingRunResult> {
+      const call = codingRunCallSchema.parse({
+        tool: 'coding.run',
+        repository: run.repository,
+        task: run.task,
+        agent: run.agent,
+        ...(run.branch === null ? {} : { branch: run.branch }),
+      });
+      if (!agents.includes(call.agent) || !(await services.enabled(workspaceId)))
+        throw new Error('coding-run-unavailable');
+      const plan = await services.plan(workspaceId, run.actor.membershipId, codingAgentProviders[call.agent]);
+      if (!plan) return { status: 'plan-required', message: planRequiredMessage(call.agent) };
+      if (codingRunDigest(call, plan.ownerMembershipId) !== run.digest)
         return {
-          status: 'github-account-required',
-          instruction:
-            'Ask the person to choose a personal GitHub account for this chat with github.personal.account, then run again.',
+          status: 'plan-changed',
+          message: 'The plan this run would use changed after it was approved, so nothing ran. Ask again to run it.',
         };
-      const timeoutMs = Math.min(codingRunLimitMs, configuration.policy.limits.jobTimeoutSeconds * 1000);
-      // Clone and diff share the job's time with the agent.
-      const agentSeconds = Math.max(60, Math.floor(timeoutMs / 1000) - Math.min(300, Math.floor(timeoutMs / 4000)));
+      const github = await services.github(workspaceId, run.actor, {
+        conversationId: run.conversationId,
+        turnId: run.turnId,
+      });
+      if (!github) return githubRequired;
+      const conversationId = run.conversationId;
+      // Clone and diff share the run's time with the agent.
+      const agentSeconds = Math.floor(codingRunLimitMs / 1000) - Math.min(300, Math.floor(codingRunLimitMs / 4000));
       const result = await runIsolated(
         backend,
         configuration,
@@ -309,12 +320,13 @@ export function createCodingRuns(
               String(agentSeconds),
             ],
           },
-          timeoutMs,
+          // Coding runs have their own limit; the policy's job limit stays for ordinary jobs.
+          limitMs: codingRunLimitMs,
           template: call.agent,
           secrets: codingRunSecrets(call.agent, plan.token, github),
           outputBytes,
         },
-        context.signal,
+        signal,
       );
       const line = result.stdout.split('\n').find(item => item.startsWith(marker));
       const parsed = line ? summarySchema.safeParse(JSON.parse(line.slice(marker.length))) : undefined;

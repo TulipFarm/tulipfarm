@@ -1865,32 +1865,20 @@ export function createChatTools(
           context.signal,
         );
       case 'coding.run': {
-        if (!codingRuns || !context.origin || outputs?.autonomous !== false) throw new AccessDenied();
-        const result = await codingRuns.run(
+        const origin = context.origin;
+        if (!codingRuns || !origin || origin.generation === undefined || outputs?.autonomous !== false)
+          throw new AccessDenied();
+        return codingRuns.run(
           {
             workspaceId,
             actor,
-            conversationId: context.origin.conversationId,
-            turnId: context.origin.turnId,
+            conversationId: origin.conversationId,
+            turnId: origin.turnId,
+            generation: origin.generation,
             callId,
-            signal: context.signal,
           },
           call,
         );
-        if (!('fullDiff' in result)) return result;
-        const { fullDiff, ...shown } = result;
-        if (!fullDiff) return shown;
-        const saved = await createFileOutput(
-          outputs.files,
-          { workspaceId, actor, autonomous: false, origin: context.origin },
-          {
-            tool: 'files.create',
-            name: `${call.repository.replace('/', '-')}-diff-${callId.slice(0, 8)}`,
-            format: 'txt',
-            content: fullDiff,
-          },
-        );
-        return { ...shown, diffFile: 'file' in saved ? saved.file : saved };
       }
       case 'skills.import': {
         if (!context.origin) throw new AccessDenied();

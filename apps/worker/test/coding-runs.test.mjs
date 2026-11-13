@@ -21,21 +21,24 @@ function services(candidates, tokens) {
   return {
     used,
     asked,
-    value: codingRunServices({}, async () => 'approved', {
-      subscriptions: {
-        eligible: async (_workspaceId, provider, membershipId) => (asked.push([provider, membershipId]), candidates),
-        markUsed: async (_workspaceId, connectionId) => void used.push(connectionId),
-      },
-      credentials: () => ({
-        accessToken: async (_workspaceId, owner) => {
-          const token = tokens[owner];
-          if (token instanceof Error) throw token;
-          return token;
+    value: codingRunServices(
+      {},
+      {
+        subscriptions: {
+          eligible: async (_workspaceId, provider, membershipId) => (asked.push([provider, membershipId]), candidates),
+          markUsed: async (_workspaceId, connectionId) => void used.push(connectionId),
         },
-        requireReconnect: async () => undefined,
-      }),
-      github: async () => null,
-    }),
+        credentials: () => ({
+          accessToken: async (_workspaceId, owner) => {
+            const token = tokens[owner];
+            if (token instanceof Error) throw token;
+            return token;
+          },
+          requireReconnect: async () => undefined,
+        }),
+        github: async () => null,
+      },
+    ),
   };
 }
 

@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { createChatExecution } from '../src/chat-execution.ts';
 import { codingRunCallSchema, codingRunScript, createCodingRuns, planRequiredMessage } from '../src/coding-runs.ts';
 import { discoverToolNames } from '../src/tools.ts';
 
@@ -33,6 +34,7 @@ const context = () => ({
   actor,
   conversationId: randomUUID(),
   turnId: randomUUID(),
+  generation: 1,
   callId: randomUUID(),
 });
 const call = { tool: 'coding.run', repository: 'octo/app', task: 'Fix the failing test', agent: 'claude-code' };
@@ -57,32 +59,40 @@ function fakeBackend({ stdout = '', finish = { state: 'completed', exitCode: 0 }
   };
 }
 function fakeServices(overrides = {}) {
-  const approvals = [];
+  const proposals = [];
   return {
-    approvals,
+    proposals,
     services: {
       enabled: async () => true,
       hasPlan: async () => true,
       plan: async () => ({ connectionId: randomUUID(), ownerMembershipId: actor.membershipId, token: planToken }),
       github: async () => githubToken,
-      approve: async request => (approvals.push(request), 'approved'),
+      propose: async (_workspaceId, run) => void proposals.push(run),
       ...overrides,
     },
   };
+}
+/** Proposes the run, then executes what was proposed, as the worker does once the member approves. */
+async function approvedRun(backend, fake, call, at = context()) {
+  const runs = createCodingRuns(backend, configuration, fake.services);
+  const waiting = await runs.run(at, call);
+  assert.deepEqual(waiting, { provider: 'coding-run', kind: 'waiting', runId: at.callId });
+  return runs.execute(at.workspaceId, fake.proposals.at(-1));
 }
 const summary = value =>
   `TULIPFARM_CODING_RUN ${JSON.stringify({ stage: 'done', exitCode: 0, message: 'Fixed it.', files: ['src/a.ts'], diff: 'diff --git a/src/a.ts b/src/a.ts\n', diffTruncated: false, log: '', ...value })}\n`;
 
 test('An approved run starts the agent template with held secrets, never the tokens themselves', async () => {
   const { backend, calls } = fakeBackend({ stdout: summary({}) });
-  const { services, approvals } = fakeServices();
-  const result = await createCodingRuns(backend, configuration, services).run(context(), call);
+  const fake = fakeServices();
+  const result = await approvedRun(backend, fake, call);
   assert.equal(result.status, 'completed');
   assert.equal(result.message, 'Fixed it.');
   assert.deepEqual(result.files, ['src/a.ts']);
-  assert.equal(approvals.length, 1);
-  assert.equal(approvals[0].repository, 'octo/app');
-  assert.equal(approvals[0].planOwnerMembershipId, actor.membershipId);
+  assert.equal(fake.proposals.length, 1);
+  assert.equal(fake.proposals[0].repository, 'octo/app');
+  assert.equal(fake.proposals[0].planOwnerMembershipId, actor.membershipId);
+  assert.match(fake.proposals[0].digest, /^[a-f0-9]{64}$/);
   const [, prepared] = calls.find(([name]) => name === 'prepare');
   assert.equal(prepared.profile.template, 'claude-code');
   assert.deepEqual(
@@ -114,7 +124,7 @@ test('Each agent gets its own plan secret', async () => {
     ['copilot', 'COPILOT_GITHUB_TOKEN', ['api.github.com', 'api.githubcopilot.com', '*.githubcopilot.com']],
   ]) {
     const { backend, calls } = fakeBackend({ stdout: summary({}) });
-    await createCodingRuns(backend, configuration, fakeServices().services).run(context(), { ...call, agent });
+    await approvedRun(backend, fakeServices(), { ...call, agent });
     const [, prepared] = calls.find(([name]) => name === 'prepare');
     assert.equal(prepared.profile.template, agent);
     assert.equal(prepared.secrets[1].env, env);
@@ -124,7 +134,7 @@ test('Each agent gets its own plan secret', async () => {
 
 test('Without an eligible plan the member is told to connect one, and nothing runs', async () => {
   const { backend, calls } = fakeBackend();
-  const { services, approvals } = fakeServices({ plan: async () => null });
+  const { services, proposals } = fakeServices({ plan: async () => null });
   for (const [agent, message] of [
     ['claude-code', 'Connect your Claude plan in Settings → Models to use Claude Code.'],
     ['codex', 'Connect your ChatGPT plan in Settings → Models to use Codex.'],
@@ -136,30 +146,56 @@ test('Without an eligible plan the member is told to connect one, and nothing ru
       message,
     });
   }
-  assert.equal(approvals.length, 0);
+  assert.equal(proposals.length, 0);
   assert.equal(calls.length, 0);
 });
 
-test('Nothing runs until the member approves the exact run', async () => {
+test('Asking only records the run for approval; nothing starts until it is executed', async () => {
   const { backend, calls } = fakeBackend();
-  let github = 0;
-  for (const [decision, status] of [
-    ['waiting', 'awaiting-approval'],
-    ['rejected', 'rejected'],
-  ]) {
-    const { services } = fakeServices({ approve: async () => decision, github: async () => (github++, githubToken) });
-    assert.deepEqual(await createCodingRuns(backend, configuration, services).run(context(), call), { status });
-  }
-  assert.equal(github, 0);
+  const fake = fakeServices();
+  const at = context();
+  await createCodingRuns(backend, configuration, fake.services).run(at, { ...call, branch: 'main' });
+  assert.equal(calls.length, 0);
+  assert.deepEqual(
+    { ...fake.proposals[0], digest: undefined },
+    {
+      id: at.callId,
+      actor,
+      conversationId: at.conversationId,
+      turnId: at.turnId,
+      generation: 1,
+      repository: 'octo/app',
+      branch: 'main',
+      agent: 'claude-code',
+      task: 'Fix the failing test',
+      planOwnerMembershipId: actor.membershipId,
+      digest: undefined,
+    },
+  );
+});
+
+test('An approved run does not start when the plan behind it changed', async () => {
+  const { backend, calls } = fakeBackend({ stdout: summary({}) });
+  const fake = fakeServices();
+  const runs = createCodingRuns(backend, configuration, fake.services);
+  const at = context();
+  await runs.run(at, call);
+  const changed = createCodingRuns(backend, configuration, {
+    ...fake.services,
+    plan: async () => ({ connectionId: randomUUID(), ownerMembershipId: randomUUID(), token: planToken }),
+  });
+  const result = await changed.execute(at.workspaceId, fake.proposals[0]);
+  assert.equal(result.status, 'plan-changed');
   assert.equal(calls.length, 0);
 });
 
 test('A chat without a selected GitHub account is asked to choose one before the machine starts', async () => {
   const { backend, calls } = fakeBackend();
-  const { services } = fakeServices({ github: async () => null });
+  const { services, proposals } = fakeServices({ github: async () => null });
   const result = await createCodingRuns(backend, configuration, services).run(context(), call);
   assert.equal(result.status, 'github-account-required');
   assert.match(result.instruction, /github\.personal\.account/);
+  assert.equal(proposals.length, 0);
   assert.equal(calls.length, 0);
 });
 
@@ -205,23 +241,43 @@ test('A failed or timed-out machine is still destroyed', async () => {
   failing.backend.startJob = async () => {
     throw new Error('backend-down');
   };
-  await assert.rejects(
-    createCodingRuns(failing.backend, configuration, fakeServices().services).run(context(), call),
-    /backend-down/,
-  );
+  await assert.rejects(approvedRun(failing.backend, fakeServices(), call), /backend-down/);
   assert.equal(failing.calls.at(-1)[0], 'destroy');
 
   const slow = fakeBackend({ finish: { state: 'timed-out' } });
-  const result = await createCodingRuns(slow.backend, configuration, fakeServices().services).run(context(), call);
+  const result = await approvedRun(slow.backend, fakeServices(), call);
   assert.equal(result.status, 'timed-out');
   assert.equal(slow.calls.at(-1)[0], 'destroy');
-  const [, started] = slow.calls.find(([name]) => name === 'startJob');
-  assert.ok(Date.parse(started.deadline) - Date.now() <= 30 * 60 * 1000);
+});
+
+test('Coding runs get their own 30-minute limit while ordinary jobs keep the policy limit of 60 seconds', async () => {
+  const shipped = {
+    ...configuration,
+    policy: { ...configuration.policy, limits: { ...configuration.policy.limits, jobTimeoutSeconds: 60 } },
+  };
+  const minutes = deadline => (Date.parse(deadline) - Date.now()) / 60000;
+  const coding = fakeBackend({ stdout: summary({}) });
+  const fake = fakeServices();
+  const at = context();
+  const runs = createCodingRuns(coding.backend, shipped, fake.services);
+  await runs.run(at, call);
+  await runs.execute(at.workspaceId, fake.proposals[0]);
+  const [, codingJob] = coding.calls.find(([name]) => name === 'startJob');
+  assert.ok(minutes(codingJob.deadline) > 29.9 && minutes(codingJob.deadline) <= 30, codingJob.deadline);
+  assert.equal(codingJob.command.args.at(-1), '1500');
+
+  const ordinary = fakeBackend({ stdout: 'ok' });
+  await createChatExecution(
+    ordinary.backend,
+    shipped,
+  )({ conversationId: randomUUID(), language: 'bash', code: 'true' });
+  const [, ordinaryJob] = ordinary.calls.find(([name]) => name === 'startJob');
+  assert.ok(minutes(ordinaryJob.deadline) > 0.98 && minutes(ordinaryJob.deadline) <= 1, ordinaryJob.deadline);
 });
 
 test('An agent stopped by its own time limit reports timed-out with the work so far', async () => {
   const { backend } = fakeBackend({ stdout: summary({ exitCode: 124, log: 'Terminated' }) });
-  const result = await createCodingRuns(backend, configuration, fakeServices().services).run(context(), call);
+  const result = await approvedRun(backend, fakeServices(), call);
   assert.equal(result.status, 'timed-out');
   assert.deepEqual(result.files, ['src/a.ts']);
 });
@@ -229,7 +285,7 @@ test('An agent stopped by its own time limit reports timed-out with the work so 
 test('Only a 16 KiB slice of the diff is shown; the whole diff is kept for the chat file', async () => {
   const diff = 'x'.repeat(20000);
   const { backend } = fakeBackend({ stdout: summary({ diff }) });
-  const result = await createCodingRuns(backend, configuration, fakeServices().services).run(context(), call);
+  const result = await approvedRun(backend, fakeServices(), call);
   assert.equal(result.diff.length, 16 * 1024);
   assert.equal(result.diffTruncated, true);
   assert.equal(result.fullDiff, diff);
