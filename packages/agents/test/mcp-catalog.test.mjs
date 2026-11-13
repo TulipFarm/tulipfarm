@@ -80,8 +80,17 @@ test('unsupported schemas fail visibly before model exposure', () => {
     { $ref: 'https://attacker.test/schema' },
     { type: 'string', pattern: '(a+)+$' },
     { type: 'object', evilKeyword: true },
+    { ...entry.inputSchema, $schema: 'https://json-schema.org/draft/2019-09/schema' },
   ])
     assert.throws(() => createMcpCatalog([{ ...entry, inputSchema }]));
+});
+
+test('draft-07 and 2020-12 dialects are accepted and hidden from the model', () => {
+  for (const $schema of ['http://json-schema.org/draft-07/schema#', 'https://json-schema.org/draft/2020-12/schema']) {
+    const catalog = createMcpCatalog([{ ...entry, inputSchema: { ...entry.inputSchema, $schema } }]);
+    assert.deepEqual(catalog.model().tools[0].inputSchema, entry.inputSchema);
+    validateMcpCall(call, catalog.model());
+  }
 });
 
 test('property names and example keys are data rather than schema keywords', () => {

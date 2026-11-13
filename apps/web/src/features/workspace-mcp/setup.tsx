@@ -14,33 +14,64 @@ import {
   type Capabilities,
   type CatalogEntry,
   type Integration,
+  type McpPackage,
   type SetupInput,
   type SetupResult,
 } from './contracts';
 import { McpCommandFeedback, useMcpCommand } from './state';
 import { useMcpSetupRecovery } from './queries';
+import { HostedSetup, type HostedSetting } from './hosted-setup';
 
-export function McpSetup({
-  api,
-  capabilities,
-  entry,
-  proposal,
-  integration,
-  close,
-  saved,
-  authorizing,
-}: {
+type SetupProps = {
   api: McpApi;
   capabilities: Capabilities;
   entry?: CatalogEntry | undefined;
   /** A chat's suggestion. It sets up a personal integration only. */
   proposal?: { name: string; endpoint: string; authentication: 'oauth' | 'secrets' | 'none' } | undefined;
-  integration?: Integration;
+  /** A chat's suggestion to run a package. It sets up a personal integration only. */
+  packageProposal?: { name: string; package: McpPackage; settings: HostedSetting[]; egress: string[] } | undefined;
+  integration?: Integration | undefined;
+  /** Opens the package form without a suggestion or catalog listing. */
+  hosted?: boolean | undefined;
   close: () => void;
   saved: (id: string) => void;
   /** Receives the provider sign-in link when OAuth setup starts. */
-  authorizing?: (id: string, authorizationUrl: string) => void;
-}) {
+  authorizing?: ((id: string, authorizationUrl: string) => void) | undefined;
+};
+
+export function McpSetup(props: SetupProps) {
+  const { entry, packageProposal, integration } = props;
+  if (props.hosted || integration?.kind === 'hosted' || entry?.package || packageProposal)
+    return (
+      <HostedSetup
+        api={props.api}
+        capabilities={props.capabilities}
+        name={integration?.name ?? entry?.name ?? packageProposal?.name ?? ''}
+        pkg={integration?.package ?? entry?.package ?? packageProposal?.package}
+        settings={entry?.package?.environment ?? packageProposal?.settings ?? []}
+        egress={integration?.egress ?? packageProposal?.egress ?? []}
+        catalogEntryId={entry?.id}
+        integration={integration}
+        personalOnly={!!packageProposal}
+        close={props.close}
+        saved={props.saved}
+      />
+    );
+  return (
+    <RemoteSetup
+      api={props.api}
+      capabilities={props.capabilities}
+      entry={entry}
+      proposal={props.proposal}
+      integration={integration}
+      close={props.close}
+      saved={props.saved}
+      authorizing={props.authorizing}
+    />
+  );
+}
+
+function RemoteSetup({ api, capabilities, entry, proposal, integration, close, saved, authorizing }: SetupProps) {
   const prefix = useId();
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
@@ -175,8 +206,8 @@ export function McpSetup({
         {integration ? 'Reconnect MCP server' : 'Set up MCP server'}
       </h3>
       <p className="text-sm text-muted-foreground">
-        Public HTTPS Streamable HTTP tools only. Resolve any endpoint template values first. Local packages and
-        private-network servers are not supported.
+        Public HTTPS servers only, over Streamable HTTP or the older HTTP+SSE transport. Resolve any endpoint template
+        values first. Local packages and private-network servers are not supported.
       </p>
       {entry?.authentication === 'unknown' && (
         <Alert>

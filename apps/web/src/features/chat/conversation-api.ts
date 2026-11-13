@@ -119,6 +119,20 @@ const integrationCardSchema = z.discriminatedUnion('action', [
     endpoint: z.string(),
     authentication: z.enum(['oauth', 'secrets', 'none']),
   }),
+  z.object({
+    action: z.literal('mcp-package'),
+    name: z.string(),
+    package: z.object({ registry: z.enum(['npm', 'pypi']), name: z.string(), version: z.string() }),
+    settings: z.array(
+      z.object({
+        name: z.string(),
+        description: z.string().optional(),
+        secret: z.boolean(),
+        required: z.boolean().optional(),
+      }),
+    ),
+    egress: z.array(z.string()),
+  }),
 ]);
 export type IntegrationCardView = z.infer<typeof integrationCardSchema>;
 const messageSchema = z.object({

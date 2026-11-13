@@ -40,6 +40,8 @@ type Options = {
   oauth?: ReturnType<typeof createWorkspaceMcpOAuth>;
   admissionEnabled: boolean;
   dispatchEnabled: boolean;
+  /** Whether this workspace may set up hosted packages: a host is registered and the workspace's flag is on. */
+  hostedEnabled?: (workspaceId: string) => Promise<boolean>;
   permissions: Pick<ReturnType<typeof workspaceMcpPermissions>, 'permissions' | 'setPermissions' | 'permissionChoices'>;
   authorizeSelection: NonNullable<WorkspaceMcpOptions['authorizeSelection']>;
   authorizeSources: WorkspaceMcpOptions['authorizeSources'];
@@ -78,6 +80,9 @@ export function createWorkspaceMcpApi(options: Options) {
       ownership: row.ownership,
       accountLabel: null,
       authMethod: row.authMethod,
+      kind: row.kind,
+      package: row.package,
+      egress: row.egress,
       version: row.version,
       authorizationEpoch: row.authorizationEpoch,
       status:
@@ -232,7 +237,9 @@ export function createWorkspaceMcpApi(options: Options) {
       throw new McpHttpError('mcp-discovery-failed', 503);
     }
   }
-  const usesSecrets = (row: Metadata) => row.authMethod === 'secret-bearer' || row.authMethod === 'secret-headers';
+  // Saved secrets are decrypted, and hosted packages run, only in the worker.
+  const usesWorker = (row: Metadata) =>
+    row.authMethod === 'secret-bearer' || row.authMethod === 'secret-headers' || row.kind === 'hosted';
   return {
     oauth,
     claimTaskSelection: service.claimTaskSelection,
@@ -252,6 +259,7 @@ export function createWorkspaceMcpApi(options: Options) {
           canManageShared: true,
           integrationsEnabled: options.admissionEnabled,
           dispatchEnabled: options.dispatchEnabled,
+          hosted: options.admissionEnabled && !!(await options.hostedEnabled?.(workspaceId)),
         };
       });
     },
@@ -275,8 +283,16 @@ export function createWorkspaceMcpApi(options: Options) {
       id?: string,
     ) {
       admitted();
-      const endpoint = normalizeEndpoint(input.endpoint);
       const auth = input.auth;
+      if (
+        (auth.kind === 'hosted') !== !!input.package ||
+        (auth.kind === 'hosted' ? input.endpoint !== undefined : input.endpoint === undefined || !!input.egress)
+      )
+        throw new McpHttpError('invalid-request', 400);
+      if (auth.kind === 'hosted' && !(await options.hostedEnabled?.(workspaceId)))
+        throw new McpHttpError('mcp-disabled', 503);
+      const endpoint = input.endpoint === undefined ? undefined : normalizeEndpoint(input.endpoint);
+      const hosted = auth.kind === 'hosted' ? { package: input.package, egress: input.egress ?? [] } : {};
       const credential =
         auth.kind === 'oauth'
           ? { kind: 'none' as const }
@@ -293,7 +309,7 @@ export function createWorkspaceMcpApi(options: Options) {
         new Set(auth.headers.map(header => header.name.toLowerCase())).size !== auth.headers.length
       )
         throw new McpHttpError('invalid-request', 400);
-      if (credential.kind !== 'secret-headers') authenticationHeaders(credential);
+      if (credential.kind !== 'secret-headers' && credential.kind !== 'hosted') authenticationHeaders(credential);
       let row;
       if (id) {
         const current = await service.status(workspaceId, userId, id);
@@ -302,16 +318,18 @@ export function createWorkspaceMcpApi(options: Options) {
         row = await service.replaceCredential(workspaceId, userId, id, {
           requestId: input.requestId,
           expectedVersion: input.expectedVersion,
-          endpoint,
+          ...(endpoint === undefined ? {} : { endpoint }),
           credential,
+          ...hosted,
         });
       } else {
         row = await service.create(workspaceId, userId, {
           requestId: input.requestId,
           name: input.name,
           ownership: input.ownership,
-          endpoint,
+          ...(endpoint === undefined ? {} : { endpoint }),
           credential,
+          ...hosted,
         });
       }
       if (auth.kind === 'oauth') {
@@ -321,7 +339,7 @@ export function createWorkspaceMcpApi(options: Options) {
         if (result.kind === 'registration-required') metadata.status = 'registration-required';
         return { ...result, integration: metadata };
       }
-      if (auth.kind === 'secrets') {
+      if (auth.kind === 'secrets' || auth.kind === 'hosted') {
         await queue(workspaceId, userId, row.id, mcpDiscoveryRequestId(input.requestId));
         return { kind: 'saved' as const, integration: integration(await service.status(workspaceId, userId, row.id)) };
       }
@@ -336,7 +354,7 @@ export function createWorkspaceMcpApi(options: Options) {
     },
     async discover(workspaceId: string, userId: string, id: string, input: z.infer<typeof mcpMutationSchema>) {
       const before = await service.status(workspaceId, userId, id);
-      if (usesSecrets(before)) {
+      if (usesWorker(before)) {
         if (before.version !== input.expectedVersion) throw new McpHttpError('mcp-conflict', 409);
         await queue(workspaceId, userId, id, input.requestId);
         return detail(workspaceId, userId, id);

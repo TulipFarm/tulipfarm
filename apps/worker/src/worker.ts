@@ -55,7 +55,7 @@ import { createDefaultKnowledgeWorker } from './knowledge-defaults-composition.t
 import { createDefaultKnowledgeGate, withKnowledgeSourceAuthorization } from '@tulipfarm/knowledge';
 import { createWorkflowAgentTasks } from './workflow-agent-tasks.ts';
 import { createSkillActivities } from './skill-activities.ts';
-import { createWorkspaceMcpDiscoveryActivities } from './workspace-mcp-composition.ts';
+import { createWorkspaceMcpDiscoveryActivities, createWorkspaceMcpHostedSweep } from './workspace-mcp-composition.ts';
 import { configuredSkillClient } from '@tulipfarm/workflow-snippets/client';
 import { createSkillExecutionFactory } from '@tulipfarm/agents/skill-execution';
 import { createChatExecution, type ChatExecution } from '@tulipfarm/agents/chat-execution';
@@ -130,6 +130,9 @@ async function run() {
   let importCleanup: ReturnType<typeof createObjectCleanupSweep> | undefined;
   let importSweep: Promise<void> | undefined;
   let importTimer: ReturnType<typeof setInterval> | undefined;
+  let hostedSweep: Promise<void> | undefined;
+  let hostedTimer: ReturnType<typeof setInterval> | undefined;
+  const hostedAbort = new AbortController();
   const sweepTelemetry: ReturnType<typeof createBackgroundJob>[] = [];
   let knowledgeEmbeddings: Awaited<ReturnType<typeof createKnowledgeEmbeddingWorker>>;
   let recommendations: ReturnType<typeof createRecommendationComposition> | undefined;
@@ -207,6 +210,21 @@ async function run() {
       importTimer = setInterval(sweep, 60_000);
       importTimer.unref();
       sweep();
+      const sweepHosted = createWorkspaceMcpHostedSweep(coreResources.runtime);
+      if (sweepHosted) {
+        const hostedJob = createBackgroundJob('mcp-hosted-sweep', 300);
+        sweepTelemetry.push(hostedJob);
+        const tick = () => {
+          hostedSweep ??= hostedJob
+            .run(() => sweepHosted(hostedAbort.signal))
+            .catch(() => Runtime.instance().logger.error('Hosted MCP sweep failed'))
+            .finally(() => {
+              hostedSweep = undefined;
+            });
+        };
+        hostedTimer = setInterval(tick, 5 * 60_000);
+        hostedTimer.unref();
+      }
     }
     if (
       (process.env.SLACK_LINK_PROMPTS_ENABLED === 'true' || process.env.SLACK_DIRECT_MESSAGES_ENABLED === 'true') &&
@@ -486,7 +504,10 @@ async function run() {
     await recommendations?.close();
     await knowledgeEmbeddings?.close();
     clearInterval(importTimer);
+    clearInterval(hostedTimer);
+    hostedAbort.abort();
     await importSweep;
+    await hostedSweep;
     await importCleanup?.close();
     for (const job of sweepTelemetry) job.close();
     chatObjects?.close();

@@ -11,6 +11,7 @@ export const capabilitiesSchema = z.discriminatedUnion('enabled', [
     canManageShared: z.boolean(),
     integrationsEnabled: z.boolean(),
     dispatchEnabled: z.boolean(),
+    hosted: z.boolean().default(false),
   }),
 ]);
 export type Capabilities = Extract<z.infer<typeof capabilitiesSchema>, { enabled: true }>;
@@ -20,6 +21,15 @@ export const catalogEntrySchema = z.object({
   description: text,
   version: text,
   endpoint: text,
+  package: z
+    .object({
+      registry: z.enum(['npm', 'pypi']),
+      name: text,
+      version: text,
+      environment: z.array(z.object({ name: text, description: text, required: z.boolean(), secret: z.boolean() })),
+    })
+    .nullable()
+    .default(null),
   compatibility: z.enum(['eligible', 'unknown', 'unsupported']),
   reason: text.nullable(),
   authentication: z.enum(['none', 'headers', 'bearer', 'oauth', 'unknown']),
@@ -33,13 +43,26 @@ export const catalogSchema = z.object({
   nextCursor: text.nullable(),
 });
 export type CatalogEntry = z.infer<typeof catalogEntrySchema>;
+export const packageSchema = z.object({
+  registry: z.enum(['npm', 'pypi']),
+  name: text,
+  version: text,
+  arguments: z.array(text).optional(),
+});
+export type McpPackage = z.infer<typeof packageSchema>;
+/** A hosted package as people read it, such as `npm · @scope/server@1.2.3`. */
+export const packageLabel = (pkg: McpPackage) =>
+  `${pkg.registry === 'npm' ? 'npm' : 'PyPI'} · ${pkg.name}@${pkg.version}`;
 export const integrationSchema = z.object({
   id,
   name: text,
   ownership: z.enum(['personal', 'shared']),
   endpoint: text,
   accountLabel: text.nullable(),
-  authMethod: z.enum(['none', 'headers', 'bearer', 'oauth', 'secret-bearer', 'secret-headers']),
+  authMethod: z.enum(['none', 'headers', 'bearer', 'oauth', 'secret-bearer', 'secret-headers', 'hosted']),
+  kind: z.enum(['remote', 'hosted']).default('remote'),
+  package: packageSchema.nullable().default(null),
+  egress: z.array(text).nullable().default(null),
   status: z.enum([
     'setup',
     'oauth-pending',
@@ -99,6 +122,17 @@ export const authSchema = z.discriminatedUnion('kind', [
   }),
   z.object({ kind: z.literal('secrets'), secretIds: z.array(id).min(1).max(10) }),
   z.object({
+    kind: z.literal('hosted'),
+    env: z
+      .array(
+        z.union([
+          z.object({ name: z.string().min(1), value: z.string() }),
+          z.object({ name: z.string().min(1), secretId: id, reveal: z.boolean().optional() }),
+        ]),
+      )
+      .max(20),
+  }),
+  z.object({
     kind: z.literal('oauth'),
     client: z
       .object({
@@ -112,7 +146,9 @@ export const authSchema = z.discriminatedUnion('kind', [
 export const setupInputSchema = z.object({
   requestId: id,
   name: z.string().trim().min(1).max(120),
-  endpoint: z.url(),
+  endpoint: z.url().optional(),
+  package: packageSchema.optional(),
+  egress: z.array(z.string()).optional(),
   ownership: z.enum(['personal', 'shared']),
   catalogEntryId: id.optional(),
   auth: authSchema,
@@ -218,6 +254,7 @@ export const actionSchema = z.discriminatedUnion('visibility', [
       requester: text,
       endpoint: text,
       accountLabel: text.nullable(),
+      package: packageSchema.nullable().default(null),
       authorizationEpoch: version,
       toolName: text,
       toolRevision: id,

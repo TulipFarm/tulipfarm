@@ -14,6 +14,7 @@ export {
   identifyAnalyticsGroup,
   identifyAnalyticsPerson,
   loadedExtensions,
+  mcpHost,
   providerCostPricing,
   recordUsage,
   registerExtension,

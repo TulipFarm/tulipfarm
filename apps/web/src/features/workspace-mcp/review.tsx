@@ -39,7 +39,16 @@ export function McpIntegrationDetail({
         {(detail, blocked) => (
           <>
             <h3 className="break-all text-lg font-medium">{detail.integration.name}</h3>
-            <p className="break-all text-sm">{detail.integration.endpoint}</p>
+            <p className="break-all text-sm">
+              {detail.integration.package
+                ? `${detail.integration.package.registry === 'npm' ? 'npm' : 'PyPI'} package ${detail.integration.package.name}@${detail.integration.package.version}, run by TulipFarm`
+                : detail.integration.endpoint}
+            </p>
+            {detail.integration.egress && (
+              <p className="break-all text-sm text-muted-foreground">
+                Can reach: {detail.integration.egress.length ? detail.integration.egress.join(', ') : 'no other hosts'}
+              </p>
+            )}
             <p>
               {detail.integration.ownership === 'personal'
                 ? 'Private to you, including from workspace admins.'

@@ -175,6 +175,13 @@ function integrationCard(row: { tool: string; status: string; output?: unknown }
           endpoint: z.string(),
           authentication: z.string(),
         }),
+        z.object({
+          status: z.literal('mcp-connect-card'),
+          name: z.string(),
+          package: z.unknown(),
+          settings: z.unknown(),
+          egress: z.unknown(),
+        }),
       ]),
     })
     .safeParse(row.output);
@@ -184,14 +191,22 @@ function integrationCard(row: { tool: string; status: string; output?: unknown }
       ? { action: 'connect', app: output.data.result.app }
       : row.tool === 'integrations.disconnect' && 'connection' in output.data.result
         ? { action: 'disconnect', connectionId: output.data.result.connection.connectionId }
-        : row.tool === 'integrations.mcp.connect' && output.data.result.status === 'mcp-connect-card'
+        : row.tool === 'integrations.mcp.connect' && 'package' in output.data.result
           ? {
-              action: 'mcp',
+              action: 'mcp-package',
               name: output.data.result.name,
-              endpoint: output.data.result.endpoint,
-              authentication: output.data.result.authentication,
+              package: output.data.result.package,
+              settings: output.data.result.settings,
+              egress: output.data.result.egress,
             }
-          : null,
+          : row.tool === 'integrations.mcp.connect' && 'endpoint' in output.data.result
+            ? {
+                action: 'mcp',
+                name: output.data.result.name,
+                endpoint: output.data.result.endpoint,
+                authentication: output.data.result.authentication,
+              }
+            : null,
   );
   return card.success ? { integration: card.data } : {};
 }

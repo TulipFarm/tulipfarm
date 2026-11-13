@@ -335,6 +335,27 @@ export const integrationCardSchema = z.discriminatedUnion('action', [
     endpoint: z.url({ protocol: /^https$/ }).max(2048),
     authentication: z.enum(['oauth', 'secrets', 'none']),
   }),
+  /** An npm or PyPI package to run in a hosted sandbox. Settings name its environment variables, never their values. */
+  z.strictObject({
+    action: z.literal('mcp-package'),
+    name: z.string().min(1).max(120),
+    package: z.strictObject({
+      registry: z.enum(['npm', 'pypi']),
+      name: z.string().min(1).max(214),
+      version: z.string().min(1).max(128),
+    }),
+    settings: z
+      .array(
+        z.strictObject({
+          name: z.string().regex(/^[A-Z_][A-Z0-9_]{0,127}$/),
+          description: z.string().max(300).optional(),
+          secret: z.boolean(),
+          required: z.boolean().optional(),
+        }),
+      )
+      .max(20),
+    egress: z.array(z.string().max(253)).max(20),
+  }),
 ]);
 export const toolReceiptSchema = z.object({
   id: uuidSchema,

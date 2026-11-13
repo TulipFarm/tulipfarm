@@ -75,6 +75,7 @@ import {
 import {
   useMemberDirectory,
   useSecretHistory,
+  useSecretReveals,
   useSecrets,
   useSecretsApi,
   useSecretsCapabilities,
@@ -1154,6 +1155,8 @@ const operations: Record<string, string> = {
   'ownership-taken': 'Ownership taken',
   used: 'Used',
   deleted: 'Deleted',
+  'reveal-granted': 'Value shared with a package',
+  'reveal-revoked': 'Value no longer shared with a package',
 };
 
 function CopyableName({ value }: { value: string }) {
@@ -1228,9 +1231,59 @@ function DetailsDialog({
             </div>
           ))}
         </dl>
+        {secret.ownerMembershipId === people.you && <Reveals workspaceId={workspaceId} secretId={secret.id} />}
         {secret.canManage && <History workspaceId={workspaceId} secretId={secret.id} people={people} />}
       </div>
     </FormDialog>
+  );
+}
+
+/** Hosted MCP packages this owner let read the value. Stopping one restarts its sandbox without the value. */
+function Reveals({ workspaceId, secretId }: { workspaceId: string; secretId: string }) {
+  const api = useSecretsApi(workspaceId);
+  const read = useSecretReveals(workspaceId, secretId);
+  const [pending, setPending] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  if (read.state.kind !== 'ready' || read.state.data.length === 0) return null;
+  return (
+    <section aria-labelledby="secret-reveals" className="space-y-2">
+      <h3 id="secret-reveals" className="text-sm font-medium">
+        Packages that can read the value
+      </h3>
+      <p className="text-sm text-muted-foreground">
+        These hosted MCP packages get the value itself, not only requests that send it.
+      </p>
+      <ul className="space-y-2">
+        {read.state.data.map(reveal => (
+          <li key={reveal.serverIdentity} className="flex items-center justify-between gap-2 text-sm">
+            <span className="min-w-0 break-all font-mono text-xs">
+              Package {reveal.serverIdentity.slice(0, 12)} · {formatDate(reveal.grantedAt)}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={pending !== null}
+              onClick={() => {
+                setPending(reveal.serverIdentity);
+                setFailed(false);
+                void api
+                  .setReveal(secretId, { serverIdentity: reveal.serverIdentity, revealed: false })
+                  .then(() => read.refresh())
+                  .catch(() => setFailed(true))
+                  .finally(() => setPending(null));
+              }}
+            >
+              {pending === reveal.serverIdentity ? 'Stopping…' : 'Stop sharing'}
+            </Button>
+          </li>
+        ))}
+      </ul>
+      {failed && (
+        <p role="alert" className="text-sm text-destructive">
+          Could not stop sharing the value. Try again.
+        </p>
+      )}
+    </section>
   );
 }
 

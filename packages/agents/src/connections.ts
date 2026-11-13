@@ -33,7 +33,13 @@ type AccountState = 'authorizing' | 'active' | 'refreshing' | 'reconnect-require
 /** The account reads chat lists connections with. Each acts for the person and returns no credentials. */
 export type ConnectionServices = {
   /** Present only when custom MCP connections are enabled. Searches the public MCP registry. */
-  mcp?: { search(query: string, signal?: AbortSignal): Promise<RegistryEntry[]> } | undefined;
+  mcp?:
+    | {
+        search(query: string, signal?: AbortSignal): Promise<RegistryEntry[]>;
+        /** Whether this workspace may run npm and PyPI server packages in a hosted sandbox. */
+        hosted?(workspaceId: string): Promise<boolean>;
+      }
+    | undefined;
   google?:
     | { availability(): { configured: boolean }; status(workspaceId: string, userId: string): Promise<GoogleStatus> }
     | undefined;

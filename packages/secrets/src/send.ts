@@ -14,7 +14,15 @@ import {
   valueParts,
 } from './contracts.ts';
 import { normalizeEndpoint } from '@tulipfarm/workspace-mcp-transport';
-import { mcpCredentialFrom, mcpSecretIds, type McpSecretCredential, type McpSecretVersion } from './mcp.ts';
+import {
+  hostedSecretRow,
+  hostedUses,
+  mcpCredentialFrom,
+  mcpSecretIds,
+  type McpHostedBinding,
+  type McpSecretCredential,
+  type McpSecretVersion,
+} from './mcp.ts';
 import { redactUrl } from './placement.ts';
 import type { SecretRequests } from './requests.ts';
 import { table, type Secrets, type SecretTransaction } from './service.ts';
@@ -233,6 +241,64 @@ export function mcpSecretSends(secrets: Secrets) {
           tool: input.tool,
           url: input.endpoint,
         });
+    },
+  };
+}
+
+/**
+ * Decrypts the saved secrets a hosted MCP server's settings name, for the member whose discovery or tool call starts
+ * its sandbox. With `expected`, a secret replaced or re-shared since then fails.
+ */
+export function hostedMcpSecretSends(secrets: Secrets) {
+  return {
+    async resolve(
+      tx: SecretTransaction,
+      input: {
+        workspaceId: string;
+        membershipId: string;
+        bindings: McpHostedBinding[];
+        serverIdentity: string;
+        expected?: McpSecretVersion[];
+      },
+    ) {
+      const membershipId = z.uuid().parse(input.membershipId);
+      const member = await tx.client.query(
+        `SELECT 1 FROM ${qualified(tx.schema, 'tf_memberships')} WHERE id = $1 AND removed_at IS NULL`,
+        [membershipId],
+      );
+      if (!member.rowCount) throw new AccessDenied();
+      const uses = hostedUses(input.bindings);
+      if (
+        input.expected &&
+        (input.expected.length !== uses.size || input.expected.some(({ secretId }) => !uses.has(secretId)))
+      )
+        throw new SecretError('conflict');
+      const resolved = [];
+      for (const [secretId, use] of uses) {
+        const { row, hosts, placement } = await hostedSecretRow(secrets, tx, secretId, use, input.serverIdentity);
+        const rights = await secrets.internal.access(tx, membershipId, row);
+        if (rights.status === 'expired') throw new SecretError('expired');
+        if (rights.status !== 'active') throw new SecretError('unavailable');
+        if (!rights.use) throw new AccessDenied();
+        const expected = input.expected?.find(version => version.secretId === secretId);
+        if (expected && (expected.version !== row.version || expected.policyVersion !== row.policy_version))
+          throw new SecretError('conflict');
+        const value = secrets.internal.cipher.decrypt(
+          { workspaceId: input.workspaceId, secretId: row.id, version: row.version, placement: row.placement },
+          row.kind,
+          row.credential,
+        );
+        resolved.push({
+          secretId: row.id,
+          version: row.version,
+          policyVersion: row.policy_version,
+          hosts,
+          placement,
+          value: 'value' in value ? value.value : `${value.username}:${value.password}`,
+          parts: valueParts(value),
+        });
+      }
+      return resolved;
     },
   };
 }

@@ -32,16 +32,30 @@ export function workspaceMcpCatalog(
           policyVersion: 'latest-usable-v1',
           syncedAt: snapshot.syncedAt,
           entries: snapshot.entries.map(
-            ({ id, name, title, description, version, endpoint, status, compatibility, authentication }) => ({
+            ({
               id,
               name,
               title,
               description,
               version,
               endpoint,
+              transport,
               status,
               compatibility,
               authentication,
+              package: pkg,
+            }) => ({
+              id,
+              name,
+              title,
+              description,
+              version,
+              endpoint,
+              ...(transport ? { transport } : {}),
+              status,
+              compatibility,
+              authentication,
+              ...(pkg ? { package: pkg } : {}),
             }),
           ),
         });
@@ -62,16 +76,30 @@ export function workspaceMcpCatalog(
       const snapshot =
         restored && (!live.syncedAt || restored.syncedAt > live.syncedAt) ? { ...restored, stale: true } : live;
       const publicEntries = snapshot.entries.map(
-        ({ id, name, title, description, version, endpoint, status, compatibility, authentication }) => ({
+        ({
           id,
           name,
           title,
           description,
           version,
           endpoint,
+          transport,
           status,
           compatibility,
           authentication,
+          package: pkg,
+        }) => ({
+          id,
+          name,
+          title,
+          description,
+          version,
+          endpoint,
+          ...(transport ? { transport } : {}),
+          status,
+          compatibility,
+          authentication,
+          ...(pkg ? { package: pkg } : {}),
         }),
       );
       const snapshotVersion = createHash('sha256')
@@ -104,13 +132,17 @@ export function workspaceMcpCatalog(
         description: entry.description,
         version: entry.version,
         endpoint: entry.endpoint,
+        transport: entry.transport ?? null,
+        package: entry.package ?? null,
         compatibility: entry.status === 'deprecated' ? ('unsupported' as const) : ('unknown' as const),
         reason:
           entry.status === 'deprecated'
             ? 'Registry listing is deprecated.'
-            : entry.compatibility === 'template-required'
-              ? 'Resolve endpoint template values before connecting.'
-              : 'Compatibility and authentication have not been verified.',
+            : entry.package
+              ? 'Runs as a hosted package. Compatibility has not been verified.'
+              : entry.compatibility === 'template-required'
+                ? 'Resolve endpoint template values before connecting.'
+                : 'Compatibility and authentication have not been verified.',
         authentication: entry.authentication === 'headers-required' ? ('headers' as const) : ('unknown' as const),
       }));
       const nextCursor =

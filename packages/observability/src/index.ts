@@ -1332,6 +1332,7 @@ export const backgroundJobs = [
   'onboarding-expiry',
   'abuse-expiry',
   'mcp-catalog-refresh',
+  'mcp-hosted-sweep',
   'conversation-stream-expiry',
   'object-cleanup',
   'table-search',

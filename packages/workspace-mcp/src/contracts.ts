@@ -21,9 +21,12 @@ export const mcpLimits = {
 };
 export const workspaceMcpCompatibility = commonCompatibility;
 export const mcpCompatibilityProfile = {
-  transport: 'streamable-http',
+  transports: ['streamable-http', 'sse'],
   protocolVersions: ['2025-03-26', '2025-06-18', '2025-11-25'],
+  legacyProtocolVersions: ['2024-11-05'],
   schemaDialect: 'http://json-schema.org/draft-07/schema#',
+  // MCP's default dialect. The allowed keywords mean the same in both, since array-form `items` is refused.
+  rootSchemaDialects: ['http://json-schema.org/draft-07/schema#', 'https://json-schema.org/draft/2020-12/schema'],
   unsupportedSchemaKeywords: [
     '$ref',
     '$dynamicRef',
@@ -51,9 +54,11 @@ export class McpError extends Error {
       | 'integration-blocked'
       | 'outcome-unknown'
       | 'oauth-conflict'
-      | 'secret-denied',
+      | 'secret-denied'
+      | 'install-failed',
+    options?: ErrorOptions,
   ) {
-    super(`Workspace MCP ${code}`);
+    super(`Workspace MCP ${code}`, options);
     this.name = 'McpError';
   }
 }
@@ -95,6 +100,72 @@ export type McpSelectionAuthority = {
     tools: Array<{ name: string; revision: string }>;
   }>;
 };
+const npmName = /^(?:@[a-z0-9-~][a-z0-9-._~]*\/)?[a-z0-9-~][a-z0-9-._~]*$/;
+const pypiName = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
+const semver =
+  /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
+const pep440 = /^(?:\d+!)?\d+(?:\.\d+)*(?:(?:a|b|rc)\d+)?(?:\.post\d+)?(?:\.dev\d+)?(?:\+[a-z0-9]+(?:\.[a-z0-9]+)*)?$/;
+/** PyPI compares names after lowercasing and folding runs of `-`, `_` and `.` into one `-`. */
+export const normalizePackageName = (registry: 'npm' | 'pypi', name: string) =>
+  registry === 'pypi' ? name.toLowerCase().replace(/[-_.]+/g, '-') : name;
+/** An npm or PyPI MCP server package at one exact version. Arguments are not secret. */
+export const mcpPackageSchema = z
+  .strictObject({
+    registry: z.enum(['npm', 'pypi']),
+    name: z.string().min(1).max(214),
+    version: z.string().min(1).max(128),
+    arguments: z
+      .array(
+        z
+          .string()
+          .max(512)
+          .regex(/^[^\0]*$/),
+      )
+      .max(16)
+      .optional(),
+  })
+  .refine(value =>
+    value.registry === 'npm'
+      ? npmName.test(value.name) && semver.test(value.version)
+      : pypiName.test(normalizePackageName('pypi', value.name)) && pep440.test(value.version),
+  );
+export type McpPackage = z.infer<typeof mcpPackageSchema>;
+/** The stable key of a package, without its version. A hosted integration's server identity is its digest. */
+export const packageKey = (value: Pick<McpPackage, 'registry' | 'name'>) => `${value.registry}:${value.name}`;
+const reservedEnv =
+  /^(PATH|HOME|PORT|NODE_OPTIONS|NODE_PATH|PYTHONPATH|PYTHONHOME|NODE_EXTRA_CA_CERTS|REQUESTS_CA_BUNDLE|CURL_CA_BUNDLE|LD_.*|SSL_.*|.*_PROXY|NPM_CONFIG_.*|PIP_.*|UV_.*|SUPERGATEWAY_.*|MCP_BRIDGE_.*)$/;
+const envName = z
+  .string()
+  .regex(/^[A-Z_][A-Z0-9_]{0,127}$/)
+  .refine(name => !reservedEnv.test(name));
+export const mcpHostedEnvSchema = z
+  .array(
+    z.union([
+      z.strictObject({
+        name: envName,
+        value: z
+          .string()
+          .regex(/^[^\0]*$/)
+          .refine(value => Buffer.byteLength(value) <= 4096),
+      }),
+      z.strictObject({ name: envName, secretId: z.uuid(), reveal: z.boolean().optional() }),
+    ]),
+  )
+  .max(20)
+  .refine(env => new Set(env.map(entry => entry.name)).size === env.length)
+  .refine(env => env.filter(entry => 'secretId' in entry).length <= 20);
+export type McpHostedEnv = z.infer<typeof mcpHostedEnvSchema>;
+/** Hosts a hosted integration may reach besides its secrets' own hosts. */
+export const mcpEgressSchema = z
+  .array(
+    z
+      .string()
+      .min(1)
+      .max(253)
+      .regex(/^(?=.*[a-z])[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/),
+  )
+  .max(20)
+  .refine(hosts => new Set(hosts).size === hosts.length);
 export const mcpCredentialSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('none') }),
   z.strictObject({
@@ -134,6 +205,7 @@ export const mcpCredentialSchema = z.discriminatedUnion('kind', [
     scopes: z.array(z.string().max(256)).max(512),
     accountId: z.string().max(512).nullable(),
   }),
+  z.strictObject({ kind: z.literal('hosted'), env: mcpHostedEnvSchema }),
   z.strictObject({ kind: z.literal('secret-bearer'), secretId: z.uuid() }),
   z.strictObject({
     kind: z.literal('secret-headers'),
@@ -146,13 +218,19 @@ export const mcpCredentialSchema = z.discriminatedUnion('kind', [
 ]);
 export type McpCredential = z.infer<typeof mcpCredentialSchema>;
 export type McpSecretCredential = Extract<McpCredential, { kind: 'secret-bearer' | 'secret-headers' }>;
+export type McpHostedCredential = Extract<McpCredential, { kind: 'hosted' }>;
+export type McpHostedBinding = { name: string; secretId: string; reveal: boolean };
+export const hostedBindings = (credential: McpHostedCredential): McpHostedBinding[] =>
+  credential.env.flatMap(entry =>
+    'secretId' in entry ? [{ name: entry.name, secretId: entry.secretId, reveal: entry.reveal === true }] : [],
+  );
 export const isSecretCredential = (credential: McpCredential): credential is McpSecretCredential =>
   credential.kind === 'secret-bearer' || credential.kind === 'secret-headers';
 export const secretIdsOf = (credential: McpSecretCredential) =>
   credential.kind === 'secret-bearer' ? [credential.secretId] : credential.secretIds;
 /** What the transport sends: a stored credential, or the bearer token or headers resolved from saved secrets. */
 export type McpSendCredential =
-  | Exclude<McpCredential, McpSecretCredential>
+  | Exclude<McpCredential, McpSecretCredential | McpHostedCredential>
   | { kind: 'headers'; headers: Record<string, string>; cookie?: string };
 export type McpSecretVersion = { secretId: string; version: number; policyVersion: number };
 export type McpSecretUsers = { membershipIds: string[]; teamIds: string[] };
@@ -180,6 +258,72 @@ export type McpSecretsPort = {
     input: { secretIds: string[]; membershipId: string; endpoint: string; tool: string },
   ) => Promise<void>;
 };
+/** Where a host writes a protected secret into the package's requests to the secret's own hosts. */
+export type McpHostPlacement = { kind: 'bearer' } | { kind: 'basic' } | { kind: 'header'; name: string };
+/** A saved secret a hosted integration names, read for one member. `value` is present only in the worker. */
+export type McpHostedSecret = McpSecretVersion & {
+  secretId: string;
+  /** The secret's host destinations. */
+  hosts: string[];
+  /** Null for a revealed secret, whose placement does not matter. */
+  placement: McpHostPlacement | null;
+};
+export type McpHostedSecretsPort = {
+  /**
+   * Checks, without decrypting, that every member and team in `users` may send each secret, that each protected
+   * secret has a bearer, basic or header placement and a host destination, and that each revealed secret's owner
+   * allowed `serverIdentity` to read it.
+   */
+  bind(
+    tx: AuthorizationTransaction,
+    input: { bindings: McpHostedBinding[]; serverIdentity: string; users: McpSecretUsers },
+  ): Promise<McpHostedSecret[]>;
+  /** Decrypts the secrets for one member, failing when any was replaced since `expected`. Worker only. */
+  resolve?: (
+    tx: AuthorizationTransaction,
+    input: {
+      workspaceId: string;
+      membershipId: string;
+      bindings: McpHostedBinding[];
+      serverIdentity: string;
+      expected?: McpSecretVersion[];
+    },
+  ) => Promise<Array<McpHostedSecret & { value: string; parts: string[] }>>;
+};
+export type McpHostLaunch = {
+  workspaceId: string;
+  integrationId: string;
+  generation: number;
+  fingerprint: string;
+  package: McpPackage;
+  /** Plain settings and revealed values. Present only in the worker. */
+  env: Record<string, string>;
+  protectedSecrets: Array<{ variable: string; value: string; hosts: string[]; placement: McpHostPlacement }>;
+  egress: string[];
+};
+/** Runs hosted MCP packages, one sandbox per integration. Supplied by an extension; absent means hosting is off. */
+export type McpHostPort = {
+  /** Builds if needed, then creates or wakes the sandbox for this generation and waits until healthy. */
+  provision(input: McpHostLaunch, signal: AbortSignal): Promise<{ sandboxId: string }>;
+  /** A URL and headers that reach the running sandbox's MCP port for a short time. */
+  connect(
+    input: { sandboxId: string },
+    signal: AbortSignal,
+  ): Promise<{ endpoint: string; headers: Record<string, string> }>;
+  /** Deletes the sandbox only if it still has this id and generation. */
+  remove(
+    input: { workspaceId: string; integrationId: string; sandboxId: string; generation: number },
+    signal: AbortSignal,
+  ): Promise<void>;
+  list(
+    signal: AbortSignal,
+  ): AsyncIterable<{ workspaceId: string; integrationId: string; sandboxId: string; generation: number }>;
+};
+/** The running sandbox a hosted integration's requests go to, instead of its synthetic endpoint. */
+export type McpHostTarget = { endpoint: string; headers: Record<string, string> };
+/** How a remote integration's server is reached; the older HTTP+SSE transport is detected when discovery falls back. */
+export const mcpTransportSchema = z.enum(['streamable-http', 'sse']);
+export type McpTransport = z.infer<typeof mcpTransportSchema>;
 export const secretVersionsSchema = z
   .array(
     z.strictObject({
@@ -188,7 +332,7 @@ export const secretVersionsSchema = z
       policyVersion: z.number().int().positive(),
     }),
   )
-  .max(10);
+  .max(20);
 export const mcpToolSchema = z.strictObject({
   name: z.string().min(1).max(256),
   description: z.string().max(32768),
@@ -204,9 +348,17 @@ export const mcpResultSchema = z.strictObject({
   isError: z.boolean().optional(),
 });
 export type McpResult = z.infer<typeof mcpResultSchema>;
-export type ProtocolContext = { endpoint: string; credential: McpSendCredential; signal: AbortSignal };
+export type ProtocolContext = {
+  endpoint: string;
+  credential: McpSendCredential;
+  signal: AbortSignal;
+  /** Set only for a hosted integration: the sandbox URL and headers that replace `endpoint`. */
+  hostTarget?: McpHostTarget;
+  /** The transport the last discovery detected; discovery itself always detects it again. */
+  transport?: McpTransport;
+};
 export type McpProtocolPort = {
-  discover(input: ProtocolContext): Promise<{ tools: McpTool[] }>;
+  discover(input: ProtocolContext): Promise<{ tools: McpTool[]; transport?: McpTransport }>;
   call(
     input: ProtocolContext & {
       tool: McpTool;
@@ -252,6 +404,11 @@ export type WorkspaceMcpOptions = {
   }) => Promise<McpSelectionAuthority>;
   resolveConfirmationCredential?: (workspaceId: string) => Promise<string>;
   secrets?: McpSecretsPort;
+  hostedSecrets?: McpHostedSecretsPort;
+  /** The sandbox host. Only the worker has one; without it hosted integrations cannot be discovered or called. */
+  host?: McpHostPort;
+  /** Whether new hosted integrations may be set up in a workspace. Defaults to false. */
+  hostedEnabled?: (workspaceId: string) => boolean | Promise<boolean>;
   admissionEnabled?: boolean;
   dispatchEnabled?: boolean;
 };
@@ -271,10 +428,14 @@ export const integrationRowSchema = z.object({
   refresh_started_at: z.date().nullable(),
   descriptor_approved: z.boolean(),
   version: z.number().int(),
-  auth_method: z.enum(['none', 'bearer', 'headers', 'oauth', 'secret-bearer', 'secret-headers']),
+  auth_method: z.enum(['none', 'bearer', 'headers', 'oauth', 'secret-bearer', 'secret-headers', 'hosted']),
   credential_expires_at: z.date().nullable(),
   discovery: z.enum(['queued', 'failed']).nullable(),
   status_reason: z.string().nullable(),
+  kind: z.enum(['remote', 'hosted']).default('remote'),
+  package: mcpPackageSchema.nullable().default(null),
+  egress: z.array(z.string()).nullable().default(null),
+  transport: mcpTransportSchema.nullable().default(null),
 });
 export const integrationMetadataSchema = z.object({
   id: z.uuid(),
@@ -292,6 +453,9 @@ export const integrationMetadataSchema = z.object({
   refreshDue: z.boolean(),
   discovery: integrationRowSchema.shape.discovery,
   statusReason: z.string().nullable(),
+  kind: integrationRowSchema.shape.kind,
+  package: mcpPackageSchema.nullable(),
+  egress: z.array(z.string()).nullable(),
   blocked: z.boolean(),
   barrierActionId: z.uuid().nullable(),
   capabilities: z.object({ read: z.boolean(), manage: z.boolean(), use: z.boolean() }),
