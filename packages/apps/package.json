@@ -11,6 +11,10 @@
       "types": "./dist/host-header-publisher.d.ts",
       "default": "./dist/host-header-publisher.js"
     },
+    "./sites": {
+      "types": "./dist/sites.d.ts",
+      "default": "./dist/sites.js"
+    },
     "./store": {
       "types": "./dist/store/index.d.ts",
       "default": "./dist/store/index.js"

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { appManifest, untar } from '../src/app-files.ts';
-import { selectAppPublisher } from '../src/app-composition.ts';
+import { selectAppPublisher } from '@tulipfarm/apps/sites';
 
 async function tarOf(build) {
   const root = await mkdtemp(join(tmpdir(), 'app-files-'));
