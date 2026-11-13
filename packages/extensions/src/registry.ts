@@ -18,6 +18,7 @@ import type {
   HookEvent,
   HookEvents,
   HookSubscriber,
+  McpHost,
   ProductAnalytics,
   ServerExtension,
   SocialPlatformApps,
@@ -48,6 +49,7 @@ type State = {
   creditPricing?: Registered<CreditPricing>;
   flagProvider?: Registered<FlagProvider>;
   socialPlatformApps?: Registered<SocialPlatformApps>;
+  mcpHost?: Registered<McpHost>;
   executionBackend?: Registered<ExecutionBackend>;
   usageSinks: Registered<UsageSink>[];
   analytics: Registered<ProductAnalytics>[];
@@ -113,7 +115,7 @@ export async function registerExtension(extension: ServerExtension, context: Ext
   };
   const wrap = <T>(value: T): Registered<T> => ({ extension: extension.name, value });
   const single = (
-    slot: 'creditGate' | 'creditPricing' | 'flagProvider' | 'socialPlatformApps' | 'executionBackend',
+    slot: 'creditGate' | 'creditPricing' | 'flagProvider' | 'socialPlatformApps' | 'executionBackend' | 'mcpHost',
     label: string,
   ) => {
     const owner = current[slot]?.extension ?? staged[slot]?.extension;
@@ -167,6 +169,18 @@ export async function registerExtension(extension: ServerExtension, context: Ext
         );
       staged.socialPlatformApps = wrap(resolver);
     }),
+    mcpHost: guard(host => {
+      single('mcpHost', 'MCP host');
+      if (
+        !['provision', 'connect', 'remove', 'list'].every(
+          method => typeof (host as Record<string, unknown> | undefined)?.[method] === 'function',
+        )
+      )
+        throw new ExtensionRegistrationError(
+          `Extension "${extension.name}" MCP host needs provision, connect, remove and list functions`,
+        );
+      staged.mcpHost = wrap(host);
+    }),
     usageSink: guard(sink => {
       staged.usageSinks.push(wrap(sink));
     }),
@@ -199,6 +213,7 @@ export async function registerExtension(extension: ServerExtension, context: Ext
   if (staged.flagProvider) current.flagProvider = staged.flagProvider;
   if (staged.socialPlatformApps) current.socialPlatformApps = staged.socialPlatformApps;
   if (staged.executionBackend) current.executionBackend = staged.executionBackend;
+  if (staged.mcpHost) current.mcpHost = staged.mcpHost;
   current.usageSinks.push(...staged.usageSinks);
   current.analytics.push(...staged.analytics);
   current.errorReporters.push(...staged.errorReporters);
@@ -233,6 +248,11 @@ export function flagProvider(): FlagProvider | undefined {
 /** The hosted social platform apps, or undefined when operator settings supply them. */
 export function socialPlatformApps(): SocialPlatformApps | undefined {
   return state().socialPlatformApps?.value;
+}
+
+/** The registered MCP package host, or undefined when hosted MCP integrations are unavailable. */
+export function mcpHost(): McpHost | undefined {
+  return state().mcpHost?.value;
 }
 
 export function executionBackend(): ExecutionBackend | undefined {

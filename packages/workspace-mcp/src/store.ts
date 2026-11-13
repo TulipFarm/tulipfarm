@@ -18,6 +18,9 @@ import {
   mcpOriginSchema,
   type McpSecretCredential,
   type McpSecretUsers,
+  type McpSecretVersion,
+  type McpHostedCredential,
+  hostedBindings,
   mcpSourcesSchema,
   workspaceMcpCompatibility,
   type WorkspaceMcpOptions,
@@ -30,6 +33,7 @@ import {
 import { mcpCredentialCipher } from './credentials.ts';
 import { canonicalJson, digest } from './validation.ts';
 
+export const hostedStorageVersion = 68;
 export const table = (tx: AuthorizationTransaction, name: string) => qualified(tx.schema, `tf_mcp_${name}`);
 export const originKey = (origin: McpOrigin) =>
   origin.kind === 'private-chat' ? `chat:${origin.conversationId}` : `task:${origin.taskId}`;
@@ -50,8 +54,10 @@ export function sourceUnion(...groups: McpSourceDependency[][]) {
 }
 export function createStore(options: WorkspaceMcpOptions) {
   const cipher = mcpCredentialCipher(options.keyring);
+  const workspaces = new WeakMap<AuthorizationTransaction, string>();
   async function transaction<T>(workspaceId: string, operation: (tx: AuthorizationTransaction) => Promise<T>) {
     return options.runtime.transaction(z.uuid().parse(workspaceId), workspaceMcpCompatibility, async tx => {
+      workspaces.set(tx, workspaceId);
       await lockAuthorization(tx, 'write');
       return operation(tx);
     });
@@ -79,6 +85,7 @@ export function createStore(options: WorkspaceMcpOptions) {
       connectionString: await options.resolveConfirmationCredential(workspaceId),
       capability: 'confirmation',
       operation: async tx => {
+        workspaces.set(tx, workspaceId);
         await lockAuthorization(tx, 'write');
         await currentMember(tx, actor);
         return operation(tx, actor);
@@ -164,8 +171,46 @@ export function createStore(options: WorkspaceMcpOptions) {
       throw new McpError('secret-denied');
     }
   }
+  /** Whether the workspace's storage has the hosted integration tables yet. */
+  function hostedStorage(tx: AuthorizationTransaction) {
+    return ((tx as { commonVersion?: number }).commonVersion ?? hostedStorageVersion) >= hostedStorageVersion;
+  }
+  function hostedCredential(workspaceId: string, row: IntegrationRow): McpHostedCredential {
+    const stored = credential(workspaceId, row);
+    if (stored.kind !== 'hosted' || row.kind !== 'hosted' || !row.package || !row.egress)
+      throw new McpError('credential-unavailable');
+    return stored;
+  }
+  /** Checks, without decrypting, that everyone who can use a hosted integration may give it the secrets it names. */
+  async function checkHosted(
+    tx: AuthorizationTransaction,
+    row: IntegrationRow,
+    credential: McpHostedCredential,
+  ): Promise<McpSecretVersion[]> {
+    if (!options.hostedSecrets) throw new McpError('disabled');
+    try {
+      const secrets = await options.hostedSecrets.bind(tx, {
+        bindings: hostedBindings(credential),
+        serverIdentity: row.server_identity,
+        users: await secretUsers(tx, row),
+      });
+      return secrets.map(({ secretId, version, policyVersion }) => ({ secretId, version, policyVersion }));
+    } catch {
+      throw new McpError('secret-denied');
+    }
+  }
   /** Why the saved secrets an integration sends cannot be used now, or null. Reads the secret list, not the credential. */
   async function secretProblem(tx: AuthorizationTransaction, row: IntegrationRow) {
+    if (row.credential && row.auth_method === 'hosted') {
+      const workspaceId = workspaces.get(tx);
+      if (!options.hostedSecrets || !workspaceId) return null;
+      try {
+        await checkHosted(tx, row, hostedCredential(workspaceId, row));
+        return null;
+      } catch {
+        return 'A saved secret this integration uses is no longer available to everyone who uses it, or its owner no longer lets this server read it.';
+      }
+    }
     if (!row.credential || (row.auth_method !== 'secret-bearer' && row.auth_method !== 'secret-headers')) return null;
     const ids = z
       .array(z.object({ secret_id: z.uuid() }))
@@ -235,6 +280,9 @@ export function createStore(options: WorkspaceMcpOptions) {
         row.credential_expires_at.getTime() <= Date.now() + 60_000,
       discovery: row.discovery,
       statusReason: row.status_reason ?? (await secretProblem(tx, row)),
+      kind: row.kind,
+      package: row.package,
+      egress: row.egress,
       blocked: await barrier(tx, row.id),
       barrierActionId: barrierRow?.action_id ?? null,
       capabilities: await capabilities(tx, actor, row),
@@ -365,6 +413,10 @@ export function createStore(options: WorkspaceMcpOptions) {
     active,
     credential,
     checkSecrets,
+    hostedStorage,
+    hostedCredential,
+    checkHosted,
+    secretUsers,
     cipher,
     barrier,
     metadata,

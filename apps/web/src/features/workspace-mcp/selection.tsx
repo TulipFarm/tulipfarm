@@ -6,7 +6,7 @@ import { Label } from '@tulipfarm/sprout/label';
 import { UnsavedChanges } from '@/features/tables/feedback';
 import { useMcpSelection, useMcpPrepareChat } from './queries';
 import type { McpApi, PrepareMcpChat } from './api';
-import type { Capabilities, Selection, SelectionOrigin } from './contracts';
+import { packageLabel, type Capabilities, type Selection, type SelectionOrigin } from './contracts';
 import { McpCommandFeedback, McpGate, McpRead, useMcpCommand } from './state';
 import { McpActions } from './actions';
 
@@ -213,7 +213,10 @@ function SelectionEditor({
                 onCheckedChange={checked => toggle(choice.integration.id, choice.slotId, checked === true)}
               />
               <span className="break-all">
-                {choice.integration.name} · {choice.integration.accountLabel ?? 'No verified account label'}
+                {choice.integration.name} ·{' '}
+                {choice.integration.package
+                  ? packageLabel(choice.integration.package)
+                  : (choice.integration.accountLabel ?? 'No verified account label')}
               </span>
             </Label>
             <p className="break-words text-sm text-muted-foreground">

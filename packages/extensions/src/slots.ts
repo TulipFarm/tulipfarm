@@ -238,6 +238,62 @@ export type SocialPlatformApps = {
   ): SocialPlatformAppResolution | Promise<SocialPlatformAppResolution>;
 };
 
+/** An npm or PyPI MCP server package at an exact version. */
+export type McpHostPackage = {
+  readonly registry: 'npm' | 'pypi';
+  readonly name: string;
+  readonly version: string;
+  readonly arguments?: readonly string[] | undefined;
+};
+
+/** Where the host writes a protected secret into requests to the secret's hosts. */
+export type McpHostPlacement =
+  | { readonly kind: 'bearer' }
+  | { readonly kind: 'basic' }
+  | { readonly kind: 'header'; readonly name: string };
+
+/** Everything a host needs to run one hosted MCP integration. Values are present only in the worker. */
+export type McpHostLaunch = {
+  readonly workspaceId: string;
+  readonly integrationId: string;
+  readonly generation: number;
+  readonly fingerprint: string;
+  readonly package: McpHostPackage;
+  /** Plain settings and revealed secret values. */
+  readonly env: Readonly<Record<string, string>>;
+  /** Secrets the package sees only as placeholders; the host writes the value into requests to `hosts`. */
+  readonly protectedSecrets: ReadonlyArray<{
+    readonly variable: string;
+    readonly value: string;
+    readonly hosts: readonly string[];
+    readonly placement: McpHostPlacement;
+  }>;
+  /** The only hosts the sandbox may reach. */
+  readonly egress: readonly string[];
+};
+
+/**
+ * Runs MCP server packages in isolated sandboxes, one per hosted integration. Without a registered host, hosted
+ * MCP integrations are unavailable.
+ */
+export type McpHost = {
+  /** Builds if needed, then creates or wakes the sandbox for this generation and waits until healthy. */
+  provision(input: McpHostLaunch, signal: AbortSignal): Promise<{ sandboxId: string }>;
+  /** A URL and headers that reach the running sandbox's MCP port for a short time. */
+  connect(
+    input: { sandboxId: string },
+    signal: AbortSignal,
+  ): Promise<{ endpoint: string; headers: Record<string, string> }>;
+  /** Deletes the sandbox only if it still has this id and generation. */
+  remove(
+    input: { workspaceId: string; integrationId: string; sandboxId: string; generation: number },
+    signal: AbortSignal,
+  ): Promise<void>;
+  list(
+    signal: AbortSignal,
+  ): AsyncIterable<{ workspaceId: string; integrationId: string; sandboxId: string; generation: number }>;
+};
+
 export type ExtensionMigration = { readonly name: string; readonly sql: string };
 
 /**
@@ -259,6 +315,8 @@ export type ExtensionRegistrar = {
   flagProvider(provider: FlagProvider): void;
   /** Single slot: a second extension setting it fails startup. */
   socialPlatformApps(resolver: SocialPlatformApps): void;
+  /** Single slot: a second extension setting it fails startup. Register it in the API and the worker alike. */
+  mcpHost(host: McpHost): void;
   usageSink(sink: UsageSink): void;
   analytics(analytics: ProductAnalytics): void;
   errorReporter(reporter: ErrorReporter): void;

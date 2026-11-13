@@ -25,6 +25,12 @@ export type FeatureFlagDefinition = {
 };
 
 export const featureFlags = {
+  'hosted-mcp': {
+    description: 'Set up MCP connections that run an npm or PyPI package on a sandbox host.',
+    default: false,
+    scope: 'workspace',
+    env: 'FEATURE_FLAG_HOSTED_MCP',
+  },
   'soul-repository-explorer': {
     description: 'Admin-only, permission-filtered read-only Soul repository explorer in workspace settings.',
     default: 'development',

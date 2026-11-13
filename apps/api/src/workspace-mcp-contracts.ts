@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { mcpHttpId } from './workspace-mcp-http.ts';
+import { mcpCatalogPackageSchema } from './workspace-mcp-catalog-cache.ts';
 
 const version = z.number().int().nonnegative();
 const revision = z.string().min(1).max(512);
@@ -11,6 +12,7 @@ export const mcpCapabilitiesSchema = z.discriminatedUnion('enabled', [
     canManageShared: z.boolean(),
     integrationsEnabled: z.boolean(),
     dispatchEnabled: z.boolean(),
+    hosted: z.boolean(),
   }),
 ]);
 export const mcpCatalogSchema = z.strictObject({
@@ -27,6 +29,8 @@ export const mcpCatalogSchema = z.strictObject({
         description: z.string(),
         version: z.string(),
         endpoint: z.string(),
+        transport: z.enum(['streamable-http', 'sse']).nullable(),
+        package: mcpCatalogPackageSchema.nullable(),
         compatibility: z.enum(['eligible', 'unknown', 'unsupported']),
         reason: z.string().nullable(),
         authentication: z.enum(['none', 'headers', 'bearer', 'oauth', 'unknown']),
@@ -44,7 +48,17 @@ export const mcpIntegrationSchema = z.strictObject({
   ownership: z.enum(['personal', 'shared']),
   endpoint: z.string(),
   accountLabel: z.string().nullable(),
-  authMethod: z.enum(['none', 'headers', 'bearer', 'oauth', 'secret-bearer', 'secret-headers']),
+  authMethod: z.enum(['none', 'headers', 'bearer', 'oauth', 'secret-bearer', 'secret-headers', 'hosted']),
+  kind: z.enum(['remote', 'hosted']),
+  package: z
+    .strictObject({
+      registry: z.enum(['npm', 'pypi']),
+      name: z.string(),
+      version: z.string(),
+      arguments: z.array(z.string()).optional(),
+    })
+    .nullable(),
+  egress: z.array(z.string()).nullable(),
   status: z.enum([
     'setup',
     'oauth-pending',
@@ -111,6 +125,17 @@ export const mcpAuthenticationSchema = z.discriminatedUnion('kind', [
       .refine(ids => new Set(ids).size === ids.length),
   }),
   z.strictObject({
+    kind: z.literal('hosted'),
+    env: z
+      .array(
+        z.union([
+          z.strictObject({ name: z.string().min(1).max(128), value: z.string().max(4096) }),
+          z.strictObject({ name: z.string().min(1).max(128), secretId: mcpHttpId, reveal: z.boolean().optional() }),
+        ]),
+      )
+      .max(20),
+  }),
+  z.strictObject({
     kind: z.literal('oauth'),
     client: z
       .strictObject({
@@ -124,7 +149,17 @@ export const mcpAuthenticationSchema = z.discriminatedUnion('kind', [
 export const mcpSetupSchema = z.strictObject({
   requestId: mcpHttpId,
   name: z.string().trim().min(1).max(120),
-  endpoint: z.url().max(2048),
+  /** A remote server's URL. A hosted server has a package instead. */
+  endpoint: z.url().max(2048).optional(),
+  package: z
+    .strictObject({
+      registry: z.enum(['npm', 'pypi']),
+      name: z.string().min(1).max(214),
+      version: z.string().min(1).max(128),
+      arguments: z.array(z.string().max(512)).max(16).optional(),
+    })
+    .optional(),
+  egress: z.array(z.string().min(1).max(253)).max(20).optional(),
   ownership: z.enum(['personal', 'shared']),
   catalogEntryId: revision.optional(),
   auth: mcpAuthenticationSchema,
@@ -255,6 +290,7 @@ export const mcpActionSchema = z.discriminatedUnion('visibility', [
       requester: z.string(),
       endpoint: z.string(),
       accountLabel: z.string().nullable(),
+      package: mcpIntegrationSchema.shape.package,
       authorizationEpoch: version,
       toolName: z.string(),
       toolRevision: revision,

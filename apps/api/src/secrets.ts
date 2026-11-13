@@ -24,6 +24,9 @@ import {
   secretRequestParams,
   secretRequestResultSchema,
   secretRequestViewSchema,
+  secretRevealBody,
+  secretRevealSchema,
+  secretRevealsSchema,
   secretsCapabilitiesSchema,
   secretsWorkspaceParams,
   secretSummarySchema,
@@ -207,6 +210,22 @@ export function registerSecrets(
       request => {
         const { workspaceId, secretId } = secret(request);
         return service.secrets.rename(workspaceId, userId(request), secretId, secretNamesBody.parse(request.body));
+      },
+    );
+    routes.get(
+      `${base}/:secretId/reveals`,
+      options('listSecretRevealsV1', secretRevealsSchema, secretParams),
+      async request => {
+        const { workspaceId, secretId } = secret(request);
+        return { reveals: await service.secrets.reveals(workspaceId, userId(request), secretId) };
+      },
+    );
+    routes.put(
+      `${base}/:secretId/reveals`,
+      options('setSecretRevealV1', secretRevealSchema, secretParams, secretRevealBody),
+      request => {
+        const { workspaceId, secretId } = secret(request);
+        return service.secrets.setReveal(workspaceId, userId(request), secretId, secretRevealBody.parse(request.body));
       },
     );
     routes.post(

@@ -4,6 +4,20 @@ import { McpNetworkError, normalizeEndpoint, type McpNetworkErrorCode } from './
 import { publicHttpsFetch } from './public-https.ts';
 
 const maximumRemotes = 64;
+const maximumPackages = 16;
+const environmentSchema = z.object({
+  name: z.string().max(128),
+  description: z.string().max(4096).optional(),
+  isRequired: z.boolean().optional(),
+  isSecret: z.boolean().optional(),
+});
+const packageSchema = z.object({
+  registryType: z.string().max(64).optional(),
+  identifier: z.string().max(512).optional(),
+  version: z.string().max(256).optional(),
+  transport: z.object({ type: z.string().max(64) }).optional(),
+  environmentVariables: z.array(environmentSchema).max(64).optional(),
+});
 const headerSchema = z.object({
   name: z.string().max(64),
   description: z.string().max(4096).optional(),
@@ -23,6 +37,7 @@ const serverSchema = z.object({
       )
       .max(maximumRemotes)
       .optional(),
+    packages: z.array(packageSchema).max(maximumPackages).optional(),
   }),
   _meta: z.object({
     'io.modelcontextprotocol.registry/official': z.object({
@@ -43,13 +58,24 @@ const maximumSnapshotBytes = 64 * 1024 * 1024 - 1024;
 const maximumEntries = 100000;
 const maximumRequests = 2000;
 
+/** An npm or PyPI package that runs a server over stdio, and the environment variables it declares. */
+export type RegistryPackage = {
+  registry: 'npm' | 'pypi';
+  name: string;
+  version: string;
+  environment: Array<{ name: string; description: string; required: boolean; secret: boolean }>;
+};
 export type RegistryEntry = {
   id: string;
   name: string;
   version: string;
   title: string;
   description: string;
+  /** Empty for a package entry, which has no endpoint until it is hosted. */
   endpoint: string;
+  /** The transport a remote endpoint's listing declares. Absent for a package entry. */
+  transport?: 'streamable-http' | 'sse';
+  package?: RegistryPackage;
   status: 'active' | 'deprecated';
   compatibility: 'unverified' | 'template-required';
   authentication: 'unknown' | 'headers-required';
@@ -79,13 +105,14 @@ export type RegistrySnapshot = {
   completedPages: number;
 };
 
-/** The Streamable HTTP endpoints one registry record lists, without deleted servers or unusable URLs. */
+/** The Streamable HTTP and HTTP+SSE endpoints one registry record lists, without deleted servers or unusable URLs. */
 function remoteEntries(record: z.infer<typeof serverSchema>): RegistryEntry[] {
   const official = record._meta['io.modelcontextprotocol.registry/official'];
   if (official.status === 'deleted') return [];
   const entries: RegistryEntry[] = [];
   for (const [index, remote] of (record.server.remotes ?? []).entries()) {
-    if (remote.type !== 'streamable-http') continue;
+    const transport = remote.type;
+    if (transport !== 'streamable-http' && transport !== 'sse') continue;
     const template = /\{[^{}]+\}/.test(remote.url);
     try {
       normalizeEndpoint(template ? remote.url.replace(/\{[^{}]+\}/g, 'template') : remote.url);
@@ -99,6 +126,7 @@ function remoteEntries(record: z.infer<typeof serverSchema>): RegistryEntry[] {
       title: record.server.title ?? record.server.name,
       description: record.server.description,
       endpoint: remote.url,
+      transport,
       status: official.status,
       compatibility: template ? 'template-required' : 'unverified',
       authentication: remote.headers?.some(header => header.isRequired) ? 'headers-required' : 'unknown',
@@ -106,6 +134,49 @@ function remoteEntries(record: z.infer<typeof serverSchema>): RegistryEntry[] {
   }
   return entries;
 }
+
+/** The npm and PyPI stdio packages one registry record lists, each pinned to the version it names. */
+function packageEntries(record: z.infer<typeof serverSchema>): RegistryEntry[] {
+  const official = record._meta['io.modelcontextprotocol.registry/official'];
+  if (official.status === 'deleted') return [];
+  const entries: RegistryEntry[] = [];
+  for (const [index, item] of (record.server.packages ?? []).entries()) {
+    const registry = item.registryType;
+    if (
+      (registry !== 'npm' && registry !== 'pypi') ||
+      !item.identifier ||
+      (item.transport?.type ?? 'stdio') !== 'stdio'
+    )
+      continue;
+    const version = item.version ?? record.server.version;
+    if (!/^[A-Za-z0-9][A-Za-z0-9.+!_-]*$/.test(version)) continue;
+    const environment = (item.environmentVariables ?? [])
+      .filter(variable => /^[A-Z_][A-Z0-9_]{0,127}$/.test(variable.name))
+      .slice(0, 20)
+      .map(variable => ({
+        name: variable.name,
+        description: variable.description ?? '',
+        required: variable.isRequired === true,
+        secret: variable.isSecret === true,
+      }));
+    entries.push({
+      id: `${record.server.name}@${record.server.version}:package:${index}`,
+      name: record.server.name,
+      version: record.server.version,
+      title: record.server.title ?? record.server.name,
+      description: record.server.description,
+      endpoint: '',
+      package: { registry, name: item.identifier, version, environment },
+      status: official.status,
+      compatibility: 'unverified',
+      authentication: environment.some(variable => variable.required && variable.secret)
+        ? 'headers-required'
+        : 'unknown',
+    });
+  }
+  return entries;
+}
+const registryEntries = (record: z.infer<typeof serverSchema>) => [...remoteEntries(record), ...packageEntries(record)];
 
 /** One bounded request to the registry's own name search, for a chat turn that cannot wait for a full catalog sync. */
 export async function searchRegistry(
@@ -149,7 +220,7 @@ export async function searchRegistry(
   } catch {
     throw new McpNetworkError('catalog-invalid-schema');
   }
-  return page.servers.flatMap(remoteEntries);
+  return page.servers.flatMap(registryEntries);
 }
 
 export function createRegistryCatalog({
@@ -286,14 +357,17 @@ export function createRegistryCatalog({
             throw new McpNetworkError('catalog-entry-limit');
           current.versions.set(record.server.name, record.server.version);
           const prefix = `${record.server.name}@${record.server.version}:`;
-          for (let index = 0; index < maximumRemotes; index++) {
-            const id = `${prefix}${index}`;
+          const ids = [
+            ...Array.from({ length: maximumRemotes }, (_, index) => `${prefix}${index}`),
+            ...Array.from({ length: maximumPackages }, (_, index) => `${prefix}package:${index}`),
+          ];
+          for (const id of ids) {
             const previous = next.get(id);
             if (!previous) continue;
             current.nextBytes -= Buffer.byteLength(JSON.stringify(previous)) + (next.size > 1 ? 1 : 0);
             next.delete(id);
           }
-          for (const entry of remoteEntries(record)) {
+          for (const entry of registryEntries(record)) {
             if (next.size >= maximumEntries) throw new McpNetworkError('catalog-entry-limit');
             const bytes = Buffer.byteLength(JSON.stringify(entry)) + (next.size ? 1 : 0);
             if (current.nextBytes + bytes > maximumSnapshotBytes) throw new McpNetworkError('catalog-byte-limit');

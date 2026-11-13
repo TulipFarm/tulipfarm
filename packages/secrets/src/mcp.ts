@@ -136,3 +136,98 @@ export async function bindMcpSecrets(
   mcpCredentialFrom(input.credential, parts);
   return versions;
 }
+
+/** A saved secret a hosted MCP server's settings name, and whether the server may read its real value. */
+export type McpHostedBinding = { name: string; secretId: string; reveal: boolean };
+export type McpHostPlacement = { kind: 'bearer' } | { kind: 'basic' } | { kind: 'header'; name: string };
+export type McpHostedSecret = McpSecretVersion & { hosts: string[]; placement: McpHostPlacement | null };
+
+export function hostPlacement(placement: Placement): McpHostPlacement | null {
+  if (placement.kind === 'bearer' || placement.kind === 'basic') return { kind: placement.kind };
+  if (placement.kind === 'header') return { kind: 'header', name: placement.name };
+  return null;
+}
+
+/**
+ * Loads the destinations of a secret a hosted MCP server names and checks how it may use it. A protected secret
+ * stays outside the server: the host adds it to requests for the secret's own hosts, so it needs a bearer, basic or
+ * header placement and at least one host destination. A revealed one reaches the server as a plain value, which its
+ * owner must have allowed for this server identity.
+ */
+export async function hostedSecretRow(
+  secrets: Secrets,
+  tx: SecretTransaction,
+  secretId: string,
+  uses: { protected: boolean; reveal: boolean },
+  serverIdentity: string,
+) {
+  const row = await secrets.internal.load(tx, secretId, 'share');
+  if (row.lifetime !== 'saved') throw new SecretError('unavailable');
+  const hosts = z
+    .array(z.object({ value: z.string() }))
+    .parse(
+      (
+        await tx.client.query(
+          `SELECT value FROM ${table(tx, 'destinations')} WHERE secret_id = $1 AND kind = 'host' ORDER BY value`,
+          [row.id],
+        )
+      ).rows,
+    )
+    .map(({ value }) => value);
+  const placement = hostPlacement(row.placement);
+  if (uses.protected && (!placement || !hosts.length)) throw new SecretError('placement-unsupported');
+  if (
+    uses.reveal &&
+    !(
+      await tx.client.query(
+        `SELECT 1 FROM ${table(tx, 'reveals')} WHERE secret_id = $1 AND server_identity = $2 AND granted_by = $3`,
+        [row.id, serverIdentity, row.owner_membership_id],
+      )
+    ).rowCount
+  )
+    throw new SecretError('destination-denied');
+  return { row, hosts, placement };
+}
+
+export function hostedUses(bindings: readonly McpHostedBinding[]) {
+  const uses = new Map<string, { protected: boolean; reveal: boolean }>();
+  if (bindings.length > 20) throw new SecretError('invalid-input');
+  for (const binding of bindings) {
+    const use = uses.get(z.uuid().parse(binding.secretId)) ?? { protected: false, reveal: false };
+    if (binding.reveal) use.reveal = true;
+    else use.protected = true;
+    uses.set(binding.secretId, use);
+  }
+  return uses;
+}
+
+/**
+ * Checks, without decrypting, that a hosted MCP server may be given these saved secrets for every member and team
+ * that can use it. Returns the versions in force now, with each secret's hosts and placement.
+ */
+export async function bindHostedMcpSecrets(
+  secrets: Secrets,
+  tx: SecretTransaction,
+  input: { bindings: McpHostedBinding[]; serverIdentity: string; users: McpSecretUsers },
+): Promise<McpHostedSecret[]> {
+  const result: McpHostedSecret[] = [];
+  for (const [secretId, uses] of hostedUses(input.bindings)) {
+    const { row, hosts, placement } = await hostedSecretRow(secrets, tx, secretId, uses, input.serverIdentity);
+    for (const membershipId of new Set(input.users.membershipIds)) {
+      const rights = await secrets.internal.access(tx, membershipId, row);
+      if (rights.status === 'expired') throw new SecretError('expired');
+      if (rights.status !== 'active') throw new SecretError('unavailable');
+      if (!rights.use) throw new SecretError('not-found');
+    }
+    for (const teamId of new Set(input.users.teamIds)) {
+      const granted = z
+        .object({ granted: z.boolean() })
+        .parse(
+          (await tx.client.query(`SELECT ${grantedTo(tx, '$2')} AS granted`, [row.id, z.uuid().parse(teamId)])).rows[0],
+        );
+      if (!granted.granted) throw new SecretError('not-found');
+    }
+    result.push({ secretId: row.id, version: row.version, policyVersion: row.policy_version, hosts, placement });
+  }
+  return result;
+}

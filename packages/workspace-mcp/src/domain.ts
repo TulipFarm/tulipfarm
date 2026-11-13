@@ -21,6 +21,14 @@ import {
   integrationMetadataSchema,
   isSecretCredential,
   secretIdsOf,
+  hostedBindings,
+  mcpPackageSchema,
+  mcpEgressSchema,
+  normalizePackageName,
+  type McpHostTarget,
+  mcpTransportSchema,
+  type McpTransport,
+  type McpPackage,
   type McpCredential,
   type McpSecretVersion,
   type McpSendCredential,
@@ -39,6 +47,7 @@ import {
   digest,
   endpointIdentity,
   serverIdentity,
+  hostedIdentity,
   toolRevision,
   toolCompatibility,
   validateArguments,
@@ -47,6 +56,7 @@ import {
 } from './validation.ts';
 import { oauthMethods } from './oauth.ts';
 import { selectionMethods } from './selections.ts';
+import { hostedMethods } from './hosted.ts';
 import { mcpRecommendations } from './recommendations.ts';
 
 const policySchema = z.object({
@@ -75,6 +85,26 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
   const dispatchEnabled = () => {
     if (!options.dispatchEnabled) throw new McpError('disabled');
   };
+  const hosted = hostedMethods(options, store);
+  async function hostedAllowed(workspaceId: string) {
+    if (!options.hostedEnabled || !(await options.hostedEnabled(workspaceId))) throw new McpError('disabled');
+  }
+  /** Where a hosted integration's package and synthetic endpoint come from, checked against the credential. */
+  function hostedSetup(
+    credential: McpCredential,
+    input: { package?: McpPackage | undefined; egress?: string[] | undefined },
+  ) {
+    if (credential.kind !== 'hosted') {
+      if (input.package || input.egress) throw new McpError('invalid-input');
+      return null;
+    }
+    if (!input.package) throw new McpError('invalid-input');
+    const pkg = mcpPackageSchema.parse({
+      ...input.package,
+      name: normalizePackageName(input.package.registry, input.package.name),
+    });
+    return { package: pkg, egress: mcpEgressSchema.parse(input.egress ?? []), ...hostedIdentity(pkg) };
+  }
   async function policies(tx: AuthorizationTransaction, id: string) {
     return z
       .array(policySchema)
@@ -300,6 +330,15 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
   /** Checks that everyone who can use the integration may send its saved secrets to its endpoint, and lists them. */
   async function bindSecrets(tx: AuthorizationTransaction, row: IntegrationRow, credential: McpCredential) {
     await tx.client.query(`DELETE FROM ${table(tx, 'integration_secrets')} WHERE integration_id=$1`, [row.id]);
+    if (credential.kind === 'hosted') {
+      const versions = await store.checkHosted(tx, row, credential);
+      for (const secretId of new Set(hostedBindings(credential).map(binding => binding.secretId)))
+        await tx.client.query(
+          `INSERT INTO ${table(tx, 'integration_secrets')} (integration_id,secret_id) VALUES ($1,$2)`,
+          [row.id, secretId],
+        );
+      return versions;
+    }
     if (!isSecretCredential(credential)) return [];
     const versions = await store.checkSecrets(tx, row, credential);
     for (const secretId of secretIdsOf(credential))
@@ -321,6 +360,12 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
     expected?: McpSecretVersion[],
   ): Promise<{ credential: McpSendCredential; secrets: McpSecretVersion[]; values: string[] }> {
     const stored = store.credential(workspaceId, row);
+    if (stored.kind === 'hosted') {
+      // The sandbox holds the values; here only check that every user may still give it the same secret versions.
+      const secrets = await store.checkHosted(tx, row, stored);
+      if (expected && !sameVersions(secrets, expected)) throw new McpError('credential-unavailable');
+      return { credential: { kind: 'none' }, secrets, values: [] };
+    }
     if (!isSecretCredential(stored)) return { credential: stored, secrets: [], values: [] };
     if (!options.secrets?.resolve) throw new McpError('credential-unavailable');
     try {
@@ -335,23 +380,39 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
       throw new McpError('credential-unavailable');
     }
   }
-  async function discoverPrepared(row: IntegrationRow, prepared: { credential: McpSendCredential; values: string[] }) {
+  async function discoverPrepared(
+    row: IntegrationRow,
+    prepared: { credential: McpSendCredential; values: string[] },
+    hostTarget?: McpHostTarget,
+  ) {
     const { credential, values } = prepared;
     let tools: McpTool[];
+    let transport: McpTransport | null;
     try {
       const response = await timed(Date.now() + mcpLimits.discoveryMs, signal =>
-        options.protocol.discover({ endpoint: row.endpoint, credential, signal }),
+        options.protocol.discover({
+          endpoint: row.endpoint,
+          credential,
+          signal,
+          ...(hostTarget ? { hostTarget } : {}),
+        }),
       );
       bounded(response, mcpLimits.catalogBytes);
       rejectReflectedSecrets(response, credential, values);
       tools = z.array(mcpToolSchema).max(mcpLimits.discoveredTools).parse(response.tools);
       if (new Set(tools.map(tool => tool.name)).size !== tools.length) throw new Error();
+      transport = mcpTransportSchema.nullable().parse(response.transport ?? null);
     } catch {
       throw new McpError('discovery-failed');
     }
-    return tools;
+    return { tools, transport };
   }
-  async function saveDiscovery(tx: AuthorizationTransaction, row: IntegrationRow, tools: McpTool[]) {
+  async function saveDiscovery(
+    tx: AuthorizationTransaction,
+    row: IntegrationRow,
+    { tools, transport }: { tools: McpTool[]; transport: McpTransport | null },
+  ) {
+    await tx.client.query(`UPDATE ${table(tx, 'integrations')} SET transport=$2 WHERE id=$1`, [row.id, transport]);
     const recommendations = await watchIntegrationRecommendations(tx, row.id, () => mcpRecommendations(tx, row.id));
     const names = tools.map(tool => tool.name);
     await tx.client.query(
@@ -361,7 +422,9 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
     for (const tool of tools) {
       const revision = toolRevision(tool);
       await tx.client.query(
-        `INSERT INTO ${table(tx, 'tool_revisions')} (integration_id,name,revision,tool,compatibility_reason) VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`,
+        `INSERT INTO ${table(tx, 'tool_revisions')} (integration_id,name,revision,tool,compatibility_reason) VALUES ($1,$2,$3,$4,$5)
+        ON CONFLICT (integration_id,name,revision) DO UPDATE SET compatibility_reason=EXCLUDED.compatibility_reason
+        WHERE tf_mcp_tool_revisions.compatibility_reason IS DISTINCT FROM EXCLUDED.compatibility_reason`,
         [row.id, tool.name, revision, tool, toolCompatibility(tool)],
       );
       await tx.client.query(
@@ -383,12 +446,18 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
           requestId: z.uuid().optional(),
           name: z.string().min(1).max(200),
           ownership: z.enum(['personal', 'shared']),
-          endpoint: z.string(),
+          endpoint: z.string().optional(),
           credential: mcpCredentialSchema,
+          package: mcpPackageSchema.optional(),
+          egress: z.array(z.string()).optional(),
         })
         .parse(input);
-      const endpoint = endpointIdentity(value.endpoint);
+      const setup = hostedSetup(value.credential, value);
+      if (setup) await hostedAllowed(workspaceId);
+      else if (value.endpoint === undefined) throw new McpError('invalid-input');
+      const endpoint = setup ? setup.endpoint : endpointIdentity(value.endpoint!);
       return store.authorized(workspaceId, principal, async (tx, actor) => {
+        if (setup && !store.hostedStorage(tx)) throw new McpError('disabled');
         const result = await store.command(
           tx,
           actor,
@@ -414,19 +483,22 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
               JSON.stringify(value.credential),
             );
             rejectReflectedSecrets({ endpoint, name: value.name }, value.credential);
+            const columns = [
+              id,
+              value.ownership,
+              value.ownership === 'personal' ? actor.membershipId : null,
+              value.name,
+              endpoint,
+              setup ? setup.serverIdentity : serverIdentity(endpoint),
+              encrypted,
+              value.credential.kind,
+              value.credential.kind === 'oauth' ? value.credential.expiresAt : null,
+            ];
             await tx.client.query(
-              `INSERT INTO ${table(tx, 'integrations')} (id,ownership,owner_membership_id,name,endpoint,server_identity,lifecycle,credential,auth_method,credential_expires_at) VALUES ($1,$2,$3,$4,$5,$6,'active',$7,$8,$9)`,
-              [
-                id,
-                value.ownership,
-                value.ownership === 'personal' ? actor.membershipId : null,
-                value.name,
-                endpoint,
-                serverIdentity(endpoint),
-                encrypted,
-                value.credential.kind,
-                value.credential.kind === 'oauth' ? value.credential.expiresAt : null,
-              ],
+              setup
+                ? `INSERT INTO ${table(tx, 'integrations')} (id,ownership,owner_membership_id,name,endpoint,server_identity,lifecycle,credential,auth_method,credential_expires_at,kind,package,egress) VALUES ($1,$2,$3,$4,$5,$6,'active',$7,$8,$9,'hosted',$10,$11)`
+                : `INSERT INTO ${table(tx, 'integrations')} (id,ownership,owner_membership_id,name,endpoint,server_identity,lifecycle,credential,auth_method,credential_expires_at) VALUES ($1,$2,$3,$4,$5,$6,'active',$7,$8,$9)`,
+              setup ? [...columns, JSON.stringify(setup.package), JSON.stringify(setup.egress)] : columns,
             );
             if (value.ownership === 'shared') {
               await setIntegrationManagers(tx, actor, 'mcp', id, { memberIds: [actor.membershipId], teamIds: [] });
@@ -641,7 +713,7 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
         );
       });
     },
-    replaceCredential(workspaceId: string, principal: McpPrincipal, id: string, input: unknown) {
+    async replaceCredential(workspaceId: string, principal: McpPrincipal, id: string, input: unknown) {
       admitted();
       const value = z
         .strictObject({
@@ -650,9 +722,13 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
           credential: mcpCredentialSchema,
           endpoint: z.string().optional(),
           expectedSecretVersion: z.number().int().positive().optional(),
+          package: mcpPackageSchema.optional(),
+          egress: z.array(z.string()).optional(),
         })
         .refine(value => (value.requestId ? !!value.expectedVersion : !!value.expectedSecretVersion))
         .parse(input);
+      const setup = hostedSetup(value.credential, value);
+      if (setup) await hostedAllowed(workspaceId);
       return store.authorized(workspaceId, principal, async (tx, actor) => {
         const row = await store.load(tx, id);
         await store.permit(tx, actor, row, 'manage');
@@ -671,7 +747,13 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
                 : row.secret_version !== value.expectedSecretVersion)
             )
               throw new McpError('conflict');
-            const endpoint = endpointIdentity(value.endpoint ?? row.endpoint);
+            // A hosted integration keeps its package name, so its server identity and approvals stay with it.
+            if (
+              (row.kind === 'hosted') !== !!setup ||
+              (setup && (setup.serverIdentity !== row.server_identity || value.endpoint !== undefined))
+            )
+              throw new McpError('invalid-input');
+            const endpoint = setup ? row.endpoint : endpointIdentity(value.endpoint ?? row.endpoint);
             rejectReflectedSecrets({ endpoint, name: row.name }, value.credential);
             const recommendations = await watchIntegrationRecommendations(tx, id, () => mcpRecommendations(tx, id));
             await store.invalidate(tx, row);
@@ -680,7 +762,7 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
               JSON.stringify(value.credential),
             );
             await tx.client.query(
-              `UPDATE ${table(tx, 'integrations')} SET credential=$2,secret_version=secret_version+1,version=version+1,endpoint=$3,server_identity=$4,lifecycle='active',auth_method=$5,credential_expires_at=$6 WHERE id=$1`,
+              `UPDATE ${table(tx, 'integrations')} SET credential=$2,secret_version=secret_version+1,version=version+1,endpoint=$3,server_identity=$4,lifecycle='active',auth_method=$5,credential_expires_at=$6,transport=NULL WHERE id=$1`,
               [
                 id,
                 encrypted,
@@ -690,6 +772,12 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
                 value.credential.kind === 'oauth' ? value.credential.expiresAt : null,
               ],
             );
+            if (setup)
+              await tx.client.query(`UPDATE ${table(tx, 'integrations')} SET package=$2,egress=$3 WHERE id=$1`, [
+                id,
+                JSON.stringify(setup.package),
+                JSON.stringify(setup.egress),
+              ]);
             await bindSecrets(tx, await store.load(tx, id), value.credential);
             await recommendations();
             return store.metadata(tx, actor, await store.load(tx, id));
@@ -754,7 +842,12 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
         return { row, result: null, material: await material(tx, workspaceId, actor.membershipId, row) };
       });
       if (before.result) return before.result;
-      const tools = await discoverPrepared(before.row, before.material!);
+      const target = await hosted.ensureHosted(workspaceId, { principal }, id);
+      const discovered = await discoverPrepared(
+        before.row,
+        { ...before.material!, values: [...before.material!.values, ...(target?.values ?? [])] },
+        target?.hostTarget,
+      );
       return store.authorized(workspaceId, principal, async (tx, actor) => {
         const row = await store.load(tx, id);
         await store.permit(tx, actor, row, 'manage');
@@ -773,7 +866,7 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
               (command && row.version !== command.expectedVersion)
             )
               throw new McpError('conflict');
-            await saveDiscovery(tx, row, tools);
+            await saveDiscovery(tx, row, discovered);
             await tx.client.query(
               `UPDATE ${table(tx, 'integrations')} SET version=version+1,discovery=NULL,status_reason=NULL WHERE id=$1`,
               [id],
@@ -973,7 +1066,11 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
           throw new AccessDenied();
         if (await store.barrier(tx, row.id)) throw new McpError('integration-blocked');
         const stored = store.credential(workspaceId, row);
-        const secrets = isSecretCredential(stored) ? await store.checkSecrets(tx, row, stored) : [];
+        const secrets = isSecretCredential(stored)
+          ? await store.checkSecrets(tx, row, stored)
+          : stored.kind === 'hosted'
+            ? await store.checkHosted(tx, row, stored)
+            : [];
         const sources = sourceUnion(authority.sources, [
           { kind: 'mcp-integration', integrationId: row.id, authorizationEpoch: row.authorization_epoch },
         ]);
@@ -1181,7 +1278,17 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
         await service.recover(workspaceId);
         return service.dispatchStatus(workspaceId, id);
       }
-      const discovered = await discoverPrepared(prepared.row, prepared.material);
+      // A hosted sandbox is provisioned before the claim, so build and start time never count against the call deadline.
+      const target = await hosted.ensureHosted(
+        workspaceId,
+        { membershipId: prepared.action.requester.membershipId },
+        prepared.row.id,
+      );
+      const discovered = await discoverPrepared(
+        prepared.row,
+        { ...prepared.material, values: [...prepared.material.values, ...(target?.values ?? [])] },
+        target?.hostTarget,
+      );
       await store.transaction(workspaceId, async tx => {
         const row = await store.load(tx, prepared.row.id);
         if (
@@ -1231,7 +1338,15 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
               )
             ).rows[0],
           );
-        return { action, row, tool: policy.tool, credential, values, token, deadline: deadline.getTime() };
+        return {
+          action,
+          row,
+          tool: policy.tool,
+          credential,
+          values: [...values, ...(target?.values ?? [])],
+          token,
+          deadline: deadline.getTime(),
+        };
       });
       if (!claimed) return service.dispatchStatus(workspaceId, id);
       const authorize = async () => {
@@ -1263,6 +1378,8 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
             deadline: claimed.deadline,
             authorize,
             signal,
+            ...(target ? { hostTarget: target.hostTarget } : {}),
+            ...(claimed.row.transport ? { transport: claimed.row.transport } : {}),
           });
         });
         bounded(response, mcpLimits.responseBytes);
@@ -1419,8 +1536,17 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
     },
     ...oauthMethods(options, store),
     ...selectionMethods(options, store),
+    sweepHosted: hosted.sweepHosted,
   };
   return service;
+}
+function sameVersions(actual: readonly McpSecretVersion[], expected: readonly McpSecretVersion[]) {
+  const key = (secrets: readonly McpSecretVersion[]) =>
+    secrets
+      .map(secret => `${secret.secretId}:${secret.version}:${secret.policyVersion}`)
+      .sort()
+      .join(',');
+  return key(actual) === key(expected);
 }
 async function timed<T>(deadline: number, operation: (signal: AbortSignal) => Promise<T>): Promise<T> {
   const controller = new AbortController();

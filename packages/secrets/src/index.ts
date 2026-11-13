@@ -14,6 +14,7 @@ export {
 export * from './requests.ts';
 export { chatSecretTools, taskSecretTools, type ChatSecretTools, type TaskSecretTools } from './chat-tools.ts';
 export {
+  bindHostedMcpSecrets,
   bindMcpSecrets,
   mcpCredentialFrom,
   mcpSecretIds,
@@ -21,4 +22,7 @@ export {
   type McpSecretUsers,
   type McpSecretVersion,
   type McpResolvedCredential,
+  type McpHostedBinding,
+  type McpHostedSecret,
+  type McpHostPlacement,
 } from './mcp.ts';

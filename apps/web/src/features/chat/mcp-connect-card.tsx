@@ -9,9 +9,11 @@ import { integrationLabels } from '@/features/workspace-mcp/integrations';
 import { useMcpIntegrations } from '@/features/workspace-mcp/queries';
 import type { McpApi } from '@/features/workspace-mcp/api';
 import type { Capabilities } from '@/features/workspace-mcp/contracts';
+import { useFlag } from '@/lib/feature-flags';
 import type { IntegrationCardView } from './conversation-api';
 
 type Proposal = Extract<IntegrationCardView, { action: 'mcp' }>;
+type PackageProposal = Extract<IntegrationCardView, { action: 'mcp-package' }>;
 const signIn = {
   oauth: 'Sign in with the provider',
   secrets: 'Saved secrets you choose',
@@ -113,6 +115,144 @@ function Connect({
           proposal={card}
           close={() => setOpen(false)}
           authorizing={(next, url) => authorizations.set(next, url)}
+          saved={next => {
+            setSavedId(next);
+            setOpen(false);
+            void read.refresh();
+          }}
+        />
+      )}
+    </ReviewCard>
+  );
+}
+
+/**
+ * A chat's suggestion to run an npm or PyPI MCP package in a sandbox. Nothing is installed until the person
+ * reviews the package and its settings and submits the form.
+ */
+export function McpPackageCard({
+  workspaceId,
+  slug,
+  card,
+}: {
+  workspaceId: string;
+  slug: string;
+  card: PackageProposal;
+}) {
+  return (
+    <McpGate workspaceId={workspaceId}>
+      {(api, capabilities) => <ConnectPackage api={api} capabilities={capabilities} slug={slug} card={card} />}
+    </McpGate>
+  );
+}
+
+function ConnectPackage({
+  api,
+  capabilities,
+  slug,
+  card,
+}: {
+  api: McpApi;
+  capabilities: Capabilities;
+  slug: string;
+  card: PackageProposal;
+}) {
+  const flag = useFlag('hosted-mcp');
+  const read = useMcpIntegrations(api);
+  const [open, setOpen] = useState(false);
+  const [savedId, setSavedId] = useState<string | null>(null);
+  const available = flag && capabilities.hosted && capabilities.integrationsEnabled;
+  const existing =
+    read.state.kind === 'ready'
+      ? read.state.data.integrations.find(
+          integration =>
+            integration.ownership === 'personal' &&
+            integration.package?.registry === card.package.registry &&
+            integration.package.name === card.package.name,
+        )
+      : undefined;
+  const id = savedId ?? existing?.id ?? null;
+  const secrets = card.settings.filter(setting => setting.secret);
+  const plain = card.settings.filter(setting => !setting.secret);
+  return (
+    <ReviewCard
+      label={`Run ${card.name}`}
+      icon={<Plug size={14} />}
+      title={`Run ${card.name}`}
+      badge={
+        existing
+          ? {
+              label: integrationLabels[existing.status],
+              variant: existing.status === 'ready' ? 'info' : existing.status === 'error' ? 'warning' : 'secondary',
+            }
+          : { label: 'Not installed', variant: 'secondary' }
+      }
+      settled={existing?.status === 'ready'}
+      actions={
+        id ? (
+          <Button
+            nativeButton={false}
+            render={
+              <Link to="/$workspaceSlug/integrations" params={{ workspaceSlug: slug }} hash={`review-mcp-${id}`} />
+            }
+          >
+            Review {card.name} tools
+          </Button>
+        ) : !open && available ? (
+          <Button onClick={() => setOpen(true)}>Set up {card.name}</Button>
+        ) : undefined
+      }
+      status={
+        !available && !id ? (
+          <p role="status" className="text-sm">
+            Running MCP packages is not available in this workspace.
+          </p>
+        ) : id ? (
+          <p role="status" className="text-sm">
+            Review its tools, then select {card.name} in a chat to use it.
+          </p>
+        ) : undefined
+      }
+    >
+      <ReviewRows>
+        <ReviewRow label="Package">
+          <span className="break-all font-mono">
+            {card.package.registry === 'npm' ? 'npm' : 'PyPI'} · {card.package.name}
+          </span>
+        </ReviewRow>
+        <ReviewRow label="Version">{card.package.version}</ReviewRow>
+        <ReviewRow label="Settings">
+          {plain.length ? (
+            <span className="break-all font-mono">{plain.map(item => item.name).join(', ')}</span>
+          ) : (
+            'None'
+          )}
+        </ReviewRow>
+        <ReviewRow label="Secrets">
+          {secrets.length ? (
+            <span>
+              <span className="break-all font-mono">{secrets.map(item => item.name).join(', ')}</span>. Protected by
+              default: the package never sees the value unless you let it.
+            </span>
+          ) : (
+            'None'
+          )}
+        </ReviewRow>
+        <ReviewRow label="Can reach">
+          {card.egress.length ? (
+            <span className="break-all font-mono">{card.egress.join(', ')}</span>
+          ) : (
+            'Only the websites of the secrets you choose'
+          )}
+        </ReviewRow>
+        <ReviewRow label="Who can use it">Only you</ReviewRow>
+      </ReviewRows>
+      {open && !id && (
+        <McpSetup
+          api={api}
+          capabilities={capabilities}
+          packageProposal={card}
+          close={() => setOpen(false)}
           saved={next => {
             setSavedId(next);
             setOpen(false);

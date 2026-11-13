@@ -7,9 +7,10 @@ import { SearchField } from '@tulipfarm/sprout/search-field';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
 import { useMcpIntegrations, useMcpCatalog } from './queries';
 import type { McpApi } from './api';
-import type { Capabilities, CatalogEntry, Integration } from './contracts';
+import { packageLabel, type Capabilities, type CatalogEntry, type Integration } from './contracts';
 import { McpGate, McpRead } from './state';
 import { McpSetup } from './setup';
+import { useFlag } from '@/lib/feature-flags';
 import { McpIntegrationDetail } from './review';
 
 export const integrationLabels: Record<Integration['status'], string> = {
@@ -23,7 +24,10 @@ export const integrationLabels: Record<Integration['status'], string> = {
   disconnected: 'Disconnected',
   error: 'Needs attention',
 };
-type View = { kind: 'list' } | { kind: 'setup'; entry?: CatalogEntry } | { kind: 'detail'; id: string };
+type View =
+  | { kind: 'list' }
+  | { kind: 'setup'; entry?: CatalogEntry; hosted?: boolean }
+  | { kind: 'detail'; id: string };
 
 export function WorkspaceMcpIntegrations({ workspaceId }: { workspaceId: string }) {
   return (
@@ -40,6 +44,7 @@ function Integrations({ api, capabilities }: { api: McpApi; capabilities: Capabi
   const reviewId = hash.startsWith('review-mcp-') ? hash.slice('review-mcp-'.length) : null;
   const [catalog, setCatalog] = useState(false);
   const read = useMcpIntegrations(api);
+  const hosted = useFlag('hosted-mcp') && capabilities.hosted;
   return (
     <section aria-label="Custom MCP integrations" className="space-y-4 border-t pt-6">
       <header className="flex flex-wrap items-start justify-between gap-3">
@@ -56,6 +61,15 @@ function Integrations({ api, capabilities }: { api: McpApi; capabilities: Capabi
           <Button disabled={!capabilities.integrationsEnabled} onClick={() => setView({ kind: 'setup' })}>
             Add MCP endpoint
           </Button>
+          {hosted && (
+            <Button
+              variant="outline"
+              disabled={!capabilities.integrationsEnabled}
+              onClick={() => setView({ kind: 'setup', hosted: true })}
+            >
+              Run an MCP package
+            </Button>
+          )}
         </div>
       </header>
       {!capabilities.integrationsEnabled && (
@@ -77,6 +91,7 @@ function Integrations({ api, capabilities }: { api: McpApi; capabilities: Capabi
         <Catalog
           api={api}
           disabled={!capabilities.integrationsEnabled}
+          hosted={hosted}
           choose={entry => setView({ kind: 'setup', entry })}
         />
       )}
@@ -100,7 +115,9 @@ function Integrations({ api, capabilities }: { api: McpApi; capabilities: Capabi
                           <div className="min-w-0 flex-1 space-y-1">
                             <p className="break-all font-medium">{integration.name}</p>
                             <p className="break-all text-sm text-muted-foreground">
-                              {integration.accountLabel ?? 'Account identity not verified'}
+                              {integration.package
+                                ? packageLabel(integration.package)
+                                : (integration.accountLabel ?? 'Account identity not verified')}
                             </p>
                             <div className="flex flex-wrap gap-2">
                               <Badge variant={integration.status === 'ready' ? 'success' : 'secondary'}>
@@ -137,10 +154,11 @@ function Integrations({ api, capabilities }: { api: McpApi; capabilities: Capabi
       </McpRead>
       {view.kind === 'setup' && (
         <McpSetup
-          key={view.entry?.id ?? 'manual'}
+          key={view.entry?.id ?? (view.hosted ? 'hosted' : 'manual')}
           api={api}
           capabilities={capabilities}
           entry={view.entry}
+          hosted={view.hosted}
           close={() => setView({ kind: 'list' })}
           saved={id => {
             setView({ kind: 'detail', id });
@@ -189,7 +207,18 @@ function Integrations({ api, capabilities }: { api: McpApi; capabilities: Capabi
     </section>
   );
 }
-function Catalog({ api, disabled, choose }: { api: McpApi; disabled: boolean; choose: (entry: CatalogEntry) => void }) {
+function Catalog({
+  api,
+  disabled,
+  hosted,
+  choose,
+}: {
+  api: McpApi;
+  disabled: boolean;
+  /** Packages TulipFarm can run in a sandbox are listed only when this workspace may run them. */
+  hosted: boolean;
+  choose: (entry: CatalogEntry) => void;
+}) {
   const [query, setQuery] = useState('');
   const [search, setSearch] = useState('');
   const [cursor, setCursor] = useState('');
@@ -248,32 +277,37 @@ function Catalog({ api, disabled, choose }: { api: McpApi; disabled: boolean; ch
                 </AlertDescription>
               </Alert>
             )}
-            {data.entries.length ? (
+            {data.entries.some(entry => hosted || !entry.package) ? (
               <ul className="divide-y">
-                {data.entries.map(entry => (
-                  <li key={entry.id} className="min-w-0 space-y-2 py-4">
-                    <h4 className="break-all font-medium">{entry.name}</h4>
-                    <p className="whitespace-pre-wrap break-words">{entry.description}</p>
-                    <p className="break-all text-sm text-muted-foreground">
-                      Version {entry.version} · {entry.endpoint}
-                    </p>
-                    <p className="text-sm">
-                      {entry.compatibility === 'eligible'
-                        ? 'Eligible remote transport; setup verification required'
-                        : entry.compatibility === 'unknown'
-                          ? 'Compatibility not verified'
-                          : 'Unsupported'}
-                      {entry.reason ? `. ${entry.reason}` : ''}
-                    </p>
-                    <Button
-                      variant="outline"
-                      disabled={disabled || entry.compatibility === 'unsupported'}
-                      onClick={() => choose(entry)}
-                    >
-                      Set up {entry.name}
-                    </Button>
-                  </li>
-                ))}
+                {data.entries
+                  .filter(entry => hosted || !entry.package)
+                  .map(entry => (
+                    <li key={entry.id} className="min-w-0 space-y-2 py-4">
+                      <h4 className="break-all font-medium">{entry.name}</h4>
+                      <p className="whitespace-pre-wrap break-words">{entry.description}</p>
+                      <p className="break-all text-sm text-muted-foreground">
+                        Version {entry.version} ·{' '}
+                        {entry.package
+                          ? `${entry.package.registry === 'npm' ? 'npm' : 'PyPI'} package ${entry.package.name}, run by TulipFarm`
+                          : entry.endpoint}
+                      </p>
+                      <p className="text-sm">
+                        {entry.compatibility === 'eligible'
+                          ? 'Eligible remote transport; setup verification required'
+                          : entry.compatibility === 'unknown'
+                            ? 'Compatibility not verified'
+                            : 'Unsupported'}
+                        {entry.reason ? `. ${entry.reason}` : ''}
+                      </p>
+                      <Button
+                        variant="outline"
+                        disabled={disabled || entry.compatibility === 'unsupported'}
+                        onClick={() => choose(entry)}
+                      >
+                        Set up {entry.name}
+                      </Button>
+                    </li>
+                  ))}
               </ul>
             ) : (
               <StatePanel

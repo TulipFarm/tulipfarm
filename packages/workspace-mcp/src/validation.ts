@@ -11,6 +11,11 @@ import {
   type McpTool,
   type McpCredential,
   type McpSendCredential,
+  type McpPackage,
+  type McpHostedSecret,
+  type McpHostedBinding,
+  packageKey,
+  normalizePackageName,
 } from './contracts.ts';
 
 export function canonicalJson(value: unknown): string {
@@ -61,6 +66,37 @@ export function endpointIdentity(input: string) {
   }
 }
 export const serverIdentity = (endpoint: string) => digest(['workspace-mcp-server-v1', endpointIdentity(endpoint)]);
+/** A hosted integration's identity comes from its package, so changing version or settings keeps its approvals' server. */
+export function hostedIdentity(value: Pick<McpPackage, 'registry' | 'name'>) {
+  const identity = createHash('sha256')
+    .update(packageKey({ registry: value.registry, name: normalizePackageName(value.registry, value.name) }))
+    .digest('hex');
+  return { serverIdentity: identity, endpoint: `https://${identity.slice(0, 32)}.hosted-mcp.invalid/mcp` };
+}
+/** The hosts a hosted integration may reach: its saved secrets' hosts, then the ones a manager added. */
+export const hostedEgress = (egress: readonly string[], secrets: readonly Pick<McpHostedSecret, 'hosts'>[]) =>
+  [...new Set([...secrets.flatMap(secret => secret.hosts), ...egress])].sort();
+/** Identifies what a sandbox was launched with, without any setting or secret value. */
+export function hostedFingerprint(input: {
+  package: McpPackage;
+  egress: readonly string[];
+  secretVersion: number;
+  names: readonly string[];
+  bindings: readonly McpHostedBinding[];
+  secrets: readonly Pick<McpHostedSecret, 'secretId' | 'version' | 'policyVersion'>[];
+}) {
+  return digest([
+    'workspace-mcp-hosted-v1',
+    input.package,
+    [...input.egress].sort(),
+    input.secretVersion,
+    [...input.names].sort(),
+    input.bindings.map(binding => {
+      const secret = input.secrets.find(secret => secret.secretId === binding.secretId);
+      return [binding.name, binding.secretId, binding.reveal, secret?.version ?? null, secret?.policyVersion ?? null];
+    }),
+  ]);
+}
 export const toolRevision = (tool: McpTool) => digest(['workspace-mcp-tool-v1', tool]);
 
 const keywords = new Set([
@@ -98,8 +134,11 @@ const keywords = new Set([
   'then',
   'else',
 ]);
-function compile(schema: JsonObject) {
-  bounded(schema, mcpLimits.schemaBytes);
+function compile(input: JsonObject) {
+  bounded(input, mcpLimits.schemaBytes);
+  const { $schema: dialect, ...schema } = input;
+  if (dialect !== undefined && !(mcpCompatibilityProfile.rootSchemaDialects as readonly unknown[]).includes(dialect))
+    throw new McpError('incompatible-tool');
   let nodes = 0;
   function walk(value: JsonValue, depth: number) {
     if (++nodes > mcpLimits.schemaNodes || depth > 16) throw new McpError('incompatible-tool');

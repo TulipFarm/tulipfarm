@@ -1446,3 +1446,128 @@ test('saved secrets bind for every user, resolve only at send, pin proposal vers
     await f.close();
   }
 });
+
+test('hosted packages provision once, send protected secrets only to the host and pin secret versions on actions', async () => {
+  const f = await mcpFixture();
+  try {
+    const value = 'synthetic-hosted-secret';
+    const secretId = randomUUID();
+    await f.db.platform.query(
+      `INSERT INTO ${f.table('tf_secrets')} (id,owner_membership_id,name,variable_name,kind,placement,placement_source,lifetime,credential,status)
+       VALUES ($1,$2,'Hosted','HOSTED_KEY','api-key','{"kind":"bearer"}','member','saved','{}','active')`,
+      [secretId, f.members[0].membershipId],
+    );
+    const secret = {
+      secretId,
+      version: 1,
+      policyVersion: 1,
+      hosts: ['api.example.com'],
+      placement: { kind: 'bearer' },
+    };
+    const launches = [],
+      connects = [];
+    const service = f.make({
+      hostedEnabled: () => true,
+      hostedSecrets: {
+        bind: async () => [secret],
+        resolve: async () => [{ ...secret, value, parts: [] }],
+      },
+      host: {
+        async provision(launch) {
+          launches.push(launch);
+          return { sandboxId: 'sbx_test' };
+        },
+        async connect(input) {
+          connects.push(input);
+          return { endpoint: 'https://sbx-test.host.example/mcp', headers: { authorization: 'Bearer host-token' } };
+        },
+        async remove() {},
+        async *list() {},
+      },
+    });
+    const pkg = { registry: 'npm', name: '@example/mcp-server', version: '1.2.3' };
+    const integration = await service.create(f.one.id, f.members[0], {
+      name: 'Hosted MCP',
+      ownership: 'personal',
+      package: pkg,
+      egress: ['docs.example.com'],
+      credential: {
+        kind: 'hosted',
+        env: [
+          { name: 'MODE', value: 'read' },
+          { name: 'API_KEY', secretId },
+        ],
+      },
+    });
+    assert.match(integration.endpoint, /\.hosted-mcp\.invalid\/mcp$/);
+    await assert.rejects(
+      f.service.create(f.one.id, f.members[0], {
+        name: 'Hosting off',
+        ownership: 'personal',
+        package: pkg,
+        credential: { kind: 'hosted', env: [] },
+      }),
+      /disabled/,
+    );
+
+    const contexts = [];
+    f.setDiscover(async input => {
+      contexts.push(input);
+      return { tools: f.getTools() };
+    });
+    const discovered = await service.discover(f.one.id, f.members[0], integration.id);
+    assert.equal(launches.length, 1);
+    assert.deepEqual(launches[0].package, pkg);
+    assert.deepEqual(launches[0].env, { MODE: 'read' });
+    assert.deepEqual(launches[0].protectedSecrets, [
+      { variable: 'API_KEY', value, hosts: ['api.example.com'], placement: { kind: 'bearer' } },
+    ]);
+    assert.deepEqual(launches[0].egress, ['api.example.com', 'docs.example.com']);
+    assert.deepEqual(contexts.at(-1).hostTarget, {
+      endpoint: 'https://sbx-test.host.example/mcp',
+      headers: { authorization: 'Bearer host-token' },
+    });
+    const host = (
+      await f.db.platform.query(`SELECT sandbox_id,launched FROM ${f.table('hosts')} WHERE integration_id=$1`, [
+        integration.id,
+      ])
+    ).rows[0];
+    assert.deepEqual(host, {
+      sandbox_id: 'sbx_test',
+      launched: { secrets: [{ secretId, version: 1, policyVersion: 1 }] },
+    });
+
+    await service.reviewTools(
+      f.one.id,
+      f.members[0],
+      integration.id,
+      discovered.map(tool => ({
+        name: tool.name,
+        revision: tool.discovered_revision,
+        enabled: true,
+        standingException: true,
+      })),
+    );
+    const origin = await f.select(integration);
+    const handle = (await service.catalog(f.one.id, f.members[0], origin)).tools.find(
+      tool => tool.tool.name === 'write',
+    ).handle;
+    const action = await service.propose(f.one.id, f.members[0], {
+      id: randomUUID(),
+      origin,
+      handle,
+      arguments: { text: 'private input' },
+    });
+    assert.deepEqual(
+      (await f.db.platform.query(`SELECT secrets FROM ${f.table('actions')} WHERE id=$1`, [action.id])).rows[0].secrets,
+      [{ secretId, version: 1, policyVersion: 1 }],
+    );
+    await f.approve(action);
+    assert.equal((await service.dispatch(f.one.id, action.id)).status, 'succeeded');
+    assert.equal(launches.length, 1);
+    assert.equal(f.calls.at(-1).hostTarget.endpoint, 'https://sbx-test.host.example/mcp');
+    assert.ok(connects.every(input => input.sandboxId === 'sbx_test'));
+  } finally {
+    await f.close();
+  }
+});

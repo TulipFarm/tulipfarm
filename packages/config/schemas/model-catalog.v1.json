@@ -161,6 +161,7 @@
               {
                 "type": "string",
                 "enum": [
+                  "hosted-mcp",
                   "images",
                   "default-connection-knowledge",
                   "social-publishing",
@@ -519,6 +520,7 @@
               {
                 "type": "string",
                 "enum": [
+                  "hosted-mcp",
                   "images",
                   "default-connection-knowledge",
                   "social-publishing",
