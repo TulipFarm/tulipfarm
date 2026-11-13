@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import type { WorkspaceRuntime } from '@tulipfarm/workspaces/storage';
 import { createWorkspaceTableConfirmation } from '@tulipfarm/workspaces/table-confirmation';
 import { registerAgents } from './agents.ts';
+import { registerAppPages } from './app-pages.ts';
 import { registerGovernance } from './governance.ts';
 import { registerWorkspaceMembers } from './workspace-members.ts';
 import { registerWorkspaceSettings } from './workspace-settings.ts';
@@ -341,6 +342,18 @@ export function registerStorageComposition(
     service: conversations,
     tables: createTableService(runtime, { readableFiles: humanReadableTableFiles }, executionCompatibility),
     replies,
+  });
+  const appAgentTasks = createAgentTasks(runtime);
+  registerAppPages(app, {
+    auth: dependencies.auth,
+    runtime,
+    tables: createTableService(runtime, { readableFiles: humanReadableTableFiles }, executionCompatibility),
+    startWorkflow: workflows.start,
+    askAgent: async (workspaceId, userId, input) => {
+      const task = await appAgentTasks.start(workspaceId, userId, input);
+      await wakeTask(workspaceId, task.id);
+      return { taskId: task.id };
+    },
   });
   registerProjects(app, {
     auth: dependencies.auth,
