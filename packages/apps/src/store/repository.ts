@@ -219,6 +219,20 @@ export function appRepositories(options: { readonly root: string; readonly stora
     async tree(repository: string, commit: GitCommit | null): Promise<Map<string, number>> {
       return commit === null ? new Map() : treeSizes(repository, commit);
     },
+
+    /** The bytes of one file at a commit, or `null` when the commit has no such file. */
+    async file(repository: string, commit: GitCommit, path: string): Promise<Uint8Array | null> {
+      const sizes = await treeSizes(repository, commit);
+      if (!sizes.has(path)) return null;
+      const { stdout } = await execute('git', ['cat-file', 'blob', `${commit}:${path}`], {
+        cwd: repository,
+        encoding: 'buffer',
+        timeout: 30000,
+        maxBuffer: maxBundleBytes,
+        env: { PATH: process.env.PATH, HOME: repository, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' },
+      });
+      return new Uint8Array(stdout);
+    },
   };
 }
 
