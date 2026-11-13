@@ -32,13 +32,15 @@ export function edgeStatus(stops: AppStops): EdgeStatus {
   return 'active';
 }
 
-/** What the editor sees. Derived from the draft, its lease and its latest build; never stored. */
+/** What the editor sees. Derived from the draft, its lease, its latest build and the live release; never stored. */
 export type AppDraftState =
   | { readonly state: 'empty' }
   | { readonly state: 'editing'; readonly leaseId: string; readonly conversationId: string }
   | { readonly state: 'building'; readonly buildId: AppBuildId }
   // eslint-disable-next-line tulipfarm/product-copy -- A stored state identifier, not user-facing copy.
   | { readonly state: 'preview-ready'; readonly buildId: AppBuildId; readonly commit: GitCommit }
+  /** The draft's newest build is the live release, so there is nothing new to publish. */
+  | { readonly state: 'live'; readonly buildId: AppBuildId; readonly commit: GitCommit }
   | { readonly state: 'failed'; readonly failure: AppFailure }
   | { readonly state: 'saved'; readonly commit: GitCommit };
 

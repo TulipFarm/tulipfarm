@@ -48,6 +48,7 @@ const draftSchema = z.discriminatedUnion('state', [
   z.object({ ...draftBase, state: z.literal('building'), buildId: z.string() }),
   // oxlint-disable-next-line tulipfarm/product-copy -- A draft state identifier, not user-facing copy.
   z.object({ ...draftBase, state: z.literal('preview-ready'), buildId: z.string(), commit: z.string() }),
+  z.object({ ...draftBase, state: z.literal('live'), buildId: z.string(), commit: z.string() }),
   z.object({ ...draftBase, state: z.literal('failed'), failure: failureSchema }),
   z.object({ ...draftBase, state: z.literal('saved'), commit: z.string() }),
 ]);

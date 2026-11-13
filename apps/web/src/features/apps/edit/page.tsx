@@ -29,6 +29,7 @@ const draftTones: Record<Draft['state'], BadgeVariant> = {
   building: 'info',
   // oxlint-disable-next-line tulipfarm/product-copy -- A draft state identifier, not user-facing copy.
   'preview-ready': 'success',
+  live: 'secondary',
   failed: 'destructive',
   saved: 'secondary',
 };
@@ -36,6 +37,7 @@ const draftTones: Record<Draft['state'], BadgeVariant> = {
 function draftNote(draft: Draft, ownChat: string | null, canBuild: boolean) {
   switch (draft.state) {
     case 'empty':
+    case 'live':
       return 'Describe what you want in chat. Nothing goes live until you publish it.';
     case 'editing':
       return draft.conversationId === ownChat

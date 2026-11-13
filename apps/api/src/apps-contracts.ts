@@ -139,8 +139,8 @@ export function appSummaryView(app: AppRecord, role: AppRole | null, sitesDomain
   };
 }
 
-/** What the editor sees, derived from the lease, the saved head and the newest build of that head. */
-export function draftState(draft: AppDraft, headBuild: AppBuild | null): AppDraftState {
+/** What the editor sees, derived from the lease, the saved head, the newest build of that head and the live release. */
+export function draftState(draft: AppDraft, headBuild: AppBuild | null, liveRelease: AppRelease | null): AppDraftState {
   if (draft.lease && !draft.lease.expired)
     return { state: 'editing', leaseId: draft.lease.id, conversationId: draft.lease.conversationId };
   if (draft.headCommit === null)
@@ -151,6 +151,8 @@ export function draftState(draft: AppDraft, headBuild: AppBuild | null): AppDraf
       case 'running':
         return { state: 'building', buildId: headBuild.id };
       case 'succeeded':
+        if (liveRelease?.buildId === headBuild.id)
+          return { state: 'live', buildId: headBuild.id, commit: headBuild.commit };
         // oxlint-disable-next-line tulipfarm/product-copy -- A draft state identifier, not user-facing copy.
         return { state: 'preview-ready', buildId: headBuild.id, commit: headBuild.commit };
       case 'failed':
@@ -173,7 +175,7 @@ export function appDetailView(
       revision: draft.revision,
       headCommit: draft.headCommit,
       previewBuildId: draft.previewBuildId,
-      ...draftState(draft, headBuild),
+      ...draftState(draft, headBuild, liveRelease),
     },
     liveRelease,
   };
