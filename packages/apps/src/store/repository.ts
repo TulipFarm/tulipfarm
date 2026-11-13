@@ -131,7 +131,7 @@ export function appRepositories(options: { readonly root: string; readonly stora
 
     /**
      * Commits staged changes on top of `head` as the workspace bot with the editor as co-author, and writes the bundle
-     * from `head` to the new commit. The cache's branch moves, but only the stored bundle makes the commit durable.
+     * from `head` to the new commit. The commit lands in the cache unreferenced; only the stored bundle makes it durable.
      */
     async commit(
       repository: string,
@@ -171,9 +171,14 @@ export function appRepositories(options: { readonly root: string; readonly stora
             GIT_COMMITTER_EMAIL: bot.email,
           },
         )) as GitCommit;
-        await git(repository, ['update-ref', 'refs/heads/main', commit]);
+        // Concurrent saves share the cache, so the bundle's `main` lives in a scratch repository borrowing the cache's
+        // objects; another save can never move it between the commit and the bundle.
+        const own = join(scratch, 'save.git');
+        await git(scratch, ['init', '--quiet', '--bare', '--object-format=sha1', own]);
+        await writeFile(join(own, 'objects', 'info', 'alternates'), `${join(repository, 'objects')}\n`);
+        await git(own, ['update-ref', 'refs/heads/main', commit]);
         const file = join(scratch, 'save.bundle');
-        await git(repository, [
+        await git(own, [
           'bundle',
           'create',
           '--quiet',
