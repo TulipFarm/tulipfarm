@@ -88,8 +88,9 @@ export async function readStagedChanges(tx: AppTransaction, appId: AppId, leaseI
 }
 
 /**
- * Takes or renews the editing lease for a chat. Another chat's live lease makes the draft busy. Taking over an expired
- * lease drops the changes its holder staged and never saved.
+ * Takes or renews the editing lease for a chat, keeping the chat's own lease and staged changes even after it expired.
+ * Another chat's live lease makes the draft busy. Taking over another chat's expired lease drops the changes its holder
+ * staged and never saved.
  */
 export async function takeLease(
   tx: AppTransaction,
@@ -98,7 +99,7 @@ export async function takeLease(
   const [taken] = await rows<{ lease_id: string; revision: string }>(
     tx,
     `UPDATE ${table(tx, 'tf_app_drafts')} SET
-       lease_id = CASE WHEN lease_conversation_id = $2 AND lease_expires_at > clock_timestamp() THEN lease_id ELSE $4 END,
+       lease_id = CASE WHEN lease_conversation_id = $2 THEN lease_id ELSE $4 END,
        lease_conversation_id = $2,
        lease_membership_id = $3,
        lease_expires_at = clock_timestamp() + make_interval(mins => $5),

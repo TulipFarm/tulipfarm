@@ -109,6 +109,9 @@ const appTx = (tx: AgentTransaction): AppTransaction => ({ client: tx.client, sc
 const table = (tx: AppTransaction, name: string) => `${escapeIdentifier(tx.schema)}.${escapeIdentifier(name)}`;
 const membership = (actor: HumanActor) => actor.membershipId as MembershipId;
 const liveLease = (draft: AppDraft) => (draft.lease && !draft.lease.expired ? draft.lease : null);
+// An expired lease still holds its chat's staged changes until another chat takes the draft.
+const chatLease = (draft: AppDraft, chat: AppChat) =>
+  draft.lease?.conversationId === chat.conversationId ? draft.lease : null;
 const decoder = new TextDecoder('utf-8', { fatal: true });
 
 function text(bytes: Uint8Array) {
@@ -158,7 +161,7 @@ export function createAppEditing(runtime: AgentStorage, options: AppEditingOptio
     <T>(action: (tx: AppTransaction) => Promise<T>) =>
       withHuman(runtime, chat.workspaceId, chat.actor, 'read', raw => action(appTx(raw)));
 
-  /** The draft head's files with the live lease's staged changes applied, as path to size or staged bytes. */
+  /** The draft head's files with this chat's staged changes applied, as path to size or staged bytes. */
   async function workingTree(chat: AppChat, tx: AppTransaction, appId: AppId, draft: AppDraft) {
     const repository = await repositories.open(
       chat.workspaceId,
@@ -168,7 +171,7 @@ export function createAppEditing(runtime: AgentStorage, options: AppEditingOptio
     );
     const sizes = await repositories.tree(repository, draft.headCommit);
     const staged = new Map<string, Uint8Array | null>();
-    const lease = liveLease(draft);
+    const lease = chatLease(draft, chat);
     if (lease)
       for (const change of await readStagedChanges(tx, appId, lease.id)) staged.set(change.path, change.content);
     for (const [path, content] of staged) {
@@ -216,8 +219,8 @@ export function createAppEditing(runtime: AgentStorage, options: AppEditingOptio
 
   /** Saves this chat's staged changes into a commit. Nothing to save, or no lease of this chat, keeps the head. */
   async function save(chat: AppChat, appId: AppId, draft: AppDraft, endLease: boolean) {
-    const lease = liveLease(draft);
-    if (lease?.conversationId !== chat.conversationId) return { ok: true as const, commit: draft.headCommit };
+    const lease = chatLease(draft, chat);
+    if (!lease) return { ok: true as const, commit: draft.headCommit };
     return saveDraft(transactions(chat), repositories, {
       workspaceId: chat.workspaceId,
       appId,

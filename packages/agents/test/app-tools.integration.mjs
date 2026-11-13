@@ -148,12 +148,7 @@ test('an app chat edits its app in a draft that only a finished turn saves', { t
       retryable: true,
     });
     assert.deepEqual(await apps.finishTurn(helperChat, 'cancelled'), { saved: null });
-    assert.deepEqual(await list(helperChat), {
-      files: [
-        { path: 'about.html', bytes: 12 },
-        { path: 'index.html', bytes: 15 },
-      ],
-    });
+    assert.deepEqual(await list(helperChat), { files: [{ path: 'index.html', bytes: 15 }] });
   });
 
   await t.test('building the app saves the draft, keeps the chat editing and waits for the build', async () => {
