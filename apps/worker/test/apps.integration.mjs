@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import {
   admitPublish,
+  admitRollback,
   claimAppName,
   createApp,
   promoteAppName,
@@ -21,6 +22,7 @@ import {
   fixture,
   loadPlatformBaseline,
 } from '../../../packages/workspace-storage/test/integration/fixture.mjs';
+import { hostHeaderPublisher } from '@tulipfarm/apps/host-header-publisher';
 import { createAppActivities } from '../src/app-activities.ts';
 
 function memoryObjects() {
@@ -180,7 +182,7 @@ test('app builds, publishes, reconciles and meters converge however often they r
   });
   const objects = memoryObjects();
   const publisher = edgePublisher();
-  const work = createAppActivities({
+  const options = enabled => ({
     transact: (workspaceId, action) => {
       assert.equal(workspaceId, workspace.id);
       return transact(action);
@@ -194,8 +196,10 @@ test('app builds, publishes, reconciles and meters converge however often they r
     async *workspaces() {
       yield workspace.id;
     },
-    enabled: async () => true,
+    enabled: async () => enabled,
   });
+  const work = createAppActivities(options(true));
+  const signal = () => new AbortController().signal;
   const input = { workspaceId: workspace.id };
 
   const app = (
@@ -332,5 +336,123 @@ test('app builds, publishes, reconciles and meters converge however often they r
       status: 'paused',
       version: 3,
     });
+  });
+
+  await t.test('a rename that goes live while reconcile lists routes keeps the new name served', async () => {
+    const builtIn = hostHeaderPublisher({ sitesDomain: 'sites.example.test', storage: objects, database: db.platform });
+    const renamed = { name: 'acme-shop', workspaceId: workspace.id, appId: app.id };
+    let rename;
+    const hosted = createAppActivities({
+      ...options(true),
+      publisher: {
+        ...builtIn,
+        async *list(signal) {
+          await rename?.();
+          rename = undefined;
+          yield* builtIn.list(signal);
+        },
+      },
+    });
+    assert.deepEqual(await claimAppName(db.platform, renamed), { ok: true });
+    await transact(tx => setAppPublicName(tx, app.id, 'acme-shop'));
+    await builtIn.apply({ name: 'acme-pending', releaseId: null, status: 'active', version: 1 }, signal());
+    rename = async () => {
+      await db.platform.query('BEGIN');
+      await promoteAppName(db.platform, renamed);
+      await db.platform.query('COMMIT');
+      await hosted.projectAppEdge({ ...input, appId: app.id });
+    };
+
+    await hosted.reconcileApps(signal());
+    await hosted.reconcileApps(signal());
+
+    const live = await transact(tx => readApp(tx, app.id));
+    const { rows } = await db.platform.query(
+      `SELECT name, state, release_id, status, edge_version::int FROM app.app_hostnames
+       WHERE name LIKE 'acme-%' ORDER BY name`,
+    );
+    assert.deepEqual(rows, [
+      { name: 'acme-abandoned', state: 'retired', release_id: null, status: null, edge_version: 0 },
+      { name: 'acme-orders', state: 'retired', release_id: null, status: null, edge_version: 4 },
+      { name: 'acme-pending', state: 'claiming', release_id: null, status: 'active', edge_version: 1 },
+      { name: 'acme-shop', state: 'current', release_id: live.liveReleaseId, status: 'paused', edge_version: 4 },
+    ]);
+  });
+
+  await t.test('reconcile keeps the files of an old release that an admitted rollback points at', async () => {
+    const { rows } = await db.platform.query(
+      `SELECT id, build_id FROM "${schema}".tf_app_releases WHERE app_id = $1 AND number = 1`,
+      [app.id],
+    );
+    const first = rows[0];
+    for (let published = 0; published < 20; published++) {
+      const admitted = await transact(tx =>
+        admitPublish(tx, {
+          appId: app.id,
+          requestId: randomUUID(),
+          requestedBy: workspace.membershipId,
+          buildId: first.build_id,
+        }),
+      );
+      const operation = { ...input, operationId: admitted.operation.id };
+      assert.equal(await work.stageAppRelease(operation), true);
+      assert.equal((await work.switchAppRelease(operation)).status, 'switched');
+    }
+    await db.platform.query(
+      `UPDATE "${schema}".tf_app_releases SET created_at = clock_timestamp() - interval '2 hours' WHERE app_id = $1`,
+      [app.id],
+    );
+    const rollback = await transact(tx =>
+      admitRollback(tx, {
+        appId: app.id,
+        requestId: randomUUID(),
+        requestedBy: workspace.membershipId,
+        releaseId: first.id,
+      }),
+    );
+    assert.equal(rollback.operation.status, 'admitted');
+
+    await work.reconcileApps(new AbortController().signal);
+
+    assert.equal(publisher.staged.size, 21);
+    assert.deepEqual(Object.fromEntries(publisher.staged.get(first.id)), {
+      'app.js': 'console.log("orders")',
+      'index.html': '<h1>Orders</h1>',
+    });
+  });
+
+  await t.test('metering charges a served app whose workspace has the app-hosting flag off', async () => {
+    const off = createAppActivities(options(false));
+    publisher.traffic = [{ name: 'acme-shop', requests: 10, bytes: 512, units: 5n }];
+    const window = { start: '2026-11-13T18:00:00.000Z', end: '2026-11-13T19:00:00.000Z' };
+    await off.meterAppUsage(window, new AbortController().signal);
+    await off.meterAppUsage(window, new AbortController().signal);
+
+    const { rows } = await db.platform.query(
+      `SELECT id, units::text FROM "${schema}".test_credit_entries WHERE id LIKE '%T18:%'`,
+    );
+    assert.deepEqual(rows, [{ id: `app-hosting:${app.id}:2026-11-13T18:00:00.000Z`, units: '5' }]);
+  });
+
+  await t.test('metering after six missed hours charges each of them once', async () => {
+    publisher.traffic = [{ name: 'acme-shop', requests: 3, bytes: 64, units: 2n }];
+    const settled = Date.parse('2026-11-14T01:00:00.000Z');
+    await work.meterAppTraffic(settled, new AbortController().signal);
+    await work.meterAppTraffic(settled, new AbortController().signal);
+
+    const { rows } = await db.platform.query(`SELECT id, units::text FROM "${schema}".test_credit_entries ORDER BY id`);
+    assert.deepEqual(
+      rows.map(row => [row.id.replace(`app-hosting:${app.id}:`, ''), row.units]),
+      [
+        ['2026-11-13T17:00:00.000Z', '250'],
+        ['2026-11-13T18:00:00.000Z', '5'],
+        ['2026-11-13T19:00:00.000Z', '2'],
+        ['2026-11-13T20:00:00.000Z', '2'],
+        ['2026-11-13T21:00:00.000Z', '2'],
+        ['2026-11-13T22:00:00.000Z', '2'],
+        ['2026-11-13T23:00:00.000Z', '2'],
+        ['2026-11-14T00:00:00.000Z', '2'],
+      ],
+    );
   });
 });
