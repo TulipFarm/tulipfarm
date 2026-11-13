@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { fromNodeHeaders } from 'better-auth/node';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Pool } from 'pg';
@@ -346,6 +346,30 @@ export function registerApps(app: FastifyInstance, dependencies: AppRouteDepende
           ...appDetailView(summary(found, role), draft, headBuild, live),
           sitesDomain: dependencies.sitesDomain,
         };
+      }),
+    );
+
+    route('POST', '/:appId/chat', 'openAppChatV1', { params: appParams }, ({ workspaceId, userId, params }) =>
+      transaction(workspaceId, async tx => {
+        const member = await memberOf(tx, userId);
+        const { app: found } = await access(tx, member, params.appId, 'edit');
+        const conversations = qualified(tx.schema, 'tf_conversations');
+        const existing = await tx.client.query(
+          `SELECT id FROM ${conversations} WHERE app_id = $1 AND owner_membership_id = $2 AND deleted_at IS NULL
+           ORDER BY created_at, id LIMIT 1`,
+          [found.id, member.membershipId],
+        );
+        if (existing.rows[0]) return { chatId: (existing.rows[0] as { id: string }).id };
+        // A chat deleted by its owner keeps its derived id, so a fresh one gets a random id instead.
+        for (const id of [derivedId('app-chat', found.id, member.membershipId), randomUUID()]) {
+          const inserted = await tx.client.query(
+            `INSERT INTO ${conversations} (id, owner_user_id, owner_membership_id, title, title_manual, app_id)
+             VALUES ($1, $2, $3, $4, true, $5) ON CONFLICT (id) DO NOTHING RETURNING id`,
+            [id, userId, member.membershipId, found.title, found.id],
+          );
+          if (inserted.rows[0]) return { chatId: id };
+        }
+        throw new Error('Could not open the app chat');
       }),
     );
 
