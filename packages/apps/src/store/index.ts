@@ -14,3 +14,4 @@ export {
 } from './repository.ts';
 export * from './save.ts';
 export type { AppResult, AppTransaction, AppTransactions, SqlClient } from './sql.ts';
+export * from './versions.ts';
