@@ -1347,6 +1347,8 @@ export const backgroundJobs = [
   'member-profile-projection',
   'social-publisher',
   'social-refresh',
+  'app-reconcile',
+  'app-usage',
 ] as const;
 export type BackgroundJob = (typeof backgroundJobs)[number];
 

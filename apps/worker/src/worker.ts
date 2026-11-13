@@ -65,6 +65,7 @@ import { createRecommendationComposition } from './recommendation-activities.ts'
 import { createMemberProfileComposition } from './member-profile-composition.ts';
 import { createSocialPublisherComposition } from './social-publisher-composition.ts';
 import { createSecretsSweep } from './secrets-sweep.ts';
+import { createAppComposition } from './app-composition.ts';
 import { workerRole, workerTelemetryService } from './worker-role.ts';
 import { workspaceSchemaPending } from '@tulipfarm/workspace-storage/runtime';
 
@@ -133,6 +134,10 @@ async function run() {
   let hostedSweep: Promise<void> | undefined;
   let hostedTimer: ReturnType<typeof setInterval> | undefined;
   const hostedAbort = new AbortController();
+  let apps: ReturnType<typeof createAppComposition>;
+  const appRuns: Record<'reconcile' | 'usage', Promise<void> | undefined> = { reconcile: undefined, usage: undefined };
+  const appTimers: ReturnType<typeof setInterval>[] = [];
+  const appAbort = new AbortController();
   const sweepTelemetry: ReturnType<typeof createBackgroundJob>[] = [];
   let knowledgeEmbeddings: Awaited<ReturnType<typeof createKnowledgeEmbeddingWorker>>;
   let recommendations: ReturnType<typeof createRecommendationComposition> | undefined;
@@ -224,6 +229,33 @@ async function run() {
         };
         hostedTimer = setInterval(tick, 5 * 60_000);
         hostedTimer.unref();
+      }
+      const appWork = (apps = createAppComposition({
+        runtime: coreResources.runtime,
+        discover: coreResources.readyTaskWorkspaces,
+      }));
+      if (appWork) {
+        const schedule = (
+          name: 'reconcile' | 'usage',
+          job: ReturnType<typeof createBackgroundJob>,
+          seconds: number,
+        ) => {
+          sweepTelemetry.push(job);
+          const work = name === 'reconcile' ? appWork.reconcile : appWork.meter;
+          const tick = () => {
+            appRuns[name] ??= job
+              .run(() => work(appAbort.signal))
+              .catch(error => Runtime.instance().logger.error(`App ${name} failed`, errorAttributes(error)))
+              .finally(() => {
+                appRuns[name] = undefined;
+              });
+          };
+          const timer = setInterval(tick, seconds * 1000);
+          timer.unref();
+          appTimers.push(timer);
+        };
+        schedule('reconcile', createBackgroundJob('app-reconcile', 300), 300);
+        schedule('usage', createBackgroundJob('app-usage', 3600), 3600);
       }
     }
     if (
@@ -366,6 +398,7 @@ async function run() {
                 : {}),
               ...workflows,
               ...slack?.activities,
+              ...apps?.activities,
               ...gmail,
               ...skillImports,
               ...(coreResources ? createWorkspaceMcpDiscoveryActivities(coreResources.runtime) : {}),
@@ -508,6 +541,10 @@ async function run() {
     hostedAbort.abort();
     await importSweep;
     await hostedSweep;
+    for (const timer of appTimers) clearInterval(timer);
+    appAbort.abort();
+    await Promise.all([appRuns.reconcile, appRuns.usage]);
+    await apps?.close();
     await importCleanup?.close();
     for (const job of sweepTelemetry) job.close();
     chatObjects?.close();

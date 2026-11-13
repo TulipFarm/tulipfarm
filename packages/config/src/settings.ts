@@ -472,6 +472,15 @@ export const settings: readonly Setting[] = [
       'Public API origin used for auth callbacks and as the Workspace MCP OAuth client ID and redirect origin. The worker needs it for social token refresh and skips social publishing in production without it.',
   },
   {
+    name: 'TULIPFARM_APP_SITES_DOMAIN',
+    group: 'Public origins',
+    services: ['worker'],
+    requirement: 'optional',
+    secret: false,
+    description:
+      'Domain that serves published apps as subdomains. It must differ from the web app domain. Unset leaves apps unpublished unless an extension serves them.',
+  },
+  {
     name: 'WEB_ORIGIN',
     group: 'Public origins',
     services: apiWorker,
@@ -814,6 +823,14 @@ export const settings: readonly Setting[] = [
     default: 'tulipfarm-files',
     description:
       'Bucket for user files and chat attachments. Unset in services falls back to CHAT_R2_*, or disables Files.',
+  },
+  {
+    name: 'TULIPFARM_OBJECT_STORAGE_APPS_BUCKET',
+    group: 'Object storage',
+    services: ['worker'],
+    requirement: 'optional',
+    secret: false,
+    description: 'Bucket for app build files and published app sites. Unset turns off app builds and publishing.',
   },
   {
     name: 'R2_ENDPOINT',
