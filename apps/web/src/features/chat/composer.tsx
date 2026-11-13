@@ -429,8 +429,6 @@ function selectorModel(model: ComposerModel): ModelSelectorModel {
         ? `${planLabels[model.plan]} plan`
         : undefined,
     disabled: model.disabled,
-    speed: model.speed,
-    quality: model.quality,
     cost: model.cost,
   };
 }

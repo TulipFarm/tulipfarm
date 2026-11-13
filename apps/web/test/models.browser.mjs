@@ -968,10 +968,10 @@ test('models in the actual Vite app through a local HTTP API fixture', { timeout
         await page.getByText('That does not look like a Claude Code token.', { exact: false }).waitFor();
         await token.fill('sk-ant-oat-token');
         await page.getByRole('button', { name: 'Connect', exact: true }).click();
-        const ask = page.getByRole('dialog', { name: 'Who can use your Claude plan?' });
+        const ask = page.getByRole('dialog', { name: 'Who can use this Claude plan?' });
         await ask.waitFor();
-        assert.equal(await ask.getByRole('button', { name: 'Share', exact: true }).isDisabled(), true);
-        await ask.getByRole('button', { name: 'Only me' }).click();
+        assert.equal(await ask.getByRole('radio', { name: 'Only you' }).isChecked(), true);
+        await ask.getByRole('button', { name: 'Not now' }).click();
         await ask.waitFor({ state: 'hidden' });
         await page
           .getByText('Pick these models in chats, from the model menu under Claude plan.', { exact: false })

@@ -140,8 +140,7 @@ export function fallbackNote(
   // Plan families are named after their provider in the catalog, such as `chatgpt-sol` or `claude-plan-opus`.
   const prefix = /^(chatgpt|claude-plan|copilot)-/.exec(chatModel ?? '')?.[1];
   const plan = prefix === 'claude-plan' ? 'claude' : (prefix as keyof typeof planLabels | undefined);
-  if (plan)
-    return `Answered by ${name(family)} because every ${planLabels[plan]} plan you can use had reached its limit or needed sign-in again.`;
+  if (plan) return `No ${planLabels[plan]} plan you can use could answer, so ${name(family)} did.`;
   const replaced = chatModel && chatModel !== family ? name(chatModel) : 'the chat model';
   return `Answered by ${name(family)} because ${replaced} was unavailable.`;
 }

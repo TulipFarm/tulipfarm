@@ -9,6 +9,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@tulipfarm/sprout/dialog';
+import { Label } from '@tulipfarm/sprout/label';
+import { RadioGroup, RadioGroupItem } from '@tulipfarm/sprout/radio-group';
 import { Switch } from '@tulipfarm/sprout/switch';
 import { z } from 'zod';
 import { apiOrigin } from '@/lib/auth';
@@ -87,9 +89,11 @@ function subscriptionsApi(workspaceId: string) {
 }
 
 const planRoles = {
-  use: { label: 'Use it', hint: 'Pick its models in chats' },
-  manage: { label: 'Use and share it', hint: 'Also change who it’s shared with' },
+  use: { label: 'Can use', hint: 'Pick its models in chat' },
+  manage: { label: 'Can use and share', hint: 'Also choose who can use it' },
 } as const satisfies RoleOptions;
+
+type Reach = 'private' | 'workspace' | 'specific';
 
 export function usePeople(workspaceId: string): People {
   const scope = useFeatureScope();
@@ -179,13 +183,33 @@ export function ShareDialog({
   const { api } = useSubscriptions(workspaceId);
   const { change } = useFeatureChanges();
   const before = subscription.grants ?? [];
-  const [grants, setGrants] = useState<SecretGrant[]>(before);
+  const [reach, setReach] = useState<Reach>(() =>
+    !before.length ? 'private' : before.some(grant => grant.grantee.kind === 'workspace') ? 'workspace' : 'specific',
+  );
+  const [chosen, setChosen] = useState<SecretGrant[]>(() => before.filter(grant => grant.grantee.kind !== 'workspace'));
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const provider = providerLabels[subscription.provider];
-  const firstShare = !before.length && grants.length > 0;
-  const unchanged = before.map(granteeKey).join() === grants.map(granteeKey).join();
+  // Sharing with everyone keeps the people who may also share it; their "use" grant is implied.
+  const grants: SecretGrant[] =
+    reach === 'private'
+      ? []
+      : reach === 'workspace'
+        ? [{ grantee: { kind: 'workspace' }, role: 'use' }, ...chosen.filter(grant => grant.role === 'manage')]
+        : chosen;
+  const signature = (list: SecretGrant[]) =>
+    list
+      .map(grant => `${granteeKey(grant)}:${grant.role}`)
+      .sort()
+      .join();
+  const unchanged = signature(before) === signature(grants);
+  const empty = reach === 'specific' && !chosen.length;
+  const nobodyElse =
+    !people.teams.length && people.members.every(member => member.id === subscription.ownerMembershipId);
+  const owner =
+    subscription.ownerMembershipId === people.you ? 'Only you' : `Only ${people.name(subscription.ownerMembershipId)}`;
   async function save() {
+    if (unchanged) return close();
     setSending(true);
     setError(null);
     try {
@@ -198,42 +222,65 @@ export function ShareDialog({
       setSending(false);
     }
   }
+  const options: { value: Reach; label: string }[] = [
+    { value: 'private', label: owner },
+    { value: 'workspace', label: 'Everyone in the workspace' },
+    { value: 'specific', label: 'Specific people or teams' },
+  ];
   return (
     <Dialog open onOpenChange={open => !open && close()}>
       <DialogContent size="form">
         <DialogHeader>
-          <DialogTitle>{asking ? `Who can use your ${provider} plan?` : `Share this ${provider} plan`}</DialogTitle>
-          <DialogDescription>
-            {asking
-              ? 'Your plan is connected. People you share with can pick its models in their chats. No one can see its sign-in details. You can change this later with Share.'
-              : 'People you share with can pick its models in their chats. No one can see its sign-in details.'}
-          </DialogDescription>
+          <DialogTitle>Who can use this {provider} plan?</DialogTitle>
+          <DialogDescription>Anyone you add can pick its models in chat but can’t see its sign-in.</DialogDescription>
         </DialogHeader>
         <div className="grid gap-4">
-          <GrantsEditor
-            value={grants}
-            owner={subscription.ownerMembershipId}
-            people={people}
+          <RadioGroup
+            aria-label="Who can use this plan"
+            value={reach}
             disabled={sending}
-            roles={planRoles}
-            description="If someone can use more than one plan, TulipFarm tries their own first, then plans shared with them, then with their teams, then with everyone. If none can answer, the workspace’s fallback model does, if one is set."
-            onChange={next => {
+            onValueChange={value => {
               setError(null);
-              setGrants(next);
+              setReach(value as Reach);
             }}
-          />
-          {firstShare && (
-            <Alert>
-              <AlertDescription>
-                {subscription.account
-                  ? `This plan belongs to ${subscription.account}.`
-                  : subscription.ownerMembershipId === people.you
-                    ? 'This is your plan.'
-                    : `This plan belongs to ${people.name(subscription.ownerMembershipId)}.`}{' '}
-                {provider} may limit or close accounts that are shared. Everyone you share with draws on this plan’s
-                usage limits.
-              </AlertDescription>
-            </Alert>
+          >
+            <div className="grid gap-3">
+              {options.map(option => (
+                <div key={option.value} className="flex items-center gap-3">
+                  <RadioGroupItem id={`share-${subscription.connectionId}-${option.value}`} value={option.value} />
+                  <Label htmlFor={`share-${subscription.connectionId}-${option.value}`}>{option.label}</Label>
+                </div>
+              ))}
+            </div>
+          </RadioGroup>
+          {reach === 'specific' && (
+            <div className="grid gap-2 pl-7">
+              <GrantsEditor
+                value={chosen}
+                owner={subscription.ownerMembershipId}
+                people={people}
+                disabled={sending}
+                roles={planRoles}
+                description=""
+                everyone={false}
+                showOwner={false}
+                addLabel="Add people or teams"
+                onChange={next => {
+                  setError(null);
+                  setChosen(next);
+                }}
+              />
+              {empty && (
+                <p className="text-sm text-muted-foreground">
+                  {nobodyElse ? 'No one else is in this workspace yet.' : 'Add at least one person or team.'}
+                </p>
+              )}
+            </div>
+          )}
+          {reach !== 'private' && (
+            <p className="text-sm text-muted-foreground">
+              {provider} may limit accounts that are shared, and everyone you add uses this plan’s limits.
+            </p>
           )}
           {error && (
             <Alert variant="destructive">
@@ -242,11 +289,11 @@ export function ShareDialog({
           )}
         </div>
         <DialogFooter>
-          <Button variant={asking ? 'outline' : 'ghost'} disabled={sending} onClick={close}>
-            {asking ? 'Only me' : 'Cancel'}
+          <Button variant="ghost" disabled={sending} onClick={close}>
+            {asking ? 'Not now' : 'Cancel'}
           </Button>
-          <Button disabled={sending || unchanged} aria-busy={sending} onClick={() => void save()}>
-            {sending ? (asking ? 'Sharing…' : 'Saving…') : firstShare ? 'Share anyway' : asking ? 'Share' : 'Save'}
+          <Button disabled={sending || empty || (!asking && unchanged)} aria-busy={sending} onClick={() => void save()}>
+            {sending ? 'Saving…' : 'Save'}
           </Button>
         </DialogFooter>
       </DialogContent>

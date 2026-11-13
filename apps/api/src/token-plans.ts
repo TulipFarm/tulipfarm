@@ -13,7 +13,12 @@ import {
   type TokenPlanRuntime,
   type TokenPlanVerifier,
 } from '@tulipfarm/integrations/token-plans';
-import { checkClaudePlan, copilotPlanModels, PlanSessionError } from '@tulipfarm/agents/plan-sessions';
+import {
+  checkClaudePlan,
+  claudePlanModels,
+  copilotPlanModels,
+  PlanSessionError,
+} from '@tulipfarm/agents/plan-sessions';
 import { authenticateRoutes } from './authenticated-routes.ts';
 import { authConfig, type registerAuth } from './auth.ts';
 import { routeValidation } from './route-validation.ts';
@@ -40,11 +45,20 @@ function catalogModels(provider: TokenPlanProvider) {
   );
 }
 
-export function claudeVerifier(check: (token: string) => Promise<void> = checkClaudePlan): TokenPlanVerifier {
+export function claudeVerifier(
+  check: (token: string, model?: string) => Promise<void> = checkClaudePlan,
+  list: (token: string) => Promise<readonly { id: string; name: string }[]> = claudePlanModels,
+): TokenPlanVerifier {
   return async token => {
-    await check(token).catch(error => vendorFailure('claude', error));
-    // Every Claude plan runs the same models, and its token cannot list them, so the catalog lists them.
-    return { models: catalogModels('claude') };
+    const listed = await list(token).catch(error => vendorFailure('claude', error));
+    const models =
+      listed === 'limited' || !listed.length
+        ? catalogModels('claude')
+        : listed.map(model => ({ slug: model.id, label: planModelName(model.id, model.name) }));
+    // Listing works without a valid token, so one tiny request on the plan's cheapest model checks the sign-in.
+    const probe = models.find(model => model.slug.includes('haiku'))?.slug;
+    await check(token, probe).catch(error => vendorFailure('claude', error));
+    return { models };
   };
 }
 

@@ -117,13 +117,15 @@ export function ModelSources({
   const shared =
     read.state.kind === 'ready' ? read.state.data.filter(item => !item.mine && item.state !== 'signed-out') : [];
   const chatGptDetail =
-    !connection || connection.state === 'not-connected' || connection.state === 'signed-out'
-      ? 'Not connected'
-      : connection.state === 'reconnect-required'
-        ? 'Needs sign-in again'
-        : connection.state === 'plan-disabled'
-          ? 'Plan usage off'
-          : (connection.email ?? 'Connected');
+    chatGpt.state.kind === 'loading'
+      ? 'Checking…'
+      : !connection || connection.state === 'not-connected' || connection.state === 'signed-out'
+        ? 'Not connected'
+        : connection.state === 'reconnect-required'
+          ? 'Needs sign-in again'
+          : connection.state === 'plan-disabled'
+            ? 'Plan usage off'
+            : (connection.email ?? 'Connected');
   const claude = useTokenConnection(workspaceId, 'claude');
   const copilot = useTokenConnection(workspaceId, 'copilot');
   const tokenRail = (
@@ -136,11 +138,13 @@ export function ModelSources({
     if (read.state.kind === 'unavailable' || (read.state.kind === 'ready' && !read.state.data)) return null;
     const connection = read.state.kind === 'ready' ? read.state.data : null;
     const detail =
-      !connection || connection.state === 'not-connected' || connection.state === 'signed-out'
-        ? 'Not connected'
-        : connection.state === 'reconnect-required'
-          ? 'Needs reconnecting'
-          : account(connection);
+      read.state.kind === 'loading'
+        ? 'Checking…'
+        : !connection || connection.state === 'not-connected' || connection.state === 'signed-out'
+          ? 'Not connected'
+          : connection.state === 'reconnect-required'
+            ? 'Needs reconnecting'
+            : account(connection);
     return item(
       id,
       <Tile muted={detail === 'Not connected'}>
