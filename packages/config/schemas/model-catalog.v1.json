@@ -161,6 +161,7 @@
               {
                 "type": "string",
                 "enum": [
+                  "app-hosting",
                   "hosted-mcp",
                   "images",
                   "default-connection-knowledge",
@@ -520,6 +521,7 @@
               {
                 "type": "string",
                 "enum": [
+                  "app-hosting",
                   "hosted-mcp",
                   "images",
                   "default-connection-knowledge",
