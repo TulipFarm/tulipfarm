@@ -14,19 +14,21 @@ const kindOptions = [
   {
     value: 'private',
     label: 'Private',
-    description: 'Opens inside TulipFarm. Only people you share it with can use it.',
+    description: 'Opens inside TulipFarm. Only people in this workspace you share it with can open it.',
   },
   {
     value: 'public',
     label: 'Public',
-    description: 'Gets its own web address anyone can visit. A workspace admin approves it before it goes live.',
+    description:
+      'Gets its own web address that anyone can visit. A workspace admin must approve it before it goes live, and it uses workspace credits.',
   },
 ] as const;
 
 export function slugError(slug: string) {
   if (!slug) return undefined;
-  if (slug === 'new' || !appSlugPattern.test(slug))
-    return 'Use up to 48 lowercase letters, digits and hyphens, starting and ending with a letter or digit.';
+  if (slug === 'new') return '“new” is reserved. Choose another address.';
+  if (!appSlugPattern.test(slug))
+    return 'Use up to 48 lowercase letters, numbers and hyphens. Start and end with a letter or number.';
   return undefined;
 }
 
@@ -72,7 +74,7 @@ export function NewAppPage() {
               params: { workspaceSlug: workspace.slug, appSlug: created.slug },
             });
           } catch (error) {
-            setFailure(failureMessage(error));
+            setFailure(failureMessage(error, { 'name-taken': 'Another app already uses this TulipFarm address.' }));
             setSaving(false);
           }
         }}
@@ -81,8 +83,8 @@ export function NewAppPage() {
           <ChoiceGroup
             type="radio"
             required
-            legend="Who can use it"
-            helper="You cannot change this later."
+            legend="Type"
+            helper="You can’t change this after you create the app."
             options={kindOptions}
             value={kind}
             onValueChange={setKind}
@@ -91,9 +93,9 @@ export function NewAppPage() {
             <Input value={title} maxLength={120} onChange={event => setTitle(event.target.value)} />
           </Field>
           <Field
-            label="Address in this workspace"
+            label="TulipFarm address"
             optional
-            helper={`Leave empty to make one from the name. It appears as /${workspace.slug}/apps/${slug.trim() || 'name'}.`}
+            helper={`Leave empty to use the name. The app opens at /${workspace.slug}/apps/${slug.trim() || 'your-app'}.`}
             error={addressError}
           >
             <Input value={slug} maxLength={48} onChange={event => setSlug(event.target.value.toLowerCase())} />

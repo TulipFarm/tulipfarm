@@ -10,28 +10,28 @@ export const kindLabels = { public: 'Public', private: 'Private' } as const;
 export function servingStatus(app: AppSummary): { label: string; tone: Tone } | null {
   if (app.kind === 'private') return null;
   if (app.stops.disabledAt) return { label: 'Turned off by an admin', tone: 'destructive' };
-  if (app.stops.budgetPausedAt) return { label: 'Paused: out of credits', tone: 'warning' };
-  if (app.stops.editorPausedAt) return { label: 'Paused', tone: 'warning' };
+  if (app.stops.budgetPausedAt) return { label: 'Paused: credits used up', tone: 'warning' };
+  if (app.stops.editorPausedAt) return { label: 'Paused by an editor', tone: 'warning' };
   if (!app.liveReleaseId) return { label: 'Not published', tone: 'secondary' };
   return { label: 'Live', tone: 'success' };
 }
 
 export const draftLabels: Record<AppDraftState, string> = {
-  empty: 'Empty',
-  editing: 'Being edited',
+  empty: 'No changes',
+  editing: 'Changing in chat',
   building: 'Building',
   // oxlint-disable-next-line tulipfarm/product-copy -- A draft state identifier, not user-facing copy.
-  'preview-ready': 'Ready to try',
+  'preview-ready': 'Built, not published',
   failed: 'Build failed',
-  saved: 'Saved',
+  saved: 'Saved, not built',
 };
 
 export function approvalLabel(approval: AppSummary['approval']): { label: string; tone: Tone } {
   switch (approval.state) {
     case 'not-requested':
-      return { label: 'Not requested', tone: 'secondary' };
+      return { label: 'Approval not requested', tone: 'secondary' };
     case 'requested':
-      return { label: 'Waiting for an admin', tone: 'info' };
+      return { label: 'Waiting for approval', tone: 'info' };
     case 'approved':
       return { label: 'Approved', tone: 'success' };
     case 'rejected':
@@ -58,5 +58,11 @@ const dateFormat = new Intl.DateTimeFormat([], { month: 'short', day: 'numeric',
 export const formatDay = (iso: string) => dateFormat.format(new Date(iso));
 
 export const shortCommit = (commit: string) => commit.slice(0, 7);
+
+/** Why a credit pause needs no action from the editor. */
+export const creditPauseNote = 'It resumes on its own when credits are available again.';
+
+/** The address inside TulipFarm, which every app has. */
+export const tulipfarmAddress = (workspaceSlug: string, appSlug: string) => `/${workspaceSlug}/apps/${appSlug}`;
 
 export const canEdit = (app: AppSummary | AppDetail) => app.role === 'edit';

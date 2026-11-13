@@ -27,7 +27,15 @@ import {
 import { AppGate, useWorkspaceAdmin } from './app-page';
 import { slugError } from './new';
 import { useAppApi, useAppChanges, useAppGrants, useNameAvailability } from './queries';
-import { approvalLabel, creditsLabel, creditsToUnits, roleLabels, servingStatus } from './labels';
+import {
+  approvalLabel,
+  creditPauseNote,
+  creditsLabel,
+  creditsToUnits,
+  roleLabels,
+  servingStatus,
+  tulipfarmAddress,
+} from './labels';
 
 export function AppSettingsPage() {
   return (
@@ -46,7 +54,7 @@ function useAction() {
     pending,
     failure,
     done,
-    run: async (work: () => Promise<unknown>, success?: string) => {
+    run: async (work: () => Promise<unknown>, success?: string, overrides?: Record<string, string>) => {
       if (pending) return false;
       setPending(true);
       setFailure(null);
@@ -56,7 +64,7 @@ function useAction() {
         setDone(success ?? null);
         return true;
       } catch (error) {
-        setFailure(failureMessage(error));
+        setFailure(failureMessage(error, overrides));
         return false;
       } finally {
         setPending(false);
@@ -127,7 +135,7 @@ function Details({ app }: { app: AppDetail }) {
   const [title, setTitle] = useState(app.title);
   const [slug, setSlug] = useState(app.slug);
   const titleError = title.trim() ? undefined : 'Enter a name.';
-  const addressError = slug.trim() ? slugError(slug.trim()) : 'Enter an address.';
+  const addressError = slug.trim() ? slugError(slug.trim()) : 'Enter a TulipFarm address.';
   const changed = title.trim() !== app.title || slug.trim() !== app.slug;
   const save = async (event: FormEvent) => {
     event.preventDefault();
@@ -136,7 +144,9 @@ function Details({ app }: { app: AppDetail }) {
       ...(title.trim() !== app.title ? { title: title.trim() } : {}),
       ...(slug.trim() !== app.slug ? { slug: slug.trim() } : {}),
     };
-    const saved = await action.run(() => api.update(app.id, input), 'Saved.');
+    const saved = await action.run(() => api.update(app.id, input), 'Saved.', {
+      'name-taken': 'Another app already uses this TulipFarm address.',
+    });
     if (!saved) return;
     await changes.app(app.id);
     if (input.slug)
@@ -154,9 +164,9 @@ function Details({ app }: { app: AppDetail }) {
             <Input value={title} maxLength={120} onChange={event => setTitle(event.target.value)} />
           </Field>
           <Field
-            label="Address in this workspace"
+            label="TulipFarm address"
             required
-            helper={`/${workspace.slug}/apps/${slug.trim() || app.slug}. Old links stop working when you change it.`}
+            helper={`${tulipfarmAddress(workspace.slug, slug.trim() || app.slug)}. Old links stop working when you change it.`}
             error={addressError}
           >
             <Input value={slug} maxLength={48} onChange={event => setSlug(event.target.value.toLowerCase())} />
@@ -172,9 +182,9 @@ function Details({ app }: { app: AppDetail }) {
 }
 
 const nameReasons = {
-  'name-taken': 'Another app already uses this name.',
-  'name-reserved': 'This name is reserved. Choose another.',
-  'name-invalid': 'Use 3 to 63 lowercase letters, digits and single hyphens.',
+  'name-taken': 'Another app already uses this web address.',
+  'name-reserved': 'This web address is reserved. Choose another.',
+  'name-invalid': 'Use 3 to 63 lowercase letters, numbers and single hyphens.',
 } as const;
 
 function PublicName({ app }: { app: AppDetail }) {
@@ -197,25 +207,30 @@ function PublicName({ app }: { app: AppDetail }) {
   );
   const result = availability.state.kind === 'ready' && checked === candidate ? availability.state.data : null;
   const error = result && !result.available ? nameReasons[result.reason ?? 'name-invalid'] : undefined;
-  const helper = unchanged
-    ? 'The name in this app’s web address. Changing it moves the app to a new address.'
-    : result?.available
-      ? 'This name is free.'
-      : 'Checking this name…';
+  const helper = !candidate
+    ? 'Enter a web address.'
+    : unchanged
+      ? 'Changing it moves the app to a new web address. The old one stops working.'
+      : result?.available
+        ? 'This web address is available.'
+        : 'Checking…';
   return (
-    <SettingsGroup title="Public name" titleId="app-public-name">
+    <SettingsGroup title="Web address" titleId="app-web-address">
       <form
         className="space-y-4 p-4"
         noValidate
         onSubmit={async event => {
           event.preventDefault();
           if (!candidate || unchanged || error) return;
-          if (await action.run(() => api.rename(app.id, candidate), 'Name saved.')) await changes.app(app.id);
+          if (await action.run(() => api.rename(app.id, candidate), 'Web address saved.')) await changes.app(app.id);
         }}
       >
         <FieldsDisabled value={action.pending}>
-          <Field label="Public name" required helper={helper} error={error}>
-            <Input value={name} maxLength={63} onChange={event => setName(event.target.value.toLowerCase())} />
+          <Field label="Web address" required helper={helper} error={error}>
+            <div className="flex items-center gap-2">
+              <Input value={name} maxLength={63} onChange={event => setName(event.target.value.toLowerCase())} />
+              {app.sitesDomain && <span className="shrink-0 text-sm text-muted-foreground">.{app.sitesDomain}</span>}
+            </div>
           </Field>
         </FieldsDisabled>
         <Feedback action={action} />
@@ -224,7 +239,7 @@ function PublicName({ app }: { app: AppDetail }) {
           disabled={!candidate || unchanged || !!error || action.pending}
           aria-busy={action.pending}
         >
-          Save name
+          Save web address
         </Button>
       </form>
     </SettingsGroup>
@@ -262,7 +277,7 @@ function Sharing({ app }: { app: AppDetail }) {
   const addRole: AppRole = target?.grantee.kind === 'workspace' ? 'use' : role;
   const name = (grantee: AppGrantee) => {
     if (grantee.kind === 'workspace') return 'Everyone in this workspace';
-    if (grantee.kind === 'team') return 'A team';
+    if (grantee.kind === 'team') return grantee.name;
     const member = members.find(entry => entry.id === grantee.membershipId);
     if (!member) return 'A former member';
     return grantee.membershipId === you ? `${member.name} (you)` : member.name;
@@ -357,7 +372,7 @@ function Sharing({ app }: { app: AppDetail }) {
           <Label htmlFor={personId}>Share with</Label>
           <Select value={adding} disabled={action.pending} onValueChange={next => setAdding(next ?? '')}>
             <SelectTrigger id={personId} width="full">
-              <SelectValue>{target?.label ?? 'Choose a person'}</SelectValue>
+              <SelectValue>{target?.label ?? 'Choose someone'}</SelectValue>
             </SelectTrigger>
             <SelectContent>
               {candidates.map(candidate => (
@@ -414,8 +429,8 @@ function Approval({ app, admin, editor }: { app: AppDetail; admin: boolean; edit
     <SettingsGroup title="Approval" titleId="app-approval">
       {confirm.element}
       <SettingsRow
-        label="Status"
-        description="A workspace admin approves a public app before it can go live. It then uses workspace credits."
+        label="Approval status"
+        description="A workspace admin must approve a public app before it can go live. Once live, it uses workspace credits."
       >
         <span className="flex flex-col items-end gap-1">
           <Badge variant={status.tone}>{status.label}</Badge>
@@ -429,7 +444,10 @@ function Approval({ app, admin, editor }: { app: AppDetail; admin: boolean; edit
         </span>
       </SettingsRow>
       {editor && !admin && (app.approval.state === 'not-requested' || app.approval.state === 'rejected') && (
-        <SettingsRow label="Ask for approval" description="Workspace admins see your request in this app’s settings.">
+        <SettingsRow
+          label="Ask for approval"
+          description="Admins see requests in this app’s settings, so let one know you’ve asked."
+        >
           <Button
             variant="outline"
             disabled={action.pending}
@@ -460,7 +478,7 @@ function Approval({ app, admin, editor }: { app: AppDetail; admin: boolean; edit
             <Field
               label="Monthly credit limit"
               optional
-              helper="The most this app can use in a month. Leave empty for no limit."
+              helper="The app pauses once it uses this many credits in a calendar month (UTC). Leave empty for no limit."
               error={limitError}
             >
               <Input inputMode="numeric" value={limit} onChange={event => setLimit(event.target.value)} />
@@ -470,7 +488,7 @@ function Approval({ app, admin, editor }: { app: AppDetail; admin: boolean; edit
             <Button type="submit" disabled={action.pending || !!limitError} aria-busy={action.pending}>
               {approved ? 'Save limit' : 'Approve'}
             </Button>
-            {app.approval.state !== 'rejected' && (
+            {app.approval.state !== 'rejected' && !app.liveReleaseId && (
               <Button
                 type="button"
                 variant="outline"
@@ -478,7 +496,7 @@ function Approval({ app, admin, editor }: { app: AppDetail; admin: boolean; edit
                 onClick={() =>
                   confirm.open({
                     title: 'Reject this app?',
-                    description: 'It cannot go live. Its editors can ask again later.',
+                    description: 'It can’t go live unless an admin approves it. Its editors can ask again.',
                     action: 'Reject',
                     run: async () => {
                       try {
@@ -486,7 +504,7 @@ function Approval({ app, admin, editor }: { app: AppDetail; admin: boolean; edit
                         await changes.app(app.id);
                         return null;
                       } catch (error) {
-                        return failureMessage(error);
+                        return failureMessage(error, { forbidden: 'Turn off this app before you reject it.' });
                       }
                     },
                   })
@@ -522,17 +540,20 @@ function Availability({ app, admin, editor }: { app: AppDetail; admin: boolean; 
     <SettingsGroup title="Availability" titleId="app-availability">
       {confirm.element}
       {serving && (
-        <SettingsRow label="Status">
+        <SettingsRow
+          label="Status"
+          description={app.stops.budgetPausedAt && !app.stops.disabledAt ? creditPauseNote : undefined}
+        >
           <Badge variant={serving.tone}>{serving.label}</Badge>
         </SettingsRow>
       )}
-      {editor && !app.stops.disabledAt && (
+      {editor && !app.stops.disabledAt && !app.stops.budgetPausedAt && app.liveReleaseId && (
         <SettingsRow
           label={app.stops.editorPausedAt ? 'Resume' : 'Pause'}
           description={
             app.stops.editorPausedAt
-              ? 'Visitors can reach the app again.'
-              : 'Visitors see that the app is paused. Nothing is deleted, and it stops using credits.'
+              ? 'Visitors can open the app again.'
+              : 'Visitors can’t open the app while it’s paused. Nothing is deleted.'
           }
         >
           <Button
@@ -555,7 +576,7 @@ function Availability({ app, admin, editor }: { app: AppDetail; admin: boolean; 
           description={
             app.stops.disabledAt
               ? 'Editors can pause, resume and publish again.'
-              : 'Only a workspace admin can turn it back on. Editors cannot publish or resume it.'
+              : 'Visitors can’t open the app. Editors can’t publish or resume it until an admin turns it back on.'
           }
         >
           <Button

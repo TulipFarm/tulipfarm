@@ -24,8 +24,8 @@ export function AppsUnavailable() {
       kind="unavailable"
       heading="h2"
       icon={Window}
-      title="Apps are not on in this workspace"
-      description="Ask a workspace admin if you expected to see apps here."
+      title="Apps aren’t available in this workspace"
+      description="They haven’t been turned on for this workspace yet."
     />
   );
 }
@@ -65,7 +65,7 @@ export function AppGate({ children }: { children: (app: AppDetail) => ReactNode 
         heading="h2"
         icon={Window}
         title="App not found"
-        description="It may have a new address, or you may not have access to it."
+        description="It may have moved to a new address, or you may not have access to it."
       >
         <Button
           variant="outline"

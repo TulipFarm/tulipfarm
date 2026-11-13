@@ -7,9 +7,19 @@ import { PageContent } from '@tulipfarm/sprout/page-content';
 import { PageHeader } from '@tulipfarm/sprout/page-header';
 import { SettingsGroup, SettingsRow } from '@tulipfarm/sprout/settings-list';
 import { workspaceRoute } from '@/router';
-import type { AppDetail } from './api';
+import { appFailureMessage, type AppDetail } from './api';
 import { AppGate, useWorkspaceAdmin } from './app-page';
-import { approvalLabel, canEdit, creditsLabel, draftLabels, kindLabels, roleLabels, servingStatus } from './labels';
+import {
+  approvalLabel,
+  canEdit,
+  creditPauseNote,
+  creditsLabel,
+  draftLabels,
+  kindLabels,
+  roleLabels,
+  servingStatus,
+  tulipfarmAddress,
+} from './labels';
 
 /** Versions and settings links for people who may open them. */
 export function AppActions({ app, admin }: { app: AppDetail; admin: boolean }) {
@@ -53,26 +63,41 @@ function Overview({ app }: { app: AppDetail }) {
   const serving = servingStatus(app);
   const approval = approvalLabel(app.approval);
   const rows: { label: string; description?: string; value: ReactNode }[] = [
-    { label: 'Kind', value: kindLabels[app.kind] },
+    { label: 'Type', value: kindLabels[app.kind] },
     app.kind === 'public'
       ? {
-          label: 'Public name',
-          description: 'The name in this app’s web address.',
-          value: app.publicName ?? 'Not chosen yet',
+          label: 'Web address',
+          value: !app.webAddress ? (
+            'Not set yet'
+          ) : app.edgeStatus === 'active' && app.liveReleaseId ? (
+            <a href={`https://${app.webAddress}`} target="_blank" rel="noreferrer" className="underline">
+              {app.webAddress}
+            </a>
+          ) : (
+            app.webAddress
+          ),
         }
       : {
-          label: 'Address',
+          label: 'TulipFarm address',
           description: 'Only people you share it with can open it.',
-          value: `/${workspace.slug}/apps/${app.slug}`,
+          value: tulipfarmAddress(workspace.slug, app.slug),
         },
     {
-      label: 'Live version',
+      label: 'Current version',
       value: app.liveRelease ? `Version ${app.liveRelease.number}` : 'Not published yet',
     },
-    ...(serving ? [{ label: 'Status', value: <Badge variant={serving.tone}>{serving.label}</Badge> }] : []),
+    ...(serving
+      ? [
+          {
+            label: 'Status',
+            ...(app.stops.budgetPausedAt && !app.stops.disabledAt ? { description: creditPauseNote } : {}),
+            value: <Badge variant={serving.tone}>{serving.label}</Badge>,
+          },
+        ]
+      : []),
     {
       label: 'Draft',
-      description: 'Changes made in chat that are not live yet.',
+      description: 'Changes from chat that aren’t published yet.',
       value: draftLabels[app.draft.state],
     },
     ...(app.kind === 'public'
@@ -82,9 +107,11 @@ function Overview({ app }: { app: AppDetail }) {
             value: (
               <span className="flex flex-col items-end gap-1">
                 <Badge variant={approval.tone}>{approval.label}</Badge>
-                {app.approval.state === 'approved' && app.approval.monthlyLimitUnits && (
+                {app.approval.state === 'approved' && (
                   <span className="text-sm text-muted-foreground">
-                    Up to {creditsLabel(app.approval.monthlyLimitUnits)}
+                    {app.approval.monthlyLimitUnits
+                      ? `Up to ${creditsLabel(app.approval.monthlyLimitUnits)}`
+                      : 'No monthly limit'}
                   </span>
                 )}
               </span>
@@ -108,14 +135,9 @@ function Overview({ app }: { app: AppDetail }) {
           <Alert variant="destructive">
             <AlertTitle>The last build failed</AlertTitle>
             <AlertDescription>
-              {app.draft.failure.message}
-              {app.draft.failure.retryable ? ' You can try again.' : ''}
+              {appFailureMessage(app.draft.failure.code)}
+              {app.draft.failure.retryable ? ' Ask in chat to try again.' : ''}
             </AlertDescription>
-          </Alert>
-        )}
-        {app.kind === 'private' && (
-          <Alert>
-            <AlertDescription>The pages of private apps will open here.</AlertDescription>
           </Alert>
         )}
         <SettingsGroup title="About this app" titleId="app-about">

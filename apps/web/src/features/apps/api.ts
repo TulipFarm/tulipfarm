@@ -29,6 +29,8 @@ const appSummarySchema = z.object({
   slug: z.string(),
   title: z.string(),
   publicName: z.string().nullable(),
+  /** The full host, `<public name>.<sites domain>`, once the app has a public name and the server serves app sites. */
+  webAddress: z.string().nullable(),
   role: z.enum(['use', 'edit']).nullable(),
   approval: approvalSchema,
   liveReleaseId: z.uuid().nullable(),
@@ -54,6 +56,8 @@ export type AppDraftState = z.infer<typeof draftSchema>['state'];
 const appDetailSchema = appSummarySchema.extend({
   draft: draftSchema,
   liveRelease: z.object({ id: z.uuid(), number: z.number(), commit: z.string() }).nullable(),
+  /** The domain public apps are served under, or null when this server does not serve app sites. */
+  sitesDomain: z.string().nullable(),
 });
 export type AppDetail = z.infer<typeof appDetailSchema>;
 
@@ -70,7 +74,7 @@ export type AppRelease = z.infer<typeof releaseSchema>;
 const granteeSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('workspace') }),
   z.object({ kind: z.literal('member'), membershipId: z.string() }),
-  z.object({ kind: z.literal('team'), teamId: z.string() }),
+  z.object({ kind: z.literal('team'), teamId: z.string(), name: z.string() }),
 ]);
 export type AppGrantee = z.infer<typeof granteeSchema>;
 const grantSchema = z.object({ grantee: granteeSchema, role: z.enum(['use', 'edit']), grantedBy: z.string() });
@@ -114,16 +118,7 @@ export function appApi(workspaceId: string) {
     if (!response.ok) {
       const failure = z.object({ failure: failureSchema }).safeParse(value).data?.failure;
       const code = failure?.code ?? z.object({ error: z.string() }).safeParse(value).data?.error ?? 'apps-unavailable';
-      throw new TableRequestError(
-        response.status,
-        code,
-        failure?.message ??
-          (response.status === 400
-            ? 'Check the details and try again.'
-            : [401, 403, 404].includes(response.status)
-              ? 'This app is unavailable or your access changed.'
-              : 'Apps are unavailable right now. Try again in a moment.'),
-      );
+      throw new TableRequestError(response.status, code, appFailureMessage(code));
     }
     return value;
   }
@@ -176,5 +171,36 @@ export function appApi(workspaceId: string) {
 }
 export type AppApi = ReturnType<typeof appApi>;
 
-export const failureMessage = (error: unknown) =>
-  error instanceof Error && error.message ? error.message : 'Apps are unavailable right now. Try again in a moment.';
+const unavailable = 'Apps are unavailable right now. Try again in a moment.';
+const noAccess = 'This app is unavailable or your access changed.';
+
+/** What people read for each failure code, so server wording never reaches the page. */
+const failureMessages: Record<string, string> = {
+  'invalid-request': 'Check the details and try again.',
+  'sign-in-required': noAccess,
+  'not-found': noAccess,
+  forbidden: noAccess,
+  'publisher-unavailable':
+    'This TulipFarm server isn’t set up to publish apps yet. Ask whoever runs your TulipFarm server to set it up.',
+  'builder-unavailable':
+    'This TulipFarm server isn’t set up to build apps yet. Ask whoever runs your TulipFarm server to set it up.',
+  'approval-required': 'A workspace admin must approve this app before it can go live.',
+  'budget-exhausted': 'Credits are used up, so this app can’t go live right now.',
+  'name-taken': 'Another app already uses this web address.',
+  'name-reserved': 'This web address is reserved. Choose another.',
+  'draft-busy': 'Someone is changing this app in chat. Try again when they finish.',
+  'stale-draft': 'This app changed while you were working. Try again.',
+  superseded: 'A newer change finished first, so this one wasn’t applied.',
+  'limit-exceeded': 'The app is too large to build.',
+  'recipe-invalid': 'The app’s build settings aren’t valid.',
+  'build-failed': 'Something in the app’s code stopped the build.',
+  'build-timeout': 'The build took too long and was stopped.',
+};
+
+export const appFailureMessage = (code: string) => failureMessages[code] ?? unavailable;
+
+/** The message for a failed request, with `overrides` for codes whose meaning depends on the action. */
+export function failureMessage(error: unknown, overrides: Record<string, string> = {}) {
+  if (!(error instanceof TableRequestError)) return unavailable;
+  return overrides[error.code] ?? error.message;
+}

@@ -10,7 +10,7 @@ import { StatePanel } from '@tulipfarm/sprout/state-panel';
 import { workspaceRoute } from '@/router';
 import { AppsUnavailable } from './app-page';
 import { useApps } from './queries';
-import { approvalLabel, kindLabels, roleLabels, servingStatus } from './labels';
+import { approvalLabel, kindLabels, roleLabels, servingStatus, tulipfarmAddress } from './labels';
 
 export function AppsPage() {
   const { workspace } = workspaceRoute.useRouteContext();
@@ -68,8 +68,14 @@ export function AppsPage() {
           );
         }}
         values={app => [
-          { label: 'Address', value: app.kind === 'public' ? (app.publicName ?? 'No name yet') : `/apps/${app.slug}` },
-          { label: 'Your access', value: app.role ? roleLabels[app.role] : 'Admin' },
+          {
+            label: 'Address',
+            value:
+              app.kind === 'public'
+                ? (app.webAddress ?? 'No web address yet')
+                : tulipfarmAddress(workspace.slug, app.slug),
+          },
+          { label: 'Your access', value: app.role ? roleLabels[app.role] : 'Workspace admin' },
         ]}
         empty={
           <StatePanel
@@ -77,7 +83,7 @@ export function AppsPage() {
             heading="h2"
             icon={Window}
             title="No apps yet"
-            description="Describe a tool in chat and TulipFarm builds it. Start with a name and whether it is private or public."
+            description="Create an app here, then describe what it should do in chat. TulipFarm builds it for you."
           >
             {newApp}
           </StatePanel>

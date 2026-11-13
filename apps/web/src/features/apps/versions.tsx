@@ -9,7 +9,7 @@ import { RecordList } from '@tulipfarm/sprout/record-list';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
 import { useConfirmation } from '@/features/access/confirm';
 import { workspaceRoute } from '@/router';
-import { failureMessage, type AppDetail, type AppRelease } from './api';
+import { appFailureMessage, failureMessage, type AppDetail, type AppRelease } from './api';
 import { AppGate } from './app-page';
 import { useAppApi, useAppChanges, useAppOperation, useAppReleases } from './queries';
 import { formatDay, shortCommit } from './labels';
@@ -43,7 +43,7 @@ function Versions({ app }: { app: AppDetail }) {
         titleId="versions-heading"
         focusable
         title="Versions"
-        description="Each time you publish, TulipFarm keeps that version. Restore one to put it live again. Your data stays as it is."
+        description="TulipFarm keeps every version you publish. Restore an earlier one to make it the current version again."
         parent={{
           label: app.title,
           link: (
@@ -60,12 +60,14 @@ function Versions({ app }: { app: AppDetail }) {
           >
             <AlertDescription>
               {restoring
-                ? 'Restoring. The current version stays live until the restored one is ready.'
+                ? 'Restoring. The current version keeps running until the restored one is ready.'
                 : outcome.status === 'switched'
-                  ? 'Restored. That version is live now.'
+                  ? 'Restored. That version is now the current version.'
                   : outcome.status === 'superseded'
                     ? 'A newer change finished first, so this restore was not applied.'
-                    : (outcome.failure?.message ?? 'The restore failed. The current version is still live.')}
+                    : outcome.failure?.code === 'publisher-unavailable'
+                      ? appFailureMessage(outcome.failure.code)
+                      : 'The restore failed. The current version hasn’t changed.'}
             </AlertDescription>
           </Alert>
         )}
@@ -91,9 +93,9 @@ function Versions({ app }: { app: AppDetail }) {
             onRetry={() => void read.refresh()}
             badges={release => <VersionBadge release={release} />}
             values={release => [
-              { label: 'Published', value: formatDay(release.createdAt) },
+              { label: 'Created', value: formatDay(release.createdAt) },
               {
-                label: 'Source',
+                label: 'Code ID',
                 value: <span className="font-mono">{shortCommit(release.commit)}</span>,
                 text: release.commit,
               },
@@ -109,7 +111,7 @@ function Versions({ app }: { app: AppDetail }) {
                     confirm.open({
                       title: `Restore version ${release.number}?`,
                       description:
-                        'It replaces the live version once it is ready. Data, permissions and limits stay as they are now.',
+                        'It replaces the current version once it’s ready. The app’s sharing and credit limit stay as they are.',
                       action: 'Restore',
                       destructive: false,
                       run: async () => {
@@ -144,7 +146,7 @@ function Versions({ app }: { app: AppDetail }) {
 }
 
 function VersionBadge({ release }: { release: AppRelease }) {
-  if (release.live) return <Badge variant="success">Live</Badge>;
+  if (release.live) return <Badge variant="success">Current</Badge>;
   if (!release.staged) return <Badge variant="secondary">Not ready</Badge>;
   return null;
 }
