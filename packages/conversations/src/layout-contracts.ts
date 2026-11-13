@@ -20,6 +20,7 @@ import {
   surfaceMessageSchema,
   surfaceText,
   type A2uiComponent,
+  type Surface,
   type SurfaceError,
   type SurfaceMessage,
 } from '@tulipfarm/sprout/a2ui/catalog';
@@ -30,6 +31,9 @@ const id = z.uuid();
 
 export const layoutCompatibility = Object.freeze({ minimum: 67 });
 
+const workspaceFileEmbed = z.strictObject({ kind: z.literal('workspace-file'), fileId: id });
+const workflowEmbed = z.strictObject({ kind: z.literal('workflow'), reference: workflowReferenceSchema });
+
 /** An existing TulipFarm card, referenced by the ID of the record that owns it. The viewer's own permissions apply. */
 export const embedReferenceSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('plan'), planId: id }),
@@ -39,8 +43,8 @@ export const embedReferenceSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('calendar-action'), proposalId: id }),
   z.strictObject({ kind: z.literal('google-action'), proposalId: id }),
   z.strictObject({ kind: z.literal('google-file'), fileId: z.string().min(1).max(256) }),
-  z.strictObject({ kind: z.literal('workspace-file'), fileId: id }),
-  z.strictObject({ kind: z.literal('workflow'), reference: workflowReferenceSchema }),
+  workspaceFileEmbed,
+  workflowEmbed,
   z.strictObject({
     kind: z.literal('package-install'),
     url: z.string().refine(value => marketplacePackage(value) !== null, 'A versioned marketplace package is required'),
@@ -81,6 +85,19 @@ export const agentFunctionArgsSchemas = {
 export const lookupItemSchema = z.strictObject({ value: z.string(), label: z.string() });
 export type LookupItem = z.infer<typeof lookupItemSchema>;
 
+const lookupFunctions = {
+  searchRows: defineFunction({
+    description: `Rows of a workspace table the person can read, as at most ${agentFunctionItemLimit} {value: row ID, label} items, filtered by an optional search text.`,
+    args: searchRowsArgsSchema,
+    returnType: 'array',
+  }),
+  listMembers: defineFunction({
+    description: `Workspace members, as at most ${agentFunctionItemLimit} {value: membership ID, label: name} items, filtered by an optional search text.`,
+    args: listMembersArgsSchema,
+    returnType: 'array',
+  }),
+};
+
 export const tulipfarmCatalog = defineCatalog({
   id: tulipfarmCatalogId,
   title: 'TulipFarm',
@@ -88,16 +105,7 @@ export const tulipfarmCatalog = defineCatalog({
   instructions: `Name this catalog on each Embed: {"id": "plan_card", "component": "Embed", "@catalogId": "${tulipfarmCatalogId}", "ref": {...}}. searchRows and listMembers return [{value, label}] lists, for example as ChoicePicker options.`,
   components: { Embed },
   functions: {
-    searchRows: defineFunction({
-      description: `Rows of a workspace table the person can read, as at most ${agentFunctionItemLimit} {value: row ID, label} items, filtered by an optional search text.`,
-      args: searchRowsArgsSchema,
-      returnType: 'array',
-    }),
-    listMembers: defineFunction({
-      description: `Workspace members, as at most ${agentFunctionItemLimit} {value: membership ID, label: name} items, filtered by an optional search text.`,
-      args: listMembersArgsSchema,
-      returnType: 'array',
-    }),
+    ...lookupFunctions,
     openInCanvas: defineFunction({
       description: 'Opens this reply in Canvas.',
       returnType: 'void',
@@ -473,3 +481,60 @@ export function layoutText(layout: Layout): string {
 
 /** The catalog description for the model. */
 export const layoutPromptSnippet = () => layoutCatalogs.map(catalog => promptSnippet(catalog)).join('\n\n');
+
+export const appsCatalogId = 'tulipfarm/apps@1';
+export const appEmbedReferenceSchema = z.discriminatedUnion('kind', [workspaceFileEmbed, workflowEmbed]);
+export type AppEmbedReference = z.infer<typeof appEmbedReferenceSchema>;
+const { openUrl: _openUrl, ...appBasicFunctions } = sproutCatalog.functions;
+
+/**
+ * The catalog of every app page surface: Sprout's components, workspace file and workflow cards, and the workspace
+ * lookups. Pages are written from table content an agent read, so the catalog has nothing that runs script, applies
+ * styles or loads or opens a URL.
+ */
+export const appsCatalog = defineCatalog({
+  id: appsCatalogId,
+  title: 'TulipFarm apps',
+  description: 'Sprout components, workspace file and workflow cards, and workspace lookups for app pages.',
+  instructions: `${sproutCatalog.instructions ?? ''}
+A Button's action.event.name is the ID of an action the page declares, and its context sends exactly the values that action binds. Pages read their sources at /sources/<source ID> and their row at /params/row.`,
+  components: {
+    ...sproutCatalog.components,
+    Embed: defineComponent({
+      description: 'A workspace file or workflow card by the ID of its record.',
+      props: z.strictObject({ ref: appEmbedReferenceSchema }),
+      text: ({ ref }) => `[${ref.kind}]`,
+    }),
+  },
+  functions: { ...appBasicFunctions, ...lookupFunctions },
+});
+
+/** App pages load and open no URLs: links and images in text are refused. */
+export const appAllowUrl = (_url: string, _kind: 'link' | 'image') => false;
+
+/** One app page surface as stored: a `createSurface`, then optional `updateComponents`. Data comes from the page's sources. */
+export const appSurfaceSchema = z.array(surfaceMessageSchema).min(1).max(64);
+
+export type AppSurfaceCheck = { ok: true; surface: Surface } | { ok: false; errors: SurfaceError[] };
+
+/** The catalog check for one app page surface, used by the worker, the API and the browser. */
+export function checkAppSurface(messages: readonly SurfaceMessage[], surfaceId: string): AppSurfaceCheck {
+  const errors: SurfaceError[] = [];
+  messages.forEach((message, index) => {
+    if (index === 0 ? !('createSurface' in message) : !('updateComponents' in message))
+      errors.push({
+        code: 'VALIDATION_FAILED',
+        surfaceId,
+        path: `/${index}`,
+        message: index === 0 ? 'The first message must be createSurface' : 'Later messages must be updateComponents',
+      });
+  });
+  if (errors.length) return { ok: false, errors };
+  const checked = checkSurface(messages, { catalogs: [appsCatalog], limits: layoutLimits, allowUrl: appAllowUrl });
+  if (!checked.ok) return checked;
+  const report = (message: string) =>
+    errors.push({ code: 'VALIDATION_FAILED', surfaceId, path: '/0/createSurface', message });
+  if (checked.surface.catalogId !== appsCatalogId) report(`The surface must use catalog ${appsCatalogId}`);
+  if (checked.surface.surfaceId !== surfaceId) report(`The surface ID must be ${surfaceId}`);
+  return errors.length ? { ok: false, errors } : checked;
+}

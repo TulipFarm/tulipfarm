@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
+  checkAppSurface,
   checkLayout,
   followUpAction,
   layoutActionRequestSchema,
@@ -165,4 +166,43 @@ test('an action may carry the labels shown for its values, but only for values i
   });
   assert.equal(layoutActionRequestSchema.parse(request).labels, undefined);
   assert.equal(layoutActionRequestSchema.safeParse({ ...request, labels: { owner: 'Dev User' } }).success, false);
+});
+
+test('app surfaces use Sprout components, file and workflow cards and lookups, but no chat-only functions', () => {
+  const surface = components => [
+    { version: '1.0', createSurface: { surfaceId: 'home', catalogId: 'tulipfarm/apps@1', components } },
+  ];
+  const tableId = '11111111-1111-4111-8111-111111111111';
+  const checked = checkAppSurface(
+    surface([
+      { id: 'root', component: 'Column', children: ['owner', 'file'] },
+      {
+        id: 'owner',
+        component: 'ChoicePicker',
+        label: 'Owner',
+        value: { '@path': '/form/owner' },
+        options: { '@call': 'searchRows', args: { tableId } },
+      },
+      { id: 'file', component: 'Embed', ref: { kind: 'workspace-file', fileId: tableId } },
+    ]),
+    'home',
+  );
+  assert.equal(checked.ok, true);
+  assert.deepEqual([...checked.surface.components.keys()], ['root', 'owner', 'file']);
+
+  const canvas = { functionCall: { '@call': 'openInCanvas' } };
+  assert.deepEqual(
+    checkAppSurface(surface([{ id: 'root', component: 'Button', label: 'Open', action: canvas }]), 'home'),
+    {
+      ok: false,
+      errors: [
+        {
+          code: 'INVALID_FUNCTION_CALL',
+          surfaceId: 'home',
+          path: '/0/createSurface/components/0/action/functionCall/@call',
+          message: 'Unknown function "openInCanvas" in "tulipfarm/apps@1".',
+        },
+      ],
+    },
+  );
 });

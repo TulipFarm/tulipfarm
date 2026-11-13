@@ -873,9 +873,15 @@ importers:
       '@aws-sdk/client-s3':
         specifier: 3.1141.0
         version: 3.1141.0
+      '@tulipfarm/conversations':
+        specifier: workspace:*
+        version: link:../conversations
       '@tulipfarm/extensions':
         specifier: workspace:*
         version: link:../extensions
+      '@tulipfarm/tables':
+        specifier: workspace:*
+        version: link:../tables
       pg:
         specifier: 8.23.0
         version: 8.23.0
