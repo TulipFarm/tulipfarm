@@ -62,7 +62,13 @@ export type CanvasItem = {
 export type LayoutHost = {
   send: (
     replyId: string,
-    action: { name: string; sourceComponentId: string; context: Record<string, unknown>; userMessage: string },
+    action: {
+      name: string;
+      sourceComponentId: string;
+      context: Record<string, unknown>;
+      labels?: Record<string, string>;
+      userMessage: string;
+    },
   ) => void;
   lookup: (replyId: string, call: unknown) => Promise<unknown>;
   /** True when the reply's controls can't send: it was answered, a reply is running, or the chat can't send. */

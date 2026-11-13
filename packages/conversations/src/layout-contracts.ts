@@ -124,17 +124,28 @@ export const layoutActionContextLimit = 8192;
 const actionContextSchema = z
   .record(z.string(), z.unknown())
   .refine(value => bytes(JSON.stringify(value)) <= layoutActionContextLimit, 'Action values exceed 8 KiB');
+export const layoutActionLabelsLimit = 4096;
+/** What the person saw for chosen values, such as a deal's name for its row ID. Shown in place of the value; the value stays the record. */
+const actionLabelsSchema = z
+  .record(z.string(), z.string().max(1000))
+  .refine(value => bytes(JSON.stringify(value)) <= layoutActionLabelsLimit, 'Action labels exceed 4 KiB');
 /** A person's use of a button in an assistant reply. The reply's surface ID is its message ID. */
-export const layoutActionRequestSchema = z.strictObject({
-  commandId: id,
-  /** The ID of the person's message the action sends. */
-  sentMessageId: id,
-  surfaceId: id,
-  name: z.string().trim().min(1).max(100),
-  sourceComponentId: identifierSchema,
-  context: actionContextSchema.default({}),
-  userMessage: z.string().trim().min(1).max(2000),
-});
+export const layoutActionRequestSchema = z
+  .strictObject({
+    commandId: id,
+    /** The ID of the person's message the action sends. */
+    sentMessageId: id,
+    surfaceId: id,
+    name: z.string().trim().min(1).max(100),
+    sourceComponentId: identifierSchema,
+    context: actionContextSchema.default({}),
+    labels: actionLabelsSchema.optional(),
+    userMessage: z.string().trim().min(1).max(2000),
+  })
+  .refine(
+    request => Object.keys(request.labels ?? {}).every(key => Object.hasOwn(request.context, key)),
+    'Every label must name an action value',
+  );
 export type LayoutActionRequest = z.infer<typeof layoutActionRequestSchema>;
 /** The stored action, beside the `userMessage` text it sent. `messageId` is the reply that drew the button. */
 export const layoutActionSchema = z.strictObject({
@@ -142,6 +153,7 @@ export const layoutActionSchema = z.strictObject({
   name: z.string(),
   sourceComponentId: z.string(),
   context: z.record(z.string(), z.unknown()).default({}),
+  labels: z.record(z.string(), z.string()).optional(),
 });
 export type LayoutAction = z.infer<typeof layoutActionSchema>;
 export const layoutActionResultSchema = z.object({ messageId: id, turnId: id, sequence: z.number().int() });

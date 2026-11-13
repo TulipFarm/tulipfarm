@@ -1902,7 +1902,13 @@ function layoutValue(value: unknown): string {
 }
 
 /** The values a person sent with a button in a reply's layout, listed under the words the button sent. */
-function SentLayoutValues({ context }: { context: Record<string, unknown> }) {
+function SentLayoutValues({
+  context,
+  labels = {},
+}: {
+  context: Record<string, unknown>;
+  labels?: Record<string, string> | undefined;
+}) {
   const entries = Object.entries(context);
   if (!entries.length) return null;
   return (
@@ -1910,7 +1916,7 @@ function SentLayoutValues({ context }: { context: Record<string, unknown> }) {
       {entries.map(([key, value]) => (
         <div key={key} className="flex min-w-0 gap-3">
           <dt className="shrink-0 font-medium">{key.replace(/[_-]+/g, ' ')}</dt>
-          <dd className="min-w-0 break-words">{layoutValue(value)}</dd>
+          <dd className="min-w-0 break-words">{labels[key] ?? layoutValue(value)}</dd>
         </div>
       ))}
     </dl>
@@ -2027,7 +2033,7 @@ function ConversationEntry({
                   </PackageChatContext>
                 );
               case 'layout-action':
-                return <SentLayoutValues key={index} context={part.action.context} />;
+                return <SentLayoutValues key={index} context={part.action.context} labels={part.action.labels} />;
               case 'text':
                 return message.followUp ? (
                   <MessageBubble key={index} variant="secondary">

@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import {
   checkLayout,
   followUpAction,
+  layoutActionRequestSchema,
   layoutAwaitsInput,
   layoutFromReply,
   layoutText,
@@ -147,4 +148,21 @@ test('a layout awaits input only when a button sends an action other than a foll
   );
   assert.equal(awaits(form(followUpAction('Tell me more'))), false);
   assert.equal(awaits(valid), false);
+});
+
+test('an action may carry the labels shown for its values, but only for values it sends', () => {
+  const request = {
+    commandId: crypto.randomUUID(),
+    sentMessageId: crypto.randomUUID(),
+    surfaceId: crypto.randomUUID(),
+    name: 'assign',
+    sourceComponentId: 'assign_button',
+    context: { deal: ['ec55d1f3-6015-5c9e-8ba9-6c2eac12d08a'] },
+    userMessage: 'Assign',
+  };
+  assert.deepEqual(layoutActionRequestSchema.parse({ ...request, labels: { deal: 'Globex pilot' } }).labels, {
+    deal: 'Globex pilot',
+  });
+  assert.equal(layoutActionRequestSchema.parse(request).labels, undefined);
+  assert.equal(layoutActionRequestSchema.safeParse({ ...request, labels: { owner: 'Dev User' } }).success, false);
 });
