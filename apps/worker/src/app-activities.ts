@@ -24,6 +24,7 @@ import {
   startBuild,
   switchRelease,
   type AppBuild,
+  type AppRecord,
   type AppTransaction,
 } from '@tulipfarm/apps/store';
 import type { AppBuilder, AppFile, AppPublisher, AppRoute, CreditGate } from '@tulipfarm/extensions';
@@ -31,6 +32,15 @@ import { escapeIdentifier } from 'pg';
 import { appManifest, untar, type AppBuiltFile } from './app-files.ts';
 
 const execute = promisify(execFile);
+
+const hour = 3_600_000;
+/** Delivery logs arrive late, and the hosted publisher reads an hour's usage only once it ended this long ago. */
+export const APP_USAGE_SETTLE_MS = 2 * hour;
+/** The end of the newest hour whose usage can be read at `now`. */
+const settledBefore = (now: number) => Math.floor((now - APP_USAGE_SETTLE_MS) / hour) * hour;
+
+type UsageWindow = { readonly start: string; readonly end: string };
+type Traffic = Map<string, { requests: number; bytes: number; units: bigint }>;
 
 export type PlatformClient = {
   query(text: string, values?: unknown[]): Promise<{ rows: any[]; rowCount: number | null }>;
@@ -256,15 +266,23 @@ export function createAppActivities(work: AppWork) {
     return { route };
   }
 
-  /**
-   * Charges one closed window of delivered traffic per app, whatever the workspace's app-hosting flag, since billing
-   * follows serving. A window already recorded is skipped, so running it again charges nothing. An app whose workspace
-   * runs out of credits or passes its monthly limit is paused.
-   */
-  async function meterWindow(window: { readonly start: string; readonly end: string }, signal: AbortSignal) {
-    if (!publisher) return;
-    const traffic = new Map<string, { requests: number; bytes: number; units: bigint }>();
-    for await (const used of publisher.usage(window, signal)) {
+  /** Whether a credit pause holds: the workspace has no credits, or the app passed its limit in the UTC month of `at`. */
+  async function overBudget(tx: AppTransaction, app: AppRecord, at: string) {
+    const available = await work.credits.available(tx);
+    if (available !== null && available <= 0n) return true;
+    const limit = app.approval.state === 'approved' ? app.approval.monthlyLimitUnits : null;
+    if (limit === null) return false;
+    const { rows } = await tx.client.query(
+      `SELECT COALESCE(SUM(units), 0)::text AS units FROM ${table(tx, 'tf_app_usage_windows')}
+       WHERE app_id = $1 AND window_start >= date_trunc('month', $2::timestamptz, 'UTC')`,
+      [app.id, at],
+    );
+    return BigInt((rows[0] as { units: string }).units) > limit;
+  }
+
+  async function readTraffic(window: UsageWindow, signal: AbortSignal) {
+    const traffic: Traffic = new Map();
+    for await (const used of publisher!.usage(window, signal)) {
       const total = traffic.get(used.name) ?? { requests: 0, bytes: 0, units: 0n };
       traffic.set(used.name, {
         requests: total.requests + used.requests,
@@ -272,6 +290,15 @@ export function createAppActivities(work: AppWork) {
         units: total.units + used.units,
       });
     }
+    return traffic;
+  }
+
+  /**
+   * Charges one closed window of delivered traffic per app, whatever the workspace's app-hosting flag, since billing
+   * follows serving. A window already recorded is skipped, so running it again charges nothing. An app whose workspace
+   * runs out of credits or passes its monthly limit is paused.
+   */
+  async function chargeWindow(window: UsageWindow, traffic: Traffic, signal: AbortSignal) {
     // Every served app records the window, with no traffic too, so the next run knows where to resume.
     const { rows: owners } = await platform.query(
       `SELECT name, workspace_id, app_id FROM app.app_hostnames
@@ -315,16 +342,7 @@ export function createAppActivities(work: AppWork) {
             activity: 'app-hosting',
           });
           const app = await readApp(tx, used.appId as AppId, true);
-          if (!app || app.stops.budgetPausedAt) return false;
-          const available = await work.credits.available(tx);
-          const limit = app.approval.state === 'approved' ? app.approval.monthlyLimitUnits : null;
-          const { rows } = await tx.client.query(
-            `SELECT COALESCE(SUM(units), 0)::text AS units FROM ${table(tx, 'tf_app_usage_windows')}
-             WHERE app_id = $1 AND window_start >= date_trunc('month', $2::timestamptz, 'UTC')`,
-            [used.appId, window.start],
-          );
-          const month = BigInt((rows[0] as { units: string }).units);
-          if ((available === null || available > 0n) && (limit === null || month <= limit)) return false;
+          if (!app || app.stops.budgetPausedAt || !(await overBudget(tx, app, window.start))) return false;
           await tx.client.query(
             `UPDATE ${table(tx, 'tf_apps')} SET budget_paused_at = clock_timestamp(), edge_version = edge_version + 1
              WHERE id = $1 AND budget_paused_at IS NULL`,
@@ -338,6 +356,10 @@ export function createAppActivities(work: AppWork) {
       }
     }
     if (failures.length) throw new AggregateError(failures, 'App usage metering failed');
+  }
+
+  async function meterWindow(window: UsageWindow, signal: AbortSignal) {
+    if (publisher) await chargeWindow(window, await readTraffic(window, signal), signal);
   }
 
   return {
@@ -602,12 +624,14 @@ export function createAppActivities(work: AppWork) {
     meterAppUsage: meterWindow,
 
     /**
-     * Meters the last closed hour before `settled` and each earlier one a served app has not recorded yet, resuming
-     * after the app's newest recorded hour and reaching back at most 48 hours. Recorded hours are skipped.
+     * Meters the newest settled hour, so traffic on a name retired in it is charged, and each earlier one a served app
+     * has not recorded, resuming after its newest recorded hour and reaching back at most 48 hours. Metering stops at
+     * the first hour that fails, so no later hour is recorded ahead of it. Returns the hour whose usage the publisher
+     * could not read; the next run reads it again.
      */
-    async meterAppTraffic(settled: number, signal: AbortSignal) {
-      if (!publisher) return;
-      const hour = 3_600_000;
+    async meterAppTraffic(now: number, signal: AbortSignal) {
+      if (!publisher) return undefined;
+      const settled = settledBefore(now);
       let from = settled - hour;
       const floor = settled - 48 * hour;
       const { rows: served } = await platform.query(
@@ -634,12 +658,20 @@ export function createAppActivities(work: AppWork) {
           failures.push(error);
         }
       }
-      for (let start = from; start + hour <= settled; start += hour)
-        await meterWindow(
-          { start: new Date(start).toISOString(), end: new Date(start + hour).toISOString() },
-          signal,
-        ).catch(error => failures.push(error));
+      // Without every workspace's resume point, a metered hour could pass one that still has earlier hours to record.
       if (failures.length) throw new AggregateError(failures, 'App usage metering failed');
+      for (let start = from; start + hour <= settled; start += hour) {
+        const window = { start: new Date(start).toISOString(), end: new Date(start + hour).toISOString() };
+        let traffic: Traffic;
+        try {
+          traffic = await readTraffic(window, signal);
+        } catch (error) {
+          signal.throwIfAborted();
+          return { window, error };
+        }
+        await chargeWindow(window, traffic, signal);
+      }
+      return undefined;
     },
   };
 }

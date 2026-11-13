@@ -13,7 +13,7 @@ import type { AppId } from '@tulipfarm/apps';
 import { hostHeaderPublisher, type AppSiteStorage } from '@tulipfarm/apps/host-header-publisher';
 import { appRepositories, readSourceBundles, type AppTransaction } from '@tulipfarm/apps/store';
 import { appBuilder, appPublisher, creditGate, type AppPublisher } from '@tulipfarm/extensions';
-import { isFeatureEnabled } from '@tulipfarm/observability';
+import { errorAttributes, isFeatureEnabled, log } from '@tulipfarm/observability';
 import { objectStorageClient } from '@tulipfarm/workspaces/object-storage';
 import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import { Pool } from 'pg';
@@ -163,10 +163,11 @@ export function createAppComposition(options: {
   return {
     activities,
     reconcile: reconcileApps,
-    /** Meters the closed hours that delivery logs have caught up with and no run has recorded yet. */
+    /** Meters the settled hours no run has recorded yet. */
     async meter(signal: AbortSignal, now = Date.now()) {
-      const hour = 3_600_000;
-      await meterAppTraffic(Math.floor((now - 20 * 60_000) / hour) * hour, signal);
+      const unread = await meterAppTraffic(now, signal);
+      if (unread)
+        log('warn', 'dependency', 'call_failed', { operation: 'app.usage', ...errorAttributes(unread.error) });
     },
     close: () => platform.end(),
   };

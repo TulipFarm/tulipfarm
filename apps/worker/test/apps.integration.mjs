@@ -98,7 +98,8 @@ function edgePublisher() {
     async *releases() {
       for (const releaseId of staged.keys()) yield { releaseId };
     },
-    async *usage() {
+    async *usage(window) {
+      if (window.start === this.undelivered) throw new Error('Delivery logs for this hour are not complete');
       yield* this.traffic;
     },
   };
@@ -515,9 +516,9 @@ test('app builds, publishes, reconciles and meters converge however often they r
 
   await t.test('metering after six missed hours charges each of them once', async () => {
     publisher.traffic = [{ name: 'acme-shop', requests: 3, bytes: 64, units: 2n }];
-    const settled = Date.parse('2026-11-14T01:00:00.000Z');
-    await work.meterAppTraffic(settled, new AbortController().signal);
-    await work.meterAppTraffic(settled, new AbortController().signal);
+    const now = Date.parse('2026-11-14T03:00:00.000Z');
+    await work.meterAppTraffic(now, new AbortController().signal);
+    await work.meterAppTraffic(now, new AbortController().signal);
 
     const { rows } = await db.platform.query(`SELECT id, units::text FROM "${schema}".test_credit_entries ORDER BY id`);
     assert.deepEqual(
@@ -531,6 +532,67 @@ test('app builds, publishes, reconciles and meters converge however often they r
         ['2026-11-13T22:00:00.000Z', '2'],
         ['2026-11-13T23:00:00.000Z', '2'],
         ['2026-11-14T00:00:00.000Z', '2'],
+      ],
+    );
+  });
+
+  const recorded = async after =>
+    (
+      await db.platform.query(
+        `SELECT window_start FROM "${schema}".tf_app_usage_windows WHERE app_id = $1 AND window_start > $2
+         ORDER BY window_start`,
+        [app.id, after],
+      )
+    ).rows.map(row => row.window_start.toISOString());
+
+  await t.test('metering at 11:05 charges hours up to 08:00 to 09:00 and leaves later hours to settle', async () => {
+    publisher.traffic = [{ name: 'acme-shop', requests: 3, bytes: 64, units: 2n }];
+    const now = Date.parse('2026-11-14T11:05:00.000Z');
+    await work.meterAppTraffic(now, signal());
+    await work.meterAppTraffic(now, signal());
+
+    assert.deepEqual(await recorded('2026-11-14T00:00:00.000Z'), [
+      '2026-11-14T01:00:00.000Z',
+      '2026-11-14T02:00:00.000Z',
+      '2026-11-14T03:00:00.000Z',
+      '2026-11-14T04:00:00.000Z',
+      '2026-11-14T05:00:00.000Z',
+      '2026-11-14T06:00:00.000Z',
+      '2026-11-14T07:00:00.000Z',
+      '2026-11-14T08:00:00.000Z',
+    ]);
+  });
+
+  await t.test('an hour whose usage the publisher cannot read yet is charged once by a later run', async () => {
+    publisher.undelivered = '2026-11-14T10:00:00.000Z';
+    const now = Date.parse('2026-11-14T14:05:00.000Z');
+    const first = await work.meterAppTraffic(now, signal());
+
+    assert.deepEqual(
+      { start: first.window.start, message: first.error.message },
+      { start: '2026-11-14T10:00:00.000Z', message: 'Delivery logs for this hour are not complete' },
+    );
+    assert.deepEqual(await recorded('2026-11-14T08:00:00.000Z'), ['2026-11-14T09:00:00.000Z']);
+
+    publisher.undelivered = undefined;
+    assert.equal(await work.meterAppTraffic(now, signal()), undefined);
+    assert.equal(await work.meterAppTraffic(now, signal()), undefined);
+
+    assert.deepEqual(await recorded('2026-11-14T08:00:00.000Z'), [
+      '2026-11-14T09:00:00.000Z',
+      '2026-11-14T10:00:00.000Z',
+      '2026-11-14T11:00:00.000Z',
+    ]);
+    const { rows } = await db.platform.query(
+      `SELECT id, units::text FROM "${schema}".test_credit_entries WHERE id > $1 ORDER BY id`,
+      [`app-hosting:${app.id}:2026-11-14T08:00:00.000Z`],
+    );
+    assert.deepEqual(
+      rows.map(row => [row.id.replace(`app-hosting:${app.id}:`, ''), row.units]),
+      [
+        ['2026-11-14T09:00:00.000Z', '2'],
+        ['2026-11-14T10:00:00.000Z', '2'],
+        ['2026-11-14T11:00:00.000Z', '2'],
       ],
     );
   });
