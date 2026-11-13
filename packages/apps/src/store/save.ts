@@ -29,12 +29,13 @@ export async function readSourceBundles(tx: AppTransaction, appId: AppId): Promi
   }));
 }
 
-const releaseLease = (tx: AppTransaction, appId: AppId) =>
+// Matching the lease id keeps a save that outlived its lease from freeing the lease another chat took since.
+const releaseLease = (tx: AppTransaction, appId: AppId, leaseId: string) =>
   tx.client.query(
     `UPDATE ${table(tx, 'tf_app_drafts')} SET lease_id = NULL, lease_conversation_id = NULL,
        lease_membership_id = NULL, lease_expires_at = NULL, updated_at = clock_timestamp()
-     WHERE app_id = $1`,
-    [appId],
+     WHERE app_id = $1 AND lease_id = $2`,
+    [appId, leaseId],
   );
 
 /**
@@ -61,7 +62,7 @@ export async function saveDraft(
     if (draft.lease?.id !== input.leaseId || draft.revision !== input.expectedRevision)
       return failed('stale-draft', 'The draft changed since this save started', true);
     const changes = await readStagedChanges(tx, input.appId, input.leaseId);
-    if (!changes.length && input.endLease) await releaseLease(tx, input.appId);
+    if (!changes.length && input.endLease) await releaseLease(tx, input.appId, input.leaseId);
     return { ok: true as const, draft, changes, bundles: await readSourceBundles(tx, input.appId) };
   });
   if (!read.ok) return read;
@@ -104,7 +105,7 @@ export async function saveDraft(
       input.appId,
       input.leaseId,
     ]);
-    if (input.endLease) await releaseLease(tx, input.appId);
+    if (input.endLease) await releaseLease(tx, input.appId, input.leaseId);
     return { ok: true, commit: saved.commit, revision: Number(updated!.revision) };
   });
 }
