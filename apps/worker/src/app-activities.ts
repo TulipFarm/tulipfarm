@@ -256,6 +256,90 @@ export function createAppActivities(work: AppWork) {
     return { route };
   }
 
+  /**
+   * Charges one closed window of delivered traffic per app, whatever the workspace's app-hosting flag, since billing
+   * follows serving. A window already recorded is skipped, so running it again charges nothing. An app whose workspace
+   * runs out of credits or passes its monthly limit is paused.
+   */
+  async function meterWindow(window: { readonly start: string; readonly end: string }, signal: AbortSignal) {
+    if (!publisher) return;
+    const traffic = new Map<string, { requests: number; bytes: number; units: bigint }>();
+    for await (const used of publisher.usage(window, signal)) {
+      const total = traffic.get(used.name) ?? { requests: 0, bytes: 0, units: 0n };
+      traffic.set(used.name, {
+        requests: total.requests + used.requests,
+        bytes: total.bytes + used.bytes,
+        units: total.units + used.units,
+      });
+    }
+    // Every served app records the window, with no traffic too, so the next run knows where to resume.
+    const { rows: owners } = await platform.query(
+      `SELECT name, workspace_id, app_id FROM app.app_hostnames
+       WHERE name = ANY($1::text[]) OR (state = 'current' AND status IS NOT NULL)`,
+      [[...traffic.keys()]],
+    );
+    const perApp = new Map<
+      string,
+      { workspaceId: string; appId: string; requests: number; bytes: number; units: bigint }
+    >();
+    for (const owner of owners as { name: string; workspace_id: string; app_id: string }[]) {
+      const used = traffic.get(owner.name) ?? { requests: 0, bytes: 0, units: 0n };
+      const key = `${owner.workspace_id}/${owner.app_id}`;
+      const total = perApp.get(key) ?? {
+        workspaceId: owner.workspace_id,
+        appId: owner.app_id,
+        requests: 0,
+        bytes: 0,
+        units: 0n,
+      };
+      perApp.set(key, {
+        ...total,
+        requests: total.requests + used.requests,
+        bytes: total.bytes + used.bytes,
+        units: total.units + used.units,
+      });
+    }
+    const failures: unknown[] = [];
+    for (const used of perApp.values()) {
+      signal.throwIfAborted();
+      try {
+        const paused = await transact(used.workspaceId, async tx => {
+          const inserted = await tx.client.query(
+            `INSERT INTO ${table(tx, 'tf_app_usage_windows')} (app_id, window_start, requests, bytes, units)
+             VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING`,
+            [used.appId, window.start, used.requests, used.bytes, used.units.toString()],
+          );
+          if (inserted.rowCount !== 1 || used.units === 0n) return false;
+          await work.credits.debit(tx, used.units, {
+            id: `app-hosting:${used.appId}:${window.start}`,
+            activity: 'app-hosting',
+          });
+          const app = await readApp(tx, used.appId as AppId, true);
+          if (!app || app.stops.budgetPausedAt) return false;
+          const available = await work.credits.available(tx);
+          const limit = app.approval.state === 'approved' ? app.approval.monthlyLimitUnits : null;
+          const { rows } = await tx.client.query(
+            `SELECT COALESCE(SUM(units), 0)::text AS units FROM ${table(tx, 'tf_app_usage_windows')}
+             WHERE app_id = $1 AND window_start >= date_trunc('month', $2::timestamptz, 'UTC')`,
+            [used.appId, window.start],
+          );
+          const month = BigInt((rows[0] as { units: string }).units);
+          if ((available === null || available > 0n) && (limit === null || month <= limit)) return false;
+          await tx.client.query(
+            `UPDATE ${table(tx, 'tf_apps')} SET budget_paused_at = clock_timestamp(), edge_version = edge_version + 1
+             WHERE id = $1 AND budget_paused_at IS NULL`,
+            [used.appId],
+          );
+          return true;
+        });
+        if (paused) await projectEdge(used, signal);
+      } catch (error) {
+        failures.push(error);
+      }
+    }
+    if (failures.length) throw new AggregateError(failures, 'App usage metering failed');
+  }
+
   return {
     /** Builds a queued build once. A build that already finished returns its outcome. */
     async buildApp(input: { readonly workspaceId: string; readonly buildId: string }): Promise<AppBuildOutcome> {
@@ -394,33 +478,38 @@ export function createAppActivities(work: AppWork) {
         edge_version: string;
         stale: boolean;
       };
-      const names = (
-        await platform.query(
-          `SELECT name, workspace_id, app_id, state, release_id, status, edge_version,
-             claimed_at < clock_timestamp() - interval '15 minutes' AS stale
-           FROM app.app_hostnames`,
-        )
-      ).rows as NameRow[];
+      const readNames = async () =>
+        (
+          await platform.query(
+            `SELECT name, workspace_id, app_id, state, release_id, status, edge_version,
+               claimed_at < clock_timestamp() - interval '15 minutes' AS stale
+             FROM app.app_hostnames`,
+          )
+        ).rows as NameRow[];
       const failures: unknown[] = [];
-      const current = new Map(names.filter(row => row.state === 'current').map(row => [row.name, row]));
       const enabled = new Map<string, boolean>();
       const isEnabled = async (workspaceId: string) => {
         if (!enabled.has(workspaceId)) enabled.set(workspaceId, await work.enabled(workspaceId));
         return enabled.get(workspaceId)!;
       };
 
+      const held = new Map<string, AppRoute>();
+      if (publisher) for await (const route of publisher.list(signal)) held.set(route.name, route);
+      // Read after listing, so a rename that went live during the listing is seen as current. Retired is final.
+      const names = await readNames();
+      const byName = new Map(names.map(row => [row.name, row]));
       if (publisher) {
-        const held = new Map<string, AppRoute>();
-        for await (const route of publisher.list(signal)) held.set(route.name, route);
-        for (const row of current.values()) {
-          if (row.status === null || !(await isEnabled(row.workspace_id))) continue;
+        for (const row of names) {
+          if (row.state !== 'current' || row.status === null || !(await isEnabled(row.workspace_id))) continue;
           const version = Number(row.edge_version);
           if ((held.get(row.name)?.version ?? -1) >= version) continue;
           await publisher.apply({ name: row.name, releaseId: row.release_id, status: row.status, version }, signal);
         }
-        for (const route of held.values())
-          if (!current.has(route.name))
+        for (const route of held.values()) {
+          const state = byName.get(route.name)?.state;
+          if (state === undefined || state === 'retired')
             await publisher.remove({ name: route.name, version: route.version + 1 }, signal);
+        }
       }
 
       const byWorkspace = new Map<string, NameRow[]>();
@@ -457,7 +546,11 @@ export function createAppActivities(work: AppWork) {
       }
 
       if (publisher) {
-        // A release is kept while it is live, among the newest switched releases of its app, or recently created.
+        // Listed before the kept set is read, so a release created during this reconcile is not discarded.
+        const staged: string[] = [];
+        for await (const { releaseId } of publisher.releases(signal)) staged.push(releaseId);
+        // A release is kept while it is live, the target of an unfinished operation, among the newest switched
+        // releases of its app, or recently created.
         const kept = new Set<string>();
         let complete = true;
         for await (const workspaceId of work.workspaces()) {
@@ -467,6 +560,8 @@ export function createAppActivities(work: AppWork) {
               const { rows: releases } = await tx.client.query(
                 `SELECT r.id FROM ${table(tx, 'tf_app_releases')} r JOIN ${table(tx, 'tf_apps')} a ON a.id = r.app_id
                  WHERE r.id = a.live_release_id OR r.created_at > clock_timestamp() - interval '1 hour'
+                   OR r.id IN (SELECT target_release_id FROM ${table(tx, 'tf_app_operations')}
+                               WHERE status IN ('admitted', 'staging'))
                    OR r.id IN (
                      SELECT id FROM (
                        SELECT s.id, row_number() OVER (PARTITION BY s.app_id ORDER BY s.number DESC) AS rank
@@ -485,93 +580,51 @@ export function createAppActivities(work: AppWork) {
           }
         }
         if (complete)
-          for await (const { releaseId } of publisher.releases(signal))
-            if (!kept.has(releaseId)) await publisher.discard({ releaseId }, signal);
+          for (const releaseId of staged) if (!kept.has(releaseId)) await publisher.discard({ releaseId }, signal);
       }
       if (failures.length) throw new AggregateError(failures, 'App reconcile failed');
     },
 
+    meterAppUsage: meterWindow,
+
     /**
-     * Charges one closed window of delivered traffic per app. A window already recorded is skipped, so running it again
-     * charges nothing. An app whose workspace runs out of credits or passes its monthly limit is paused.
+     * Meters the last closed hour before `settled` and each earlier one a served app has not recorded yet, resuming
+     * after the app's newest recorded hour and reaching back at most 48 hours. Recorded hours are skipped.
      */
-    async meterAppUsage(window: { readonly start: string; readonly end: string }, signal: AbortSignal) {
+    async meterAppTraffic(settled: number, signal: AbortSignal) {
       if (!publisher) return;
-      const traffic = new Map<string, { requests: number; bytes: number; units: bigint }>();
-      for await (const used of publisher.usage(window, signal)) {
-        const total = traffic.get(used.name) ?? { requests: 0, bytes: 0, units: 0n };
-        traffic.set(used.name, {
-          requests: total.requests + used.requests,
-          bytes: total.bytes + used.bytes,
-          units: total.units + used.units,
-        });
-      }
-      if (!traffic.size) return;
-      const { rows: owners } = await platform.query(
-        'SELECT name, workspace_id, app_id FROM app.app_hostnames WHERE name = ANY($1::text[])',
-        [[...traffic.keys()]],
+      const hour = 3_600_000;
+      let from = settled - hour;
+      const floor = settled - 48 * hour;
+      const { rows: served } = await platform.query(
+        `SELECT workspace_id, array_agg(app_id) AS apps FROM app.app_hostnames
+         WHERE state = 'current' AND status IS NOT NULL GROUP BY workspace_id`,
       );
-      const perApp = new Map<
-        string,
-        { workspaceId: string; appId: string; requests: number; bytes: number; units: bigint }
-      >();
-      for (const owner of owners as { name: string; workspace_id: string; app_id: string }[]) {
-        const used = traffic.get(owner.name)!;
-        const key = `${owner.workspace_id}/${owner.app_id}`;
-        const total = perApp.get(key) ?? {
-          workspaceId: owner.workspace_id,
-          appId: owner.app_id,
-          requests: 0,
-          bytes: 0,
-          units: 0n,
-        };
-        perApp.set(key, {
-          ...total,
-          requests: total.requests + used.requests,
-          bytes: total.bytes + used.bytes,
-          units: total.units + used.units,
-        });
-      }
       const failures: unknown[] = [];
-      for (const used of perApp.values()) {
+      for (const { workspace_id: workspaceId, apps } of served as { workspace_id: string; apps: string[] }[]) {
         signal.throwIfAborted();
         try {
-          if (!(await work.enabled(used.workspaceId))) continue;
-          const paused = await transact(used.workspaceId, async tx => {
-            const inserted = await tx.client.query(
-              `INSERT INTO ${table(tx, 'tf_app_usage_windows')} (app_id, window_start, requests, bytes, units)
-               VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING`,
-              [used.appId, window.start, used.requests, used.bytes, used.units.toString()],
-            );
-            if (inserted.rowCount !== 1) return false;
-            if (used.units > 0n)
-              await work.credits.debit(tx, used.units, {
-                id: `app-hosting:${used.appId}:${window.start}`,
-                activity: 'app-hosting',
-              });
-            const app = await readApp(tx, used.appId as AppId, true);
-            if (!app || app.stops.budgetPausedAt) return false;
-            const available = await work.credits.available(tx);
-            const limit = app.approval.state === 'approved' ? app.approval.monthlyLimitUnits : null;
+          const next = await transact(workspaceId, async tx => {
             const { rows } = await tx.client.query(
-              `SELECT COALESCE(SUM(units), 0)::text AS units FROM ${table(tx, 'tf_app_usage_windows')}
-               WHERE app_id = $1 AND window_start >= date_trunc('month', $2::timestamptz, 'UTC')`,
-              [used.appId, window.start],
+              `SELECT MIN(COALESCE(
+                 (SELECT MAX(w.window_start) + interval '1 hour' FROM ${table(tx, 'tf_app_usage_windows')} w
+                  WHERE w.app_id = a.id),
+                 date_trunc('hour', a.created_at))) AS next
+               FROM ${table(tx, 'tf_apps')} a WHERE a.id = ANY($1::uuid[])`,
+              [apps],
             );
-            const month = BigInt((rows[0] as { units: string }).units);
-            if ((available === null || available > 0n) && (limit === null || month <= limit)) return false;
-            await tx.client.query(
-              `UPDATE ${table(tx, 'tf_apps')} SET budget_paused_at = clock_timestamp(), edge_version = edge_version + 1
-               WHERE id = $1 AND budget_paused_at IS NULL`,
-              [used.appId],
-            );
-            return true;
+            return (rows[0] as { next: Date | null }).next?.getTime() ?? settled;
           });
-          if (paused) await projectEdge(used, signal);
+          from = Math.min(from, Math.max(next, floor));
         } catch (error) {
           failures.push(error);
         }
       }
+      for (let start = from; start + hour <= settled; start += hour)
+        await meterWindow(
+          { start: new Date(start).toISOString(), end: new Date(start + hour).toISOString() },
+          signal,
+        ).catch(error => failures.push(error));
       if (failures.length) throw new AggregateError(failures, 'App usage metering failed');
     },
   };

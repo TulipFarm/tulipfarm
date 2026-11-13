@@ -65,7 +65,7 @@ import { createRecommendationComposition } from './recommendation-activities.ts'
 import { createMemberProfileComposition } from './member-profile-composition.ts';
 import { createSocialPublisherComposition } from './social-publisher-composition.ts';
 import { createSecretsSweep } from './secrets-sweep.ts';
-import { createAppComposition } from './app-composition.ts';
+import { createAppComposition, repeatFromStart } from './app-composition.ts';
 import { workerRole, workerTelemetryService } from './worker-role.ts';
 import { workspaceSchemaPending } from '@tulipfarm/workspace-storage/runtime';
 
@@ -135,8 +135,7 @@ async function run() {
   let hostedTimer: ReturnType<typeof setInterval> | undefined;
   const hostedAbort = new AbortController();
   let apps: ReturnType<typeof createAppComposition>;
-  const appRuns: Record<'reconcile' | 'usage', Promise<void> | undefined> = { reconcile: undefined, usage: undefined };
-  const appTimers: ReturnType<typeof setInterval>[] = [];
+  const appJobs: ReturnType<typeof repeatFromStart>[] = [];
   const appAbort = new AbortController();
   const sweepTelemetry: ReturnType<typeof createBackgroundJob>[] = [];
   let knowledgeEmbeddings: Awaited<ReturnType<typeof createKnowledgeEmbeddingWorker>>;
@@ -242,17 +241,15 @@ async function run() {
         ) => {
           sweepTelemetry.push(job);
           const work = name === 'reconcile' ? appWork.reconcile : appWork.meter;
-          const tick = () => {
-            appRuns[name] ??= job
-              .run(() => work(appAbort.signal))
-              .catch(error => Runtime.instance().logger.error(`App ${name} failed`, errorAttributes(error)))
-              .finally(() => {
-                appRuns[name] = undefined;
-              });
-          };
-          const timer = setInterval(tick, seconds * 1000);
-          timer.unref();
-          appTimers.push(timer);
+          appJobs.push(
+            repeatFromStart(
+              () =>
+                job
+                  .run(() => work(appAbort.signal))
+                  .catch(error => Runtime.instance().logger.error(`App ${name} failed`, errorAttributes(error))),
+              seconds * 1000,
+            ),
+          );
         };
         schedule('reconcile', createBackgroundJob('app-reconcile', 300), 300);
         schedule('usage', createBackgroundJob('app-usage', 3600), 3600);
@@ -541,9 +538,8 @@ async function run() {
     hostedAbort.abort();
     await importSweep;
     await hostedSweep;
-    for (const timer of appTimers) clearInterval(timer);
     appAbort.abort();
-    await Promise.all([appRuns.reconcile, appRuns.usage]);
+    await Promise.all(appJobs.map(job => job.stop()));
     await apps?.close();
     await importCleanup?.close();
     for (const job of sweepTelemetry) job.close();

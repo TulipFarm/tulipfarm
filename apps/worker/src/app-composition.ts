@@ -126,7 +126,12 @@ export function createAppComposition(options: {
   const transact = <T>(workspaceId: string, action: (tx: AppTransaction) => Promise<T>) =>
     options.runtime.transaction(workspaceId, commonCompatibility, action);
   const repositories = appRepositories({ root: join(tmpdir(), 'tulipfarm-apps'), storage: { client, bucket } });
-  const { reconcileApps, meterAppUsage, ...activities } = createAppActivities({
+  const {
+    reconcileApps,
+    meterAppTraffic,
+    meterAppUsage: _meterWindow,
+    ...activities
+  } = createAppActivities({
     transact,
     platform,
     objects,
@@ -158,13 +163,30 @@ export function createAppComposition(options: {
   return {
     activities,
     reconcile: reconcileApps,
-    /** Meters the last three closed hours that delivery logs have caught up with; recorded hours are skipped. */
+    /** Meters the closed hours that delivery logs have caught up with and no run has recorded yet. */
     async meter(signal: AbortSignal, now = Date.now()) {
       const hour = 3_600_000;
-      const settled = Math.floor((now - 20 * 60_000) / hour) * hour;
-      for (let end = settled - 2 * hour; end <= settled; end += hour)
-        await meterAppUsage({ start: new Date(end - hour).toISOString(), end: new Date(end).toISOString() }, signal);
+      await meterAppTraffic(Math.floor((now - 20 * 60_000) / hour) * hour, signal);
     },
     close: () => platform.end(),
+  };
+}
+
+/** Runs a job now and then every `ms`. A tick that finds the previous run still going is skipped. */
+export function repeatFromStart(run: () => Promise<void>, ms: number) {
+  let running: Promise<void> | undefined;
+  const tick = () => {
+    running ??= run().finally(() => {
+      running = undefined;
+    });
+  };
+  const timer = setInterval(tick, ms);
+  timer.unref();
+  tick();
+  return {
+    async stop() {
+      clearInterval(timer);
+      await running;
+    },
   };
 }
