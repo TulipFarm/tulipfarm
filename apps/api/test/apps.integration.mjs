@@ -80,13 +80,23 @@ test(
     cleanup.push(() => runtime.close());
     const started = [];
     const removed = [];
+    let holdPromotion = null;
+    const platform = {
+      query: (...args) => pool.query(...args),
+      connect: async () => {
+        const hold = holdPromotion;
+        holdPromotion = null;
+        await hold?.();
+        return pool.connect();
+      },
+    };
     const app = Fastify();
     app.register(
       async routes =>
         registerApps(routes, {
           auth,
           runtime,
-          platform: pool,
+          platform,
           start: async (workflow, workflowId, input) => void started.push({ workflow, workflowId, input }),
           repositories: null,
           publisher: () => ({ remove: async route => void removed.push(route) }),
@@ -308,6 +318,46 @@ test(
       name: 'orders',
       available: false,
       reason: 'name-taken',
+    });
+
+    const boardId = second.body.id;
+    const currentNames = async () =>
+      (
+        await pool.query(`SELECT name FROM app.app_hostnames WHERE app_id = $1 AND state = 'current'`, [boardId])
+      ).rows.map(row => row.name);
+    await t.test('a reused rename request id with another name changes nothing', async () => {
+      const boardRename = { requestId: '55555555-5555-4555-8555-555555555558', name: 'board-foo' };
+      assert.equal((await http(editor, 'PUT', `/${boardId}/name`, boardRename)).status, 200);
+      const reused = await http(editor, 'PUT', `/${boardId}/name`, { ...boardRename, name: 'board-bar' });
+      assert.equal(reused.status, 409);
+      assert.equal(reused.body.failure.code, 'superseded');
+      assert.equal((await http(editor, 'GET', `/${boardId}`)).body.publicName, 'board-foo');
+      assert.deepEqual(await currentNames(), ['board-foo']);
+      assert.deepEqual((await http(editor, 'GET', '/names/board-bar')).body, { name: 'board-bar', available: true });
+      assert.equal(
+        removed.some(route => route.name === 'board-foo'),
+        false,
+      );
+    });
+
+    await t.test('of two overlapping renames, the name committed last is the one served', async () => {
+      let reachedPromotion, releasePromotion;
+      const reached = new Promise(resolve => (reachedPromotion = resolve));
+      holdPromotion = () => (reachedPromotion(), new Promise(resolve => (releasePromotion = resolve)));
+      const earlier = http(editor, 'PUT', `/${boardId}/name`, { requestId: randomUUID(), name: 'board-a' });
+      await reached;
+      const later = await http(editor, 'PUT', `/${boardId}/name`, { requestId: randomUUID(), name: 'board-b' });
+      assert.equal(later.status, 200);
+      releasePromotion();
+      const overtaken = await earlier;
+      assert.equal(overtaken.status, 409);
+      assert.equal(overtaken.body.failure.code, 'superseded');
+      assert.equal((await http(editor, 'GET', `/${boardId}`)).body.publicName, 'board-b');
+      assert.deepEqual(await currentNames(), ['board-b']);
+      assert.deepEqual(
+        removed.filter(route => route.name.startsWith('board-')).map(route => route.name),
+        ['board-foo'],
+      );
     });
 
     const pause = { requestId: '66666666-6666-4666-8666-666666666666' };
