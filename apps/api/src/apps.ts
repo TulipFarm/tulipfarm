@@ -635,31 +635,38 @@ export function registerApps(app: FastifyInstance, dependencies: AppRouteDepende
       { params: appParams, body: nameBody },
       async ({ workspaceId, userId, params, body }) => {
         const name = publicName(body.name);
+        const rename = { appId: params.appId, requestId: body.requestId, name };
         const prepared = await transaction(workspaceId, async tx => {
           const member = await memberOf(tx, userId);
           const { app: found } = await access(tx, member, params.appId, 'edit');
           if (found.kind !== 'public') throw failure('forbidden', 'Only public apps have a public name');
-          return member;
+          return { member, repeat: await repeatedRename(tx, member.membershipId, rename) };
         });
         const claim = { name, workspaceId, appId: params.appId };
-        const claimed = await claimAppName(platform, claim);
-        if (!claimed.ok) throw new AppRouteFailure(claimed.failure);
-        const renamed = await transaction(workspaceId, async tx => {
-          const { app: found, role } = await access(tx, prepared, params.appId, 'edit', { lock: true });
-          const repeat = await requestedOperation(tx, prepared.membershipId, body.requestId);
-          if (repeat) {
-            if (repeat.appId !== found.id || repeat.kind !== 'rename') throw failure('not-found', 'App not found');
-            return { operation: repeat, app: found, role };
-          }
-          await setAppPublicName(tx, found.id, name);
-          const changed = (await readApp(tx, found.id))!;
-          const operation = await insertRenameOperation(tx, changed, prepared.membershipId, body.requestId);
-          return { operation, app: changed, role };
-        });
+        if (!prepared.repeat) {
+          const claimed = await claimAppName(platform, claim);
+          if (!claimed.ok) throw new AppRouteFailure(claimed.failure);
+          await transaction(workspaceId, async tx => {
+            const { app: found } = await access(tx, prepared.member, params.appId, 'edit', { lock: true });
+            if (await repeatedRename(tx, prepared.member.membershipId, rename)) return;
+            await setAppPublicName(tx, found.id, name);
+            await insertRenameOperation(tx, found, prepared.member.membershipId, rename);
+          });
+        }
         const client = await platform.connect();
         let retired: AppName | null;
+        let renamed;
         try {
           await client.query('BEGIN');
+          // Promotions of one app are serialized and each promotes the name the workspace holds now, so the name
+          // committed last ends up current whichever request reaches the platform first.
+          await client.query(`SELECT pg_advisory_xact_lock(hashtextextended('app-name:' || $1, 0))`, [params.appId]);
+          renamed = await transaction(workspaceId, async tx => {
+            const { app: found, role } = await access(tx, prepared.member, params.appId, 'edit');
+            const operation = await requestedOperation(tx, prepared.member.membershipId, body.requestId);
+            return { operation: operation!, app: found, role };
+          });
+          if (renamed.app.publicName !== name) throw failure('superseded', 'A later rename replaced this name');
           ({ retired } = await promoteAppName(client, claim));
           await client.query('COMMIT');
         } catch (error) {
@@ -792,13 +799,32 @@ async function requestedOperation(tx: AppTransaction, requestedBy: MembershipId,
   return row ? readOperation(tx, row.id) : null;
 }
 
-async function insertRenameOperation(tx: AppTransaction, app: AppRecord, requestedBy: MembershipId, requestId: string) {
-  const id = derivedId('app-rename', requestedBy, requestId);
+type RenameRequest = { readonly appId: AppId; readonly requestId: string; readonly name: AppName };
+
+// The operation id covers the name, so a request id reused with another name is told apart without storing the name.
+const renameOperationId = (requestedBy: MembershipId, rename: RenameRequest) =>
+  derivedId('app-rename', requestedBy, rename.requestId, rename.name);
+
+async function repeatedRename(tx: AppTransaction, requestedBy: MembershipId, rename: RenameRequest) {
+  const repeat = await requestedOperation(tx, requestedBy, rename.requestId);
+  if (!repeat) return null;
+  if (repeat.appId !== rename.appId || repeat.kind !== 'rename') throw failure('not-found', 'App not found');
+  if (repeat.id !== renameOperationId(requestedBy, rename))
+    throw failure('superseded', 'This request already renamed the app to another name');
+  return repeat;
+}
+
+async function insertRenameOperation(
+  tx: AppTransaction,
+  app: AppRecord,
+  requestedBy: MembershipId,
+  rename: RenameRequest,
+) {
+  const id = renameOperationId(requestedBy, rename);
   await tx.client.query(
     `INSERT INTO ${qualified(tx.schema, 'tf_app_operations')}
        (id, app_id, request_id, requested_by, kind, generation, target_release_id, status, finished_at)
      VALUES ($1, $2, $3, $4, 'rename', $5, $6, 'switched', clock_timestamp())`,
-    [id, app.id, requestId, requestedBy, app.releaseGeneration, app.liveReleaseId],
+    [id, app.id, rename.requestId, requestedBy, app.releaseGeneration, app.liveReleaseId],
   );
-  return (await readOperation(tx, id as AppOperation['id']))!;
 }
