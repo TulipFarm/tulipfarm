@@ -28,10 +28,10 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.1141.0",
-    "@tulipfarm/extensions": "workspace:*",
-    "pg": "8.23.0",
     "@tulipfarm/conversations": "workspace:*",
+    "@tulipfarm/extensions": "workspace:*",
     "@tulipfarm/tables": "workspace:*",
+    "pg": "8.23.0",
     "zod": "4.6.6"
   },
   "devDependencies": {
