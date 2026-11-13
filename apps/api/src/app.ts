@@ -45,6 +45,11 @@ import { isFeatureEnabled, registerFlagSubjectResolver } from '@tulipfarm/observ
 import { apiFlagSubjects } from './flag-subjects.ts';
 import { registerFeatureFlags } from './feature-flags.ts';
 import { protectExpectedSession } from './authenticated-routes.ts';
+import { registerApps } from './apps.ts';
+import { appHostingFromEnvironment, temporalAppWorkflows } from './apps-hosting.ts';
+import { routeAppSites } from './apps-sites.ts';
+import { appBuilder } from '@tulipfarm/extensions';
+import type { Pool } from 'pg';
 
 export function buildApp(
   options: {
@@ -69,6 +74,9 @@ export function buildApp(
     },
     logController: new LogController({ disableRequestLogging: true }),
   });
+  let appPlatform: Pick<Pool, 'query'> | undefined;
+  const appHosting = appHostingFromEnvironment(process.env, () => appPlatform);
+  if (appHosting?.sites) routeAppSites(app, appHosting.sites);
   registerObservability(app);
   registerSecurity(app, authConfig().webOrigin);
   const temporal = createTemporalClient();
@@ -120,6 +128,18 @@ export function buildApp(
         const storage = registerWorkspaces(business, auth, temporal);
         if (storage) protectWorkspaceRequests(business, auth.auth, storage);
         workspaceStorage = storage;
+        if (storage) {
+          appPlatform = auth.pool;
+          registerApps(business, {
+            auth: auth.auth,
+            runtime: storage,
+            platform: auth.pool,
+            start: temporalAppWorkflows(temporal),
+            repositories: appHosting?.repositories ?? null,
+            publisher: () => appHosting?.publisher,
+            builderId: () => appBuilder()?.id,
+          });
+        }
         registerFeatureFlags(
           business,
           auth.auth,
