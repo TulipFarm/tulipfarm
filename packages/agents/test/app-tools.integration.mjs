@@ -170,4 +170,23 @@ test('an app chat edits its app in a draft that only a finished turn saves', { t
     assert.deepEqual(await read(helperChat, 'about.html'), { path: 'about.html', content: '<p>About</p>' });
     assert.equal(await lease(), null);
   });
+
+  await t.test('a chat whose lease expired keeps and saves what it staged', async () => {
+    const expire = () =>
+      db.platform.query(
+        `UPDATE ${table('tf_app_drafts')} SET lease_expires_at = clock_timestamp() - interval '1 minute' WHERE app_id = $1`,
+        [appId],
+      );
+    const head = (await apps.invoke(ownerChat, { tool: 'apps.status' })).draft.commit;
+    assert.deepEqual(await write(ownerChat, 'late.html', '<p>Late</p>'), { revision: 7 });
+    await expire();
+    assert.deepEqual(await read(ownerChat, 'late.html'), { path: 'late.html', content: '<p>Late</p>' });
+    assert.deepEqual(await write(ownerChat, 'later.html', '<p>Later</p>'), { revision: 8 });
+    await expire();
+    const finished = await apps.finishTurn(ownerChat, 'completed');
+    assert.match(finished.saved, /^[0-9a-f]{40}$/);
+    assert.notEqual(finished.saved, head);
+    assert.deepEqual(await read(helperChat, 'late.html'), { path: 'late.html', content: '<p>Late</p>' });
+    assert.deepEqual(await read(helperChat, 'later.html'), { path: 'later.html', content: '<p>Later</p>' });
+  });
 });
