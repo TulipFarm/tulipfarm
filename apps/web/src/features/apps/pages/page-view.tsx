@@ -25,6 +25,14 @@ import { confirming, initialPage, pageLocked, pageReducer, type ActionResult, ty
 
 const statusOf = (error: unknown) => (error instanceof TableRequestError ? error.status : 0);
 
+/** The time data loaded, with its date when that wasn't today. */
+function loadedTime(at: string) {
+  const loaded = new Date(at);
+  const time = loaded.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  if (loaded.toDateString() === new Date().toDateString()) return time;
+  return `${loaded.toLocaleDateString([], { day: 'numeric', month: 'short' })}, ${time}`;
+}
+
 /**
  * One page of a private app: its content, its sources, and its buttons. `draft` shows the editor's saved draft instead
  * of the live version, and a new `revision` reloads it in place.
@@ -145,7 +153,12 @@ export function AppPageView({
       dispatch({ type: 'accepted', actionId: press.actionId, result });
       settle(result);
     } catch (error) {
-      dispatch({ type: 'refused', actionId: press.actionId, status: statusOf(error), message: failureMessage(error) });
+      dispatch({
+        type: 'refused',
+        actionId: press.actionId,
+        status: statusOf(error),
+        message: failureMessage(error, { forbidden: 'You don’t have permission to run this.' }),
+      });
     } finally {
       sending.current.delete(press.requestId);
     }
@@ -172,8 +185,8 @@ export function AppPageView({
         kind="unavailable"
         heading="h2"
         icon={Window}
-        title="Your access to this app ended"
-        description="Ask an editor of this app to share it with you again."
+        title="This app is no longer available to you"
+        description="Your access may have ended, or the app changed. Ask an editor of this app if you still need it."
       >
         <Button
           variant="outline"
@@ -208,7 +221,7 @@ export function AppPageView({
             )
           }
         >
-          Go to the home page
+          Go to the app’s home page
         </Button>
       </StatePanel>
     );
@@ -293,16 +306,18 @@ export function AppPageView({
           {data.phase === 'loading'
             ? 'Loading…'
             : data.phase === 'failed'
-              ? 'This page’s data couldn’t load.'
+              ? data.loadedAt
+                ? `Couldn’t refresh. Showing data loaded at ${loadedTime(data.loadedAt)}.`
+                : 'This page’s data couldn’t load.'
               : data.loadedAt
-                ? `Loaded at ${new Date(data.loadedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}. Refresh to see changes.`
+                ? `Loaded at ${loadedTime(data.loadedAt)}. Refresh for the latest.`
                 : null}
         </p>
         {refresh}
       </div>
       {data.phase === 'failed' && (
         <Alert variant="destructive">
-          <AlertDescription>Check your connection, then refresh.</AlertDescription>
+          <AlertDescription>Refresh to try again.</AlertDescription>
         </Alert>
       )}
       <PageSurface
@@ -339,7 +354,7 @@ export function AppPageView({
             Run “{page.actions.find(action => action.id === waiting?.actionId)?.label ?? 'this action'}” from the draft?
           </AlertDialogTitle>
           <AlertDialogDescription>
-            This makes real changes with your own permissions, the same as using the published app.
+            This makes real changes with your own permissions, the same as using the current version.
           </AlertDialogDescription>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>

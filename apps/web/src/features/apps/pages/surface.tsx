@@ -29,21 +29,17 @@ const sourceNotes: Record<
   Exclude<SourceStatus, 'ready' | 'loading'>,
   { text: string; tone: 'default' | 'destructive' | null }
 > = {
-  empty: { text: 'Nothing here yet.', tone: null },
+  empty: { text: 'Nothing to show.', tone: null },
   restricted: { text: 'Some content here isn’t available to you.', tone: 'default' },
   unavailable: { text: 'This content is no longer available.', tone: 'default' },
-  failed: { text: 'This couldn’t load. Refresh the page to try again.', tone: 'destructive' },
+  failed: { text: 'This content couldn’t load. Refresh to try again.', tone: 'destructive' },
 };
 
 /** Draws a component only when every source it reads is ready, and says why otherwise. */
 function SourceGate({ status, children }: { status: SourceStatus; children: ReactNode }) {
   if (status === 'ready') return children;
-  if (status === 'loading')
-    return (
-      <div role="status" aria-label="Loading">
-        <Skeleton />
-      </div>
-    );
+  // The page's own status line announces loading once, so each placeholder stays silent.
+  if (status === 'loading') return <Skeleton aria-hidden="true" />;
   const note = sourceNotes[status];
   if (note.tone === null) return <p className="text-sm text-muted-foreground">{note.text}</p>;
   return (
@@ -68,9 +64,9 @@ function gated(Adapter: ComponentType<A2uiAdapterProps>) {
 const pressNotes: Record<Press['state'], { state: 'running' | 'success' | 'error'; text: string } | null> = {
   confirming: null,
   sent: { state: 'running', text: 'Sending…' },
-  running: { state: 'running', text: 'The workflow started. Refresh to see its changes.' },
+  running: { state: 'running', text: 'Workflow started. Refresh later to see its changes.' },
   succeeded: { state: 'success', text: 'Done.' },
-  failed: { state: 'error', text: 'This didn’t run.' },
+  failed: { state: 'error', text: 'This didn’t go through.' },
 };
 
 const availabilityNotes = {
@@ -94,9 +90,11 @@ function ActionButton(props: A2uiAdapterProps<Parameters<typeof sproutAdapters.B
       {availability !== 'available' ? (
         <p className="text-sm text-muted-foreground">{availabilityNotes[availability]}</p>
       ) : note ? (
-        <p role="status" className="flex items-center gap-2 text-sm">
+        <p role="status" className="flex flex-wrap items-center gap-x-2 text-sm">
           <Status state={note.state} size="sm" aria-hidden="true" />
-          <span>{press.state === 'failed' && press.message ? `${note.text} ${press.message}` : note.text}</span>
+          <span className="min-w-0">
+            {press.state === 'failed' && press.message ? `${note.text} ${press.message}` : note.text}
+          </span>
           {press.state === 'failed' && (
             <Button variant="link" size="sm" onClick={() => state.retry(press.actionId)}>
               Try again
@@ -119,7 +117,7 @@ function EmbedAdapter({ props }: A2uiAdapterProps<{ ref: AppEmbedReference }>) {
       title={name}
       kind="Workflow"
       apps={[]}
-      status="Workflow"
+      status="Saved in Workflows"
       action={{
         label: 'Open workflow',
         onClick: () =>
@@ -175,7 +173,7 @@ export function PageSurface({
           version: layoutVersion,
           agentFunctionResponse: {
             functionCallId: message.callAgentFunction.functionCallId,
-            error: { code: 'EXECUTION_ERROR', message: 'Search isn’t available on app pages yet.' },
+            error: { code: 'EXECUTION_ERROR', message: 'Search isn’t available on app pages.' },
           },
         },
       ]);
