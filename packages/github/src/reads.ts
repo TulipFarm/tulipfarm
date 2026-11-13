@@ -149,6 +149,28 @@ export function createGitHubReads(options: {
     };
   }
   return {
+    /**
+     * The access token of the account selected for this chat turn, for a coding run to clone with; null when no
+     * account is selected. The caller hands it only to an execution backend that keeps it out of the machine.
+     */
+    async cloneToken(workspaceId: string, actor: HumanActor, origin: { conversationId: string; turnId: string }) {
+      const source = await authorized(workspaceId, actor, origin.conversationId, tx =>
+        sourceFor(tx, actor, origin, 'coding.run').catch((error: unknown) => {
+          if (error instanceof GitHubReadError && error.code === 'selection-required') return null;
+          throw error;
+        }),
+      );
+      if (!source) return null;
+      return options.accounts.withCredential(
+        workspaceId,
+        actor,
+        source.accountId,
+        async credential => credential.accessToken,
+        source.generation,
+        (tx, owner) => requireExecution(tx, owner, origin, source, 'coding.run'),
+        true,
+      );
+    },
     async prepareDownload(workspaceId: string, actor: HumanActor, origin: ReadOrigin, callId: string, input: unknown) {
       denyMcpEgress();
       const operation = githubDownloadSchema.parse(input);

@@ -357,6 +357,8 @@ export const toolReceiptSchema = z.object({
   api: apiCallReceiptSchema.nullable().optional(),
   /** The code and output of an `execution.run` call. */
   execution: executionReceiptSchema.nullable().optional(),
+  /** A `coding.run` call recorded for its member's approval, whose review card reads the run. */
+  codingRun: z.literal(true).optional(),
   knowledge: knowledgeActivitySchema.nullable().optional(),
   fileId: uuidSchema.optional(),
   fileIds: z.array(uuidSchema).max(64).optional(),

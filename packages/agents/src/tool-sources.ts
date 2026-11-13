@@ -446,6 +446,7 @@ export async function resultSources(
     case 'skills.import.status':
     case 'skills.import.select':
     case 'execution.run':
+    case 'coding.run':
       return [];
     case 'atlassian.sources':
       return [];

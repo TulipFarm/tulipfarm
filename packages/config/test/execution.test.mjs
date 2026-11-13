@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { executionPathSchema } from '@tulipfarm/execution-contract';
+import { executionPathSchema, executionProfileSupported, executionSecretsSchema } from '@tulipfarm/execution-contract';
 import { executionConfiguration, ExecutionConfigurationError } from '../dist/execution.js';
 
 const policy = () => ({
@@ -171,4 +171,25 @@ test('working paths reject traversal, absolute paths and control characters', ()
   ]) {
     assert.equal(executionPathSchema.safeParse(path).success, false, JSON.stringify(path));
   }
+});
+
+test('a profile template must be one the backend lists, and secrets need unique names and variables', () => {
+  const resources = { kind: 'limited', cpuMillis: 1000, memoryMiB: 512, diskBytes: 1048576 };
+  const descriptor = {
+    capabilities: { secrets: true },
+    profiles: [{ id: 'small', resources }],
+    templates: ['codex'],
+  };
+  assert.equal(executionProfileSupported({ id: 'small', resources, template: 'codex' }, descriptor), true);
+  assert.equal(executionProfileSupported({ id: 'small', resources, template: 'copilot' }, descriptor), false);
+  assert.equal(
+    executionProfileSupported({ id: 'small', resources, template: 'codex' }, { ...descriptor, templates: undefined }),
+    false,
+  );
+  const secret = { name: 'plan', value: 'v', env: 'TOKEN', hosts: ['api.example.com', '*.example.com'] };
+  assert.equal(executionSecretsSchema.safeParse([secret]).success, true);
+  assert.equal(executionSecretsSchema.safeParse([secret, { ...secret, env: 'OTHER' }]).success, false);
+  assert.equal(executionSecretsSchema.safeParse([secret, { ...secret, name: 'git' }]).success, false);
+  assert.equal(executionSecretsSchema.safeParse([{ ...secret, hosts: ['https://example.com'] }]).success, false);
+  assert.equal(executionSecretsSchema.safeParse([{ ...secret, format: 'Bearer' }]).success, false);
 });

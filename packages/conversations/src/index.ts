@@ -214,6 +214,10 @@ function createdFile(row: { tool: string; status: string; output?: unknown }) {
       .safeParse(row.output);
     return output.success ? { fileIds: output.data.result.files.map(file => file.id) } : {};
   }
+  if (row.tool === 'coding.run' && row.status === 'completed') {
+    const output = z.object({ result: z.object({ diffFile: z.object({ id: uuidSchema }) }) }).safeParse(row.output);
+    return output.success ? { fileId: output.data.result.diffFile.id } : {};
+  }
   const output =
     row.tool === 'files.create' && row.status === 'completed' ? createdFileOutput.safeParse(row.output) : null;
   return output?.success ? { fileId: output.data.result.file.id } : {};
@@ -920,6 +924,17 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
             ).rows.map(row => row.id)
           : [],
       );
+      const codingRunIds = toolRows.filter(row => row.tool === 'coding.run').map(row => row.id);
+      const recordedCodingRuns = new Set(
+        !hidden.size && tx.commonVersion >= 67 && codingRunIds.length
+          ? (
+              await tx.client.query(
+                `SELECT id FROM ${qualified(tx.schema, 'tf_coding_runs')} WHERE id=ANY($1::uuid[])`,
+                [codingRunIds],
+              )
+            ).rows.map(row => row.id)
+          : [],
+      );
       for (const message of messages)
         if (message.turn) {
           const rows = toolsByTurn.get(message.turn.id) ?? [];
@@ -1014,6 +1029,7 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
                   ? null
                   : apiCallReceipt(row.tool, row.output, row.tool === 'api.request' && digestedApiCalls.has(row.id)),
                 execution: hidden.size ? null : executionReceipt(row.tool, row.call, row.output),
+                ...(recordedCodingRuns.has(row.id) ? { codingRun: true } : {}),
                 knowledge: await knowledgeActivityForHistory(tx, actor, {
                   ...(chat.projectId ? { projectChatId: chatId } : {}),
                   tool: row.tool,

@@ -52,7 +52,7 @@ export function planCredentialsFromEnvironment(
   });
 }
 
-const unusable = (error: unknown) => error instanceof ChatGptPlanError || error instanceof TokenPlanError;
+export const isUnusablePlan = (error: unknown) => error instanceof ChatGptPlanError || error instanceof TokenPlanError;
 
 export function subscriptionsFromEnvironment(runtime: ConversationRuntime) {
   return createSubscriptions({ runtime });
@@ -107,7 +107,7 @@ export async function memberPlans(input: {
         await subscriptions.markUsed(workspaceId, candidate.connectionId).catch(() => undefined);
         return token;
       } catch (error) {
-        if (!unusable(error)) throw error;
+        if (!isUnusablePlan(error)) throw error;
         // A plan that can't give a token now (signed out, needs sign-in, plan turned off, vendor down) is skipped.
       }
     }

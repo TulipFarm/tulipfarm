@@ -69,6 +69,22 @@ that a job stopped: inspect the terminal state. Unknown outcomes cannot authoriz
 replaying a command. The adapter's optional `shutdown` hook releases its client
 resources and must not indiscriminately destroy ongoing allocations.
 
+## Templates and held secrets
+
+A descriptor may list `templates`, the machine images the backend can start,
+and declare `capabilities.secrets`. A profile's optional `template` asks for one
+of those images; `executionProfileSupported` rejects a template the descriptor
+does not list.
+
+`prepare` may carry up to eight `secrets` when the backend declares that
+capability. Each has a `name`, the `value`, optional `env`, and the `hosts`,
+`header` and `format` its value may be sent with. The backend keeps the value
+outside the machine: the machine gets only a placeholder, in `env` when set, and
+the backend's egress writes the value into the named header of HTTPS requests
+to those hosts. The backend deletes the secrets when it destroys the
+allocation, and also when preparing fails. Backends without the capability,
+such as the Docker adapter, reject an allocation that names any secret.
+
 ## Output replay
 
 Output events have a positive, contiguous job-local `sequence`, independent of

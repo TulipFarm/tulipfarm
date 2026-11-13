@@ -6,6 +6,7 @@ import { temporalConnectionOptions } from '@tulipfarm/config/temporal';
 import { publicWebConfiguration } from '@tulipfarm/config/public-web';
 import { apiCallPrivateHosts } from '@tulipfarm/api-calls';
 import { executionConfiguration } from '@tulipfarm/config/execution';
+import type { ExecutionBackend, ExecutionConfiguration } from '@tulipfarm/execution-contract';
 import {
   captureException,
   createBackgroundJob,
@@ -58,6 +59,7 @@ import { createWorkspaceMcpDiscoveryActivities } from './workspace-mcp-compositi
 import { configuredSkillClient } from '@tulipfarm/workflow-snippets/client';
 import { createSkillExecutionFactory } from '@tulipfarm/agents/skill-execution';
 import { createChatExecution, type ChatExecution } from '@tulipfarm/agents/chat-execution';
+import { codingRunsFactory, createCodingRunActivities, createCodingRunDispatcher } from './coding-runs.ts';
 import { slackActionsFromEnvironment } from '@tulipfarm/agents/slack-environment';
 import { createRecommendationComposition } from './recommendation-activities.ts';
 import { createMemberProfileComposition } from './member-profile-composition.ts';
@@ -71,6 +73,7 @@ const service = workerTelemetryService(role);
 // Bare package names in TULIPFARM_EXTENSIONS resolve from this app.
 await startExtensions('worker', { resolve: specifier => import.meta.resolve(specifier), service });
 let chatExecution: ChatExecution | undefined;
+let coding: { backend: ExecutionBackend; configuration: Exclude<ExecutionConfiguration, { mode: 'off' }> } | undefined;
 let snippets: SnippetClient | undefined;
 if (role !== 'knowledge') {
   try {
@@ -78,6 +81,7 @@ if (role !== 'knowledge') {
     const backend = configuredExecutionBackend(configuration);
     if (backend && configuration.mode !== 'off') {
       chatExecution = createChatExecution(backend, configuration);
+      coding = { backend, configuration };
       snippets = createExecutionSnippetClient(backend, configuration);
     }
   } catch (error) {
@@ -118,6 +122,7 @@ async function run() {
   let tasks: ReturnType<typeof createTaskComposition> | undefined;
   let modelBundles: ReturnType<typeof createModelBundleRegistry> | undefined;
   let taskDispatch: ReturnType<typeof createTaskDispatcher> | undefined;
+  let codingDispatch: ReturnType<typeof createCodingRunDispatcher> | undefined;
   let planDispatch: ReturnType<typeof createPlanDispatcher> | undefined;
   let documentDispatch: ReturnType<typeof createPlanDocumentDispatcher> | undefined;
   let slack: Awaited<ReturnType<typeof createSlackPromptComposition>>;
@@ -273,6 +278,11 @@ async function run() {
       guarded && chatObjects
         ? createSkillActivities(guarded, chatObjects, () => skillClient?.available?.() ?? false)
         : undefined;
+    codingDispatch = coreResources && coding ? createCodingRunDispatcher() : undefined;
+    const codingRuns =
+      coding && codingDispatch
+        ? codingRunsFactory(coding.backend, coding.configuration, codingDispatch.start)
+        : undefined;
     const conversations = coreResources
       ? createConversationActivities(
           coreResources.runtime,
@@ -287,6 +297,7 @@ async function run() {
           (workspaceId, taskId) => taskDispatch?.wake(workspaceId, taskId) ?? Promise.resolve(),
           async workspaceId => (await coreResources.flagContext({ workspaceId })).workspace?.slug,
           chatExecution,
+          codingRuns,
         )
       : undefined;
     const gmail = coreResources ? createGoogleHeartbeatActivities(coreResources.runtime) : undefined;
@@ -340,6 +351,14 @@ async function run() {
               ...gmail,
               ...skillImports,
               ...(coreResources ? createWorkspaceMcpDiscoveryActivities(coreResources.runtime) : {}),
+              ...(coreResources && coding
+                ? createCodingRunActivities(
+                    coreResources.runtime,
+                    coding.backend,
+                    coding.configuration,
+                    chatObjects ? createFiles(coreResources.runtime, chatObjects) : undefined,
+                  )
+                : {}),
             },
             ...workerTelemetry(telemetry),
             shutdownGraceTime: '5 seconds',
@@ -478,6 +497,7 @@ async function run() {
     await tasks?.close();
     await modelBundles?.close();
     await taskDispatch?.close();
+    await codingDispatch?.close();
     await planDispatch?.close();
     await documentDispatch?.close();
   }

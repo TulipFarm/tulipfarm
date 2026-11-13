@@ -21,6 +21,8 @@ export const executionResourcesSchema = z.discriminatedUnion('kind', [
 export const executionProfileSchema = z.strictObject({
   id: name,
   resources: executionResourcesSchema,
+  /** A backend machine image to start from instead of the profile's own; only a backend that lists it runs it. */
+  template: name.optional(),
 });
 export type ExecutionProfile = z.infer<typeof executionProfileSchema>;
 
@@ -36,12 +38,20 @@ export const executionCapabilitiesSchema = z.strictObject({
   hardDeadlines: z.boolean(),
   reconnect: z.boolean(),
   previews: z.boolean(),
+  /** Whether `prepare` accepts held secrets. Backends without it reject an allocation that names any. */
+  secrets: z.boolean().optional(),
 });
 export type ExecutionCapabilities = z.infer<typeof executionCapabilitiesSchema>;
 
 export const executionDescriptorSchema = z.strictObject({
   capabilities: executionCapabilitiesSchema,
   profiles,
+  /** The machine images a profile's `template` may name. */
+  templates: z
+    .array(name)
+    .max(64)
+    .refine(items => new Set(items).size === items.length, 'Duplicate execution template')
+    .optional(),
 });
 export type ExecutionDescriptor = z.infer<typeof executionDescriptorSchema>;
 
@@ -96,6 +106,47 @@ export const executionAllocationSchema = z.strictObject({
 export type ExecutionAllocation = z.infer<typeof executionAllocationSchema>;
 export const executionJobSchema = executionAllocationSchema.extend({ jobId: z.uuid() });
 export type ExecutionJob = z.infer<typeof executionJobSchema>;
+
+const secretHost = z
+  .string()
+  .max(253)
+  .regex(/^(?:\*\.)?[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/);
+/**
+ * A credential the backend holds outside the machine. The machine sees only a placeholder, in `env` when set; the
+ * backend's egress puts the value into the `header` of HTTPS requests to `hosts`, replacing the placeholder or, when
+ * the request lacks the header, writing `format` with `{value}` replaced.
+ */
+export const executionSecretSchema = z.strictObject({
+  name: z.string().regex(/^[a-z][a-z0-9-]{0,15}$/),
+  value: z
+    .string()
+    .min(1)
+    .max(16384)
+    .regex(/^[\x20-\x7e]+$/),
+  env: z
+    .string()
+    .regex(/^[A-Z_][A-Z0-9_]{0,127}$/)
+    .optional(),
+  hosts: z.array(secretHost).min(1).max(16),
+  header: z
+    .string()
+    .regex(/^[A-Za-z0-9-]{1,128}$/)
+    .optional(),
+  format: z
+    .string()
+    .max(1024)
+    .refine(value => value.includes('{value}'), 'Format must contain {value}')
+    .optional(),
+});
+export type ExecutionSecret = z.infer<typeof executionSecretSchema>;
+export const executionSecretsSchema = z
+  .array(executionSecretSchema)
+  .max(8)
+  .refine(items => new Set(items.map(item => item.name)).size === items.length, 'Duplicate execution secret')
+  .refine(
+    items => new Set(items.flatMap(item => (item.env ? [item.env] : []))).size === items.filter(i => i.env).length,
+    'Duplicate execution secret variable',
+  );
 
 export const executionPathSchema = z
   .string()
@@ -180,6 +231,8 @@ export interface ExecutionBackend {
       readonly baseRevision: string;
       readonly policyRevision: string;
       readonly deadline: string;
+      /** Only for a backend with `capabilities.secrets`; it deletes them when the allocation is destroyed. */
+      readonly secrets?: readonly ExecutionSecret[];
     },
     operation: Operation,
   ): Promise<ExecutionAllocationState>;
@@ -234,6 +287,7 @@ export function executionBackendValid(value: unknown): value is ExecutionBackend
 }
 
 export function executionProfileSupported(profile: ExecutionProfile, descriptor: ExecutionDescriptor): boolean {
+  if (profile.template !== undefined && !descriptor.templates?.includes(profile.template)) return false;
   return descriptor.profiles.some(candidate => {
     if (candidate.id !== profile.id || candidate.resources.kind !== profile.resources.kind) return false;
     const requested = profile.resources;

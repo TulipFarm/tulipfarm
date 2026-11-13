@@ -344,6 +344,8 @@ export type ConversationReply = (input: {
   earlierMessages?: boolean;
   /** The images reader read this turn's files, so the model may call `files.read`. */
   chatFiles?: boolean;
+  /** The person may run coding agents here, so the model may call `coding.run`. */
+  codingRuns?: boolean;
   builtinSkills?: readonly string[];
   /** Counts the requester's undecided review and approval cards in this chat, so a reply may point to one. */
   waitingCards?: () => Promise<number>;
@@ -427,6 +429,8 @@ export type ResumeApiCall = (context: {
   turnId: string;
   callId: string;
 }) => Promise<{ state: 'waiting' } | { state: 'done'; result: unknown; sources: SourceDependency[] }>;
+/** Continues a `coding.run` call after its member's decision; `waiting` means it is undecided or still running. */
+export type ResumeCodingRun = ResumeApiCall;
 const executionStepSchema = z.object({
   call_id: uuidSchema,
   call: z.json(),
@@ -440,6 +444,9 @@ const mcpWaitSchema = z.object({
 });
 const apiCallWaitSchema = z.object({
   result: z.object({ provider: z.literal('api-call'), kind: z.literal('waiting'), callId: uuidSchema }),
+});
+const codingRunWaitSchema = z.object({
+  result: z.object({ provider: z.literal('coding-run'), kind: z.literal('waiting'), runId: uuidSchema }),
 });
 const protectedOutputSchema = z.object({ result: z.unknown(), sources: conversationResultSchema.shape.sources });
 class ExternalActionWaiting extends Error {}
@@ -694,10 +701,12 @@ export function createConversationExecutor(
   turnFiles?: TurnFiles,
   secrets?: ConversationSecrets,
   resumeApiCall?: ResumeApiCall,
+  codingRuns?: { offered(workspaceId: string, membershipId: string): Promise<boolean>; resume?: ResumeCodingRun },
 ) {
+  const resumeCodingRun = codingRuns?.resume;
   // Matches the durable replay rule in prepare: these chats store every tool receipt, so a turn can resume its model.
   const replayable = (chat: { slack: unknown; context: unknown }) =>
-    Boolean(resumeMcp || resumeApiCall) && !chat.slack && !chat.context;
+    Boolean(resumeMcp || resumeApiCall || resumeCodingRun) && !chat.slack && !chat.context;
 
   async function transaction<T>(workspaceId: string, operation: (tx: RuntimeTransaction) => Promise<T>) {
     return guardChatReplyFinal(() =>
@@ -938,6 +947,22 @@ export function createConversationExecutor(
       ) {
         await tx.client.query(
           `UPDATE ${table(tx, 'tf_conversation_turns')} SET status='waiting',lease_until=NULL,error_code='api-call-waiting' WHERE id=$1`,
+          [turn.id],
+        );
+        await changed(tx, work, true);
+        return null;
+      }
+      if (
+        resumeCodingRun &&
+        (
+          await tx.client.query(
+            `SELECT 1 FROM ${table(tx, 'tf_conversation_tool_calls')} c JOIN ${table(tx, 'tf_coding_runs')} r ON r.id=c.id WHERE c.turn_id=$1 AND c.tool='coding.run' AND c.status='running'`,
+            [turn.id],
+          )
+        ).rowCount
+      ) {
+        await tx.client.query(
+          `UPDATE ${table(tx, 'tf_conversation_turns')} SET status='waiting',lease_until=NULL,error_code='coding-run-waiting' WHERE id=$1`,
           [turn.id],
         );
         await changed(tx, work, true);
@@ -1735,6 +1760,7 @@ export function createConversationExecutor(
               Boolean(planningContext) ||
               Boolean(resumeMcp) ||
               Boolean(resumeApiCall) ||
+              Boolean(resumeCodingRun) ||
               priorTools.some(call => call.tool === 'present.choice' || call.tool === 'secrets.request')) &&
             !chat.slack &&
             !chat.context;
@@ -2591,6 +2617,24 @@ export function createConversationExecutor(
               });
               throw new ExternalActionWaiting();
             }
+            const codingRun = codingRunWaitSchema.safeParse(result);
+            if (codingRun.success) {
+              if (
+                !source.durable ||
+                !resumeCodingRun ||
+                codingRun.data.result.runId !== callId ||
+                name !== 'coding.run'
+              )
+                throw new AccessDenied();
+              await guarded(async tx => {
+                await tx.client.query(
+                  `UPDATE ${table(tx, 'tf_conversation_turns')} SET status='waiting',lease_until=NULL,error_code='coding-run-waiting' WHERE id=$1`,
+                  [fence.turnId],
+                );
+                await changed(tx, fence, true);
+              });
+              throw new ExternalActionWaiting();
+            }
             const slack = z
               .object({ result: z.object({ provider: z.literal('slack'), status: z.string() }) })
               .safeParse(result);
@@ -2928,6 +2972,10 @@ export function createConversationExecutor(
               ...tail,
             ]);
       if (prepared === 'stale') return 'stale';
+      const coding =
+        interactiveChat && codingRuns
+          ? await codingRuns.offered(fence.workspaceId, source.requester.membershipId)
+          : false;
       const answer = conversationResult(
         await staged('model', () =>
           reply({
@@ -3027,6 +3075,7 @@ export function createConversationExecutor(
             }),
             earlierMessages: refersToEarlierMessages(prepared),
             ...(images ? { chatFiles: true } : {}),
+            ...(coding ? { codingRuns: true } : {}),
             builtinSkills: [source.invoked, source.planningSkill, source.packageSkill].flatMap(skill =>
               skill?.origin === 'built-in' ? [skill.skillId] : [],
             ),
@@ -3394,6 +3443,64 @@ export function createConversationExecutor(
                     });
                   }
                 }
+                if (resumeCodingRun) {
+                  const pending = await transaction(work.workspaceId, async tx => {
+                    const chat = await root(tx, work);
+                    if (!chat || chat.slack || chat.context) return null;
+                    const turn = await head(tx, work.conversationId);
+                    if (
+                      !turn ||
+                      turn.id !== work.turnId ||
+                      turn.generation !== work.generation ||
+                      turn.status !== 'waiting'
+                    )
+                      return null;
+                    const row = (
+                      await tx.client.query(
+                        `SELECT c.id FROM ${table(tx, 'tf_conversation_tool_calls')} c JOIN ${table(tx, 'tf_coding_runs')} r ON r.id=c.id WHERE c.turn_id=$1 AND c.tool='coding.run' AND c.status='running'`,
+                        [work.turnId],
+                      )
+                    ).rows[0];
+                    if (!row) return null;
+                    return { callId: uuidSchema.parse(row.id), actor: chat.requester };
+                  });
+                  if (pending) {
+                    const response = await resumeCodingRun({
+                      runtime,
+                      workspaceId: work.workspaceId,
+                      actor: pending.actor,
+                      conversationId: work.conversationId,
+                      turnId: work.turnId,
+                      callId: pending.callId,
+                    });
+                    if (response.state === 'waiting') return 'idle';
+                    await transaction(work.workspaceId, async tx => {
+                      const chat = await root(tx, work);
+                      const turn = await head(tx, work.conversationId);
+                      if (
+                        !chat ||
+                        !turn ||
+                        turn.id !== work.turnId ||
+                        turn.generation !== work.generation ||
+                        turn.status !== 'waiting'
+                      )
+                        throw new AccessDenied();
+                      await tx.client.query(
+                        `UPDATE ${table(tx, 'tf_conversation_execution_steps')} SET output=$2 WHERE call_id=$1 AND output IS NULL`,
+                        [pending.callId, JSON.stringify({ result: response.result, sources: response.sources })],
+                      );
+                      await tx.client.query(
+                        `UPDATE ${table(tx, 'tf_conversation_tool_calls')} SET status='completed' WHERE id=$1 AND status='running'`,
+                        [pending.callId],
+                      );
+                      await tx.client.query(
+                        `UPDATE ${table(tx, 'tf_conversation_turns')} SET status='queued',error_code=NULL,attempts=0,retry_at=NULL WHERE id=$1`,
+                        [work.turnId],
+                      );
+                      await changed(tx, work);
+                    });
+                  }
+                }
                 const waiting = await transaction(work.workspaceId, async tx => {
                   if (!(await root(tx, work))) return false;
                   return Boolean(
@@ -3570,7 +3677,7 @@ export function createConversationExecutor(
 
   function dueTurns(tx: RuntimeTransaction) {
     return `FROM ${table(tx, 'tf_conversation_turns')} t JOIN ${table(tx, 'tf_conversation_outbox')} o ON o.turn_id = t.id AND o.generation = t.generation
-          WHERE ((t.status = 'queued' AND (t.retry_at IS NULL OR t.retry_at <= clock_timestamp())) OR (t.status = 'processing' AND t.lease_until <= clock_timestamp()) OR (t.status='waiting' AND t.error_code IN ('slack-action-waiting','mcp-action-waiting','api-call-waiting')))
+          WHERE ((t.status = 'queued' AND (t.retry_at IS NULL OR t.retry_at <= clock_timestamp())) OR (t.status = 'processing' AND t.lease_until <= clock_timestamp()) OR (t.status='waiting' AND t.error_code IN ('slack-action-waiting','mcp-action-waiting','api-call-waiting','coding-run-waiting')))
           AND o.next_attempt_at <= clock_timestamp()
           AND ($1::uuid IS NULL OR t.conversation_id = $1)
           AND NOT EXISTS (SELECT 1 FROM ${table(tx, 'tf_slack_default_turns')} s WHERE s.turn_id=t.id)
