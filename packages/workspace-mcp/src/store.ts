@@ -33,7 +33,7 @@ import {
 import { mcpCredentialCipher } from './credentials.ts';
 import { canonicalJson, digest } from './validation.ts';
 
-export const hostedStorageVersion = 68;
+export const hostedStorageVersion = 69;
 export const table = (tx: AuthorizationTransaction, name: string) => qualified(tx.schema, `tf_mcp_${name}`);
 export const originKey = (origin: McpOrigin) =>
   origin.kind === 'private-chat' ? `chat:${origin.conversationId}` : `task:${origin.taskId}`;

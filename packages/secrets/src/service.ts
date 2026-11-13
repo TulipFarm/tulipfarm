@@ -42,7 +42,7 @@ import {
 import { secretCipher, type SecretKeyring } from './cipher.ts';
 
 /** The storage version that added hosted MCP reveal permissions. */
-const revealsVersion = 68;
+const revealsVersion = 69;
 
 export type SecretsRuntime = Pick<ReturnType<typeof createWorkspaceRuntime>, 'transaction'>;
 export type SecretsPrincipal = string | HumanActor;
