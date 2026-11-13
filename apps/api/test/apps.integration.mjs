@@ -101,6 +101,7 @@ test(
           repositories: null,
           publisher: () => ({ remove: async route => void removed.push(route) }),
           builderId: () => undefined,
+          sitesDomain: 'apps.example.test',
         }),
       { prefix: '/v1' },
     );
@@ -130,6 +131,7 @@ test(
     assert.equal(created.body.slug, 'order-board');
     assert.equal(created.body.role, 'edit');
     assert.deepEqual(created.body.approval, { state: 'not-requested' });
+    assert.equal(created.body.webAddress, null);
     const appId = created.body.id;
     const again = await http(editor, 'POST', '', create);
     assert.equal(again.body.id, appId);
@@ -154,6 +156,7 @@ test(
     const detail = await http(editor, 'GET', `/${appId}`);
     assert.equal(detail.status, 200);
     assert.deepEqual(detail.body.draft, { revision: 0, headCommit: null, previewBuildId: null, state: 'empty' });
+    assert.equal(detail.body.sitesDomain, 'apps.example.test');
 
     assert.equal(
       (await http(editor, 'PUT', `/${appId}/grants/member:${readerMembership}`, { role: 'use' })).status,
@@ -164,6 +167,18 @@ test(
       'use',
     ]);
     assert.equal((await http(reader, 'GET', `/${appId}`)).body.role, 'use');
+    const team = randomUUID();
+    await db.platform.query(`INSERT INTO ${schema}.tf_teams(id,name) VALUES($1,'Purchasing')`, [team]);
+    assert.deepEqual((await http(editor, 'PUT', `/${appId}/grants/team:${team}`, { role: 'use' })).body.grantee, {
+      kind: 'team',
+      teamId: team,
+      name: 'Purchasing',
+    });
+    assert.deepEqual(
+      (await http(editor, 'GET', `/${appId}/grants`)).body.grants.find(grant => grant.grantee.kind === 'team').grantee,
+      { kind: 'team', teamId: team, name: 'Purchasing' },
+    );
+    assert.equal((await http(editor, 'DELETE', `/${appId}/grants/team:${team}`)).status, 204);
     const forbidden = await http(reader, 'PATCH', `/${appId}`, { title: 'Mine now' });
     assert.equal(forbidden.status, 403);
     assert.equal(forbidden.body.failure.code, 'forbidden');
@@ -295,6 +310,8 @@ test(
     const renamed = await http(editor, 'PUT', `/${appId}/name`, rename);
     assert.equal(renamed.status, 200);
     assert.equal(renamed.body.app.publicName, 'orders');
+    assert.equal(renamed.body.app.webAddress, 'orders.apps.example.test');
+    assert.equal((await http(editor, 'GET', `/${appId}`)).body.webAddress, 'orders.apps.example.test');
     assert.equal(renamed.body.operation.kind, 'rename');
     assert.equal((await http(editor, 'PUT', `/${appId}/name`, rename)).body.operation.id, renamed.body.operation.id);
     assert.deepEqual((await http(editor, 'GET', '/names/orders')).body, {

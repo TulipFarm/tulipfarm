@@ -138,6 +138,7 @@ export function buildApp(
             repositories: appHosting?.repositories ?? null,
             publisher: () => appHosting?.publisher,
             builderId: () => appBuilder()?.id,
+            sitesDomain: appHosting?.sites?.domain ?? null,
           });
         }
         registerFeatureFlags(

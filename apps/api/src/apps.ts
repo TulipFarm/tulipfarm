@@ -35,6 +35,7 @@ import {
   requestBuild,
   revokeAppGrant,
   setAppPublicName,
+  type AppGrant,
   type AppOperation,
   type AppRecord,
   type AppRepositories,
@@ -93,6 +94,8 @@ export type AppRouteDependencies = {
   readonly publisher: () => AppPublisher | undefined;
   /** The registered builder's id, which command recipes build with. */
   readonly builderId: () => string | undefined;
+  /** The domain public apps are served under, or null when this server does not serve app sites. */
+  readonly sitesDomain: string | null;
 };
 
 type Member = { readonly membershipId: MembershipId; readonly admin: boolean };
@@ -128,6 +131,7 @@ const workflowIds = {
  */
 export function registerApps(app: FastifyInstance, dependencies: AppRouteDependencies) {
   const { runtime, platform, start } = dependencies;
+  const summary = (found: AppRecord, role: AppRole | null) => appSummaryView(found, role, dependencies.sitesDomain);
 
   const transaction = <T>(workspaceId: string, action: (tx: AppTransaction) => Promise<T>) =>
     runtime.transaction(workspaceId, commonCompatibility, action);
@@ -273,7 +277,7 @@ export function registerApps(app: FastifyInstance, dependencies: AppRouteDepende
         return {
           apps: (rows as (AppRow & { member_role: AppRole | null })[])
             .filter(row => row.member_role !== null || member.admin)
-            .map(row => appSummaryView(appRecord(row), row.member_role)),
+            .map(row => summary(appRecord(row), row.member_role)),
         };
       }),
     );
@@ -309,7 +313,7 @@ export function registerApps(app: FastifyInstance, dependencies: AppRouteDepende
           throw failure('name-taken', 'Another app already uses this address');
         });
         reply.code(201);
-        return { ...appSummaryView(created.app, 'edit'), chatId: created.chatId };
+        return { ...summary(created.app, 'edit'), chatId: created.chatId };
       },
     );
 
@@ -326,7 +330,10 @@ export function registerApps(app: FastifyInstance, dependencies: AppRouteDepende
           : { rows: [] };
         const headBuild = rows[0] ? await readBuild(tx, (rows[0] as { id: AppBuildId }).id) : null;
         const live = found.liveReleaseId ? await readRelease(tx, found.liveReleaseId) : null;
-        return appDetailView(found, role, draft, headBuild, live);
+        return {
+          ...appDetailView(summary(found, role), draft, headBuild, live),
+          sitesDomain: dependencies.sitesDomain,
+        };
       }),
     );
 
@@ -343,7 +350,7 @@ export function registerApps(app: FastifyInstance, dependencies: AppRouteDepende
              WHERE id = $1 RETURNING *`,
             [params.appId, body.title ?? null, body.slug ?? null],
           );
-          return appSummaryView(appRecord(rows[0] as AppRow), role);
+          return summary(appRecord(rows[0] as AppRow), role);
         }),
     );
 
@@ -374,7 +381,9 @@ export function registerApps(app: FastifyInstance, dependencies: AppRouteDepende
     route('GET', '/:appId/grants', 'listAppGrantsV1', { params: appParams }, ({ workspaceId, userId, params }) =>
       transaction(workspaceId, async tx => {
         await access(tx, await memberOf(tx, userId), params.appId, 'edit');
-        return { grants: (await listAppGrants(tx, params.appId)).map(grantView) };
+        const grants = await listAppGrants(tx, params.appId);
+        const names = await teamNames(tx, grants);
+        return { grants: grants.map(grant => grantView(grant, names)) };
       }),
     );
 
@@ -397,7 +406,7 @@ export function registerApps(app: FastifyInstance, dependencies: AppRouteDepende
             grantedBy: member.membershipId,
           });
           if (!result.ok) throw new AppRouteFailure(result.failure);
-          return grantView(result.grant);
+          return grantView(result.grant, await teamNames(tx, [result.grant]));
         }),
     );
 
@@ -620,7 +629,7 @@ export function registerApps(app: FastifyInstance, dependencies: AppRouteDepende
             return { operation: result.operation, app: result.app, role };
           });
           await projectEdge(workspaceId, changed.app);
-          return { operation: changed.operation, app: appSummaryView(changed.app, changed.role) };
+          return { operation: changed.operation, app: summary(changed.app, changed.role) };
         },
       );
     stop('pause', 'pauseAppV1');
@@ -681,7 +690,7 @@ export function registerApps(app: FastifyInstance, dependencies: AppRouteDepende
           await publisher
             .remove({ name: retired, version: renamed.app.edgeVersion }, AbortSignal.timeout(10_000))
             .catch(error => app.log.warn(errorAttributes(error), 'app_name_route_remove_failed'));
-        return { operation: renamed.operation, app: appSummaryView(renamed.app, renamed.role) };
+        return { operation: renamed.operation, app: summary(renamed.app, renamed.role) };
       },
     );
 
@@ -711,15 +720,14 @@ export function registerApps(app: FastifyInstance, dependencies: AppRouteDepende
           const member = await memberOf(tx, userId);
           const { app: found, role } = await access(tx, member, params.appId, 'edit', { lock: true });
           if (found.kind !== 'public') throw failure('forbidden', 'Only public apps need approval');
-          if (found.approval.state === 'requested' || found.approval.state === 'approved')
-            return appSummaryView(found, role);
+          if (found.approval.state === 'requested' || found.approval.state === 'approved') return summary(found, role);
           const { rows } = await tx.client.query(
             `UPDATE ${qualified(tx.schema, 'tf_apps')} SET approval_state = 'requested', approval_by = $2,
                approval_at = clock_timestamp(), monthly_limit_units = NULL
              WHERE id = $1 RETURNING *`,
             [found.id, member.membershipId],
           );
-          return appSummaryView(appRecord(rows[0] as AppRow), role);
+          return summary(appRecord(rows[0] as AppRow), role);
         }),
     );
 
@@ -746,7 +754,7 @@ export function registerApps(app: FastifyInstance, dependencies: AppRouteDepende
               body.decision === 'approve' ? (body.monthlyLimitUnits ?? null) : null,
             ],
           );
-          return appSummaryView(appRecord(rows[0] as AppRow), role);
+          return summary(appRecord(rows[0] as AppRow), role);
         }),
     );
   });
@@ -776,6 +784,16 @@ function encoded(content: Uint8Array) {
   } catch {
     return { encoding: 'base64' as const, content: Buffer.from(content).toString('base64'), bytes: content.byteLength };
   }
+}
+
+async function teamNames(tx: AppTransaction, grants: readonly AppGrant[]) {
+  const ids = grants.flatMap(grant => (grant.grantee.kind === 'team' ? [grant.grantee.teamId] : []));
+  if (!ids.length) return new Map<string, string>();
+  const { rows } = await tx.client.query(
+    `SELECT id, name FROM ${qualified(tx.schema, 'tf_teams')} WHERE id = ANY($1::uuid[])`,
+    [ids],
+  );
+  return new Map((rows as { id: string; name: string }[]).map(row => [row.id, row.name]));
 }
 
 async function granteeExists(tx: AppTransaction, grantee: ReturnType<typeof parseGrantee> & object) {
