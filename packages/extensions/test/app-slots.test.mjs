@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict';
 import { beforeEach, test } from 'node:test';
-import { appBuilder, appPublisher, registerExtension, resetExtensions } from '../src/index.ts';
+import {
+  appBuilder,
+  appHost,
+  appPublisher,
+  registerExtension,
+  resetExtensions,
+  unavailableAppHost,
+} from '../src/index.ts';
 import { appPublisherContract, memoryAppPublisher, testAppPublisher } from '../src/testing.ts';
 
 const context = { app: 'worker', env: {} };
@@ -80,6 +87,53 @@ test('app slots refuse incomplete implementations', async () => {
   );
   assert.equal(appBuilder(), undefined);
   assert.equal(appPublisher(), undefined);
+});
+
+const host = {
+  provision: async ({ appId, releaseId, size }) => ({ hostRef: `${appId}/${releaseId}/${size.vcpu}x${size.memMiB}` }),
+  switch: async ({ expectedGeneration }) => ({ generation: (expectedGeneration ?? 0) + 1 }),
+  connect: async ({ appId }) => ({
+    url: `https://forward.example.test/${appId}`,
+    headers: { authorization: 'Bearer t' },
+  }),
+  remove: async () => undefined,
+  async *list() {
+    yield { appId: 'orders', hostRef: 'orders/r1/1x1024' };
+  },
+};
+
+test('a registered app host replaces the unavailable default', async () => {
+  await registerExtension({ name: 'hosted', register: slots => slots.appHost(host) }, context);
+  const signal = new AbortController().signal;
+  assert.equal(appHost(), host);
+  assert.deepEqual(
+    await appHost().provision({ appId: 'orders', releaseId: 'r1', size: { vcpu: 1, memMiB: 1024 } }, signal),
+    { hostRef: 'orders/r1/1x1024' },
+  );
+  assert.deepEqual(
+    await appHost().switch({ appId: 'orders', hostRef: 'orders/r1/1x1024', drainS: 30, expectedGeneration: 4 }, signal),
+    { generation: 5 },
+  );
+  assert.deepEqual(await appHost().connect({ appId: 'orders' }, signal), {
+    url: 'https://forward.example.test/orders',
+    headers: { authorization: 'Bearer t' },
+  });
+  assert.deepEqual(await Array.fromAsync(appHost().list(signal)), [{ appId: 'orders', hostRef: 'orders/r1/1x1024' }]);
+});
+
+test('a second or incomplete app host fails startup and leaves the registry as it was', async () => {
+  const { switch: _switch, ...noSwitch } = host;
+  await assert.rejects(registerExtension({ name: 'partial', register: slots => slots.appHost(noSwitch) }, context), {
+    name: 'ExtensionRegistrationError',
+    message: 'Extension "partial" app host needs provision, switch, connect, remove and list functions',
+  });
+  assert.equal(appHost(), unavailableAppHost);
+  await registerExtension({ name: 'hosted', register: slots => slots.appHost(host) }, context);
+  await assert.rejects(registerExtension({ name: 'other', register: slots => slots.appHost({ ...host }) }, context), {
+    name: 'ExtensionRegistrationError',
+    message: 'Extension "other" cannot set the app host: "hosted" already set it',
+  });
+  assert.equal(appHost(), host);
 });
 
 let names = 0;

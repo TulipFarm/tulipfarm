@@ -5,6 +5,7 @@ export * from './grants.ts';
 export * from './names.ts';
 export * from './operations.ts';
 export * from './preview.ts';
+export * from './runtimes.ts';
 export {
   appRepositories,
   maxBundleBytes,

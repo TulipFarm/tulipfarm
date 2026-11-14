@@ -1,3 +1,4 @@
+import type { AppServerSize } from '@tulipfarm/extensions';
 import type { AppBuildId, AppGeneration, AppReleaseId, GitCommit, MembershipId } from './ids.ts';
 
 /** Fixed at creation. A private app never gets a public name, approval or hosted release. */
@@ -78,6 +79,17 @@ export type AppFailureCode =
   | 'forbidden';
 
 export type AppFailure = { readonly code: AppFailureCode; readonly message: string; readonly retryable: boolean };
+
+export type { AppServerSize };
+
+/** Every server app runs at this size unless a workspace admin raises it. */
+export const defaultServerSize: AppServerSize = Object.freeze({ vcpu: 1, memMiB: 1024 });
+
+/**
+ * Where a server app's runtime is. `starting` brings up the first host and `replacing` brings up a host beside the
+ * live one; both name it as the candidate. Idle apps stop and start cold, so there is no paused state.
+ */
+export type AppRuntimeState = 'none' | 'starting' | 'serving' | 'replacing' | 'failed';
 
 export const appLimits = Object.freeze({
   fileBytes: 512 * 1024,

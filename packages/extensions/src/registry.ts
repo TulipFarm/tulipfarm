@@ -7,6 +7,7 @@ import {
 import type {
   AnalyticsEvent,
   AppBuilder,
+  AppHost,
   AppPublisher,
   AnalyticsGroup,
   AnalyticsPerson,
@@ -32,6 +33,26 @@ export class ExtensionRegistrationError extends Error {
   override name = 'ExtensionRegistrationError';
 }
 
+export class AppHostUnavailableError extends Error {
+  override name = 'AppHostUnavailableError';
+  constructor() {
+    super('No app host is registered, so server apps cannot run');
+  }
+}
+
+const unavailable = async () => {
+  throw new AppHostUnavailableError();
+};
+
+/** The default app host: every call fails with `AppHostUnavailableError`. */
+export const unavailableAppHost: AppHost = Object.freeze({
+  provision: unavailable,
+  switch: unavailable,
+  connect: unavailable,
+  remove: unavailable,
+  list: () => ({ [Symbol.asyncIterator]: () => ({ next: unavailable }) }),
+});
+
 /** The default credit gate: unlimited credits, nothing stored. Usage is still metered. */
 export const unlimitedCredits: CreditGate = {
   available: async () => null,
@@ -54,6 +75,7 @@ type State = {
   mcpHost?: Registered<McpHost>;
   appBuilder?: Registered<AppBuilder>;
   appPublisher?: Registered<AppPublisher>;
+  appHost?: Registered<AppHost>;
   executionBackend?: Registered<ExecutionBackend>;
   usageSinks: Registered<UsageSink>[];
   analytics: Registered<ProductAnalytics>[];
@@ -130,7 +152,8 @@ export async function registerExtension(extension: ServerExtension, context: Ext
       | 'executionBackend'
       | 'mcpHost'
       | 'appBuilder'
-      | 'appPublisher',
+      | 'appPublisher'
+      | 'appHost',
     label: string,
   ) => {
     const owner = current[slot]?.extension ?? staged[slot]?.extension;
@@ -208,6 +231,14 @@ export async function registerExtension(extension: ServerExtension, context: Ext
         );
       staged.appPublisher = wrap(publisher);
     }),
+    appHost: guard(host => {
+      single('appHost', 'app host');
+      if (!hasFunctions(host, ['provision', 'switch', 'connect', 'remove', 'list']))
+        throw new ExtensionRegistrationError(
+          `Extension "${extension.name}" app host needs provision, switch, connect, remove and list functions`,
+        );
+      staged.appHost = wrap(host);
+    }),
     usageSink: guard(sink => {
       staged.usageSinks.push(wrap(sink));
     }),
@@ -243,6 +274,7 @@ export async function registerExtension(extension: ServerExtension, context: Ext
   if (staged.mcpHost) current.mcpHost = staged.mcpHost;
   if (staged.appBuilder) current.appBuilder = staged.appBuilder;
   if (staged.appPublisher) current.appPublisher = staged.appPublisher;
+  if (staged.appHost) current.appHost = staged.appHost;
   current.usageSinks.push(...staged.usageSinks);
   current.analytics.push(...staged.analytics);
   current.errorReporters.push(...staged.errorReporters);
@@ -292,6 +324,11 @@ export function appBuilder(): AppBuilder | undefined {
 /** The registered app publisher, or undefined to use the built-in one, if the operator configured it. */
 export function appPublisher(): AppPublisher | undefined {
   return state().appPublisher?.value;
+}
+
+/** The registered app host, or `unavailableAppHost` when server apps cannot run. */
+export function appHost(): AppHost {
+  return state().appHost?.value ?? unavailableAppHost;
 }
 
 export function executionBackend(): ExecutionBackend | undefined {

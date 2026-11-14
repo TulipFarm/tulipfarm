@@ -4,7 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { edgeStatus } from '../../src/index.ts';
+import { defaultServerSize, edgeStatus } from '../../src/index.ts';
 import {
   admitPublish,
   admitRollback,
@@ -17,8 +17,10 @@ import {
   finishBuild,
   markOperationStaging,
   markReleaseStaged,
+  putAppRuntime,
   putAppGrant,
   readApp,
+  readAppRuntime,
   readDraft,
   readSourceBundles,
   readStagedChanges,
@@ -599,3 +601,66 @@ test('two apps building the same commit and recipe each get their own build', { 
   assert.deepEqual([first.appId, second.appId], [orders.id, invoices.id]);
   assert.notEqual(first.id, second.id);
 });
+
+test(
+  'a server app runtime row reads back as written and refuses a bad state or half a candidate',
+  { timeout: 120000 },
+  async t => {
+    const { transact, admin, publicApp, approve, build } = await setup(t);
+    const app = await publicApp();
+    await approve(app.id);
+    const built = await build(app.id, 'a'.repeat(40));
+    const { operation } = await transact(tx =>
+      admitPublish(tx, { appId: app.id, requestId: randomUUID(), requestedBy: admin, buildId: built.id }),
+    );
+    const release = operation.targetReleaseId;
+    const stored = async () => {
+      const { updatedAt, ...runtime } = await transact(tx => readAppRuntime(tx, app.id));
+      assert.match(updatedAt, /^\d{4}-\d{2}-\d{2}T/);
+      return runtime;
+    };
+
+    assert.equal(await transact(tx => readAppRuntime(tx, app.id)), null);
+    const starting = {
+      appId: app.id,
+      liveReleaseId: null,
+      size: defaultServerSize,
+      hostRef: null,
+      state: 'starting',
+      candidate: {
+        operationId: operation.id,
+        releaseId: release,
+        size: { vcpu: 1, memMiB: 1024 },
+        hostRef: 'sbx-orders-1',
+      },
+    };
+    await transact(tx => putAppRuntime(tx, starting));
+    assert.deepEqual(await stored(), starting);
+
+    const serving = {
+      appId: app.id,
+      liveReleaseId: release,
+      size: { vcpu: 2, memMiB: 2048 },
+      hostRef: 'sbx-orders-1',
+      state: 'serving',
+      candidate: null,
+    };
+    await transact(tx => putAppRuntime(tx, serving));
+    assert.deepEqual(await stored(), serving);
+
+    await assert.rejects(
+      transact(tx => putAppRuntime(tx, { ...serving, state: 'paused' })),
+      {
+        code: '23514',
+        constraint: 'tf_app_runtimes_state_check',
+      },
+    );
+    await assert.rejects(
+      transact(tx =>
+        putAppRuntime(tx, { ...serving, state: 'replacing', candidate: { ...starting.candidate, hostRef: null } }),
+      ),
+      { code: '23514', constraint: 'tf_app_runtimes_candidate_check' },
+    );
+    assert.deepEqual(await stored(), serving);
+  },
+);

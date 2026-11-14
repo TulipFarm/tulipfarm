@@ -48,6 +48,7 @@ export default defineExtension({
 | `executionBackend`   | one per process | none: execution is unavailable                                                       | API/core-worker startup preflight when `TULIPFARM_EXECUTION_BACKEND=extension`                                |
 | `appBuilder`         | one per process | none: apps build with no extension builder                                           | app publishing, through `appBuilder()`                                                                        |
 | `appPublisher`       | one per process | none: `hostHeaderPublisher` from `@tulipfarm/apps/host-header-publisher` once wired  | app publishing and edge reconciliation, through `appPublisher()`                                              |
+| `appHost`            | one per process | `unavailableAppHost`: every call fails with `AppHostUnavailableError`                | server apps, through `appHost()`                                                                              |
 | `usageSink`          | many            | none                                                                                 | `recordUsage(usage)`                                                                                          |
 | `analytics`          | many            | none                                                                                 | `captureEvent`, `observeInference` in `@tulipfarm/observability`                                              |
 | `errorReporter`      | many            | none                                                                                 | `captureException` in `@tulipfarm/observability`                                                              |
@@ -91,6 +92,16 @@ testAppPublisher('my publisher', () => ({ publisher, name: async () => 'menu' })
 
 `name()` returns a fresh app name the publisher may route. `memoryAppPublisher()`
 from the same entry is an in-memory publisher for tests.
+
+### App host
+
+`slots.appHost(host)` runs server apps. `provision` brings up a host for one
+release at one size and returns its `hostRef`. `switch` points the app's single
+endpoint at a host, draining the previous one for `drainS` seconds; with
+`expectedGeneration` it applies only if the endpoint has not moved since.
+`connect` returns a short-lived URL and headers for the endpoint, `remove`
+deletes a host, and `list` reports every host for reconciliation. Without a
+registered host, `appHost()` returns `unavailableAppHost`.
 
 ### Credits
 
