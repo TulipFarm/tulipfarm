@@ -1,0 +1,31 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "meta-ads",
+  "name": "Meta Ads",
+  "maker": "Meta",
+  "homepage": "https://www.facebook.com/business/ads",
+  "category": "marketing",
+  "teams": ["marketing"],
+  "summary": "Manage Facebook and Instagram ad campaigns",
+  "capabilities": [
+    "Review campaign, ad set, and ad performance",
+    "Create and update campaigns and ads",
+    "Manage catalogs and audiences"
+  ],
+  "official": {
+    "evidence": "https://developers.facebook.com/documentation/mcp"
+  },
+  "docs": "https://www.facebook.com/business/help/1456422242197840",
+  "remote": {
+    "url": "https://mcp.facebook.com/ads",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "lobehub": "Meta",
+    "simpleIcons": "meta",
+    "color": "#0467DF"
+  },
+  "supportedBy": ["manus", "gumloop"]
+}

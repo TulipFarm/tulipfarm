@@ -1,0 +1,45 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "astra-db",
+  "name": "Astra DB",
+  "maker": "DataStax",
+  "homepage": "https://www.datastax.com/products/datastax-astra",
+  "category": "data-and-databases",
+  "teams": ["engineering"],
+  "summary": "Manage collections and records in Astra DB",
+  "capabilities": [
+    "Create and list collections",
+    "Insert, update, and delete records",
+    "Find records, including vector search"
+  ],
+  "official": {
+    "evidence": "https://docs.datastax.com/en/astra-db-serverless/integrations/model-context-protocol.html",
+    "repository": "https://github.com/datastax/astra-db-mcp"
+  },
+  "docs": "https://docs.datastax.com/en/astra-db-serverless/integrations/model-context-protocol.html",
+  "packages": [
+    {
+      "registry": "npm",
+      "name": "@datastax/astra-db-mcp",
+      "env": [
+        {
+          "name": "ASTRA_DB_APPLICATION_TOKEN",
+          "description": "Application token",
+          "secret": true,
+          "required": true
+        },
+        {
+          "name": "ASTRA_DB_API_ENDPOINT",
+          "description": "Database API endpoint",
+          "secret": false,
+          "required": true
+        }
+      ]
+    }
+  ],
+  "icons": {
+    "simpleIcons": "datastax",
+    "color": "#000000"
+  },
+  "supportedBy": ["microsoft-copilot", "glean", "docker"]
+}

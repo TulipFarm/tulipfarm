@@ -1,0 +1,26 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "statsig",
+  "name": "Statsig",
+  "maker": "Statsig",
+  "homepage": "https://statsig.com",
+  "category": "monitoring-and-analytics",
+  "teams": ["engineering", "product"],
+  "summary": "Manage Statsig flags, experiments, and metrics",
+  "capabilities": ["Create and update feature gates", "Check experiment results", "Find stale gates to clean up"],
+  "official": {
+    "evidence": "https://docs.statsig.com/integrations/mcp/overview"
+  },
+  "docs": "https://docs.statsig.com/integrations/mcp/overview",
+  "remote": {
+    "url": "https://api.statsig.com/v1/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "com.statsig/statsig-mcp-server",
+  "icons": {
+    "color": "#194BFF"
+  },
+  "supportedBy": ["chatgpt", "manus", "gumloop"]
+}

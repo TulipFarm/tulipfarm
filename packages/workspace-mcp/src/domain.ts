@@ -419,8 +419,18 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
       `UPDATE ${table(tx, 'tool_policies')} SET present=false,enabled_revision=NULL,standing_exception=false,policy_version=policy_version+1 WHERE integration_id=$1 AND present AND NOT (name=ANY($2::text[]))`,
       [row.id, names],
     );
+    // Tools are on as soon as they are found, or found changed; read-only ones also run without asking each time.
+    const kept = new Map(
+      (await policies(tx, row.id))
+        .filter(policy => policy.present)
+        .map(policy => [`${policy.name}\n${policy.discovered_revision}`, policy.enabled_revision !== null]),
+    );
+    let budget = mcpLimits.selectedTools - tools.filter(tool => kept.get(`${tool.name}\n${toolRevision(tool)}`)).length;
     for (const tool of tools) {
       const revision = toolRevision(tool);
+      const automatic = budget > 0 && !kept.has(`${tool.name}\n${revision}`) && toolCompatibility(tool) === null;
+      if (automatic) budget--;
+      const readOnly = tool.annotations?.readOnlyHint === true && tool.annotations.destructiveHint !== true;
       await tx.client.query(
         `INSERT INTO ${table(tx, 'tool_revisions')} (integration_id,name,revision,tool,compatibility_reason) VALUES ($1,$2,$3,$4,$5)
         ON CONFLICT (integration_id,name,revision) DO UPDATE SET compatibility_reason=EXCLUDED.compatibility_reason
@@ -428,12 +438,12 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
         [row.id, tool.name, revision, tool, toolCompatibility(tool)],
       );
       await tx.client.query(
-        `INSERT INTO ${table(tx, 'tool_policies')} (integration_id,name,discovered_revision) VALUES ($1,$2,$3) ON CONFLICT (integration_id,name) DO UPDATE SET
+        `INSERT INTO ${table(tx, 'tool_policies')} (integration_id,name,discovered_revision,enabled_revision,standing_exception) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (integration_id,name) DO UPDATE SET
         discovered_revision=EXCLUDED.discovered_revision,present=true,
-        enabled_revision=CASE WHEN tf_mcp_tool_policies.discovered_revision=EXCLUDED.discovered_revision AND tf_mcp_tool_policies.present THEN tf_mcp_tool_policies.enabled_revision ELSE NULL END,
-        standing_exception=CASE WHEN tf_mcp_tool_policies.discovered_revision=EXCLUDED.discovered_revision AND tf_mcp_tool_policies.present THEN tf_mcp_tool_policies.standing_exception ELSE false END,
+        enabled_revision=CASE WHEN tf_mcp_tool_policies.discovered_revision=EXCLUDED.discovered_revision AND tf_mcp_tool_policies.present THEN tf_mcp_tool_policies.enabled_revision ELSE EXCLUDED.enabled_revision END,
+        standing_exception=CASE WHEN tf_mcp_tool_policies.discovered_revision=EXCLUDED.discovered_revision AND tf_mcp_tool_policies.present THEN tf_mcp_tool_policies.standing_exception ELSE EXCLUDED.standing_exception END,
         policy_version=tf_mcp_tool_policies.policy_version+CASE WHEN tf_mcp_tool_policies.discovered_revision=EXCLUDED.discovered_revision AND tf_mcp_tool_policies.present THEN 0 ELSE 1 END`,
-        [row.id, tool.name, revision],
+        [row.id, tool.name, revision, automatic ? revision : null, automatic && readOnly],
       );
     }
     await recommendations();
@@ -446,12 +456,14 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
           requestId: z.uuid().optional(),
           name: z.string().min(1).max(200),
           ownership: z.enum(['personal', 'shared']),
+          workspace: z.boolean().optional(),
           endpoint: z.string().optional(),
           credential: mcpCredentialSchema,
           package: mcpPackageSchema.optional(),
           egress: z.array(z.string()).optional(),
         })
         .parse(input);
+      if (value.workspace && value.ownership !== 'shared') throw new McpError('invalid-input');
       const setup = hostedSetup(value.credential, value);
       if (setup) await hostedAllowed(workspaceId);
       else if (value.endpoint === undefined) throw new McpError('invalid-input');
@@ -506,6 +518,11 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
                 `INSERT INTO ${table(tx, 'member_grants')} (integration_id,membership_id) VALUES ($1,$2)`,
                 [id, actor.membershipId],
               );
+              if (value.workspace)
+                await tx.client.query(
+                  `UPDATE ${table(tx, 'integrations')} SET shared_with_workspace=true WHERE id=$1`,
+                  [id],
+                );
             }
             await bindSecrets(tx, await store.load(tx, id), value.credential);
             await recommendations();
@@ -565,6 +582,7 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
           expectedVersion: z.number().int().positive(),
           memberIds: z.array(z.uuid()).max(1000),
           teamIds: z.array(z.uuid()).max(1000),
+          workspace: z.boolean().default(false),
           managers: managerGrantsSchema.optional(),
         })
         .parse(input);
@@ -607,10 +625,13 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
             for (const team of new Set(value.teamIds))
               await tx.client.query(`INSERT INTO ${table(tx, 'team_grants')} VALUES ($1,$2)`, [id, team]);
             await tx.client.query(
-              `UPDATE ${table(tx, 'integrations')} SET grants_version=grants_version+1,version=version+1 WHERE id=$1`,
-              [id],
+              `UPDATE ${table(tx, 'integrations')} SET shared_with_workspace=$2,grants_version=grants_version+1,version=version+1 WHERE id=$1`,
+              [id, value.workspace],
             );
-            if (row.credential) await bindSecrets(tx, row, store.credential(workspaceId, row));
+            if (row.credential) {
+              const current = await store.load(tx, id);
+              await bindSecrets(tx, current, store.credential(workspaceId, current));
+            }
             if (changedIntegrationRecommendationMembers(recommendationBefore, await mcpRecommendations(tx, id)).length)
               await store.invalidate(tx, row);
             await recordIntegrationRecommendationChange(tx, id, recommendationBefore, await mcpRecommendations(tx, id));
@@ -636,6 +657,7 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
         if (row.ownership !== 'shared') throw new AccessDenied();
         return {
           version: row.grants_version,
+          workspace: row.shared_with_workspace,
           managers: await integrationManagers(tx, 'mcp', id),
           memberIds: z
             .array(z.object({ membership_id: z.uuid() }))

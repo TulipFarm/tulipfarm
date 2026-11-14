@@ -1,0 +1,32 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "kong-konnect",
+  "name": "Kong Konnect",
+  "maker": "Kong",
+  "homepage": "https://konghq.com",
+  "category": "cloud-and-infrastructure",
+  "teams": ["engineering"],
+  "summary": "Inspect Kong Konnect API gateways and traffic",
+  "capabilities": [
+    "List gateway services, routes, and plugins",
+    "Query API traffic analytics",
+    "Find control planes and consumers"
+  ],
+  "official": {
+    "evidence": "https://github.com/Kong/mcp-konnect",
+    "repository": "https://github.com/Kong/mcp-konnect"
+  },
+  "docs": "https://github.com/Kong/mcp-konnect",
+  "remote": {
+    "url": "https://global.mcp.konghq.com/",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "com.konghq/konnect",
+  "icons": {
+    "simpleIcons": "kong",
+    "color": "#003459"
+  },
+  "supportedBy": ["docker"]
+}

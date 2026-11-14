@@ -1,0 +1,34 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "scrapingbee",
+  "name": "ScrapingBee",
+  "maker": "ScrapingBee",
+  "homepage": "https://www.scrapingbee.com",
+  "category": "search-and-research",
+  "teams": ["engineering", "marketing"],
+  "summary": "Scrape web pages and search results with ScrapingBee",
+  "capabilities": ["Scrape pages with JavaScript rendering", "Get Google search results", "Extract data with AI rules"],
+  "official": {
+    "evidence": "https://github.com/ScrapingBee/mcp-server",
+    "repository": "https://github.com/ScrapingBee/mcp-server"
+  },
+  "docs": "https://github.com/ScrapingBee/mcp-server",
+  "remote": {
+    "url": "https://mcp.scrapingbee.com/mcp",
+    "transport": "streamable-http",
+    "auth": "api-key",
+    "headers": [
+      {
+        "name": "Authorization",
+        "value": "Bearer {key}",
+        "description": "ScrapingBee API key"
+      }
+    ],
+    "checked": "2026-11-14"
+  },
+  "registryName": "com.scrapingbee/mcp",
+  "icons": {
+    "color": "#FFC942"
+  },
+  "supportedBy": ["lindy", "relevance-ai", "github-registry"]
+}

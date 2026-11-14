@@ -1,0 +1,39 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "pinecone",
+  "name": "Pinecone",
+  "maker": "Pinecone",
+  "homepage": "https://www.pinecone.io",
+  "category": "data-and-databases",
+  "teams": ["engineering"],
+  "summary": "Search and manage Pinecone vector indexes",
+  "capabilities": [
+    "Create and describe indexes",
+    "Upsert records with integrated embeddings",
+    "Search and rerank records",
+    "Search Pinecone documentation"
+  ],
+  "official": {
+    "evidence": "https://docs.pinecone.io/guides/operations/mcp-server",
+    "repository": "https://github.com/pinecone-io/pinecone-mcp"
+  },
+  "docs": "https://docs.pinecone.io/guides/operations/mcp-server",
+  "packages": [
+    {
+      "registry": "npm",
+      "name": "@pinecone-database/mcp",
+      "env": [
+        {
+          "name": "PINECONE_API_KEY",
+          "description": "Pinecone API key",
+          "secret": true,
+          "required": true
+        }
+      ]
+    }
+  ],
+  "icons": {
+    "color": "#000000"
+  },
+  "supportedBy": ["lindy", "relevance-ai", "glean", "n8n", "docker"]
+}

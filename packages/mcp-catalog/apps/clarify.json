@@ -1,0 +1,29 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "clarify",
+  "name": "Clarify",
+  "maker": "Clarify",
+  "homepage": "https://www.clarify.ai",
+  "category": "crm-and-sales",
+  "teams": ["sales"],
+  "summary": "Search and update your Clarify CRM",
+  "capabilities": [
+    "Find people, companies, and deals",
+    "Create and update CRM records",
+    "Review meetings and activity on a deal"
+  ],
+  "official": {
+    "evidence": "https://docs.clarify.ai/en/articles/13367278-clarify-mcp"
+  },
+  "docs": "https://docs.clarify.ai/en/articles/13367278-clarify-mcp",
+  "remote": {
+    "url": "https://api.clarify.ai/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#6E56CF"
+  },
+  "supportedBy": ["chatgpt", "claude", "microsoft-copilot", "manus", "lindy", "gumloop", "relevance-ai", "glean"]
+}

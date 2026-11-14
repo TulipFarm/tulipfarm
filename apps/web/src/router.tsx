@@ -103,6 +103,7 @@ const WorkspaceSetupStatusPage = lazyRouteComponent(
 const JoinWorkspacePage = lazyRouteComponent(() => import('@/pages/governance-invitations'), 'JoinWorkspacePage');
 const SlackLinkPage = lazyRouteComponent(() => import('@/pages/slack-link'), 'SlackLinkPage');
 const GoogleCallbackPage = lazyRouteComponent(() => import('@/pages/google-callback'), 'GoogleCallbackPage');
+const McpCallbackPage = lazyRouteComponent(() => import('@/pages/mcp-callback'), 'McpCallbackPage');
 const GitHubCallbackPage = lazyRouteComponent(() => import('@/pages/github-callback'), 'GitHubCallbackPage');
 const AtlassianCallbackPage = lazyRouteComponent(() => import('@/pages/atlassian-callback'), 'AtlassianCallbackPage');
 const WorkspaceHomePage = lazyRouteComponent(() => import('@/pages/workspace-home'), 'WorkspaceHomePage');
@@ -403,6 +404,19 @@ export const googleCallbackRoute = createRoute({
     const result = googleCallbackResultSchema.safeParse(search);
     return result.success ? result.data : googleCallbackResultSchema.parse({ outcome: 'invalid-request' });
   },
+});
+export const mcpCallbackRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/mcp/callback',
+  component: McpCallbackPage,
+  validateSearch: search =>
+    z
+      .object({
+        outcome: z.enum(['connected', 'sign-in-required', 'denied', 'expired', 'failed']).catch('failed'),
+        workspaceId: z.uuid().optional().catch(undefined),
+        integrationId: z.uuid().optional().catch(undefined),
+      })
+      .parse(search),
 });
 // TanStack Router preloads route components only after every beforeLoad settles. Session
 // gates start the matched routes' code at once so it downloads during the session check.
@@ -1537,7 +1551,10 @@ export const integrationDetailRoute = createRoute({
   validateSearch: search =>
     z
       .object({
-        tab: z.enum(['accounts', 'knowledge', 'channels', 'settings', 'advanced']).optional().catch(undefined),
+        tab: z
+          .enum(['tools', 'access', 'accounts', 'knowledge', 'channels', 'settings', 'advanced'])
+          .optional()
+          .catch(undefined),
         returnChat: z.uuid().optional().catch(undefined),
       })
       .parse(search),
@@ -1564,6 +1581,7 @@ export const router = createRouter({
     indexRoute,
     chatRedirectRoute,
     googleCallbackRoute,
+    mcpCallbackRoute,
     githubCallbackRoute,
     githubSetupRoute,
     atlassianCallbackRoute,

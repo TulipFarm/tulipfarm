@@ -1,0 +1,29 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "seismic",
+  "name": "Seismic",
+  "maker": "Seismic",
+  "homepage": "https://seismic.com",
+  "category": "crm-and-sales",
+  "teams": ["sales", "marketing"],
+  "summary": "Find sales content in Seismic",
+  "capabilities": [
+    "Search your Seismic content library",
+    "Get recommended content for a deal",
+    "Read content details and summaries"
+  ],
+  "official": {
+    "evidence": "https://developer.seismic.com/seismicsoftware/docs/seismic-mcp-server"
+  },
+  "docs": "https://developer.seismic.com/seismicsoftware/docs/seismic-mcp-server",
+  "remote": {
+    "url": "https://mcp.seismic.com",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#E4002B"
+  },
+  "supportedBy": ["chatgpt", "claude", "copilot-studio", "gumloop", "glean"]
+}

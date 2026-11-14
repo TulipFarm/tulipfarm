@@ -15,7 +15,7 @@ test(
     const db = await fixture();
     try {
       const before = db.baseline.findIndex(item => item.name === appsMigration);
-      assert.equal(db.baseline.at(-1).name, '0075_app_version_retention.sql');
+      assert.equal(db.baseline.at(-1).name, '0076_mcp_workspace_share.sql');
       const upgraded = await db.create(db.baseline.slice(0, before));
       assert.equal(
         (await db.platform.query(`SELECT to_regclass($1) AS present`, [`${upgraded.names.schema}.tf_apps`])).rows[0]

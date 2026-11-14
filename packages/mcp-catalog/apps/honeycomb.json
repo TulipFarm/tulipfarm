@@ -1,0 +1,26 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "honeycomb",
+  "name": "Honeycomb",
+  "maker": "Honeycomb",
+  "homepage": "https://www.honeycomb.io",
+  "category": "monitoring-and-analytics",
+  "teams": ["engineering"],
+  "summary": "Query Honeycomb traces, events, and SLOs",
+  "capabilities": ["Run queries on events and traces", "Check SLOs and triggers", "Explore datasets and columns"],
+  "official": {
+    "evidence": "https://docs.honeycomb.io/integrations/mcp/concepts"
+  },
+  "docs": "https://docs.honeycomb.io/integrations/mcp/concepts",
+  "remote": {
+    "url": "https://mcp.honeycomb.io/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "io.honeycomb/mcp",
+  "icons": {
+    "color": "#F5A623"
+  },
+  "supportedBy": ["claude", "manus", "gumloop", "glean"]
+}

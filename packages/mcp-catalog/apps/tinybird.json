@@ -1,0 +1,25 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "tinybird",
+  "name": "Tinybird",
+  "maker": "Tinybird",
+  "homepage": "https://www.tinybird.co",
+  "category": "data-and-databases",
+  "teams": ["engineering"],
+  "summary": "Query Tinybird data sources and endpoints",
+  "capabilities": ["List data sources and endpoints", "Run SQL queries", "Call published API endpoints"],
+  "official": {
+    "evidence": "https://www.tinybird.co/docs/forward/analytics-agents/mcp"
+  },
+  "docs": "https://www.tinybird.co/docs/forward/analytics-agents/mcp",
+  "remote": {
+    "url": "https://mcp.tinybird.co?token={key}",
+    "transport": "streamable-http",
+    "auth": "api-key",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#27F795"
+  },
+  "supportedBy": ["lindy", "relevance-ai"]
+}

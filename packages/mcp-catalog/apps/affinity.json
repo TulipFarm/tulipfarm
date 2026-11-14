@@ -1,0 +1,29 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "affinity",
+  "name": "Affinity",
+  "maker": "Affinity",
+  "homepage": "https://www.affinity.co",
+  "category": "crm-and-sales",
+  "teams": ["sales", "finance"],
+  "summary": "Query and update relationships in Affinity",
+  "capabilities": [
+    "Search people, organizations, and opportunities",
+    "Update list entries and fields",
+    "Add notes and review relationship history"
+  ],
+  "official": {
+    "evidence": "https://support.affinity.co/s/article/Getting-started-with-Affinity-MCP"
+  },
+  "docs": "https://support.affinity.co/s/article/Tutorial-MCP-connect-ai-tools-to-affinity",
+  "remote": {
+    "url": "https://mcp.affinity.co/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#1E5EFF"
+  },
+  "supportedBy": ["chatgpt", "claude", "copilot-studio", "notion-ai", "lindy", "gumloop", "relevance-ai", "glean"]
+}

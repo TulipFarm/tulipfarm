@@ -1,0 +1,31 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "mailchimp",
+  "name": "Mailchimp",
+  "maker": "Intuit Mailchimp",
+  "homepage": "https://mailchimp.com",
+  "category": "marketing",
+  "teams": ["marketing"],
+  "summary": "Work with audiences and campaigns in Mailchimp",
+  "capabilities": [
+    "Look up audiences and contacts",
+    "Review campaigns and their performance",
+    "Draft and manage email campaigns"
+  ],
+  "official": {
+    "evidence": "https://mailchimp.com/resources/connect-mailchimp-to-claude/"
+  },
+  "docs": "https://mailchimp.com/resources/connect-mailchimp-to-claude/",
+  "remote": {
+    "url": "https://mcp.mailchimp.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "simpleIcons": "mailchimp",
+    "color": "#FFE01B"
+  },
+  "supportedBy": ["manus", "lindy", "relevance-ai", "zapier", "make", "n8n"],
+  "featured": true
+}

@@ -1,0 +1,31 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "beehiiv",
+  "name": "beehiiv",
+  "maker": "beehiiv",
+  "homepage": "https://www.beehiiv.com",
+  "category": "marketing",
+  "teams": ["marketing"],
+  "summary": "Work with posts, subscribers, and stats in beehiiv",
+  "capabilities": [
+    "Look up subscribers and segments",
+    "Review posts and their performance",
+    "Draft newsletter content"
+  ],
+  "official": {
+    "evidence": "https://www.beehiiv.com/features/mcp",
+    "repository": "https://github.com/beehiiv/agents"
+  },
+  "docs": "https://www.beehiiv.com/features/mcp",
+  "remote": {
+    "url": "https://mcp.beehiiv.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "com.beehiiv/beehiiv",
+  "icons": {
+    "color": "#0A0A0A"
+  },
+  "supportedBy": ["claude", "manus", "lindy", "gumloop", "relevance-ai", "zapier", "make", "github-registry"]
+}

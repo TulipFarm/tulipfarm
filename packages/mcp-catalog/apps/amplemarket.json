@@ -1,0 +1,25 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "amplemarket",
+  "name": "Amplemarket",
+  "maker": "Amplemarket",
+  "homepage": "https://www.amplemarket.com",
+  "category": "crm-and-sales",
+  "teams": ["sales"],
+  "summary": "Find leads and run sequences in Amplemarket",
+  "capabilities": ["Search and enrich leads", "Add leads to sequences", "Review sequence and inbox activity"],
+  "official": {
+    "evidence": "https://docs.amplemarket.com/mcp"
+  },
+  "docs": "https://docs.amplemarket.com/mcp",
+  "remote": {
+    "url": "https://mcp.amplemarket.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#1A1A1A"
+  },
+  "supportedBy": ["chatgpt", "manus"]
+}

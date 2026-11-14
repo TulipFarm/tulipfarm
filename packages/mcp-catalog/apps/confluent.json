@@ -1,0 +1,30 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "confluent",
+  "name": "Confluent",
+  "maker": "Confluent",
+  "homepage": "https://www.confluent.io",
+  "category": "data-and-databases",
+  "teams": ["engineering"],
+  "summary": "Manage Kafka topics, connectors, and Flink SQL",
+  "capabilities": [
+    "Create, list, and delete Kafka topics",
+    "Produce and consume messages",
+    "Manage connectors and Flink SQL statements"
+  ],
+  "official": {
+    "evidence": "https://github.com/confluentinc/mcp-confluent",
+    "repository": "https://github.com/confluentinc/mcp-confluent"
+  },
+  "docs": "https://github.com/confluentinc/mcp-confluent",
+  "packages": [
+    {
+      "registry": "npm",
+      "name": "@confluentinc/mcp-confluent"
+    }
+  ],
+  "icons": {
+    "color": "#040531"
+  },
+  "supportedBy": ["lindy", "relevance-ai"]
+}

@@ -1,0 +1,29 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "grain",
+  "name": "Grain",
+  "maker": "Grain",
+  "homepage": "https://grain.com",
+  "category": "chat",
+  "teams": ["sales", "everyone"],
+  "summary": "Search meeting recordings and notes in Grain",
+  "capabilities": [
+    "Find recent meetings and their transcripts",
+    "Read AI meeting notes and highlights",
+    "Answer questions across past calls"
+  ],
+  "official": {
+    "evidence": "https://developers.grain.com/mcp/"
+  },
+  "docs": "https://developers.grain.com/mcp/",
+  "remote": {
+    "url": "https://api.grain.com/_/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#F5C400"
+  },
+  "supportedBy": ["chatgpt", "claude", "microsoft-copilot", "manus", "lindy", "gumloop", "relevance-ai"]
+}

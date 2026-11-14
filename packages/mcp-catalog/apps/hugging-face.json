@@ -1,0 +1,41 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "hugging-face",
+  "name": "Hugging Face",
+  "maker": "Hugging Face",
+  "homepage": "https://huggingface.co",
+  "category": "ai-and-media",
+  "teams": ["engineering"],
+  "summary": "Search Hugging Face models, datasets, and Spaces",
+  "capabilities": ["Search models, datasets, and papers", "Run Gradio apps hosted on Spaces", "Read Hugging Face docs"],
+  "official": {
+    "evidence": "https://huggingface.co/docs/hub/hf-mcp-server",
+    "repository": "https://github.com/huggingface/hf-mcp-server"
+  },
+  "docs": "https://huggingface.co/docs/hub/hf-mcp-server",
+  "remote": {
+    "url": "https://huggingface.co/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "lobehub": "HuggingFace",
+    "simpleIcons": "huggingface",
+    "color": "#FFD21E"
+  },
+  "supportedBy": [
+    "chatgpt",
+    "claude",
+    "microsoft-copilot",
+    "manus",
+    "lindy",
+    "gumloop",
+    "relevance-ai",
+    "glean",
+    "n8n",
+    "docker",
+    "github-registry"
+  ],
+  "featured": true
+}

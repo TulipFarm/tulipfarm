@@ -1,0 +1,33 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "linkup",
+  "name": "Linkup",
+  "maker": "Linkup",
+  "homepage": "https://www.linkup.so",
+  "category": "search-and-research",
+  "teams": ["everyone"],
+  "summary": "Search the web for sourced answers with Linkup",
+  "capabilities": ["Search the web for current facts", "Get answers with source links"],
+  "official": {
+    "evidence": "https://github.com/LinkupPlatform/linkup-mcp-server",
+    "repository": "https://github.com/LinkupPlatform/linkup-mcp-server"
+  },
+  "docs": "https://github.com/LinkupPlatform/linkup-mcp-server",
+  "remote": {
+    "url": "https://mcp.linkup.so/mcp",
+    "transport": "streamable-http",
+    "auth": "api-key",
+    "headers": [
+      {
+        "name": "Authorization",
+        "value": "Bearer {key}",
+        "description": "Linkup API key"
+      }
+    ],
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#0A0A0A"
+  },
+  "supportedBy": ["lindy", "relevance-ai"]
+}

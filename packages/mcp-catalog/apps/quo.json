@@ -1,0 +1,25 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "quo",
+  "name": "Quo",
+  "maker": "Quo",
+  "homepage": "https://www.quo.com",
+  "category": "chat",
+  "teams": ["sales", "support"],
+  "summary": "Read calls and texts in Quo",
+  "capabilities": ["Search calls, messages, and contacts", "Read call summaries and transcripts", "Send text messages"],
+  "official": {
+    "evidence": "https://www.quo.com/docs/2026-03-30/mcp/overview"
+  },
+  "docs": "https://www.quo.com/docs/2026-03-30/mcp/overview",
+  "remote": {
+    "url": "https://mcp.quo.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#000000"
+  },
+  "supportedBy": ["chatgpt", "claude", "gumloop", "zapier", "make"]
+}

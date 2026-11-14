@@ -1,0 +1,43 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "airtable",
+  "name": "Airtable",
+  "maker": "Airtable",
+  "homepage": "https://www.airtable.com",
+  "category": "docs-and-files",
+  "teams": ["operations", "everyone"],
+  "summary": "Query and update Airtable bases and records",
+  "capabilities": ["List bases, tables and fields", "Search and read records", "Create and update records"],
+  "official": {
+    "evidence": "https://support.airtable.com/docs/using-the-airtable-mcp-server"
+  },
+  "docs": "https://support.airtable.com/docs/using-the-airtable-mcp-server",
+  "remote": {
+    "url": "https://mcp.airtable.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "com.airtable/mcp",
+  "icons": {
+    "simpleIcons": "airtable",
+    "color": "#18BFFF"
+  },
+  "supportedBy": [
+    "chatgpt",
+    "claude",
+    "gemini",
+    "microsoft-copilot",
+    "manus",
+    "lindy",
+    "gumloop",
+    "relevance-ai",
+    "dust",
+    "glean",
+    "zapier",
+    "make",
+    "n8n",
+    "docker"
+  ],
+  "featured": true
+}

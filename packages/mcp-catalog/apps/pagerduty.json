@@ -1,0 +1,56 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "pagerduty",
+  "name": "PagerDuty",
+  "maker": "PagerDuty",
+  "homepage": "https://www.pagerduty.com",
+  "category": "monitoring-and-analytics",
+  "teams": ["engineering", "operations"],
+  "summary": "Manage PagerDuty incidents and on-call schedules",
+  "capabilities": [
+    "Find, acknowledge, and resolve incidents",
+    "Check who is on call",
+    "Read services and escalation policies"
+  ],
+  "official": {
+    "evidence": "https://docs.pagerduty.com/ai-automation/advance/pagerduty-mcp-server",
+    "repository": "https://github.com/PagerDuty/pagerduty-mcp-server"
+  },
+  "docs": "https://docs.pagerduty.com/ai-automation/advance/pagerduty-mcp-server",
+  "remote": {
+    "url": "https://mcp.pagerduty.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "packages": [
+    {
+      "registry": "pypi",
+      "name": "pagerduty-mcp",
+      "env": [
+        {
+          "name": "PAGERDUTY_USER_API_KEY",
+          "description": "PagerDuty user API key",
+          "secret": true,
+          "required": true
+        }
+      ]
+    }
+  ],
+  "registryName": "io.github.PagerDuty/pagerduty-mcp",
+  "icons": {
+    "simpleIcons": "pagerduty",
+    "color": "#06AC38"
+  },
+  "supportedBy": [
+    "claude",
+    "microsoft-copilot",
+    "manus",
+    "lindy",
+    "gumloop",
+    "relevance-ai",
+    "glean",
+    "n8n",
+    "github-registry"
+  ]
+}

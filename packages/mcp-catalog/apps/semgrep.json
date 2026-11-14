@@ -1,0 +1,30 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "semgrep",
+  "name": "Semgrep",
+  "maker": "Semgrep",
+  "homepage": "https://semgrep.dev",
+  "category": "security",
+  "teams": ["engineering"],
+  "summary": "Scan code for security issues with Semgrep",
+  "capabilities": [
+    "Scan code for vulnerabilities and bugs",
+    "Write and test custom rules",
+    "Read findings from Semgrep AppSec Platform"
+  ],
+  "official": {
+    "evidence": "https://semgrep.dev/docs/mcp",
+    "repository": "https://github.com/semgrep/mcp"
+  },
+  "docs": "https://semgrep.dev/docs/mcp",
+  "remote": {
+    "url": "https://mcp.semgrep.ai/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#FF3A00"
+  },
+  "supportedBy": ["lindy", "relevance-ai", "docker"]
+}

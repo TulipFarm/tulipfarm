@@ -1,0 +1,25 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "plain",
+  "name": "Plain",
+  "maker": "Plain",
+  "homepage": "https://www.plain.com",
+  "category": "support",
+  "teams": ["support", "engineering"],
+  "summary": "Manage threads and customers in Plain",
+  "capabilities": ["Search threads and customers", "Reply to and update threads", "Assign and label threads"],
+  "official": {
+    "evidence": "https://www.plain.com/docs/mcp"
+  },
+  "docs": "https://www.plain.com/docs/mcp",
+  "remote": {
+    "url": "https://mcp.plain.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#000000"
+  },
+  "supportedBy": ["manus", "lindy", "relevance-ai"]
+}

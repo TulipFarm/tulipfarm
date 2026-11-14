@@ -1,0 +1,41 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "wordpress-com",
+  "name": "WordPress.com",
+  "maker": "Automattic",
+  "homepage": "https://wordpress.com",
+  "category": "marketing",
+  "teams": ["marketing"],
+  "summary": "Manage posts, pages, and sites on WordPress.com",
+  "capabilities": [
+    "Draft, edit, and publish posts and pages",
+    "Manage media, comments, and site settings",
+    "Read site stats"
+  ],
+  "official": {
+    "evidence": "https://developer.wordpress.com/docs/mcp/"
+  },
+  "docs": "https://developer.wordpress.com/docs/mcp/",
+  "remote": {
+    "url": "https://public-api.wordpress.com/wpcom/v2/mcp/v1",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "simpleIcons": "wordpress",
+    "color": "#21759B"
+  },
+  "supportedBy": [
+    "chatgpt",
+    "claude",
+    "microsoft-copilot",
+    "manus",
+    "lindy",
+    "relevance-ai",
+    "glean",
+    "zapier",
+    "make",
+    "n8n"
+  ]
+}

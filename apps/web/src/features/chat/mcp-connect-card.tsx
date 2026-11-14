@@ -3,26 +3,24 @@ import { Link } from '@tanstack/react-router';
 import { Plug } from 'reicon-react/icons/Plug';
 import { Button } from '@tulipfarm/sprout/button';
 import { ReviewCard, ReviewRow, ReviewRows } from '@tulipfarm/sprout/review-card';
-import { McpGate } from '@/features/workspace-mcp/state';
-import { McpSetup, sameEndpoint } from '@/features/workspace-mcp/setup';
-import { integrationLabels } from '@/features/workspace-mcp/integrations';
-import { useMcpIntegrations } from '@/features/workspace-mcp/queries';
+import { Input } from '@tulipfarm/sprout/input';
+import { ToggleGroup, ToggleGroupItem } from '@tulipfarm/sprout/toggle-group';
+import { McpGate, useMcpCommand } from '@/features/workspace-mcp/state';
+import { McpSetup } from '@/features/workspace-mcp/setup';
+import { connectionFor, mcpStatusLabel, useMcpConnect, type Ownership } from '@/features/workspace-mcp/connect';
+import { useMcpIntegration, useMcpIntegrations } from '@/features/workspace-mcp/queries';
+import { markMcpConnected, takeMcpConnected } from '@/features/workspace-mcp/sign-in';
 import type { McpApi } from '@/features/workspace-mcp/api';
-import type { Capabilities } from '@/features/workspace-mcp/contracts';
+import type { Capabilities, Integration } from '@/features/workspace-mcp/contracts';
+import { mcpPagePrefix } from '@/features/integrations/mcp-apps';
 import { useFlag } from '@/lib/feature-flags';
 import type { IntegrationCardView } from './conversation-api';
 
 type Proposal = Extract<IntegrationCardView, { action: 'mcp' }>;
 type PackageProposal = Extract<IntegrationCardView, { action: 'mcp-package' }>;
-const signIn = {
-  oauth: 'Sign in with the provider',
-  secrets: 'Saved secrets you choose',
-  none: 'No sign-in',
-} as const;
-// Starting OAuth hides this chat's loaded messages, which remounts the card, so the sign-in link lives outside it.
-const authorizations = new Map<string, string>();
+const owners: Record<Ownership, string> = { personal: 'Only you', shared: 'Everyone in this workspace' };
 
-/** A chat's suggestion to connect a remote MCP server. The person sets it up here, as their own integration. */
+/** A chat's suggestion to connect a remote MCP server. One click connects it and opens the provider's sign-in. */
 export function McpConnectCard({ workspaceId, slug, card }: { workspaceId: string; slug: string; card: Proposal }) {
   return (
     <McpGate workspaceId={workspaceId}>
@@ -44,85 +42,211 @@ function Connect({
 }) {
   const read = useMcpIntegrations(api);
   const [open, setOpen] = useState(false);
-  const [savedId, setSavedId] = useState<string | null>(null);
-  const existing =
-    read.state.kind === 'ready'
-      ? read.state.data.integrations.find(
-          integration => integration.ownership === 'personal' && sameEndpoint(integration.endpoint, card.endpoint),
-        )
-      : undefined;
-  const id = savedId ?? existing?.id ?? null;
-  const authorization = existing?.status === 'oauth-pending' ? authorizations.get(existing.id) : undefined;
+  const [ownership, setOwnership] = useState<Ownership>('personal');
+  const existing = read.state.kind === 'ready' ? connectionFor(read.state.data.integrations, card.endpoint) : undefined;
+  const {
+    connect: run,
+    command,
+    current,
+    registration,
+    clientId,
+    setClientId,
+    clientSecret,
+    setClientSecret,
+  } = useMcpConnect({
+    api,
+    name: card.name,
+    endpoint: card.endpoint,
+    authentication: card.authentication === 'none' ? 'none' : 'oauth',
+    existing,
+    refresh: read.refresh,
+  });
+  const connect = () => (card.authentication === 'secrets' ? setOpen(true) : run(ownership));
+  if (existing && !registration && !['setup', 'oauth-pending', 'registration-required'].includes(existing.status))
+    return <Connected api={api} slug={slug} name={card.name} integration={existing} />;
   return (
     <ReviewCard
       label={`Connect ${card.name}`}
       icon={<Plug size={14} />}
       title={`Connect ${card.name}`}
-      badge={
-        existing
-          ? {
-              label: integrationLabels[existing.status],
-              variant: existing.status === 'ready' ? 'info' : existing.status === 'error' ? 'warning' : 'secondary',
-            }
-          : { label: 'Not connected', variant: 'secondary' }
-      }
-      settled={existing?.status === 'ready'}
+      badge={{ label: registration ? 'One more step' : 'Suggested', variant: 'secondary' }}
       actions={
-        authorization && new URL(authorization).protocol === 'https:' ? (
-          <Button nativeButton={false} render={<a href={authorization} target="_blank" rel="noopener noreferrer" />}>
-            Continue to {card.name} sign-in
+        capabilities.integrationsEnabled && !open ? (
+          <Button aria-busy={command.busy} disabled={command.busy} onClick={connect}>
+            {command.busy ? 'Connecting…' : registration ? 'Continue' : `Connect ${card.name}`}
           </Button>
-        ) : id ? (
-          <Button
-            nativeButton={false}
-            render={
-              <Link to="/$workspaceSlug/integrations" params={{ workspaceSlug: slug }} hash={`review-mcp-${id}`} />
-            }
-          >
-            Review {card.name} tools
-          </Button>
-        ) : !open && capabilities.integrationsEnabled ? (
-          <Button onClick={() => setOpen(true)}>Set up {card.name}</Button>
         ) : undefined
       }
       status={
-        !capabilities.integrationsEnabled && !id ? (
+        !capabilities.integrationsEnabled ? (
           <p role="status" className="text-sm">
-            New MCP integrations are paused in this workspace.
+            An admin has paused new connections in this workspace.
           </p>
-        ) : authorization ? (
-          <p role="status" className="text-sm">
-            Sign in to {card.name} in the new tab, then return here to review its tools.
-          </p>
-        ) : id ? (
-          <p role="status" className="text-sm">
-            Review its tools, then select {card.name} in a chat to use it.
+        ) : command.state.kind === 'error' ? (
+          <p role="alert" className="text-sm text-destructive">
+            {command.state.message}
           </p>
         ) : undefined
       }
     >
       <ReviewRows>
-        <ReviewRow label="Endpoint">
-          <span className="break-all">{card.endpoint}</span>
+        <ReviewRow label="Sign-in">
+          {card.authentication === 'oauth'
+            ? `Your ${card.name} account`
+            : card.authentication === 'none'
+              ? 'None needed'
+              : 'A saved secret'}
         </ReviewRow>
-        <ReviewRow label="Sign-in">{signIn[card.authentication]}</ReviewRow>
-        <ReviewRow label="Who can use it">Only you</ReviewRow>
+        <ReviewRow label="Who can use it">
+          {capabilities.canManageShared && !current ? (
+            <ToggleGroup
+              aria-label="Who can use it"
+              value={[ownership]}
+              onValueChange={(value: string[]) => {
+                const next = value[0];
+                if (next === 'personal' || next === 'shared') setOwnership(next);
+              }}
+            >
+              <ToggleGroupItem value="personal">{owners.personal}</ToggleGroupItem>
+              <ToggleGroupItem value="shared">Everyone</ToggleGroupItem>
+            </ToggleGroup>
+          ) : (
+            owners[current?.ownership ?? 'personal']
+          )}
+        </ReviewRow>
       </ReviewRows>
-      {open && !id && (
+      {ownership === 'shared' && !current && (
+        <p className="text-sm text-muted-foreground">
+          Everyone will use the {card.name} account you sign in with, so pick one that only sees what the whole team
+          should.
+        </p>
+      )}
+      {registration && (
+        <section aria-label={`Connect your own ${card.name} app`} className="space-y-3 text-sm">
+          <p>
+            {card.name} doesn't let apps connect automatically. Create an OAuth app in {card.name}, set its callback URL
+            to the one below, then paste the client ID here.
+          </p>
+          <p className="break-all font-mono">{registration.registration.redirectUri}</p>
+          <Input
+            aria-label="Client ID"
+            placeholder="Client ID"
+            autoComplete="off"
+            value={clientId}
+            onChange={event => setClientId(event.target.value)}
+          />
+          <Input
+            aria-label="Client secret, if your app has one"
+            placeholder="Client secret, if your app has one"
+            type="password"
+            autoComplete="off"
+            value={clientSecret}
+            onChange={event => setClientSecret(event.target.value)}
+          />
+        </section>
+      )}
+      {open && (
         <McpSetup
           api={api}
           capabilities={capabilities}
           proposal={card}
+          ownership={ownership}
           close={() => setOpen(false)}
-          authorizing={(next, url) => authorizations.set(next, url)}
           saved={next => {
-            setSavedId(next);
+            markMcpConnected(next);
             setOpen(false);
             void read.refresh();
           }}
         />
       )}
     </ReviewCard>
+  );
+}
+
+/** A connection that exists. It shows "Connected" once tools are on, and offers one click for anything else. */
+function Connected({
+  api,
+  slug,
+  name,
+  integration,
+}: {
+  api: McpApi;
+  slug: string;
+  name: string;
+  integration: Integration;
+}) {
+  const detail = useMcpIntegration(api, integration.id);
+  const command = useMcpCommand();
+  const [justConnected] = useState(() => takeMcpConnected() === integration.id);
+  const state = detail.state.kind === 'ready' ? detail.state.data : null;
+  const live = state?.integration ?? integration;
+  const turnOn = () =>
+    state &&
+    void command.run(
+      () =>
+        api.integrationCommand(live.id, 'tools', {
+          requestId: crypto.randomUUID(),
+          expectedVersion: live.version,
+          tools: state.tools.map(tool => ({
+            name: tool.name,
+            revision: tool.revision,
+            enabled: tool.compatibility === 'compatible',
+            standingException: tool.standingException,
+          })),
+        }),
+      () => void detail.refresh(),
+    );
+  const ready = live.status === 'ready';
+  const manage = (
+    <Button
+      variant="outline"
+      nativeButton={false}
+      render={
+        <Link
+          to="/$workspaceSlug/integrations/$integrationId"
+          params={{ workspaceSlug: slug, integrationId: `${mcpPagePrefix}${live.id}` }}
+        />
+      }
+    >
+      Manage
+    </Button>
+  );
+  return (
+    <ReviewCard
+      label={`${name} connection`}
+      icon={<Plug size={14} />}
+      title={name}
+      badge={
+        ready
+          ? { label: 'Connected', variant: 'info' }
+          : live.status === 'discovering'
+            ? { label: 'Connecting', variant: 'secondary' }
+            : { label: mcpStatusLabel[live.status], variant: live.status === 'error' ? 'warning' : 'secondary' }
+      }
+      settled={ready}
+      actions={
+        live.status === 'review-required' && live.canManage ? (
+          <Button aria-busy={command.busy} disabled={command.busy || !state} onClick={turnOn}>
+            Turn on {name}
+          </Button>
+        ) : (
+          manage
+        )
+      }
+      status={
+        <p role={command.state.kind === 'error' ? 'alert' : 'status'} className="text-sm">
+          {command.state.kind === 'error'
+            ? command.state.message
+            : ready
+              ? `${justConnected ? `${name} is connected. ` : ''}Ask away. Anything that changes data in ${name} still asks you first.`
+              : live.status === 'discovering'
+                ? `Getting ${name} ready…`
+                : live.status === 'review-required'
+                  ? `${name} is connected, but its tools are off.`
+                  : (live.statusReason ?? `Open Manage to fix ${name}.`)}
+        </p>
+      }
+    />
   );
 }
 
@@ -174,32 +298,39 @@ function ConnectPackage({
   const id = savedId ?? existing?.id ?? null;
   const secrets = card.settings.filter(setting => setting.secret);
   const plain = card.settings.filter(setting => !setting.secret);
+  const command = useMcpCommand();
+  const needsValues = card.settings.some(setting => setting.secret || setting.required);
+  const install = () => {
+    if (needsValues) return setOpen(true);
+    void command.run(
+      async () => {
+        const result = await api.setup({
+          requestId: crypto.randomUUID(),
+          name: card.name,
+          package: card.package,
+          egress: card.egress,
+          ownership: 'personal',
+          auth: { kind: 'hosted', env: [] },
+        });
+        markMcpConnected(result.integration.id);
+        setSavedId(result.integration.id);
+        await read.refresh();
+      },
+      () => {},
+    );
+  };
+  if (existing) return <Connected api={api} slug={slug} name={card.name} integration={existing} />;
   return (
     <ReviewCard
       label={`Run ${card.name}`}
       icon={<Plug size={14} />}
       title={`Run ${card.name}`}
-      badge={
-        existing
-          ? {
-              label: integrationLabels[existing.status],
-              variant: existing.status === 'ready' ? 'info' : existing.status === 'error' ? 'warning' : 'secondary',
-            }
-          : { label: 'Not installed', variant: 'secondary' }
-      }
-      settled={existing?.status === 'ready'}
+      badge={{ label: 'Suggested', variant: 'secondary' }}
       actions={
-        id ? (
-          <Button
-            nativeButton={false}
-            render={
-              <Link to="/$workspaceSlug/integrations" params={{ workspaceSlug: slug }} hash={`review-mcp-${id}`} />
-            }
-          >
-            Review {card.name} tools
+        !id && !open && available ? (
+          <Button aria-busy={command.busy} disabled={command.busy} onClick={install}>
+            {command.busy ? 'Installing…' : needsValues ? `Set up ${card.name}` : `Install ${card.name}`}
           </Button>
-        ) : !open && available ? (
-          <Button onClick={() => setOpen(true)}>Set up {card.name}</Button>
         ) : undefined
       }
       status={
@@ -207,9 +338,13 @@ function ConnectPackage({
           <p role="status" className="text-sm">
             Running MCP packages is not available in this workspace.
           </p>
+        ) : command.state.kind === 'error' ? (
+          <p role="alert" className="text-sm text-destructive">
+            {command.state.message}
+          </p>
         ) : id ? (
           <p role="status" className="text-sm">
-            Review its tools, then select {card.name} in a chat to use it.
+            Installing {card.name}…
           </p>
         ) : undefined
       }
@@ -254,6 +389,7 @@ function ConnectPackage({
           packageProposal={card}
           close={() => setOpen(false)}
           saved={next => {
+            markMcpConnected(next);
             setSavedId(next);
             setOpen(false);
             void read.refresh();

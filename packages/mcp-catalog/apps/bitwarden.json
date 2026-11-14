@@ -1,0 +1,51 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "bitwarden",
+  "name": "Bitwarden",
+  "maker": "Bitwarden",
+  "homepage": "https://bitwarden.com",
+  "category": "security",
+  "teams": ["engineering", "operations"],
+  "summary": "Manage Bitwarden vault items and organisations",
+  "capabilities": [
+    "Find, create, and edit vault items",
+    "Manage organisation members and collections",
+    "Generate passwords"
+  ],
+  "official": {
+    "evidence": "https://github.com/bitwarden/mcp-server",
+    "repository": "https://github.com/bitwarden/mcp-server"
+  },
+  "docs": "https://github.com/bitwarden/mcp-server",
+  "packages": [
+    {
+      "registry": "npm",
+      "name": "@bitwarden/mcp-server",
+      "env": [
+        {
+          "name": "BW_SESSION",
+          "description": "Bitwarden CLI session key",
+          "secret": true,
+          "required": true
+        },
+        {
+          "name": "BW_CLIENT_ID",
+          "description": "Organisation API client ID",
+          "secret": false,
+          "required": false
+        },
+        {
+          "name": "BW_CLIENT_SECRET",
+          "description": "Organisation API client secret",
+          "secret": true,
+          "required": false
+        }
+      ]
+    }
+  ],
+  "icons": {
+    "simpleIcons": "bitwarden",
+    "color": "#175DDC"
+  },
+  "supportedBy": ["lindy", "relevance-ai"]
+}

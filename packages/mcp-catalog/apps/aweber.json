@@ -1,0 +1,25 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "aweber",
+  "name": "AWeber",
+  "maker": "AWeber",
+  "homepage": "https://www.aweber.com",
+  "category": "marketing",
+  "teams": ["marketing"],
+  "summary": "Manage lists, subscribers, and emails in AWeber",
+  "capabilities": ["Manage lists and subscribers", "Create and send broadcasts", "Read account details"],
+  "official": {
+    "evidence": "https://www.aweber.com/ai/aweber-mcp.htm"
+  },
+  "docs": "https://www.aweber.com/ai/aweber-mcp.htm",
+  "remote": {
+    "url": "https://mcp.aweber.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#246BE8"
+  },
+  "supportedBy": ["chatgpt", "manus", "lindy", "relevance-ai"]
+}

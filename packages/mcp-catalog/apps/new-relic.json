@@ -1,0 +1,32 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "new-relic",
+  "name": "New Relic",
+  "maker": "New Relic",
+  "homepage": "https://newrelic.com",
+  "category": "monitoring-and-analytics",
+  "teams": ["engineering"],
+  "summary": "Query New Relic telemetry, alerts, and entities",
+  "capabilities": [
+    "Run NRQL queries",
+    "Find entities and their health",
+    "Check alerts and incidents",
+    "Analyse logs and deployments"
+  ],
+  "official": {
+    "evidence": "https://docs.newrelic.com/docs/agentic-ai/mcp/overview/"
+  },
+  "docs": "https://docs.newrelic.com/docs/agentic-ai/mcp/overview/",
+  "remote": {
+    "url": "https://mcp.newrelic.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "com.newrelic/mcp-server",
+  "icons": {
+    "simpleIcons": "newrelic",
+    "color": "#1CE783"
+  },
+  "supportedBy": ["claude", "lindy", "relevance-ai"]
+}

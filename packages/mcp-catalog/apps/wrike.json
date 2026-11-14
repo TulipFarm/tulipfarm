@@ -1,0 +1,25 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "wrike",
+  "name": "Wrike",
+  "maker": "Wrike",
+  "homepage": "https://www.wrike.com",
+  "category": "projects-and-issues",
+  "teams": ["operations", "marketing"],
+  "summary": "Manage Wrike tasks, projects and folders",
+  "capabilities": ["Search tasks, projects and folders", "Create and update tasks", "Add comments and track time"],
+  "official": {
+    "evidence": "https://developers.wrike.com/docs/connect-wrike-mcp-as-a-custom-connector"
+  },
+  "docs": "https://developers.wrike.com/docs/connect-wrike-mcp-as-a-custom-connector",
+  "remote": {
+    "url": "https://mcp.wrike.com/v2",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#08CF65"
+  },
+  "supportedBy": ["chatgpt", "claude", "manus", "lindy", "relevance-ai", "glean"]
+}

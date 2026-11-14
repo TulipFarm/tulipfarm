@@ -1,0 +1,34 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "heroku",
+  "name": "Heroku",
+  "maker": "Salesforce",
+  "homepage": "https://www.heroku.com",
+  "category": "cloud-and-infrastructure",
+  "teams": ["engineering"],
+  "summary": "Manage Heroku apps, dynos, and add-ons",
+  "capabilities": ["Create, deploy, and scale apps", "Read app logs", "Manage add-ons and Postgres databases"],
+  "official": {
+    "evidence": "https://devcenter.heroku.com/articles/heroku-mcp-server",
+    "repository": "https://github.com/heroku/heroku-mcp-server"
+  },
+  "docs": "https://devcenter.heroku.com/articles/heroku-mcp-server",
+  "packages": [
+    {
+      "registry": "npm",
+      "name": "@heroku/mcp-server",
+      "env": [
+        {
+          "name": "HEROKU_API_KEY",
+          "description": "Heroku API key",
+          "secret": true,
+          "required": true
+        }
+      ]
+    }
+  ],
+  "icons": {
+    "color": "#5A1BA9"
+  },
+  "supportedBy": ["lindy", "relevance-ai", "docker"]
+}

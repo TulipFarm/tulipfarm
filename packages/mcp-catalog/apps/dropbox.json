@@ -1,0 +1,41 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "dropbox",
+  "name": "Dropbox",
+  "maker": "Dropbox",
+  "homepage": "https://www.dropbox.com",
+  "category": "docs-and-files",
+  "teams": ["everyone"],
+  "summary": "Search and read files stored in Dropbox",
+  "capabilities": ["Search files and folders", "Read file contents and metadata", "Browse shared folders"],
+  "official": {
+    "evidence": "https://help.dropbox.com/integrations/connect-dropbox-mcp-server"
+  },
+  "docs": "https://help.dropbox.com/integrations/connect-dropbox-mcp-server",
+  "remote": {
+    "url": "https://mcp.dropbox.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "simpleIcons": "dropbox",
+    "color": "#0061FF"
+  },
+  "supportedBy": [
+    "chatgpt",
+    "claude",
+    "gemini",
+    "microsoft-copilot",
+    "manus",
+    "perplexity",
+    "lindy",
+    "gumloop",
+    "relevance-ai",
+    "dust",
+    "glean",
+    "zapier",
+    "make",
+    "n8n"
+  ]
+}

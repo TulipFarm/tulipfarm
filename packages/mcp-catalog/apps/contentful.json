@@ -1,0 +1,37 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "contentful",
+  "name": "Contentful",
+  "maker": "Contentful",
+  "homepage": "https://www.contentful.com",
+  "category": "docs-and-files",
+  "teams": ["marketing", "engineering"],
+  "summary": "Manage content entries in Contentful",
+  "capabilities": [
+    "Search and read entries and assets",
+    "Create, update, and publish entries",
+    "Inspect and edit content types"
+  ],
+  "official": {
+    "evidence": "https://www.contentful.com/developers/docs/tools/mcp-server/",
+    "repository": "https://github.com/contentful/contentful-mcp-server"
+  },
+  "docs": "https://www.contentful.com/developers/docs/tools/mcp-server/",
+  "remote": {
+    "url": "https://mcp.contentful.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "packages": [
+    {
+      "registry": "npm",
+      "name": "@contentful/mcp-server"
+    }
+  ],
+  "icons": {
+    "simpleIcons": "contentful",
+    "color": "#2478CC"
+  },
+  "supportedBy": ["claude", "lindy", "gumloop", "relevance-ai", "glean"]
+}

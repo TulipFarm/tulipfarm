@@ -233,7 +233,8 @@ export type McpSendCredential =
   | Exclude<McpCredential, McpSecretCredential | McpHostedCredential>
   | { kind: 'headers'; headers: Record<string, string>; cookie?: string };
 export type McpSecretVersion = { secretId: string; version: number; policyVersion: number };
-export type McpSecretUsers = { membershipIds: string[]; teamIds: string[] };
+/** Who can use an integration. `workspace` means every current and future member. */
+export type McpSecretUsers = { membershipIds: string[]; teamIds: string[]; workspace?: boolean };
 /**
  * Saved secrets an integration authenticates with. `bind` reads policy only and may run in the API; `resolve` and
  * `recordUse` decrypt or record sends and are given only in the worker.
@@ -436,6 +437,7 @@ export const integrationRowSchema = z.object({
   package: mcpPackageSchema.nullable().default(null),
   egress: z.array(z.string()).nullable().default(null),
   transport: mcpTransportSchema.nullable().default(null),
+  shared_with_workspace: z.boolean().default(false),
 });
 export const integrationMetadataSchema = z.object({
   id: z.uuid(),

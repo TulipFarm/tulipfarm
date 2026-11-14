@@ -1,0 +1,53 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "terraform",
+  "name": "Terraform",
+  "maker": "HashiCorp",
+  "homepage": "https://www.terraform.io",
+  "category": "cloud-and-infrastructure",
+  "teams": ["engineering"],
+  "summary": "Look up Terraform providers and manage workspaces",
+  "capabilities": [
+    "Search providers, modules, and policies in the registry",
+    "Read provider resource docs",
+    "Manage HCP Terraform workspaces and runs"
+  ],
+  "official": {
+    "evidence": "https://developer.hashicorp.com/terraform/mcp-server",
+    "repository": "https://github.com/hashicorp/terraform-mcp-server"
+  },
+  "docs": "https://developer.hashicorp.com/terraform/mcp-server",
+  "remote": {
+    "url": "https://mcp.terraform.io/mcp",
+    "transport": "streamable-http",
+    "auth": "api-key",
+    "headers": [
+      {
+        "name": "Authorization",
+        "value": "Bearer {key}",
+        "description": "HCP Terraform API token"
+      }
+    ],
+    "checked": "2026-11-14"
+  },
+  "packages": [
+    {
+      "registry": "oci",
+      "name": "docker.io/hashicorp/terraform-mcp-server",
+      "env": [
+        {
+          "name": "TFE_TOKEN",
+          "description": "HCP Terraform API token",
+          "secret": true,
+          "required": false
+        }
+      ]
+    }
+  ],
+  "registryName": "io.github.hashicorp/terraform-mcp-server",
+  "icons": {
+    "simpleIcons": "terraform",
+    "color": "#844FBA"
+  },
+  "supportedBy": ["lindy", "relevance-ai", "docker", "github-registry"]
+}

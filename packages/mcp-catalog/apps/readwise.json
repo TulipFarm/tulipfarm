@@ -1,0 +1,29 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "readwise",
+  "name": "Readwise",
+  "maker": "Readwise",
+  "homepage": "https://readwise.io",
+  "category": "docs-and-files",
+  "teams": ["everyone"],
+  "summary": "Search your highlights and saved articles",
+  "capabilities": [
+    "Search highlights from books and articles",
+    "Find documents in Reader",
+    "Save and tag new documents"
+  ],
+  "official": {
+    "evidence": "https://docs.readwise.io/tools/mcp"
+  },
+  "docs": "https://docs.readwise.io/tools/mcp",
+  "remote": {
+    "url": "https://mcp2.readwise.io/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#000000"
+  },
+  "supportedBy": ["chatgpt", "claude", "manus", "lindy", "relevance-ai"]
+}

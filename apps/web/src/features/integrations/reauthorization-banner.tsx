@@ -11,6 +11,7 @@ import { useMcpApi, useMcpCapabilities, useMcpIntegrations } from '@/features/wo
 import { useAtlassianAccounts, useGitHubAccounts, useGoogleIntegration, useSlackIntegration } from './queries';
 import { slackInstallUrl } from './slack';
 import { useFeatureContext } from '@/lib/query/provider';
+import { mcpPagePrefix } from './mcp-apps';
 import { authorizationAttention, type AuthorizationSources } from './authorization-attention';
 import type { ReadState } from '@/features/tables/request-state';
 
@@ -95,9 +96,8 @@ export function ReauthorizationBanner({ workspaceId, slug }: { workspaceId: stri
         if (active()) window.location.assign(consentUrl(result.url));
       } else
         await navigate({
-          to: '/$workspaceSlug/integrations',
-          params: { workspaceSlug: slug },
-          hash: `reauthorize-mcp-${target.accountId}`,
+          to: '/$workspaceSlug/integrations/$integrationId',
+          params: { workspaceSlug: slug, integrationId: `${mcpPagePrefix}${target.accountId}` },
         });
     } catch {
       setFailed(true);

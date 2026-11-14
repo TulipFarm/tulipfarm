@@ -1,0 +1,24 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "tipalti",
+  "name": "Tipalti",
+  "maker": "Tipalti",
+  "homepage": "https://tipalti.com",
+  "category": "finance-and-accounting",
+  "teams": ["finance"],
+  "summary": "Review payables, payees, and payments",
+  "capabilities": ["Look up bills and approval status", "Find payees and payment history", "Review payment batches"],
+  "official": {
+    "evidence": "https://tipalti.com/en-eu/product/mcp/"
+  },
+  "docs": "https://tipalti.com/en-eu/product/mcp/",
+  "remote": {
+    "url": "https://mcp.tipalti.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#2D2A6E"
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "instacart",
+  "name": "Instacart",
+  "maker": "Instacart",
+  "homepage": "https://www.instacart.com",
+  "category": "payments-and-commerce",
+  "teams": ["everyone"],
+  "summary": "Turn recipes and lists into Instacart carts",
+  "capabilities": ["Create a shoppable recipe page", "Create a shopping list link"],
+  "official": {
+    "evidence": "https://docs.instacart.com/developer_platform_api/guide/tutorials/mcp/"
+  },
+  "docs": "https://docs.instacart.com/developer_platform_api/guide/tutorials/mcp/",
+  "remote": {
+    "url": "https://mcp.instacart.com/mcp",
+    "transport": "streamable-http",
+    "auth": "api-key",
+    "headers": [
+      {
+        "name": "Authorization",
+        "value": "Bearer {key}",
+        "description": "Instacart Developer Platform API key"
+      }
+    ],
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "simpleIcons": "instacart",
+    "color": "#43B02A"
+  },
+  "supportedBy": ["chatgpt", "claude", "gemini", "manus", "gumloop"]
+}

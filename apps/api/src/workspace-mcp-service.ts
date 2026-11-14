@@ -177,7 +177,10 @@ export function createWorkspaceMcpApi(options: Options) {
         .filter(tool => tool.present)
         .map(tool => ({
           name: tool.name,
+          title: typeof tool.tool.annotations?.title === 'string' ? tool.tool.annotations.title : null,
           description: tool.tool.description,
+          readOnly: tool.tool.annotations?.readOnlyHint === true && tool.tool.annotations.destructiveHint !== true,
+          destructive: tool.tool.annotations?.readOnlyHint !== true && tool.tool.annotations?.destructiveHint === true,
           revision: tool.discovered_revision,
           previousRevision: null,
           inputSchema: tool.tool.inputSchema,
@@ -196,6 +199,7 @@ export function createWorkspaceMcpApi(options: Options) {
       grants: grants
         ? [...grants.memberIds.map(id => ({ kind: 'member', id })), ...grants.teamIds.map(id => ({ kind: 'team', id }))]
         : [],
+      workspace: grants?.workspace ?? false,
       managers: grants
         ? [
             ...grants.managers.memberIds.map(id => ({ kind: 'member', id })),
@@ -327,6 +331,7 @@ export function createWorkspaceMcpApi(options: Options) {
           requestId: input.requestId,
           name: input.name,
           ownership: input.ownership,
+          ...(input.shareWithWorkspace ? { workspace: true } : {}),
           ...(endpoint === undefined ? {} : { endpoint }),
           credential,
           ...hosted,
@@ -381,6 +386,7 @@ export function createWorkspaceMcpApi(options: Options) {
         expectedVersion: input.expectedVersion,
         memberIds: input.grants.filter(grant => grant.kind === 'member').map(grant => grant.id),
         teamIds: input.grants.filter(grant => grant.kind === 'team').map(grant => grant.id),
+        workspace: input.workspace ?? false,
         ...(input.managers
           ? {
               managers: {

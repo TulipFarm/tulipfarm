@@ -1,0 +1,40 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "attio",
+  "name": "Attio",
+  "maker": "Attio",
+  "homepage": "https://attio.com",
+  "category": "crm-and-sales",
+  "teams": ["sales", "operations"],
+  "summary": "Search and update records and lists in Attio",
+  "capabilities": [
+    "Search people, companies, and deals",
+    "Create and update records and list entries",
+    "Add notes and tasks to records"
+  ],
+  "official": {
+    "evidence": "https://docs.attio.com/mcp/overview"
+  },
+  "docs": "https://docs.attio.com/mcp/overview",
+  "remote": {
+    "url": "https://mcp.attio.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#1C1D1F"
+  },
+  "supportedBy": [
+    "chatgpt",
+    "claude",
+    "notion-ai",
+    "manus",
+    "lindy",
+    "gumloop",
+    "relevance-ai",
+    "dust",
+    "glean",
+    "zapier"
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "trello",
+  "name": "Trello",
+  "maker": "Atlassian",
+  "homepage": "https://trello.com",
+  "category": "projects-and-issues",
+  "teams": ["everyone"],
+  "summary": "Manage Trello boards, lists and cards",
+  "capabilities": ["Search boards, lists and cards", "Create, move and update cards", "Add comments and checklists"],
+  "official": {
+    "evidence": "https://trello.com/mcp"
+  },
+  "docs": "https://support.atlassian.com/trello/docs/connect-trello-to-ai-assistants-with-trello-mcp/",
+  "remote": {
+    "url": "https://mcp.trello.com/v1",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "simpleIcons": "trello",
+    "color": "#0052CC"
+  },
+  "supportedBy": [
+    "chatgpt",
+    "claude",
+    "microsoft-copilot",
+    "manus",
+    "lindy",
+    "gumloop",
+    "relevance-ai",
+    "glean",
+    "zapier",
+    "make",
+    "n8n"
+  ]
+}

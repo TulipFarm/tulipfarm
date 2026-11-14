@@ -1,0 +1,29 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "omnisend",
+  "name": "Omnisend",
+  "maker": "Omnisend",
+  "homepage": "https://www.omnisend.com",
+  "category": "marketing",
+  "teams": ["marketing"],
+  "summary": "Manage contacts and campaigns in Omnisend",
+  "capabilities": [
+    "Look up and update contacts",
+    "Review campaign and automation performance",
+    "Work with products and events"
+  ],
+  "official": {
+    "evidence": "https://support.omnisend.com/en/articles/15096086-connect-omnisend-mcp-to-ai-tools"
+  },
+  "docs": "https://support.omnisend.com/en/articles/15096086-connect-omnisend-mcp-to-ai-tools",
+  "remote": {
+    "url": "https://mcp.omnisend.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#1E1E1E"
+  },
+  "supportedBy": ["chatgpt", "claude", "lindy", "relevance-ai"]
+}

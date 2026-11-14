@@ -1,0 +1,36 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "keboola",
+  "name": "Keboola",
+  "maker": "Keboola",
+  "homepage": "https://www.keboola.com",
+  "category": "data-and-databases",
+  "teams": ["engineering", "operations"],
+  "summary": "Build and run Keboola data pipelines",
+  "capabilities": [
+    "Explore buckets, tables, and components",
+    "Run SQL transformations",
+    "Create and run flows and jobs"
+  ],
+  "official": {
+    "evidence": "https://help.keboola.com/ai/mcp-server/",
+    "repository": "https://github.com/keboola/mcp-server"
+  },
+  "docs": "https://help.keboola.com/ai/mcp-server/",
+  "remote": {
+    "url": "https://mcp.keboola.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "packages": [
+    {
+      "registry": "pypi",
+      "name": "keboola-mcp-server"
+    }
+  ],
+  "icons": {
+    "color": "#1F8FFF"
+  },
+  "supportedBy": ["lindy", "relevance-ai", "docker"]
+}

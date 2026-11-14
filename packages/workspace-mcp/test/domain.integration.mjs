@@ -65,6 +65,52 @@ test('fresh and populated migrations, restricted SQL, owner privacy and explicit
   }
 });
 
+test('sharing with the whole workspace covers people who join later and ends with their membership', async () => {
+  const f = await mcpFixture();
+  try {
+    await assert.rejects(
+      f.service.create(f.one.id, f.members[0], {
+        name: 'Mine',
+        endpoint: 'https://mcp.example.com/tools',
+        ownership: 'personal',
+        workspace: true,
+        credential: { kind: 'bearer', token: 'synthetic-private-mcp-secret' },
+      }),
+    );
+    const integration = await f.service.create(f.one.id, f.admin, {
+      name: 'Team MCP',
+      endpoint: 'https://mcp.example.com/tools',
+      ownership: 'shared',
+      workspace: true,
+      credential: { kind: 'bearer', token: 'synthetic-private-mcp-secret' },
+    });
+    await f.service.discover(f.one.id, f.admin, integration.id);
+    const joined = { kind: 'human', userId: randomUUID(), membershipId: randomUUID() };
+    await f.db.platform.query(`INSERT INTO ${f.table('tf_memberships')} (id,user_id,role) VALUES ($1,$2,'member')`, [
+      joined.membershipId,
+      joined.userId,
+    ]);
+    const status = await f.service.status(f.one.id, joined, integration.id);
+    assert.equal(status.capabilities.use, true);
+    assert.equal(status.capabilities.manage, false);
+    await f.select(integration, joined);
+    assert.equal((await f.service.grants(f.one.id, f.admin, integration.id)).workspace, true);
+    await f.db.platform.query(`UPDATE ${f.table('tf_memberships')} SET removed_at=clock_timestamp() WHERE id=$1`, [
+      joined.membershipId,
+    ]);
+    await assert.rejects(f.service.status(f.one.id, joined, integration.id), /Resource not found/);
+    const { grantsVersion } = await f.service.status(f.one.id, f.admin, integration.id);
+    await f.service.setGrants(f.one.id, f.admin, integration.id, {
+      expectedVersion: grantsVersion,
+      memberIds: [],
+      teamIds: [],
+      workspace: false,
+    });
+    await assert.rejects(f.service.status(f.one.id, f.members[1], integration.id), /Resource not found/);
+  } finally {
+    await f.close();
+  }
+});
 test('private input requires exact confirmation despite standing policy, dispatch once and retain protected receipt', async () => {
   const f = await mcpFixture();
   try {

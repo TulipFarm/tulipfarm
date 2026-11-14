@@ -1,0 +1,25 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "pylon",
+  "name": "Pylon",
+  "maker": "Pylon",
+  "homepage": "https://www.usepylon.com",
+  "category": "support",
+  "teams": ["support"],
+  "summary": "Manage issues and accounts in Pylon",
+  "capabilities": ["Search and update issues", "Look up accounts and contacts", "Search knowledge base articles"],
+  "official": {
+    "evidence": "https://www.usepylon.com/integrations/mcp"
+  },
+  "docs": "https://www.usepylon.com/integrations/mcp",
+  "remote": {
+    "url": "https://mcp.usepylon.com",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#5B4CF0"
+  },
+  "supportedBy": ["chatgpt", "claude", "manus", "gumloop", "glean"]
+}

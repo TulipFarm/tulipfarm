@@ -1,0 +1,45 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "webflow",
+  "name": "Webflow",
+  "maker": "Webflow",
+  "homepage": "https://webflow.com",
+  "category": "design",
+  "teams": ["marketing", "design"],
+  "summary": "Manage Webflow sites, pages and CMS content",
+  "capabilities": ["Read and update CMS collections and items", "Edit pages and Designer elements", "Publish sites"],
+  "official": {
+    "evidence": "https://developers.webflow.com/mcp/reference/overview",
+    "repository": "https://github.com/webflow/mcp-server"
+  },
+  "docs": "https://developers.webflow.com/mcp/reference/overview",
+  "remote": {
+    "url": "https://mcp.webflow.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "com.webflow/mcp",
+  "icons": {
+    "simpleIcons": "webflow",
+    "color": "#146EF5"
+  },
+  "supportedBy": [
+    "chatgpt",
+    "claude",
+    "gemini",
+    "microsoft-copilot",
+    "copilot-studio",
+    "manus",
+    "lindy",
+    "gumloop",
+    "relevance-ai",
+    "glean",
+    "zapier",
+    "make",
+    "n8n",
+    "docker",
+    "github-registry"
+  ],
+  "featured": true
+}

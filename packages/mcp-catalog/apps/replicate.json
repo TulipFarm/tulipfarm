@@ -1,0 +1,45 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "replicate",
+  "name": "Replicate",
+  "maker": "Replicate",
+  "homepage": "https://replicate.com",
+  "category": "ai-and-media",
+  "teams": ["engineering"],
+  "summary": "Run and manage AI models on Replicate",
+  "capabilities": [
+    "Search models and read their inputs",
+    "Run predictions and read outputs",
+    "Manage deployments and trainings"
+  ],
+  "official": {
+    "evidence": "https://replicate.com/docs/reference/mcp"
+  },
+  "docs": "https://replicate.com/docs/reference/mcp",
+  "remote": {
+    "url": "https://mcp.replicate.com/sse",
+    "transport": "sse",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "packages": [
+    {
+      "registry": "npm",
+      "name": "replicate-mcp",
+      "env": [
+        {
+          "name": "REPLICATE_API_TOKEN",
+          "description": "Replicate API token",
+          "secret": true,
+          "required": true
+        }
+      ]
+    }
+  ],
+  "icons": {
+    "lobehub": "Replicate",
+    "simpleIcons": "replicate",
+    "color": "#000000"
+  },
+  "supportedBy": ["manus", "lindy"]
+}

@@ -1,0 +1,39 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "smartsheet",
+  "name": "Smartsheet",
+  "maker": "Smartsheet",
+  "homepage": "https://www.smartsheet.com",
+  "category": "projects-and-issues",
+  "teams": ["operations", "everyone"],
+  "summary": "Read and update Smartsheet sheets and reports",
+  "capabilities": [
+    "Search sheets, reports and workspaces",
+    "Read and update rows and cells",
+    "Add discussions and comments"
+  ],
+  "official": {
+    "evidence": "https://developers.smartsheet.com/ai-mcp/smartsheet/install-the-smartsheet-mcp-server"
+  },
+  "docs": "https://developers.smartsheet.com/ai-mcp/smartsheet/install-the-smartsheet-mcp-server",
+  "remote": {
+    "url": "https://mcp.smartsheet.com",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#0073EC"
+  },
+  "supportedBy": [
+    "chatgpt",
+    "claude",
+    "microsoft-copilot",
+    "copilot-studio",
+    "manus",
+    "lindy",
+    "relevance-ai",
+    "glean",
+    "zapier"
+  ]
+}

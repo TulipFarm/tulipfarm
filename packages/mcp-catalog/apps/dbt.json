@@ -1,0 +1,37 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "dbt",
+  "name": "dbt",
+  "maker": "dbt Labs",
+  "homepage": "https://www.getdbt.com",
+  "category": "data-and-databases",
+  "teams": ["engineering", "operations"],
+  "summary": "Query dbt models, metrics, and lineage",
+  "capabilities": [
+    "Explore models, sources, and lineage",
+    "Query Semantic Layer metrics",
+    "Run dbt commands such as build and test",
+    "Run SQL against your warehouse"
+  ],
+  "official": {
+    "evidence": "https://docs.getdbt.com/docs/dbt-ai/about-mcp",
+    "repository": "https://github.com/dbt-labs/dbt-mcp"
+  },
+  "docs": "https://docs.getdbt.com/docs/dbt-ai/setup-remote-mcp",
+  "remote": {
+    "url": "https://cloud.getdbt.com/api/ai/v1/mcp/",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "packages": [
+    {
+      "registry": "pypi",
+      "name": "dbt-mcp"
+    }
+  ],
+  "icons": {
+    "color": "#FF694B"
+  },
+  "supportedBy": ["claude", "lindy", "relevance-ai"]
+}

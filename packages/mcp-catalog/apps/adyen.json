@@ -1,0 +1,39 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "adyen",
+  "name": "Adyen",
+  "maker": "Adyen",
+  "homepage": "https://www.adyen.com",
+  "category": "payments-and-commerce",
+  "teams": ["engineering", "finance"],
+  "summary": "Create payment links and manage payments",
+  "capabilities": [
+    "Create payment sessions and payment links",
+    "Cancel or refund payments",
+    "Manage terminals, webhooks, and merchant accounts"
+  ],
+  "official": {
+    "evidence": "https://docs.adyen.com/development-resources/mcp-server",
+    "repository": "https://github.com/Adyen/adyen-mcp"
+  },
+  "docs": "https://docs.adyen.com/development-resources/mcp-server",
+  "packages": [
+    {
+      "registry": "npm",
+      "name": "@adyen/mcp",
+      "env": [
+        {
+          "name": "ADYEN_API_KEY",
+          "description": "Adyen API key; pass --env=TEST or --env=LIVE",
+          "secret": true,
+          "required": true
+        }
+      ]
+    }
+  ],
+  "icons": {
+    "simpleIcons": "adyen",
+    "color": "#0ABF53"
+  },
+  "supportedBy": ["lindy", "relevance-ai"]
+}

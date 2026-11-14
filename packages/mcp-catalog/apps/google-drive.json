@@ -1,0 +1,43 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "google-drive",
+  "name": "Google Drive",
+  "maker": "Google",
+  "homepage": "https://workspace.google.com",
+  "category": "docs-and-files",
+  "teams": ["everyone"],
+  "summary": "Search and read files in Google Drive",
+  "capabilities": ["Search files and folders", "Read file contents and metadata", "Create and organise files"],
+  "official": {
+    "evidence": "https://developers.google.com/workspace/guides/configure-mcp-servers"
+  },
+  "docs": "https://developers.google.com/workspace/guides/configure-mcp-servers",
+  "remote": {
+    "url": "https://drivemcp.googleapis.com/mcp/v1",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "lobehub": "Google",
+    "simpleIcons": "googledrive",
+    "color": "#4285F4"
+  },
+  "supportedBy": [
+    "chatgpt",
+    "claude",
+    "gemini",
+    "microsoft-copilot",
+    "notion-ai",
+    "perplexity",
+    "lindy",
+    "gumloop",
+    "relevance-ai",
+    "dust",
+    "glean",
+    "zapier",
+    "make",
+    "n8n"
+  ],
+  "featured": true
+}

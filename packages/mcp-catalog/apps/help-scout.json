@@ -1,0 +1,30 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "help-scout",
+  "name": "Help Scout",
+  "maker": "Help Scout",
+  "homepage": "https://www.helpscout.com",
+  "category": "support",
+  "teams": ["support"],
+  "summary": "Search conversations and pull reports in Help Scout",
+  "capabilities": [
+    "Search customer conversations",
+    "Read conversation threads and customers",
+    "Pull mailbox and team reports"
+  ],
+  "official": {
+    "evidence": "https://docs.helpscout.com/article/1779-connect-your-ai-agent-with-help-scout-to-search-conversations-and-pull-reports"
+  },
+  "docs": "https://docs.helpscout.com/article/1779-connect-your-ai-agent-with-help-scout-to-search-conversations-and-pull-reports",
+  "remote": {
+    "url": "https://mcp.helpscout.net/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "simpleIcons": "helpscout",
+    "color": "#1292EE"
+  },
+  "supportedBy": ["lindy", "relevance-ai"]
+}

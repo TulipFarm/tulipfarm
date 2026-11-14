@@ -1,0 +1,27 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "google-sheets",
+  "name": "Google Sheets",
+  "maker": "Google",
+  "homepage": "https://workspace.google.com",
+  "category": "docs-and-files",
+  "teams": ["everyone", "finance"],
+  "summary": "Read and update Google Sheets spreadsheets",
+  "capabilities": ["Read sheet ranges and values", "Create spreadsheets", "Write and append rows"],
+  "official": {
+    "evidence": "https://developers.google.com/workspace/guides/configure-mcp-servers"
+  },
+  "docs": "https://developers.google.com/workspace/guides/configure-mcp-servers",
+  "remote": {
+    "url": "https://sheetsmcp.googleapis.com/mcp/v1",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "lobehub": "Google",
+    "simpleIcons": "googlesheets",
+    "color": "#34A853"
+  },
+  "supportedBy": ["gemini", "lindy", "gumloop", "relevance-ai", "dust", "zapier", "make", "n8n"]
+}

@@ -1,0 +1,31 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "servicenow",
+  "name": "ServiceNow",
+  "maker": "ServiceNow",
+  "homepage": "https://www.servicenow.com",
+  "category": "support",
+  "teams": ["support", "operations"],
+  "summary": "Work with incidents and records in ServiceNow",
+  "capabilities": ["Search incidents, requests, and records", "Create and update tickets", "Search knowledge articles"],
+  "official": {
+    "evidence": "https://www.servicenow.com/docs/r/intelligent-experiences/configure-client-connect-server.html"
+  },
+  "docs": "https://www.servicenow.com/docs/r/intelligent-experiences/configure-client-connect-server.html",
+  "remote": {
+    "url": "https://{instance}.service-now.com/sncapps/mcp-server/mcp/sn_mcp_server_default",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "variables": [
+      {
+        "name": "instance",
+        "description": "Your ServiceNow instance name",
+        "example": "acme"
+      }
+    ]
+  },
+  "icons": {
+    "color": "#62D84E"
+  },
+  "supportedBy": ["claude", "microsoft-copilot", "relevance-ai", "dust", "glean", "n8n"]
+}

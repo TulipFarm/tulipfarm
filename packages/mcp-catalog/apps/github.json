@@ -1,0 +1,67 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "github",
+  "name": "GitHub",
+  "maker": "GitHub",
+  "homepage": "https://github.com",
+  "category": "code",
+  "teams": ["engineering", "product"],
+  "summary": "Work with repositories, issues, and pull requests",
+  "capabilities": [
+    "Search code and read files across repositories",
+    "Create and review pull requests",
+    "Open, update, and comment on issues",
+    "Check GitHub Actions workflow runs"
+  ],
+  "official": {
+    "evidence": "https://github.com/github/github-mcp-server",
+    "repository": "https://github.com/github/github-mcp-server"
+  },
+  "docs": "https://github.com/github/github-mcp-server",
+  "remote": {
+    "url": "https://api.githubcopilot.com/mcp/",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "packages": [
+    {
+      "registry": "oci",
+      "name": "ghcr.io/github/github-mcp-server",
+      "env": [
+        {
+          "name": "GITHUB_PERSONAL_ACCESS_TOKEN",
+          "description": "GitHub personal access token",
+          "secret": true,
+          "required": true
+        }
+      ]
+    }
+  ],
+  "registryName": "io.github.github/github-mcp-server",
+  "icons": {
+    "lobehub": "Github",
+    "simpleIcons": "github",
+    "color": "#181717"
+  },
+  "supportedBy": [
+    "chatgpt",
+    "gemini",
+    "microsoft-copilot",
+    "copilot-studio",
+    "notion-ai",
+    "manus",
+    "perplexity",
+    "lindy",
+    "gumloop",
+    "relevance-ai",
+    "dust",
+    "glean",
+    "zapier",
+    "make",
+    "n8n",
+    "docker",
+    "github-registry"
+  ],
+  "featured": true
+}

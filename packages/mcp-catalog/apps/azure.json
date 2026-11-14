@@ -1,0 +1,33 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "azure",
+  "name": "Azure",
+  "maker": "Microsoft",
+  "homepage": "https://azure.microsoft.com",
+  "category": "cloud-and-infrastructure",
+  "teams": ["engineering"],
+  "summary": "Manage Azure resources and services",
+  "capabilities": [
+    "List and inspect Azure resources",
+    "Query storage, Cosmos DB, and monitor logs",
+    "Manage AKS, Key Vault, and App Service"
+  ],
+  "official": {
+    "evidence": "https://learn.microsoft.com/en-us/azure/developer/azure-mcp-server/",
+    "repository": "https://github.com/microsoft/mcp"
+  },
+  "docs": "https://learn.microsoft.com/en-us/azure/developer/azure-mcp-server/",
+  "packages": [
+    {
+      "registry": "npm",
+      "name": "@azure/mcp",
+      "env": []
+    }
+  ],
+  "registryName": "com.microsoft/azure",
+  "icons": {
+    "lobehub": "Azure",
+    "color": "#0078D4"
+  },
+  "supportedBy": ["claude", "gumloop", "glean", "docker", "github-registry"]
+}

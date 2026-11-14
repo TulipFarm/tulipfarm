@@ -1,0 +1,29 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "common-room",
+  "name": "Common Room",
+  "maker": "Common Room",
+  "homepage": "https://www.commonroom.io",
+  "category": "crm-and-sales",
+  "teams": ["sales", "marketing"],
+  "summary": "Research accounts and signals in Common Room",
+  "capabilities": [
+    "Search contacts, organizations, and segments",
+    "Review product, community, and intent signals",
+    "Create and update records"
+  ],
+  "official": {
+    "evidence": "https://www.commonroom.io/docs/using-common-room/mcp-server/"
+  },
+  "docs": "https://www.commonroom.io/docs/using-common-room/mcp-server/",
+  "remote": {
+    "url": "https://mcp.commonroom.io/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#0E1A2B"
+  },
+  "supportedBy": ["chatgpt", "claude", "manus", "gumloop", "glean"]
+}

@@ -1,0 +1,29 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "s-p-global",
+  "name": "S&P Global",
+  "maker": "S&P Global",
+  "homepage": "https://www.spglobal.com",
+  "category": "search-and-research",
+  "teams": ["finance"],
+  "summary": "Get S&P Global company financials and market data",
+  "capabilities": [
+    "Get company financials and key metrics",
+    "Look up earnings call transcripts",
+    "Find mergers, acquisitions, and capital structure"
+  ],
+  "official": {
+    "evidence": "https://docs.kensho.com/llmreadyapi/overview"
+  },
+  "docs": "https://docs.kensho.com/llmreadyapi/overview",
+  "remote": {
+    "url": "https://kfinance.kensho.com/integrations/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#D6002A"
+  },
+  "supportedBy": ["chatgpt", "microsoft-copilot", "manus", "gumloop", "glean"]
+}

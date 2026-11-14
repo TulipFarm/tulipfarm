@@ -1,0 +1,42 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "google-calendar",
+  "name": "Google Calendar",
+  "maker": "Google",
+  "homepage": "https://workspace.google.com",
+  "category": "email-and-calendar",
+  "teams": ["everyone"],
+  "summary": "View and manage Google Calendar events",
+  "capabilities": ["List calendars and events", "Create and update events", "Check free and busy times"],
+  "official": {
+    "evidence": "https://developers.google.com/workspace/guides/configure-mcp-servers"
+  },
+  "docs": "https://developers.google.com/workspace/guides/configure-mcp-servers",
+  "remote": {
+    "url": "https://calendarmcp.googleapis.com/mcp/v1",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "lobehub": "Google",
+    "simpleIcons": "googlecalendar",
+    "color": "#4285F4"
+  },
+  "supportedBy": [
+    "chatgpt",
+    "claude",
+    "gemini",
+    "microsoft-copilot",
+    "notion-ai",
+    "manus",
+    "perplexity",
+    "lindy",
+    "gumloop",
+    "dust",
+    "glean",
+    "zapier",
+    "make",
+    "n8n"
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "deel",
+  "name": "Deel",
+  "maker": "Deel",
+  "homepage": "https://www.deel.com",
+  "category": "hr-and-recruiting",
+  "teams": ["hr", "finance"],
+  "summary": "Manage global contracts, people, and payroll",
+  "capabilities": [
+    "Look up contracts and workers",
+    "Review payroll, invoices, and time off",
+    "Create and update contracts"
+  ],
+  "official": {
+    "evidence": "https://developer.deel.com/mcp/authorization"
+  },
+  "docs": "https://developer.deel.com/mcp/authorization",
+  "remote": {
+    "url": "https://api.letsdeel.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#15357A"
+  },
+  "supportedBy": ["chatgpt", "claude", "manus", "lindy", "glean"]
+}

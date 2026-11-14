@@ -1,0 +1,27 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "google-docs",
+  "name": "Google Docs",
+  "maker": "Google",
+  "homepage": "https://workspace.google.com",
+  "category": "docs-and-files",
+  "teams": ["everyone"],
+  "summary": "Read and edit Google Docs documents",
+  "capabilities": ["Read document content", "Create documents", "Insert and update text"],
+  "official": {
+    "evidence": "https://developers.google.com/workspace/guides/configure-mcp-servers"
+  },
+  "docs": "https://developers.google.com/workspace/guides/configure-mcp-servers",
+  "remote": {
+    "url": "https://docsmcp.googleapis.com/mcp/v1",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "lobehub": "Google",
+    "simpleIcons": "googledocs",
+    "color": "#4285F4"
+  },
+  "supportedBy": ["gemini", "lindy", "gumloop", "relevance-ai", "zapier", "make", "n8n"]
+}

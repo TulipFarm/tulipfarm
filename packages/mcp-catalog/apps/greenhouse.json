@@ -1,0 +1,31 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "greenhouse",
+  "name": "Greenhouse",
+  "maker": "Greenhouse",
+  "homepage": "https://www.greenhouse.com",
+  "category": "hr-and-recruiting",
+  "teams": ["hr"],
+  "summary": "Search candidates, jobs, and interviews",
+  "capabilities": [
+    "Find candidates and applications",
+    "Review jobs, stages, and scorecards",
+    "Look up interviews and offers"
+  ],
+  "official": {
+    "evidence": "https://support.greenhouse.io/hc/en-us/articles/52090956642075-Greenhouse-MCP"
+  },
+  "docs": "https://support.greenhouse.io/hc/en-us/articles/52090956642075-Greenhouse-MCP",
+  "remote": {
+    "url": "https://mcp.greenhouse.io/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "simpleIcons": "greenhouse",
+    "color": "#24A47F"
+  },
+  "supportedBy": ["chatgpt", "claude", "copilot-studio", "lindy", "gumloop", "relevance-ai", "glean"],
+  "featured": true
+}

@@ -1,0 +1,31 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "razorpay",
+  "name": "Razorpay",
+  "maker": "Razorpay",
+  "homepage": "https://razorpay.com",
+  "category": "payments-and-commerce",
+  "teams": ["finance", "engineering"],
+  "summary": "Manage payments, orders, and payouts",
+  "capabilities": [
+    "Look up payments, orders, and settlements",
+    "Create payment links and QR codes",
+    "Issue refunds and track payouts"
+  ],
+  "official": {
+    "evidence": "https://razorpay.com/docs/mcp-server/remote",
+    "repository": "https://github.com/razorpay/razorpay-mcp-server"
+  },
+  "docs": "https://razorpay.com/docs/mcp-server/remote",
+  "remote": {
+    "url": "https://mcp.razorpay.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "simpleIcons": "razorpay",
+    "color": "#0C2451"
+  },
+  "supportedBy": ["chatgpt", "claude", "manus", "lindy", "gumloop", "relevance-ai", "docker"]
+}

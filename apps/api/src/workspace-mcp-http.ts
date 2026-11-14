@@ -1,5 +1,5 @@
 import { fromNodeHeaders } from 'better-auth/node';
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { AccessDenied } from '@tulipfarm/access';
 import { authConfig, type registerAuth } from './auth.ts';
@@ -37,6 +37,14 @@ export const mcpCallbackSchema = z.union([
   }),
 ]);
 
+export type McpCallbackOutcome =
+  | { outcome: 'connected'; workspaceId: string; integrationId: string }
+  | { outcome: 'sign-in-required' | 'denied' | 'expired' | 'failed' };
+export function mcpCallbackRedirect(reply: FastifyReply, result: McpCallbackOutcome) {
+  const url = new URL('/mcp/callback', authConfig().webOrigin);
+  for (const [key, value] of Object.entries(result)) url.searchParams.set(key, value);
+  return reply.redirect(url.href, 303);
+}
 export function workspaceMcpHttp(
   routes: FastifyInstance,
   auth: McpHttpAuth,
@@ -49,16 +57,36 @@ export function workspaceMcpHttp(
   });
   validation.install(routes, true);
   const sessions = new WeakMap<FastifyRequest, { userId: string; sessionId: string }>();
+  // The provider sends the browser here, so the callback answers with a page in the web app, never JSON.
+  const isCallback = (request: FastifyRequest) =>
+    request.routeOptions.schema?.operationId === 'completeWorkspaceMcpOAuthV1';
   routes.addHook('onRequest', async (request, reply) => {
     reply.header('Cache-Control', 'no-store');
     reply.header('Referrer-Policy', 'no-referrer');
     if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method) && request.headers.origin !== authConfig().webOrigin)
       return reply.code(403).send({ error: 'untrusted-origin' });
     const session = await auth.api.getSession({ headers: fromNodeHeaders(request.headers) });
-    if (!session) return reply.code(401).send({ error: 'sign-in-required' });
+    if (!session)
+      return isCallback(request)
+        ? mcpCallbackRedirect(reply, { outcome: 'sign-in-required' })
+        : reply.code(401).send({ error: 'sign-in-required' });
     sessions.set(request, { userId: session.user.id, sessionId: session.session.id });
   });
   routes.setErrorHandler((error, request, reply) => {
+    if (isCallback(request)) {
+      const code = error instanceof McpHttpError ? error.code : classify(error)?.code;
+      return mcpCallbackRedirect(reply, {
+        outcome:
+          code === 'mcp-authorization-denied'
+            ? 'denied'
+            : code === 'mcp-expired' ||
+                code === 'mcp-not-found' ||
+                code === 'invalid-request' ||
+                error instanceof AccessDenied
+              ? 'expired'
+              : 'failed',
+      });
+    }
     if (requestBoundaryError(error, reply)) return;
     if (error instanceof AccessDenied) return reply.code(404).send({ error: 'mcp-not-found' });
     if (error instanceof z.ZodError)

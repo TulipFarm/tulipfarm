@@ -1,0 +1,25 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "mem",
+  "name": "Mem",
+  "maker": "Mem",
+  "homepage": "https://mem.ai",
+  "category": "docs-and-files",
+  "teams": ["everyone"],
+  "summary": "Search, read, and write notes in Mem",
+  "capabilities": ["Search your notes and collections", "Create and update notes", "Save chat answers as notes"],
+  "official": {
+    "evidence": "https://docs.mem.ai/mcp/setup"
+  },
+  "docs": "https://docs.mem.ai/mcp/setup",
+  "remote": {
+    "url": "https://mcp.mem.ai/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#1F1F1F"
+  },
+  "supportedBy": ["chatgpt", "claude", "microsoft-copilot", "manus", "lindy", "gumloop", "relevance-ai"]
+}

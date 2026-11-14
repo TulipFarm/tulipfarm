@@ -1,0 +1,35 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "freshservice",
+  "name": "Freshservice",
+  "maker": "Freshworks",
+  "homepage": "https://www.freshworks.com/freshservice/",
+  "category": "support",
+  "teams": ["support", "operations"],
+  "summary": "Manage IT tickets, assets, and requests in Freshservice",
+  "capabilities": [
+    "Search, create, and update tickets",
+    "Look up assets and service catalog items",
+    "Submit service requests"
+  ],
+  "official": {
+    "evidence": "https://support.freshservice.com/support/solutions/articles/50000012678-model-context-protocol-mcp-integration-in-freshservice"
+  },
+  "docs": "https://support.freshservice.com/support/solutions/articles/50000012678-model-context-protocol-mcp-integration-in-freshservice",
+  "remote": {
+    "url": "https://{subdomain}.freshservice.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "variables": [
+      {
+        "name": "subdomain",
+        "description": "Your Freshservice subdomain",
+        "example": "acme"
+      }
+    ]
+  },
+  "icons": {
+    "color": "#00A886"
+  },
+  "supportedBy": ["claude", "gemini", "microsoft-copilot", "lindy", "relevance-ai", "dust", "glean"]
+}

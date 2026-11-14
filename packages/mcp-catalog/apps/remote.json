@@ -1,0 +1,29 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "remote",
+  "name": "Remote",
+  "maker": "Remote",
+  "homepage": "https://remote.com",
+  "category": "hr-and-recruiting",
+  "teams": ["hr"],
+  "summary": "Manage global employees, time off, and expenses",
+  "capabilities": [
+    "Look up employees and employments",
+    "Review and approve time off",
+    "Manage expenses and payroll details"
+  ],
+  "official": {
+    "evidence": "https://developer.remote.com/docs/introduction-to-remote-mcp"
+  },
+  "docs": "https://developer.remote.com/docs/introduction-to-remote-mcp",
+  "remote": {
+    "url": "https://mcp.remote.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#624DE3"
+  },
+  "supportedBy": ["claude", "lindy", "relevance-ai"]
+}

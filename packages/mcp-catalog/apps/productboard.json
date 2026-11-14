@@ -1,0 +1,30 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "productboard",
+  "name": "Productboard",
+  "maker": "Productboard",
+  "homepage": "https://www.productboard.com",
+  "category": "projects-and-issues",
+  "teams": ["product"],
+  "summary": "Explore Productboard features, notes and insights",
+  "capabilities": [
+    "Search features, notes and customer insights",
+    "Read roadmaps and objectives",
+    "Create notes from feedback"
+  ],
+  "official": {
+    "evidence": "https://www.productboard.com/integrations/mcp-server/"
+  },
+  "docs": "https://www.productboard.com/integrations/mcp-server/",
+  "remote": {
+    "url": "https://mcp.productboard.com",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "com.productboard/productboard",
+  "icons": {
+    "color": "#0071F7"
+  },
+  "supportedBy": ["claude", "manus", "lindy", "relevance-ai", "dust"]
+}

@@ -1,0 +1,32 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "airbyte",
+  "name": "Airbyte",
+  "maker": "Airbyte",
+  "homepage": "https://airbyte.com",
+  "category": "data-and-databases",
+  "teams": ["engineering", "operations"],
+  "summary": "Manage Airbyte connections and data syncs",
+  "capabilities": [
+    "List sources, destinations, and connections",
+    "Start and monitor syncs",
+    "Create new data pipelines"
+  ],
+  "official": {
+    "evidence": "https://docs.airbyte.com/platform/airbyte-mcp/install",
+    "repository": "https://github.com/airbytehq/PyAirbyte"
+  },
+  "docs": "https://docs.airbyte.com/platform/airbyte-mcp/install",
+  "remote": {
+    "url": "https://mcp.airbyte.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "io.github.airbytehq/airbyte",
+  "icons": {
+    "simpleIcons": "airbyte",
+    "color": "#615EFF"
+  },
+  "supportedBy": ["lindy", "relevance-ai", "github-registry"]
+}

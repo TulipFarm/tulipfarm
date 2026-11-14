@@ -1,0 +1,30 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "revenuecat",
+  "name": "RevenueCat",
+  "maker": "RevenueCat",
+  "homepage": "https://www.revenuecat.com",
+  "category": "payments-and-commerce",
+  "teams": ["engineering", "product"],
+  "summary": "Manage in-app subscription products and entitlements",
+  "capabilities": [
+    "Create and update products, entitlements, and offerings",
+    "Configure apps and paywalls",
+    "Look up customers and subscriptions"
+  ],
+  "official": {
+    "evidence": "https://www.revenuecat.com/docs/tools/mcp"
+  },
+  "docs": "https://www.revenuecat.com/docs/tools/mcp",
+  "remote": {
+    "url": "https://mcp.revenuecat.ai/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "simpleIcons": "revenuecat",
+    "color": "#F2545B"
+  },
+  "supportedBy": ["manus"]
+}

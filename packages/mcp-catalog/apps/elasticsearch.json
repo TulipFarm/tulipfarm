@@ -1,0 +1,44 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "elasticsearch",
+  "name": "Elasticsearch",
+  "maker": "Elastic",
+  "homepage": "https://www.elastic.co/elasticsearch",
+  "category": "data-and-databases",
+  "teams": ["engineering", "operations"],
+  "summary": "Search and query Elasticsearch indices",
+  "capabilities": [
+    "List indices and read mappings",
+    "Search documents with ES|QL",
+    "Run Agent Builder tools on your data"
+  ],
+  "official": {
+    "evidence": "https://www.elastic.co/docs/explore-analyze/ai-features/agent-builder/mcp-server",
+    "repository": "https://github.com/elastic/mcp-server-elasticsearch"
+  },
+  "docs": "https://www.elastic.co/docs/explore-analyze/ai-features/agent-builder/mcp-server",
+  "remote": {
+    "url": "https://{kibana-url}/api/agent_builder/mcp",
+    "transport": "streamable-http",
+    "auth": "api-key",
+    "headers": [
+      {
+        "name": "Authorization",
+        "value": "ApiKey {key}",
+        "description": "Elastic API key"
+      }
+    ],
+    "variables": [
+      {
+        "name": "kibana-url",
+        "description": "Your Kibana host",
+        "example": "my-deployment.kb.us-east-1.aws.elastic.cloud"
+      }
+    ]
+  },
+  "icons": {
+    "simpleIcons": "elasticsearch",
+    "color": "#005571"
+  },
+  "supportedBy": ["microsoft-copilot", "docker", "github-registry"]
+}

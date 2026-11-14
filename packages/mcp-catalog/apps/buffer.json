@@ -1,0 +1,26 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "buffer",
+  "name": "Buffer",
+  "maker": "Buffer",
+  "homepage": "https://buffer.com",
+  "category": "marketing",
+  "teams": ["marketing"],
+  "summary": "Draft and schedule social posts in Buffer",
+  "capabilities": ["Create and schedule posts", "Review queued and sent posts", "Work across connected channels"],
+  "official": {
+    "evidence": "https://developers.buffer.com/guides/integrations/mcp.html"
+  },
+  "docs": "https://developers.buffer.com/guides/integrations/mcp.html",
+  "remote": {
+    "url": "https://mcp.buffer.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "simpleIcons": "buffer",
+    "color": "#231F20"
+  },
+  "supportedBy": ["manus", "gumloop", "zapier", "make"]
+}

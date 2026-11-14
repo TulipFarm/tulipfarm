@@ -1,0 +1,30 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "whimsical",
+  "name": "Whimsical",
+  "maker": "Whimsical",
+  "homepage": "https://whimsical.com",
+  "category": "design",
+  "teams": ["product", "design"],
+  "summary": "Create flowcharts, mind maps and docs in Whimsical",
+  "capabilities": [
+    "Create flowcharts, mind maps and wireframes",
+    "Read and search boards and docs",
+    "Update existing diagrams"
+  ],
+  "official": {
+    "evidence": "https://whimsical.com/learn/integrations/mcp"
+  },
+  "docs": "https://whimsical.com/learn/integrations/mcp",
+  "remote": {
+    "url": "https://mcp.whimsical.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "com.whimsical/mcp",
+  "icons": {
+    "color": "#7B61FF"
+  },
+  "supportedBy": ["chatgpt", "claude", "manus", "lindy", "gumloop"]
+}

@@ -1,0 +1,25 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "invideo",
+  "name": "invideo",
+  "maker": "invideo",
+  "homepage": "https://invideo.io",
+  "category": "ai-and-media",
+  "teams": ["marketing"],
+  "summary": "Turn scripts and ideas into videos with invideo",
+  "capabilities": ["Generate videos from a script or idea", "Get a link to edit the video"],
+  "official": {
+    "evidence": "https://invideo.io/mcp"
+  },
+  "docs": "https://invideo.io/mcp",
+  "remote": {
+    "url": "https://mcp.invideo.io/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#5D4BFF"
+  },
+  "supportedBy": ["chatgpt", "docker"]
+}

@@ -1,0 +1,36 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "twilio",
+  "name": "Twilio",
+  "maker": "Twilio",
+  "homepage": "https://www.twilio.com",
+  "category": "code",
+  "teams": ["engineering"],
+  "summary": "Look up and call Twilio APIs",
+  "capabilities": [
+    "Search Twilio API endpoints and docs",
+    "Get exact request schemas for an endpoint",
+    "Call Twilio APIs from your account with the local server"
+  ],
+  "official": {
+    "evidence": "https://www.twilio.com/docs/ai/mcp",
+    "repository": "https://github.com/twilio-labs/mcp"
+  },
+  "docs": "https://www.twilio.com/docs/ai/mcp",
+  "remote": {
+    "url": "https://mcp.twilio.com/docs",
+    "transport": "streamable-http",
+    "auth": "none",
+    "checked": "2026-11-14"
+  },
+  "packages": [
+    {
+      "registry": "npm",
+      "name": "@twilio-alpha/mcp"
+    }
+  ],
+  "icons": {
+    "color": "#F22F46"
+  },
+  "supportedBy": ["claude", "lindy", "relevance-ai", "zapier", "make", "n8n"]
+}

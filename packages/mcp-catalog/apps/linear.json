@@ -1,0 +1,48 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "linear",
+  "name": "Linear",
+  "maker": "Linear",
+  "homepage": "https://linear.app",
+  "category": "projects-and-issues",
+  "teams": ["engineering", "product"],
+  "summary": "Find, create and update Linear issues and projects",
+  "capabilities": [
+    "Search and read issues, projects and comments",
+    "Create and update issues",
+    "Add comments and manage project updates"
+  ],
+  "official": {
+    "evidence": "https://linear.app/docs/mcp"
+  },
+  "docs": "https://linear.app/docs/mcp",
+  "remote": {
+    "url": "https://mcp.linear.app/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "app.linear/linear",
+  "icons": {
+    "simpleIcons": "linear",
+    "color": "#5E6AD2"
+  },
+  "supportedBy": [
+    "chatgpt",
+    "claude",
+    "gemini",
+    "microsoft-copilot",
+    "notion-ai",
+    "manus",
+    "perplexity",
+    "lindy",
+    "gumloop",
+    "relevance-ai",
+    "dust",
+    "glean",
+    "zapier",
+    "n8n",
+    "docker"
+  ],
+  "featured": true
+}

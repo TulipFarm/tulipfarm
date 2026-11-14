@@ -81,7 +81,13 @@ export const mcpIntegrationSchema = z.strictObject({
 export const mcpGrantSchema = z.strictObject({ kind: z.enum(['member', 'team']), id: mcpHttpId });
 export const mcpToolViewSchema = z.strictObject({
   name: z.string(),
+  /** The server's display name for the tool, when it gives one. */
+  title: z.string().nullable(),
   description: z.string(),
+  /** The server says the tool only reads data, so it may run without asking. */
+  readOnly: z.boolean(),
+  /** The server says the tool may delete or overwrite data. */
+  destructive: z.boolean(),
   revision,
   previousRevision: revision.nullable(),
   inputSchema: z.json(),
@@ -96,6 +102,8 @@ export const mcpIntegrationDetailSchema = z.strictObject({
   integration: mcpIntegrationSchema,
   tools: z.array(mcpToolViewSchema).max(200),
   grants: z.array(mcpGrantSchema),
+  /** Shared with every current and future member of the workspace. */
+  workspace: z.boolean(),
   managers: z.array(mcpGrantSchema),
   grantOptions: z.array(mcpGrantSchema.extend({ label: z.string() })),
   descriptor: z.discriminatedUnion('kind', [
@@ -161,6 +169,8 @@ export const mcpSetupSchema = z.strictObject({
     .optional(),
   egress: z.array(z.string().min(1).max(253)).max(20).optional(),
   ownership: z.enum(['personal', 'shared']),
+  /** For a new shared integration: share it with every current and future member of the workspace. */
+  shareWithWorkspace: z.boolean().optional(),
   catalogEntryId: revision.optional(),
   auth: mcpAuthenticationSchema,
   expectedVersion: version.optional(),
@@ -190,6 +200,8 @@ export const mcpReviewSchema = mcpMutationSchema.extend({
 });
 export const mcpGrantsSchema = mcpMutationSchema.extend({
   grants: z.array(mcpGrantSchema).max(200),
+  /** Shares with every current and future member of the workspace. */
+  workspace: z.boolean().optional(),
   managers: z.array(mcpGrantSchema).max(200).optional(),
 });
 export const mcpLifecycleSchema = mcpMutationSchema.extend({

@@ -1,0 +1,49 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "kagi",
+  "name": "Kagi",
+  "maker": "Kagi",
+  "homepage": "https://kagi.com",
+  "category": "search-and-research",
+  "teams": ["everyone"],
+  "summary": "Search the web and summarize pages with Kagi",
+  "capabilities": ["Search the web with Kagi results", "Summarize pages and videos"],
+  "official": {
+    "evidence": "https://github.com/kagisearch/kagimcp",
+    "repository": "https://github.com/kagisearch/kagimcp"
+  },
+  "docs": "https://github.com/kagisearch/kagimcp",
+  "remote": {
+    "url": "https://mcp.kagi.com/mcp",
+    "transport": "streamable-http",
+    "auth": "api-key",
+    "headers": [
+      {
+        "name": "Authorization",
+        "value": "Bearer {key}",
+        "description": "Kagi API key"
+      }
+    ],
+    "checked": "2026-11-14"
+  },
+  "packages": [
+    {
+      "registry": "pypi",
+      "name": "kagimcp",
+      "env": [
+        {
+          "name": "KAGI_API_KEY",
+          "description": "Kagi API key",
+          "secret": true,
+          "required": true
+        }
+      ]
+    }
+  ],
+  "icons": {
+    "lobehub": "Kagi",
+    "simpleIcons": "kagi",
+    "color": "#FFB319"
+  },
+  "supportedBy": ["docker"]
+}

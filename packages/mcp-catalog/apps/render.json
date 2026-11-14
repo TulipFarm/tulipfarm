@@ -1,0 +1,27 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "render",
+  "name": "Render",
+  "maker": "Render",
+  "homepage": "https://render.com",
+  "category": "cloud-and-infrastructure",
+  "teams": ["engineering"],
+  "summary": "Manage Render services, databases, and deploys",
+  "capabilities": ["Create web services and databases", "Check deploys and read logs", "Query metrics for services"],
+  "official": {
+    "evidence": "https://render.com/docs/mcp-server",
+    "repository": "https://github.com/render-oss/render-mcp-server"
+  },
+  "docs": "https://render.com/docs/mcp-server",
+  "remote": {
+    "url": "https://mcp.render.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "simpleIcons": "render",
+    "color": "#000000"
+  },
+  "supportedBy": ["claude", "manus", "lindy", "relevance-ai", "docker"]
+}

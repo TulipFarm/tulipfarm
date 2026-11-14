@@ -1,0 +1,75 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "sonarqube",
+  "name": "SonarQube",
+  "maker": "SonarSource",
+  "homepage": "https://www.sonarsource.com/products/sonarqube/",
+  "category": "code",
+  "teams": ["engineering"],
+  "summary": "Check code quality and security issues in SonarQube",
+  "capabilities": [
+    "Find issues and security hotspots in a project",
+    "Check quality gate status",
+    "Analyse code snippets for problems"
+  ],
+  "official": {
+    "evidence": "https://docs.sonarsource.com/sonarqube-mcp-server",
+    "repository": "https://github.com/SonarSource/sonarqube-mcp-server"
+  },
+  "docs": "https://docs.sonarsource.com/sonarqube-mcp-server",
+  "remote": {
+    "url": "https://api.sonarcloud.io/mcp",
+    "transport": "streamable-http",
+    "auth": "api-key",
+    "headers": [
+      {
+        "name": "Authorization",
+        "value": "Bearer {key}",
+        "description": "SonarQube Cloud user token"
+      },
+      {
+        "name": "SONARQUBE_ORG",
+        "value": "{organization}",
+        "description": "SonarQube Cloud organization key"
+      }
+    ],
+    "variables": [
+      {
+        "name": "organization",
+        "description": "Your SonarQube Cloud organization key"
+      }
+    ]
+  },
+  "packages": [
+    {
+      "registry": "oci",
+      "name": "sonarsource/sonarqube-mcp",
+      "env": [
+        {
+          "name": "SONARQUBE_TOKEN",
+          "description": "SonarQube user token",
+          "secret": true,
+          "required": true
+        },
+        {
+          "name": "SONARQUBE_ORG",
+          "description": "SonarQube Cloud organization key",
+          "secret": false,
+          "required": false
+        },
+        {
+          "name": "SONARQUBE_URL",
+          "description": "SonarQube Server URL",
+          "secret": false,
+          "required": false
+        }
+      ]
+    }
+  ],
+  "registryName": "io.github.SonarSource/sonarqube-mcp-server",
+  "icons": {
+    "simpleIcons": "sonarqubecloud",
+    "color": "#126ED3"
+  },
+  "supportedBy": ["docker", "github-registry"]
+}

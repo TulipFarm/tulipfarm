@@ -1,0 +1,29 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "salesloft",
+  "name": "Salesloft",
+  "maker": "Salesloft",
+  "homepage": "https://www.salesloft.com",
+  "category": "crm-and-sales",
+  "teams": ["sales"],
+  "summary": "Work with cadences, people, and deals in Salesloft",
+  "capabilities": [
+    "Search people, accounts, and cadences",
+    "Review calls, emails, and activity",
+    "Find deal and pipeline information"
+  ],
+  "official": {
+    "evidence": "https://help.salesloft.com/s/article/Set-Up-the-Salesloft-MCP-Server-Claude?language=en_US"
+  },
+  "docs": "https://help.salesloft.com/s/article/Set-Up-the-Salesloft-MCP-Server-Claude?language=en_US",
+  "remote": {
+    "url": "https://mcp.salesloft.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#054752"
+  },
+  "supportedBy": ["claude", "manus", "lindy", "gumloop", "relevance-ai", "dust"]
+}

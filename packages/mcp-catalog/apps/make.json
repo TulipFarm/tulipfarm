@@ -1,0 +1,32 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "make",
+  "name": "Make",
+  "maker": "Make",
+  "homepage": "https://www.make.com",
+  "category": "automation",
+  "teams": ["everyone", "operations"],
+  "summary": "Run Make scenarios and manage automations",
+  "capabilities": [
+    "Run scenarios as tools",
+    "Create and edit scenarios",
+    "Manage connections, webhooks, and data stores"
+  ],
+  "official": {
+    "evidence": "https://developers.make.com/mcp-server"
+  },
+  "docs": "https://developers.make.com/mcp-server",
+  "remote": {
+    "url": "https://mcp.make.com/v2",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "lobehub": "Make",
+    "simpleIcons": "make",
+    "color": "#6D00CC"
+  },
+  "supportedBy": ["claude", "microsoft-copilot", "manus", "gumloop", "glean"],
+  "featured": true
+}

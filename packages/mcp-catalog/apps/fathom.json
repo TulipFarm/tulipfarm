@@ -1,0 +1,31 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "fathom",
+  "name": "Fathom",
+  "maker": "Fathom",
+  "homepage": "https://fathom.video",
+  "category": "chat",
+  "teams": ["sales", "everyone"],
+  "summary": "Search Fathom meeting recordings and summaries",
+  "capabilities": [
+    "Search meetings and transcripts",
+    "Read summaries and action items",
+    "Find meetings by team or attendee"
+  ],
+  "official": {
+    "evidence": "https://developers.fathom.ai/mcp-docs"
+  },
+  "docs": "https://developers.fathom.ai/mcp-docs",
+  "remote": {
+    "url": "https://api.fathom.ai/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "ai.fathom.api/mcp",
+  "icons": {
+    "simpleIcons": "fathom",
+    "color": "#9187FF"
+  },
+  "supportedBy": ["chatgpt", "claude", "manus", "lindy", "gumloop", "dust", "zapier"]
+}

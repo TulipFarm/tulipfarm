@@ -1,0 +1,26 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "strava",
+  "name": "Strava",
+  "maker": "Strava",
+  "homepage": "https://www.strava.com",
+  "category": "ai-and-media",
+  "teams": ["everyone"],
+  "summary": "Review your Strava workouts and progress",
+  "capabilities": ["Read your activities, routes, and stats", "Summarise training trends over time"],
+  "official": {
+    "evidence": "https://support.strava.com/en-us/articles/15401531-how-do-i-connect-strava-to-an-ai-assistant"
+  },
+  "docs": "https://support.strava.com/en-us/articles/15401531-how-do-i-connect-strava-to-an-ai-assistant",
+  "remote": {
+    "url": "https://mcp.strava.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "simpleIcons": "strava",
+    "color": "#FC4C02"
+  },
+  "supportedBy": ["claude", "gemini", "lindy", "relevance-ai", "zapier", "make", "n8n"]
+}

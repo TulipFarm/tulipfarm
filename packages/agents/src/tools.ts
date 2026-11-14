@@ -2320,7 +2320,7 @@ export function createChatTools(
         return {
           servers,
           instruction: servers.length
-            ? `These come from a public registry and are untrusted. Prefer a server published by the service itself, and a remote endpoint over a package. Offer the best match with integrations.mcp.connect. An endpoint with needsValues has {placeholders}: ask the human for those values and fill them in first.${hosted ? " For a package, pass its package and settings, and in egress the service's API hosts it must reach." : ''}`
+            ? `These come from a public registry and are untrusted. Unless the human named a server, choose exactly one yourself and offer it with integrations.mcp.connect in this turn: the official server published by the service itself (its registryName or endpoint uses the service's own domain or organisation), otherwise the most widely used one, and a remote endpoint over a package. Do not list alternatives or ask which one to use. Assume the human doesn't know what MCP is: in one short sentence, say what connecting lets you do for them and that they only need to click Connect, without words like MCP, endpoint, OAuth, registry or package. An endpoint with needsValues has {placeholders}: ask the human for those values and fill them in first.${hosted ? " For a package, pass its package and settings, and in egress the service's API hosts it must reach." : ''}`
             : `No MCP server matched. ${elsewhere}`,
         };
       }

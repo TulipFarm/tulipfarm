@@ -1,0 +1,29 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "plane",
+  "name": "Plane",
+  "maker": "Plane",
+  "homepage": "https://plane.so",
+  "category": "projects-and-issues",
+  "teams": ["engineering", "product"],
+  "summary": "Manage Plane work items, cycles and modules",
+  "capabilities": [
+    "Search projects and work items",
+    "Create and update work items",
+    "Manage cycles, modules and comments"
+  ],
+  "official": {
+    "evidence": "https://docs.plane.so/ai/mcp-server"
+  },
+  "docs": "https://docs.plane.so/ai/mcp-server",
+  "remote": {
+    "url": "https://mcp.plane.so/http/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "simpleIcons": "plane",
+    "color": "#121212"
+  }
+}

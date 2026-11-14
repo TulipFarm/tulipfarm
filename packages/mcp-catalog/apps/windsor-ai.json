@@ -1,0 +1,30 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "windsor-ai",
+  "name": "Windsor.ai",
+  "maker": "Windsor.ai",
+  "homepage": "https://windsor.ai",
+  "category": "monitoring-and-analytics",
+  "teams": ["marketing"],
+  "summary": "Query and manage marketing data and ads",
+  "capabilities": [
+    "Query ads, analytics, and CRM data",
+    "Compare campaign performance across channels",
+    "Update campaigns, budgets, and bids"
+  ],
+  "official": {
+    "evidence": "https://windsor.ai/documentation/windsor-mcp/",
+    "repository": "https://github.com/windsor-ai/windsor_mcp"
+  },
+  "docs": "https://windsor.ai/documentation/windsor-mcp/",
+  "remote": {
+    "url": "https://mcp.windsor.ai/",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#3B5BDB"
+  },
+  "supportedBy": ["chatgpt", "claude", "copilot-studio", "manus", "gumloop"]
+}

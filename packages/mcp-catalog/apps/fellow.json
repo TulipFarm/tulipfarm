@@ -1,0 +1,29 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "fellow",
+  "name": "Fellow",
+  "maker": "Fellow",
+  "homepage": "https://fellow.ai",
+  "category": "chat",
+  "teams": ["everyone"],
+  "summary": "Search meeting notes and action items in Fellow",
+  "capabilities": [
+    "Find meetings, notes, and transcripts",
+    "List action items and decisions",
+    "Answer questions about past meetings"
+  ],
+  "official": {
+    "evidence": "https://developers.fellow.ai/reference/mcp-server"
+  },
+  "docs": "https://developers.fellow.ai/reference/mcp-server",
+  "remote": {
+    "url": "https://fellow.app/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#5A3FE8"
+  },
+  "supportedBy": ["claude", "microsoft-copilot", "manus", "lindy", "gumloop", "glean"]
+}

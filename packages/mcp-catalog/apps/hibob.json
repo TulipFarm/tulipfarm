@@ -1,0 +1,30 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "hibob",
+  "name": "HiBob",
+  "maker": "HiBob",
+  "homepage": "https://www.hibob.com",
+  "category": "hr-and-recruiting",
+  "teams": ["hr", "everyone"],
+  "summary": "Look up people data, time off, and org info",
+  "capabilities": [
+    "Search employees and org structure",
+    "Check time off balances and requests",
+    "Read people data your role allows"
+  ],
+  "official": {
+    "evidence": "https://apidocs.hibob.com/docs/hibob-mcp-connector"
+  },
+  "docs": "https://apidocs.hibob.com/docs/hibob-mcp-connector",
+  "remote": {
+    "url": "https://mcp.hibob.com/mcp/public",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "simpleIcons": "hibob",
+    "color": "#E42C51"
+  },
+  "supportedBy": ["chatgpt", "claude"]
+}

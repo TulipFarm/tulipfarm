@@ -1,0 +1,29 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "cognism",
+  "name": "Cognism",
+  "maker": "Cognism",
+  "homepage": "https://www.cognism.com",
+  "category": "crm-and-sales",
+  "teams": ["sales"],
+  "summary": "Search and reveal B2B contacts in Cognism",
+  "capabilities": [
+    "Search companies and contacts",
+    "Count audiences before building lists",
+    "Reveal contact details using credits"
+  ],
+  "official": {
+    "evidence": "https://docs.cognism.com/docs/mcp-server"
+  },
+  "docs": "https://docs.cognism.com/docs/mcp-server",
+  "remote": {
+    "url": "https://mcp.cognism.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#1F2C5C"
+  },
+  "supportedBy": ["claude"]
+}

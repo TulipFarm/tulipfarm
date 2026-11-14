@@ -1,0 +1,29 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "pitch",
+  "name": "Pitch",
+  "maker": "Pitch",
+  "homepage": "https://pitch.com",
+  "category": "design",
+  "teams": ["sales", "marketing"],
+  "summary": "Create and edit Pitch presentations",
+  "capabilities": [
+    "Generate presentations from prompts",
+    "Read and edit slides",
+    "Apply workspace templates and styles"
+  ],
+  "official": {
+    "evidence": "https://help.pitch.com/en/articles/16849368-an-overview-of-pitch-s-mcp"
+  },
+  "docs": "https://help.pitch.com/en/articles/16849368-an-overview-of-pitch-s-mcp",
+  "remote": {
+    "url": "https://mcp.pitch.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#2A00FF"
+  },
+  "supportedBy": ["chatgpt", "claude", "perplexity"]
+}

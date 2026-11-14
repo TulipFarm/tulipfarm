@@ -1,0 +1,29 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "mux",
+  "name": "Mux",
+  "maker": "Mux",
+  "homepage": "https://www.mux.com",
+  "category": "ai-and-media",
+  "teams": ["engineering"],
+  "summary": "Manage Mux video assets, streams, and data",
+  "capabilities": [
+    "Upload and manage video assets",
+    "Create and manage live streams",
+    "Read video views and quality metrics"
+  ],
+  "official": {
+    "evidence": "https://www.mux.com/docs/integrations/mcp-server"
+  },
+  "docs": "https://www.mux.com/docs/integrations/mcp-server",
+  "remote": {
+    "url": "https://mcp.mux.com",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#FA50B5"
+  },
+  "supportedBy": ["lindy", "relevance-ai"]
+}

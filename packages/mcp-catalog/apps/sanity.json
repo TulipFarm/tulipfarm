@@ -1,0 +1,28 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "sanity",
+  "name": "Sanity",
+  "maker": "Sanity",
+  "homepage": "https://www.sanity.io",
+  "category": "docs-and-files",
+  "teams": ["engineering", "marketing"],
+  "summary": "Query and edit content in Sanity",
+  "capabilities": ["Query documents with GROQ", "Create, edit, and publish documents", "Inspect schemas and datasets"],
+  "official": {
+    "evidence": "https://www.sanity.io/docs/ai/mcp-server",
+    "repository": "https://github.com/sanity-io/agent-toolkit"
+  },
+  "docs": "https://www.sanity.io/docs/ai/mcp-server",
+  "remote": {
+    "url": "https://mcp.sanity.io",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "io.sanity.www/mcp",
+  "icons": {
+    "simpleIcons": "sanity",
+    "color": "#0D0E12"
+  },
+  "supportedBy": ["claude", "manus", "lindy", "gumloop", "glean"]
+}
