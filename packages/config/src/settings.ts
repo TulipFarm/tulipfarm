@@ -484,11 +484,11 @@ export const settings: readonly Setting[] = [
   {
     name: 'TULIPFARM_APP_SITES_DOMAIN',
     group: 'Public origins',
-    services: apiWorker,
+    services: [...apiWorker, 'gateway'],
     requirement: 'optional',
     secret: false,
     description:
-      'Domain that serves published apps as subdomains; point a wildcard record at the API. It must differ from the web app domain. Unset leaves apps unpublished unless an extension serves them.',
+      'Domain that serves published apps as subdomains; point a wildcard record at the API. It must differ from the web app domain. Unset leaves apps unpublished unless an extension serves them. The gateway answers apps that run a server on it.',
   },
   {
     name: 'WEB_ORIGIN',

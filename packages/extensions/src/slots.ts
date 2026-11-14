@@ -487,7 +487,7 @@ export type ExtensionRegistrar = {
   appBuilder(builder: AppBuilder): void;
   /** Single slot: a second extension setting it fails startup. Register it in the API and the worker alike. */
   appPublisher(publisher: AppPublisher): void;
-  /** Single slot: a second extension setting it fails startup. Register it in the API and the worker alike. */
+  /** Single slot: a second extension setting it fails startup. Register it in the API, the worker and the gateway. */
   appHost(host: AppHost): void;
   usageSink(sink: UsageSink): void;
   analytics(analytics: ProductAnalytics): void;
