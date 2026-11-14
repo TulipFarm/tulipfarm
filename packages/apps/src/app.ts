@@ -62,6 +62,7 @@ export type AppFailureCode =
   | 'stale-draft'
   | 'limit-exceeded'
   | 'recipe-invalid'
+  | 'definition-invalid'
   | 'builder-unavailable'
   | 'build-failed'
   | 'build-timeout'

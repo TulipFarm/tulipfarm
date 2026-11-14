@@ -95,6 +95,7 @@ export const failureStatus: Record<AppFailureCode, number> = {
   'budget-exhausted': 409,
   'limit-exceeded': 422,
   'recipe-invalid': 422,
+  'definition-invalid': 422,
   'build-failed': 422,
   'build-timeout': 422,
   'builder-unavailable': 503,
