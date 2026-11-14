@@ -161,65 +161,68 @@ export function buildPreviewGateway(
       return page(reply, shellOrigin, 403, 'Drafts cannot install service workers');
   });
 
-  gateway.post(previewEnterPath, async (request, reply) => {
-    const ticket = request.body instanceof URLSearchParams ? request.body.get('ticket') : null;
-    const redeemed = ticket ? await dependencies.redeem(keyOf(request), ticket) : null;
-    if (!redeemed)
+  // Routes go in a plugin after the rate limit so its global hook reaches them.
+  gateway.register(async routes => {
+    routes.post(previewEnterPath, async (request, reply) => {
+      const ticket = request.body instanceof URLSearchParams ? request.body.get('ticket') : null;
+      const redeemed = ticket ? await dependencies.redeem(keyOf(request), ticket) : null;
+      if (!redeemed)
+        return page(
+          reply,
+          shellOrigin,
+          403,
+          'This link has expired. Open the draft again from TulipFarm.',
+          notify(shellOrigin, expiredMessage),
+        );
+      reply.header(
+        'Set-Cookie',
+        `${previewCookie}=${redeemed.token}; Path=/; Max-Age=${previewSessionSeconds}; Secure; HttpOnly; SameSite=None; Partitioned`,
+      );
       return page(
         reply,
         shellOrigin,
-        403,
-        'This link has expired. Open the draft again from TulipFarm.',
-        notify(shellOrigin, expiredMessage),
+        200,
+        'Opening draft',
+        `fetch(${JSON.stringify(previewCheckPath)}, { credentials: 'same-origin' })
+    .then(response => { if (!response.ok) throw new Error('blocked'); window.location.replace('/'); })
+    .catch(() => { ${notify(shellOrigin, blockedMessage)} });`,
       );
-    reply.header(
-      'Set-Cookie',
-      `${previewCookie}=${redeemed.token}; Path=/; Max-Age=${previewSessionSeconds}; Secure; HttpOnly; SameSite=None; Partitioned`,
-    );
-    return page(
-      reply,
-      shellOrigin,
-      200,
-      'Opening draft',
-      `fetch(${JSON.stringify(previewCheckPath)}, { credentials: 'same-origin' })
-  .then(response => { if (!response.ok) throw new Error('blocked'); window.location.replace('/'); })
-  .catch(() => { ${notify(shellOrigin, blockedMessage)} });`,
-    );
-  });
+    });
 
-  gateway.get(previewCheckPath, async (request, reply) => {
-    const session = await sessionOf(request);
-    return reply.code(session && (await dependencies.enabled(session.workspaceId)) ? 204 : 401).send();
-  });
-
-  gateway.route({
-    method: ['GET', 'HEAD'],
-    url: '/*',
-    async handler(request, reply) {
+    routes.get(previewCheckPath, async (request, reply) => {
       const session = await sessionOf(request);
-      if (!session)
-        return page(reply, shellOrigin, 401, 'This session has ended. Open the draft again from TulipFarm.');
-      if (!(await dependencies.enabled(session.workspaceId)))
-        return page(reply, shellOrigin, 404, 'There is nothing here');
-      const access = await dependencies.build(session);
-      if (!access.ok)
-        return access.failure.code === 'forbidden'
-          ? page(reply, shellOrigin, 403, 'You can no longer edit this app')
-          : page(reply, shellOrigin, 404, 'There is nothing here');
-      if (!access.build) return page(reply, shellOrigin, 404, 'Nothing has been built yet');
-      const files = await manifest(access.build);
-      const path = previewFilePath(new URL(request.url, 'http://draft').pathname);
-      const file = path === null ? undefined : files?.get(path);
-      if (!file) return page(reply, shellOrigin, 404, 'This file is not in the draft');
-      const body = await dependencies.object(`blobs/${file.sha256}`);
-      if (!body) return page(reply, shellOrigin, 404, 'This file is not in the draft');
-      reply.type(file.contentType).header('Content-Length', file.bytes);
-      if (request.method === 'HEAD') {
-        body.destroy();
-        return reply.send();
-      }
-      return reply.send(body);
-    },
+      return reply.code(session && (await dependencies.enabled(session.workspaceId)) ? 204 : 401).send();
+    });
+
+    routes.route({
+      method: ['GET', 'HEAD'],
+      url: '/*',
+      async handler(request, reply) {
+        const session = await sessionOf(request);
+        if (!session)
+          return page(reply, shellOrigin, 401, 'This session has ended. Open the draft again from TulipFarm.');
+        if (!(await dependencies.enabled(session.workspaceId)))
+          return page(reply, shellOrigin, 404, 'There is nothing here');
+        const access = await dependencies.build(session);
+        if (!access.ok)
+          return access.failure.code === 'forbidden'
+            ? page(reply, shellOrigin, 403, 'You can no longer edit this app')
+            : page(reply, shellOrigin, 404, 'There is nothing here');
+        if (!access.build) return page(reply, shellOrigin, 404, 'Nothing has been built yet');
+        const files = await manifest(access.build);
+        const path = previewFilePath(new URL(request.url, 'http://draft').pathname);
+        const file = path === null ? undefined : files?.get(path);
+        if (!file) return page(reply, shellOrigin, 404, 'This file is not in the draft');
+        const body = await dependencies.object(`blobs/${file.sha256}`);
+        if (!body) return page(reply, shellOrigin, 404, 'This file is not in the draft');
+        reply.type(file.contentType).header('Content-Length', file.bytes);
+        if (request.method === 'HEAD') {
+          body.destroy();
+          return reply.send();
+        }
+        return reply.send(body);
+      },
+    });
   });
 
   gateway.setNotFoundHandler((_request, reply) => page(reply, shellOrigin, 404, 'There is nothing here'));

@@ -138,6 +138,7 @@ test('the gateway process serves previews on preview hosts and only liveness els
   const { dependencies } = fakes();
   const gateway = buildGateway({
     preview: dependencies,
+    apps: null,
     serverOptions: {},
     identity: { version: 'development', commit: 'development' },
   });
@@ -163,4 +164,13 @@ test('the gateway process serves previews on preview hosts and only liveness els
   const other = await gateway.inject({ url: '/', headers: { host: 'api.tulipfarm.test' } });
   assert.equal(other.statusCode, 404);
   assert.deepEqual(other.json(), { error: 'not-found' });
+});
+
+test('one client is limited to 1,200 preview requests a minute', async t => {
+  const gateway = buildPreviewGateway(fakes().dependencies, {});
+  t.after(() => gateway.close());
+  for (let sent = 0; sent < 1_200; sent += 1) assert.equal((await gateway.inject(asset('/'))).statusCode, 200);
+  const limited = await gateway.inject(asset('/'));
+  assert.equal(limited.statusCode, 429);
+  assert.deepEqual(limited.json(), { error: 'rate-limit-exceeded' });
 });
