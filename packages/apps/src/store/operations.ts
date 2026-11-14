@@ -176,7 +176,10 @@ export function admitPublish(
   });
 }
 
-/** Admits pointing the app back at one of its earlier releases that the publisher already holds. */
+/**
+ * Admits pointing the app back at one of its earlier releases that the publisher already holds. The share lock waits
+ * out a cleanup that is discarding the release, which clears `staged_at` first.
+ */
 export function admitRollback(
   tx: AppTransaction,
   input: Request & { readonly releaseId: AppReleaseId },
@@ -184,7 +187,8 @@ export function admitRollback(
   return admitRelease(tx, input, 'rollback', async app => {
     const [release] = await rows<{ id: string }>(
       tx,
-      `SELECT id FROM ${table(tx, 'tf_app_releases')} WHERE id = $1 AND app_id = $2 AND staged_at IS NOT NULL`,
+      `SELECT id FROM ${table(tx, 'tf_app_releases')} WHERE id = $1 AND app_id = $2 AND staged_at IS NOT NULL
+       FOR SHARE`,
       [input.releaseId, app.id],
     );
     if (!release) return failed('not-found', 'Release not found');
