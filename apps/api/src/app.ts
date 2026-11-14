@@ -50,8 +50,9 @@ import { appHostingFromEnvironment, temporalAppWorkflows } from './apps-hosting.
 import { routeAppSites } from './apps-sites.ts';
 import { appBuilder } from '@tulipfarm/extensions';
 import type { Pool } from 'pg';
-import { buildPreviewGateway, routePreviewHosts, type PreviewGatewayDependencies } from './app-preview.ts';
-import { previewGatewayFromEnvironment, registerPreviewTickets, type PreviewStorage } from './app-preview-tickets.ts';
+import { buildPreviewGateway, routePreviewHosts, type PreviewGatewayDependencies } from '@tulipfarm/gateway/preview';
+import { previewGatewayFromEnvironment, type PreviewStorage } from '@tulipfarm/gateway/preview-environment';
+import { registerPreviewTickets } from './app-preview-tickets.ts';
 
 export function buildApp(
   options: {
@@ -83,7 +84,8 @@ export function buildApp(
     options.previewGateway === undefined
       ? previewGatewayFromEnvironment(process.env, authConfig().webOrigin, () => previewStorage)
       : options.previewGateway;
-  if (preview) routePreviewHosts(app, buildPreviewGateway(preview), preview.domain);
+  // Until preview hosts route to the gateway service, the API serves them with the same gateway.
+  if (preview) routePreviewHosts(app, buildPreviewGateway(preview, securityServerOptions()), preview.domain);
   let appPlatform: Pick<Pool, 'query'> | undefined;
   const appHosting = appHostingFromEnvironment(process.env, () => appPlatform);
   if (appHosting?.sites) routeAppSites(app, { ...appHosting.sites, excluded: preview?.domain });

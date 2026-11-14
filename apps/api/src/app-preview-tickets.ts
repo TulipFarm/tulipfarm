@@ -1,61 +1,16 @@
 import { fromNodeHeaders } from 'better-auth/node';
 import type { FastifyInstance } from 'fastify';
-import type { Pool } from 'pg';
 import { z } from 'zod';
 import type { AppId } from '@tulipfarm/apps';
-import {
-  admitPreview,
-  issuePreviewTicket,
-  readAppObject,
-  readPreviewBuild,
-  readPreviewSession,
-  redeemPreviewTicket,
-  registerPreviewHost,
-  type AppTransaction,
-} from '@tulipfarm/apps/store';
+import { admitPreview, issuePreviewTicket, registerPreviewHost } from '@tulipfarm/apps/store';
+import { previewEnterPath } from '@tulipfarm/gateway/preview';
+import type { PreviewStorage } from '@tulipfarm/gateway/preview-environment';
 import { isFeatureEnabled } from '@tulipfarm/observability';
-import { objectStorageClient } from '@tulipfarm/workspaces/object-storage';
-import { commonCompatibility, type createWorkspaceRuntime } from '@tulipfarm/workspace-storage/runtime';
-import { previewEnterPath, type PreviewGatewayDependencies } from './app-preview.ts';
+import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import type { registerAuth } from './auth.ts';
 import { requestBoundaryError } from './security.ts';
 
-type Runtime = Pick<ReturnType<typeof createWorkspaceRuntime>, 'transaction'>;
-export type PreviewStorage = { readonly pool: Pick<Pool, 'query'>; readonly runtime: Runtime };
-
 const enabled = (workspaceId: string) => isFeatureEnabled('app-hosting', null, { id: workspaceId });
-
-const workspace = <T>(runtime: Runtime, workspaceId: string, action: (tx: AppTransaction) => Promise<T>) =>
-  runtime.transaction(workspaceId, commonCompatibility, action);
-
-/**
- * Gateway dependencies from the environment, or null when previews are not configured. Storage is read late because
- * the API opens its pools while it registers routes.
- */
-export function previewGatewayFromEnvironment(
-  env: NodeJS.ProcessEnv,
-  shellOrigin: string,
-  storage: () => PreviewStorage | undefined,
-): PreviewGatewayDependencies | null {
-  const domain = env.TULIPFARM_APP_PREVIEW_DOMAIN?.toLowerCase();
-  const bucket = env.TULIPFARM_OBJECT_STORAGE_APPS_BUCKET;
-  if (!domain || !bucket) return null;
-  const objects = { client: objectStorageClient(env), bucket };
-  const ready = () => {
-    const found = storage();
-    if (!found) throw new Error('Workspace storage is unavailable');
-    return found;
-  };
-  return {
-    domain,
-    shellOrigin,
-    redeem: (previewKey, ticket) => redeemPreviewTicket(ready().pool, previewKey, ticket),
-    session: (previewKey, token) => readPreviewSession(ready().pool, previewKey, token),
-    enabled,
-    build: session => workspace(ready().runtime, session.workspaceId, tx => readPreviewBuild(tx, session)),
-    object: key => readAppObject(objects, key),
-  };
-}
 
 const params = z.object({ workspaceId: z.uuid(), appId: z.uuid() });
 
@@ -80,7 +35,9 @@ export function registerPreviewTickets(
       const workspaceId = parsed.data.workspaceId.toLowerCase();
       const appId = parsed.data.appId.toLowerCase() as AppId;
       try {
-        const admitted = await workspace(storage.runtime, workspaceId, tx => admitPreview(tx, appId, session.user.id));
+        const admitted = await storage.runtime.transaction(workspaceId, commonCompatibility, tx =>
+          admitPreview(tx, appId, session.user.id),
+        );
         if (!admitted.ok)
           return reply
             .code(admitted.failure.code === 'forbidden' ? 403 : 404)

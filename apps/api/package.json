@@ -43,6 +43,7 @@
     "@tulipfarm/conversations": "workspace:*",
     "@tulipfarm/extensions": "workspace:*",
     "@tulipfarm/files": "workspace:*",
+    "@tulipfarm/gateway": "workspace:*",
     "@tulipfarm/github": "workspace:*",
     "@tulipfarm/google-workspace": "workspace:*",
     "@tulipfarm/integrations": "workspace:*",

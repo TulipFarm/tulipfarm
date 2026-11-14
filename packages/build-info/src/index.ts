@@ -1,6 +1,14 @@
 import { z } from 'zod';
 
-export const appSchema = z.enum(['api', 'worker', 'storage-maintenance', 'snippet-broker', 'database', 'web']);
+export const appSchema = z.enum([
+  'api',
+  'worker',
+  'storage-maintenance',
+  'snippet-broker',
+  'gateway',
+  'database',
+  'web',
+]);
 const version = z
   .string()
   .regex(/^\d{4}\.[1-9]\d?\.[1-9]\d?\.[1-9]\d*$/)

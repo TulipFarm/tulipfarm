@@ -8,6 +8,7 @@ RUN printf '\nallowUnusedPatches: true\n' >> pnpm-workspace.yaml
 RUN pnpm fetch
 COPY packages/ packages/
 COPY apps/api/ apps/api/
+COPY apps/gateway/ apps/gateway/
 # Legacy deploy checks the whole lockfile, where xlsx is a URL tarball pinned by integrity.
 RUN pnpm install --offline --frozen-lockfile --filter @tulipfarm/api... \
     && pnpm --filter @tulipfarm/api... build \

@@ -3,7 +3,7 @@
 
 import type { ExecutionBackend } from '@tulipfarm/execution-contract';
 
-export type ExtensionApp = 'api' | 'worker' | 'storage-worker' | 'database';
+export type ExtensionApp = 'api' | 'worker' | 'storage-worker' | 'database' | 'gateway';
 
 export type ExtensionContext = {
   readonly app: ExtensionApp;

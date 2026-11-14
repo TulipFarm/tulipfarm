@@ -92,6 +92,9 @@ importers:
       '@tulipfarm/files':
         specifier: workspace:*
         version: link:../../packages/files
+      '@tulipfarm/gateway':
+        specifier: workspace:*
+        version: link:../gateway
       '@tulipfarm/github':
         specifier: workspace:*
         version: link:../../packages/github
@@ -262,6 +265,52 @@ importers:
       '@tulipfarm/workspaces':
         specifier: workspace:*
         version: link:../../packages/workspaces
+      pg:
+        specifier: 8.23.0
+        version: 8.23.0
+      zod:
+        specifier: 4.6.6
+        version: 4.6.6
+    devDependencies:
+      '@tulipfarm/typescript-config':
+        specifier: workspace:*
+        version: link:../../packages/typescript-config
+      '@types/node':
+        specifier: 26.6.3
+        version: 26.6.3
+      '@types/pg':
+        specifier: 8.23.1
+        version: 8.23.1
+
+  apps/gateway:
+    dependencies:
+      '@fastify/rate-limit':
+        specifier: 11.2.0
+        version: 11.2.0
+      '@tulipfarm/apps':
+        specifier: workspace:*
+        version: link:../../packages/apps
+      '@tulipfarm/build-info':
+        specifier: workspace:*
+        version: link:../../packages/build-info
+      '@tulipfarm/config':
+        specifier: workspace:*
+        version: link:../../packages/config
+      '@tulipfarm/extensions':
+        specifier: workspace:*
+        version: link:../../packages/extensions
+      '@tulipfarm/observability':
+        specifier: workspace:*
+        version: link:../../packages/observability
+      '@tulipfarm/workspace-storage':
+        specifier: workspace:*
+        version: link:../../packages/workspace-storage
+      '@tulipfarm/workspaces':
+        specifier: workspace:*
+        version: link:../../packages/workspaces
+      fastify:
+        specifier: 5.12.5
+        version: 5.12.5
       pg:
         specifier: 8.23.0
         version: 8.23.0

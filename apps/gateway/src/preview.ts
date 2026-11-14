@@ -1,6 +1,12 @@
 import { randomBytes } from 'node:crypto';
 import type { Readable } from 'node:stream';
-import Fastify, { LogController, type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
+import Fastify, {
+  LogController,
+  type FastifyInstance,
+  type FastifyReply,
+  type FastifyRequest,
+  type FastifyServerOptions,
+} from 'fastify';
 import rateLimit from '@fastify/rate-limit';
 import { z } from 'zod';
 import {
@@ -10,8 +16,7 @@ import {
   type PreviewBuild,
   type PreviewSession,
 } from '@tulipfarm/apps/store';
-import { registerObservability } from './observability.ts';
-import { requestBoundaryError, securityServerOptions } from './security.ts';
+import { registerObservability, requestBoundaryError } from './http.ts';
 
 /* oxlint-disable tulipfarm/product-copy -- The paths and message types are a protocol shared with the web shell. */
 export const previewCookie = '__Host-tf_preview';
@@ -102,12 +107,16 @@ const notify = (shellOrigin: string, type: string) =>
 
 /**
  * The gateway that serves draft previews on their own hosts. It is a separate server from the API, so no API route,
- * cookie or CORS rule ever answers on a preview host.
+ * cookie or CORS rule ever answers on a preview host. The host process supplies the server options, which decide
+ * whether the client address comes from a trusted proxy.
  */
-export function buildPreviewGateway(dependencies: PreviewGatewayDependencies): FastifyInstance {
+export function buildPreviewGateway(
+  dependencies: PreviewGatewayDependencies,
+  serverOptions: FastifyServerOptions,
+): FastifyInstance {
   const { domain, shellOrigin } = dependencies;
   const gateway = Fastify({
-    ...securityServerOptions(),
+    ...serverOptions,
     logger: { serializers: { err: () => ({ type: 'Error', message: 'request_failed', stack: '' }), req: () => ({}) } },
     logController: new LogController({ disableRequestLogging: true }),
   });
@@ -223,8 +232,8 @@ export function buildPreviewGateway(dependencies: PreviewGatewayDependencies): F
 }
 
 /**
- * Hands every request for a preview host to the gateway before the API sees it. Requests for other hosts reach the
- * API unchanged.
+ * Hands every request for a preview host to the gateway before the host server's routes see it. Requests for other
+ * hosts reach the host server unchanged.
  */
 export function routePreviewHosts(app: FastifyInstance, gateway: FastifyInstance, domain: string) {
   app.addHook('onRequest', async (request, reply) => {
