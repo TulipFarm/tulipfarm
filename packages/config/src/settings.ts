@@ -430,7 +430,8 @@ export const settings: readonly Setting[] = [
     requirement: 'optional',
     secret: false,
     default: 'direct',
-    description: '`direct` or `reverse-proxy`: whether the gateway trusts the forwarded client address from one proxy.',
+    description:
+      '`direct`, `reverse-proxy` (one load balancer), or `cloudfront` (CloudFront, then a load balancer): which forwarded hops the gateway trusts for the client address.',
   },
   {
     name: 'TEMPORAL_UI_URL',

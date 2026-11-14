@@ -4,12 +4,16 @@ import { captureException, startHttp, telemetryErrorCode, withTelemetryContext }
 import { StorageUnavailableError, transientStorageError, withCallerSignal } from '@tulipfarm/workspace-storage/runtime';
 
 export function gatewayServerOptions(env: NodeJS.ProcessEnv): FastifyServerOptions {
-  const proxied = z.enum(['direct', 'reverse-proxy']).parse(env.GATEWAY_PROXY_MODE ?? 'direct') !== 'direct';
+  const mode = z.enum(['direct', 'reverse-proxy', 'cloudfront']).parse(env.GATEWAY_PROXY_MODE ?? 'direct');
+  const proxied = mode !== 'direct';
+  // Each trusted proxy appends the address it received from as the rightmost forwarded hop. Behind CloudFront and a load
+  // balancer, the balancer appends the CloudFront edge and CloudFront appends the client, so the client is the second
+  // hop from the right. Anything further left is whatever the client sent and is never trusted.
+  const trustedHops = { direct: 0, 'reverse-proxy': 1, cloudfront: 2 }[mode];
   // Behind a load balancer, idle connections outlive its idle timeout (AWS ALB: 60 s) so it never reuses a socket the
   // gateway is closing.
   return {
-    // The single trusted proxy appends the client address as the rightmost forwarded hop.
-    trustProxy: proxied ? (_address, hop) => hop === 0 : false,
+    trustProxy: proxied ? (_address, hop) => hop < trustedHops : false,
     bodyLimit: 1_048_576,
     requestTimeout: 30_000,
     connectionTimeout: proxied ? 70_000 : 60_000,

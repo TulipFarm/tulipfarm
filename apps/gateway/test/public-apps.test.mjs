@@ -6,6 +6,7 @@ import { test } from 'node:test';
 import { AppHostUnavailableError } from '@tulipfarm/extensions';
 import { buildGateway } from '../src/gateway.ts';
 import { appCookies } from '../src/forward.ts';
+import { gatewayServerOptions } from '../src/http.ts';
 import { appNameOf, buildPublicAppsGateway } from '../src/public-apps.ts';
 
 const workspaceId = '11111111-1111-4111-8111-111111111111';
@@ -104,7 +105,7 @@ async function gatewayFor(t, options = {}) {
       },
       wakeBudgetMs: 1_500,
     },
-    serverOptions: {},
+    serverOptions: options.serverOptions ?? {},
     identity: { version: 'development', commit: 'development' },
   });
   await gateway.listen({ host: '127.0.0.1', port: 0 });
@@ -301,13 +302,14 @@ test('a stale endpoint is replaced once and the request sent again', async t => 
 });
 
 /** Opens a WebSocket by hand, since a browser-style client cannot name the app's host, and sends one text frame. */
-function echo(port, text) {
+function echo(port, text, headers = {}) {
   return new Promise((resolve, reject) => {
     const outgoing = request({
       host: '127.0.0.1',
       port,
       path: '/live',
       headers: {
+        ...headers,
         host,
         connection: 'Upgrade',
         upgrade: 'websocket',
@@ -387,4 +389,64 @@ test('one client is limited to 1,200 requests a minute', async t => {
   const limited = await send();
   assert.equal(limited.statusCode, 429);
   assert.deepEqual(limited.json(), { error: 'rate-limit-exceeded' });
+});
+
+/** What the load balancer sends when a client that forged its own hop reaches it through a CloudFront edge. */
+const throughEdge = client => ({ 'x-forwarded-for': `198.51.100.66, ${client}, 192.0.2.10` });
+
+test('behind CloudFront and a load balancer the client is the second forwarded hop', async t => {
+  const proxied = mode => ({ serverOptions: gatewayServerOptions({ GATEWAY_PROXY_MODE: mode }) });
+  for (const [mode, forwardedFor] of [
+    ['cloudfront', '203.0.113.7'],
+    ['reverse-proxy', '192.0.2.10'],
+    ['direct', '127.0.0.1'],
+  ]) {
+    await t.test(mode, async t => {
+      const { port, upstream } = await gatewayFor(t, { ...proxied(mode), running: true });
+      assert.equal((await call(port, { headers: throughEdge('203.0.113.7') })).status, 201);
+      assert.deepEqual(await echo(port, 'ping', throughEdge('203.0.113.7')), { status: 101, text: 'ping' });
+      assert.deepEqual(
+        upstream.seen.map(seen => seen['x-forwarded-for']),
+        [forwardedFor, forwardedFor],
+      );
+    });
+  }
+  assert.throws(() => gatewayServerOptions({ GATEWAY_PROXY_MODE: 'true' }));
+});
+
+test('two clients behind the same CloudFront edge have separate request limits', async t => {
+  const { http } = buildPublicAppsGateway(
+    { domain: 'apps.tulipfarm.test', route: async () => null, enabled: async () => true, host: {} },
+    gatewayServerOptions({ GATEWAY_PROXY_MODE: 'cloudfront' }),
+  );
+  t.after(() => http.close());
+  const send = client =>
+    http.inject({ url: '/', remoteAddress: '10.0.1.5', headers: { host, ...throughEdge(client) } });
+  for (let sent = 0; sent < 1_200; sent += 1) assert.equal((await send('203.0.113.7')).statusCode, 404);
+  assert.equal((await send('203.0.113.7')).statusCode, 429);
+  assert.equal((await send('203.0.113.8')).statusCode, 404);
+});
+
+test('two clients behind the same CloudFront edge have separate WebSocket limits', async t => {
+  const { port } = await gatewayFor(t, { serverOptions: gatewayServerOptions({ GATEWAY_PROXY_MODE: 'cloudfront' }) });
+  const open = client =>
+    new Promise((resolve, reject) => {
+      const headers = {
+        host: 'acme-web.apps.tulipfarm.test',
+        connection: 'Upgrade',
+        upgrade: 'websocket',
+        'sec-websocket-key': randomBytes(16).toString('base64'),
+        'sec-websocket-version': '13',
+        ...throughEdge(client),
+      };
+      const outgoing = request({ host: '127.0.0.1', port, headers, agent: false }, response => {
+        response.resume();
+        resolve(response.statusCode);
+      });
+      outgoing.on('error', reject);
+      outgoing.end();
+    });
+  for (let opened = 0; opened < 120; opened += 1) assert.equal(await open('203.0.113.7'), 404);
+  assert.equal(await open('203.0.113.7'), 429);
+  assert.equal(await open('203.0.113.8'), 404);
 });
