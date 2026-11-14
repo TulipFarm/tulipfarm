@@ -315,6 +315,10 @@
       "types": "./dist/app-tools.d.ts",
       "default": "./dist/app-tools.js"
     },
+    "./app-page-tools": {
+      "types": "./dist/app-page-tools.d.ts",
+      "default": "./dist/app-page-tools.js"
+    },
     "./coding-runs": {
       "types": "./dist/coding-runs.d.ts",
       "default": "./dist/coding-runs.js"

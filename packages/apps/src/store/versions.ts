@@ -102,16 +102,6 @@ export async function readLiveVersion(
   return row ?? null;
 }
 
-/** The saved draft's pages, or null while the draft has none. Not checked: an edit run may have saved anything. */
-export async function readDraftDefinition(tx: AppTransaction, appId: AppId): Promise<unknown> {
-  const [row] = await rows<{ definition: unknown }>(
-    tx,
-    `SELECT definition FROM ${table(tx, 'tf_app_drafts')} WHERE app_id = $1`,
-    [appId],
-  );
-  return row?.definition ?? null;
-}
-
 /**
  * Records references a version names that no longer exist and returns the ones recorded for the first time, so a
  * caller tells editors about each broken reference once.
@@ -202,7 +192,7 @@ async function admitVersion(
   if (!chosen.ok) return chosen;
   const checked = checkAppDefinition(chosen.definition);
   if (!checked.ok) return invalid(checked.issues);
-  const missing = await missingReferences(tx, appDefinitionReferences(checked.definition));
+  const missing = await missingAppReferences(tx, checked.definition);
   if (missing.length) return invalid(missing);
 
   const versionId = randomUUID();
@@ -303,11 +293,12 @@ function queryFieldIds(query: unknown): string[] {
   return ids;
 }
 
-/** The references that no longer name a live record, as issues at the place the definition uses them. */
-async function missingReferences(
+/** The records the definition names that no longer exist, as issues at the place the definition uses them. */
+export async function missingAppReferences(
   tx: AppTransaction,
-  references: { reference: AppReference; path: string }[],
+  definition: AppDefinition,
 ): Promise<AppDefinitionIssue[]> {
+  const references = appDefinitionReferences(definition);
   const absent = await absentReferences(
     tx,
     references.map(({ reference }) => reference),

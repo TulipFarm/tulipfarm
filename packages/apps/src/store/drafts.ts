@@ -77,6 +77,19 @@ export async function readDraft(tx: AppTransaction, appId: AppId, lock = false):
   return row ? draftOf(row) : null;
 }
 
+/** A private app's draft pages as last written, unchecked, with the revision a replace must name. */
+export async function readDraftDefinition(
+  tx: AppTransaction,
+  appId: AppId,
+): Promise<{ readonly revision: number; readonly definition: unknown } | null> {
+  const [row] = await rows<{ revision: string; definition: unknown }>(
+    tx,
+    `SELECT revision, definition FROM ${table(tx, 'tf_app_drafts')} WHERE app_id = $1`,
+    [appId],
+  );
+  return row ? { revision: Number(row.revision), definition: row.definition } : null;
+}
+
 export type AppStagedChange = { readonly path: string; readonly content: Uint8Array | null };
 
 export async function readStagedChanges(tx: AppTransaction, appId: AppId, leaseId: string): Promise<AppStagedChange[]> {
@@ -187,6 +200,40 @@ export function treeLimitFailure(tree: ReadonlyMap<string, number>): AppFailure 
       retryable: false,
     };
   return null;
+}
+
+/** Most bytes a private app's draft pages may take as JSON. */
+export const appDefinitionBytes = 1024 * 1024;
+
+/**
+ * Writes a private app's draft pages for a chat, taking the lease if it is free. The pages are kept even when they do
+ * not pass the check yet, so an editor can build them up across calls; publishing checks them again.
+ */
+export async function writeDraftDefinition(
+  tx: AppTransaction,
+  input: {
+    readonly appId: AppId;
+    readonly conversationId: string;
+    readonly membershipId: MembershipId;
+    readonly expectedRevision: number;
+    readonly definition: unknown;
+  },
+): Promise<AppResult<{ readonly revision: number }>> {
+  const json = JSON.stringify(input.definition);
+  if (Buffer.byteLength(json) > appDefinitionBytes)
+    return failed('limit-exceeded', `An app's pages can take at most ${appDefinitionBytes} bytes`);
+  const lease = await takeLease(tx, input);
+  if (!lease.ok) return lease;
+  if (lease.revision !== input.expectedRevision)
+    return failed('stale-draft', `The draft is at revision ${lease.revision}. Read it again, then replace the page.`);
+  const [written] = await rows<{ revision: string }>(
+    tx,
+    `UPDATE ${table(tx, 'tf_app_drafts')} SET definition = $2::jsonb, revision = revision + 1,
+       updated_at = clock_timestamp()
+     WHERE app_id = $1 RETURNING revision`,
+    [input.appId, json],
+  );
+  return { ok: true, revision: Number(written!.revision) };
 }
 
 /** Drops what a cancelled or failed turn staged and frees the lease. The saved draft and the live app are untouched. */

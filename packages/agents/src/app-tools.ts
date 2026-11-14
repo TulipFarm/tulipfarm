@@ -362,7 +362,8 @@ export function createAppEditing(runtime: AgentStorage, options: AppEditingOptio
 }
 export type AppEditing = ReturnType<typeof createAppEditing>;
 
-async function chatApp(tx: AppTransaction, conversationId: string) {
+/** The app a chat belongs to, or null for any other chat. */
+export async function chatApp(tx: AppTransaction, conversationId: string) {
   const found = await tx.client.query(`SELECT app_id FROM ${table(tx, 'tf_conversations')} WHERE id = $1`, [
     conversationId,
   ]);

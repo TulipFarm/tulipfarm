@@ -92,8 +92,9 @@ import { conversationInventoryReads, type ConversationInventoryReads } from './c
 import { secretsServices } from './secrets-composition.ts';
 import { heldSecrets } from '@tulipfarm/secrets/send';
 import { resumeApiCall, type ApiCallFiles } from '@tulipfarm/api-calls';
+import type { AppPages } from '@tulipfarm/agents/app-page-tools';
 import type { AppEditing } from '@tulipfarm/agents/app-tools';
-import { appEditingFromEnvironment, finishAppTurn } from './app-editing-composition.ts';
+import { appEditingFromEnvironment, finishAppTurn, workerAppPages } from './app-editing-composition.ts';
 
 /** The first-turn title is short, so it uses the title role's family. Without a model for it, the title uses the chat model. */
 export function chatTitleModel(env: NodeJS.ProcessEnv = process.env): ConversationModel | undefined {
@@ -123,8 +124,10 @@ export type MeteredReplyOptions = {
   chatExecution?: ChatExecution | undefined;
   /** Runs `coding.run` agents; without it, chat does not offer the tool. */
   codingRuns?: CodingRuns | undefined;
-  /** Edits the app of an app's own chat; without it, chat does not offer the app tools. */
+  /** Edits the public app of an app's own chat; without it, chat does not offer the app file tools. */
   apps?: AppEditing | undefined;
+  /** Edits the private app of an app's own chat; without it, chat does not offer the app page tools. */
+  appPages?: AppPages | undefined;
   wakePlan?: PlanWake | undefined;
   wakeTask?: TaskWake | undefined;
   /** Delivers per-card Stop requests to running sub-agents. */
@@ -173,6 +176,7 @@ export function meteredReply(
     chatExecution,
     codingRuns,
     apps,
+    appPages,
     wakePlan,
     wakeTask,
     subagentStops = (sharedSubagentStops ??= createSubagentStops()),
@@ -353,14 +357,13 @@ export function meteredReply(
     let delegations = 0;
     // A coding run uses the member's own plan and GitHub account, so only in their own chat in the app.
     const codingRunTools = requester && !externalContext && !project ? codingRuns : undefined;
-    const appTools =
-      apps &&
-      requester?.kind === 'human' &&
-      !externalContext &&
-      !project &&
-      (await apps.admitted({ workspaceId: fence.workspaceId, actor: requester, conversationId: fence.conversationId }))
-        ? apps
+    const appChat =
+      requester?.kind === 'human' && !externalContext && !project
+        ? { workspaceId: fence.workspaceId, actor: requester, conversationId: fence.conversationId }
         : undefined;
+    const appTools = apps && appChat && (await apps.admitted(appChat)) ? apps : undefined;
+    const pageTools = !appTools && appPages && appChat && (await appPages.admitted(appChat)) ? appPages : undefined;
+    const appKind = appTools ? 'public' : pageTools ? 'private' : undefined;
     const chatToolOptions = (
       toolRuntime: Parameters<typeof createChatTools>[0],
       tool?: string,
@@ -385,6 +388,7 @@ export function meteredReply(
       chatExecution,
       codingRuns: codingRunTools,
       apps: appTools,
+      appPages: pageTools,
       telemetryRuntime: externalContext ? 'slack' : 'chat',
       wakePlan,
       agentSetup: slackAgentSetupFromEnvironment(toolRuntime),
@@ -534,7 +538,7 @@ export function meteredReply(
               waitingRowCards,
               chatFiles: chatFilesOffered && Boolean(chatFiles),
               codingRuns: codingRunsOffered && Boolean(codingRunTools),
-              apps: Boolean(appTools),
+              apps: appKind,
               ...(answerText ? { answerText } : {}),
               ...(layoutPreview ? { layoutPreview } : {}),
               progress,
@@ -571,7 +575,7 @@ export function meteredReply(
               waitingRowCards,
               chatFiles: chatFilesOffered && Boolean(chatFiles),
               codingRuns: codingRunsOffered && Boolean(codingRunTools),
-              apps: Boolean(appTools),
+              apps: appKind,
               ...(externalContext ? { preloadedTools: ['slack.thread.react'] } : {}),
               ...(answerText ? { answerText } : {}),
               ...(layoutPreview ? { layoutPreview } : {}),
@@ -625,6 +629,7 @@ export function createConversationActivities(
   chatExecution?: ChatExecution,
   codingRuns?: CodingRunsFactory,
   apps: AppEditing | undefined = appEditingFromEnvironment(storage),
+  appPages: AppPages | undefined = workerAppPages(storage),
 ) {
   const runtime = withFileSources(withKnowledgeSourceAuthorization(withGitHubSourceAuthorization(storage)));
   const slack = slackActionsFromEnvironment()?.(runtime);
@@ -661,6 +666,7 @@ export function createConversationActivities(
             chatExecution,
             codingRuns: coding,
             apps,
+            appPages,
             wakePlan,
             wakeTask,
             inventory,
@@ -737,7 +743,7 @@ export function createConversationActivities(
         coding,
       );
       const result = await process(executor, parsed);
-      if (apps) await finishAppTurn(storage, apps, parsed);
+      await finishAppTurn(storage, { apps, pages: appPages }, parsed);
       return result;
     });
   return {

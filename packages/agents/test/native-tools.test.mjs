@@ -86,16 +86,27 @@ test('native tool names and descriptions follow the registered chat tools', t =>
       else process.env[name] = previous;
     });
   }
-  const { tools } = nativeChatTools(undefined, true, undefined, true, true, true);
+  const { tools } = nativeChatTools(undefined, true, undefined, true, true, 'public');
   const registered = chatCallSchema.options
     .map(option => option.shape.tool.value)
     .filter(tool => !tool.startsWith('mcp.'));
+  const pageTools = ['apps.page.read', 'apps.page.replace', 'apps.page.check'];
   assert.deepEqual(
     tools.map(tool => tool.name),
-    registered.map(nativeToolName),
+    registered.filter(tool => !pageTools.includes(tool)).map(nativeToolName),
   );
+  const privateTools = nativeChatTools(undefined, true, undefined, true, true, 'private').tools;
+  const privateNames = privateTools.map(tool => tool.name);
+  assert.deepEqual(
+    pageTools.map(nativeToolName).filter(name => privateNames.includes(name)),
+    ['apps_page_read', 'apps_page_replace', 'apps_page_check'],
+  );
+  assert.equal(privateNames.includes('apps_files_write'), false);
   for (const tool of registered)
-    assert.equal(tools.find(candidate => candidate.name === nativeToolName(tool)).description, toolDescription(tool));
+    assert.equal(
+      [...tools, ...privateTools].find(candidate => candidate.name === nativeToolName(tool)).description,
+      toolDescription(tool),
+    );
   assert.equal(nativeToolName('google.calendar.read'), 'google_calendar_read');
 });
 

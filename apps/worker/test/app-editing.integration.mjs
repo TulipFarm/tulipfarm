@@ -177,6 +177,47 @@ test('an app chat turn edits its app, and only a turn that completes saves', { t
     assert.deepEqual(appToolNames(off.requests[0]), []);
   });
 
+  await t.test('a private app chat turn replaces a page and frees the draft when it completes', async () => {
+    const privateApp = await createApp(platform, {
+      id: randomUUID(),
+      kind: 'private',
+      slug: 'deals',
+      title: 'Deals',
+      createdBy: w.membershipId,
+    });
+    const page = {
+      id: 'home',
+      slug: 'home',
+      title: 'Home',
+      sources: [],
+      actions: [],
+      surface: [
+        {
+          version: '1.0',
+          createSurface: {
+            surfaceId: 'home',
+            catalogId: 'tulipfarm/apps@1',
+            components: [{ id: 'root', component: 'Text', text: 'Open deals' }],
+          },
+        },
+      ],
+    };
+    const { result, requests } = await turn(await chat(privateApp.app.id), n =>
+      n === 1
+        ? Response.json(anthropicChat({ kind: 'tool', call: { tool: 'apps.page.replace', page, expectedRevision: 0 } }))
+        : answer('Done.'),
+    );
+    assert.equal(result, 'completed');
+    assert.deepEqual(appToolNames(requests[0]), ['apps_page_read', 'apps_page_replace', 'apps_page_check']);
+    const [replaced] = requests[1].messages.at(-1).content;
+    assert.match(replaced.content, /apps\.page\.replace: \{"revision":1,"issues":\[\],/);
+    const { rows } = await f.db.platform.query(
+      `SELECT revision, lease_id, definition FROM ${f.table('tf_app_drafts')} WHERE app_id = $1`,
+      [privateApp.app.id],
+    );
+    assert.deepEqual(rows, [{ revision: '1', lease_id: null, definition: { pages: [page] } }]);
+  });
+
   await t.test('building the app queues a build of the saved commit with the recipe in its app.json', async () => {
     const started = [];
     const apps = workerAppEditing(
