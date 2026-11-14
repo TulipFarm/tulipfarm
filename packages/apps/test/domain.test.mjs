@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { appBuildId, appNameSchema, appSlugSchema, commitSchema, edgeStatus, readAppRecipe } from '../src/index.ts';
+import {
+  appBuildId,
+  appNameSchema,
+  appSlugSchema,
+  commitSchema,
+  edgeStatus,
+  readAppRecipe,
+  recipeBuilder,
+} from '../src/index.ts';
 
 const commit = commitSchema.parse('a'.repeat(40));
 
@@ -45,6 +53,77 @@ test('a command recipe names its runtime, command and output directory', () => {
       recipe: { kind: 'command', runtime: 'node22', install: 'npm ci', command: 'npm run build', output: 'dist' },
     },
   );
+});
+
+test('a server recipe names its runtime, optional build steps, and the port and command it serves on', () => {
+  assert.deepEqual(
+    readAppRecipe(
+      '{"kind":"server","runtime":"node22","install":"npm ci","command":"npm run build","serve":{"port":3000,"start":"node server.js"}}',
+    ),
+    {
+      ok: true,
+      recipe: {
+        kind: 'server',
+        runtime: 'node22',
+        install: 'npm ci',
+        command: 'npm run build',
+        serve: { port: 3000, start: 'node server.js' },
+      },
+    },
+  );
+  assert.deepEqual(readAppRecipe('{"kind":"server","runtime":"node22","serve":{"port":1024,"start":"npm start"}}'), {
+    ok: true,
+    recipe: { kind: 'server', runtime: 'node22', serve: { port: 1024, start: 'npm start' } },
+  });
+  assert.deepEqual(
+    readAppRecipe('{"kind":"server","runtime":"node22","serve":{"port":65535,"start":"npm start"}}').recipe.serve,
+    { port: 65535, start: 'npm start' },
+  );
+});
+
+test('a server recipe needs a port from 1024 to 65535 and a start command', () => {
+  const server = serve => readAppRecipe(JSON.stringify({ kind: 'server', runtime: 'node22', serve }));
+  const failure = message => ({ ok: false, failure: { code: 'recipe-invalid', message, retryable: false } });
+  const badPort = failure('app.json serve.port: Use a whole number port from 1024 to 65535');
+  const badStart = failure('app.json serve.start: Name the command that starts the server');
+  for (const port of [1023, 65536, 0, -1, 3000.5, '3000', null])
+    assert.deepEqual(server({ port, start: 'npm start' }), badPort, String(port));
+  assert.deepEqual(server({ start: 'npm start' }), badPort);
+  for (const start of ['', '   ', 42]) assert.deepEqual(server({ port: 3000, start }), badStart, JSON.stringify(start));
+  assert.deepEqual(server({ port: 3000 }), badStart);
+  assert.deepEqual(
+    readAppRecipe('{"kind":"server","runtime":"node22"}'),
+    failure('app.json serve: Invalid input: expected object, received undefined'),
+  );
+  assert.deepEqual(
+    server({ port: 3000, start: 'npm start', env: { TOKEN: 'x' } }),
+    failure('app.json serve: Unrecognized key: "env"'),
+  );
+  assert.deepEqual(
+    readAppRecipe('{"kind":"server","runtime":"node22","output":"dist","serve":{"port":3000,"start":"npm start"}}'),
+    failure('app.json Unrecognized key: "output"'),
+  );
+});
+
+test('copy recipes build anywhere, commands need a builder, and no builder takes a server recipe', () => {
+  const server = { kind: 'server', runtime: 'node22', serve: { port: 3000, start: 'npm start' } };
+  const command = { kind: 'command', runtime: 'node22', command: 'npm run build', output: 'dist' };
+  const hostUnavailable = {
+    ok: false,
+    failure: {
+      code: 'host-unavailable',
+      message: 'This server cannot run apps that start their own server',
+      retryable: false,
+    },
+  };
+  assert.deepEqual(recipeBuilder({ kind: 'copy', root: '.' }, undefined), { ok: true, builder: 'copy' });
+  assert.deepEqual(recipeBuilder(command, 'sandbox-node22-v1'), { ok: true, builder: 'sandbox-node22-v1' });
+  assert.deepEqual(recipeBuilder(command, undefined), {
+    ok: false,
+    failure: { code: 'builder-unavailable', message: 'This server cannot run build commands', retryable: false },
+  });
+  assert.deepEqual(recipeBuilder(server, undefined), hostUnavailable);
+  assert.deepEqual(recipeBuilder(server, 'sandbox-node22-v1'), hostUnavailable);
 });
 
 test('an invalid app.json is a recipe failure that names the problem', () => {

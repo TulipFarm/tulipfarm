@@ -281,6 +281,8 @@ const failureMessages: Record<string, string> = {
     'This TulipFarm server isn’t set up to publish apps yet. Ask whoever runs your TulipFarm server to set it up.',
   'builder-unavailable':
     'This TulipFarm server isn’t set up to build apps yet. Ask whoever runs your TulipFarm server to set it up.',
+  'host-unavailable':
+    'This TulipFarm server can’t run apps that start their own server yet. Ask whoever runs your TulipFarm server about it.',
   'approval-required': 'A workspace admin must approve this app before it can go live.',
   'budget-exhausted': 'Credits are used up, so this app can’t go live right now.',
   'name-taken': 'Another app already uses this web address.',

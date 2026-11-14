@@ -289,6 +289,24 @@ test('an app chat turn edits its app, and only a turn that completes saves', { t
       { outcome: 'failed', failure_code: 'build-failed', value: 1 },
     ]);
 
+    await apps.invoke(on, {
+      tool: 'apps.files.write',
+      path: 'app.json',
+      content: JSON.stringify({ kind: 'server', runtime: 'node22', serve: { port: 3000, start: 'node server.js' } }),
+    });
+    const server = await build();
+    assert.deepEqual(
+      { status: server.status, failure: server.failure },
+      {
+        status: 'failed',
+        failure: {
+          code: 'host-unavailable',
+          message: 'This server cannot run apps that start their own server',
+          retryable: false,
+        },
+      },
+    );
+
     commandBuilder.id = undefined;
     await apps.invoke(on, {
       tool: 'apps.files.write',
