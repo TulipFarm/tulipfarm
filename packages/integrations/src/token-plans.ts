@@ -60,9 +60,12 @@ export type TokenPlanAttemptStatus = { status: 'pending' | 'completed' | 'failed
 /**
  * Checks a token with the vendor and returns the models it may use and the account it belongs to. It throws a
  * `TokenPlanError` with `token-rejected`, `not-eligible`, `rate-limited` or `unavailable`. A plan that has reached its
- * usage limit still connects: `verify` returns normally for it.
+ * usage limit still connects: `verify` returns normally for it, with `fallback` set when the vendor couldn't list the
+ * plan's own models and `models` are the catalog's instead.
  */
-export type TokenPlanVerifier = (token: string) => Promise<{ models: TokenPlanModel[]; account?: string | null }>;
+export type TokenPlanVerifier = (
+  token: string,
+) => Promise<{ models: TokenPlanModel[]; account?: string | null; fallback?: boolean }>;
 export type TokenPlanRuntime = Pick<ReturnType<typeof createWorkspaceRuntime>, 'transaction'>;
 
 const uuid = z.uuid();
@@ -74,6 +77,9 @@ const tokenFormats: Record<TokenPlanProvider, RegExp> = {
 };
 const attemptMinutes = 15;
 const modelsMaxAgeMs = 60 * 60_000;
+// Fallback models are dated back so the plan's own list is fetched again after this long, not after an hour.
+const fallbackRetryMs = 5 * 60_000;
+const fetchedAgoSeconds = (fallback: boolean | undefined) => (fallback ? (modelsMaxAgeMs - fallbackRetryMs) / 1000 : 0);
 const deviceCodeEndpoint = 'https://github.com/login/device/code';
 const deviceTokenEndpoint = 'https://github.com/login/oauth/access_token';
 const deviceVerificationUri = 'https://github.com/login/device';
@@ -237,7 +243,7 @@ export function createTokenPlan(options: {
     // A Copilot token that lists no models can't run anything, most often because the account has no Copilot plan.
     if (provider === 'copilot' && !models.length) throw failure('not-eligible');
     const account = checked.account && checked.account.length <= 320 ? checked.account : null;
-    return { models, account };
+    return { models, account, fallback: checked.fallback === true };
   }
 
   /**
@@ -251,7 +257,7 @@ export function createTokenPlan(options: {
     renewal?: Omit<Credential, 'token'>,
     githubAccountId: string | null = null,
   ) {
-    const { models, account } = await verified(token);
+    const { models, account, fallback } = await verified(token);
     await options.runtime.transaction(uuid.parse(workspaceId), commonCompatibility, async tx => {
       const row = await loadConnection(tx, membershipId, true);
       const generation = row ? row.generation + 1 : 1;
@@ -259,12 +265,21 @@ export function createTokenPlan(options: {
       const credential = githubAccountId ? null : cipher.encrypt(binding, { token, ...renewal });
       if (row)
         await tx.client.query(
-          `UPDATE ${table(tx, 'connections')} SET generation=$3,state='connected',email=$4,credential=$5,models=$6,github_account_id=$7,models_fetched_at=clock_timestamp(),cooldown_until=NULL,updated_at=clock_timestamp() WHERE owner_membership_id=$1 AND provider=$2`,
-          [membershipId, provider, generation, account, credential, JSON.stringify(models), githubAccountId],
+          `UPDATE ${table(tx, 'connections')} SET generation=$3,state='connected',email=$4,credential=$5,models=$6,github_account_id=$7,models_fetched_at=clock_timestamp()-make_interval(secs=>$8),cooldown_until=NULL,updated_at=clock_timestamp() WHERE owner_membership_id=$1 AND provider=$2`,
+          [
+            membershipId,
+            provider,
+            generation,
+            account,
+            credential,
+            JSON.stringify(models),
+            githubAccountId,
+            fetchedAgoSeconds(fallback),
+          ],
         );
       else
         await tx.client.query(
-          `INSERT INTO ${table(tx, 'connections')} (id,provider,owner_membership_id,generation,state,email,credential,models,github_account_id,models_fetched_at) VALUES ($1,$2,$3,$4,'connected',$5,$6,$7,$8,clock_timestamp())`,
+          `INSERT INTO ${table(tx, 'connections')} (id,provider,owner_membership_id,generation,state,email,credential,models,github_account_id,models_fetched_at) VALUES ($1,$2,$3,$4,'connected',$5,$6,$7,$8,clock_timestamp()-make_interval(secs=>$9))`,
           [
             randomUUID(),
             provider,
@@ -274,6 +289,7 @@ export function createTokenPlan(options: {
             credential,
             JSON.stringify(models),
             githubAccountId,
+            fetchedAgoSeconds(fallback),
           ],
         );
     });
@@ -351,20 +367,23 @@ export function createTokenPlan(options: {
     });
   }
 
-  async function refreshModels(workspaceId: string, membershipId: string) {
+  /** Fetches the plan's models again. While the vendor can't list them, the last list it gave stays. */
+  async function refreshModels(workspaceId: string, membershipId: string, current: TokenPlanModel[]) {
     const { token } = await storedToken(workspaceId, membershipId);
     let models: TokenPlanModel[];
+    let fallback: boolean;
     try {
-      ({ models } = await verified(token));
+      ({ models, fallback } = await verified(token));
     } catch (error) {
       if (error instanceof TokenPlanError && error.code === 'token-rejected')
         await markReconnect(workspaceId, membershipId);
       throw error;
     }
+    if (fallback && current.length) models = current;
     await options.runtime.transaction(uuid.parse(workspaceId), commonCompatibility, async tx => {
       await tx.client.query(
-        `UPDATE ${table(tx, 'connections')} SET models=$3,models_fetched_at=clock_timestamp() WHERE owner_membership_id=$1 AND provider=$2 AND state='connected'`,
-        [membershipId, provider, JSON.stringify(models)],
+        `UPDATE ${table(tx, 'connections')} SET models=$3,models_fetched_at=clock_timestamp()-make_interval(secs=>$4) WHERE owner_membership_id=$1 AND provider=$2 AND state='connected'`,
+        [membershipId, provider, JSON.stringify(models), fetchedAgoSeconds(fallback)],
       );
     });
     return models;
@@ -413,7 +432,7 @@ export function createTokenPlan(options: {
         (!row.models_fetched_at || Date.now() - row.models_fetched_at.getTime() > modelsMaxAgeMs);
       if (!stale) return status;
       try {
-        return { ...status, models: await refreshModels(workspaceId, membershipId) };
+        return { ...status, models: await refreshModels(workspaceId, membershipId, status.models) };
       } catch (error) {
         if (error instanceof TokenPlanError && error.code !== 'unavailable' && error.code !== 'rate-limited')
           return statusOf(await authorized(workspaceId, userId, (tx, actor) => loadConnection(tx, actor.membershipId)));

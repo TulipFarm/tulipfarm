@@ -97,3 +97,40 @@ test('a token the vendor refuses, or that is not a setup token, stores nothing',
     await db.close();
   }
 });
+
+test(
+  "a plan that can't list its models keeps its last list and asks again within minutes",
+  { timeout: 300000 },
+  async () => {
+    const db = await fixture();
+    try {
+      const fallbackModels = [{ slug: 'claude-sonnet-5', label: 'Claude Sonnet 5' }];
+      const answers = [{ models }, { models: fallbackModels, fallback: true }];
+      const plan = claudePlan(db, async () => answers.shift());
+      const fetchedAgo = () =>
+        db.owner
+          .query(
+            `SELECT EXTRACT(EPOCH FROM clock_timestamp()-models_fetched_at) AS seconds FROM ${db.table('tf_subscription_connections')}`,
+          )
+          .then(result => Number(result.rows[0].seconds));
+      const expire = () =>
+        db.owner.query(
+          `UPDATE ${db.table('tf_subscription_connections')} SET models_fetched_at=clock_timestamp()-interval '2 hours'`,
+        );
+
+      await plan.connectToken(db.workspaceId, db.actor.userId, token);
+      assert.ok((await fetchedAgo()) < 60);
+
+      await expire();
+      assert.deepEqual((await plan.status(db.workspaceId, db.actor.userId)).models, models);
+      assert.ok((await fetchedAgo()) > 50 * 60);
+
+      answers.push({ models: fallbackModels, fallback: true });
+      await plan.disconnect(db.workspaceId, db.actor.userId);
+      assert.deepEqual((await plan.connectToken(db.workspaceId, db.actor.userId, token)).models, fallbackModels);
+      assert.ok((await fetchedAgo()) > 50 * 60);
+    } finally {
+      await db.close();
+    }
+  },
+);
