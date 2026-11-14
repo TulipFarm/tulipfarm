@@ -6,6 +6,7 @@ export const appKeys = {
   all: ['apps'] as const,
   list: ['apps', 'list'] as const,
   detail: (id: string) => ['apps', 'detail', id] as const,
+  chat: (id: string) => ['apps', 'chat', id] as const,
   releases: (id: string) => ['apps', 'releases', id] as const,
   grants: (id: string) => ['apps', 'grants', id] as const,
   operation: (appId: string, id: string) => ['apps', 'operation', appId, id] as const,
@@ -28,6 +29,24 @@ export function useApp(workspaceId: string, appId: string | undefined) {
     load: signal => api.read(appId!, signal),
     enabled: appId !== undefined,
   });
+}
+
+/** Keeps an app's draft state current while chat and builds change it. */
+export function useWatchedApp(workspaceId: string, appId: string) {
+  const api = useAppApi(workspaceId);
+  return useFeatureRead({
+    key: appKeys.detail(appId),
+    load: signal => api.read(appId, signal),
+    pollWhile: () => true,
+    interval: 3000,
+    maxChecks: 2400,
+  });
+}
+
+/** The caller's own chat for editing this app, opened on first use. */
+export function useAppChat(workspaceId: string, appId: string) {
+  const api = useAppApi(workspaceId);
+  return useFeatureRead({ key: appKeys.chat(appId), load: () => api.chat(appId), staleTime: Infinity });
 }
 
 export function useAppReleases(workspaceId: string, appId: string, enabled: boolean) {

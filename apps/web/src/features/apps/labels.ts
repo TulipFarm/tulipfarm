@@ -22,6 +22,7 @@ export const draftLabels: Record<AppDraftState, string> = {
   building: 'Building',
   // oxlint-disable-next-line tulipfarm/product-copy -- A draft state identifier, not user-facing copy.
   'preview-ready': 'Built, not published',
+  live: 'No changes',
   failed: 'Build failed',
   saved: 'Saved, not built',
 };

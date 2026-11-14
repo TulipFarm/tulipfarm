@@ -182,6 +182,31 @@ test(
     const forbidden = await http(reader, 'PATCH', `/${appId}`, { title: 'Mine now' });
     assert.equal(forbidden.status, 403);
     assert.equal(forbidden.body.failure.code, 'forbidden');
+
+    assert.deepEqual(await http(editor, 'POST', `/${appId}/chat`), {
+      status: 200,
+      body: { chatId: created.body.chatId },
+    });
+    assert.deepEqual((await http(editor, 'POST', `/${appId}/chat`)).body, { chatId: created.body.chatId });
+    assert.equal((await http(reader, 'POST', `/${appId}/chat`)).status, 403);
+    assert.equal((await http(admin, 'POST', `/${appId}/chat`)).status, 403);
+    const secondId = second.body.id;
+    await http(editor, 'PUT', `/${secondId}/grants/member:${readerMembership}`, { role: 'edit' });
+    const readerChat = await http(reader, 'POST', `/${secondId}/chat`);
+    assert.equal(readerChat.status, 200);
+    assert.notEqual(readerChat.body.chatId, second.body.chatId);
+    assert.deepEqual((await http(reader, 'POST', `/${secondId}/chat`)).body, readerChat.body);
+    const { rows: chats } = await db.platform.query(
+      `SELECT owner_user_id, app_id FROM ${schema}.tf_conversations WHERE id = $1`,
+      [readerChat.body.chatId],
+    );
+    assert.deepEqual(chats, [{ owner_user_id: reader.id, app_id: secondId }]);
+    await db.platform.query(`UPDATE ${schema}.tf_conversations SET deleted_at = now() WHERE id = $1`, [
+      readerChat.body.chatId,
+    ]);
+    const reopened = await http(reader, 'POST', `/${secondId}/chat`);
+    assert.equal(reopened.status, 200);
+    assert.notEqual(reopened.body.chatId, readerChat.body.chatId);
     assert.equal(
       (await http(editor, 'PUT', `/${appId}/grants/member:6f1c2d4e-0000-4000-8000-00000000dead`, { role: 'use' }))
         .status,

@@ -48,6 +48,7 @@ const draftSchema = z.discriminatedUnion('state', [
   z.object({ ...draftBase, state: z.literal('building'), buildId: z.string() }),
   // oxlint-disable-next-line tulipfarm/product-copy -- A draft state identifier, not user-facing copy.
   z.object({ ...draftBase, state: z.literal('preview-ready'), buildId: z.string(), commit: z.string() }),
+  z.object({ ...draftBase, state: z.literal('live'), buildId: z.string(), commit: z.string() }),
   z.object({ ...draftBase, state: z.literal('failed'), failure: failureSchema }),
   z.object({ ...draftBase, state: z.literal('saved'), commit: z.string() }),
 ]);
@@ -139,6 +140,14 @@ export function appApi(workspaceId: string) {
       z
         .object({ releases: z.array(releaseSchema) })
         .parse(await request(`/${appId}/releases`, 'GET', undefined, signal)).releases,
+    chat: async (appId: string) => z.object({ chatId: z.uuid() }).parse(await request(`/${appId}/chat`, 'POST')).chatId,
+    build: async (appId: string) =>
+      z.object({ buildId: z.string() }).parse(await request(`/${appId}/builds`, 'POST', withRequestId())).buildId,
+    previewTicket: async (appId: string) =>
+      // oxlint-disable-next-line tulipfarm/product-copy -- A route, not user-facing copy.
+      z.object({ ticket: z.string(), entryUrl: z.url() }).parse(await request(`/${appId}/preview-tickets`, 'POST')),
+    publish: async (appId: string, buildId: string) =>
+      operation.parse(await request(`/${appId}/publish`, 'POST', withRequestId({ buildId }))).operation,
     rollback: async (appId: string, releaseId: string) =>
       operation.parse(await request(`/${appId}/rollback`, 'POST', withRequestId({ releaseId }))).operation,
     operation: async (appId: string, operationId: string, signal: AbortSignal) =>
