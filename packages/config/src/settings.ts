@@ -474,11 +474,11 @@ export const settings: readonly Setting[] = [
   {
     name: 'TULIPFARM_APP_SITES_DOMAIN',
     group: 'Public origins',
-    services: ['worker'],
+    services: apiWorker,
     requirement: 'optional',
     secret: false,
     description:
-      'Domain that serves published apps as subdomains. It must differ from the web app domain. Unset leaves apps unpublished unless an extension serves them.',
+      'Domain that serves published apps as subdomains; point a wildcard record at the API. It must differ from the web app domain. Unset leaves apps unpublished unless an extension serves them.',
   },
   {
     name: 'WEB_ORIGIN',
@@ -827,7 +827,7 @@ export const settings: readonly Setting[] = [
   {
     name: 'TULIPFARM_OBJECT_STORAGE_APPS_BUCKET',
     group: 'Object storage',
-    services: ['worker'],
+    services: apiWorker,
     requirement: 'optional',
     secret: false,
     description: 'Bucket for app build files and published app sites. Unset turns off app builds and publishing.',
