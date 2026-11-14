@@ -76,7 +76,7 @@ export async function captureEvidence(page, path) {
 /** A model picker row: its accessible name starts with the model's name, then any unavailable note and meters. */
 export function modelOption(page, name) {
   const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return page.getByRole('option', { name: new RegExp(`^${escaped}(?= Unavailable| Speed|$)`) });
+  return page.getByRole('option', { name: new RegExp(`^${escaped}(?= Unavailable| Speed| Quality| Cost|$)`) });
 }
 
 /** Open the chat list through the sidebar's Chats link, expanding the collapsed mobile sidebar first. */
