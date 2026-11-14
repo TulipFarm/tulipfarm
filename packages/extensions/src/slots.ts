@@ -313,6 +313,16 @@ export type AppCommandRecipe = {
   readonly output: string;
 };
 
+/** The `server` recipe from an app's `app.json`: optional build steps, then a command that listens on `port`. */
+export type AppServerRecipe = {
+  readonly kind: 'server';
+  readonly runtime: 'node22';
+  readonly install?: string | undefined;
+  readonly command?: string | undefined;
+  /** `port` is an integer from 1024 to 65535 and `start` is a non-empty command. */
+  readonly serve: { readonly port: number; readonly start: string };
+};
+
 export type AppBuildInput = {
   readonly workspaceId: string;
   readonly appId: string;
@@ -338,14 +348,33 @@ export type AppBuildResult =
       readonly units: bigint;
     };
 
+/** What a server build hands to the app host: an immutable artifact and the contract that starts it. */
+export type AppServerBuildOutput = {
+  readonly kind: 'server';
+  /** Opaque to TulipFarm, such as an image digest. The same reference always boots the same files. */
+  readonly artifact: string;
+  readonly port: number;
+  readonly start: string;
+};
+
+export type AppServerBuildResult =
+  | { readonly ok: true; readonly output: AppServerBuildOutput; readonly log: string; readonly units: bigint }
+  | Extract<AppBuildResult, { ok: false }>;
+
 /**
- * Turns an exact commit into static files. It never receives Git history or storage credentials. Without a
- * registered builder, `copy` recipes still build and `command` recipes fail.
+ * Turns an exact commit into static files or a server artifact. It never receives Git history, storage credentials
+ * or workspace data credentials. Without a registered builder, `copy` recipes still build, `command` recipes fail
+ * with `builder-unavailable` and `server` recipes fail with `host-unavailable`.
  */
 export type AppBuilder = {
   /** Stable identifier folded into the build id, such as `sandbox-node22-v1`. Changing it rebuilds every app. */
   readonly id: string;
   build(input: AppBuildInput, signal: AbortSignal): Promise<AppBuildResult>;
+  /** Runs a `server` recipe's build steps and packages the tree. TulipFarm does not call it yet. */
+  buildServer?(
+    input: Omit<AppBuildInput, 'recipe'> & { readonly recipe: AppServerRecipe },
+    signal: AbortSignal,
+  ): Promise<AppServerBuildResult>;
 };
 
 export type AppEdgeStatus = 'active' | 'paused' | 'disabled';
