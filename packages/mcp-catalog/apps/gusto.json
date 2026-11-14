@@ -1,0 +1,27 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "gusto",
+  "name": "Gusto",
+  "maker": "Gusto",
+  "homepage": "https://gusto.com",
+  "category": "hr-and-recruiting",
+  "teams": ["hr", "finance"],
+  "summary": "Look up payroll, employees, and time off",
+  "capabilities": ["Review payroll runs and costs", "Look up employees and contractors", "Check time off and benefits"],
+  "official": {
+    "evidence": "https://gusto.com/product/integrations/gusto_mcp"
+  },
+  "docs": "https://gusto.com/product/integrations/gusto_mcp",
+  "remote": {
+    "url": "https://mcp.api.gusto.com",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "simpleIcons": "gusto",
+    "color": "#F45D48"
+  },
+  "supportedBy": ["chatgpt", "claude", "microsoft-copilot", "manus", "gumloop"],
+  "featured": true
+}

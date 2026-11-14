@@ -1,0 +1,25 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "workable",
+  "name": "Workable",
+  "maker": "Workable",
+  "homepage": "https://www.workable.com",
+  "category": "hr-and-recruiting",
+  "teams": ["hr"],
+  "summary": "Manage jobs, candidates, and hiring stages",
+  "capabilities": ["Search jobs and candidates", "Move candidates between stages", "Add comments and review activity"],
+  "official": {
+    "evidence": "https://help.workable.com/hc/en-us/articles/39415735712407"
+  },
+  "docs": "https://help.workable.com/hc/en-us/articles/39415735712407",
+  "remote": {
+    "url": "https://mcp.workable.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#00756A"
+  },
+  "supportedBy": ["chatgpt", "claude", "copilot-studio", "manus", "gumloop"]
+}

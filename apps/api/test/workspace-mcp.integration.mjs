@@ -80,7 +80,11 @@ test('workspace MCP HTTP uses real restricted domain storage and never dispatche
           for (const method of Object.keys(methods)) {
             if (!['get', 'post', 'put', 'delete'].includes(method)) continue;
             const response = await app.inject({ method: method.toUpperCase(), url, headers: { origin } });
-            assert.equal(response.statusCode, 401, `${method} ${url}: ${response.body}`);
+            if (url.endsWith('/oauth/callback')) {
+              // The provider sends the browser here, so a signed-out visit lands on a web page instead.
+              assert.equal(response.statusCode, 303, `${method} ${url}: ${response.body}`);
+              assert.match(response.headers.location, /outcome=sign-in-required/);
+            } else assert.equal(response.statusCode, 401, `${method} ${url}: ${response.body}`);
             assert.equal(response.headers['cache-control'], 'no-store');
             if (method !== 'get') {
               const denied = await app.inject({
@@ -110,7 +114,7 @@ test('workspace MCP HTTP uses real restricted domain storage and never dispatche
       const created = await request({ method: 'POST', url: `${base}/integrations`, payload }, 200);
       integration = created.integration;
       assert.equal(created.kind, 'saved');
-      assert.equal(integration.status, 'review-required');
+      assert.equal(integration.status, 'ready');
       assert.deepEqual(
         remote.requests.map(request => request.method),
         ['initialize', 'notifications/initialized', 'tools/list'],
@@ -174,7 +178,7 @@ test('workspace MCP HTTP uses real restricted domain storage and never dispatche
         remote.setFailure(false);
         const recovered = await request({ method: 'POST', url: `${base}/integrations`, payload }, 200);
         assert.equal(recovered.integration.id, saved.id);
-        assert.equal(recovered.integration.status, 'review-required');
+        assert.equal(recovered.integration.status, 'ready');
         const after = (
           await f.db.platform.query(
             `SELECT credential,secret_version,authorization_epoch,version FROM ${f.table('integrations')} WHERE id=$1`,
@@ -206,7 +210,7 @@ test('workspace MCP HTTP uses real restricted domain storage and never dispatche
           { method: 'POST', url: `${base}/integrations/${saved.id}/setup`, payload: replacement },
           200,
         );
-        assert.equal(retried.integration.status, 'review-required');
+        assert.equal(retried.integration.status, 'ready');
         assert.equal((await f.service.status(f.one.id, member, saved.id)).secretVersion, replaced.secretVersion);
         assert.equal(retried.integration.authorizationEpoch, replaced.authorizationEpoch);
         await request(
@@ -233,6 +237,43 @@ test('workspace MCP HTTP uses real restricted domain storage and never dispatche
       const created = await request({ method: 'POST', url: `${base}/integrations`, payload }, 200);
       assert.equal(created.integration.status, 'review-required');
       assert.deepEqual((await request({ url: `${base}/integrations/${created.integration.id}` }, 200)).tools, []);
+      remote.resetTools();
+    });
+    await t.test('tool views carry the server’s title and read or delete hints', async () => {
+      const schema = { type: 'object', additionalProperties: false };
+      remote.setTools([
+        {
+          name: 'list',
+          description: 'List',
+          inputSchema: schema,
+          annotations: { title: 'List records', readOnlyHint: true },
+        },
+        { name: 'drop', description: 'Drop', inputSchema: schema, annotations: { destructiveHint: true } },
+        { name: 'save', description: 'Save', inputSchema: schema },
+      ]);
+      const created = await request(
+        {
+          method: 'POST',
+          url: `${base}/integrations`,
+          payload: {
+            requestId: randomUUID(),
+            name: 'Hinted server',
+            ownership: 'personal',
+            endpoint: 'https://mcp.example.com/hinted',
+            auth: { kind: 'none' },
+          },
+        },
+        200,
+      );
+      const { tools } = await request({ url: `${base}/integrations/${created.integration.id}` }, 200);
+      assert.deepEqual(
+        tools.map(({ name, title, readOnly, destructive }) => ({ name, title, readOnly, destructive })),
+        [
+          { name: 'drop', title: null, readOnly: false, destructive: true },
+          { name: 'list', title: 'List records', readOnly: true, destructive: false },
+          { name: 'save', title: null, readOnly: false, destructive: false },
+        ],
+      );
       remote.resetTools();
     });
     await t.test(
@@ -302,7 +343,7 @@ test('workspace MCP HTTP uses real restricted domain storage and never dispatche
         );
       }
     });
-    await t.test('discovery starts disabled, exact review enables tools, and stale mutation conflicts', async () => {
+    await t.test('discovery turns tools on, exact review changes them, and stale mutation conflicts', async () => {
       const item = `${base}/integrations/${integration.id}`;
       const discovered = await request(
         {
@@ -313,7 +354,7 @@ test('workspace MCP HTTP uses real restricted domain storage and never dispatche
         200,
       );
       assert.ok(discovered.tools.length);
-      assert.ok(discovered.tools.every(tool => !tool.enabled && !tool.standingException));
+      assert.ok(discovered.tools.every(tool => tool.enabled && !tool.standingException));
       const payload = {
         requestId: randomUUID(),
         expectedVersion: discovered.integration.version,

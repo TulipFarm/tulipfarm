@@ -1,0 +1,28 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "honeybadger",
+  "name": "Honeybadger",
+  "maker": "Honeybadger",
+  "homepage": "https://www.honeybadger.io",
+  "category": "monitoring-and-analytics",
+  "teams": ["engineering"],
+  "summary": "Investigate Honeybadger errors and uptime",
+  "capabilities": ["Find and read error faults and notices", "Check uptime and check-ins", "Read project details"],
+  "official": {
+    "evidence": "https://github.com/honeybadger-io/honeybadger-mcp-server",
+    "repository": "https://github.com/honeybadger-io/honeybadger-mcp-server"
+  },
+  "docs": "https://github.com/honeybadger-io/honeybadger-mcp-server",
+  "remote": {
+    "url": "https://mcp.honeybadger.io/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "io.honeybadger/mcp",
+  "icons": {
+    "simpleIcons": "honeybadger",
+    "color": "#EA5937"
+  },
+  "supportedBy": ["claude", "lindy", "relevance-ai", "github-registry"]
+}

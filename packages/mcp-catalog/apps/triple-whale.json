@@ -1,0 +1,30 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "triple-whale",
+  "name": "Triple Whale",
+  "maker": "Triple Whale",
+  "homepage": "https://www.triplewhale.com",
+  "category": "marketing",
+  "teams": ["marketing", "finance"],
+  "summary": "Ask questions about ecommerce and ad performance",
+  "capabilities": [
+    "Report on revenue, orders, and ROAS",
+    "Compare ad spend across channels",
+    "Analyse product and customer metrics"
+  ],
+  "official": {
+    "evidence": "https://kb.triplewhale.com/en/articles/15656798-triple-whale-mcp",
+    "repository": "https://github.com/Triple-Whale/mcp-server-triplewhale"
+  },
+  "docs": "https://kb.triplewhale.com/en/articles/15463483-how-to-connect-triple-whale-to-claude-with-the-mcp",
+  "remote": {
+    "url": "https://mcp.triplewhale.com/sse",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#1F69FF"
+  },
+  "supportedBy": ["claude", "docker"]
+}

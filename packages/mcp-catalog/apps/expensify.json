@@ -1,0 +1,30 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "expensify",
+  "name": "Expensify",
+  "maker": "Expensify",
+  "homepage": "https://www.expensify.com",
+  "category": "finance-and-accounting",
+  "teams": ["finance", "everyone"],
+  "summary": "Look up expenses and reports",
+  "capabilities": [
+    "Search expenses and receipts",
+    "Review expense reports and their status",
+    "Summarise spend by category or merchant"
+  ],
+  "official": {
+    "evidence": "https://help.expensify.com/articles/new-expensify/connections/connect-ai-assistants/Use-the-Expensify-MCP-Server-With-AI-Assistants"
+  },
+  "docs": "https://help.expensify.com/articles/new-expensify/connections/connect-ai-assistants/Use-the-Expensify-MCP-Server-With-AI-Assistants",
+  "remote": {
+    "url": "https://www.expensify.com/mcp/",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "simpleIcons": "expensify",
+    "color": "#0185FF"
+  },
+  "supportedBy": ["claude", "lindy", "gumloop", "relevance-ai"]
+}

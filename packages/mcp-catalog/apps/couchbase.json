@@ -1,0 +1,47 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "couchbase",
+  "name": "Couchbase",
+  "maker": "Couchbase",
+  "homepage": "https://www.couchbase.com",
+  "category": "data-and-databases",
+  "teams": ["engineering"],
+  "summary": "Query and manage documents in Couchbase",
+  "capabilities": ["List buckets, scopes, and collections", "Run SQL++ queries", "Get, upsert, and delete documents"],
+  "official": {
+    "evidence": "https://github.com/couchbase/mcp-server-couchbase",
+    "repository": "https://github.com/couchbase/mcp-server-couchbase"
+  },
+  "docs": "https://github.com/couchbase/mcp-server-couchbase",
+  "packages": [
+    {
+      "registry": "pypi",
+      "name": "couchbase-mcp-server",
+      "env": [
+        {
+          "name": "CB_CONNECTION_STRING",
+          "description": "Connection string",
+          "secret": false,
+          "required": true
+        },
+        {
+          "name": "CB_USERNAME",
+          "description": "Username",
+          "secret": false,
+          "required": true
+        },
+        {
+          "name": "CB_PASSWORD",
+          "description": "Password",
+          "secret": true,
+          "required": true
+        }
+      ]
+    }
+  ],
+  "icons": {
+    "simpleIcons": "couchbase",
+    "color": "#EA2328"
+  },
+  "supportedBy": ["docker"]
+}

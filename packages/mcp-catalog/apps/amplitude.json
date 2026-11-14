@@ -1,0 +1,36 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "amplitude",
+  "name": "Amplitude",
+  "maker": "Amplitude",
+  "homepage": "https://amplitude.com",
+  "category": "monitoring-and-analytics",
+  "teams": ["product", "marketing"],
+  "summary": "Query Amplitude charts, dashboards, and experiments",
+  "capabilities": ["Search charts, dashboards, and cohorts", "Run analytics queries", "Check experiment results"],
+  "official": {
+    "evidence": "https://amplitude.com/docs/amplitude-ai/amplitude-mcp"
+  },
+  "docs": "https://amplitude.com/docs/amplitude-ai/amplitude-mcp",
+  "remote": {
+    "url": "https://mcp.amplitude.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "com.amplitude/mcp-server",
+  "icons": {
+    "color": "#1E61F0"
+  },
+  "supportedBy": [
+    "chatgpt",
+    "claude",
+    "notion-ai",
+    "manus",
+    "lindy",
+    "gumloop",
+    "relevance-ai",
+    "glean",
+    "github-registry"
+  ]
+}

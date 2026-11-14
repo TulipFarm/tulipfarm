@@ -1,0 +1,29 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "gamma",
+  "name": "Gamma",
+  "maker": "Gamma",
+  "homepage": "https://gamma.app",
+  "category": "design",
+  "teams": ["marketing", "sales", "everyone"],
+  "summary": "Generate presentations, docs and sites with Gamma",
+  "capabilities": [
+    "Generate decks, docs and webpages from text",
+    "Apply themes and formats",
+    "Export to PDF or PowerPoint"
+  ],
+  "official": {
+    "evidence": "https://developers.gamma.app/mcp/gamma-mcp-server"
+  },
+  "docs": "https://developers.gamma.app/mcp/gamma-mcp-server",
+  "remote": {
+    "url": "https://mcp.gamma.app/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#7C3AED"
+  },
+  "supportedBy": ["chatgpt", "claude", "microsoft-copilot", "manus", "lindy", "gumloop", "glean"]
+}

@@ -1,0 +1,59 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "snowflake",
+  "name": "Snowflake",
+  "maker": "Snowflake",
+  "homepage": "https://www.snowflake.com",
+  "category": "data-and-databases",
+  "teams": ["engineering", "operations", "finance"],
+  "summary": "Query Snowflake data with SQL and Cortex agents",
+  "capabilities": [
+    "Run SQL against warehouses you can access",
+    "Ask Cortex Analyst questions over semantic views",
+    "Search unstructured data with Cortex Search",
+    "Call Cortex Agents and custom tools"
+  ],
+  "official": {
+    "evidence": "https://docs.snowflake.com/en/user-guide/snowflake-cortex/cortex-agents-mcp",
+    "repository": "https://github.com/Snowflake-Labs/mcp"
+  },
+  "docs": "https://docs.snowflake.com/en/user-guide/snowflake-cortex/cortex-agents-mcp",
+  "remote": {
+    "url": "https://{account}.snowflakecomputing.com/api/v2/databases/{database}/schemas/{schema}/mcp-servers/{name}",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "variables": [
+      {
+        "name": "account",
+        "description": "Your Snowflake account identifier",
+        "example": "myorg-myaccount"
+      },
+      {
+        "name": "database",
+        "description": "Database that holds the MCP server"
+      },
+      {
+        "name": "schema",
+        "description": "Schema that holds the MCP server"
+      },
+      {
+        "name": "name",
+        "description": "Name of the MCP server object"
+      }
+    ]
+  },
+  "packages": [
+    {
+      "registry": "pypi",
+      "name": "snowflake-labs-mcp"
+    }
+  ],
+  "registryName": "io.github.Snowflake-Labs/mcp",
+  "icons": {
+    "lobehub": "Snowflake",
+    "simpleIcons": "snowflake",
+    "color": "#29B5E8"
+  },
+  "supportedBy": ["claude", "manus", "perplexity", "lindy", "gumloop", "relevance-ai", "dust", "glean", "n8n"],
+  "featured": true
+}

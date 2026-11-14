@@ -1,0 +1,37 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "guru",
+  "name": "Guru",
+  "maker": "Guru",
+  "homepage": "https://www.getguru.com",
+  "category": "docs-and-files",
+  "teams": ["support", "everyone"],
+  "summary": "Search and answer from your Guru knowledge base",
+  "capabilities": ["Search cards and collections", "Get answers from verified knowledge", "Create and update cards"],
+  "official": {
+    "evidence": "https://help.getguru.com/docs/connecting-gurus-mcp-server",
+    "repository": "https://github.com/guruhq/remote-mcp-server"
+  },
+  "docs": "https://help.getguru.com/docs/connecting-gurus-mcp-server",
+  "remote": {
+    "url": "https://mcp.api.getguru.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "com.getguru/mcp-server",
+  "icons": {
+    "color": "#6E3CF5"
+  },
+  "supportedBy": [
+    "claude",
+    "microsoft-copilot",
+    "manus",
+    "lindy",
+    "gumloop",
+    "relevance-ai",
+    "dust",
+    "glean",
+    "github-registry"
+  ]
+}

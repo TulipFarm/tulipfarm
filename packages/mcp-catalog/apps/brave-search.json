@@ -1,0 +1,40 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "brave-search",
+  "name": "Brave Search",
+  "maker": "Brave",
+  "homepage": "https://brave.com/search/api/",
+  "category": "search-and-research",
+  "teams": ["everyone"],
+  "summary": "Search the web, news, images, and videos with Brave",
+  "capabilities": [
+    "Search the web and local businesses",
+    "Search news, images, and videos",
+    "Summarize search results"
+  ],
+  "official": {
+    "evidence": "https://github.com/brave/brave-search-mcp-server",
+    "repository": "https://github.com/brave/brave-search-mcp-server"
+  },
+  "docs": "https://github.com/brave/brave-search-mcp-server",
+  "packages": [
+    {
+      "registry": "npm",
+      "name": "@brave/brave-search-mcp-server",
+      "env": [
+        {
+          "name": "BRAVE_API_KEY",
+          "description": "Brave Search API key",
+          "secret": true,
+          "required": true
+        }
+      ]
+    }
+  ],
+  "icons": {
+    "lobehub": "Brave",
+    "simpleIcons": "brave",
+    "color": "#FB542B"
+  },
+  "supportedBy": ["lindy", "docker"]
+}

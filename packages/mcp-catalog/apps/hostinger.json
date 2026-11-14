@@ -1,0 +1,35 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "hostinger",
+  "name": "Hostinger",
+  "maker": "Hostinger",
+  "homepage": "https://www.hostinger.com",
+  "category": "cloud-and-infrastructure",
+  "teams": ["engineering", "marketing"],
+  "summary": "Manage Hostinger VPS, domains, and hosting",
+  "capabilities": ["Manage VPS instances and backups", "Manage domains and DNS records", "Deploy websites"],
+  "official": {
+    "evidence": "https://github.com/hostinger/api-mcp-server",
+    "repository": "https://github.com/hostinger/api-mcp-server"
+  },
+  "docs": "https://github.com/hostinger/api-mcp-server",
+  "packages": [
+    {
+      "registry": "npm",
+      "name": "hostinger-api-mcp",
+      "env": [
+        {
+          "name": "API_TOKEN",
+          "description": "Hostinger API token",
+          "secret": true,
+          "required": true
+        }
+      ]
+    }
+  ],
+  "icons": {
+    "simpleIcons": "hostinger",
+    "color": "#673DE6"
+  },
+  "supportedBy": ["chatgpt", "docker", "github-registry"]
+}

@@ -1,0 +1,30 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "indeed",
+  "name": "Indeed",
+  "maker": "Indeed",
+  "homepage": "https://www.indeed.com",
+  "category": "hr-and-recruiting",
+  "teams": ["hr", "everyone"],
+  "summary": "Search Indeed jobs and company information",
+  "capabilities": [
+    "Search jobs by title, keyword, and location",
+    "Read job descriptions and requirements",
+    "Look up employer information"
+  ],
+  "official": {
+    "evidence": "https://docs.indeed.com/mcp/"
+  },
+  "docs": "https://docs.indeed.com/mcp/",
+  "remote": {
+    "url": "https://mcp.indeed.com/claude/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "simpleIcons": "indeed",
+    "color": "#003A9B"
+  },
+  "supportedBy": ["chatgpt", "claude", "lindy"]
+}

@@ -85,7 +85,10 @@ export const integrationSchema = z.object({
 export type Integration = z.infer<typeof integrationSchema>;
 const toolSchema = z.object({
   name: text,
+  title: text.nullable().default(null),
   description: text,
+  readOnly: z.boolean().default(false),
+  destructive: z.boolean().default(false),
   revision: id,
   previousRevision: id.nullable(),
   inputSchema: z.json(),
@@ -101,6 +104,7 @@ export const integrationDetailSchema = z.object({
   integration: integrationSchema,
   tools: z.array(toolSchema),
   grants: z.array(grantSchema),
+  workspace: z.boolean().default(false),
   managers: z.array(grantSchema).default([]),
   grantOptions: z.array(grantSchema.extend({ label: text })),
   descriptor: z.discriminatedUnion('kind', [
@@ -150,6 +154,7 @@ export const setupInputSchema = z.object({
   package: packageSchema.optional(),
   egress: z.array(z.string()).optional(),
   ownership: z.enum(['personal', 'shared']),
+  shareWithWorkspace: z.boolean().optional(),
   catalogEntryId: id.optional(),
   auth: authSchema,
   expectedVersion: version.optional(),

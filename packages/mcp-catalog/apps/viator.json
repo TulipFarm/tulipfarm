@@ -1,0 +1,25 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "viator",
+  "name": "Viator",
+  "maker": "Viator",
+  "homepage": "https://www.viator.com",
+  "category": "search-and-research",
+  "teams": ["everyone"],
+  "summary": "Find tours and things to do with Viator",
+  "capabilities": ["Search experiences by place, date, and interest", "Get details, prices, and booking links"],
+  "official": {
+    "evidence": "https://docs.viator.com/partner-api/mcp/"
+  },
+  "docs": "https://docs.viator.com/partner-api/mcp/",
+  "remote": {
+    "url": "https://exp-app-mcp.prod.ep.viator.com/mcp",
+    "transport": "streamable-http",
+    "auth": "none",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#186B6D"
+  },
+  "supportedBy": ["chatgpt", "claude", "gemini", "microsoft-copilot", "manus"]
+}

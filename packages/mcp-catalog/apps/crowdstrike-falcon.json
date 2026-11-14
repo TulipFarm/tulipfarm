@@ -1,0 +1,47 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "crowdstrike-falcon",
+  "name": "CrowdStrike Falcon",
+  "maker": "CrowdStrike",
+  "homepage": "https://www.crowdstrike.com",
+  "category": "security",
+  "teams": ["engineering", "operations"],
+  "summary": "Query CrowdStrike Falcon detections and hosts",
+  "capabilities": ["Search detections and incidents", "Look up hosts and their status", "Query threat intelligence"],
+  "official": {
+    "evidence": "https://github.com/CrowdStrike/falcon-mcp",
+    "repository": "https://github.com/CrowdStrike/falcon-mcp"
+  },
+  "docs": "https://github.com/CrowdStrike/falcon-mcp",
+  "packages": [
+    {
+      "registry": "pypi",
+      "name": "falcon-mcp",
+      "env": [
+        {
+          "name": "FALCON_CLIENT_ID",
+          "description": "Falcon API client ID",
+          "secret": false,
+          "required": true
+        },
+        {
+          "name": "FALCON_CLIENT_SECRET",
+          "description": "Falcon API client secret",
+          "secret": true,
+          "required": true
+        },
+        {
+          "name": "FALCON_BASE_URL",
+          "description": "Falcon API base URL",
+          "secret": false,
+          "required": false
+        }
+      ]
+    }
+  ],
+  "registryName": "io.github.CrowdStrike/falcon-mcp",
+  "icons": {
+    "color": "#FC0000"
+  },
+  "supportedBy": ["lindy", "github-registry"]
+}

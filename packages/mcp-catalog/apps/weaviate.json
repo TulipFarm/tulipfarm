@@ -1,0 +1,42 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "weaviate",
+  "name": "Weaviate",
+  "maker": "Weaviate",
+  "homepage": "https://weaviate.io",
+  "category": "data-and-databases",
+  "teams": ["engineering"],
+  "summary": "Search and manage data in a Weaviate cluster",
+  "capabilities": [
+    "List collections and read their config",
+    "Run hybrid and vector searches",
+    "Insert and update objects"
+  ],
+  "official": {
+    "evidence": "https://docs.weaviate.io/weaviate/configuration/mcp-server"
+  },
+  "docs": "https://docs.weaviate.io/weaviate/configuration/mcp-server",
+  "remote": {
+    "url": "https://{cluster-host}/v1/mcp",
+    "transport": "streamable-http",
+    "auth": "api-key",
+    "headers": [
+      {
+        "name": "Authorization",
+        "value": "Bearer {key}",
+        "description": "Weaviate API key"
+      }
+    ],
+    "variables": [
+      {
+        "name": "cluster-host",
+        "description": "Your Weaviate Cloud cluster host",
+        "example": "abc123.c0.us-east1.gcp.weaviate.cloud"
+      }
+    ]
+  },
+  "icons": {
+    "color": "#00A142"
+  },
+  "supportedBy": ["lindy", "relevance-ai", "n8n"]
+}

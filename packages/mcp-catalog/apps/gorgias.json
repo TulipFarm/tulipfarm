@@ -1,0 +1,25 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "gorgias",
+  "name": "Gorgias",
+  "maker": "Gorgias",
+  "homepage": "https://www.gorgias.com",
+  "category": "support",
+  "teams": ["support"],
+  "summary": "Search and manage support tickets in Gorgias",
+  "capabilities": ["Search tickets and customers", "Read ticket messages and order context", "Pull support statistics"],
+  "official": {
+    "evidence": "https://helpcenter.gorgias.com/en-US/connect-your-ai-assistant-to-the-gorgias-mcp-6310546"
+  },
+  "docs": "https://helpcenter.gorgias.com/en-US/connect-your-ai-assistant-to-the-gorgias-mcp-6310546",
+  "remote": {
+    "url": "https://mcp.gorgias.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#161616"
+  },
+  "supportedBy": ["chatgpt", "claude", "lindy", "relevance-ai"]
+}

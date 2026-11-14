@@ -1,0 +1,63 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "xero",
+  "name": "Xero",
+  "maker": "Xero",
+  "homepage": "https://www.xero.com",
+  "category": "finance-and-accounting",
+  "teams": ["finance"],
+  "summary": "Manage invoices, contacts, and accounting reports",
+  "capabilities": [
+    "Create and update invoices, quotes, and contacts",
+    "Read profit and loss, balance sheet, and trial balance",
+    "Look up bank transactions and payments"
+  ],
+  "official": {
+    "evidence": "https://developer.xero.com/documentation/guides/remote-mcp/overview/",
+    "repository": "https://github.com/XeroAPI/xero-mcp-server"
+  },
+  "docs": "https://developer.xero.com/documentation/guides/remote-mcp/overview/",
+  "remote": {
+    "url": "https://api.xero.com/mcp/v1",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "packages": [
+    {
+      "registry": "npm",
+      "name": "@xeroapi/xero-mcp-server",
+      "env": [
+        {
+          "name": "XERO_CLIENT_ID",
+          "description": "Client ID of your Xero custom connection app",
+          "secret": false,
+          "required": true
+        },
+        {
+          "name": "XERO_CLIENT_SECRET",
+          "description": "Client secret of your Xero custom connection app",
+          "secret": true,
+          "required": true
+        }
+      ]
+    }
+  ],
+  "icons": {
+    "simpleIcons": "xero",
+    "color": "#13B5EA"
+  },
+  "supportedBy": [
+    "claude",
+    "gemini",
+    "microsoft-copilot",
+    "manus",
+    "lindy",
+    "relevance-ai",
+    "glean",
+    "zapier",
+    "make",
+    "n8n"
+  ],
+  "featured": true
+}

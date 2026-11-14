@@ -1,0 +1,33 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "google-cloud",
+  "name": "Google Cloud",
+  "maker": "Google",
+  "homepage": "https://cloud.google.com",
+  "category": "cloud-and-infrastructure",
+  "teams": ["engineering"],
+  "summary": "Manage Google Cloud resources with gcloud",
+  "capabilities": [
+    "Run gcloud commands to inspect and change resources",
+    "Read Cloud Logging entries",
+    "Manage Cloud Storage and Compute Engine"
+  ],
+  "official": {
+    "evidence": "https://docs.cloud.google.com/mcp/overview",
+    "repository": "https://github.com/googleapis/gcloud-mcp"
+  },
+  "docs": "https://github.com/googleapis/gcloud-mcp",
+  "packages": [
+    {
+      "registry": "npm",
+      "name": "@google-cloud/gcloud-mcp",
+      "env": []
+    }
+  ],
+  "icons": {
+    "lobehub": "GoogleCloud",
+    "simpleIcons": "googlecloud",
+    "color": "#4285F4"
+  },
+  "supportedBy": ["chatgpt", "lindy", "gumloop", "relevance-ai", "dust", "make", "n8n"]
+}

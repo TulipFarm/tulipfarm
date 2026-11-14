@@ -1,0 +1,24 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "activepieces",
+  "name": "Activepieces",
+  "maker": "Activepieces",
+  "homepage": "https://www.activepieces.com",
+  "category": "automation",
+  "teams": ["operations", "everyone"],
+  "summary": "Run Activepieces flows and app actions",
+  "capabilities": ["Run actions in connected apps", "Trigger flows", "Manage flows and connections"],
+  "official": {
+    "evidence": "https://www.activepieces.com/docs/mcp/overview"
+  },
+  "docs": "https://www.activepieces.com/docs/mcp/overview",
+  "remote": {
+    "url": "https://cloud.activepieces.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#8142E3"
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "vanta",
+  "name": "Vanta",
+  "maker": "Vanta",
+  "homepage": "https://www.vanta.com",
+  "category": "security",
+  "teams": ["engineering", "operations"],
+  "summary": "Check Vanta compliance tests and controls",
+  "capabilities": [
+    "List failing tests and controls",
+    "Find vulnerabilities and affected resources",
+    "Read frameworks and policies"
+  ],
+  "official": {
+    "evidence": "https://github.com/VantaInc/vanta-mcp-server",
+    "repository": "https://github.com/VantaInc/vanta-mcp-server"
+  },
+  "docs": "https://github.com/VantaInc/vanta-mcp-server",
+  "remote": {
+    "url": "https://mcp.vanta.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "packages": [
+    {
+      "registry": "npm",
+      "name": "@vantasdk/vanta-mcp-server",
+      "env": [
+        {
+          "name": "VANTA_ENV_FILE",
+          "description": "Path to Vanta OAuth credentials file",
+          "secret": false,
+          "required": true
+        }
+      ]
+    }
+  ],
+  "icons": {
+    "color": "#5C4EE5"
+  },
+  "supportedBy": ["chatgpt", "claude", "dust"]
+}

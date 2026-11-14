@@ -1,0 +1,30 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "tldv",
+  "name": "tl;dv",
+  "maker": "tl;dv",
+  "homepage": "https://tldv.io",
+  "category": "chat",
+  "teams": ["sales", "everyone"],
+  "summary": "Search tl;dv meeting recordings and notes",
+  "capabilities": [
+    "Search meetings and transcripts",
+    "Read meeting notes and highlights",
+    "Find meetings by participant"
+  ],
+  "official": {
+    "evidence": "https://github.com/tldv-public/tldv-mcp-server",
+    "repository": "https://github.com/tldv-public/tldv-mcp-server"
+  },
+  "docs": "https://github.com/tldv-public/tldv-mcp-server",
+  "remote": {
+    "url": "https://mcp.tldv.io/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#6B4EFF"
+  },
+  "supportedBy": ["chatgpt", "claude", "manus", "zapier"]
+}

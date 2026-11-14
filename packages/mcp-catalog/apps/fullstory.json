@@ -1,0 +1,25 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "fullstory",
+  "name": "Fullstory",
+  "maker": "Fullstory",
+  "homepage": "https://www.fullstory.com",
+  "category": "monitoring-and-analytics",
+  "teams": ["product", "support"],
+  "summary": "Query Fullstory sessions and user behaviour",
+  "capabilities": ["Find sessions for a user", "Summarise what happened in a session", "Query behaviour metrics"],
+  "official": {
+    "evidence": "https://developer.fullstory.com/mcp/introduction/"
+  },
+  "docs": "https://developer.fullstory.com/mcp/introduction/",
+  "remote": {
+    "url": "https://api.fullstory.com/mcp/fullstory",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#6C2FF2"
+  },
+  "supportedBy": ["claude", "lindy", "relevance-ai"]
+}

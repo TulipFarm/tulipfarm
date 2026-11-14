@@ -1,0 +1,30 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "wise",
+  "name": "Wise",
+  "maker": "Wise",
+  "homepage": "https://wise.com",
+  "category": "payments-and-commerce",
+  "teams": ["finance"],
+  "summary": "View Wise balances, transfers, and statements",
+  "capabilities": [
+    "Check multi-currency balances",
+    "Look up transfers and their status",
+    "Read statements and exchange rates"
+  ],
+  "official": {
+    "evidence": "https://docs.wise.com/mcp/wise-mcp"
+  },
+  "docs": "https://docs.wise.com/mcp/wise-mcp",
+  "remote": {
+    "url": "https://mcp.wise.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "simpleIcons": "wise",
+    "color": "#9FE870"
+  },
+  "supportedBy": ["lindy", "relevance-ai"]
+}

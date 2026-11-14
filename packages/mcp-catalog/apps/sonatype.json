@@ -1,0 +1,35 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "sonatype",
+  "name": "Sonatype",
+  "maker": "Sonatype",
+  "homepage": "https://www.sonatype.com",
+  "category": "security",
+  "teams": ["engineering"],
+  "summary": "Check open source packages for risk and versions",
+  "capabilities": ["Check packages for vulnerabilities and licence risk", "Find the safest version to upgrade to"],
+  "official": {
+    "evidence": "https://github.com/sonatype/dependency-management-mcp-server",
+    "repository": "https://github.com/sonatype/dependency-management-mcp-server"
+  },
+  "docs": "https://github.com/sonatype/dependency-management-mcp-server",
+  "remote": {
+    "url": "https://mcp.guide.sonatype.com/mcp",
+    "transport": "streamable-http",
+    "auth": "api-key",
+    "headers": [
+      {
+        "name": "Authorization",
+        "value": "Bearer {key}",
+        "description": "Sonatype Guide API token"
+      }
+    ],
+    "checked": "2026-11-14"
+  },
+  "registryName": "com.sonatype/dependency-management-mcp-server",
+  "icons": {
+    "simpleIcons": "sonatype",
+    "color": "#1B1C30"
+  },
+  "supportedBy": ["github-registry"]
+}

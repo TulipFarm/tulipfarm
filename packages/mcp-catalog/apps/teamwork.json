@@ -1,0 +1,27 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "teamwork",
+  "name": "Teamwork.com",
+  "maker": "Teamwork.com",
+  "homepage": "https://www.teamwork.com",
+  "category": "projects-and-issues",
+  "teams": ["operations", "everyone"],
+  "summary": "Manage Teamwork.com projects, tasks and time",
+  "capabilities": ["Read projects, tasklists and tasks", "Create and update tasks", "Log and review time entries"],
+  "official": {
+    "evidence": "https://github.com/teamwork/mcp",
+    "repository": "https://github.com/teamwork/mcp"
+  },
+  "docs": "https://github.com/teamwork/mcp/blob/main/docs/usage/README.md",
+  "remote": {
+    "url": "https://mcp.ai.teamwork.com",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "com.teamwork/mcp",
+  "icons": {
+    "color": "#4461D7"
+  },
+  "supportedBy": ["lindy", "relevance-ai", "docker"]
+}

@@ -1,0 +1,36 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "granola",
+  "name": "Granola",
+  "maker": "Granola",
+  "homepage": "https://www.granola.ai",
+  "category": "chat",
+  "teams": ["everyone"],
+  "summary": "Search Granola meeting notes and transcripts",
+  "capabilities": ["Search meeting notes", "Read transcripts and summaries", "Find meetings by person or topic"],
+  "official": {
+    "evidence": "https://docs.granola.ai/help-center/sharing/integrations/mcp"
+  },
+  "docs": "https://docs.granola.ai/help-center/sharing/integrations/mcp",
+  "remote": {
+    "url": "https://mcp.granola.ai/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#1F2B1F"
+  },
+  "supportedBy": [
+    "chatgpt",
+    "claude",
+    "gemini",
+    "microsoft-copilot",
+    "manus",
+    "lindy",
+    "gumloop",
+    "glean",
+    "zapier",
+    "docker"
+  ]
+}

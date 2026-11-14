@@ -1,0 +1,26 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "consensus",
+  "name": "Consensus",
+  "maker": "Consensus",
+  "homepage": "https://consensus.app",
+  "category": "search-and-research",
+  "teams": ["everyone"],
+  "summary": "Search peer-reviewed research with Consensus",
+  "capabilities": ["Search scientific papers by question", "Get findings with paper citations"],
+  "official": {
+    "evidence": "https://consensus.app/home/mcp/",
+    "repository": "https://github.com/Consensus-NLP/consensus-mcp"
+  },
+  "docs": "https://consensus.app/home/mcp/",
+  "remote": {
+    "url": "https://mcp.consensus.app/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#068EF1"
+  },
+  "supportedBy": ["chatgpt", "claude", "microsoft-copilot", "manus"]
+}

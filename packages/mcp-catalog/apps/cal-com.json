@@ -1,0 +1,26 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "cal-com",
+  "name": "Cal.com",
+  "maker": "Cal.com",
+  "homepage": "https://cal.com",
+  "category": "email-and-calendar",
+  "teams": ["sales", "everyone"],
+  "summary": "Manage Cal.com bookings, schedules and event types",
+  "capabilities": ["List and create bookings", "Manage event types and availability", "Reschedule or cancel bookings"],
+  "official": {
+    "evidence": "https://cal.com/docs/mcp-server"
+  },
+  "docs": "https://cal.com/docs/mcp-server",
+  "remote": {
+    "url": "https://mcp.cal.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "simpleIcons": "caldotcom",
+    "color": "#292929"
+  },
+  "supportedBy": ["manus", "lindy", "gumloop", "relevance-ai", "zapier", "make"]
+}

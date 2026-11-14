@@ -1,0 +1,31 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "semrush",
+  "name": "Semrush",
+  "maker": "Semrush",
+  "homepage": "https://www.semrush.com",
+  "category": "marketing",
+  "teams": ["marketing"],
+  "summary": "Research keywords, backlinks, and traffic with Semrush",
+  "capabilities": [
+    "Research keywords and search volume",
+    "Analyse domains and backlinks",
+    "Compare competitors' organic and paid traffic"
+  ],
+  "official": {
+    "evidence": "https://developer.semrush.com/api/v3/introduction/semrush-mcp/"
+  },
+  "docs": "https://developer.semrush.com/api/v3/introduction/semrush-mcp/",
+  "remote": {
+    "url": "https://mcp.semrush.com/v1/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "simpleIcons": "semrush",
+    "color": "#FF642D"
+  },
+  "supportedBy": ["chatgpt", "claude", "manus", "lindy", "gumloop", "relevance-ai", "dust"],
+  "featured": true
+}

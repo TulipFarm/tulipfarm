@@ -1,0 +1,26 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "fillout",
+  "name": "Fillout",
+  "maker": "Fillout",
+  "homepage": "https://www.fillout.com",
+  "category": "marketing",
+  "teams": ["marketing", "operations"],
+  "summary": "Create forms and read submissions in Fillout",
+  "capabilities": ["Create and edit forms", "Read form submissions", "List forms and their questions"],
+  "official": {
+    "evidence": "https://www.fillout.com/help/mcp"
+  },
+  "docs": "https://www.fillout.com/help/mcp",
+  "remote": {
+    "url": "https://mcp.fillout.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "simpleIcons": "fillout",
+    "color": "#FFC738"
+  },
+  "supportedBy": ["lindy", "relevance-ai"]
+}

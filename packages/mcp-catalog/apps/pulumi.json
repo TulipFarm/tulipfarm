@@ -1,0 +1,37 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "pulumi",
+  "name": "Pulumi",
+  "maker": "Pulumi",
+  "homepage": "https://www.pulumi.com",
+  "category": "cloud-and-infrastructure",
+  "teams": ["engineering"],
+  "summary": "Manage Pulumi stacks and cloud resources",
+  "capabilities": [
+    "Search cloud resources across stacks",
+    "Look up Pulumi registry docs",
+    "Run previews and deployments"
+  ],
+  "official": {
+    "evidence": "https://www.pulumi.com/docs/ai/guides/set-up-mcp-server/"
+  },
+  "docs": "https://www.pulumi.com/docs/ai/guides/set-up-mcp-server/",
+  "remote": {
+    "url": "https://mcp.ai.pulumi.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "packages": [
+    {
+      "registry": "npm",
+      "name": "@pulumi/mcp-server",
+      "env": []
+    }
+  ],
+  "icons": {
+    "simpleIcons": "pulumi",
+    "color": "#8A3391"
+  },
+  "supportedBy": ["docker"]
+}

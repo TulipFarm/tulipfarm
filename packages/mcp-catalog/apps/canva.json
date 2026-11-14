@@ -1,0 +1,39 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "canva",
+  "name": "Canva",
+  "maker": "Canva",
+  "homepage": "https://www.canva.com",
+  "category": "design",
+  "teams": ["marketing", "design", "everyone"],
+  "summary": "Create, search and export Canva designs",
+  "capabilities": ["Search designs and folders", "Generate and edit designs", "Export designs and upload assets"],
+  "official": {
+    "evidence": "https://www.canva.com/help/mcp-agent-setup/"
+  },
+  "docs": "https://www.canva.com/help/mcp-agent-setup/",
+  "remote": {
+    "url": "https://mcp.canva.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "com.canva.mcp/mcp",
+  "icons": {
+    "color": "#00C4CC"
+  },
+  "supportedBy": [
+    "chatgpt",
+    "claude",
+    "gemini",
+    "microsoft-copilot",
+    "manus",
+    "lindy",
+    "gumloop",
+    "relevance-ai",
+    "dust",
+    "glean",
+    "make"
+  ],
+  "featured": true
+}

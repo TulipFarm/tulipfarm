@@ -167,11 +167,12 @@ async function withCard(authentication, steps) {
       return route.fulfill({ json });
     });
 
+    await page.route('https://oauth.posthog.com/**', route =>
+      route.fulfill({ contentType: 'text/html', body: '<title>PostHog sign-in</title>' }),
+    );
     await page.goto(`${origin}/${workspace.slug}/chat/${id}`);
     const card = page.getByRole('region', { name: 'Connect PostHog' });
-    await card.getByText('Not connected', { exact: true }).waitFor();
-    await card.getByText('Only you', { exact: true }).waitFor();
-    await card.getByRole('button', { name: 'Set up PostHog' }).click();
+    await card.getByRole('group', { name: 'Who can use it' }).waitFor();
     await steps({ page, card, integrations, setups });
     assert.deepEqual(errors, []);
   } finally {
@@ -181,19 +182,15 @@ async function withCard(authentication, steps) {
 }
 
 test('a chat MCP proposal sets up a personal integration with saved secrets', { timeout: 120000 }, () =>
-  withCard('secrets', async ({ card, setups }) => {
+  withCard('secrets', async ({ page, card, setups }) => {
+    await card.locator('[data-slot="button"]', { hasText: 'Connect PostHog' }).click();
     assert.equal(await card.getByLabel('MCP endpoint').inputValue(), endpoint);
-    const ownership = card.getByRole('combobox', { name: 'Integration ownership' });
-    assert.equal((await ownership.textContent()).trim(), 'Personal, private to you');
-    assert.ok(await ownership.isDisabled(), 'chat proposals are personal only');
-    assert.equal((await card.getByRole('combobox', { name: 'Authentication' }).textContent()).trim(), 'Saved secrets');
     await card.getByRole('checkbox', { name: /PostHog personal key/ }).check();
     assert.equal(await card.getByText('Other service key').count(), 0, 'only secrets for this endpoint are offered');
     await card.getByRole('button', { name: 'Verify and discover tools' }).click();
 
-    const review = card.getByRole('link', { name: 'Review PostHog tools' });
-    await review.waitFor();
-    await card.getByText('Tool review required', { exact: true }).waitFor();
+    const connected = page.getByRole('region', { name: 'PostHog connection' });
+    await connected.getByRole('button', { name: 'Turn on PostHog' }).waitFor();
     assert.equal(setups.length, 1);
     assert.deepEqual(
       { ...setups[0], requestId: undefined },
@@ -205,25 +202,24 @@ test('a chat MCP proposal sets up a personal integration with saved secrets', { 
         requestId: undefined,
       },
     );
-    assert.equal(await review.getAttribute('href'), `/${workspace.slug}/integrations#review-mcp-${savedId}`);
   }),
 );
 
-test('a chat OAuth proposal keeps the provider sign-in link after the chat reloads', { timeout: 120000 }, () =>
-  withCard('oauth', async ({ page, card, integrations }) => {
-    assert.equal(
-      (await card.getByRole('combobox', { name: 'Authentication', exact: true }).textContent()).trim(),
-      'OAuth',
-    );
-    await card.getByRole('button', { name: 'Start OAuth setup' }).click();
-    const signIn = card.getByRole('link', { name: 'Continue to PostHog sign-in' });
-    await signIn.waitFor();
-    await card.getByText('Authorization pending', { exact: true }).waitFor();
-    assert.equal(await signIn.getAttribute('href'), authorizationUrl);
-    assert.equal(await signIn.getAttribute('target'), '_blank');
-    integrations[0] = { ...integrations[0], status: 'review-required' };
-    await page.reload();
-    await card.getByRole('link', { name: 'Review PostHog tools' }).waitFor();
-    assert.equal(await card.getByRole('link', { name: 'Continue to PostHog sign-in' }).count(), 0);
-  }),
+test(
+  'a chat OAuth proposal connects in one click and shows the connection when the chat comes back',
+  { timeout: 120000 },
+  () =>
+    withCard('oauth', async ({ page, card, integrations, setups }) => {
+      await card.locator('[data-slot="button"]', { hasText: 'Connect PostHog' }).click();
+      await page.waitForURL(authorizationUrl);
+      assert.equal(setups.length, 1);
+      assert.deepEqual(setups[0].auth, { kind: 'oauth' });
+      assert.equal(setups[0].ownership, 'personal');
+
+      integrations[0] = { ...integrations[0], status: 'ready' };
+      await page.goto(`${origin}/${workspace.slug}/chat/${id}`);
+      const connected = page.getByRole('region', { name: 'PostHog connection' });
+      await connected.getByText('Connected', { exact: true }).waitFor();
+      await connected.getByText(/Ask away/).waitFor();
+    }),
 );

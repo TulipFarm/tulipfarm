@@ -1,0 +1,32 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "firebase",
+  "name": "Firebase",
+  "maker": "Google",
+  "homepage": "https://firebase.google.com",
+  "category": "cloud-and-infrastructure",
+  "teams": ["engineering"],
+  "summary": "Manage Firebase projects, Firestore, and auth",
+  "capabilities": [
+    "Create and configure Firebase projects and apps",
+    "Read and write Firestore data",
+    "Manage users, security rules, and hosting"
+  ],
+  "official": {
+    "evidence": "https://firebase.google.com/docs/ai-assistance/mcp-server",
+    "repository": "https://github.com/firebase/firebase-tools"
+  },
+  "docs": "https://firebase.google.com/docs/ai-assistance/mcp-server",
+  "packages": [
+    {
+      "registry": "npm",
+      "name": "firebase-tools",
+      "env": []
+    }
+  ],
+  "registryName": "io.github.firebase/firebase-mcp",
+  "icons": {
+    "simpleIcons": "firebase",
+    "color": "#DD2C00"
+  }
+}

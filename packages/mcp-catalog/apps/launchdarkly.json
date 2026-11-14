@@ -1,0 +1,44 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "launchdarkly",
+  "name": "LaunchDarkly",
+  "maker": "LaunchDarkly",
+  "homepage": "https://launchdarkly.com",
+  "category": "code",
+  "teams": ["engineering", "product"],
+  "summary": "Manage LaunchDarkly feature flags",
+  "capabilities": [
+    "Create, update, and toggle feature flags",
+    "Check flag status across environments",
+    "Find stale flags to clean up"
+  ],
+  "official": {
+    "evidence": "https://launchdarkly.com/docs/home/getting-started/mcp",
+    "repository": "https://github.com/launchdarkly/mcp-server"
+  },
+  "docs": "https://launchdarkly.com/docs/home/getting-started/mcp",
+  "remote": {
+    "url": "https://mcp.launchdarkly.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "packages": [
+    {
+      "registry": "npm",
+      "name": "@launchdarkly/mcp-server",
+      "env": [
+        {
+          "name": "LD_ACCESS_TOKEN",
+          "description": "LaunchDarkly API access token",
+          "secret": true,
+          "required": true
+        }
+      ]
+    }
+  ],
+  "icons": {
+    "color": "#405BFF"
+  },
+  "supportedBy": ["manus", "lindy", "gumloop", "relevance-ai", "github-registry"]
+}

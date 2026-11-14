@@ -1,0 +1,51 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "zscaler",
+  "name": "Zscaler",
+  "maker": "Zscaler",
+  "homepage": "https://www.zscaler.com",
+  "category": "security",
+  "teams": ["engineering", "operations"],
+  "summary": "Manage Zscaler Internet and Private Access",
+  "capabilities": [
+    "Read and update ZIA security policies",
+    "Manage ZPA application segments",
+    "Query Zscaler Digital Experience data"
+  ],
+  "official": {
+    "evidence": "https://github.com/zscaler/zscaler-mcp-server",
+    "repository": "https://github.com/zscaler/zscaler-mcp-server"
+  },
+  "docs": "https://github.com/zscaler/zscaler-mcp-server",
+  "packages": [
+    {
+      "registry": "pypi",
+      "name": "zscaler-mcp",
+      "env": [
+        {
+          "name": "ZSCALER_CLIENT_ID",
+          "description": "Zidentity client ID",
+          "secret": false,
+          "required": true
+        },
+        {
+          "name": "ZSCALER_CLIENT_SECRET",
+          "description": "Zidentity client secret",
+          "secret": true,
+          "required": true
+        },
+        {
+          "name": "ZSCALER_VANITY_DOMAIN",
+          "description": "Zidentity vanity domain",
+          "secret": false,
+          "required": true
+        }
+      ]
+    }
+  ],
+  "registryName": "io.github.zscaler/zscaler-mcp-server",
+  "icons": {
+    "color": "#2368F5"
+  },
+  "supportedBy": ["claude", "docker", "github-registry"]
+}

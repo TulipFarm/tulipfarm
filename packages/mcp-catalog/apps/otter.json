@@ -1,0 +1,25 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "otter",
+  "name": "Otter.ai",
+  "maker": "Otter.ai",
+  "homepage": "https://otter.ai",
+  "category": "chat",
+  "teams": ["everyone", "sales"],
+  "summary": "Search Otter meeting notes and transcripts",
+  "capabilities": ["Search meeting transcripts", "Read summaries and action items", "Ask questions across meetings"],
+  "official": {
+    "evidence": "https://help.otter.ai/hc/en-us/articles/35287607569687-Otter-MCP-Server"
+  },
+  "docs": "https://help.otter.ai/hc/en-us/articles/35287607569687-Otter-MCP-Server",
+  "remote": {
+    "url": "https://mcp.otter.ai/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#3C5DF5"
+  },
+  "supportedBy": ["chatgpt", "claude", "gemini", "manus", "gumloop", "glean", "zapier"]
+}

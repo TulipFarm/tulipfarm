@@ -1,0 +1,29 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "outreach",
+  "name": "Outreach",
+  "maker": "Outreach",
+  "homepage": "https://www.outreach.io",
+  "category": "crm-and-sales",
+  "teams": ["sales"],
+  "summary": "Search prospects, sequences, and emails in Outreach",
+  "capabilities": [
+    "Search prospects, accounts, and opportunities",
+    "Find sequences and sent emails",
+    "Review Kaia meeting notes"
+  ],
+  "official": {
+    "evidence": "https://support.outreach.io/support/solutions/articles/159000429156-connect-outreach-mcp-server-to-google-gemini-visual-studio-and-similar-cli-or-config-tools"
+  },
+  "docs": "https://support.outreach.io/support/solutions/articles/159000429156-connect-outreach-mcp-server-to-google-gemini-visual-studio-and-similar-cli-or-config-tools",
+  "remote": {
+    "url": "https://api.outreach.io/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#5951FF"
+  },
+  "supportedBy": ["chatgpt", "claude", "copilot-studio", "lindy", "gumloop", "relevance-ai", "glean"]
+}

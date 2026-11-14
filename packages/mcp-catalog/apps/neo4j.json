@@ -1,0 +1,47 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "neo4j",
+  "name": "Neo4j",
+  "maker": "Neo4j",
+  "homepage": "https://neo4j.com",
+  "category": "data-and-databases",
+  "teams": ["engineering"],
+  "summary": "Query Neo4j graph databases with Cypher",
+  "capabilities": ["Read the graph schema", "Run read Cypher queries", "Run write Cypher queries"],
+  "official": {
+    "evidence": "https://neo4j.com/docs/mcp/current/",
+    "repository": "https://github.com/neo4j/mcp"
+  },
+  "docs": "https://neo4j.com/docs/mcp/current/",
+  "packages": [
+    {
+      "registry": "pypi",
+      "name": "neo4j-mcp-server",
+      "env": [
+        {
+          "name": "NEO4J_URI",
+          "description": "Database URI",
+          "secret": false,
+          "required": true
+        },
+        {
+          "name": "NEO4J_USERNAME",
+          "description": "Username",
+          "secret": false,
+          "required": true
+        },
+        {
+          "name": "NEO4J_PASSWORD",
+          "description": "Password",
+          "secret": true,
+          "required": true
+        }
+      ]
+    }
+  ],
+  "icons": {
+    "simpleIcons": "neo4j",
+    "color": "#4581C3"
+  },
+  "supportedBy": ["docker"]
+}

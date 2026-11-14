@@ -1,0 +1,43 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "lucid",
+  "name": "Lucid",
+  "maker": "Lucid Software",
+  "homepage": "https://lucid.co",
+  "category": "design",
+  "teams": ["product", "engineering", "everyone"],
+  "summary": "Search and create Lucid diagrams and boards",
+  "capabilities": [
+    "Search Lucidchart and Lucidspark documents",
+    "Read diagram content",
+    "Create diagrams from prompts"
+  ],
+  "official": {
+    "evidence": "https://help.lucid.co/hc/en-us/articles/42578801807508",
+    "repository": "https://github.com/lucidsoftware/lucid-mcp-server"
+  },
+  "docs": "https://help.lucid.co/hc/en-us/articles/42578801807508",
+  "remote": {
+    "url": "https://mcp.lucid.app/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "app.lucid.mcp/lucid",
+  "icons": {
+    "simpleIcons": "lucid",
+    "color": "#282C33"
+  },
+  "supportedBy": [
+    "chatgpt",
+    "claude",
+    "microsoft-copilot",
+    "copilot-studio",
+    "manus",
+    "lindy",
+    "gumloop",
+    "relevance-ai",
+    "glean",
+    "github-registry"
+  ]
+}

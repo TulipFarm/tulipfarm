@@ -1,0 +1,47 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "qdrant",
+  "name": "Qdrant",
+  "maker": "Qdrant",
+  "homepage": "https://qdrant.tech",
+  "category": "data-and-databases",
+  "teams": ["engineering"],
+  "summary": "Store and search memories in a Qdrant collection",
+  "capabilities": ["Store text with metadata as vectors", "Find similar entries by meaning"],
+  "official": {
+    "evidence": "https://github.com/qdrant/mcp-server-qdrant",
+    "repository": "https://github.com/qdrant/mcp-server-qdrant"
+  },
+  "docs": "https://github.com/qdrant/mcp-server-qdrant",
+  "packages": [
+    {
+      "registry": "pypi",
+      "name": "mcp-server-qdrant",
+      "env": [
+        {
+          "name": "QDRANT_URL",
+          "description": "Qdrant server URL",
+          "secret": false,
+          "required": true
+        },
+        {
+          "name": "QDRANT_API_KEY",
+          "description": "Qdrant API key",
+          "secret": true,
+          "required": false
+        },
+        {
+          "name": "COLLECTION_NAME",
+          "description": "Default collection",
+          "secret": false,
+          "required": false
+        }
+      ]
+    }
+  ],
+  "icons": {
+    "simpleIcons": "qdrant",
+    "color": "#DC244C"
+  },
+  "supportedBy": ["lindy", "relevance-ai", "n8n"]
+}

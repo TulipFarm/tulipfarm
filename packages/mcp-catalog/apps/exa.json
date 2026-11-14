@@ -1,0 +1,46 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "exa",
+  "name": "Exa",
+  "maker": "Exa",
+  "homepage": "https://exa.ai",
+  "category": "search-and-research",
+  "teams": ["everyone"],
+  "summary": "Search the web and crawl pages with Exa",
+  "capabilities": [
+    "Search the web for current results",
+    "Fetch the content of web pages",
+    "Find code examples and docs"
+  ],
+  "official": {
+    "evidence": "https://github.com/exa-labs/exa-mcp-server",
+    "repository": "https://github.com/exa-labs/exa-mcp-server"
+  },
+  "docs": "https://docs.exa.ai/reference/exa-mcp",
+  "remote": {
+    "url": "https://mcp.exa.ai/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "packages": [
+    {
+      "registry": "npm",
+      "name": "exa-mcp-server",
+      "env": [
+        {
+          "name": "EXA_API_KEY",
+          "description": "Exa API key",
+          "secret": true,
+          "required": true
+        }
+      ]
+    }
+  ],
+  "registryName": "ai.exa/exa",
+  "icons": {
+    "lobehub": "Exa",
+    "color": "#1F40ED"
+  },
+  "supportedBy": ["chatgpt", "claude", "manus", "lindy", "gumloop", "glean", "docker"]
+}

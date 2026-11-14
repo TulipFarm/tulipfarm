@@ -1,0 +1,25 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "tally",
+  "name": "Tally",
+  "maker": "Tally",
+  "homepage": "https://tally.so",
+  "category": "marketing",
+  "teams": ["marketing", "product"],
+  "summary": "Create forms and read submissions in Tally",
+  "capabilities": ["Create and edit forms", "Read form submissions", "List workspaces and forms"],
+  "official": {
+    "evidence": "https://tally.so/help/mcp"
+  },
+  "docs": "https://tally.so/help/mcp",
+  "remote": {
+    "url": "https://api.tally.so/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#000000"
+  },
+  "supportedBy": ["claude", "manus", "lindy", "gumloop", "relevance-ai", "glean", "zapier", "make"]
+}

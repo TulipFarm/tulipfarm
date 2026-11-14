@@ -1,0 +1,30 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "clickup",
+  "name": "ClickUp",
+  "maker": "ClickUp",
+  "homepage": "https://clickup.com",
+  "category": "projects-and-issues",
+  "teams": ["everyone", "operations"],
+  "summary": "Manage ClickUp tasks, docs and time",
+  "capabilities": [
+    "Search and read tasks, lists and docs",
+    "Create and update tasks and comments",
+    "Track time and manage assignees"
+  ],
+  "official": {
+    "evidence": "https://developer.clickup.com/docs/connect-an-ai-assistant-to-clickups-mcp-server"
+  },
+  "docs": "https://developer.clickup.com/docs/connect-an-ai-assistant-to-clickups-mcp-server",
+  "remote": {
+    "url": "https://mcp.clickup.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "simpleIcons": "clickup",
+    "color": "#7B68EE"
+  },
+  "supportedBy": ["chatgpt", "claude", "manus", "lindy", "gumloop", "relevance-ai", "glean", "zapier", "make", "n8n"]
+}

@@ -1,0 +1,29 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "mailerlite",
+  "name": "MailerLite",
+  "maker": "MailerLite",
+  "homepage": "https://www.mailerlite.com",
+  "category": "marketing",
+  "teams": ["marketing"],
+  "summary": "Manage subscribers and campaigns in MailerLite",
+  "capabilities": [
+    "Manage subscribers, groups, and segments",
+    "Create and schedule campaigns",
+    "Read campaign reports"
+  ],
+  "official": {
+    "evidence": "https://developers.mailerlite.com/mcp"
+  },
+  "docs": "https://developers.mailerlite.com/mcp",
+  "remote": {
+    "url": "https://mcp.mailerlite.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#09C269"
+  },
+  "supportedBy": ["claude", "microsoft-copilot", "manus", "lindy", "gumloop", "relevance-ai", "zapier", "make", "n8n"]
+}

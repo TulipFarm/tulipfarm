@@ -1,0 +1,40 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "mixpanel",
+  "name": "Mixpanel",
+  "maker": "Mixpanel",
+  "homepage": "https://mixpanel.com",
+  "category": "monitoring-and-analytics",
+  "teams": ["product", "marketing"],
+  "summary": "Query Mixpanel product analytics",
+  "capabilities": [
+    "Run event, funnel, and retention queries",
+    "Read reports and dashboards",
+    "Explore events and properties"
+  ],
+  "official": {
+    "evidence": "https://docs.mixpanel.com/docs/mcp"
+  },
+  "docs": "https://docs.mixpanel.com/docs/mcp",
+  "remote": {
+    "url": "https://mcp.mixpanel.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "simpleIcons": "mixpanel",
+    "color": "#7856FF"
+  },
+  "supportedBy": [
+    "chatgpt",
+    "claude",
+    "microsoft-copilot",
+    "notion-ai",
+    "manus",
+    "lindy",
+    "gumloop",
+    "relevance-ai",
+    "glean"
+  ]
+}

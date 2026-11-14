@@ -1,0 +1,26 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "framer",
+  "name": "Framer",
+  "maker": "Framer",
+  "homepage": "https://www.framer.com",
+  "category": "design",
+  "teams": ["design", "marketing"],
+  "summary": "Edit Framer sites, pages and CMS from chat",
+  "capabilities": ["Read and edit pages and components", "Manage CMS collections", "Update styles and content"],
+  "official": {
+    "evidence": "https://www.framer.com/mcp/"
+  },
+  "docs": "https://www.framer.com/mcp/",
+  "remote": {
+    "url": "https://mcp.framer.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "simpleIcons": "framer",
+    "color": "#0055FF"
+  },
+  "supportedBy": ["claude"]
+}

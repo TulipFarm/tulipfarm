@@ -1,0 +1,44 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "oxylabs",
+  "name": "Oxylabs",
+  "maker": "Oxylabs",
+  "homepage": "https://oxylabs.io",
+  "category": "search-and-research",
+  "teams": ["engineering", "marketing"],
+  "summary": "Scrape websites and search results with Oxylabs",
+  "capabilities": [
+    "Scrape any URL with rendering",
+    "Get search engine and Amazon results",
+    "Extract structured data with AI"
+  ],
+  "official": {
+    "evidence": "https://github.com/oxylabs/oxylabs-mcp",
+    "repository": "https://github.com/oxylabs/oxylabs-mcp"
+  },
+  "docs": "https://github.com/oxylabs/oxylabs-mcp",
+  "packages": [
+    {
+      "registry": "pypi",
+      "name": "oxylabs-mcp",
+      "env": [
+        {
+          "name": "OXYLABS_USERNAME",
+          "description": "Web Scraper API username",
+          "secret": false,
+          "required": true
+        },
+        {
+          "name": "OXYLABS_PASSWORD",
+          "description": "Web Scraper API password",
+          "secret": true,
+          "required": true
+        }
+      ]
+    }
+  ],
+  "icons": {
+    "color": "#23C5B5"
+  },
+  "supportedBy": ["lindy", "relevance-ai", "docker"]
+}

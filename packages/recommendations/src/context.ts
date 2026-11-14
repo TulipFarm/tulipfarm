@@ -630,7 +630,7 @@ export async function collectRecommendationContext(transaction: Transaction, act
           `SELECT c.id,left(c.name,160) AS name,c.authorization_epoch FROM ${table('tf_mcp_integrations')} c
     WHERE c.lifecycle='active' AND c.credential IS NOT NULL AND (c.credential_expires_at IS NULL OR c.credential_expires_at>now())
       AND ((c.ownership='personal' AND c.owner_membership_id=$1) OR (c.ownership='shared' AND
-        (EXISTS (SELECT 1 FROM ${table('tf_mcp_member_grants')} g WHERE g.integration_id=c.id AND g.membership_id=$1)
+        (c.shared_with_workspace OR EXISTS (SELECT 1 FROM ${table('tf_mcp_member_grants')} g WHERE g.integration_id=c.id AND g.membership_id=$1)
         OR EXISTS (SELECT 1 FROM ${table('tf_mcp_team_grants')} g JOIN ${table('tf_member_teams')} mt ON mt.team_id=g.team_id
           WHERE g.integration_id=c.id AND mt.membership_id=$1))))
     ORDER BY c.id LIMIT 12`,

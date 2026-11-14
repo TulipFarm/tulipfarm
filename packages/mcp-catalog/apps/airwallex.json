@@ -1,0 +1,29 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "airwallex",
+  "name": "Airwallex",
+  "maker": "Airwallex",
+  "homepage": "https://www.airwallex.com",
+  "category": "payments-and-commerce",
+  "teams": ["finance"],
+  "summary": "Manage global accounts, payments, and cards",
+  "capabilities": [
+    "Check balances and transactions",
+    "Create transfers and payment links",
+    "Manage cards and beneficiaries"
+  ],
+  "official": {
+    "evidence": "https://www.airwallex.com/docs/developer-tools/ai/agentos"
+  },
+  "docs": "https://www.airwallex.com/docs/developer-tools/ai/agentos",
+  "remote": {
+    "url": "https://mcp.airwallex.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#612FFF"
+  },
+  "supportedBy": ["claude", "gumloop"]
+}

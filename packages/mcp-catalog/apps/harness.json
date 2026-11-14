@@ -1,0 +1,44 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "harness",
+  "name": "Harness",
+  "maker": "Harness",
+  "homepage": "https://www.harness.io",
+  "category": "code",
+  "teams": ["engineering"],
+  "summary": "Work with Harness pipelines, deployments, and services",
+  "capabilities": [
+    "List and run pipelines",
+    "Check executions and deployment logs",
+    "Read services, environments, and connectors"
+  ],
+  "official": {
+    "evidence": "https://github.com/harness/mcp-server",
+    "repository": "https://github.com/harness/mcp-server"
+  },
+  "docs": "https://github.com/harness/mcp-server",
+  "remote": {
+    "url": "https://mcp.harness.io/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "packages": [
+    {
+      "registry": "npm",
+      "name": "harness-mcp-v2",
+      "env": [
+        {
+          "name": "HARNESS_API_KEY",
+          "description": "Harness API key",
+          "secret": true,
+          "required": true
+        }
+      ]
+    }
+  ],
+  "icons": {
+    "color": "#00ADE4"
+  },
+  "supportedBy": ["claude", "manus"]
+}

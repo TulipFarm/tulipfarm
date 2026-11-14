@@ -1,0 +1,27 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "skyvern",
+  "name": "Skyvern",
+  "maker": "Skyvern",
+  "homepage": "https://www.skyvern.com",
+  "category": "automation",
+  "teams": ["operations", "engineering"],
+  "summary": "Automate website tasks with Skyvern browser agents",
+  "capabilities": ["Run browser tasks from a prompt", "Create and run workflows", "Fill forms and download files"],
+  "official": {
+    "evidence": "https://docs.skyvern.com/integrations/mcp",
+    "repository": "https://github.com/Skyvern-AI/skyvern"
+  },
+  "docs": "https://docs.skyvern.com/integrations/mcp",
+  "remote": {
+    "url": "https://api.skyvern.com/mcp/",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "io.github.Skyvern-AI/skyvern",
+  "icons": {
+    "color": "#4F46E5"
+  },
+  "supportedBy": ["lindy", "relevance-ai", "github-registry"]
+}

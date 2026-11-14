@@ -1,0 +1,46 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "miro",
+  "name": "Miro",
+  "maker": "Miro",
+  "homepage": "https://miro.com",
+  "category": "design",
+  "teams": ["product", "design", "everyone"],
+  "summary": "Read and create content on Miro boards",
+  "capabilities": [
+    "Read board content and context",
+    "Create diagrams, docs and tables",
+    "Generate boards from text or code"
+  ],
+  "official": {
+    "evidence": "https://developers.miro.com/docs/mcp-intro",
+    "repository": "https://github.com/miroapp/miro-ai"
+  },
+  "docs": "https://developers.miro.com/docs/mcp-intro",
+  "remote": {
+    "url": "https://mcp.miro.com/",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "io.github.miroapp/mcp-server",
+  "icons": {
+    "simpleIcons": "miro",
+    "color": "#050038"
+  },
+  "supportedBy": [
+    "chatgpt",
+    "claude",
+    "gemini",
+    "microsoft-copilot",
+    "notion-ai",
+    "manus",
+    "lindy",
+    "gumloop",
+    "relevance-ai",
+    "dust",
+    "glean",
+    "docker",
+    "github-registry"
+  ]
+}

@@ -1,0 +1,53 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "paypal",
+  "name": "PayPal",
+  "maker": "PayPal",
+  "homepage": "https://www.paypal.com",
+  "category": "payments-and-commerce",
+  "teams": ["finance", "sales"],
+  "summary": "Manage invoices, orders, and payments",
+  "capabilities": [
+    "Create and send invoices",
+    "Create orders and process refunds",
+    "Look up transactions and disputes",
+    "Manage products and subscriptions"
+  ],
+  "official": {
+    "evidence": "https://developer.paypal.com/ai-tools/mcp-server"
+  },
+  "docs": "https://developer.paypal.com/ai-tools/mcp-server",
+  "remote": {
+    "url": "https://mcp.paypal.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "packages": [
+    {
+      "registry": "npm",
+      "name": "@paypal/mcp",
+      "env": [
+        {
+          "name": "PAYPAL_ACCESS_TOKEN",
+          "description": "PayPal REST API access token",
+          "secret": true,
+          "required": true
+        },
+        {
+          "name": "PAYPAL_ENVIRONMENT",
+          "description": "SANDBOX or PRODUCTION",
+          "secret": false,
+          "required": false
+        }
+      ]
+    }
+  ],
+  "registryName": "com.paypal.mcp/mcp",
+  "icons": {
+    "simpleIcons": "paypal",
+    "color": "#002991"
+  },
+  "supportedBy": ["chatgpt", "claude", "lindy", "gumloop", "relevance-ai", "glean", "zapier", "n8n", "docker"],
+  "featured": true
+}

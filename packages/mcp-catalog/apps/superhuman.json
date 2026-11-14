@@ -1,0 +1,26 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "superhuman",
+  "name": "Superhuman Mail",
+  "maker": "Superhuman",
+  "homepage": "https://superhuman.com",
+  "category": "email-and-calendar",
+  "teams": ["everyone", "sales"],
+  "summary": "Search, triage and draft email in Superhuman",
+  "capabilities": ["Search and read email threads", "Draft and send replies", "Check calendar availability"],
+  "official": {
+    "evidence": "https://help.superhuman.com/hc/en-us/articles/46005696690317-Superhuman-Mail-MCP-Server",
+    "repository": "https://github.com/superhuman/mcp-mail"
+  },
+  "docs": "https://help.superhuman.com/hc/en-us/articles/46005696690317-Superhuman-Mail-MCP-Server",
+  "remote": {
+    "url": "https://mcp.mail.superhuman.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#1C1C1C"
+  },
+  "supportedBy": ["chatgpt", "claude", "manus", "perplexity", "gumloop", "glean"]
+}

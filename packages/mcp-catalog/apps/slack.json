@@ -1,0 +1,45 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "slack",
+  "name": "Slack",
+  "maker": "Slack (Salesforce)",
+  "homepage": "https://slack.com",
+  "category": "chat",
+  "teams": ["everyone"],
+  "summary": "Search and send messages in Slack",
+  "capabilities": [
+    "Search messages, channels and files",
+    "Read threads and channel history",
+    "Send messages and create canvases"
+  ],
+  "official": {
+    "evidence": "https://docs.slack.dev/ai/slack-mcp-server/"
+  },
+  "docs": "https://docs.slack.dev/ai/slack-mcp-server/",
+  "remote": {
+    "url": "https://mcp.slack.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#4A154B"
+  },
+  "supportedBy": [
+    "chatgpt",
+    "claude",
+    "microsoft-copilot",
+    "notion-ai",
+    "manus",
+    "perplexity",
+    "lindy",
+    "gumloop",
+    "relevance-ai",
+    "dust",
+    "glean",
+    "zapier",
+    "make",
+    "n8n"
+  ],
+  "featured": true
+}

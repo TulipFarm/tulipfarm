@@ -1,0 +1,29 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "puzzle",
+  "name": "Puzzle",
+  "maker": "Puzzle",
+  "homepage": "https://puzzle.io",
+  "category": "finance-and-accounting",
+  "teams": ["finance"],
+  "summary": "Read financial statements and update your books",
+  "capabilities": [
+    "Read balance sheet and income statement",
+    "Check cash, burn, and runway",
+    "Categorise transactions and reconcile accounts"
+  ],
+  "official": {
+    "evidence": "https://puzzle.io/api-mcp"
+  },
+  "docs": "https://help.puzzle.io/en/articles/15331316-how-to-setup-your-puzzle-mcp",
+  "remote": {
+    "url": "https://app.puzzle.io/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "io.puzzle/puzzle",
+  "icons": {
+    "color": "#000000"
+  }
+}

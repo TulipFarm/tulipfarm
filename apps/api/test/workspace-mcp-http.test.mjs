@@ -127,3 +127,52 @@ test('workspace MCP HTTP boundary authenticates before parsing and conceals diag
     await app.close();
   }
 });
+
+test('workspace MCP OAuth callback returns the browser to the web app instead of JSON', async () => {
+  const app = Fastify({ logger: false });
+  await app.register(async routes => {
+    const boundary = workspaceMcpHttp(
+      routes,
+      {
+        api: {
+          getSession: async ({ headers }) =>
+            headers.get('cookie') === 'session=valid' ? { user: { id: 'user' }, session: { id: 'login' } } : null,
+        },
+      },
+      () => null,
+    );
+    routes.get(
+      '/callback',
+      {
+        schema: boundary.schema(
+          'completeWorkspaceMcpOAuthV1',
+          z.strictObject({ saved: z.literal(true) }),
+          undefined,
+          undefined,
+          mcpCallbackSchema,
+        ),
+      },
+      request => {
+        if ('error' in request.query) throw new McpHttpError('mcp-authorization-denied', 400);
+        throw new Error('provider exploded');
+      },
+    );
+  });
+  const state = 'private-state-'.repeat(4);
+  const outcome = async (url, cookie) => {
+    const response = await app.inject({ url, headers: cookie ? { cookie } : {} });
+    assert.equal(response.statusCode, 303, response.body);
+    const location = new URL(response.headers.location);
+    assert.equal(location.origin + location.pathname, new URL('/mcp/callback', authConfig().webOrigin).href);
+    assert.equal(response.body.includes('private'), false);
+    return location.searchParams.get('outcome');
+  };
+  try {
+    assert.equal(await outcome(`/callback?state=${state}&code=private-code`), 'sign-in-required');
+    assert.equal(await outcome(`/callback?state=${state}&error=access_denied`, 'session=valid'), 'denied');
+    assert.equal(await outcome(`/callback?state=${state}&code=one&code=two`, 'session=valid'), 'expired');
+    assert.equal(await outcome(`/callback?state=${state}&code=private-code`, 'session=valid'), 'failed');
+  } finally {
+    await app.close();
+  }
+});

@@ -1,0 +1,31 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "mobbin",
+  "name": "Mobbin",
+  "maker": "Mobbin",
+  "homepage": "https://mobbin.com",
+  "category": "design",
+  "teams": ["design", "product"],
+  "summary": "Search real-world UI and UX design references",
+  "capabilities": [
+    "Search app and web screens by pattern",
+    "Browse user flows from shipped products",
+    "Find design references for prompts"
+  ],
+  "official": {
+    "evidence": "https://mobbin.com/mcp",
+    "repository": "https://github.com/mobbin/mobbin-mcp-server"
+  },
+  "docs": "https://docs.mobbin.com/mcp/clients/overview",
+  "remote": {
+    "url": "https://api.mobbin.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "com.mobbin/mobbin",
+  "icons": {
+    "color": "#000000"
+  },
+  "supportedBy": ["chatgpt", "claude", "microsoft-copilot", "manus", "gumloop", "github-registry"]
+}

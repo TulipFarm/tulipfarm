@@ -1,0 +1,33 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "neon",
+  "name": "Neon",
+  "maker": "Neon",
+  "homepage": "https://neon.com",
+  "category": "data-and-databases",
+  "teams": ["engineering"],
+  "summary": "Manage Neon Postgres projects, branches, and queries",
+  "capabilities": [
+    "Create and delete projects and branches",
+    "Run SQL queries and inspect schemas",
+    "Prepare and apply schema migrations safely",
+    "Tune slow queries"
+  ],
+  "official": {
+    "evidence": "https://neon.com/docs/ai/neon-mcp-server",
+    "repository": "https://github.com/neondatabase/mcp-server-neon"
+  },
+  "docs": "https://neon.com/docs/ai/neon-mcp-server",
+  "remote": {
+    "url": "https://mcp.neon.tech/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "com.neon/mcp",
+  "icons": {
+    "simpleIcons": "neon",
+    "color": "#34D59A"
+  },
+  "supportedBy": ["chatgpt", "claude", "manus", "lindy", "gumloop", "relevance-ai", "docker", "github-registry"]
+}

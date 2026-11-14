@@ -1,0 +1,42 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "buildkite",
+  "name": "Buildkite",
+  "maker": "Buildkite",
+  "homepage": "https://buildkite.com",
+  "category": "code",
+  "teams": ["engineering"],
+  "summary": "Check Buildkite pipelines, builds, and jobs",
+  "capabilities": ["List pipelines and recent builds", "Read job logs and test results", "Trigger and retry builds"],
+  "official": {
+    "evidence": "https://buildkite.com/docs/apis/mcp-server",
+    "repository": "https://github.com/buildkite/buildkite-mcp-server"
+  },
+  "docs": "https://buildkite.com/docs/apis/mcp-server",
+  "remote": {
+    "url": "https://mcp.buildkite.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "packages": [
+    {
+      "registry": "oci",
+      "name": "ghcr.io/buildkite/buildkite-mcp-server",
+      "env": [
+        {
+          "name": "BUILDKITE_API_TOKEN",
+          "description": "Buildkite API access token",
+          "secret": true,
+          "required": true
+        }
+      ]
+    }
+  ],
+  "registryName": "io.github.buildkite/buildkite-mcp-server",
+  "icons": {
+    "simpleIcons": "buildkite",
+    "color": "#14CC80"
+  },
+  "supportedBy": ["manus", "lindy", "relevance-ai", "glean", "docker"]
+}

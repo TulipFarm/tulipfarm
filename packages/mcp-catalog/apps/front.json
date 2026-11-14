@@ -1,0 +1,29 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "front",
+  "name": "Front",
+  "maker": "Front",
+  "homepage": "https://front.com",
+  "category": "support",
+  "teams": ["support", "sales"],
+  "summary": "Search and act on conversations in Front",
+  "capabilities": [
+    "Search conversations and messages",
+    "Reply, comment, and tag conversations",
+    "Assign and archive conversations"
+  ],
+  "official": {
+    "evidence": "https://dev.frontapp.com/docs/mcp-server"
+  },
+  "docs": "https://dev.frontapp.com/docs/mcp-server",
+  "remote": {
+    "url": "https://mcp.frontapp.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#001B38"
+  },
+  "supportedBy": ["claude", "lindy", "relevance-ai", "dust"]
+}

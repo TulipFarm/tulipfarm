@@ -1,0 +1,32 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "mermaid-chart",
+  "name": "Mermaid Chart",
+  "maker": "Mermaid Chart",
+  "homepage": "https://mermaid.ai",
+  "category": "design",
+  "teams": ["engineering", "product"],
+  "summary": "Create, validate and render Mermaid diagrams",
+  "capabilities": [
+    "Validate Mermaid diagram syntax",
+    "Render diagrams to images and links",
+    "Save diagrams to Mermaid projects"
+  ],
+  "official": {
+    "evidence": "https://mermaid.ai/docs/ai/mcp-server",
+    "repository": "https://github.com/Mermaid-Chart/mermaid-mcp"
+  },
+  "docs": "https://mermaid.ai/docs/ai/mcp-server",
+  "remote": {
+    "url": "https://mcp.mermaid.ai/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "com.mermaidchart/mermaid-mcp",
+  "icons": {
+    "simpleIcons": "mermaid",
+    "color": "#FF3670"
+  },
+  "supportedBy": ["chatgpt", "claude", "manus", "glean"]
+}

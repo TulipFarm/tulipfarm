@@ -1,0 +1,33 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "elevenlabs",
+  "name": "ElevenLabs",
+  "maker": "ElevenLabs",
+  "homepage": "https://elevenlabs.io",
+  "category": "ai-and-media",
+  "teams": ["marketing", "product", "engineering"],
+  "summary": "Generate speech, voices, and audio with ElevenLabs",
+  "capabilities": [
+    "Turn text into speech",
+    "Transcribe audio",
+    "Design and clone voices",
+    "Create sound effects and music"
+  ],
+  "official": {
+    "evidence": "https://elevenlabs.io/docs/agents-platform/operate/hosted-mcp",
+    "repository": "https://github.com/elevenlabs/elevenlabs-mcp"
+  },
+  "docs": "https://elevenlabs.io/docs/agents-platform/operate/hosted-mcp",
+  "remote": {
+    "url": "https://api.elevenlabs.io/v1/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "lobehub": "ElevenLabs",
+    "simpleIcons": "elevenlabs",
+    "color": "#000000"
+  },
+  "supportedBy": ["claude", "manus", "lindy", "gumloop", "make", "docker"]
+}

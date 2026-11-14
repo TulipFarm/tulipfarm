@@ -1,0 +1,42 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "freshdesk",
+  "name": "Freshdesk",
+  "maker": "Freshworks",
+  "homepage": "https://www.freshworks.com/freshdesk/",
+  "category": "support",
+  "teams": ["support"],
+  "summary": "Search and update tickets in Freshdesk",
+  "capabilities": [
+    "Search, create, and update tickets",
+    "Reply to and add notes on tickets",
+    "Look up contacts and companies"
+  ],
+  "official": {
+    "evidence": "https://support.freshdesk.com/support/solutions/articles/50000012670-model-context-protocol-mcp-integration-in-freshdesk"
+  },
+  "docs": "https://support.freshdesk.com/support/solutions/articles/50000012670-model-context-protocol-mcp-integration-in-freshdesk",
+  "remote": {
+    "url": "https://{subdomain}.freshdesk.com/mcp",
+    "transport": "streamable-http",
+    "auth": "api-key",
+    "headers": [
+      {
+        "name": "Authorization",
+        "value": "{key}",
+        "description": "Freshdesk API key from Profile settings"
+      }
+    ],
+    "variables": [
+      {
+        "name": "subdomain",
+        "description": "Your Freshdesk subdomain",
+        "example": "acme"
+      }
+    ]
+  },
+  "icons": {
+    "color": "#25C16F"
+  },
+  "supportedBy": ["lindy", "gumloop", "relevance-ai", "glean", "n8n"]
+}

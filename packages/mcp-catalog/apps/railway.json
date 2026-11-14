@@ -1,0 +1,40 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "railway",
+  "name": "Railway",
+  "maker": "Railway",
+  "homepage": "https://railway.com",
+  "category": "cloud-and-infrastructure",
+  "teams": ["engineering"],
+  "summary": "Deploy and manage Railway projects",
+  "capabilities": [
+    "Create projects and deploy services",
+    "Manage environment variables",
+    "Read deploy and service logs"
+  ],
+  "official": {
+    "evidence": "https://docs.railway.com/ai/mcp-server",
+    "repository": "https://github.com/railwayapp/railway-mcp-server"
+  },
+  "docs": "https://docs.railway.com/ai/mcp-server",
+  "remote": {
+    "url": "https://mcp.railway.com",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "packages": [
+    {
+      "registry": "npm",
+      "name": "@railway/mcp-server",
+      "env": []
+    }
+  ],
+  "registryName": "com.railway/mcp",
+  "icons": {
+    "lobehub": "Railway",
+    "simpleIcons": "railway",
+    "color": "#0B0D0E"
+  },
+  "supportedBy": ["claude", "lindy"]
+}

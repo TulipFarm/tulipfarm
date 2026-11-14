@@ -1,0 +1,31 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "process-street",
+  "name": "Process Street",
+  "maker": "Process Street",
+  "homepage": "https://www.process.st",
+  "category": "automation",
+  "teams": ["operations"],
+  "summary": "Run and track checklists in Process Street",
+  "capabilities": [
+    "Find workflows and running checklists",
+    "Start workflow runs",
+    "Complete tasks and fill in form fields"
+  ],
+  "official": {
+    "evidence": "https://github.com/process-street/process-street-mcp",
+    "repository": "https://github.com/process-street/process-street-mcp"
+  },
+  "docs": "https://github.com/process-street/process-street-mcp",
+  "remote": {
+    "url": "https://mcp.process.st/",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "io.github.process-street/process-street-mcp",
+  "icons": {
+    "color": "#1E88E5"
+  },
+  "supportedBy": ["claude", "copilot-studio", "lindy", "relevance-ai", "glean", "github-registry"]
+}

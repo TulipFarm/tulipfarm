@@ -1,0 +1,30 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "atlan",
+  "name": "Atlan",
+  "maker": "Atlan",
+  "homepage": "https://atlan.com",
+  "category": "data-and-databases",
+  "teams": ["engineering", "operations"],
+  "summary": "Search and update assets in the Atlan data catalog",
+  "capabilities": [
+    "Search data assets and glossary terms",
+    "Explore lineage across systems",
+    "Update descriptions, owners, and tags"
+  ],
+  "official": {
+    "evidence": "https://docs.atlan.com/product/capabilities/atlan-ai/how-tos/remote-mcp-overview",
+    "repository": "https://github.com/atlanhq/agent-toolkit"
+  },
+  "docs": "https://docs.atlan.com/product/capabilities/atlan-ai/how-tos/remote-mcp-overview",
+  "remote": {
+    "url": "https://mcp.atlan.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#2026D2"
+  },
+  "supportedBy": ["chatgpt", "manus", "glean", "docker"]
+}

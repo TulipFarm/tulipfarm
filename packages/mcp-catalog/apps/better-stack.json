@@ -1,0 +1,26 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "better-stack",
+  "name": "Better Stack",
+  "maker": "Better Stack",
+  "homepage": "https://betterstack.com",
+  "category": "monitoring-and-analytics",
+  "teams": ["engineering"],
+  "summary": "Query Better Stack logs, uptime, and incidents",
+  "capabilities": ["Search logs and metrics", "Check monitors and uptime", "Manage incidents and on-call"],
+  "official": {
+    "evidence": "https://betterstack.com/docs/getting-started/integrations/mcp/"
+  },
+  "docs": "https://betterstack.com/docs/getting-started/integrations/mcp/",
+  "remote": {
+    "url": "https://mcp.betterstack.com",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "simpleIcons": "betterstack",
+    "color": "#000000"
+  },
+  "supportedBy": ["lindy", "relevance-ai"]
+}

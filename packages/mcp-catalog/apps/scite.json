@@ -1,0 +1,30 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "scite",
+  "name": "Scite",
+  "maker": "Research Solutions",
+  "homepage": "https://scite.ai",
+  "category": "search-and-research",
+  "teams": ["everyone"],
+  "summary": "Search research papers and how they are cited",
+  "capabilities": [
+    "Search scholarly articles",
+    "See supporting and contrasting citations",
+    "Get answers with references"
+  ],
+  "official": {
+    "evidence": "https://scite.ai/mcp"
+  },
+  "docs": "https://scite.ai/mcp",
+  "remote": {
+    "url": "https://api.scite.ai/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "ai.scite/mcp",
+  "icons": {
+    "color": "#2F5FD5"
+  },
+  "supportedBy": ["chatgpt", "claude", "microsoft-copilot", "manus", "gumloop"]
+}

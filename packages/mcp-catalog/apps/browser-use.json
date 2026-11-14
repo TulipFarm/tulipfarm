@@ -1,0 +1,38 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "browser-use",
+  "name": "Browser Use",
+  "maker": "Browser Use",
+  "homepage": "https://browser-use.com",
+  "category": "automation",
+  "teams": ["engineering"],
+  "summary": "Automate browsers locally or in Browser Use Cloud",
+  "capabilities": [
+    "Open pages, click, and type",
+    "Read page content and take screenshots",
+    "Run browsers in Browser Use Cloud"
+  ],
+  "official": {
+    "evidence": "https://docs.browser-use.com/customize/mcp-server",
+    "repository": "https://github.com/browser-use/browser-use"
+  },
+  "docs": "https://docs.browser-use.com/customize/mcp-server",
+  "packages": [
+    {
+      "registry": "pypi",
+      "name": "browser-use",
+      "env": [
+        {
+          "name": "BROWSER_USE_API_KEY",
+          "description": "Browser Use Cloud API key",
+          "secret": true,
+          "required": false
+        }
+      ]
+    }
+  ],
+  "icons": {
+    "color": "#FE750E"
+  },
+  "supportedBy": ["lindy"]
+}

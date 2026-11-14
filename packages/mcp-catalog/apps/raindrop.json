@@ -1,0 +1,30 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "raindrop",
+  "name": "Raindrop.io",
+  "maker": "Raindrop.io",
+  "homepage": "https://raindrop.io",
+  "category": "docs-and-files",
+  "teams": ["everyone"],
+  "summary": "Search, save and organise Raindrop.io bookmarks",
+  "capabilities": [
+    "Search saved bookmarks and highlights",
+    "Save new links to collections",
+    "Organise collections and tags"
+  ],
+  "official": {
+    "evidence": "https://help.raindrop.io/integrations/mcp"
+  },
+  "docs": "https://help.raindrop.io/integrations/mcp",
+  "remote": {
+    "url": "https://api.raindrop.io/rest/v2/ai/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "io.raindrop/mcp",
+  "icons": {
+    "color": "#1988E0"
+  },
+  "supportedBy": ["manus", "lindy", "relevance-ai", "n8n"]
+}

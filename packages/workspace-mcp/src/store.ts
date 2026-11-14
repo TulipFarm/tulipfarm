@@ -112,15 +112,17 @@ export function createStore(options: WorkspaceMcpOptions) {
       return { read: owner, manage: owner, use: owner };
     }
     const manage = await canManageIntegration(tx, actor, 'mcp', row.id);
-    const use = Boolean(
-      (
-        await tx.client.query(
-          `SELECT 1 FROM ${table(tx, 'member_grants')} WHERE integration_id=$1 AND membership_id=$2
+    const use =
+      row.shared_with_workspace ||
+      Boolean(
+        (
+          await tx.client.query(
+            `SELECT 1 FROM ${table(tx, 'member_grants')} WHERE integration_id=$1 AND membership_id=$2
       UNION ALL SELECT 1 FROM ${table(tx, 'team_grants')} g JOIN ${qualified(tx.schema, 'tf_member_teams')} mt ON mt.team_id=g.team_id WHERE g.integration_id=$1 AND mt.membership_id=$2 LIMIT 1`,
-          [row.id, actor.membershipId],
-        )
-      ).rowCount,
-    );
+            [row.id, actor.membershipId],
+          )
+        ).rowCount,
+      );
     return { read: manage || use, manage, use };
   }
   async function permit(
@@ -160,6 +162,7 @@ export function createStore(options: WorkspaceMcpOptions) {
         `SELECT g.membership_id AS id FROM ${table(tx, 'member_grants')} g JOIN ${qualified(tx.schema, 'tf_memberships')} m ON m.id=g.membership_id WHERE g.integration_id=$1 AND m.removed_at IS NULL`,
       ),
       teamIds: await ids(`SELECT team_id AS id FROM ${table(tx, 'team_grants')} WHERE integration_id=$1`),
+      workspace: row.shared_with_workspace,
     };
   }
   /** Checks, without decrypting, that everyone who can use the integration may send these secrets to its endpoint. */
@@ -293,8 +296,13 @@ export function createStore(options: WorkspaceMcpOptions) {
       `UPDATE ${table(tx, 'integrations')} SET authorization_epoch=authorization_epoch+1,descriptor_approved=false,refresh_claim=NULL,refresh_started_at=NULL WHERE id=$1`,
       [row.id],
     );
+    // Tools stay on, but a new account or audience must not inherit "run without asking" for anything that can
+    // change data, and the policy version bump retires every earlier approval.
     await tx.client.query(
-      `UPDATE ${table(tx, 'tool_policies')} SET enabled_revision=NULL,standing_exception=false,policy_version=policy_version+1 WHERE integration_id=$1`,
+      `UPDATE ${table(tx, 'tool_policies')} p SET policy_version=p.policy_version+1,standing_exception=COALESCE((
+        SELECT (r.tool->'annotations'->>'readOnlyHint')='true' AND (r.tool->'annotations'->>'destructiveHint') IS DISTINCT FROM 'true'
+        FROM ${table(tx, 'tool_revisions')} r WHERE r.integration_id=p.integration_id AND r.name=p.name AND r.revision=p.enabled_revision
+      ),false) WHERE p.integration_id=$1`,
       [row.id],
     );
     await tx.client.query(

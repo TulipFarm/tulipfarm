@@ -1,0 +1,25 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "enterpret",
+  "name": "Enterpret",
+  "maker": "Enterpret",
+  "homepage": "https://www.enterpret.com",
+  "category": "search-and-research",
+  "teams": ["product", "support"],
+  "summary": "Analyse customer feedback in Enterpret",
+  "capabilities": ["Search feedback across channels", "Find top themes and trends", "Pull customer quotes for a topic"],
+  "official": {
+    "evidence": "https://helpcenter.enterpret.com/article/enterpret-mcp-server"
+  },
+  "docs": "https://helpcenter.enterpret.com/article/enterpret-mcp-server",
+  "remote": {
+    "url": "https://wisdom-api.enterpret.com/server/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#5B3DF5"
+  },
+  "supportedBy": ["chatgpt", "claude", "manus", "gumloop", "glean"]
+}

@@ -1,0 +1,29 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "uberall",
+  "name": "Uberall",
+  "maker": "Uberall",
+  "homepage": "https://uberall.com",
+  "category": "marketing",
+  "teams": ["marketing"],
+  "summary": "Manage business listings and reviews in Uberall",
+  "capabilities": [
+    "Review and update location listings",
+    "Read and reply to reviews",
+    "Report on local search performance"
+  ],
+  "official": {
+    "evidence": "https://docs.uberall.com/guides/platform-mcp"
+  },
+  "docs": "https://docs.uberall.com/guides/platform-mcp",
+  "remote": {
+    "url": "https://mcp.uberall.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#F1504C"
+  },
+  "supportedBy": ["docker"]
+}

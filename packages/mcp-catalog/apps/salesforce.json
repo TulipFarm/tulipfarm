@@ -1,0 +1,43 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "salesforce",
+  "name": "Salesforce",
+  "maker": "Salesforce",
+  "homepage": "https://www.salesforce.com",
+  "category": "crm-and-sales",
+  "teams": ["sales", "support"],
+  "summary": "Query and update Salesforce records",
+  "capabilities": [
+    "Run SOQL queries across standard and custom objects",
+    "Create, update, and delete records",
+    "Read object and field metadata"
+  ],
+  "official": {
+    "evidence": "https://developer.salesforce.com/docs/platform/hosted-mcp-servers/overview"
+  },
+  "docs": "https://developer.salesforce.com/docs/platform/hosted-mcp-servers/overview",
+  "remote": {
+    "url": "https://api.salesforce.com/platform/mcp/v1/platform/sobject-all",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#00A1E0"
+  },
+  "supportedBy": [
+    "claude",
+    "microsoft-copilot",
+    "notion-ai",
+    "perplexity",
+    "lindy",
+    "gumloop",
+    "relevance-ai",
+    "dust",
+    "glean",
+    "zapier",
+    "make",
+    "n8n"
+  ],
+  "featured": true
+}

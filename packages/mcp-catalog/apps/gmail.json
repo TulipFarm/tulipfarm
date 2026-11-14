@@ -1,0 +1,45 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "gmail",
+  "name": "Gmail",
+  "maker": "Google",
+  "homepage": "https://workspace.google.com/gmail/",
+  "category": "email-and-calendar",
+  "teams": ["everyone"],
+  "summary": "Search, read and draft email in Gmail",
+  "capabilities": ["Search and read messages and threads", "Draft and send email", "Manage labels"],
+  "official": {
+    "evidence": "https://developers.google.com/workspace/gmail/api/guides/configure-mcp-server"
+  },
+  "docs": "https://developers.google.com/workspace/gmail/api/guides/configure-mcp-server",
+  "remote": {
+    "url": "https://gmailmcp.googleapis.com/mcp/v1",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "lobehub": "Google",
+    "simpleIcons": "gmail",
+    "color": "#EA4335"
+  },
+  "supportedBy": [
+    "chatgpt",
+    "claude",
+    "gemini",
+    "microsoft-copilot",
+    "notion-ai",
+    "manus",
+    "perplexity",
+    "lindy",
+    "gumloop",
+    "relevance-ai",
+    "dust",
+    "glean",
+    "zapier",
+    "make",
+    "n8n",
+    "docker"
+  ],
+  "featured": true
+}

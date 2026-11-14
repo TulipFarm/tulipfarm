@@ -49,6 +49,7 @@
     "@tulipfarm/google-workspace": "workspace:*",
     "@tulipfarm/integrations": "workspace:*",
     "@tulipfarm/knowledge": "workspace:*",
+    "@tulipfarm/mcp-catalog": "workspace:*",
     "@tulipfarm/plan-documents": "workspace:*",
     "@tulipfarm/recommendations": "workspace:*",
     "@tulipfarm/slack": "workspace:*",

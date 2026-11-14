@@ -8,7 +8,8 @@ export type McpSecretCredential =
   | { kind: 'secret-bearer'; secretId: string }
   | { kind: 'secret-headers'; secretIds: string[] };
 export type McpSecretVersion = { secretId: string; version: number; policyVersion: number };
-export type McpSecretUsers = { membershipIds: string[]; teamIds: string[] };
+/** Who can use an integration. `workspace` means every current and future member. */
+export type McpSecretUsers = { membershipIds: string[]; teamIds: string[]; workspace?: boolean };
 export type McpResolvedCredential =
   | { kind: 'bearer'; token: string }
   | { kind: 'headers'; headers: Record<string, string>; cookie?: string };
@@ -89,6 +90,22 @@ const grantedTo = (tx: SecretTransaction, team: string) =>
   `EXISTS (SELECT 1 FROM ${table(tx, 'grants')} g WHERE g.secret_id = $1 AND g.role IN ('use','manage')
     AND (g.grantee = 'workspace' OR g.team_id = ${team}))`;
 
+/** An integration shared with the whole workspace may only send a secret that is itself shared with the workspace. */
+async function requireWorkspaceGrant(tx: SecretTransaction, secretId: string, users: McpSecretUsers) {
+  if (!users.workspace) return;
+  const granted = z
+    .object({ granted: z.boolean() })
+    .parse(
+      (
+        await tx.client.query(
+          `SELECT EXISTS (SELECT 1 FROM ${table(tx, 'grants')} g WHERE g.secret_id = $1 AND g.role IN ('use','manage') AND g.grantee = 'workspace') AS granted`,
+          [secretId],
+        )
+      ).rows[0],
+    );
+  if (!granted.granted) throw new SecretError('not-found');
+}
+
 /**
  * Checks, without decrypting, that an MCP connection at `endpoint` may send these saved secrets for every member
  * and team that can use it. Each secret must be active and saved, name the exact endpoint (a host destination is
@@ -130,6 +147,7 @@ export async function bindMcpSecrets(
         );
       if (!granted.granted) throw new SecretError('not-found');
     }
+    await requireWorkspaceGrant(tx, row.id, input.users);
     parts.push({ placement: row.placement });
     versions.push({ secretId: row.id, version: row.version, policyVersion: row.policy_version });
   }
@@ -227,6 +245,7 @@ export async function bindHostedMcpSecrets(
         );
       if (!granted.granted) throw new SecretError('not-found');
     }
+    await requireWorkspaceGrant(tx, row.id, input.users);
     result.push({ secretId: row.id, version: row.version, policyVersion: row.policy_version, hosts, placement });
   }
   return result;

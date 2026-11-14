@@ -1,0 +1,30 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "chartmogul",
+  "name": "ChartMogul",
+  "maker": "ChartMogul",
+  "homepage": "https://chartmogul.com",
+  "category": "finance-and-accounting",
+  "teams": ["finance"],
+  "summary": "Query subscription revenue metrics",
+  "capabilities": [
+    "Get MRR, churn, and other SaaS metrics",
+    "Look up customers and subscriptions",
+    "Compare revenue over time"
+  ],
+  "official": {
+    "evidence": "https://dev.chartmogul.com/docs/chartmogul-mcp-server/"
+  },
+  "docs": "https://dev.chartmogul.com/docs/chartmogul-mcp-server/",
+  "remote": {
+    "url": "https://mcp.chartmogul.com",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "simpleIcons": "chartmogul",
+    "color": "#13324B"
+  },
+  "supportedBy": ["chatgpt", "claude", "manus", "lindy", "relevance-ai"]
+}

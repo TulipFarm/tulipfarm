@@ -1,0 +1,43 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "square",
+  "name": "Square",
+  "maker": "Block",
+  "homepage": "https://squareup.com",
+  "category": "payments-and-commerce",
+  "teams": ["operations", "finance", "sales"],
+  "summary": "Manage payments, orders, catalog, and customers",
+  "capabilities": [
+    "Look up payments, orders, and refunds",
+    "Manage catalog items and inventory",
+    "Find and update customers",
+    "Work with invoices and bookings"
+  ],
+  "official": {
+    "evidence": "https://developer.squareup.com/docs/mcp",
+    "repository": "https://github.com/square/square-mcp-server"
+  },
+  "docs": "https://developer.squareup.com/docs/mcp",
+  "remote": {
+    "url": "https://mcp.squareup.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "simpleIcons": "square",
+    "color": "#3E4348"
+  },
+  "supportedBy": [
+    "chatgpt",
+    "claude",
+    "microsoft-copilot",
+    "copilot-studio",
+    "manus",
+    "lindy",
+    "relevance-ai",
+    "zapier",
+    "make"
+  ],
+  "featured": true
+}

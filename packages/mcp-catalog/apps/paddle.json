@@ -1,0 +1,31 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "paddle",
+  "name": "Paddle",
+  "maker": "Paddle",
+  "homepage": "https://www.paddle.com",
+  "category": "payments-and-commerce",
+  "teams": ["finance", "engineering"],
+  "summary": "Manage products, prices, and subscriptions",
+  "capabilities": [
+    "Create and update products and prices",
+    "Look up customers, transactions, and subscriptions",
+    "Manage discounts and adjustments"
+  ],
+  "official": {
+    "evidence": "https://developer.paddle.com/sdks/ai/paddle-mcp/"
+  },
+  "docs": "https://developer.paddle.com/sdks/ai/paddle-mcp/",
+  "remote": {
+    "url": "https://mcp.paddle.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "com.paddle/mcp",
+  "icons": {
+    "simpleIcons": "paddle",
+    "color": "#FDDD35"
+  },
+  "supportedBy": ["lindy", "relevance-ai"]
+}

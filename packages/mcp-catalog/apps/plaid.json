@@ -1,0 +1,29 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "plaid",
+  "name": "Plaid",
+  "maker": "Plaid",
+  "homepage": "https://plaid.com",
+  "category": "payments-and-commerce",
+  "teams": ["engineering"],
+  "summary": "Monitor your Plaid integration and usage",
+  "capabilities": [
+    "Diagnose Link sessions and Item errors",
+    "Review API usage and conversion metrics",
+    "Look up institution status"
+  ],
+  "official": {
+    "evidence": "https://plaid.com/docs/resources/mcp/"
+  },
+  "docs": "https://plaid.com/docs/resources/mcp/",
+  "remote": {
+    "url": "https://api.dashboard.plaid.com/mcp/",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#000000"
+  },
+  "supportedBy": ["lindy", "relevance-ai"]
+}

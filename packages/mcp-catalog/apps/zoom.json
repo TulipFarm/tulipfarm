@@ -1,0 +1,44 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "zoom",
+  "name": "Zoom",
+  "maker": "Zoom",
+  "homepage": "https://www.zoom.com",
+  "category": "chat",
+  "teams": ["everyone"],
+  "summary": "Work with Zoom meetings, recordings and chat",
+  "capabilities": [
+    "Schedule and list meetings",
+    "Read meeting summaries and recordings",
+    "Search Zoom Docs and Team Chat"
+  ],
+  "official": {
+    "evidence": "https://developers.zoom.us/docs/mcp/",
+    "repository": "https://github.com/zoom/mcp-registry"
+  },
+  "docs": "https://developers.zoom.us/docs/mcp/",
+  "remote": {
+    "url": "https://mcp.zoom.us/mcp/zoom/streamable",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "io.github.zoom/zoom-workspace",
+  "icons": {
+    "simpleIcons": "zoom",
+    "color": "#0B5CFF"
+  },
+  "supportedBy": [
+    "chatgpt",
+    "claude",
+    "microsoft-copilot",
+    "manus",
+    "lindy",
+    "gumloop",
+    "relevance-ai",
+    "glean",
+    "zapier",
+    "make",
+    "n8n"
+  ]
+}

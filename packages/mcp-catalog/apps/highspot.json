@@ -1,0 +1,29 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "highspot",
+  "name": "Highspot",
+  "maker": "Highspot",
+  "homepage": "https://www.highspot.com",
+  "category": "crm-and-sales",
+  "teams": ["sales"],
+  "summary": "Find sales content and answers in Highspot",
+  "capabilities": [
+    "Search your sales content library",
+    "Answer seller questions from your content",
+    "Look up CRM deals"
+  ],
+  "official": {
+    "evidence": "https://www.highspot.com/product/mcp-server/"
+  },
+  "docs": "https://www.highspot.com/product/mcp-server/",
+  "remote": {
+    "url": "https://mcp.highspot.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#FF6B3D"
+  },
+  "supportedBy": ["chatgpt", "claude", "microsoft-copilot", "copilot-studio", "glean"]
+}

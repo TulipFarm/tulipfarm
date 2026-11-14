@@ -1,0 +1,31 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "opslevel",
+  "name": "OpsLevel",
+  "maker": "OpsLevel",
+  "homepage": "https://www.opslevel.com",
+  "category": "cloud-and-infrastructure",
+  "teams": ["engineering"],
+  "summary": "Query your OpsLevel service catalog",
+  "capabilities": [
+    "Find services, owners, and teams",
+    "Check service maturity and checks",
+    "Read documentation and dependencies"
+  ],
+  "official": {
+    "evidence": "https://docs.opslevel.com/docs/mcp"
+  },
+  "docs": "https://docs.opslevel.com/docs/mcp",
+  "remote": {
+    "url": "https://app.opslevel.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "com.opslevel/mcp",
+  "icons": {
+    "simpleIcons": "opslevel",
+    "color": "#0A53E0"
+  },
+  "supportedBy": ["github-registry"]
+}

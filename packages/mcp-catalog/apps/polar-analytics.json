@@ -1,0 +1,37 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "polar-analytics",
+  "name": "Polar Analytics",
+  "maker": "Polar Analytics",
+  "homepage": "https://www.polaranalytics.com",
+  "category": "monitoring-and-analytics",
+  "teams": ["marketing", "finance"],
+  "summary": "Query ecommerce sales and marketing data",
+  "capabilities": [
+    "Get sales, orders, and margin metrics",
+    "Compare ad spend and return by channel",
+    "Break down performance by product"
+  ],
+  "official": {
+    "evidence": "https://www.polaranalytics.com/mcp-for-ecommerce/polar-analytics"
+  },
+  "docs": "https://www.polaranalytics.com/mcp-for-ecommerce/polar-analytics",
+  "remote": {
+    "url": "https://api.polaranalytics.com/mcp",
+    "transport": "streamable-http",
+    "auth": "api-key",
+    "headers": [
+      {
+        "name": "Authorization",
+        "value": "Bearer {key}",
+        "description": "Token from app.polaranalytics.com/mcp"
+      }
+    ],
+    "checked": "2026-11-14"
+  },
+  "registryName": "com.polaranalytics/polar",
+  "icons": {
+    "color": "#3F51F5"
+  },
+  "supportedBy": ["chatgpt", "claude", "microsoft-copilot", "manus", "gumloop"]
+}

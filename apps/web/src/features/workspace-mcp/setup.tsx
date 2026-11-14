@@ -21,6 +21,8 @@ import {
 import { McpCommandFeedback, useMcpCommand } from './state';
 import { useMcpSetupRecovery } from './queries';
 import { HostedSetup, type HostedSetting } from './hosted-setup';
+import { startMcpSignIn } from './sign-in';
+import { Disclosure } from '@/components/disclosure';
 
 type SetupProps = {
   api: McpApi;
@@ -31,6 +33,8 @@ type SetupProps = {
   /** A chat's suggestion to run a package. It sets up a personal integration only. */
   packageProposal?: { name: string; package: McpPackage; settings: HostedSetting[]; egress: string[] } | undefined;
   integration?: Integration | undefined;
+  /** Who the new connection is for; sharing with everyone includes people who join later. */
+  ownership?: 'personal' | 'shared' | undefined;
   /** Opens the package form without a suggestion or catalog listing. */
   hosted?: boolean | undefined;
   close: () => void;
@@ -63,6 +67,7 @@ export function McpSetup(props: SetupProps) {
       capabilities={props.capabilities}
       entry={entry}
       proposal={props.proposal}
+      ownership={props.ownership}
       integration={integration}
       close={props.close}
       saved={props.saved}
@@ -71,7 +76,17 @@ export function McpSetup(props: SetupProps) {
   );
 }
 
-function RemoteSetup({ api, capabilities, entry, proposal, integration, close, saved, authorizing }: SetupProps) {
+function RemoteSetup({
+  api,
+  capabilities,
+  entry,
+  proposal,
+  integration,
+  close,
+  saved,
+  authorizing,
+  ...props
+}: SetupProps) {
   const prefix = useId();
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
@@ -79,7 +94,9 @@ function RemoteSetup({ api, capabilities, entry, proposal, integration, close, s
   }, []);
   const [name, setName] = useState(integration?.name ?? entry?.name ?? proposal?.name ?? '');
   const [endpoint, setEndpoint] = useState(integration?.endpoint ?? entry?.endpoint ?? proposal?.endpoint ?? '');
-  const [ownership, setOwnership] = useState<'personal' | 'shared'>(integration?.ownership ?? 'personal');
+  const [ownership, setOwnership] = useState<'personal' | 'shared'>(
+    integration?.ownership ?? props.ownership ?? 'personal',
+  );
   const [auth, setAuth] = useState<string>(
     integration?.authMethod === 'secret-bearer' || integration?.authMethod === 'secret-headers'
       ? 'secrets'
@@ -170,6 +187,7 @@ function RemoteSetup({ api, capabilities, entry, proposal, integration, close, s
       name: name.trim(),
       endpoint,
       ownership,
+      ...(!current && proposal && ownership === 'shared' ? { shareWithWorkspace: true } : {}),
       auth: parsed.data,
       ...(entry ? { catalogEntryId: entry.id } : {}),
       ...(current ? { expectedVersion: current.version } : {}),
@@ -181,7 +199,10 @@ function RemoteSetup({ api, capabilities, entry, proposal, integration, close, s
       async () => {
         const next = await api.setup(payload, integration?.id ?? result?.integration.id);
         setResult(next);
-        if (next.kind === 'oauth') authorizing?.(next.integration.id, next.authorizationUrl);
+        if (next.kind === 'oauth') {
+          authorizing?.(next.integration.id, next.authorizationUrl);
+          startMcpSignIn(next.authorizationUrl);
+        }
         setToken('');
         setClientSecret('');
         setHeaders(previous => previous.map(header => ({ name: header.name, value: '' })));
@@ -417,10 +438,14 @@ function RemoteSetup({ api, capabilities, entry, proposal, integration, close, s
             </div>
           )}
           {auth === 'oauth' && (
-            <div className="space-y-3">
-              <p>
-                The server checks supported OAuth registration methods. If automatic registration is unavailable,
-                register a client with the provider and enter its details here.
+            <Disclosure
+              key={result?.kind === 'registration-required' ? 'needed' : 'optional'}
+              title="Use your own OAuth app (most servers don't need this)"
+              defaultOpen={result?.kind === 'registration-required' || !!clientId}
+            >
+              <p className="text-sm text-muted-foreground">
+                Leave this empty and TulipFarm registers itself with the server. Fill it in only if the server asks you
+                to create an OAuth app first.
               </p>
               <div className="space-y-2">
                 <Label htmlFor={`${prefix}-client`}>Registered client ID, if required</Label>
@@ -441,34 +466,32 @@ function RemoteSetup({ api, capabilities, entry, proposal, integration, close, s
                   onChange={event => setClientSecret(event.target.value)}
                 />
               </div>
-            </div>
-          )}
-          {auth === 'oauth' && (
-            <div className="space-y-2">
-              <Label htmlFor={`${prefix}-client-auth`}>Registered client authentication method</Label>
-              <Select
-                value={clientAuthMethod}
-                onValueChange={value => {
-                  if (value === 'none' || value === 'client_secret_basic' || value === 'client_secret_post') {
-                    setClientAuthMethod(value);
-                    if (value === 'none') setClientSecret('');
-                  }
-                }}
-              >
-                <SelectTrigger id={`${prefix}-client-auth`}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">none, public client</SelectItem>
-                  <SelectItem value="client_secret_basic">client_secret_basic, HTTP Basic</SelectItem>
-                  <SelectItem value="client_secret_post">client_secret_post, request body</SelectItem>
-                </SelectContent>
-              </Select>
-              <p className="text-sm text-muted-foreground">
-                Choose the method registered for this client, even if the issuer supports both secret methods. TulipFarm
-                does not guess from advertised methods.
-              </p>
-            </div>
+              <div className="space-y-2">
+                <Label htmlFor={`${prefix}-client-auth`}>Registered client authentication method</Label>
+                <Select
+                  value={clientAuthMethod}
+                  onValueChange={value => {
+                    if (value === 'none' || value === 'client_secret_basic' || value === 'client_secret_post') {
+                      setClientAuthMethod(value);
+                      if (value === 'none') setClientSecret('');
+                    }
+                  }}
+                >
+                  <SelectTrigger id={`${prefix}-client-auth`}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">none, public client</SelectItem>
+                    <SelectItem value="client_secret_basic">client_secret_basic, HTTP Basic</SelectItem>
+                    <SelectItem value="client_secret_post">client_secret_post, request body</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-sm text-muted-foreground">
+                  Choose the method registered for this client, even if the issuer supports both secret methods.
+                  TulipFarm does not guess from advertised methods.
+                </p>
+              </div>
+            </Disclosure>
           )}
           <Button type="submit" aria-busy={command.busy} disabled={!capabilities.integrationsEnabled}>
             {command.busy

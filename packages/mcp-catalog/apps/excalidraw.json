@@ -1,0 +1,31 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "excalidraw",
+  "name": "Excalidraw",
+  "maker": "Excalidraw",
+  "homepage": "https://excalidraw.com",
+  "category": "design",
+  "teams": ["engineering", "product"],
+  "summary": "Draw hand-drawn style diagrams in Excalidraw",
+  "capabilities": [
+    "Create diagrams and sketches from prompts",
+    "Render interactive drawings in chat",
+    "Export drawings to Excalidraw"
+  ],
+  "official": {
+    "evidence": "https://github.com/excalidraw/excalidraw-mcp",
+    "repository": "https://github.com/excalidraw/excalidraw-mcp"
+  },
+  "docs": "https://github.com/excalidraw/excalidraw-mcp",
+  "remote": {
+    "url": "https://mcp.excalidraw.com/mcp",
+    "transport": "streamable-http",
+    "auth": "none",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "simpleIcons": "excalidraw",
+    "color": "#6965DB"
+  },
+  "supportedBy": ["claude", "microsoft-copilot", "manus", "lindy", "glean", "docker"]
+}

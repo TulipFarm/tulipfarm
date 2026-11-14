@@ -1,0 +1,34 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "serpapi",
+  "name": "SerpApi",
+  "maker": "SerpApi",
+  "homepage": "https://serpapi.com",
+  "category": "search-and-research",
+  "teams": ["marketing", "everyone"],
+  "summary": "Get Google and other search engine results",
+  "capabilities": ["Search Google, Bing, and other engines", "Read maps, news, shopping, and image results"],
+  "official": {
+    "evidence": "https://github.com/serpapi/serpapi-mcp",
+    "repository": "https://github.com/serpapi/serpapi-mcp"
+  },
+  "docs": "https://github.com/serpapi/serpapi-mcp",
+  "remote": {
+    "url": "https://mcp.serpapi.com/mcp",
+    "transport": "streamable-http",
+    "auth": "api-key",
+    "headers": [
+      {
+        "name": "Authorization",
+        "value": "Bearer {key}",
+        "description": "SerpApi API key"
+      }
+    ],
+    "checked": "2026-11-14"
+  },
+  "registryName": "io.github.serpapi/serpapi-mcp",
+  "icons": {
+    "color": "#377FEA"
+  },
+  "supportedBy": ["lindy", "gumloop", "make", "n8n", "github-registry"]
+}

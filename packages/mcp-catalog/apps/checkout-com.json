@@ -1,0 +1,31 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "checkout-com",
+  "name": "Checkout.com",
+  "maker": "Checkout.com",
+  "homepage": "https://www.checkout.com",
+  "category": "payments-and-commerce",
+  "teams": ["engineering", "finance"],
+  "summary": "Search docs and investigate payment operations",
+  "capabilities": [
+    "Search docs, API reference, and support articles",
+    "Investigate payments and operations",
+    "Get guided integration recommendations"
+  ],
+  "official": {
+    "evidence": "https://www.checkout.com/docs/developer-resources/ai-tooling-for-developers/checkout-com-mcp-server",
+    "repository": "https://github.com/checkout/checkout-mcp"
+  },
+  "docs": "https://www.checkout.com/docs/developer-resources/ai-tooling-for-developers/checkout-com-mcp-server",
+  "remote": {
+    "url": "https://mcp.checkout.com",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "io.github.checkout/mcp",
+  "icons": {
+    "color": "#000000"
+  },
+  "supportedBy": ["claude", "github-registry"]
+}

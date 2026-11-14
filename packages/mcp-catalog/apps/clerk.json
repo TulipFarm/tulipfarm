@@ -1,0 +1,27 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "clerk",
+  "name": "Clerk",
+  "maker": "Clerk",
+  "homepage": "https://clerk.com",
+  "category": "security",
+  "teams": ["engineering"],
+  "summary": "Add Clerk authentication to apps",
+  "capabilities": ["Fetch Clerk SDK snippets and setup guides", "Get code patterns for auth flows"],
+  "official": {
+    "evidence": "https://clerk.com/docs/guides/ai/mcp/clerk-mcp-server"
+  },
+  "docs": "https://clerk.com/docs/guides/ai/mcp/clerk-mcp-server",
+  "remote": {
+    "url": "https://mcp.clerk.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "io.github.clerk/mcp-server",
+  "icons": {
+    "simpleIcons": "clerk",
+    "color": "#6C47FF"
+  },
+  "supportedBy": ["claude", "microsoft-copilot", "manus", "lindy", "relevance-ai", "glean"]
+}

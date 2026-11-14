@@ -1,0 +1,34 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "posthog",
+  "name": "PostHog",
+  "maker": "PostHog",
+  "homepage": "https://posthog.com",
+  "category": "monitoring-and-analytics",
+  "teams": ["engineering", "product"],
+  "summary": "Query PostHog analytics, flags, and errors",
+  "capabilities": [
+    "Run product analytics queries",
+    "Create and update feature flags",
+    "Read insights and dashboards",
+    "Investigate error tracking issues"
+  ],
+  "official": {
+    "evidence": "https://posthog.com/docs/model-context-protocol",
+    "repository": "https://github.com/PostHog/mcp"
+  },
+  "docs": "https://posthog.com/docs/model-context-protocol",
+  "remote": {
+    "url": "https://mcp.posthog.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "io.github.PostHog/mcp",
+  "icons": {
+    "simpleIcons": "posthog",
+    "color": "#000000"
+  },
+  "supportedBy": ["chatgpt", "claude", "manus", "lindy", "gumloop", "relevance-ai", "glean"],
+  "featured": true
+}

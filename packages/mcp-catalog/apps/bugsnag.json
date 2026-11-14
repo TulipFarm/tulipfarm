@@ -1,0 +1,41 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "bugsnag",
+  "name": "BugSnag",
+  "maker": "SmartBear",
+  "homepage": "https://www.bugsnag.com",
+  "category": "monitoring-and-analytics",
+  "teams": ["engineering"],
+  "summary": "Investigate BugSnag errors and stability",
+  "capabilities": ["Find and read errors and events", "Check release stability", "Update error status"],
+  "official": {
+    "evidence": "https://github.com/SmartBear/smartbear-mcp",
+    "repository": "https://github.com/SmartBear/smartbear-mcp"
+  },
+  "docs": "https://github.com/SmartBear/smartbear-mcp",
+  "remote": {
+    "url": "https://bugsnag.mcp.smartbear.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "packages": [
+    {
+      "registry": "npm",
+      "name": "@smartbear/mcp",
+      "env": [
+        {
+          "name": "BUGSNAG_AUTH_TOKEN",
+          "description": "BugSnag personal auth token",
+          "secret": true,
+          "required": true
+        }
+      ]
+    }
+  ],
+  "registryName": "com.smartbear/smartbear-mcp",
+  "icons": {
+    "color": "#4949E4"
+  },
+  "supportedBy": ["lindy", "relevance-ai", "docker", "github-registry"]
+}

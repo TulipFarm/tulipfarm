@@ -1,0 +1,27 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "openrouter",
+  "name": "OpenRouter",
+  "maker": "OpenRouter",
+  "homepage": "https://openrouter.ai",
+  "category": "ai-and-media",
+  "teams": ["engineering"],
+  "summary": "Browse models and usage on OpenRouter",
+  "capabilities": ["Find models by price and capability", "Check credits and usage", "Compare model providers"],
+  "official": {
+    "evidence": "https://openrouter.ai/docs/guides/overview/mcp-server"
+  },
+  "docs": "https://openrouter.ai/docs/guides/overview/mcp-server",
+  "remote": {
+    "url": "https://mcp.openrouter.ai/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "lobehub": "OpenRouter",
+    "simpleIcons": "openrouter",
+    "color": "#94A3B8"
+  },
+  "supportedBy": ["manus", "lindy", "relevance-ai", "make", "n8n"]
+}

@@ -1,0 +1,30 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "tableau",
+  "name": "Tableau",
+  "maker": "Salesforce",
+  "homepage": "https://www.tableau.com",
+  "category": "monitoring-and-analytics",
+  "teams": ["operations", "finance", "product"],
+  "summary": "Query Tableau data sources and dashboards",
+  "capabilities": [
+    "Find workbooks, views, and data sources",
+    "Query published data sources",
+    "Get insights from Tableau Pulse metrics"
+  ],
+  "official": {
+    "evidence": "https://tableau.github.io/tableau-mcp/docs/hosted-tableau-mcp",
+    "repository": "https://github.com/tableau/tableau-mcp"
+  },
+  "docs": "https://tableau.github.io/tableau-mcp/docs/hosted-tableau-mcp",
+  "remote": {
+    "url": "https://mcp.tableau.com",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#E97627"
+  },
+  "supportedBy": ["claude", "microsoft-copilot", "manus", "lindy", "gumloop", "relevance-ai", "glean"]
+}

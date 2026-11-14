@@ -1,0 +1,29 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "hex",
+  "name": "Hex",
+  "maker": "Hex",
+  "homepage": "https://hex.tech",
+  "category": "data-and-databases",
+  "teams": ["operations", "product", "finance"],
+  "summary": "Ask data questions and search Hex projects",
+  "capabilities": [
+    "Ask questions answered by Hex agents",
+    "Search projects and published apps",
+    "Run threads over your warehouse data"
+  ],
+  "official": {
+    "evidence": "https://learn.hex.tech/docs/administration/mcp-server"
+  },
+  "docs": "https://learn.hex.tech/docs/administration/mcp-server",
+  "remote": {
+    "url": "https://app.hex.tech/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#473982"
+  },
+  "supportedBy": ["chatgpt", "claude", "manus", "lindy", "gumloop", "glean"]
+}

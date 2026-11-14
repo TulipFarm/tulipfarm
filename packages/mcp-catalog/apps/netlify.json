@@ -1,0 +1,41 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "netlify",
+  "name": "Netlify",
+  "maker": "Netlify",
+  "homepage": "https://www.netlify.com",
+  "category": "cloud-and-infrastructure",
+  "teams": ["engineering"],
+  "summary": "Create, deploy, and manage Netlify sites",
+  "capabilities": ["Create and deploy sites", "Manage environment variables and forms", "Check deploy status and logs"],
+  "official": {
+    "evidence": "https://docs.netlify.com/build/build-with-ai/agent-setup-guides/agent-setup-overview/",
+    "repository": "https://github.com/netlify/netlify-mcp"
+  },
+  "docs": "https://docs.netlify.com/build/build-with-ai/agent-setup-guides/agent-setup-overview/",
+  "remote": {
+    "url": "https://mcp.netlify.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "packages": [
+    {
+      "registry": "npm",
+      "name": "@netlify/mcp",
+      "env": [
+        {
+          "name": "NETLIFY_PERSONAL_ACCESS_TOKEN",
+          "description": "Netlify personal access token",
+          "secret": true,
+          "required": false
+        }
+      ]
+    }
+  ],
+  "icons": {
+    "simpleIcons": "netlify",
+    "color": "#00C7B7"
+  },
+  "supportedBy": ["chatgpt", "claude", "manus", "lindy", "gumloop", "relevance-ai", "glean", "zapier"]
+}

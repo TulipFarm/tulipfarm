@@ -1,0 +1,55 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "apify",
+  "name": "Apify",
+  "maker": "Apify",
+  "homepage": "https://apify.com",
+  "category": "search-and-research",
+  "teams": ["engineering", "marketing", "sales"],
+  "summary": "Run Apify Actors to scrape and extract web data",
+  "capabilities": [
+    "Search the Apify Store for Actors",
+    "Run Actors and read their results",
+    "Scrape websites and social media"
+  ],
+  "official": {
+    "evidence": "https://docs.apify.com/mcp",
+    "repository": "https://github.com/apify/apify-mcp-server"
+  },
+  "docs": "https://docs.apify.com/mcp",
+  "remote": {
+    "url": "https://mcp.apify.com",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "packages": [
+    {
+      "registry": "npm",
+      "name": "@apify/actors-mcp-server",
+      "env": [
+        {
+          "name": "APIFY_TOKEN",
+          "description": "Apify API token",
+          "secret": true,
+          "required": true
+        }
+      ]
+    }
+  ],
+  "registryName": "com.apify/apify-mcp-server",
+  "icons": {
+    "color": "#020202"
+  },
+  "supportedBy": [
+    "claude",
+    "microsoft-copilot",
+    "manus",
+    "lindy",
+    "gumloop",
+    "glean",
+    "make",
+    "docker",
+    "github-registry"
+  ]
+}

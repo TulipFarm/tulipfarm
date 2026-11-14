@@ -1,0 +1,333 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tulipfarm.ai/schemas/mcp-catalog-app.v1.json",
+  "title": "TulipFarm MCP catalog app",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 40
+    },
+    "maker": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 60
+    },
+    "homepage": {
+      "type": "string",
+      "format": "uri"
+    },
+    "category": {
+      "type": "string",
+      "enum": [
+        "email-and-calendar",
+        "chat",
+        "docs-and-files",
+        "projects-and-issues",
+        "code",
+        "cloud-and-infrastructure",
+        "data-and-databases",
+        "monitoring-and-analytics",
+        "crm-and-sales",
+        "support",
+        "marketing",
+        "payments-and-commerce",
+        "finance-and-accounting",
+        "hr-and-recruiting",
+        "design",
+        "search-and-research",
+        "automation",
+        "ai-and-media",
+        "security"
+      ]
+    },
+    "teams": {
+      "minItems": 1,
+      "maxItems": 3,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "engineering",
+          "product",
+          "design",
+          "sales",
+          "marketing",
+          "support",
+          "operations",
+          "finance",
+          "hr",
+          "everyone"
+        ]
+      }
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 2,
+      "maxLength": 60,
+      "pattern": "^\\S(.*\\S)?$"
+    },
+    "capabilities": {
+      "minItems": 2,
+      "maxItems": 4,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 2,
+        "maxLength": 70,
+        "pattern": "^\\S(.*\\S)?$"
+      }
+    },
+    "official": {
+      "type": "object",
+      "properties": {
+        "evidence": {
+          "type": "string",
+          "format": "uri"
+        },
+        "repository": {
+          "type": "string",
+          "format": "uri"
+        }
+      },
+      "required": [
+        "evidence"
+      ],
+      "additionalProperties": false
+    },
+    "docs": {
+      "type": "string",
+      "format": "uri"
+    },
+    "remote": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string"
+        },
+        "transport": {
+          "type": "string",
+          "enum": [
+            "streamable-http",
+            "sse"
+          ]
+        },
+        "auth": {
+          "type": "string",
+          "enum": [
+            "oauth",
+            "api-key",
+            "none",
+            "unknown"
+          ]
+        },
+        "headers": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_-]+$"
+              },
+              "value": {
+                "type": "string",
+                "pattern": "\\{[a-z][a-z0-9-]*\\}"
+              },
+              "description": {
+                "type": "string",
+                "minLength": 2,
+                "maxLength": 120,
+                "pattern": "^\\S(.*\\S)?$"
+              }
+            },
+            "required": [
+              "name",
+              "value",
+              "description"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "variables": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]*$"
+              },
+              "description": {
+                "type": "string",
+                "minLength": 2,
+                "maxLength": 120,
+                "pattern": "^\\S(.*\\S)?$"
+              },
+              "example": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "name",
+              "description"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "checked": {
+          "type": "string",
+          "format": "date",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+        },
+        "unreachableSince": {
+          "type": "string",
+          "format": "date",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$"
+        }
+      },
+      "required": [
+        "url",
+        "transport",
+        "auth"
+      ],
+      "additionalProperties": false
+    },
+    "packages": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "registry": {
+            "type": "string",
+            "enum": [
+              "npm",
+              "pypi",
+              "oci"
+            ]
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "env": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "pattern": "^[A-Z][A-Z0-9_]*$"
+                },
+                "description": {
+                  "type": "string",
+                  "minLength": 2,
+                  "maxLength": 120,
+                  "pattern": "^\\S(.*\\S)?$"
+                },
+                "secret": {
+                  "type": "boolean"
+                },
+                "required": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "name",
+                "description",
+                "secret",
+                "required"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "registry",
+          "name"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "registryName": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9.-]+\\/[a-zA-Z0-9._-]+$"
+    },
+    "icons": {
+      "type": "object",
+      "properties": {
+        "lobehub": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Za-z0-9]*$"
+        },
+        "simpleIcons": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+$"
+        },
+        "color": {
+          "type": "string",
+          "pattern": "^#[0-9A-F]{6}$"
+        }
+      },
+      "required": [
+        "color"
+      ],
+      "additionalProperties": false
+    },
+    "supportedBy": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "chatgpt",
+          "claude",
+          "gemini",
+          "microsoft-copilot",
+          "copilot-studio",
+          "notion-ai",
+          "manus",
+          "perplexity",
+          "lindy",
+          "gumloop",
+          "relevance-ai",
+          "dust",
+          "glean",
+          "zapier",
+          "make",
+          "n8n",
+          "docker",
+          "github-registry"
+        ]
+      }
+    },
+    "featured": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "id",
+    "name",
+    "maker",
+    "homepage",
+    "category",
+    "teams",
+    "summary",
+    "capabilities",
+    "official",
+    "docs",
+    "icons"
+  ],
+  "additionalProperties": false
+}

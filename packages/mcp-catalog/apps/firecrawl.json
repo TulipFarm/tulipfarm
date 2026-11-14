@@ -1,0 +1,45 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "firecrawl",
+  "name": "Firecrawl",
+  "maker": "Firecrawl",
+  "homepage": "https://www.firecrawl.dev",
+  "category": "search-and-research",
+  "teams": ["engineering", "marketing"],
+  "summary": "Scrape, crawl, and search websites with Firecrawl",
+  "capabilities": [
+    "Scrape pages into clean markdown",
+    "Crawl and map whole websites",
+    "Search the web and extract structured data"
+  ],
+  "official": {
+    "evidence": "https://github.com/firecrawl/firecrawl-mcp-server",
+    "repository": "https://github.com/firecrawl/firecrawl-mcp-server"
+  },
+  "docs": "https://docs.firecrawl.dev/mcp-server",
+  "remote": {
+    "url": "https://mcp.firecrawl.dev/v2/mcp-oauth",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "packages": [
+    {
+      "registry": "npm",
+      "name": "firecrawl-mcp",
+      "env": [
+        {
+          "name": "FIRECRAWL_API_KEY",
+          "description": "Firecrawl API key",
+          "secret": true,
+          "required": true
+        }
+      ]
+    }
+  ],
+  "icons": {
+    "lobehub": "Firecrawl",
+    "color": "#FA5D19"
+  },
+  "supportedBy": ["claude", "manus", "lindy", "gumloop", "docker", "github-registry"]
+}

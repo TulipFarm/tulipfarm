@@ -1,0 +1,26 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "runway",
+  "name": "Runway",
+  "maker": "Runway",
+  "homepage": "https://runwayml.com",
+  "category": "ai-and-media",
+  "teams": ["marketing", "design"],
+  "summary": "Generate video and images with Runway",
+  "capabilities": ["Generate video from text or images", "Generate images", "Edit and upscale video"],
+  "official": {
+    "evidence": "https://runway.com/mcp"
+  },
+  "docs": "https://runway.com/mcp",
+  "remote": {
+    "url": "https://mcp.runwayml.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "lobehub": "Runway",
+    "color": "#0C0C0C"
+  },
+  "supportedBy": ["chatgpt", "manus", "lindy"]
+}

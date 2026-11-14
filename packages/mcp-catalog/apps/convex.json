@@ -1,0 +1,27 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "convex",
+  "name": "Convex",
+  "maker": "Convex",
+  "homepage": "https://www.convex.dev",
+  "category": "data-and-databases",
+  "teams": ["engineering"],
+  "summary": "Inspect Convex deployments, tables, and functions",
+  "capabilities": ["Browse tables and documents", "Run queries and functions", "Read logs and environment variables"],
+  "official": {
+    "evidence": "https://docs.convex.dev/ai/convex-mcp-server",
+    "repository": "https://github.com/get-convex/convex-backend"
+  },
+  "docs": "https://docs.convex.dev/ai/convex-mcp-server",
+  "packages": [
+    {
+      "registry": "npm",
+      "name": "convex"
+    }
+  ],
+  "icons": {
+    "simpleIcons": "convex",
+    "color": "#EE342F"
+  },
+  "supportedBy": ["chatgpt"]
+}

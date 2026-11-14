@@ -1,0 +1,25 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "qonto",
+  "name": "Qonto",
+  "maker": "Qonto",
+  "homepage": "https://qonto.com",
+  "category": "finance-and-accounting",
+  "teams": ["finance"],
+  "summary": "View business account balances and transactions",
+  "capabilities": ["Check account balances", "Search transactions and attachments", "Review cards and team spend"],
+  "official": {
+    "evidence": "https://docs.qonto.com/mcp/overview"
+  },
+  "docs": "https://docs.qonto.com/mcp/overview",
+  "remote": {
+    "url": "https://mcp.qonto.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#1D1D1B"
+  },
+  "supportedBy": ["claude", "make"]
+}

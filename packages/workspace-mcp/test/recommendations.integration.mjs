@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
 import { mcpFixture } from './fixture.mjs';
 
-test('MCP recommendation events track enabled tools, not command replay, repeated discovery or repeated review', async () => {
+test('MCP recommendation events track tools enabled at discovery, not command replay, repeated discovery or repeated review', async () => {
   const f = await mcpFixture();
   try {
     const actor = f.members[0];
@@ -25,7 +25,7 @@ test('MCP recommendation events track enabled tools, not command replay, repeate
     assert.deepEqual(await events(), [{ membership_ids: [actor.membershipId], invalidate: false }]);
     await f.service.create(f.one.id, actor, input);
     const discovered = await f.service.discover(f.one.id, actor, integration.id);
-    assert.equal((await events()).length, 1);
+    assert.equal((await events()).length, 2);
     const review = discovered.map(tool => ({
       name: tool.name,
       revision: tool.discovered_revision,
@@ -33,7 +33,6 @@ test('MCP recommendation events track enabled tools, not command replay, repeate
       standingException: false,
     }));
     await f.service.reviewTools(f.one.id, actor, integration.id, review);
-    assert.equal((await events()).length, 2);
     await f.service.reviewTools(f.one.id, actor, integration.id, [...review].reverse());
     await f.service.discover(f.one.id, actor, integration.id);
     await f.service.setLifecycle(f.one.id, actor, integration.id, 'active');

@@ -1,0 +1,30 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "similarweb",
+  "name": "Similarweb",
+  "maker": "Similarweb",
+  "homepage": "https://www.similarweb.com",
+  "category": "marketing",
+  "teams": ["marketing", "sales"],
+  "summary": "Analyse website traffic and market data",
+  "capabilities": [
+    "Compare website traffic and engagement",
+    "Research traffic sources and keywords",
+    "Benchmark competitors and industries"
+  ],
+  "official": {
+    "evidence": "https://developers.similarweb.com/docs/similarweb-mcp"
+  },
+  "docs": "https://developers.similarweb.com/docs/similarweb-mcp",
+  "remote": {
+    "url": "https://mcp.similarweb.com",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "simpleIcons": "similarweb",
+    "color": "#092540"
+  },
+  "supportedBy": ["chatgpt", "claude", "manus", "relevance-ai", "glean"]
+}

@@ -406,6 +406,9 @@ importers:
       '@tulipfarm/knowledge':
         specifier: workspace:*
         version: link:../../packages/knowledge
+      '@tulipfarm/mcp-catalog':
+        specifier: workspace:*
+        version: link:../../packages/mcp-catalog
       '@tulipfarm/plan-documents':
         specifier: workspace:*
         version: link:../../packages/plan-documents
@@ -1308,6 +1311,19 @@ importers:
       pdf-lib:
         specifier: 1.17.1
         version: 1.17.1
+
+  packages/mcp-catalog:
+    dependencies:
+      zod:
+        specifier: 4.6.6
+        version: 4.6.6
+    devDependencies:
+      '@tulipfarm/typescript-config':
+        specifier: workspace:*
+        version: link:../typescript-config
+      '@types/node':
+        specifier: 26.6.3
+        version: 26.6.3
 
   packages/media:
     dependencies:

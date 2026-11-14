@@ -1,0 +1,33 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "n8n",
+  "name": "n8n",
+  "maker": "n8n",
+  "homepage": "https://n8n.io",
+  "category": "automation",
+  "teams": ["engineering", "operations"],
+  "summary": "Find and run n8n workflows",
+  "capabilities": ["Search workflows on your instance", "Run workflows and read results", "Read workflow details"],
+  "official": {
+    "evidence": "https://docs.n8n.io/connect/connect-to-n8n-mcp-server"
+  },
+  "docs": "https://docs.n8n.io/connect/connect-to-n8n-mcp-server",
+  "remote": {
+    "url": "https://{n8n-host}/mcp-server/http",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "variables": [
+      {
+        "name": "n8n-host",
+        "description": "Your n8n host",
+        "example": "example.app.n8n.cloud"
+      }
+    ]
+  },
+  "icons": {
+    "lobehub": "N8n",
+    "simpleIcons": "n8n",
+    "color": "#FF91AC"
+  },
+  "supportedBy": ["claude", "notion-ai", "manus", "lindy", "relevance-ai", "docker"]
+}
