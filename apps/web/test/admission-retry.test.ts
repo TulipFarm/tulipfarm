@@ -72,3 +72,25 @@ test('admission does not retry a denial, and stops when the retry budget or the 
   setTimeout(() => leaving.abort(new Error('left the page')), 50);
   await assert.rejects(pending, /left the page/);
 });
+
+test('admission retries a read another load cancelled, but not its own cancellation', async () => {
+  let calls = 0;
+  const result = await retryAdmission(async () => {
+    if (++calls === 1) throw new DOMException('This operation was aborted', 'AbortError');
+    return 'admitted';
+  }, new AbortController().signal);
+  assert.equal(result, 'admitted');
+  assert.equal(calls, 2);
+
+  const own = new AbortController();
+  calls = 0;
+  await assert.rejects(
+    retryAdmission(async () => {
+      calls++;
+      own.abort();
+      throw own.signal.reason;
+    }, own.signal),
+    { name: 'AbortError' },
+  );
+  assert.equal(calls, 1);
+});

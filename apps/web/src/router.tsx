@@ -808,6 +808,9 @@ export const workspaceRoute = createRoute({
           ? snapshot.read.workspace
           : null;
       const navigating = snapshot.kind === 'admitted' && snapshot.read.pathname !== location.pathname;
+      // A page shown at once hands these reads to its background check, which outlives this load, so a
+      // newer load must not cancel them. Otherwise they end with this load.
+      const earlyAbort = new AbortController();
       const earlyReads =
         navigating && previousWorkspace && snapshot.kind === 'admitted'
           ? {
@@ -816,9 +819,9 @@ export const workspaceRoute = createRoute({
               workspace: getWorkspace(params.workspaceSlug),
               membership:
                 previousWorkspace.status === 'ready'
-                  ? loadOwnMembership(previousWorkspace.id, abortController.signal)
+                  ? loadOwnMembership(previousWorkspace.id, earlyAbort.signal)
                   : null,
-              list: cause === 'stay' ? listWorkspaces(abortController.signal) : null,
+              list: cause === 'stay' ? listWorkspaces(earlyAbort.signal) : null,
             }
           : null;
       if (earlyReads) {
@@ -1016,7 +1019,7 @@ export const workspaceRoute = createRoute({
         shown.workspaceStale === false
       ) {
         const shownContext = shown as WorkspaceContext;
-        const check = new AbortController();
+        const check = earlyAbort;
         const verification = retryAdmission(
           fresh => profile(check.signal).then(session => admit(session, check.signal, fresh)),
           check.signal,
@@ -1053,6 +1056,9 @@ export const workspaceRoute = createRoute({
           });
         return shownContext;
       }
+      const endEarlyReads = () => earlyAbort.abort(abortController.signal.reason);
+      if (abortController.signal.aborted) endEarlyReads();
+      else abortController.signal.addEventListener('abort', endEarlyReads, { once: true });
 
       const provisional =
         last && !verified && !earlyReads && cause !== 'stay' && snapshot.kind !== 'admitted'
