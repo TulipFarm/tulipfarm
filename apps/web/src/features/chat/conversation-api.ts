@@ -640,7 +640,11 @@ export function conversationApi(workspaceId: string, denied: (status: number) =>
         hasGitHubProposals,
       };
     },
-    async findMessage(chatId: string, messageId: string, signal: AbortSignal) {
+    /**
+     * How many history pages were read to find the message, `null` when it is not in them, or `'unsent'`
+     * when it was certainly never sent.
+     */
+    async findMessage(chatId: string, messageId: string, signal: AbortSignal): Promise<number | null | 'unsent'> {
       let before: number | null = null;
       for (let pages = 1; pages <= 2; pages++) {
         const query = before === null ? '' : `?before=${before}`;
@@ -821,7 +825,8 @@ export function draftConversationApi(
       return api.command(command, signal);
     },
     async findMessage(id, messageId, signal) {
-      if (!created) return null;
+      // A message is sent only after its chat is created.
+      if (!created) return 'unsent';
       return api.findMessage(id, messageId, signal);
     },
     async upload(id, attachmentId, file, signal) {

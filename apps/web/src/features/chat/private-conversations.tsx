@@ -1419,7 +1419,11 @@ function ConversationDetail({
                                   </p>
                                 )}
                                 {unconfirmed && (
-                                  <p className="self-end text-xs text-muted-foreground">Not confirmed sent</p>
+                                  <p className="self-end text-xs text-muted-foreground">
+                                    {write.state.kind === 'uncertain' && write.state.unsent
+                                      ? 'Not sent'
+                                      : 'Not confirmed sent'}
+                                  </p>
                                 )}
                               </MessageContent>
                             </Message>

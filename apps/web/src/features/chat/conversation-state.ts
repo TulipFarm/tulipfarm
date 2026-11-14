@@ -14,8 +14,9 @@ export type CommandState =
   /**
    * `offline` means the browser had no network, so the command can wait for the connection to return.
    * `updating` means the workspace was still updating when automatic retries ran out.
+   * `unsent` means the message was certainly never sent, so sending it again is the only recovery.
    */
-  | { kind: 'uncertain'; command: ConversationCommand; offline: boolean; updating?: boolean }
+  | { kind: 'uncertain'; command: ConversationCommand; offline: boolean; updating?: boolean; unsent?: boolean }
   | { kind: 'rejected'; message: string; status: number; command?: ConversationCommand }
   | { kind: 'accepted'; operation: ConversationCommand['kind'] };
 
@@ -49,9 +50,12 @@ export function useConversationCommand(
       command.messageId,
       AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]),
     );
-    if (pages) await confirm(command, controller, pages);
-    else await changes.command(command);
-    return pages !== null;
+    if (typeof pages === 'number') {
+      await confirm(command, controller, pages);
+      return 'sent';
+    }
+    await changes.command(command);
+    return pages === 'unsent' ? 'unsent' : 'missing';
   }
   /** With `chat`, a rename, archive, or pin shows at once and is undone if the server does not confirm it. */
   async function submit(command: ConversationCommand, chat?: Chat) {
@@ -91,7 +95,13 @@ export function useConversationCommand(
         ![408, 429].includes(error.status);
       if (command.kind === 'send' && (!rejected || error.status === 409) && !browserOffline()) {
         try {
-          if (await checkSend(command, controller)) return;
+          const found = await checkSend(command, controller);
+          if (found === 'sent') return;
+          if (found === 'unsent' && !rejected && !workspaceUpdating(error)) {
+            if (mounted.current && !controller.signal.aborted)
+              setState({ kind: 'uncertain', command, offline: false, unsent: true });
+            return;
+          }
         } catch {
           if (mounted.current && !controller.signal.aborted)
             setState({ kind: 'uncertain', command, offline: browserOffline() });
@@ -116,7 +126,7 @@ export function useConversationCommand(
     active.current = controller;
     let retry = false;
     try {
-      if (await checkSend(command, controller)) return;
+      if ((await checkSend(command, controller)) === 'sent') return;
       if (mounted.current && !controller.signal.aborted) {
         if (state.kind === 'rejected') setState({ kind: 'idle' });
         else retry = true;

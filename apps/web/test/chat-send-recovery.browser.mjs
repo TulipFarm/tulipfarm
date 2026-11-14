@@ -50,7 +50,18 @@ test('chat sends reconcile transport failures and recover without reloading', { 
           createdAt: new Date().toISOString(),
         };
         const history = [];
-        const state = { outcome: 'success', historyStatus: 200, writes: [], reads: [], receipts: new Map() };
+        const state = {
+          outcome: 'success',
+          historyStatus: 200,
+          writes: [],
+          reads: [],
+          receipts: new Map(),
+          // Chats created from a new-chat draft, by id, and the writes sent to them.
+          created: new Map(),
+          newChatWrites: [],
+          dropCreate: false,
+          accessReads: null,
+        };
         const add = (author, text, id = randomUUID()) => {
           const message = {
             id,
@@ -81,6 +92,10 @@ test('chat sends reconcile transport failures and recover without reloading', { 
           const path = url.pathname;
           let json;
           let status = 200;
+          const other = path.match(/\/conversations\/([0-9a-f-]{36})(\/.*)?$/);
+          const newChat = other && other[1] !== chat.id ? { id: other[1], suffix: other[2] ?? '' } : null;
+          if ((path === '/v1/workspaces' || path.endsWith('/governance/me')) && state.accessReads)
+            await state.accessReads;
           if (path === '/v1/auth/get-session')
             json = {
               session: { id: 'session-ada', userId: 'ada' },
@@ -94,8 +109,42 @@ test('chat sends reconcile transport failures and recover without reloading', { 
           else if (path.endsWith('/system-package-installations')) json = { installations: [], nextCursor: null };
           else if (path.endsWith('/slack/status'))
             json = { state: 'active', teamId: 'T_TEST', canManage: false, linked: true, scopes: [] };
-          else if (path.endsWith(`/conversations/${chat.id}/events`)) status = 503;
-          else if (request.method() === 'GET' && path.endsWith(`/conversations/${chat.id}/messages`)) {
+          else if (path.endsWith('/events')) status = 503;
+          else if (newChat && request.method() === 'PUT' && newChat.suffix === '') {
+            state.newChatWrites.push({ kind: 'create', id: newChat.id });
+            if (state.dropCreate) {
+              state.dropCreate = false;
+              return route.abort('failed');
+            }
+            if (!state.created.has(newChat.id)) state.created.set(newChat.id, []);
+            json = { id: newChat.id };
+          } else if (newChat && request.method() === 'PUT' && newChat.suffix.startsWith('/messages/')) {
+            const body = request.postDataJSON();
+            const messages = state.created.get(newChat.id);
+            const id = newChat.suffix.split('/').at(-1);
+            state.newChatWrites.push({ kind: 'send', id, chatId: newChat.id });
+            if (!messages) status = 404;
+            else {
+              const turn = { id: randomUUID(), generation: 0, status: 'completed' };
+              const at = new Date().toISOString();
+              const text = body.parts.find(part => part.kind === 'text').text;
+              messages.push({ id, sequence: 1, author: 'human', createdAt: at, parts: [{ kind: 'text', text }], turn });
+              messages.push({
+                id: randomUUID(),
+                sequence: 2,
+                author: 'assistant',
+                createdAt: at,
+                parts: [{ kind: 'text', text: 'Reply in the new chat' }],
+                turn: null,
+              });
+              json = { messageId: id, turnId: turn.id, sequence: 1 };
+            }
+          } else if (newChat && request.method() === 'GET') {
+            const messages = state.created.get(newChat.id);
+            if (!messages) status = 404;
+            else if (newChat.suffix === '/messages') json = { messages, nextBefore: null, hasGitHubProposals: false };
+            else json = { ...chat, id: newChat.id, title: 'New chat' };
+          } else if (request.method() === 'GET' && path.endsWith(`/conversations/${chat.id}/messages`)) {
             const before = Number(url.searchParams.get('before') ?? Infinity);
             status = state.historyStatus;
             json = historyPage(before);
@@ -137,11 +186,14 @@ test('chat sends reconcile transport failures and recover without reloading', { 
           else if (request.method() === 'GET' && path.endsWith('/conversations'))
             json = { chats: [chat], nextCursor: null };
           else status = 404;
-          await route.fulfill({
-            status,
-            json: status === 200 || status === 409 ? json : { error: 'unavailable' },
-            headers: cors,
-          });
+          // The page may have cancelled a held read while it waited.
+          await route
+            .fulfill({
+              status,
+              json: status === 200 || status === 409 ? json : { error: 'unavailable' },
+              headers: cors,
+            })
+            .catch(() => {});
         });
         try {
           await page.goto(`${origin}/acme/chat/${chat.id}`);
@@ -361,6 +413,55 @@ test('chat sends reconcile transport failures and recover without reloading', { 
         assert.equal(found, null);
         assert.deepEqual(state.reads, [Infinity, 113]);
         assert.equal(state.writes.length, 0);
+      },
+    );
+
+    await scenario(
+      "a new chat's first message is sent after a newer page load cancels the previous access check",
+      async ({ page, state, composer, send }) => {
+        let release;
+        state.accessReads = new Promise(resolve => (release = resolve));
+        await page.getByRole('link', { name: 'New chat', exact: true }).click();
+        await page.waitForURL(url => url.pathname === '/acme');
+        await composer.fill('First message in a new chat');
+        await send.click();
+        // Sending moves the draft to its chat page, a newer load that cancels the reads the new-chat page started.
+        await page.waitForURL(url => /^\/acme\/chat\/[0-9a-f-]{36}$/.test(url.pathname));
+        await new Promise(resolve => setTimeout(resolve, 300));
+        assert.deepEqual(state.newChatWrites, [], 'Writes wait for the access check');
+        state.accessReads = null;
+        release();
+        await page.getByText('Reply in the new chat', { exact: true }).waitFor();
+        assert.deepEqual(
+          state.newChatWrites.map(write => write.kind),
+          ['create', 'send'],
+        );
+        assert.equal(await page.getByText('Could not confirm your workspace access', { exact: false }).count(), 0);
+      },
+    );
+
+    await scenario(
+      'a new chat that was never created shows its first message as not sent, and trying again sends it once',
+      async ({ page, state, composer, send }) => {
+        await page.getByRole('link', { name: 'New chat', exact: true }).click();
+        await page.waitForURL(url => url.pathname === '/acme');
+        state.dropCreate = true;
+        await composer.fill('Send this when the chat exists');
+        await send.click();
+        await page.getByText("Your message hasn't been sent. Try again.", { exact: true }).waitFor();
+        await page.getByText('Not sent', { exact: true }).waitFor();
+        assert.equal(await page.getByRole('button', { name: 'Check message status', exact: true }).count(), 0);
+        assert.equal(await page.getByText("We couldn't confirm your message was sent", { exact: false }).count(), 0);
+        assert.deepEqual(
+          state.newChatWrites.map(write => write.kind),
+          ['create'],
+        );
+        await page.getByRole('button', { name: 'Try again', exact: true }).click();
+        await page.getByText('Reply in the new chat', { exact: true }).waitFor();
+        assert.deepEqual(
+          state.newChatWrites.map(write => write.kind),
+          ['create', 'create', 'send'],
+        );
       },
     );
 
