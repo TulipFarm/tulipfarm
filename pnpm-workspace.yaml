@@ -26,3 +26,7 @@ overrides:
 
 patchedDependencies:
   braces@3.0.3: patches/braces@3.0.3.patch
+
+# Sprout is our own package: install a release as soon as it is on npm.
+minimumReleaseAgeExclude:
+  - '@tulipfarm/sprout'
