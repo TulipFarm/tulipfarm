@@ -206,9 +206,9 @@ jobs:
         run: |
           pnpm --filter @tulipfarm/api exec node --test --test-name-pattern='workspace HTTP conceals' test/governance.integration.mjs
           pnpm --filter @tulipfarm/workspace-storage exec node --test --test-name-pattern='membership admission' test/integration/runtime.test.mjs
-      - name: Check app tables and app names
+      - name: Check app tables, app credits and app names
         run: |
-          pnpm --filter @tulipfarm/workspace-storage exec node --test --test-concurrency=1 test/integration/apps.test.mjs
+          pnpm --filter @tulipfarm/workspace-storage exec node --test --test-concurrency=1 test/integration/apps.test.mjs test/integration/app-credits.test.mjs
           pnpm --filter @tulipfarm/database exec node --test test/integration/app-hostnames.test.mjs
           pnpm --filter @tulipfarm/apps run test:integration
       - name: Check row and project review drafts

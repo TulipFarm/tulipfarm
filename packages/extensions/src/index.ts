@@ -1,5 +1,7 @@
 export type * from './slots.ts';
 export {
+  appBuilder,
+  appPublisher,
   captureAnalytics,
   configuredExecutionBackend,
   creditGate,

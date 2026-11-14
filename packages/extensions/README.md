@@ -46,6 +46,8 @@ export default defineExtension({
 | `flagProvider`       | one per process | none: each flag's env override, then its declared default (see below)                | `isFeatureEnabled`, `featureFlagSnapshot` in `@tulipfarm/observability`                                       |
 | `socialPlatformApps` | one per process | none: operator `SOCIAL_<PLATFORM>_*` settings supply platform apps                   | social platform-app resolution in `@tulipfarm/social`; when set, X and Reddit need a workspace's own app      |
 | `executionBackend`   | one per process | none: execution is unavailable                                                       | API/core-worker startup preflight when `TULIPFARM_EXECUTION_BACKEND=extension`                                |
+| `appBuilder`         | one per process | none: apps build with no extension builder                                           | app publishing, through `appBuilder()`                                                                        |
+| `appPublisher`       | one per process | none: `hostHeaderPublisher` from `@tulipfarm/apps/host-header-publisher` once wired  | app publishing and edge reconciliation, through `appPublisher()`                                              |
 | `usageSink`          | many            | none                                                                                 | `recordUsage(usage)`                                                                                          |
 | `analytics`          | many            | none                                                                                 | `captureEvent`, `observeInference` in `@tulipfarm/observability`                                              |
 | `errorReporter`      | many            | none                                                                                 | `captureException` in `@tulipfarm/observability`                                                              |
@@ -70,6 +72,25 @@ Unavailable backends and unsupported policies fail preflight without fallback.
 
 This registration and configuration foundation does not yet expose chat tools
 or implement local/Docker execution.
+
+### App builder and app publisher
+
+`slots.appBuilder(builder)` turns an app's source files into release files.
+`slots.appPublisher(publisher)` stages release files, moves each app name's
+route with `apply` and `remove`, and reports `usage`. Routes carry a version:
+a publisher keeps a route only when the incoming version is newer than the
+stored one, so retries and out-of-order calls cannot move a route backward.
+
+Test a publisher against the shared contract:
+
+```js
+import { testAppPublisher } from '@tulipfarm/extensions/testing';
+
+testAppPublisher('my publisher', () => ({ publisher, name: async () => 'menu' }));
+```
+
+`name()` returns a fresh app name the publisher may route. `memoryAppPublisher()`
+from the same entry is an in-memory publisher for tests.
 
 ### Credits
 

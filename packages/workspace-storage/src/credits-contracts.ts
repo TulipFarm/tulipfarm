@@ -8,6 +8,8 @@ export const creditActivitySchema = z.enum([
   'knowledge-ingestion',
   'knowledge-query',
   'knowledge-reindex',
+  'app-build',
+  'app-hosting',
   // Only under the workspace `images` flag; otherwise they are counted as the activity that charged them.
   'image-generation',
   'image-recognition',

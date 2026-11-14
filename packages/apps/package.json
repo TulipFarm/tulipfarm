@@ -7,6 +7,10 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./host-header-publisher": {
+      "types": "./dist/host-header-publisher.d.ts",
+      "default": "./dist/host-header-publisher.js"
+    },
     "./store": {
       "types": "./dist/store/index.d.ts",
       "default": "./dist/store/index.js"
@@ -20,6 +24,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.1141.0",
+    "@tulipfarm/extensions": "workspace:*",
     "pg": "8.23.0",
     "zod": "4.6.6"
   },
