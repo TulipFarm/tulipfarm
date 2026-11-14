@@ -49,11 +49,20 @@ test('app names stay with one app forever and the API role can never delete them
     await assert.rejects(client.query(`UPDATE app.app_hostnames SET status = 'deleted' WHERE name = 'menu'`), {
       code: '23514',
     });
+    await client.query(`UPDATE app.app_hostnames SET kind = 'server', status = 'active' WHERE name = 'menu'`);
+    await assert.rejects(client.query(`UPDATE app.app_hostnames SET release_id = $1 WHERE name = 'menu'`, [appId]), {
+      code: '23514',
+    });
+    assert.deepEqual((await client.query(`SELECT name, kind FROM app.app_hostnames ORDER BY name`)).rows, [
+      { name: 'menu', kind: 'server' },
+      { name: 'old-menu', kind: 'static' },
+    ]);
 
     const privileges = (
       await client.query(`SELECT
         has_table_privilege('tulipfarm', 'app.app_hostnames', 'INSERT') AS claim,
         has_column_privilege('tulipfarm', 'app.app_hostnames', 'edge_version', 'UPDATE') AS project,
+        has_column_privilege('tulipfarm', 'app.app_hostnames', 'kind', 'UPDATE') AS route,
         has_column_privilege('tulipfarm', 'app.app_hostnames', 'app_id', 'UPDATE') AS reassign,
         has_table_privilege('tulipfarm', 'app.app_hostnames', 'DELETE') AS release,
         has_table_privilege('tulipfarm', 'app.app_preview_hosts', 'DELETE') AS rotate,
@@ -62,6 +71,7 @@ test('app names stay with one app forever and the API role can never delete them
     assert.deepEqual(privileges, {
       claim: true,
       project: true,
+      route: true,
       reassign: false,
       release: false,
       rotate: true,

@@ -379,13 +379,15 @@ export type AppBuilder = {
 
 export type AppEdgeStatus = 'active' | 'paused' | 'disabled';
 
-/** The delivery state for one public name. `version` only ever grows. */
+/**
+ * The delivery state for one public name. `version` only ever grows. A `static` route serves the files of
+ * `releaseId`; a `server` route sends each request to the gateway, which forwards it to the app's server.
+ */
 export type AppRoute = {
   readonly name: string;
-  readonly releaseId: string | null;
   readonly status: AppEdgeStatus;
   readonly version: number;
-};
+} & ({ readonly kind: 'static'; readonly releaseId: string | null } | { readonly kind: 'server' });
 
 export type AppTraffic = {
   readonly name: string;

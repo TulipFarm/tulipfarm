@@ -133,7 +133,7 @@ test('serves the live release by Host header and refuses everything else', async
     signal(),
   );
   const name = await claim('menu');
-  await publisher.apply({ name, releaseId: release, status: 'active', version: 1 }, signal());
+  await publisher.apply({ name, kind: 'static', releaseId: release, status: 'active', version: 1 }, signal());
   const serve = (host, path) => publisher.serve({ host, path }, signal());
 
   const home = await serve('Menu.Sites.Example.test:8443', '/');
@@ -159,15 +159,20 @@ test('serves the live release by Host header and refuses everything else', async
   ])
     assert.deepEqual(await serve(host, path), { kind: 'not-found' }, `${host} ${path}`);
 
-  assert.deepEqual(await publisher.apply({ name, releaseId: release, status: 'paused', version: 2 }, signal()), {
-    stored: { name, releaseId: release, status: 'paused', version: 2 },
-  });
+  assert.deepEqual(
+    await publisher.apply({ name, kind: 'static', releaseId: release, status: 'paused', version: 2 }, signal()),
+    {
+      stored: { name, kind: 'static', releaseId: release, status: 'paused', version: 2 },
+    },
+  );
   assert.deepEqual(await serve('menu.sites.example.test', '/'), { kind: 'unavailable' });
-  await publisher.apply({ name, releaseId: release, status: 'disabled', version: 3 }, signal());
+  await publisher.apply({ name, kind: 'static', releaseId: release, status: 'disabled', version: 3 }, signal());
   assert.deepEqual(await serve('menu.sites.example.test', '/'), { kind: 'unavailable' });
-  await publisher.apply({ name, releaseId: null, status: 'active', version: 4 }, signal());
+  await publisher.apply({ name, kind: 'static', releaseId: null, status: 'active', version: 4 }, signal());
   assert.deepEqual(await serve('menu.sites.example.test', '/'), { kind: 'unavailable' });
-  await publisher.apply({ name, releaseId: release, status: 'active', version: 5 }, signal());
+  await publisher.apply({ name, kind: 'server', status: 'active', version: 5 }, signal());
+  assert.deepEqual(await serve('menu.sites.example.test', '/'), { kind: 'unavailable' });
+  await publisher.apply({ name, kind: 'static', releaseId: release, status: 'active', version: 6 }, signal());
   assert.equal((await serve('menu.sites.example.test', '/')).kind, 'file');
 
   await owner.query(`UPDATE app.app_hostnames SET state = 'retired', retired_at = now() WHERE name = $1`, [name]);
@@ -183,18 +188,24 @@ test('a removed name serves 404 and an unclaimed name is never routed', async ()
   const release = randomUUID();
   await publisher.stage(page(release, 'index.html', 'hi'), signal());
   const name = await claim('orders');
-  await publisher.apply({ name, releaseId: release, status: 'active', version: 7 }, signal());
+  await publisher.apply({ name, kind: 'static', releaseId: release, status: 'active', version: 7 }, signal());
   assert.equal((await publisher.serve({ host: 'orders.sites.example.test', path: '/' }, signal())).kind, 'file');
   await publisher.remove({ name, version: 8 }, signal());
   assert.deepEqual(await publisher.serve({ host: 'orders.sites.example.test', path: '/' }, signal()), {
     kind: 'not-found',
   });
-  assert.deepEqual(await publisher.apply({ name, releaseId: release, status: 'active', version: 8 }, signal()), {
-    stored: null,
-  });
+  assert.deepEqual(
+    await publisher.apply({ name, kind: 'static', releaseId: release, status: 'active', version: 8 }, signal()),
+    {
+      stored: null,
+    },
+  );
 
   assert.deepEqual(
-    await publisher.apply({ name: 'nobody-claimed', releaseId: release, status: 'active', version: 1 }, signal()),
+    await publisher.apply(
+      { name: 'nobody-claimed', kind: 'static', releaseId: release, status: 'active', version: 1 },
+      signal(),
+    ),
     { stored: null },
   );
   const { rows } = await owner.query(

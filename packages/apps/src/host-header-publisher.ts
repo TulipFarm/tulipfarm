@@ -1,6 +1,7 @@
-import type { AppPublisher, AppRoute } from '@tulipfarm/extensions';
+import type { AppPublisher } from '@tulipfarm/extensions';
 import { z } from 'zod';
 import { appNameSchema } from './names.ts';
+import { appRouteColumns, appRouteFromRow } from './store/names.ts';
 
 export type AppSiteObject = {
   readonly body: AsyncIterable<Uint8Array>;
@@ -30,7 +31,7 @@ export type PlatformDatabase = {
 
 export type AppSiteResponse =
   | { readonly kind: 'file'; readonly object: AppSiteObject }
-  /** The app is paused, disabled, or has no release yet. Serve 503 and never cache it. */
+  /** The app is paused, disabled, has no release yet or runs its own server. Serve 503 and never cache it. */
   | { readonly kind: 'unavailable' }
   | { readonly kind: 'not-found' };
 
@@ -38,20 +39,6 @@ export type HostHeaderPublisher = AppPublisher & {
   /** Answers one request to `<name>.<sitesDomain>`. `path` is the URL path, still percent-encoded. */
   serve(request: { readonly host: string; readonly path: string }, signal: AbortSignal): Promise<AppSiteResponse>;
 };
-
-const routeRowSchema = z.object({
-  name: z.string(),
-  release_id: z.uuid().nullable(),
-  status: z.enum(['active', 'paused', 'disabled']).nullable(),
-  edge_version: z.coerce.number().int().nonnegative(),
-});
-
-// A route with no status was never applied or has been removed; the row only keeps the name and its version.
-function route(row: unknown): AppRoute | null {
-  const parsed = routeRowSchema.parse(row);
-  if (parsed.status === null) return null;
-  return { name: parsed.name, releaseId: parsed.release_id, status: parsed.status, version: parsed.edge_version };
-}
 
 const releaseIdSchema = z.uuid();
 
@@ -109,18 +96,16 @@ export function hostHeaderPublisher(options: {
 
     async apply(next) {
       const written = await database.query(
-        `UPDATE app.app_hostnames SET release_id = $2, status = $3, edge_version = $4
-         WHERE name = $1 AND edge_version < $4
-         RETURNING name, release_id, status, edge_version`,
-        [next.name, next.releaseId, next.status, next.version],
+        `UPDATE app.app_hostnames SET kind = $2, release_id = $3, status = $4, edge_version = $5
+         WHERE name = $1 AND edge_version < $5
+         RETURNING ${appRouteColumns}`,
+        [next.name, next.kind, next.kind === 'static' ? next.releaseId : null, next.status, next.version],
       );
       // A separate statement takes a fresh snapshot, so a lost race reads the winner's route.
       const { rows } = written.rows.length
         ? written
-        : await database.query(`SELECT name, release_id, status, edge_version FROM app.app_hostnames WHERE name = $1`, [
-            next.name,
-          ]);
-      return { stored: rows[0] === undefined ? null : route(rows[0]) };
+        : await database.query(`SELECT ${appRouteColumns} FROM app.app_hostnames WHERE name = $1`, [next.name]);
+      return { stored: rows[0] === undefined ? null : appRouteFromRow(rows[0]) };
     },
 
     async remove({ name, version }) {
@@ -148,13 +133,13 @@ export function hostHeaderPublisher(options: {
       for (;;) {
         signal.throwIfAborted();
         const { rows } = await database.query(
-          `SELECT name, release_id, status, edge_version FROM app.app_hostnames
+          `SELECT ${appRouteColumns} FROM app.app_hostnames
            WHERE status IS NOT NULL AND name > $1 ORDER BY name LIMIT ${listPage}`,
           [after],
         );
-        for (const row of rows) yield route(row)!;
+        for (const row of rows) yield appRouteFromRow(row)!;
         if (rows.length < listPage) return;
-        after = routeRowSchema.parse(rows.at(-1)).name;
+        after = appRouteFromRow(rows.at(-1))!.name;
       }
     },
 
@@ -176,13 +161,14 @@ export function hostHeaderPublisher(options: {
       const name = appNameSchema.safeParse(host.slice(0, -sitesDomain.length - 1));
       if (!name.success) return { kind: 'not-found' };
       const { rows } = await database.query(
-        `SELECT name, release_id, status, edge_version FROM app.app_hostnames
-         WHERE name = $1 AND state = 'current'`,
+        `SELECT ${appRouteColumns} FROM app.app_hostnames WHERE name = $1 AND state = 'current'`,
         [name.data],
       );
-      const current = rows[0] === undefined ? null : route(rows[0]);
+      const current = rows[0] === undefined ? null : appRouteFromRow(rows[0]);
       if (!current) return { kind: 'not-found' };
-      if (current.status !== 'active' || !current.releaseId) return { kind: 'unavailable' };
+      // Server apps are reached through the gateway, which this publisher does not run.
+      if (current.status !== 'active' || current.kind !== 'static' || !current.releaseId)
+        return { kind: 'unavailable' };
       const key = requestKey(current.releaseId, request.path);
       const object = key && (await storage.get(key, signal));
       return object ? { kind: 'file', object } : { kind: 'not-found' };

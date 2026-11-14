@@ -13,11 +13,13 @@ import {
 } from '@tulipfarm/apps';
 import type { AppSiteStorage } from '@tulipfarm/apps/host-header-publisher';
 import {
+  appRouteFromRow,
   failOperation,
   finishBuild,
   markOperationStaging,
   markReleaseStaged,
   readApp,
+  readAppRuntime,
   readBuild,
   readOperation,
   readRelease,
@@ -254,18 +256,29 @@ export function createAppActivities(work: AppWork) {
   }
 
   async function projectEdge(input: { readonly workspaceId: string; readonly appId: string }, signal: AbortSignal) {
-    const app = await transact(input.workspaceId, tx => readApp(tx, input.appId as AppId));
-    if (!app?.publicName) return { route: null };
-    const route: AppRoute = {
-      name: app.publicName,
-      releaseId: app.liveReleaseId,
-      status: edgeStatus(app.stops),
-      version: app.edgeVersion,
-    };
+    const found = await transact(input.workspaceId, async tx => {
+      const app = await readApp(tx, input.appId as AppId);
+      return app && { app, server: (await readAppRuntime(tx, app.id)) !== null };
+    });
+    const name = found?.app.publicName;
+    if (!found || !name) return { route: null };
+    const { app, server } = found;
+    const common = { name, status: edgeStatus(app.stops), version: app.edgeVersion };
+    const route: AppRoute = server
+      ? { ...common, kind: 'server' }
+      : { ...common, kind: 'static', releaseId: app.liveReleaseId };
     await platform.query(
-      `UPDATE app.app_hostnames SET release_id = $4, status = $5, edge_version = $6
-       WHERE name = $1 AND workspace_id = $2 AND app_id = $3 AND edge_version < $6`,
-      [route.name, input.workspaceId, input.appId, route.releaseId, route.status, route.version],
+      `UPDATE app.app_hostnames SET kind = $4, release_id = $5, status = $6, edge_version = $7
+       WHERE name = $1 AND workspace_id = $2 AND app_id = $3 AND edge_version < $7`,
+      [
+        route.name,
+        input.workspaceId,
+        input.appId,
+        route.kind,
+        route.kind === 'static' ? route.releaseId : null,
+        route.status,
+        route.version,
+      ],
     );
     if (publisher) await publisher.apply(route, signal);
     return { route };
@@ -514,6 +527,7 @@ export function createAppActivities(work: AppWork) {
         workspace_id: string;
         app_id: string;
         state: 'claiming' | 'current' | 'retired';
+        kind: AppRoute['kind'];
         release_id: string | null;
         status: AppRoute['status'] | null;
         edge_version: string;
@@ -522,7 +536,7 @@ export function createAppActivities(work: AppWork) {
       const readNames = async () =>
         (
           await platform.query(
-            `SELECT name, workspace_id, app_id, state, release_id, status, edge_version,
+            `SELECT name, workspace_id, app_id, state, kind, release_id, status, edge_version,
                claimed_at < clock_timestamp() - interval '15 minutes' AS stale
              FROM app.app_hostnames`,
           )
@@ -544,7 +558,7 @@ export function createAppActivities(work: AppWork) {
           if (row.state !== 'current' || row.status === null || !(await isEnabled(row.workspace_id))) continue;
           const version = Number(row.edge_version);
           if ((held.get(row.name)?.version ?? -1) >= version) continue;
-          await publisher.apply({ name: row.name, releaseId: row.release_id, status: row.status, version }, signal);
+          await publisher.apply(appRouteFromRow(row)!, signal);
           recordAppReconcileRepair('route-applied');
         }
         for (const route of held.values()) {

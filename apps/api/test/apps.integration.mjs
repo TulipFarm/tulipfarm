@@ -30,9 +30,10 @@ test(
       else process.env.FEATURE_FLAG_APP_HOSTING = flag;
     });
     await loadPlatformBaseline(db.platform);
-    await db.platform.query(
-      await readFile(new URL('../../database/migrations/0011_app_hostnames.sql', import.meta.url), 'utf8'),
-    );
+    for (const migration of ['0011_app_hostnames.sql', '0013_app_server_routes.sql'])
+      await db.platform.query(
+        await readFile(new URL(`../../database/migrations/${migration}`, import.meta.url), 'utf8'),
+      );
     const pool = new Pool({ connectionString: db.connectionString, options: '-c search_path=app', max: 4 });
     cleanup.push(() => pool.end());
     const deliveries = [];

@@ -2,7 +2,13 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
-import { claimAppName, promoteAppName, setAppPublicName, createApp } from '../../src/store/index.ts';
+import {
+  claimAppName,
+  promoteAppName,
+  readCurrentAppRoute,
+  setAppPublicName,
+  createApp,
+} from '../../src/store/index.ts';
 import { connect, fixture, loadPlatformBaseline } from '../../../workspace-storage/test/integration/fixture.mjs';
 
 test(
@@ -16,9 +22,10 @@ test(
       await db.close();
     });
     await loadPlatformBaseline(db.platform);
-    await db.platform.query(
-      await readFile(new URL('../../../../apps/database/migrations/0011_app_hostnames.sql', import.meta.url), 'utf8'),
-    );
+    for (const migration of ['0011_app_hostnames.sql', '0013_app_server_routes.sql'])
+      await db.platform.query(
+        await readFile(new URL(`../../../../apps/database/migrations/${migration}`, import.meta.url), 'utf8'),
+      );
     const workspace = await db.create();
     runtime = await connect(db.login(workspace));
     const tx = { client: runtime, schema: workspace.names.schema };
@@ -59,5 +66,17 @@ test(
     assert.equal((await claimAppName(db.platform, other)).failure.code, 'name-taken');
     assert.equal((await claimAppName(db.platform, { ...other, name: 'acme-orders' })).failure.code, 'name-taken');
     assert.equal((await claimAppName(db.platform, claim('acme-orders'))).failure.code, 'name-taken');
+
+    const current = { workspaceId: workspace.id, appId: app.id };
+    assert.equal(await readCurrentAppRoute(db.platform, 'acme-orders'), null);
+    assert.equal(await readCurrentAppRoute(db.platform, 'acme-nobody'), null);
+    assert.deepEqual(await readCurrentAppRoute(db.platform, 'acme-sales'), { ...current, route: null });
+    await db.platform.query(
+      "UPDATE app.app_hostnames SET kind = 'server', status = 'active', edge_version = 3 WHERE name = 'acme-sales'",
+    );
+    assert.deepEqual(await readCurrentAppRoute(db.platform, 'acme-sales'), {
+      ...current,
+      route: { name: 'acme-sales', kind: 'server', status: 'active', version: 3 },
+    });
   },
 );
