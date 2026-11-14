@@ -25,6 +25,12 @@ export type FeatureFlagDefinition = {
 };
 
 export const featureFlags = {
+  'app-hosting': {
+    description: 'Build and publish workspace apps, public on their own name or private to members.',
+    default: false,
+    scope: 'workspace',
+    env: 'FEATURE_FLAG_APP_HOSTING',
+  },
   'hosted-mcp': {
     description: 'Set up MCP connections that run an npm or PyPI package on a sandbox host.',
     default: false,

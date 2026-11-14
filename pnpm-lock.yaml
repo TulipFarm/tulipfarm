@@ -859,6 +859,19 @@ importers:
         specifier: 26.6.3
         version: 26.6.3
 
+  packages/apps:
+    dependencies:
+      zod:
+        specifier: 4.6.6
+        version: 4.6.6
+    devDependencies:
+      '@tulipfarm/typescript-config':
+        specifier: workspace:*
+        version: link:../typescript-config
+      '@types/node':
+        specifier: 26.6.3
+        version: 26.6.3
+
   packages/atlassian:
     dependencies:
       '@tulipfarm/access':
