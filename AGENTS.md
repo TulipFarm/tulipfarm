@@ -10,6 +10,10 @@ Use pnpm; commit dependency changes with `pnpm-lock.yaml`. `apps/web` owns React
 domains. Find matching filenames before reading content. Add scripts only for
 actual workspace work. Setup and commands are in [DEVELOPMENT.md](DEVELOPMENT.md).
 
+Pin `@tulipfarm/sprout` to an exact npm version, never a release tarball or git URL. npm can
+take about five minutes to list a new release, so check `npm view @tulipfarm/sprout@X.Y.Z version`
+before bumping. Keep its name-wide `minimumReleaseAgeExclude` entry in `pnpm-workspace.yaml`.
+
 ## Conventions
 
 - Use shared sprout (`@tulipfarm/sprout/<name>`) controls and semantic variants; put layout on
