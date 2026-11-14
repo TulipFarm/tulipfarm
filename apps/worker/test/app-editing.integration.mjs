@@ -105,7 +105,10 @@ test('an app chat turn edits its app, and only a turn that completes saves', { t
       requests.push(body);
       return answer(requests.length, sent.turnId);
     });
-    const apps = appEditingFromEnvironment(f.runtime, { start: async () => {}, commandBuilder: () => undefined });
+    const apps = appEditingFromEnvironment(f.runtime, {
+      start: async () => {},
+      builders: () => ({ command: undefined, server: undefined }),
+    });
     const result = await createConversationActivities(
       f.runtime,
       ...Array.from({ length: 12 }),
@@ -252,7 +255,7 @@ test('an app chat turn edits its app, and only a turn that completes saves', { t
     const commandBuilder = { id: builder.id };
     const apps = workerAppEditing(f.runtime, appRepositories({ root: join(root, 'tools'), storage: objects.storage }), {
       start: (workspaceId, buildId) => builds.buildApp({ workspaceId, buildId }),
-      commandBuilder: () => commandBuilder.id,
+      builders: () => ({ command: commandBuilder.id, server: undefined }),
     });
     const actor = { kind: 'human', userId: w.userId, membershipId: w.membershipId };
     const on = { workspaceId: w.id, actor, conversationId: editing };

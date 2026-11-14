@@ -22,6 +22,7 @@ import {
   putAppGrant,
   readApp,
   readAppRuntime,
+  recordAppEndpoint,
   readDraft,
   readRuntimeTarget,
   readSourceBundles,
@@ -618,9 +619,9 @@ test(
     );
     const release = operation.targetReleaseId;
     const stored = async () => {
-      const { updatedAt, ...runtime } = await transact(tx => readAppRuntime(tx, app.id));
+      const { updatedAt, endpoint, ...runtime } = await transact(tx => readAppRuntime(tx, app.id));
       assert.match(updatedAt, /^\d{4}-\d{2}-\d{2}T/);
-      return runtime;
+      return { ...runtime, ...(endpoint && { endpoint }) };
     };
 
     assert.equal(await transact(tx => readAppRuntime(tx, app.id)), null);
@@ -665,6 +666,20 @@ test(
       { code: '23514', constraint: 'tf_app_runtimes_candidate_check' },
     );
     assert.deepEqual(await stored(), serving);
+
+    await transact(tx => recordAppEndpoint(tx, app.id, { hostRef: 'sbx-orders-1', generation: 3 }));
+    await transact(tx => recordAppEndpoint(tx, app.id, { hostRef: 'sbx-orders-0', generation: 2 }));
+    await transact(tx => putAppRuntime(tx, { ...serving, state: 'replacing', candidate: starting.candidate }));
+    assert.deepEqual(
+      await stored(),
+      {
+        ...serving,
+        state: 'replacing',
+        candidate: starting.candidate,
+        endpoint: { hostRef: 'sbx-orders-1', generation: 3 },
+      },
+      'only a newer endpoint generation is recorded, and writing the runtime keeps it',
+    );
   },
 );
 
@@ -683,8 +698,9 @@ async function servingApp(t) {
   await transact(tx => recordRuntimeCandidate(tx, first.id, 'host-0'));
   assert.equal((await transact(tx => switchRelease(tx, first.id))).retiredHostRef, null);
   const runtime = async () => {
-    const { updatedAt, appId, ...stored } = await transact(tx => readAppRuntime(tx, app.id));
+    const { updatedAt, appId, endpoint, ...stored } = await transact(tx => readAppRuntime(tx, app.id));
     assert.equal(appId, app.id);
+    assert.equal(endpoint, null);
     assert.match(updatedAt, /^\d{4}-\d{2}-\d{2}T/);
     return stored;
   };

@@ -3,7 +3,14 @@ import { join } from 'node:path';
 import { Client, Connection } from '@temporalio/client';
 import { createAppPages, type AppPages } from '@tulipfarm/agents/app-page-tools';
 import { createAppEditing, type AppEditing, type AppTurnOutcome } from '@tulipfarm/agents/app-tools';
-import { appBuildWorkflowId, readAppRecipe, recipeBuilder, type AppBuildId, type AppFailure } from '@tulipfarm/apps';
+import {
+  appBuildWorkflowId,
+  readAppRecipe,
+  recipeBuilder,
+  type AppBuildId,
+  type AppBuilders,
+  type AppFailure,
+} from '@tulipfarm/apps';
 import {
   appRepositories,
   finishBuild,
@@ -25,7 +32,7 @@ const appHosting = (workspaceId: string) => isFeatureEnabled('app-hosting', null
 /** How this worker builds apps: starting a queued build, and the builder that runs build commands, if it has one. */
 export type AppBuilds = {
   readonly start: (workspaceId: string, buildId: AppBuildId) => Promise<unknown>;
-  readonly commandBuilder: () => string | undefined;
+  readonly builders: () => AppBuilders;
 };
 
 /** Starts the `appBuild` workflow, the same one the API starts for the same build. */
@@ -65,7 +72,7 @@ export function workerAppEditing(
       );
       const appJson = await repositories.file(repository, commit, 'app.json');
       const read = readAppRecipe(appJson && new TextDecoder().decode(appJson));
-      const chosen = read.ok ? recipeBuilder(read.recipe, builds.commandBuilder()) : read;
+      const chosen = read.ok ? recipeBuilder(read.recipe, builds.builders()) : read;
       // The recipe follows from the commit, so a commit that cannot build records one failed build the editor can see.
       const refused: AppFailure | null = chosen.ok ? null : chosen.failure;
       const build = await transact(workspaceId, async tx => {

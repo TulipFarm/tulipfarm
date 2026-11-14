@@ -18,7 +18,7 @@
     "test:conversations": "node --test test/conversation.integration.mjs",
     "test:atlassian": "node --test test/atlassian-chat.integration.mjs",
     "test:social": "node --test test/social-publisher.integration.mjs",
-    "test:apps": "node --test --test-concurrency=1 test/apps.integration.mjs",
+    "test:apps": "node --test --test-concurrency=1 test/apps.integration.mjs test/app-servers.integration.mjs",
     "test:app-workflows": "node --test test/app-workflows.integration.mjs",
     "start": "node dist/worker.js",
     "start:storage": "node dist/storage-worker.js"

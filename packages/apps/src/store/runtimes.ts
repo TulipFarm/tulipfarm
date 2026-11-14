@@ -18,8 +18,12 @@ export type AppRuntime = {
   readonly hostRef: string | null;
   readonly state: AppRuntimeState;
   readonly candidate: AppRuntimeCandidate | null;
+  /** The host the endpoint was last switched to and the generation it reported, or null before the first switch. */
+  readonly endpoint: AppEndpoint | null;
   readonly updatedAt: string;
 };
+
+export type AppEndpoint = { readonly hostRef: string; readonly generation: number };
 
 type RuntimeRow = {
   app_id: string;
@@ -33,6 +37,8 @@ type RuntimeRow = {
   candidate_size_vcpu: number | null;
   candidate_size_mem_mib: number | null;
   candidate_host_ref: string | null;
+  endpoint_host_ref: string | null;
+  endpoint_generation: string | null;
   updated_at: Date;
 };
 
@@ -51,6 +57,10 @@ const runtimeOf = (row: RuntimeRow): AppRuntime => ({
           size: { vcpu: row.candidate_size_vcpu!, memMiB: row.candidate_size_mem_mib! },
           hostRef: row.candidate_host_ref!,
         },
+  endpoint:
+    row.endpoint_host_ref === null
+      ? null
+      : { hostRef: row.endpoint_host_ref, generation: Number(row.endpoint_generation) },
   updatedAt: row.updated_at.toISOString(),
 });
 
@@ -63,8 +73,8 @@ export async function readAppRuntime(tx: AppTransaction, appId: AppId, lock = fa
   return row ? runtimeOf(row) : null;
 }
 
-/** Creates or replaces an app's runtime record and returns it as stored. */
-export async function putAppRuntime(tx: AppTransaction, runtime: Omit<AppRuntime, 'updatedAt'>) {
+/** Creates or replaces an app's runtime record and returns it as stored. The endpoint is kept as it was. */
+export async function putAppRuntime(tx: AppTransaction, runtime: Omit<AppRuntime, 'updatedAt' | 'endpoint'>) {
   const { candidate } = runtime;
   const [row] = await rows<RuntimeRow>(
     tx,
@@ -93,4 +103,17 @@ export async function putAppRuntime(tx: AppTransaction, runtime: Omit<AppRuntime
     ],
   );
   return runtimeOf(row!);
+}
+
+/**
+ * Records where an endpoint switch left the app's endpoint. A report older than the one stored is ignored, so a late
+ * retry cannot move the record back.
+ */
+export async function recordAppEndpoint(tx: AppTransaction, appId: AppId, endpoint: AppEndpoint) {
+  await tx.client.query(
+    `UPDATE ${table(tx, 'tf_app_runtimes')} SET endpoint_host_ref = $2, endpoint_generation = $3,
+       updated_at = clock_timestamp()
+     WHERE app_id = $1 AND (endpoint_generation IS NULL OR endpoint_generation < $3)`,
+    [appId, endpoint.hostRef, endpoint.generation],
+  );
 }

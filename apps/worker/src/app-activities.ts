@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { promisify } from 'node:util';
 import { Context } from '@temporalio/activity';
 import {
+  appBuilders,
   appLimits,
   edgeStatus,
   recipeBuilder,
@@ -28,7 +29,15 @@ import {
   type AppRecord,
   type AppTransaction,
 } from '@tulipfarm/apps/store';
-import type { AppBuilder, AppFile, AppPublisher, AppRoute, CreditGate } from '@tulipfarm/extensions';
+import type {
+  AppBuilder,
+  AppFile,
+  AppHost,
+  AppPublisher,
+  AppRoute,
+  AppServerBuildOutput,
+  CreditGate,
+} from '@tulipfarm/extensions';
 import { recordAppBuild, recordAppReconcileRepair } from '@tulipfarm/observability';
 import { escapeIdentifier } from 'pg';
 import { appManifest, untar, type AppBuiltFile } from './app-files.ts';
@@ -59,6 +68,8 @@ export type AppWork = {
   readonly source: (workspaceId: string, appId: AppId, commit: string) => Promise<string>;
   readonly publisher: AppPublisher | undefined;
   readonly builder: AppBuilder | undefined;
+  /** Runs server apps; `unavailableAppHost` when this server cannot. */
+  readonly host: AppHost;
   readonly credits: CreditGate;
   /** Every workspace id, so cleanup can tell an unreferenced release from one it has not looked at. */
   readonly workspaces: () => AsyncIterable<string>;
@@ -81,7 +92,7 @@ function activityContext() {
 }
 
 /** Heartbeats every 10 seconds while work runs inside a Temporal activity, and stops when the activity is cancelled. */
-async function heartbeating<T>(work: (signal: AbortSignal) => Promise<T>, signal?: AbortSignal) {
+export async function heartbeating<T>(work: (signal: AbortSignal) => Promise<T>, signal?: AbortSignal) {
   const context = activityContext();
   const timer = context ? setInterval(() => context.heartbeat(), 10_000) : undefined;
   try {
@@ -149,7 +160,7 @@ async function* archive(repository: string, commit: string): AsyncIterable<Uint8
   if ((await exited) !== 0) throw new Error(`git archive of ${commit} failed`);
 }
 
-async function collect(stream: AsyncIterable<Uint8Array>, limit: number) {
+export async function collect(stream: AsyncIterable<Uint8Array>, limit: number) {
   const chunks: Uint8Array[] = [];
   let length = 0;
   for await (const chunk of stream) {
@@ -160,7 +171,10 @@ async function collect(stream: AsyncIterable<Uint8Array>, limit: number) {
   return Buffer.concat(chunks);
 }
 
-async function* bytesOf(object: Buffer): AsyncIterable<Uint8Array> {
+/** Where a server build's output is kept: the artifact and the contract that starts it, as JSON. */
+export const serverOutputKey = (buildId: string) => `builds/${buildId}/server.json`;
+
+export async function* bytesOf(object: Buffer): AsyncIterable<Uint8Array> {
   yield object;
 }
 
@@ -192,7 +206,8 @@ export function createAppActivities(work: AppWork) {
         return { status: status === 'succeeded' ? ('succeeded' as const) : ('failed' as const), now: false };
       await finishBuild(tx, build.id, outcome);
       if (units > 0n) await work.credits.debit(tx, units, { id: `app-build:${build.id}`, activity: 'app-build' });
-      if (outcome.ok) await setPreviewBuild(tx, build.id);
+      // The draft preview serves files; a server build has none.
+      if (outcome.ok && build.recipe.kind !== 'server') await setPreviewBuild(tx, build.id);
       return { status: outcome.ok ? ('succeeded' as const) : ('failed' as const), now: true };
     });
     if (settled.now) recordAppBuild(outcome.ok ? null : outcome.failure.code);
@@ -210,7 +225,7 @@ export function createAppActivities(work: AppWork) {
     if (build.recipe.kind === 'copy') {
       return { ...(await copyTree(repository, build.commit, build.recipe.root)), units: 0n };
     }
-    if (build.recipe.kind === 'server') throw new Error('Server recipes are refused before they build');
+    if (build.recipe.kind === 'server') throw new Error('Server recipes build through buildServer');
     const builder = work.builder!;
     const timeout = AbortSignal.timeout(appLimits.buildSeconds * 1000);
     const result = await builder
@@ -251,6 +266,47 @@ export function createAppActivities(work: AppWork) {
         failure: failure('limit-exceeded', 'The build output is larger than 50 MB'),
       };
     return { ...untar(tar), units: result.units };
+  }
+
+  async function produceServer(
+    workspaceId: string,
+    build: AppBuild,
+    signal: AbortSignal,
+  ): Promise<
+    { ok: true; output: AppServerBuildOutput; units: bigint } | { ok: false; failure: AppFailure; units: bigint }
+  > {
+    if (build.recipe.kind !== 'server') throw new Error(`Build ${build.id} is not a server build`);
+    const recipe = build.recipe;
+    const repository = await work.source(workspaceId, build.appId, build.commit);
+    const timeout = AbortSignal.timeout(appLimits.buildSeconds * 1000);
+    const result = await work.builder!.buildServer!(
+      {
+        workspaceId,
+        appId: build.appId,
+        buildId: build.id,
+        recipe,
+        source: () => archive(repository, build.commit),
+        limits: {
+          seconds: appLimits.buildSeconds,
+          outputBytes: appLimits.artifactBytes,
+          outputFiles: appLimits.artifactFiles,
+        },
+      },
+      AbortSignal.any([signal, timeout]),
+    ).catch(error => {
+      if (timeout.aborted) return { ok: false as const, code: 'build-timeout' as const, log: '', units: 0n };
+      throw error;
+    });
+    if (!result.ok)
+      return {
+        ok: false,
+        units: result.units,
+        failure: failure(
+          result.code,
+          result.code === 'build-timeout' ? 'The build ran longer than 10 minutes' : 'The build command failed',
+        ),
+      };
+    return { ok: true, output: result.output, units: result.units };
   }
 
   async function projectEdge(input: { readonly workspaceId: string; readonly appId: string }, signal: AbortSignal) {
@@ -394,7 +450,7 @@ export function createAppActivities(work: AppWork) {
         const found = await readBuild(tx, id);
         if (!found) throw new Error(`App build ${id} not found`);
         if (found.status.status === 'succeeded' || found.status.status === 'failed') return found;
-        if (found.recipe.kind === 'command') {
+        if (found.recipe.kind !== 'copy') {
           if (!work.builder) return found;
           const available = await work.credits.available(tx, { lock: true });
           if (available !== null && available <= 0n) return found;
@@ -403,7 +459,7 @@ export function createAppActivities(work: AppWork) {
       });
       if (build.status.status === 'succeeded' || build.status.status === 'failed')
         return { status: build.status.status };
-      const chosen = recipeBuilder(build.recipe, work.builder?.id);
+      const chosen = recipeBuilder(build.recipe, appBuilders(work.builder, work.host));
       if (!chosen.ok) return settleBuild(input.workspaceId, build, chosen, 0n);
       if (build.status.status === 'queued')
         return settleBuild(
@@ -412,6 +468,31 @@ export function createAppActivities(work: AppWork) {
           { ok: false, failure: failure('budget-exhausted', 'The workspace has no credits left for builds') },
           0n,
         );
+      if (build.recipe.kind === 'server')
+        return heartbeating(async signal => {
+          const produced = await produceServer(input.workspaceId, build, signal);
+          if (!produced.ok) return settleBuild(input.workspaceId, build, produced, produced.units);
+          const body = Buffer.from(JSON.stringify(produced.output));
+          const manifestKey = serverOutputKey(build.id);
+          await objects.put(
+            manifestKey,
+            bytesOf(body),
+            { contentType: 'application/json', bytes: body.length },
+            signal,
+          );
+          return settleBuild(
+            input.workspaceId,
+            build,
+            {
+              ok: true,
+              manifestKey,
+              manifestDigest: createHash('sha256').update(body).digest('hex'),
+              files: 0,
+              bytes: 0,
+            },
+            produced.units,
+          );
+        });
       return heartbeating(async signal => {
         const produced = await produce(input.workspaceId, build, signal);
         if (!produced.ok) return settleBuild(input.workspaceId, build, produced, produced.units);

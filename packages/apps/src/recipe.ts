@@ -1,3 +1,4 @@
+import { unavailableAppHost, type AppBuilder, type AppHost } from '@tulipfarm/extensions';
 import { z } from 'zod';
 import type { AppFailure } from './app.ts';
 import { buildIdSchema, type AppBuildId, type AppId, type GitCommit } from './ids.ts';
@@ -43,24 +44,33 @@ export type AppRecipe = z.infer<typeof appRecipeSchema>;
 
 export const defaultAppRecipe: AppRecipe = Object.freeze({ kind: 'copy', root: '.' });
 
+/** The builder ids this server builds with: `command` for command recipes, `server` for server recipes. */
+export type AppBuilders = { readonly command: string | undefined; readonly server: string | undefined };
+
 /**
- * The builder folded into a build's id, or why this server cannot build the recipe. A command needs the registered
- * builder. Nothing builds a server recipe until a host can run it, so the built-in copy builder and a registered
- * builder both refuse one.
+ * Which recipes the registered builder and host can build. A server recipe builds only when a host can run it and the
+ * builder can package a server.
  */
+export function appBuilders(builder: AppBuilder | undefined, host: AppHost): AppBuilders {
+  return { command: builder?.id, server: builder?.buildServer && host !== unavailableAppHost ? builder.id : undefined };
+}
+
+/** The builder folded into a build's id, or why this server cannot build the recipe. */
 export function recipeBuilder(
   recipe: AppRecipe,
-  commandBuilder: string | undefined,
+  builders: AppBuilders,
 ): { readonly ok: true; readonly builder: string } | { readonly ok: false; readonly failure: AppFailure } {
   switch (recipe.kind) {
     case 'copy':
       return { ok: true, builder: 'copy' };
     case 'command':
-      return commandBuilder
-        ? { ok: true, builder: commandBuilder }
+      return builders.command
+        ? { ok: true, builder: builders.command }
         : refused('builder-unavailable', 'This server cannot run build commands');
     case 'server':
-      return refused('host-unavailable', 'This server cannot run apps that start their own server');
+      return builders.server
+        ? { ok: true, builder: builders.server }
+        : refused('host-unavailable', 'This server cannot run apps that start their own server');
   }
 }
 
