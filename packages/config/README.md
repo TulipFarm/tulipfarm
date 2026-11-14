@@ -227,10 +227,15 @@ catalog`. `loadModelCatalog(env)` returns the served catalog and
   `gen_ai_model_fallback` and logged as `chat.model-fallback` with a bounded
   `model_fallback` outcome (`used`, `not_configured`, `not_eligible`,
   `failed`), labelled with the failed model (`gen_ai.request.model`) and the
-  fallback (`fallback.provider`, `fallback.model`). A chat reply a fallback
+  fallback (`fallback.provider`, `fallback.model`), and who pays for each:
+  `billing.source` and `fallback.billing.source` are `plan` for a member's
+  subscription plan route (ChatGPT, Claude, GitHub Copilot) and `hosted` for
+  the deployment's own provider keys. A chat reply a fallback
   answered adds `model_fallback="used"` to `cloud_chat_reply_duration`, and its
   `chat.reply.summary` log names the chat's model as `gen_ai.request.model`
-  and the one that answered as `fallback.model`.
+  and the one that answered as `fallback.model`. Every summary carries the
+  `billing.source` of the chat's model, and `fallback.billing.source` when a
+  fallback answered.
 - **Usage.** Chat-completions usage is read from any streamed chunk, including a
   final usage-only chunk, and tolerates null or missing detail objects and
   `total_tokens`. When `total_tokens` is reported, it decides whether reasoning

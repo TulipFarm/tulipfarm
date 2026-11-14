@@ -1,3 +1,5 @@
+import { isPlanProvider } from '@tulipfarm/config/model-catalog-file';
+
 /**
  * Bounded classification of a failed model call. It is the only model failure value that becomes `error.code`,
  * `error.type` or a metric label; provider codes and messages stay in logs.
@@ -81,6 +83,13 @@ export const fallbackEligibleClasses: ReadonlySet<ModelErrorClass> = new Set([
 
 export const modelFallbackOutcomes = Object.freeze(['used', 'not_configured', 'not_eligible', 'failed'] as const);
 export type ModelFallbackOutcome = (typeof modelFallbackOutcomes)[number];
+
+/** Who pays for a model call: `plan`, a member's subscription plan; `hosted`, the deployment's own provider keys. */
+export const billingSources = Object.freeze(['plan', 'hosted'] as const);
+export type BillingSource = (typeof billingSources)[number];
+export function billingSource(provider: string): BillingSource {
+  return isPlanProvider(provider) ? 'plan' : 'hosted';
+}
 
 /** Whether a successful model call reported token usage the runtime could read. */
 export const modelUsageOutcomes = Object.freeze(['reported', 'unknown'] as const);

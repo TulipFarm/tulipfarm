@@ -430,4 +430,45 @@ test('a reply the fallback answered labels its durations and names both models i
   assert.equal(summaries[0].model_fallback, 'used');
   assert.equal(summaries[0]['gen_ai.request.model'], 'Kimi-K2.6');
   assert.equal(summaries[0]['fallback.model'], 'grok-4.3');
+  assert.equal(summaries[0]['billing.source'], 'hosted');
+  assert.equal(summaries[0]['fallback.billing.source'], 'hosted');
+  for (const point of points) assert.equal(point.attributes['billing.source'], undefined, 'durations stay unsplit');
+});
+
+test('a reply summary names who pays for the model, and a plan reply that fell back to a hosted model shows both', async t => {
+  const { collect } = harness(t);
+  const streamed = provider =>
+    withChatModelRequest('reply', () =>
+      observeInference({ provider, model: `${provider}-model`, operation: 'chat' }, async report => {
+        report.firstToken();
+        report.usage(10, 5);
+      }),
+    );
+  await withChatMeasurements(async () => {
+    await streamed('copilot');
+    noteChatReplyFinal(chatReplyFinal(timing()));
+  }, 'turn-plan');
+  await withChatMeasurements(async () => {
+    await streamed('azure');
+    noteChatReplyFinal(chatReplyFinal(timing()));
+  }, 'turn-hosted');
+  await withChatMeasurements(async () => {
+    await withChatModelRequest('reply', async () =>
+      recordModelFallback(
+        'used',
+        { provider: 'claude', model: 'claude-plan-model', errorClass: 'rate_limited' },
+        { provider: 'azure', model: 'grok-4.3' },
+      ),
+    );
+    noteChatReplyFinal(chatReplyFinal(timing()));
+  }, 'turn-plan-fallback');
+  const { summaries } = await collect();
+  assert.deepEqual(
+    summaries.map(summary => [summary['billing.source'], summary['fallback.billing.source']]),
+    [
+      ['plan', undefined],
+      ['hosted', undefined],
+      ['plan', 'hosted'],
+    ],
+  );
 });
