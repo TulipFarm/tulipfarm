@@ -858,3 +858,42 @@ test(
     assert.equal(noServer.failure.code, 'not-found');
   },
 );
+
+test(
+  'a server operation that ends keeps its host while a newer operation still targets the same release and size',
+  { timeout: 120000 },
+  async t => {
+    const { transact, request, runtime, first } = await servingApp(t);
+    const resize = async size =>
+      (await transact(tx => admitResize(tx, { ...request(), size, maximumSize: null }))).operation;
+    const big = { vcpu: 2, memMiB: 2048 };
+
+    const a = await resize(big);
+    await transact(tx => recordRuntimeCandidate(tx, a.id, 'host-big'));
+    const b = await resize(big);
+    const lost = await transact(tx => switchRelease(tx, a.id));
+    assert.deepEqual([lost.operation.status, lost.retiredHostRef], ['superseded', null]);
+    await transact(tx => recordRuntimeCandidate(tx, b.id, 'host-big'));
+    const won = await transact(tx => switchRelease(tx, b.id));
+    assert.deepEqual([won.operation.status, won.retiredHostRef], ['switched', 'host-0']);
+
+    const huge = { vcpu: 4, memMiB: 4096 };
+    const c = await resize(huge);
+    await transact(tx => recordRuntimeCandidate(tx, c.id, 'host-huge'));
+    const d = await resize(huge);
+    const failed = await transact(tx =>
+      failOperation(tx, c.id, { code: 'publisher-unavailable', message: 'No answer', retryable: true }),
+    );
+    assert.deepEqual([failed.operation.status, failed.retiredHostRef], ['failed', null]);
+    await transact(tx => recordRuntimeCandidate(tx, d.id, 'host-huge'));
+    const resized = await transact(tx => switchRelease(tx, d.id));
+    assert.deepEqual([resized.operation.status, resized.retiredHostRef], ['switched', 'host-big']);
+    assert.deepEqual(await runtime(), {
+      liveReleaseId: first.targetReleaseId,
+      size: huge,
+      hostRef: 'host-huge',
+      state: 'serving',
+      candidate: null,
+    });
+  },
+);

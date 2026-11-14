@@ -292,7 +292,8 @@ export async function markReleaseStaged(tx: AppTransaction, id: AppReleaseId) {
 /**
  * What a finished operation leaves behind. `retiredHostRef` is a host nothing serves from any more, which the caller
  * removes: the replaced live host after a switch, or the operation's own host when it lost or failed. It is null when
- * that host is still live or still a candidate, since hosts are shared by release and size.
+ * that host is still live, still a candidate or still wanted by an active operation, since hosts are shared by release
+ * and size.
  */
 export type AppOperationEnd = { readonly operation: AppOperation; readonly retiredHostRef: string | null };
 
@@ -302,9 +303,14 @@ function unused(hostRef: string | null, runtime: AppRuntime | null) {
   return hostRef !== null && hostRef !== runtime?.hostRef && hostRef !== runtime?.candidate?.hostRef ? hostRef : null;
 }
 
-/** Clears the operation's candidate, if it still holds the slot, and returns its host unless something still uses it. */
+/**
+ * Clears the operation's candidate, if it still holds the slot, and returns its host unless something still uses it.
+ * An active operation for the same release and size will reuse the host even before it records it. The app row lock
+ * keeps a new one from being admitted while this looks.
+ */
 async function releaseCandidate(tx: AppTransaction, operation: AppOperation, idle: 'none' | 'failed') {
   if (operation.hostRef === null) return null;
+  await readApp(tx, operation.appId, true);
   let runtime = await readAppRuntime(tx, operation.appId, true);
   if (runtime && runtime.candidate?.operationId === operation.id)
     runtime = await putAppRuntime(tx, {
@@ -312,7 +318,27 @@ async function releaseCandidate(tx: AppTransaction, operation: AppOperation, idl
       state: runtime.liveReleaseId === null ? idle : 'serving',
       candidate: null,
     });
-  return unused(operation.hostRef, runtime);
+  const size = runtime?.size ?? defaultServerSize;
+  const target = operation.targetSize ?? size;
+  const [sharing] = await rows<{ id: string }>(
+    tx,
+    `SELECT id FROM ${table(tx, 'tf_app_operations')}
+     WHERE app_id = $1 AND id <> $2 AND status IN ('admitted', 'staging')
+       AND (host_ref = $3 OR (target_release_id = $4
+         AND COALESCE(target_size_vcpu, $5) = $6 AND COALESCE(target_size_mem_mib, $7) = $8))
+     LIMIT 1`,
+    [
+      operation.appId,
+      operation.id,
+      operation.hostRef,
+      operation.targetReleaseId,
+      size.vcpu,
+      target.vcpu,
+      size.memMiB,
+      target.memMiB,
+    ],
+  );
+  return sharing ? null : unused(operation.hostRef, runtime);
 }
 
 async function supersede(tx: AppTransaction, operation: AppOperation): Promise<AppOperationEnd> {
