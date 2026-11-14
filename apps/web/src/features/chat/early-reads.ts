@@ -6,6 +6,7 @@ import { chatGptConnectionSchema } from '@/features/models/chatgpt-plan-api';
 import { tokenConnectionSchema } from '@/features/models/token-plan-api';
 import { projectApi, projectListSchema } from '@/features/projects/api';
 import { projectKeys } from '@/features/projects/queries';
+import { integrationDirectoryPersistedReads, integrationDirectoryReads } from '@/features/integrations/directory-reads';
 import { chatHistorySchema, chatListSchema, conversationApi } from './conversation-api';
 import { conversationKeys } from './queries';
 
@@ -28,6 +29,7 @@ export function workspacePageReads(
   const conversations = conversationApi(workspaceId, () => {});
   const projects = { key: projectKeys.list(), load: projectApi(workspaceId).list };
   if (page === undefined || page === 'projects') return id === undefined ? [projects] : [];
+  if (page === 'integrations') return id === undefined ? integrationDirectoryReads(workspaceId) : [];
   if (page !== 'chat' || rest.length) return [];
   if (id === undefined) {
     const project = projectId.safeParse(search.project);
@@ -74,4 +76,5 @@ export const persistedPageReads: PersistedRead[] = [
   { name: 'projects', limit: 1, match: matches(projectsKey), schema: projectListSchema },
   { name: 'chatgpt-connection', limit: 1, match: matches(chatGptKey), schema: chatGptConnectionSchema.nullable() },
   { name: 'token-plan-connection', limit: 2, match: matches(tokenPlanKey), schema: tokenConnectionSchema.nullable() },
+  ...integrationDirectoryPersistedReads,
 ];

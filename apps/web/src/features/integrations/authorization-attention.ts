@@ -2,7 +2,7 @@ import { googleAppScopes, googleIdentityScopes, type GoogleApp } from '@tulipfar
 import type { loadGoogleIntegration } from '@/lib/google-workspace';
 import type { githubApi } from '@/lib/github';
 import type { AccountList } from '@/lib/atlassian';
-import type { SlackStatus } from './slack';
+import type { SlackStatus } from './slack-status';
 import type { Integration } from '@/features/workspace-mcp/contracts';
 import { accountConnectionState, slackConnectionState } from './connection-state.ts';
 

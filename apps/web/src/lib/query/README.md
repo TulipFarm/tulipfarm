@@ -212,7 +212,8 @@ failures leave normal network and memory reads available.
 
 On admission the router saves the workspace snapshot (user, workspace, workspace
 list and membership) with the session id and session expiry. On a fresh load
-of a workspace page, other than `/<slug>/integrations…`, the router reads that
+of a workspace page, other than one integration's page
+(`/<slug>/integrations/<id>`), the router reads that
 snapshot for the last session. When it is younger than 24 hours, its session
 has not expired, and it loads within 300 ms, the route admits it at once with
 `workspaceProvisional: true`. `WorkspaceQueryProvider` seeds the persisted reads

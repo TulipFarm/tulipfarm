@@ -7,7 +7,7 @@ import { useMcpCommand } from './state';
 
 export const mcpStatusLabel: Record<Integration['status'], string> = {
   setup: 'One more step',
-  'oauth-pending': 'Waiting for sign-in',
+  'oauth-pending': 'Finish sign-in',
   'registration-required': 'One more step',
   discovering: 'Connecting',
   'review-required': 'Tools changed',

@@ -335,6 +335,10 @@
   :where(:has(> [data-slot='page-content'])) {
     scrollbar-gutter: stable both-edges;
   }
+  /* Forms whose fields appear as you choose keep their width when the scrollbar shows up. */
+  :where([data-steady-width] > [data-slot='dialog-body']) {
+    scrollbar-gutter: stable;
+  }
 }
 
 @media (pointer: coarse) {
