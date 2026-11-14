@@ -62,24 +62,33 @@ test('an invalid app.json is a recipe failure that names the problem', () => {
     readAppRecipe('{"kind":"copy","root":"site/.git"}'),
     failure('app.json root: Path must stay inside the app'),
   );
+  assert.deepEqual(
+    readAppRecipe('{"kind":"copy","root":"site/.GIT"}'),
+    failure('app.json root: Path must stay inside the app'),
+  );
   assert.equal(readAppRecipe('{"kind":"command","runtime":"node18","command":"x","output":"dist"}').ok, false);
   assert.equal(readAppRecipe('{"kind":"copy","script":"rm -rf /"}').ok, false);
   assert.equal(readAppRecipe('{"kind":"shell"}').ok, false);
 });
 
-test('the build id is a digest of commit, canonical recipe and builder', async () => {
+test('the build id is a digest of app, commit, canonical recipe and builder', async () => {
+  const app = '0b5e3c2a-8d4f-4e1b-9c7a-6f2d1e0a3b4c';
   assert.equal(
-    await appBuildId(commit, { kind: 'copy', root: '.' }, 'copy'),
-    '45d3bdabd2521005c86c9a768b65091785c6ccd7ff07caad310974d092255915',
+    await appBuildId(app, commit, { kind: 'copy', root: '.' }, 'copy'),
+    'c70f51b6853cbc6ccdfe95e5a5751605a6062d1a2ad98eaec50774c543c2d842',
   );
   const recipe = { output: 'dist', command: 'npm run build', runtime: 'node22', kind: 'command', install: undefined };
   assert.equal(
-    await appBuildId(commit, recipe, 'builder-1'),
-    '77ee2607878df28737db4dcc2477e4b591b99118e4c82c2614a15a62741bddab',
+    await appBuildId(app, commit, recipe, 'builder-1'),
+    '807ec77d76f21c5ea8442f0e5c7f1125bbd96ded7c297c63ab53e3c8b3e44659',
   );
   assert.equal(
-    await appBuildId(commit, { kind: 'copy', root: '.' }, 'builder-1'),
-    '458d011e5ec88446155858ed787a0d8d1734dc0a866b8dc6f62574fc0d91b14b',
+    await appBuildId(app, commit, { kind: 'copy', root: '.' }, 'builder-1'),
+    '336171f8a4f4386d04221d548dd3a5a348c95cef2103bdda60624d736d7cfcb9',
+  );
+  assert.equal(
+    await appBuildId('5f0c2a8e-7b1d-4c3e-9a6f-2d8b4e1c7a90', commit, { kind: 'copy', root: '.' }, 'copy'),
+    '9c6e06c8dc0ed9f61d2ec7a21a5ecf0b07eb1b756d22ea7ad00649c1bec43dd6',
   );
 });
 
