@@ -23,11 +23,12 @@ export function appHostingFromEnvironment(env: NodeJS.ProcessEnv, platform: () =
       return pool.query(text, values);
     },
   });
+  const domain = env.TULIPFARM_APP_SITES_DOMAIN?.trim().toLowerCase();
   const sites = publisher && 'serve' in publisher ? (publisher as HostHeaderPublisher) : undefined;
   return {
     publisher,
     repositories: appRepositories({ root: join(tmpdir(), 'tulipfarm-api-apps'), storage: { client, bucket } }),
-    sites: sites && { publisher: sites, domain: env.TULIPFARM_APP_SITES_DOMAIN!.trim().toLowerCase() },
+    sites: sites && domain ? { publisher: sites, domain } : undefined,
   };
 }
 

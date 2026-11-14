@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { Readable } from 'node:stream';
 import Fastify from 'fastify';
+import { registerExtension, resetExtensions } from '@tulipfarm/extensions';
+import { appHostingFromEnvironment } from '../src/apps-hosting.ts';
 import { routeAppSites } from '../src/apps-sites.ts';
 
 test('app site hosts are answered by the publisher before any shell route', async t => {
@@ -85,4 +87,33 @@ test('a HEAD request releases the stored file body without reading it', async t 
   assert.equal(head.body, '');
   assert.equal(read, false);
   assert.equal(destroyed, true);
+});
+
+test('a registered publisher without a sites domain serves no app sites', async t => {
+  t.after(resetExtensions);
+  const none = async function* () {};
+  await registerExtension(
+    {
+      name: 'publisher-fixture',
+      register(slots) {
+        slots.appPublisher({
+          stage: async () => {},
+          apply: async () => {},
+          remove: async () => {},
+          discard: async () => {},
+          list: none,
+          releases: none,
+          usage: none,
+          serve: async () => ({ kind: 'not-found' }),
+        });
+      },
+    },
+    { app: 'api', env: {} },
+  );
+  const hosting = appHostingFromEnvironment(
+    { TULIPFARM_OBJECT_STORAGE_APPS_BUCKET: 'apps', TULIPFARM_OBJECT_STORAGE_REGION: 'us-east-1' },
+    () => undefined,
+  );
+  assert.equal(typeof hosting.publisher.serve, 'function');
+  assert.equal(hosting.sites, undefined);
 });
