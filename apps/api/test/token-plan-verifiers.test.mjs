@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { claudeVerifier } from '../src/token-plans.ts';
+
+process.env.ANTHROPIC_API_KEY ??= 'test-key';
+const { PlanSessionError } = await import('@tulipfarm/agents/plan-sessions');
+const { claudeVerifier, copilotVerifier } = await import('../src/token-plans.ts');
 
 test('a Claude plan offers the models Claude Code lists and checks the sign-in on the cheapest one', async () => {
   const checked = [];
@@ -20,4 +23,17 @@ test('a Claude plan offers the models Claude Code lists and checks the sign-in o
     ],
   });
   assert.deepEqual(checked, [['sk-ant-oat01-token', 'claude-haiku-5-5']]);
+});
+
+test("a Copilot plan past GitHub's API limit offers the catalog's models as a fallback", async () => {
+  const verify = copilotVerifier(
+    async () => {
+      throw new PlanSessionError(429, 'plan_usage_limit', 'API rate limit exceeded', 60);
+    },
+    async () => new Response(JSON.stringify({ login: 'octocat' })),
+  );
+  const checked = await verify('ghu_token');
+  assert.equal(checked.fallback, true);
+  assert.equal(checked.account, 'octocat');
+  assert.ok(checked.models.length > 0);
 });

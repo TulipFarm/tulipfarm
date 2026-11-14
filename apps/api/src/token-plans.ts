@@ -51,14 +51,14 @@ export function claudeVerifier(
 ): TokenPlanVerifier {
   return async token => {
     const listed = await list(token).catch(error => vendorFailure('claude', error));
-    const models =
-      listed === 'limited' || !listed.length
-        ? catalogModels('claude')
-        : listed.map(model => ({ slug: model.id, label: planModelName(model.id, model.name) }));
+    const fallback = listed === 'limited' || !listed.length;
+    const models = fallback
+      ? catalogModels('claude')
+      : listed.map(model => ({ slug: model.id, label: planModelName(model.id, model.name) }));
     // Listing works without a valid token, so one tiny request on the plan's cheapest model checks the sign-in.
     const probe = models.find(model => model.slug.includes('haiku'))?.slug;
     await check(token, probe).catch(error => vendorFailure('claude', error));
-    return { models };
+    return { models, ...(fallback ? { fallback } : {}) };
   };
 }
 
@@ -68,21 +68,22 @@ export function copilotVerifier(
 ): TokenPlanVerifier {
   return async token => {
     const listed = await list(token).catch(error => vendorFailure('copilot', error));
-    // Copilot names each model; a plan at its usage limit can't list them, so it keeps the catalog's.
-    const models =
-      listed === 'limited'
-        ? catalogModels('copilot')
-        : listed
-            .map(model => (typeof model === 'string' ? { id: model, name: '' } : model))
-            .filter(model => model.id !== 'auto')
-            .map(model => ({ slug: model.id, label: planModelName(model.id, model.name) }));
+    // Copilot names each model. A plan at its usage limit, or a member past GitHub's hourly API limit, can't list
+    // them, so it offers the catalog's until the next refresh.
+    const fallback = listed === 'limited';
+    const models = fallback
+      ? catalogModels('copilot')
+      : listed
+          .map(model => (typeof model === 'string' ? { id: model, name: '' } : model))
+          .filter(model => model.id !== 'auto')
+          .map(model => ({ slug: model.id, label: planModelName(model.id, model.name) }));
     const account = await fetcher('https://api.github.com/user', {
       headers: { authorization: `Bearer ${token}`, accept: 'application/vnd.github+json' },
       signal: AbortSignal.timeout(10_000),
     })
       .then(async response => (response.ok ? z.object({ login: z.string() }).parse(await response.json()).login : null))
       .catch(() => null);
-    return { models, account };
+    return { models, account, ...(fallback ? { fallback } : {}) };
   };
 }
 
