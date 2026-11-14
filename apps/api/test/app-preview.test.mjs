@@ -29,11 +29,14 @@ function fakes() {
       },
       session: async (previewKey, token) => (previewKey === key && token === 'token-1' ? session : null),
       enabled: async () => true,
-      async build() {
+      async target() {
         state.builds += 1;
         if (state.role !== 'edit')
           return { ok: false, failure: { code: 'forbidden', message: 'App edit is required' } };
-        return { ok: true, build: { buildId: 'b1', manifestKey: 'manifests/b1.json' } };
+        return { ok: true, target: { kind: 'files', build: { buildId: 'b1', manifestKey: 'manifests/b1.json' } } };
+      },
+      connectHost: async () => {
+        throw new Error('A draft that builds files has no server');
       },
       object: async objectKey =>
         objectKey === 'manifests/b1.json'

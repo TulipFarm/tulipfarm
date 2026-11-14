@@ -85,8 +85,8 @@ export function buildApp(
     options.previewGateway === undefined
       ? previewGatewayFromEnvironment(process.env, authConfig().webOrigin, () => previewStorage)
       : options.previewGateway;
-  // Until preview hosts route to the gateway service, the API serves them with the same gateway.
-  if (preview) routePreviewHosts(app, buildPreviewGateway(preview, securityServerOptions()), preview.domain);
+  // Until preview hosts route to the gateway service, the API serves their HTTP requests with the same gateway.
+  if (preview) routePreviewHosts(app, buildPreviewGateway(preview, securityServerOptions()).http, preview.domain);
   let appPlatform: Pick<Pool, 'query'> | undefined;
   const appHosting = appHostingFromEnvironment(process.env, () => appPlatform);
   if (appHosting?.sites) routeAppSites(app, { ...appHosting.sites, excluded: preview?.domain });

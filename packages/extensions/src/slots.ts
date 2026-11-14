@@ -459,6 +459,14 @@ export type AppHost = {
     input: { readonly appId: string },
     signal: AbortSignal,
   ): Promise<{ readonly url: string; readonly headers: Readonly<Record<string, string>> }>;
+  /**
+   * A URL and headers that reach one host of the app for a short time, whether or not the endpoint points at it. Draft
+   * previews use it to reach a host that is not live; without it, a draft's server cannot be previewed.
+   */
+  connectHost?(
+    input: { readonly appId: string; readonly hostRef: string },
+    signal: AbortSignal,
+  ): Promise<{ readonly url: string; readonly headers: Readonly<Record<string, string>> }>;
   /** Deletes one host of an app. Removing a host that is already gone succeeds. */
   remove(input: { readonly appId: string; readonly hostRef: string }, signal: AbortSignal): Promise<void>;
   /** Every host it runs, for reconciliation. */
