@@ -33,7 +33,10 @@ export function routeAppSites(
         .header('Content-Length', String(found.object.bytes))
         .header('Cache-Control', 'public, max-age=60')
         .header('X-Content-Type-Options', 'nosniff');
-      return reply.send(request.method === 'HEAD' ? undefined : Readable.from(found.object.body));
+      const { body } = found.object;
+      if (request.method !== 'HEAD') return reply.send(Readable.from(body));
+      if (body instanceof Readable) body.destroy();
+      return reply.send();
     } catch (error) {
       request.log.error(errorAttributes(error), 'app_site_failed');
       return reply.code(503).header('Cache-Control', 'no-store').send();
