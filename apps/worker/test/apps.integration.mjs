@@ -25,6 +25,7 @@ import {
 } from '../../../packages/workspace-storage/test/integration/fixture.mjs';
 import { hostHeaderPublisher } from '@tulipfarm/apps/host-header-publisher';
 import { createAppActivities } from '../src/app-activities.ts';
+import { captureMetrics } from './metric-capture.mjs';
 
 function memoryObjects() {
   const objects = new Map();
@@ -133,6 +134,7 @@ function commitFiles(directory, files) {
 }
 
 test('app builds, publishes, reconciles and meters converge however often they run', { timeout: 120000 }, async t => {
+  const telemetry = captureMetrics(t);
   const db = await fixture();
   const root = await mkdtemp(join(tmpdir(), 'app-workflows-'));
   let runtime;
@@ -239,6 +241,9 @@ test('app builds, publishes, reconciles and meters converge however often they r
     );
     assert.deepEqual(await work.buildApp({ ...input, buildId: build.id }), { status: 'succeeded' });
     assert.deepEqual(await work.buildApp({ ...input, buildId: build.id }), { status: 'succeeded' });
+    assert.deepEqual(await telemetry.points('cloud_app_builds'), [
+      { outcome: 'succeeded', failure_code: 'none', value: 1 },
+    ]);
     assert.equal(objects.puts(), 3);
     const manifest = JSON.parse(objects.objects.get(`builds/${build.id}/manifest.json`).content.toString('utf8'));
     assert.deepEqual(
@@ -300,7 +305,14 @@ test('app builds, publishes, reconciles and meters converge however often they r
     );
 
     await work.reconcileApps(new AbortController().signal);
+    await work.reconcileApps(new AbortController().signal);
 
+    assert.deepEqual(await telemetry.points('cloud_app_reconcile_repairs'), [
+      { kind: 'route-applied', value: 1 },
+      { kind: 'route-removed', value: 1 },
+      { kind: 'claim-retired', value: 1 },
+      { kind: 'release-discarded', value: 1 },
+    ]);
     assert.deepEqual(publisher.routes.get('acme-orders'), route);
     assert.equal(publisher.routes.has('acme-gone'), false);
     assert.deepEqual([...publisher.staged.keys()], [route.releaseId]);

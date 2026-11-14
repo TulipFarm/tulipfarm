@@ -28,6 +28,7 @@ import {
   type AppTransaction,
 } from '@tulipfarm/apps/store';
 import type { AppBuilder, AppFile, AppPublisher, AppRoute, CreditGate } from '@tulipfarm/extensions';
+import { recordAppBuild, recordAppReconcileRepair } from '@tulipfarm/observability';
 import { escapeIdentifier } from 'pg';
 import { appManifest, untar, type AppBuiltFile } from './app-files.ts';
 
@@ -180,19 +181,21 @@ export function createAppActivities(work: AppWork) {
     outcome: Parameters<typeof finishBuild>[2],
     units: bigint,
   ): Promise<AppBuildOutcome> {
-    return transact(workspaceId, async tx => {
+    const settled = await transact(workspaceId, async tx => {
       const { rows } = await tx.client.query(
         `SELECT status FROM ${table(tx, 'tf_app_builds')} WHERE id = $1 FOR UPDATE`,
         [build.id],
       );
       const status = (rows[0] as { status: string } | undefined)?.status;
       if (status !== 'queued' && status !== 'running')
-        return { status: status === 'succeeded' ? 'succeeded' : 'failed' };
+        return { status: status === 'succeeded' ? ('succeeded' as const) : ('failed' as const), now: false };
       await finishBuild(tx, build.id, outcome);
       if (units > 0n) await work.credits.debit(tx, units, { id: `app-build:${build.id}`, activity: 'app-build' });
       if (outcome.ok) await setPreviewBuild(tx, build.id);
-      return { status: outcome.ok ? 'succeeded' : 'failed' };
+      return { status: outcome.ok ? ('succeeded' as const) : ('failed' as const), now: true };
     });
+    if (settled.now) recordAppBuild(outcome.ok ? null : outcome.failure.code);
+    return { status: settled.status };
   }
 
   async function produce(
@@ -545,11 +548,14 @@ export function createAppActivities(work: AppWork) {
           const version = Number(row.edge_version);
           if ((held.get(row.name)?.version ?? -1) >= version) continue;
           await publisher.apply({ name: row.name, releaseId: row.release_id, status: row.status, version }, signal);
+          recordAppReconcileRepair('route-applied');
         }
         for (const route of held.values()) {
           const state = byName.get(route.name)?.state;
-          if (state === undefined || state === 'retired')
+          if (state === undefined || state === 'retired') {
             await publisher.remove({ name: route.name, version: route.version + 1 }, signal);
+            recordAppReconcileRepair('route-removed');
+          }
         }
       }
 
@@ -580,14 +586,18 @@ export function createAppActivities(work: AppWork) {
           });
           for (const row of rows) {
             const app = apps.get(row.app_id);
-            if (row.state === 'claiming' && row.stale && app?.public_name !== row.name)
-              await platform.query(
+            if (row.state === 'claiming' && row.stale && app?.public_name !== row.name) {
+              const retired = await platform.query(
                 `UPDATE app.app_hostnames SET state = 'retired', retired_at = clock_timestamp()
                  WHERE name = $1 AND state = 'claiming'`,
                 [row.name],
               );
-            if (row.state === 'current' && app && Number(app.edge_version) > Number(row.edge_version))
+              if (retired.rowCount) recordAppReconcileRepair('claim-retired');
+            }
+            if (row.state === 'current' && app && Number(app.edge_version) > Number(row.edge_version)) {
               await projectEdge({ workspaceId, appId: row.app_id }, signal);
+              recordAppReconcileRepair('edge-projected');
+            }
           }
         } catch (error) {
           failures.push(error);
@@ -636,14 +646,21 @@ export function createAppActivities(work: AppWork) {
               };
             });
             for (const id of found) known.add(id);
-            for (const releaseId of discarded) await publisher.discard({ releaseId }, signal);
+            for (const releaseId of discarded) {
+              await publisher.discard({ releaseId }, signal);
+              recordAppReconcileRepair('release-discarded');
+            }
           } catch (error) {
             complete = false;
             failures.push(error);
           }
         }
         if (complete)
-          for (const releaseId of staged) if (!known.has(releaseId)) await publisher.discard({ releaseId }, signal);
+          for (const releaseId of staged) {
+            if (known.has(releaseId)) continue;
+            await publisher.discard({ releaseId }, signal);
+            recordAppReconcileRepair('release-discarded');
+          }
       }
       if (failures.length) throw new AggregateError(failures, 'App reconcile failed');
     },

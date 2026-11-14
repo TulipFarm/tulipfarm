@@ -6,11 +6,15 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { registerExtension } from '@tulipfarm/extensions';
 import { creditAccountExtension } from '@tulipfarm/workspace-storage/credit-account';
-import { appRepositories, createApp, finishBuild, readSourceBundles } from '../../../packages/apps/src/store/index.ts';
+import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
+import { s3AppStorage } from '../../../packages/apps/src/sites.ts';
+import { appRepositories, createApp, readSourceBundles } from '../../../packages/apps/src/store/index.ts';
 import { startObjectStore } from '../../../packages/apps/test/object-store.mjs';
 import { conversationFixture } from '../../../packages/conversations/test/fixture.mjs';
-import { workerAppEditing } from '../src/app-editing-composition.ts';
+import { createAppActivities } from '../src/app-activities.ts';
+import { appEditingFromEnvironment, workerAppEditing } from '../src/app-editing-composition.ts';
 import { createConversationActivities } from '../src/conversation-activities.ts';
+import { captureMetrics } from './metric-capture.mjs';
 import { useModelCatalog } from './model-catalog-fixture.mjs';
 import {
   anthropicChat,
@@ -101,7 +105,12 @@ test('an app chat turn edits its app, and only a turn that completes saves', { t
       requests.push(body);
       return answer(requests.length, sent.turnId);
     });
-    const result = await createConversationActivities(f.runtime).processConversationReply({
+    const apps = appEditingFromEnvironment(f.runtime, { start: async () => {}, commandBuilder: () => undefined });
+    const result = await createConversationActivities(
+      f.runtime,
+      ...Array.from({ length: 12 }),
+      apps,
+    ).processConversationReply({
       workspaceId: w.id,
       conversationId: chatId,
       turnId: sent.turnId,
@@ -218,48 +227,80 @@ test('an app chat turn edits its app, and only a turn that completes saves', { t
     assert.deepEqual(rows, [{ revision: '1', lease_id: null, definition: { pages: [page] } }]);
   });
 
-  await t.test('building the app queues a build of the saved commit with the recipe in its app.json', async () => {
-    const started = [];
-    const apps = workerAppEditing(
-      f.runtime,
-      appRepositories({ root: join(root, 'tools'), storage: objects.storage }),
-      async (workspaceId, buildId) => {
-        started.push(buildId);
-        await finishBuild(platform, buildId, {
-          ok: true,
-          manifestKey: `builds/${buildId}/manifest.json`,
-          manifestDigest: 'a'.repeat(64),
-          files: 1,
-          bytes: 15,
-        });
+  await t.test('building the app starts the build and reports how it ended', async () => {
+    const recorded = captureMetrics(t);
+    const builder = {
+      id: 'test-node22@1',
+      async build(input) {
+        if (input.recipe.command === 'npm run broken') return { ok: false, code: 'build-failed', log: '', units: 0n };
+        return { ok: true, output: input.source, log: '', units: 0n };
       },
-    );
+    };
+    const builds = createAppActivities({
+      transact: (workspaceId, action) =>
+        f.runtime.transaction(workspaceId, commonCompatibility, tx => action({ client: tx.client, schema: tx.schema })),
+      platform: f.db.platform,
+      objects: s3AppStorage(objects.storage.client, objects.storage.bucket),
+      source: async (workspaceId, id, commit) =>
+        repositories.open(workspaceId, id, commit, await readSourceBundles(platform, id)),
+      publisher: undefined,
+      builder,
+      credits: { available: async () => null, debit: async () => {} },
+      async *workspaces() {},
+      enabled: async () => true,
+    });
+    const commandBuilder = { id: builder.id };
+    const apps = workerAppEditing(f.runtime, appRepositories({ root: join(root, 'tools'), storage: objects.storage }), {
+      start: (workspaceId, buildId) => builds.buildApp({ workspaceId, buildId }),
+      commandBuilder: () => commandBuilder.id,
+    });
     const actor = { kind: 'human', userId: w.userId, membershipId: w.membershipId };
     const on = { workspaceId: w.id, actor, conversationId: editing };
     // eslint-disable-next-line tulipfarm/product-copy -- A tool name, not user-facing copy.
     const build = () => apps.invoke(on, { tool: 'apps.preview.build' });
-    const recipeOf = async id =>
-      (await f.db.platform.query(`SELECT recipe, builder FROM ${f.table('tf_app_builds')} WHERE id = $1`, [id]))
-        .rows[0];
-
-    await apps.invoke(on, { tool: 'apps.files.write', path: 'app.json', content: '{"kind":"copy","root":"public"}' });
-    const copied = await build();
-    assert.deepEqual(started, [copied.buildId]);
-    assert.equal(copied.status, 'succeeded');
-    assert.deepEqual(await recipeOf(copied.buildId), { recipe: { kind: 'copy', root: 'public' }, builder: 'copy@1' });
+    const recipe = command => ({ kind: 'command', runtime: 'node22', command, output: 'dist' });
+    const builderOf = async id =>
+      (await f.db.platform.query(`SELECT builder FROM ${f.table('tf_app_builds')} WHERE id = $1`, [id])).rows[0]
+        .builder;
 
     await apps.invoke(on, {
       tool: 'apps.files.write',
       path: 'app.json',
-      content: '{"kind":"command","runtime":"node22","command":"npm run build","output":"dist"}',
+      content: JSON.stringify(recipe('npm run build')),
     });
-    const commanded = await build();
+    const built = await build();
     assert.deepEqual(
-      { status: commanded.status, failure: commanded.failure, started: started.length },
+      { status: built.status, files: built.files, builder: await builderOf(built.buildId) },
+      { status: 'succeeded', files: 2, builder: 'test-node22@1' },
+    );
+
+    await apps.invoke(on, {
+      tool: 'apps.files.write',
+      path: 'app.json',
+      content: JSON.stringify(recipe('npm run broken')),
+    });
+    const broken = await build();
+    assert.deepEqual(
+      { status: broken.status, failure: broken.failure },
+      { status: 'failed', failure: { code: 'build-failed', message: 'The build command failed', retryable: false } },
+    );
+    assert.deepEqual(await recorded.points('cloud_app_builds'), [
+      { outcome: 'succeeded', failure_code: 'none', value: 1 },
+      { outcome: 'failed', failure_code: 'build-failed', value: 1 },
+    ]);
+
+    commandBuilder.id = undefined;
+    await apps.invoke(on, {
+      tool: 'apps.files.write',
+      path: 'app.json',
+      content: JSON.stringify(recipe('npm run ci')),
+    });
+    const refused = await build();
+    assert.deepEqual(
+      { status: refused.status, failure: refused.failure },
       {
         status: 'failed',
         failure: { code: 'builder-unavailable', message: 'This server cannot run build commands', retryable: false },
-        started: 1,
       },
     );
     assert.deepEqual(await apps.finishTurn(on, 'cancelled'), { saved: null });

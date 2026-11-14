@@ -16,7 +16,7 @@ import {
   registerFlagSubjectResolver,
   startTelemetry,
 } from '@tulipfarm/observability';
-import { configuredExecutionBackend, shutdownExtensions, startExtensions } from '@tulipfarm/extensions';
+import { appBuilder, configuredExecutionBackend, shutdownExtensions, startExtensions } from '@tulipfarm/extensions';
 import { temporalSlotReadings, workerTelemetry } from './telemetry.ts';
 import { loadModelCatalog } from '@tulipfarm/config';
 import { readBuildInfo } from '@tulipfarm/build-info/node';
@@ -66,6 +66,7 @@ import { createMemberProfileComposition } from './member-profile-composition.ts'
 import { createSocialPublisherComposition } from './social-publisher-composition.ts';
 import { createSecretsSweep } from './secrets-sweep.ts';
 import { createAppComposition, repeatFromStart } from './app-composition.ts';
+import { appEditingFromEnvironment, createAppBuildDispatcher } from './app-editing-composition.ts';
 import { workerRole, workerTelemetryService } from './worker-role.ts';
 import { workspaceSchemaPending } from '@tulipfarm/workspace-storage/runtime';
 
@@ -124,6 +125,7 @@ async function run() {
   let modelBundles: ReturnType<typeof createModelBundleRegistry> | undefined;
   let taskDispatch: ReturnType<typeof createTaskDispatcher> | undefined;
   let codingDispatch: ReturnType<typeof createCodingRunDispatcher> | undefined;
+  let appBuilds: ReturnType<typeof createAppBuildDispatcher> | undefined;
   let planDispatch: ReturnType<typeof createPlanDispatcher> | undefined;
   let documentDispatch: ReturnType<typeof createPlanDocumentDispatcher> | undefined;
   let slack: Awaited<ReturnType<typeof createSlackPromptComposition>>;
@@ -330,6 +332,7 @@ async function run() {
       coding && codingDispatch
         ? codingRunsFactory(coding.backend, coding.configuration, codingDispatch.start)
         : undefined;
+    appBuilds = coreResources ? createAppBuildDispatcher() : undefined;
     const conversations = coreResources
       ? createConversationActivities(
           coreResources.runtime,
@@ -345,6 +348,10 @@ async function run() {
           async workspaceId => (await coreResources.flagContext({ workspaceId })).workspace?.slug,
           chatExecution,
           codingRuns,
+          appEditingFromEnvironment(coreResources.runtime, {
+            start: appBuilds!.start,
+            commandBuilder: () => appBuilder()?.id,
+          }),
         )
       : undefined;
     const gmail = coreResources ? createGoogleHeartbeatActivities(coreResources.runtime) : undefined;
@@ -552,6 +559,7 @@ async function run() {
     await modelBundles?.close();
     await taskDispatch?.close();
     await codingDispatch?.close();
+    await appBuilds?.close();
     await planDispatch?.close();
     await documentDispatch?.close();
   }
