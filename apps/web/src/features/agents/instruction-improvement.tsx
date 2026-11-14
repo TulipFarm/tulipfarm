@@ -79,7 +79,7 @@ export function InstructionImprovement({
             Cancel request
           </Button>
         )}
-        <p className="text-xs text-muted-foreground">GPT Luna. Uses workspace credits. You review before applying.</p>
+        <p className="text-xs text-muted-foreground">GPT-6 Luna. Uses workspace credits. You review before applying.</p>
       </div>
       {busy && (
         <p role="status" className="sr-only">

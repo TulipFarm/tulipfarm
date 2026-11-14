@@ -162,7 +162,8 @@ export function createSubscriptions(options: { runtime: Runtime }) {
     );
     return rows.rows.flatMap(raw => {
       const row = candidateRow.parse(raw);
-      const listed = (storedModels.safeParse(row.models).data ?? []).map(model => model.slug);
+      const stored = storedModels.safeParse(row.models).data ?? [];
+      const listed = stored.map(model => model.slug);
       const models = listed.filter(slug => !row.disabled_models.includes(slug));
       // A plan whose owner turned every listed model off is not used at all.
       if (listed.length && !models.length) return [];
@@ -172,7 +173,8 @@ export function createSubscriptions(options: { runtime: Runtime }) {
           ownerMembershipId: row.owner_membership_id,
           models,
           disabled: row.disabled_models,
-        } satisfies SubscriptionCandidate,
+          labels: stored.filter(model => models.includes(model.slug)),
+        } satisfies SubscriptionCandidate & { labels: SubscriptionModel[] },
       ];
     });
   }
@@ -268,12 +270,15 @@ export function createSubscriptions(options: { runtime: Runtime }) {
       });
     },
 
-    /** Models of `provider` the signed-in member can pick: those of every plan they may use. */
-    async models(workspaceId: string, userId: string, provider: SubscriptionProvider) {
+    /** Models of `provider` the signed-in member can pick, with the provider's names: those of every plan they may use. */
+    async models(workspaceId: string, userId: string, provider: SubscriptionProvider): Promise<SubscriptionModel[]> {
       try {
-        return await authorized(workspaceId, userId, 'read', async (tx, actor) => [
-          ...new Set((await eligibleIn(tx, provider, actor.membershipId)).flatMap(candidate => candidate.models)),
-        ]);
+        return await authorized(workspaceId, userId, 'read', async (tx, actor) => {
+          const models = new Map<string, SubscriptionModel>();
+          for (const candidate of await eligibleIn(tx, provider, actor.membershipId))
+            for (const model of candidate.labels) if (!models.has(model.slug)) models.set(model.slug, model);
+          return [...models.values()];
+        });
       } catch (error) {
         if (error instanceof AccessDenied) return [];
         throw error;

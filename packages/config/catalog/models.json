@@ -5,7 +5,7 @@
   "models": [
     {
       "id": "claude-haiku",
-      "name": "Claude Haiku",
+      "name": "Claude Haiku 4.5",
       "vendor": "anthropic",
       "speed": 94.9,
       "quality": 17,
@@ -43,7 +43,7 @@
     },
     {
       "id": "claude-sonnet",
-      "name": "Claude Sonnet",
+      "name": "Claude Sonnet 5",
       "vendor": "anthropic",
       "speed": 84.5,
       "quality": 38,
@@ -82,7 +82,7 @@
     },
     {
       "id": "claude-opus",
-      "name": "Claude Opus",
+      "name": "Claude Opus 5.5",
       "vendor": "anthropic",
       "speed": 98.3,
       "quality": 58,
@@ -119,7 +119,7 @@
     },
     {
       "id": "claude-fable",
-      "name": "Claude Fable",
+      "name": "Claude Fable 5.1",
       "vendor": "anthropic",
       "speed": 67.6,
       "quality": 53,
@@ -156,7 +156,7 @@
     },
     {
       "id": "gpt-luna",
-      "name": "GPT Luna",
+      "name": "GPT-6 Luna",
       "vendor": "openai",
       "speed": 120.2,
       "quality": 38,
@@ -208,7 +208,7 @@
     },
     {
       "id": "gpt-sol",
-      "name": "GPT Sol",
+      "name": "GPT-6 Sol",
       "vendor": "openai",
       "speed": 117.7,
       "quality": 48,
@@ -259,7 +259,7 @@
     },
     {
       "id": "gpt-astra",
-      "name": "GPT Astra",
+      "name": "GPT-6 Astra",
       "vendor": "openai",
       "speed": 61.4,
       "quality": 53,
@@ -311,7 +311,7 @@
     },
     {
       "id": "chatgpt-sol",
-      "name": "GPT Sol (ChatGPT plan)",
+      "name": "GPT-6.1 Sol",
       "vendor": "openai",
       "speed": null,
       "quality": null,
@@ -336,7 +336,7 @@
     },
     {
       "id": "chatgpt-astra",
-      "name": "GPT Astra (ChatGPT plan)",
+      "name": "GPT-6 Astra",
       "vendor": "openai",
       "speed": 61.4,
       "quality": 53,
@@ -361,7 +361,7 @@
     },
     {
       "id": "chatgpt-luna",
-      "name": "GPT Luna (ChatGPT plan)",
+      "name": "GPT-6 Luna",
       "vendor": "openai",
       "speed": 120.2,
       "quality": 38,
@@ -386,7 +386,7 @@
     },
     {
       "id": "claude-plan-sonnet",
-      "name": "Claude Sonnet (Claude plan)",
+      "name": "Claude Sonnet 5",
       "vendor": "anthropic",
       "speed": 84.5,
       "quality": 38,
@@ -407,7 +407,7 @@
     },
     {
       "id": "claude-plan-opus",
-      "name": "Claude Opus (Claude plan)",
+      "name": "Claude Opus 5.5",
       "vendor": "anthropic",
       "speed": 98.3,
       "quality": 58,
@@ -428,7 +428,7 @@
     },
     {
       "id": "claude-plan-haiku",
-      "name": "Claude Haiku (Claude plan)",
+      "name": "Claude Haiku 4.5",
       "vendor": "anthropic",
       "speed": 94.9,
       "quality": 17,
@@ -449,7 +449,7 @@
     },
     {
       "id": "copilot-claude-sonnet",
-      "name": "Claude Sonnet (Copilot plan)",
+      "name": "Claude Sonnet 5.5",
       "vendor": "anthropic",
       "speed": 84.5,
       "quality": 38,
@@ -470,7 +470,7 @@
     },
     {
       "id": "copilot-claude-opus",
-      "name": "Claude Opus (Copilot plan)",
+      "name": "Claude Opus 5.5",
       "vendor": "anthropic",
       "speed": 98.3,
       "quality": 58,
@@ -491,7 +491,7 @@
     },
     {
       "id": "copilot-gpt-sol",
-      "name": "GPT Sol (Copilot plan)",
+      "name": "GPT-6.1 Sol",
       "vendor": "openai",
       "speed": 117.7,
       "quality": 48,
@@ -512,7 +512,7 @@
     },
     {
       "id": "copilot-gpt-luna",
-      "name": "GPT Luna (Copilot plan)",
+      "name": "GPT-6 Luna",
       "vendor": "openai",
       "speed": 120.2,
       "quality": 38,
@@ -533,7 +533,7 @@
     },
     {
       "id": "deepseek-pro",
-      "name": "DeepSeek Pro",
+      "name": "DeepSeek V4 Pro",
       "vendor": "deepseek",
       "speed": 94.9,
       "quality": 36,
@@ -565,7 +565,7 @@
     },
     {
       "id": "deepseek-flash",
-      "name": "DeepSeek Flash",
+      "name": "DeepSeek V4 Flash",
       "vendor": "deepseek",
       "speed": 142.7,
       "quality": 34,
@@ -597,7 +597,7 @@
     },
     {
       "id": "grok",
-      "name": "Grok",
+      "name": "Grok 4.6",
       "vendor": "xai",
       "speed": 76.5,
       "quality": 44,
@@ -648,7 +648,7 @@
     },
     {
       "id": "grok-fast",
-      "name": "Grok Fast",
+      "name": "Grok 4.3 Fast",
       "vendor": "xai",
       "speed": 84.2,
       "quality": 25,
@@ -690,7 +690,7 @@
     },
     {
       "id": "kimi",
-      "name": "Kimi",
+      "name": "Kimi K2.6",
       "vendor": "moonshot",
       "speed": 92.9,
       "quality": 27,
@@ -726,7 +726,7 @@
     },
     {
       "id": "kimi-code",
-      "name": "Kimi Code",
+      "name": "Kimi K2.7 Code",
       "vendor": "moonshot",
       "speed": 81.4,
       "quality": 26,
@@ -760,7 +760,7 @@
     },
     {
       "id": "gemini-flash",
-      "name": "Gemini Flash",
+      "name": "Gemini 3.8 Flash",
       "vendor": "google",
       "speed": 134.0,
       "quality": 41,
@@ -804,7 +804,7 @@
     },
     {
       "id": "gemini-pro",
-      "name": "Gemini Pro",
+      "name": "Gemini 3.1 Pro",
       "vendor": "google",
       "speed": 141.2,
       "quality": 30,

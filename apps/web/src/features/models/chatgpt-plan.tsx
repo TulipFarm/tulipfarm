@@ -254,12 +254,19 @@ export function ChatGptPlanPane({
             <p className="text-sm text-muted-foreground">Shared with: {audience(own.grants, people)}</p>
           )}
         </div>
-        {live && own?.canShare && (
-          <Button size="sm" variant="outline" onClick={() => setSharing(true)}>
-            Share
-          </Button>
+        {live && phase.kind !== 'pending' && phase.kind !== 'finishing' && (
+          <div className="flex flex-wrap items-center gap-2">
+            {own?.canShare && (
+              <Button size="sm" variant="outline" onClick={() => setSharing(true)}>
+                Share
+              </Button>
+            )}
+            {connection.state === 'connected' && <ManageUsageLink />}
+            <Button size="sm" variant="ghost-destructive" onClick={() => setConfirming(true)} disabled={busy}>
+              {phase.kind === 'disconnecting' ? 'Disconnecting…' : 'Disconnect'}
+            </Button>
+          </div>
         )}
-        {connection?.state === 'connected' && <ManageUsageLink />}
       </header>
       {state.kind === 'loading' && (
         <div role="status" aria-label="Checking your ChatGPT connection" className="grid gap-2">
@@ -301,13 +308,6 @@ export function ChatGptPlanPane({
         <ConnectionState connection={connection} busy={busy} begin={mode => void begin(mode)} />
       )}
       {live && own && <PlanModels workspaceId={workspaceId} subscription={own} people={people} />}
-      {live && phase.kind !== 'pending' && phase.kind !== 'finishing' && (
-        <div>
-          <Button size="sm" variant="ghost-destructive" onClick={() => setConfirming(true)} disabled={busy}>
-            {phase.kind === 'disconnecting' ? 'Disconnecting…' : 'Disconnect'}
-          </Button>
-        </div>
-      )}
       {confirming && (
         <Dialog open onOpenChange={open => !open && setConfirming(false)}>
           <DialogContent size="form">

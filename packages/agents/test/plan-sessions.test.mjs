@@ -184,4 +184,11 @@ test('a context overflow never reads as a sign-out, so the member keeps their to
   assert.equal(copilotError({ message: 'Bad credentials' }).code, 'plan_reconnect');
   assert.equal(copilotError({ statusCode: 401, message: 'Unauthorized' }).code, 'plan_reconnect');
   assert.equal(claudeError('Claude AI usage limit reached|1760000000').code, 'plan_usage_limit');
+  const githubQuota = copilotError({
+    message:
+      'Request session.create failed with message: Standalone managed telemetry preparation failed: Failed to fetch ' +
+      'Copilot user info: 403 Forbidden: {"message":"API rate limit exceeded for user ID 1."}',
+  });
+  assert.equal(githubQuota.code, 'plan_usage_limit');
+  assert.equal(githubQuota.retryAfterSeconds, 60);
 });

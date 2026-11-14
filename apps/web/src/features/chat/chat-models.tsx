@@ -10,7 +10,6 @@ import { modelBrand } from '@/features/models/model-brand';
 import { modelLogo } from '@/features/models/model-logo';
 import { ModelSetupLink, noModelsConfigured } from '@/features/models/model-setup';
 import { familyPlan } from '@/features/models/chatgpt-plan-api';
-import { planLabels, planUsageUrls } from './reply-failure-copy';
 
 function composerModel(family: ModelCatalogFamily): ComposerModel {
   return {
@@ -18,8 +17,6 @@ function composerModel(family: ModelCatalogFamily): ComposerModel {
     label: family.displayName,
     logo: modelLogo(family.vendor),
     brand: modelBrand(family.vendor),
-    speed: family.speed ?? undefined,
-    quality: family.quality ?? undefined,
     cost: familyCost(family),
     ...(familyPlan(family) ? { plan: familyPlan(family)! } : {}),
     disabled: !family.available,
@@ -88,10 +85,10 @@ export function useChatModels(
   const current = families.find(family => family.id === selected?.id);
   const model = state.kind === 'unavailable' ? null : current ? composerModel(current) : selected;
   const ready = state.kind === 'ready';
-  // Subscription plan models sit together after the workspace's own models.
+  // The member's own plan models come first, before the workspace's models that use credits.
   const choices = families
     .map(composerModel)
-    .sort((a, b) => Number(!!a.disabled) - Number(!!b.disabled) || Number(!!a.plan) - Number(!!b.plan));
+    .sort((a, b) => Number(!!a.disabled) - Number(!!b.disabled) || Number(!a.plan) - Number(!b.plan));
   // The member's remembered model can no longer be used here, so new messages use another one until they choose.
   const savedUnavailable =
     ready && !!saved && saved !== acknowledged && !families.some(family => family.id === saved && family.available);
@@ -177,7 +174,6 @@ export function ChatModelStatus({
   const failed = state.kind === 'error' || (state.kind === 'ready' && !!state.error);
   const family = state.kind === 'ready' ? state.data.families.find(item => item.id === model?.id) : undefined;
   const empty = state.kind === 'ready' && !state.data.families.length;
-  const planUsage = family?.available ? familyPlan(family) : null;
   const message = busy
     ? 'Checking available models…'
     : failed
@@ -201,19 +197,6 @@ export function ChatModelStatus({
       : null;
   return (
     <>
-      {planUsage && !message && (
-        <p className="text-xs text-muted-foreground">
-          Using {planLabels[planUsage]} plan ·{' '}
-          <a
-            className="underline underline-offset-2"
-            href={planUsageUrls[planUsage]}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Manage usage
-          </a>
-        </p>
-      )}
       {replaced && (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
           <p role="status">{replaced}</p>

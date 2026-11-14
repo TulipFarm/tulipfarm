@@ -26,7 +26,7 @@ import { registerGitHubAccounts } from './github-accounts.ts';
 import { chatGptPlan, registerChatGptPlan } from './chatgpt-plan.ts';
 import { registerTokenPlan, tokenPlan } from './token-plans.ts';
 import type { TokenPlan, TokenPlanProvider } from '@tulipfarm/integrations/token-plans';
-import { planProviders, type PlanProvider } from '@tulipfarm/config';
+import { planModelFamilyId, planProviders, type PlanProvider } from '@tulipfarm/config';
 import { registerSubscriptions } from './subscriptions.ts';
 import { createSubscriptions } from '@tulipfarm/integrations/subscriptions';
 import { registerGitHubInvestigation } from './github-investigation.ts';
@@ -161,13 +161,10 @@ export function buildApp(
         registerTokenPlan(business, auth.auth, 'claude', tokenPlans.claude);
         registerTokenPlan(business, auth.auth, 'copilot', tokenPlans.copilot);
         const subscriptions = runtime ? createSubscriptions({ runtime }) : null;
-        registerSubscriptions(
-          business,
-          auth.auth,
-          subscriptions,
-          provider =>
-            new Set(models.catalog.models.flatMap(model => (model.route.type === provider ? [model.route.model] : []))),
-        );
+        registerSubscriptions(business, auth.auth, subscriptions, (provider, slug) => {
+          const id = planModelFamilyId(provider, slug);
+          return id !== null && models.catalog.model(id) !== undefined;
+        });
         if (runtime && github)
           registerGitHubInvestigation(business, auth.auth, createGitHubInvestigation({ runtime, accounts: github }));
         registerStorageComposition(

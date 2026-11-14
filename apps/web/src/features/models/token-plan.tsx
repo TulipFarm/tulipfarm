@@ -319,21 +319,28 @@ export function TokenPlanPane({ workspaceId, provider }: { workspaceId: string; 
             <p className="text-sm text-muted-foreground">Shared with: {audience(own.grants, people)}</p>
           )}
         </div>
-        {live && own?.canShare && (
-          <Button size="sm" variant="outline" onClick={() => setSharing(true)}>
-            Share
-          </Button>
-        )}
-        {connection?.state === 'connected' && (
-          <Button
-            size="sm"
-            variant="outline"
-            nativeButton={false}
-            render={<a href={planUsageUrls[provider]} target="_blank" rel="noopener noreferrer" />}
-          >
-            Manage usage
-            <ArrowUpRight size={14} aria-hidden="true" />
-          </Button>
+        {live && (
+          <div className="flex flex-wrap items-center gap-2">
+            {own?.canShare && (
+              <Button size="sm" variant="outline" onClick={() => setSharing(true)}>
+                Share
+              </Button>
+            )}
+            {connection.state === 'connected' && (
+              <Button
+                size="sm"
+                variant="outline"
+                nativeButton={false}
+                render={<a href={planUsageUrls[provider]} target="_blank" rel="noopener noreferrer" />}
+              >
+                Manage usage
+                <ArrowUpRight size={14} aria-hidden="true" />
+              </Button>
+            )}
+            <Button size="sm" variant="ghost-destructive" onClick={() => setConfirming(true)} disabled={busy}>
+              {phase.kind === 'disconnecting' ? 'Disconnecting…' : 'Disconnect'}
+            </Button>
+          </div>
         )}
       </header>
       {state.kind === 'loading' && (
@@ -528,13 +535,6 @@ export function TokenPlanPane({ workspaceId, provider }: { workspaceId: string; 
         </form>
       )}
       {live && own && <PlanModels workspaceId={workspaceId} subscription={own} people={people} />}
-      {live && (
-        <div>
-          <Button size="sm" variant="ghost-destructive" onClick={() => setConfirming(true)} disabled={busy}>
-            {phase.kind === 'disconnecting' ? 'Disconnecting…' : 'Disconnect'}
-          </Button>
-        </div>
-      )}
       {confirming && (
         <Dialog open onOpenChange={open => !open && setConfirming(false)}>
           <DialogContent size="form">

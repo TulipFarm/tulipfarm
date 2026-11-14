@@ -2,6 +2,8 @@ import { z } from 'zod';
 import type { QueryKey } from '@tanstack/react-query';
 import type { EarlyRead } from '@/lib/query/early-reads';
 import type { PersistedRead } from '@/lib/query/persisted-reads';
+import { chatGptConnectionSchema } from '@/features/models/chatgpt-plan-api';
+import { tokenConnectionSchema } from '@/features/models/token-plan-api';
 import { projectApi, projectListSchema } from '@/features/projects/api';
 import { projectKeys } from '@/features/projects/queries';
 import { chatHistorySchema, chatListSchema, conversationApi } from './conversation-api';
@@ -60,6 +62,9 @@ const historyKey = z.tuple([
   z.strictObject({ pages: z.literal(1) }),
 ]);
 const projectsKey = z.tuple([z.literal('projects'), z.literal('list')]);
+// The Models page rail reads each plan connection; keeping the last answer lets a reload show it at once.
+const chatGptKey = z.tuple([z.literal('models'), z.literal('chatgpt-connection')]);
+const tokenPlanKey = z.tuple([z.literal('models'), z.enum(['claude-connection', 'copilot-connection'])]);
 const matches = (schema: z.ZodType) => (key: QueryKey) => schema.safeParse(key).success;
 
 /** The first pages of these reads persist, so a return visit shows them before the network answers. */
@@ -67,4 +72,6 @@ export const persistedPageReads: PersistedRead[] = [
   { name: 'chat-list', limit: 4, match: matches(listKey), schema: chatListSchema },
   { name: 'chat-history', limit: 12, match: matches(historyKey), schema: chatHistorySchema },
   { name: 'projects', limit: 1, match: matches(projectsKey), schema: projectListSchema },
+  { name: 'chatgpt-connection', limit: 1, match: matches(chatGptKey), schema: chatGptConnectionSchema.nullable() },
+  { name: 'token-plan-connection', limit: 2, match: matches(tokenPlanKey), schema: tokenConnectionSchema.nullable() },
 ];

@@ -38,6 +38,9 @@ export function GrantsEditor({
   onChange,
   description = 'They can use it in their chats and tasks. Nobody can read it back.',
   roles = roleOptions,
+  everyone = true,
+  showOwner = true,
+  addLabel = 'Add someone',
 }: {
   value: SecretGrant[];
   owner: string;
@@ -46,16 +49,24 @@ export function GrantsEditor({
   onChange: (value: SecretGrant[]) => void;
   description?: string;
   roles?: RoleOptions;
+  /** Offers Everyone in the workspace as a grantee; off when the caller asks about everyone separately. */
+  everyone?: boolean;
+  showOwner?: boolean;
+  addLabel?: string;
 }) {
   const id = useId();
   const granted = new Set(value.map(granteeKey));
   const candidates: { key: string; label: string; hint: string; grant: SecretGrant }[] = [
-    {
-      key: 'workspace',
-      label: 'Everyone',
-      hint: 'Everyone in the workspace',
-      grant: { grantee: { kind: 'workspace' }, role: 'use' } satisfies SecretGrant,
-    },
+    ...(everyone
+      ? [
+          {
+            key: 'workspace',
+            label: 'Everyone',
+            hint: 'Everyone in the workspace',
+            grant: { grantee: { kind: 'workspace' }, role: 'use' } satisfies SecretGrant,
+          },
+        ]
+      : []),
     ...people.teams.map(team => ({
       key: `team:${team.id}`,
       label: team.name,
@@ -80,12 +91,14 @@ export function GrantsEditor({
         : people.name(grant.grantee.membershipId);
   return (
     <div className="space-y-3">
-      <p className="text-sm text-muted-foreground">{description}</p>
+      {description && <p className="text-sm text-muted-foreground">{description}</p>}
       <ul className="space-y-2" aria-label="Who can use it">
-        <li className="flex items-center gap-2 text-sm">
-          <span className="min-w-0 flex-1 truncate">{owner === people.you ? 'You' : people.name(owner)}</span>
-          <span className="text-muted-foreground">Owner</span>
-        </li>
+        {showOwner && (
+          <li className="flex items-center gap-2 text-sm">
+            <span className="min-w-0 flex-1 truncate">{owner === people.you ? 'You' : people.name(owner)}</span>
+            <span className="text-muted-foreground">Owner</span>
+          </li>
+        )}
         {value.map((grant, index) => (
           <li key={granteeKey(grant)} className="flex items-center gap-2">
             <span className="min-w-0 flex-1 truncate text-sm">{label(grant)}</span>
@@ -134,7 +147,7 @@ export function GrantsEditor({
         ))}
       </ul>
       {candidates.length > 0 && (
-        <Labelled id={`${id}-add`} label="Add someone">
+        <Labelled id={`${id}-add`} label={addLabel}>
           <Select
             value=""
             disabled={disabled}

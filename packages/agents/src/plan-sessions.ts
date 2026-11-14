@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -691,8 +691,11 @@ async function copilot() {
   return copilotClient;
 }
 
-/** Signs in to Copilot with `token` and lists the models its plan offers. Throws a PlanSessionError if it cannot. */
-export async function copilotPlanModels(token: string): Promise<string[]> {
+/**
+ * Signs in to Copilot with `token` and lists the models its plan offers, with Copilot's names. Leaves out `auto`, which
+ * picks a model per request. Throws a PlanSessionError if it cannot.
+ */
+export async function copilotPlanModels(token: string): Promise<{ id: string; name: string }[]> {
   const sdk = await import('@github/copilot-sdk');
   const baseDirectory = join(tmpdir(), 'tulipfarm-copilot-check', hash(token));
   mkdirSync(baseDirectory, { recursive: true });
@@ -707,7 +710,7 @@ export async function copilotPlanModels(token: string): Promise<string[]> {
   try {
     await client.start();
     const models = await client.listModels();
-    return models.map(model => model.id);
+    return models.filter(model => model.id !== 'auto').map(model => ({ id: model.id, name: model.name }));
   } catch (error) {
     throw copilotError({ message: error instanceof Error ? error.message : String(error) });
   } finally {
@@ -720,7 +723,15 @@ function copilotError(data: { errorType?: string; statusCode?: number; message?:
   const type = data.errorType ?? '';
   if (type === 'context_limit' || (!type && contextLimit.test(message)))
     return new PlanSessionError(400, 'context_length_exceeded', message);
-  if (type === 'quota' || type === 'rate_limit' || data.statusCode === 429 || data.statusCode === 402)
+  // A GitHub App user token shares the member's hourly GitHub API quota with their other tools, so Copilot can fail
+  // with a 403 rate-limit answer from GitHub that has no error type.
+  if (
+    type === 'quota' ||
+    type === 'rate_limit' ||
+    data.statusCode === 429 ||
+    data.statusCode === 402 ||
+    /rate limit/i.test(message)
+  )
     return new PlanSessionError(429, 'plan_usage_limit', message, 60);
   if (type === 'authentication' || data.statusCode === 401 || (!type && signedOut.test(message)))
     return new PlanSessionError(401, 'plan_reconnect', message);
@@ -860,6 +871,64 @@ export async function checkClaudePlan(token: string, model = 'claude-haiku-4-5')
   }
 }
 
+/**
+ * Lists the models Claude Code offers with `token`, by full model id, with Claude's names. Leaves out `default`, which
+ * only points at another listed model. The list does not prove the token works; checkClaudePlan does.
+ */
+export async function claudePlanModels(token: string): Promise<{ id: string; name: string }[]> {
+  const { query } = await import('@anthropic-ai/claude-agent-sdk');
+  const home = join(tmpdir(), 'tulipfarm-claude', randomUUID());
+  mkdirSync(home, { recursive: true });
+  const abort = new AbortController();
+  const run = query({
+    // An input stream that sends nothing keeps the session open long enough to ask for its models.
+    prompt: {
+      [Symbol.asyncIterator]: () => ({
+        next: () =>
+          new Promise(resolve =>
+            abort.signal.addEventListener('abort', () => resolve({ done: true, value: undefined })),
+          ),
+      }),
+    } as never,
+    options: {
+      tools: [],
+      strictMcpConfig: true,
+      settingSources: [],
+      persistSession: false,
+      cwd: home,
+      abortController: abort,
+      env: claudeEnv(token, home),
+    },
+  });
+  try {
+    const listed = await run.supportedModels();
+    const models = new Map<string, string>();
+    for (const model of listed) {
+      if (model.value === 'default' || !model.resolvedModel || models.has(model.resolvedModel)) continue;
+      const name = model.displayName.replace(/^(?!claude\b)/i, 'Claude ');
+      models.set(model.resolvedModel, name);
+    }
+    return [...models].map(([id, name]) => ({ id, name }));
+  } catch (error) {
+    throw claudeError(error instanceof Error ? error.message : String(error));
+  } finally {
+    abort.abort();
+    rmSync(home, { recursive: true, force: true });
+  }
+}
+
+/** Claude Code gets only its token and a private home, never the worker's own secrets. */
+function claudeEnv(token: string, home: string) {
+  return {
+    CLAUDE_CODE_OAUTH_TOKEN: token,
+    HOME: home,
+    PATH: process.env.PATH ?? '',
+    CLAUDE_AGENT_SDK_CLIENT_APP: 'tulipfarm',
+    DISABLE_AUTOUPDATER: '1',
+    DISABLE_TELEMETRY: '1',
+  };
+}
+
 async function claudeVendor(token: string, model: string, system: string, tools: Tool[]): Promise<Vendor> {
   const [{ query }, { McpServer }, { ListToolsRequestSchema, CallToolRequestSchema }] = await Promise.all([
     import('@anthropic-ai/claude-agent-sdk'),
@@ -961,14 +1030,7 @@ async function claudeVendor(token: string, model: string, system: string, tools:
       includePartialMessages: true,
       cwd: home,
       abortController: abort,
-      env: {
-        CLAUDE_CODE_OAUTH_TOKEN: token,
-        HOME: home,
-        PATH: process.env.PATH ?? '',
-        CLAUDE_AGENT_SDK_CLIENT_APP: 'tulipfarm',
-        DISABLE_AUTOUPDATER: '1',
-        DISABLE_TELEMETRY: '1',
-      },
+      env: claudeEnv(token, home),
     },
   });
   const counted = new Set<string>();
