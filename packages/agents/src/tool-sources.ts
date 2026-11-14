@@ -491,6 +491,13 @@ export async function resultSources(
     case 'followups.schedule':
     case 'followups.list':
     case 'followups.cancel':
+    case 'apps.status':
+    case 'apps.files.list':
+    case 'apps.files.read':
+    case 'apps.files.write':
+    case 'apps.files.delete':
+    // eslint-disable-next-line tulipfarm/product-copy -- A tool name, not user-facing copy.
+    case 'apps.preview.build':
       return [];
     case 'bud.preference.ask':
     case 'bud.preference.propose':

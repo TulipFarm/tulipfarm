@@ -122,6 +122,13 @@ export const toolActivityLabels = {
   'followups.schedule': 'Scheduling a follow-up',
   'followups.list': 'Listing follow-ups',
   'followups.cancel': 'Cancelling a follow-up',
+  'apps.status': 'Checking the app',
+  'apps.files.list': 'Listing app files',
+  'apps.files.read': 'Reading an app file',
+  'apps.files.write': 'Editing an app file',
+  'apps.files.delete': 'Deleting an app file',
+  // eslint-disable-next-line tulipfarm/product-copy -- A tool name, not user-facing copy.
+  'apps.preview.build': 'Building the app',
   'github.issue.read': 'Reading a GitHub issue',
   'github.personal.account': 'Checking available GitHub accounts',
   'github.investigation.account': 'Choosing a private GitHub investigation source',

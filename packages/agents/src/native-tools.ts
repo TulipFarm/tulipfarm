@@ -215,6 +215,14 @@ const coreChatTools = new Set(
     'agents.delegate',
     'followups.schedule',
     'plans.create',
+    // Offered only in an app's own chat, where editing that app is the whole task.
+    'apps.status',
+    'apps.files.list',
+    'apps.files.read',
+    'apps.files.write',
+    'apps.files.delete',
+    // eslint-disable-next-line tulipfarm/product-copy -- A tool name, not user-facing copy.
+    'apps.preview.build',
   ].map(nativeToolName),
 );
 export const toolSearchName = 'tools_search';
@@ -270,8 +278,9 @@ export function nativeChatTools(
   loaded?: Set<string>,
   chatFiles = false,
   codingRuns = false,
+  apps = false,
 ): ChatCatalog {
-  const full = nativeTools({ kind: 'chat', mcp, earlierMessages, chatFiles, codingRuns }, chatCallSchema);
+  const full = nativeTools({ kind: 'chat', mcp, earlierMessages, chatFiles, codingRuns, apps }, chatCallSchema);
   if (!full.tools.length) throw new Error('tool-catalog-empty');
   if (!loaded) return { ...full, discovery: '', load: () => [], search: () => [] };
   const deferred = full.tools.filter(tool => !coreChatTools.has(tool.name) && !tool.name.startsWith('mcp_'));

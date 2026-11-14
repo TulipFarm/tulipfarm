@@ -213,6 +213,8 @@ jobs:
           pnpm --filter @tulipfarm/apps run test:integration
           pnpm --filter @tulipfarm/worker run test:apps
           pnpm --filter @tulipfarm/api run test:apps
+      - name: Check that one chat at a time edits an app and only a finished turn saves
+        run: pnpm --filter @tulipfarm/agents exec node --test --test-concurrency=1 test/app-tools.integration.mjs
       - name: Check row and project review drafts
         env:
           XAI_API_KEY: synthetic-not-secret

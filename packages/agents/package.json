@@ -340,6 +340,7 @@
     "@temporalio/workflow": "1.24.0",
     "@tulipfarm/access": "workspace:*",
     "@tulipfarm/api-calls": "workspace:*",
+    "@tulipfarm/apps": "workspace:*",
     "@tulipfarm/atlassian": "workspace:*",
     "@tulipfarm/config": "workspace:*",
     "@tulipfarm/conversations": "workspace:*",
