@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { TableRequestError } from '@/features/tables/request-state';
+import { analytics } from '@/lib/analytics';
 import { browserOffline, onReconnect } from '@/lib/online';
 import { updatingRetries, updatingRetryMs, workspaceUpdating } from '@/lib/query/policy';
 import type { ChatEdit } from './chat-edits';
 import { useChatOptimism, useConversationChanges } from './queries';
 import type { Chat, ConversationApi, ConversationCommand } from './conversation-api';
+import { chatSendFailedEvent, chatSendFailureProperties } from './send-failure-report';
 
 export type CommandState =
   | { kind: 'idle' }
@@ -36,6 +38,11 @@ export function useConversationCommand(
       active.current?.abort();
     };
   }, []);
+  /** Shows a command that did not go through, and reports a message left not sent without its content. */
+  function failed(next: Extract<CommandState, { kind: 'uncertain' | 'rejected' }>, error?: unknown) {
+    setState(next);
+    if (next.command?.kind === 'send') analytics.capture(chatSendFailedEvent, chatSendFailureProperties(next, error));
+  }
   async function confirm(command: ConversationCommand, controller: AbortController, recoveredPages?: number) {
     await changes.command(command);
     if (mounted.current && !controller.signal.aborted) {
@@ -61,7 +68,7 @@ export function useConversationCommand(
   async function submit(command: ConversationCommand, chat?: Chat) {
     if (active.current) return;
     if (browserOffline()) {
-      setState({ kind: 'uncertain', command, offline: true });
+      failed({ kind: 'uncertain', command, offline: true });
       return;
     }
     const controller = new AbortController();
@@ -99,20 +106,21 @@ export function useConversationCommand(
           if (found === 'sent') return;
           if (found === 'unsent' && !rejected && !workspaceUpdating(error)) {
             if (mounted.current && !controller.signal.aborted)
-              setState({ kind: 'uncertain', command, offline: false, unsent: true });
+              failed({ kind: 'uncertain', command, offline: false, unsent: true }, error);
             return;
           }
         } catch {
           if (mounted.current && !controller.signal.aborted)
-            setState({ kind: 'uncertain', command, offline: browserOffline() });
+            failed({ kind: 'uncertain', command, offline: browserOffline() }, error);
           return;
         }
       }
       if (mounted.current && !controller.signal.aborted)
-        setState(
+        failed(
           rejected
             ? { kind: 'rejected', message: error.message, status: error.status, command }
             : { kind: 'uncertain', command, offline: browserOffline(), updating: workspaceUpdating(error) },
+          error,
         );
     } finally {
       if (active.current === controller) active.current = null;
@@ -133,7 +141,7 @@ export function useConversationCommand(
       }
     } catch {
       if (mounted.current && !controller.signal.aborted)
-        setState({ kind: 'uncertain', command, offline: browserOffline() });
+        failed({ kind: 'uncertain', command, offline: browserOffline() });
     } finally {
       if (active.current === controller) active.current = null;
     }
