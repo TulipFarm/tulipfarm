@@ -15,7 +15,7 @@ test(
     const db = await fixture();
     try {
       const before = db.baseline.findIndex(item => item.name === appsMigration);
-      assert.equal(db.baseline.at(-1).name, '0076_mcp_workspace_share.sql');
+      assert.equal(db.baseline.at(-1).name, '0077_app_runtimes.sql');
       const upgraded = await db.create(db.baseline.slice(0, before));
       assert.equal(
         (await db.platform.query(`SELECT to_regclass($1) AS present`, [`${upgraded.names.schema}.tf_apps`])).rows[0]
@@ -51,6 +51,7 @@ test(
           'tf_app_grants',
           'tf_app_operations',
           'tf_app_releases',
+          'tf_app_runtimes',
           'tf_app_source_bundles',
           'tf_app_usage_windows',
           'tf_app_versions',

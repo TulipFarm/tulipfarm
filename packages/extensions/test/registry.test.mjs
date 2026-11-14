@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { beforeEach, test } from 'node:test';
 import {
+  appHost,
   captureAnalytics,
   configuredExecutionBackend,
   creditGate,
@@ -21,6 +22,7 @@ import {
   resetExtensions,
   shutdownExtensions,
   socialPlatformApps,
+  unavailableAppHost,
   unlimitedCredits,
   providerCostPricing,
 } from '../src/index.ts';
@@ -56,6 +58,20 @@ test('every slot is a no-op by default', async () => {
   assert.equal(flagProvider(), undefined);
   assert.equal(socialPlatformApps(), undefined);
   assert.equal(executionBackend(), undefined);
+  assert.equal(appHost(), unavailableAppHost);
+  const signal = new AbortController().signal;
+  const unavailable = {
+    name: 'AppHostUnavailableError',
+    message: 'No app host is registered, so server apps cannot run',
+  };
+  await assert.rejects(
+    appHost().provision({ appId: 'a', releaseId: 'r', size: { vcpu: 1, memMiB: 1024 } }, signal),
+    unavailable,
+  );
+  await assert.rejects(appHost().switch({ appId: 'a', hostRef: 'h', drainS: 30 }, signal), unavailable);
+  await assert.rejects(appHost().connect({ appId: 'a' }, signal), unavailable);
+  await assert.rejects(appHost().remove({ appId: 'a', hostRef: 'h' }, signal), unavailable);
+  await assert.rejects(Array.fromAsync(appHost().list(signal)), unavailable);
   assert.deepEqual(extensionMigrations(), []);
   captureAnalytics({ event: 'e', distinctId: 'd' });
   reportError(new Error('x'));

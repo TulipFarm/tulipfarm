@@ -390,6 +390,45 @@ export type AppPublisher = {
   usage(window: { readonly start: string; readonly end: string }, signal: AbortSignal): AsyncIterable<AppTraffic>;
 };
 
+/** CPU and memory for one running server app. */
+export type AppServerSize = { readonly vcpu: number; readonly memMiB: number };
+
+/**
+ * Runs server apps. Each host runs one release at one size; `hostRef` is the host's own opaque name for it. Each app
+ * has one endpoint that forwards to whichever host was switched in last. Without a registered host, server apps are
+ * unavailable and every call fails with `AppHostUnavailableError`.
+ */
+export type AppHost = {
+  /** Creates or reuses the host for this release and size and waits until it answers. Idempotent per input. */
+  provision(
+    input: { readonly appId: string; readonly releaseId: string; readonly size: AppServerSize },
+    signal: AbortSignal,
+  ): Promise<{ readonly hostRef: string }>;
+  /**
+   * Points the app's endpoint at `hostRef`, giving requests on the previous host `drainS` seconds to finish. With
+   * `expectedGeneration`, the switch applies only if the endpoint is still at that generation. Returns the endpoint's
+   * generation after the call.
+   */
+  switch(
+    input: {
+      readonly appId: string;
+      readonly hostRef: string;
+      readonly drainS: number;
+      readonly expectedGeneration?: number | undefined;
+    },
+    signal: AbortSignal,
+  ): Promise<{ readonly generation: number }>;
+  /** A URL and headers that reach the app's endpoint for a short time. */
+  connect(
+    input: { readonly appId: string },
+    signal: AbortSignal,
+  ): Promise<{ readonly url: string; readonly headers: Readonly<Record<string, string>> }>;
+  /** Deletes one host of an app. Removing a host that is already gone succeeds. */
+  remove(input: { readonly appId: string; readonly hostRef: string }, signal: AbortSignal): Promise<void>;
+  /** Every host it runs, for reconciliation. */
+  list(signal: AbortSignal): AsyncIterable<{ readonly appId: string; readonly hostRef: string }>;
+};
+
 export type ExtensionMigration = { readonly name: string; readonly sql: string };
 
 /**
@@ -417,6 +456,8 @@ export type ExtensionRegistrar = {
   appBuilder(builder: AppBuilder): void;
   /** Single slot: a second extension setting it fails startup. Register it in the API and the worker alike. */
   appPublisher(publisher: AppPublisher): void;
+  /** Single slot: a second extension setting it fails startup. Register it in the API and the worker alike. */
+  appHost(host: AppHost): void;
   usageSink(sink: UsageSink): void;
   analytics(analytics: ProductAnalytics): void;
   errorReporter(reporter: ErrorReporter): void;
