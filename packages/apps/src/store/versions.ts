@@ -85,13 +85,51 @@ export async function listAppVersions(tx: AppTransaction, appId: AppId): Promise
 
 /** The live version's pages, which viewers see. */
 export async function readLiveDefinition(tx: AppTransaction, appId: AppId): Promise<AppDefinition | null> {
-  const [row] = await rows<{ definition: AppDefinition }>(
+  return (await readLiveVersion(tx, appId))?.definition ?? null;
+}
+
+/** The live version's id and pages, or null before the first publish. */
+export async function readLiveVersion(
+  tx: AppTransaction,
+  appId: AppId,
+): Promise<{ readonly versionId: string; readonly definition: AppDefinition } | null> {
+  const [row] = await rows<{ versionId: string; definition: AppDefinition }>(
     tx,
-    `SELECT v.definition FROM ${table(tx, 'tf_app_versions')} v
+    `SELECT v.id AS "versionId", v.definition FROM ${table(tx, 'tf_app_versions')} v
      JOIN ${table(tx, 'tf_apps')} a ON a.live_version_id = v.id WHERE a.id = $1`,
     [appId],
   );
+  return row ?? null;
+}
+
+/** The saved draft's pages, or null while the draft has none. Not checked: an edit run may have saved anything. */
+export async function readDraftDefinition(tx: AppTransaction, appId: AppId): Promise<unknown> {
+  const [row] = await rows<{ definition: unknown }>(
+    tx,
+    `SELECT definition FROM ${table(tx, 'tf_app_drafts')} WHERE app_id = $1`,
+    [appId],
+  );
   return row?.definition ?? null;
+}
+
+/**
+ * Records references a version names that no longer exist and returns the ones recorded for the first time, so a
+ * caller tells editors about each broken reference once.
+ */
+export async function recordBrokenReferences(
+  tx: AppTransaction,
+  versionId: string,
+  references: readonly AppReference[],
+): Promise<AppReference[]> {
+  if (!references.length) return [];
+  return (
+    await rows<{ reference: AppReference }>(
+      tx,
+      `INSERT INTO ${table(tx, 'tf_app_broken_references')} (version_id, reference)
+       SELECT $1, unnest($2::text[]) ON CONFLICT DO NOTHING RETURNING reference`,
+      [versionId, references],
+    )
+  ).map(({ reference }) => reference);
 }
 
 /** Publishes the saved draft as the next numbered version and makes it live at once. */
@@ -270,7 +308,24 @@ async function missingReferences(
   tx: AppTransaction,
   references: { reference: AppReference; path: string }[],
 ): Promise<AppDefinitionIssue[]> {
-  if (!references.length) return [];
+  const absent = await absentReferences(
+    tx,
+    references.map(({ reference }) => reference),
+  );
+  return references
+    .filter(({ reference }) => absent.has(reference))
+    .map(({ reference, path }) => {
+      const [kind, id] = reference.split(':');
+      return { path, message: `The ${kind} ${id} no longer exists` };
+    });
+}
+
+/** The references that name a table, field, file, workflow or agent that no longer exists. */
+export async function absentReferences(
+  tx: AppTransaction,
+  references: readonly AppReference[],
+): Promise<Set<AppReference>> {
+  if (!references.length) return new Set();
   const [present] = await rows<{ present: AppReference[] }>(
     tx,
     `SELECT ARRAY(
@@ -290,15 +345,10 @@ async function missingReferences(
        SELECT 'agent:' || id FROM ${table(tx, 'tf_agents')} WHERE deleted_at IS NULL AND archived_at IS NULL
          AND 'agent:' || id = ANY($1)
      ) AS present`,
-    [references.map(({ reference }) => reference)],
+    [references],
   );
   const live = new Set(present!.present);
-  return references
-    .filter(({ reference }) => !live.has(reference))
-    .map(({ reference, path }) => {
-      const [kind, id] = reference.split(':');
-      return { path, message: `The ${kind} ${id} no longer exists` };
-    });
+  return new Set(references.filter(reference => !live.has(reference)));
 }
 
 /** JSON with sorted object keys, so the same pages always store and digest the same way. */
