@@ -91,7 +91,7 @@ function ActionButton(props: A2uiAdapterProps<Parameters<typeof sproutAdapters.B
         <p className="text-sm text-muted-foreground">{availabilityNotes[availability]}</p>
       ) : note ? (
         <p role="status" className="flex flex-wrap items-baseline gap-x-2 text-sm">
-          <Status state={note.state} size="sm" aria-hidden="true" className="shrink-0" />
+          <Status state={note.state} size="sm" aria-hidden="true" />
           <span className="min-w-0 flex-1">
             {press.state === 'failed' && press.message ? `${note.text} ${press.message}` : note.text}
           </span>
