@@ -1,5 +1,5 @@
 // The application configuration contract: every environment variable that the api,
-// worker, storage-worker, snippet-broker, and database setup read, plus the Compose
+// worker, storage-worker, snippet-broker, gateway, and database setup read, plus the Compose
 // inputs of the self-hosted stack. Applications read plain environment variables only;
 // operators deliver them with any tool. `pnpm config:docs` renders
 // self-host/.env.example from this list, and
@@ -13,6 +13,7 @@ export const settingServices = [
   'storage-worker',
   'render-worker',
   'snippet-broker',
+  'gateway',
   'database',
   'compose',
 ] as const;
@@ -358,7 +359,7 @@ export const settings: readonly Setting[] = [
   {
     name: 'HOST',
     group: 'Runtime',
-    services: ['api', 'snippet-broker'],
+    services: ['api', 'snippet-broker', 'gateway'],
     requirement: 'optional',
     secret: false,
     default: '127.0.0.1',
@@ -367,10 +368,10 @@ export const settings: readonly Setting[] = [
   {
     name: 'PORT',
     group: 'Runtime',
-    services: ['api', 'snippet-broker'],
+    services: ['api', 'snippet-broker', 'gateway'],
     requirement: 'optional',
     secret: false,
-    default: '3001 (api), 8090 (snippet-broker)',
+    default: '3001 (api), 8090 (snippet-broker), 3002 (gateway)',
     description: 'Listen port.',
   },
   {
@@ -423,6 +424,15 @@ export const settings: readonly Setting[] = [
     description: '`direct`, `reverse-proxy`, or `azure-container-apps`: which proxy headers to trust.',
   },
   {
+    name: 'GATEWAY_PROXY_MODE',
+    group: 'Runtime',
+    services: ['gateway'],
+    requirement: 'optional',
+    secret: false,
+    default: 'direct',
+    description: '`direct` or `reverse-proxy`: whether the gateway trusts the forwarded client address from one proxy.',
+  },
+  {
     name: 'TEMPORAL_UI_URL',
     group: 'Runtime',
     services: ['api'],
@@ -436,7 +446,7 @@ export const settings: readonly Setting[] = [
   {
     name: 'TULIPFARM_EXTENSIONS',
     group: 'Runtime',
-    services: apps,
+    services: [...apps, 'gateway'],
     requirement: 'optional',
     secret: false,
     description:
@@ -483,7 +493,7 @@ export const settings: readonly Setting[] = [
   {
     name: 'WEB_ORIGIN',
     group: 'Public origins',
-    services: apiWorker,
+    services: [...apiWorker, 'gateway'],
     requirement: 'production',
     secret: false,
     description: 'Public web app origin.',
@@ -560,7 +570,7 @@ export const settings: readonly Setting[] = [
   {
     name: 'DATABASE_URL',
     group: 'Database',
-    services: ['api', 'database'],
+    services: ['api', 'gateway', 'database'],
     requirement: 'production',
     secret: true,
     generated: true,
@@ -827,7 +837,7 @@ export const settings: readonly Setting[] = [
   {
     name: 'TULIPFARM_OBJECT_STORAGE_APPS_BUCKET',
     group: 'Object storage',
-    services: apiWorker,
+    services: [...apiWorker, 'gateway'],
     requirement: 'optional',
     secret: false,
     description:
@@ -836,11 +846,11 @@ export const settings: readonly Setting[] = [
   {
     name: 'TULIPFARM_APP_PREVIEW_DOMAIN',
     group: 'Object storage',
-    services: ['api'],
+    services: ['api', 'gateway'],
     requirement: 'optional',
     secret: false,
     description:
-      'Parent domain for draft builds, served by the API at <app host key>.<domain>. Point a wildcard record at the API.',
+      'Parent domain for draft builds, served at <app host key>.<domain> by the gateway, or by the API while the wildcard record points at it. The gateway requires it.',
   },
   {
     name: 'R2_ENDPOINT',

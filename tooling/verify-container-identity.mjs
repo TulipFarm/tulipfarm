@@ -14,6 +14,7 @@ for (const [app, dockerfile, target, localTarget] of [
   ['worker', 'apps/worker/Dockerfile', 'worker', 'local-worker'],
   ['storage-maintenance', 'apps/worker/Dockerfile', 'storage-maintenance', 'local-storage-maintenance'],
   ['snippet-broker', 'apps/snippet-broker/Dockerfile', undefined, 'local'],
+  ['gateway', 'apps/gateway/Dockerfile', undefined, 'local'],
 ]) {
   const image = `tulipfarm-version-proof-${app}:local`;
   run([
