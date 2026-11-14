@@ -830,7 +830,17 @@ export const settings: readonly Setting[] = [
     services: apiWorker,
     requirement: 'optional',
     secret: false,
-    description: 'Bucket for app build files and published app sites. Unset turns off app builds and publishing.',
+    description:
+      'Bucket for app build files and published app sites. Unset turns off app builds and publishing. With TULIPFARM_APP_PREVIEW_DOMAIN set, editors can open draft builds.',
+  },
+  {
+    name: 'TULIPFARM_APP_PREVIEW_DOMAIN',
+    group: 'Object storage',
+    services: ['api'],
+    requirement: 'optional',
+    secret: false,
+    description:
+      'Parent domain for draft builds, served by the API at <app host key>.<domain>. Point a wildcard record at the API.',
   },
   {
     name: 'R2_ENDPOINT',

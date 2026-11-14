@@ -50,6 +50,8 @@ import { appHostingFromEnvironment, temporalAppWorkflows } from './apps-hosting.
 import { routeAppSites } from './apps-sites.ts';
 import { appBuilder } from '@tulipfarm/extensions';
 import type { Pool } from 'pg';
+import { buildPreviewGateway, routePreviewHosts, type PreviewGatewayDependencies } from './app-preview.ts';
+import { previewGatewayFromEnvironment, registerPreviewTickets, type PreviewStorage } from './app-preview-tickets.ts';
 
 export function buildApp(
   options: {
@@ -61,6 +63,8 @@ export function buildApp(
     >;
     /** Replaces the Claude and Copilot connections, for tests that must not reach the vendors. */
     tokenPlans?: Partial<Record<TokenPlanProvider, TokenPlan | null>>;
+    /** Replaces what the preview gateway reads; null turns previews off. */
+    previewGateway?: PreviewGatewayDependencies | null;
   } = {},
 ) {
   const app = Fastify({
@@ -74,9 +78,15 @@ export function buildApp(
     },
     logController: new LogController({ disableRequestLogging: true }),
   });
+  let previewStorage: PreviewStorage | undefined;
+  const preview =
+    options.previewGateway === undefined
+      ? previewGatewayFromEnvironment(process.env, authConfig().webOrigin, () => previewStorage)
+      : options.previewGateway;
+  if (preview) routePreviewHosts(app, buildPreviewGateway(preview), preview.domain);
   let appPlatform: Pick<Pool, 'query'> | undefined;
   const appHosting = appHostingFromEnvironment(process.env, () => appPlatform);
-  if (appHosting?.sites) routeAppSites(app, appHosting.sites);
+  if (appHosting?.sites) routeAppSites(app, { ...appHosting.sites, excluded: preview?.domain });
   registerObservability(app);
   registerSecurity(app, authConfig().webOrigin);
   const temporal = createTemporalClient();
@@ -140,6 +150,8 @@ export function buildApp(
             builderId: () => appBuilder()?.id,
             sitesDomain: appHosting?.sites?.domain ?? null,
           });
+          previewStorage = { pool: auth.pool, runtime: storage };
+          if (preview) registerPreviewTickets(business, auth.auth, previewStorage, preview.domain);
         }
         registerFeatureFlags(
           business,
