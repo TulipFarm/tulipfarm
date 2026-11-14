@@ -73,6 +73,14 @@ test('each source keeps its own state, and a component shows the one that most s
   assert.equal(componentStatus(failed.data, ['open']), 'failed');
 });
 
+test('a draft page that chat renamed or removed is not found, and another page still opens', () => {
+  const gone = run([{ type: 'open-failed', key: 'a', status: 404, message: '' }], opened(true));
+  assert.deepEqual(gone, { kind: 'not-found', key: 'a' });
+  assert.equal(run([{ type: 'opened', key: 'a', content: content(true) }], gone).kind, 'open');
+  assert.deepEqual(run([{ type: 'open', key: 'b' }], gone), { kind: 'opening', key: 'b' });
+  assert.equal(run([{ type: 'open-failed', key: 'a', status: 403, message: '' }], opened(true)).kind, 'ended');
+});
+
 test('a first 404 is an unknown page, but a 404 or 403 after opening means access ended for good', () => {
   assert.equal(run([{ type: 'open-failed', key: 'a', status: 404, message: '' }]).kind, 'not-found');
   assert.equal(run([{ type: 'open-failed', key: 'a', status: 503, message: 'Down' }]).kind, 'failed');

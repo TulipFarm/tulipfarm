@@ -91,8 +91,10 @@ export function pageReducer(view: PageView, event: PageEvent): PageView {
         : { kind: 'open', key: event.key, content: event.content, data: emptyData, presses: {} };
     case 'open-failed':
       if (view.key !== event.key) return view;
-      // A page that was open and now answers 404 was taken away mid-session; a first 404 is an unknown page.
-      if (event.status === 403 || (event.status === 404 && view.kind === 'open')) return { kind: 'ended' };
+      // A published page that was open and now answers 404 was taken away mid-session. In a draft, chat may have
+      // renamed or removed the page, so it is only not found.
+      if (event.status === 403 || (event.status === 404 && view.kind === 'open' && !view.content.draft))
+        return { kind: 'ended' };
       if (event.status === 404) return { kind: 'not-found', key: event.key };
       return { kind: 'failed', key: event.key, message: event.message };
   }
