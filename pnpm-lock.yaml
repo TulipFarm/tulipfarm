@@ -413,8 +413,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/slack
       '@tulipfarm/sprout':
-        specifier: https://github.com/TulipFarm/sprout/releases/download/v0.17.2/tulipfarm-sprout-0.17.2.tgz
-        version: https://github.com/TulipFarm/sprout/releases/download/v0.17.2/tulipfarm-sprout-0.17.2.tgz(@date-fns/tz@1.5.0)(@floating-ui/dom@1.8.0)(@tiptap/extensions@3.32.2(@tiptap/core@3.32.2(@tiptap/pm@3.32.2))(@tiptap/pm@3.32.2))(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(date-fns@4.4.0)(immer@11.1.21)(react-dom@19.3.0(react@19.3.0))(react-is@19.3.1)(react@19.3.0)(redux@5.0.1)(tailwindcss@4.3.3)(zod@4.6.6)
+        specifier: 0.17.2
+        version: 0.17.2(@date-fns/tz@1.5.0)(@floating-ui/dom@1.8.0)(@tiptap/extensions@3.32.2(@tiptap/core@3.32.2(@tiptap/pm@3.32.2))(@tiptap/pm@3.32.2))(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(date-fns@4.4.0)(immer@11.1.21)(react-dom@19.3.0(react@19.3.0))(react-is@19.3.1)(react@19.3.0)(redux@5.0.1)(tailwindcss@4.3.3)(zod@4.6.6)
       '@tulipfarm/tables':
         specifier: workspace:*
         version: link:../../packages/tables
@@ -967,8 +967,8 @@ importers:
         specifier: workspace:*
         version: link:../observability
       '@tulipfarm/sprout':
-        specifier: https://github.com/TulipFarm/sprout/releases/download/v0.17.2/tulipfarm-sprout-0.17.2.tgz
-        version: https://github.com/TulipFarm/sprout/releases/download/v0.17.2/tulipfarm-sprout-0.17.2.tgz(@date-fns/tz@1.5.0)(@floating-ui/dom@1.8.0)(@tiptap/extensions@3.32.2(@tiptap/core@3.32.2(@tiptap/pm@3.32.2))(@tiptap/pm@3.32.2))(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(date-fns@4.4.0)(immer@11.1.21)(react-dom@19.3.0(react@19.3.0))(react-is@19.3.1)(react@19.3.0)(redux@5.0.1)(tailwindcss@4.3.3)(zod@4.6.6)
+        specifier: 0.17.2
+        version: 0.17.2(@date-fns/tz@1.5.0)(@floating-ui/dom@1.8.0)(@tiptap/extensions@3.32.2(@tiptap/core@3.32.2(@tiptap/pm@3.32.2))(@tiptap/pm@3.32.2))(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(date-fns@4.4.0)(immer@11.1.21)(react-dom@19.3.0(react@19.3.0))(react-is@19.3.1)(react@19.3.0)(redux@5.0.1)(tailwindcss@4.3.3)(zod@4.6.6)
       '@tulipfarm/workspace-storage':
         specifier: workspace:*
         version: link:../workspace-storage
@@ -4494,9 +4494,8 @@ packages:
   '@ts-morph/common@0.27.0':
     resolution: {integrity: sha512-Wf29UqxWDpc+i61k3oIOzcUfQt79PIT9y/MWfAGlrkjg6lBC1hwDECLXPVJAhWjiGbfBCxZd65F/LIZF3+jeJQ==}
 
-  '@tulipfarm/sprout@https://github.com/TulipFarm/sprout/releases/download/v0.17.2/tulipfarm-sprout-0.17.2.tgz':
-    resolution: {integrity: sha512-eMaDmjw+c5lG58ODpbrHy02xrTOEHLvigGARuVDdzcS/wxDZOy4w+plYNyrOwcL4PIyGj/r7oBGhgQU0VnyDqA==, tarball: https://github.com/TulipFarm/sprout/releases/download/v0.17.2/tulipfarm-sprout-0.17.2.tgz}
-    version: 0.17.2
+  '@tulipfarm/sprout@0.17.2':
+    resolution: {integrity: sha512-G6+vMK+r8oue8kj7n5qNiRT9LphGxMHFr+f8fulp4cSToY8fRi4cOInSke5WKjQAJXyuaKsfZ0iZngaxUo6cAQ==}
     peerDependencies:
       nuqs: ^2.0.0
       react: ^19.0.0
@@ -10872,7 +10871,7 @@ snapshots:
       minimatch: 10.2.6
       path-browserify: 1.0.1
 
-  '@tulipfarm/sprout@https://github.com/TulipFarm/sprout/releases/download/v0.17.2/tulipfarm-sprout-0.17.2.tgz(@date-fns/tz@1.5.0)(@floating-ui/dom@1.8.0)(@tiptap/extensions@3.32.2(@tiptap/core@3.32.2(@tiptap/pm@3.32.2))(@tiptap/pm@3.32.2))(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(date-fns@4.4.0)(immer@11.1.21)(react-dom@19.3.0(react@19.3.0))(react-is@19.3.1)(react@19.3.0)(redux@5.0.1)(tailwindcss@4.3.3)(zod@4.6.6)':
+  '@tulipfarm/sprout@0.17.2(@date-fns/tz@1.5.0)(@floating-ui/dom@1.8.0)(@tiptap/extensions@3.32.2(@tiptap/core@3.32.2(@tiptap/pm@3.32.2))(@tiptap/pm@3.32.2))(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(date-fns@4.4.0)(immer@11.1.21)(react-dom@19.3.0(react@19.3.0))(react-is@19.3.1)(react@19.3.0)(redux@5.0.1)(tailwindcss@4.3.3)(zod@4.6.6)':
     dependencies:
       '@base-ui/react': 1.9.0(@date-fns/tz@1.5.0)(@types/react@19.3.0)(date-fns@4.4.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@dnd-kit/core': 6.3.1(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
