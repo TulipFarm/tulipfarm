@@ -40,7 +40,7 @@ export type PreviewGatewayDependencies = {
  * host the gateway does not own.
  */
 export function previewKeyOf(host: string | undefined, domain: string): string | null | undefined {
-  const name = host?.toLowerCase().replace(/:\d+$/, '');
+  const name = host?.toLowerCase().replace(/:\d+$/, '').replace(/\.$/, '');
   if (!name?.endsWith(`.${domain}`)) return undefined;
   const key = name.slice(0, -domain.length - 1);
   return previewKeyPattern.test(key) ? key : null;
