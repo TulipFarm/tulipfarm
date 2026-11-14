@@ -184,10 +184,11 @@ async function withCard(authentication, steps) {
 test('a chat MCP proposal sets up a personal integration with saved secrets', { timeout: 120000 }, () =>
   withCard('secrets', async ({ page, card, setups }) => {
     await card.locator('[data-slot="button"]', { hasText: 'Connect PostHog' }).click();
-    assert.equal(await card.getByLabel('MCP endpoint').inputValue(), endpoint);
-    await card.getByRole('checkbox', { name: /PostHog personal key/ }).check();
-    assert.equal(await card.getByText('Other service key').count(), 0, 'only secrets for this endpoint are offered');
-    await card.getByRole('button', { name: 'Verify and discover tools' }).click();
+    const setup = page.getByRole('dialog', { name: 'Connect PostHog' });
+    assert.equal(await setup.getByLabel('Server link').inputValue(), endpoint);
+    await setup.getByRole('checkbox', { name: /PostHog personal key/ }).check();
+    assert.equal(await setup.getByText('Other service key').count(), 0, 'only secrets for this endpoint are offered');
+    await setup.getByRole('button', { name: 'Connect', exact: true }).click();
 
     const connected = page.getByRole('region', { name: 'PostHog connection' });
     await connected.getByRole('button', { name: 'Turn on PostHog' }).waitFor();

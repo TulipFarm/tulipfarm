@@ -15,26 +15,8 @@ import { apiOrigin } from '@/lib/auth';
 import { jsonResponse, readJson, requestSignal } from '@/lib/http';
 import { SlackKnowledgeSources } from './slack-knowledge';
 import { slackConnectionState } from './connection-state';
+import type { SlackStatus } from './slack-status';
 
-const statusSchema = z.object({
-  state: z.string(),
-  teamId: z.string().nullable(),
-  canManage: z.boolean(),
-  linked: z.boolean().default(false),
-  scopes: z.array(z.string()),
-  missingScopes: z.array(z.string()).optional(),
-  recoveryEventId: z.uuid().optional(),
-});
-export type SlackStatus = z.infer<typeof statusSchema>;
-export async function loadSlackStatus(workspaceId: string, signal?: AbortSignal): Promise<SlackStatus | 'unavailable'> {
-  const response = await jsonResponse(`${apiOrigin}/v1/workspaces/${workspaceId}/slack/status`, {
-    signal: requestSignal(signal),
-    cache: 'no-store',
-  });
-  if (!response.ok) throw new IntegrationRequestError(response.status);
-  const value = statusSchema.parse(await readJson(response));
-  return value.state === 'unavailable' ? 'unavailable' : value;
-}
 export async function slackInstallUrl(workspaceId: string) {
   const response = await jsonResponse(`${apiOrigin}/v1/workspaces/${workspaceId}/slack/install`, {
     method: 'POST',
@@ -54,7 +36,7 @@ type State =
   | { kind: 'error' }
   | { kind: 'opening' }
   | { kind: 'unavailable' }
-  | { kind: 'ready'; value: z.infer<typeof statusSchema> };
+  | { kind: 'ready'; value: SlackStatus };
 
 export function SlackIntegration({ workspaceId }: { workspaceId: string }) {
   const read = useSlackIntegration(workspaceId);

@@ -557,8 +557,9 @@ const admissionSnapshotSchema = z.object({
  * if they are young enough to show before the session and membership checks return.
  */
 async function provisionalAdmission(identity: SessionIdentity, slug: string, pathname: string) {
-  // Integration controls change workspace connections, so those pages always wait for the checks.
-  if (onIntegrationsPage(slug, pathname)) return null;
+  // An integration's own page changes its connection, so it always waits for the checks. The
+  // directory only lists statuses and links, and its writes already wait like any other page's.
+  if (pathname.startsWith(`/${slug}/integrations/`)) return null;
   const read = async () => {
     const [, snapshot] = await Promise.all([
       loadPageReads(),
@@ -1548,7 +1549,13 @@ export const knowledgeRoute = createRoute({
 export const integrationsRoute = createRoute({
   getParentRoute: () => workspaceRoute,
   path: 'integrations',
-  validateSearch: search => z.object({ returnChat: z.uuid().optional().catch(undefined) }).parse(search),
+  validateSearch: search =>
+    z
+      .object({
+        returnChat: z.uuid().optional().catch(undefined),
+        view: z.string().max(64).optional().catch(undefined),
+      })
+      .parse(search),
   component: IntegrationsPage,
 });
 export const integrationDetailRoute = createRoute({
