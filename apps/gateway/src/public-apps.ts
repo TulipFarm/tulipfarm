@@ -71,6 +71,7 @@ const jsonErrors: Record<Answer, string> = {
 const lookupMs = 15_000;
 const endpointMs = 30_000;
 const warmMs = 60_000;
+const gateWaitMs = 1_000;
 const connectTimeoutMs = 10_000;
 const retrySeconds = 5;
 const upgradesPerMinute = 120;
@@ -132,7 +133,7 @@ function rawHead(status: number, message: string, headers: OutgoingHttpHeaders) 
 /**
  * The gateway for public server apps. Each request for `<name>.<domain>` goes to the app's endpoint from
  * `AppHost.connect` with its body streamed both ways. A request that may wake a stopped app waits for it; while one
- * request wakes an app, the others for it wait for that one, so a burst wakes it once.
+ * request wakes an app, the others for it briefly wait for that one, so a burst wakes it once.
  */
 export function buildPublicAppsGateway(dependencies: PublicAppsDependencies, serverOptions: FastifyServerOptions) {
   const { domain } = dependencies;
@@ -179,7 +180,10 @@ export function buildPublicAppsGateway(dependencies: PublicAppsDependencies, ser
       return { kind: 'unreachable' };
     }
     const refusal = refusalOf(upstream.response);
-    if (!refusal) return { kind: 'answered', upstream };
+    if (!refusal) {
+      warm(appId);
+      return { kind: 'answered', upstream };
+    }
     upstream.response.resume();
     if (staleEndpointCodes.has(refusal.code)) endpoints.forget(appId);
     if (wakingCodes.has(refusal.code)) warmUntil.delete(appId);
@@ -207,34 +211,33 @@ export function buildPublicAppsGateway(dependencies: PublicAppsDependencies, ser
     }
   }
 
-  /** Lets one request at a time wake a cold app; the rest wait for it and then go straight through. */
+  /**
+   * Lets one request at a time wake a cold app, so a burst wakes it once. The others wait for it only briefly and then
+   * go anyway: the holder may be a slow request to an app that already runs, and the forwarding layer joins concurrent
+   * wakes of one sandbox itself.
+   */
   async function deliver(
     appId: string,
     send: (endpoint: Endpoint) => Promise<Upstream>,
     options: { readonly wake: boolean; readonly replayable: boolean },
   ): Promise<Outcome> {
     const deadline = Date.now() + wakeBudgetMs;
-    const starting: Outcome = { kind: 'refused', refusal: { code: 'not_ready', retryAfterSeconds: retrySeconds } };
-    if (!options.wake) return exchange(appId, send, { ...options, deadline });
-    for (;;) {
-      if (isWarm(appId)) return exchange(appId, send, { ...options, deadline });
-      if (Date.now() >= deadline) return starting;
-      const gate = waking.get(appId);
-      if (gate) {
-        const opened = await Promise.race([gate.then(() => true), sleep(deadline - Date.now()).then(() => false)]);
-        if (!opened) return starting;
-        continue;
-      }
-      let open!: () => void;
-      waking.set(appId, new Promise<void>(resolve => (open = resolve)));
-      try {
-        const outcome = await exchange(appId, send, { ...options, deadline });
-        if (outcome.kind === 'answered') warm(appId);
-        return outcome;
-      } finally {
-        waking.delete(appId);
-        open();
-      }
+    const go = () => exchange(appId, send, { ...options, deadline });
+    if (!options.wake || isWarm(appId)) return go();
+    const gate = waking.get(appId);
+    if (gate) {
+      await Promise.race([gate, sleep(Math.min(gateWaitMs, deadline - Date.now()))]);
+      return go();
+    }
+    // A request with a body cannot be sent again, so it would hold the others while its client trickles the body.
+    if (!options.replayable) return go();
+    let open!: () => void;
+    waking.set(appId, new Promise<void>(resolve => (open = resolve)));
+    try {
+      return await go();
+    } finally {
+      waking.delete(appId);
+      open();
     }
   }
 

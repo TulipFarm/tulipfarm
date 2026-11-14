@@ -18,7 +18,7 @@ const browser = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.
  * wakes a stopped sandbox for any request that allows it, and answers with what the app received.
  */
 async function sandbox(t, options = {}) {
-  const state = { running: false, wakes: 0, requests: 0, keys: new Set(['key-1']), seen: [] };
+  const state = { running: options.running === true, wakes: 0, requests: 0, keys: new Set(['key-1']), seen: [] };
   const refuse = (response, code, status = 503) =>
     response.writeHead(status, { 'X-Spawnbox-Error': code, 'Retry-After': '1' }).end();
   async function admit(incoming) {
@@ -37,6 +37,7 @@ async function sandbox(t, options = {}) {
   const server = createServer(async (incoming, response) => {
     const refused = await admit(incoming);
     if (refused) return refuse(response, refused, refused === 'unauthorized' ? 401 : 503);
+    if (incoming.url === '/slow') await new Promise(resolve => setTimeout(resolve, 3_000));
     const chunks = [];
     for await (const chunk of incoming) chunks.push(chunk);
     response
@@ -152,6 +153,82 @@ test('a burst of requests to a stopped app wakes it once', async t => {
   assert.equal(calls.routes, 1);
   assert.equal(upstream.wakes, 1);
   assert.equal(upstream.requests, 20);
+});
+
+/** Starts a POST whose body arrives in two parts; `finish` sends the rest and resolves with the response. */
+function trickle(port) {
+  let settled = false;
+  const outgoing = request({ host: '127.0.0.1', port, method: 'POST', path: '/orders', headers: { host } });
+  const response = new Promise((resolve, reject) => {
+    outgoing.on('response', incoming => {
+      const chunks = [];
+      incoming.on('data', chunk => chunks.push(chunk));
+      incoming.on('end', () => {
+        settled = true;
+        resolve({ status: incoming.statusCode, body: Buffer.concat(chunks).toString() });
+      });
+    });
+    outgoing.on('error', reject);
+  });
+  outgoing.write('{"item":');
+  return {
+    settled: () => settled,
+    abandon() {
+      response.catch(() => {});
+      outgoing.destroy();
+    },
+    finish() {
+      outgoing.end('"tea"}');
+      return response;
+    },
+  };
+}
+
+async function until(condition) {
+  while (!condition()) await new Promise(resolve => setTimeout(resolve, 10));
+}
+
+test('a POST whose body is still arriving does not hold back other requests', async t => {
+  for (const warmFirst of [false, true]) {
+    await t.test(warmFirst ? 'the app answered a moment ago' : 'the app runs but has not answered lately', async t => {
+      const { port, upstream } = await gatewayFor(t, { running: true });
+      if (warmFirst) assert.equal((await call(port)).status, 201);
+      const sent = upstream.requests;
+      const post = trickle(port);
+      try {
+        await until(() => upstream.requests === sent + 1);
+        const responses = await Promise.all(Array.from({ length: 5 }, () => call(port, { path: '/menu' })));
+        assert.deepEqual(
+          responses.map(response => response.status),
+          [201, 201, 201, 201, 201],
+        );
+        assert.equal(post.settled(), false);
+      } catch (error) {
+        post.abandon();
+        throw error;
+      }
+      const posted = await post.finish();
+      assert.equal(posted.status, 201);
+      assert.deepEqual(JSON.parse(posted.body), { method: 'POST', url: '/orders', body: '{"item":"tea"}' });
+    });
+  }
+});
+
+test('a slow request to a running app does not leave the others starting', async t => {
+  const { port, upstream } = await gatewayFor(t, { running: true });
+  const finished = [];
+  const slow = call(port, { path: '/slow' }).then(response => (finished.push('/slow'), response));
+  await until(() => upstream.requests === 1);
+  const responses = await Promise.all(
+    Array.from({ length: 5 }, () => call(port, { path: '/menu' }).then(response => (finished.push('/menu'), response))),
+  );
+  assert.deepEqual(
+    responses.map(response => response.status),
+    [201, 201, 201, 201, 201],
+  );
+  assert.equal((await slow).status, 201);
+  assert.deepEqual(finished, ['/menu', '/menu', '/menu', '/menu', '/menu', '/slow']);
+  assert.equal(upstream.wakes, 0);
 });
 
 test('the client cannot steer the forwarding layer, and TulipFarm cookies and headers stay behind', async t => {
