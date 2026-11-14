@@ -8,6 +8,7 @@ import { workspaceFlagSubjects } from './flag-subjects.ts';
 import { buildGateway } from './gateway.ts';
 import { gatewayServerOptions } from './http.ts';
 import { previewGatewayFromEnvironment } from './preview-environment.ts';
+import { publicAppsFromEnvironment } from './public-apps-environment.ts';
 
 const buildInfo = readBuildInfo('gateway', new URL('../version.json', import.meta.url));
 // Bare package names in TULIPFARM_EXTENSIONS resolve from this app.
@@ -34,6 +35,7 @@ if (!preview) throw new Error('Set TULIPFARM_APP_PREVIEW_DOMAIN and TULIPFARM_OB
 
 const server = buildGateway({
   preview,
+  apps: publicAppsFromEnvironment(process.env, pool),
   serverOptions: gatewayServerOptions(process.env),
   identity: { version: buildInfo.version, commit: buildInfo.commit },
 });

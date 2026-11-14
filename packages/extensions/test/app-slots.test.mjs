@@ -186,7 +186,7 @@ const routedBy = (publisher, routes) => {
   };
 };
 
-test('the publisher contract catches broken route versions, removes, copies and discards', async () => {
+test('the publisher contract catches broken route versions, kinds, removes, copies and discards', async () => {
   const lastWriteWins = memoryAppPublisher();
   const routes = new Map();
   Object.assign(lastWriteWins, {
@@ -233,6 +233,21 @@ test('the publisher contract catches broken route versions, removes, copies and 
     await stage(input, signal);
   };
   assert.deepEqual(await failures(recopies), ['stage copies each file once and discard drops the release']);
+
+  const flattening = memoryAppPublisher();
+  const apply = flattening.apply;
+  flattening.apply = (route, signal) =>
+    apply(
+      {
+        name: route.name,
+        kind: 'static',
+        releaseId: route.releaseId ?? null,
+        status: route.status,
+        version: route.version,
+      },
+      signal,
+    );
+  assert.deepEqual(await failures(flattening), ['a route keeps its kind']);
 
   const reckless = memoryAppPublisher();
   reckless.discard = async ({ releaseId }) => {

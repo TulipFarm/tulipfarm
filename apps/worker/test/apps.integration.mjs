@@ -12,6 +12,7 @@ import {
   claimAppName,
   createApp,
   promoteAppName,
+  putAppRuntime,
   readApp,
   readOperation,
   readRelease,
@@ -144,9 +145,8 @@ test('app builds, publishes, reconciles and meters converge however often they r
     await db.close();
   });
   await loadPlatformBaseline(db.platform);
-  await db.platform.query(
-    await readFile(new URL('../../database/migrations/0011_app_hostnames.sql', import.meta.url), 'utf8'),
-  );
+  for (const migration of ['0011_app_hostnames.sql', '0013_app_server_routes.sql'])
+    await db.platform.query(await readFile(new URL(`../../database/migrations/${migration}`, import.meta.url), 'utf8'));
   const workspace = await db.create();
   const schema = workspace.names.schema;
   runtime = await connect(db.login(workspace));
@@ -281,6 +281,7 @@ test('app builds, publishes, reconciles and meters converge however often they r
     assert.equal((await transact(tx => readRelease(tx, releaseId))).staged, true);
     assert.deepEqual(publisher.routes.get('acme-orders'), {
       name: 'acme-orders',
+      kind: 'static',
       releaseId,
       status: 'active',
       version: 2,
@@ -294,7 +295,13 @@ test('app builds, publishes, reconciles and meters converge however often they r
   await t.test('reconcile restores a lost route, retires a stale claim and discards an orphaned release', async () => {
     const route = publisher.routes.get('acme-orders');
     publisher.routes.delete('acme-orders');
-    publisher.routes.set('acme-gone', { name: 'acme-gone', releaseId: null, status: 'active', version: 1 });
+    publisher.routes.set('acme-gone', {
+      name: 'acme-gone',
+      kind: 'static',
+      releaseId: null,
+      status: 'active',
+      version: 1,
+    });
     const orphan = randomUUID();
     publisher.staged.set(orphan, new Map([['index.html', 'old']]));
     await db.platform.query(
@@ -346,6 +353,7 @@ test('app builds, publishes, reconciles and meters converge however often they r
     assert.notEqual(paused.stops.budgetPausedAt, null);
     assert.deepEqual(publisher.routes.get('acme-orders'), {
       name: 'acme-orders',
+      kind: 'static',
       releaseId: paused.liveReleaseId,
       status: 'paused',
       version: 3,
@@ -369,7 +377,10 @@ test('app builds, publishes, reconciles and meters converge however often they r
     });
     assert.deepEqual(await claimAppName(db.platform, renamed), { ok: true });
     await transact(tx => setAppPublicName(tx, app.id, 'acme-shop'));
-    await builtIn.apply({ name: 'acme-pending', releaseId: null, status: 'active', version: 1 }, signal());
+    await builtIn.apply(
+      { name: 'acme-pending', kind: 'static', releaseId: null, status: 'active', version: 1 },
+      signal(),
+    );
     rename = async () => {
       await db.platform.query('BEGIN');
       await promoteAppName(db.platform, renamed);
@@ -722,5 +733,50 @@ test('app builds, publishes, reconciles and meters converge however often they r
       name: 'paused',
       route: 'paused',
     });
+  });
+
+  await t.test('an app that runs a server is routed to the gateway without a release', async () => {
+    const server = (
+      await transact(tx =>
+        createApp(tx, {
+          id: randomUUID(),
+          kind: 'public',
+          slug: 'api',
+          title: 'API',
+          createdBy: workspace.membershipId,
+        }),
+      )
+    ).app;
+    const named = { name: 'acme-api', workspaceId: workspace.id, appId: server.id };
+    assert.deepEqual(await claimAppName(db.platform, named), { ok: true });
+    await transact(tx => setAppPublicName(tx, server.id, 'acme-api'));
+    await db.platform.query('BEGIN');
+    await promoteAppName(db.platform, named);
+    await db.platform.query('COMMIT');
+    await transact(async tx => {
+      await putAppRuntime(tx, {
+        appId: server.id,
+        liveReleaseId: null,
+        size: { vcpu: 1, memMiB: 1024 },
+        hostRef: 'host-1',
+        state: 'serving',
+        candidate: null,
+      });
+      await tx.client.query(`UPDATE "${schema}".tf_apps SET edge_version = 7 WHERE id = $1`, [server.id]);
+    });
+
+    assert.deepEqual(await work.projectAppEdge({ ...input, appId: server.id }), {
+      route: { name: 'acme-api', kind: 'server', status: 'active', version: 7 },
+    });
+    assert.deepEqual(publisher.routes.get('acme-api'), {
+      name: 'acme-api',
+      kind: 'server',
+      status: 'active',
+      version: 7,
+    });
+    const { rows } = await db.platform.query(
+      `SELECT kind, release_id, status, edge_version::int FROM app.app_hostnames WHERE name = 'acme-api'`,
+    );
+    assert.deepEqual(rows, [{ kind: 'server', release_id: null, status: 'active', edge_version: 7 }]);
   });
 });

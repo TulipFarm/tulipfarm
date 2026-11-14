@@ -37,22 +37,48 @@ export const appPublisherContract: readonly AppPublisherCase[] = [
       const first = randomUUID();
       const second = randomUUID();
       const apply = (route: AppRoute) => publisher.apply(route, signal());
-      assert.deepEqual(await apply({ name: app, releaseId: first, status: 'active', version: 2 }), {
-        stored: { name: app, releaseId: first, status: 'active', version: 2 },
+      assert.deepEqual(await apply({ name: app, kind: 'static', releaseId: first, status: 'active', version: 2 }), {
+        stored: { name: app, kind: 'static', releaseId: first, status: 'active', version: 2 },
       });
-      assert.deepEqual(await apply({ name: app, releaseId: second, status: 'active', version: 1 }), {
-        stored: { name: app, releaseId: first, status: 'active', version: 2 },
+      assert.deepEqual(await apply({ name: app, kind: 'static', releaseId: second, status: 'active', version: 1 }), {
+        stored: { name: app, kind: 'static', releaseId: first, status: 'active', version: 2 },
       });
-      assert.deepEqual(await apply({ name: app, releaseId: second, status: 'disabled', version: 2 }), {
-        stored: { name: app, releaseId: first, status: 'active', version: 2 },
+      assert.deepEqual(await apply({ name: app, kind: 'static', releaseId: second, status: 'disabled', version: 2 }), {
+        stored: { name: app, kind: 'static', releaseId: first, status: 'active', version: 2 },
       });
-      assert.deepEqual(await apply({ name: app, releaseId: second, status: 'paused', version: 3 }), {
-        stored: { name: app, releaseId: second, status: 'paused', version: 3 },
+      assert.deepEqual(await apply({ name: app, kind: 'static', releaseId: second, status: 'paused', version: 3 }), {
+        stored: { name: app, kind: 'static', releaseId: second, status: 'paused', version: 3 },
       });
-      assert.deepEqual(await apply({ name: app, releaseId: null, status: 'active', version: 4 }), {
-        stored: { name: app, releaseId: null, status: 'active', version: 4 },
+      assert.deepEqual(await apply({ name: app, kind: 'static', releaseId: null, status: 'active', version: 4 }), {
+        stored: { name: app, kind: 'static', releaseId: null, status: 'active', version: 4 },
       });
-      assert.deepEqual(await routeOf(publisher, app), { name: app, releaseId: null, status: 'active', version: 4 });
+      assert.deepEqual(await routeOf(publisher, app), {
+        name: app,
+        kind: 'static',
+        releaseId: null,
+        status: 'active',
+        version: 4,
+      });
+    },
+  },
+  {
+    name: 'a route keeps its kind',
+    async run({ publisher, name }) {
+      const app = await name();
+      const release = randomUUID();
+      await publisher.apply({ name: app, kind: 'static', releaseId: release, status: 'active', version: 1 }, signal());
+      assert.deepEqual(await publisher.apply({ name: app, kind: 'server', status: 'active', version: 2 }, signal()), {
+        stored: { name: app, kind: 'server', status: 'active', version: 2 },
+      });
+      assert.deepEqual(await routeOf(publisher, app), { name: app, kind: 'server', status: 'active', version: 2 });
+      await publisher.apply({ name: app, kind: 'static', releaseId: release, status: 'paused', version: 3 }, signal());
+      assert.deepEqual(await routeOf(publisher, app), {
+        name: app,
+        kind: 'static',
+        releaseId: release,
+        status: 'paused',
+        version: 3,
+      });
     },
   },
   {
@@ -61,12 +87,16 @@ export const appPublisherContract: readonly AppPublisherCase[] = [
       const removed = await name();
       const kept = await name();
       const release = randomUUID();
-      await publisher.apply({ name: removed, releaseId: release, status: 'active', version: 5 }, signal());
-      await publisher.apply({ name: kept, releaseId: release, status: 'active', version: 1 }, signal());
+      await publisher.apply(
+        { name: removed, kind: 'static', releaseId: release, status: 'active', version: 5 },
+        signal(),
+      );
+      await publisher.apply({ name: kept, kind: 'static', releaseId: release, status: 'active', version: 1 }, signal());
       await publisher.remove({ name: removed, version: 5 }, signal());
       await publisher.remove({ name: removed, version: 4 }, signal());
       assert.deepEqual(await routeOf(publisher, removed), {
         name: removed,
+        kind: 'static',
         releaseId: release,
         status: 'active',
         version: 5,
@@ -74,12 +104,16 @@ export const appPublisherContract: readonly AppPublisherCase[] = [
       await publisher.remove({ name: removed, version: 6 }, signal());
       assert.equal(await routeOf(publisher, removed), undefined);
       assert.deepEqual(
-        await publisher.apply({ name: removed, releaseId: release, status: 'active', version: 6 }, signal()),
+        await publisher.apply(
+          { name: removed, kind: 'static', releaseId: release, status: 'active', version: 6 },
+          signal(),
+        ),
         { stored: null },
       );
       assert.equal(await routeOf(publisher, removed), undefined);
       assert.deepEqual(await routeOf(publisher, kept), {
         name: kept,
+        kind: 'static',
         releaseId: release,
         status: 'active',
         version: 1,
@@ -130,10 +164,10 @@ export const appPublisherContract: readonly AppPublisherCase[] = [
       };
       await publisher.stage({ releaseId: live, files: [file], read }, signal());
       await publisher.stage({ releaseId: next, files: [file], read }, signal());
-      await publisher.apply({ name: app, releaseId: live, status: 'paused', version: 1 }, signal());
+      await publisher.apply({ name: app, kind: 'static', releaseId: live, status: 'paused', version: 1 }, signal());
       await publisher.discard({ releaseId: live }, signal());
       assert.equal(await staged(publisher, live), true);
-      await publisher.apply({ name: app, releaseId: next, status: 'active', version: 2 }, signal());
+      await publisher.apply({ name: app, kind: 'static', releaseId: next, status: 'active', version: 2 }, signal());
       await publisher.discard({ releaseId: live }, signal());
       assert.equal(await staged(publisher, live), false);
       assert.equal(await staged(publisher, next), true);
@@ -185,7 +219,7 @@ export function memoryAppPublisher(
       versions.set(name, version);
     },
     async discard({ releaseId }) {
-      for (const route of routes.values()) if (route.releaseId === releaseId) return;
+      for (const route of routes.values()) if (route.kind === 'static' && route.releaseId === releaseId) return;
       for (const key of objects.keys()) if (key.startsWith(prefix(releaseId))) objects.delete(key);
     },
     async *list() {

@@ -181,6 +181,15 @@ export async function grantApplicationAccess(
     await client.query('GRANT SELECT (creation_name, settings_revision) ON app.workspaces TO tulipfarm');
     await client.query('GRANT SELECT ON app.workspace_settings_commands TO tulipfarm');
   }
+  if (
+    (
+      await client.query(
+        "SELECT 1 FROM information_schema.columns WHERE table_schema = 'app' AND table_name = 'app_hostnames' AND column_name = 'kind'",
+      )
+    ).rowCount
+  ) {
+    await client.query('GRANT UPDATE (kind) ON app.app_hostnames TO tulipfarm');
+  }
 }
 
 export async function connect(url: string) {
