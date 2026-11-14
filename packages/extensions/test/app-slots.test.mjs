@@ -3,6 +3,7 @@ import { beforeEach, test } from 'node:test';
 import {
   appBuilder,
   appHost,
+  AppHostConflictError,
   appPublisher,
   registerExtension,
   resetExtensions,
@@ -89,9 +90,18 @@ test('app slots refuse incomplete implementations', async () => {
   assert.equal(appPublisher(), undefined);
 });
 
+const generations = new Map();
 const host = {
-  provision: async ({ appId, releaseId, size }) => ({ hostRef: `${appId}/${releaseId}/${size.vcpu}x${size.memMiB}` }),
-  switch: async ({ expectedGeneration }) => ({ generation: (expectedGeneration ?? 0) + 1 }),
+  provision: async ({ appId, releaseId, size, output }) => ({
+    hostRef: `${appId}/${releaseId}/${size.vcpu}x${size.memMiB}/${output.artifact}:${output.port}`,
+  }),
+  switch: async ({ appId, expectedGeneration }) => {
+    const current = generations.get(appId) ?? 0;
+    if (expectedGeneration !== undefined && expectedGeneration !== current)
+      throw new AppHostConflictError(appId, expectedGeneration);
+    generations.set(appId, current + 1);
+    return { generation: current + 1 };
+  },
   connect: async ({ appId }) => ({
     url: `https://forward.example.test/${appId}`,
     headers: { authorization: 'Bearer t' },
@@ -103,16 +113,32 @@ const host = {
 };
 
 test('a registered app host replaces the unavailable default', async () => {
+  generations.clear();
   await registerExtension({ name: 'hosted', register: slots => slots.appHost(host) }, context);
   const signal = new AbortController().signal;
   assert.equal(appHost(), host);
+  const output = { kind: 'server', artifact: 'sha256:ab12', port: 3000, start: 'node server.js' };
   assert.deepEqual(
-    await appHost().provision({ appId: 'orders', releaseId: 'r1', size: { vcpu: 1, memMiB: 1024 } }, signal),
-    { hostRef: 'orders/r1/1x1024' },
+    await appHost().provision({ appId: 'orders', releaseId: 'r1', size: { vcpu: 1, memMiB: 1024 }, output }, signal),
+    { hostRef: 'orders/r1/1x1024/sha256:ab12:3000' },
   );
+  assert.deepEqual(await appHost().switch({ appId: 'orders', hostRef: 'h1', drainS: 30 }, signal), { generation: 1 });
   assert.deepEqual(
-    await appHost().switch({ appId: 'orders', hostRef: 'orders/r1/1x1024', drainS: 30, expectedGeneration: 4 }, signal),
-    { generation: 5 },
+    await appHost().switch({ appId: 'orders', hostRef: 'h2', drainS: 30, expectedGeneration: 1 }, signal),
+    { generation: 2 },
+  );
+  const stale = await appHost()
+    .switch({ appId: 'orders', hostRef: 'h3', drainS: 30, expectedGeneration: 1 }, signal)
+    .catch(error => error);
+  assert.ok(stale instanceof AppHostConflictError);
+  assert.deepEqual(
+    { name: stale.name, message: stale.message, appId: stale.appId, expectedGeneration: stale.expectedGeneration },
+    {
+      name: 'AppHostConflictError',
+      message: 'The endpoint of app "orders" is no longer at generation 1',
+      appId: 'orders',
+      expectedGeneration: 1,
+    },
   );
   assert.deepEqual(await appHost().connect({ appId: 'orders' }, signal), {
     url: 'https://forward.example.test/orders',

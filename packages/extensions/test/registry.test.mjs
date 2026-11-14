@@ -65,7 +65,15 @@ test('every slot is a no-op by default', async () => {
     message: 'No app host is registered, so server apps cannot run',
   };
   await assert.rejects(
-    appHost().provision({ appId: 'a', releaseId: 'r', size: { vcpu: 1, memMiB: 1024 } }, signal),
+    appHost().provision(
+      {
+        appId: 'a',
+        releaseId: 'r',
+        size: { vcpu: 1, memMiB: 1024 },
+        output: { kind: 'server', artifact: 'sha256:ab12', port: 3000, start: 'node server.js' },
+      },
+      signal,
+    ),
     unavailable,
   );
   await assert.rejects(appHost().switch({ appId: 'a', hostRef: 'h', drainS: 30 }, signal), unavailable);

@@ -40,6 +40,18 @@ export class AppHostUnavailableError extends Error {
   }
 }
 
+/** A switch with `expectedGeneration` found the endpoint already moved on. A newer switch superseded this one. */
+export class AppHostConflictError extends Error {
+  override name = 'AppHostConflictError';
+  readonly appId: string;
+  readonly expectedGeneration: number;
+  constructor(appId: string, expectedGeneration: number) {
+    super(`The endpoint of app "${appId}" is no longer at generation ${expectedGeneration}`);
+    this.appId = appId;
+    this.expectedGeneration = expectedGeneration;
+  }
+}
+
 const unavailable = async () => {
   throw new AppHostUnavailableError();
 };
