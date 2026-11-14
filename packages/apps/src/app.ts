@@ -1,4 +1,5 @@
 import type { AppServerSize } from '@tulipfarm/extensions';
+import { z } from 'zod';
 import type { AppBuildId, AppGeneration, AppReleaseId, GitCommit, MembershipId } from './ids.ts';
 
 /** Fixed at creation. A private app never gets a public name, approval or hosted release. */
@@ -51,7 +52,7 @@ export type AppBuildStatus =
   | { readonly status: 'succeeded'; readonly manifestDigest: string; readonly files: number; readonly bytes: number }
   | { readonly status: 'failed'; readonly failure: AppFailure };
 
-export type AppOperationKind = 'publish' | 'rollback' | 'pause' | 'resume' | 'disable' | 'enable' | 'rename';
+export type AppOperationKind = 'publish' | 'rollback' | 'resize' | 'pause' | 'resume' | 'disable' | 'enable' | 'rename';
 
 export type AppOperationStatus =
   | { readonly status: 'admitted'; readonly generation: AppGeneration }
@@ -85,6 +86,9 @@ export type { AppServerSize };
 
 /** Every server app runs at this size unless a workspace admin raises it. */
 export const defaultServerSize: AppServerSize = Object.freeze({ vcpu: 1, memMiB: 1024 });
+
+/** A size a caller asks for. Whether the workspace allows it is checked when the resize is admitted. */
+export const appServerSizeSchema = z.strictObject({ vcpu: z.int32().positive(), memMiB: z.int32().positive() });
 
 /**
  * Where a server app's runtime is. `starting` brings up the first host and `replacing` brings up a host beside the

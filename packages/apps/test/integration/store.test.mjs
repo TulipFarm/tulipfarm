@@ -7,6 +7,7 @@ import { test } from 'node:test';
 import { defaultServerSize, edgeStatus } from '../../src/index.ts';
 import {
   admitPublish,
+  admitResize,
   admitRollback,
   appRepositories,
   appRole,
@@ -22,7 +23,9 @@ import {
   readApp,
   readAppRuntime,
   readDraft,
+  readRuntimeTarget,
   readSourceBundles,
+  recordRuntimeCandidate,
   readStagedChanges,
   requestBuild,
   saveDraft,
@@ -273,7 +276,7 @@ test('rollback needs a staged release and a failed publish leaves the live relea
   const failed = await transact(tx =>
     failOperation(tx, second.operation.id, { code: 'publisher-unavailable', message: 'Down', retryable: true }),
   );
-  assert.equal(failed.status, 'failed');
+  assert.deepEqual([failed.operation.status, failed.retiredHostRef], ['failed', null]);
   assert.equal((await transact(tx => switchRelease(tx, second.operation.id))).operation.status, 'failed');
   const rollback = await transact(tx =>
     admitRollback(tx, { ...request(), releaseId: first.operation.targetReleaseId }),
@@ -662,5 +665,235 @@ test(
       { code: '23514', constraint: 'tf_app_runtimes_candidate_check' },
     );
     assert.deepEqual(await stored(), serving);
+  },
+);
+
+/** A public app whose first release is serving from `host-0` at the default size. */
+async function servingApp(t) {
+  const context = await setup(t);
+  const { transact, admin, publicApp, approve, build } = context;
+  const app = await publicApp();
+  await approve(app.id);
+  const request = () => ({ appId: app.id, requestId: randomUUID(), requestedBy: admin });
+  const publish = async commit => {
+    const built = await build(app.id, commit);
+    return (await transact(tx => admitPublish(tx, { ...request(), buildId: built.id }))).operation;
+  };
+  const first = await publish('0'.repeat(40));
+  await transact(tx => recordRuntimeCandidate(tx, first.id, 'host-0'));
+  assert.equal((await transact(tx => switchRelease(tx, first.id))).retiredHostRef, null);
+  const runtime = async () => {
+    const { updatedAt, appId, ...stored } = await transact(tx => readAppRuntime(tx, app.id));
+    assert.equal(appId, app.id);
+    assert.match(updatedAt, /^\d{4}-\d{2}-\d{2}T/);
+    return stored;
+  };
+  assert.deepEqual(await runtime(), {
+    liveReleaseId: first.targetReleaseId,
+    size: { vcpu: 1, memMiB: 1024 },
+    hostRef: 'host-0',
+    state: 'serving',
+    candidate: null,
+  });
+  return { ...context, app, first, request, publish, runtime };
+}
+
+test('the newest admitted server operation goes live whatever order they finish in', { timeout: 120000 }, async t => {
+  const { transact, app, first, request, publish, runtime } = await servingApp(t);
+
+  const a = await publish('a'.repeat(40));
+  await transact(tx => recordRuntimeCandidate(tx, a.id, 'host-a'));
+  const b = (
+    await transact(tx => admitResize(tx, { ...request(), size: { vcpu: 2, memMiB: 2048 }, maximumSize: null }))
+  ).operation;
+  await transact(tx => recordRuntimeCandidate(tx, b.id, 'host-b'));
+  const c = await publish('c'.repeat(40));
+  assert.deepEqual(await transact(tx => readRuntimeTarget(tx, c.id)), {
+    releaseId: c.targetReleaseId,
+    size: { vcpu: 1, memMiB: 1024 },
+  });
+  const recorded = await transact(tx => recordRuntimeCandidate(tx, c.id, 'host-c'));
+  assert.equal(recorded.retiredHostRef, null);
+  assert.deepEqual(await runtime(), {
+    liveReleaseId: first.targetReleaseId,
+    size: { vcpu: 1, memMiB: 1024 },
+    hostRef: 'host-0',
+    state: 'replacing',
+    candidate: { operationId: c.id, releaseId: c.targetReleaseId, size: { vcpu: 1, memMiB: 1024 }, hostRef: 'host-c' },
+  });
+
+  const finishedC = await transact(tx => switchRelease(tx, c.id));
+  assert.equal(finishedC.operation.status, 'switched');
+  assert.equal(finishedC.retiredHostRef, 'host-0');
+  const finishedA = await transact(tx => switchRelease(tx, a.id));
+  const finishedB = await transact(tx => switchRelease(tx, b.id));
+  assert.deepEqual(
+    [finishedA, finishedB].map(({ operation, edgeVersion, retiredHostRef }) => [
+      operation.status,
+      operation.supersededBy,
+      operation.hostRef,
+      edgeVersion,
+      retiredHostRef,
+    ]),
+    [
+      ['superseded', 4, 'host-a', null, 'host-a'],
+      ['superseded', 4, 'host-b', null, 'host-b'],
+    ],
+  );
+  assert.deepEqual(await runtime(), {
+    liveReleaseId: c.targetReleaseId,
+    size: { vcpu: 1, memMiB: 1024 },
+    hostRef: 'host-c',
+    state: 'serving',
+    candidate: null,
+  });
+  const live = await transact(tx => readApp(tx, app.id));
+  assert.equal(live.liveReleaseId, c.targetReleaseId);
+  assert.equal(live.releaseGeneration, 4);
+  assert.equal((await transact(tx => switchRelease(tx, a.id))).retiredHostRef, null);
+});
+
+test(
+  'a resize keeps the live release, changes only the size and leaves a stopped app stopped',
+  { timeout: 120000 },
+  async t => {
+    const { transact, admin, member, app, first, request, runtime } = await servingApp(t);
+    const resize = (size, maximumSize = null, requestedBy = admin) =>
+      transact(tx => admitResize(tx, { ...request(), requestedBy, size, maximumSize }));
+
+    assert.equal((await resize({ vcpu: 1, memMiB: 1024 }, null, await member())).failure.code, 'forbidden');
+    assert.deepEqual((await resize({ vcpu: 0, memMiB: 1024 })).failure, {
+      code: 'limit-exceeded',
+      message: 'A server needs a whole number of vCPUs and MiB, at least 1 of each',
+      retryable: false,
+    });
+    assert.deepEqual((await resize({ vcpu: 4, memMiB: 4096 }, { vcpu: 2, memMiB: 8192 })).failure, {
+      code: 'limit-exceeded',
+      message: 'This workspace allows up to 2 vCPUs and 8192 MiB per app',
+      retryable: false,
+    });
+    assert.equal((await transact(tx => readApp(tx, app.id))).releaseGeneration, 1);
+
+    const resized = (await resize({ vcpu: 2, memMiB: 2048 }, { vcpu: 2, memMiB: 8192 })).operation;
+    assert.deepEqual(
+      [resized.kind, resized.targetReleaseId, resized.targetSize],
+      ['resize', first.targetReleaseId, { vcpu: 2, memMiB: 2048 }],
+    );
+    assert.deepEqual(await transact(tx => readRuntimeTarget(tx, resized.id)), {
+      releaseId: first.targetReleaseId,
+      size: { vcpu: 2, memMiB: 2048 },
+    });
+    await transact(tx => recordRuntimeCandidate(tx, resized.id, 'host-big'));
+    const paused = await transact(tx =>
+      changeAppStop(tx, { appId: app.id, requestId: randomUUID(), requestedBy: admin, kind: 'pause' }),
+    );
+    assert.equal(edgeStatus(paused.app.stops), 'paused');
+
+    const switched = await transact(tx => switchRelease(tx, resized.id));
+    assert.equal(switched.operation.status, 'switched');
+    assert.equal(switched.retiredHostRef, 'host-0');
+    assert.deepEqual(await runtime(), {
+      liveReleaseId: first.targetReleaseId,
+      size: { vcpu: 2, memMiB: 2048 },
+      hostRef: 'host-big',
+      state: 'serving',
+      candidate: null,
+    });
+    const live = await transact(tx => readApp(tx, app.id));
+    assert.equal(live.liveReleaseId, first.targetReleaseId);
+    assert.equal(edgeStatus(live.stops), 'paused');
+  },
+);
+
+test(
+  'a server operation that falls behind or fails gives back its host and leaves the live one serving',
+  { timeout: 120000 },
+  async t => {
+    const { transact, publicApp, approve, admin, publish, runtime, first } = await servingApp(t);
+    const serving = {
+      liveReleaseId: first.targetReleaseId,
+      size: { vcpu: 1, memMiB: 1024 },
+      hostRef: 'host-0',
+      state: 'serving',
+      candidate: null,
+    };
+
+    const late = await publish('a'.repeat(40));
+    const next = await publish('b'.repeat(40));
+    const fellBehind = await transact(tx => recordRuntimeCandidate(tx, late.id, 'host-late'));
+    assert.deepEqual(
+      [fellBehind.operation.status, fellBehind.operation.supersededBy, fellBehind.retiredHostRef],
+      ['superseded', 3, 'host-late'],
+    );
+    assert.deepEqual(await runtime(), serving);
+
+    await transact(tx => recordRuntimeCandidate(tx, next.id, 'host-0'));
+    const fail = id =>
+      transact(tx => failOperation(tx, id, { code: 'publisher-unavailable', message: 'No answer', retryable: true }));
+    const sharedHost = await fail(next.id);
+    assert.deepEqual(
+      [sharedHost.operation.status, sharedHost.operation.hostRef, sharedHost.retiredHostRef],
+      ['failed', 'host-0', null],
+    );
+    assert.deepEqual(await runtime(), serving);
+
+    const another = await publish('c'.repeat(40));
+    await transact(tx => recordRuntimeCandidate(tx, another.id, 'host-c'));
+    assert.equal((await runtime()).state, 'replacing');
+    assert.equal((await fail(another.id)).retiredHostRef, 'host-c');
+    assert.deepEqual(await runtime(), serving);
+    assert.equal((await fail(another.id)).retiredHostRef, null);
+
+    const staticApp = await publicApp('invoices');
+    await approve(staticApp.id);
+    const noServer = await transact(tx =>
+      admitResize(tx, {
+        appId: staticApp.id,
+        requestId: randomUUID(),
+        requestedBy: admin,
+        size: { vcpu: 2, memMiB: 2048 },
+        maximumSize: null,
+      }),
+    );
+    assert.equal(noServer.failure.code, 'not-found');
+  },
+);
+
+test(
+  'a server operation that ends keeps its host while a newer operation still targets the same release and size',
+  { timeout: 120000 },
+  async t => {
+    const { transact, request, runtime, first } = await servingApp(t);
+    const resize = async size =>
+      (await transact(tx => admitResize(tx, { ...request(), size, maximumSize: null }))).operation;
+    const big = { vcpu: 2, memMiB: 2048 };
+
+    const a = await resize(big);
+    await transact(tx => recordRuntimeCandidate(tx, a.id, 'host-big'));
+    const b = await resize(big);
+    const lost = await transact(tx => switchRelease(tx, a.id));
+    assert.deepEqual([lost.operation.status, lost.retiredHostRef], ['superseded', null]);
+    await transact(tx => recordRuntimeCandidate(tx, b.id, 'host-big'));
+    const won = await transact(tx => switchRelease(tx, b.id));
+    assert.deepEqual([won.operation.status, won.retiredHostRef], ['switched', 'host-0']);
+
+    const huge = { vcpu: 4, memMiB: 4096 };
+    const c = await resize(huge);
+    await transact(tx => recordRuntimeCandidate(tx, c.id, 'host-huge'));
+    const d = await resize(huge);
+    const failed = await transact(tx =>
+      failOperation(tx, c.id, { code: 'publisher-unavailable', message: 'No answer', retryable: true }),
+    );
+    assert.deepEqual([failed.operation.status, failed.retiredHostRef], ['failed', null]);
+    await transact(tx => recordRuntimeCandidate(tx, d.id, 'host-huge'));
+    const resized = await transact(tx => switchRelease(tx, d.id));
+    assert.deepEqual([resized.operation.status, resized.retiredHostRef], ['switched', 'host-big']);
+    assert.deepEqual(await runtime(), {
+      liveReleaseId: first.targetReleaseId,
+      size: huge,
+      hostRef: 'host-huge',
+      state: 'serving',
+      candidate: null,
+    });
   },
 );
