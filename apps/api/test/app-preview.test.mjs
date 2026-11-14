@@ -59,6 +59,8 @@ const asset = (url = '/', headers = {}) => ({
 
 test('preview hosts are recognised by their key alone', () => {
   assert.equal(previewKeyOf(`${key.toUpperCase()}.Preview.TulipFarm.test:443`, 'preview.tulipfarm.test'), key);
+  assert.equal(previewKeyOf(`${key}.preview.tulipfarm.test.`, 'preview.tulipfarm.test'), key);
+  assert.equal(previewKeyOf(`${key}.preview.tulipfarm.test.:443`, 'preview.tulipfarm.test'), key);
   assert.equal(previewKeyOf('api.tulipfarm.test', 'preview.tulipfarm.test'), undefined);
   assert.equal(previewKeyOf('preview.tulipfarm.test', 'preview.tulipfarm.test'), undefined);
   assert.equal(previewKeyOf('www.preview.tulipfarm.test', 'preview.tulipfarm.test'), null);

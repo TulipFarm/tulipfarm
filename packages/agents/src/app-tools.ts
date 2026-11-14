@@ -6,8 +6,6 @@ import {
   appLimits,
   edgeStatus,
   type AppBuildId,
-  type AppBuildStatus,
-  type AppDraftState,
   type AppFailure,
   type AppId,
   type GitCommit,
@@ -17,9 +15,11 @@ import {
   appFilePathSchema,
   appRole,
   discardDraftChanges,
+  draftState,
   readApp,
   readBuild,
   readDraft,
+  readRelease,
   readSourceBundles,
   readStagedChanges,
   saveDraft,
@@ -108,7 +108,6 @@ const failure = ({ code, message, retryable }: AppFailure): Failure => ({ error:
 const appTx = (tx: AgentTransaction): AppTransaction => ({ client: tx.client, schema: tx.schema });
 const table = (tx: AppTransaction, name: string) => `${escapeIdentifier(tx.schema)}.${escapeIdentifier(name)}`;
 const membership = (actor: HumanActor) => actor.membershipId as MembershipId;
-const liveLease = (draft: AppDraft) => (draft.lease && !draft.lease.expired ? draft.lease : null);
 // An expired lease still holds its chat's staged changes until another chat takes the draft.
 const chatLease = (draft: AppDraft, chat: AppChat) =>
   draft.lease?.conversationId === chat.conversationId ? draft.lease : null;
@@ -243,16 +242,10 @@ export function createAppEditing(runtime: AgentStorage, options: AppEditingOptio
         )
       ).rows as { id: AppBuildId }[];
       const build = newest ? await readBuild(tx, newest.id) : null;
-      const [live] = app.liveReleaseId
-        ? ((
-            await tx.client.query(`SELECT number FROM ${table(tx, 'tf_app_releases')} WHERE id = $1`, [
-              app.liveReleaseId,
-            ])
-          ).rows as { number: number }[])
-        : [];
+      const live = app.liveReleaseId ? await readRelease(tx, app.liveReleaseId) : null;
       return {
         title: app.title,
-        draft: draftState(draft, build?.id ?? null, build?.status ?? null),
+        draft: draftState(draft, build, live),
         revision: draft.revision,
         live: live ? { release: live.number, edge: edgeStatus(app.stops) } : null,
         build: build ? { id: build.id, ...build.status } : null,
@@ -368,19 +361,4 @@ export async function chatApp(tx: AppTransaction, conversationId: string) {
     conversationId,
   ]);
   return ((found.rows[0] as { app_id: string | null } | undefined)?.app_id ?? null) as AppId | null;
-}
-
-/** What the editor sees, derived from the draft, its lease and the newest build of its head. */
-export function draftState(draft: AppDraft, buildId: AppBuildId | null, build: AppBuildStatus | null): AppDraftState {
-  const lease = liveLease(draft);
-  if (lease) return { state: 'editing', leaseId: lease.id, conversationId: lease.conversationId };
-  if (buildId && build && (build.status === 'queued' || build.status === 'running'))
-    return { state: 'building', buildId };
-  if (build?.status === 'failed') return { state: 'failed', failure: build.failure };
-  if (draft.failure) return { state: 'failed', failure: draft.failure };
-  if (draft.headCommit && draft.previewBuildId === buildId && buildId)
-    // eslint-disable-next-line tulipfarm/product-copy -- A draft state name, not user-facing copy.
-    return { state: 'preview-ready', buildId, commit: draft.headCommit };
-  if (draft.headCommit) return { state: 'saved', commit: draft.headCommit };
-  return { state: 'empty' };
 }

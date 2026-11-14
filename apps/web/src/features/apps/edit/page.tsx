@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useState, type ReactElement } from 'react';
-import { Link } from '@tanstack/react-router';
+import { Link, useSearch } from '@tanstack/react-router';
 import { Alert, AlertDescription, AlertTitle } from '@tulipfarm/sprout/alert';
 import { Badge, type BadgeVariant } from '@tulipfarm/sprout/badge';
 import { Button } from '@tulipfarm/sprout/button';
@@ -7,10 +7,18 @@ import { PageHeader } from '@tulipfarm/sprout/page-header';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
 import { useConfirmation } from '@/features/access/confirm';
 import { workspaceRoute } from '@/router';
-import { appFailureMessage, failureMessage, type AppDetail, type AppOperation } from '../api';
+import {
+  appFailureMessage,
+  AppRequestError,
+  failureMessage,
+  type AppDetail,
+  type AppIssue,
+  type AppOperation,
+} from '../api';
 import { AppGate, LoadFailed, Loading } from '../app-page';
 import { approvalLabel, canEdit, draftLabels, servingStatus } from '../labels';
-import { useAppApi, useAppChanges, useAppChat, useAppOperation, useWatchedApp } from '../queries';
+import { useAppApi, useAppChanges, useAppChat, useAppOperation, useAppReleases, useWatchedApp } from '../queries';
+import { AppPageView } from '../pages/page-view';
 import { DraftPreview } from './preview';
 
 const AppChat = lazy(() =>
@@ -86,24 +94,160 @@ function Editor({ app }: { app: AppDetail }) {
   const appLink = (
     <Link to="/$workspaceSlug/apps/$appSlug" params={{ workspaceSlug: workspace.slug, appSlug: app.slug }} />
   );
-  if (app.kind !== 'public' || !canEdit(app))
+  if (!canEdit(app))
     return (
       <StatePanel
         kind="unavailable"
         heading="h2"
-        title={app.kind === 'public' ? 'Only editors can change this app' : 'This page is for public apps'}
-        description={
-          app.kind === 'public'
-            ? 'Ask an editor of this app for edit access.'
-            : 'Private apps are changed in their chat. Go back to the app to see its details and settings.'
-        }
+        title="Only editors can change this app"
+        description="Ask an editor of this app for edit access."
       >
         <Button variant="outline" nativeButton={false} render={appLink}>
           Back to app
         </Button>
       </StatePanel>
     );
-  return <PublicEditor app={app} appLink={appLink} />;
+  return app.kind === 'public' ? (
+    <PublicEditor app={app} appLink={appLink} />
+  ) : (
+    <PrivateEditor app={app} appLink={appLink} />
+  );
+}
+
+function ChatPanel({ appId }: { appId: string }) {
+  const { workspace } = workspaceRoute.useRouteContext();
+  const chat = useAppChat(workspace.id, appId);
+  return (
+    <section
+      aria-label="Chat"
+      className="flex min-h-96 flex-col overflow-hidden rounded-lg border lg:w-md lg:min-h-0 lg:shrink-0"
+    >
+      {chat.state.kind === 'ready' ? (
+        <Suspense fallback={<Loading label="Opening chat" />}>
+          <AppChat workspaceId={workspace.id} chatId={chat.state.data} headerElement={null} visible compact />
+        </Suspense>
+      ) : chat.state.kind === 'error' || chat.state.kind === 'unavailable' ? (
+        <LoadFailed
+          title="Could not open chat"
+          message={chat.state.kind === 'error' ? chat.state.message : 'You no longer have edit access to this app.'}
+          retry={() => void chat.refresh()}
+        />
+      ) : (
+        <Loading label="Opening chat" />
+      )}
+    </section>
+  );
+}
+
+// A private draft is a saved definition with no code or builds, so revision 0 is the only sign nothing is saved yet.
+const unsaved = (draft: Draft) => draft.revision === 0;
+
+/** `hasCurrentVersion` is null until the versions load, so the note never claims who sees what before it knows. */
+function privateDraftNote(draft: Draft, ownChat: string | null, hasCurrentVersion: boolean | null) {
+  if (draft.state === 'editing')
+    return draft.conversationId === ownChat
+      ? 'Chat is changing the draft. Changes show here when it finishes.'
+      : draftNote(draft, ownChat, false);
+  if (unsaved(draft)) return 'Describe the app you want in chat. Nothing goes live until you publish it.';
+  if (hasCurrentVersion === null) return null;
+  return hasCurrentVersion
+    ? 'This is the saved draft. People you share the app with still see the current version.'
+    : 'This is the saved draft. Nobody else sees it until you publish.';
+}
+
+/** The answer to publishing one draft revision; a newer revision makes it stale, so it stops showing. */
+type PrivatePublish = { revision: number; issues: AppIssue[] };
+
+/** A private app's chat beside its draft pages, which run with the editor's own permissions. */
+function PrivateEditor({ app, appLink }: { app: AppDetail; appLink: ReactElement }) {
+  const { workspace } = workspaceRoute.useRouteContext();
+  const { page, row } = useSearch({ strict: false }) as { page?: string; row?: string };
+  const api = useAppApi(workspace.id);
+  const changes = useAppChanges();
+  const confirm = useConfirmation();
+  useWatchedApp(workspace.id, app.id);
+  const chat = useAppChat(workspace.id, app.id);
+  const chatId = chat.state.kind === 'ready' ? chat.state.data : null;
+  const releases = useAppReleases(workspace.id, app.id, true);
+  const hasCurrentVersion = releases.state.kind === 'ready' ? releases.state.data.some(release => release.live) : null;
+  const [published, setPublished] = useState<PrivatePublish | null>(null);
+  const draft = app.draft;
+  const outcome = published?.revision === draft.revision ? published : null;
+
+  const publish = () =>
+    confirm.open({
+      title: 'Publish this draft?',
+      description: hasCurrentVersion === false ? 'It becomes the current version.' : 'It replaces the current version.',
+      action: 'Publish',
+      destructive: false,
+      run: async () => {
+        try {
+          await api.publishDraft(app.id, draft.revision);
+          setPublished({ revision: draft.revision, issues: [] });
+          await changes.app(app.id);
+          return null;
+        } catch (error) {
+          if (error instanceof AppRequestError && error.code === 'definition-invalid') {
+            setPublished({ revision: draft.revision, issues: error.issues });
+            return null;
+          }
+          return failureMessage(error);
+        }
+      },
+    });
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col gap-4">
+      <PageHeader
+        titleId="app-edit-heading"
+        title="Edit"
+        parent={{ label: app.title, link: appLink }}
+        actions={
+          !unsaved(draft) && (
+            <Button disabled={draft.state === 'editing' || releases.state.kind === 'loading'} onClick={publish}>
+              Publish
+            </Button>
+          )
+        }
+      />
+      {confirm.element}
+      <p role="status" className="text-sm text-muted-foreground">
+        {privateDraftNote(draft, chatId, hasCurrentVersion)}
+      </p>
+      {outcome &&
+        (outcome.issues.length ? (
+          <Alert variant="destructive">
+            <AlertTitle>{appFailureMessage('definition-invalid')}</AlertTitle>
+            <AlertDescription>
+              <ul className="list-disc space-y-1 pl-5">
+                {outcome.issues.map(issue => (
+                  <li key={`${issue.path}:${issue.message}`}>{issue.message}</li>
+                ))}
+              </ul>
+            </AlertDescription>
+          </Alert>
+        ) : (
+          <Alert>
+            <AlertDescription>Published. The draft is now the current version.</AlertDescription>
+          </Alert>
+        ))}
+      <div className="flex min-h-0 flex-1 flex-col gap-4 lg:flex-row">
+        <ChatPanel appId={app.id} />
+        <section aria-label="Draft" className="flex min-h-96 min-w-0 flex-1 flex-col overflow-auto">
+          {unsaved(draft) ? (
+            <StatePanel
+              kind="empty"
+              heading="h2"
+              title="No pages yet"
+              description="Pages show here after chat saves the draft."
+            />
+          ) : (
+            <AppPageView app={app} slug={page} row={row} draft revision={draft.revision} />
+          )}
+        </section>
+      </div>
+    </div>
+  );
 }
 
 function PublicEditor({ app, appLink }: { app: AppDetail; appLink: ReactElement }) {
@@ -244,24 +388,7 @@ function PublicEditor({ app, appLink }: { app: AppDetail; appLink: ReactElement 
         </Alert>
       )}
       <div className="flex min-h-0 flex-1 flex-col gap-4 lg:flex-row">
-        <section
-          aria-label="Chat"
-          className="flex min-h-96 flex-col overflow-hidden rounded-lg border lg:w-md lg:min-h-0 lg:shrink-0"
-        >
-          {chat.state.kind === 'ready' ? (
-            <Suspense fallback={<Loading label="Opening chat" />}>
-              <AppChat workspaceId={workspace.id} chatId={chat.state.data} headerElement={null} visible compact />
-            </Suspense>
-          ) : chat.state.kind === 'error' || chat.state.kind === 'unavailable' ? (
-            <LoadFailed
-              title="Could not open chat"
-              message={chat.state.kind === 'error' ? chat.state.message : 'You no longer have edit access to this app.'}
-              retry={() => void chat.refresh()}
-            />
-          ) : (
-            <Loading label="Opening chat" />
-          )}
-        </section>
+        <ChatPanel appId={app.id} />
         <div className="flex min-h-96 min-w-0 flex-1 flex-col">
           <DraftPreview api={api} appId={app.id} appTitle={app.title} buildId={draft.previewBuildId} />
         </div>

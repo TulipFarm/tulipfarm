@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { Readable } from 'node:stream';
 import Fastify from 'fastify';
+import { registerExtension, resetExtensions } from '@tulipfarm/extensions';
+import { appHostingFromEnvironment } from '../src/apps-hosting.ts';
 import { routeAppSites } from '../src/apps-sites.ts';
 
 test('app site hosts are answered by the publisher before any shell route', async t => {
@@ -53,4 +56,64 @@ test('app site hosts are answered by the publisher before any shell route', asyn
   );
   assert.equal((await app.inject({ url: '/index.html', headers: { host: 'localhost:3000' } })).body, 'shell');
   assert.equal(served.length, 3);
+});
+
+test('a HEAD request releases the stored file body without reading it', async t => {
+  let destroyed = false;
+  let read = false;
+  const publisher = {
+    async serve() {
+      const body = new Readable({
+        read() {
+          read = true;
+          this.push(Buffer.from('<h1>Orders</h1>'));
+          this.push(null);
+        },
+        destroy(error, callback) {
+          destroyed = true;
+          callback(error);
+        },
+      });
+      return { kind: 'file', object: { contentType: 'text/html; charset=utf-8', bytes: 15, body } };
+    },
+  };
+  const app = Fastify();
+  routeAppSites(app, { publisher, domain: 'apps.example.test' });
+  t.after(() => app.close());
+
+  const head = await app.inject({ method: 'HEAD', url: '/index.html', headers: { host: 'orders.apps.example.test' } });
+  assert.equal(head.statusCode, 200);
+  assert.equal(head.headers['content-length'], '15');
+  assert.equal(head.body, '');
+  assert.equal(read, false);
+  assert.equal(destroyed, true);
+});
+
+test('a registered publisher without a sites domain serves no app sites', async t => {
+  t.after(resetExtensions);
+  const none = async function* () {};
+  await registerExtension(
+    {
+      name: 'publisher-fixture',
+      register(slots) {
+        slots.appPublisher({
+          stage: async () => {},
+          apply: async () => {},
+          remove: async () => {},
+          discard: async () => {},
+          list: none,
+          releases: none,
+          usage: none,
+          serve: async () => ({ kind: 'not-found' }),
+        });
+      },
+    },
+    { app: 'api', env: {} },
+  );
+  const hosting = appHostingFromEnvironment(
+    { TULIPFARM_OBJECT_STORAGE_APPS_BUCKET: 'apps', TULIPFARM_OBJECT_STORAGE_REGION: 'us-east-1' },
+    () => undefined,
+  );
+  assert.equal(typeof hosting.publisher.serve, 'function');
+  assert.equal(hosting.sites, undefined);
 });

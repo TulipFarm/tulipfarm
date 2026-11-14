@@ -22,6 +22,7 @@ import {
   readLiveVersion,
   recordBrokenReferences,
   type AppReference,
+  type AppReferenceKind,
 } from '@tulipfarm/apps/store';
 import { AccessDenied, hasWorkflowGrant, requireTaskInvocation } from '@tulipfarm/access';
 import { readableTableFiles } from '@tulipfarm/agents/table-sources';
@@ -64,7 +65,8 @@ export type AppPageDependencies = {
   ) => Promise<{ taskId: string }>;
 };
 
-const pageParams = z.strictObject({ workspaceId: z.uuid(), appId: appIdSchema, page: z.string().max(80) });
+const appParams = z.strictObject({ workspaceId: z.uuid(), appId: appIdSchema });
+const pageParams = appParams.extend({ page: z.string().max(80) });
 const actionParams = pageParams.extend({ action: z.string().max(80) });
 const pageQuery = z.strictObject({ draft: z.enum(['true', 'false']).optional() });
 const dataBody = z.strictObject({ row: z.uuid().optional() });
@@ -116,6 +118,30 @@ function actionReference(action: AppAction): AppReference | null {
   return null;
 }
 
+const referenceNouns: [AppReferenceKind, string, string][] = [
+  ['table', 'a table', 'tables'],
+  ['field', 'a field', 'fields'],
+  ['file', 'a file', 'files'],
+  ['workflow', 'a workflow', 'workflows'],
+  ['agent', 'an agent', 'agents'],
+];
+
+/** Names what broke by kind and count, such as "a table and 2 fields", so the chat never shows record IDs. */
+function brokenNotice(references: readonly AppReference[], title: string) {
+  const counts = new Map<string, number>();
+  for (const reference of references) {
+    const kind = reference.slice(0, reference.indexOf(':'));
+    counts.set(kind, (counts.get(kind) ?? 0) + 1);
+  }
+  const parts = referenceNouns.flatMap(([kind, one, many]) => {
+    const count = counts.get(kind) ?? 0;
+    return count === 0 ? [] : [count === 1 ? one : `${count} ${many}`];
+  });
+  const what = parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}` : parts[0];
+  const single = references.length === 1;
+  return `The current version of this app uses ${what} that no longer ${single ? 'exists' : 'exist'}. People you share the app with see that part of “${title}” as no longer available. Other pages that use ${single ? 'it' : 'them'} show the same. Reply here to fix it, then publish.`;
+}
+
 /** The plain text an agent receives: the action's message, then each value the button sent. */
 function agentText(action: Extract<AppAction, { kind: 'ask-agent' }>, values: Record<string, unknown>) {
   const lines = Object.entries(values).map(
@@ -144,8 +170,17 @@ export function registerAppPages(app: FastifyInstance, dependencies: AppPageDepe
     return { membershipId: row.id, userId, admin: row.role === 'admin' };
   };
 
-  /** The live pages for anyone the app is shared with, or the saved draft for its editors. */
-  const load = async (tx: Tx, member: Member, appId: AppId, slug: string, draft: boolean): Promise<Loaded> => {
+  /**
+   * The live pages for anyone the app is shared with, or the saved draft for its editors. With no slug it is the home
+   * page, the first one.
+   */
+  const load = async (
+    tx: Tx,
+    member: Member,
+    appId: AppId,
+    slug: string | undefined,
+    draft: boolean,
+  ): Promise<Loaded> => {
     const found = await readApp(tx, appId);
     if (!found || found.kind !== 'private' || found.archivedAt || found.stops.disabledAt) throw new AccessDenied();
     const role = await appRole(tx, appId, member.membershipId as MembershipId);
@@ -163,28 +198,36 @@ export function registerAppPages(app: FastifyInstance, dependencies: AppPageDepe
       definition = live.definition;
       versionId = live.versionId;
     }
-    const page = definition.pages.find(candidate => candidate.slug === slug);
+    const page = slug === undefined ? definition.pages[0] : definition.pages.find(candidate => candidate.slug === slug);
     if (!page) throw new AccessDenied();
     return { appId, draft, versionId, definition, page };
   };
 
   /**
-   * Tells editors in the app's chat about references the live version names that no longer exist. A reference is
-   * recorded once per version, so editors hear about it once however many members open the page.
+   * Tells each editor, in their chat for the app, about references the live version names that no longer exist. A
+   * reference is recorded once per version, so editors hear about it once however many members open the page.
    */
   const reportBroken = async (workspaceId: string, tx: Tx, loaded: Loaded, absent: ReadonlySet<AppReference>) => {
     if (!loaded.versionId || !absent.size) return;
     const fresh = await recordBrokenReferences(tx, loaded.versionId, [...absent].sort());
     if (!fresh.length) return;
     const { rows } = await tx.client.query(
-      `SELECT id, next_message_sequence FROM ${qualified(tx.schema, 'tf_conversations')}
-       WHERE app_id = $1 AND deleted_at IS NULL ORDER BY created_at, id LIMIT 1 FOR UPDATE`,
+      `SELECT id, owner_membership_id, next_message_sequence FROM ${qualified(tx.schema, 'tf_conversations')}
+       WHERE app_id = $1 AND deleted_at IS NULL ORDER BY id FOR UPDATE`,
       [loaded.appId],
     );
-    const chat = rows[0] as { id: string; next_message_sequence: string } | undefined;
-    if (!chat) return;
-    const names = fresh.map(reference => reference.replace(':', ' ')).join(', ');
-    const text = `The live version of this app names something that no longer exists: ${names}. Members see that part of "${loaded.page.title}" as unavailable until you fix it and publish again.`;
+    const text = brokenNotice(fresh, loaded.page.title);
+    for (const chat of rows as { id: string; owner_membership_id: string; next_message_sequence: string }[])
+      if ((await appRole(tx, loaded.appId, chat.owner_membership_id as MembershipId)) === 'edit')
+        await postNotice(workspaceId, tx, chat, text);
+  };
+
+  const postNotice = async (
+    workspaceId: string,
+    tx: Tx,
+    chat: { id: string; next_message_sequence: string },
+    text: string,
+  ) => {
     const id = randomUUID();
     await tx.client.query(
       `INSERT INTO ${qualified(tx.schema, 'tf_conversation_messages')} (id, conversation_id, sequence, author_kind)
@@ -327,7 +370,8 @@ export function registerAppPages(app: FastifyInstance, dependencies: AppPageDepe
     });
 
     // oxlint-disable-next-line tulipfarm/product-copy -- A stable route, not user-facing copy.
-    const base = '/workspaces/:workspaceId/apps/:appId/pages/:page';
+    const pages = '/workspaces/:workspaceId/apps/:appId/pages';
+    const base = `${pages}/:page`;
     const context = (request: FastifyRequest) => {
       const params = request.params as z.infer<typeof actionParams>;
       return {
@@ -337,6 +381,41 @@ export function registerAppPages(app: FastifyInstance, dependencies: AppPageDepe
         draft: (request.query as z.infer<typeof pageQuery>).draft === 'true',
       };
     };
+
+    const readPage = async (request: FastifyRequest) => {
+      const { workspaceId, userId, params, draft } = context(request);
+      return transaction(workspaceId, async tx => {
+        const member = await memberOf(tx, userId);
+        const loaded = await load(tx, member, params.appId, params.page, draft);
+        const absent = await absentReferences(tx, pageReferences(loaded.page));
+        const actions = [];
+        for (const action of loaded.page.actions)
+          actions.push({
+            id: action.id,
+            label: action.label,
+            kind: action.kind,
+            availability: await availability(tx, member, action, absent),
+          });
+        return {
+          draft,
+          navigation: loaded.definition.pages.map(({ slug, title }) => ({ slug, title })),
+          page: { slug: loaded.page.slug, title: loaded.page.title, surface: loaded.page.surface, actions },
+        };
+      });
+    };
+
+    routes.get(
+      pages,
+      {
+        schema: {
+          operationId: 'getAppHomePageV1',
+          hide: true,
+          params: validation.json(appParams),
+          querystring: validation.json(pageQuery),
+        },
+      },
+      readPage,
+    );
 
     routes.get(
       base,
@@ -348,26 +427,7 @@ export function registerAppPages(app: FastifyInstance, dependencies: AppPageDepe
           querystring: validation.json(pageQuery),
         },
       },
-      async request => {
-        const { workspaceId, userId, params, draft } = context(request);
-        return transaction(workspaceId, async tx => {
-          const member = await memberOf(tx, userId);
-          const loaded = await load(tx, member, params.appId, params.page, draft);
-          const absent = await absentReferences(tx, pageReferences(loaded.page));
-          const actions = [];
-          for (const action of loaded.page.actions)
-            actions.push({
-              id: action.id,
-              label: action.label,
-              availability: await availability(tx, member, action, absent),
-            });
-          return {
-            draft,
-            navigation: loaded.definition.pages.map(({ slug, title }) => ({ slug, title })),
-            page: { slug: loaded.page.slug, title: loaded.page.title, surface: loaded.page.surface, actions },
-          };
-        });
-      },
+      readPage,
     );
 
     routes.post(
@@ -433,7 +493,9 @@ export function registerAppPages(app: FastifyInstance, dependencies: AppPageDepe
           throw new PageFailure(400, 'invalid-context');
         if (available === 'unavailable') throw new PageFailure(409, 'action-unavailable');
         if (available === 'restricted') throw new PageFailure(403, 'forbidden');
-        if (loaded.draft && body.confirmed !== true) throw new PageFailure(409, 'confirmation-required');
+        // Only a workflow or agent changes anything, so only those ask the editor to confirm a draft press.
+        if (loaded.draft && body.confirmed !== true && (action.kind === 'run-workflow' || action.kind === 'ask-agent'))
+          throw new PageFailure(409, 'confirmation-required');
         const value = (binding: { context: string }) => body.context[binding.context];
         switch (action.kind) {
           case 'open-page': {

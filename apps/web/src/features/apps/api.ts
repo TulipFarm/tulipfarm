@@ -4,6 +4,17 @@ import { jsonResponse, readJson } from '@/lib/http';
 import { TableRequestError } from '@/features/tables/request-state';
 
 const failureSchema = z.object({ code: z.string(), message: z.string(), retryable: z.boolean().optional() });
+const issuesSchema = z.object({ issues: z.array(z.object({ path: z.string(), message: z.string() })) });
+export type AppIssue = z.infer<typeof issuesSchema>['issues'][number];
+
+/** A refused app request, with what to fix when a private app's draft fails its publish check. */
+export class AppRequestError extends TableRequestError {
+  readonly issues: AppIssue[];
+  constructor(status: number, code: string, issues: AppIssue[]) {
+    super(status, code, appFailureMessage(code));
+    this.issues = issues;
+  }
+}
 
 const approvalSchema = z.discriminatedUnion('state', [
   z.object({ state: z.literal('not-requested') }),
@@ -65,7 +76,8 @@ export type AppDetail = z.infer<typeof appDetailSchema>;
 const releaseSchema = z.object({
   id: z.uuid(),
   number: z.number(),
-  commit: z.string(),
+  /** The public app's code; private apps have no code, only a definition. */
+  commit: z.string().optional(),
   staged: z.boolean(),
   live: z.boolean(),
   createdAt: z.string(),
@@ -95,6 +107,47 @@ const nameAvailabilitySchema = z.object({
   reason: z.enum(['name-taken', 'name-reserved', 'name-invalid']).optional(),
 });
 
+const pageContentSchema = z.object({
+  draft: z.boolean(),
+  navigation: z.array(z.object({ slug: z.string(), title: z.string() })),
+  page: z.object({
+    slug: z.string(),
+    title: z.string(),
+    surface: z.array(z.unknown()),
+    actions: z.array(
+      z.object({
+        id: z.string(),
+        label: z.string(),
+        kind: z.enum(['open-page', 'open-record', 'run-workflow', 'ask-agent']),
+        availability: z.enum(['available', 'restricted', 'unavailable']),
+      }),
+    ),
+  }),
+});
+
+const pageDataSchema = z.object({
+  version: z.string(),
+  updateDataModel: z.object({
+    surfaceId: z.string(),
+    path: z.literal('/sources'),
+    value: z.record(
+      z.string(),
+      z.object({
+        status: z.enum(['ready', 'empty', 'restricted', 'unavailable', 'failed']),
+        loadedAt: z.string(),
+        value: z.unknown(),
+      }),
+    ),
+  }),
+});
+
+const actionResultSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('open-page'), page: z.string(), row: z.uuid().optional() }),
+  z.object({ kind: z.literal('open-record'), tableId: z.uuid(), recordId: z.uuid() }),
+  z.object({ kind: z.literal('run-workflow'), runId: z.string() }),
+  z.object({ kind: z.literal('ask-agent'), taskId: z.uuid() }),
+]);
+
 /** The address inside the workspace, `/<workspace>/apps/<slug>`; the server applies the same rule. */
 export const appSlugPattern = /^[a-z0-9](?:[a-z0-9-]{0,46}[a-z0-9])?$/;
 
@@ -119,7 +172,7 @@ export function appApi(workspaceId: string) {
     if (!response.ok) {
       const failure = z.object({ failure: failureSchema }).safeParse(value).data?.failure;
       const code = failure?.code ?? z.object({ error: z.string() }).safeParse(value).data?.error ?? 'apps-unavailable';
-      throw new TableRequestError(response.status, code, appFailureMessage(code));
+      throw new AppRequestError(response.status, code, issuesSchema.safeParse(value).data?.issues ?? []);
     }
     return value;
   }
@@ -148,6 +201,9 @@ export function appApi(workspaceId: string) {
       z.object({ ticket: z.string(), entryUrl: z.url() }).parse(await request(`/${appId}/preview-tickets`, 'POST')),
     publish: async (appId: string, buildId: string) =>
       operation.parse(await request(`/${appId}/publish`, 'POST', withRequestId({ buildId }))).operation,
+    /** Publishes a private app's saved draft at `revision`, the one the editor reviewed. It is live when this returns. */
+    publishDraft: async (appId: string, revision: number) =>
+      operation.parse(await request(`/${appId}/publish`, 'POST', withRequestId({ revision }))).operation,
     rollback: async (appId: string, releaseId: string) =>
       operation.parse(await request(`/${appId}/rollback`, 'POST', withRequestId({ releaseId }))).operation,
     operation: async (appId: string, operationId: string, signal: AbortSignal) =>
@@ -168,6 +224,38 @@ export function appApi(workspaceId: string) {
     enable: stop('enable'),
     requestApproval: async (appId: string) =>
       appSummarySchema.parse(await request(`/${appId}/approval-request`, 'POST', withRequestId())),
+    /** A private app's page, or its home page when `slug` is null. Editors read the draft with `draft`. */
+    page: async (appId: string, slug: string | null, draft: boolean, signal: AbortSignal) =>
+      pageContentSchema.parse(
+        await request(
+          `/${appId}/pages${slug === null ? '' : `/${encodeURIComponent(slug)}`}${draft ? '?draft=true' : ''}`,
+          'GET',
+          undefined,
+          signal,
+        ),
+      ),
+    pageData: async (appId: string, slug: string, draft: boolean, row: string | undefined) =>
+      pageDataSchema.parse(
+        await request(
+          `/${appId}/pages/${encodeURIComponent(slug)}/data${draft ? '?draft=true' : ''}`,
+          'POST',
+          row ? { row } : {},
+        ),
+      ),
+    pageAction: async (
+      appId: string,
+      slug: string,
+      draft: boolean,
+      actionId: string,
+      body: { requestId: string; context: Record<string, unknown>; labels?: Record<string, string>; confirmed?: true },
+    ) =>
+      actionResultSchema.parse(
+        await request(
+          `/${appId}/pages/${encodeURIComponent(slug)}/actions/${encodeURIComponent(actionId)}${draft ? '?draft=true' : ''}`,
+          'POST',
+          body,
+        ),
+      ),
     decideApproval: async (appId: string, decision: 'approve' | 'reject', monthlyLimitUnits: string | null) =>
       appSummarySchema.parse(
         await request(
@@ -204,6 +292,10 @@ const failureMessages: Record<string, string> = {
   'recipe-invalid': 'The app’s build settings aren’t valid.',
   'build-failed': 'Something in the app’s code stopped the build.',
   'build-timeout': 'The build took too long and was stopped.',
+  'action-unavailable': 'This action is no longer available.',
+  'confirmation-required': 'Confirm the action to run it from the draft.',
+  'definition-invalid': 'This draft has problems. Ask in chat to fix them.',
+  'invalid-context': 'Check the details and try again.',
 };
 
 export const appFailureMessage = (code: string) => failureMessages[code] ?? unavailable;

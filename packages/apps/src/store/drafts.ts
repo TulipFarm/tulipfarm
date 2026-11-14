@@ -1,7 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { appLimits, type AppFailure } from '../app.ts';
+import { appLimits, type AppDraftState, type AppFailure } from '../app.ts';
 import type { AppBuildId, AppId, GitCommit, MembershipId } from '../ids.ts';
+import type { AppBuild } from './builds.ts';
+import type { AppRelease } from './operations.ts';
 import { failed, rows, table, type AppResult, type AppTransaction } from './sql.ts';
 
 export const appLeaseMinutes = 15;
@@ -248,4 +250,28 @@ export async function discardDraftChanges(tx: AppTransaction, appId: AppId, leas
      WHERE app_id = $1 AND lease_id = $2`,
     [appId, leaseId],
   );
+}
+
+/** What the editor sees, derived from the lease, the saved head, the newest build of that head and the live release. */
+export function draftState(draft: AppDraft, headBuild: AppBuild | null, liveRelease: AppRelease | null): AppDraftState {
+  if (draft.lease && !draft.lease.expired)
+    return { state: 'editing', leaseId: draft.lease.id, conversationId: draft.lease.conversationId };
+  if (draft.headCommit === null)
+    return draft.failure ? { state: 'failed', failure: draft.failure } : { state: 'empty' };
+  if (headBuild) {
+    switch (headBuild.status.status) {
+      case 'queued':
+      case 'running':
+        return { state: 'building', buildId: headBuild.id };
+      case 'succeeded':
+        if (liveRelease?.buildId === headBuild.id)
+          return { state: 'live', buildId: headBuild.id, commit: headBuild.commit };
+        // oxlint-disable-next-line tulipfarm/product-copy -- A draft state identifier, not user-facing copy.
+        return { state: 'preview-ready', buildId: headBuild.id, commit: headBuild.commit };
+      case 'failed':
+        return { state: 'failed', failure: headBuild.status.failure };
+    }
+  }
+  if (draft.failure) return { state: 'failed', failure: draft.failure };
+  return { state: 'saved', commit: draft.headCommit };
 }
