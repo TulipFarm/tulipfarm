@@ -10,6 +10,7 @@ import {
   readRelease,
   readRuntimeTarget,
   recordAppEndpoint,
+  recordAppEndpointTarget,
   recordRuntimeCandidate,
   supersedeOperation,
   switchRelease,
@@ -85,6 +86,7 @@ export function createAppServerActivities(work: AppWork) {
     expectedGeneration: number | undefined,
     signal: AbortSignal,
   ) {
+    await transact(workspaceId, tx => recordAppEndpointTarget(tx, appId as AppId, hostRef));
     const switched = await within(SERVER_SWITCH_MS, signal, bounded =>
       host.switch({ appId, hostRef, drainS: SERVER_DRAIN_S, expectedGeneration }, bounded),
     );
@@ -265,14 +267,13 @@ export function createAppServerActivities(work: AppWork) {
         host_ref: string | null;
         candidate_host_ref: string | null;
         endpoint_host_ref: string | null;
-        endpoint_generation: string | null;
         busy: boolean;
       };
       /** Every server app, and every app that has a listed host; or, locked, only the app `only` names. */
       const readServers = (tx: AppTransaction, appIds: readonly string[], only?: string) =>
         tx.client
           .query(
-            `SELECT a.id, r.host_ref, r.candidate_host_ref, r.endpoint_host_ref, r.endpoint_generation,
+            `SELECT a.id, r.host_ref, r.candidate_host_ref, r.endpoint_host_ref,
                EXISTS (SELECT 1 FROM ${table(tx, 'tf_app_operations')} o
                        WHERE o.app_id = a.id AND o.status IN ('admitted', 'staging')) AS busy
              FROM ${table(tx, 'tf_apps')} a LEFT JOIN ${table(tx, 'tf_app_runtimes')} r ON r.app_id = a.id
@@ -292,11 +293,18 @@ export function createAppServerActivities(work: AppWork) {
             if (app.busy) continue;
             if (app.host_ref && app.endpoint_host_ref !== app.host_ref && repairs < SERVER_RECONCILE_BATCH) {
               repairs++;
-              const expected = app.endpoint_generation === null ? undefined : Number(app.endpoint_generation);
-              // The record may trail the endpoint; with no operation in flight the live host is the right target.
-              const moved = await switchEndpoint(workspaceId, app.id, app.host_ref, expected, signal).catch(error => {
-                if (!(error instanceof AppHostConflictError)) throw error;
-                return switchEndpoint(workspaceId, app.id, app.host_ref!, undefined, signal);
+              // The list above may be minutes old. Under the app row lock no operation can start, so with none in
+              // flight the live host read here is the right target, whatever generation the endpoint reached.
+              const moved = await transact(workspaceId, async tx => {
+                const [now] = await readServers(tx, [], app.id);
+                if (!now?.host_ref || now.busy || now.endpoint_host_ref === now.host_ref) return false;
+                const hostRef = now.host_ref;
+                const switched = await within(SERVER_SWITCH_MS, signal, bounded =>
+                  host.switch({ appId: app.id, hostRef, drainS: SERVER_DRAIN_S }, bounded),
+                );
+                if (!switched.ok) return false;
+                await recordAppEndpoint(tx, app.id as AppId, { hostRef, generation: switched.value.generation });
+                return true;
               });
               if (moved) recordAppReconcileRepair('endpoint-switched');
             }
