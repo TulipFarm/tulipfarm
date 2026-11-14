@@ -101,8 +101,11 @@ build output (artifact, port and start command) at one size and returns its
 previous one for `drainS` seconds; with `expectedGeneration` it applies only if
 the endpoint has not moved since, and otherwise throws `AppHostConflictError`.
 `connect` returns a short-lived URL and headers for the endpoint, `remove`
-deletes a host, and `list` reports every host for reconciliation. Without a
-registered host, `appHost()` returns `unavailableAppHost`.
+deletes a host, and `list` reports every host for reconciliation. The optional
+`usage` reports each app's compute in a closed hourly window, priced in credit
+units. The worker adds it to the app's hosting charge for that window, only for
+apps that hold a public name; without `usage`, server compute is not charged.
+Without a registered host, `appHost()` returns `unavailableAppHost`.
 
 ### Credits
 

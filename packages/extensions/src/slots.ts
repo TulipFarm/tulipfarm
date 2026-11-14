@@ -463,7 +463,15 @@ export type AppHost = {
   remove(input: { readonly appId: string; readonly hostRef: string }, signal: AbortSignal): Promise<void>;
   /** Every host it runs, for reconciliation. */
   list(signal: AbortSignal): AsyncIterable<{ readonly appId: string; readonly hostRef: string }>;
+  /**
+   * Compute used by each app's hosts in a closed window of ISO 8601 instants, priced in credit units. It throws for a
+   * window whose usage is not complete yet. Without it, server compute is not metered.
+   */
+  usage?(window: { readonly start: string; readonly end: string }, signal: AbortSignal): AsyncIterable<AppCompute>;
 };
+
+/** One app's server compute in a usage window. */
+export type AppCompute = { readonly appId: string; readonly units: bigint };
 
 export type ExtensionMigration = { readonly name: string; readonly sql: string };
 
