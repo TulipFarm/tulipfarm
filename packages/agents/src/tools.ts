@@ -1049,6 +1049,7 @@ export function isExternalTool(tool: ToolName) {
     tool === 'images.generate' ||
     tool === 'agents.delegate' ||
     tool === 'api.request' ||
+    tool.startsWith('apps.') ||
     tool.startsWith('knowledge.') ||
     tool.startsWith('web.') ||
     tool.startsWith('github.personal.') ||

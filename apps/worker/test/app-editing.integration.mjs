@@ -1,0 +1,226 @@
+import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { test } from 'node:test';
+import { registerExtension } from '@tulipfarm/extensions';
+import { creditAccountExtension } from '@tulipfarm/workspace-storage/credit-account';
+import { appRepositories, createApp, finishBuild, readSourceBundles } from '../../../packages/apps/src/store/index.ts';
+import { startObjectStore } from '../../../packages/apps/test/object-store.mjs';
+import { conversationFixture } from '../../../packages/conversations/test/fixture.mjs';
+import { workerAppEditing } from '../src/app-editing-composition.ts';
+import { createConversationActivities } from '../src/conversation-activities.ts';
+import { useModelCatalog } from './model-catalog-fixture.mjs';
+import {
+  anthropicChat,
+  anthropicText,
+  completionReply,
+  isCompletionRequest,
+  isTitleRequest,
+} from './native-chat-fixture.mjs';
+
+await registerExtension(creditAccountExtension, { app: 'worker', env: {} });
+
+const appToolNames = body => (body.tools ?? []).map(tool => tool.name).filter(name => name.startsWith('apps_'));
+
+test('an app chat turn edits its app, and only a turn that completes saves', { timeout: 180000 }, async t => {
+  const f = await conversationFixture();
+  const objects = await startObjectStore();
+  const root = await mkdtemp(join(tmpdir(), 'app-editing-'));
+  const endpoint = await objects.storage.client.config.endpoint();
+  const env = {
+    ANTHROPIC_API_KEY: 'synthetic-test-key',
+    FEATURE_FLAG_APP_HOSTING: 'true',
+    TULIPFARM_OBJECT_STORAGE_APPS_BUCKET: objects.storage.bucket,
+    TULIPFARM_OBJECT_STORAGE_ENDPOINT: `http://${endpoint.hostname}:${endpoint.port}`,
+    TULIPFARM_OBJECT_STORAGE_ACCESS_KEY_ID: 'test',
+    TULIPFARM_OBJECT_STORAGE_SECRET_ACCESS_KEY: 'test',
+  };
+  const previous = Object.fromEntries(Object.keys(env).map(key => [key, process.env[key]]));
+  Object.assign(process.env, env);
+  t.after(useModelCatalog());
+  t.after(async () => {
+    for (const [key, value] of Object.entries(previous))
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    await objects.close();
+    await rm(root, { recursive: true, force: true });
+    await f.close();
+  });
+
+  const w = f.workspace;
+  const platform = { client: f.db.platform, schema: w.names.schema };
+  const created = await createApp(platform, {
+    id: randomUUID(),
+    kind: 'public',
+    slug: 'orders',
+    title: 'Orders',
+    createdBy: w.membershipId,
+  });
+  const appId = created.app.id;
+  const draft = async () => {
+    const row = (
+      await f.db.platform.query(
+        `SELECT head_commit, lease_id, (SELECT count(*)::int FROM ${f.table('tf_app_draft_changes')} WHERE app_id = $1) AS staged
+         FROM ${f.table('tf_app_drafts')} WHERE app_id = $1`,
+        [appId],
+      )
+    ).rows[0];
+    return { head: row.head_commit, lease: row.lease_id, staged: row.staged };
+  };
+  const repositories = appRepositories({ root: join(root, 'check'), storage: objects.storage });
+  async function savedFiles(head) {
+    const repository = await repositories.open(w.id, appId, head, await readSourceBundles(platform, appId));
+    const files = {};
+    for (const path of (await repositories.tree(repository, head)).keys())
+      files[path] = new TextDecoder().decode(await repositories.file(repository, head, path));
+    return files;
+  }
+
+  async function chat(app) {
+    const chatId = randomUUID();
+    await f.store.create(w.id, w.userId, { chatId, commandId: randomUUID() });
+    if (app)
+      await f.db.platform.query(`UPDATE ${f.table('tf_conversations')} SET app_id = $2 WHERE id = $1`, [chatId, app]);
+    return chatId;
+  }
+  /** Runs one turn of `chatId`; `answer` gives the model's response to its nth chat request. */
+  async function turn(chatId, answer) {
+    const requests = [];
+    const sent = await f.store.send(w.id, w.userId, chatId, {
+      messageId: randomUUID(),
+      commandId: randomUUID(),
+      model: 'claude-sonnet',
+      parts: [{ kind: 'text', text: 'Update the app.' }],
+    });
+    t.mock.method(globalThis, 'fetch', async (_url, options) => {
+      const body = JSON.parse(options.body);
+      if (isTitleRequest(body)) return Response.json(anthropicText('Orders app'));
+      if (isCompletionRequest(body)) return Response.json(completionReply('anthropic'));
+      requests.push(body);
+      return answer(requests.length, sent.turnId);
+    });
+    const result = await createConversationActivities(f.runtime).processConversationReply({
+      workspaceId: w.id,
+      conversationId: chatId,
+      turnId: sent.turnId,
+      generation: 0,
+    });
+    t.mock.restoreAll();
+    return { result, requests };
+  }
+  const write = (path, content) =>
+    Response.json(anthropicChat({ kind: 'tool', call: { tool: 'apps.files.write', path, content } }));
+  const answer = text => Response.json(anthropicChat({ kind: 'answer', text }));
+
+  const editing = await chat(appId);
+  let saved;
+
+  await t.test('a completed turn saves the file it wrote as the next draft commit', async () => {
+    const { result, requests } = await turn(editing, n =>
+      n === 1 ? write('index.html', '<h1>Orders</h1>') : answer('Done.'),
+    );
+    assert.equal(result, 'completed');
+    assert.deepEqual(appToolNames(requests[0]), [
+      'apps_status',
+      'apps_files_list',
+      'apps_files_read',
+      'apps_files_write',
+      'apps_files_delete',
+      'apps_preview_build',
+    ]);
+    const after = await draft();
+    assert.match(after.head, /^[0-9a-f]{40}$/);
+    assert.deepEqual({ lease: after.lease, staged: after.staged }, { lease: null, staged: 0 });
+    assert.deepEqual(await savedFiles(after.head), { 'index.html': '<h1>Orders</h1>' });
+    saved = after.head;
+  });
+
+  await t.test('a cancelled turn leaves no staged changes and no lease', async () => {
+    let staged;
+    const { result } = await turn(editing, async (n, turnId) => {
+      if (n === 1) return write('about.html', '<p>About</p>');
+      staged = (await draft()).staged;
+      await f.store.cancel(w.id, w.userId, editing, turnId, { commandId: randomUUID(), expectedGeneration: 0 });
+      return answer('Done.');
+    });
+    assert.equal(result, 'stale');
+    assert.equal(staged, 1);
+    assert.deepEqual(await draft(), { head: saved, lease: null, staged: 0 });
+  });
+
+  await t.test('a failed turn leaves no staged changes and no lease', async () => {
+    let staged;
+    const { result } = await turn(editing, async n => {
+      if (n === 1) return write('about.html', '<p>About</p>');
+      staged = (await draft()).staged;
+      return Response.json(
+        { type: 'error', error: { type: 'authentication_error', message: 'invalid x-api-key' } },
+        { status: 401 },
+      );
+    });
+    assert.equal(result, 'failed');
+    assert.equal(staged, 1);
+    assert.deepEqual(await draft(), { head: saved, lease: null, staged: 0 });
+    assert.deepEqual(await savedFiles(saved), { 'index.html': '<h1>Orders</h1>' });
+  });
+
+  await t.test('a chat that edits no app, or a workspace without app hosting, gets no app tools', async () => {
+    const plain = await turn(await chat(null), () => answer('Hello.'));
+    assert.equal(plain.result, 'completed');
+    assert.deepEqual(appToolNames(plain.requests[0]), []);
+    process.env.FEATURE_FLAG_APP_HOSTING = 'false';
+    const off = await turn(await chat(appId), () => answer('Hello.'));
+    process.env.FEATURE_FLAG_APP_HOSTING = 'true';
+    assert.equal(off.result, 'completed');
+    assert.deepEqual(appToolNames(off.requests[0]), []);
+  });
+
+  await t.test('building the app queues a build of the saved commit with the recipe in its app.json', async () => {
+    const started = [];
+    const apps = workerAppEditing(
+      f.runtime,
+      appRepositories({ root: join(root, 'tools'), storage: objects.storage }),
+      async (workspaceId, buildId) => {
+        started.push(buildId);
+        await finishBuild(platform, buildId, {
+          ok: true,
+          manifestKey: `builds/${buildId}/manifest.json`,
+          manifestDigest: 'a'.repeat(64),
+          files: 1,
+          bytes: 15,
+        });
+      },
+    );
+    const actor = { kind: 'human', userId: w.userId, membershipId: w.membershipId };
+    const on = { workspaceId: w.id, actor, conversationId: editing };
+    // eslint-disable-next-line tulipfarm/product-copy -- A tool name, not user-facing copy.
+    const build = () => apps.invoke(on, { tool: 'apps.preview.build' });
+    const recipeOf = async id =>
+      (await f.db.platform.query(`SELECT recipe, builder FROM ${f.table('tf_app_builds')} WHERE id = $1`, [id]))
+        .rows[0];
+
+    await apps.invoke(on, { tool: 'apps.files.write', path: 'app.json', content: '{"kind":"copy","root":"public"}' });
+    const copied = await build();
+    assert.deepEqual(started, [copied.buildId]);
+    assert.equal(copied.status, 'succeeded');
+    assert.deepEqual(await recipeOf(copied.buildId), { recipe: { kind: 'copy', root: 'public' }, builder: 'copy@1' });
+
+    await apps.invoke(on, {
+      tool: 'apps.files.write',
+      path: 'app.json',
+      content: '{"kind":"command","runtime":"node22","command":"npm run build","output":"dist"}',
+    });
+    const commanded = await build();
+    assert.deepEqual(
+      { status: commanded.status, failure: commanded.failure, started: started.length },
+      {
+        status: 'failed',
+        failure: { code: 'builder-unavailable', message: 'This server cannot run build commands', retryable: false },
+        started: 1,
+      },
+    );
+    assert.deepEqual(await apps.finishTurn(on, 'cancelled'), { saved: null });
+  });
+});

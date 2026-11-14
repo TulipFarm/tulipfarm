@@ -92,6 +92,8 @@ import { conversationInventoryReads, type ConversationInventoryReads } from './c
 import { secretsServices } from './secrets-composition.ts';
 import { heldSecrets } from '@tulipfarm/secrets/send';
 import { resumeApiCall, type ApiCallFiles } from '@tulipfarm/api-calls';
+import type { AppEditing } from '@tulipfarm/agents/app-tools';
+import { appEditingFromEnvironment, finishAppTurn } from './app-editing-composition.ts';
 
 /** The first-turn title is short, so it uses the title role's family. Without a model for it, the title uses the chat model. */
 export function chatTitleModel(env: NodeJS.ProcessEnv = process.env): ConversationModel | undefined {
@@ -121,6 +123,8 @@ export type MeteredReplyOptions = {
   chatExecution?: ChatExecution | undefined;
   /** Runs `coding.run` agents; without it, chat does not offer the tool. */
   codingRuns?: CodingRuns | undefined;
+  /** Edits the app of an app's own chat; without it, chat does not offer the app tools. */
+  apps?: AppEditing | undefined;
   wakePlan?: PlanWake | undefined;
   wakeTask?: TaskWake | undefined;
   /** Delivers per-card Stop requests to running sub-agents. */
@@ -168,6 +172,7 @@ export function meteredReply(
     skillExecution,
     chatExecution,
     codingRuns,
+    apps,
     wakePlan,
     wakeTask,
     subagentStops = (sharedSubagentStops ??= createSubagentStops()),
@@ -348,6 +353,14 @@ export function meteredReply(
     let delegations = 0;
     // A coding run uses the member's own plan and GitHub account, so only in their own chat in the app.
     const codingRunTools = requester && !externalContext && !project ? codingRuns : undefined;
+    const appTools =
+      apps &&
+      requester?.kind === 'human' &&
+      !externalContext &&
+      !project &&
+      (await apps.admitted({ workspaceId: fence.workspaceId, actor: requester, conversationId: fence.conversationId }))
+        ? apps
+        : undefined;
     const chatToolOptions = (
       toolRuntime: Parameters<typeof createChatTools>[0],
       tool?: string,
@@ -371,6 +384,7 @@ export function meteredReply(
       skillExecution,
       chatExecution,
       codingRuns: codingRunTools,
+      apps: appTools,
       telemetryRuntime: externalContext ? 'slack' : 'chat',
       wakePlan,
       agentSetup: slackAgentSetupFromEnvironment(toolRuntime),
@@ -520,6 +534,7 @@ export function meteredReply(
               waitingRowCards,
               chatFiles: chatFilesOffered && Boolean(chatFiles),
               codingRuns: codingRunsOffered && Boolean(codingRunTools),
+              apps: Boolean(appTools),
               ...(answerText ? { answerText } : {}),
               ...(layoutPreview ? { layoutPreview } : {}),
               progress,
@@ -556,6 +571,7 @@ export function meteredReply(
               waitingRowCards,
               chatFiles: chatFilesOffered && Boolean(chatFiles),
               codingRuns: codingRunsOffered && Boolean(codingRunTools),
+              apps: Boolean(appTools),
               ...(externalContext ? { preloadedTools: ['slack.thread.react'] } : {}),
               ...(answerText ? { answerText } : {}),
               ...(layoutPreview ? { layoutPreview } : {}),
@@ -608,6 +624,7 @@ export function createConversationActivities(
   workspaceSlug?: (workspaceId: string) => Promise<string | undefined>,
   chatExecution?: ChatExecution,
   codingRuns?: CodingRunsFactory,
+  apps: AppEditing | undefined = appEditingFromEnvironment(storage),
 ) {
   const runtime = withFileSources(withKnowledgeSourceAuthorization(withGitHubSourceAuthorization(storage)));
   const slack = slackActionsFromEnvironment()?.(runtime);
@@ -643,6 +660,7 @@ export function createConversationActivities(
             skillExecution,
             chatExecution,
             codingRuns: coding,
+            apps,
             wakePlan,
             wakeTask,
             inventory,
@@ -718,7 +736,9 @@ export function createConversationActivities(
         },
         coding,
       );
-      return process(executor, parsed);
+      const result = await process(executor, parsed);
+      if (apps) await finishAppTurn(storage, apps, parsed);
+      return result;
     });
   return {
     processConversationReply: (work: Parameters<ReturnType<typeof createConversationExecutor>['process']>[0]) =>
