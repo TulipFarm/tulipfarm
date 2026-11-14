@@ -95,10 +95,11 @@ from the same entry is an in-memory publisher for tests.
 
 ### App host
 
-`slots.appHost(host)` runs server apps. `provision` brings up a host for one
-release at one size and returns its `hostRef`. `switch` points the app's single
-endpoint at a host, draining the previous one for `drainS` seconds; with
-`expectedGeneration` it applies only if the endpoint has not moved since.
+`slots.appHost(host)` runs server apps. `provision` boots one release's server
+build output (artifact, port and start command) at one size and returns its
+`hostRef`. `switch` points the app's single endpoint at a host, draining the
+previous one for `drainS` seconds; with `expectedGeneration` it applies only if
+the endpoint has not moved since, and otherwise throws `AppHostConflictError`.
 `connect` returns a short-lived URL and headers for the endpoint, `remove`
 deletes a host, and `list` reports every host for reconciliation. Without a
 registered host, `appHost()` returns `unavailableAppHost`.

@@ -428,15 +428,20 @@ export type AppServerSize = { readonly vcpu: number; readonly memMiB: number };
  * unavailable and every call fails with `AppHostUnavailableError`.
  */
 export type AppHost = {
-  /** Creates or reuses the host for this release and size and waits until it answers. Idempotent per input. */
+  /** Boots the release's build output at this size and waits until it answers on `output.port`. Idempotent per input. */
   provision(
-    input: { readonly appId: string; readonly releaseId: string; readonly size: AppServerSize },
+    input: {
+      readonly appId: string;
+      readonly releaseId: string;
+      readonly size: AppServerSize;
+      readonly output: AppServerBuildOutput;
+    },
     signal: AbortSignal,
   ): Promise<{ readonly hostRef: string }>;
   /**
    * Points the app's endpoint at `hostRef`, giving requests on the previous host `drainS` seconds to finish. With
-   * `expectedGeneration`, the switch applies only if the endpoint is still at that generation. Returns the endpoint's
-   * generation after the call.
+   * `expectedGeneration`, the switch applies only if the endpoint is still at that generation and otherwise fails with
+   * `AppHostConflictError`. Returns the endpoint's generation after the call.
    */
   switch(
     input: {

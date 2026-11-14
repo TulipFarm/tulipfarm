@@ -2,6 +2,7 @@ export type * from './slots.ts';
 export {
   appBuilder,
   appHost,
+  AppHostConflictError,
   AppHostUnavailableError,
   appPublisher,
   captureAnalytics,
