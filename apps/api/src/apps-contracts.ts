@@ -109,13 +109,15 @@ const approvalView = (approval: AppApproval) =>
       }
     : approval;
 
-export function appSummaryView(app: AppRecord, role: AppRole | null) {
+/** `sitesDomain` is the domain public apps are served under, or null when this server cannot publish them. */
+export function appSummaryView(app: AppRecord, role: AppRole | null, sitesDomain: string | null) {
   return {
     id: app.id,
     kind: app.kind,
     slug: app.slug,
     title: app.title,
     publicName: app.publicName,
+    webAddress: app.publicName && sitesDomain ? `${app.publicName}.${sitesDomain}` : null,
     role,
     approval: approvalView(app.approval),
     liveReleaseId: app.liveReleaseId,
@@ -147,14 +149,13 @@ export function draftState(draft: AppDraft, headBuild: AppBuild | null): AppDraf
 }
 
 export function appDetailView(
-  app: AppRecord,
-  role: AppRole | null,
+  summary: ReturnType<typeof appSummaryView>,
   draft: AppDraft,
   headBuild: AppBuild | null,
   liveRelease: AppRelease | null,
 ) {
   return {
-    ...appSummaryView(app, role),
+    ...summary,
     draft: {
       revision: draft.revision,
       headCommit: draft.headCommit,
@@ -165,8 +166,10 @@ export function appDetailView(
   };
 }
 
-export const grantView = (grant: AppGrant) => ({
-  grantee: grant.grantee,
+/** `teamNames` holds the name of every team the grants name; team grants cascade with their team. */
+export const grantView = (grant: AppGrant, teamNames: ReadonlyMap<string, string>) => ({
+  grantee:
+    grant.grantee.kind === 'team' ? { ...grant.grantee, name: teamNames.get(grant.grantee.teamId)! } : grant.grantee,
   role: grant.role,
   grantedBy: grant.grantedBy,
 });

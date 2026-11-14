@@ -84,6 +84,7 @@ import {
   useSidebar,
 } from '@tulipfarm/sprout/sidebar';
 import { SidebarLeft } from 'reicon-react/icons/SidebarLeft';
+import { Window } from 'reicon-react/icons/Window';
 import { TooltipProvider } from '@tulipfarm/sprout/tooltip';
 import { authClient } from '@/lib/auth';
 import { SearchPalette, useSearchShortcut } from '@/features/search/search-palette';
@@ -116,6 +117,7 @@ export type WorkspacePath =
   | '/$workspaceSlug/files'
   | '/$workspaceSlug/knowledge'
   | '/$workspaceSlug/workflows'
+  | '/$workspaceSlug/apps'
   | '/$workspaceSlug/settings'
   | '/$workspaceSlug/settings/account'
   | '/$workspaceSlug/settings/secrets'
@@ -148,6 +150,7 @@ const account: Page = { label: 'Account', to: '/$workspaceSlug/settings/account'
 const secrets: Page = { label: 'Secrets', to: '/$workspaceSlug/settings/secrets', icon: LockKeyhole };
 const members: Page = { label: 'Members', to: '/$workspaceSlug/members', icon: User };
 const teams: Page = { label: 'Teams', to: '/$workspaceSlug/teams', icon: People };
+const apps: Page = { label: 'Apps', to: '/$workspaceSlug/apps', icon: Window };
 const workspaceGroups: { label: string; pages: Page[] }[] = [
   {
     label: 'Daily work',
@@ -163,6 +166,7 @@ const workspaceGroups: { label: string; pages: Page[] }[] = [
       { label: 'Agents', to: '/$workspaceSlug/agents', icon: Users, recent: 'agents' },
       { label: 'Skills', to: '/$workspaceSlug/skills', icon: BookOpen },
       { label: 'Workflows', to: '/$workspaceSlug/workflows', icon: BranchDown, recent: 'workflows' },
+      apps,
       { label: 'Packages', to: '/$workspaceSlug/packages', icon: Files },
     ],
   },
@@ -577,6 +581,7 @@ function WorkspaceNavigation({ onSearch }: { onSearch: () => void }) {
   const { workspace } = workspaceRoute.useRouteContext();
   const { setOpenMobile } = useSidebar();
   const settingsMode = useSettingsMode();
+  const appsEnabled = useFlag('app-hosting');
   usePreloadSidebarCode(workspace.slug);
   return (
     <Sidebar collapsible="icon" label="Workspace sidebar">
@@ -617,9 +622,11 @@ function WorkspaceNavigation({ onSearch }: { onSearch: () => void }) {
                   <SidebarGroup key={group.label}>
                     <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
                     <SidebarMenu>
-                      {group.pages.map(page => (
-                        <NavItem key={page.to} page={page} />
-                      ))}
+                      {group.pages
+                        .filter(page => page !== apps || appsEnabled)
+                        .map(page => (
+                          <NavItem key={page.to} page={page} />
+                        ))}
                     </SidebarMenu>
                   </SidebarGroup>
                 ))}
@@ -717,6 +724,7 @@ export function WorkspaceShell() {
 
 function WorkspaceShellContent() {
   const { user, workspace, workspaceStale, membershipId } = workspaceRoute.useRouteContext();
+  const appsEnabled = useFlag('app-hosting');
   // Integration pages explain the stale state themselves and pause their controls.
   const onIntegrations = useLocation({
     select: location =>
@@ -820,7 +828,7 @@ function WorkspaceShellContent() {
           <SearchPalette
             open={searchOpen}
             onOpenChange={setSearchOpen}
-            pages={searchPages}
+            pages={appsEnabled ? searchPages : searchPages.filter(page => page !== apps)}
             onOpen={to => void navigate({ to, params: { workspaceSlug: workspace.slug } })}
           />
         </SidebarProvider>
