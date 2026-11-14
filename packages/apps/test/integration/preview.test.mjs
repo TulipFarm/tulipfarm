@@ -5,12 +5,14 @@ import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import {
   admitPreview,
+  admitPublish,
   createApp,
   finishBuild,
   issuePreviewTicket,
   putAppGrant,
-  readPreviewBuild,
   readPreviewSession,
+  readPreviewTarget,
+  recordRuntimeCandidate,
   redeemPreviewTicket,
   registerPreviewHost,
   requestBuild,
@@ -121,7 +123,7 @@ test('only current editors preview, and losing edit blocks the next read', { tim
   assert.equal((await admitPreview(tx, randomUUID(), workspace.userId)).failure.code, 'not-found');
 
   const session = { workspaceId: workspace.id, appId: app.id, membershipId: workspace.membershipId };
-  assert.deepEqual(await readPreviewBuild(tx, session), { ok: true, build: null });
+  assert.deepEqual(await readPreviewTarget(tx, session), { ok: true, target: { kind: 'files', build: null } });
 
   const commit = 'c'.repeat(40);
   await db.platform.query(`UPDATE "${tx.schema}".tf_app_drafts SET head_commit = $2 WHERE app_id = $1`, [
@@ -138,10 +140,49 @@ test('only current editors preview, and losing edit blocks the next read', { tim
   const manifestKey = `builds/${queued.id}/manifest.json`;
   await finishBuild(tx, queued.id, { ok: true, manifestKey, manifestDigest: 'f'.repeat(64), files: 1, bytes: 5 });
   await setPreviewBuild(tx, queued.id);
-  assert.deepEqual(await readPreviewBuild(tx, session), { ok: true, build: { buildId: queued.id, manifestKey } });
+  assert.deepEqual(await readPreviewTarget(tx, session), {
+    ok: true,
+    target: { kind: 'files', build: { buildId: queued.id, manifestKey } },
+  });
+
+  await db.platform.query(
+    `UPDATE "${tx.schema}".tf_apps SET approval_state = 'approved', approval_by = $2, approval_at = now() WHERE id = $1`,
+    [app.id, workspace.membershipId],
+  );
+  const { operation } = await admitPublish(tx, {
+    appId: app.id,
+    requestId: randomUUID(),
+    requestedBy: workspace.membershipId,
+    buildId: queued.id,
+  });
+  await recordRuntimeCandidate(tx, operation.id, 'host-1');
+  const server = { kind: 'server', runtime: 'node22', serve: { port: 3000, start: 'node server.js' } };
+  await requestBuild(tx, {
+    appId: app.id,
+    commit,
+    recipe: server,
+    builder: 'server@1',
+    requestedBy: session.membershipId,
+  });
+  assert.deepEqual(await readPreviewTarget(tx, session), { ok: true, target: { kind: 'server', hostRef: 'host-1' } });
+
+  const next = 'd'.repeat(40);
+  await db.platform.query(`UPDATE "${tx.schema}".tf_app_drafts SET head_commit = $2 WHERE app_id = $1`, [app.id, next]);
+  await requestBuild(tx, {
+    appId: app.id,
+    commit: next,
+    recipe: server,
+    builder: 'server@1',
+    requestedBy: session.membershipId,
+  });
+  assert.deepEqual(await readPreviewTarget(tx, session), { ok: true, target: { kind: 'server', hostRef: null } });
+
+  await db.platform.query(`UPDATE "${tx.schema}".tf_apps SET disabled_at = now() WHERE id = $1`, [app.id]);
+  assert.equal((await readPreviewTarget(tx, session)).failure.code, 'not-found');
+  await db.platform.query(`UPDATE "${tx.schema}".tf_apps SET disabled_at = NULL WHERE id = $1`, [app.id]);
 
   await revokeAppGrant(tx, app.id, { kind: 'member', membershipId: workspace.membershipId });
-  assert.equal((await readPreviewBuild(tx, session)).failure.code, 'forbidden');
+  assert.equal((await readPreviewTarget(tx, session)).failure.code, 'forbidden');
 });
 
 test('a preview host stays bound to the app it was registered for', { timeout: 120000 }, async t => {

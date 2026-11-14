@@ -151,30 +151,54 @@ export async function readPreviewSession(
 export type PreviewBuild = { readonly buildId: AppBuildId; readonly manifestKey: string };
 
 /**
- * What a preview session may serve right now: the draft's previewed build, while the member is current and still
- * holds `edit`. A draft with nothing built yet previews no build.
+ * What a draft preview serves. A draft whose head commit builds a server previews that server, which runs only while
+ * a publish of that commit has brought it up as the app's candidate host; `hostRef` is null otherwise. Any other
+ * draft previews the files of its previewed build, or nothing before its first build.
  */
-export async function readPreviewBuild(
+export type PreviewTarget =
+  | { readonly kind: 'files'; readonly build: PreviewBuild | null }
+  | { readonly kind: 'server'; readonly hostRef: string | null };
+
+/**
+ * What a preview session may serve right now, while the member is current and still holds `edit` and the app is
+ * neither archived nor disabled.
+ */
+export async function readPreviewTarget(
   tx: AppTransaction,
   session: PreviewSession,
-): Promise<AppResult<{ readonly build: PreviewBuild | null }>> {
+): Promise<AppResult<{ readonly target: PreviewTarget }>> {
   if ((await appRole(tx, session.appId, session.membershipId)) !== 'edit')
     return failed('forbidden', 'Only editors can open the draft of this app');
-  const [row] = await rows<{ id: string | null; manifest_key: string | null }>(
+  const [row] = await rows<{
+    id: string | null;
+    manifest_key: string | null;
+    head_kind: string | null;
+    candidate_host_ref: string | null;
+  }>(
     tx,
-    `SELECT b.id, b.manifest_key FROM ${table(tx, 'tf_apps')} a
+    `SELECT b.id, b.manifest_key,
+       (SELECT h.recipe->>'kind' FROM ${table(tx, 'tf_app_builds')} h WHERE h.app_id = a.id AND h.commit = d.head_commit
+         ORDER BY h.created_at DESC LIMIT 1) AS head_kind,
+       (SELECT r.candidate_host_ref FROM ${table(tx, 'tf_app_runtimes')} r
+         JOIN ${table(tx, 'tf_app_releases')} c ON c.id = r.candidate_release_id
+         WHERE r.app_id = a.id AND c.commit = d.head_commit) AS candidate_host_ref
+     FROM ${table(tx, 'tf_apps')} a
      JOIN ${table(tx, 'tf_app_drafts')} d ON d.app_id = a.id
      LEFT JOIN ${table(tx, 'tf_app_builds')} b ON b.id = d.preview_build_id AND b.status = 'succeeded'
-     WHERE a.id = $1 AND a.archived_at IS NULL`,
+     WHERE a.id = $1 AND a.archived_at IS NULL AND a.disabled_at IS NULL`,
     [session.appId],
   );
   if (!row) return failed('not-found', 'App not found');
+  if (row.head_kind === 'server') return { ok: true, target: { kind: 'server', hostRef: row.candidate_host_ref } };
   return {
     ok: true,
-    build:
-      row.id === null || row.manifest_key === null
-        ? null
-        : { buildId: row.id as AppBuildId, manifestKey: row.manifest_key },
+    target: {
+      kind: 'files',
+      build:
+        row.id === null || row.manifest_key === null
+          ? null
+          : { buildId: row.id as AppBuildId, manifestKey: row.manifest_key },
+    },
   };
 }
 

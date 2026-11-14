@@ -28,11 +28,14 @@ function fakes() {
       },
       session: async (previewKey, token) => (previewKey === key && token === 'token-1' ? session : null),
       enabled: async () => true,
-      async build() {
+      async target() {
         state.builds += 1;
         if (state.role !== 'edit')
           return { ok: false, failure: { code: 'forbidden', message: 'App edit is required' } };
-        return { ok: true, build: { buildId: 'b1', manifestKey: 'manifests/b1.json' } };
+        return { ok: true, target: { kind: 'files', build: { buildId: 'b1', manifestKey: 'manifests/b1.json' } } };
+      },
+      connectHost: async () => {
+        throw new Error('A draft that builds files has no server');
       },
       object: async objectKey =>
         objectKey === 'manifests/b1.json'
@@ -77,7 +80,7 @@ test('preview paths match the public edge', () => {
 
 test('a ticket opens one preview session and cannot be used again', async t => {
   const { dependencies } = fakes();
-  const gateway = buildPreviewGateway(dependencies, {});
+  const { http: gateway } = buildPreviewGateway(dependencies, {});
   t.after(() => gateway.close());
 
   const first = await gateway.inject(enter('ticket-1'));
@@ -99,7 +102,7 @@ test('a ticket opens one preview session and cannot be used again', async t => {
 
 test('the preview serves the draft build without caching and stops when edit access is revoked', async t => {
   const { dependencies, state } = fakes();
-  const gateway = buildPreviewGateway(dependencies, {});
+  const { http: gateway } = buildPreviewGateway(dependencies, {});
   t.after(() => gateway.close());
 
   const page = await gateway.inject(asset('/'));
@@ -125,13 +128,27 @@ test('the preview serves the draft build without caching and stops when edit acc
 
 test('a preview cannot install a service worker', async t => {
   const { dependencies, state } = fakes();
-  const gateway = buildPreviewGateway(dependencies, {});
+  const { http: gateway } = buildPreviewGateway(dependencies, {});
   t.after(() => gateway.close());
 
   const response = await gateway.inject(asset('/sw.js', { 'service-worker': 'script' }));
   assert.equal(response.statusCode, 403);
   assert.equal(response.headers['cache-control'], 'no-store');
   assert.equal(state.builds, 0);
+});
+
+test('a draft that builds files answers only GET and HEAD', async t => {
+  const { dependencies } = fakes();
+  const { http: gateway } = buildPreviewGateway(dependencies, {});
+  t.after(() => gateway.close());
+
+  const response = await gateway.inject({
+    ...asset('/'),
+    method: 'POST',
+    headers: { ...asset('/').headers, origin: `http://${host}` },
+    payload: 'a=1',
+  });
+  assert.equal(response.statusCode, 404);
 });
 
 test('the gateway process serves previews on preview hosts and only liveness elsewhere', async t => {
@@ -167,7 +184,7 @@ test('the gateway process serves previews on preview hosts and only liveness els
 });
 
 test('one client is limited to 1,200 preview requests a minute', async t => {
-  const gateway = buildPreviewGateway(fakes().dependencies, {});
+  const { http: gateway } = buildPreviewGateway(fakes().dependencies, {});
   t.after(() => gateway.close());
   for (let sent = 0; sent < 1_200; sent += 1) assert.equal((await gateway.inject(asset('/'))).statusCode, 200);
   const limited = await gateway.inject(asset('/'));

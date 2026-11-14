@@ -82,8 +82,11 @@ async function gatewayFor(t, options = {}) {
       redeem: async () => null,
       session: async () => null,
       enabled: async () => true,
-      build: async () => ({ ok: true, build: null }),
+      target: async () => ({ ok: true, target: { kind: 'files', build: null } }),
       object: async () => null,
+      connectHost: async () => {
+        throw new AppHostUnavailableError();
+      },
     },
     apps: {
       domain: 'apps.tulipfarm.test',
