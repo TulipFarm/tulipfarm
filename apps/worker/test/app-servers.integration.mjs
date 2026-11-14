@@ -148,10 +148,17 @@ test('server apps publish, roll back, resize and reconcile against an app host',
     },
   };
   const host = memoryHost();
+  let databaseDown = false;
+  let afterNextTransaction;
   const options = appHost => ({
-    transact: (workspaceId, action) => {
+    transact: async (workspaceId, action) => {
       assert.equal(workspaceId, workspace.id);
-      return transact(action);
+      if (databaseDown) throw new Error('The database is unavailable');
+      const result = await transact(action);
+      const after = afterNextTransaction;
+      afterNextTransaction = undefined;
+      await after?.();
+      return result;
     },
     platform: db.platform,
     objects: memoryObjects(),
@@ -411,6 +418,63 @@ test('server apps publish, roll back, resize and reconcile against an app host',
       { kind: 'endpoint-switched', value: 1 },
       { kind: 'host-removed', value: 2 },
     ]);
+  });
+
+  await t.test('reconcile leaves the endpoint a publish moved after reconcile read the app', async () => {
+    host.hosts.set('host-stray', { appId: app.id });
+    const { generation } = await host.switch({ appId: app.id, hostRef: 'host-stray', drainS: 30 });
+    await transact(tx => recordAppEndpoint(tx, app.id, { hostRef: 'host-stray', generation }));
+    let concurrent;
+    let switched;
+    afterNextTransaction = async () => {
+      concurrent = await publish(await buildAt({ 'server.js': 'listen(8)' }));
+      switched = await servers.switchAppServer({ ...concurrent, hostRef: (await bringUp(concurrent)).hostRef });
+    };
+
+    await servers.reconcileAppServers(signal());
+    await retire(switched);
+    const published = `host-${(await releaseOf(concurrent)).slice(0, 8)}-2x2048`;
+    assert.deepEqual(await state(), {
+      live: await releaseOf(concurrent),
+      host: published,
+      size: { vcpu: 2, memMiB: 2048 },
+      state: 'serving',
+      endpoint: published,
+      hosts: [published],
+    });
+  });
+
+  await t.test('reconcile moves the endpoint off a failed host the switch reached but never recorded', async () => {
+    const { live: release, host: live } = await state();
+    const operation = await publish(await buildAt({ 'server.js': 'listen(9)' }));
+    const { hostRef: candidate } = await bringUp(operation);
+    const original = host.switch;
+    host.switch = async request => {
+      host.switch = original;
+      const result = await original(request);
+      databaseDown = true;
+      return result;
+    };
+    for (let attempt = 0; attempt < 3; attempt++)
+      await assert.rejects(servers.switchAppServer({ ...operation, hostRef: candidate }), /database is unavailable/);
+    databaseDown = false;
+    assert.deepEqual(
+      await retire(
+        await servers.failAppServerOperation({ ...operation, message: 'The app server could not start. Try again.' }),
+      ),
+      { status: 'failed', retiredHostRef: candidate },
+    );
+    assert.deepEqual((await state()).hosts, [live]);
+
+    await servers.reconcileAppServers(signal());
+    assert.deepEqual(await state(), {
+      live: release,
+      host: live,
+      size: { vcpu: 2, memMiB: 2048 },
+      state: 'serving',
+      endpoint: live,
+      hosts: [live],
+    });
   });
 
   await t.test('without an app host a server publish fails and nothing changes', async () => {

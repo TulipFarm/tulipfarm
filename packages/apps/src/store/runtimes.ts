@@ -18,7 +18,10 @@ export type AppRuntime = {
   readonly hostRef: string | null;
   readonly state: AppRuntimeState;
   readonly candidate: AppRuntimeCandidate | null;
-  /** The host the endpoint was last switched to and the generation it reported, or null before the first switch. */
+  /**
+   * The host the endpoint was last switched to, or a switch since may have moved it to, and the generation last
+   * reported, or null before the first switch.
+   */
   readonly endpoint: AppEndpoint | null;
   readonly updatedAt: string;
 };
@@ -103,6 +106,18 @@ export async function putAppRuntime(tx: AppTransaction, runtime: Omit<AppRuntime
     ],
   );
   return runtimeOf(row!);
+}
+
+/**
+ * Records the host a switch is about to move the endpoint to, keeping the stored generation. A switch the host applies
+ * but no one records then still shows the endpoint off the live host, so reconcile moves it back.
+ */
+export async function recordAppEndpointTarget(tx: AppTransaction, appId: AppId, hostRef: string) {
+  await tx.client.query(
+    `UPDATE ${table(tx, 'tf_app_runtimes')} SET endpoint_host_ref = $2, updated_at = clock_timestamp()
+     WHERE app_id = $1 AND endpoint_generation IS NOT NULL`,
+    [appId, hostRef],
+  );
 }
 
 /**
