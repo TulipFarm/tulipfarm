@@ -394,5 +394,154 @@ test(
       (await http(editor, 'GET', '')).body.apps.map(found => found.id),
       [appId],
     );
+
+    await t.test('a private app publishes, lists and restores versions through the release routes', async () => {
+      const created = await http(editor, 'POST', '', {
+        requestId: randomUUID(),
+        kind: 'private',
+        title: 'Deal Desk',
+      });
+      const privateId = created.body.id;
+      const pages = text => ({
+        pages: [
+          {
+            id: 'home',
+            slug: 'home',
+            title: 'Home',
+            sources: [],
+            actions: [],
+            surface: [
+              {
+                version: '1.0',
+                createSurface: {
+                  surfaceId: 'home',
+                  catalogId: 'tulipfarm/apps@1',
+                  components: [{ id: 'root', component: 'Text', text }],
+                },
+              },
+            ],
+          },
+        ],
+      });
+      const saveDraft = async definition =>
+        Number(
+          (
+            await db.platform.query(
+              `UPDATE ${schema}.tf_app_drafts SET definition = $2, revision = revision + 1 WHERE app_id = $1
+               RETURNING revision`,
+              [privateId, JSON.stringify(definition)],
+            )
+          ).rows[0].revision,
+        );
+      const liveText = async () =>
+        (
+          await db.platform.query(
+            `SELECT v.definition FROM ${schema}.tf_app_versions v JOIN ${schema}.tf_apps a ON a.live_version_id = v.id
+             WHERE a.id = $1`,
+            [privateId],
+          )
+        ).rows[0].definition.pages[0].surface[0].createSurface.components[0].text;
+      assert.equal(
+        (await http(editor, 'PUT', `/${privateId}/grants/member:${readerMembership}`, { role: 'use' })).status,
+        200,
+      );
+
+      const first = { requestId: randomUUID(), revision: await saveDraft(pages('Open deals')) };
+      const published = await http(editor, 'POST', `/${privateId}/publish`, first);
+      assert.equal(published.status, 200);
+      assert.equal(published.body.operation.kind, 'publish');
+      assert.equal(published.body.operation.status, 'switched');
+      assert.equal(published.body.version.number, 1);
+      assert.equal(published.body.version.live, true);
+      assert.equal(published.body.version.staged, true);
+      assert.equal(published.body.version.publishedBy, editorMembership);
+      const repeated = await http(editor, 'POST', `/${privateId}/publish`, first);
+      assert.equal(repeated.body.version.id, published.body.version.id);
+
+      const listed = await http(editor, 'GET', `/${privateId}/releases`);
+      const second = await http(editor, 'POST', `/${privateId}/publish`, {
+        requestId: randomUUID(),
+        revision: await saveDraft(pages('Closed deals')),
+        generation: listed.body.generation,
+      });
+      assert.equal(second.body.version.number, 2);
+      assert.equal(await liveText(), 'Closed deals');
+
+      const overtaken = await http(editor, 'POST', `/${privateId}/publish`, {
+        requestId: randomUUID(),
+        revision: await saveDraft(pages('Lost deals')),
+        generation: listed.body.generation,
+      });
+      assert.equal(overtaken.status, 409);
+      assert.equal(overtaken.body.failure.code, 'superseded');
+      const stale = await http(editor, 'POST', `/${privateId}/publish`, { requestId: randomUUID(), revision: 1 });
+      assert.equal(stale.status, 409);
+      assert.equal(stale.body.failure.code, 'stale-draft');
+
+      const readerList = await http(reader, 'GET', `/${privateId}/releases`);
+      assert.equal(readerList.status, 200);
+      assert.equal(readerList.body.generation, 2);
+      assert.deepEqual(
+        readerList.body.releases.map(({ number, live, staged }) => ({ number, live, staged })),
+        [
+          { number: 2, live: true, staged: true },
+          { number: 1, live: false, staged: true },
+        ],
+      );
+      const readerPublish = await http(reader, 'POST', `/${privateId}/publish`, {
+        requestId: randomUUID(),
+        revision: await saveDraft(pages('Reader deals')),
+      });
+      assert.equal(readerPublish.status, 403);
+      assert.equal(readerPublish.body.failure.code, 'forbidden');
+      const readerRestore = await http(reader, 'POST', `/${privateId}/rollback`, {
+        requestId: randomUUID(),
+        releaseId: published.body.version.id,
+      });
+      assert.equal(readerRestore.status, 403);
+
+      const invalid = await http(editor, 'POST', `/${privateId}/publish`, {
+        requestId: randomUUID(),
+        revision: await saveDraft({ pages: [] }),
+      });
+      assert.equal(invalid.status, 422);
+      assert.deepEqual(invalid.body, {
+        failure: {
+          name: 'AppFailure',
+          code: 'definition-invalid',
+          message: 'Fix the listed issues, then publish',
+        },
+        issues: [{ path: '/pages', message: 'Too small: expected array to have >=1 items' }],
+      });
+      assert.equal(
+        (await http(editor, 'POST', `/${privateId}/publish`, { requestId: randomUUID(), buildId: randomUUID() }))
+          .status,
+        400,
+      );
+
+      assert.equal((await http(editor, 'DELETE', `/${privateId}/grants/member:${readerMembership}`)).status, 204);
+      const restored = await http(editor, 'POST', `/${privateId}/rollback`, {
+        requestId: randomUUID(),
+        releaseId: published.body.version.id,
+      });
+      assert.equal(restored.status, 200);
+      assert.equal(restored.body.operation.kind, 'rollback');
+      assert.equal(restored.body.operation.status, 'switched');
+      assert.equal(restored.body.version.number, 3);
+      assert.equal(restored.body.version.digest, published.body.version.digest);
+      assert.equal(await liveText(), 'Open deals');
+      assert.deepEqual(
+        (await http(editor, 'GET', `/${privateId}/releases`)).body.releases.map(({ number, live }) => [number, live]),
+        [
+          [3, true],
+          [2, false],
+          [1, false],
+        ],
+      );
+      assert.deepEqual((await http(editor, 'GET', `/${privateId}/grants`)).body.grants, [
+        { grantee: { kind: 'member', membershipId: editorMembership }, role: 'edit', grantedBy: editorMembership },
+      ]);
+      assert.equal((await http(reader, 'GET', `/${privateId}/releases`)).status, 404);
+    });
   },
 );

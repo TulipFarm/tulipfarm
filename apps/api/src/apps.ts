@@ -23,7 +23,9 @@ import {
   claimAppName,
   createApp,
   listAppGrants,
+  listAppVersions,
   promoteAppName,
+  publishAppVersion,
   putAppGrant,
   readApp,
   readBuild,
@@ -33,6 +35,7 @@ import {
   readSourceBundles,
   readStagedChanges,
   requestBuild,
+  restoreAppVersion,
   revokeAppGrant,
   setAppPublicName,
   type AppGrant,
@@ -43,6 +46,7 @@ import {
   type AppRow,
   type AppStopKind,
   type AppTransaction,
+  type AppVersionResult,
 } from '@tulipfarm/apps/store';
 import type { AppPublisher } from '@tulipfarm/extensions';
 import { errorAttributes, isFeatureEnabled } from '@tulipfarm/observability';
@@ -67,10 +71,15 @@ import {
   nameParams,
   operationParams,
   parseGrantee,
+  privatePublishBody,
+  privateRollbackBody,
+  publicPublishBody,
+  publicRollbackBody,
   publishBody,
   requestBody,
   rollbackBody,
   updateBody,
+  versionView,
   workspaceParams,
 } from './apps-contracts.ts';
 import type { registerAuth } from './auth.ts';
@@ -206,6 +215,7 @@ export function registerApps(app: FastifyInstance, dependencies: AppRouteDepende
       if (error instanceof AppRouteFailure)
         return reply.code(failureStatus[error.failure.code]).send({
           failure: { name: 'AppFailure', code: error.failure.code, message: error.failure.message },
+          ...(error.issues.length ? { issues: error.issues } : {}),
         });
       if (error instanceof z.ZodError || (typeof error === 'object' && error !== null && 'validation' in error))
         return reply.code(400).send({ error: 'invalid-request' });
@@ -510,7 +520,12 @@ export function registerApps(app: FastifyInstance, dependencies: AppRouteDepende
 
     route('GET', '/:appId/releases', 'listAppReleasesV1', { params: appParams }, ({ workspaceId, userId, params }) =>
       transaction(workspaceId, async tx => {
-        const { app: found } = await access(tx, await memberOf(tx, userId), params.appId, 'edit');
+        const { app: found, role } = await access(tx, await memberOf(tx, userId), params.appId, 'use');
+        if (found.kind === 'private') {
+          const { generation, versions } = await listAppVersions(tx, found.id);
+          return { generation, releases: versions.map(versionView) };
+        }
+        if (role !== 'edit') throw failure('forbidden', 'You need edit access to this app');
         const { rows } = await tx.client.query(
           `SELECT id, number, build_id, commit, staged_at, created_at FROM ${qualified(tx.schema, 'tf_app_releases')}
            WHERE app_id = $1 ORDER BY number DESC`,
@@ -550,22 +565,35 @@ export function registerApps(app: FastifyInstance, dependencies: AppRouteDepende
       'publishAppV1',
       { params: appParams, body: publishBody },
       async ({ workspaceId, userId, params, body }, reply) => {
-        requirePublisher();
-        const operation = await transaction(workspaceId, async tx => {
+        const result = await transaction(workspaceId, async tx => {
           const member = await memberOf(tx, userId);
-          await access(tx, member, params.appId, 'edit');
+          const { app: found } = await access(tx, member, params.appId, 'edit');
+          if (found.kind === 'private') {
+            const request = privatePublishBody.parse(body);
+            return switched(
+              await publishAppVersion(tx, {
+                appId: found.id,
+                requestId: request.requestId,
+                requestedBy: member.membershipId,
+                revision: request.revision,
+                generation: request.generation ?? found.releaseGeneration,
+              }),
+            );
+          }
+          requirePublisher();
           return admitted(
             await admitPublish(tx, {
               appId: params.appId,
               requestId: body.requestId,
               requestedBy: member.membershipId,
-              buildId: body.buildId,
+              buildId: publicPublishBody.parse(body).buildId,
             }),
           );
         });
-        await startRelease(workspaceId, operation);
+        if ('version' in result) return result;
+        await startRelease(workspaceId, result);
         reply.code(202);
-        return { operation };
+        return { operation: result };
       },
     );
 
@@ -575,22 +603,35 @@ export function registerApps(app: FastifyInstance, dependencies: AppRouteDepende
       'rollbackAppV1',
       { params: appParams, body: rollbackBody },
       async ({ workspaceId, userId, params, body }, reply) => {
-        requirePublisher();
-        const operation = await transaction(workspaceId, async tx => {
+        const result = await transaction(workspaceId, async tx => {
           const member = await memberOf(tx, userId);
-          await access(tx, member, params.appId, 'edit');
+          const { app: found } = await access(tx, member, params.appId, 'edit');
+          if (found.kind === 'private') {
+            const request = privateRollbackBody.parse(body);
+            return switched(
+              await restoreAppVersion(tx, {
+                appId: found.id,
+                requestId: request.requestId,
+                requestedBy: member.membershipId,
+                versionId: request.releaseId,
+                generation: request.generation ?? found.releaseGeneration,
+              }),
+            );
+          }
+          requirePublisher();
           return admitted(
             await admitRollback(tx, {
               appId: params.appId,
               requestId: body.requestId,
               requestedBy: member.membershipId,
-              releaseId: body.releaseId,
+              releaseId: publicRollbackBody.parse(body).releaseId,
             }),
           );
         });
-        await startRelease(workspaceId, operation);
+        if ('version' in result) return result;
+        await startRelease(workspaceId, result);
         reply.code(202);
-        return { operation };
+        return { operation: result };
       },
     );
 
@@ -763,6 +804,12 @@ export function registerApps(app: FastifyInstance, dependencies: AppRouteDepende
 function admitted(result: Awaited<ReturnType<typeof admitPublish>>) {
   if (!result.ok) throw new AppRouteFailure(result.failure);
   return result.operation;
+}
+
+/** A private app's publish or restore has already switched when it returns. */
+function switched(result: AppVersionResult) {
+  if (!result.ok) throw new AppRouteFailure(result.failure, result.issues);
+  return { operation: result.operation, version: versionView(result.version) };
 }
 
 function nameProblem(name: string) {
