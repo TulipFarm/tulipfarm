@@ -65,19 +65,15 @@ export function workerAppEditing(
       );
       const appJson = await repositories.file(repository, commit, 'app.json');
       const read = readAppRecipe(appJson && new TextDecoder().decode(appJson));
-      const builder = read.ok ? recipeBuilder(read.recipe, builds.commandBuilder()) : undefined;
+      const chosen = read.ok ? recipeBuilder(read.recipe, builds.commandBuilder()) : read;
       // The recipe follows from the commit, so a commit that cannot build records one failed build the editor can see.
-      const refused: AppFailure | null = !read.ok
-        ? read.failure
-        : builder
-          ? null
-          : { code: 'builder-unavailable', message: 'This server cannot run build commands', retryable: false };
+      const refused: AppFailure | null = chosen.ok ? null : chosen.failure;
       const build = await transact(workspaceId, async tx => {
         const queued = await requestBuild(tx, {
           appId,
           commit,
           recipe: read.ok ? read.recipe : { kind: 'copy', root: '.' },
-          builder: builder ?? 'none',
+          builder: chosen.ok ? chosen.builder : 'none',
           requestedBy,
         });
         return refused ? finishBuild(tx, queued.id, { ok: false, failure: refused }) : queued;

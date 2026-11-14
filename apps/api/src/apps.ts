@@ -513,13 +513,13 @@ export function registerApps(app: FastifyInstance, dependencies: AppRouteDepende
           const appJson = await source.repositories.file(source.repository, head, 'app.json');
           const recipe = readAppRecipe(appJson === null ? null : Buffer.from(appJson).toString('utf8'));
           if (!recipe.ok) throw new AppRouteFailure(recipe.failure);
-          const builder = recipeBuilder(recipe.recipe, dependencies.builderId());
-          if (!builder) throw failure('builder-unavailable', 'This server cannot run build commands');
+          const chosen = recipeBuilder(recipe.recipe, dependencies.builderId());
+          if (!chosen.ok) throw new AppRouteFailure(chosen.failure);
           return requestBuild(tx, {
             appId: params.appId,
             commit: head,
             recipe: recipe.recipe,
-            builder,
+            builder: chosen.builder,
             requestedBy: member.membershipId,
           });
         });

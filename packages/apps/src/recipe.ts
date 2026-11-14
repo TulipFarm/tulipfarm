@@ -12,24 +12,60 @@ const treePathSchema = z
     error: 'Path must stay inside the app',
   });
 
+const stepSchema = z.string().min(1).max(500);
+const port = { error: 'Use a whole number port from 1024 to 65535' };
+const start = { error: 'Name the command that starts the server' };
+
 export const appRecipeSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('copy'), root: treePathSchema.default('.') }),
   z.strictObject({
     kind: z.literal('command'),
     runtime: z.enum(['node22']),
-    install: z.string().min(1).max(500).optional(),
-    command: z.string().min(1).max(500),
+    install: stepSchema.optional(),
+    command: stepSchema,
     output: treePathSchema,
+  }),
+  z.strictObject({
+    kind: z.literal('server'),
+    runtime: z.enum(['node22']),
+    install: stepSchema.optional(),
+    command: stepSchema.optional(),
+    serve: z.strictObject({
+      port: z.int(port).min(1024, port).max(65535, port),
+      start: z
+        .string(start)
+        .max(500)
+        .refine(command => command.trim() !== '', start),
+    }),
   }),
 ]);
 export type AppRecipe = z.infer<typeof appRecipeSchema>;
 
 export const defaultAppRecipe: AppRecipe = Object.freeze({ kind: 'copy', root: '.' });
 
-/** The builder folded into a build's id. A command needs the server's builder, so without one it has none. */
-export function recipeBuilder(recipe: AppRecipe, commandBuilder: string | undefined) {
-  return recipe.kind === 'copy' ? 'copy' : commandBuilder;
+/**
+ * The builder folded into a build's id, or why this server cannot build the recipe. A command needs the registered
+ * builder. Nothing builds a server recipe until a host can run it, so the built-in copy builder and a registered
+ * builder both refuse one.
+ */
+export function recipeBuilder(
+  recipe: AppRecipe,
+  commandBuilder: string | undefined,
+): { readonly ok: true; readonly builder: string } | { readonly ok: false; readonly failure: AppFailure } {
+  switch (recipe.kind) {
+    case 'copy':
+      return { ok: true, builder: 'copy' };
+    case 'command':
+      return commandBuilder
+        ? { ok: true, builder: commandBuilder }
+        : refused('builder-unavailable', 'This server cannot run build commands');
+    case 'server':
+      return refused('host-unavailable', 'This server cannot run apps that start their own server');
+  }
 }
+
+const refused = (code: AppFailure['code'], message: string) =>
+  ({ ok: false, failure: { code, message, retryable: false } }) as const;
 
 /** The one workflow that builds a build, whichever service starts it. */
 export const appBuildWorkflowId = (buildId: string) => `app-build-${buildId}`;

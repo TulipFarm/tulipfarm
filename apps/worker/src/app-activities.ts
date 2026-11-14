@@ -5,6 +5,7 @@ import { Context } from '@temporalio/activity';
 import {
   appLimits,
   edgeStatus,
+  recipeBuilder,
   type AppBuildId,
   type AppFailure,
   type AppId,
@@ -209,6 +210,7 @@ export function createAppActivities(work: AppWork) {
     if (build.recipe.kind === 'copy') {
       return { ...(await copyTree(repository, build.commit, build.recipe.root)), units: 0n };
     }
+    if (build.recipe.kind === 'server') throw new Error('Server recipes are refused before they build');
     const builder = work.builder!;
     const timeout = AbortSignal.timeout(appLimits.buildSeconds * 1000);
     const result = await builder
@@ -401,13 +403,8 @@ export function createAppActivities(work: AppWork) {
       });
       if (build.status.status === 'succeeded' || build.status.status === 'failed')
         return { status: build.status.status };
-      if (build.recipe.kind === 'command' && !work.builder)
-        return settleBuild(
-          input.workspaceId,
-          build,
-          { ok: false, failure: failure('builder-unavailable', 'This server cannot run build commands') },
-          0n,
-        );
+      const chosen = recipeBuilder(build.recipe, work.builder?.id);
+      if (!chosen.ok) return settleBuild(input.workspaceId, build, chosen, 0n);
       if (build.status.status === 'queued')
         return settleBuild(
           input.workspaceId,

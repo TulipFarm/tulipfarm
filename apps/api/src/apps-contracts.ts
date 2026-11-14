@@ -111,6 +111,7 @@ export const failureStatus: Record<AppFailureCode, number> = {
   'build-failed': 422,
   'build-timeout': 422,
   'builder-unavailable': 503,
+  'host-unavailable': 503,
   'publisher-unavailable': 503,
 };
 

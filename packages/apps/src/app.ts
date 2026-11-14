@@ -67,6 +67,7 @@ export type AppFailureCode =
   | 'recipe-invalid'
   | 'definition-invalid'
   | 'builder-unavailable'
+  | 'host-unavailable'
   | 'build-failed'
   | 'build-timeout'
   | 'publisher-unavailable'
