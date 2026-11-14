@@ -53,7 +53,12 @@ export const APP_USAGE_SETTLE_MS = 2 * hour;
 const settledBefore = (now: number) => Math.floor((now - APP_USAGE_SETTLE_MS) / hour) * hour;
 
 type UsageWindow = { readonly start: string; readonly end: string };
-type Traffic = Map<string, { requests: number; bytes: number; units: bigint }>;
+const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+/** Delivered traffic per public name, and server compute per app id, in one window. */
+type Usage = {
+  readonly traffic: Map<string, { requests: number; bytes: number; units: bigint }>;
+  readonly compute: Map<string, bigint>;
+};
 
 export type PlatformClient = {
   query(text: string, values?: unknown[]): Promise<{ rows: any[]; rowCount: number | null }>;
@@ -373,30 +378,36 @@ export function createAppActivities(work: AppWork) {
     for (const appId of lifted) await projectEdge({ workspaceId, appId }, signal);
   }
 
-  async function readTraffic(window: UsageWindow, signal: AbortSignal) {
-    const traffic: Traffic = new Map();
+  async function readUsage(window: UsageWindow, signal: AbortSignal): Promise<Usage> {
+    const usage: Usage = { traffic: new Map(), compute: new Map() };
     for await (const used of publisher!.usage(window, signal)) {
-      const total = traffic.get(used.name) ?? { requests: 0, bytes: 0, units: 0n };
-      traffic.set(used.name, {
+      const total = usage.traffic.get(used.name) ?? { requests: 0, bytes: 0, units: 0n };
+      usage.traffic.set(used.name, {
         requests: total.requests + used.requests,
         bytes: total.bytes + used.bytes,
         units: total.units + used.units,
       });
     }
-    return traffic;
+    if (work.host.usage)
+      for await (const used of work.host.usage(window, signal)) {
+        const appId = used.appId.toLowerCase();
+        if (uuid.test(appId)) usage.compute.set(appId, (usage.compute.get(appId) ?? 0n) + used.units);
+      }
+    return usage;
   }
 
   /**
-   * Charges one closed window of delivered traffic per app, whatever the workspace's app-hosting flag, since billing
-   * follows serving. A window already recorded is skipped, so running it again charges nothing. An app whose workspace
-   * runs out of credits or passes its monthly limit is paused.
+   * Charges one closed window of delivered traffic and server compute per app, whatever the workspace's app-hosting
+   * flag, since billing follows serving. Only apps that hold or held a public name are charged. A window already
+   * recorded is skipped, so running it again charges nothing. An app whose workspace runs out of credits or passes its
+   * monthly limit is paused.
    */
-  async function chargeWindow(window: UsageWindow, traffic: Traffic, signal: AbortSignal) {
+  async function chargeWindow(window: UsageWindow, { traffic, compute }: Usage, signal: AbortSignal) {
     // Every served app records the window, with no traffic too, so the next run knows where to resume.
     const { rows: owners } = await platform.query(
       `SELECT name, workspace_id, app_id FROM app.app_hostnames
-       WHERE name = ANY($1::text[]) OR (state = 'current' AND status IS NOT NULL)`,
-      [[...traffic.keys()]],
+       WHERE name = ANY($1::text[]) OR app_id = ANY($2::uuid[]) OR (state = 'current' AND status IS NOT NULL)`,
+      [[...traffic.keys()], [...compute.keys()]],
     );
     const perApp = new Map<
       string,
@@ -405,12 +416,13 @@ export function createAppActivities(work: AppWork) {
     for (const owner of owners as { name: string; workspace_id: string; app_id: string }[]) {
       const used = traffic.get(owner.name) ?? { requests: 0, bytes: 0, units: 0n };
       const key = `${owner.workspace_id}/${owner.app_id}`;
+      // An app's compute is counted once, on the first of its names.
       const total = perApp.get(key) ?? {
         workspaceId: owner.workspace_id,
         appId: owner.app_id,
         requests: 0,
         bytes: 0,
-        units: 0n,
+        units: compute.get(owner.app_id) ?? 0n,
       };
       perApp.set(key, {
         ...total,
@@ -452,7 +464,7 @@ export function createAppActivities(work: AppWork) {
   }
 
   async function meterWindow(window: UsageWindow, signal: AbortSignal) {
-    if (publisher) await chargeWindow(window, await readTraffic(window, signal), signal);
+    if (publisher) await chargeWindow(window, await readUsage(window, signal), signal);
   }
 
   return {
@@ -763,7 +775,7 @@ export function createAppActivities(work: AppWork) {
      * Meters the newest settled hour, so traffic on a name retired in it is charged, and each earlier one a served app
      * has not recorded, resuming after its newest recorded hour and reaching back at most 48 hours. Metering stops at
      * the first hour that fails, so no later hour is recorded ahead of it. Returns the hour whose usage the publisher
-     * could not read; the next run reads it again.
+     * or the host could not read; the next run reads it again.
      */
     async meterAppTraffic(now: number, signal: AbortSignal) {
       if (!publisher) return undefined;
@@ -798,14 +810,14 @@ export function createAppActivities(work: AppWork) {
       if (failures.length) throw new AggregateError(failures, 'App usage metering failed');
       for (let start = from; start + hour <= settled; start += hour) {
         const window = { start: new Date(start).toISOString(), end: new Date(start + hour).toISOString() };
-        let traffic: Traffic;
+        let usage: Usage;
         try {
-          traffic = await readTraffic(window, signal);
+          usage = await readUsage(window, signal);
         } catch (error) {
           signal.throwIfAborted();
           return { window, error };
         }
-        await chargeWindow(window, traffic, signal);
+        await chargeWindow(window, usage, signal);
       }
       return undefined;
     },

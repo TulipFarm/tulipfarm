@@ -781,4 +781,57 @@ test('app builds, publishes, reconciles and meters converge however often they r
     );
     assert.deepEqual(rows, [{ kind: 'server', release_id: null, status: 'active', edge_version: 7 }]);
   });
+
+  await t.test('a server app is charged its compute with its traffic, once per settled hour', async () => {
+    const server = (
+      await transact(tx =>
+        createApp(tx, {
+          id: randomUUID(),
+          kind: 'public',
+          slug: 'jobs',
+          title: 'Jobs',
+          createdBy: workspace.membershipId,
+        }),
+      )
+    ).app;
+    const named = { name: 'acme-jobs', workspaceId: workspace.id, appId: server.id };
+    assert.deepEqual(await claimAppName(db.platform, named), { ok: true });
+    await transact(tx => setAppPublicName(tx, server.id, 'acme-jobs'));
+    await db.platform.query('BEGIN');
+    await promoteAppName(db.platform, named);
+    await db.platform.query('COMMIT');
+    const window = { start: '2026-11-15T05:00:00.000Z', end: '2026-11-15T06:00:00.000Z' };
+    const unsettled = { start: '2026-11-15T06:00:00.000Z', end: '2026-11-15T07:00:00.000Z' };
+    const unnamed = randomUUID();
+    const metered = createAppActivities({
+      ...options(true),
+      host: {
+        ...unavailableAppHost,
+        async *usage(read) {
+          if (read.start === unsettled.start) throw new Error('Compute usage for this hour is not complete');
+          yield { appId: server.id.toUpperCase(), units: 30n };
+          yield { appId: unnamed, units: 900n };
+          yield { appId: 'not-an-app', units: 900n };
+        },
+      },
+    });
+    publisher.traffic = [{ name: 'acme-jobs', requests: 2, bytes: 100, units: 7n }];
+    await metered.meterAppUsage(window, signal());
+    await metered.meterAppUsage(window, signal());
+    await assert.rejects(metered.meterAppUsage(unsettled, signal()), /not complete/);
+
+    const usage = await db.platform.query(
+      `SELECT window_start, requests::int, bytes::int, units::text FROM "${schema}".tf_app_usage_windows
+       WHERE app_id = $1 ORDER BY window_start`,
+      [server.id],
+    );
+    assert.deepEqual(
+      usage.rows.map(row => ({ ...row, window_start: row.window_start.toISOString() })),
+      [{ window_start: window.start, requests: 2, bytes: 100, units: '37' }],
+    );
+    const debits = await db.platform.query(
+      `SELECT id, units::text FROM "${schema}".test_credit_entries WHERE id LIKE '%2026-11-15T0%' ORDER BY id`,
+    );
+    assert.deepEqual(debits.rows, [{ id: `app-hosting:${server.id}:${window.start}`, units: '37' }]);
+  });
 });
