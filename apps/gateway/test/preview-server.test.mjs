@@ -14,6 +14,13 @@ const appId = '22222222-2222-4222-8222-222222222222';
 const session = { workspaceId: '11111111-1111-4111-8111-111111111111', appId, membershipId: 'm' };
 const cookie = '__Host-tf_preview=token-1; theme=dark';
 const policyClose = Buffer.from([0x88, 0x02, 0x03, 0xf0]);
+const draftCookies = [
+  'cart=3; Path=/; Secure',
+  '__Host-tf_session=forged; Path=/; Secure',
+  '__host-TF_preview=forged; Path=/; Secure',
+  'wide=1; Domain=preview.tulipfarm.test; Path=/',
+];
+const cookieLines = draftCookies.map(line => `Set-Cookie: ${line}\r\n`).join('');
 
 /** Stands in for the forwarding layer in front of the draft's host: it answers only for the host it was given. */
 async function draftServer(t) {
@@ -37,27 +44,24 @@ async function draftServer(t) {
         'Content-Type': 'application/json',
         'Content-Security-Policy': "default-src 'self'",
         'Cache-Control': 'public, max-age=3600',
-        'Set-Cookie': [
-          'cart=3; Path=/; Secure',
-          '__Host-tf_session=forged; Path=/; Secure',
-          '__host-TF_preview=forged; Path=/; Secure',
-          'wide=1; Domain=preview.tulipfarm.test; Path=/',
-        ],
+        'Set-Cookie': draftCookies,
       })
       .end(
         JSON.stringify({ method: incoming.method, url: incoming.url, body: Buffer.concat(chunks).toString('utf8') }),
       );
   });
-  // A WebSocket server that accepts the handshake and keeps the socket open.
+  // A WebSocket server that accepts the handshake and keeps the socket open, except on /refused.
   server.on('upgrade', (incoming, socket) => {
     state.sockets += 1;
     state.seen.push(incoming.headers);
+    if (incoming.url === '/refused')
+      return socket.end(`HTTP/1.1 403 Forbidden\r\n${cookieLines}Content-Length: 0\r\nConnection: close\r\n\r\n`);
     const accept = createHash('sha1')
       .update(`${incoming.headers['sec-websocket-key']}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`)
       .digest('base64');
     socket.on('error', () => socket.destroy());
     socket.write(
-      `HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`,
+      `HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n${cookieLines}\r\n`,
     );
     socket.on('end', () => socket.end());
   });
@@ -122,13 +126,13 @@ function call(port, { method = 'GET', path = '/', headers = {}, body } = {}) {
   });
 }
 
-/** Opens a WebSocket by hand and resolves with the handshake status, plus the socket once it switched. */
-function connect(port, headers = {}) {
+/** Opens a WebSocket by hand and resolves with the handshake status and headers, plus the socket once it switched. */
+function connect(port, headers = {}, path = '/live') {
   return new Promise((resolve, reject) => {
     const outgoing = request({
       host: '127.0.0.1',
       port,
-      path: '/live',
+      path,
       headers: Object.fromEntries(
         Object.entries({
           host,
@@ -144,9 +148,11 @@ function connect(port, headers = {}) {
     });
     outgoing.on('response', response => {
       response.resume();
-      resolve({ status: response.statusCode });
+      resolve({ status: response.statusCode, headers: response.headers });
     });
-    outgoing.on('upgrade', (response, socket) => resolve({ status: response.statusCode, socket }));
+    outgoing.on('upgrade', (response, socket) =>
+      resolve({ status: response.statusCode, headers: response.headers, socket }),
+    );
     outgoing.on('error', reject);
     outgoing.end();
   });
@@ -181,6 +187,19 @@ test("an editor's draft request reaches the draft's server", async t => {
   socket.socket.destroy();
   assert.equal(upstream.sockets, 1);
   assert.equal(upstream.seen[1].cookie, 'theme=dark');
+});
+
+test('a WebSocket handshake carries only the cookies a draft may set', async t => {
+  const { port } = await previewFor(t);
+
+  const switched = await connect(port);
+  assert.equal(switched.status, 101);
+  switched.socket.destroy();
+  assert.deepEqual(switched.headers['set-cookie'], ['cart=3; Path=/; Secure']);
+
+  const refused = await connect(port, {}, '/refused');
+  assert.equal(refused.status, 403);
+  assert.deepEqual(refused.headers['set-cookie'], ['cart=3; Path=/; Secure']);
 });
 
 test('a request without a valid session never reaches the draft', async t => {

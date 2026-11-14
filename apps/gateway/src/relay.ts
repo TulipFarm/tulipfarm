@@ -294,6 +294,7 @@ export function createRelay(options: { readonly wakeBudgetMs: number; readonly l
     /**
      * Forwards a WebSocket handshake and, once the app switches protocols, pipes both sockets until either closes.
      * Resolves with the app's socket while the two are piped, or null once the client has been answered instead.
+     * `responseHeaders` rewrites the headers of the app's handshake response before the client sees them.
      */
     async upgrade(
       request: IncomingMessage,
@@ -301,6 +302,7 @@ export function createRelay(options: { readonly wakeBudgetMs: number; readonly l
       head: Buffer,
       client: Client,
       destination: Destination,
+      responseHeaders: (headers: OutgoingHttpHeaders) => OutgoingHttpHeaders = headers => headers,
     ): Promise<Duplex | null> {
       let outcome: Outcome;
       try {
@@ -339,7 +341,7 @@ export function createRelay(options: { readonly wakeBudgetMs: number; readonly l
         const { response } = upstream;
         socket.write(
           rawHead(response.statusCode ?? 502, response.statusMessage ?? '', {
-            ...clientHeaders(response.headers, { upgrade: false }),
+            ...responseHeaders(clientHeaders(response.headers, { upgrade: false })),
             connection: 'close',
           }),
         );
@@ -352,7 +354,9 @@ export function createRelay(options: { readonly wakeBudgetMs: number; readonly l
       app.on('close', () => socket.destroy());
       // The server keeps half-open sockets; a WebSocket is over once either side stops sending.
       socket.once('end', () => socket.end());
-      socket.write(rawHead(101, 'Switching Protocols', clientHeaders(response.headers, { upgrade: true })));
+      socket.write(
+        rawHead(101, 'Switching Protocols', responseHeaders(clientHeaders(response.headers, { upgrade: true }))),
+      );
       if (upstream.head.length) socket.write(upstream.head);
       if (head.length) app.write(head);
       app.pipe(socket);

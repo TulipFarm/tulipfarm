@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import type { IncomingHttpHeaders, IncomingMessage, OutgoingHttpHeader } from 'node:http';
+import type { IncomingHttpHeaders, IncomingMessage, OutgoingHttpHeader, OutgoingHttpHeaders } from 'node:http';
 import type { Duplex, Readable } from 'node:stream';
 import Fastify, {
   LogController,
@@ -138,10 +138,17 @@ const policyClose = Buffer.from([0x88, 0x02, 0x03, 0xf0]);
 const safeMethods = new Set(['GET', 'HEAD', 'OPTIONS']);
 const reservedCookie = /^__Host-tf_/i;
 
-/** Drops cookies a draft may not set: TulipFarm's own, and any scoped to a parent domain shared with other drafts. */
+/** Whether a draft may set a cookie: not TulipFarm's own, and not scoped to a parent domain shared with other drafts. */
 function draftCookie(cookie: string) {
   const [pair = '', ...attributes] = cookie.split(';');
   return !reservedCookie.test(pair.split('=', 1)[0]!.trim()) && !attributes.some(item => /^\s*domain\s*=/i.test(item));
+}
+
+/** A draft's response headers without the cookies it may not set. */
+function draftCookies(headers: OutgoingHttpHeaders): OutgoingHttpHeaders {
+  const { 'set-cookie': setCookie, ...kept } = headers;
+  const cookies = [setCookie ?? []].flat().map(String).filter(draftCookie);
+  return cookies.length ? { ...kept, 'set-cookie': cookies } : kept;
 }
 
 function timeout<T>(work: Promise<T>, ms: number): Promise<T> {
@@ -245,10 +252,7 @@ export function buildPreviewGateway(dependencies: PreviewGatewayDependencies, se
 
   /** The draft's response headers, kept inside its own host and frame. */
   function draftHeaders(headers: IncomingHttpHeaders): Record<string, OutgoingHttpHeader | undefined> {
-    const kept: Record<string, OutgoingHttpHeader | undefined> = clientHeaders(headers, { upgrade: false });
-    const cookies = [kept['set-cookie'] ?? []].flat().map(String).filter(draftCookie);
-    delete kept['set-cookie'];
-    if (cookies.length) kept['set-cookie'] = cookies;
+    const kept = draftCookies(clientHeaders(headers, { upgrade: false }));
     const policies = [kept['content-security-policy'] ?? []].flat().map(String);
     return {
       ...kept,
@@ -386,7 +390,7 @@ export function buildPreviewGateway(dependencies: PreviewGatewayDependencies, se
     if (found.kind !== 'server') return rawStatus(socket, 404);
     const { appId, hostRef } = found;
     if (hostRef === null) return rawStatus(socket, 503);
-    const app = await relay.upgrade(request, socket, head, client, destination(appId, hostRef));
+    const app = await relay.upgrade(request, socket, head, client, destination(appId, hostRef), draftCookies);
     if (!app) return;
     const stop = watch(request.headers, hostRef, () => {
       app.unpipe(socket);
