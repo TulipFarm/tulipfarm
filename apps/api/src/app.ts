@@ -48,7 +48,8 @@ import { protectExpectedSession } from './authenticated-routes.ts';
 import { registerApps } from './apps.ts';
 import { appHostingFromEnvironment, temporalAppWorkflows } from './apps-hosting.ts';
 import { routeAppSites } from './apps-sites.ts';
-import { appBuilder } from '@tulipfarm/extensions';
+import { appBuilders } from '@tulipfarm/apps';
+import { appBuilder, appHost } from '@tulipfarm/extensions';
 import type { Pool } from 'pg';
 import { buildPreviewGateway, routePreviewHosts, type PreviewGatewayDependencies } from '@tulipfarm/gateway/preview';
 import { previewGatewayFromEnvironment, type PreviewStorage } from '@tulipfarm/gateway/preview-environment';
@@ -149,7 +150,7 @@ export function buildApp(
             start: temporalAppWorkflows(temporal),
             repositories: appHosting?.repositories ?? null,
             publisher: () => appHosting?.publisher,
-            builderId: () => appBuilder()?.id,
+            builders: () => appBuilders(appBuilder(), appHost()),
             sitesDomain: appHosting?.sites?.domain ?? null,
           });
           previewStorage = { pool: auth.pool, runtime: storage };

@@ -25,6 +25,7 @@ import {
   loadPlatformBaseline,
 } from '../../../packages/workspace-storage/test/integration/fixture.mjs';
 import { hostHeaderPublisher } from '@tulipfarm/apps/host-header-publisher';
+import { unavailableAppHost } from '@tulipfarm/extensions';
 import { createAppActivities } from '../src/app-activities.ts';
 import { captureMetrics } from './metric-capture.mjs';
 
@@ -196,6 +197,7 @@ test('app builds, publishes, reconciles and meters converge however often they r
     source: async () => repository,
     publisher,
     builder: undefined,
+    host: unavailableAppHost,
     credits,
     async *workspaces() {
       yield workspace.id;

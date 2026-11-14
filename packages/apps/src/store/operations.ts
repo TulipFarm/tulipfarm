@@ -360,6 +360,29 @@ async function supersede(tx: AppTransaction, operation: AppOperation): Promise<A
   };
 }
 
+/**
+ * Ends an unfinished operation as superseded, for when the app host refused its switch because another switch moved
+ * the endpoint first. The live release keeps serving.
+ */
+export async function supersedeOperation(tx: AppTransaction, id: AppOperationId): Promise<AppOperationEnd> {
+  const operation = await readOperation(tx, id, true);
+  if (!operation) throw new Error(`App operation ${id} not found`);
+  if (!active(operation)) return { operation, retiredHostRef: null };
+  return supersede(tx, operation);
+}
+
+/** Whether an operation's release runs as a server on an app host rather than as files the publisher delivers. */
+export async function runsServer(tx: AppTransaction, operation: AppOperation) {
+  if (operation.kind === 'resize') return true;
+  const [row] = await rows<{ kind: string }>(
+    tx,
+    `SELECT b.recipe->>'kind' AS kind FROM ${table(tx, 'tf_app_releases')} r
+     JOIN ${table(tx, 'tf_app_builds')} b ON b.id = r.build_id WHERE r.id = $1`,
+    [operation.targetReleaseId],
+  );
+  return row?.kind === 'server';
+}
+
 /** Ends an unfinished operation with a failure. The live release keeps serving. */
 export async function failOperation(
   tx: AppTransaction,

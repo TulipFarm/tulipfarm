@@ -991,13 +991,18 @@ export function recordAgentSetup(status: string, errorCode: string | null, error
   }
 }
 
-/** What an app reconcile repaired: a route, an edge projection, a stale name claim or an unreferenced release. */
+/**
+ * What an app reconcile repaired: a route, an edge projection, a stale name claim, an unreferenced release, a server
+ * endpoint left on the wrong host or a server host nothing uses.
+ */
 export const appReconcileRepairs = [
   'route-applied',
   'route-removed',
   'edge-projected',
   'claim-retired',
   'release-discarded',
+  'endpoint-switched',
+  'host-removed',
 ] as const;
 export type AppReconcileRepair = (typeof appReconcileRepairs)[number];
 

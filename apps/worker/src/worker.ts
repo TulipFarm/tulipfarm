@@ -5,6 +5,7 @@ import { NativeConnection, Runtime, Worker } from '@temporalio/worker';
 import { temporalConnectionOptions } from '@tulipfarm/config/temporal';
 import { publicWebConfiguration } from '@tulipfarm/config/public-web';
 import { apiCallPrivateHosts } from '@tulipfarm/api-calls';
+import { appBuilders } from '@tulipfarm/apps';
 import { executionConfiguration } from '@tulipfarm/config/execution';
 import type { ExecutionBackend, ExecutionConfiguration } from '@tulipfarm/execution-contract';
 import {
@@ -16,7 +17,13 @@ import {
   registerFlagSubjectResolver,
   startTelemetry,
 } from '@tulipfarm/observability';
-import { appBuilder, configuredExecutionBackend, shutdownExtensions, startExtensions } from '@tulipfarm/extensions';
+import {
+  appBuilder,
+  appHost,
+  configuredExecutionBackend,
+  shutdownExtensions,
+  startExtensions,
+} from '@tulipfarm/extensions';
 import { temporalSlotReadings, workerTelemetry } from './telemetry.ts';
 import { loadModelCatalog } from '@tulipfarm/config';
 import { readBuildInfo } from '@tulipfarm/build-info/node';
@@ -350,7 +357,7 @@ async function run() {
           codingRuns,
           appEditingFromEnvironment(coreResources.runtime, {
             start: appBuilds!.start,
-            commandBuilder: () => appBuilder()?.id,
+            builders: () => appBuilders(appBuilder(), appHost()),
           }),
         )
       : undefined;

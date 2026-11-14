@@ -17,7 +17,15 @@ export { knowledgeIngest } from './knowledge-workflows.ts';
 export { skillImport } from './skill-workflows.ts';
 export { workspaceMcpDiscovery } from './workspace-mcp-workflows.ts';
 export { codingRun } from './coding-run-workflows.ts';
-export { appBuild, appPublish, appRollback, appProjectEdge } from './app-workflows.ts';
+export {
+  appBuild,
+  appPublish,
+  appRollback,
+  appProjectEdge,
+  appServerPublish,
+  appServerRollback,
+  appServerResize,
+} from './app-workflows.ts';
 
 const { ping } = proxyActivities<typeof activities>({
   startToCloseTimeout: '2 seconds',

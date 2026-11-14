@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { unavailableAppHost } from '@tulipfarm/extensions';
 import {
   appBuildId,
+  appBuilders,
   appNameSchema,
   appSlugSchema,
   commitSchema,
@@ -105,7 +107,7 @@ test('a server recipe needs a port from 1024 to 65535 and a start command', () =
   );
 });
 
-test('copy recipes build anywhere, commands need a builder, and no builder takes a server recipe', () => {
+test('copy recipes build anywhere, commands need a builder, and servers need a host and a server builder', () => {
   const server = { kind: 'server', runtime: 'node22', serve: { port: 3000, start: 'npm start' } };
   const command = { kind: 'command', runtime: 'node22', command: 'npm run build', output: 'dist' };
   const hostUnavailable = {
@@ -116,14 +118,27 @@ test('copy recipes build anywhere, commands need a builder, and no builder takes
       retryable: false,
     },
   };
-  assert.deepEqual(recipeBuilder({ kind: 'copy', root: '.' }, undefined), { ok: true, builder: 'copy' });
-  assert.deepEqual(recipeBuilder(command, 'sandbox-node22-v1'), { ok: true, builder: 'sandbox-node22-v1' });
-  assert.deepEqual(recipeBuilder(command, undefined), {
+  const none = appBuilders(undefined, unavailableAppHost);
+  const host = { ...unavailableAppHost };
+  const staticOnly = { id: 'sandbox-node22-v1', build: async () => ({}) };
+  const serverCapable = { ...staticOnly, buildServer: async () => ({}) };
+  assert.deepEqual(none, { command: undefined, server: undefined });
+  assert.deepEqual(recipeBuilder({ kind: 'copy', root: '.' }, none), { ok: true, builder: 'copy' });
+  assert.deepEqual(recipeBuilder(command, appBuilders(staticOnly, unavailableAppHost)), {
+    ok: true,
+    builder: 'sandbox-node22-v1',
+  });
+  assert.deepEqual(recipeBuilder(command, none), {
     ok: false,
     failure: { code: 'builder-unavailable', message: 'This server cannot run build commands', retryable: false },
   });
-  assert.deepEqual(recipeBuilder(server, undefined), hostUnavailable);
-  assert.deepEqual(recipeBuilder(server, 'sandbox-node22-v1'), hostUnavailable);
+  assert.deepEqual(recipeBuilder(server, none), hostUnavailable);
+  assert.deepEqual(recipeBuilder(server, appBuilders(serverCapable, unavailableAppHost)), hostUnavailable);
+  assert.deepEqual(recipeBuilder(server, appBuilders(staticOnly, host)), hostUnavailable);
+  assert.deepEqual(recipeBuilder(server, appBuilders(serverCapable, host)), {
+    ok: true,
+    builder: 'sandbox-node22-v1',
+  });
 });
 
 test('an invalid app.json is a recipe failure that names the problem', () => {

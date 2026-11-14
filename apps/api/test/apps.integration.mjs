@@ -101,7 +101,7 @@ test(
           start: async (workflow, workflowId, input) => void started.push({ workflow, workflowId, input }),
           repositories: null,
           publisher: () => ({ remove: async route => void removed.push(route) }),
-          builderId: () => undefined,
+          builders: () => ({ command: undefined, server: undefined }),
           sitesDomain: 'apps.example.test',
         }),
       { prefix: '/v1' },

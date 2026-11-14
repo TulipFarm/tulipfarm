@@ -3,13 +3,14 @@ import { join } from 'node:path';
 import type { AppId } from '@tulipfarm/apps';
 import { s3AppStorage, selectAppPublisher } from '@tulipfarm/apps/sites';
 import { appRepositories, readSourceBundles, type AppTransaction } from '@tulipfarm/apps/store';
-import { appBuilder, creditGate } from '@tulipfarm/extensions';
+import { appBuilder, appHost, creditGate } from '@tulipfarm/extensions';
 import { errorAttributes, isFeatureEnabled, log } from '@tulipfarm/observability';
 import { objectStorageClient } from '@tulipfarm/workspaces/object-storage';
 import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import { Pool } from 'pg';
 import { z } from 'zod';
-import { createAppActivities } from './app-activities.ts';
+import { createAppActivities, type AppWork } from './app-activities.ts';
+import { createAppServerActivities } from './app-server-activities.ts';
 
 type WorkspaceRuntime = {
   transaction<T>(
@@ -34,17 +35,13 @@ export function createAppComposition(options: {
   const transact = <T>(workspaceId: string, action: (tx: AppTransaction) => Promise<T>) =>
     options.runtime.transaction(workspaceId, commonCompatibility, action);
   const repositories = appRepositories({ root: join(tmpdir(), 'tulipfarm-apps'), storage: { client, bucket } });
-  const {
-    reconcileApps,
-    meterAppTraffic,
-    meterAppUsage: _meterWindow,
-    ...activities
-  } = createAppActivities({
+  const work: AppWork = {
     transact,
     platform,
     objects,
     publisher: selectAppPublisher(env, objects, platform),
     builder: appBuilder(),
+    host: appHost(),
     credits: creditGate(),
     source: async (workspaceId, appId, commit) =>
       repositories.open(
@@ -67,10 +64,18 @@ export function createAppComposition(options: {
       yield* seen;
     },
     enabled: workspaceId => isFeatureEnabled('app-hosting', null, { id: workspaceId }),
-  });
+  };
+  const { reconcileApps, meterAppTraffic, meterAppUsage: _meterWindow, ...activities } = createAppActivities(work);
+  const { reconcileAppServers, ...serverActivities } = createAppServerActivities(work);
   return {
-    activities,
-    reconcile: reconcileApps,
+    activities: { ...activities, ...serverActivities },
+    /** Repairs static delivery and server hosts; one failing does not stop the other. */
+    async reconcile(signal: AbortSignal) {
+      const failures = (await Promise.allSettled([reconcileApps(signal), reconcileAppServers(signal)]))
+        .filter(result => result.status === 'rejected')
+        .map(result => result.reason);
+      if (failures.length) throw new AggregateError(failures, 'App reconcile failed');
+    },
     /** Meters the settled hours no run has recorded yet. */
     async meter(signal: AbortSignal, now = Date.now()) {
       const unread = await meterAppTraffic(now, signal);

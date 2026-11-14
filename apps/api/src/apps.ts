@@ -9,6 +9,7 @@ import {
   appSlugSchema,
   readAppRecipe,
   recipeBuilder,
+  type AppBuilders,
   type AppBuildId,
   type AppId,
   type AppName,
@@ -35,6 +36,7 @@ import {
   readOperation,
   readRelease,
   readSourceBundles,
+  runsServer,
   readStagedChanges,
   requestBuild,
   restoreAppVersion,
@@ -91,7 +93,14 @@ import { requestBoundaryError } from './security.ts';
 
 type Runtime = Pick<ReturnType<typeof createWorkspaceRuntime>, 'transaction'>;
 
-export type AppWorkflow = 'appBuild' | 'appPublish' | 'appRollback' | 'appProjectEdge';
+export type AppWorkflow =
+  | 'appBuild'
+  | 'appPublish'
+  | 'appRollback'
+  | 'appProjectEdge'
+  | 'appServerPublish'
+  | 'appServerRollback'
+  | 'appServerResize';
 
 export type AppRouteDependencies = {
   readonly auth: { api: Pick<ReturnType<typeof registerAuth>['auth']['api'], 'getSession'> };
@@ -103,8 +112,8 @@ export type AppRouteDependencies = {
   /** The app source cache, or null when no apps bucket is configured. */
   readonly repositories: AppRepositories | null;
   readonly publisher: () => AppPublisher | undefined;
-  /** The registered builder's id, which command recipes build with. */
-  readonly builderId: () => string | undefined;
+  /** The registered builder's ids for command and server recipes. */
+  readonly builders: () => AppBuilders;
   /** The domain public apps are served under, or null when this server does not serve app sites. */
   readonly sitesDomain: string | null;
 };
@@ -180,11 +189,19 @@ export function registerApps(app: FastifyInstance, dependencies: AppRouteDepende
   };
 
   const startRelease = async (workspaceId: string, operation: AppOperation) => {
-    if (operation.status === 'admitted' || operation.status === 'staging')
-      await start(operation.kind === 'publish' ? 'appPublish' : 'appRollback', workflowIds.release(operation), {
-        workspaceId,
-        operationId: operation.id,
-      });
+    if (operation.status !== 'admitted' && operation.status !== 'staging') return;
+    const server = await transaction(workspaceId, tx => runsServer(tx, operation));
+    const workflow: AppWorkflow =
+      operation.kind === 'resize'
+        ? 'appServerResize'
+        : operation.kind === 'publish'
+          ? server
+            ? 'appServerPublish'
+            : 'appPublish'
+          : server
+            ? 'appServerRollback'
+            : 'appRollback';
+    await start(workflow, workflowIds.release(operation), { workspaceId, operationId: operation.id });
   };
 
   const sourceAt = async (workspaceId: string, appId: AppId, commit: GitCommit, tx: AppTransaction) => {
@@ -513,7 +530,7 @@ export function registerApps(app: FastifyInstance, dependencies: AppRouteDepende
           const appJson = await source.repositories.file(source.repository, head, 'app.json');
           const recipe = readAppRecipe(appJson === null ? null : Buffer.from(appJson).toString('utf8'));
           if (!recipe.ok) throw new AppRouteFailure(recipe.failure);
-          const chosen = recipeBuilder(recipe.recipe, dependencies.builderId());
+          const chosen = recipeBuilder(recipe.recipe, dependencies.builders());
           if (!chosen.ok) throw new AppRouteFailure(chosen.failure);
           return requestBuild(tx, {
             appId: params.appId,
