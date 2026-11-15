@@ -9,3 +9,105 @@
 .question-panel [data-slot='form-footer'] {
   padding-top: 4px;
 }
+
+/* New-chat home */
+.home-greeting {
+  position: relative;
+}
+
+.home-greeting::before {
+  position: absolute;
+  inset: -6rem -10rem -4rem;
+  z-index: -1;
+  background:
+    radial-gradient(closest-side at 30% 50%, color-mix(in oklab, var(--primary) 16%, transparent), transparent),
+    radial-gradient(closest-side at 55% 40%, color-mix(in oklab, var(--info) 12%, transparent), transparent);
+  background-size:
+    60% 100%,
+    50% 90%;
+  background-position:
+    0% 50%,
+    60% 0%;
+  background-repeat: no-repeat;
+  content: '';
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .home-greeting::before {
+    animation: home-drift 14s ease-in-out infinite alternate;
+  }
+}
+
+@keyframes home-drift {
+  to {
+    transform: translate3d(4%, 6%, 0) scale(1.08);
+  }
+}
+
+/* Start screen to conversation: the start screen fades away, the composer settles, and a chosen card becomes the sent message. */
+.chat-composer-transition {
+  view-transition-name: chat-composer;
+}
+
+.chat-sent-transition {
+  view-transition-name: chat-sent-prompt;
+}
+
+::view-transition-group(chat-composer),
+::view-transition-group(chat-sent-prompt) {
+  animation-duration: 480ms;
+  animation-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+::view-transition-old(chat-sent-prompt),
+::view-transition-new(chat-sent-prompt) {
+  height: 100%;
+  object-fit: none;
+  object-position: center;
+}
+
+::view-transition-old(chat-sent-prompt) {
+  animation: home-out 200ms ease-out both;
+}
+
+::view-transition-new(chat-sent-prompt) {
+  animation: home-in 280ms ease-out 120ms both;
+}
+
+::view-transition-new(chat-sent-prompt):only-child {
+  animation: chat-sent-in 420ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.chat-timeline-transition {
+  view-transition-name: chat-timeline;
+}
+
+::view-transition-old(chat-timeline) {
+  animation: home-out 220ms ease-out both;
+}
+
+::view-transition-new(chat-timeline) {
+  animation: home-in 320ms ease-out 80ms both;
+}
+
+@keyframes chat-sent-in {
+  from {
+    opacity: 0;
+    transform: translateY(24px) scale(0.96);
+  }
+}
+
+@keyframes home-out {
+  to {
+    opacity: 0;
+    transform: scale(0.98);
+    filter: blur(4px);
+  }
+}
+
+@keyframes home-in {
+  from {
+    opacity: 0;
+  }
+}

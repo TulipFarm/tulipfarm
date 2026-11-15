@@ -103,6 +103,12 @@ function installBudMock() {
     brands: [],
     action: { kind: 'prompt', prompt: label },
   }));
+  // Kept in sessionStorage so a chat sent from the start screen survives a reload.
+  const storageKey = 'bud-mock-chats';
+  const newChats = new Map<string, { chat: typeof chat; messages: ConversationMessage[] }>(
+    JSON.parse(sessionStorage.getItem(storageKey) ?? '[]'),
+  );
+  const saveChats = () => sessionStorage.setItem(storageKey, JSON.stringify([...newChats]));
   let recommendationReads = 0;
   const messages: ConversationMessage[] = [];
   const message = (author: 'human' | 'assistant', text: string) =>
@@ -190,8 +196,7 @@ function installBudMock() {
     const googleResponse = await googleMock?.(url, method, input, init);
     if (googleResponse) return googleResponse;
     if (path === '/v1/user/visit') return Response.json({ firstSession: false });
-    if (start && path === '/v1/workspaces/bud-mock/last-used' && method === 'PUT')
-      return new Response(null, { status: 204 });
+    if (path === '/v1/workspaces/bud-mock/last-used' && method === 'PUT') return new Response(null, { status: 204 });
     if (path.endsWith('/bud')) {
       if (method === 'POST') {
         const value =
@@ -234,6 +239,45 @@ function installBudMock() {
           return Response.json({ error: 'not-available-in-bud-demo' }, { status: 400 });
       }
       return Response.json(state);
+    }
+    // New chats live in memory so sending from the start screen opens a real chat page. No model replies.
+    const created = /\/conversations\/([^/]+)(\/messages(?:\/([^/]+))?)?$/.exec(path);
+    if (created && created[1] !== chatId) {
+      const [, newId, messagesPath, messageId] = created;
+      const body = async () =>
+        typeof init?.body === 'string' ? JSON.parse(init.body) : input instanceof Request ? await input.json() : {};
+      if (method === 'PUT' && !messagesPath) {
+        const at = new Date().toISOString();
+        if (!newChats.has(newId!))
+          newChats.set(newId!, {
+            chat: { ...chat, id: newId!, title: 'New chat', titleManual: false, activityAt: at, createdAt: at },
+            messages: [],
+          });
+        saveChats();
+        return Response.json({ id: newId });
+      }
+      const stored = newChats.get(newId!);
+      if (!stored) return Response.json({ error: 'not-found' }, { status: 404 });
+      if (method === 'PUT' && messageId) {
+        const { parts } = (await body()) as { parts: ConversationMessage['parts'] };
+        const text = parts.find(part => part.kind === 'text')?.text ?? '';
+        if (stored.messages.length === 0 && text) stored.chat.title = text.slice(0, 60);
+        stored.messages.push({
+          id: messageId,
+          sequence: stored.messages.length + 1,
+          author: 'human',
+          createdAt: new Date().toISOString(),
+          parts,
+          turn: null,
+          tools: [],
+          calendarResults: [],
+        });
+        saveChats();
+        return Response.json({ messageId, turnId: crypto.randomUUID(), sequence: stored.messages.length });
+      }
+      if (method === 'GET' && messagesPath)
+        return Response.json({ messages: stored.messages, nextBefore: null, hasGitHubProposals: false });
+      if (method === 'GET') return Response.json(stored.chat);
     }
     if (method === 'PUT' && /\/conversations\/[^/]+\/messages\/[^/]+$/.test(path)) {
       return Response.json({ error: 'demo-has-no-live-model' }, { status: 409 });
@@ -281,6 +325,7 @@ function installBudMock() {
       if (path.endsWith('/workspace-mcp/capabilities')) return Response.json({ enabled: false });
     }
     if (path.endsWith('/model-catalog')) return Response.json(catalogFixture());
+    if (path.endsWith('/system-package-installations')) return Response.json({ installations: [], nextCursor: null });
     if (start && path.endsWith('/recommendations')) {
       recommendationReads++;
       if (start === 'loading') await new Promise(resolve => setTimeout(resolve, 2000));
@@ -307,7 +352,11 @@ function installBudMock() {
     if (path.endsWith(`/conversations/${chatId}/messages`))
       return Response.json({ messages, nextBefore: null, hasGitHubProposals: false });
     if (path.endsWith(`/conversations/${chatId}`)) return Response.json(chat);
-    if (path.endsWith('/conversations')) return Response.json({ chats: [chat], nextCursor: null });
+    if (path.endsWith('/conversations'))
+      return Response.json({
+        chats: [...[...newChats.values()].map(stored => stored.chat).reverse(), chat],
+        nextCursor: null,
+      });
     return Response.json({ error: 'not-available-in-bud-demo' }, { status: 404 });
   };
 }

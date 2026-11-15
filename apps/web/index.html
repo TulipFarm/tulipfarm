@@ -47,7 +47,8 @@
         box-sizing: border-box;
       }
       #tf-early aside {
-        width: 244px;
+        /* Matches Sprout's --sidebar-width so the shell doesn't jump when the app takes over. */
+        width: 17.5rem;
         flex: none;
         background: var(--n);
         border-right: 1px solid var(--l);
@@ -69,10 +70,17 @@
         font-size: 13px;
       }
       #tf-early .col {
+        flex: 1;
         width: 100%;
-        max-width: 800px;
-        margin: 102px auto 0;
-        padding: 0 16px;
+        max-width: 816px;
+        margin: 64px auto 0;
+        padding: 0 24px;
+      }
+      #tf-early footer {
+        width: 100%;
+        max-width: 816px;
+        margin: 0 auto;
+        padding: 8px 24px;
       }
       #tf-early i {
         display: block;
@@ -90,14 +98,14 @@
       #tf-early textarea {
         display: block;
         width: 100%;
-        min-height: 80px;
+        height: 40px;
         resize: none;
         border: 0;
         outline: 0;
         background: none;
         color: inherit;
         font: inherit;
-        padding: 12px 14px;
+        padding: 9px 12px;
       }
       #tf-early textarea::placeholder {
         color: var(--m);
@@ -105,7 +113,7 @@
       #tf-early form div {
         display: flex;
         align-items: center;
-        height: 38px;
+        height: 36px;
         padding: 0 10px;
         border-top: 1px solid var(--l);
       }
@@ -123,16 +131,26 @@
       }
       #tf-early p {
         color: var(--m);
-        font-size: 13px;
-        margin: 12px 0 0;
-        min-height: 20px;
+        font-size: 12px;
+        line-height: 16px;
+        text-align: center;
+        margin: 5px 0 0;
+        min-height: 16px;
       }
       @media (max-width: 767px) {
         #tf-early aside {
           display: none;
         }
         #tf-early .col {
-          margin-top: 48px;
+          margin-top: 32px;
+          padding: 0 16px;
+        }
+        #tf-early footer {
+          padding: 8px 12px 12px;
+        }
+        #tf-early p {
+          margin: 0;
+          min-height: 11px;
         }
       }
     </style>
@@ -159,9 +177,10 @@
             bars +
             '</aside>' +
             '<main><header>New chat</header><div class="col">' +
-            '<i style="width:260px;height:20px;margin:0 0 12px"></i><i style="width:320px;margin:0 0 28px"></i>' +
-            '<form><textarea aria-label="Message" placeholder="What would you like to get done?"></textarea>' +
-            '<div><button type="submit" aria-label="Send"></button></div></form><p role="status"></p></div></main>';
+            '<i style="width:min(360px,80%);height:40px;border-radius:10px;margin:4px 0 16px"></i>' +
+            '<i style="width:min(440px,90%);height:28px;border-radius:8px;margin:0"></i></div>' +
+            '<footer><form><textarea rows="1" aria-label="Message" placeholder="What would you like to get done?"></textarea>' +
+            '<div><button type="submit" aria-label="Send"></button></div></form><p role="status"></p></footer></main>';
           document.body.appendChild(shell);
           var form = shell.querySelector('form');
           var input = shell.querySelector('textarea');

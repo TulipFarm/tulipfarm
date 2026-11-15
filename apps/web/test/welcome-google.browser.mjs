@@ -134,7 +134,7 @@ try {
     assert.equal(await page.getByRole('heading', { name: /^Welcome/ }).count(), 0);
     state.session.session.id = 'session-B';
     await page.goto(`${origin}/${second.slug}`);
-    await page.getByRole('heading', { name: 'Welcome back, Maya', exact: true }).waitFor();
+    await page.getByRole('heading', { name: /^(?!Welcome|Glad).*Maya/ }).waitFor();
     state.session = structuredClone(fixture.session);
     state.session.user.name = 'M';
     state.gate = Promise.withResolvers();
@@ -145,21 +145,21 @@ try {
     await input.fill('Keep this draft');
     state.gate.resolve();
     state.gate = null;
-    await page.getByRole('heading', { name: 'Welcome to TulipFarm', exact: true }).waitFor();
+    await page.getByRole('heading', { name: /^(Welcome to TulipFarm|Glad you're here)$/ }).waitFor();
     assert.equal(await input.textContent(), 'Keep this draft');
     await page.reload();
-    await page.getByRole('heading', { name: 'Welcome to TulipFarm', exact: true }).waitFor();
+    await page.getByRole('heading', { name: /^(Welcome to TulipFarm|Glad you're here)$/ }).waitFor();
     await page.goto(`${origin}/${second.slug}`);
-    await page.getByRole('heading', { name: 'Welcome to TulipFarm', exact: true }).waitFor();
+    await page.getByRole('heading', { name: /^(Welcome to TulipFarm|Glad you're here)$/ }).waitFor();
     state.session.session.id = 'returning-session';
     state.session.user.name = 'Maya Smith';
     await page.reload();
-    await page.getByRole('heading', { name: 'Welcome back, Maya', exact: true }).waitFor();
+    await page.getByRole('heading', { name: /^(?!Welcome|Glad).*Maya/ }).waitFor();
     state.session.user.id = 'other-user';
     state.session.session.id = 'other-session';
     state.session.user.name = 'Ana';
     await page.reload();
-    await page.getByRole('heading', { name: 'Welcome, Ana', exact: true }).waitFor();
+    await page.getByRole('heading', { name: /^(Welcome, Ana|Glad you're here, Ana)$/ }).waitFor();
     state.visitStatus = 503;
     await page.reload();
     await heading.waitFor();
@@ -167,7 +167,7 @@ try {
     assert.equal(await input.textContent(), 'Still usable');
     state.visitStatus = 200;
     await page.reload();
-    await page.getByRole('heading', { name: 'Welcome, Ana', exact: true }).waitFor();
+    await page.getByRole('heading', { name: /^(Welcome, Ana|Glad you're here, Ana)$/ }).waitFor();
     await page.screenshot({
       path: new URL(
         `../../../reports/check/welcome-google/welcome-${mobile ? 'mobile-dark' : 'desktop-light'}.png`,

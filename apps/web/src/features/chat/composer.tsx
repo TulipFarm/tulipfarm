@@ -208,7 +208,7 @@ export function Composer({
             onChange={doc => onContentChange({ version: 1, doc })}
             onSend={send}
             toolbarAddon={
-              <div className="flex min-w-0 flex-1 items-center justify-between gap-2">
+              <div className="flex min-h-7 min-w-0 flex-1 items-center justify-between gap-2">
                 <div className="flex min-w-0 items-center gap-0.5">
                   {!compact && !condensed && (
                     <>
