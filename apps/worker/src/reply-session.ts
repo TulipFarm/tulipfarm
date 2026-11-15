@@ -468,7 +468,12 @@ export async function beginReplySession(input: {
       (spent: (credits: number) => void): ToolModelMeter =>
       attempt =>
         meterWith(attempt, spent),
-    sources: contextSources,
+    /**
+     * The sources of what the reply's tools and answer read from its context. The MCP catalog is left out: it is checked
+     * with every model call and recorded as the call's model sources, but tool descriptions are not data from an
+     * integration, so they never become a tool's or the answer's provenance.
+     */
+    sources: () => inventorySources,
     /** Aborted, with the storage failure as its reason, once the reply's lease is lost. */
     leaseSignal: lease.signal,
     /** Settles like the reply, or rejects with the lease's failure as soon as the lease is lost. */

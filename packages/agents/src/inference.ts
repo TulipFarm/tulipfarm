@@ -94,6 +94,7 @@ import {
 } from './native-tools.ts';
 import { isMcpCall, mcpExecutionResultSchema, type McpModelCatalog } from './mcp-contracts.ts';
 import { validateMcpCall } from './mcp-catalog.ts';
+import { mcpCatalogPrompt, outboundRefusal } from './mcp-catalog-egress.ts';
 import { readModelResponse, streamRequestFields, streamUrl, type StreamFormat } from './inference-stream.ts';
 import { containsToolEnvelope, toolTextPreview, writesLayoutCall } from './tool-text.ts';
 import { withoutReasoningMarkup } from './reasoning-markup.ts';
@@ -1517,6 +1518,7 @@ type LoopItem =
 const nativeFrameworkToolNames = new Set(toolNameSchema.options.map(nativeToolName));
 const presentChoiceName = nativeToolName('present.choice');
 const webToolNames = new Set(['web.search', 'web.fetch'].map(nativeToolName));
+const webResultNames = new Set(['web.search', 'web.fetch']);
 const webWithheldPrompt =
   'Web search and page fetching are not available in this reply, because it includes data from a connected MCP integration and TulipFarm does not send that data to outside services. If the person asks for something online, say plainly that web lookups are unavailable here and answer with what you have.';
 const rowAnswerReadTools = new Set(
@@ -1525,7 +1527,13 @@ const rowAnswerReadTools = new Set(
   ),
 );
 /** Why the reply loop returned a tool request unrun, as logged. */
-type ToolRejection = 'render-batch' | 'unknown-tool' | 'invalid-arguments' | 'write-batch' | 'mcp-invalid';
+type ToolRejection =
+  | 'render-batch'
+  | 'unknown-tool'
+  | 'invalid-arguments'
+  | 'write-batch'
+  | 'mcp-invalid'
+  | 'ungrounded-outbound';
 type NativeStep =
   | { kind: 'step'; text: string; calls: NativeCall[]; raw: unknown }
   | { kind: 'failure'; reason: InferenceFailure; rejection?: ResponseRejection };
@@ -4503,6 +4511,8 @@ export async function inferWithTools(
   let previousInventory: string | undefined;
   let catalog: ReturnType<typeof nativeChatTools> | undefined;
   let webWithheld = false;
+  /** The round offers connected MCP tools, so their server-written descriptions are in the model's context. */
+  let mcpOffered = false;
   const activeBuiltinSkills = new Set(tools?.builtinSkills);
   let authoringContextRead = false;
   let authoringDraftMade = false;
@@ -4547,6 +4557,37 @@ export async function inferWithTools(
   const stored = new Map<string, string>();
   const chunksRead = new Set<string>();
   let rereadOffered = false;
+  const outboundRefusals = <T extends { call: FrameworkCall }>(valid: readonly T[]) => {
+    const evidence = outboundEvidence();
+    for (const entry of valid) {
+      const refusal = outboundRefusal(entry.call, evidence);
+      if (refusal) return { ...entry, refusal };
+    }
+    return undefined;
+  };
+  /** What grounds an outbound address while MCP tools are offered: the people's messages and web results only. */
+  const outboundEvidence = () => ({
+    person: sourceMessages
+      .filter(turn => turn.role === 'user')
+      .map(turn => textTurn(turn).text)
+      .join('\n'),
+    web: [
+      ...(tools?.priorToolResults ?? []).flatMap(({ call, output }) =>
+        webResultNames.has(z.object({ tool: z.string() }).safeParse(call).data?.tool ?? '')
+          ? [JSON.stringify(output)]
+          : [],
+      ),
+      ...items.flatMap(item =>
+        item.kind === 'results'
+          ? item.results.flatMap(entry =>
+              webToolNames.has(entry.name) && !entry.error && entry.compacted !== 'summary'
+                ? [(entry.ref && stored.get(entry.ref)) || entry.output]
+                : [],
+            )
+          : [],
+      ),
+    ].join('\n'),
+  });
   /** The provider's prompt tokens for the last reply round, and that request's measure. */
   let baseline: (RequestMeasure & { tokens: number }) | undefined;
   /** The last reply-round request's measure, so a rejected one can recalibrate the estimate. */
@@ -4601,6 +4642,7 @@ export async function inferWithTools(
     ...chatSystemBlocks(tools?.projectInstructions, tools?.chatFiles),
     ...(catalog?.discovery ? [catalog.discovery] : []),
     ...(webWithheld ? [webWithheldPrompt] : []),
+    ...(mcpOffered ? [mcpCatalogPrompt] : []),
     ...(tools?.agentBuilderUrl && activeBuiltinSkills.has('agent-authoring')
       ? [
           `If an agent setup cannot be prepared, say why plainly at the first failed prerequisite, stop without repeated helpers, and link to [Configure manually](${tools.agentBuilderUrl}). Do not expose internal tool names.`,
@@ -4924,6 +4966,7 @@ export async function inferWithTools(
         await tools?.beforeRound?.();
         const mcp = await observeChatDetail('catalog', async () => tools?.catalog?.());
         webWithheld = (await tools?.webWithheld?.()) ?? false;
+        mcpOffered = Boolean(mcp?.tools.length || mcp?.discovery);
         const currentCatalogKey = observeChatDetailSync('serialize', () => catalogKey(mcp));
         const personalMemory =
           tools?.projectInstructions === undefined
@@ -6160,6 +6203,16 @@ export async function inferWithTools(
         ),
         'mcp-invalid',
         [mcpFailure.call.tool],
+      );
+      continue;
+    }
+    // With MCP data in context the web tools are withheld and every send is refused as MCP egress instead.
+    const ungrounded = mcpOffered && !webWithheld ? outboundRefusals(valid) : undefined;
+    if (ungrounded) {
+      reject(
+        valid.map(({ native }) => result(native, native === ungrounded.native ? ungrounded.refusal : notRun, true)),
+        'ungrounded-outbound',
+        [ungrounded.call.tool],
       );
       continue;
     }
