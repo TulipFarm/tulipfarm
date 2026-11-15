@@ -239,6 +239,53 @@ test('the integrations directory lists every app with one action per row', { tim
       await community.waitFor({ state: 'detached' });
     });
 
+    await t.test('Bud keeps its floating pill sizing and drag affordance', async () => {
+      const launcher = page.getByRole('button', { name: /Open quick chat$/ });
+      assert.equal(await launcher.getAttribute('data-shape'), 'pill');
+      assert.equal((await launcher.boundingBox()).height, 48);
+      assert.deepEqual(
+        await launcher.evaluate(element => {
+          const style = getComputedStyle(element);
+          return [style.paddingInlineStart, style.paddingInlineEnd, style.touchAction, style.borderRadius];
+        }),
+        ['8px', '16px', 'none', '9999px'],
+      );
+    });
+
+    await t.test('brand and fallback tiles keep row sizing across the phone breakpoint', async () => {
+      const github = row('GitHub').locator('[data-slot="brand-tile"]');
+      await search.fill('ledger');
+      const ledger = page.getByRole('region', { name: 'Community' }).getByRole('listitem');
+      const fallback = ledger.locator('[data-slot="brand-tile"]');
+      await fallback.waitFor();
+      for (const [width, size] of [
+        [639, 40],
+        [640, 48],
+      ]) {
+        await page.setViewportSize({ width, height: 1000 });
+        await page.waitForFunction(({ tile, size }) => tile.getBoundingClientRect().width === size, {
+          tile: await fallback.elementHandle(),
+          size,
+        });
+        assert.equal((await fallback.boundingBox()).width, size);
+        assert.equal((await fallback.boundingBox()).height, size);
+        assert.equal(await fallback.getAttribute('aria-hidden'), 'true');
+        assert.equal((await fallback.innerText()).trim(), 'L');
+        await ledger.getByRole('button', { name: 'Connect Ledger tools', exact: true }).waitFor();
+        await search.fill('');
+        await github.waitFor();
+        assert.equal((await github.boundingBox()).width, size);
+        assert.equal((await github.boundingBox()).height, size);
+        await row('GitHub').getByRole('button', { name: 'Reconnect GitHub', exact: true }).waitFor();
+        assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+        if (!(await search.isVisible())) await page.getByRole('button', { name: 'Search apps', exact: true }).click();
+        await search.fill('ledger');
+        await fallback.waitFor();
+      }
+      await search.fill('');
+      await page.setViewportSize({ width: 1440, height: 1000 });
+    });
+
     assert.deepEqual(errors, []);
   } finally {
     await browser.close();

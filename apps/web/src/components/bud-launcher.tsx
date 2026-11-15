@@ -7,7 +7,8 @@ export function BudLauncher({ docked, ...props }: Omit<ButtonProps, 'size' | 'cl
     <Button
       {...props}
       size="lg"
-      className="h-12 cursor-grab touch-none gap-2 rounded-full ps-2 pe-4 active:cursor-grabbing"
+      shape="pill"
+      className="h-12 cursor-grab touch-none gap-2 ps-2 pe-4 active:cursor-grabbing"
     />
   );
 }

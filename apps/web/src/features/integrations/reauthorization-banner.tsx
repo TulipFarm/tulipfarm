@@ -221,15 +221,18 @@ export function ReauthorizationBanner({ workspaceId, slug }: { workspaceId: stri
   // Narrow screens get one line, so the page keeps its height; the details and controls open in a sheet.
   return (
     <>
-      <NoticeBanner aria-label="Integration authorization">
-        <div className="flex items-center justify-between gap-3">
-          <p role={failed || stale ? 'alert' : 'status'} className="min-w-0 truncate font-medium text-warning">
-            {summary}
-          </p>
+      <NoticeBanner
+        compact="lg"
+        aria-label="Integration authorization"
+        actions={
           <Button variant="link" size="sm" aria-haspopup="dialog" onClick={() => setSheet(true)}>
             Fix
           </Button>
-        </div>
+        }
+      >
+        <p role={failed || stale ? 'alert' : 'status'} className="font-medium text-warning">
+          {summary}
+        </p>
       </NoticeBanner>
       <Sheet open={sheet} onOpenChange={setSheet}>
         <SheetContent side="bottom">

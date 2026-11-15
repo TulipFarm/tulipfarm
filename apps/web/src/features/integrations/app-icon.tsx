@@ -2,10 +2,15 @@ import { useState, type CSSProperties } from 'react';
 import { Plug } from 'reicon-react/icons/Plug';
 import { BrandIcon, BrandTile, type Brand } from '@tulipfarm/sprout/brand-icon';
 
-type Size = 'md' | 'lg' | 'xl';
-const tileShape: Record<Size, string> = { md: 'rounded-lg', lg: 'rounded-xl text-lg', xl: 'rounded-2xl text-2xl' };
-const logoSize: Record<Size, string> = { md: 'size-4', lg: 'size-6', xl: 'size-8' };
-const plugSize: Record<Size, number> = { md: 16, lg: 20, xl: 24 };
+type Size = 'md' | 'lg' | 'xl' | 'row';
+const tileShape: Record<Size, string> = {
+  md: 'rounded-lg',
+  lg: 'rounded-xl text-lg',
+  xl: 'rounded-2xl text-2xl',
+  row: 'rounded-xl text-lg',
+};
+const logoSize: Record<Size, string> = { md: 'size-4', lg: 'size-6', xl: 'size-8', row: 'size-6' };
+const plugSize: Record<Size, number> = { md: 16, lg: 20, xl: 24, row: 20 };
 
 /**
  * An app's logo. Apps without a Sprout glyph get their catalog logo in white on their brand colour, or the first

@@ -600,7 +600,7 @@ function RegistryRow({
   return (
     <>
       <Row
-        icon={<AppIcon tile={{ letter: monogram(entry.name), color: 'var(--muted-foreground)' }} size="lg" />}
+        icon={<AppIcon tile={{ letter: monogram(entry.name), color: 'var(--muted-foreground)' }} size="row" />}
         name={readableName(entry.name)}
         title={entry.name}
         description={
@@ -673,7 +673,7 @@ function Row({
 }) {
   return (
     <div
-      className={`app-row relative flex h-16 items-center gap-3 rounded-2xl px-4 transition-colors sm:h-20 sm:gap-4 ${link ? 'hover:bg-muted/60' : ''}`}
+      className={`relative flex h-16 items-center gap-3 rounded-2xl px-4 transition-colors sm:h-20 sm:gap-4 ${link ? 'hover:bg-muted/60' : ''}`}
     >
       <span className="relative shrink-0">
         {icon}
@@ -909,7 +909,7 @@ function AppRow({
   const action = actionFor(app, status, admin);
   const settings = tabsFor(app, admin).includes('settings') ? ('settings' as const) : undefined;
   const configure = <Configure slug={slug} id={app.id} name={app.name} tab={settings} returnChat={returnChat} />;
-  const icon = <AppIcon brand={app.brand} size="lg" />;
+  const icon = <AppIcon brand={app.brand} size="row" />;
   if (app.provider === 'soon')
     return (
       <Row
@@ -1037,7 +1037,7 @@ function CuratedRow({
   return (
     <>
       <Row
-        icon={<AppIcon brand={app.brand} tile={app.tile} logo={app.logo} size="lg" />}
+        icon={<AppIcon brand={app.brand} tile={app.tile} logo={app.logo} size="row" />}
         name={app.name}
         description={failed ? `Couldn’t connect. ${failed}` : app.tagline}
         tone={failed ? 'error' : 'muted'}
@@ -1113,7 +1113,7 @@ function ServerRow({
         .join(' · ');
   return (
     <Row
-      icon={<AppIcon brand={brand?.brand} tile={brand?.tile} logo={brand?.logo} size="lg" />}
+      icon={<AppIcon brand={brand?.brand} tile={brand?.tile} logo={brand?.logo} size="row" />}
       name={name}
       description={failed ? `Couldn’t connect. ${failed}` : attention ? (brand?.tagline ?? label) : about}
       tone={failed ? 'error' : attention ? 'warning' : server.status === 'discovering' ? 'pending' : 'muted'}

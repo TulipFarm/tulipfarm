@@ -241,9 +241,16 @@ test(
         assert.equal(await banner.evaluate(element => element.scrollWidth <= element.clientWidth), true);
         // Narrow screens keep the banner to one line; its controls open in a sheet.
         await banner.getByText('2 apps need reauthorization', { exact: true }).waitFor();
+        const fix = banner.getByRole('button', { name: 'Fix', exact: true });
+        assert.equal(
+          await fix.evaluate(element => element.parentElement.dataset.slot),
+          'notice-banner-actions',
+          'the compact banner owns the trailing action layout',
+        );
         assert.equal(await banner.getByRole('combobox').count(), 0);
         assert.ok((await banner.boundingBox()).height <= 56, `one-line banner at ${width}`);
-        await banner.getByRole('button', { name: 'Fix', exact: true }).click();
+        await fix.focus();
+        await page.keyboard.press('Enter');
         const sheet = page.getByRole('dialog', { name: '2 apps need reauthorization' });
         assert.equal(
           await sheet.getByRole('combobox', { name: 'Integration to reauthorize' }).innerText(),
@@ -253,6 +260,7 @@ test(
         await shot(`multiple-${width}-${colorScheme}`);
         await page.keyboard.press('Escape');
         await sheet.waitFor({ state: 'detached' });
+        assert.equal(await fix.evaluate(element => document.activeElement === element), true);
       }
       await banner.getByRole('button', { name: 'Fix', exact: true }).click();
       await page.getByRole('dialog').getByRole('button', { name: 'Update permissions' }).click();

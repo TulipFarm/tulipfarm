@@ -231,14 +231,6 @@
   }
 }
 
-/* App rows use a smaller logo on phones, so more of the list fits on the first screen. */
-@media (width < 40rem) {
-  .app-row .sprout-brand-tile[data-size='lg'] {
-    --sprout-brand-tile-size: 2.5rem;
-    padding: 0.5rem;
-  }
-}
-
 @layer base {
   * {
     @apply border-border;
