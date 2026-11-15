@@ -21,7 +21,7 @@ import {
 import { AppHostUnavailableError, type AppHost } from '@tulipfarm/extensions';
 import { clientHeaders, type Client } from './forward.ts';
 import { registerObservability, requestBoundaryError } from './http.ts';
-import { answer, createRelay, rawAnswer, rawStatus, type Destination } from './relay.ts';
+import { answer, clientOf, createRelay, rawAnswer, rawStatus, type Destination } from './relay.ts';
 
 /* oxlint-disable tulipfarm/product-copy -- The paths and message types are a protocol shared with the web shell. */
 export const previewCookie = '__Host-tf_preview';
@@ -324,15 +324,16 @@ export function buildPreviewGateway(dependencies: PreviewGatewayDependencies, se
       url: '/*',
       exposeHeadRoute: false,
       async handler(request, reply) {
+        const client = clientOf(request.raw, serverOptions.trustProxy);
         // A page on another site cannot make a draft act for its editor.
-        if (!safeMethods.has(request.method) && request.headers.origin !== `${request.protocol}://${request.host}`)
+        if (!safeMethods.has(request.method) && request.headers.origin !== `${client.protocol}://${client.host}`)
           return page(reply, shellOrigin, 403, 'This request came from another site');
         const found = await access(request.headers);
         if (found.kind === 'denied') return page(reply, shellOrigin, found.status, found.title);
         if (found.kind === 'server') {
           const { appId, hostRef } = found;
           if (hostRef === null) return page(reply, shellOrigin, 503, notRunning);
-          const forwarded = await relay.request(request, reply, destination(appId, hostRef));
+          const forwarded = await relay.request(request, reply, client, destination(appId, hostRef));
           if (forwarded.kind === 'answer')
             return answer(request, reply, forwarded.answer, {
               retryAfterSeconds: forwarded.retryAfterSeconds,

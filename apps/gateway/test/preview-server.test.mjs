@@ -229,6 +229,31 @@ test('another site cannot send unsafe requests or open WebSockets on the draft',
   assert.equal(upstream.sockets, 0);
 });
 
+test('behind a load balancer a forged forwarded host neither passes the origin check nor reaches the draft', async t => {
+  const { port, upstream } = await previewFor(t, {
+    serverOptions: gatewayServerOptions({ GATEWAY_PROXY_MODE: 'reverse-proxy' }),
+  });
+  const balancer = { 'x-forwarded-for': '192.0.2.10', 'x-forwarded-proto': 'https', 'x-forwarded-host': 'evil.test' };
+
+  const forged = await call(port, {
+    method: 'POST',
+    headers: { ...balancer, origin: 'https://evil.test' },
+    body: 'a=1',
+  });
+  assert.equal(forged.status, 403);
+  assert.equal(upstream.requests, 0);
+
+  const posted = await call(port, { method: 'POST', headers: { ...balancer, origin: `https://${host}` }, body: 'a=1' });
+  assert.equal(posted.status, 200);
+  const switched = await connect(port, { ...balancer, origin: `https://${host}` });
+  assert.equal(switched.status, 101);
+  switched.socket.destroy();
+  const forwarding = seen =>
+    Object.fromEntries(Object.entries(seen).filter(([name]) => name.startsWith('x-forwarded-')));
+  const sent = { 'x-forwarded-for': '192.0.2.10', 'x-forwarded-host': host, 'x-forwarded-proto': 'https' };
+  assert.deepEqual(upstream.seen.map(forwarding), [sent, sent]);
+});
+
 test('the next request after access is lost is denied', async t => {
   const { port, upstream, access } = await previewFor(t);
   assert.equal((await call(port)).status, 200);

@@ -251,6 +251,7 @@ export function createRelay(options: { readonly wakeBudgetMs: number; readonly l
     async request(
       request: FastifyRequest,
       reply: FastifyReply,
+      client: Client,
       destination: Destination,
     ): Promise<
       | { readonly kind: 'response'; readonly response: IncomingMessage }
@@ -258,7 +259,6 @@ export function createRelay(options: { readonly wakeBudgetMs: number; readonly l
     > {
       const wake = wakes(request.method, request.headers);
       const replayable = !hasBody(request.headers);
-      const client: Client = { address: request.ip, protocol: request.protocol, host: request.host };
       const sender = new AbortController();
       reply.raw.once('close', () => {
         if (!reply.raw.writableFinished) sender.abort();
@@ -366,8 +366,11 @@ export function createRelay(options: { readonly wakeBudgetMs: number; readonly l
   };
 }
 
-/** The client of a raw upgrade request, trusting forwarded hops the same way the server options do. */
-export function upgradeClient(request: IncomingMessage, trustProxy: FastifyServerOptions['trustProxy']): Client {
+/**
+ * The client of a request, trusting forwarded hops the same way the server options do. The host is the one the gateway
+ * routed on, never a forwarded one.
+ */
+export function clientOf(request: IncomingMessage, trustProxy: FastifyServerOptions['trustProxy']): Client {
   const trusted = typeof trustProxy === 'function' ? trustProxy : () => trustProxy === true;
   const forwardedFor = String(request.headers['x-forwarded-for'] ?? '')
     .split(',')

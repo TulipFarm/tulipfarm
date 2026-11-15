@@ -3,7 +3,7 @@ import type { Duplex } from 'node:stream';
 import Fastify, { LogController, type FastifyInstance, type FastifyServerOptions } from 'fastify';
 import { buildPreviewGateway, previewKeyOf, routePreviewHosts, type PreviewGatewayDependencies } from './preview.ts';
 import { appNameOf, buildPublicAppsGateway, routePublicAppHosts, type PublicAppsDependencies } from './public-apps.ts';
-import { rawAnswer, upgradeClient } from './relay.ts';
+import { clientOf, rawAnswer } from './relay.ts';
 
 export type GatewayOptions = {
   readonly preview: PreviewGatewayDependencies;
@@ -37,9 +37,9 @@ export function buildGateway({
   if (apps && publicApps) routePublicAppHosts(server, publicApps.http, apps.domain);
   server.server.on('upgrade', (request: IncomingMessage, socket: Duplex, head: Buffer) => {
     if (previewKeyOf(request.headers.host, preview.domain))
-      return void drafts.upgrade(request, socket, head, upgradeClient(request, previewServerOptions.trustProxy));
+      return void drafts.upgrade(request, socket, head, clientOf(request, previewServerOptions.trustProxy));
     if (apps && publicApps && appNameOf(request.headers.host, apps.domain) !== undefined)
-      return void publicApps.upgrade(request, socket, head, upgradeClient(request, serverOptions.trustProxy));
+      return void publicApps.upgrade(request, socket, head, clientOf(request, serverOptions.trustProxy));
     rawAnswer(socket, 'not-found');
   });
   server.addHook('onRequest', async (_request, reply) => {
