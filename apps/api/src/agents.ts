@@ -1,17 +1,12 @@
 import type { FastifyInstance } from 'fastify';
 import { authenticateRoutes } from './authenticated-routes.ts';
 import { routeValidation } from './route-validation.ts';
-import { backgroundSweep, readyWorkspaces } from './background-sweep.ts';
+import type { AgentWork } from './agent-sweeps.ts';
 import { z } from 'zod';
 import { AccessDenied, SourceAuthorizationUnavailable, uuidSchema } from '@tulipfarm/access';
 import { createAgentAuthoring } from '@tulipfarm/agents/authoring';
 import { createSavedAgentService } from '@tulipfarm/agents/saved-service';
-import {
-  createAgentChat,
-  retryModelSchema,
-  retryModelReceiptSchema,
-  type ModelContinuity,
-} from '@tulipfarm/agents/chat';
+import { retryModelSchema, retryModelReceiptSchema } from '@tulipfarm/agents/chat';
 import { chatInputSchema, chatReceiptSchema, chatStatusSchema } from '@tulipfarm/agents/chat-contracts';
 import { executionPolicySchema, maximumTaskLimits, scopeSchema, taskLimitsSchema } from '@tulipfarm/agents/contracts';
 import {
@@ -56,11 +51,7 @@ import {
   modelAvailabilityCommandSchema,
   modelAvailabilityReceiptSchema,
 } from '@tulipfarm/agents/model-policy-contracts';
-import { createIntegrationService, integrationCredentialKeyring } from '@tulipfarm/integrations';
-import { googleOperations } from './google-composition.ts';
-import { slackActionsFromEnvironment } from '@tulipfarm/agents/slack-environment';
 import { definitionSharingCandidatesSchema } from '@tulipfarm/agents/saved-contracts';
-import { createAgentSetup, type AgentSetupOptions } from '@tulipfarm/agents/setup';
 import {
   agentLinkedWorkflowSchema,
   agentSetupDraftSchema,
@@ -75,9 +66,8 @@ export function registerAgents(
     auth: ReturnType<typeof registerAuth>['auth'];
     runtime: WorkspaceRuntime;
     pool: Pool;
-    agentModel?: ModelContinuity | null | undefined;
     modelFamilyEligibility?: ModelFamilyEligibility | undefined;
-    agentSetup?: AgentSetupOptions | undefined;
+    work: AgentWork;
   },
 ) {
   let storage: ReturnType<typeof soulStorageConfig> | undefined =
@@ -93,60 +83,7 @@ export function registerAgents(
   const models = createModelPolicyService(dependencies.runtime, dependencies.modelFamilyEligibility);
   const compaction = createCompactionPolicyService(dependencies.runtime, dependencies.modelFamilyEligibility);
   const images = createImageSettingsService(dependencies.runtime);
-  const setup = createAgentSetup(dependencies.runtime, dependencies.modelFamilyEligibility, dependencies.agentSetup);
-  const chat = createAgentChat(
-    dependencies.runtime,
-    dependencies.agentModel ?? null,
-    {
-      readIssue: (workspaceId, actor, input) =>
-        createIntegrationService({ runtime: dependencies.runtime, keyring: integrationCredentialKeyring() }).readIssue(
-          workspaceId,
-          actor,
-          input,
-        ),
-    },
-    googleOperations,
-    undefined,
-    slackActionsFromEnvironment(),
-  );
-  let after: string | null = null;
-  async function sweepChat(stopped: () => boolean) {
-    const rows = await readyWorkspaces(dependencies.pool, after, 20);
-    await Promise.all(
-      rows.map(async row => {
-        if (stopped()) return;
-        try {
-          const [id] = await chat.pending(row.workspace_id);
-          if (id && !stopped()) await chat.processTurn(row.workspace_id, id);
-        } catch {
-          app.log.error({ workspaceId: row.workspace_id }, 'Agent chat will retry');
-        }
-      }),
-    );
-    after = rows.length < 20 ? null : (rows.at(-1)?.workspace_id ?? null);
-  }
-  backgroundSweep(app, sweepChat, 'Agent chat discovery will retry', 'agent-chat-discovery', { immediate: false });
-  let setupAfter: string | null = null;
-  backgroundSweep(
-    app,
-    async stopped => {
-      const rows = await readyWorkspaces(dependencies.pool, setupAfter, 20);
-      for (const row of rows) {
-        if (stopped()) return;
-        try {
-          for (const command of await setup.pending(row.workspace_id)) {
-            if (stopped()) return;
-            await setup.advance(row.workspace_id, command.user_id, command.id);
-          }
-        } catch {
-          app.log.error({ workspaceId: row.workspace_id }, 'Agent setup will retry');
-        }
-      }
-      setupAfter = rows.length < 20 ? null : (rows.at(-1)?.workspace_id ?? null);
-    },
-    'Agent setup discovery will retry',
-    'agent-setup-discovery',
-  );
+  const { setup, chat } = dependencies.work;
   const origin = authConfig().webOrigin;
   const workspace = z.object({ workspaceId: uuidSchema });
   const agent = workspace.extend({ agentId: uuidSchema });

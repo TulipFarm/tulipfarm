@@ -2,7 +2,6 @@ import { createHash, randomUUID } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { z } from 'zod';
 import { parse } from 'csv-parse';
-import ExcelJS from 'exceljs';
 import { fromBuffer, type Entry } from 'yauzl';
 import {
   AccessDenied,
@@ -707,7 +706,7 @@ export async function fitFileImportSelection(
       'invalid-selection',
     );
   } else {
-    const workbook = new ExcelJS.Workbook();
+    const workbook = new (await import('exceljs')).default.Workbook();
     await checkArchive(bytes);
     await workbook.xlsx.read(Readable.from([Buffer.from(bytes)])).catch(() => {
       throw new TableImportError('malformed-file');
@@ -929,7 +928,7 @@ async function fileCells(
         }
     } else {
       await checkArchive(bytes);
-      const workbook = new ExcelJS.Workbook();
+      const workbook = new (await import('exceljs')).default.Workbook();
       await workbook.xlsx.read(Readable.from([Buffer.from(bytes)]));
       const sheet = workbook.getWorksheet(selection.sheet);
       if (!sheet) throw new TableImportError('invalid-selection');

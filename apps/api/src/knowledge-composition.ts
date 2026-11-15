@@ -1,140 +1,49 @@
 import type { FastifyInstance } from 'fastify';
-import { createFiles } from '@tulipfarm/files';
-import {
-  createConversationKnowledge,
-  createLocalKnowledge,
-  KnowledgeError,
-  type LocalKnowledgeOptions,
-} from '@tulipfarm/knowledge';
-import { parseKnowledgeEmbeddingsConfig } from '@tulipfarm/config';
-import {
-  createKnowledgeAgentTools,
-  createKnowledgeEmbeddings,
-  createKnowledgeSearch,
-  createKnowledgeSourceFailures,
-} from '@tulipfarm/knowledge';
-import { createKnowledgeEmbeddingCapacity } from '@tulipfarm/knowledge/embedding-capacity';
-import type { Pool } from 'pg';
-import { registerKnowledge } from './knowledge.ts';
-import { registerKnowledgeEmbeddingDispatch } from './knowledge-embedding-dispatch.ts';
-import type { createTemporalClient } from './temporal.ts';
-import { createGoogleWorkspaceService } from '@tulipfarm/google-workspace';
-import { createGoogleCorpusProvider } from '@tulipfarm/google-workspace/corpus';
-import { createGoogleKnowledge } from '@tulipfarm/knowledge';
+import { createKnowledgeAgentTools, createKnowledgeSourceFailures, KnowledgeError } from '@tulipfarm/knowledge';
+import { defaultKnowledgeFlagEnabled } from '@tulipfarm/knowledge';
 import { AccessDenied, lockAuthorization, resolveHuman, uuidSchema } from '@tulipfarm/access';
 import { qualified, commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import { z } from 'zod';
+import { registerKnowledge } from './knowledge.ts';
+import type { createTemporalClient } from './temporal.ts';
 import { googleDocumentsResponseSchema, googleMembersSchema, registerGoogleKnowledge } from './knowledge-google.ts';
-import { registerGoogleKnowledgeDispatch } from './knowledge-google-dispatch.ts';
-import { createSlackKnowledge, type SlackCorpusProvider } from '@tulipfarm/knowledge';
-import { slackCorpusFromEnvironment } from '@tulipfarm/slack/corpus';
 import { registerSlackKnowledge, slackDocumentsResponseSchema } from './knowledge-slack.ts';
-import { registerSlackKnowledgeDispatch } from './knowledge-slack-dispatch.ts';
-import { createGitHubKnowledge, type GitHubCorpusProvider } from '@tulipfarm/knowledge';
-import { githubCorpusFromEnvironment } from '@tulipfarm/github/corpus';
 import { registerGitHubKnowledge, githubDocumentsResponseSchema } from './knowledge-github.ts';
-import { registerGitHubKnowledgeDispatch } from './knowledge-github-dispatch.ts';
-import {
-  githubKnowledgeEventsFromEnvironment,
-  registerGitHubKnowledgeEvents,
-  type GitHubWorkflowFanOut,
-} from './knowledge-github-events.ts';
+import { registerGitHubKnowledgeEvents, type GitHubWorkflowFanOut } from './knowledge-github-events.ts';
 import { registerGitHubDeliveryRetention } from './github-delivery-retention.ts';
-import { createAtlassianKnowledge, type AtlassianCorpusProvider } from '@tulipfarm/knowledge';
-import { atlassianCorpusFromEnvironment } from '@tulipfarm/atlassian/corpus';
 import { atlassianDocumentsResponseSchema, registerAtlassianKnowledge } from './knowledge-atlassian.ts';
-import { registerAtlassianKnowledgeDispatch } from './knowledge-atlassian-dispatch.ts';
-import {
-  createDefaultKnowledge,
-  createDefaultKnowledgeGate,
-  defaultKnowledgeFlagEnabled,
-  type DefaultKnowledge,
-} from '@tulipfarm/knowledge';
 import { registerDefaultKnowledge } from './knowledge-defaults.ts';
-import { registerDefaultKnowledgeDispatch, type defaultKnowledgeStarter } from './knowledge-defaults-dispatch.ts';
+import {
+  createKnowledgeServices,
+  registerKnowledgeSweeps,
+  type KnowledgeServiceDependencies,
+  type KnowledgeServices,
+} from './knowledge-services.ts';
 
 export function registerKnowledgeComposition(
   app: FastifyInstance,
-  dependencies: {
+  dependencies: KnowledgeServiceDependencies & {
     auth: Parameters<typeof registerKnowledge>[1]['auth'];
-    runtime: LocalKnowledgeOptions['runtime'];
-    files?: LocalKnowledgeOptions['files'];
-    pool?: Pool;
     temporal?: ReturnType<typeof createTemporalClient>;
-    env?: NodeJS.ProcessEnv;
-    provider?: Parameters<typeof createKnowledgeEmbeddings>[0]['provider'];
-    /** Whether document-vision recognition could run for a workspace now; lets dispatch re-parse unread images. */
-    recognitionAvailable?: LocalKnowledgeOptions['recognitionAvailable'];
-    googleService?: ReturnType<typeof createGoogleWorkspaceService>;
-    providerFetch?: typeof fetch;
-    slackCorpus?: SlackCorpusProvider;
-    githubCorpus?: GitHubCorpusProvider;
-    atlassianCorpus?: AtlassianCorpusProvider;
-    defaultKnowledge?: ReturnType<typeof defaultKnowledgeStarter>;
     githubWorkflowFanOut?: GitHubWorkflowFanOut;
   },
 ) {
-  const gate = createDefaultKnowledgeGate({ runtime: dependencies.runtime });
-  const unavailable = async (): Promise<never> => {
-    throw new KnowledgeError('adapter-required');
-  };
-  const files =
-    dependencies.files ??
-    createFiles(dependencies.runtime, { read: unavailable, putIfAbsent: unavailable, remove: unavailable });
-  const service = createLocalKnowledge({
-    runtime: dependencies.runtime,
-    files,
-    ...(dependencies.recognitionAvailable ? { recognitionAvailable: dependencies.recognitionAvailable } : {}),
-  });
-  const conversations = createConversationKnowledge({ runtime: dependencies.runtime });
-  const google = createGoogleKnowledge({
-    runtime: dependencies.runtime,
-    provider: createGoogleCorpusProvider({
-      service:
-        dependencies.googleService ??
-        createGoogleWorkspaceService({
-          runtime: dependencies.runtime,
-          ...(dependencies.providerFetch ? { providerFetch: dependencies.providerFetch } : {}),
-        }),
-      ...(dependencies.providerFetch ? { providerFetch: dependencies.providerFetch } : {}),
-    }),
-    gate,
-  });
-  const slack = createSlackKnowledge({
-    runtime: dependencies.runtime,
-    provider:
-      dependencies.slackCorpus ??
-      slackCorpusFromEnvironment({
-        runtime: dependencies.runtime,
-        ...(dependencies.env ? { env: dependencies.env } : {}),
-      }),
-    gate,
-  });
-  const github = createGitHubKnowledge({
-    runtime: dependencies.runtime,
-    provider:
-      dependencies.githubCorpus ??
-      githubCorpusFromEnvironment({
-        runtime: dependencies.runtime,
-        ...(dependencies.env ? { env: dependencies.env } : {}),
-      }),
-    gate,
-  });
-  const atlassian = createAtlassianKnowledge({
-    runtime: dependencies.runtime,
-    provider:
-      dependencies.atlassianCorpus ??
-      atlassianCorpusFromEnvironment({
-        runtime: dependencies.runtime,
-        ...(dependencies.env ? { env: dependencies.env } : {}),
-      }),
-    gate,
-  });
-  const defaults: DefaultKnowledge = createDefaultKnowledge({
-    runtime: dependencies.runtime,
-    engines: { google, slack, github, atlassian },
-  });
-  dependencies.defaultKnowledge?.attach(defaults);
+  const services = createKnowledgeServices(dependencies);
+  registerKnowledgeRoutes(app, dependencies, services);
+  if (dependencies.pool && dependencies.temporal)
+    registerKnowledgeSweeps(app, { pool: dependencies.pool, temporal: dependencies.temporal }, services);
+  return services.service;
+}
+
+export function registerKnowledgeRoutes(
+  app: FastifyInstance,
+  dependencies: Pick<KnowledgeServiceDependencies, 'runtime' | 'pool' | 'env' | 'defaultKnowledge'> & {
+    auth: Parameters<typeof registerKnowledge>[1]['auth'];
+    githubWorkflowFanOut?: GitHubWorkflowFanOut;
+  },
+  services: KnowledgeServices,
+) {
+  const { service, conversations, google, slack, github, atlassian, defaults, embeddings, search } = services;
   async function documentAdapter(workspaceId: string, userId: string, documentId: string) {
     const provider = await dependencies.runtime.transaction(
       uuidSchema.parse(workspaceId),
@@ -203,25 +112,6 @@ export function registerKnowledgeComposition(
         }),
       });
     });
-  const config = parseKnowledgeEmbeddingsConfig(dependencies.env ?? process.env);
-  if (config.kind === 'enabled' && !dependencies.pool)
-    throw new Error('Knowledge embeddings require the application registry pool');
-  const embeddings = createKnowledgeEmbeddings({
-    runtime: dependencies.runtime,
-    config,
-    google,
-    slack,
-    github,
-    atlassian,
-    gate,
-    ...(config.kind === 'enabled' && dependencies.pool
-      ? {
-          ...(dependencies.provider ? { provider: dependencies.provider } : {}),
-          capacity: createKnowledgeEmbeddingCapacity(dependencies.pool).acquire,
-        }
-      : {}),
-  });
-  const search = createKnowledgeSearch({ runtime: dependencies.runtime, embeddings, google, slack, github, atlassian });
   registerKnowledge(app, {
     auth: dependencies.auth,
     service,
@@ -359,8 +249,7 @@ export function registerKnowledgeComposition(
       });
     },
   });
-  const githubEvents = githubKnowledgeEventsFromEnvironment(dependencies.pool, dependencies.env ?? process.env);
-  registerGitHubKnowledgeEvents(app, githubEvents, dependencies.githubWorkflowFanOut);
+  registerGitHubKnowledgeEvents(app, services.githubEvents, dependencies.githubWorkflowFanOut);
   if (dependencies.pool) registerGitHubDeliveryRetention(app, dependencies.pool, dependencies.env ?? process.env);
   registerDefaultKnowledge(app, {
     auth: dependencies.auth,
@@ -368,30 +257,4 @@ export function registerKnowledgeComposition(
     enabled: defaultKnowledgeFlagEnabled,
     ...(dependencies.defaultKnowledge ? { started: dependencies.defaultKnowledge.hook.started } : {}),
   });
-  if (dependencies.pool && dependencies.temporal) {
-    registerDefaultKnowledgeDispatch(app, {
-      pool: dependencies.pool,
-      temporal: dependencies.temporal,
-      service: defaults,
-    });
-    registerKnowledgeEmbeddingDispatch(app, {
-      pool: dependencies.pool,
-      temporal: dependencies.temporal,
-      service: embeddings,
-    });
-    registerGoogleKnowledgeDispatch(app, { pool: dependencies.pool, temporal: dependencies.temporal, service: google });
-    registerSlackKnowledgeDispatch(app, { pool: dependencies.pool, temporal: dependencies.temporal, service: slack });
-    registerGitHubKnowledgeDispatch(app, {
-      pool: dependencies.pool,
-      temporal: dependencies.temporal,
-      service: github,
-      events: githubEvents,
-    });
-    registerAtlassianKnowledgeDispatch(app, {
-      pool: dependencies.pool,
-      temporal: dependencies.temporal,
-      service: atlassian,
-    });
-  }
-  return service;
 }

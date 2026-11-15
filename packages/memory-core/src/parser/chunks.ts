@@ -1,11 +1,17 @@
-import { Tiktoken } from 'js-tiktoken/lite';
-import cl100k from 'js-tiktoken/ranks/cl100k_base';
 import { knowledgeLimits } from '../document-contracts.js';
 import { KnowledgeParseError, parserLimits } from './contracts.js';
 import type { KnowledgeChunk } from './contracts.js';
 
-const tokenizer = new Tiktoken(cl100k);
-const pieces = new RegExp(cl100k.pat_str, 'gu');
+// Building the cl100k tokenizer costs a new process a few hundred milliseconds of CPU, so it loads on first use.
+let encoding: Promise<{ tokenizer: { encode(text: string, allowed: [], disallowed: []): number[] }; pieces: RegExp }>;
+let loaded: Awaited<typeof encoding> | undefined;
+function loadEncoding() {
+  encoding ??= Promise.all([import('js-tiktoken/lite'), import('js-tiktoken/ranks/cl100k_base')]).then(
+    ([{ Tiktoken }, { default: cl100k }]) =>
+      (loaded = { tokenizer: new Tiktoken(cl100k), pieces: new RegExp(cl100k.pat_str, 'gu') }),
+  );
+  return encoding;
+}
 const pieceTokens = new Map<string, number>();
 const pieceCacheLimit = 100_000;
 /** Names the text normalization and chunking below; part of every parser profile. */
@@ -20,6 +26,8 @@ export function countTokens(text: string): number {
  * Stops once the count passes `limit`, so callers that only test a limit skip the rest of the text.
  */
 function countTokensUpTo(text: string, limit: number): number {
+  if (!loaded) throw new Error('The tokenizer is not loaded');
+  const { tokenizer, pieces } = loaded;
   let total = 0;
   for (const [piece] of text.matchAll(pieces)) {
     let tokens = pieceTokens.get(piece);
@@ -57,7 +65,12 @@ interface Section {
   lines: string[];
 }
 
-export function chunkMarkdown(markdown: string): { chunks: KnowledgeChunk[]; tokens: number } {
+export async function chunkMarkdown(markdown: string): Promise<{ chunks: KnowledgeChunk[]; tokens: number }> {
+  await loadEncoding();
+  return chunkLoaded(markdown);
+}
+
+function chunkLoaded(markdown: string): { chunks: KnowledgeChunk[]; tokens: number } {
   if (!fitsTokens(markdown, knowledgeLimits.tokens)) throw new KnowledgeParseError('resource-limited');
   const sections: Section[] = [];
   const headings: { level: number; text: string }[] = [];
@@ -160,15 +173,15 @@ export function chunkMarkdown(markdown: string): { chunks: KnowledgeChunk[]; tok
 }
 
 /** Chunks each located segment separately so every passage keeps the page, slide or sheet it came from. */
-export function chunkSegments(segments: readonly { location: KnowledgeChunk['offset']; markdown: string }[]): {
-  chunks: KnowledgeChunk[];
-  tokens: number;
-} {
+export async function chunkSegments(
+  segments: readonly { location: KnowledgeChunk['offset']; markdown: string }[],
+): Promise<{ chunks: KnowledgeChunk[]; tokens: number }> {
+  await loadEncoding();
   const chunks: KnowledgeChunk[] = [];
   let tokens = 0;
   for (const segment of segments) {
     if (!segment.markdown.trim()) continue;
-    const result = chunkMarkdown(segment.markdown);
+    const result = chunkLoaded(segment.markdown);
     tokens += result.tokens;
     if (tokens > knowledgeLimits.tokens || chunks.length + result.chunks.length > knowledgeLimits.chunksPerRevision)
       throw new KnowledgeParseError('resource-limited');

@@ -215,7 +215,7 @@ test('oversized tables without outer pipes retain column positions and whitespac
   assert.equal(restored, cells[1]);
 });
 
-test('table continuations repeat bounded short cells left-to-right without dropping other columns', () => {
+test('table continuations repeat bounded short cells left-to-right without dropping other columns', async () => {
   const header = '| Customer | Context | Excluded | Terms | Status |\n| --- | --- | --- | --- | --- |';
   const cells = ['Acme', 'small '.repeat(70), 'other '.repeat(60), 'terms 🌻 '.repeat(1200), 'Active'];
   const repeatedTokens = [cells[0], cells[1], cells[4]].reduce(
@@ -224,7 +224,7 @@ test('table continuations repeat bounded short cells left-to-right without dropp
   );
   assert.ok(repeatedTokens <= 100);
   assert.ok(repeatedTokens + encoding.encode(cells[2], [], []).length > 100);
-  const result = chunkMarkdown(`# Contracts\n\n${header}\n|${cells.join('|')}|\n`);
+  const result = await chunkMarkdown(`# Contracts\n\n${header}\n|${cells.join('|')}|\n`);
   const restored = ['', ''];
   assert.ok(result.chunks.length > 2);
   for (const chunk of result.chunks) {
@@ -240,13 +240,13 @@ test('table continuations repeat bounded short cells left-to-right without dropp
   assert.deepEqual(restored, [cells[2], cells[3]]);
 });
 
-test('table context leaves a minimum content margin under large section headings', () => {
+test('table context leaves a minimum content margin under large section headings', async () => {
   const title = '🌻'.repeat(230);
   const header = '| Customer | Terms |\n| --- | --- |';
   const cells = ['customer '.repeat(90), 'terms 🌻 '.repeat(80)];
   assert.ok(encoding.encode(cells[0], [], []).length <= 100);
   assert.ok(encoding.encode(`# ${title}\n\n${header}\n|${cells[0]}||`, [], []).length > 800 - 32);
-  const result = chunkMarkdown(`# ${title}\n\n${header}\n|${cells.join('|')}|\n`);
+  const result = await chunkMarkdown(`# ${title}\n\n${header}\n|${cells.join('|')}|\n`);
   const restored = ['', ''];
   assert.ok(result.chunks.length > 2);
   for (const chunk of result.chunks) {
@@ -260,7 +260,7 @@ test('table context leaves a minimum content margin under large section headings
   assert.deepEqual(restored, cells);
 });
 
-test('token counts match the cl100k_base encoder', () => {
+test('token counts match the cl100k_base encoder', async () => {
   const samples = [
     'Harvest apples on Tuesday.\n\n\n  Keep   every\torchard record. ',
     "We'LL ship it's 12,345.67 units — 日本語 🌻🌻 café\u00a0x",
@@ -268,7 +268,7 @@ test('token counts match the cl100k_base encoder', () => {
     `| a | b |\n| --- | --- |\n${'| cell 🌻 | 42 |\n'.repeat(50)}`,
   ];
   for (const text of samples) {
-    const result = chunkMarkdown(text);
+    const result = await chunkMarkdown(text);
     let total = 0;
     for (const chunk of result.chunks) {
       const expected = encoding.encode(chunk.text, [], []).length;

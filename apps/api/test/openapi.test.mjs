@@ -16,6 +16,7 @@ syncBuiltinESMExports();
 const [
   { buildApp },
   { registerAgents },
+  { createAgentWork },
   { registerAccountDetails },
   { registerGoogleOperations },
   { registerSkills },
@@ -23,6 +24,7 @@ const [
 ] = await Promise.all([
   import('../src/app.ts'),
   import('../src/agents.ts'),
+  import('../src/agent-sweeps.ts'),
   import('../src/account-details.ts'),
   import('../src/google-operations.ts'),
   import('../src/skills.ts'),
@@ -38,7 +40,12 @@ process.env.ANTHROPIC_API_KEY ??= 'test-key';
 
 test('saved-agent and chat routes compile with the aggregate integration tool contracts', async () => {
   const app = Fastify();
-  registerAgents(app, { auth: { api: { getSession: async () => null } }, runtime: {}, pool: {}, agentModel: null });
+  registerAgents(app, {
+    auth: { api: { getSession: async () => null } },
+    runtime: {},
+    pool: {},
+    work: createAgentWork({ runtime: {}, agentModel: null }),
+  });
   try {
     const response = await app.inject(
       '/workspaces/11111111-1111-4111-8111-111111111111/agents/22222222-2222-4222-8222-222222222222/chat/33333333-3333-4333-8333-333333333333',
@@ -72,7 +79,7 @@ test('agent detail responses preserve effective access for each activation', asy
     auth: { api: { getSession: async () => ({ user: { id: 'reader' } }) } },
     runtime: {},
     pool: { query: async () => ({ rows: [] }) },
-    agentModel: null,
+    work: createAgentWork({ runtime: {}, agentModel: null }),
   });
   t.after(() => app.close());
   const response = await app.inject(`/workspaces/${randomUUID()}/agents/${detail.id}`);

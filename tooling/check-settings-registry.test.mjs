@@ -54,7 +54,7 @@ const computedReads = {
     ],
   },
   // Guards that refuse maintenance credentials name declared variables but read none.
-  'apps/api/src/storage-composition.ts': { sites: 1, names: [] },
+  'apps/api/src/storage-services.ts': { sites: 1, names: [] },
   'apps/api/src/workspace-mcp-composition.ts': {
     sites: 1,
     names: ['WORKSPACE_MCP_ADMISSION_ENABLED', 'WORKSPACE_MCP_DISPATCH_ENABLED'],

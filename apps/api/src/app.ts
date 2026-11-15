@@ -1,4 +1,4 @@
-import Fastify, { LogController } from 'fastify';
+import Fastify from 'fastify';
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
 import { registerHealth, registerRoot } from './health.ts';
@@ -10,7 +10,8 @@ import { registerStorageComposition } from './storage-composition.ts';
 import { registerObservability } from './observability.ts';
 import type { ModelContinuity } from '@tulipfarm/agents/chat';
 import type { ModelFamilyEligibility } from '@tulipfarm/agents/model-policy';
-import { registerSecurity, securityServerOptions } from './security.ts';
+import { registerSecurity } from './security.ts';
+import { apiServerOptions } from './server-options.ts';
 import { registerAbuseProtection } from './abuse.ts';
 import { registerModelCatalog, type ModelCatalogDependencies } from './model-catalog.ts';
 import { createModelConfiguration } from './model-configuration.ts';
@@ -48,7 +49,6 @@ import { protectExpectedSession } from './authenticated-routes.ts';
 import { registerApps } from './apps.ts';
 import { appHostingFromEnvironment, temporalAppWorkflows } from './apps-hosting.ts';
 import { routeAppSites } from './apps-sites.ts';
-import { lazySerializers } from './lazy-serializers.ts';
 import { appBuilders } from '@tulipfarm/apps';
 import { appBuilder, appHost } from '@tulipfarm/extensions';
 import type { Pool } from 'pg';
@@ -66,18 +66,7 @@ export function buildApp(
     tokenPlans?: Partial<Record<TokenPlanProvider, TokenPlan | null>>;
   } = {},
 ) {
-  const app = Fastify({
-    ...securityServerOptions(),
-    logger: {
-      serializers: {
-        err: () => ({ type: 'Error', message: 'request_failed', stack: '' }),
-        req: () => ({}),
-        res: () => ({}),
-      },
-    },
-    logController: new LogController({ disableRequestLogging: true }),
-    schemaController: { compilersFactory: { buildSerializer: lazySerializers() } },
-  });
+  const app = Fastify(apiServerOptions());
   let appPlatform: Pick<Pool, 'query'> | undefined;
   const appHosting = appHostingFromEnvironment(process.env, () => appPlatform);
   if (appHosting?.sites) routeAppSites(app, appHosting.sites);

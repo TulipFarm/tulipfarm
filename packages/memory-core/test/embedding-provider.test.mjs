@@ -58,19 +58,19 @@ test('core provider uses the explicit profile without importing host configurati
   });
 });
 
-test('input preparation applies the supplied byte, token, batch and count limits', () => {
-  const prepared = prepareEmbeddingInputs(['hello world'], profile);
+test('input preparation applies the supplied byte, token, batch and count limits', async () => {
+  const prepared = await prepareEmbeddingInputs(['hello world'], profile);
   assert.equal(prepared.inputTokensUpperBound, 2);
   assert.equal(Object.isFrozen(prepared), true);
   assert.equal(Object.isFrozen(prepared.inputs), true);
-  assert.equal(prepareEmbeddingInputs([' x'.repeat(8)], profile).inputTokensUpperBound, 8);
-  assert.equal(prepareEmbeddingInputs(Array(2).fill(' x'.repeat(5)), profile).inputTokensUpperBound, 10);
+  assert.equal((await prepareEmbeddingInputs([' x'.repeat(8)], profile)).inputTokensUpperBound, 8);
+  assert.equal((await prepareEmbeddingInputs(Array(2).fill(' x'.repeat(5)), profile)).inputTokensUpperBound, 10);
   const byteBoundary = `${' '.repeat(63)}x`;
   const beyondByteBoundary = `${' '.repeat(64)}x`;
   assert.equal(Buffer.byteLength(byteBoundary), 64);
   assert.equal(Buffer.byteLength(beyondByteBoundary), 65);
-  assert.doesNotThrow(() => prepareEmbeddingInputs([byteBoundary], profile));
-  assert.doesNotThrow(() => prepareEmbeddingInputs([beyondByteBoundary], { ...profile, maxInputBytes: 65 }));
+  await assert.doesNotReject(prepareEmbeddingInputs([byteBoundary], profile));
+  await assert.doesNotReject(prepareEmbeddingInputs([beyondByteBoundary], { ...profile, maxInputBytes: 65 }));
   for (const inputs of [
     [],
     [''],
@@ -81,7 +81,7 @@ test('input preparation applies the supplied byte, token, batch and count limits
     [' x'.repeat(9)],
     Array(2).fill(' x'.repeat(6)),
   ])
-    assert.throws(() => prepareEmbeddingInputs(inputs, profile), { message: 'Invalid knowledge embedding input' });
+    await assert.rejects(prepareEmbeddingInputs(inputs, profile), { message: 'Invalid knowledge embedding input' });
 });
 
 test('disabled, cancelled and invalid requests cannot dispatch', async () => {
