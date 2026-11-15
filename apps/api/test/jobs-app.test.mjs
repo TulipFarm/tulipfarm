@@ -18,7 +18,7 @@ registerHooks({
 test('neither app loads the Office, tokenizer or image libraries at startup', async () => {
   await import('../src/app.ts');
   const { buildJobsApp } = await import('../src/jobs-app.ts');
-  const app = buildJobsApp();
+  const app = buildJobsApp({ agentModel: null });
   try {
     await app.ready();
   } finally {
@@ -29,7 +29,7 @@ test('neither app loads the Office, tokenizer or image libraries at startup', as
 
 test('the jobs app answers health checks and serves no request routes', async () => {
   const { buildJobsApp } = await import('../src/jobs-app.ts');
-  const app = buildJobsApp();
+  const app = buildJobsApp({ agentModel: null });
   try {
     assert.equal((await app.inject('/')).statusCode, 200);
     assert.equal((await app.inject('/v1/health/live')).statusCode, 200);
