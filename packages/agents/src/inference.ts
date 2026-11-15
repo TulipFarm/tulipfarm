@@ -5511,6 +5511,7 @@ export async function inferWithTools(
       }
       const localCorrection: z.infer<typeof completionCheckSchema>['decision'] | undefined =
         unbacked ?? writeUnbacked ?? idAsked ?? misdescribed;
+      let intentChecked = false;
       let checked: z.infer<typeof completionCheckSchema>['decision'] | undefined =
         fileCheckNeeded || inventoryCheckNeeded() || rowReviewCheckNeeded ? undefined : localCorrection;
       const wordingCheck: ReturnType<typeof leakedWording> =
@@ -5584,6 +5585,7 @@ export async function inferWithTools(
             );
           });
           if (wordingCheck) checked = { ...checked, status: 'continue', reason: wordingCheck.reason };
+          intentChecked = true;
         } catch (error) {
           recordChatCompletionCheck('error');
           if (!(error instanceof ModelCallError) || signal?.aborted) {
@@ -5659,8 +5661,11 @@ export async function inferWithTools(
             'The person explicitly requested rows for review, but this turn has no saved readable row-review receipt. Inspect the table and prepare the requested rows now. Reading the schema needs no extra approval. An unrelated card cannot replace the row review.',
         };
       if (tableCheckNeeded) {
-        rowWriteRequested = checked.rowWriteRequested === true;
-        smallRowBatchRequested = checked.smallRowBatchRequested === true;
+        // Local corrections carry no row intent; only a checker decision may change it.
+        if (intentChecked) {
+          rowWriteRequested = checked.rowWriteRequested === true;
+          smallRowBatchRequested = checked.smallRowBatchRequested === true;
+        }
         const correction = localCorrection ?? tableStateUnchecked;
         if (correction) checked = { ...checked, ...correction };
         const target = tableInventory.length === 1 ? tableInventory[0] : undefined;
