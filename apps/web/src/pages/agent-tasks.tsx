@@ -100,7 +100,7 @@ function TaskRead<T>({
           </Button>
         </ReadError>
       )}
-      refreshing={<p role="status">Refreshing task data…</p>}
+      refreshing={<p role="status" className="sr-only">Refreshing task data…</p>}
     >
       {children}
     </ReadFeedback>
@@ -628,7 +628,7 @@ function RetainedFile({
 }) {
   const api = useMemo(() => conversationApi(workspaceId, () => {}), [workspaceId]);
   const read = useTaskAttachment(api, conversationId, id);
-  if (read.state.kind === 'loading') return <p role="status">Loading retained file…</p>;
+  if (read.state.kind === 'loading') return <p role="status" className="sr-only">Loading retained file…</p>;
   if (read.state.kind !== 'ready')
     return (
       <div>

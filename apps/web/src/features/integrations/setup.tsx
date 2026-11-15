@@ -423,7 +423,7 @@ function CreationGrantEditor({
   return (
     <section className="flex flex-col gap-4" aria-label="Saved creation permissions">
       <UnsavedChanges dirty={additions.length > 0 || removals.length > 0} />
-      {read.state.kind === 'loading' && <p role="status">Loading saved permissions…</p>}
+      {read.state.kind === 'loading' && <p role="status" className="sr-only">Loading saved permissions…</p>}
       {(read.state.kind === 'error' || read.state.kind === 'unavailable') && (
         <p role="alert">Saved permissions could not load. Retry before editing.</p>
       )}

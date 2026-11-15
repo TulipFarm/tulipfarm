@@ -29,7 +29,7 @@ function EntryMedia({ entry }: { entry: SearchEntry }) {
   const Icon = entry.icon ?? PageIcon;
   return (
     <SearchItemIcon>
-      <Icon size={14} aria-hidden="true" />
+      <Icon size={18} aria-hidden="true" />
     </SearchItemIcon>
   );
 }

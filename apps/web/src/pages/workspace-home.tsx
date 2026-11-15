@@ -40,7 +40,7 @@ export function WorkspaceHomePage() {
     new URLSearchParams(window.location.search).get('start') === 'result-cards'
   ) {
     return (
-      <Suspense fallback={<p role="status">Loading result cards...</p>}>
+      <Suspense fallback={<p role="status" className="sr-only">Loading result cards...</p>}>
         <ResultCardsMock />
       </Suspense>
     );

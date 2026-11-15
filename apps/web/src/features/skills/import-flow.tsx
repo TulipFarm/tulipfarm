@@ -203,7 +203,7 @@ export function SkillImportPanel({
       errorTitle="Could not load the review"
       retry={retry}
       refreshError={message => <ReadError message={message}>{retry}</ReadError>}
-      loading={<p role="status">Loading skill review…</p>}
+      loading={<p role="status" className="sr-only">Loading skill review…</p>}
       unavailable={() => (
         <StatePanel kind="unavailable" title="Import not found" description="Check the link, or start a new import.">
           <RestartImport onRestart={onRestart} />

@@ -206,13 +206,10 @@ export function ChatModelStatus({
         </div>
       )}
       {message && (
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
+        <div className={busy ? 'sr-only' : 'flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground'}>
           <p role={failed ? 'alert' : 'status'}>{message}</p>
           {!busy && (
             <>
-              <Button size="sm" variant="outline" onClick={() => void catalog.refresh()}>
-                Retry models
-              </Button>
               {empty && <ModelSetupLink />}
               <Button
                 size="sm"

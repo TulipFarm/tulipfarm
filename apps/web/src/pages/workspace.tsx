@@ -9,18 +9,14 @@ import {
   type ComponentProps,
   type CSSProperties,
 } from 'react';
-import { CalendarDays } from 'lucide-react';
+import { ChevronRight } from 'lucide-react';
 import { Link, Outlet, useLocation, useNavigate, useRouter } from '@tanstack/react-router';
 import { Add } from 'reicon-react/icons/Add';
 import { BranchDown } from 'reicon-react/icons/BranchDown';
-import { Check } from 'reicon-react/icons/Check';
 import { LockKeyhole } from 'reicon-react/icons/LockKeyhole';
 import { ChevronDown } from 'reicon-react/icons/ChevronDown';
 import { ChevronLeft } from 'reicon-react/icons/ChevronLeft';
-import { BookOpen } from 'reicon-react/icons/BookOpen';
-import { Folder } from 'reicon-react/icons/Folder';
 import { Files } from 'reicon-react/icons/Files';
-import { Checklist } from 'reicon-react/icons/Checklist';
 import { Cpu } from 'reicon-react/icons/Cpu';
 import { ChartBar } from 'reicon-react/icons/ChartBar';
 import { Database } from 'reicon-react/icons/Database';
@@ -29,11 +25,9 @@ import { People } from 'reicon-react/icons/People';
 import { Setting2 } from 'reicon-react/icons/Setting2';
 import { ShieldUser } from 'reicon-react/icons/ShieldUser';
 import { User } from 'reicon-react/icons/User';
-import { UserAdd } from 'reicon-react/icons/UserAdd';
 import { UserCircle } from 'reicon-react/icons/UserCircle';
 import { Inbox } from 'reicon-react/icons/Inbox';
 import { Plug } from 'reicon-react/icons/Plug';
-import { Book } from 'reicon-react/icons/Book';
 import { Logout } from 'reicon-react/icons/Logout';
 import { Monitor } from 'reicon-react/icons/Monitor';
 import { Moon } from 'reicon-react/icons/Moon';
@@ -63,7 +57,6 @@ import {
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
-  DropdownMenuShortcut,
   DropdownMenuSub,
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
@@ -84,6 +77,7 @@ import {
   useSidebar,
 } from '@tulipfarm/sprout/sidebar';
 import { SidebarLeft } from 'reicon-react/icons/SidebarLeft';
+import { SidebarRecents } from '@/features/navigation/sidebar-recents';
 import { Window } from 'reicon-react/icons/Window';
 import { TooltipProvider } from '@tulipfarm/sprout/tooltip';
 import { authClient } from '@/lib/auth';
@@ -149,25 +143,22 @@ const settings: Page = { label: 'Settings', to: '/$workspaceSlug/settings', icon
 const account: Page = { label: 'Account', to: '/$workspaceSlug/settings/account', icon: UserCircle };
 const secrets: Page = { label: 'Secrets', to: '/$workspaceSlug/settings/secrets', icon: LockKeyhole };
 const members: Page = { label: 'Members', to: '/$workspaceSlug/members', icon: User };
+const membersAndTeams: Page = { label: 'Members & teams', to: members.to, icon: People };
 const teams: Page = { label: 'Teams', to: '/$workspaceSlug/teams', icon: People };
+const agents: Page = { label: 'Agents', to: '/$workspaceSlug/agents', icon: Users, recent: 'agents' };
 const apps: Page = { label: 'Apps', to: '/$workspaceSlug/apps', icon: Window };
 const workspaceGroups: { label: string; pages: Page[] }[] = [
   {
     label: 'Daily work',
     pages: [
-      { label: 'Calendar', to: '/$workspaceSlug/calendar', icon: CalendarDays },
-      { label: 'Projects', to: '/$workspaceSlug/projects', icon: Folder, recent: 'projects' },
-      { label: 'My agent tasks', to: '/$workspaceSlug/agent-tasks', icon: Checklist, recent: 'agent-tasks' },
     ],
   },
   {
     label: 'Agents & workflows',
     pages: [
-      { label: 'Agents', to: '/$workspaceSlug/agents', icon: Users, recent: 'agents' },
-      { label: 'Skills', to: '/$workspaceSlug/skills', icon: BookOpen },
+      agents,
       { label: 'Workflows', to: '/$workspaceSlug/workflows', icon: BranchDown, recent: 'workflows' },
       apps,
-      { label: 'Packages', to: '/$workspaceSlug/packages', icon: Files },
     ],
   },
   {
@@ -175,7 +166,6 @@ const workspaceGroups: { label: string; pages: Page[] }[] = [
     pages: [
       { label: 'Tables', to: '/$workspaceSlug/tables', icon: Database, recent: 'tables' },
       { label: 'Files', to: '/$workspaceSlug/files', icon: Files, recent: 'files' },
-      { label: 'Knowledge', to: '/$workspaceSlug/knowledge', icon: Book },
       { label: 'Integrations', to: '/$workspaceSlug/integrations', icon: Plug },
     ],
   },
@@ -212,14 +202,12 @@ const usage: Page[] = overrides.get('usage')
   ? [{ label: 'Usage', to: '/$workspaceSlug/settings/usage', icon: ChartBar }]
   : [];
 const soul: Page = { label: 'Soul repository', to: '/$workspaceSlug/settings/soul', icon: Files };
-const administrationPages: Page[] = [
-  members,
-  teams,
-  { label: 'Table access', to: '/$workspaceSlug/grants', icon: ShieldUser },
-];
+const tableAccess: Page = { label: 'Table access', to: '/$workspaceSlug/grants', icon: ShieldUser };
+const administrationPages: Page[] = [members, teams, tableAccess];
 const settingsPages: Page[] = [
   { label: 'General', to: settings.to, icon: Setting2 },
-  ...administrationPages,
+  membersAndTeams,
+  tableAccess,
   models,
   ...usage,
   soul,
@@ -313,7 +301,8 @@ function NavItem({ page }: { page: Page }) {
 function StandardNavItem({ page }: { page: Page }) {
   const { workspace } = workspaceRoute.useRouteContext();
   const { setOpenMobile } = useSidebar();
-  const active = useCurrentPage().to === page.to;
+  const current = useCurrentPage().to;
+  const active = current === page.to || (page === membersAndTeams && current === teams.to);
   const Icon = page.icon;
   return (
     <SidebarMenuItem>
@@ -356,7 +345,6 @@ function MenuAvatar({ seed, name, image, size = 'md', shape = 'circle' }: Compon
 function WorkspaceMenu() {
   const { workspace, workspaces: choices } = workspaceRoute.useRouteContext();
   const { setOpenMobile } = useSidebar();
-  const params = { workspaceSlug: workspace.slug };
   const close = () => setOpenMobile(false);
   return (
     <DropdownMenu>
@@ -375,36 +363,23 @@ function WorkspaceMenu() {
         {workspace.name}
       </DropdownMenuTrigger>
       <DropdownMenuContent size="menu">
-        <DropdownMenuItem render={<Link to={settings.to} params={params} />} onClick={close}>
-          <Setting2 size={14} aria-hidden="true" />
-          Settings<DropdownMenuShortcut>G then S</DropdownMenuShortcut>
-        </DropdownMenuItem>
-        <DropdownMenuItem render={<Link to={members.to} params={params} />} onClick={close}>
-          <UserAdd size={14} aria-hidden="true" />
-          Invite and manage members
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuSub>
-          <DropdownMenuSubTrigger>Switch workspace</DropdownMenuSubTrigger>
-          <DropdownMenuSubContent>
-            {choices.map(item => (
-              <DropdownMenuItem
-                key={item.slug}
-                render={<Link to="/$workspaceSlug" params={{ workspaceSlug: item.slug }} />}
-                onClick={close}
-              >
-                <EntityAvatar seed={item.id} name={item.name} image={item.icon} size="sm" shape="square" />
-                <span className="min-w-0 flex-1 truncate">{item.name}</span>
-                {item.slug === workspace.slug && <Check size={14} aria-label="Current workspace" />}
-              </DropdownMenuItem>
-            ))}
-            <DropdownMenuSeparator />
-            <DropdownMenuItem render={<Link to="/create-workspace" />} onClick={close}>
-              <Add size={14} aria-hidden="true" />
-              Create workspace
+        {choices
+          .filter(item => item.slug !== workspace.slug)
+          .map(item => (
+            <DropdownMenuItem
+              key={item.slug}
+              render={<Link to="/$workspaceSlug" params={{ workspaceSlug: item.slug }} />}
+              onClick={close}
+            >
+              <EntityAvatar seed={item.id} name={item.name} image={item.icon} size="sm" shape="square" />
+              <span className="min-w-0 flex-1 truncate">{item.name}</span>
             </DropdownMenuItem>
-          </DropdownMenuSubContent>
-        </DropdownMenuSub>
+          ))}
+        {choices.length > 1 && <DropdownMenuSeparator />}
+        <DropdownMenuItem render={<Link to="/create-workspace" />} onClick={close}>
+          <Add size={14} aria-hidden="true" />
+          Create workspace
+        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -499,7 +474,12 @@ function ProfileMenu() {
 
 function useSettingsMode() {
   const current = useCurrentPage();
-  return current === account || current === secrets || settingsPages.some(page => page.to === current.to);
+  return (
+    current === account ||
+    current === secrets ||
+    current === teams ||
+    settingsPages.some(page => page.to === current.to)
+  );
 }
 
 function SettingsNavigation() {
@@ -557,24 +537,17 @@ function SettingsNavigation() {
   );
 }
 
-function PeopleNavigation() {
+function PeopleItems() {
   const { workspace, membershipId } = workspaceRoute.useRouteContext();
-  return (
-    <SidebarGroup>
-      <SidebarGroupLabel>People</SidebarGroupLabel>
-      <SidebarMenu>
-        {membershipId && workspace.status === 'ready' && <AdminMembersNavItem key={workspace.id} />}
-        <NavItem page={teams} />
-      </SidebarMenu>
-    </SidebarGroup>
-  );
+  if (!membershipId || workspace.status !== 'ready') return <NavItem page={teams} />;
+  return <AdminPeopleItem key={workspace.id} />;
 }
 
-function AdminMembersNavItem() {
+function AdminPeopleItem() {
   const { workspace } = workspaceRoute.useRouteContext();
   const membership = useOwnMembership(workspace.id);
   const admin = membership.state.kind === 'ready' && membership.state.data.capabilities.manageGovernance;
-  return admin ? <NavItem page={members} /> : null;
+  return <NavItem page={admin ? membersAndTeams : teams} />;
 }
 
 function WorkspaceNavigation({ onSearch }: { onSearch: () => void }) {
@@ -583,6 +556,14 @@ function WorkspaceNavigation({ onSearch }: { onSearch: () => void }) {
   const settingsMode = useSettingsMode();
   const appsEnabled = useFlag('app-hosting');
   usePreloadSidebarCode(workspace.slug);
+  const currentTo = useCurrentPage().to;
+  const morePages = workspacePages.filter(page => page !== agents && (page !== apps || appsEnabled));
+  const inMore = currentTo === members.to || currentTo === teams.to || morePages.some(page => page.to === currentTo);
+  const [more, setMore] = useState(inMore);
+  useEffect(() => {
+    if (inMore) setMore(true);
+  }, [inMore, currentTo]);
+  const moreOpen = more;
   return (
     <Sidebar collapsible="icon" label="Workspace sidebar">
       <>
@@ -601,36 +582,42 @@ function WorkspaceNavigation({ onSearch }: { onSearch: () => void }) {
               <nav aria-label="Workspace navigation">
                 <SidebarGroup>
                   <SidebarMenu>
+                    <NavItem page={newChat} />
                     <SidebarMenuItem>
                       <SidebarMenuButton
                         icon={<Search3 size={16} aria-hidden="true" />}
-                        tooltip="Jump to…"
+                        tooltip="Search"
                         aria-keyshortcuts="Meta+K Control+K"
                         onClick={() => {
                           setOpenMobile(false);
                           onSearch();
                         }}
                       >
-                        Jump to…
+                        Search
                       </SidebarMenuButton>
                     </SidebarMenuItem>
-                    <NavItem page={newChat} />
-                    <NavItem page={chats} />
+                    <StandardNavItem page={chats} />
+                    <StandardNavItem page={agents} />
+                    <SidebarMenuItem>
+                      <SidebarMenuButton
+                        icon={<ChevronRight size={12} aria-hidden="true" className={moreOpen ? 'rotate-90' : ''} />}
+                        aria-expanded={moreOpen}
+                        onClick={() => setMore(!moreOpen)}
+                      >
+                        More
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                    {moreOpen && morePages.map(page => <NavItem key={page.to} page={page} />)}
+                    {moreOpen && <PeopleItems />}
+                    {moreOpen && <NavItem page={settings} />}
                   </SidebarMenu>
                 </SidebarGroup>
-                {workspaceGroups.map(group => (
-                  <SidebarGroup key={group.label}>
-                    <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
-                    <SidebarMenu>
-                      {group.pages
-                        .filter(page => page !== apps || appsEnabled)
-                        .map(page => (
-                          <NavItem key={page.to} page={page} />
-                        ))}
-                    </SidebarMenu>
-                  </SidebarGroup>
-                ))}
-                <PeopleNavigation />
+                {workspace.status === 'ready' && (
+                  <>
+                    <SidebarRecents label="Recents" section="chat" workspaceId={workspace.id} slug={workspace.slug} />
+                    <SidebarRecents label="Recent agents" section="agents" workspaceId={workspace.id} slug={workspace.slug} />
+                  </>
+                )}
               </nav>
             </SidebarContent>
           </>

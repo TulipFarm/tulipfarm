@@ -472,7 +472,7 @@ function RemoteSetup({
                     <p className="text-sm">No saved secrets are set up for this link yet.</p>
                   )
                 ) : (
-                  <p className="text-sm text-muted-foreground">Loading saved secrets…</p>
+                  <p className="sr-only">Loading saved secrets…</p>
                 )}
                 <p id={`${prefix}-secrets-help`} className="text-sm text-muted-foreground">
                   Only secrets set up for this exact link appear here. Add one in Settings › Secrets.

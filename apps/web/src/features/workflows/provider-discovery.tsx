@@ -131,7 +131,7 @@ export function ProviderResourcePicker({
       </div>
       {!token && <p className="text-sm text-muted-foreground">Enter a token to load choices.</p>}
       {parentId === '' && <p className="text-sm text-muted-foreground">Choose the account or site first.</p>}
-      {state === 'loading' && <p role="status">Loading {label.toLowerCase()} choices.</p>}
+      {state === 'loading' && <p role="status" className="sr-only">Loading {label.toLowerCase()} choices.</p>}
       {state === 'ready' && !items.length && (
         <p role="status">
           No choices on this page.{' '}

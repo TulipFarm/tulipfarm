@@ -9,7 +9,7 @@ import { jsonResponse, readJson, requestSignal } from '@/lib/http';
 import { useFeatureRead } from '@/lib/query';
 
 export type RecentSection = 'chat' | 'projects' | 'agents' | 'agent-tasks' | 'workflows' | 'tables' | 'files';
-/** `pinned` chats lead the chat section, ahead of its three most recent chats. */
+/** `pinned` chats lead the chat section, ahead of its fifteen most recent chats. */
 export type RecentItem = { id: string; name: string; pinned?: boolean };
 const recentSchema = z.array(z.object({ id: z.uuid(), name: z.string() })).max(3);
 const domains: Record<RecentSection, string> = {
@@ -49,7 +49,7 @@ export async function loadRecentItems(
       ...pinned.map(chat => ({ id: chat.id, name: chat.title || 'New chat', pinned: true })),
       ...recent.chats
         .filter(chat => !pinned.some(item => item.id === chat.id))
-        .slice(0, 3)
+        .slice(0, 15)
         .map(chat => ({ id: chat.id, name: chat.title || 'New chat' })),
     ];
   }

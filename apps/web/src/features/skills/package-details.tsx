@@ -53,7 +53,7 @@ export function SkillPackageDetails({
         state={read.state}
         errorTitle="Could not read the package source"
         retry={retry}
-        loading={<p role="status">Loading source details…</p>}
+        loading={<p role="status" className="sr-only">Loading source details…</p>}
         unavailable={() => <p role="alert">Source details are unavailable. Your access may have changed.</p>}
         refreshError={message => <ReadError message={message}>{retry}</ReadError>}
       >
@@ -146,7 +146,7 @@ function SkillHistory({ api, id, revision }: { api: ReturnType<typeof skillApi>;
       state={read.state}
       errorTitle="Could not read version history"
       retry={retry}
-      loading={<p role="status">Loading version history…</p>}
+      loading={<p role="status" className="sr-only">Loading version history…</p>}
       unavailable={() => <p role="alert">A retained source or your access to this history is unavailable.</p>}
       refreshError={message => <ReadError message={message}>{retry}</ReadError>}
     >
@@ -204,7 +204,7 @@ function SkillRuntimeStatus({ api, id }: { api: ReturnType<typeof skillApi>; id:
       state={read.state}
       errorTitle="Could not check the script runner"
       retry={retry}
-      loading={<p role="status">Checking script support…</p>}
+      loading={<p role="status" className="sr-only">Checking script support…</p>}
       unavailable={() => <p role="alert">Script support or your access changed.</p>}
       refreshError={message => <ReadError message={message}>{retry}</ReadError>}
     >
