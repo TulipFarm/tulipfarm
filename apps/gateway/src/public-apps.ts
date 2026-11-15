@@ -18,6 +18,8 @@ export type PublicAppsDependencies = {
   readonly host: Pick<AppHost, 'connect'>;
   /** How long a request that may wake an app waits for it before the client is told it is starting. */
   readonly wakeBudgetMs?: number;
+  /** How long a WebSocket may carry nothing from the app before the gateway sends the client a keepalive frame. */
+  readonly keepaliveMs?: number | undefined;
 };
 
 /** What a public name leads to. Static apps are served by the edge, so the gateway has nothing for them. */
@@ -69,6 +71,7 @@ export function buildPublicAppsGateway(dependencies: PublicAppsDependencies, ser
   });
   const relay = createRelay({
     wakeBudgetMs: dependencies.wakeBudgetMs ?? 30_000,
+    keepaliveMs: dependencies.keepaliveMs,
     log: error => gateway.log.error({ err: error }, 'App upgrade failed'),
   });
 
