@@ -170,7 +170,11 @@ function PackageInput({
           )}
         </div>
       )}
-      {read.state.kind === 'loading' && <p role="status" className="sr-only">Loading choices…</p>}
+      {read.state.kind === 'loading' && (
+        <p role="status" className="sr-only">
+          Loading choices…
+        </p>
+      )}
       {read.state.kind === 'ready' && choices.length === 0 && (
         <p className="text-sm text-muted-foreground">
           {kind === 'team'

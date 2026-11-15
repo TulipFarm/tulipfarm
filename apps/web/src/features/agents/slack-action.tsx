@@ -179,7 +179,11 @@ export function SlackAction({
           </p>
         )}
         refreshError={message => <ReadError message={message} />}
-        refreshing={<p role="status" className="sr-only">Refreshing Slack action…</p>}
+        refreshing={
+          <p role="status" className="sr-only">
+            Refreshing Slack action…
+          </p>
+        }
       >
         {value => (
           <>

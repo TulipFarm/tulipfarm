@@ -332,7 +332,9 @@ function WorkflowTask({ workspaceId, taskId }: { workspaceId: string; taskId: st
       </Button>
     </div>
   ) : read.state.kind === 'loading' ? (
-    <p role="status" className="sr-only">Checking linked task...</p>
+    <p role="status" className="sr-only">
+      Checking linked task...
+    </p>
   ) : (
     <div>
       <p>

@@ -37,7 +37,11 @@ export function AgentRead<T>({
         </StatePanel>
       )}
       refreshError={message => <ReadError message={message} />}
-      refreshing={<p role="status" className="sr-only">Refreshing agents…</p>}
+      refreshing={
+        <p role="status" className="sr-only">
+          Refreshing agents…
+        </p>
+      }
     >
       {children}
     </ReadFeedback>

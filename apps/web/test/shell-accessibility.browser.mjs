@@ -272,6 +272,7 @@ for (const mobile of [false, true])
         await launcher.click();
         await page.getByRole('dialog', { name: 'Bud quick chat', exact: true }).waitFor({ state: 'hidden' });
         if (mobile) await toggle.click();
+        await page.getByRole('button', { name: 'More', exact: true }).click();
         await page.getByRole('link', { name: 'Calendar', exact: true }).click();
         await injectAxe(page, '/acme/calendar', page.locator('aside[data-corner="header"]'));
         assert.equal(await launcher.getAttribute('aria-label'), 'Bud. Open quick chat');

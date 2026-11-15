@@ -1,4 +1,12 @@
-import { SidebarGroup, SidebarGroupLabel, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarMenuSkeleton, useSidebar } from '@tulipfarm/sprout/sidebar';
+import {
+  SidebarGroup,
+  SidebarGroupLabel,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarMenuSkeleton,
+  useSidebar,
+} from '@tulipfarm/sprout/sidebar';
 import { useLocation } from '@tanstack/react-router';
 import { itemLink } from './sidebar-nav-item';
 import { useRecentItems, type RecentSection } from './recent-queries';

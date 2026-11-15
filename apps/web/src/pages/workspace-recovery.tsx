@@ -64,7 +64,11 @@ function RecoveryList({ userId }: { userId: string }) {
           description="This tab has no retained workspace commands for your account."
         />
       )}
-      {read.state.kind === 'loading' && <p role="status" className="sr-only">Loading workspace names…</p>}
+      {read.state.kind === 'loading' && (
+        <p role="status" className="sr-only">
+          Loading workspace names…
+        </p>
+      )}
       {(read.state.kind === 'error' || (read.state.kind === 'ready' && read.state.error)) && (
         <StatePanel
           kind="error"

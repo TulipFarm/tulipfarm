@@ -217,7 +217,11 @@ export function AtlassianIntegrations({
               Refresh sources
             </Button>
           </header>
-          {sources.kind === 'loading' && <p role="status" className="sr-only">Loading sources…</p>}
+          {sources.kind === 'loading' && (
+            <p role="status" className="sr-only">
+              Loading sources…
+            </p>
+          )}
           {sources.kind === 'error' && (
             <StatePanel kind="error" title="Could not load sources" description={sources.message}>
               <Button variant="outline" disabled={refreshing} onClick={() => void refresh()}>

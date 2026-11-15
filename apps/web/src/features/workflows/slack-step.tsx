@@ -63,7 +63,9 @@ export function SlackStepControls({
         </SelectContent>
       </Select>
       {read.state.kind === 'loading' ? (
-        <p role="status" className="sr-only">Loading Slack destinations…</p>
+        <p role="status" className="sr-only">
+          Loading Slack destinations…
+        </p>
       ) : read.state.kind === 'error' || read.state.kind === 'unavailable' || read.state.error ? (
         <StatePanel
           kind="unavailable"
@@ -203,14 +205,20 @@ export function WorkflowSlackDestinationLabel({
   return (
     <section aria-label="Verified Slack destination" className="space-y-2">
       {read.state.kind === 'loading' ? (
-        <p role="status" className="sr-only">Checking the exact Slack channel…</p>
+        <p role="status" className="sr-only">
+          Checking the exact Slack channel…
+        </p>
       ) : read.state.kind === 'ready' ? (
         <>
           <p className="font-medium">
             #{read.state.data.name} · Slack workspace {read.state.data.teamId}
           </p>
           <p className="text-sm text-muted-foreground">Channel {read.state.data.channel}</p>
-          {read.state.refreshing && <p role="status" className="sr-only">Checking Slack access…</p>}
+          {read.state.refreshing && (
+            <p role="status" className="sr-only">
+              Checking Slack access…
+            </p>
+          )}
           {read.state.error && <p role="alert">The channel could not be refreshed. Check it again before saving.</p>}
         </>
       ) : (

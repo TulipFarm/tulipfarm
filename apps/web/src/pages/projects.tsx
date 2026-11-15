@@ -164,7 +164,11 @@ function ProjectRead<T>({
           </Button>
         </ReadError>
       )}
-      refreshing={<p role="status" className="sr-only">Refreshing {label}…</p>}
+      refreshing={
+        <p role="status" className="sr-only">
+          Refreshing {label}…
+        </p>
+      }
     >
       {children}
     </ReadFeedback>

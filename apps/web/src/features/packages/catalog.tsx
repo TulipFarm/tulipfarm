@@ -80,7 +80,11 @@ export function SystemPackagesPage() {
           refreshError={message => (
             <ReadError message={`Showing the last loaded catalog. ${message}`}>{retry}</ReadError>
           )}
-          refreshing={<p role="status" className="sr-only">Refreshing packages…</p>}
+          refreshing={
+            <p role="status" className="sr-only">
+              Refreshing packages…
+            </p>
+          }
         >
           {packages => <PublicPackageBrowser packages={packages} />}
         </ReadFeedback>

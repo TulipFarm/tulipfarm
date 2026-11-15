@@ -150,8 +150,7 @@ const apps: Page = { label: 'Apps', to: '/$workspaceSlug/apps', icon: Window };
 const workspaceGroups: { label: string; pages: Page[] }[] = [
   {
     label: 'Daily work',
-    pages: [
-    ],
+    pages: [],
   },
   {
     label: 'Agents & workflows',
@@ -615,7 +614,12 @@ function WorkspaceNavigation({ onSearch }: { onSearch: () => void }) {
                 {workspace.status === 'ready' && (
                   <>
                     <SidebarRecents label="Recents" section="chat" workspaceId={workspace.id} slug={workspace.slug} />
-                    <SidebarRecents label="Recent agents" section="agents" workspaceId={workspace.id} slug={workspace.slug} />
+                    <SidebarRecents
+                      label="Recent agents"
+                      section="agents"
+                      workspaceId={workspace.id}
+                      slug={workspace.slug}
+                    />
                   </>
                 )}
               </nav>

@@ -53,12 +53,7 @@ const destinationIcons = {
   files: <Book size={16} />,
   members: <UserAdd size={16} />,
 };
-const chipTones = [
-  'text-primary-text',
-  'text-info',
-  'text-success',
-  'text-warning',
-];
+const chipTones = ['text-primary-text', 'text-info', 'text-success', 'text-warning'];
 const sourceNames = { google: 'Google', github: 'GitHub', slack: 'Slack' };
 
 export function StartingTasks({ onChoose, disabled }: { onChoose: (prompt: string) => void; disabled: boolean }) {
