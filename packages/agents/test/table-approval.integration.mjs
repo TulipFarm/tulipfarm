@@ -9,7 +9,11 @@ import { workspaceTableMigrations } from '@tulipfarm/workspaces/table-migrations
 import { createTableProposalDecisions } from '@tulipfarm/tables/proposals';
 import { createTableExecution, createTablePublication } from '@tulipfarm/tables/execution';
 import { tableExecutionAccess } from '../../../apps/worker/src/table-access.ts';
-import { createChatTools } from '../src/tools.ts';
+import { createChatTools, readWorkspaceInventory } from '../src/tools.ts';
+import { inferWithTools } from '../src/inference.ts';
+import { nativeRoutes, nativeReply, selectReply, isCompletionRequest, use } from './native-fixture.mjs';
+import { textField } from '../../tables/test/fixture.mjs';
+import { createAgentRecordTools } from '../src/record-tools.ts';
 import { createChatTableProposals, tableProposalOptions } from '../src/table-proposals.ts';
 import { AccessDenied } from '@tulipfarm/access';
 import { createConversationRequests } from '../../conversations/src/requests.ts';
@@ -99,7 +103,7 @@ test('chat table approvals recheck workspace skill access under storage roles', 
       projection: { definition: input.definition },
     }),
   });
-  async function propose(sources = [], approve = true, tableId = randomUUID()) {
+  async function propose(sources = [], approve = true, tableId = randomUUID(), fields = []) {
     const result = (
       await tools.invokeWithSources(
         { workspaceId: ws.id, actor, callId: randomUUID(), origin: { conversationId, turnId, sources } },
@@ -117,7 +121,7 @@ test('chat table approvals recheck workspace skill access under storage roles', 
                   id: tableId,
                   owningTeamId: team,
                   label: `Records ${tableId}`,
-                  fields: [],
+                  fields,
                   uniqueKeys: [],
                 },
                 transforms: { outputs: [] },
@@ -188,6 +192,133 @@ test('chat table approvals recheck workspace skill access under storage roles', 
   });
   await t.test('plain creation applies after approval', async () => {
     await expectCreated(await propose());
+  });
+  await t.test('one and two explicit rows recover after table approval in the same chat', async () => {
+    await db.platform.query(`INSERT INTO ${s}.tf_member_teams(membership_id,team_id) VALUES($1,$2)`, [
+      actor.membershipId,
+      team,
+    ]);
+    try {
+      for (const count of [1, 2]) {
+        const name = textField('Name');
+        const proposal = await propose([], true, randomUUID(), [name]);
+        await expectCreated(proposal);
+        const tableName = `Records ${proposal.tableId}`;
+        const request = `Add ${count} rows to ${tableName}: ${['Rose', 'Pear'].slice(0, count).join(', ')}.`;
+        const nextMessage = randomUUID(),
+          nextTurn = randomUUID();
+        await db.platform.query(
+          `INSERT INTO ${s}.tf_conversation_messages(id,conversation_id,sequence,author_kind,membership_id)
+           VALUES($1,$2,$3,'human',$4)`,
+          [nextMessage, conversationId, count + 1, actor.membershipId],
+        );
+        await db.platform.query(
+          `INSERT INTO ${s}.tf_conversation_parts(conversation_id,message_id,ordinal,kind,text)
+           VALUES($1,$2,0,'text',$3)`,
+          [conversationId, nextMessage, request],
+        );
+        await db.platform.query(
+          `INSERT INTO ${s}.tf_conversation_turns(id,conversation_id,source_message_id,accepted_sequence)
+           VALUES($1,$2,$3,$4)`,
+          [nextTurn, conversationId, nextMessage, count + 1],
+        );
+        const executed = [];
+        let inspection;
+        const fetch = t.mock.method(globalThis, 'fetch', async (_url, init) => {
+          const body = JSON.parse(init.body);
+          if (isCompletionRequest(body))
+            return Response.json(
+              selectReply('azure', {
+                status: executed.includes('rows.create.batch') ? 'completed' : 'waiting',
+                reason: 'The current table details must be looked up.',
+                rowWriteRequested: true,
+                smallRowBatchRequested: true,
+                tableLookupRequired: !inspection,
+              }),
+            );
+          const forced = body.tool_choice?.function?.name;
+          assert.ok(executed.length <= 2, 'the batch is not repeated');
+          return Response.json(
+            nativeReply(
+              'azure',
+              executed.includes('rows.create.batch')
+                ? { text: `${count} rows were added.` }
+                : forced === 'schema_inspect'
+                  ? { calls: [use('schema.inspect', { tableId: proposal.tableId })] }
+                  : forced === 'rows_create_batch'
+                    ? {
+                        calls: [
+                          use('rows.create.batch', {
+                            tableId: proposal.tableId,
+                            expectedAppliedRevision: inspection.appliedRevision,
+                            rows: ['Rose', 'Pear'].slice(0, count).map(value => ({
+                              values: { [name.id]: { kind: 'text', value } },
+                            })),
+                          }),
+                        ],
+                      }
+                    : { text: `What is the exact applied revision for ${tableName}?` },
+            ),
+          );
+        });
+        try {
+          const result = await inferWithTools(
+            { ...nativeRoutes.azure, model: 'grok-4.3' },
+            [
+              { role: 'user', text: `Create ${tableName} with a Name field.` },
+              { role: 'assistant', text: 'The table change is ready for approval.' },
+              { role: 'user', text: 'The table was created.' },
+              { role: 'user', text: request },
+            ],
+            async call => {
+              executed.push(call.tool);
+              const output = (
+                await tools.invokeWithSources(
+                  {
+                    workspaceId: ws.id,
+                    actor,
+                    callId: randomUUID(),
+                    origin: { conversationId, turnId: nextTurn, sources: [] },
+                  },
+                  call,
+                )
+              ).result;
+              assert.equal(output.error, undefined, JSON.stringify(output));
+              if (call.tool === 'schema.inspect') inspection = output;
+              return output;
+            },
+            undefined,
+            false,
+            null,
+            {
+              preloadedTools: ['schema.inspect', 'rows.create.batch'],
+              readWorkspaceInventory: async () => (await readWorkspaceInventory(runtime, ws.id, actor)).inventory,
+              waitingCards: async () => 0,
+            },
+          );
+          assert.equal(result.text, `${count} rows were added.`);
+          assert.deepEqual(executed, ['schema.inspect', 'rows.create.batch']);
+          const page = await createAgentRecordTools(runtime).listRecords(
+            ws.id,
+            actor,
+            proposal.tableId,
+            inspection.appliedRevision,
+            {},
+          );
+          assert.deepEqual(
+            page.records.map(row => row.values[name.id].value).sort(),
+            ['Rose', 'Pear'].slice(0, count).sort(),
+          );
+        } finally {
+          fetch.mock.restore();
+        }
+      }
+    } finally {
+      await db.platform.query(`DELETE FROM ${s}.tf_member_teams WHERE membership_id=$1 AND team_id=$2`, [
+        actor.membershipId,
+        team,
+      ]);
+    }
   });
   await t.test('a readable enabled workspace skill can inform an approved table', async () => {
     await expectCreated(await propose([skill]));
