@@ -860,7 +860,7 @@ export const settings: readonly Setting[] = [
     requirement: 'optional',
     secret: false,
     description:
-      'Parent domain for draft builds, served at <app host key>.<domain> by the gateway, or by the API while the wildcard record points at it. The gateway requires it.',
+      'Parent domain for draft builds, served at <app host key>.<domain> by the gateway. Point the wildcard record at the gateway. The gateway requires it, and the API uses it for the links that open draft builds.',
   },
   {
     name: 'R2_ENDPOINT',

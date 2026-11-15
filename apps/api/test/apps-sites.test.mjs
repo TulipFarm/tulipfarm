@@ -26,7 +26,7 @@ test('app site hosts are answered by the publisher before any shell route', asyn
     },
   };
   const app = Fastify();
-  routeAppSites(app, { publisher, domain: 'apps.example.test', excluded: 'drafts.apps.example.test' });
+  routeAppSites(app, { publisher, domain: 'apps.example.test' });
   app.get('/index.html', async () => 'shell');
   t.after(() => app.close());
 
@@ -50,10 +50,6 @@ test('app site hosts are answered by the publisher before any shell route', asyn
   assert.equal(posted.statusCode, 405);
   assert.equal(posted.headers.allow, 'GET, HEAD');
 
-  assert.equal(
-    (await app.inject({ url: '/index.html', headers: { host: 'k1.drafts.apps.example.test' } })).body,
-    'shell',
-  );
   assert.equal((await app.inject({ url: '/index.html', headers: { host: 'localhost:3000' } })).body, 'shell');
   assert.equal(served.length, 3);
 });

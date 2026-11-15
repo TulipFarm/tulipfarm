@@ -51,8 +51,6 @@ import { routeAppSites } from './apps-sites.ts';
 import { appBuilders } from '@tulipfarm/apps';
 import { appBuilder, appHost } from '@tulipfarm/extensions';
 import type { Pool } from 'pg';
-import { buildPreviewGateway, routePreviewHosts, type PreviewGatewayDependencies } from '@tulipfarm/gateway/preview';
-import { previewGatewayFromEnvironment, type PreviewStorage } from '@tulipfarm/gateway/preview-environment';
 import { registerPreviewTickets } from './app-preview-tickets.ts';
 
 export function buildApp(
@@ -65,8 +63,6 @@ export function buildApp(
     >;
     /** Replaces the Claude and Copilot connections, for tests that must not reach the vendors. */
     tokenPlans?: Partial<Record<TokenPlanProvider, TokenPlan | null>>;
-    /** Replaces what the preview gateway reads; null turns previews off. */
-    previewGateway?: PreviewGatewayDependencies | null;
   } = {},
 ) {
   const app = Fastify({
@@ -80,16 +76,11 @@ export function buildApp(
     },
     logController: new LogController({ disableRequestLogging: true }),
   });
-  let previewStorage: PreviewStorage | undefined;
-  const preview =
-    options.previewGateway === undefined
-      ? previewGatewayFromEnvironment(process.env, authConfig().webOrigin, () => previewStorage)
-      : options.previewGateway;
-  // Until preview hosts route to the gateway service, the API serves their HTTP requests with the same gateway.
-  if (preview) routePreviewHosts(app, buildPreviewGateway(preview, securityServerOptions()).http, preview.domain);
   let appPlatform: Pick<Pool, 'query'> | undefined;
   const appHosting = appHostingFromEnvironment(process.env, () => appPlatform);
-  if (appHosting?.sites) routeAppSites(app, { ...appHosting.sites, excluded: preview?.domain });
+  if (appHosting?.sites) routeAppSites(app, appHosting.sites);
+  // The gateway serves draft builds; the API only issues the tickets that open them.
+  const previewDomain = appHosting && process.env.TULIPFARM_APP_PREVIEW_DOMAIN?.toLowerCase();
   registerObservability(app);
   registerSecurity(app, authConfig().webOrigin);
   const temporal = createTemporalClient();
@@ -153,8 +144,8 @@ export function buildApp(
             builders: () => appBuilders(appBuilder(), appHost()),
             sitesDomain: appHosting?.sites?.domain ?? null,
           });
-          previewStorage = { pool: auth.pool, runtime: storage };
-          if (preview) registerPreviewTickets(business, auth.auth, previewStorage, preview.domain);
+          if (previewDomain)
+            registerPreviewTickets(business, auth.auth, { pool: auth.pool, runtime: storage }, previewDomain);
         }
         registerFeatureFlags(
           business,
