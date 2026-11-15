@@ -1322,6 +1322,11 @@ function ConversationDetail({
                                   followLatest.current = 'inspecting';
                                 }}
                               />
+                              {message.turn?.status === 'waiting' &&
+                                (() => {
+                                  const note = message.tools.filter(tool => tool.narration).at(-1)?.narration;
+                                  return note ? <StepNarration text={note} /> : null;
+                                })()}
                               {message.parts.map((part, index) =>
                                 part.kind === 'request' ? (
                                   <InteractionCard key={index} api={api} chatId={chatId} reference={part} />

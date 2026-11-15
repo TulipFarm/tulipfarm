@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { layoutPreviewHasRoot } from './layout-preview-ready.ts';
 import { A2uiSurface, sproutAdapters, type A2uiAdapterProps, type A2uiOutgoingMessage } from '@tulipfarm/sprout/a2ui';
 import { sproutCatalog } from '@tulipfarm/sprout/a2ui/catalog';
 import { PanelRightIcon } from 'lucide-react';
@@ -360,6 +361,8 @@ export function LayoutPreview({ chatId, turnId, json }: { chatId: string; turnId
         {preview.title ? `Preparing ${preview.title} for Canvas…` : 'Preparing a report for Canvas…'}
       </p>
     );
+  // The surface draws a grey placeholder bar until its root component arrives; show nothing until then.
+  if (!layoutPreviewHasRoot(preview.messages)) return null;
   return (
     <div data-layout="chat" aria-busy="true" className="w-full min-w-0 px-3 py-2">
       <A2uiSurface
