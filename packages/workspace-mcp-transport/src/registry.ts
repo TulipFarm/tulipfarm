@@ -5,6 +5,8 @@ import { publicHttpsFetch } from './public-https.ts';
 
 const maximumRemotes = 64;
 const maximumPackages = 16;
+// The registry sets no limit on declared variables; a page's byte limit bounds the whole record.
+const maximumEnvironmentVariables = 1024;
 const environmentSchema = z.object({
   name: z.string().max(128),
   description: z.string().max(4096).optional(),
@@ -16,7 +18,7 @@ const packageSchema = z.object({
   identifier: z.string().max(512).optional(),
   version: z.string().max(256).optional(),
   transport: z.object({ type: z.string().max(64) }).optional(),
-  environmentVariables: z.array(environmentSchema).max(64).optional(),
+  environmentVariables: z.array(environmentSchema).max(maximumEnvironmentVariables).optional(),
 });
 const headerSchema = z.object({
   name: z.string().max(64),
@@ -24,6 +26,18 @@ const headerSchema = z.object({
   isRequired: z.boolean().optional(),
   isSecret: z.boolean().optional(),
   value: z.string().max(8192).optional(),
+});
+const officialSchema = z.object({
+  'io.modelcontextprotocol.registry/official': z.object({
+    status: z.enum(['active', 'deprecated', 'deleted']),
+    updatedAt: z.string(),
+    publishedAt: z.string().optional(),
+    isLatest: z.literal(true),
+  }),
+});
+const identitySchema = z.looseObject({
+  server: z.looseObject({ name: z.string().min(1).max(512), version: z.string().min(1).max(256) }),
+  _meta: officialSchema,
 });
 const serverSchema = z.object({
   server: z.object({
@@ -39,17 +53,14 @@ const serverSchema = z.object({
       .optional(),
     packages: z.array(packageSchema).max(maximumPackages).optional(),
   }),
-  _meta: z.object({
-    'io.modelcontextprotocol.registry/official': z.object({
-      status: z.enum(['active', 'deprecated', 'deleted']),
-      updatedAt: z.string(),
-      publishedAt: z.string().optional(),
-      isLatest: z.literal(true),
-    }),
-  }),
+  _meta: officialSchema,
 });
+/**
+ * A page whose envelope or record identities are malformed fails the refresh, since paging and latest-version
+ * checks depend on them. A record that is identifiable but otherwise outside our bounds is only left out.
+ */
 const pageSchema = z.object({
-  servers: z.array(serverSchema).max(100),
+  servers: z.array(identitySchema).max(100),
   metadata: z.object({ nextCursor: z.string().max(4096).nullish(), count: z.number().int().nonnegative().optional() }),
 });
 const maximumPageBytes = 2 * 1024 * 1024;
@@ -103,6 +114,8 @@ export type RegistrySnapshot = {
   failureDiagnostics?: RegistryFailureDiagnostics;
   refreshInProgress: boolean;
   completedPages: number;
+  /** Registry records the last complete refresh left out because they failed validation. */
+  skippedRecords: number;
 };
 
 /** The Streamable HTTP and HTTP+SSE endpoints one registry record lists, without deleted servers or unusable URLs. */
@@ -176,7 +189,10 @@ function packageEntries(record: z.infer<typeof serverSchema>): RegistryEntry[] {
   }
   return entries;
 }
-const registryEntries = (record: z.infer<typeof serverSchema>) => [...remoteEntries(record), ...packageEntries(record)];
+function registryEntries(record: z.infer<typeof pageSchema>['servers'][number]): RegistryEntry[] | null {
+  const parsed = serverSchema.safeParse(record);
+  return parsed.success ? [...remoteEntries(parsed.data), ...packageEntries(parsed.data)] : null;
+}
 
 /** One bounded request to the registry's own name search, for a chat turn that cannot wait for a full catalog sync. */
 export async function searchRegistry(
@@ -220,7 +236,7 @@ export async function searchRegistry(
   } catch {
     throw new McpNetworkError('catalog-invalid-schema');
   }
-  return page.servers.flatMap(registryEntries);
+  return page.servers.flatMap(record => registryEntries(record) ?? []);
 }
 
 export function createRegistryCatalog({
@@ -230,6 +246,7 @@ export function createRegistryCatalog({
 }: { fetcher?: typeof fetch; now?: () => Date; elapsedNow?: () => number } = {}) {
   let entries = new Map<string, RegistryEntry>();
   let syncedAt: string | null = null;
+  let skippedRecords = 0;
   let refreshFailed = false;
   let failureCode: McpNetworkErrorCode | undefined;
   let failureStage: RegistryFailureStage | undefined;
@@ -245,6 +262,7 @@ export function createRegistryCatalog({
     nextBytes: number;
     attempts: number;
     pages: number;
+    skipped: number;
   } | null = null;
 
   function isStale() {
@@ -261,6 +279,7 @@ export function createRegistryCatalog({
       ...(failureStage ? { failureStage } : {}),
       ...(failureDiagnostics ? { failureDiagnostics: { ...failureDiagnostics } } : {}),
       completedPages: scan?.pages ?? 0,
+      skippedRecords,
     };
   }
   function search(query: string) {
@@ -281,6 +300,7 @@ export function createRegistryCatalog({
         nextBytes: 2,
         attempts: 0,
         pages: 0,
+        skipped: 0,
       };
     }
     const current = scan;
@@ -367,7 +387,12 @@ export function createRegistryCatalog({
             current.nextBytes -= Buffer.byteLength(JSON.stringify(previous)) + (next.size > 1 ? 1 : 0);
             next.delete(id);
           }
-          for (const entry of registryEntries(record)) {
+          const recordEntries = registryEntries(record);
+          if (!recordEntries) {
+            current.skipped++;
+            continue;
+          }
+          for (const entry of recordEntries) {
             if (next.size >= maximumEntries) throw new McpNetworkError('catalog-entry-limit');
             const bytes = Buffer.byteLength(JSON.stringify(entry)) + (next.size ? 1 : 0);
             if (current.nextBytes + bytes > maximumSnapshotBytes) throw new McpNetworkError('catalog-byte-limit');
@@ -386,6 +411,7 @@ export function createRegistryCatalog({
       } while (current.cursor);
       entries = current.next;
       syncedAt = current.startedAt;
+      skippedRecords = current.skipped;
       scan = null;
     } catch (error) {
       refreshFailed = true;
