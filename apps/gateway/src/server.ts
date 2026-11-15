@@ -6,7 +6,7 @@ import { captureException, log, registerFlagSubjectResolver, startTelemetry } fr
 import { isolatedStorageEnabled, workspaceRuntime } from '@tulipfarm/workspaces/storage';
 import { workspaceFlagSubjects } from './flag-subjects.ts';
 import { buildGateway } from './gateway.ts';
-import { gatewayServerOptions } from './http.ts';
+import { gatewayServerOptions, previewServerOptions } from './http.ts';
 import { previewGatewayFromEnvironment } from './preview-environment.ts';
 import { publicAppsFromEnvironment } from './public-apps-environment.ts';
 
@@ -37,6 +37,7 @@ const server = buildGateway({
   preview,
   apps: publicAppsFromEnvironment(process.env, pool),
   serverOptions: gatewayServerOptions(process.env),
+  previewServerOptions: previewServerOptions(process.env),
   identity: { version: buildInfo.version, commit: buildInfo.commit },
 });
 server.addHook('onClose', async () => {

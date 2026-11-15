@@ -10,6 +10,8 @@ export type GatewayOptions = {
   /** Null leaves public app hosts unanswered. */
   readonly apps: PublicAppsDependencies | null;
   readonly serverOptions: FastifyServerOptions;
+  /** Options for preview hosts when they reach the gateway through other proxies; `serverOptions` by default. */
+  readonly previewServerOptions?: FastifyServerOptions;
   readonly identity: { readonly version: string; readonly commit: string };
 };
 
@@ -17,21 +19,27 @@ export type GatewayOptions = {
  * The gateway process. Preview hosts go to the preview gateway and public app hosts to the public apps gateway; any
  * other host, such as a load balancer health check that addresses the task by IP, sees only the liveness route.
  */
-export function buildGateway({ preview, apps, serverOptions, identity }: GatewayOptions): FastifyInstance {
+export function buildGateway({
+  preview,
+  apps,
+  serverOptions,
+  previewServerOptions = serverOptions,
+  identity,
+}: GatewayOptions): FastifyInstance {
   const server = Fastify({
     ...serverOptions,
     logger: { serializers: { err: () => ({ type: 'Error', message: 'request_failed', stack: '' }), req: () => ({}) } },
     logController: new LogController({ disableRequestLogging: true }),
   });
-  const drafts = buildPreviewGateway(preview, serverOptions);
+  const drafts = buildPreviewGateway(preview, previewServerOptions);
   routePreviewHosts(server, drafts.http, preview.domain);
   const publicApps = apps ? buildPublicAppsGateway(apps, serverOptions) : null;
   if (apps && publicApps) routePublicAppHosts(server, publicApps.http, apps.domain);
   server.server.on('upgrade', (request: IncomingMessage, socket: Duplex, head: Buffer) => {
-    const client = clientOf(request, serverOptions.trustProxy);
-    if (previewKeyOf(request.headers.host, preview.domain)) return void drafts.upgrade(request, socket, head, client);
+    if (previewKeyOf(request.headers.host, preview.domain))
+      return void drafts.upgrade(request, socket, head, clientOf(request, previewServerOptions.trustProxy));
     if (apps && publicApps && appNameOf(request.headers.host, apps.domain) !== undefined)
-      return void publicApps.upgrade(request, socket, head, client);
+      return void publicApps.upgrade(request, socket, head, clientOf(request, serverOptions.trustProxy));
     rawAnswer(socket, 'not-found');
   });
   server.addHook('onRequest', async (_request, reply) => {

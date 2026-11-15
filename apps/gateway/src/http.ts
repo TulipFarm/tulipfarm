@@ -3,8 +3,21 @@ import { z } from 'zod';
 import { captureException, startHttp, telemetryErrorCode, withTelemetryContext } from '@tulipfarm/observability';
 import { StorageUnavailableError, transientStorageError, withCallerSignal } from '@tulipfarm/workspace-storage/runtime';
 
+const proxyMode = z.enum(['direct', 'reverse-proxy', 'cloudfront']);
+
 export function gatewayServerOptions(env: NodeJS.ProcessEnv): FastifyServerOptions {
-  const mode = z.enum(['direct', 'reverse-proxy', 'cloudfront']).parse(env.GATEWAY_PROXY_MODE ?? 'direct');
+  return serverOptions(proxyMode.parse(env.GATEWAY_PROXY_MODE ?? 'direct'));
+}
+
+/**
+ * Server options for preview hosts, which a deployment may route past the proxy in front of public app hosts. They
+ * follow `GATEWAY_PROXY_MODE` unless `GATEWAY_PREVIEW_PROXY_MODE` is set.
+ */
+export function previewServerOptions(env: NodeJS.ProcessEnv): FastifyServerOptions {
+  return serverOptions(proxyMode.parse(env.GATEWAY_PREVIEW_PROXY_MODE ?? env.GATEWAY_PROXY_MODE ?? 'direct'));
+}
+
+function serverOptions(mode: z.infer<typeof proxyMode>): FastifyServerOptions {
   const proxied = mode !== 'direct';
   // Each trusted proxy appends the address it received from as the rightmost forwarded hop. Behind CloudFront and a load
   // balancer, the balancer appends the CloudFront edge and CloudFront appends the client, so the client is the second
