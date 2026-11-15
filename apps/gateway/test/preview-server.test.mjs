@@ -5,6 +5,7 @@ import { createServer, request } from 'node:http';
 import { test } from 'node:test';
 import { AppHostUnavailableError } from '@tulipfarm/extensions';
 import { buildGateway } from '../src/gateway.ts';
+import { gatewayServerOptions, previewServerOptions } from '../src/http.ts';
 
 const key = 'abcdefghijklmnopqrstuvwxyz';
 const host = `${key}.preview.tulipfarm.test`;
@@ -101,7 +102,8 @@ async function previewFor(t, options = {}) {
       recheckMs: options.recheckMs ?? 100,
     },
     apps: null,
-    serverOptions: {},
+    serverOptions: options.serverOptions ?? {},
+    previewServerOptions: options.previewServerOptions,
     identity: { version: 'development', commit: 'development' },
   });
   await gateway.listen({ host: '127.0.0.1', port: 0 });
@@ -335,4 +337,30 @@ test('without a way to reach a draft host the preview is unavailable', async t =
   assert.equal((await call(port)).status, 503);
   assert.equal((await connect(port)).status, 503);
   assert.equal(upstream.requests, 0);
+});
+
+test('preview hosts trust the forwarded hops of their own proxy chain', async t => {
+  // A client reaching the load balancer directly forged a hop; the balancer appended the client's real address.
+  const forged = { 'x-forwarded-for': '198.51.100.66, 203.0.113.7' };
+  const env = { GATEWAY_PROXY_MODE: 'cloudfront', GATEWAY_PREVIEW_PROXY_MODE: 'reverse-proxy' };
+  for (const [name, previewOptions, forwardedFor] of [
+    ['own mode', previewServerOptions(env), '203.0.113.7'],
+    ['public app mode', undefined, '198.51.100.66'],
+  ]) {
+    await t.test(name, async t => {
+      const { port, upstream } = await previewFor(t, {
+        serverOptions: gatewayServerOptions(env),
+        previewServerOptions: previewOptions,
+      });
+      assert.equal((await call(port, { headers: forged })).status, 200);
+      const socket = await connect(port, forged);
+      assert.equal(socket.status, 101);
+      socket.socket.destroy();
+      assert.deepEqual(
+        upstream.seen.map(seen => seen['x-forwarded-for']),
+        [forwardedFor, forwardedFor],
+      );
+    });
+  }
+  assert.equal(previewServerOptions({ GATEWAY_PROXY_MODE: 'cloudfront' }).trustProxy('10.0.0.1', 1), true);
 });

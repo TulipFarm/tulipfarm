@@ -434,6 +434,15 @@ export const settings: readonly Setting[] = [
       '`direct`, `reverse-proxy` (one load balancer), or `cloudfront` (CloudFront, then a load balancer): which forwarded hops the gateway trusts for the client address.',
   },
   {
+    name: 'GATEWAY_PREVIEW_PROXY_MODE',
+    group: 'Runtime',
+    services: ['gateway'],
+    requirement: 'optional',
+    secret: false,
+    description:
+      'The same choice as `GATEWAY_PROXY_MODE`, for draft build hosts under `TULIPFARM_APP_PREVIEW_DOMAIN` only. Set it when draft hosts reach the gateway through a different proxy chain than public apps. Defaults to `GATEWAY_PROXY_MODE`.',
+  },
+  {
     name: 'TEMPORAL_UI_URL',
     group: 'Runtime',
     services: ['api'],
