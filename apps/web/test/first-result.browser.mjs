@@ -324,12 +324,12 @@ try {
     await notifyChange(page, workspace.id, 'ada', 'catalog');
     await page.getByText(/Could not check model availability/).waitFor();
     assert.equal(await send.isEnabled(), true);
-    await page.getByRole('button', { name: 'Retry models', exact: true }).click();
+    await notifyChange(page, workspace.id, 'ada', 'catalog');
     await page.getByText('Checking available models…', { exact: true }).waitFor();
-    await page.getByRole('button', { name: 'Retry models', exact: true }).waitFor();
+    await page.getByText(/Could not check model availability/).waitFor();
     catalogStatus = 200;
     catalogDelay = 600;
-    await page.getByRole('button', { name: 'Retry models', exact: true }).click();
+    await notifyChange(page, workspace.id, 'ada', 'catalog');
     await page.getByText('Checking available models…', { exact: true }).waitFor();
     assert.equal(await send.isEnabled(), true);
     await page.getByText('Checking available models…', { exact: true }).waitFor({ state: 'hidden' });
@@ -344,7 +344,7 @@ try {
     assert.equal(await page.getByText(/Gemini Flash/).count(), 0);
     assert.equal(await send.isEnabled(), false);
     catalog = [];
-    await page.getByRole('button', { name: 'Retry models', exact: true }).click();
+    await notifyChange(page, workspace.id, 'ada', 'catalog');
     await page.getByText(/No models configured/).waitFor();
     assert.equal(await message.textContent(), 'Keep this draft while checking models.');
     await message.fill('');
@@ -358,7 +358,7 @@ try {
     await page.getByText(/Could not check model availability/).waitFor();
     catalogStatus = 200;
     catalog = [family('claude-sonnet', 'Claude Sonnet', 'anthropic'), family('gemini-flash', 'Gemini Flash', 'google')];
-    await page.getByRole('button', { name: 'Retry models', exact: true }).click();
+    await notifyChange(page, workspace.id, 'ada', 'catalog');
     await page.getByRole('combobox', { name: 'Model: Claude Sonnet', exact: true }).waitFor();
     catalog = catalog.map(item => ({
       ...item,

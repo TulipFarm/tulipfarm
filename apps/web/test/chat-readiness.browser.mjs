@@ -379,12 +379,12 @@ test('chat readiness and relevant GitHub approvals', async t => {
             assert.equal(await input.textContent(), 'My first business task');
             f.state.modelGate.resolve();
             await f.page.getByText('Could not check model availability. Try again.', { exact: true }).waitFor();
-            await f.page.getByRole('button', { name: 'Retry models', exact: true }).click();
+            await notifyChange(f.page, workspace.id, 'ada', 'catalog');
             await f.page.getByText('Checking available models…', { exact: true }).waitFor();
             await f.page.getByText('Could not check model availability. Try again.', { exact: true }).waitFor();
             assert.equal(await input.textContent(), 'My first business task');
             f.state.modelStatus = 200;
-            await f.page.getByRole('button', { name: 'Retry models', exact: true }).click();
+            await notifyChange(f.page, workspace.id, 'ada', 'catalog');
             await f.page.getByRole('combobox', { name: 'Model: Claude Sonnet', exact: true }).waitFor();
             await input.click();
             await f.page.keyboard.press('Enter');

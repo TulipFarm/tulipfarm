@@ -163,7 +163,7 @@ try {
       assert.equal(await message.innerText(), 'Keep this draft');
       assert.equal(await page.getByRole('button', { name: 'Send message', exact: true }).isDisabled(), false);
       status = 200;
-      await page.getByRole('button', { name: 'Retry models', exact: true }).click();
+      await notifyChange(page, workspace.id, userId, 'catalog');
       await page.waitForFunction(() => !document.querySelector('button[aria-label="Send message"]').disabled);
       items = catalog.map(family =>
         family.id === 'claude-haiku'
