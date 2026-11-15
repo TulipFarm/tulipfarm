@@ -2,7 +2,14 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
-import { AccessDenied, mcpSourceClosure, requireNoMcpDerived, withMcpSourceContext } from '@tulipfarm/access';
+import {
+  AccessDenied,
+  McpEgressDenied,
+  hasMcpDerivedSources,
+  mcpSourceClosure,
+  requireNoMcpDerived,
+  withMcpSourceContext,
+} from '@tulipfarm/access';
 import { createWorkspaceRuntime } from '@tulipfarm/workspace-storage/runtime';
 import { fixture } from '../../workspace-storage/test/integration/fixture.mjs';
 import { createAgentTasks } from '../src/tasks.ts';
@@ -191,7 +198,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
   );
   await assert.rejects(
     tx(tx => requireNoMcpDerived(tx, [definitionSource])),
-    AccessDenied,
+    McpEgressDenied,
   );
 
   const chats = createConversations(runtime),
@@ -203,6 +210,15 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     [chatId, w.userId, w.membershipId],
   );
   const ownMemory = { kind: 'personal-memory', membershipId: actor.membershipId };
+  // MCP data with personal memory, or MCP data in the context, refuses egress with its own typed denial.
+  await assert.rejects(
+    tx(tx => mcpSourceClosure(tx, [source, ownMemory])),
+    McpEgressDenied,
+  );
+  assert.equal(await tx(tx => hasMcpDerivedSources(tx, [source])), true);
+  assert.equal(await tx(tx => hasMcpDerivedSources(tx, [source, ownMemory])), true);
+  assert.equal(await tx(tx => hasMcpDerivedSources(tx, [ownMemory])), false);
+  assert.equal(await tx(tx => hasMcpDerivedSources(tx, [])), false);
   await tx(tx => requireReplyMcpSources(tx, actor, chatId, [source, ownMemory]));
   await assert.rejects(
     tx(tx => requireReplyMcpSources(tx, actor, chatId, [source, { ...ownMemory, membershipId: randomUUID() }])),
@@ -256,7 +272,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
   await tx(tx =>
     withMcpSourceContext(tx, [reference], async () => {
       await assert.rejects(files.upload(w.id, w.userId, randomUUID(), {}, new Uint8Array([1])), AccessDenied);
-      await assert.rejects(fetchPublicText('https://example.com/leak'), AccessDenied);
+      await assert.rejects(fetchPublicText('https://example.com/leak'), McpEgressDenied);
       await assert.rejects(google.read(w.id, w.userId, {}), AccessDenied);
       await assert.rejects(google.propose(w.id, w.userId, {}), AccessDenied);
       await assert.rejects(atlassian.read(w.id, actor, {}), AccessDenied);

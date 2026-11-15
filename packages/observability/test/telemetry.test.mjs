@@ -1172,6 +1172,11 @@ test('error type keeps only short code messages', () => {
   assert.equal(errorType(new AccessDenied()), 'AccessDenied');
   class PersonalMemoryDenied extends AccessDenied {}
   assert.equal(errorType(new PersonalMemoryDenied()), 'PersonalMemoryDenied');
+  class McpEgressDenied extends AccessDenied {
+    code = 'mcp-egress-denied';
+  }
+  assert.equal(errorType(new McpEgressDenied()), 'McpEgressDenied');
+  assert.equal(telemetryErrorCode(new McpEgressDenied().code), 'mcp-egress-denied');
   class ExternalActionWaiting extends Error {}
   assert.equal(errorType(new ExternalActionWaiting()), 'ExternalActionWaiting', 'a paused tool is not a failure type');
 });

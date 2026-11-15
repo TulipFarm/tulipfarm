@@ -35,6 +35,8 @@ export async function respondToConversation(
     sources: () => SourceDependency[];
     /** Saves a finished tool round with every source the reply has used so far; see `beforeRound`. */
     checkpoint?: (sources: SourceDependency[]) => Promise<void>;
+    /** Whether these sources carry data from a connected MCP integration; see `webWithheld`. */
+    mcpDerived?: (sources: SourceDependency[]) => Promise<boolean>;
   },
   retainedSources: SourceDependency[] = [],
   sourceMessages?: Parameters<typeof inferWithTools>[1],
@@ -43,6 +45,8 @@ export async function respondToConversation(
   let widenedWebSearch = false;
   const checkpoint = tools?.checkpoint;
   const summarise = tools?.compactToolResults;
+  const mcpDerived = tools?.mcpDerived;
+  let derived: { key: string; value: boolean } | undefined;
   const context = tools && {
     ...tools,
     /**
@@ -64,6 +68,23 @@ export async function respondToConversation(
           beforeRound: async () => {
             sources.push(...tools.sources());
             await checkpoint(mergeSources(sources));
+          },
+        }
+      : {}),
+    ...(mcpDerived
+      ? {
+          // Web tools send data out, so a round whose context holds MCP-derived data does not offer them. A failed check
+          // offers them as before: each web call still runs the egress check itself.
+          webWithheld: async () => {
+            sources.push(...tools.sources());
+            const current = mergeSources(sources);
+            const key = JSON.stringify(current);
+            if (derived?.key !== key) {
+              const value = await mcpDerived(current).catch(() => undefined);
+              if (value === undefined) return false;
+              derived = { key, value };
+            }
+            return derived.value;
           },
         }
       : {}),

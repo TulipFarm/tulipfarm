@@ -299,3 +299,44 @@ test('a failed source check before summarising leaves stubs and fails at the nex
   );
   assert.equal(summarised, 0);
 });
+
+test('the responder withholds web tools once the reply context holds MCP-derived sources', async t => {
+  const mcpSource = { kind: 'mcp-integration', integrationId, authorizationEpoch: 1 };
+  let step = 0;
+  const requests = [];
+  t.mock.method(globalThis, 'fetch', async (_url, init) => {
+    const request = JSON.parse(init.body);
+    requests.push(request);
+    return Response.json(
+      isCompletionRequest(request)
+        ? completionReply('anthropic')
+        : step++ === 0
+          ? anthropicTools([{ tool: 'agents.list' }])
+          : anthropicText('The agents were checked.'),
+    );
+  });
+  const checked = [];
+  await respondToConversation(
+    { provider: 'anthropic', endpoint: 'https://api.anthropic.com/', model: 'fixture', apiKey: 'synthetic' },
+    [{ role: 'user', text: 'Check the agents.' }],
+    async () => ({ result: { agents: [] }, sources: [mcpSource] }),
+    undefined,
+    undefined,
+    false,
+    null,
+    {
+      catalog: async () => undefined,
+      sources: () => [],
+      mcpDerived: async sources => {
+        checked.push(sources);
+        return sources.some(source => source.kind === 'mcp-integration');
+      },
+    },
+  );
+  const offered = request => request.tools.map(tool => tool.name);
+  const rounds = requests.filter(request => !isCompletionRequest(request));
+  assert.ok(offered(rounds[0]).includes('web_search'));
+  assert.equal(offered(rounds[1]).includes('web_search'), false);
+  assert.equal(offered(rounds[1]).includes('web_fetch'), false);
+  assert.deepEqual(checked, [[], [mcpSource]]);
+});
