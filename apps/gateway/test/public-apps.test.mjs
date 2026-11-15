@@ -417,6 +417,42 @@ test('behind CloudFront and a load balancer the client is the second forwarded h
   assert.throws(() => gatewayServerOptions({ GATEWAY_PROXY_MODE: 'true' }));
 });
 
+test('the app sees only the forwarding headers the gateway derived, over HTTP and WebSocket', async t => {
+  const forged = {
+    'x-forwarded-host': 'evil.test',
+    'x-forwarded-proto': 'https',
+    forwarded: 'for=198.51.100.66;host=evil.test;proto=https',
+    'x-real-ip': '198.51.100.66',
+    'x-spawnbox-key': 'forged',
+    'x-spawnbox-target': '33333333-3333-4333-8333-333333333333',
+  };
+  for (const [mode, headers, expected] of [
+    ['cloudfront', { ...forged, ...throughEdge('203.0.113.7') }, { for: '203.0.113.7', host, proto: 'https' }],
+    ['direct', { ...forged, 'x-forwarded-for': '203.0.113.7' }, { for: '127.0.0.1', host, proto: 'http' }],
+  ]) {
+    await t.test(mode, async t => {
+      const { port, upstream } = await gatewayFor(t, {
+        serverOptions: gatewayServerOptions({ GATEWAY_PROXY_MODE: mode }),
+        running: true,
+      });
+      assert.equal((await call(port, { headers })).status, 201);
+      assert.deepEqual(await echo(port, 'ping', headers), { status: 101, text: 'ping' });
+      const forwarding = seen =>
+        Object.fromEntries(
+          Object.entries(seen).filter(([name]) => /^(x-forwarded-|x-real-ip$|forwarded$|x-spawnbox-)/.test(name)),
+        );
+      const sent = {
+        'x-forwarded-for': expected.for,
+        'x-forwarded-host': expected.host,
+        'x-forwarded-proto': expected.proto,
+        'x-spawnbox-key': 'key-1',
+        'x-spawnbox-target': appId,
+      };
+      assert.deepEqual(upstream.seen.map(forwarding), [sent, sent]);
+    });
+  }
+});
+
 test('two clients behind the same CloudFront edge have separate request limits', async t => {
   const { http } = buildPublicAppsGateway(
     { domain: 'apps.tulipfarm.test', route: async () => null, enabled: async () => true, host: {} },
