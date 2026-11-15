@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -18,7 +18,11 @@ import {
   requestBuild,
 } from '@tulipfarm/apps/store';
 import { AppHostConflictError, unavailableAppHost } from '@tulipfarm/extensions';
-import { connect, fixture } from '../../../packages/workspace-storage/test/integration/fixture.mjs';
+import {
+  connect,
+  fixture,
+  loadPlatformBaseline,
+} from '../../../packages/workspace-storage/test/integration/fixture.mjs';
 import { createAppActivities } from '../src/app-activities.ts';
 import { createAppServerActivities } from '../src/app-server-activities.ts';
 import { captureMetrics } from './metric-capture.mjs';
@@ -83,6 +87,12 @@ function memoryHost() {
   };
 }
 
+async function migrate(db) {
+  await loadPlatformBaseline(db.platform);
+  for (const migration of ['0011_app_hostnames.sql', '0015_app_server_owners.sql'])
+    await db.platform.query(await readFile(new URL(`../../database/migrations/${migration}`, import.meta.url), 'utf8'));
+}
+
 function commit(directory, files) {
   const git = args =>
     execFileSync('git', args, {
@@ -118,6 +128,7 @@ test('server apps publish, roll back, resize and reconcile against an app host',
     await rm(root, { recursive: true, force: true });
     await db.close();
   });
+  await migrate(db);
   const workspace = await db.create();
   const schema = workspace.names.schema;
   runtime = await connect(db.login(workspace));
@@ -486,4 +497,152 @@ test('server apps publish, roll back, resize and reconcile against an app host',
     await without.reconcileAppServers(signal());
     assert.deepEqual(await state(), before);
   });
+});
+
+test('reconcile removes every host of a deleted workspace without opening it', { timeout: 120000 }, async t => {
+  const telemetry = captureMetrics(t);
+  const db = await fixture();
+  const root = await mkdtemp(join(tmpdir(), 'app-servers-deleted-'));
+  const runtimes = [];
+  t.after(async () => {
+    for (const runtime of runtimes) await runtime.end();
+    await rm(root, { recursive: true, force: true });
+    await db.close();
+  });
+  await migrate(db);
+  execFileSync('git', ['init', '--quiet', '--initial-branch=main', root]);
+  const deleted = new Set();
+  const opened = new Map();
+  const open = async () => {
+    const workspace = await db.create();
+    const runtime = await connect(db.login(workspace));
+    runtimes.push(runtime);
+    opened.set(workspace.id, async action => {
+      await runtime.query('BEGIN');
+      try {
+        const result = await action({ client: runtime, schema: workspace.names.schema });
+        await runtime.query('COMMIT');
+        return result;
+      } catch (error) {
+        await runtime.query('ROLLBACK');
+        throw error;
+      }
+    });
+    return workspace;
+  };
+  const remove = async workspace => {
+    deleted.add(workspace.id);
+    await db.platform.query(
+      `UPDATE app.workspace_storage SET stage = 'unavailable', disabled_at = clock_timestamp(),
+         disabled_operation_id = gen_random_uuid() WHERE workspace_id = $1`,
+      [workspace.id],
+    );
+  };
+
+  const memory = memoryHost();
+  const removed = [];
+  const host = {
+    ...memory,
+    async provision({ appId }) {
+      const hostRef = `host-${appId.slice(-4)}`;
+      memory.hosts.set(hostRef, { appId });
+      return { hostRef };
+    },
+    async remove(input) {
+      removed.push(input);
+      await memory.remove(input);
+    },
+  };
+  const builder = {
+    id: 'sandbox-node22-v1',
+    async build() {
+      throw new Error('Not used');
+    },
+    async buildServer(input) {
+      return {
+        ok: true,
+        output: { kind: 'server', artifact: `image-${input.buildId.slice(0, 8)}`, port: 8080, start: 'node server.js' },
+        log: '',
+        units: 0n,
+      };
+    },
+  };
+  const work = {
+    transact: (workspaceId, action) => {
+      if (deleted.has(workspaceId)) throw new Error(`Workspace ${workspaceId} is fenced`);
+      return opened.get(workspaceId)(action);
+    },
+    platform: db.platform,
+    objects: memoryObjects(),
+    source: async () => root,
+    publisher: undefined,
+    builder,
+    host,
+    credits: { available: async () => null, debit: async () => {} },
+    async *workspaces() {
+      for (const id of opened.keys()) if (!deleted.has(id)) yield id;
+    },
+    enabled: async () => true,
+  };
+  const builds = createAppActivities(work);
+  const servers = createAppServerActivities(work);
+  const signal = () => new AbortController().signal;
+
+  const serve = async (workspace, appId, source) => {
+    const input = { workspaceId: workspace.id };
+    const transact = opened.get(workspace.id);
+    await transact(tx =>
+      createApp(tx, { id: appId, kind: 'public', slug: 'shop', title: 'Shop', createdBy: workspace.membershipId }),
+    );
+    await db.platform.query(
+      `UPDATE "${workspace.names.schema}".tf_apps SET approval_state = 'approved', approval_by = $2,
+         approval_at = now() WHERE id = $1`,
+      [appId, workspace.membershipId],
+    );
+    const head = await commit(root, { 'server.js': source });
+    const build = await transact(tx =>
+      requestBuild(tx, {
+        appId,
+        commit: head,
+        recipe,
+        builder: builder.id,
+        requestedBy: workspace.membershipId,
+      }),
+    );
+    await builds.buildApp({ ...input, buildId: build.id });
+    const admitted = await transact(tx =>
+      admitPublish(tx, { appId, requestId: randomUUID(), requestedBy: workspace.membershipId, buildId: build.id }),
+    );
+    const operation = { ...input, operationId: admitted.operation.id };
+    const target = await servers.prepareAppServer(operation);
+    const { hostRef } = await servers.provisionAppServer({ ...operation, ...target });
+    await servers.recordAppServerCandidate({ ...operation, hostRef });
+    assert.equal((await servers.switchAppServer({ ...operation, hostRef })).status, 'switched');
+  };
+
+  const kept = await open();
+  const gone = await open();
+  await serve(kept, '00000000-0000-4000-8000-00000000a001', 'listen(1)');
+  await serve(gone, '00000000-0000-4000-8000-00000000b002', 'listen(2)');
+  // A draft preview host of the same app, which the workspace never recorded as live.
+  memory.hosts.set('draft-b002', { appId: '00000000-0000-4000-8000-00000000b002' });
+  // A host brought up before the platform recorded which workspace its app belongs to.
+  await db.platform.query(`DELETE FROM app.app_server_owners WHERE app_id = '00000000-0000-4000-8000-00000000a001'`);
+  await remove(gone);
+
+  await servers.reconcileAppServers(signal());
+  await servers.reconcileAppServers(signal());
+  assert.deepEqual(removed, [
+    { appId: '00000000-0000-4000-8000-00000000b002', hostRef: 'host-b002' },
+    { appId: '00000000-0000-4000-8000-00000000b002', hostRef: 'draft-b002' },
+  ]);
+  assert.deepEqual([...memory.hosts.keys()], ['host-a001']);
+  assert.equal(memory.endpoints.get('00000000-0000-4000-8000-00000000a001').hostRef, 'host-a001');
+
+  await remove(kept);
+  await servers.reconcileAppServers(signal());
+  await servers.reconcileAppServers(signal());
+  assert.deepEqual(removed.slice(2), [{ appId: '00000000-0000-4000-8000-00000000a001', hostRef: 'host-a001' }]);
+  assert.deepEqual([...memory.hosts.keys()], []);
+  assert.deepEqual(await telemetry.points('cloud_app_reconcile_repairs'), [{ kind: 'host-removed', value: 3 }]);
 });

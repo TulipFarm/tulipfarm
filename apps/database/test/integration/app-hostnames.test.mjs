@@ -67,7 +67,9 @@ test('app names stay with one app forever and the API role can never delete them
         has_table_privilege('tulipfarm', 'app.app_hostnames', 'DELETE') AS release,
         has_table_privilege('tulipfarm', 'app.app_preview_hosts', 'DELETE') AS rotate,
         has_column_privilege('tulipfarm', 'app.app_preview_hosts', 'app_id', 'UPDATE') AS move,
-        has_column_privilege('tulipfarm', 'app.app_usage_cursors', 'metered_before', 'UPDATE') AS resume`)
+        has_column_privilege('tulipfarm', 'app.app_usage_cursors', 'metered_before', 'UPDATE') AS resume,
+        has_table_privilege('tulipfarm', 'app.app_server_owners', 'INSERT') AS own,
+        has_column_privilege('tulipfarm', 'app.app_server_owners', 'workspace_id', 'UPDATE') AS transfer`)
     ).rows[0];
     assert.deepEqual(privileges, {
       claim: true,
@@ -78,6 +80,8 @@ test('app names stay with one app forever and the API role can never delete them
       rotate: true,
       move: false,
       resume: true,
+      own: true,
+      transfer: false,
     });
   } finally {
     await client?.end();
