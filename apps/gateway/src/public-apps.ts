@@ -7,7 +7,7 @@ import type { CurrentAppRoute } from '@tulipfarm/apps/store';
 import { AppHostUnavailableError, type AppHost } from '@tulipfarm/extensions';
 import { clientHeaders, type Client } from './forward.ts';
 import { registerObservability, requestBoundaryError } from './http.ts';
-import { answer, cached, createRelay, rawAnswer, type Destination } from './relay.ts';
+import { answer, cached, clientOf, createRelay, rawAnswer, type Destination } from './relay.ts';
 
 export type PublicAppsDependencies = {
   /** Parent domain of public app hosts: `<app name>.<domain>`. */
@@ -84,7 +84,12 @@ export function buildPublicAppsGateway(dependencies: PublicAppsDependencies, ser
           return answer(request, reply, app.kind === 'missing' ? 'not-found' : 'unavailable', {
             frameAncestors: unframed,
           });
-        const forwarded = await relay.request(request, reply, destination(app.appId));
+        const forwarded = await relay.request(
+          request,
+          reply,
+          clientOf(request.raw, serverOptions.trustProxy),
+          destination(app.appId),
+        );
         if (forwarded.kind === 'answer')
           return answer(request, reply, forwarded.answer, {
             retryAfterSeconds: forwarded.retryAfterSeconds,
