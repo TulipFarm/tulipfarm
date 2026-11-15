@@ -28,6 +28,7 @@ import { hostHeaderPublisher } from '@tulipfarm/apps/host-header-publisher';
 import { unavailableAppHost } from '@tulipfarm/extensions';
 import { fenceWorkspaceAccess } from '../../../packages/workspace-storage/src/runtime.ts';
 import { createAppActivities, namedWorkspaces } from '../src/app-activities.ts';
+import { authoringPlatform } from './authoring-platform.mjs';
 import { captureMetrics } from './metric-capture.mjs';
 
 function memoryObjects() {
@@ -141,14 +142,17 @@ test('app builds, publishes, reconciles and meters converge however often they r
   const db = await fixture();
   const root = await mkdtemp(join(tmpdir(), 'app-workflows-'));
   let runtime;
+  let worker;
   t.after(async () => {
     await runtime?.end();
+    await worker?.close();
     await rm(root, { recursive: true, force: true });
     await db.close();
   });
   await loadPlatformBaseline(db.platform);
   for (const migration of ['0011_app_hostnames.sql', '0013_app_server_routes.sql', '0014_app_usage_cursors.sql'])
     await db.platform.query(await readFile(new URL(`../../database/migrations/${migration}`, import.meta.url), 'utf8'));
+  worker = await authoringPlatform(db);
   const workspace = await db.create();
   const schema = workspace.names.schema;
   runtime = await connect(db.login(workspace));
@@ -193,7 +197,7 @@ test('app builds, publishes, reconciles and meters converge however often they r
       assert.equal(workspaceId, workspace.id);
       return transact(action);
     },
-    platform: db.platform,
+    platform: worker.client,
     objects,
     source: async () => repository,
     publisher,
@@ -364,7 +368,11 @@ test('app builds, publishes, reconciles and meters converge however often they r
   });
 
   await t.test('a rename that goes live while reconcile lists routes keeps the new name served', async () => {
-    const builtIn = hostHeaderPublisher({ sitesDomain: 'sites.example.test', storage: objects, database: db.platform });
+    const builtIn = hostHeaderPublisher({
+      sitesDomain: 'sites.example.test',
+      storage: objects,
+      database: worker.client,
+    });
     const renamed = { name: 'acme-shop', workspaceId: workspace.id, appId: app.id };
     let rename;
     const hosted = createAppActivities({
@@ -1224,7 +1232,7 @@ test('app builds, publishes, reconciles and meters converge however often they r
       transact: (workspaceId, action) =>
         opened.has(workspaceId) ? opened.get(workspaceId).transact(action) : transact(action),
       async *workspaces() {
-        yield* await namedWorkspaces(db.platform);
+        yield* await namedWorkspaces(worker.client);
       },
     });
     await serve(reconciled, open, 'open-cafe');

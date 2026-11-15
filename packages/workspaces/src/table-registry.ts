@@ -39,6 +39,34 @@ async function repairRegistryDefaults(client: SqlClient, role: string) {
   }
 }
 
+const authoringWorkspaceColumns = ['id', 'created_by', 'created_at', 'soul_commit', 'soul_bucket', 'soul_key'];
+
+/** The platform columns the worker's app reconcile, metering and built-in publisher read and write as the authoring login. */
+const appHostingAccess: readonly {
+  readonly table: string;
+  readonly select: readonly string[];
+  readonly insert?: readonly string[];
+  readonly update?: readonly string[];
+}[] = [
+  {
+    table: 'app_hostnames',
+    select: ['name', 'workspace_id', 'app_id', 'state', 'kind', 'release_id', 'status', 'edge_version', 'claimed_at'],
+    update: ['state', 'kind', 'release_id', 'status', 'edge_version', 'retired_at'],
+  },
+  { table: 'app_preview_hosts', select: ['workspace_id', 'app_id'] },
+  { table: 'app_server_owners', select: ['app_id', 'workspace_id'], insert: ['app_id', 'workspace_id'] },
+  {
+    table: 'app_usage_cursors',
+    select: ['workspace_id', 'metered_before'],
+    insert: ['workspace_id', 'metered_before'],
+    update: ['metered_before'],
+  },
+];
+
+const columns = (table: string, names: readonly string[]) => names.map(name => `${table}.${name}`);
+const hostingColumns = (privilege: 'select' | 'insert' | 'update') =>
+  appHostingAccess.flatMap(access => columns(access.table, access[privilege] ?? []));
+
 async function verifyRegistryPrivileges(
   client: SqlClient,
   role: string,
@@ -57,10 +85,11 @@ async function verifyRegistryPrivileges(
       JOIN pg_namespace n ON n.oid = c.relnamespace
     WHERE n.nspname NOT IN ('pg_catalog', 'information_schema') AND n.nspname NOT LIKE 'pg_toast%'
       AND c.relkind IN ('r', 'p', 'v', 'm', 'f') AND a.attnum > 0 AND NOT a.attisdropped
-      AND (has_column_privilege($1, c.oid, a.attnum, 'INSERT,UPDATE,REFERENCES,SELECT WITH GRANT OPTION')
-        OR (has_column_privilege($1, c.oid, a.attnum, 'SELECT') AND NOT (n.nspname = 'app' AND (
-          (c.relname = 'workspace_storage' AND a.attname = ANY($2::text[]))
-          OR (c.relname = 'workspaces' AND a.attname = ANY($3::text[]))))))
+      AND (has_column_privilege($1, c.oid, a.attnum,
+          'REFERENCES,SELECT WITH GRANT OPTION,INSERT WITH GRANT OPTION,UPDATE WITH GRANT OPTION')
+        OR (has_column_privilege($1, c.oid, a.attnum, 'SELECT') AND NOT (n.nspname = 'app' AND c.relname || '.' || a.attname = ANY($2::text[])))
+        OR (has_column_privilege($1, c.oid, a.attnum, 'INSERT') AND NOT (n.nspname = 'app' AND c.relname || '.' || a.attname = ANY($3::text[])))
+        OR (has_column_privilege($1, c.oid, a.attnum, 'UPDATE') AND NOT (n.nspname = 'app' AND c.relname || '.' || a.attname = ANY($5::text[]))))
     UNION ALL
     SELECT 'routine' FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
     WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
@@ -84,9 +113,15 @@ async function verifyRegistryPrivileges(
     LIMIT 1`,
     [
       role,
-      ['workspace_id', 'generation', 'stage', credential],
-      capability === 'authoring' ? ['id', 'created_by', 'created_at', 'soul_commit', 'soul_bucket', 'soul_key'] : [],
+      [
+        ...columns('workspace_storage', ['workspace_id', 'generation', 'stage', credential]),
+        ...(capability === 'authoring'
+          ? [...columns('workspaces', authoringWorkspaceColumns), ...hostingColumns('select')]
+          : []),
+      ],
+      capability === 'authoring' ? hostingColumns('insert') : [],
       capability,
+      capability === 'authoring' ? hostingColumns('update') : [],
     ],
   );
   if (violations.rowCount) throw new Error('Registry login has ambient privileges outside its capability boundary');
@@ -108,8 +143,26 @@ export async function grantTableRegistryAccess(
   );
   if (capability === 'authoring') {
     await client.query(
-      `GRANT SELECT (id, created_by, created_at, soul_commit, soul_bucket, soul_key) ON app.workspaces TO ${name}`,
+      `GRANT SELECT (${authoringWorkspaceColumns.map(escapeIdentifier).join(', ')}) ON app.workspaces TO ${name}`,
     );
+    for (const access of appHostingAccess) {
+      // A fresh install grants after each migration, before later ones create these tables and columns.
+      const present = new Set(
+        (
+          await client.query(
+            `SELECT attname FROM pg_catalog.pg_attribute
+             WHERE attrelid = pg_catalog.to_regclass($1) AND attnum > 0 AND NOT attisdropped`,
+            [`app.${access.table}`],
+          )
+        ).rows.map(row => (row as { attname: string }).attname),
+      );
+      const privileges = (['select', 'insert', 'update'] as const).flatMap(privilege => {
+        const granted = (access[privilege] ?? []).filter(column => present.has(column));
+        return granted.length ? [`${privilege.toUpperCase()} (${granted.map(escapeIdentifier).join(', ')})`] : [];
+      });
+      if (privileges.length)
+        await client.query(`GRANT ${privileges.join(', ')} ON app.${escapeIdentifier(access.table)} TO ${name}`);
+    }
     const embeddingCapacity = 'app.acquire_knowledge_embedding_capacity(uuid,text,integer,uuid)';
     if ((await client.query('SELECT to_regprocedure($1) AS routine', [embeddingCapacity])).rows[0]?.routine) {
       await client.query(`GRANT EXECUTE ON FUNCTION ${embeddingCapacity} TO ${name}`);

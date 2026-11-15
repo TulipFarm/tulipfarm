@@ -24,6 +24,7 @@ import {
   loadPlatformBaseline,
 } from '../../../packages/workspace-storage/test/integration/fixture.mjs';
 import { createAppActivities } from '../src/app-activities.ts';
+import { authoringPlatform } from './authoring-platform.mjs';
 import { createAppServerActivities } from '../src/app-server-activities.ts';
 import { captureMetrics } from './metric-capture.mjs';
 
@@ -87,10 +88,12 @@ function memoryHost() {
   };
 }
 
+/** Migrates the platform and returns the worker's authoring login onto it. */
 async function migrate(db) {
   await loadPlatformBaseline(db.platform);
   for (const migration of ['0011_app_hostnames.sql', '0015_app_server_owners.sql'])
     await db.platform.query(await readFile(new URL(`../../database/migrations/${migration}`, import.meta.url), 'utf8'));
+  return authoringPlatform(db);
 }
 
 function commit(directory, files) {
@@ -123,12 +126,14 @@ test('server apps publish, roll back, resize and reconcile against an app host',
   const db = await fixture();
   const root = await mkdtemp(join(tmpdir(), 'app-servers-'));
   let runtime;
+  let worker;
   t.after(async () => {
     await runtime?.end();
+    await worker?.close();
     await rm(root, { recursive: true, force: true });
     await db.close();
   });
-  await migrate(db);
+  worker = await migrate(db);
   const workspace = await db.create();
   const schema = workspace.names.schema;
   runtime = await connect(db.login(workspace));
@@ -171,7 +176,7 @@ test('server apps publish, roll back, resize and reconcile against an app host',
       await after?.();
       return result;
     },
-    platform: db.platform,
+    platform: worker.client,
     objects: memoryObjects(),
     source: async () => root,
     publisher: undefined,
@@ -504,12 +509,14 @@ test('reconcile removes every host of a deleted workspace without opening it', {
   const db = await fixture();
   const root = await mkdtemp(join(tmpdir(), 'app-servers-deleted-'));
   const runtimes = [];
+  let worker;
   t.after(async () => {
     for (const runtime of runtimes) await runtime.end();
+    await worker?.close();
     await rm(root, { recursive: true, force: true });
     await db.close();
   });
-  await migrate(db);
+  worker = await migrate(db);
   execFileSync('git', ['init', '--quiet', '--initial-branch=main', root]);
   const deleted = new Set();
   const opened = new Map();
@@ -572,7 +579,7 @@ test('reconcile removes every host of a deleted workspace without opening it', {
       if (deleted.has(workspaceId)) throw new Error(`Workspace ${workspaceId} is fenced`);
       return opened.get(workspaceId)(action);
     },
-    platform: db.platform,
+    platform: worker.client,
     objects: memoryObjects(),
     source: async () => root,
     publisher: undefined,
