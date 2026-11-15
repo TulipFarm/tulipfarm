@@ -911,4 +911,97 @@ test('app builds, publishes, reconciles and meters converge however often they r
       );
     },
   );
+
+  await t.test(
+    'compute the host could not report is charged once after the workspace stops serving its only app',
+    async st => {
+      const other = await db.create();
+      const otherRuntime = await connect(db.login(other));
+      st.after(() => otherRuntime.end());
+      const otherSchema = other.names.schema;
+      await db.platform.query(
+        `CREATE TABLE "${otherSchema}".test_credit_entries (id text NOT NULL, units numeric NOT NULL)`,
+      );
+      await db.platform.query(
+        `GRANT SELECT, INSERT ON "${otherSchema}".test_credit_entries TO "${other.names.runtime}"`,
+      );
+      const transactOther = async action => {
+        await otherRuntime.query('BEGIN');
+        try {
+          const result = await action({ client: otherRuntime, schema: otherSchema });
+          await otherRuntime.query('COMMIT');
+          return result;
+        } catch (error) {
+          await otherRuntime.query('ROLLBACK');
+          throw error;
+        }
+      };
+      const solo = (
+        await transactOther(tx =>
+          createApp(tx, {
+            id: randomUUID(),
+            kind: 'public',
+            slug: 'solo',
+            title: 'Solo',
+            createdBy: other.membershipId,
+          }),
+        )
+      ).app;
+      let hostDown = true;
+      const metered = createAppActivities({
+        ...options(true),
+        transact: (workspaceId, action) => (workspaceId === other.id ? transactOther(action) : transact(action)),
+        credits: {
+          async available() {
+            return 1000n;
+          },
+          async debit(tx, units, entry) {
+            await tx.client.query(`INSERT INTO "${tx.schema}".test_credit_entries VALUES ($1, $2)`, [
+              entry.id,
+              units.toString(),
+            ]);
+          },
+        },
+        host: {
+          ...unavailableAppHost,
+          async *usage() {
+            if (hostDown) throw new Error('The host usage API is down');
+            yield { appId: solo.id, units: 30n };
+          },
+        },
+      });
+      const claimed = { name: 'beta-solo', workspaceId: other.id, appId: solo.id };
+      assert.deepEqual(await claimAppName(db.platform, claimed), { ok: true });
+      await transactOther(tx => setAppPublicName(tx, solo.id, claimed.name));
+      await db.platform.query('BEGIN');
+      await promoteAppName(db.platform, claimed);
+      await db.platform.query('COMMIT');
+      await metered.projectAppEdge({ workspaceId: other.id, appId: solo.id });
+      const charged = async () =>
+        (
+          await db.platform.query(`SELECT id, units::text FROM "${otherSchema}".test_credit_entries ORDER BY id`)
+        ).rows.map(row => [row.id.replace(`app-hosting:${solo.id}:`, ''), row.units]);
+
+      publisher.traffic = [{ name: 'beta-solo', requests: 2, bytes: 100, units: 7n }];
+      assert.equal(await metered.meterAppTraffic(Date.parse('2026-11-14T20:05:00.000Z'), signal()), undefined);
+      assert.deepEqual(await charged(), [['2026-11-14T17:00:00.000Z', '7']]);
+
+      await db.platform.query(
+        `UPDATE app.app_hostnames SET state = 'retired', retired_at = clock_timestamp() WHERE name = 'beta-solo'`,
+      );
+      publisher.traffic = [];
+      hostDown = false;
+      const later = Date.parse('2026-11-14T21:05:00.000Z');
+      assert.equal(await metered.meterAppTraffic(later, signal()), undefined);
+      assert.deepEqual(await charged(), [
+        ['2026-11-14T17:00:00.000Z', '7'],
+        ['2026-11-14T17:00:00.000Z:compute', '30'],
+      ]);
+      assert.equal(await metered.meterAppTraffic(later, signal()), undefined);
+      assert.deepEqual(await charged(), [
+        ['2026-11-14T17:00:00.000Z', '7'],
+        ['2026-11-14T17:00:00.000Z:compute', '30'],
+      ]);
+    },
+  );
 });
