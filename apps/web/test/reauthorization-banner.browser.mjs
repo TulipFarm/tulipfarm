@@ -176,11 +176,10 @@ test(
       await visit();
       await banner.getByText('Approve the updated permissions to continue.', { exact: false }).waitFor();
       const bounds = await banner.boundingBox(),
-        sidebar = await page.locator('[data-slot="sidebar-container"]').boundingBox();
-      assert.equal(bounds.x, 0);
+        sidebar = await page.getByRole('complementary', { name: 'Workspace sidebar' }).boundingBox();
       assert.equal(bounds.y, 0);
-      assert.equal(bounds.width, 1440);
-      assert.ok(sidebar.y >= bounds.height, 'banner sits above the sidebar, not behind it');
+      assert.ok(bounds.x >= sidebar.x + sidebar.width, 'banner sits beside the sidebar, not behind it');
+      assert.equal(bounds.x + bounds.width, 1440);
       await shot('after-desktop');
 
       await banner.getByRole('button', { name: 'Update permissions' }).evaluate(element => {
@@ -240,9 +239,23 @@ test(
           `no page overflow at ${width}`,
         );
         assert.equal(await banner.evaluate(element => element.scrollWidth <= element.clientWidth), true);
+        // Narrow screens keep the banner to one line; its controls open in a sheet.
+        await banner.getByText('2 apps need reauthorization', { exact: true }).waitFor();
+        assert.equal(await banner.getByRole('combobox').count(), 0);
+        assert.ok((await banner.boundingBox()).height <= 56, `one-line banner at ${width}`);
+        await banner.getByRole('button', { name: 'Fix', exact: true }).click();
+        const sheet = page.getByRole('dialog', { name: '2 apps need reauthorization' });
+        assert.equal(
+          await sheet.getByRole('combobox', { name: 'Integration to reauthorize' }).innerText(),
+          'GitHub (@ada)',
+          'the sheet keeps the chosen integration',
+        );
         await shot(`multiple-${width}-${colorScheme}`);
+        await page.keyboard.press('Escape');
+        await sheet.waitFor({ state: 'detached' });
       }
-      await banner.getByRole('button', { name: 'Update permissions' }).click();
+      await banner.getByRole('button', { name: 'Fix', exact: true }).click();
+      await page.getByRole('dialog').getByRole('button', { name: 'Update permissions' }).click();
       await page.getByRole('heading', { name: 'GitHub consent fixture' }).waitFor();
       assert.equal(
         writes.at(-1),
@@ -266,8 +279,9 @@ test(
       await visit();
       await banner.getByText('Customer support tools needs authorization.', { exact: false }).waitFor();
       await banner.getByRole('button', { name: 'Update permissions' }).click();
-      await page.getByRole('heading', { name: 'Reconnect MCP server', exact: true }).waitFor();
-      assert.ok(page.url().endsWith(`#reauthorize-mcp-${mcpId}`));
+      // MCP servers reconnect from their own page.
+      await page.waitForURL(`${origin}/${workspace.slug}/integrations/mcp-${mcpId}`);
+      await page.getByRole('heading', { name: 'Customer support tools', exact: true }).waitFor();
       assert.equal(destinations.length, 2);
       assert.deepEqual(errors, []);
     } catch (error) {

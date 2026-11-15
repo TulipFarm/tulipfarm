@@ -106,7 +106,7 @@ export const integrations: Integration[] = [
     brand: 'gmail',
     category: 'Email and calendar',
     provider: 'google',
-    blurb: 'Read, label, and send email',
+    blurb: 'Read, label & send email',
     prompts: [
       'Draft follow-ups to last week’s leads',
       'Sum up unread mail from customers',
@@ -125,7 +125,7 @@ export const integrations: Integration[] = [
     brand: 'google-calendar',
     category: 'Email and calendar',
     provider: 'google',
-    blurb: 'Read and book events',
+    blurb: 'Read & book events',
     prompts: ['Find 30 minutes with Sam next week', 'What does my Thursday look like?', 'Move my 3 pm call to Friday'],
     recommended: true,
     googleApp: 'calendar',
@@ -150,7 +150,7 @@ export const integrations: Integration[] = [
     brand: 'google-drive',
     category: 'Docs and files',
     provider: 'google',
-    blurb: 'Find and read files',
+    blurb: 'Find & read files',
     prompts: ['Find the latest pricing sheet', 'Pull the Q3 report into chat', 'Tidy the Clients folder'],
     recommended: true,
     googleApp: 'drive',
@@ -165,7 +165,7 @@ export const integrations: Integration[] = [
     brand: 'github',
     category: 'Code',
     provider: 'github-personal',
-    blurb: 'Work in your private repos',
+    blurb: 'Repos, issues & PRs',
     prompts: ['What changed in main this week?', 'List my open pull requests', 'Find issues assigned to me'],
     recommended: true,
   },
@@ -175,7 +175,7 @@ export const integrations: Integration[] = [
     brand: 'jira',
     category: 'Projects and issues',
     provider: 'atlassian',
-    blurb: 'Read and update issues',
+    blurb: 'Read & update issues',
     prompts: ['Triage new bugs from today', 'Show what slipped this sprint', 'Write a status note for the team'],
     recommended: true,
   },
@@ -185,7 +185,7 @@ export const integrations: Integration[] = [
     brand: 'google-sheets',
     category: 'Docs and files',
     provider: 'google',
-    blurb: 'Read and update rows',
+    blurb: 'Read & update rows',
     prompts: ['Add today’s orders to the tracker', 'Flag rows with missing emails', 'Sum sales by region'],
     googleApp: 'sheets',
     can: [
@@ -199,7 +199,7 @@ export const integrations: Integration[] = [
     brand: 'google-docs',
     category: 'Docs and files',
     provider: 'google',
-    blurb: 'Write and edit documents',
+    blurb: 'Write & edit documents',
     prompts: ['Draft a proposal for Acme', 'Turn these notes into a brief', 'Fix the tone of this doc'],
     googleApp: 'docs',
     can: [
@@ -213,7 +213,7 @@ export const integrations: Integration[] = [
     brand: 'google-slides',
     category: 'Docs and files',
     provider: 'google',
-    blurb: 'Create and edit slides',
+    blurb: 'Create & edit slides',
     prompts: ['Make a 5-slide sales deck', 'Update the numbers on slide 3', 'Turn this doc into slides'],
     googleApp: 'slides',
     can: [
@@ -227,7 +227,7 @@ export const integrations: Integration[] = [
     brand: 'confluence',
     category: 'Docs and files',
     provider: 'atlassian',
-    blurb: 'Search and write pages',
+    blurb: 'Search & write pages',
     prompts: ['What does our refund policy say?', 'Draft an onboarding page', 'Find the release checklist'],
   },
   {
@@ -236,7 +236,7 @@ export const integrations: Integration[] = [
     brand: 'trello',
     category: 'Projects and issues',
     provider: 'trello',
-    blurb: 'Track and move cards',
+    blurb: 'Track & move cards',
     prompts: ['Move done cards to Shipped', 'Add a card for each new lead', 'What is stuck in Review?'],
   },
   {
@@ -245,7 +245,7 @@ export const integrations: Integration[] = [
     brand: 'google-forms',
     category: 'Marketing and social',
     provider: 'soon',
-    blurb: 'Start workflows from responses',
+    blurb: 'Start workflows from replies',
     prompts: [],
   },
   {
@@ -254,7 +254,7 @@ export const integrations: Integration[] = [
     brand: 'hubspot',
     category: 'CRM and sales',
     provider: 'soon',
-    blurb: 'Start workflows from new CRM records',
+    blurb: 'Start workflows from records',
     prompts: [],
   },
   {
@@ -263,7 +263,7 @@ export const integrations: Integration[] = [
     brand: 'microsoft',
     category: 'Email and calendar',
     provider: 'soon',
-    blurb: 'Outlook, Teams, and OneDrive',
+    blurb: 'Outlook, Teams & OneDrive',
     prompts: [],
   },
   {
@@ -272,7 +272,7 @@ export const integrations: Integration[] = [
     brand: 'calendly',
     category: 'Email and calendar',
     provider: 'soon',
-    blurb: 'Read and book meetings',
+    blurb: 'Read & book meetings',
     prompts: [],
   },
   {
@@ -281,7 +281,7 @@ export const integrations: Integration[] = [
     brand: 'dropbox',
     category: 'Docs and files',
     provider: 'soon',
-    blurb: 'Find and share files',
+    blurb: 'Find & share files',
     prompts: [],
   },
   {
@@ -299,7 +299,7 @@ export const integrations: Integration[] = [
     brand: 'gitlab',
     category: 'Code',
     provider: 'soon',
-    blurb: 'Read issues and merge requests',
+    blurb: 'Read issues & merge requests',
     prompts: [],
   },
   {
@@ -308,7 +308,7 @@ export const integrations: Integration[] = [
     brand: 'asana',
     category: 'Projects and issues',
     provider: 'soon',
-    blurb: 'Track tasks and projects',
+    blurb: 'Track tasks & projects',
     prompts: [],
   },
   {
@@ -317,7 +317,7 @@ export const integrations: Integration[] = [
     brand: 'clickup',
     category: 'Projects and issues',
     provider: 'soon',
-    blurb: 'Read and update tasks',
+    blurb: 'Read & update tasks',
     prompts: [],
   },
   {
@@ -335,7 +335,7 @@ export const integrations: Integration[] = [
     brand: 'shopify',
     category: 'Payments and commerce',
     provider: 'soon',
-    blurb: 'Read orders and products',
+    blurb: 'Read orders & products',
     prompts: [],
   },
 ];

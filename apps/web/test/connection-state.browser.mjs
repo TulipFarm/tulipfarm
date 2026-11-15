@@ -146,15 +146,17 @@ test(
       }
       assert.equal(external.length, 5);
       await visit();
-      await page.getByRole('link', { name: 'Needs attention 0', exact: true }).waitFor();
+      await page.getByRole('tab', { name: 'Needs attention 0', exact: true }).waitFor();
       const search = page.getByRole('searchbox', { name: 'Search apps', exact: true });
       for (const name of Object.values(appNames)) {
         await search.fill(name);
-        assert.match(await page.getByRole('link').filter({ hasText: name }).last().innerText(), /Not connected/);
+        const row = page.getByRole('listitem').filter({ has: page.getByRole('link', { name, exact: true }) });
+        await row.getByRole('button', { name: `Connect ${name}`, exact: true }).waitFor();
+        assert.equal(await row.getByRole('button', { name: `Reconnect ${name}`, exact: true }).count(), 0);
       }
       await search.fill('');
       await page.screenshot({ path: '/tmp/connection-state-directory.png' });
-      await page.getByRole('link', { name: 'Needs attention 0', exact: true }).click();
+      await page.getByRole('tab', { name: 'Needs attention 0', exact: true }).click();
       await page.getByText('Nothing needs attention', { exact: true }).waitFor();
 
       github[0].state = 'reconnect-required';
@@ -205,7 +207,7 @@ test(
       );
       slack = { ...slack, state: 'reconnect-required', teamId: 'TEXISTING', scopes: ['chat:write'] };
       await visit(undefined, undefined, true);
-      await page.getByRole('link', { name: 'Needs attention 4', exact: true }).waitFor();
+      await page.getByRole('tab', { name: 'Needs attention 4', exact: true }).waitFor();
       await page.getByLabel('Integration authorization', { exact: true }).waitFor();
       for (const id of ['github', 'slack', 'jira', 'confluence']) {
         await visit(id);
@@ -221,7 +223,7 @@ test(
       await visit('slack', undefined, true);
       await neutral('slack');
       await visit();
-      await page.getByRole('link', { name: 'Needs attention 0', exact: true }).waitFor();
+      await page.getByRole('tab', { name: 'Needs attention 0', exact: true }).waitFor();
       assert.deepEqual(errors, []);
     } catch (error) {
       await page.screenshot({ path: '/tmp/connection-state-failure.png' });
