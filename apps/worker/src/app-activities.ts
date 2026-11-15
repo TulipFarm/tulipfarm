@@ -822,20 +822,23 @@ export function createAppActivities(work: AppWork) {
      * has not recorded, resuming after its newest recorded hour and reaching back at most 48 hours. Metering stops at
      * the first hour whose traffic the publisher cannot read, so no later hour is recorded ahead of it, and returns
      * that hour; the next run reads it again. Compute the host cannot report holds nothing back: its hours stay
-     * unsettled and a later run within the same 48 hours charges them.
+     * unsettled and a later run within the same 48 hours charges them, even once the app is no longer served.
      */
     async meterAppTraffic(now: number, signal: AbortSignal) {
       if (!publisher) return undefined;
       const settled = settledBefore(now);
       let from = settled - hour;
       const floor = settled - 48 * hour;
-      const { rows: served } = await platform.query(
-        `SELECT workspace_id, array_agg(app_id) AS apps FROM app.app_hostnames
-         WHERE state = 'current' AND status IS NOT NULL GROUP BY workspace_id`,
+      // Usage windows are only recorded for apps that hold a name, and names are never deleted, so every unsettled
+      // window is in a workspace listed here, whether or not it serves an app now.
+      const { rows: named } = await platform.query(
+        `SELECT workspace_id,
+           COALESCE(array_agg(app_id) FILTER (WHERE state = 'current' AND status IS NOT NULL), '{}') AS apps
+         FROM app.app_hostnames GROUP BY workspace_id`,
       );
       const pending = new Map<number, Map<string, AppUsage>>();
       const failures: unknown[] = [];
-      for (const { workspace_id: workspaceId, apps } of served as { workspace_id: string; apps: string[] }[]) {
+      for (const { workspace_id: workspaceId, apps } of named as { workspace_id: string; apps: string[] }[]) {
         signal.throwIfAborted();
         try {
           const next = await transact(workspaceId, async tx => {
