@@ -75,7 +75,7 @@ components:
   button-primary:
     backgroundColor: '{colors.primary}'
     textColor: '{colors.primary-foreground}'
-    rounded: '{rounded.lg}'
+    rounded: '0.625rem'
     height: '1.75rem'
     padding: '0 0.625rem'
   button-primary-hover:
@@ -85,29 +85,29 @@ components:
   button-outline:
     backgroundColor: '{colors.card}'
     textColor: '{colors.foreground}'
-    rounded: '{rounded.lg}'
+    rounded: '0.625rem'
     height: '1.75rem'
     padding: '0 0.625rem'
   button-secondary:
     backgroundColor: '{colors.secondary}'
     textColor: '{colors.foreground}'
-    rounded: '{rounded.lg}'
+    rounded: '0.625rem'
     height: '1.75rem'
     padding: '0 0.625rem'
   button-ghost:
     textColor: '{colors.muted-foreground}'
-    rounded: '{rounded.lg}'
+    rounded: '0.625rem'
     height: '1.75rem'
     padding: '0 0.625rem'
   button-destructive:
     backgroundColor: '{colors.destructive-subtle}'
     textColor: '{colors.destructive}'
-    rounded: '{rounded.lg}'
+    rounded: '0.625rem'
     height: '1.75rem'
     padding: '0 0.625rem'
   button-link:
     textColor: '{colors.primary-text}'
-    rounded: '{rounded.lg}'
+    rounded: '0.625rem'
     height: '1.75rem'
     padding: '0 0.625rem'
   input:
@@ -115,7 +115,7 @@ components:
     textColor: '{colors.foreground}'
     rounded: '{rounded.lg}'
     height: '2rem'
-    padding: '0.25rem 0.625rem'
+    padding: '0.25rem 0.75rem'
   badge:
     backgroundColor: '{colors.primary-subtle}'
     textColor: '{colors.primary-text}'
@@ -231,7 +231,7 @@ the main action within a region.
 
 The owner confirmed this description and the name "Action green" on
 29 September 2026, and the Linear-style depth hierarchy on 23 October 2026. This
-snapshot was refreshed from code on 25 October 2026 and checked against Sprout 0.15.4 on 6 November 2026. Every color, the font, the type scale,
+snapshot was refreshed from code on 25 October 2026 and checked against Sprout 0.18.0 on 15 November 2026. Every color, the font, the type scale,
 motion and shadows come from Sprout's `tulipfarm` theme
 (`@tulipfarm/sprout/themes/tulipfarm.css`), which is the source of truth shared
 with tulipfarm.ai. [`src/index.css`](src/index.css) only maps app token names
@@ -436,7 +436,8 @@ and transition duration to 0.01ms and removes smooth scrolling.
 
 ## Shapes
 
-Controls and navigation rows have 8px corners. Cards, popovers, attachment chips,
+Default medium buttons and toggles have 10px corners; inputs and navigation rows
+have 8px corners. Cards, popovers, attachment chips,
 and dialogs have 12px corners. Small internal elements use 4px corners. Badges,
 avatars, and glass chips can be pill-shaped. Glass banners use 20px corners.
 
@@ -454,10 +455,10 @@ Dropdowns are Sprout's searchable `Combobox` (`@tulipfarm/sprout/combobox`):
 
 ### Business record tables
 
-Shared Sprout tables always use a grid look: a visible `input`-color frame and
-cell separators, a muted sticky header, and contained scrolling capped at 60dvh.
+Shared Sprout tables use subtle `line`-color row separators, no vertical cell
+separators, a surface-colored sticky header, and contained scrolling capped at 60dvh.
 There is no shared `Table` variant prop. The app-local records grid retains its
-own `grid` variant with the same visual treatment.
+own `grid` variant with an `input`-color frame and cell separators.
 Sortable headers always show a direction control; active sorts have a filled
 background. Low priority uses information blue, Medium/Normal uses warning
 amber, and High/Urgent uses destructive red. Keep authored option labels intact;
@@ -475,16 +476,17 @@ absolute range from a linked cursor with an unknown offset. Leave space below
 the footer so the floating assistant does not cover the controls.
 
 Buttons use the shared `Button` variants. The default is a solid green action with
-a white label and a control shadow. Outline buttons use a card fill and input border.
+a white label and no idle shadow. Outline buttons use a card fill and input border.
 Secondary and ghost actions remain neutral. Destructive buttons use tinted red
 with red text; link buttons use `primary-text` and underline on hover. Buttons and
-inputs use a 2px focus outline with a 2px offset, overriding the global 1px outline
+inputs use a 3px translucent focus outline with no offset, overriding the global 1px outline
 and 1px offset. Keyboard-scrollable regions get a 1px inset `field` outline on
 keyboard focus only. Disabled controls are muted. Icon-only actions have accessible names.
 
 Inputs have visible labels, a card fill, a thin `input` border, and no idle shadow.
 Focus changes the border and adds an outline. Invalid fields use destructive
-feedback, with error text linked through `aria-describedby`.
+feedback, with error text linked through `aria-describedby`. Required fields show
+a red asterisk; optional fields have no requirement marker.
 
 Cards have flat fills, a subtle ring, and 16px internal spacing. The small size uses
 12px spacing. Inside sheets, sibling settings groups can use `Card surface="raised"`.
@@ -703,7 +705,7 @@ Signed-out workspace creation is two steps, each with a "Step k of 2" label.
 Step 1 asks only for the workspace: name and URL (host prefix inside the
 input, with the permanence helper), then one **Continue** button. Every new
 workspace is a business workspace; do not ask for a type. Auth fields are all
-required, so the auth panel hides Sprout's "Required" tag. While the name is
+required, so the auth panel hides Sprout's required asterisk. While the name is
 empty, the URL shows its helper rather than a second error. Step 2 is
 the account: a summary card with an **Edit** button that goes back, Google
 first, then the email form with one primary submit; the email link is the
@@ -726,8 +728,8 @@ Inspected 13 October 2026: the real conversation and workflow viewer share the
 seeded preview.
 
 - Use aligned numbered answer rows, not filter chips. A recommendation is guidance,
-  not a selected answer. Render it as a small blue info badge;
-  use a checked control and green row treatment for the actual selection.
+  not a selected answer. Render it as a small success badge;
+  use a checked control and neutral row treatment for the actual selection.
 - Condense the idle composer while questions are pending. Restore tools on focus
   without remounting the editor. Normal chat is a separate message, not an answer.
   Remove routine request Details; keep recovery visible when needed.

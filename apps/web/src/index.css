@@ -409,7 +409,7 @@
     box-shadow: none;
   }
 
-  /* Every auth field is required, so the per-field "Required" tag is noise; aria-required still announces it. */
+  /* Every auth field is required, so the per-field asterisk is noise; aria-required still announces it. */
   [data-slot='auth-panel'] [data-slot='requirement'][aria-hidden='true'] {
     display: none;
   }

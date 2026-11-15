@@ -265,9 +265,9 @@ test(
       assert.equal(rowStyle[0].radius, rowStyle[1].radius);
       assert.equal(rowStyle[0].width, rowStyle[1].width, 'answer rows share one reading edge');
       assert.equal(
-        await rows.first().locator('[data-slot="badge"][data-variant="info"]').textContent(),
+        await rows.first().locator('[data-slot="badge"][data-variant="success"]').textContent(),
         'Recommended',
-        'recommendation has a distinct info badge',
+        'recommendation has a success badge without selecting the answer',
       );
       const input = page.locator('[contenteditable="true"]').first();
       const questionBox = await dock.boundingBox(),
