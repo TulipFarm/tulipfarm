@@ -58,12 +58,17 @@ async function sandbox(t, options = {}) {
       `HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`,
     );
     socket.on('end', () => socket.end());
-    socket.on('data', frame => {
+    socket.on('data', async frame => {
       if ((frame[0] & 0x0f) !== 1) return socket.end();
       const length = frame[1] & 0x7f;
       const mask = frame.subarray(2, 6);
       const payload = Buffer.from(frame.subarray(6, 6 + length).map((byte, index) => byte ^ mask[index % 4]));
-      socket.write(Buffer.concat([Buffer.from([0x81, length]), payload]));
+      const reply = Buffer.concat([Buffer.from([0x81, length]), payload]);
+      // `slow` arrives in two writes with a pause inside the frame.
+      if (payload.toString() !== 'slow') return socket.write(reply);
+      socket.write(reply.subarray(0, 4));
+      await new Promise(resolve => setTimeout(resolve, 300));
+      socket.write(reply.subarray(4));
     });
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -107,6 +112,7 @@ async function gatewayFor(t, options = {}) {
         },
       },
       wakeBudgetMs: 1_500,
+      keepaliveMs: options.keepaliveMs,
     },
     serverOptions: options.serverOptions ?? {},
     identity: { version: 'development', commit: 'development' },
@@ -342,6 +348,52 @@ test('a WebSocket reaches the app and echoes', async t => {
   assert.equal(upstream.wakes, 1);
   assert.equal(upstream.seen[0]['x-spawnbox-target'], appId);
   assert.equal(upstream.seen[0].cookie, undefined);
+});
+
+/** Opens a WebSocket, optionally sends one text frame, and resolves with every byte the client received in `ms`. */
+function listen(port, ms, text) {
+  return new Promise((resolve, reject) => {
+    const outgoing = request({
+      host: '127.0.0.1',
+      port,
+      path: '/live',
+      headers: {
+        host,
+        connection: 'Upgrade',
+        upgrade: 'websocket',
+        'sec-websocket-key': randomBytes(16).toString('base64'),
+        'sec-websocket-version': '13',
+      },
+    });
+    outgoing.on('upgrade', (_response, socket) => {
+      const chunks = [];
+      socket.on('data', chunk => chunks.push(chunk));
+      if (text !== undefined) {
+        const mask = randomBytes(4);
+        const payload = Buffer.from(text).map((byte, index) => byte ^ mask[index % 4]);
+        socket.write(Buffer.concat([Buffer.from([0x81, 0x80 | payload.length]), mask, payload]));
+      }
+      setTimeout(() => {
+        resolve({ bytes: Buffer.concat(chunks).toString('hex'), open: !socket.destroyed && socket.readable });
+        socket.destroy();
+      }, ms);
+    });
+    outgoing.on('error', reject);
+    outgoing.end();
+  });
+}
+
+test('an idle WebSocket gets a pong frame each keepalive interval and stays open', async t => {
+  const { port } = await gatewayFor(t, { keepaliveMs: 100 });
+  const { bytes, open } = await listen(port, 450);
+  assert.equal(open, true);
+  assert.match(bytes, /^(8a00){3,4}$/);
+});
+
+test('a keepalive frame never lands inside a frame the app is still sending', async t => {
+  const { port } = await gatewayFor(t, { keepaliveMs: 100 });
+  const { bytes } = await listen(port, 350, 'slow');
+  assert.equal(bytes.replace(/^(8a00)+|(8a00)+$/g, ''), `8104${Buffer.from('slow').toString('hex')}`);
 });
 
 test('names that lead nowhere get 404, stopped apps and a missing host get 503', async t => {
