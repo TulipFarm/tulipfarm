@@ -88,8 +88,11 @@ export function BudProvider({ children, headerActions }: { children: ReactNode; 
   const router = useRouter();
   const pathname = useLocation({ select: location => location.pathname });
   const globalHeader = useContext(ChatHeaderContext);
-  // In the calendar and in an open chat a floating launcher would cover controls at the bottom, so it sits in the header.
-  const docked = pathname === `/${workspace.slug}/calendar` || pathname.startsWith(`/${workspace.slug}/chat/`);
+  // The calendar, new-chat home and open chats keep controls at the bottom, so the launcher sits in the header instead.
+  const docked =
+    pathname === `/${workspace.slug}/calendar` ||
+    pathname.replace(/\/$/, '') === `/${workspace.slug}` ||
+    pathname.startsWith(`/${workspace.slug}/chat/`);
   const changes = useConversationChanges();
   const read = useFeatureRead({
     key,

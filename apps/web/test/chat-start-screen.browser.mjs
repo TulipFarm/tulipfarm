@@ -40,7 +40,7 @@ test(
       }
       const more = page.getByText('More setup options (4)', { exact: true });
       const composerBounds = await composer.boundingBox();
-      const greeting = page.getByRole('heading', { name: 'Welcome back, Dhruv', exact: true });
+      const greeting = page.locator('.home-greeting h2');
       const greetingBounds = await greeting.boundingBox();
       await more.focus();
       await page.keyboard.press('Enter');

@@ -16,7 +16,7 @@ import { chatDocumentReferences, chatDocumentText, type ChatDocument } from '@tu
 import { packageInstallRequest } from '@tulipfarm/conversations/layout-contracts';
 import { parseChatDraft, type ChatDraft } from './editor-document';
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
-import { createPortal } from 'react-dom';
+import { createPortal, flushSync } from 'react-dom';
 import { newChatSearch, workspaceChatRoute, workspaceRoute } from '@/router';
 import { publicPackageInstallPrompt } from '@/features/packages/public-catalog';
 import { ArrowDown } from 'reicon-react/icons/ArrowDown';
@@ -89,7 +89,7 @@ import {
   useChatPackages,
   type PackageChatContextValue,
 } from '@/features/packages/chat-packages';
-import { Welcome } from './welcome';
+import { HomeWelcome } from './welcome';
 import { agentApi } from '@/features/agents/api';
 import { modelName } from '@/features/models/model-name';
 import { skillApi } from '@/features/skills/api';
@@ -242,7 +242,13 @@ type NewChatPrefill = {
 
 function Greeting() {
   const { user, sessionId } = workspaceRoute.useRouteContext();
-  return <Welcome key={`${user.id}:${sessionId}`} name={user.name} />;
+  return <HomeWelcome key={`${user.id}:${sessionId}`} name={user.name} />;
+}
+
+/** Morphs the start screen into the new conversation where the browser supports view transitions. */
+function startScreenTransition(update: () => void) {
+  if (!document.startViewTransition || window.matchMedia('(prefers-reduced-motion: reduce)').matches) update();
+  else document.startViewTransition(() => flushSync(update));
 }
 
 function ConversationWorkspace({ api }: { api: ConversationApi }) {
@@ -663,11 +669,13 @@ function ConversationDetail({
   const olderScrollHeight = useRef<number | null>(null);
   const [awayFromLatest, setAwayFromLatest] = useState(false);
   const [unseenUpdates, setUnseenUpdates] = useState(false);
+  // The start screen reads from the top, so it never follows the latest message.
+  const startScreen = useRef(false);
   const pinLatest = (element: HTMLElement) => {
-    element.scrollTop = element.scrollHeight;
+    if (!startScreen.current) element.scrollTop = element.scrollHeight;
   };
   const syncLatest = (element: HTMLElement) => {
-    const near = nearLatest(element);
+    const near = startScreen.current || nearLatest(element);
     setAwayFromLatest(!near);
     if (near) setUnseenUpdates(false);
   };
@@ -887,7 +895,15 @@ function ConversationDetail({
         sendNavigation.current = false;
       });
     }
-    setOutgoing({ id: messageId, content: structuredClone(shown), references: [...references], skill, at: Date.now() });
+    const outgoingMessage = {
+      id: messageId,
+      content: structuredClone(shown),
+      references: [...references],
+      skill,
+      at: Date.now(),
+    };
+    if (startScreen.current) startScreenTransition(() => setOutgoing(outgoingMessage));
+    else setOutgoing(outgoingMessage);
     followLatest.current = 'following';
     setRefreshed(false);
     void write
@@ -999,6 +1015,7 @@ function ConversationDetail({
         ? activity.label
         : null;
   const empty = data?.messages.length === 0 && !pending && incomingTurns.length === 0 && !packages.active;
+  startScreen.current = !compact && empty;
   const latestId = pending?.id ?? data?.messages.at(-1)?.id;
   const firstId = data?.messages.at(0)?.id;
   useLayoutEffect(() => {
@@ -1025,13 +1042,7 @@ function ConversationDetail({
   }, []);
   return (
     <ChatKeywords value={integrations.keywords}>
-      <div
-        className={
-          !compact && empty
-            ? 'flex min-h-0 flex-1 flex-col overflow-y-auto pt-8 pb-24 sm:pt-16 sm:pb-12'
-            : 'flex min-h-0 flex-1 flex-col'
-        }
-      >
+      <div className="flex min-h-0 flex-1 flex-col">
         {!draft && (
           <MoveToProjectDialog
             workspaceId={workspace.id}
@@ -1138,13 +1149,11 @@ function ConversationDetail({
           className={
             compact
               ? 'conversation-timeline min-h-0 flex-1 overflow-y-auto overscroll-contain px-3'
-              : empty
-                ? 'conversation-timeline shrink-0 px-4 sm:px-6'
-                : 'conversation-timeline min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 sm:px-6'
+              : `conversation-timeline min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 sm:px-6 ${empty ? 'overflow-x-clip' : ''} ${visible ? 'chat-timeline-transition' : ''}`
           }
           onScroll={event => {
             const element = event.currentTarget;
-            if (followLatest.current !== 'inspecting')
+            if (followLatest.current !== 'inspecting' && !startScreen.current)
               followLatest.current = nearLatest(element) ? 'following' : 'scrolled';
             syncLatest(element);
           }}
@@ -1155,7 +1164,7 @@ function ConversationDetail({
               compact
                 ? 'w-full space-y-3 py-3'
                 : empty
-                  ? 'mx-auto w-full max-w-3xl space-y-4 pt-4 pb-3'
+                  ? 'mx-auto w-full max-w-3xl space-y-8 pt-8 pb-6 sm:pt-16'
                   : 'mx-auto w-full max-w-3xl space-y-6 py-6 sm:py-8'
             }
           >
@@ -1241,9 +1250,7 @@ function ConversationDetail({
                     compact ? (
                       <p className="text-sm text-muted-foreground">What can I help you with?</p>
                     ) : (
-                      <h2 className="w-full text-center text-3xl font-medium tracking-tight">
-                        <Greeting />
-                      </h2>
+                      <Greeting />
                     )
                   ) : (
                     <ol aria-label="Messages" className={compact ? 'space-y-3' : 'space-y-8'}>
@@ -1376,7 +1383,7 @@ function ConversationDetail({
                           ),
                         ),
                         pending ? (
-                          <li key="pending">
+                          <li key="pending" className={!compact && visible ? 'chat-sent-transition' : undefined}>
                             <Message align="end">
                               <MessageContent>
                                 {pending.skill && <SentSkill skill={pending.skill} />}
@@ -1613,6 +1620,25 @@ function ConversationDetail({
                 </>
               )}
             </ConversationRead>
+            {!compact && empty && (
+              <StartingTasks
+                disabled={locked || !models.usable || !!text || staged}
+                onChoose={prompt => {
+                  if (!locked && models.usable && !text && !staged)
+                    post(textDocument(prompt), [{ kind: 'text', text: prompt }]);
+                }}
+              />
+            )}
+            {draft && empty && (
+              <UpcomingMeetings
+                workspaceId={workspace.id}
+                disabled={locked || !models.usable || !!text || staged}
+                onShowAll={() => {
+                  if (!locked && models.usable && !text && !staged)
+                    post(textDocument(showAllMeetingsPrompt), [{ kind: 'text', text: showAllMeetingsPrompt }]);
+                }}
+              />
+            )}
             {!draft && data?.hasGitHubProposals && (
               <GitHubBatches
                 workspaceId={workspace.id}
@@ -1628,7 +1654,7 @@ function ConversationDetail({
           className={
             compact
               ? 'relative shrink-0 px-3 pb-3'
-              : `relative shrink-0 px-3 pt-2 pb-3 sm:px-6 ${empty ? 'sm:pb-5' : 'sm:pb-2'}`
+              : `relative shrink-0 px-3 pt-2 pb-3 sm:px-6 sm:pb-2 ${visible ? 'chat-composer-transition' : ''}`
           }
         >
           {awayFromLatest && (
@@ -1676,7 +1702,7 @@ function ConversationDetail({
               </div>
               <Composer
                 compact={compact}
-                minRows={empty ? undefined : 1}
+                minRows={1}
                 inputRef={composerInput}
                 content={draftSent ? emptyRichDocument() : content}
                 onContentChange={setContent}
@@ -1747,33 +1773,12 @@ function ConversationDetail({
                 onModelChange={models.select}
               />
             </div>
-            {!compact && empty && (
-              <StartingTasks
-                disabled={locked || !models.usable || !!text || staged}
-                onChoose={prompt => {
-                  if (!locked && models.usable && !text && !staged)
-                    post(textDocument(prompt), [{ kind: 'text', text: prompt }]);
-                }}
-              />
-            )}
-            {draft && empty && (
-              <div className="pt-6">
-                <UpcomingMeetings
-                  workspaceId={workspace.id}
-                  disabled={locked || !models.usable || !!text || staged}
-                  onShowAll={() => {
-                    if (!locked && models.usable && !text && !staged)
-                      post(textDocument(showAllMeetingsPrompt), [{ kind: 'text', text: showAllMeetingsPrompt }]);
-                  }}
-                />
-              </div>
-            )}
             <ChatModelStatus
               catalog={models}
               slug={workspaceSlug}
               quiet={commandFailed || (read.state.kind === 'ready' && !!read.state.error)}
             />
-            {!compact && !empty && (
+            {!compact && (
               <p className="-mt-1.5 hidden text-center text-xs text-muted-foreground sm:block">
                 TulipFarm can make mistakes. Check important details.
               </p>

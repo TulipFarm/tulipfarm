@@ -12,7 +12,8 @@ import { Repeat } from 'reicon-react/icons/Repeat';
 import { UserAdd } from 'reicon-react/icons/UserAdd';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { Button } from '@tulipfarm/sprout/button';
-import type { Brand } from '@tulipfarm/sprout/brand-icon';
+import { BrandStack, type Brand } from '@tulipfarm/sprout/brand-icon';
+import { SuggestionCard, SuggestionGrid, type SuggestionTone } from '@/components/chat-suggestions';
 import { workspaceRoute } from '@/router';
 import { fillTasks, prioritizeTasks } from './starting-task-priority';
 import { fallbackRecommendations, useRecommendations, sourcePickerHash, type Recommendation } from './recommendations';
@@ -53,7 +54,7 @@ const destinationIcons = {
   files: <Book size={16} />,
   members: <UserAdd size={16} />,
 };
-const chipTones = ['text-primary-text', 'text-info', 'text-success', 'text-warning'];
+const tones: SuggestionTone[] = ['primary', 'info', 'success', 'warning'];
 const sourceNames = { google: 'Google', github: 'GitHub', slack: 'Slack' };
 
 export function StartingTasks({ onChoose, disabled }: { onChoose: (prompt: string) => void; disabled: boolean }) {
@@ -97,19 +98,31 @@ export function StartingTasks({ onChoose, disabled }: { onChoose: (prompt: strin
           : item.brands.map(brand => ({ brand: brand satisfies Brand, name: brandNames[brand] })),
       };
     });
-  const chips = [...rows(primary.slice(0, 3)), ...rows(setup.slice(0, 1))];
+  const cards = [
+    ...rows(primary.slice(0, 3)).map((row, index) => ({
+      ...row,
+      kind: index === 0 ? 'Suggested for you' : 'Suggested task',
+    })),
+    ...rows(setup.slice(0, 1)).map(row => ({ ...row, kind: 'Set up your workspace' })),
+  ];
   return (
-    <section aria-label="Recommended for you" className="flex w-full flex-col gap-4 pt-4">
-      <div className="flex flex-wrap justify-center gap-2">
-        {chips.map((chip, index) => (
-          <span key={chip.id} className="rounded-full border border-border bg-background">
-            <Button variant="ghost" disabled={disabled} onClick={() => choose(chip.id)}>
-              <span className={chipTones[index % chipTones.length]}>{chip.icon}</span>
-              {chip.label}
-            </Button>
-          </span>
+    <section aria-label="Recommended for you" className="flex w-full flex-col gap-4">
+      <SuggestionGrid>
+        {cards.map((card, index) => (
+          <SuggestionCard
+            key={card.id}
+            index={index}
+            featured={index === 0}
+            tone={tones[index % tones.length]!}
+            disabled={disabled}
+            onClick={() => choose(card.id)}
+            icon={card.icon}
+            kind={card.kind}
+            label={card.label}
+            trailing={<BrandStack brands={card.brands} />}
+          />
         ))}
-      </div>
+      </SuggestionGrid>
       {message &&
         (error ? (
           <div className="flex flex-col gap-2">

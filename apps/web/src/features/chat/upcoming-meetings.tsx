@@ -1,4 +1,5 @@
 import { Button } from '@tulipfarm/sprout/button';
+import { cardVariants } from '@tulipfarm/sprout/card';
 import { CalendarEventList } from '@/components/calendar-event-list';
 import { Skeleton } from '@tulipfarm/sprout/skeleton';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
@@ -22,7 +23,7 @@ export function UpcomingMeetings({
     <section
       aria-label="Upcoming meetings"
       aria-busy={meetings.kind === 'loading' || (meetings.kind === 'ready' && meetings.refreshing)}
-      className="space-y-3"
+      className={cardVariants({ className: 'px-4' })}
     >
       <header className="flex items-center justify-between gap-3">
         <h2 className="text-sm font-medium text-foreground">Upcoming meetings</h2>
@@ -33,7 +34,7 @@ export function UpcomingMeetings({
         )}
       </header>
       {meetings.kind === 'loading' ? (
-        <div role="status" aria-label="Loading upcoming meetings" className="space-y-3 rounded-xl border p-4">
+        <div role="status" aria-label="Loading upcoming meetings" className="space-y-3">
           <div aria-hidden="true" className="space-y-3">
             <Skeleton shape="line" />
             <Skeleton shape="line" />

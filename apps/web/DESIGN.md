@@ -610,29 +610,51 @@ Inspected 13 October 2026 in
 [`bud-provider.tsx`](src/features/chat/bud-provider.tsx). Local browser evidence
 uses fictional dev-only data; it does not establish live provider or model behavior.
 
-Keep the composer as the main action. Place the welcome and its short explanation
-beside the avatar, with their text edges aligned. The explanation is one action
-line, "Ask anything, or start from a task below."; the privacy fact belongs in the
-**Personal chat** control's tooltip, not the intro. Anchor the empty-chat content
-from the top rather than centering the entire growing list: opening setup must
-not move the greeting or composer. Let short screens scroll, and leave enough
-bottom room on phones that the floating Bud button never covers the last control.
+The home has three bands: a left-aligned greeting at the top, prompt cards and
+widgets in the middle, and the composer pinned to the bottom like an open chat.
+The greeting is dynamic (`pickHomeGreeting` in `greeting.ts`): each visit picks a
+title at random from templates that fit the local time of day, with extra ones
+for early mornings, Monday mornings, Fridays and weekends, and uses "Welcome"
+only on a first session. Templates hold `{name}` for the first name and have a
+plain form when there is no usable name. The name carries a gradient; the title
+has no emoji. The muted subtitle, drawn from its own time-of-day pool, types
+itself in. The draw happens once per visit, so it doesn't change on re-render.
+A soft drifting glow sits behind the greeting.
+The privacy fact belongs in the **Personal chat** control's tooltip, not the intro.
+Only the middle band scrolls, and it starts at the top: the start screen never
+auto-follows to the bottom as a conversation does. Add future home widgets, such
+as **Upcoming meetings**, as cards in the middle band.
 
 Separate **Start with a task** from **Set up your workspace (optional)**; the
-heading carries the optional state, so add no separate footnote. Show one saved
-setup action initially; put the remaining items behind **More setup options**,
-changing to **Fewer setup options** with an upward chevron when open. Do not repeat
-the heading inside the expanded list. When the saved list has fewer than three
-prompts, top it up to three with general planning/drafting prompts, skipping any
-whose id or label is already shown; this implies no connected-data access.
-Preserve the saved-list loading, recovery, and privacy contract.
-Recovery reloads saved state, never starts generation.
+heading carries the optional state, so add no separate footnote. When the saved
+list has fewer than three prompts, top it up to three with general
+planning/drafting prompts, skipping any whose id or label is already shown; this
+implies no connected-data access. Preserve the saved-list loading, recovery, and
+privacy contract. Recovery reloads saved state, never starts generation.
 
-Use compact action rows, not a wall of cards. Keep trailing arrows visible at rest,
-leading icons in `foreground-secondary`, and provider marks beside their labels.
-Choose icons from the action's meaning; source-picker actions show the actual
-provider. Preserve full-row hit targets, keyboard focus, and 44px coarse-pointer
-rows. Disable task choices while the composer holds text or staged content.
+Show prompt cards as a bento grid (`components/chat-suggestions.tsx`): on
+desktop the first suggestion is a featured card spanning two rows, with a
+gradient wash, a large faded ghost of its icon and a **Start this** line; the
+setup card spans two columns; phones get one column. Each card has a tinted icon
+tile, its kind (**Suggested for you**, **Suggested task** or **Set up your
+workspace**) as a small uppercase label, provider marks on the right, and the
+prompt as the title. On hover a spotlight follows the pointer, the card lifts and
+an arrow slides in; cards enter with a short stagger. The whole card is the hit
+target, with keyboard focus. Choose icons from the action's meaning; source-picker
+actions show the actual provider. Disable the cards while the composer holds text
+or staged content. Honour reduced motion for every animation.
+
+The home and an open chat share one footer: same padding, one-row input,
+fixed-height toolbar and the "TulipFarm can make mistakes" line, so the composer
+sits at the bottom edge and never moves when a chat starts. The **Bud quick
+chat** launcher docks in the header on the home, as it does in open chats and
+the calendar, so it never reserves space under the composer.
+
+Sending from the home uses a view transition: the composer keeps its place, the
+home content fades and blurs out, and a clicked card morphs into the sent message
+bubble (a typed message slides up instead). Name only the visible, non-compact
+chat's elements so transition names stay unique while Bud's popup is mounted.
+Skip the transition when reduced motion is on or the browser lacks it.
 The new-chat placeholder updates independently of Bud's compact reply field.
 
 The main composer shows **Personal chat** or its selected project; this is a real
