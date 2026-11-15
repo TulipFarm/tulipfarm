@@ -69,6 +69,7 @@ export function workspaceMcpCatalog(
         failureDiagnostics: snapshot.failureDiagnostics,
         refreshInProgress: snapshot.refreshInProgress,
         completedPages: snapshot.completedPages,
+        skippedRecords: snapshot.skippedRecords,
       };
     },
     search(search: string, cursor?: string) {
@@ -200,6 +201,12 @@ export function registerWorkspaceMcpCatalogRefresh(
             stage: result.failureStage,
             catalogDiagnostics: result.failureDiagnostics,
           });
+        }
+        if (!result.refreshInProgress && result.skippedRecords > 0) {
+          app.log.warn(
+            { catalogStatus: 'complete', skippedRecords: result.skippedRecords },
+            'Workspace MCP catalog refresh left out invalid registry records',
+          );
         }
         if (result.refreshInProgress) {
           app.log.info(

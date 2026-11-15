@@ -1101,6 +1101,34 @@ test('Registry rejects non-latest metadata and malformed publication timestamps 
   assert.deepEqual(catalog.snapshot().entries, initial.entries);
 });
 
+test('Registry keeps packages with many variables and leaves out only records outside its bounds', async () => {
+  const variables = count => Array.from({ length: count }, (_, index) => ({ name: `SETTING_${index}` }));
+  const packaged = record('org/many-settings');
+  packaged.server.packages = [
+    {
+      registryType: 'npm',
+      identifier: '@org/many-settings',
+      version: '1.0.0',
+      transport: { type: 'stdio' },
+      environmentVariables: variables(133),
+    },
+  ];
+  const oversized = record('org/oversized');
+  oversized.server.packages = [{ ...packaged.server.packages[0], environmentVariables: variables(1025) }];
+  const catalog = createRegistryCatalog({
+    fetcher: async () => Response.json({ servers: [packaged, oversized, record('org/plain')], metadata: {} }),
+  });
+  const result = await catalog.refresh();
+  assert.equal(result.refreshFailed, false);
+  assert.equal(result.failureCode, undefined);
+  assert.equal(result.skippedRecords, 1);
+  assert.deepEqual(
+    result.entries.map(entry => entry.id),
+    ['org/many-settings@1:0', 'org/many-settings@1:package:0', 'org/plain@1:0'],
+  );
+  assert.equal(result.entries[1].package.environment.length, 20);
+});
+
 test('Registry replaces all endpoints when the same latest record repeats across pages', async () => {
   const catalog = createRegistryCatalog({
     fetcher: async input => {
