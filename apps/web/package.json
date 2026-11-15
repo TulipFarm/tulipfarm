@@ -53,7 +53,7 @@
     "@tulipfarm/plan-documents": "workspace:*",
     "@tulipfarm/recommendations": "workspace:*",
     "@tulipfarm/slack": "workspace:*",
-    "@tulipfarm/sprout": "0.17.2",
+    "@tulipfarm/sprout": "0.17.3",
     "@tulipfarm/tables": "workspace:*",
     "@tulipfarm/workflows": "workspace:*",
     "@tulipfarm/workspace-storage": "workspace:*",
