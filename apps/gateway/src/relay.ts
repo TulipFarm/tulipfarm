@@ -37,12 +37,12 @@ export type Answer =
   | 'rate-limited';
 
 const answers: Record<Answer, { readonly status: number; readonly title: string }> = {
-  'not-found': { status: 404, title: 'There is nothing here' },
-  unavailable: { status: 503, title: 'This app is unavailable' },
+  'not-found': { status: 404, title: 'There is no app at this address' },
+  unavailable: { status: 503, title: 'This app is not available right now' },
   starting: { status: 503, title: 'This app is starting. This page will refresh in a few seconds.' },
-  asleep: { status: 503, title: 'This app is asleep' },
-  'not-responding': { status: 502, title: 'This app is not responding' },
-  'timed-out': { status: 504, title: 'This app is not responding' },
+  asleep: { status: 503, title: 'This app is asleep. Reload the page to wake it.' },
+  'not-responding': { status: 502, title: 'This app is not responding. Try again later.' },
+  'timed-out': { status: 504, title: 'This app took too long to respond. Try again later.' },
   'rate-limited': { status: 429, title: 'Too many requests. Try again in a minute.' },
 };
 const jsonErrors: Record<Answer, string> = {
