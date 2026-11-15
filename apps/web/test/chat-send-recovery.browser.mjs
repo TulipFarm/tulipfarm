@@ -61,6 +61,8 @@ test('chat sends reconcile transport failures and recover without reloading', { 
           newChatWrites: [],
           dropCreate: false,
           accessReads: null,
+          // The status the workspace and membership reads answer with.
+          accessStatus: 200,
         };
         const add = (author, text, id = randomUUID()) => {
           const message = {
@@ -94,17 +96,24 @@ test('chat sends reconcile transport failures and recover without reloading', { 
           let status = 200;
           const other = path.match(/\/conversations\/([0-9a-f-]{36})(\/.*)?$/);
           const newChat = other && other[1] !== chat.id ? { id: other[1], suffix: other[2] ?? '' } : null;
-          if ((path === '/v1/workspaces' || path.endsWith('/governance/me')) && state.accessReads)
+          if (
+            (path === '/v1/workspaces' || path === '/v1/workspaces/acme' || path.endsWith('/governance/me')) &&
+            state.accessReads
+          )
             await state.accessReads;
           if (path === '/v1/auth/get-session')
             json = {
-              session: { id: 'session-ada', userId: 'ada' },
+              session: { id: 'session-ada', userId: 'ada', expiresAt: '2099-01-01T00:00:00.000Z' },
               user: { id: 'ada', name: 'Ada', email: 'ada@example.com' },
             };
           else if (path === '/v1/workspaces') json = [workspace];
-          else if (path === '/v1/workspaces/acme') json = workspace;
-          else if (path.endsWith('/governance/me')) json = membership;
-          else if (path.endsWith('/credits')) json = credits;
+          else if (path === '/v1/workspaces/acme') {
+            status = state.accessStatus;
+            json = workspace;
+          } else if (path.endsWith('/governance/me')) {
+            status = state.accessStatus;
+            json = membership;
+          } else if (path.endsWith('/credits')) json = credits;
           else if (path.endsWith('/model-catalog')) json = chatCatalog;
           else if (path.endsWith('/system-package-installations')) json = { installations: [], nextCursor: null };
           else if (path.endsWith('/slack/status'))
@@ -439,6 +448,84 @@ test('chat sends reconcile transport failures and recover without reloading', { 
         assert.equal(await page.getByText('Could not confirm your workspace access', { exact: false }).count(), 0);
       },
     );
+
+    const holdAccess = state => {
+      let release;
+      state.accessReads = new Promise(resolve => (release = resolve));
+      return outcome => {
+        state.accessStatus = outcome;
+        state.accessReads = null;
+        release();
+      };
+    };
+    const writes = page =>
+      page.evaluate(() =>
+        import('/src/lib/http.ts').then(({ writesAllowed }) =>
+          Promise.race([
+            writesAllowed().then(
+              () => 'allowed',
+              () => 'refused',
+            ),
+            new Promise(resolve => setTimeout(() => resolve('held'), 300)),
+          ]),
+        ),
+      );
+    // The page must change while the access check is still waiting, then follow the check's answer.
+    const opensAtOnceThenSettles = async (page, release, outcome) => {
+      await page
+        .getByRole('navigation', { name: 'Workspace navigation' })
+        .getByRole('link', { name: 'Chats', exact: true })
+        .click();
+      await page.getByRole('heading', { name: 'Chats', exact: true }).waitFor({ timeout: 1500 });
+      assert.equal(await writes(page), 'held', 'Writes wait for the pending access check');
+      release(outcome);
+      if (outcome === 200) {
+        assert.equal(await writes(page), 'allowed');
+        assert.equal(new URL(page.url()).pathname, '/acme/chat');
+      } else {
+        await page.getByRole('heading', { name: 'Chats', exact: true }).waitFor({ state: 'detached' });
+        assert.equal(await page.getByText('Follow-up messages', { exact: true }).count(), 0);
+      }
+    };
+    for (const outcome of [200, 403]) {
+      await scenario(
+        `a sidebar click during the startup access check opens the page at once and then follows a ${outcome}`,
+        async ({ page, state }) => {
+          const chats = page
+            .getByRole('navigation', { name: 'Workspace navigation' })
+            .getByRole('link', { name: 'Chats', exact: true });
+          let release;
+          // Reopening shows the workspace from its last admission while the startup check waits. The
+          // dev server can miss the brief window for reading it, so a reload that waits is tried again.
+          for (let attempt = 0; ; attempt++) {
+            release = holdAccess(state);
+            await page.goto(`${origin}/acme`);
+            if (
+              await chats.waitFor({ timeout: 3000 }).then(
+                () => true,
+                () => false,
+              )
+            )
+              break;
+            assert.ok(attempt < 2, 'The workspace opens from its last admission');
+            release(200);
+            await chats.waitFor();
+          }
+          await opensAtOnceThenSettles(page, release, outcome);
+        },
+      );
+      await scenario(
+        `a sidebar click after a failed access refresh opens the page at once and then follows a ${outcome}`,
+        async ({ page, state }) => {
+          state.accessStatus = 503;
+          await page.evaluate(() => window.dispatchEvent(new Event('tulipfarm:workspace-access-changed')));
+          const reconnect = page.getByRole('button', { name: 'Reconnect now', exact: true });
+          await reconnect.waitFor();
+          await opensAtOnceThenSettles(page, holdAccess(state), outcome);
+          if (outcome === 200) await reconnect.waitFor({ state: 'detached' });
+        },
+      );
+    }
 
     await scenario(
       'a new chat that was never created shows its first message as not sent, and trying again sends it once',

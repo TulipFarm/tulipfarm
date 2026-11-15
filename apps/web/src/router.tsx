@@ -1004,20 +1004,24 @@ export const workspaceRoute = createRoute({
 
       // Moving between pages of an admitted workspace shows the next page at once with the last
       // admission. The full check runs behind it, writes wait for it, and any change re-runs this load.
+      // That holds while the shown admission is still provisional or stale, except on an integration's
+      // own page, which changes its connection and so waits for a confirmed check.
       const shown =
         earlyReads && !verified && loadCause === 'stay'
           ? (router.state.matches.find(match => match.routeId === workspaceRoute.id)?.context as
               | Partial<WorkspaceContext>
               | undefined)
           : undefined;
+      const unconfirmed = shown?.workspaceProvisional !== false || shown.workspaceStale !== false;
       if (
         earlyReads &&
         shown?.workspace?.slug === params.workspaceSlug &&
         shown.workspace.id === previousWorkspace?.id &&
         shown.user?.id === earlyReads.userId &&
         shown.sessionId === earlyReads.sessionId &&
-        shown.workspaceProvisional === false &&
-        shown.workspaceStale === false
+        typeof shown.workspaceProvisional === 'boolean' &&
+        typeof shown.workspaceStale === 'boolean' &&
+        !(unconfirmed && location.pathname.startsWith(`/${params.workspaceSlug}/integrations/`))
       ) {
         const shownContext = shown as WorkspaceContext;
         const check = earlyAbort;
@@ -1042,7 +1046,9 @@ export const workspaceRoute = createRoute({
         );
         void verification
           .then(
-            result => (fingerprint(result) === fingerprint(shownContext) ? undefined : { context: result }),
+            // A provisional or stale admission is replaced once confirmed, even when nothing else changed.
+            result =>
+              fingerprint(result) === fingerprint(shownContext) && !unconfirmed ? undefined : { context: result },
             () => ({ context: null }),
           )
           .then(outcome => {
