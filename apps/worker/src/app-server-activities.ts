@@ -70,7 +70,16 @@ async function within<T>(ms: number, signal: AbortSignal, call: (signal: AbortSi
  * endpoint generation only keeps a stale switch from moving the endpoint. Server apps get no workspace data credentials.
  */
 export function createAppServerActivities(work: AppWork) {
-  const { transact, host, objects } = work;
+  const { transact, host, objects, platform } = work;
+
+  /** Records which workspace each app belongs to, so its hosts can be found once the workspace is deleted. */
+  async function recordOwners(workspaceId: string, appIds: readonly string[]) {
+    await platform.query(
+      `INSERT INTO app.app_server_owners (app_id, workspace_id) SELECT unnest($1::uuid[]), $2
+       ON CONFLICT (app_id) DO NOTHING`,
+      [appIds, workspaceId],
+    );
+  }
 
   async function fail(input: OperationInput, reason: AppFailure) {
     return ended(
@@ -135,6 +144,7 @@ export function createAppServerActivities(work: AppWork) {
     async provisionAppServer(
       input: OperationInput & AppServerTarget,
     ): Promise<{ readonly ok: true; readonly hostRef: string } | { readonly ok: false }> {
+      await recordOwners(input.workspaceId, [input.appId]);
       const provisioned = await heartbeating(signal =>
         within(SERVER_PROVISION_MS, signal, bounded =>
           host.provision(
@@ -250,8 +260,8 @@ export function createAppServerActivities(work: AppWork) {
     /**
      * Moves each server app's endpoint back to its live host when a lost race left it elsewhere, and removes hosts that
      * are not live, not a candidate, and belong to an app with no operation in flight. Apps of workspaces without app
-     * hosting, and hosts of apps no workspace knows, are left alone. Makes at most `SERVER_RECONCILE_BATCH` repairs of
-     * each kind.
+     * hosting, and hosts of apps no workspace knows, are left alone. Every host of an app whose workspace was deleted is
+     * removed without reading that workspace. Makes at most `SERVER_RECONCILE_BATCH` repairs of each kind.
      */
     async reconcileAppServers(signal: AbortSignal) {
       if (host === unavailableAppHost) return;
@@ -262,6 +272,29 @@ export function createAppServerActivities(work: AppWork) {
       let repairs = 0;
       let removals = 0;
       const failures: unknown[] = [];
+
+      // A deleted workspace's storage never comes back, so its apps' hosts serve no one. Names and preview hosts also
+      // record an app's workspace, for hosts brought up before owners were recorded.
+      const { rows: orphaned } = await platform.query(
+        `SELECT DISTINCT o.app_id::text AS app_id
+         FROM (SELECT app_id, workspace_id FROM app.app_server_owners
+               UNION ALL SELECT app_id, workspace_id FROM app.app_hostnames
+               UNION ALL SELECT app_id, workspace_id FROM app.app_preview_hosts) o
+         JOIN app.workspace_storage s ON s.workspace_id = o.workspace_id AND s.stage = 'unavailable'
+         WHERE o.app_id::text = ANY($1::text[])`,
+        [[...listed.keys()]],
+      );
+      for (const { app_id: appId } of orphaned as { app_id: string }[])
+        for (const hostRef of listed.get(appId) ?? []) {
+          if (removals >= SERVER_RECONCILE_BATCH) break;
+          removals++;
+          try {
+            const done = await within(SERVER_REMOVE_MS, signal, bounded => host.remove({ appId, hostRef }, bounded));
+            if (done.ok) recordAppReconcileRepair('host-removed');
+          } catch (error) {
+            failures.push(error);
+          }
+        }
       type Row = {
         id: string;
         host_ref: string | null;
@@ -288,6 +321,10 @@ export function createAppServerActivities(work: AppWork) {
         try {
           if (!(await work.enabled(workspaceId))) continue;
           const servers = await transact(workspaceId, tx => readServers(tx, [...listed.keys()]));
+          await recordOwners(
+            workspaceId,
+            servers.map(app => app.id),
+          );
           for (const app of servers) {
             // An operation in flight may own a host it has not recorded yet, and will switch the endpoint itself.
             if (app.busy) continue;
