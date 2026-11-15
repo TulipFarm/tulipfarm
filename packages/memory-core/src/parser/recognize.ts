@@ -110,7 +110,7 @@ export async function parseKnowledgeDocument(
       .filter(Boolean)
       .join('\n\n'),
   );
-  const { chunks, tokens } = chunkSegments(segments);
+  const { chunks, tokens } = await chunkSegments(segments);
   const base = `${extraction.engine}-${extraction.version}-${extraction.normalization}`;
   const recognizer = used;
   return {

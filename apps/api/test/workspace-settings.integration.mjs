@@ -22,6 +22,7 @@ import {
 import { createWorkspace, getWorkspace, listWorkspaces } from '@tulipfarm/workspaces/store';
 import { registerGovernance } from '../src/governance.ts';
 import { registerAgents } from '../src/agents.ts';
+import { createAgentWork } from '../src/agent-sweeps.ts';
 import { grantApplicationAccess } from '../../database/src/postgres.ts';
 import { workspaceTableMigrations } from '@tulipfarm/workspaces/table-migrations';
 import { createEmailDeliveryStore, encryptEmailDelivery } from '../../../packages/workspaces/src/email-delivery.ts';
@@ -164,7 +165,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
         async routes => {
           registerWorkspaceSettings(routes, { auth, ...store });
           registerGovernance(routes, { auth, identity: pool, runtime, compatibility });
-          registerAgents(routes, { auth, pool, runtime, agentModel: null });
+          registerAgents(routes, { auth, pool, runtime, work: createAgentWork({ runtime, agentModel: null }) });
         },
         { prefix: '/v1' },
       );

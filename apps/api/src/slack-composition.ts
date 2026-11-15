@@ -8,7 +8,8 @@ import {
 } from '@tulipfarm/slack';
 import { createSlackChannelAgents } from '@tulipfarm/agents/slack-channels';
 import type { WorkspaceRuntime } from '@tulipfarm/workspaces/storage';
-import { authConfig, type registerAuth } from './auth.ts';
+import { authConfig } from './better-auth.ts';
+import type { registerAuth } from './auth.ts';
 import type { SlackDependencies } from './slack.ts';
 import type { DefaultKnowledgeHook } from '@tulipfarm/integrations/authorization';
 

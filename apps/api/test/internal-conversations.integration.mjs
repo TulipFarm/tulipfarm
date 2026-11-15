@@ -5,6 +5,7 @@ import Fastify from 'fastify';
 import { authenticatedFixture } from './auth-fixture.mjs';
 import { registerConversations } from '../src/conversations.ts';
 import { registerAgents } from '../src/agents.ts';
+import { createAgentWork } from '../src/agent-sweeps.ts';
 import { createInternalConversations } from '../../../packages/conversations/src/internal.ts';
 import { internalFixture } from '../../../packages/conversations/test/internal-fixture.mjs';
 
@@ -43,7 +44,12 @@ test(
       await app.register(
         async routes => {
           registerConversations(routes, { auth, service: f.store });
-          registerAgents(routes, { auth, runtime: f.runtime, pool: identity, agentModel: null });
+          registerAgents(routes, {
+            auth,
+            runtime: f.runtime,
+            pool: identity,
+            work: createAgentWork({ runtime: f.runtime, agentModel: null }),
+          });
         },
         { prefix: '/v1' },
       );

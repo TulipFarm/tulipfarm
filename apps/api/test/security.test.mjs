@@ -5,6 +5,7 @@ import { buildApp } from '../src/app.ts';
 import { registerSecurity, securityServerOptions } from '../src/security.ts';
 import { registerAbuseHooks } from '../src/abuse.ts';
 import { registerAgents } from '../src/agents.ts';
+import { createAgentWork } from '../src/agent-sweeps.ts';
 import { registerIntegrations } from '../src/integrations.ts';
 import { registerGovernance } from '../src/governance.ts';
 import { registerModelCatalog } from '../src/model-catalog.ts';
@@ -56,7 +57,7 @@ test('disabled workspace errors are concealed across business routes without con
   const app = Fastify();
   t.after(() => app.close());
   registerGovernance(app, { auth, runtime, identity: {} });
-  registerAgents(app, { auth, runtime, pool: {}, agentModel: null });
+  registerAgents(app, { auth, runtime, pool: {}, work: createAgentWork({ runtime, agentModel: null }) });
   registerModelCatalog(app, { auth, runtime, compatibility: commonCompatibility });
   registerConversations(app, { auth, service: { list: unavailable } });
   registerIntegrations(app, { auth, service: { list: unavailable } });
@@ -508,7 +509,11 @@ test('nested business error handlers preserve parser status codes', async t => {
   const auth = { api: { getSession: async () => ({ user: { id: '11111111-1111-4111-8111-111111111111' } }) } };
   const id = '22222222-2222-4222-8222-222222222222';
   for (const [register, path] of [
-    [app => registerAgents(app, { auth, runtime: {}, pool: {}, agentModel: null }), `/workspaces/${id}/agents/${id}`],
+    [
+      app =>
+        registerAgents(app, { auth, runtime: {}, pool: {}, work: createAgentWork({ runtime: {}, agentModel: null }) }),
+      `/workspaces/${id}/agents/${id}`,
+    ],
     [app => registerIntegrations(app, { auth, service: {} }), `/workspaces/${id}/integrations/creation-grants`],
     [app => registerGovernance(app, { auth, runtime: {}, pool: {} }), `/workspaces/${id}/governance/teams/${id}`],
   ]) {

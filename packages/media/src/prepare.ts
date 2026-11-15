@@ -1,4 +1,4 @@
-import sharp, { type Sharp } from 'sharp';
+import type { Sharp } from 'sharp';
 import { decodeBmp, type RgbaImage } from './bmp.ts';
 import { sniffMediaType, type MediaType } from './sniff.ts';
 
@@ -39,6 +39,10 @@ const shrinkFactor = 0.75;
 const maxPasses = 64;
 const lossyQuality = 85;
 
+// sharp loads on first use; importing its native binding costs a new process tens of milliseconds of CPU.
+const loadSharp = async () => (await import('sharp')).default;
+type SharpModule = Awaited<ReturnType<typeof loadSharp>>;
+
 type DecodedImage = {
   open: () => Sharp;
   width: number;
@@ -51,6 +55,7 @@ type DecodedImage = {
 /** The displayed width and height of an image, after its EXIF orientation; null when sharp cannot read it. */
 export async function imageDimensions(bytes: Uint8Array): Promise<{ width: number; height: number } | null> {
   try {
+    const sharp = await loadSharp();
     const { autoOrient } = await sharp(bytes, { limitInputPixels: maxInputPixels }).metadata();
     return { width: autoOrient.width, height: autoOrient.height };
   } catch {
@@ -132,6 +137,7 @@ async function encode(
 async function decodeWithSharp(bytes: Uint8Array): Promise<DecodedImage> {
   // librsvg only resolves external references relative to a base file; buffer input has none, so SVG cannot fetch.
   const options = { limitInputPixels: maxInputPixels, autoOrient: true } as const;
+  const sharp = await loadSharp();
   const metadata = await sharp(bytes, options).metadata();
   checkPixels(metadata.width, metadata.height);
   return {
@@ -147,9 +153,11 @@ function decode(mediaType: MediaType, bytes: Uint8Array, deadline: number): Prom
   switch (mediaType) {
     case 'image/heic':
     case 'image/heif':
-      return decodeHeif(bytes, deadline).then(fromRgba);
-    case 'image/bmp':
-      return Promise.resolve(fromRgba(decodeBmp(bytes, checkPixels)));
+      return decodeHeif(bytes, deadline).then(async image => fromRgba(await loadSharp(), image));
+    case 'image/bmp': {
+      const image = decodeBmp(bytes, checkPixels);
+      return loadSharp().then(sharp => fromRgba(sharp, image));
+    }
     default:
       return decodeWithSharp(bytes);
   }
@@ -182,7 +190,7 @@ async function decodeHeif(bytes: Uint8Array, deadline: number): Promise<RgbaImag
   }
 }
 
-function fromRgba({ width, height, rgba }: RgbaImage): DecodedImage {
+function fromRgba(sharp: SharpModule, { width, height, rgba }: RgbaImage): DecodedImage {
   const raw = { width, height, channels: 4 } as const;
   const hasAlpha = !isOpaque(rgba);
   return {

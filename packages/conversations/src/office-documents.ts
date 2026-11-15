@@ -1,38 +1,16 @@
-import {
-  AlignmentType,
-  BorderStyle,
-  Document,
-  ExternalHyperlink,
-  type FileChild,
-  Footer,
-  Header,
-  HeadingLevel,
-  ImageRun,
-  LevelFormat,
-  Packer,
-  PageBreak,
-  PageNumber,
-  PageOrientation,
-  Paragraph,
-  type ILevelsOptions,
-  ShadingType,
-  Table,
-  TableCell,
-  TableOfContents,
-  TableRow,
-  TextRun,
-  WidthType,
-} from 'docx';
-import ExcelJS from 'exceljs';
-import JSZip from 'jszip';
-import pptxgen from 'pptxgenjs';
+import type { FileChild, ILevelsOptions, Paragraph } from 'docx';
+import type ExcelJS from 'exceljs';
+import type pptxgen from 'pptxgenjs';
 import { z } from 'zod';
 
-// pptxgenjs ships CommonJS-style types, so NodeNext sees the default export one level down.
-const Presentation = pptxgen as unknown as typeof pptxgen.default;
 type TextProps = pptxgen.default.TextProps;
 type TextOptions = pptxgen.default.TextPropsOptions;
 type Slide = pptxgen.default.Slide;
+
+// The Office libraries load on first use; importing them costs a new process a few hundred milliseconds of CPU.
+const loadJSZip = async () => (await import('jszip')).default;
+// pptxgenjs ships CommonJS-style types, so NodeNext sees the default export one level down.
+const loadPresentation = async () => (await import('pptxgenjs')).default as unknown as typeof pptxgen.default;
 
 export const officeFormats = {
   docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -397,6 +375,7 @@ const fixedDate = new Date('2000-01-01T00:00:00Z');
  * The libraries stamp the current time into entries, core properties, and embedded chart workbooks, and docx gives hyperlinks random relationship ids.
  */
 async function stable(bytes: Uint8Array) {
+  const JSZip = await loadJSZip();
   const source = await JSZip.loadAsync(bytes);
   const target = new JSZip();
   const links = new Map<string, string>();
@@ -454,6 +433,29 @@ function fit(image: OfficeImage, width: number, height: number) {
 }
 
 async function renderDocument(spec: z.infer<typeof documentSpecSchema>, imageOf: (fileId: string) => OfficeImage) {
+  const {
+    AlignmentType,
+    BorderStyle,
+    Document,
+    ExternalHyperlink,
+    Footer,
+    Header,
+    HeadingLevel,
+    ImageRun,
+    LevelFormat,
+    Packer,
+    PageBreak,
+    PageNumber,
+    PageOrientation,
+    Paragraph,
+    ShadingType,
+    Table,
+    TableCell,
+    TableOfContents,
+    TableRow,
+    TextRun,
+    WidthType,
+  } = await import('docx');
   let drawings = 0;
   const theme = themeOf(spec);
   const inline = (value: Text, extra: { bold?: boolean; italics?: boolean; color?: string } = {}) =>
@@ -681,7 +683,7 @@ async function renderDocument(spec: z.infer<typeof documentSpecSchema>, imageOf:
 
 async function renderWorkbook(spec: z.infer<typeof workbookSpecSchema>) {
   const theme = themeOf(spec);
-  const workbook = new ExcelJS.Workbook();
+  const workbook = new (await import('exceljs')).default.Workbook();
   workbook.creator = 'TulipFarm';
   // Nothing here evaluates formulas, so ask the opening app to calculate them instead of showing empty cached values.
   workbook.calcProperties.fullCalcOnLoad = true;
@@ -761,7 +763,7 @@ async function renderPresentation(
   imageOf: (fileId: string) => OfficeImage,
 ) {
   const theme = themeOf(spec);
-  const deck = new Presentation();
+  const deck = new (await loadPresentation())();
   deck.author = 'TulipFarm';
   deck.layout = spec.aspectRatio === '4:3' ? 'LAYOUT_4x3' : 'LAYOUT_16x9';
   const width = 10,

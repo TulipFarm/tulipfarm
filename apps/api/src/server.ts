@@ -6,7 +6,8 @@ import { buildInfo } from './build-info.ts';
 import { apiRole, apiTelemetryService } from './api-role.ts';
 
 // Fails startup on an invalid TULIPFARM_API_ROLE, even when no sweep is registered to read it.
-const service = apiTelemetryService(apiRole());
+const role = apiRole();
+const service = apiTelemetryService(role);
 // Bare package names in TULIPFARM_EXTENSIONS resolve from this app.
 await startExtensions('api', { resolve: specifier => import.meta.resolve(specifier), service });
 try {
@@ -16,7 +17,8 @@ try {
   throw error;
 }
 const telemetry = startTelemetry(buildInfo, { serviceName: service });
-const { buildApp } = await import('./app.ts');
+// The jobs process serves only health checks, so it skips loading and registering the request routes.
+const buildApp = role === 'jobs' ? (await import('./jobs-app.ts')).buildJobsApp : (await import('./app.ts')).buildApp;
 const { logUnconfiguredIntegrations } = await import('./integration-status.ts');
 
 // Fails startup on an invalid model catalog or provider environment.

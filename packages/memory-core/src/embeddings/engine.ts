@@ -101,7 +101,7 @@ export type EmbeddingEngineOptions<Context, Source extends { kind: string }> = {
   profile: EmbeddingProfile;
   enabled(): boolean;
   provider: KnowledgeEmbeddingProvider;
-  prepareInputs(inputs: readonly string[]): { inputHash: string; inputTokensUpperBound: number };
+  prepareInputs(inputs: readonly string[]): Promise<{ inputHash: string; inputTokensUpperBound: number }>;
   clock: Clock;
   usageMeter: UsageMeter<Context>;
   capacity: EmbeddingCapacity;
@@ -242,10 +242,12 @@ export function createEmbeddingEngine<Context, Source extends { kind: string }>(
   async function insertItems(tx: Transaction, jobId: string, texts: readonly string[]) {
     let items: z.infer<typeof itemSchema>[];
     try {
-      items = texts.map((input_text, ordinal) => {
-        const prepared = prepareKnowledgeEmbeddingInputs([input_text]);
-        return { ordinal, input_text, input_hash: prepared.inputHash, tokens: prepared.inputTokensUpperBound };
-      });
+      items = await Promise.all(
+        texts.map(async (input_text, ordinal) => {
+          const prepared = await prepareKnowledgeEmbeddingInputs([input_text]);
+          return { ordinal, input_text, input_hash: prepared.inputHash, tokens: prepared.inputTokensUpperBound };
+        }),
+      );
     } catch {
       await repository(tx).invalidateInput([jobId]);
       return;

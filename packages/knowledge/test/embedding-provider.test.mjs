@@ -22,14 +22,14 @@ const body = () => ({
 });
 const response = value => new Response(JSON.stringify(value), { headers: { 'apim-request-id': 'test-request-123' } });
 
-test('final input tokenizer counts verbatim context and treats special spellings as ordinary text', () => {
-  assert.equal(prepareKnowledgeEmbeddingInputs(['hello world']).inputTokensUpperBound, 2);
-  assert.equal(prepareKnowledgeEmbeddingInputs(['<|endoftext|>']).inputTokensUpperBound, 7);
-  const prepared = prepareKnowledgeEmbeddingInputs(['# Title\n\nhello world']);
+test('final input tokenizer counts verbatim context and treats special spellings as ordinary text', async () => {
+  assert.equal((await prepareKnowledgeEmbeddingInputs(['hello world'])).inputTokensUpperBound, 2);
+  assert.equal((await prepareKnowledgeEmbeddingInputs(['<|endoftext|>'])).inputTokensUpperBound, 7);
+  const prepared = await prepareKnowledgeEmbeddingInputs(['# Title\n\nhello world']);
   assert.deepEqual(prepared.inputs, ['# Title\n\nhello world']);
   assert.equal(prepared.inputTokensUpperBound, 5);
   assert.match(prepared.inputHash, /^[a-f0-9]{64}$/);
-  assert.notEqual(prepared.inputHash, prepareKnowledgeEmbeddingInputs(['hello world']).inputHash);
+  assert.notEqual(prepared.inputHash, (await prepareKnowledgeEmbeddingInputs(['hello world'])).inputHash);
   assert.throws(() => prepared.inputs.push('extra'), TypeError);
 });
 

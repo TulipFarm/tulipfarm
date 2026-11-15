@@ -2,8 +2,8 @@ export type ApiRole = 'all' | 'requests' | 'jobs';
 
 /**
  * `all` serves requests and runs the scheduled background sweeps in one process. `requests` starts no sweeps, so
- * they cannot hold workspace-storage connections that requests are waiting for; `jobs` runs them. Both roles serve
- * every route, so `/v1/health` keeps answering health checks.
+ * they cannot hold workspace-storage connections that requests are waiting for; `jobs` runs them and serves only `/`
+ * and the `/v1/health` routes, so it keeps answering health checks without loading the request routes.
  */
 export function apiRole(env: NodeJS.ProcessEnv = process.env): ApiRole {
   const value = env.TULIPFARM_API_ROLE?.trim() || 'all';

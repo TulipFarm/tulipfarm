@@ -1,13 +1,12 @@
 import { createEmailDeliveryStore, emailDeliveryKeys } from '@tulipfarm/workspaces/email-delivery';
 import { fromNodeHeaders } from 'better-auth/node';
 import type { FastifyInstance } from 'fastify';
-import { Pool } from 'pg';
-import { log } from '@tulipfarm/observability';
 import { turnstileConfig } from './turnstile.ts';
 import { createDevSessions, devSessionsAllowed, safeRedirectPath } from './dev-session.ts';
 import { authConfig, createAuth, emailTransportConfigured } from './better-auth.ts';
 import { registerAccountDetails } from './account-details.ts';
 import type { InvitationLinks } from './invitation-sign-in.ts';
+import { createIdentityPool } from './identity-pool.ts';
 
 export { authConfig, createAuth } from './better-auth.ts';
 
@@ -20,16 +19,7 @@ export function registerAuth(app: FastifyInstance) {
   const { magicLink } = config;
   for (const method of config.unavailableMethods)
     app.log.warn({ method }, `AUTH_METHODS lists ${method}, but its credentials are missing; it stays off`);
-  const pool = new Pool({
-    connectionString: process.env.DATABASE_URL ?? 'postgresql://tulipfarm:local-tulipfarm@127.0.0.1:5432/tulipfarm',
-    options: '-c search_path=app',
-    connectionTimeoutMillis: 5000,
-    max: 10,
-  });
-  pool.on('error', () => log('error', 'dependency', 'database_connection_failed'));
-  app.addHook('onClose', async () => {
-    await pool.end();
-  });
+  const pool = createIdentityPool(app);
   const passwordResetEmail = config.emailPassword && emailTransportConfigured();
   const invitationLinks: InvitationLinks = { current: null };
   const auth = createAuth(

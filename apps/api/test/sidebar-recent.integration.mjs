@@ -7,6 +7,7 @@ import { createAgentTasks } from '@tulipfarm/agents/tasks';
 import { savedTaskAgent } from '../../../packages/agents/test/task-fixture.mjs';
 import { knowledgeFixture } from './knowledge-fixture.mjs';
 import { registerAgents } from '../src/agents.ts';
+import { createAgentWork } from '../src/agent-sweeps.ts';
 import { registerAgentTasks } from '../src/agent-tasks.ts';
 import { registerWorkflows } from '../src/workflows.ts';
 import { protectBusinessRequests } from '../src/business.ts';
@@ -21,7 +22,12 @@ test('recent endpoints return the newest three accessible items, not UUID order'
   protectBusinessRequests(app);
   const workflows = createWorkflows(f.runtime),
     tasks = createAgentTasks(f.runtime);
-  registerAgents(app, { runtime: f.runtime, pool: f.signed.identity, auth: f.signed.auth });
+  registerAgents(app, {
+    runtime: f.runtime,
+    pool: f.signed.identity,
+    auth: f.signed.auth,
+    work: createAgentWork({ runtime: f.runtime }),
+  });
   registerAgentTasks(app, { runtime: f.runtime, auth: f.signed.auth });
   registerWorkflows(app, { service: workflows, auth: f.signed.auth });
   const w = f.workspace,

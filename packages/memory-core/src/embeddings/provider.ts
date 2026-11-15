@@ -1,5 +1,4 @@
 import { createHash } from 'node:crypto';
-import { getEncoding } from 'js-tiktoken';
 import { z } from 'zod';
 import type {
   EmbeddingError,
@@ -10,18 +9,21 @@ import type {
   EmbeddingUsage,
 } from '../ports/embedding-provider.js';
 
-const tokenizer = getEncoding('cl100k_base');
+// Building the cl100k tokenizer costs a new process a few hundred milliseconds of CPU, so it loads on first use.
+let tokenizer: Promise<{ encode(text: string, allowed: [], disallowed: []): number[] }> | undefined;
+const loadTokenizer = () => (tokenizer ??= import('js-tiktoken').then(({ getEncoding }) => getEncoding('cl100k_base')));
 const tokenCount = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const usageEnvelope = z.object({ usage: z.object({ prompt_tokens: tokenCount, total_tokens: tokenCount }) });
 
-export function prepareEmbeddingInputs(inputs: readonly string[], profile: EmbeddingProfile) {
+export async function prepareEmbeddingInputs(inputs: readonly string[], profile: EmbeddingProfile) {
   const parsed = z.array(z.string().min(1)).min(1).max(profile.maxBatchInputs).safeParse(inputs);
   if (!parsed.success) throw new Error('Invalid knowledge embedding input');
+  const encoder = await loadTokenizer();
   let inputTokensUpperBound = 0;
   for (const text of parsed.data) {
     if (!text.trim() || /[\uD800-\uDFFF]/u.test(text) || Buffer.byteLength(text, 'utf8') > profile.maxInputBytes)
       throw new Error('Invalid knowledge embedding input');
-    const tokens = tokenizer.encode(text, [], []).length;
+    const tokens = encoder.encode(text, [], []).length;
     if (tokens > profile.maxInputTokens) throw new Error('Invalid knowledge embedding input');
     inputTokensUpperBound += tokens;
   }
@@ -102,9 +104,9 @@ export function createEmbeddingProvider(
     });
     if (config.kind === 'disabled') return undispatched('disabled');
     if (signal?.aborted) return undispatched('cancelled');
-    let prepared: ReturnType<typeof prepareEmbeddingInputs>;
+    let prepared: Awaited<ReturnType<typeof prepareEmbeddingInputs>>;
     try {
-      prepared = prepareEmbeddingInputs(inputs, profile);
+      prepared = await prepareEmbeddingInputs(inputs, profile);
     } catch {
       return undispatched('invalid_input');
     }
