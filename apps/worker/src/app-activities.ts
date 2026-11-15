@@ -57,6 +57,11 @@ const hour = 3_600_000;
 export const APP_USAGE_SETTLE_MS = 2 * hour;
 /** The end of the newest hour whose usage can be read at `now`. */
 const settledBefore = (now: number) => Math.floor((now - APP_USAGE_SETTLE_MS) / hour) * hour;
+/**
+ * Keeps the names `h` of workspaces whose storage still exists. A deleted workspace's storage is unavailable for good,
+ * the same test `app.workspace_access` refuses it by, while its names stay behind.
+ */
+const inLiveWorkspace = `JOIN app.workspace_storage s ON s.workspace_id = h.workspace_id AND s.stage <> 'unavailable'`;
 
 type UsageWindow = { readonly start: string; readonly end: string };
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -421,8 +426,8 @@ export function createAppActivities(work: AppWork) {
    */
   async function trafficByApp(traffic: Map<string, Traffic>) {
     const { rows: owners } = await platform.query(
-      `SELECT name, workspace_id, app_id FROM app.app_hostnames
-       WHERE name = ANY($1::text[]) OR (state = 'current' AND status IS NOT NULL)`,
+      `SELECT h.name, h.workspace_id, h.app_id FROM app.app_hostnames h ${inLiveWorkspace}
+       WHERE h.name = ANY($1::text[]) OR (h.state = 'current' AND h.status IS NOT NULL)`,
       [[...traffic.keys()]],
     );
     const perApp = new Map<string, AppUsage & { traffic: Traffic }>();
@@ -494,23 +499,36 @@ export function createAppActivities(work: AppWork) {
     if (paused) await projectEdge(used, signal);
   }
 
-  async function chargeWindow(window: UsageWindow, apps: Iterable<AppUsage>, compute: Compute, signal: AbortSignal) {
-    const failures: unknown[] = [];
+  /** Charges each app outside the skipped workspaces, and returns the workspaces that failed with their errors. */
+  async function chargeWindow(
+    window: UsageWindow,
+    apps: Iterable<AppUsage>,
+    compute: Compute,
+    signal: AbortSignal,
+    skip: ReadonlySet<string> = new Set(),
+  ) {
+    const failures: { workspaceId: string; error: unknown }[] = [];
     for (const used of apps) {
       signal.throwIfAborted();
+      if (skip.has(used.workspaceId)) continue;
       try {
         await chargeApp(window, used, compute, signal);
       } catch (error) {
-        failures.push(error);
+        failures.push({ workspaceId: used.workspaceId, error });
       }
     }
-    if (failures.length) throw new AggregateError(failures, 'App usage metering failed');
+    return failures;
   }
 
   async function meterWindow(window: UsageWindow, signal: AbortSignal) {
     if (!publisher) return;
     const apps = await trafficByApp(await readTraffic(window, signal));
-    await chargeWindow(window, apps.values(), await readCompute(window, signal), signal);
+    const failures = await chargeWindow(window, apps.values(), await readCompute(window, signal), signal);
+    if (failures.length)
+      throw new AggregateError(
+        failures.map(failure => failure.error),
+        'App usage metering failed',
+      );
   }
 
   return {
@@ -822,20 +840,28 @@ export function createAppActivities(work: AppWork) {
      * has not recorded, resuming after its newest recorded hour and reaching back at most 48 hours. Metering stops at
      * the first hour whose traffic the publisher cannot read, so no later hour is recorded ahead of it, and returns
      * that hour; the next run reads it again. Compute the host cannot report holds nothing back: its hours stay
-     * unsettled and a later run within the same 48 hours charges them.
+     * unsettled and a later run within the same 48 hours charges them, even once the app is no longer served. A
+     * workspace that fails is left out of the rest of the run and the others are still charged; the run then throws.
+     * A deleted workspace is not metered, so what it had not been charged is dropped.
      */
     async meterAppTraffic(now: number, signal: AbortSignal) {
       if (!publisher) return undefined;
       const settled = settledBefore(now);
       let from = settled - hour;
       const floor = settled - 48 * hour;
-      const { rows: served } = await platform.query(
-        `SELECT workspace_id, array_agg(app_id) AS apps FROM app.app_hostnames
-         WHERE state = 'current' AND status IS NOT NULL GROUP BY workspace_id`,
+      // Usage windows are only recorded for apps that hold a name, and names are never deleted, so every unsettled
+      // window is in a workspace listed here, whether or not it serves an app now.
+      const { rows: named } = await platform.query(
+        `SELECT h.workspace_id,
+           COALESCE(array_agg(h.app_id) FILTER (WHERE h.state = 'current' AND h.status IS NOT NULL), '{}') AS apps
+         FROM app.app_hostnames h ${inLiveWorkspace} GROUP BY h.workspace_id`,
       );
       const pending = new Map<number, Map<string, AppUsage>>();
       const failures: unknown[] = [];
-      for (const { workspace_id: workspaceId, apps } of served as { workspace_id: string; apps: string[] }[]) {
+      // Each app resumes after its newest recorded hour, so recording no later hour for a failed workspace keeps the
+      // hours it missed for the next run. Hours other workspaces already recorded are not charged again.
+      const failed = new Set<string>();
+      for (const { workspace_id: workspaceId, apps } of named as { workspace_id: string; apps: string[] }[]) {
         signal.throwIfAborted();
         try {
           const next = await transact(workspaceId, async tx => {
@@ -861,14 +887,14 @@ export function createAppActivities(work: AppWork) {
           });
           from = Math.min(from, Math.max(next, floor));
         } catch (error) {
+          failed.add(workspaceId);
           failures.push(error);
         }
       }
-      // Without every workspace's resume point, a metered hour could pass one that still has earlier hours to record.
-      if (failures.length) throw new AggregateError(failures, 'App usage metering failed');
       const starts = new Set(pending.keys());
       for (let start = from; start + hour <= settled; start += hour) starts.add(start);
       let hostReports = true;
+      let unread: { window: UsageWindow; error: unknown } | undefined;
       for (const start of [...starts].sort((a, b) => a - b)) {
         const window = { start: new Date(start).toISOString(), end: new Date(start + hour).toISOString() };
         const apps = pending.get(start) ?? new Map<string, AppUsage>();
@@ -879,16 +905,21 @@ export function createAppActivities(work: AppWork) {
           } catch (error) {
             signal.throwIfAborted();
             recordAppUsageReadFailure('traffic');
-            return { window, error };
+            unread = { window, error };
+            break;
           }
           for (const [key, used] of await trafficByApp(traffic)) apps.set(key, used);
         }
         // A host that cannot report one hour is not asked for the next in the same run, so an outage logs once a run.
         const compute: Compute = hostReports ? await readCompute(window, signal) : undefined;
         hostReports &&= compute !== undefined;
-        await chargeWindow(window, apps.values(), compute, signal);
+        for (const { workspaceId, error } of await chargeWindow(window, apps.values(), compute, signal, failed)) {
+          failed.add(workspaceId);
+          failures.push(error);
+        }
       }
-      return undefined;
+      if (failures.length) throw new AggregateError(failures, 'App usage metering failed');
+      return unread;
     },
   };
 }
