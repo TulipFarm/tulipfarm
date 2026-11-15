@@ -9,6 +9,8 @@ import {
   mcpSourceClosure,
   requireProtectedSource,
   requireNoMcpDerived,
+  hasMcpDerivedSources,
+  McpEgressDenied,
 } from '../dist/index.js';
 
 const actor = { kind: 'human', userId: 'owner', membershipId: randomUUID() };
@@ -144,4 +146,27 @@ test('a chat snapshot retains its explicit Knowledge and MCP dependencies withou
   assert.deepEqual(await protectedSourceClosure(tx, [snapshot, source]), [snapshot, source, mcp]);
   assert.deepEqual(await mcpSourceClosure(tx, [snapshot, source]), [mcp]);
   await assert.rejects(requireNoMcpDerived(tx, [snapshot, source]), AccessDenied);
+});
+
+test('a catalog read of an MCP integration needs access but is not MCP data', async () => {
+  const integration = { kind: 'mcp-integration', integrationId: randomUUID(), authorizationEpoch: 1 };
+  const catalog = { ...integration, catalog: true };
+  const memory = { kind: 'personal-memory', membershipId: actor.membershipId };
+  assert.deepEqual(sourceDependencySchema.parse(catalog), catalog);
+  assert.equal(sourceDependencySchema.safeParse({ ...integration, catalog: false }).success, false);
+  const tx = {
+    schema: 'workspace',
+    client: {
+      query: async sql => {
+        if (sql === 'SELECT to_regclass($1) IS NOT NULL AS installed')
+          return { rows: [{ installed: true }], rowCount: 1 };
+        throw new AccessDenied();
+      },
+    },
+  };
+  assert.deepEqual(await mcpSourceClosure(tx, [catalog, memory]), []);
+  assert.equal(await hasMcpDerivedSources(tx, [catalog, memory]), false);
+  await assert.rejects(mcpSourceClosure(tx, [integration, memory]), McpEgressDenied);
+  assert.equal(await hasMcpDerivedSources(tx, [integration]), true);
+  await assert.rejects(requireProtectedSource(tx, actor, catalog), AccessDenied);
 });

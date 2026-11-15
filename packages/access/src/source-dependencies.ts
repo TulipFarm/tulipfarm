@@ -30,6 +30,11 @@ export const mcpSourceDependencySchema = z.strictObject({
   kind: z.literal('mcp-integration'),
   integrationId: uuidSchema,
   authorizationEpoch: z.number().int().positive(),
+  /**
+   * The integration's tool catalog (names, descriptions and schemas) was read, but none of its tools ran. Reading the
+   * source still needs access to the integration, but it is not MCP data, so it never makes a step MCP-derived.
+   */
+  catalog: z.literal(true).optional(),
 });
 export const privateTaskSourceDependencySchema = z.strictObject({
   kind: z.literal('private-task'),

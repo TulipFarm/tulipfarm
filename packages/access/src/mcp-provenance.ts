@@ -33,7 +33,8 @@ const table = (tx: AuthorizationTransaction, name: string) =>
 
 export async function mcpSourceClosure(tx: AuthorizationTransaction, sources: unknown): Promise<McpSource[]> {
   const retained = await sourceClosure(tx, sources, false);
-  const mcp = retained.filter(source => source.kind === 'mcp-integration');
+  // A catalog read is only tool metadata: it needs access to the integration, but it carries none of its data.
+  const mcp = retained.filter((source): source is McpSource => source.kind === 'mcp-integration' && !source.catalog);
   if (
     mcp.length &&
     retained.some(

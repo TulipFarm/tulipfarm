@@ -70,7 +70,9 @@ export function createMcpExecution(
           inputSchema: entry.tool.inputSchema,
         })),
       ),
-      sources: sourceDependenciesSchema.parse(selected.sources),
+      // Reading the catalog needs access to each bound integration, but tool names, descriptions and schemas are not
+      // data from it, so these sources never make the reply MCP-derived. Only a tool that ran returns MCP data.
+      sources: sourceDependenciesSchema.parse(selected.sources.map(source => ({ ...source, catalog: true }))),
     };
   }
   function result(view: Awaited<ReturnType<WorkspaceMcpService['action']>>) {

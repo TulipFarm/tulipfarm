@@ -6,6 +6,8 @@ import { fixture } from '../../../packages/workspace-storage/test/integration/fi
 import { createWorkspaceRuntime, commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import { workspaceTableMigrations } from '@tulipfarm/workspaces/table-migrations';
 import { createConversations } from '@tulipfarm/conversations';
+import { createPersonalMemoryService } from '@tulipfarm/conversations/personal-memory';
+import { publicNetwork } from '@tulipfarm/agents/web-fetch';
 import { createWorkspaceMcp } from '@tulipfarm/workspace-mcp';
 import {
   authorizeMcpOrigin,
@@ -28,6 +30,7 @@ import {
   anthropicChat,
   anthropicText,
   isTitleRequest,
+  toolResults,
 } from './native-chat-fixture.mjs';
 import { modelCatalogOf, useModelCatalog } from './model-catalog-fixture.mjs';
 
@@ -804,5 +807,127 @@ test(
       [{ kind: 'receipt', status: 'expired' }],
     );
     assert.equal(f.calls.length, 0);
+  },
+);
+
+test(
+  'a fresh private chat with MCP tools and personal memory uses the web until an MCP tool returns data',
+  { timeout: 180000 },
+  async t => {
+    const f = await setup(t),
+      w = f.workspace,
+      actor = f.members[0];
+    const env = {
+      ANTHROPIC_API_KEY: 'synthetic-model-key',
+      HUNTSMAN_ENDPOINT: 'https://huntsman.test',
+      SEARXNG_ENDPOINT: 'https://searxng.test',
+    };
+    for (const [key, value] of Object.entries(env)) {
+      const previous = process.env[key];
+      process.env[key] = value;
+      t.after(() => {
+        if (previous === undefined) delete process.env[key];
+        else process.env[key] = previous;
+      });
+    }
+    t.after(useModelCatalog(['claude-haiku', 'claude-sonnet', 'claude-opus']));
+    t.mock.method(publicNetwork, 'resolve', async () => ['93.184.216.34']);
+    await f.connect(actor);
+    await createPersonalMemoryService(f.runtime).save(w.id, actor.userId, {
+      content: 'Prefer short notes.',
+      expectedRevision: 0,
+    });
+    const chatId = randomUUID();
+    const chats = () => createConversations(f.runtime);
+    await chats().create(w.id, actor.userId, { chatId, commandId: randomUUID() });
+    const sent = await chats().send(w.id, actor.userId, chatId, {
+      commandId: randomUUID(),
+      messageId: randomUUID(),
+      model: 'claude-opus',
+      parts: [{ kind: 'text', text: 'Summarize https://docs.example.com/start, find the release notes, then log it.' }],
+    });
+    const origin = { kind: 'private-chat', conversationId: chatId, turnId: sent.turnId, stepId: sent.turnId };
+    const handle = (await f.domain().catalog(w.id, actor, origin)).tools[0].handle;
+    const web = [];
+    const requests = [];
+    const offered = body => body.tools.map(tool => tool.name);
+    const script = [
+      { kind: 'tool', call: { tool: 'web.search', query: 'release notes' } },
+      { kind: 'tool', call: { tool: 'web.fetch', url: 'https://docs.example.com/start' } },
+      { kind: 'tool', call: { tool: 'web.fetch', url: 'https://news.example.net/notes' } },
+      { kind: 'tool', call: { tool: 'tables.definitions' } },
+      { kind: 'tool', call: { tool: 'mcp.call', handle, arguments: { text: 'Release notes summary' } } },
+      { kind: 'tool', call: { tool: 'web.search', query: 'more release notes' } },
+      { kind: 'answer', text: 'Logged ticket 7.' },
+    ];
+    t.mock.method(globalThis, 'fetch', async (url, init) => {
+      const target = String(url);
+      if (target.startsWith('https://searxng.test/')) {
+        web.push(target);
+        return Response.json({ results: [{ url: 'https://news.example.net/notes', title: 'Notes', content: 'New.' }] });
+      }
+      if (target.startsWith('https://huntsman.test/')) {
+        web.push(JSON.parse(init.body).url);
+        return Response.json({ success: true, data: { markdown: 'Page text.', metadata: { title: 'Page' } } });
+      }
+      const body = JSON.parse(init.body);
+      if (isTitleRequest(body)) return Response.json(anthropicText('Notes', { model: route.model, usage }));
+      if (isCompletionRequest(body))
+        return Response.json({ ...completionReply('anthropic'), model: route.model, usage });
+      requests.push(body);
+      const next = script.shift();
+      assert.ok(next, 'no unexpected model request');
+      return chatResponse(next);
+    });
+    const work = { workspaceId: w.id, conversationId: chatId, turnId: sent.turnId, generation: 0 };
+    const run = () =>
+      createConversationActivities(f.runtime, undefined, undefined, f.factory).processConversationReply(work);
+    assert.equal(await run(), 'idle', 'the MCP call waits for consent');
+    assert.match(JSON.stringify(requests[0]), /Prefer short notes/, 'the reply read personal memory');
+    for (const body of requests.slice(0, 5)) {
+      assert.ok(offered(body).includes('web_search'), 'web search is offered before MCP data');
+      assert.ok(offered(body).includes('web_fetch'), 'web fetch is offered before MCP data');
+    }
+    assert.deepEqual(web, [
+      'https://searxng.test/search?q=release+notes&format=json',
+      'https://docs.example.com/start',
+      'https://news.example.net/notes',
+    ]);
+    assert.equal(toolResults(requests[4]).filter(result => /error|denied|Not run/i.test(result)).length, 0);
+    const steps = (
+      await f.db.platform.query(
+        `SELECT call->>'tool' AS tool,sources FROM ${f.table('tf_conversation_execution_steps')} WHERE turn_id=$1 AND call->>'tool' IN ('web.search','web.fetch','tables.definitions')`,
+        [sent.turnId],
+      )
+    ).rows;
+    assert.equal(steps.length, 4);
+    for (const step of steps)
+      assert.equal(
+        step.sources.some(source => source.kind === 'mcp-integration' && !source.catalog),
+        false,
+        `${step.tool} ran without MCP data`,
+      );
+    const models = (
+      await f.db.platform.query(`SELECT sources FROM ${f.table('tf_conversation_model_sources')} WHERE turn_id=$1`, [
+        sent.turnId,
+      ])
+    ).rows.flatMap(row => row.sources);
+    assert.ok(
+      models.some(source => source.kind === 'mcp-integration' && source.catalog === true),
+      'the catalog is still checked and recorded with each model call',
+    );
+    const actionId = (await f.db.platform.query(`SELECT id FROM ${f.table('tf_mcp_actions')}`)).rows[0].id;
+    const action = await f.domain().action(w.id, actor, actionId);
+    await f.domain().decide(w.id, actor, actionId, { digest: action.digest, decision: 'approve' });
+    assert.equal(await run(), 'completed');
+    assert.equal(f.calls.length, 1);
+    const after = requests.slice(5);
+    assert.ok(after.length >= 1);
+    assert.match(JSON.stringify(after[0]), /Confirmed private receipt/, 'the MCP tool returned data');
+    for (const body of after) {
+      assert.equal(offered(body).includes('web_search'), false, 'web search is withheld after MCP data');
+      assert.equal(offered(body).includes('web_fetch'), false, 'web fetch is withheld after MCP data');
+    }
+    assert.equal(web.length, 3, 'no web request after MCP data');
   },
 );
