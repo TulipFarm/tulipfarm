@@ -353,7 +353,7 @@ test('chat model selection uses the configured default, then the first available
     });
     await page.waitForFunction(
       expected => [...document.querySelectorAll('output')].map(output => output.textContent).join(',') === expected,
-      'claude-sonnet,gpt-sol,claude-haiku,claude-sonnet (replaced: Claude Sonnet),claude-sonnet (replaced: Claude Sonnet)',
+      'claude-sonnet,gpt-sol,claude-haiku,claude-sonnet (replaced: Claude Sonnet 5),claude-sonnet (replaced: Claude Sonnet 5)',
     );
   } finally {
     await browser.close();
@@ -430,8 +430,8 @@ test('the last-model notice shows only for an unavailable last model and stops a
     const button = (workspace, name) => page.getByRole('region', { name: workspace }).getByRole('button', { name });
     await mount();
     await output('current').filter({ hasText: 'claude-haiku:none' }).waitFor();
-    await output('sent').filter({ hasText: 'claude-sonnet:Claude Sonnet' }).waitFor();
-    await output('dismissed').filter({ hasText: 'claude-sonnet:Claude Sonnet' }).waitFor();
+    await output('sent').filter({ hasText: 'claude-sonnet:Claude Sonnet 5' }).waitFor();
+    await output('dismissed').filter({ hasText: 'claude-sonnet:Claude Sonnet 5' }).waitFor();
     // Sending with the model that is already the last one needs no notice and no save.
     await button('current', 'Send').click();
     await button('sent', 'Send').click();
@@ -442,7 +442,7 @@ test('the last-model notice shows only for an unavailable last model and stops a
     // A dismissal is kept for this workspace, so the next new chat does not repeat the notice.
     await mount();
     await output('dismissed').filter({ hasText: 'claude-sonnet:none' }).waitFor();
-    await output('sent').filter({ hasText: 'claude-sonnet:Claude Sonnet' }).waitFor();
+    await output('sent').filter({ hasText: 'claude-sonnet:Claude Sonnet 5' }).waitFor();
   } finally {
     await browser.close();
     await server.close();

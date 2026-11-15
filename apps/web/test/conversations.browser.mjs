@@ -224,16 +224,16 @@ try {
   assert.equal(page.url(), `${origin}/acme`);
   assert.equal(writes.length, 0, 'Opening a workspace does not create a chat');
   assert.equal(await page.getByRole('region', { name: 'Chat list', exact: true }).count(), 0);
-  await page.getByRole('combobox', { name: 'Model: Claude Sonnet', exact: true }).click();
-  for (const name of ['DeepSeek Pro', 'DeepSeek Flash', 'Kimi', 'Kimi Code']) {
+  await page.getByRole('combobox', { name: 'Model: Claude Sonnet 5', exact: true }).click();
+  for (const name of ['DeepSeek V4 Pro', 'DeepSeek V4 Flash', 'Kimi K2.6', 'Kimi K2.7 Code']) {
     const option = modelOption(page, name);
     assert.equal(
       await option.locator(name.startsWith('Kimi') ? '[data-brand="kimi"] svg' : '[data-brand="deepseek"] svg').count(),
       1,
     );
   }
-  await modelOption(page, 'Kimi').click();
-  await page.getByRole('combobox', { name: 'Model: Kimi', exact: true }).waitFor();
+  await modelOption(page, 'Kimi K2.6').click();
+  await page.getByRole('combobox', { name: 'Model: Kimi K2.6', exact: true }).waitFor();
   await page.locator('[data-slot="model-selector-content"]').waitFor({ state: 'detached' });
   for (const theme of ['light', 'dark']) {
     await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' });
@@ -323,9 +323,9 @@ try {
   );
   assert.equal(sent.body.model, 'claude-sonnet');
   assert.equal(messages.get(chatId).length, 1);
-  await page.getByRole('combobox', { name: 'Model: Claude Sonnet', exact: true }).click();
-  assert.equal(await page.getByRole('option', { name: /Gemini Pro/ }).count(), 0);
-  await modelOption(page, 'Claude Haiku').click();
+  await page.getByRole('combobox', { name: 'Model: Claude Sonnet 5', exact: true }).click();
+  assert.equal(await page.getByRole('option', { name: /Gemini 3.1 Pro/ }).count(), 0);
+  await modelOption(page, 'Claude Haiku 4.5').click();
   await page.getByLabel('Message', { exact: true }).fill('Second');
   await page.getByLabel('Message', { exact: true }).press('Shift+Enter');
   assert.equal(

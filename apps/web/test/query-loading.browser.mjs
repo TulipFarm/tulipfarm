@@ -148,7 +148,7 @@ try {
     async function usableChat() {
       await page.getByRole('heading', { name: chat.title, exact: true }).waitFor();
       await page.getByText(messageText, { exact: true }).waitFor();
-      await page.getByRole('combobox', { name: 'Model: Claude Sonnet', exact: true }).waitFor();
+      await page.getByRole('combobox', { name: 'Model: Claude Sonnet 5', exact: true }).waitFor();
       await input.fill(draftText);
       await page.waitForFunction(() => document.querySelector('button[aria-label="Send message"]')?.disabled === false);
     }
@@ -278,7 +278,7 @@ try {
           await page.getByLabel('Workspace name', { exact: true }).waitFor();
           await navigateLink('/settings/models');
         },
-        () => page.getByRole('row', { name: 'Claude Sonnet', exact: true }).waitFor(),
+        () => page.getByRole('row', { name: 'Claude Sonnet 5', exact: true }).waitFor(),
       );
       check(
         'fresh catalog reused by settings model consumer',
@@ -290,13 +290,13 @@ try {
         'models-concurrent-consumers',
         () => goto(`${origin}/${workspace.slug}/agents/${id}`),
         async () => {
-          await page.getByText('Claude Sonnet is available.', { exact: true }).waitFor();
+          await page.getByText('Claude Sonnet 5 is available.', { exact: true }).waitFor();
           await page.getByRole('tab', { name: 'Instructions', exact: true }).click();
           await page.getByLabel('Preferred model family', { exact: true }).waitFor();
           // The family is a custom Select whose trigger shows the chosen family (cloud 9be14feb features/models/agent-model-picker.tsx:21-25).
           assert.equal(
             (await page.getByLabel('Preferred model family', { exact: true }).innerText()).trim(),
-            'Claude Sonnet',
+            'Claude Sonnet 5',
           );
         },
       );

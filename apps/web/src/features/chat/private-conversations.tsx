@@ -91,6 +91,7 @@ import {
 } from '@/features/packages/chat-packages';
 import { Welcome } from './welcome';
 import { agentApi } from '@/features/agents/api';
+import { modelName } from '@/features/models/model-name';
 import { skillApi } from '@/features/skills/api';
 import { TableHandoffNotice, useTableHandoff } from './table-handoff';
 import { SlackAction } from '@/features/agents/slack-action';
@@ -1258,7 +1259,7 @@ function ConversationDetail({
                                 latest={index === history.messages.length - 1}
                                 rowViews={rowViewsForMessage(history.messages, message)}
                                 stats={replyStats(history.messages, index, modelFamilies)}
-                                modelName={id => modelFamilies.find(family => family.id === id)?.displayName ?? id}
+                                modelName={id => modelName(modelFamilies, id)}
                                 disabled={locked}
                                 packageContext={{
                                   packages,

@@ -1,6 +1,7 @@
 import type { MessageActionsStats } from '@tulipfarm/sprout/message-actions';
 import type { ConversationMessage } from './conversation-api.ts';
 import { replyModel } from './reply-failure-copy.ts';
+import { modelName } from '../models/model-name.ts';
 
 /** Stats for the reply at `index`: they live on the turn of the person's message that asked for it. */
 export function replyStats(
@@ -16,7 +17,7 @@ export function replyStats(
   const { model, firstTextMs, durationMs, traceId } = turn.stats;
   const family = replyModel(model, turn.errorCode);
   return {
-    model: families.find(item => item.id === family)?.displayName ?? family,
+    model: family && modelName(families, family),
     firstTokenMs: firstTextMs,
     durationMs,
     traceId,

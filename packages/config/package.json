@@ -23,6 +23,10 @@
       "types": "./dist/model-catalog-file.d.ts",
       "default": "./dist/model-catalog-file.js"
     },
+    "./plan-models": {
+      "types": "./dist/plan-models.d.ts",
+      "default": "./dist/plan-models.js"
+    },
     "./model-catalog.v1.schema.json": "./schemas/model-catalog.v1.json",
     "./system-package.v1.schema.json": "./schemas/system-package.v1.json",
     "./examples/system-packages/leave-management.json": "./examples/system-packages/leave-management.json",

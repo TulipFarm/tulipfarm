@@ -1861,7 +1861,7 @@ test('models in the actual Vite app through a local HTTP API fixture', { timeout
         assert.equal(await modelPreferenceValue(page), 'Primary family');
         await page.getByRole('button', { name: 'Check status again', exact: true }).click();
         const newer = page.getByRole('region', { name: 'Newer saved definition', exact: true });
-        await newer.getByText('Model preference: secondary', { exact: true }).waitFor();
+        await newer.getByText('Model preference: Secondary family', { exact: true }).waitFor();
         assert.equal(await page.getByRole('button', { name: 'Save agent', exact: true }).isDisabled(), true);
         assert.equal(await modelPreferenceValue(page), 'Primary family');
         assert.equal(writes(fixture).length, 1);

@@ -15,6 +15,7 @@ import { WriteFeedback, UnsavedChanges } from '@/features/tables/feedback';
 import { AgentRead } from './feedback';
 import { AgentModelPicker } from '@/features/models/agent-model-picker';
 import { useModelCatalog } from '@/features/models/use-model-catalog';
+import { modelName } from '@/features/models/model-name';
 import { McpAgentPermissions } from '@/features/workspace-mcp/agent-permissions';
 import { AgentSkillPicker, type SkillSelections } from './skill-picker';
 import { AgentToolPicker, changingTools, type ToolName } from './tool-picker';
@@ -119,6 +120,8 @@ export function AgentEditor({
   );
   const status = useAgentCommand(api, id, command, !concealed);
   const catalog = useModelCatalog(workspaceId);
+  const familyName = (id: string) =>
+    modelName(catalog.state.kind === 'ready' ? catalog.state.data.families : undefined, id);
   useEffect(() => {
     if (
       status.state.kind === 'ready' &&
@@ -595,14 +598,7 @@ export function AgentEditor({
               </div>
               <dl className="space-y-2 text-sm">
                 {[
-                  [
-                    'Model',
-                    draft.modelFamilyId
-                      ? ((catalog.state.kind === 'ready'
-                          ? catalog.state.data.families.find(family => family.id === draft.modelFamilyId)?.displayName
-                          : undefined) ?? draft.modelFamilyId)
-                      : 'No preference',
-                  ],
+                  ['Model', draft.modelFamilyId ? familyName(draft.modelFamilyId) : 'No preference'],
                   ['Skills', draft.skills.length ? String(draft.skills.length) : 'None'],
                   [
                     'Actions',
@@ -631,7 +627,10 @@ export function AgentEditor({
             Skills:{' '}
             {detail.definition.skills?.map(skill => `${skill.id} version ${skill.revision}`).join(', ') || 'None'}
           </p>
-          <p>Model preference: {detail.definition.modelFamilyId ?? 'No saved preference'}</p>
+          <p>
+            Model preference:{' '}
+            {detail.definition.modelFamilyId ? familyName(detail.definition.modelFamilyId) : 'No saved preference'}
+          </p>
           <p>Slack response rule: {detail.definition.responseRule ?? 'tag'}</p>
           <Button
             variant="outline"
