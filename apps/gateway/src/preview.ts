@@ -391,11 +391,14 @@ export function buildPreviewGateway(dependencies: PreviewGatewayDependencies, se
     if (found.kind !== 'server') return rawStatus(socket, 404);
     const { appId, hostRef } = found;
     if (hostRef === null) return rawStatus(socket, 503);
-    const app = await relay.upgrade(request, socket, head, client, destination(appId, hostRef), draftCookies);
-    if (!app) return;
+    const relayed = await relay.upgrade(request, socket, head, client, destination(appId, hostRef), draftCookies);
+    if (!relayed) return;
+    const { app, frames } = relayed;
     const stop = watch(request.headers, hostRef, () => {
       app.unpipe(socket);
       socket.unpipe(app);
+      // A close frame written inside one of the app's frames would corrupt the stream, so mid-frame it is cut instead.
+      if (!frames?.between || frames.closed) return void socket.destroy();
       socket.end(policyClose);
       setTimeout(() => socket.destroy(), 1_000).unref();
     });

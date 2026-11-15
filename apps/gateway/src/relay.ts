@@ -14,7 +14,7 @@ import {
   type Refusal,
   type Upstream,
 } from './forward.ts';
-import { keepAlive } from './websocket.ts';
+import { keepAlive, type FrameCursor } from './websocket.ts';
 
 /** Where a request goes: `key` names the endpoint for its cache, warm window and wake gate. */
 export type Destination = {
@@ -302,7 +302,8 @@ export function createRelay(options: {
     /**
      * Forwards a WebSocket handshake and, once the app switches protocols, pipes both sockets until either closes and
      * keeps an idle WebSocket open with keepalive frames.
-     * Resolves with the app's socket while the two are piped, or null once the client has been answered instead.
+     * Resolves with the app's socket while the two are piped, with the cursor over the app's frames when the protocol is
+     * WebSocket, or null once the client has been answered instead.
      * `responseHeaders` rewrites the headers of the app's handshake response before the client sees them.
      */
     async upgrade(
@@ -312,7 +313,7 @@ export function createRelay(options: {
       client: Client,
       destination: Destination,
       responseHeaders: (headers: OutgoingHttpHeaders) => OutgoingHttpHeaders = headers => headers,
-    ): Promise<Duplex | null> {
+    ): Promise<{ app: Duplex; frames: FrameCursor | null } | null> {
       let outcome: Outcome;
       try {
         const sender = new AbortController();
@@ -370,8 +371,10 @@ export function createRelay(options: {
       if (head.length) app.write(head);
       app.pipe(socket);
       socket.pipe(app);
-      if (/^websocket$/i.test(String(response.headers.upgrade))) keepAlive(app, socket, upstream.head, keepaliveMs);
-      return app;
+      const frames = /^websocket$/i.test(String(response.headers.upgrade))
+        ? keepAlive(app, socket, upstream.head, keepaliveMs)
+        : null;
+      return { app, frames };
     },
   };
 }

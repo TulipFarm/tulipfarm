@@ -15,6 +15,8 @@ const appId = '22222222-2222-4222-8222-222222222222';
 const session = { workspaceId: '11111111-1111-4111-8111-111111111111', appId, membershipId: 'm' };
 const cookie = '__Host-tf_preview=token-1; theme=dark';
 const policyClose = Buffer.from([0x88, 0x02, 0x03, 0xf0]);
+// What the draft's WebSocket server sends after the handshake: one whole text frame, or the start of a 256-byte frame.
+const appFrames = { '/whole': Buffer.from('81026869', 'hex'), '/partial': Buffer.from('827e0100010203', 'hex') };
 const draftCookies = [
   'cart=3; Path=/; Secure',
   '__Host-tf_session=forged; Path=/; Secure',
@@ -65,6 +67,7 @@ async function draftServer(t) {
       `HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n${cookieLines}\r\n`,
     );
     socket.on('end', () => socket.end());
+    if (appFrames[incoming.url]) setTimeout(() => socket.write(appFrames[incoming.url]), 20);
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(() => {
@@ -152,9 +155,10 @@ function connect(port, headers = {}, path = '/live') {
       response.resume();
       resolve({ status: response.statusCode, headers: response.headers });
     });
-    outgoing.on('upgrade', (response, socket) =>
-      resolve({ status: response.statusCode, headers: response.headers, socket }),
-    );
+    outgoing.on('upgrade', (response, socket, head) => {
+      if (head.length) socket.unshift(head);
+      resolve({ status: response.statusCode, headers: response.headers, socket });
+    });
     outgoing.on('error', reject);
     outgoing.end();
   });
@@ -302,6 +306,24 @@ test('an open WebSocket closes with 1008 soon after edit access is revoked', asy
   const elapsed = Date.now() - revokedAt;
   assert.deepEqual([...frames.subarray(-4)], [...policyClose]);
   assert.ok(elapsed < 1_000, `closed after ${elapsed} ms`);
+});
+
+test('a revoked WebSocket gets the close frame after the last whole frame from the app', async t => {
+  const { port, access } = await previewFor(t, { recheckMs: 100 });
+  const { socket } = await connect(port, {}, '/whole');
+  const received = closed(socket);
+  await new Promise(resolve => setTimeout(resolve, 150));
+  access.role = 'use';
+  assert.equal((await received).toString('hex'), '81026869880203f0');
+});
+
+test('a WebSocket revoked while the app is mid-frame is cut off without a close frame inside the frame', async t => {
+  const { port, access } = await previewFor(t, { recheckMs: 100 });
+  const { socket } = await connect(port, {}, '/partial');
+  const received = closed(socket);
+  await new Promise(resolve => setTimeout(resolve, 150));
+  access.role = 'use';
+  assert.equal((await received).toString('hex'), '827e0100010203');
 });
 
 test('an open WebSocket closes when the access check fails', async t => {

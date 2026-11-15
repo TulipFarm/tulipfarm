@@ -57,10 +57,12 @@ export function frameCursor() {
   };
 }
 
+export type FrameCursor = ReturnType<typeof frameCursor>;
+
 /**
  * Sends the client a pong whenever the app has sent nothing for `intervalMs`, between the app's frames. Load balancers
  * and CDNs close a connection that carries no bytes for their idle timeout, and an app may stay quiet for longer.
- * `head` is what the app sent before the socket was handed over.
+ * `head` is what the app sent before the socket was handed over. Returns the cursor over the app's frames.
  */
 export function keepAlive(app: Duplex, client: Duplex, head: Buffer, intervalMs: number) {
   const frames = frameCursor();
@@ -75,4 +77,5 @@ export function keepAlive(app: Duplex, client: Duplex, head: Buffer, intervalMs:
     timer.refresh();
   });
   client.once('close', () => clearTimeout(timer));
+  return frames;
 }
