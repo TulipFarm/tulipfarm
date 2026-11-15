@@ -26,6 +26,7 @@ import {
 } from '../../../packages/workspace-storage/test/integration/fixture.mjs';
 import { hostHeaderPublisher } from '@tulipfarm/apps/host-header-publisher';
 import { unavailableAppHost } from '@tulipfarm/extensions';
+import { fenceWorkspaceAccess } from '../../../packages/workspace-storage/src/runtime.ts';
 import { createAppActivities } from '../src/app-activities.ts';
 import { captureMetrics } from './metric-capture.mjs';
 
@@ -1004,4 +1005,161 @@ test('app builds, publishes, reconciles and meters converge however often they r
       ]);
     },
   );
+
+  /** Fresh workspaces whose transactions are fenced like the runtime's, and a way to make them fail. */
+  const opened = new Map();
+  const openWorkspace = async () => {
+    const created = await db.create();
+    const client = await connect(db.login(created));
+    // Later runs still meter this workspace, so it stays open until the database is dropped.
+    client.on('error', () => {});
+    t.after(() => client.end());
+    const ledger = `"${created.names.schema}".test_credit_entries`;
+    await db.platform.query(`CREATE TABLE ${ledger} (id text NOT NULL, units numeric NOT NULL)`);
+    await db.platform.query(`GRANT SELECT, INSERT ON ${ledger} TO "${created.names.runtime}"`);
+    const workspace = {
+      ...created,
+      down: false,
+      async transact(action) {
+        if (workspace.down) throw new Error('The workspace database is restarting');
+        await client.query('BEGIN');
+        try {
+          await fenceWorkspaceAccess(client, created.id);
+          const result = await action({ client, schema: created.names.schema });
+          await client.query('COMMIT');
+          return result;
+        } catch (error) {
+          await client.query('ROLLBACK');
+          throw error;
+        }
+      },
+      async charged() {
+        return (await db.platform.query(`SELECT id, units::text FROM ${ledger} ORDER BY id`)).rows.map(row => [
+          row.id.replace(/^app-hosting:[^:]+:/, ''),
+          row.units,
+        ]);
+      },
+    };
+    opened.set(created.id, workspace);
+    return workspace;
+  };
+  const meterAcross = (host = unavailableAppHost) =>
+    createAppActivities({
+      ...options(true),
+      transact: (workspaceId, action) =>
+        opened.has(workspaceId) ? opened.get(workspaceId).transact(action) : transact(action),
+      credits: {
+        async available() {
+          return 1000n;
+        },
+        async debit(tx, units, entry) {
+          await tx.client.query(`INSERT INTO "${tx.schema}".test_credit_entries VALUES ($1, $2)`, [
+            entry.id,
+            units.toString(),
+          ]);
+        },
+      },
+      host,
+    });
+  const serve = async (metered, owner, name) => {
+    const created = (
+      await owner.transact(tx =>
+        createApp(tx, { id: randomUUID(), kind: 'public', slug: name, title: name, createdBy: owner.membershipId }),
+      )
+    ).app;
+    const claimed = { name, workspaceId: owner.id, appId: created.id };
+    assert.deepEqual(await claimAppName(db.platform, claimed), { ok: true });
+    await owner.transact(tx => setAppPublicName(tx, created.id, name));
+    await db.platform.query('BEGIN');
+    await promoteAppName(db.platform, claimed);
+    await db.platform.query('COMMIT');
+    await metered.projectAppEdge({ workspaceId: owner.id, appId: created.id });
+    return created.id;
+  };
+
+  await t.test('a deleted workspace does not stop metering from charging the others', async () => {
+    const healthy = await openWorkspace();
+    const deleted = await openWorkspace();
+    const ids = {};
+    let hostDown = true;
+    const metered = meterAcross({
+      ...unavailableAppHost,
+      async *usage() {
+        if (hostDown) throw new Error('The host usage API is down');
+        yield { appId: ids.shop, units: 30n };
+        yield { appId: ids.blog, units: 40n };
+      },
+    });
+    ids.shop = await serve(metered, healthy, 'kept-shop');
+    ids.blog = await serve(metered, deleted, 'gone-blog');
+    await serve(metered, deleted, 'gone-wiki');
+
+    publisher.traffic = [{ name: 'gone-blog', requests: 3, bytes: 300, units: 5n }];
+    assert.equal(await metered.meterAppTraffic(Date.parse('2026-11-14T22:05:00.000Z'), signal()), undefined);
+    assert.deepEqual(await deleted.charged(), [['2026-11-14T19:00:00.000Z', '5']]);
+
+    await db.platform.query(
+      `UPDATE app.app_hostnames SET state = 'retired', retired_at = clock_timestamp() WHERE name = 'gone-blog'`,
+    );
+    await db.platform.query(
+      `UPDATE app.workspace_storage SET stage = 'unavailable', disabled_at = clock_timestamp(),
+         disabled_operation_id = gen_random_uuid() WHERE workspace_id = $1`,
+      [deleted.id],
+    );
+    publisher.traffic = [
+      { name: 'kept-shop', requests: 2, bytes: 100, units: 7n },
+      { name: 'gone-wiki', requests: 9, bytes: 900, units: 11n },
+    ];
+    hostDown = false;
+    const later = Date.parse('2026-11-14T23:05:00.000Z');
+    assert.equal(await metered.meterAppTraffic(later, signal()), undefined);
+    assert.equal(await metered.meterAppTraffic(later, signal()), undefined);
+
+    assert.deepEqual(await healthy.charged(), [
+      ['2026-11-14T19:00:00.000Z:compute', '30'],
+      ['2026-11-14T20:00:00.000Z', '37'],
+    ]);
+    assert.deepEqual(await deleted.charged(), [['2026-11-14T19:00:00.000Z', '5']]);
+  });
+
+  await t.test('a workspace that fails is charged by a later run while the others are charged now', async () => {
+    const steady = await openWorkspace();
+    const flaky = await openWorkspace();
+    const metered = meterAcross();
+    await serve(metered, steady, 'steady-news');
+    await serve(metered, flaky, 'flaky-news');
+    publisher.traffic = [
+      { name: 'steady-news', requests: 1, bytes: 10, units: 2n },
+      { name: 'flaky-news', requests: 1, bytes: 10, units: 3n },
+    ];
+
+    assert.equal(await metered.meterAppTraffic(Date.parse('2026-11-15T00:05:00.000Z'), signal()), undefined);
+    flaky.down = true;
+    await assert.rejects(metered.meterAppTraffic(Date.parse('2026-11-15T02:05:00.000Z'), signal()), error => {
+      assert.deepEqual(
+        error.errors.map(failure => failure.message),
+        ['The workspace database is restarting'],
+      );
+      return true;
+    });
+    assert.deepEqual(await steady.charged(), [
+      ['2026-11-14T21:00:00.000Z', '2'],
+      ['2026-11-14T22:00:00.000Z', '2'],
+      ['2026-11-14T23:00:00.000Z', '2'],
+    ]);
+    assert.deepEqual(await flaky.charged(), [['2026-11-14T21:00:00.000Z', '3']]);
+
+    flaky.down = false;
+    assert.equal(await metered.meterAppTraffic(Date.parse('2026-11-15T02:05:00.000Z'), signal()), undefined);
+    assert.deepEqual(await steady.charged(), [
+      ['2026-11-14T21:00:00.000Z', '2'],
+      ['2026-11-14T22:00:00.000Z', '2'],
+      ['2026-11-14T23:00:00.000Z', '2'],
+    ]);
+    assert.deepEqual(await flaky.charged(), [
+      ['2026-11-14T21:00:00.000Z', '3'],
+      ['2026-11-14T22:00:00.000Z', '3'],
+      ['2026-11-14T23:00:00.000Z', '3'],
+    ]);
+  });
 });
