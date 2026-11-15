@@ -73,6 +73,11 @@ When the route error page ("Could not open TulipFarm") renders, the app calls
 `capture('route_error_shown', { kind, status?, errorType })` (`src/lib/route-error-report.ts`). The
 properties never include the error message, URL or stack. React errors also reach `captureException`.
 
+When a chat message ends up not sent, the app calls
+`capture('chat_send_failed', { reason, status?, code? })` (`src/features/chat/send-failure-report.ts`).
+`reason` is `rejected`, `unsent`, `offline`, `updating` or `uncertain`; `status` is the API's error
+status and `code` its short error code. The properties never include the message, chat or error text.
+
 ## Self-hosting
 
 `apps/web/Dockerfile` builds the app and serves it with Caddy using `self-host/Caddyfile`, which
