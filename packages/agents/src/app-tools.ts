@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { HumanActor } from '@tulipfarm/access';
 import {
   appLimits,
+  appRecipeSchema,
   edgeStatus,
   type AppBuildId,
   type AppFailure,
@@ -60,6 +61,23 @@ const appToolCallSchema = z.discriminatedUnion('tool', appToolCallSchemas);
 export type AppToolCall = z.infer<typeof appToolCallSchema>;
 export type AppToolName = AppToolCall['tool'];
 
+/** One valid `app.json` per recipe kind, shown to the model where it writes files. */
+export const appRecipeExamples = [
+  ['Serve a folder as it is', { kind: 'copy', root: 'site' }],
+  [
+    'Run a build, then serve its output folder',
+    { kind: 'command', runtime: 'node22', install: 'npm install', command: 'npm run build', output: 'dist' },
+  ],
+  [
+    'Run a Node server that listens on serve.port',
+    { kind: 'server', runtime: 'node22', install: 'npm install', serve: { port: 8080, start: 'node server.js' } },
+  ],
+] as const satisfies readonly (readonly [string, z.input<typeof appRecipeSchema>])[];
+
+const recipeGuide = `An optional app.json at the app root says how to build it; without one the files are served as they are. It takes one of these shapes and no other keys; install is optional. ${appRecipeExamples
+  .map(([use, recipe]) => `${use}: ${JSON.stringify(recipe)}.`)
+  .join(' ')}`;
+
 export const appToolDescriptions: Record<AppToolName, string> = {
   'apps.status':
     'Read the state of the app this chat edits: its draft (empty, editing, building, built, failed or saved), draft revision, live release and edge status, and the newest build of the draft. Changes nothing.',
@@ -67,8 +85,7 @@ export const appToolDescriptions: Record<AppToolName, string> = {
     'List the files of the app this chat edits, with their sizes: the saved draft plus changes not yet saved. Pass prefix to list one folder. Changes nothing.',
   'apps.files.read':
     'Read one text file of the app this chat edits, including changes not yet saved. A binary file reports only its size. Long files return nextOffset; pass it as offset to continue. Changes nothing.',
-  'apps.files.write':
-    'Create or replace one text file in the app this chat edits. Changes stay in the draft, never on the live app, and are saved when your reply ends. Only one chat edits an app at a time; draft-busy means another chat holds it.',
+  'apps.files.write': `Create or replace one text file in the app this chat edits. Changes stay in the draft, never on the live app, and are saved when your reply ends. Only one chat edits an app at a time; draft-busy means another chat holds it. ${recipeGuide}`,
   'apps.files.delete':
     'Delete one file from the draft of the app this chat edits. The live app is unchanged. draft-busy means another chat is editing the app.',
   // eslint-disable-next-line tulipfarm/product-copy -- A tool name, not user-facing copy.
