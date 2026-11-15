@@ -14,6 +14,7 @@ import {
   type Refusal,
   type Upstream,
 } from './forward.ts';
+import { keepAlive } from './websocket.ts';
 
 /** Where a request goes: `key` names the endpoint for its cache, warm window and wake gate. */
 export type Destination = {
@@ -60,6 +61,8 @@ const gateWaitMs = 1_000;
 const connectTimeoutMs = 10_000;
 const retrySeconds = 5;
 const upgradesPerMinute = 120;
+// Half the AWS load balancer's default idle timeout (60 s), the shortest in front of the gateway.
+const defaultKeepaliveMs = 30_000;
 export const cacheEntries = 10_000;
 // Link previews, crawlers and monitors must not keep a stopped app awake.
 const bots = /bot|crawl|spider|slurp|facebookexternalhit|embedly|preview|uptime|monitor/i;
@@ -142,8 +145,13 @@ export function answer(
  * wake a stopped app waits for it; while one request wakes an endpoint, the others for it briefly wait for that one,
  * so a burst wakes it once.
  */
-export function createRelay(options: { readonly wakeBudgetMs: number; readonly log: (error: unknown) => void }) {
-  const { wakeBudgetMs } = options;
+export function createRelay(options: {
+  readonly wakeBudgetMs: number;
+  /** How long a relayed WebSocket may carry nothing from the app before the client gets a keepalive frame. */
+  readonly keepaliveMs?: number | undefined;
+  readonly log: (error: unknown) => void;
+}) {
+  const { wakeBudgetMs, keepaliveMs = defaultKeepaliveMs } = options;
   const endpoints = cached<Endpoint>(endpointMs);
   const warmUntil = new Map<string, number>();
   const waking = new Map<string, Promise<void>>();
@@ -292,7 +300,8 @@ export function createRelay(options: { readonly wakeBudgetMs: number; readonly l
     allowUpgrade,
 
     /**
-     * Forwards a WebSocket handshake and, once the app switches protocols, pipes both sockets until either closes.
+     * Forwards a WebSocket handshake and, once the app switches protocols, pipes both sockets until either closes and
+     * keeps an idle WebSocket open with keepalive frames.
      * Resolves with the app's socket while the two are piped, or null once the client has been answered instead.
      * `responseHeaders` rewrites the headers of the app's handshake response before the client sees them.
      */
@@ -361,6 +370,7 @@ export function createRelay(options: { readonly wakeBudgetMs: number; readonly l
       if (head.length) app.write(head);
       app.pipe(socket);
       socket.pipe(app);
+      if (/^websocket$/i.test(String(response.headers.upgrade))) keepAlive(app, socket, upstream.head, keepaliveMs);
       return app;
     },
   };
