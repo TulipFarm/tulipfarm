@@ -177,23 +177,22 @@ function Detail({ app, workspaceId, slug }: { app: Integration; workspaceId: str
       />
       <WorkspaceRefreshNotice />
       <fieldset disabled={workspaceStale} className="min-w-0">
-        {/* The Channels table uses the full width; other tabs keep the reading width. */}
-        <div className={tab === 'channels' ? 'space-y-6' : 'max-w-5xl space-y-6'}>
-          <section aria-label={`${app.name} summary`} className="flex flex-wrap items-start gap-4">
+        <div className="mx-auto w-full max-w-7xl space-y-8">
+          <section aria-label={`${app.name} summary`} className="flex items-start gap-4 sm:gap-5">
             <BrandIcon brand={app.brand} size="xl" />
-            <div className="min-w-0 flex-1 basis-56 space-y-1.5">
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                <p className="text-2xl font-semibold tracking-tight">{app.name}</p>
-                <span className="flex h-6 items-center">
+            <div className="min-w-0 flex-1 space-y-3">
+              <div className="space-y-1">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <p className="text-2xl font-semibold tracking-tight">{app.name}</p>
                   <StatusBadge status={status} soon={app.provider === 'soon'} />
-                </span>
+                </div>
+                <p className="max-w-prose text-base text-foreground-secondary">{app.blurb}</p>
+                <p className="text-sm text-muted-foreground">
+                  By {makerOf(app)} · {app.category}
+                </p>
               </div>
-              <p className="text-sm text-muted-foreground">
-                By {makerOf(app)} · {app.category}
-              </p>
-              <p className="max-w-prose pt-1">{app.blurb}</p>
+              {primary && <div className="flex flex-wrap items-center gap-2">{primary}</div>}
             </div>
-            {primary && <div className="w-full sm:w-auto sm:shrink-0 sm:pt-1">{primary}</div>}
           </section>
           {failure || status?.kind === 'error' ? (
             <div className="space-y-3">
@@ -384,7 +383,7 @@ function Overview({
       ? [...new Set((app.can ?? []).map(item => dependency(item, granted)).filter(value => value !== undefined))]
       : [];
   return (
-    <div className="grid gap-8 lg:grid-cols-3">
+    <div className="grid gap-8 lg:grid-cols-3 lg:gap-12">
       <div className="space-y-8 lg:col-span-2">
         {hint && (
           <Alert>

@@ -129,6 +129,8 @@
 
 @theme {
   --spacing: 0.25rem;
+  /* App directories: up to three columns, each wide enough for a logo, a short line and a button. Pair with gap-x-8. */
+  --grid-template-columns-apps: repeat(auto-fill, minmax(max(min(100%, 20rem), calc((100% - 4rem) / 3)), 1fr));
   --text-xs: 0.75rem;
   --text-xs--line-height: 1rem;
   --text-sm: 0.8125rem;
@@ -220,6 +222,21 @@
 }
 .dark {
   color-scheme: dark;
+}
+
+@utility scrollbar-none {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* App rows use a smaller logo on phones, so more of the list fits on the first screen. */
+@media (width < 40rem) {
+  .app-row .sprout-brand-tile[data-size='lg'] {
+    --sprout-brand-tile-size: 2.5rem;
+    padding: 0.5rem;
+  }
 }
 
 @layer base {

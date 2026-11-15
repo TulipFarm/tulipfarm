@@ -9,6 +9,7 @@ import {
   type McpCatalogApp,
 } from '@tulipfarm/mcp-catalog';
 import { integrations, type Category } from './catalog';
+import { taglines } from './taglines';
 
 /** An app from the open MCP catalog whose maker hosts its own MCP server. */
 export type McpApp = {
@@ -17,6 +18,8 @@ export type McpApp = {
   maker: string;
   category: Category;
   blurb: string;
+  /** A few words for the integrations list. */
+  tagline: string;
   /** What agents can do once it's connected. */
   does: string[];
   /** Server URL. Per-account parts are `{name}` placeholders listed in `variables`. */
@@ -57,6 +60,7 @@ const fromCatalog = (app: McpCatalogApp): McpApp => {
     maker: app.maker,
     category: catalogCategories[app.category],
     blurb: app.summary,
+    tagline: taglines[app.id] ?? app.summary,
     does: app.capabilities,
     endpoint: remote.url,
     auth: remote.auth === 'unknown' ? 'oauth' : remote.auth,

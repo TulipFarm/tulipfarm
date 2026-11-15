@@ -2,7 +2,10 @@ import { useState, type CSSProperties } from 'react';
 import { Plug } from 'reicon-react/icons/Plug';
 import { BrandIcon, BrandTile, type Brand } from '@tulipfarm/sprout/brand-icon';
 
-type Size = 'md' | 'xl';
+type Size = 'md' | 'lg' | 'xl';
+const tileShape: Record<Size, string> = { md: 'rounded-lg', lg: 'rounded-xl text-lg', xl: 'rounded-2xl text-2xl' };
+const logoSize: Record<Size, string> = { md: 'size-4', lg: 'size-6', xl: 'size-8' };
+const plugSize: Record<Size, number> = { md: 16, lg: 20, xl: 24 };
 
 /**
  * An app's logo. Apps without a Sprout glyph get their catalog logo in white on their brand colour, or the first
@@ -26,7 +29,7 @@ export function AppIcon({
       <span className="flex shrink-0" style={{ '--app-tile': tile.color } as CSSProperties}>
         <BrandTile size={size} aria-hidden="true">
           <span
-            className={`flex size-full items-center justify-center bg-(--app-tile) font-semibold text-white ${size === 'xl' ? 'rounded-2xl text-2xl' : 'rounded-lg'}`}
+            className={`flex size-full items-center justify-center bg-(--app-tile) font-semibold text-white ${tileShape[size]}`}
           >
             {logo && failed !== logo ? (
               <img
@@ -36,7 +39,7 @@ export function AppIcon({
                 decoding="async"
                 referrerPolicy="no-referrer"
                 onError={() => setFailed(logo)}
-                className={`brightness-0 invert ${size === 'xl' ? 'size-8' : 'size-4'}`}
+                className={`brightness-0 invert ${logoSize[size]}`}
               />
             ) : (
               tile.letter
@@ -47,7 +50,7 @@ export function AppIcon({
     );
   return (
     <BrandTile size={size} aria-hidden="true">
-      <Plug size={size === 'xl' ? 24 : 16} />
+      <Plug size={plugSize[size]} />
     </BrandTile>
   );
 }

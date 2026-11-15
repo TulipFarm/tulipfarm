@@ -165,16 +165,19 @@ function Hero({
   action?: ReactNode;
 }) {
   return (
-    <section aria-label={`${name} summary`} className="flex flex-wrap items-start gap-4">
+    <section aria-label={`${name} summary`} className="flex items-start gap-4 sm:gap-5">
       <AppIcon brand={app?.brand} tile={app?.tile} logo={app?.logo} size="xl" />
-      <div className="min-w-0 flex-1 basis-56 space-y-1.5">
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-          <p className="break-words text-2xl font-semibold tracking-tight">{name}</p>
-          {status && <span className="flex h-6 items-center">{status}</span>}
+      <div className="min-w-0 flex-1 space-y-3">
+        <div className="space-y-1">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <p className="break-words text-2xl font-semibold tracking-tight">{name}</p>
+            {status}
+          </div>
+          {app && <p className="max-w-prose text-base text-foreground-secondary">{app.blurb}</p>}
+          <p className="text-sm text-muted-foreground">{about}</p>
         </div>
-        <p className="text-sm text-muted-foreground">{about}</p>
+        {action && <div className="flex flex-wrap items-center gap-2">{action}</div>}
       </div>
-      {action && <div className="w-full sm:w-auto sm:shrink-0 sm:pt-1">{action}</div>}
     </section>
   );
 }
@@ -263,13 +266,8 @@ function NewApp({ api, capabilities, slug, app, refreshList }: PageProps & { app
   return (
     <>
       <Header slug={slug} name={app.name} />
-      <div className="max-w-5xl space-y-8">
-        <Hero
-          app={app}
-          name={app.name}
-          about={`${app.blurb}. By ${app.maker}.`}
-          action={fields.length ? undefined : connectButton}
-        />
+      <div className="mx-auto w-full max-w-7xl space-y-8">
+        <Hero app={app} name={app.name} about={`By ${app.maker}`} action={fields.length ? undefined : connectButton} />
         {fields.length > 0 && (
           <section aria-labelledby="mcp-account" className="max-w-md space-y-4">
             <div className="space-y-1">
@@ -470,7 +468,7 @@ function ConnectedBody({
     .filter(Boolean)
     .join(' · ');
   return (
-    <div className="max-w-5xl space-y-6">
+    <div className="mx-auto w-full max-w-7xl space-y-8">
       <Hero app={app} name={name} status={<StatusBadge integration={integration} />} about={about} action={action} />
       {justConnected && integration.status === 'ready' && (
         <Alert>

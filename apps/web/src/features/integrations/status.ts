@@ -18,6 +18,8 @@ export type Status =
   | { kind: 'off'; canConnect: boolean; granted?: readonly string[] }
   | { kind: 'unavailable'; detail: string }
   | { kind: 'error'; detail: string; accessLost: boolean };
+/** The provider has no app credentials on this server, so nobody in any workspace can connect it. */
+export const notSetUp = 'Not set up on this server';
 export type Statuses = Record<'google' | 'slack' | 'github' | 'github-personal' | 'atlassian' | 'trello', Status>;
 const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? '' : 's'}`;
 function status<T>(state: ReadState<T>, present: (data: T) => Status): Status {
@@ -52,7 +54,7 @@ export function useIntegrationStatus(workspaceId: string, provider?: keyof Statu
         provider => provider.protocol === (trello ? 'trello' : 'atlassian-mcp') && provider.configured,
       )
         ? { kind: 'off', canConnect: true }
-        : { kind: 'unavailable', detail: 'Not set up on this server' };
+        : { kind: 'unavailable', detail: notSetUp };
     });
   const statuses: Statuses = {
     google: status(google.state, ({ configured, status }) =>
@@ -62,11 +64,11 @@ export function useIntegrationStatus(workspaceId: string, provider?: keyof Statu
           ? { kind: 'attention', detail: 'Access expired. Reconnect.' }
           : configured
             ? { kind: 'off', canConnect: true }
-            : { kind: 'unavailable', detail: 'Not set up on this server' },
+            : { kind: 'unavailable', detail: notSetUp },
     ),
     slack: status(slack.state, value =>
       value === 'unavailable'
-        ? { kind: 'unavailable', detail: 'Ask an integration manager for access' }
+        ? { kind: 'unavailable', detail: 'Slack isn’t available in this workspace' }
         : value.state === 'active'
           ? value.linked
             ? { kind: 'connected', detail: null }
@@ -87,7 +89,7 @@ export function useIntegrationStatus(workspaceId: string, provider?: keyof Statu
           : { kind: 'off', canConnect: true };
     }),
     'github-personal': status(personal.state, ({ configured, accounts }) => {
-      if (!configured) return { kind: 'unavailable', detail: 'Not set up on this server' };
+      if (!configured) return { kind: 'unavailable', detail: notSetUp };
       const active = accounts.filter(account => accountConnectionState(account) === 'connected').length;
       return active
         ? { kind: 'connected', detail: plural(active, 'private account') }
