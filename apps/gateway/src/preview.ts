@@ -128,11 +128,11 @@ type Access =
 const ended: Access = {
   kind: 'denied',
   status: 401,
-  title: 'This session has ended. Open the draft again from TulipFarm.',
+  title: 'Your sign-in to the draft expired. Open the draft again from TulipFarm.',
 };
 const notEditor: Access = { kind: 'denied', status: 403, title: 'You can no longer edit this app' };
-const nothing: Access = { kind: 'denied', status: 404, title: 'There is nothing here' };
-const notRunning = 'The server for this draft is not running. Publish the app to run it.';
+const nothing: Access = { kind: 'denied', status: 404, title: 'There is no draft at this address' };
+const notRunning = "This draft's server is not running. Publish the app to start it.";
 // A WebSocket close frame with status 1008, policy violation.
 const policyClose = Buffer.from([0x88, 0x02, 0x03, 0xf0]);
 const safeMethods = new Set(['GET', 'HEAD', 'OPTIONS']);
@@ -269,7 +269,8 @@ export function buildPreviewGateway(dependencies: PreviewGatewayDependencies, se
       .header('Content-Security-Policy', `frame-ancestors ${shellOrigin}`)
       .header('X-Content-Type-Options', 'nosniff')
       .header('Referrer-Policy', 'no-referrer');
-    if (!previewKeyOf(request.headers.host, domain)) return page(reply, shellOrigin, 404, 'There is nothing here');
+    if (!previewKeyOf(request.headers.host, domain))
+      return page(reply, shellOrigin, 404, 'There is no draft at this address');
     if (request.headers['service-worker'] === 'script')
       return page(reply, shellOrigin, 403, 'Drafts cannot install service workers');
   });
@@ -290,7 +291,7 @@ export function buildPreviewGateway(dependencies: PreviewGatewayDependencies, se
           reply,
           shellOrigin,
           403,
-          'This link has expired. Open the draft again from TulipFarm.',
+          'Your sign-in to the draft expired. Open the draft again from TulipFarm.',
           notify(shellOrigin, expiredMessage),
         );
       reply.header(
@@ -301,7 +302,7 @@ export function buildPreviewGateway(dependencies: PreviewGatewayDependencies, se
         reply,
         shellOrigin,
         200,
-        'Opening draft',
+        'Opening draft…',
         `fetch(${JSON.stringify(previewCheckPath)}, { credentials: 'same-origin' })
     .then(response => { if (!response.ok) throw new Error('blocked'); window.location.replace('/'); })
     .catch(() => { ${notify(shellOrigin, blockedMessage)} });`,
@@ -327,7 +328,7 @@ export function buildPreviewGateway(dependencies: PreviewGatewayDependencies, se
         const client = clientOf(request.raw, serverOptions.trustProxy);
         // A page on another site cannot make a draft act for its editor.
         if (!safeMethods.has(request.method) && request.headers.origin !== `${client.protocol}://${client.host}`)
-          return page(reply, shellOrigin, 403, 'This request came from another site');
+          return page(reply, shellOrigin, 403, 'This draft cannot accept requests from other sites');
         const found = await access(request.headers);
         if (found.kind === 'denied') return page(reply, shellOrigin, found.status, found.title);
         if (found.kind === 'server') {
@@ -349,8 +350,8 @@ export function buildPreviewGateway(dependencies: PreviewGatewayDependencies, se
           return reply.send(response);
         }
         if (request.method !== 'GET' && request.method !== 'HEAD')
-          return page(reply, shellOrigin, 404, 'There is nothing here');
-        if (!found.build) return page(reply, shellOrigin, 404, 'Nothing has been built yet');
+          return page(reply, shellOrigin, 404, 'There is no draft at this address');
+        if (!found.build) return page(reply, shellOrigin, 404, 'This draft has not been built yet');
         const files = await manifest(found.build);
         const path = previewFilePath(new URL(request.url, 'http://draft').pathname);
         const file = path === null ? undefined : files?.get(path);
@@ -367,12 +368,12 @@ export function buildPreviewGateway(dependencies: PreviewGatewayDependencies, se
     });
   });
 
-  gateway.setNotFoundHandler((_request, reply) => page(reply, shellOrigin, 404, 'There is nothing here'));
+  gateway.setNotFoundHandler((_request, reply) => page(reply, shellOrigin, 404, 'There is no draft at this address'));
   // Anything that fails, such as an unreachable database, denies the request rather than serving it.
   gateway.setErrorHandler((error, request, reply) => {
     if (requestBoundaryError(error, reply)) return;
     if (!(error instanceof AppHostUnavailableError)) request.log.error({ err: error }, 'Draft request failed');
-    return page(reply, shellOrigin, 503, 'The draft could not be loaded');
+    return page(reply, shellOrigin, 503, 'The draft could not be loaded. Reload it to try again.');
   });
 
   /** Forwards a WebSocket handshake to a draft's server, and closes it once the session loses access. */

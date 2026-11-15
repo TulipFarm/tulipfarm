@@ -401,7 +401,7 @@ test('names that lead nowhere get 404, stopped apps and a missing host get 503',
     const { port, upstream } = await gatewayFor(t, { enabled: false });
     const response = await call(port, { headers: { accept: 'text/html' } });
     assert.equal(response.status, 404);
-    assert.match(response.body, /There is nothing here/);
+    assert.match(response.body, /There is no app at this address/);
     assert.equal(upstream.requests, 0);
   });
   await t.test('no app holds the name', async t => {
@@ -422,7 +422,7 @@ test('names that lead nowhere get 404, stopped apps and a missing host get 503',
     });
     const response = await call(port, { headers: { accept: 'text/html' } });
     assert.equal(response.status, 503);
-    assert.match(response.body, /This app is unavailable/);
+    assert.match(response.body, /This app is not available right now/);
     assert.equal(calls.connects, 0);
   });
   await t.test('no app host is registered', async t => {

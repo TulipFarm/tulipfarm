@@ -364,7 +364,7 @@ test('a draft whose server is not running says so without contacting a host', as
 
   const response = await call(port, { headers: { accept: 'text/html' } });
   assert.equal(response.status, 503);
-  assert.match(response.body, /The server for this draft is not running\. Publish the app to run it\./);
+  assert.match(response.body, /This draft&#39;s server is not running\. Publish the app to start it\./);
   assert.match(response.headers['content-security-policy'], /frame-ancestors https:\/\/app\.tulipfarm\.test$/);
   assert.equal((await connect(port)).status, 503);
   assert.equal(calls.connects, 0);
