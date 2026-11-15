@@ -75,6 +75,12 @@ export type PlatformClient = {
   query(text: string, values?: unknown[]): Promise<{ rows: any[]; rowCount: number | null }>;
 };
 
+/** The workspaces that hold an app name and have not been deleted. */
+export async function namedWorkspaces(platform: PlatformClient) {
+  const { rows } = await platform.query(`SELECT DISTINCT h.workspace_id FROM app.app_hostnames h ${inLiveWorkspace}`);
+  return (rows as { workspace_id: string }[]).map(row => row.workspace_id);
+}
+
 export type AppWork = {
   /** Runs an action in one transaction on a workspace schema, as the workspace runtime role. */
   readonly transact: <T>(workspaceId: string, action: (tx: AppTransaction) => Promise<T>) => Promise<T>;
@@ -677,7 +683,10 @@ export function createAppActivities(work: AppWork) {
       return heartbeating(signal => projectEdge(input, signal));
     },
 
-    /** Repairs publisher routes, edge projections, stale name claims and staged releases nothing refers to. */
+    /**
+     * Repairs publisher routes, edge projections, stale name claims, names held by deleted workspaces and staged
+     * releases nothing refers to.
+     */
     async reconcileApps(signal: AbortSignal, now = Date.now()) {
       type NameRow = {
         name: string;
@@ -704,6 +713,14 @@ export function createAppActivities(work: AppWork) {
         if (!enabled.has(workspaceId)) enabled.set(workspaceId, await work.enabled(workspaceId));
         return enabled.get(workspaceId)!;
       };
+
+      // A deleted workspace's storage never comes back, so its names are retired and their routes removed below.
+      const { rowCount: orphaned } = await platform.query(
+        `UPDATE app.app_hostnames h SET state = 'retired', retired_at = clock_timestamp()
+         FROM app.workspace_storage s
+         WHERE s.workspace_id = h.workspace_id AND s.stage = 'unavailable' AND h.state <> 'retired'`,
+      );
+      for (let i = 0; i < (orphaned ?? 0); i++) recordAppReconcileRepair('name-retired');
 
       const held = new Map<string, AppRoute>();
       if (publisher) for await (const route of publisher.list(signal)) held.set(route.name, route);
@@ -842,7 +859,9 @@ export function createAppActivities(work: AppWork) {
      * that hour; the next run reads it again. Compute the host cannot report holds nothing back: its hours stay
      * unsettled and a later run within the same 48 hours charges them, even once the app is no longer served. A
      * workspace that fails is left out of the rest of the run and the others are still charged; the run then throws.
-     * A deleted workspace is not metered, so what it had not been charged is dropped.
+     * Its cursor in `app.app_usage_cursors` stays where this run started, so the next run reads its missed hours
+     * again, even when it serves no app and owes only for traffic on retired names. A deleted workspace is not
+     * metered, so what it had not been charged is dropped.
      */
     async meterAppTraffic(now: number, signal: AbortSignal) {
       if (!publisher) return undefined;
@@ -852,17 +871,20 @@ export function createAppActivities(work: AppWork) {
       // Usage windows are only recorded for apps that hold a name, and names are never deleted, so every unsettled
       // window is in a workspace listed here, whether or not it serves an app now.
       const { rows: named } = await platform.query(
-        `SELECT h.workspace_id,
+        `SELECT h.workspace_id, MIN(c.metered_before) AS metered_before,
            COALESCE(array_agg(h.app_id) FILTER (WHERE h.state = 'current' AND h.status IS NOT NULL), '{}') AS apps
-         FROM app.app_hostnames h ${inLiveWorkspace} GROUP BY h.workspace_id`,
+         FROM app.app_hostnames h ${inLiveWorkspace}
+         LEFT JOIN app.app_usage_cursors c ON c.workspace_id = h.workspace_id
+         GROUP BY h.workspace_id`,
       );
       const pending = new Map<number, Map<string, AppUsage>>();
       const failures: unknown[] = [];
-      // Each app resumes after its newest recorded hour, so recording no later hour for a failed workspace keeps the
-      // hours it missed for the next run. Hours other workspaces already recorded are not charged again.
+      // Hours other workspaces already recorded are not charged again when a failed workspace holds the start back.
       const failed = new Set<string>();
-      for (const { workspace_id: workspaceId, apps } of named as { workspace_id: string; apps: string[] }[]) {
+      type Named = { workspace_id: string; metered_before: Date | null; apps: string[] };
+      for (const { workspace_id: workspaceId, metered_before: cursor, apps } of named as Named[]) {
         signal.throwIfAborted();
+        from = Math.min(from, Math.max(cursor?.getTime() ?? settled, floor));
         try {
           const next = await transact(workspaceId, async tx => {
             const { rows: unsettled } = await tx.client.query(
@@ -918,6 +940,15 @@ export function createAppActivities(work: AppWork) {
           failures.push(error);
         }
       }
+      const workspaces = (named as Named[]).map(row => row.workspace_id);
+      const metered = new Date(unread ? Date.parse(unread.window.start) : settled);
+      await platform.query(
+        `INSERT INTO app.app_usage_cursors (workspace_id, metered_before)
+         SELECT * FROM unnest($1::uuid[], $2::timestamptz[])
+         ON CONFLICT (workspace_id) DO UPDATE SET metered_before = EXCLUDED.metered_before
+         WHERE app.app_usage_cursors.metered_before < EXCLUDED.metered_before`,
+        [workspaces, workspaces.map(id => (failed.has(id) ? new Date(from) : metered))],
+      );
       if (failures.length) throw new AggregateError(failures, 'App usage metering failed');
       return unread;
     },

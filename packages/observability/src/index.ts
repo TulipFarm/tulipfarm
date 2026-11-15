@@ -1002,14 +1002,15 @@ export function recordAgentSetup(status: string, errorCode: string | null, error
 }
 
 /**
- * What an app reconcile repaired: a route, an edge projection, a stale name claim, an unreferenced release, a server
- * endpoint left on the wrong host or a server host nothing uses.
+ * What an app reconcile repaired: a route, an edge projection, a stale name claim, a name a deleted workspace held,
+ * an unreferenced release, a server endpoint left on the wrong host or a server host nothing uses.
  */
 export const appReconcileRepairs = [
   'route-applied',
   'route-removed',
   'edge-projected',
   'claim-retired',
+  'name-retired',
   'release-discarded',
   'endpoint-switched',
   'host-removed',

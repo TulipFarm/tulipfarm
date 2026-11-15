@@ -9,7 +9,7 @@ import { objectStorageClient } from '@tulipfarm/workspaces/object-storage';
 import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import { Pool } from 'pg';
 import { z } from 'zod';
-import { createAppActivities, type AppWork } from './app-activities.ts';
+import { createAppActivities, namedWorkspaces, type AppWork } from './app-activities.ts';
 import { createAppServerActivities } from './app-server-activities.ts';
 
 type WorkspaceRuntime = {
@@ -51,9 +51,7 @@ export function createAppComposition(options: {
         await transact(workspaceId, tx => readSourceBundles(tx, appId as AppId)),
       ),
     async *workspaces() {
-      const seen = new Set<string>();
-      for (const row of (await platform.query('SELECT DISTINCT workspace_id FROM app.app_hostnames')).rows)
-        seen.add(row.workspace_id as string);
+      const seen = new Set(await namedWorkspaces(platform));
       let after: string | null = null;
       for (;;) {
         const page = await options.discover(after);
