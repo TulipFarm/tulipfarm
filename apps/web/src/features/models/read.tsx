@@ -67,7 +67,11 @@ export function ModelRead<T>({
           </ReadError>
         </div>
       )}
-      refreshing={<p role="status">Refreshing {label}…</p>}
+      refreshing={
+        <p role="status" className="sr-only">
+          Refreshing {label}…
+        </p>
+      }
     >
       {children}
     </ReadFeedback>

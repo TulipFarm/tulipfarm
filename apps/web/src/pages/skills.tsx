@@ -72,7 +72,11 @@ function SkillRead<T>({
           </Button>
         </ReadError>
       )}
-      refreshing={<p role="status">Refreshing skills…</p>}
+      refreshing={
+        <p role="status" className="sr-only">
+          Refreshing skills…
+        </p>
+      }
     >
       {children}
     </ReadFeedback>

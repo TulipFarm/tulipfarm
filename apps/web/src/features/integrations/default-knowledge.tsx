@@ -319,7 +319,7 @@ export function useDefaultKnowledge(workspaceId: string) {
 function Checking() {
   return (
     <div role="status" aria-label="Checking automatic Knowledge" className="space-y-2">
-      <p className="text-sm text-muted-foreground">Checking automatic Knowledge…</p>
+      <p className="sr-only">Checking automatic Knowledge…</p>
       <Skeleton />
     </div>
   );

@@ -295,7 +295,7 @@ function PinnedSkillName({
   state: ReadState<SkillDetail> | null;
   retry: () => void;
 }) {
-  if (state?.kind === 'loading') return <p className="text-sm text-muted-foreground">Loading skill name…</p>;
+  if (state?.kind === 'loading') return <p className="sr-only">Loading skill name…</p>;
   if (state?.kind === 'error')
     return (
       <Button type="button" variant="outline" size="sm" onClick={retry}>

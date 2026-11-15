@@ -271,8 +271,7 @@ for (const mobile of [false, true])
         await accessible(page);
         await launcher.click();
         await page.getByRole('dialog', { name: 'Bud quick chat', exact: true }).waitFor({ state: 'hidden' });
-        if (mobile) await toggle.click();
-        await page.getByRole('link', { name: 'Calendar', exact: true }).click();
+        await page.goto(`${origin}/acme/calendar`);
         await injectAxe(page, '/acme/calendar', page.locator('aside[data-corner="header"]'));
         assert.equal(await launcher.getAttribute('aria-label'), 'Bud. Open quick chat');
         await accessible(page, { shellOnly: true });

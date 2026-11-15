@@ -226,7 +226,7 @@ function SkillDeleteDialog({
         <div className="-mx-4 min-h-0 space-y-3 overflow-y-auto px-4 pb-1">
           {view.kind === 'loading' && (
             <div role="status" className="space-y-2">
-              <p className="text-sm text-muted-foreground">Checking where this skill is used…</p>
+              <p className="sr-only">Checking where this skill is used…</p>
               <Skeleton aria-hidden="true" />
               <Skeleton aria-hidden="true" />
             </div>

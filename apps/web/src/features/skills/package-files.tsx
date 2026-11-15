@@ -66,7 +66,11 @@ function FilePreview({
         state={read.state}
         errorTitle="Could not read the file"
         retry={retry}
-        loading={<p role="status">Loading file…</p>}
+        loading={
+          <p role="status" className="sr-only">
+            Loading file…
+          </p>
+        }
         unavailable={() => <p role="alert">This file or your access changed. Reopen the skill.</p>}
         refreshError={message => <ReadError message={message}>{retry}</ReadError>}
       >

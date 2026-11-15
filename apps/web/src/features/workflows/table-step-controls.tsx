@@ -189,7 +189,7 @@ export function TableStepControls({
           </SelectContent>
         </Select>
       </Field>
-      {read.state.kind === 'loading' && <p className="text-sm text-muted-foreground">Loading tables.</p>}
+      {read.state.kind === 'loading' && <p className="sr-only">Loading tables.</p>}
       {read.state.kind === 'error' && (
         <p role="alert">Tables are unavailable. Retry loading the workflow before editing this step.</p>
       )}

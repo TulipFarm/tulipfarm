@@ -292,7 +292,7 @@ function Browser({
 }
 
 function ItemStatus({ status, names, retry }: { status: Status; names: Names; retry: () => void }) {
-  if (status.kind === 'checking') return <p className="text-sm text-muted-foreground">Checking how access changes…</p>;
+  if (status.kind === 'checking') return <p className="sr-only">Checking how access changes…</p>;
   if (status.kind === 'moving') return <p className="text-sm text-muted-foreground">Moving…</p>;
   if (status.kind === 'moved')
     return (

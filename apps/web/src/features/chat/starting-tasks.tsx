@@ -1,21 +1,17 @@
-import { useState, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { Book } from 'reicon-react/icons/Book';
 import { CalendarSearch } from 'reicon-react/icons/CalendarSearch';
 import { Checklist } from 'reicon-react/icons/Checklist';
 import { Clock } from 'reicon-react/icons/Clock';
-import { ChevronDown } from 'reicon-react/icons/ChevronDown';
-import { ChevronUp } from 'reicon-react/icons/ChevronUp';
 import { Database } from 'reicon-react/icons/Database';
 import { MessageEdit } from 'reicon-react/icons/MessageEdit';
 import { Note } from 'reicon-react/icons/Note';
 import { Plug } from 'reicon-react/icons/Plug';
 import { Repeat } from 'reicon-react/icons/Repeat';
 import { UserAdd } from 'reicon-react/icons/UserAdd';
-import { PromptList } from '@tulipfarm/sprout/prompt-list';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { Button } from '@tulipfarm/sprout/button';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@tulipfarm/sprout/collapsible';
 import type { Brand } from '@tulipfarm/sprout/brand-icon';
 import { workspaceRoute } from '@/router';
 import { fillTasks, prioritizeTasks } from './starting-task-priority';
@@ -57,11 +53,10 @@ const destinationIcons = {
   files: <Book size={16} />,
   members: <UserAdd size={16} />,
 };
+const chipTones = ['text-primary-text', 'text-info', 'text-success', 'text-warning'];
 const sourceNames = { google: 'Google', github: 'GitHub', slack: 'Slack' };
 
 export function StartingTasks({ onChoose, disabled }: { onChoose: (prompt: string) => void; disabled: boolean }) {
-  const [setupOpen, setSetupOpen] = useState(false);
-  const [moreOpen, setMoreOpen] = useState(false);
   const { workspace } = workspaceRoute.useRouteContext();
   const { workspaceSlug } = workspaceRoute.useParams();
   const navigate = useNavigate();
@@ -69,7 +64,7 @@ export function StartingTasks({ onChoose, disabled }: { onChoose: (prompt: strin
   const setup = items.filter(item => item.kind === 'onboarding');
   const suggested = items.filter(item => item.kind === 'prompt');
   const tasks = fillTasks(suggested, fallbackRecommendations);
-  const { primary, more } = prioritizeTasks(tasks);
+  const { primary } = prioritizeTasks(tasks);
   const choose = (id: string) => {
     const action = [...tasks, ...setup].find(item => item.id === id)?.action;
     if (action?.kind === 'prompt') onChoose(action.prompt);
@@ -102,67 +97,19 @@ export function StartingTasks({ onChoose, disabled }: { onChoose: (prompt: strin
           : item.brands.map(brand => ({ brand: brand satisfies Brand, name: brandNames[brand] })),
       };
     });
+  const chips = [...rows(primary.slice(0, 3)), ...rows(setup.slice(0, 1))];
   return (
-    <section aria-label="Recommended for you" className="flex w-full flex-col gap-4 pt-3">
-      <div className="space-y-2">
-        <PromptList title="Start with a task" disabled={disabled} onSelect={choose} items={rows(primary)} />
-        {more.length > 0 && (
-          <Collapsible open={moreOpen} onOpenChange={setMoreOpen}>
-            <CollapsibleContent>
-              <div className="pb-2">
-                <PromptList
-                  title="More tasks"
-                  showTitle={false}
-                  disabled={disabled}
-                  onSelect={choose}
-                  items={rows(more)}
-                />
-              </div>
-            </CollapsibleContent>
-            <div className="px-1">
-              <CollapsibleTrigger render={<Button variant="ghost" size="sm" />}>
-                {moreOpen ? <ChevronUp size={14} aria-hidden="true" /> : <ChevronDown size={14} aria-hidden="true" />}
-                {moreOpen ? 'Fewer tasks' : `More tasks (${more.length})`}
-              </CollapsibleTrigger>
-            </div>
-          </Collapsible>
-        )}
+    <section aria-label="Recommended for you" className="flex w-full flex-col gap-4 pt-4">
+      <div className="flex flex-wrap justify-center gap-2">
+        {chips.map((chip, index) => (
+          <span key={chip.id} className="rounded-full border border-border bg-background">
+            <Button variant="ghost" disabled={disabled} onClick={() => choose(chip.id)}>
+              <span className={chipTones[index % chipTones.length]}>{chip.icon}</span>
+              {chip.label}
+            </Button>
+          </span>
+        ))}
       </div>
-      {setup.length > 0 && (
-        <div className="space-y-2 border-t border-muted-foreground/30 pt-4">
-          <PromptList
-            title="Set up your workspace (optional)"
-            disabled={disabled}
-            onSelect={choose}
-            items={rows(setup.slice(0, 1))}
-          />
-          {setup.length > 1 && (
-            <Collapsible open={setupOpen} onOpenChange={setSetupOpen}>
-              <div className="px-1">
-                <CollapsibleTrigger render={<Button variant="ghost" size="sm" />}>
-                  {setupOpen ? (
-                    <ChevronUp size={14} aria-hidden="true" />
-                  ) : (
-                    <ChevronDown size={14} aria-hidden="true" />
-                  )}
-                  {setupOpen ? 'Fewer setup options' : `More setup options (${setup.length - 1})`}
-                </CollapsibleTrigger>
-              </div>
-              <CollapsibleContent>
-                <div className="pt-2">
-                  <PromptList
-                    title="More setup options"
-                    showTitle={false}
-                    disabled={disabled}
-                    onSelect={choose}
-                    items={rows(setup.slice(1))}
-                  />
-                </div>
-              </CollapsibleContent>
-            </Collapsible>
-          )}
-        </div>
-      )}
       {message &&
         (error ? (
           <div className="flex flex-col gap-2">
@@ -176,7 +123,7 @@ export function StartingTasks({ onChoose, disabled }: { onChoose: (prompt: strin
             </div>
           </div>
         ) : (
-          <p role="status" className="px-3 text-sm text-muted-foreground">
+          <p role="status" className="sr-only">
             {message}
           </p>
         ))}

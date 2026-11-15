@@ -468,8 +468,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/slack
       '@tulipfarm/sprout':
-        specifier: 0.17.2
-        version: 0.17.2(@date-fns/tz@1.5.0)(@floating-ui/dom@1.8.0)(@tiptap/extensions@3.32.2(@tiptap/core@3.32.2(@tiptap/pm@3.32.2))(@tiptap/pm@3.32.2))(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(date-fns@4.4.0)(immer@11.1.21)(react-dom@19.3.0(react@19.3.0))(react-is@19.3.1)(react@19.3.0)(redux@5.0.1)(tailwindcss@4.3.3)(zod@4.6.6)
+        specifier: 0.17.3
+        version: 0.17.3(@date-fns/tz@1.5.0)(@floating-ui/dom@1.8.0)(@tiptap/extensions@3.32.2(@tiptap/core@3.32.2(@tiptap/pm@3.32.2))(@tiptap/pm@3.32.2))(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(date-fns@4.4.0)(immer@11.1.21)(react-dom@19.3.0(react@19.3.0))(react-is@19.3.1)(react@19.3.0)(redux@5.0.1)(tailwindcss@4.3.3)(zod@4.6.6)
       '@tulipfarm/tables':
         specifier: workspace:*
         version: link:../../packages/tables
@@ -1059,8 +1059,8 @@ importers:
         specifier: workspace:*
         version: link:../observability
       '@tulipfarm/sprout':
-        specifier: 0.17.2
-        version: 0.17.2(@date-fns/tz@1.5.0)(@floating-ui/dom@1.8.0)(@tiptap/extensions@3.32.2(@tiptap/core@3.32.2(@tiptap/pm@3.32.2))(@tiptap/pm@3.32.2))(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(date-fns@4.4.0)(immer@11.1.21)(react-dom@19.3.0(react@19.3.0))(react-is@19.3.1)(react@19.3.0)(redux@5.0.1)(tailwindcss@4.3.3)(zod@4.6.6)
+        specifier: 0.17.3
+        version: 0.17.3(@date-fns/tz@1.5.0)(@floating-ui/dom@1.8.0)(@tiptap/extensions@3.32.2(@tiptap/core@3.32.2(@tiptap/pm@3.32.2))(@tiptap/pm@3.32.2))(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(date-fns@4.4.0)(immer@11.1.21)(react-dom@19.3.0(react@19.3.0))(react-is@19.3.1)(react@19.3.0)(redux@5.0.1)(tailwindcss@4.3.3)(zod@4.6.6)
       '@tulipfarm/workspace-storage':
         specifier: workspace:*
         version: link:../workspace-storage
@@ -4599,8 +4599,8 @@ packages:
   '@ts-morph/common@0.27.0':
     resolution: {integrity: sha512-Wf29UqxWDpc+i61k3oIOzcUfQt79PIT9y/MWfAGlrkjg6lBC1hwDECLXPVJAhWjiGbfBCxZd65F/LIZF3+jeJQ==}
 
-  '@tulipfarm/sprout@0.17.2':
-    resolution: {integrity: sha512-G6+vMK+r8oue8kj7n5qNiRT9LphGxMHFr+f8fulp4cSToY8fRi4cOInSke5WKjQAJXyuaKsfZ0iZngaxUo6cAQ==}
+  '@tulipfarm/sprout@0.17.3':
+    resolution: {integrity: sha512-MvyK4WsE2m9TIh1tKol93y2rDTN1K/dlXleybR2L0uzyAk2sHzuIkc5H4kYBpo9tGSyg/hTXlpO1+rTuId/usQ==}
     peerDependencies:
       nuqs: ^2.0.0
       react: ^19.0.0
@@ -10976,7 +10976,7 @@ snapshots:
       minimatch: 10.2.6
       path-browserify: 1.0.1
 
-  '@tulipfarm/sprout@0.17.2(@date-fns/tz@1.5.0)(@floating-ui/dom@1.8.0)(@tiptap/extensions@3.32.2(@tiptap/core@3.32.2(@tiptap/pm@3.32.2))(@tiptap/pm@3.32.2))(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(date-fns@4.4.0)(immer@11.1.21)(react-dom@19.3.0(react@19.3.0))(react-is@19.3.1)(react@19.3.0)(redux@5.0.1)(tailwindcss@4.3.3)(zod@4.6.6)':
+  '@tulipfarm/sprout@0.17.3(@date-fns/tz@1.5.0)(@floating-ui/dom@1.8.0)(@tiptap/extensions@3.32.2(@tiptap/core@3.32.2(@tiptap/pm@3.32.2))(@tiptap/pm@3.32.2))(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(date-fns@4.4.0)(immer@11.1.21)(react-dom@19.3.0(react@19.3.0))(react-is@19.3.1)(react@19.3.0)(redux@5.0.1)(tailwindcss@4.3.3)(zod@4.6.6)':
     dependencies:
       '@base-ui/react': 1.9.0(@date-fns/tz@1.5.0)(@types/react@19.3.0)(date-fns@4.4.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@dnd-kit/core': 6.3.1(react-dom@19.3.0(react@19.3.0))(react@19.3.0)

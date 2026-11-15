@@ -5,7 +5,7 @@ import { useSidebar } from '@tulipfarm/sprout/sidebar';
 import { SidebarRecentItem } from './sidebar-recent-item';
 import { useRecentItems, type RecentItem, type RecentSection } from './recent-queries';
 
-function itemLink(section: RecentSection, slug: string, item: RecentItem) {
+export function itemLink(section: RecentSection, slug: string, item: RecentItem) {
   switch (section) {
     case 'chat':
       return (

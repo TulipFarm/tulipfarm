@@ -1146,7 +1146,7 @@ function RuleEditor({
 function CapabilitiesFeedback({ read }: { read: ReturnType<typeof useTableCapabilities> }) {
   if (read.state.kind === 'loading')
     return (
-      <p role="status" className="text-sm text-muted-foreground">
+      <p role="status" className="sr-only">
         Checking available filters…
       </p>
     );

@@ -119,7 +119,7 @@ export function AtlassianIntegrations({
       </h2>
       {accounts.kind === 'loading' && (
         <div role="status" className="space-y-3">
-          <p>Loading Atlassian accounts…</p>
+          <p className="sr-only">Loading Atlassian accounts…</p>
           <Skeleton />
           <Skeleton />
         </div>
@@ -217,7 +217,11 @@ export function AtlassianIntegrations({
               Refresh sources
             </Button>
           </header>
-          {sources.kind === 'loading' && <p role="status">Loading sources…</p>}
+          {sources.kind === 'loading' && (
+            <p role="status" className="sr-only">
+              Loading sources…
+            </p>
+          )}
           {sources.kind === 'error' && (
             <StatePanel kind="error" title="Could not load sources" description={sources.message}>
               <Button variant="outline" disabled={refreshing} onClick={() => void refresh()}>

@@ -95,3 +95,10 @@ test('small grey shell text meets WCAG AA in light and dark themes', () => {
   }
   assert.doesNotMatch(source('features/navigation/sidebar-recent-item.tsx'), /text-muted-foreground/);
 });
+
+test('the workspace menu lists other workspaces and Create workspace only', () => {
+  const menu = source('pages/workspace.tsx');
+  assert.match(menu, /Create workspace/);
+  assert.doesNotMatch(menu, /Invite and manage members|Switch workspace/);
+  assert.doesNotMatch(source('features/chat/chat-models.tsx'), /Retry models/);
+});

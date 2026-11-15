@@ -1,4 +1,3 @@
-import { emptyChatIntro } from './empty-chat';
 import {
   lazy,
   memo,
@@ -23,7 +22,6 @@ import { publicPackageInstallPrompt } from '@/features/packages/public-catalog';
 import { ArrowDown } from 'reicon-react/icons/ArrowDown';
 import { Folder } from 'reicon-react/icons/Folder';
 import { ChevronDown } from 'reicon-react/icons/ChevronDown';
-import { Sparkle } from 'reicon-react/icons/Sparkle';
 import { Alert, AlertDescription, AlertTitle } from '@tulipfarm/sprout/alert';
 import { Button } from '@tulipfarm/sprout/button';
 import { ChatCanvasToggle, ChatWithCanvas } from './canvas-items';
@@ -1242,15 +1240,9 @@ function ConversationDetail({
                     compact ? (
                       <p className="text-sm text-muted-foreground">What can I help you with?</p>
                     ) : (
-                      <div className="flex items-center gap-4">
-                        {sharedChat ? <Sparkle size={28} aria-hidden="true" /> : <Bud size={64} />}
-                        <div className="min-w-0 space-y-1">
-                          <h2 className="text-2xl font-medium tracking-tight">
-                            <Greeting />
-                          </h2>
-                          <p className="text-base text-pretty text-muted-foreground">{emptyChatIntro(draft)}</p>
-                        </div>
-                      </div>
+                      <h2 className="w-full text-center text-3xl font-medium tracking-tight">
+                        <Greeting />
+                      </h2>
                     )
                   ) : (
                     <ol aria-label="Messages" className={compact ? 'space-y-3' : 'space-y-8'}>

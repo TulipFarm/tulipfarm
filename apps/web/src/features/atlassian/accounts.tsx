@@ -384,7 +384,11 @@ function BusinessGrants({
       <p className="text-muted-foreground">
         Select every member or team allowed to use this business account, including admins. Saving replaces both lists.
       </p>
-      {status === 'loading' && <p role="status">Loading use grants…</p>}
+      {status === 'loading' && (
+        <p role="status" className="sr-only">
+          Loading use grants…
+        </p>
+      )}
       {!draft && status === 'error' && (
         <StatePanel kind="error" title="Could not load use grants" description="Reload the grants to recover.">
           <Button variant="outline" onClick={() => void reload()}>
