@@ -28,7 +28,7 @@ import { authoringPlatform } from './authoring-platform.mjs';
 import { createAppServerActivities } from '../src/app-server-activities.ts';
 import { captureMetrics } from './metric-capture.mjs';
 
-const recipe = { kind: 'server', runtime: 'node22', serve: { port: 8080, start: 'node server.js' } };
+const recipe = { kind: 'server', runtime: 'node26', serve: { port: 8080, start: 'node server.js' } };
 
 function memoryObjects() {
   const objects = new Map();
@@ -150,7 +150,7 @@ test('server apps publish, roll back, resize and reconcile against an app host',
   };
   execFileSync('git', ['init', '--quiet', '--initial-branch=main', root]);
   const builder = {
-    id: 'sandbox-node22-v1',
+    id: 'sandbox-node26-v1',
     async build() {
       throw new Error('Not used');
     },
@@ -561,7 +561,7 @@ test('reconcile removes every host of a deleted workspace without opening it', {
     },
   };
   const builder = {
-    id: 'sandbox-node22-v1',
+    id: 'sandbox-node26-v1',
     async build() {
       throw new Error('Not used');
     },

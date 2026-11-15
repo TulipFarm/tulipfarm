@@ -156,7 +156,7 @@ test('only current editors preview, and losing edit blocks the next read', { tim
     buildId: queued.id,
   });
   await recordRuntimeCandidate(tx, operation.id, 'host-1');
-  const server = { kind: 'server', runtime: 'node22', serve: { port: 3000, start: 'node server.js' } };
+  const server = { kind: 'server', runtime: 'node26', serve: { port: 3000, start: 'node server.js' } };
   await requestBuild(tx, {
     appId: app.id,
     commit,

@@ -49,10 +49,10 @@ test('a tree without app.json is copied from its root', () => {
 
 test('a command recipe names its runtime, command and output directory', () => {
   assert.deepEqual(
-    readAppRecipe('{"kind":"command","runtime":"node22","install":"npm ci","command":"npm run build","output":"dist"}'),
+    readAppRecipe('{"kind":"command","runtime":"node26","install":"npm ci","command":"npm run build","output":"dist"}'),
     {
       ok: true,
-      recipe: { kind: 'command', runtime: 'node22', install: 'npm ci', command: 'npm run build', output: 'dist' },
+      recipe: { kind: 'command', runtime: 'node26', install: 'npm ci', command: 'npm run build', output: 'dist' },
     },
   );
 });
@@ -60,31 +60,31 @@ test('a command recipe names its runtime, command and output directory', () => {
 test('a server recipe names its runtime, optional build steps, and the port and command it serves on', () => {
   assert.deepEqual(
     readAppRecipe(
-      '{"kind":"server","runtime":"node22","install":"npm ci","command":"npm run build","serve":{"port":3000,"start":"node server.js"}}',
+      '{"kind":"server","runtime":"node26","install":"npm ci","command":"npm run build","serve":{"port":3000,"start":"node server.js"}}',
     ),
     {
       ok: true,
       recipe: {
         kind: 'server',
-        runtime: 'node22',
+        runtime: 'node26',
         install: 'npm ci',
         command: 'npm run build',
         serve: { port: 3000, start: 'node server.js' },
       },
     },
   );
-  assert.deepEqual(readAppRecipe('{"kind":"server","runtime":"node22","serve":{"port":1024,"start":"npm start"}}'), {
+  assert.deepEqual(readAppRecipe('{"kind":"server","runtime":"node26","serve":{"port":1024,"start":"npm start"}}'), {
     ok: true,
-    recipe: { kind: 'server', runtime: 'node22', serve: { port: 1024, start: 'npm start' } },
+    recipe: { kind: 'server', runtime: 'node26', serve: { port: 1024, start: 'npm start' } },
   });
   assert.deepEqual(
-    readAppRecipe('{"kind":"server","runtime":"node22","serve":{"port":65535,"start":"npm start"}}').recipe.serve,
+    readAppRecipe('{"kind":"server","runtime":"node26","serve":{"port":65535,"start":"npm start"}}').recipe.serve,
     { port: 65535, start: 'npm start' },
   );
 });
 
 test('a server recipe needs a port from 1024 to 65535 and a start command', () => {
-  const server = serve => readAppRecipe(JSON.stringify({ kind: 'server', runtime: 'node22', serve }));
+  const server = serve => readAppRecipe(JSON.stringify({ kind: 'server', runtime: 'node26', serve }));
   const failure = message => ({ ok: false, failure: { code: 'recipe-invalid', message, retryable: false } });
   const badPort = failure('app.json serve.port: Use a whole number port from 1024 to 65535');
   const badStart = failure('app.json serve.start: Name the command that starts the server');
@@ -94,7 +94,7 @@ test('a server recipe needs a port from 1024 to 65535 and a start command', () =
   for (const start of ['', '   ', 42]) assert.deepEqual(server({ port: 3000, start }), badStart, JSON.stringify(start));
   assert.deepEqual(server({ port: 3000 }), badStart);
   assert.deepEqual(
-    readAppRecipe('{"kind":"server","runtime":"node22"}'),
+    readAppRecipe('{"kind":"server","runtime":"node26"}'),
     failure('app.json serve: Invalid input: expected object, received undefined'),
   );
   assert.deepEqual(
@@ -102,14 +102,14 @@ test('a server recipe needs a port from 1024 to 65535 and a start command', () =
     failure('app.json serve: Unrecognized key: "env"'),
   );
   assert.deepEqual(
-    readAppRecipe('{"kind":"server","runtime":"node22","output":"dist","serve":{"port":3000,"start":"npm start"}}'),
+    readAppRecipe('{"kind":"server","runtime":"node26","output":"dist","serve":{"port":3000,"start":"npm start"}}'),
     failure('app.json Unrecognized key: "output"'),
   );
 });
 
 test('copy recipes build anywhere, commands need a builder, and servers need a host and a server builder', () => {
-  const server = { kind: 'server', runtime: 'node22', serve: { port: 3000, start: 'npm start' } };
-  const command = { kind: 'command', runtime: 'node22', command: 'npm run build', output: 'dist' };
+  const server = { kind: 'server', runtime: 'node26', serve: { port: 3000, start: 'npm start' } };
+  const command = { kind: 'command', runtime: 'node26', command: 'npm run build', output: 'dist' };
   const hostUnavailable = {
     ok: false,
     failure: {
@@ -120,13 +120,13 @@ test('copy recipes build anywhere, commands need a builder, and servers need a h
   };
   const none = appBuilders(undefined, unavailableAppHost);
   const host = { ...unavailableAppHost };
-  const staticOnly = { id: 'sandbox-node22-v1', build: async () => ({}) };
+  const staticOnly = { id: 'sandbox-node26-v1', build: async () => ({}) };
   const serverCapable = { ...staticOnly, buildServer: async () => ({}) };
   assert.deepEqual(none, { command: undefined, server: undefined });
   assert.deepEqual(recipeBuilder({ kind: 'copy', root: '.' }, none), { ok: true, builder: 'copy' });
   assert.deepEqual(recipeBuilder(command, appBuilders(staticOnly, unavailableAppHost)), {
     ok: true,
-    builder: 'sandbox-node22-v1',
+    builder: 'sandbox-node26-v1',
   });
   assert.deepEqual(recipeBuilder(command, none), {
     ok: false,
@@ -137,7 +137,7 @@ test('copy recipes build anywhere, commands need a builder, and servers need a h
   assert.deepEqual(recipeBuilder(server, appBuilders(staticOnly, host)), hostUnavailable);
   assert.deepEqual(recipeBuilder(server, appBuilders(serverCapable, host)), {
     ok: true,
-    builder: 'sandbox-node22-v1',
+    builder: 'sandbox-node26-v1',
   });
 });
 
@@ -145,7 +145,7 @@ test('an invalid app.json is a recipe failure that names the problem', () => {
   const failure = message => ({ ok: false, failure: { code: 'recipe-invalid', message, retryable: false } });
   assert.deepEqual(readAppRecipe('{'), failure('app.json is not valid JSON'));
   assert.deepEqual(
-    readAppRecipe('{"kind":"command","runtime":"node22","command":"npm run build","output":"../site"}'),
+    readAppRecipe('{"kind":"command","runtime":"node26","command":"npm run build","output":"../site"}'),
     failure('app.json output: Path must stay inside the app'),
   );
   assert.deepEqual(
@@ -171,10 +171,10 @@ test('the build id is a digest of app, commit, canonical recipe and builder', as
     await appBuildId(app, commit, { kind: 'copy', root: '.' }, 'copy'),
     'c70f51b6853cbc6ccdfe95e5a5751605a6062d1a2ad98eaec50774c543c2d842',
   );
-  const recipe = { output: 'dist', command: 'npm run build', runtime: 'node22', kind: 'command', install: undefined };
+  const recipe = { output: 'dist', command: 'npm run build', runtime: 'node26', kind: 'command', install: undefined };
   assert.equal(
     await appBuildId(app, commit, recipe, 'builder-1'),
-    '807ec77d76f21c5ea8442f0e5c7f1125bbd96ded7c297c63ab53e3c8b3e44659',
+    '625d3dcdaac632f52d1dc1e5948add0765fe0d1d7a7f200b85fd274eaab05376',
   );
   assert.equal(
     await appBuildId(app, commit, { kind: 'copy', root: '.' }, 'builder-1'),
