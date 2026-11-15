@@ -27,7 +27,7 @@ import {
 import { hostHeaderPublisher } from '@tulipfarm/apps/host-header-publisher';
 import { unavailableAppHost } from '@tulipfarm/extensions';
 import { fenceWorkspaceAccess } from '../../../packages/workspace-storage/src/runtime.ts';
-import { createAppActivities } from '../src/app-activities.ts';
+import { createAppActivities, namedWorkspaces } from '../src/app-activities.ts';
 import { captureMetrics } from './metric-capture.mjs';
 
 function memoryObjects() {
@@ -147,7 +147,7 @@ test('app builds, publishes, reconciles and meters converge however often they r
     await db.close();
   });
   await loadPlatformBaseline(db.platform);
-  for (const migration of ['0011_app_hostnames.sql', '0013_app_server_routes.sql'])
+  for (const migration of ['0011_app_hostnames.sql', '0013_app_server_routes.sql', '0014_app_usage_cursors.sql'])
     await db.platform.query(await readFile(new URL(`../../database/migrations/${migration}`, import.meta.url), 'utf8'));
   const workspace = await db.create();
   const schema = workspace.names.schema;
@@ -1161,5 +1161,97 @@ test('app builds, publishes, reconciles and meters converge however often they r
       ['2026-11-14T22:00:00.000Z', '3'],
       ['2026-11-14T23:00:00.000Z', '3'],
     ]);
+  });
+
+  await t.test(
+    'a workspace that only owes for a retired name is charged for an hour it missed in two failed runs',
+    async () => {
+      const calm = await openWorkspace();
+      const retiree = await openWorkspace();
+      const metered = meterAcross();
+      await serve(metered, calm, 'calm-docs');
+      await serve(metered, retiree, 'old-menu');
+      await db.platform.query(
+        `UPDATE app.app_hostnames SET state = 'retired', retired_at = clock_timestamp() WHERE name = 'old-menu'`,
+      );
+      const hourly = {
+        '2026-11-15T00:00:00.000Z': [
+          { name: 'calm-docs', requests: 1, bytes: 10, units: 1n },
+          { name: 'old-menu', requests: 4, bytes: 40, units: 4n },
+        ],
+        '2026-11-15T01:00:00.000Z': [{ name: 'calm-docs', requests: 2, bytes: 20, units: 2n }],
+      };
+      const usage = publisher.usage;
+      publisher.usage = async function* (window) {
+        yield* hourly[window.start] ?? [];
+      };
+      try {
+        retiree.down = true;
+        for (const now of ['2026-11-15T03:05:00.000Z', '2026-11-15T04:05:00.000Z'])
+          await assert.rejects(metered.meterAppTraffic(Date.parse(now), signal()), error => {
+            assert.deepEqual(
+              error.errors.map(failure => failure.message),
+              ['The workspace database is restarting'],
+            );
+            return true;
+          });
+        assert.deepEqual(await calm.charged(), [
+          ['2026-11-15T00:00:00.000Z', '1'],
+          ['2026-11-15T01:00:00.000Z', '2'],
+        ]);
+        assert.deepEqual(await retiree.charged(), []);
+
+        retiree.down = false;
+        const later = Date.parse('2026-11-15T05:05:00.000Z');
+        assert.equal(await metered.meterAppTraffic(later, signal()), undefined);
+        assert.equal(await metered.meterAppTraffic(later, signal()), undefined);
+        assert.deepEqual(await retiree.charged(), [['2026-11-15T00:00:00.000Z', '4']]);
+        assert.deepEqual(await calm.charged(), [
+          ['2026-11-15T00:00:00.000Z', '1'],
+          ['2026-11-15T01:00:00.000Z', '2'],
+        ]);
+      } finally {
+        publisher.usage = usage;
+      }
+    },
+  );
+
+  await t.test('reconcile retires the names of a deleted workspace and still repairs the others', async () => {
+    const open = await openWorkspace();
+    const deleted = await openWorkspace();
+    const reconciled = createAppActivities({
+      ...options(true),
+      transact: (workspaceId, action) =>
+        opened.has(workspaceId) ? opened.get(workspaceId).transact(action) : transact(action),
+      async *workspaces() {
+        yield* await namedWorkspaces(db.platform);
+      },
+    });
+    await serve(reconciled, open, 'open-cafe');
+    await serve(reconciled, deleted, 'shut-cafe');
+    await db.platform.query(
+      `UPDATE app.workspace_storage SET stage = 'unavailable', disabled_at = clock_timestamp(),
+         disabled_operation_id = gen_random_uuid() WHERE workspace_id = $1`,
+      [deleted.id],
+    );
+    const lost = publisher.routes.get('open-cafe');
+    publisher.routes.delete('open-cafe');
+
+    await reconciled.reconcileApps(signal());
+    await reconciled.reconcileApps(signal());
+
+    assert.deepEqual(publisher.routes.get('open-cafe'), lost);
+    assert.equal(publisher.routes.has('shut-cafe'), false);
+    assert.deepEqual(
+      (
+        await db.platform.query(
+          `SELECT name, state FROM app.app_hostnames WHERE name IN ('open-cafe', 'shut-cafe') ORDER BY name`,
+        )
+      ).rows,
+      [
+        { name: 'open-cafe', state: 'current' },
+        { name: 'shut-cafe', state: 'retired' },
+      ],
+    );
   });
 });
