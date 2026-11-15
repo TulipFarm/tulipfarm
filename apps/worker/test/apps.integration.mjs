@@ -898,7 +898,12 @@ test('app builds, publishes, reconciles and meters converge however often they r
         [[cron.id, draft.id]],
       );
       assert.deepEqual(
-        rows.map(row => [row.app_id === cron.id ? 'cron' : 'draft', row.window_start.toISOString(), row.units, row.compute_units]),
+        rows.map(row => [
+          row.app_id === cron.id ? 'cron' : 'draft',
+          row.window_start.toISOString(),
+          row.units,
+          row.compute_units,
+        ]),
         [
           ['cron', '2026-11-14T15:00:00.000Z', '37', '30'],
           ['cron', '2026-11-14T16:00:00.000Z', '37', '30'],

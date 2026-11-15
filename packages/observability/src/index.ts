@@ -1038,6 +1038,19 @@ export function recordAppBuild(failureCode: string | null) {
   trace.getActiveSpan()?.setAttributes({ outcome, ...(failureCode === null ? {} : { failure_code: code }) });
 }
 
+/**
+ * Counts an hour of app usage that could not be read: publisher traffic, which holds back that hour and later ones, or
+ * host compute, which a later run charges.
+ */
+export function recordAppUsageReadFailure(source: 'traffic' | 'compute') {
+  metrics
+    .getMeter(scope)
+    .createCounter('cloud_app_usage_read_failures', {
+      description: 'App usage hours that could not be read, by source',
+    })
+    .add(1, { ...dimensions, source });
+}
+
 export interface KnowledgeSyncSnapshot {
   failedItems: number;
   failedSources: number;
