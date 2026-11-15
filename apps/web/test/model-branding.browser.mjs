@@ -32,10 +32,10 @@ const catalog = {
   defaultChatFamilyId: 'acme-chat',
 };
 const expected = [
-  ['Acme Chat', 'neutral'],
-  ['Acme Claude EU', 'claude'],
-  ['Local Llama', 'neutral'],
-  ['Grok', 'grok'],
+  ['Acme Chat 1', 'neutral'],
+  ['Acme Claude 1 EU', 'claude'],
+  ['Local Llama 4', 'neutral'],
+  ['Grok 4.6', 'grok'],
 ];
 const agent = {
   id: agentId,
@@ -136,20 +136,20 @@ try {
     await routeApi(page, () => items);
 
     await page.goto(`${origin}/acme`);
-    await page.getByRole('combobox', { name: 'Model: Acme Chat', exact: true }).click();
+    await page.getByRole('combobox', { name: 'Model: Acme Chat 1', exact: true }).click();
     await page.getByRole('option').first().waitFor();
     assert.equal(await page.getByRole('option').count(), expected.length);
     for (const [name, brand] of expected)
       await logo(page.getByRole('option', { name: new RegExp(`^${name}\\b`) }), brand);
     await screenshot(page, 'composer-picker', theme);
     await page.keyboard.press('Escape');
-    await logo(page.getByRole('combobox', { name: 'Model: Acme Chat', exact: true }), 'neutral');
+    await logo(page.getByRole('combobox', { name: 'Model: Acme Chat 1', exact: true }), 'neutral');
 
     await page.goto(`${origin}/acme/agents/${agentId}`);
     await page.getByRole('tab', { name: 'Instructions', exact: true }).click();
     const preference = page.getByRole('combobox', { name: 'Preferred model family', exact: true });
     await logo(preference, 'neutral');
-    assert.match(await preference.innerText(), /Acme Chat/);
+    assert.match(await preference.innerText(), /Acme Chat 1/);
     await preference.evaluate(trigger => trigger.scrollIntoView({ block: 'start' }));
     await preference.click();
     for (const [name, brand] of expected)
@@ -167,7 +167,7 @@ try {
     items = catalogFixture([]);
     const setupGuide = 'https://tulipfarm.ai/docs/self-hosting/models/';
     await page.goto(`${origin}/acme`);
-    await page.getByRole('combobox', { name: 'Model: Acme Chat', exact: true }).waitFor();
+    await page.getByRole('combobox', { name: 'Model: Acme Chat 1', exact: true }).waitFor();
     await notifyChange(page, workspace.id, 'ada', 'catalog');
     await page
       .getByText('No models configured. An operator needs to set up a model provider.', { exact: true })

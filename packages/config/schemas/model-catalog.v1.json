@@ -79,7 +79,7 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 100,
-            "description": "Name people see in the model picker"
+            "description": "Name people see in the model picker, with its version, such as Claude Opus 5.5"
           },
           "vendor": {
             "type": "string",
@@ -461,7 +461,7 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 100,
-            "description": "Name people see in the catalog"
+            "description": "Name people see in the catalog, with its version, such as GPT Image 2.5"
           },
           "vendor": {
             "type": "string",

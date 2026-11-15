@@ -385,7 +385,7 @@ test('chat readiness and relevant GitHub approvals', async t => {
             assert.equal(await input.textContent(), 'My first business task');
             f.state.modelStatus = 200;
             await notifyChange(f.page, workspace.id, 'ada', 'catalog');
-            await f.page.getByRole('combobox', { name: 'Model: Claude Sonnet', exact: true }).waitFor();
+            await f.page.getByRole('combobox', { name: 'Model: Claude Sonnet 5', exact: true }).waitFor();
             await input.click();
             await f.page.keyboard.press('Enter');
             await f.page.waitForURL(/\/chat\/[\w-]+$/);
@@ -409,7 +409,7 @@ test('chat readiness and relevant GitHub approvals', async t => {
           try {
             f.state.createGate = Promise.withResolvers();
             await f.page.goto(`${origin}/${workspace.slug}`);
-            await f.page.getByRole('combobox', { name: 'Model: Claude Sonnet', exact: true }).waitFor();
+            await f.page.getByRole('combobox', { name: 'Model: Claude Sonnet 5', exact: true }).waitFor();
             const input = f.page.getByRole('textbox', { name: 'Message', exact: true });
             await input.click();
             await f.page.keyboard.type('Keep this pending');
@@ -459,7 +459,7 @@ test('chat readiness and relevant GitHub approvals', async t => {
         try {
           f.state.createStatus = 503;
           await f.page.goto(`${origin}/${workspace.slug}`);
-          await f.page.getByRole('combobox', { name: 'Model: Claude Sonnet', exact: true }).waitFor();
+          await f.page.getByRole('combobox', { name: 'Model: Claude Sonnet 5', exact: true }).waitFor();
           const input = f.page.getByRole('textbox', { name: 'Message', exact: true });
           await input.click();
           await f.page.keyboard.type('Retry this chat');
@@ -494,7 +494,7 @@ test('chat readiness and relevant GitHub approvals', async t => {
         const f = await fixture();
         try {
           await f.page.goto(`${origin}/${workspace.slug}`);
-          await f.page.getByRole('combobox', { name: 'Model: Claude Sonnet', exact: true }).waitFor();
+          await f.page.getByRole('combobox', { name: 'Model: Claude Sonnet 5', exact: true }).waitFor();
           const input = f.page.getByRole('textbox', { name: 'Message', exact: true });
           await input.click();
           await f.page.keyboard.type('Send me when online');
@@ -534,7 +534,7 @@ test('chat readiness and relevant GitHub approvals', async t => {
           try {
             await f.page.goto(`${origin}/${workspace.slug}/chat/${id}`);
             await f.page.getByText(message.parts[0].text, { exact: true }).waitFor();
-            await f.page.getByRole('combobox', { name: 'Model: Claude Sonnet', exact: true }).waitFor();
+            await f.page.getByRole('combobox', { name: 'Model: Claude Sonnet 5', exact: true }).waitFor();
             await delay(100);
             assert.equal(
               await f.page.getByText('GitHub approvals unavailable', { exact: true }).count(),

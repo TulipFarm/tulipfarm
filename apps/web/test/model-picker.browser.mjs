@@ -88,18 +88,18 @@ try {
       assert.equal(await page.getByRole('option').count(), 13);
       assert.equal(await page.getByRole('option', { name: /Gemini/ }).count(), 0);
       for (const [name, brand] of [
-        ['Claude Haiku', 'claude'],
-        ['GPT Astra', 'openai'],
-        ['DeepSeek Pro', 'deepseek'],
-        ['Grok', 'grok'],
-        ['Kimi', 'kimi'],
+        ['Claude Haiku 4.5', 'claude'],
+        ['GPT-6 Astra', 'openai'],
+        ['DeepSeek V4 Pro', 'deepseek'],
+        ['Grok 4.6', 'grok'],
+        ['Kimi K2.6', 'kimi'],
       ]) {
         const row = modelOption(page, name);
         assert.notEqual(await row.getAttribute('aria-disabled'), 'true');
         assert.equal(await row.locator(`[data-brand="${brand}"] svg`).count(), 1);
       }
       assert.equal(saves, 0, 'The automatic initial choice is not a user preference');
-      const deepseek = modelOption(page, 'DeepSeek Pro').locator('[data-brand="deepseek"] svg');
+      const deepseek = modelOption(page, 'DeepSeek V4 Pro').locator('[data-brand="deepseek"] svg');
       assert.equal(
         await deepseek.evaluate(
           glyph => glyph.querySelector('path') !== null && glyph.getBoundingClientRect().width > 0,
@@ -109,19 +109,19 @@ try {
       const search = page.getByRole('combobox', { name: 'Search models' });
       await search.fill('no-such-model');
       await page.getByText('No models found.', { exact: true }).waitFor();
-      await search.fill('Grok Fast');
+      await search.fill('Grok 4.3 Fast');
       await page.keyboard.press('ArrowDown');
       await page.keyboard.press('Enter');
-      await page.getByRole('combobox', { name: 'Model: Grok Fast', exact: true }).waitFor();
+      await page.getByRole('combobox', { name: 'Model: Grok 4.3 Fast', exact: true }).waitFor();
       await page.getByText('Saving your default model…', { exact: true }).waitFor();
-      assert.equal(await page.getByRole('combobox', { name: 'Model: Grok Fast', exact: true }).isDisabled(), true);
+      assert.equal(await page.getByRole('combobox', { name: 'Model: Grok 4.3 Fast', exact: true }).isDisabled(), true);
       await page.getByText('Saving your default model…', { exact: true }).waitFor({ state: 'hidden' });
       assert.equal(preferences.get('ada'), 'grok-fast');
       await page.reload();
-      await page.getByRole('combobox', { name: 'Model: Grok Fast', exact: true }).waitFor();
+      await page.getByRole('combobox', { name: 'Model: Grok 4.3 Fast', exact: true }).waitFor();
       assert.equal(await page.getByText(/Your last model is no longer available/).count(), 0);
       await page.goto(`${origin}/other`);
-      await page.getByRole('combobox', { name: 'Model: Grok Fast', exact: true }).waitFor();
+      await page.getByRole('combobox', { name: 'Model: Grok 4.3 Fast', exact: true }).waitFor();
       userId = 'grace';
       await page.reload();
       await page.getByRole('combobox', { name: defaultModelName, exact: true }).waitFor();
@@ -131,7 +131,7 @@ try {
       await page.reload();
       await page.getByRole('combobox', { name: defaultModelName, exact: true }).waitFor();
       await page
-        .getByText('Your last model is no longer available. New messages use Claude Sonnet.', { exact: true })
+        .getByText('Your last model is no longer available. New messages use Claude Sonnet 5.', { exact: true })
         .waitFor();
       await page.getByRole('button', { name: 'Dismiss', exact: true }).click();
       await page.getByText(/Your last model is no longer available/).waitFor({ state: 'hidden' });
@@ -140,9 +140,9 @@ try {
       assert.equal(await page.getByText(/Your last model is no longer available/).count(), 0);
       userId = 'ada';
       await page.goto(`${origin}/acme`);
-      await page.getByRole('combobox', { name: 'Model: Grok Fast', exact: true }).click();
+      await page.getByRole('combobox', { name: 'Model: Grok 4.3 Fast', exact: true }).click();
       saveStatus = 503;
-      await modelOption(page, 'Claude Haiku').click();
+      await modelOption(page, 'Claude Haiku 4.5').click();
       await page.getByRole('button', { name: 'Retry saving default', exact: true }).waitFor();
       assert.equal(preferences.get('ada'), 'grok-fast');
       saveStatus = 200;
@@ -150,7 +150,7 @@ try {
       await page.getByText('Saving your default model…', { exact: true }).waitFor({ state: 'hidden' });
       assert.equal(preferences.get('ada'), 'claude-haiku');
       await page.reload();
-      await page.getByRole('combobox', { name: 'Model: Claude Haiku', exact: true }).waitFor();
+      await page.getByRole('combobox', { name: 'Model: Claude Haiku 4.5', exact: true }).waitFor();
       const message = page.getByRole('textbox', { name: 'Message', exact: true });
       await message.fill('Keep this draft');
       status = 503;
@@ -178,13 +178,13 @@ try {
       );
       await notifyChange(page, workspace.id, userId, 'catalog');
       await page
-        .getByText('Claude Haiku is disabled in this workspace. Choose another model.', { exact: true })
+        .getByText('Claude Haiku 4.5 is disabled in this workspace. Choose another model.', { exact: true })
         .waitFor();
       assert.equal(preferences.get('ada'), 'claude-haiku');
       items = catalog.filter(family => family.id !== 'claude-haiku');
       await notifyChange(page, workspace.id, userId, 'catalog');
-      await page.getByRole('combobox', { name: 'Model: Claude Haiku', exact: true }).waitFor({ state: 'hidden' });
-      assert.equal(await page.getByText(/Claude Haiku/).count(), 0);
+      await page.getByRole('combobox', { name: 'Model: Claude Haiku 4.5', exact: true }).waitFor({ state: 'hidden' });
+      assert.equal(await page.getByText(/Claude Haiku 4.5/).count(), 0);
       assert.equal(preferences.get('ada'), 'claude-haiku');
       userId = 'new-user';
       items = [];

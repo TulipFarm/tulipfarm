@@ -100,7 +100,7 @@ try {
   });
   await page.goto(`${origin}/acme/chat/${chat.id}`);
   await page.getByRole('combobox', { name: /^Model:/ }).click();
-  await modelOption(page, 'DeepSeek Flash').click();
+  await modelOption(page, 'DeepSeek V4 Flash').click();
   await page.getByLabel('Message', { exact: true }).fill('Show my events for today.');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await page.getByRole('button', { name: 'Retry same operation' }).click();
@@ -112,7 +112,7 @@ try {
   assert.equal(await page.getByRole('alert').filter({ hasText: error }).count(), 1);
   await page.getByRole('combobox', { name: /^Model:/ }).click();
   // Chat composer model options show only the family label, without credit rates (cloud 9725b0ba features/chat/composer.tsx:296).
-  await modelOption(page, 'Kimi').click();
+  await modelOption(page, 'Kimi K2.6').click();
   await page.getByRole('button', { name: 'Retry reply', exact: true }).click();
   await page.getByRole('button', { name: 'Stop reply', exact: true }).waitFor();
   assert.equal(sends[0].model, 'deepseek-flash');

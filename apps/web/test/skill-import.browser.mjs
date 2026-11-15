@@ -269,7 +269,7 @@ test(
         'Opens a chat with Bud',
       );
       await page.getByRole('link', { name: 'New skill', exact: true }).click();
-      await page.getByRole('combobox', { name: /Model: Grok Fast/ }).waitFor();
+      await page.getByRole('combobox', { name: /Model: Grok 4.3 Fast/ }).waitFor();
       await page.getByText('Create a reusable skill · Version latest', { exact: true }).waitFor();
       const message = page.getByRole('textbox', { name: 'Message', exact: true });
       await message.fill('Create a weekly summary with completed work, open questions, and next actions.');
@@ -280,9 +280,9 @@ test(
       assert.equal(sends[0].model, 'grok-fast');
       assert.deepEqual(savedModels, [], 'Sending an applied workspace default must not save a preference');
       await page.goto(`${server.origin}/${fixture.workspace.slug}`);
-      await page.getByRole('combobox', { name: 'Model: DeepSeek Pro', exact: true }).waitFor();
-      await page.getByRole('combobox', { name: 'Model: DeepSeek Pro', exact: true }).click();
-      await page.getByRole('option', { name: /Grok Fast/ }).click();
+      await page.getByRole('combobox', { name: 'Model: DeepSeek V4 Pro', exact: true }).waitFor();
+      await page.getByRole('combobox', { name: 'Model: DeepSeek V4 Pro', exact: true }).click();
+      await page.getByRole('option', { name: /Grok 4.3 Fast/ }).click();
       await page.getByText('Saving your default model…', { exact: true }).waitFor({ state: 'hidden' });
       await message.fill('Summarize this week.');
       await message.press('Enter');
@@ -292,27 +292,27 @@ test(
       assert.equal(sends.at(-1).model, 'grok-fast');
       assert.deepEqual(savedModels, ['grok-fast']);
       await page.goto(`${server.origin}/${fixture.workspace.slug}`);
-      await page.getByRole('combobox', { name: 'Model: Grok Fast', exact: true }).waitFor();
+      await page.getByRole('combobox', { name: 'Model: Grok 4.3 Fast', exact: true }).waitFor();
       await page.getByRole('link', { name: 'Skills', exact: true }).click();
       await page.getByRole('link', { name: 'New skill', exact: true }).click();
-      await page.getByRole('combobox', { name: /Model: Grok Fast/ }).click();
-      await page.getByRole('option', { name: /Kimi/ }).click();
-      await page.getByRole('combobox', { name: /Model: Kimi/ }).waitFor();
+      await page.getByRole('combobox', { name: /Model: Grok 4.3 Fast/ }).click();
+      await page.getByRole('option', { name: /Kimi K2.6/ }).click();
+      await page.getByRole('combobox', { name: /Model: Kimi K2.6/ }).waitFor();
       assert.deepEqual(savedModels, ['grok-fast', 'kimi']);
       await notifyChange(page, fixture.workspace.id, fixture.session.user.id, 'catalog');
-      await page.getByRole('combobox', { name: /Model: Kimi/ }).waitFor();
+      await page.getByRole('combobox', { name: /Model: Kimi K2.6/ }).waitFor();
       await page.goto(`${server.origin}/${fixture.workspace.slug}`);
-      await page.getByRole('combobox', { name: 'Model: Kimi', exact: true }).waitFor();
+      await page.getByRole('combobox', { name: 'Model: Kimi K2.6', exact: true }).waitFor();
       await page.getByRole('link', { name: 'Skills', exact: true }).click();
       await page.getByRole('link', { name: 'New skill', exact: true }).click();
-      await page.getByRole('combobox', { name: 'Model: Grok Fast', exact: true }).click();
-      await page.getByRole('option', { name: /Kimi/ }).click();
-      await page.getByRole('combobox', { name: 'Model: Kimi', exact: true }).waitFor();
+      await page.getByRole('combobox', { name: 'Model: Grok 4.3 Fast', exact: true }).click();
+      await page.getByRole('option', { name: /Kimi K2.6/ }).click();
+      await page.getByRole('combobox', { name: 'Model: Kimi K2.6', exact: true }).waitFor();
       catalog.families = catalog.families.map(family =>
         family.id === 'kimi' ? { ...family, available: false, unavailableReason: 'model-family-unavailable' } : family,
       );
       await notifyChange(page, fixture.workspace.id, fixture.session.user.id, 'catalog');
-      await page.getByRole('combobox', { name: /Model: Grok Fast/ }).waitFor();
+      await page.getByRole('combobox', { name: /Model: Grok 4.3 Fast/ }).waitFor();
       await page.screenshot({ path: '/tmp/skill-create-model.png', fullPage: true });
       assert.equal(
         fixture.requests.some(request => request.path.includes('/skills/workspace-skill-authoring')),

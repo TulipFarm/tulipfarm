@@ -8,7 +8,7 @@
   "models": [
     {
       "id": "grok",
-      "name": "Grok",
+      "name": "Grok 4.6",
       "vendor": "xai",
       "routes": [
         { "provider": "foundry", "model": "grok-4.6" },
@@ -24,7 +24,7 @@
     },
     {
       "id": "claude-haiku",
-      "name": "Claude Haiku",
+      "name": "Claude Haiku 4.5",
       "vendor": "anthropic",
       "routes": [{ "provider": "anthropic", "model": "claude-haiku-4-5" }],
       "selectable": false,
@@ -39,7 +39,7 @@
     },
     {
       "id": "gpt-sol",
-      "name": "GPT Sol",
+      "name": "GPT-6 Sol",
       "vendor": "openai",
       "routes": [{ "provider": "foundry", "model": "gpt-6-sol" }],
       "paused": true,
@@ -55,7 +55,7 @@
     },
     {
       "id": "local-llama",
-      "name": "Local Llama",
+      "name": "Llama 4 70B",
       "vendor": "meta",
       "routes": [{ "provider": "gateway", "model": "llama-4-70b" }],
       "limits": { "maxInputTokens": 128000, "maxOutputTokens": 8192 },

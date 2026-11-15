@@ -139,7 +139,11 @@ const modelSchema = z
     id: modelFamilyIdSchema.describe(
       'Stable ID chats, agents and settings store. Keep it when the underlying model version changes.',
     ),
-    name: z.string().min(1).max(100).describe('Name people see in the model picker'),
+    name: z
+      .string()
+      .min(1)
+      .max(100)
+      .describe('Name people see in the model picker, with its version, such as Claude Opus 5.5'),
     vendor: modelIdentifierSchema.describe('Who makes the model, for branding, such as anthropic or openai'),
     routes: z
       .array(routeSchema)
@@ -246,7 +250,11 @@ const aspectPrices = z.strictObject({ square: usd, portrait: usd, landscape: usd
 const imageModelSchema = z
   .strictObject({
     id: modelFamilyIdSchema.describe('Stable ID settings and generated-image receipts store'),
-    name: z.string().min(1).max(100).describe('Name people see in the catalog'),
+    name: z
+      .string()
+      .min(1)
+      .max(100)
+      .describe('Name people see in the catalog, with its version, such as GPT Image 2.5'),
     vendor: modelIdentifierSchema.describe('Who makes the model, for branding'),
     routes: z
       .array(

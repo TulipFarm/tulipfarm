@@ -8,6 +8,8 @@ import {
   AlertDialogAction,
   AlertDialogCancel,
 } from '@tulipfarm/sprout/alert-dialog';
+import { modelName } from '@/features/models/model-name';
+import { useModelCatalog } from '@/features/models/use-model-catalog';
 import { ScopeSummary } from './reference-names';
 import { toolLabels } from './labels';
 import type { AgentDetail } from './api';
@@ -29,6 +31,8 @@ export function RevisionReview({
   saved: boolean;
 }) {
   const title = useRef<HTMLHeadingElement>(null);
+  const catalog = useModelCatalog(workspaceId).state;
+  const familyName = (id: string) => modelName(catalog.kind === 'ready' ? catalog.data.families : undefined, id);
   return (
     <AlertDialog open={definition !== null} onOpenChange={open => !open && close()}>
       <AlertDialogContent
@@ -67,7 +71,10 @@ export function RevisionReview({
                 </ul>
               </div>
             )}
-            <p>Model preference: {definition.modelFamilyId ?? 'No saved preference'}</p>
+            <p>
+              Model preference:{' '}
+              {definition.modelFamilyId ? familyName(definition.modelFamilyId) : 'No saved preference'}
+            </p>
             <p>
               Slack trigger: {definition.responseRule === 'every-message' ? 'Every channel message' : 'When tagged'}
             </p>
