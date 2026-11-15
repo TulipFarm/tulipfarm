@@ -231,7 +231,7 @@ the main action within a region.
 
 The owner confirmed this description and the name "Action green" on
 29 September 2026, and the Linear-style depth hierarchy on 23 October 2026. This
-snapshot was refreshed from code on 25 October 2026 and checked against Sprout 0.15.4 on 6 November 2026. Every color, the font, the type scale,
+snapshot was refreshed from code on 25 October 2026 and checked against Sprout 0.17.3 on 15 November 2026. Every color, the font, the type scale,
 motion and shadows come from Sprout's `tulipfarm` theme
 (`@tulipfarm/sprout/themes/tulipfarm.css`), which is the source of truth shared
 with tulipfarm.ai. [`src/index.css`](src/index.css) only maps app token names
@@ -397,11 +397,15 @@ select and combobox options, and menu items expand to at least 44px on coarse
 pointers, where input text also becomes 16px. A `ChoiceGroup` option row is one
 click target for its checkbox or radio.
 
-The workspace shell has a 244px sidebar and one inset content panel. At desktop
+The workspace shell has a 280px (`--sprout-sidebar-width`) sidebar and one inset content panel. At desktop
 widths, the panel has 8px top, right, and bottom margins, 12px corners, and a 1px
 border. Both headers are 44px tall. The sidebar can collapse to a 48px icon rail.
 Below 768px, content fills the screen and the sidebar opens as a 288px-wide sheet.
 Use the shared sidebar's responsive behavior.
+
+Sidebar groups and menu rows use 14px text, with 34px minimum-height menu rows,
+2px menu gaps, and no header or footer divider. The jump-to search palette
+matches the sidebar's 34px rows, 14px text, and 18px icons.
 
 The inset panel is the only `main` landmark; pages scroll inside a plain container.
 `PageContent` (`@tulipfarm/sprout/page-content`) fills the panel width with no
