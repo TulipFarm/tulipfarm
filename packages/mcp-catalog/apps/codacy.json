@@ -1,0 +1,39 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "codacy",
+  "name": "Codacy",
+  "maker": "Codacy",
+  "homepage": "https://www.codacy.com",
+  "category": "code",
+  "teams": ["engineering"],
+  "summary": "Check code quality and security issues in Codacy",
+  "capabilities": [
+    "List repository issues and security findings",
+    "Check coverage and pull request analysis",
+    "Run local code analysis"
+  ],
+  "official": {
+    "evidence": "https://docs.codacy.com/codacy-guardrails/codacy-guardrails-getting-started/",
+    "repository": "https://github.com/codacy/codacy-mcp-server"
+  },
+  "docs": "https://github.com/codacy/codacy-mcp-server",
+  "packages": [
+    {
+      "registry": "npm",
+      "name": "@codacy/codacy-mcp",
+      "env": [
+        {
+          "name": "CODACY_ACCOUNT_TOKEN",
+          "description": "Codacy account API token",
+          "secret": true,
+          "required": true
+        }
+      ]
+    }
+  ],
+  "icons": {
+    "simpleIcons": "codacy",
+    "color": "#222F29"
+  },
+  "supportedBy": ["lindy", "relevance-ai", "github-registry"]
+}

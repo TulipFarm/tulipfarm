@@ -1,0 +1,30 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "brevo",
+  "name": "Brevo",
+  "maker": "Brevo",
+  "homepage": "https://www.brevo.com",
+  "category": "marketing",
+  "teams": ["marketing"],
+  "summary": "Manage contacts and email campaigns in Brevo",
+  "capabilities": [
+    "Manage contacts and lists",
+    "Create and send email campaigns",
+    "Read campaign and transactional statistics"
+  ],
+  "official": {
+    "evidence": "https://developers.brevo.com/docs/mcp-protocol"
+  },
+  "docs": "https://developers.brevo.com/docs/mcp-protocol",
+  "remote": {
+    "url": "https://mcp.brevo.com/v1/brevo/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "simpleIcons": "brevo",
+    "color": "#0B996E"
+  },
+  "supportedBy": ["claude", "lindy", "gumloop", "relevance-ai", "zapier", "make", "n8n"]
+}

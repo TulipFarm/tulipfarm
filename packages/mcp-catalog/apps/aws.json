@@ -1,0 +1,52 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "aws",
+  "name": "AWS",
+  "maker": "Amazon Web Services",
+  "homepage": "https://aws.amazon.com",
+  "category": "cloud-and-infrastructure",
+  "teams": ["engineering"],
+  "summary": "Manage AWS resources and search AWS docs",
+  "capabilities": [
+    "Run AWS API calls to inspect and change resources",
+    "Search and read AWS documentation",
+    "Get guidance on AWS services and best practices"
+  ],
+  "official": {
+    "evidence": "https://docs.aws.amazon.com/agent-toolkit/latest/userguide/what-is-agent-toolkit.html",
+    "repository": "https://github.com/awslabs/mcp"
+  },
+  "docs": "https://awslabs.github.io/mcp/",
+  "remote": {
+    "url": "https://knowledge-mcp.global.api.aws",
+    "transport": "streamable-http",
+    "auth": "none",
+    "checked": "2026-11-14"
+  },
+  "packages": [
+    {
+      "registry": "pypi",
+      "name": "awslabs.aws-api-mcp-server",
+      "env": [
+        {
+          "name": "AWS_REGION",
+          "description": "Default AWS region",
+          "secret": false,
+          "required": true
+        },
+        {
+          "name": "AWS_PROFILE",
+          "description": "AWS credentials profile",
+          "secret": false,
+          "required": false
+        }
+      ]
+    }
+  ],
+  "icons": {
+    "lobehub": "Aws",
+    "color": "#FF9900"
+  },
+  "supportedBy": ["claude", "lindy", "relevance-ai", "docker"],
+  "featured": true
+}

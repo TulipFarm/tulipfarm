@@ -1,0 +1,24 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "synthesia",
+  "name": "Synthesia",
+  "maker": "Synthesia",
+  "homepage": "https://www.synthesia.io",
+  "category": "ai-and-media",
+  "teams": ["marketing", "hr"],
+  "summary": "Create AI avatar videos with Synthesia",
+  "capabilities": ["Create videos from scripts and templates", "List avatars and templates", "Check video status"],
+  "official": {
+    "evidence": "https://developers.synthesia.io/docs/synthesia-mcp"
+  },
+  "docs": "https://developers.synthesia.io/docs/synthesia-mcp",
+  "remote": {
+    "url": "https://mcp.synthesia.io/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#3B3BFF"
+  }
+}

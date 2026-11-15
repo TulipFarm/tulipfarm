@@ -1,0 +1,29 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "clay",
+  "name": "Clay",
+  "maker": "Clay",
+  "homepage": "https://www.clay.com",
+  "category": "crm-and-sales",
+  "teams": ["sales", "marketing"],
+  "summary": "Find and enrich companies and people with Clay",
+  "capabilities": [
+    "Search companies and people",
+    "Enrich records with Clay data providers",
+    "Work with Clay tables and results"
+  ],
+  "official": {
+    "evidence": "https://university.clay.com/docs/connect-to-clay-mcp"
+  },
+  "docs": "https://university.clay.com/docs/connect-to-clay-mcp",
+  "remote": {
+    "url": "https://api.clay.com/v3/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#000000"
+  },
+  "supportedBy": ["chatgpt", "claude", "manus", "gumloop", "glean"]
+}

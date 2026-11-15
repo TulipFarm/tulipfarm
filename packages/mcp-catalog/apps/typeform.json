@@ -1,0 +1,27 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "typeform",
+  "name": "Typeform",
+  "maker": "Typeform",
+  "homepage": "https://www.typeform.com",
+  "category": "marketing",
+  "teams": ["marketing", "product"],
+  "summary": "Create forms and read responses in Typeform",
+  "capabilities": ["Create and update forms", "Read and analyse responses", "List workspaces and forms"],
+  "official": {
+    "evidence": "https://www.typeform.com/developers/mcp/"
+  },
+  "docs": "https://www.typeform.com/developers/mcp/",
+  "remote": {
+    "url": "https://api.typeform.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "com.typeform/typeform",
+  "icons": {
+    "simpleIcons": "typeform",
+    "color": "#262627"
+  },
+  "supportedBy": ["manus", "lindy", "gumloop", "relevance-ai", "glean", "zapier", "make"]
+}

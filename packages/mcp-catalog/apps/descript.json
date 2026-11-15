@@ -1,0 +1,29 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "descript",
+  "name": "Descript",
+  "maker": "Descript",
+  "homepage": "https://www.descript.com",
+  "category": "ai-and-media",
+  "teams": ["marketing"],
+  "summary": "Edit video and audio projects in Descript",
+  "capabilities": [
+    "Import media and create projects",
+    "Edit with AI actions such as removing filler words",
+    "Export and publish videos"
+  ],
+  "official": {
+    "evidence": "https://help.descript.com/api-and-mcp/mcp-custom"
+  },
+  "docs": "https://help.descript.com/api-and-mcp/mcp-custom",
+  "remote": {
+    "url": "https://api.descript.com/v2/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#00C67D"
+  },
+  "supportedBy": ["chatgpt", "claude", "manus", "lindy", "gumloop"]
+}

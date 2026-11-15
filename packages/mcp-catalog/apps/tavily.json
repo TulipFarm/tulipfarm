@@ -1,0 +1,56 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "tavily",
+  "name": "Tavily",
+  "maker": "Tavily",
+  "homepage": "https://tavily.com",
+  "category": "search-and-research",
+  "teams": ["everyone"],
+  "summary": "Search, extract, and crawl the web with Tavily",
+  "capabilities": ["Search the web for current results", "Extract content from web pages", "Crawl and map websites"],
+  "official": {
+    "evidence": "https://github.com/tavily-ai/tavily-mcp",
+    "repository": "https://github.com/tavily-ai/tavily-mcp"
+  },
+  "docs": "https://docs.tavily.com/documentation/mcp",
+  "remote": {
+    "url": "https://mcp.tavily.com/mcp/",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "packages": [
+    {
+      "registry": "npm",
+      "name": "tavily-mcp",
+      "env": [
+        {
+          "name": "TAVILY_API_KEY",
+          "description": "Tavily API key",
+          "secret": true,
+          "required": true
+        }
+      ]
+    }
+  ],
+  "registryName": "io.github.tavily-ai/tavily-mcp",
+  "icons": {
+    "lobehub": "Tavily",
+    "color": "#468BFF"
+  },
+  "supportedBy": [
+    "chatgpt",
+    "claude",
+    "microsoft-copilot",
+    "copilot-studio",
+    "manus",
+    "lindy",
+    "gumloop",
+    "relevance-ai",
+    "glean",
+    "make",
+    "docker",
+    "github-registry"
+  ],
+  "featured": true
+}

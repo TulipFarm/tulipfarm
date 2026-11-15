@@ -1,0 +1,31 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "explorium",
+  "name": "Explorium",
+  "maker": "Explorium",
+  "homepage": "https://www.explorium.ai",
+  "category": "crm-and-sales",
+  "teams": ["sales", "marketing"],
+  "summary": "Find and enrich businesses and prospects",
+  "capabilities": [
+    "Search businesses and prospects by firmographics",
+    "Enrich companies and contacts",
+    "Find business events and intent signals"
+  ],
+  "official": {
+    "evidence": "https://developers.explorium.ai/reference/agentsource-mcp",
+    "repository": "https://github.com/explorium-ai/mcp-explorium"
+  },
+  "docs": "https://www.explorium.ai/mcp/",
+  "remote": {
+    "url": "https://mcp.explorium.ai/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "ai.explorium/mcp-explorium",
+  "icons": {
+    "color": "#6C3BF5"
+  },
+  "supportedBy": ["manus", "lindy", "relevance-ai", "docker", "github-registry"]
+}

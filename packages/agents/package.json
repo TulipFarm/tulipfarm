@@ -263,6 +263,10 @@
       "types": "./dist/inference.d.ts",
       "default": "./dist/inference.js"
     },
+    "./plan-sessions": {
+      "types": "./dist/plan-sessions.d.ts",
+      "default": "./dist/plan-sessions.js"
+    },
     "./agent-trigger-workflows": {
       "types": "./dist/agent-trigger-workflows.d.ts",
       "default": "./dist/agent-trigger-workflows.js"
@@ -306,6 +310,26 @@
     "./chat-execution": {
       "types": "./dist/chat-execution.d.ts",
       "default": "./dist/chat-execution.js"
+    },
+    "./app-tools": {
+      "types": "./dist/app-tools.d.ts",
+      "default": "./dist/app-tools.js"
+    },
+    "./app-page-tools": {
+      "types": "./dist/app-page-tools.d.ts",
+      "default": "./dist/app-page-tools.js"
+    },
+    "./coding-runs": {
+      "types": "./dist/coding-runs.d.ts",
+      "default": "./dist/coding-runs.js"
+    },
+    "./coding-run-contracts": {
+      "types": "./dist/coding-run-contracts.d.ts",
+      "default": "./dist/coding-run-contracts.js"
+    },
+    "./coding-run-store": {
+      "types": "./dist/coding-run-store.d.ts",
+      "default": "./dist/coding-run-store.js"
     }
   },
   "scripts": {
@@ -318,9 +342,13 @@
     "test:integrations": "node --test test/integrations.integration.mjs"
   },
   "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "0.3.322",
+    "@github/copilot-sdk": "1.0.31",
+    "@modelcontextprotocol/sdk": "1.32.0",
     "@temporalio/workflow": "1.24.0",
     "@tulipfarm/access": "workspace:*",
     "@tulipfarm/api-calls": "workspace:*",
+    "@tulipfarm/apps": "workspace:*",
     "@tulipfarm/atlassian": "workspace:*",
     "@tulipfarm/config": "workspace:*",
     "@tulipfarm/conversations": "workspace:*",

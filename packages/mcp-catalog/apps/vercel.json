@@ -1,0 +1,29 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "vercel",
+  "name": "Vercel",
+  "maker": "Vercel",
+  "homepage": "https://vercel.com",
+  "category": "cloud-and-infrastructure",
+  "teams": ["engineering"],
+  "summary": "Manage Vercel projects and deployments",
+  "capabilities": ["List projects and deployments", "Read build and runtime logs", "Search Vercel documentation"],
+  "official": {
+    "evidence": "https://vercel.com/docs/agent-resources/vercel-mcp"
+  },
+  "docs": "https://vercel.com/docs/agent-resources/vercel-mcp",
+  "remote": {
+    "url": "https://mcp.vercel.com",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "com.vercel/vercel-mcp",
+  "icons": {
+    "lobehub": "Vercel",
+    "simpleIcons": "vercel",
+    "color": "#000000"
+  },
+  "supportedBy": ["chatgpt", "claude", "manus", "lindy", "relevance-ai", "glean", "github-registry"],
+  "featured": true
+}

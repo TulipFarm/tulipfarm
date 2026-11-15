@@ -1,0 +1,30 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "cdata-connect-ai",
+  "name": "CData Connect AI",
+  "maker": "CData",
+  "homepage": "https://www.cdata.com/ai/",
+  "category": "data-and-databases",
+  "teams": ["engineering", "operations"],
+  "summary": "Query hundreds of business data sources with SQL",
+  "capabilities": [
+    "List connected sources, tables, and columns",
+    "Run SQL across connected apps and databases",
+    "Search data source context"
+  ],
+  "official": {
+    "evidence": "https://cloud.cdata.com/docs/MCP.html"
+  },
+  "docs": "https://cloud.cdata.com/docs/MCP.html",
+  "remote": {
+    "url": "https://mcp.cloud.cdata.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "com.cdata/cdata-connect-ai",
+  "icons": {
+    "color": "#1D7AFF"
+  },
+  "supportedBy": ["chatgpt", "claude", "copilot-studio", "gumloop", "glean", "docker"]
+}

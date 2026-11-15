@@ -1,0 +1,29 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "teamtailor",
+  "name": "Teamtailor",
+  "maker": "Teamtailor",
+  "homepage": "https://www.teamtailor.com",
+  "category": "hr-and-recruiting",
+  "teams": ["hr"],
+  "summary": "Manage jobs, candidates, and recruitment tasks",
+  "capabilities": [
+    "Search jobs and candidates",
+    "Review applications and pipeline stages",
+    "Complete recruitment tasks in plain language"
+  ],
+  "official": {
+    "evidence": "https://support.teamtailor.com/en/articles/15842409-connect-an-ai-assistant-to-teamtailor-using-mcp"
+  },
+  "docs": "https://support.teamtailor.com/en/articles/15842409-connect-an-ai-assistant-to-teamtailor-using-mcp",
+  "remote": {
+    "url": "https://mcp.teamtailor.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#F7346C"
+  },
+  "supportedBy": ["chatgpt", "claude", "microsoft-copilot"]
+}

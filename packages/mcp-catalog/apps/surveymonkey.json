@@ -1,0 +1,26 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "surveymonkey",
+  "name": "SurveyMonkey",
+  "maker": "SurveyMonkey",
+  "homepage": "https://www.surveymonkey.com",
+  "category": "marketing",
+  "teams": ["marketing", "product", "hr"],
+  "summary": "Create surveys and analyse responses in SurveyMonkey",
+  "capabilities": ["Create and edit surveys", "Read and summarise responses", "Review survey results"],
+  "official": {
+    "evidence": "https://help.surveymonkey.com/en/surveymonkey/integrations/llm-connectors/"
+  },
+  "docs": "https://help.surveymonkey.com/en/surveymonkey/integrations/llm-connectors/",
+  "remote": {
+    "url": "https://mcp.surveymonkey.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "simpleIcons": "surveymonkey",
+    "color": "#00BF6F"
+  },
+  "supportedBy": ["chatgpt", "claude", "microsoft-copilot", "lindy", "relevance-ai", "zapier"]
+}

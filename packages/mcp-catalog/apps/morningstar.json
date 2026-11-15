@@ -1,0 +1,29 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "morningstar",
+  "name": "Morningstar",
+  "maker": "Morningstar",
+  "homepage": "https://www.morningstar.com",
+  "category": "search-and-research",
+  "teams": ["finance"],
+  "summary": "Get Morningstar fund, stock, and market data",
+  "capabilities": [
+    "Look up fund and stock ratings and data",
+    "Read Morningstar research and analyst views",
+    "Compare securities and portfolios"
+  ],
+  "official": {
+    "evidence": "https://developer.morningstar.com/content/documentation/morningstar-ai-integrations/morningstar-mcp-server/overview/morningstar-mcp-server.md"
+  },
+  "docs": "https://developer.morningstar.com/content/documentation/morningstar-ai-integrations/morningstar-mcp-server/overview/morningstar-mcp-server.md",
+  "remote": {
+    "url": "https://mcp.morningstar.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#E5001C"
+  },
+  "supportedBy": ["chatgpt", "claude", "microsoft-copilot", "copilot-studio", "manus", "gumloop", "glean", "docker"]
+}

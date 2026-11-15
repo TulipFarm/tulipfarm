@@ -1,0 +1,26 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "craft",
+  "name": "Craft",
+  "maker": "Craft Docs",
+  "homepage": "https://www.craft.do",
+  "category": "docs-and-files",
+  "teams": ["everyone"],
+  "summary": "Access and edit your Craft documents",
+  "capabilities": ["Search and read documents", "Create and edit documents and blocks", "Manage tasks and daily notes"],
+  "official": {
+    "evidence": "https://www.craft.do/imagine/guide/mcp/mcp"
+  },
+  "docs": "https://www.craft.do/imagine/guide/mcp/mcp",
+  "remote": {
+    "url": "https://mcp.craft.do/my/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "do.craft.mcp/server",
+  "icons": {
+    "color": "#000000"
+  },
+  "supportedBy": ["claude", "manus", "gumloop"]
+}

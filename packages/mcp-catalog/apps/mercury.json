@@ -1,0 +1,37 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "mercury",
+  "name": "Mercury",
+  "maker": "Mercury",
+  "homepage": "https://mercury.com",
+  "category": "finance-and-accounting",
+  "teams": ["finance"],
+  "summary": "View bank balances, transactions, and statements",
+  "capabilities": ["Check account balances", "Search and categorise transactions", "Read statements and recipients"],
+  "official": {
+    "evidence": "https://docs.mercury.com/docs/connecting-mercury-mcp"
+  },
+  "docs": "https://docs.mercury.com/docs/connecting-mercury-mcp",
+  "remote": {
+    "url": "https://mcp.mercury.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#5266EB"
+  },
+  "supportedBy": [
+    "chatgpt",
+    "claude",
+    "gemini",
+    "microsoft-copilot",
+    "notion-ai",
+    "manus",
+    "perplexity",
+    "lindy",
+    "gumloop",
+    "relevance-ai",
+    "glean"
+  ]
+}

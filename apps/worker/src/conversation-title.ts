@@ -1,6 +1,13 @@
 import { inferChatTitle, inferenceRouteSchema, type ToolModelMeter } from '@tulipfarm/agents/inference';
 import { pausedFamilyReplacement } from '@tulipfarm/agents/model-policy';
-import { calculateUsageCost, estimateInputTokens, reserveModelCost, usageTokenCounts } from '@tulipfarm/config';
+import {
+  calculateUsageCost,
+  estimateInputTokens,
+  isPlanProvider,
+  loadModelCatalog,
+  reserveModelCost,
+  usageTokenCounts,
+} from '@tulipfarm/config';
 import type { ConversationRuntime } from '@tulipfarm/conversations/runtime';
 import { conversationTitleWorkSchema, createConversationTitles } from '@tulipfarm/conversations/titles';
 import { recordUsage } from '@tulipfarm/extensions';
@@ -93,6 +100,13 @@ async function chatModel(
     : null;
   const model = resolve(replacement ?? family);
   if (!model) throw new Error('conversation-model-unavailable');
+  // Titles run after the reply without the member's plan credentials, so a plan chat is titled by the workspace's
+  // default model.
+  if (isPlanProvider(model.route.provider)) {
+    const fallback = resolve(loadModelCatalog().defaultModel.id);
+    if (!fallback) throw new Error('conversation-model-unavailable');
+    return fallback;
+  }
   return model;
 }
 

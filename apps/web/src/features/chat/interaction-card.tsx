@@ -112,7 +112,7 @@ export function InteractionCard({
         description="This request is missing or your current access does not allow it. Its details have been cleared."
       />
     );
-  const stalled = pending && (read.delayed || (read.state.kind === 'ready' && !!read.state.error));
+  const stalled = pending && read.state.kind === 'ready' && !!read.state.error;
   const metadata = read.state.kind === 'ready' && ((kind === 'approval' && pending) || stalled) && (
     <div
       data-slot="request-status"
@@ -137,7 +137,7 @@ export function InteractionCard({
       {stalled && (
         <>
           <span role="status" className="min-w-0 flex-1">
-            {read.state.error ? 'Could not check this request' : 'Automatic status checks paused'}
+            Could not check this request
           </span>
           <Button
             size="sm"

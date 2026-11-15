@@ -1,0 +1,30 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "wolfram",
+  "name": "Wolfram",
+  "maker": "Wolfram Research",
+  "homepage": "https://www.wolfram.com",
+  "category": "search-and-research",
+  "teams": ["engineering", "everyone"],
+  "summary": "Compute answers with Wolfram Language and Alpha",
+  "capabilities": [
+    "Ask Wolfram|Alpha factual and math questions",
+    "Run Wolfram Language code",
+    "Look up curated data and units"
+  ],
+  "official": {
+    "evidence": "https://www.wolfram.com/ai/mcp/"
+  },
+  "docs": "https://www.wolfram.com/ai/mcp/cloud/",
+  "remote": {
+    "url": "https://agenttools.wolfram.com/mcp",
+    "transport": "streamable-http",
+    "auth": "none",
+    "checked": "2026-11-14"
+  },
+  "registryName": "com.wolfram/mcp",
+  "icons": {
+    "color": "#DD1100"
+  },
+  "supportedBy": ["chatgpt", "claude", "microsoft-copilot", "manus", "lindy", "relevance-ai"]
+}

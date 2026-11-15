@@ -1,0 +1,29 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "gitguardian",
+  "name": "GitGuardian",
+  "maker": "GitGuardian",
+  "homepage": "https://www.gitguardian.com",
+  "category": "security",
+  "teams": ["engineering"],
+  "summary": "Find and fix leaked secrets with GitGuardian",
+  "capabilities": [
+    "Scan code for hardcoded secrets",
+    "List and triage secret incidents",
+    "Help remediate leaked secrets"
+  ],
+  "official": {
+    "evidence": "https://github.com/GitGuardian/ggmcp",
+    "repository": "https://github.com/GitGuardian/ggmcp"
+  },
+  "docs": "https://github.com/GitGuardian/ggmcp",
+  "remote": {
+    "url": "https://mcp.gitguardian.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#1B2D4B"
+  }
+}

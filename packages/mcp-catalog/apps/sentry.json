@@ -1,0 +1,59 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "sentry",
+  "name": "Sentry",
+  "maker": "Sentry",
+  "homepage": "https://sentry.io",
+  "category": "monitoring-and-analytics",
+  "teams": ["engineering"],
+  "summary": "Find and investigate errors in Sentry",
+  "capabilities": [
+    "Search issues and errors across projects",
+    "Read stack traces and event details",
+    "Get suggested fixes for issues",
+    "Update issue status and assignees"
+  ],
+  "official": {
+    "evidence": "https://docs.sentry.io/product/sentry-mcp/",
+    "repository": "https://github.com/getsentry/sentry-mcp"
+  },
+  "docs": "https://docs.sentry.io/product/sentry-mcp/",
+  "remote": {
+    "url": "https://mcp.sentry.dev/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "packages": [
+    {
+      "registry": "npm",
+      "name": "@sentry/mcp-server",
+      "env": [
+        {
+          "name": "SENTRY_ACCESS_TOKEN",
+          "description": "Sentry user auth token",
+          "secret": true,
+          "required": true
+        }
+      ]
+    }
+  ],
+  "registryName": "io.github.getsentry/sentry-mcp",
+  "icons": {
+    "simpleIcons": "sentry",
+    "color": "#362D59"
+  },
+  "supportedBy": [
+    "claude",
+    "copilot-studio",
+    "notion-ai",
+    "manus",
+    "lindy",
+    "gumloop",
+    "relevance-ai",
+    "glean",
+    "docker",
+    "github-registry"
+  ],
+  "featured": true
+}

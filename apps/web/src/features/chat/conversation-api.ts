@@ -12,6 +12,7 @@ import { rowChangeSchema, rowViewSchema } from '@tulipfarm/conversations/row-vie
 import { calendarHistoryResultSchema } from '@tulipfarm/google-workspace/calendar-events';
 import { draftViewSchema, draftOutcomeSchema, type draftDecisionSchema } from '@tulipfarm/agents/draft-contracts';
 import { chatDocumentSchema } from '@tulipfarm/conversations/rich-content';
+import { layoutActionResultSchema, type LayoutActionRequest } from '@tulipfarm/conversations/layout-contracts';
 import {
   compactCommandPartSchema,
   compactionDetailSchema,
@@ -78,6 +79,16 @@ const partSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('text'), text: z.string(), content: chatDocumentSchema.optional() }),
   // Checked when drawn, so one bad layout falls back to its text instead of failing the history.
   z.object({ kind: z.literal('layout'), text: z.string(), layout: z.unknown() }),
+  z.object({
+    kind: z.literal('layout-action'),
+    action: z.object({
+      messageId: z.uuid(),
+      name: z.string(),
+      sourceComponentId: z.string(),
+      context: z.record(z.string(), z.unknown()).default({}),
+      labels: z.record(z.string(), z.string()).optional(),
+    }),
+  }),
   z.object({ kind: z.literal('attachment'), attachmentId: z.uuid() }),
   z.object({ kind: z.literal('file'), fileId: z.uuid() }),
   z.object({ kind: z.literal('google-file'), fileId: z.string(), name: z.string(), mimeType: z.string() }),
@@ -108,6 +119,20 @@ const integrationCardSchema = z.discriminatedUnion('action', [
     name: z.string(),
     endpoint: z.string(),
     authentication: z.enum(['oauth', 'secrets', 'none']),
+  }),
+  z.object({
+    action: z.literal('mcp-package'),
+    name: z.string(),
+    package: z.object({ registry: z.enum(['npm', 'pypi']), name: z.string(), version: z.string() }),
+    settings: z.array(
+      z.object({
+        name: z.string(),
+        description: z.string().optional(),
+        secret: z.boolean(),
+        required: z.boolean().optional(),
+      }),
+    ),
+    egress: z.array(z.string()),
   }),
 ]);
 export type IntegrationCardView = z.infer<typeof integrationCardSchema>;
@@ -140,6 +165,7 @@ const messageSchema = z.object({
         followUpId: z.uuid().optional(),
         googleProposalId: z.uuid().optional(),
         tableProposal: z.literal(true).optional(),
+        codingRun: z.literal(true).optional(),
         integration: integrationCardSchema.optional(),
         rowDraftId: z.uuid().optional(),
         waitingRowDraft: z.object({ id: z.uuid(), table: z.string().optional() }).optional(),
@@ -230,6 +256,10 @@ export type ConversationCommand =
       timeZone?: string;
       mode?: 'normal' | 'plan';
     }
+  | ({ kind: 'layout-action'; chatId: string; commandId: string; replyId: string } & Omit<
+      LayoutActionRequest,
+      'commandId'
+    >)
   | { kind: 'rename'; chatId: string; commandId: string; title: string; expectedRevision: number }
   | { kind: 'archive'; chatId: string; commandId: string; archived: boolean }
   | { kind: 'pin'; chatId: string; commandId: string; pinned: boolean }
@@ -610,7 +640,11 @@ export function conversationApi(workspaceId: string, denied: (status: number) =>
         hasGitHubProposals,
       };
     },
-    async findMessage(chatId: string, messageId: string, signal: AbortSignal) {
+    /**
+     * How many history pages were read to find the message, `null` when it is not in them, or `'unsent'`
+     * when it was certainly never sent.
+     */
+    async findMessage(chatId: string, messageId: string, signal: AbortSignal): Promise<number | null | 'unsent'> {
       let before: number | null = null;
       for (let pages = 1; pages <= 2; pages++) {
         const query = before === null ? '' : `?before=${before}`;
@@ -620,6 +654,10 @@ export function conversationApi(workspaceId: string, denied: (status: number) =>
         if (before === null) break;
       }
       return null;
+    },
+    /** Runs a read-only lookup for a form in a reply's layout and returns the renderer's response message. */
+    async layoutFunction(chatId: string, replyId: string, call: unknown, signal: AbortSignal) {
+      return request(`/${chatId}/layouts/${replyId}/functions`, 'POST', signal, call, true);
     },
     async command(command: ConversationCommand, signal: AbortSignal) {
       const path = `/${command.chatId}`;
@@ -695,6 +733,12 @@ export function conversationApi(workspaceId: string, denied: (status: number) =>
               mode: command.mode,
             }),
           );
+        case 'layout-action': {
+          const { kind: _kind, chatId: _chatId, replyId, ...body } = command;
+          return layoutActionResultSchema.parse(
+            await request(`${path}/layouts/${replyId}/actions`, 'POST', signal, body, true),
+          );
+        }
         case 'rename':
           return z.object({ titleRevision: z.number().int() }).parse(
             await request(path, 'PATCH', signal, {
@@ -781,7 +825,8 @@ export function draftConversationApi(
       return api.command(command, signal);
     },
     async findMessage(id, messageId, signal) {
-      if (!created) return null;
+      // A message is sent only after its chat is created.
+      if (!created) return 'unsent';
       return api.findMessage(id, messageId, signal);
     },
     async upload(id, attachmentId, file, signal) {

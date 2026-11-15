@@ -1,0 +1,25 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "dialpad",
+  "name": "Dialpad",
+  "maker": "Dialpad",
+  "homepage": "https://www.dialpad.com",
+  "category": "chat",
+  "teams": ["sales", "support"],
+  "summary": "Work with Dialpad calls, messages and contacts",
+  "capabilities": ["Read call history and transcripts", "Send SMS messages", "Look up contacts and users"],
+  "official": {
+    "evidence": "https://developers.dialpad.com/docs/dialpad-mcp-server"
+  },
+  "docs": "https://developers.dialpad.com/docs/dialpad-mcp-server",
+  "remote": {
+    "url": "https://mcp.dialpad.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#7C52FF"
+  },
+  "supportedBy": ["lindy", "relevance-ai", "glean"]
+}

@@ -1,0 +1,29 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "fivetran",
+  "name": "Fivetran",
+  "maker": "Fivetran",
+  "homepage": "https://www.fivetran.com",
+  "category": "data-and-databases",
+  "teams": ["engineering", "operations"],
+  "summary": "Find and query data synced by Fivetran",
+  "capabilities": [
+    "Search tables and columns across destinations",
+    "Read schema and lineage context",
+    "Run queries on synced data"
+  ],
+  "official": {
+    "evidence": "https://fivetran.com/docs/context-layer/agent-context-mcp"
+  },
+  "docs": "https://fivetran.com/docs/context-layer/agent-context-mcp",
+  "remote": {
+    "url": "https://api.fivetran.ai/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#0073FF"
+  },
+  "supportedBy": ["lindy", "relevance-ai"]
+}

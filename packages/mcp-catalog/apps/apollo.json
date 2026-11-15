@@ -1,0 +1,45 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "apollo",
+  "name": "Apollo.io",
+  "maker": "Apollo.io",
+  "homepage": "https://www.apollo.io",
+  "category": "crm-and-sales",
+  "teams": ["sales", "marketing"],
+  "summary": "Find prospects and enrich contacts with Apollo",
+  "capabilities": [
+    "Search people and companies in the Apollo database",
+    "Enrich contacts and accounts",
+    "Add contacts to sequences and lists"
+  ],
+  "official": {
+    "evidence": "https://docs.apollo.io/docs/apollo-mcp"
+  },
+  "docs": "https://docs.apollo.io/docs/apollo-mcp",
+  "remote": {
+    "url": "https://mcp.apollo.io/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "io.github.apolloio/apollo-mcp",
+  "icons": {
+    "color": "#F7D046"
+  },
+  "supportedBy": [
+    "chatgpt",
+    "claude",
+    "copilot-studio",
+    "manus",
+    "perplexity",
+    "lindy",
+    "gumloop",
+    "relevance-ai",
+    "glean",
+    "zapier",
+    "make",
+    "docker",
+    "github-registry"
+  ],
+  "featured": true
+}

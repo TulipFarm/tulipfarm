@@ -11,7 +11,7 @@ import { requireDraftSources } from '../src/draft-sources.ts';
 import { requireTableSources } from '../src/table-sources.ts';
 import { fetchPublicText } from '../src/web-fetch.ts';
 import { createConversations } from '@tulipfarm/conversations';
-import { requireResultSources } from '@tulipfarm/conversations/source-access';
+import { requireReplyMcpSources, requireResultSources } from '@tulipfarm/conversations/source-access';
 import { recordConversationResultProvenance } from '@tulipfarm/conversations/provenance';
 import { createFiles } from '../../files/dist/index.js';
 import { createGoogleOperations } from '@tulipfarm/google-workspace/operations';
@@ -201,6 +201,11 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
   await db.platform.query(
     `INSERT INTO ${s}.tf_conversations (id,owner_user_id,owner_membership_id,title) VALUES ($1,$2,$3,'MCP-derived title')`,
     [chatId, w.userId, w.membershipId],
+  );
+  const ownMemory = { kind: 'personal-memory', membershipId: actor.membershipId };
+  await tx(tx => requireReplyMcpSources(tx, actor, chatId, [source, ownMemory]));
+  await assert.rejects(
+    tx(tx => requireReplyMcpSources(tx, actor, chatId, [source, { ...ownMemory, membershipId: randomUUID() }])),
   );
   await db.platform.query(
     `INSERT INTO ${s}.tf_conversation_messages (id,conversation_id,sequence,author_kind) VALUES ($1,$2,1,'assistant')`,

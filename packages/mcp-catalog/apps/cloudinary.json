@@ -1,0 +1,30 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "cloudinary",
+  "name": "Cloudinary",
+  "maker": "Cloudinary",
+  "homepage": "https://cloudinary.com",
+  "category": "ai-and-media",
+  "teams": ["engineering", "marketing", "design"],
+  "summary": "Upload, search, and transform media in Cloudinary",
+  "capabilities": [
+    "Upload and organize images and videos",
+    "Search assets by tags and metadata",
+    "Transform and optimize media"
+  ],
+  "official": {
+    "evidence": "https://cloudinary.com/documentation/cloudinary_llm_mcp"
+  },
+  "docs": "https://cloudinary.com/documentation/cloudinary_llm_mcp",
+  "remote": {
+    "url": "https://asset-management.mcp.cloudinary.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "simpleIcons": "cloudinary",
+    "color": "#3448C5"
+  },
+  "supportedBy": ["chatgpt", "claude", "microsoft-copilot", "lindy", "gumloop", "relevance-ai", "glean", "make"]
+}

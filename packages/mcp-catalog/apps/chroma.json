@@ -1,0 +1,30 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "chroma",
+  "name": "Chroma",
+  "maker": "Chroma",
+  "homepage": "https://www.trychroma.com",
+  "category": "data-and-databases",
+  "teams": ["engineering"],
+  "summary": "Manage and search Chroma vector collections",
+  "capabilities": [
+    "Create, list, and delete collections",
+    "Add, update, and delete documents",
+    "Query documents by meaning and metadata"
+  ],
+  "official": {
+    "evidence": "https://github.com/chroma-core/chroma-mcp",
+    "repository": "https://github.com/chroma-core/chroma-mcp"
+  },
+  "docs": "https://github.com/chroma-core/chroma-mcp",
+  "packages": [
+    {
+      "registry": "pypi",
+      "name": "chroma-mcp"
+    }
+  ],
+  "icons": {
+    "color": "#FFDE2D"
+  },
+  "supportedBy": ["docker", "github-registry"]
+}

@@ -1,0 +1,29 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "ashby",
+  "name": "Ashby",
+  "maker": "Ashby",
+  "homepage": "https://www.ashbyhq.com",
+  "category": "hr-and-recruiting",
+  "teams": ["hr"],
+  "summary": "Search candidates, jobs, and recruiting data",
+  "capabilities": [
+    "Find candidates and applications",
+    "Review jobs and interview stages",
+    "Answer recruiting analytics questions"
+  ],
+  "official": {
+    "evidence": "https://docs.ashbyhq.com/ashby-mcp-server-beta"
+  },
+  "docs": "https://docs.ashbyhq.com/ashby-mcp-server-beta",
+  "remote": {
+    "url": "https://mcp.ashbyhq.com/mcp/v1",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#4F46E5"
+  },
+  "supportedBy": ["chatgpt", "claude", "manus", "lindy", "gumloop", "dust", "glean"]
+}

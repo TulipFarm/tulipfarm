@@ -7,7 +7,9 @@ export const fileListingEmpty = "I didn't find any files that match your search.
 const saveFailed = "I couldn't save the file. Ask me to try again.";
 const repeatedFailure = 'I stopped because the same file request kept failing.';
 const filePrefilter =
-  /\b(?:file|excel|xlsx|xls|sheet|workbook|spreadsheet|powerpoint|pptx|ppt|slide|deck|presentation|word|docx|doc|document|pdf|report|csv|tsv|txt|markdown|md|json|ya?ml|html|image|sav|export|download|attach)|\S+\.[a-z0-9]+\b/i;
+  /\b(?:file|excel|xlsx|xls|sheet|workbook|spreadsheet|powerpoint|pptx|ppt|slide|deck|presentation|word\s+(?:docs?|documents?|files?)\b|docx|doc|document|pdf|report|csv|tsv|txt|markdown|md|json|ya?ml|html|image|sav|export|download|attach)|\S+\.[a-z0-9]+\b/i;
+// Capitalised Word names the app; lowercase word counts text, as in "a 500 word story".
+const wordApp = /\bWord\b/;
 // Claim matches trigger checking or a safe failure reply, never save authorization.
 const fileSubject = String.raw`(?:files?|excel|xlsx|xls|sheets?|workbooks?|spreadsheets?|powerpoint|pptx|ppt|slides?|decks?|presentations?|word|docx|docs?|documents?|pdfs?|reports?|csv|tsv|txt|markdown|md|json|ya?ml|html|images?|attachments?|outputs?|\S+\.[a-z0-9]+)\b`;
 const fileSavedClaim = new RegExp(
@@ -58,7 +60,12 @@ export function createFileJobGuard(request: string, prior: readonly { call: unkn
   let repeated = false;
   let needsListing = false;
   const needsCheck = (text = '') =>
-    !saved && (attempted || filePrefilter.test(request) || fileSavedClaim.test(text) || readyFileClaim.test(text));
+    !saved &&
+    (attempted ||
+      filePrefilter.test(request) ||
+      wordApp.test(request) ||
+      fileSavedClaim.test(text) ||
+      readyFileClaim.test(text));
   const record = (call: { tool: string }, value: unknown) => {
     if (!call.tool.startsWith('files.')) return;
     calls++;

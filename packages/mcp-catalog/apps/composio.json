@@ -1,0 +1,26 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "composio",
+  "name": "Composio",
+  "maker": "Composio",
+  "homepage": "https://composio.dev",
+  "category": "automation",
+  "teams": ["engineering"],
+  "summary": "Use hundreds of app tools through Composio",
+  "capabilities": ["Search tools across 500+ apps", "Connect app accounts with managed auth", "Run app actions"],
+  "official": {
+    "evidence": "https://docs.composio.dev/docs/mcp-overview"
+  },
+  "docs": "https://docs.composio.dev/docs/mcp-overview",
+  "remote": {
+    "url": "https://connect.composio.dev/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "io.github.ComposioHQ/composio",
+  "icons": {
+    "color": "#000000"
+  },
+  "supportedBy": ["github-registry"]
+}

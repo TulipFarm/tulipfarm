@@ -1,0 +1,50 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "notion",
+  "name": "Notion",
+  "maker": "Notion",
+  "homepage": "https://www.notion.com",
+  "category": "docs-and-files",
+  "teams": ["everyone"],
+  "summary": "Search, read and write Notion pages and databases",
+  "capabilities": [
+    "Search your workspace and connected sources",
+    "Create and edit pages and databases",
+    "Add comments and query database views"
+  ],
+  "official": {
+    "evidence": "https://developers.notion.com/guides/mcp/overview",
+    "repository": "https://github.com/makenotion/notion-mcp-server"
+  },
+  "docs": "https://developers.notion.com/guides/mcp/overview",
+  "remote": {
+    "url": "https://mcp.notion.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "com.notion/mcp",
+  "icons": {
+    "lobehub": "Notion",
+    "simpleIcons": "notion",
+    "color": "#000000"
+  },
+  "supportedBy": [
+    "chatgpt",
+    "claude",
+    "microsoft-copilot",
+    "manus",
+    "perplexity",
+    "lindy",
+    "gumloop",
+    "relevance-ai",
+    "dust",
+    "glean",
+    "zapier",
+    "make",
+    "n8n",
+    "docker",
+    "github-registry"
+  ],
+  "featured": true
+}

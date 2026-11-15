@@ -1,0 +1,43 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "todoist",
+  "name": "Todoist",
+  "maker": "Doist",
+  "homepage": "https://www.todoist.com",
+  "category": "projects-and-issues",
+  "teams": ["everyone"],
+  "summary": "Manage Todoist tasks and projects",
+  "capabilities": [
+    "Find tasks by date, project or label",
+    "Add, update and complete tasks",
+    "Organise projects and sections"
+  ],
+  "official": {
+    "evidence": "https://github.com/todoist/todoist-mcp",
+    "repository": "https://github.com/todoist/todoist-mcp"
+  },
+  "docs": "https://github.com/todoist/todoist-mcp",
+  "remote": {
+    "url": "https://ai.todoist.net/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "net.todoist/mcp",
+  "icons": {
+    "simpleIcons": "todoist",
+    "color": "#E44332"
+  },
+  "supportedBy": [
+    "chatgpt",
+    "claude",
+    "manus",
+    "lindy",
+    "gumloop",
+    "relevance-ai",
+    "zapier",
+    "make",
+    "n8n",
+    "github-registry"
+  ]
+}

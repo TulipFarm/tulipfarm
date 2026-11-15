@@ -345,7 +345,18 @@ export async function requireMcpSources(
   if (!retained.some(source => source.kind === 'mcp-integration')) return;
   await currentMember(tx, actor);
   await requireMcpPrivateConversation(tx, actor, conversationId);
-  for (const source of retained) await requireProtectedSource(tx, actor, source, undefined, false, readOnly);
+  for (const source of retained) await requireMcpChatSource(tx, actor, source, readOnly);
+}
+
+/** An MCP chat is the requester's own private chat, so their own personal memory in its context is allowed. */
+async function requireMcpChatSource(
+  tx: AuthorizationTransaction,
+  actor: HumanActor,
+  source: z.infer<typeof sourceDependencySchema>,
+  readOnly = false,
+) {
+  if (source.kind === 'personal-memory') await requirePersonalMemorySource(tx, actor, source);
+  else await requireProtectedSource(tx, actor, source, undefined, false, readOnly);
 }
 
 const integrationKinds = new Set(['google-integration', 'google-file', 'github-personal', 'mcp-integration']);
@@ -388,7 +399,7 @@ export async function requireReplyMcpSources(
   }
   if (!kept.some(source => source.kind === 'mcp-integration')) return;
   await requireMcpPrivateConversation(tx, actor, conversationId);
-  for (const source of kept) await requireProtectedSource(tx, actor, source);
+  for (const source of kept) await requireMcpChatSource(tx, actor, source);
 }
 
 export async function requireConversationMcpSources(

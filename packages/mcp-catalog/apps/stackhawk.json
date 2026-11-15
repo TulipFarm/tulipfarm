@@ -1,0 +1,36 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "stackhawk",
+  "name": "StackHawk",
+  "maker": "StackHawk",
+  "homepage": "https://www.stackhawk.com",
+  "category": "security",
+  "teams": ["engineering"],
+  "summary": "Run and review StackHawk API security scans",
+  "capabilities": ["Set up and run API security scans", "Read scan findings", "Validate scan configuration"],
+  "official": {
+    "evidence": "https://github.com/stackhawk/stackhawk-mcp",
+    "repository": "https://github.com/stackhawk/stackhawk-mcp"
+  },
+  "docs": "https://github.com/stackhawk/stackhawk-mcp",
+  "packages": [
+    {
+      "registry": "pypi",
+      "name": "stackhawk-mcp",
+      "env": [
+        {
+          "name": "STACKHAWK_API_KEY",
+          "description": "StackHawk API key",
+          "secret": true,
+          "required": true
+        }
+      ]
+    }
+  ],
+  "registryName": "com.stackhawk/stackhawk",
+  "icons": {
+    "simpleIcons": "stackhawk",
+    "color": "#00CBC6"
+  },
+  "supportedBy": ["docker", "github-registry"]
+}

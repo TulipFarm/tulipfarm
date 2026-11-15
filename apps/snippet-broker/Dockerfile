@@ -7,7 +7,7 @@ RUN pnpm fetch
 COPY . .
 # Filtered installs may not include every patched package; the full install stays strict.
 RUN printf '\nallowUnusedPatches: true\n' >> pnpm-workspace.yaml
-# Legacy deploy checks the whole lockfile, where sprout is a URL tarball pinned by integrity.
+# Legacy deploy checks the whole lockfile, where xlsx is a URL tarball pinned by integrity.
 RUN pnpm install --offline --frozen-lockfile --filter @tulipfarm/snippet-broker... \
     && pnpm --filter @tulipfarm/snippet-broker... build \
     && pnpm --filter @tulipfarm/snippet-broker deploy --legacy --prod --config.block-exotic-subdeps=false /out

@@ -32,6 +32,23 @@ function apiPreconnect(): Plugin {
   };
 }
 
+// A stylesheet in <head> holds the first paint until it downloads; after the early composer
+// in <body> it lets that composer paint at once. Scripts still wait for it, so the app never shows unstyled.
+function stylesAfterEarlyComposer(): Plugin {
+  return {
+    name: 'styles-after-early-composer',
+    transformIndexHtml: {
+      order: 'post',
+      handler(html) {
+        const styles = html.match(/<link rel="stylesheet"[^>]*>/g) ?? [];
+        if (!styles.length) return html;
+        for (const style of styles) html = html.replace(style, '');
+        return html.replace('</body>', `${styles.join('\n')}\n</body>`);
+      },
+    },
+  };
+}
+
 // Web extensions are chosen at build time: VITE_TULIPFARM_WEB_EXTENSIONS is a comma-separated
 // list of module specifiers (package names, or paths relative to apps/web), each default-exporting
 // a web extension. `virtual:tulipfarm-web-extensions` imports them in order; unset means none.
@@ -96,6 +113,7 @@ export default defineConfig(({ command }) => {
       apiPreconnect(),
       webExtensions(),
       emojiGlyphs(),
+      stylesAfterEarlyComposer(),
       {
         name: 'build-identity',
         generateBundle() {
@@ -103,7 +121,13 @@ export default defineConfig(({ command }) => {
         },
       },
     ],
+    // Lazy chunks can import each other in a cycle (recharts split across `chart` and `surface`).
+    // Without strict order, the chunk loaded first runs before its dependency and throws.
+    build: { rolldownOptions: { output: { strictExecutionOrder: true } } },
+    // Web extensions live in other packages, where pnpm can install a second Sprout or React
+    // copy. A second copy has its own React contexts, so its sidebar parts crash outside <Sidebar>.
     resolve: {
+      dedupe: ['@tulipfarm/sprout', 'react', 'react-dom'],
       alias: {
         '@': fileURLToPath(new URL('./src', import.meta.url)),
       },

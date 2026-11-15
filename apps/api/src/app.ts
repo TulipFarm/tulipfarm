@@ -23,6 +23,12 @@ import { registerSocialAccounts } from './social-accounts.ts';
 import { socialAccounts, socialChannels, socialPosts } from './social-composition.ts';
 import { githubAccounts } from './github-composition.ts';
 import { registerGitHubAccounts } from './github-accounts.ts';
+import { chatGptPlan, registerChatGptPlan } from './chatgpt-plan.ts';
+import { registerTokenPlan, tokenPlan } from './token-plans.ts';
+import type { TokenPlan, TokenPlanProvider } from '@tulipfarm/integrations/token-plans';
+import { planModelFamilyId, planProviders, type PlanProvider } from '@tulipfarm/config';
+import { registerSubscriptions } from './subscriptions.ts';
+import { createSubscriptions } from '@tulipfarm/integrations/subscriptions';
 import { registerGitHubInvestigation } from './github-investigation.ts';
 import { createGitHubInvestigation } from '@tulipfarm/github/investigation';
 import { createGitHubBotGrants } from '@tulipfarm/github/bot';
@@ -35,10 +41,19 @@ import { registerViewer } from './viewer.ts';
 import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import { registerPublicGuide } from './public-guide.ts';
 import { getLastWorkspace, getWorkspace } from '@tulipfarm/workspaces/store';
-import { registerFlagSubjectResolver } from '@tulipfarm/observability';
+import { isFeatureEnabled, registerFlagSubjectResolver } from '@tulipfarm/observability';
 import { apiFlagSubjects } from './flag-subjects.ts';
 import { registerFeatureFlags } from './feature-flags.ts';
 import { protectExpectedSession } from './authenticated-routes.ts';
+import { registerApps } from './apps.ts';
+import { appHostingFromEnvironment, temporalAppWorkflows } from './apps-hosting.ts';
+import { routeAppSites } from './apps-sites.ts';
+import { appBuilders } from '@tulipfarm/apps';
+import { appBuilder, appHost } from '@tulipfarm/extensions';
+import type { Pool } from 'pg';
+import { buildPreviewGateway, routePreviewHosts, type PreviewGatewayDependencies } from '@tulipfarm/gateway/preview';
+import { previewGatewayFromEnvironment, type PreviewStorage } from '@tulipfarm/gateway/preview-environment';
+import { registerPreviewTickets } from './app-preview-tickets.ts';
 
 export function buildApp(
   options: {
@@ -48,6 +63,10 @@ export function buildApp(
       ModelCatalogDependencies,
       'modelFamilyEligibility' | 'modelFamilyResolution' | 'modelCatalogSnapshot'
     >;
+    /** Replaces the Claude and Copilot connections, for tests that must not reach the vendors. */
+    tokenPlans?: Partial<Record<TokenPlanProvider, TokenPlan | null>>;
+    /** Replaces what the preview gateway reads; null turns previews off. */
+    previewGateway?: PreviewGatewayDependencies | null;
   } = {},
 ) {
   const app = Fastify({
@@ -61,6 +80,16 @@ export function buildApp(
     },
     logController: new LogController({ disableRequestLogging: true }),
   });
+  let previewStorage: PreviewStorage | undefined;
+  const preview =
+    options.previewGateway === undefined
+      ? previewGatewayFromEnvironment(process.env, authConfig().webOrigin, () => previewStorage)
+      : options.previewGateway;
+  // Until preview hosts route to the gateway service, the API serves their HTTP requests with the same gateway.
+  if (preview) routePreviewHosts(app, buildPreviewGateway(preview, securityServerOptions()).http, preview.domain);
+  let appPlatform: Pick<Pool, 'query'> | undefined;
+  const appHosting = appHostingFromEnvironment(process.env, () => appPlatform);
+  if (appHosting?.sites) routeAppSites(app, { ...appHosting.sites, excluded: preview?.domain });
   registerObservability(app);
   registerSecurity(app, authConfig().webOrigin);
   const temporal = createTemporalClient();
@@ -112,6 +141,21 @@ export function buildApp(
         const storage = registerWorkspaces(business, auth, temporal);
         if (storage) protectWorkspaceRequests(business, auth.auth, storage);
         workspaceStorage = storage;
+        if (storage) {
+          appPlatform = auth.pool;
+          registerApps(business, {
+            auth: auth.auth,
+            runtime: storage,
+            platform: auth.pool,
+            start: temporalAppWorkflows(temporal),
+            repositories: appHosting?.repositories ?? null,
+            publisher: () => appHosting?.publisher,
+            builders: () => appBuilders(appBuilder(), appHost()),
+            sitesDomain: appHosting?.sites?.domain ?? null,
+          });
+          previewStorage = { pool: auth.pool, runtime: storage };
+          if (preview) registerPreviewTickets(business, auth.auth, previewStorage, preview.domain);
+        }
         registerFeatureFlags(
           business,
           auth.auth,
@@ -128,13 +172,35 @@ export function buildApp(
         if (posts) business.addHook('onClose', posts.close);
         registerSocialAccounts(business, auth.auth, social, undefined, channels, posts?.posts ?? null);
         const github = githubAccounts(runtime, process.env, defaultKnowledge.hook);
+        const planFor = (provider: TokenPlanProvider) =>
+          options.tokenPlans && provider in options.tokenPlans
+            ? (options.tokenPlans[provider] ?? null)
+            : tokenPlan(provider, runtime, process.env, undefined, github?.memberAccessToken);
+        const tokenPlans = { claude: planFor('claude'), copilot: planFor('copilot') };
+        const copilot = tokenPlans.copilot;
         registerGitHubAccounts(
           business,
           auth.auth,
           github,
           runtime && github ? createGitHubReads({ runtime, accounts: github }) : undefined,
           runtime && github ? createGitHubBotGrants(runtime) : undefined,
+          // One GitHub sign-in also connects Copilot when the account has a plan and no other Copilot connection works.
+          copilot
+            ? async (workspaceId, userId, accountId) => {
+                if (await isFeatureEnabled(planProviders.copilot.flag, null, { id: workspaceId }))
+                  await copilot.useGitHubAccount(workspaceId, userId, accountId, true);
+              }
+            : undefined,
         );
+        const chatGpt = chatGptPlan(runtime, auth.pool);
+        registerChatGptPlan(business, auth.auth, chatGpt, auth.pool);
+        registerTokenPlan(business, auth.auth, 'claude', tokenPlans.claude);
+        registerTokenPlan(business, auth.auth, 'copilot', tokenPlans.copilot);
+        const subscriptions = runtime ? createSubscriptions({ runtime }) : null;
+        registerSubscriptions(business, auth.auth, subscriptions, (provider, slug) => {
+          const id = planModelFamilyId(provider, slug);
+          return id !== null && models.catalog.model(id) !== undefined;
+        });
         if (runtime && github)
           registerGitHubInvestigation(business, auth.auth, createGitHubInvestigation({ runtime, accounts: github }));
         registerStorageComposition(
@@ -155,6 +221,14 @@ export function buildApp(
             runtime,
             compatibility: commonCompatibility,
             ...(options.modelCatalog ?? { modelCatalogSnapshot: models.modelCatalogSnapshot }),
+            ...(subscriptions && (chatGpt || tokenPlans.claude || tokenPlans.copilot)
+              ? {
+                  planModels: async (workspaceId: string, userId: string, provider: PlanProvider) =>
+                    (provider === 'chatgpt' ? chatGpt : tokenPlans[provider])
+                      ? subscriptions.models(workspaceId, userId, provider)
+                      : [],
+                }
+              : {}),
           });
       });
     },

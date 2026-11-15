@@ -1,0 +1,51 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "mongodb",
+  "name": "MongoDB",
+  "maker": "MongoDB",
+  "homepage": "https://www.mongodb.com",
+  "category": "data-and-databases",
+  "teams": ["engineering"],
+  "summary": "Query MongoDB data and manage Atlas clusters",
+  "capabilities": [
+    "Find, aggregate, and update documents",
+    "Inspect collections, indexes, and schemas",
+    "Manage Atlas clusters, users, and access lists"
+  ],
+  "official": {
+    "evidence": "https://www.mongodb.com/docs/mcp-server/get-started/",
+    "repository": "https://github.com/mongodb-js/mongodb-mcp-server"
+  },
+  "docs": "https://www.mongodb.com/docs/mcp-server/get-started/",
+  "remote": {
+    "url": "https://mcp.mongodb.com",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "packages": [
+    {
+      "registry": "npm",
+      "name": "mongodb-mcp-server",
+      "env": [
+        {
+          "name": "MDB_MCP_CONNECTION_STRING",
+          "description": "MongoDB connection string",
+          "secret": true,
+          "required": true
+        }
+      ]
+    },
+    {
+      "registry": "oci",
+      "name": "docker.io/mongodb/mongodb-mcp-server"
+    }
+  ],
+  "registryName": "io.github.mongodb-js/mongodb-mcp-server",
+  "icons": {
+    "simpleIcons": "mongodb",
+    "color": "#47A248"
+  },
+  "supportedBy": ["lindy", "relevance-ai", "n8n", "docker", "github-registry"],
+  "featured": true
+}

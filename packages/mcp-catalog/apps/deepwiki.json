@@ -1,0 +1,26 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "deepwiki",
+  "name": "DeepWiki",
+  "maker": "Cognition",
+  "homepage": "https://deepwiki.com",
+  "category": "code",
+  "teams": ["engineering"],
+  "summary": "Ask questions about public GitHub repositories",
+  "capabilities": ["Read the generated wiki for a public repository", "Ask questions about how a codebase works"],
+  "official": {
+    "evidence": "https://docs.devin.ai/work-with-devin/deepwiki-mcp"
+  },
+  "docs": "https://docs.devin.ai/work-with-devin/deepwiki-mcp",
+  "remote": {
+    "url": "https://mcp.deepwiki.com/mcp",
+    "transport": "streamable-http",
+    "auth": "none",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "lobehub": "Devin",
+    "color": "#000000"
+  },
+  "supportedBy": ["glean", "docker", "github-registry"]
+}

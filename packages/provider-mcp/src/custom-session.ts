@@ -11,8 +11,10 @@ import {
   customToolRevision,
   CustomMcpError,
   CUSTOM_MCP_LIMITS,
+  CUSTOM_MCP_LEGACY_PROTOCOL_VERSION,
   CUSTOM_MCP_PROTOCOL_VERSIONS,
   rejectReflectedSecrets,
+  type CustomMcpTransport,
   type CustomToolResult,
   type CustomToolRevision,
 } from './custom-contract.ts';
@@ -31,7 +33,38 @@ export type CustomSessionOptions = {
   secretValues?: readonly string[];
   signal?: AbortSignal;
   deadline?: number;
+  /**
+   * `auto` tries Streamable HTTP first and falls back to the older HTTP+SSE transport when the endpoint answers
+   * the initialize request with 400, 404 or 405. Defaults to `streamable-http`.
+   */
+  transport?: CustomMcpTransport | 'auto';
 };
+
+class LegacyTransport extends Error {}
+const maximumEndpointEventBytes = 65536;
+
+function parseEvent(raw: string) {
+  const lines = raw.split('\n');
+  const type = lines
+    .find(line => line.startsWith('event:'))
+    ?.slice(6)
+    .trim();
+  const data = lines
+    .filter(line => line.startsWith('data:'))
+    .map(line => line.slice(5).replace(/^ /, ''))
+    .join('\n');
+  return { type, data };
+}
+
+function abortable<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const stop = () => reject(new CustomMcpError('discovery-failed'));
+    work.catch(() => undefined);
+    if (signal.aborted) return stop();
+    signal.addEventListener('abort', stop, { once: true });
+    work.then(resolve, reject).finally(() => signal.removeEventListener('abort', stop));
+  });
+}
 
 function freeze(value: object): void {
   for (const child of Object.values(value)) if (child && typeof child === 'object') freeze(child);
@@ -57,6 +90,168 @@ export function createCustomMcpSession(options: CustomSessionOptions) {
   let version: string | undefined;
   let id = 0;
   let catalogBytes = 0;
+  let active: CustomMcpTransport | undefined =
+    options.transport === 'auto' ? undefined : (options.transport ?? 'streamable-http');
+  // The HTTP+SSE event stream of this session; requests are POSTed to `messages` and answered on the stream.
+  let stream:
+    | {
+        reader: ReadableStreamDefaultReader<Uint8Array>;
+        decoder: TextDecoder;
+        buffer: string;
+        abort: AbortController;
+        messages?: string;
+      }
+    | undefined;
+
+  function message(raw: string, requestId: string | number): { done: false } | { done: true; result: unknown } {
+    const parsed = boundedJson(JSON.parse(raw), CUSTOM_MCP_LIMITS.responseBytes);
+    rejectReflectedSecrets(parsed, secrets);
+    const rpc = JSONRPCMessageSchema.parse(parsed);
+    if ('method' in rpc) {
+      if ('id' in rpc || !['notifications/progress', 'notifications/tools/list_changed'].includes(rpc.method))
+        throw new CustomMcpError('unsupported-feature');
+      return { done: false };
+    }
+    if (rpc.id !== requestId || 'error' in rpc) throw new CustomMcpError('unsupported-protocol');
+    return { done: true, result: rpc.result };
+  }
+
+  function closeStream() {
+    const current = stream;
+    stream = undefined;
+    current?.reader.cancel().catch(() => undefined);
+    current?.abort.abort();
+  }
+
+  async function nextEvent(signal: AbortSignal, count: (bytes: number) => void) {
+    const current = stream;
+    if (!current) throw new CustomMcpError('closed');
+    while (true) {
+      current.buffer = current.buffer.replace(/\r\n/g, '\n');
+      const end = current.buffer.indexOf('\n\n');
+      if (end >= 0) {
+        const raw = current.buffer.slice(0, end);
+        current.buffer = current.buffer.slice(end + 2);
+        return parseEvent(raw);
+      }
+      const chunk = await abortable(current.reader.read(), signal);
+      if (chunk.done) return undefined;
+      count(chunk.value.byteLength);
+      current.buffer += current.decoder.decode(chunk.value, { stream: true });
+    }
+  }
+
+  /** Opens the HTTP+SSE stream and waits for the server to name its message endpoint, which must be same-origin. */
+  async function openStream(signal: AbortSignal) {
+    closeStream();
+    signal.throwIfAborted();
+    lifetime.signal.throwIfAborted();
+    const abort = new AbortController();
+    try {
+      const response = await abortable(
+        observeFetch(
+          'mcp',
+          'rpc',
+          fetcher,
+        )(endpoint, {
+          method: 'GET',
+          redirect: 'error',
+          signal: AbortSignal.any([lifetime.signal, abort.signal]),
+          headers: { accept: 'text/event-stream' },
+        }),
+        signal,
+      );
+      const contentType = response.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase();
+      if (response.status < 200 || response.status >= 300) {
+        await response.body?.cancel();
+        throw new CustomMcpError('discovery-failed');
+      }
+      if (!response.body || contentType !== 'text/event-stream') {
+        await response.body?.cancel();
+        throw new CustomMcpError('unsupported-protocol');
+      }
+      const opened = {
+        reader: response.body.getReader(),
+        decoder: new TextDecoder('utf-8', { fatal: true }),
+        buffer: '',
+        abort,
+      };
+      stream = opened;
+      let bytes = 0;
+      while (true) {
+        const event = await nextEvent(signal, received => {
+          bytes += received;
+          if (bytes > maximumEndpointEventBytes) throw new CustomMcpError('response-limit');
+        });
+        if (!event || (event.data && event.type !== 'endpoint')) throw new CustomMcpError('unsupported-protocol');
+        if (!event.data) continue;
+        const base = new URL(endpoint);
+        let url: URL;
+        try {
+          if (event.data.length > 4096) throw new Error();
+          url = new URL(event.data.trim(), base);
+        } catch {
+          throw new CustomMcpError('unsupported-protocol');
+        }
+        if (url.origin !== base.origin || url.username || url.password || url.hash)
+          throw new CustomMcpError('unsupported-protocol');
+        stream = { ...opened, messages: url.href };
+        return;
+      }
+    } catch (failure) {
+      closeStream();
+      abort.abort();
+      throw failure;
+    }
+  }
+
+  async function postLegacy(
+    method: string,
+    params: object,
+    signal: AbortSignal,
+    discovery: boolean,
+    notification: boolean,
+    requestId: string | number,
+    requestDeadline: number,
+  ): Promise<unknown> {
+    const messages = stream?.messages;
+    if (!messages) throw new CustomMcpError('closed');
+    if (Date.now() >= Math.min(deadline, requestDeadline)) lifetime.abort();
+    signal.throwIfAborted();
+    lifetime.signal.throwIfAborted();
+    try {
+      const response = await observeFetch(
+        'mcp',
+        'rpc',
+        fetcher,
+      )(messages, {
+        method: 'POST',
+        redirect: 'error',
+        signal,
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', ...(notification ? {} : { id: requestId }), method, params }),
+      });
+      await response.body?.cancel();
+      if (response.status < 200 || response.status >= 300) throw new CustomMcpError('discovery-failed');
+      if (notification) return undefined;
+      let bytes = 0;
+      while (true) {
+        const event = await nextEvent(signal, received => {
+          bytes += received;
+          if (discovery) catalogBytes += received;
+          if (bytes > CUSTOM_MCP_LIMITS.responseBytes || (discovery && catalogBytes > CUSTOM_MCP_LIMITS.catalogBytes))
+            throw new CustomMcpError('response-limit');
+        });
+        if (!event) throw new CustomMcpError('unsupported-protocol');
+        if (!event.data || (event.type && event.type !== 'message')) continue;
+        const result = message(event.data, requestId);
+        if (result.done) return result.result;
+      }
+    } catch (failure) {
+      closeStream();
+      throw failure;
+    }
+  }
 
   async function post(
     method: string,
@@ -68,6 +263,8 @@ export function createCustomMcpSession(options: CustomSessionOptions) {
     requestDeadline = deadline,
   ): Promise<unknown> {
     const requestId = callRequestId ?? ++id;
+    if (active === 'sse')
+      return postLegacy(method, params, signal, discovery, notification, requestId, requestDeadline);
     const init = {
       method: 'POST',
       redirect: 'error',
@@ -84,6 +281,10 @@ export function createCustomMcpSession(options: CustomSessionOptions) {
     signal.throwIfAborted();
     lifetime.signal.throwIfAborted();
     const response = await observeFetch('mcp', 'rpc', fetcher)(endpoint, init);
+    if (active === undefined && method === 'initialize' && [400, 404, 405].includes(response.status)) {
+      await response.body?.cancel();
+      throw new LegacyTransport();
+    }
     if (response.status < 200 || response.status >= 300) {
       await response.body?.cancel();
       throw new CustomMcpError('discovery-failed');
@@ -110,18 +311,6 @@ export function createCustomMcpSession(options: CustomSessionOptions) {
     const decoder = new TextDecoder('utf-8', { fatal: true });
     let bytes = 0;
     let text = '';
-    function message(raw: string): { done: false } | { done: true; result: unknown } {
-      const parsed = boundedJson(JSON.parse(raw), CUSTOM_MCP_LIMITS.responseBytes);
-      rejectReflectedSecrets(parsed, secrets);
-      const rpc = JSONRPCMessageSchema.parse(parsed);
-      if ('method' in rpc) {
-        if ('id' in rpc || !['notifications/progress', 'notifications/tools/list_changed'].includes(rpc.method))
-          throw new CustomMcpError('unsupported-feature');
-        return { done: false };
-      }
-      if (rpc.id !== requestId || 'error' in rpc) throw new CustomMcpError('unsupported-protocol');
-      return { done: true, result: rpc.result };
-    }
     try {
       while (true) {
         const chunk = await reader.read();
@@ -135,20 +324,11 @@ export function createCustomMcpSession(options: CustomSessionOptions) {
           text = text.replace(/\r\n/g, '\n');
           let end: number;
           while ((end = text.indexOf('\n\n')) >= 0) {
-            const event = text.slice(0, end);
+            const event = parseEvent(text.slice(0, end));
             text = text.slice(end + 2);
-            const lines = event.split('\n');
-            const eventType = lines
-              .find(line => line.startsWith('event:'))
-              ?.slice(6)
-              .trim();
-            if (eventType && eventType !== 'message') throw new CustomMcpError('unsupported-feature');
-            const data = lines
-              .filter(line => line.startsWith('data:'))
-              .map(line => line.slice(5).replace(/^ /, ''))
-              .join('\n');
-            if (data) {
-              const result = message(data);
+            if (event.type && event.type !== 'message') throw new CustomMcpError('unsupported-feature');
+            if (event.data) {
+              const result = message(event.data, requestId);
               if (result.done) return result.result;
             }
           }
@@ -156,7 +336,7 @@ export function createCustomMcpSession(options: CustomSessionOptions) {
       }
       text += decoder.decode();
       if (contentType === 'application/json') {
-        const result = message(text);
+        const result = message(text, requestId);
         if (result.done) return result.result;
       }
       throw new CustomMcpError('unsupported-protocol');
@@ -170,8 +350,8 @@ export function createCustomMcpSession(options: CustomSessionOptions) {
     const signal = AbortSignal.any([lifetime.signal, AbortSignal.timeout(Math.max(0, catalogDeadline - Date.now()))]);
     catalogBytes = 0;
     if (!initialized) {
-      const result = InitializeResultSchema.parse(
-        await post(
+      const initialize = () =>
+        post(
           'initialize',
           {
             protocolVersion: '2025-11-25',
@@ -183,9 +363,23 @@ export function createCustomMcpSession(options: CustomSessionOptions) {
           false,
           undefined,
           catalogDeadline,
-        ),
-      );
-      if (!CUSTOM_MCP_PROTOCOL_VERSIONS.includes(result.protocolVersion))
+        );
+      if (active === 'sse') await openStream(signal);
+      let response: unknown;
+      try {
+        response = await initialize();
+      } catch (failure) {
+        if (!(failure instanceof LegacyTransport)) throw failure;
+        active = 'sse';
+        await openStream(signal);
+        response = await initialize();
+      }
+      const result = InitializeResultSchema.parse(response);
+      active ??= 'streamable-http';
+      if (
+        !CUSTOM_MCP_PROTOCOL_VERSIONS.includes(result.protocolVersion) &&
+        !(active === 'sse' && result.protocolVersion === CUSTOM_MCP_LEGACY_PROTOCOL_VERSION)
+      )
         throw new CustomMcpError('unsupported-protocol');
       if (!result.capabilities.tools) throw new CustomMcpError('unsupported-feature');
       version = result.protocolVersion;
@@ -302,9 +496,12 @@ export function createCustomMcpSession(options: CustomSessionOptions) {
   }
   function close() {
     state = 'closed';
+    closeStream();
     lifetime.abort();
     clearTimeout(deadlineTimer);
     externalSignal?.removeEventListener('abort', abort);
   }
-  return { discover, execute, close };
+  /** The transport this session uses, known once it has initialized. */
+  const transport = () => active;
+  return { discover, execute, close, transport };
 }

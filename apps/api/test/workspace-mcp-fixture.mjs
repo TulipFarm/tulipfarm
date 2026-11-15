@@ -113,7 +113,9 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         integrationIds: [integration.id],
       });
       const catalog = await service.catalog(one.id, actor, selectedOrigin);
-      const selected = catalog.tools.find(entry => entry.tool.name === 'write');
+      const selected = catalog.tools.find(
+        entry => entry.tool.name === 'write' && entry.integrationId === integration.id,
+      );
       assert.ok(selected);
       return service.propose(one.id, actor, {
         id: selectedOrigin.stepId,

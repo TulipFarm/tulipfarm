@@ -49,7 +49,7 @@ let writeHold: Promise<void> | null = null;
 
 /**
  * While a workspace shown from disk waits for its session and membership to be confirmed, requests
- * that change data wait too, and fail if the confirmation does. Reads never wait.
+ * that change data wait too, and fail if the latest confirmation does. Reads never wait.
  */
 export function holdWrites(confirmation: Promise<void>) {
   const hold = confirmation.finally(() => {
@@ -60,12 +60,15 @@ export function holdWrites(confirmation: Promise<void>) {
 }
 
 export async function writesAllowed() {
-  const hold = writeHold;
-  if (!hold) return;
-  try {
-    await hold;
-  } catch {
-    throw new Error('Could not confirm your workspace access. Reload the page and try again.');
+  for (let hold = writeHold; hold;) {
+    try {
+      await hold;
+      return;
+    } catch {
+      // A newer check replaced the one that failed, so only the newer answer decides.
+      if (writeHold && writeHold !== hold) hold = writeHold;
+      else throw new Error('Could not confirm your workspace access. Reload the page and try again.');
+    }
   }
 }
 

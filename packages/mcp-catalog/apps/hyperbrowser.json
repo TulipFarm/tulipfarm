@@ -1,0 +1,34 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "hyperbrowser",
+  "name": "Hyperbrowser",
+  "maker": "Hyperbrowser",
+  "homepage": "https://www.hyperbrowser.ai",
+  "category": "automation",
+  "teams": ["engineering"],
+  "summary": "Scrape pages and run browser agents with Hyperbrowser",
+  "capabilities": ["Scrape and crawl web pages", "Extract structured data", "Run browser agents on tasks"],
+  "official": {
+    "evidence": "https://github.com/hyperbrowserai/mcp",
+    "repository": "https://github.com/hyperbrowserai/mcp"
+  },
+  "docs": "https://github.com/hyperbrowserai/mcp",
+  "packages": [
+    {
+      "registry": "npm",
+      "name": "hyperbrowser-mcp",
+      "env": [
+        {
+          "name": "HYPERBROWSER_API_KEY",
+          "description": "Hyperbrowser API key",
+          "secret": true,
+          "required": true
+        }
+      ]
+    }
+  ],
+  "icons": {
+    "color": "#F0FF00"
+  },
+  "supportedBy": ["relevance-ai", "docker"]
+}

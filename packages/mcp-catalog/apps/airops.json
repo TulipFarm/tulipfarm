@@ -1,0 +1,29 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "airops",
+  "name": "AirOps",
+  "maker": "AirOps",
+  "homepage": "https://www.airops.com",
+  "category": "marketing",
+  "teams": ["marketing"],
+  "summary": "Track AI search visibility and content in AirOps",
+  "capabilities": [
+    "Check brand visibility in AI search answers",
+    "Review content performance and citations",
+    "Run AirOps content workflows"
+  ],
+  "official": {
+    "evidence": "https://docs.airops.com/mcp-server"
+  },
+  "docs": "https://docs.airops.com/mcp-server",
+  "remote": {
+    "url": "https://app.airops.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#000000"
+  },
+  "supportedBy": ["claude", "manus", "lindy", "gumloop", "relevance-ai", "glean"]
+}

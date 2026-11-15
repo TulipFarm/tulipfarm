@@ -1,0 +1,31 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "logfire",
+  "name": "Pydantic Logfire",
+  "maker": "Pydantic",
+  "homepage": "https://pydantic.dev/logfire",
+  "category": "monitoring-and-analytics",
+  "teams": ["engineering"],
+  "summary": "Query Logfire traces, logs, and exceptions",
+  "capabilities": [
+    "Find recent exceptions in traces",
+    "Run SQL queries on telemetry",
+    "Link to traces in the Logfire UI"
+  ],
+  "official": {
+    "evidence": "https://pydantic.dev/docs/logfire/guides/mcp-server/",
+    "repository": "https://github.com/pydantic/logfire-mcp"
+  },
+  "docs": "https://pydantic.dev/docs/logfire/guides/mcp-server/",
+  "remote": {
+    "url": "https://logfire-us.pydantic.dev/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "simpleIcons": "pydantic",
+    "color": "#E92063"
+  },
+  "supportedBy": ["lindy", "github-registry"]
+}

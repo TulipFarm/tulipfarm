@@ -1,0 +1,26 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "adobe-workfront",
+  "name": "Adobe Workfront",
+  "maker": "Adobe",
+  "homepage": "https://business.adobe.com/products/workfront.html",
+  "category": "projects-and-issues",
+  "teams": ["marketing", "operations"],
+  "summary": "Work with Adobe Workfront projects and tasks",
+  "capabilities": ["Search projects, tasks and issues", "Create and update tasks", "Review assignments and approvals"],
+  "official": {
+    "evidence": "https://experienceleague.adobe.com/en/docs/workfront/using/basics/workfront-mcp-server/configure-workfront-mcp-server"
+  },
+  "docs": "https://experienceleague.adobe.com/en/docs/workfront/using/basics/workfront-mcp-server/configure-workfront-mcp-server",
+  "remote": {
+    "url": "https://mcp.workfront.adobe.com/mcp/v1/workfront",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "lobehub": "Adobe",
+    "color": "#FA0F00"
+  },
+  "supportedBy": ["claude"]
+}

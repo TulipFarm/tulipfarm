@@ -1,0 +1,26 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "loops",
+  "name": "Loops",
+  "maker": "Loops",
+  "homepage": "https://loops.so",
+  "category": "marketing",
+  "teams": ["marketing", "product"],
+  "summary": "Manage contacts and email in Loops",
+  "capabilities": ["Create and update contacts", "Send events to trigger loops", "Send transactional email"],
+  "official": {
+    "evidence": "https://loops.so/docs/mcp-server"
+  },
+  "docs": "https://loops.so/docs/mcp-server",
+  "remote": {
+    "url": "https://mcp.loops.so",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "simpleIcons": "loops",
+    "color": "#FC5200"
+  },
+  "supportedBy": ["claude", "lindy", "gumloop"]
+}

@@ -1,0 +1,45 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "bright-data",
+  "name": "Bright Data",
+  "maker": "Bright Data",
+  "homepage": "https://brightdata.com",
+  "category": "search-and-research",
+  "teams": ["engineering", "marketing"],
+  "summary": "Search and scrape the web through Bright Data",
+  "capabilities": [
+    "Search the web without blocks",
+    "Scrape pages into markdown",
+    "Pull structured data from popular sites"
+  ],
+  "official": {
+    "evidence": "https://github.com/brightdata/brightdata-mcp",
+    "repository": "https://github.com/brightdata/brightdata-mcp"
+  },
+  "docs": "https://github.com/brightdata/brightdata-mcp",
+  "remote": {
+    "url": "https://mcp.brightdata.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "packages": [
+    {
+      "registry": "npm",
+      "name": "@brightdata/mcp",
+      "env": [
+        {
+          "name": "API_TOKEN",
+          "description": "Bright Data API token",
+          "secret": true,
+          "required": true
+        }
+      ]
+    }
+  ],
+  "registryName": "io.github.brightdata/brightdata-mcp",
+  "icons": {
+    "color": "#3D7FFC"
+  },
+  "supportedBy": ["manus", "lindy", "gumloop", "relevance-ai", "docker", "github-registry"]
+}

@@ -1,0 +1,30 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "mercado-pago",
+  "name": "Mercado Pago",
+  "maker": "Mercado Libre",
+  "homepage": "https://www.mercadopago.com",
+  "category": "payments-and-commerce",
+  "teams": ["engineering"],
+  "summary": "Search Mercado Pago docs and check integrations",
+  "capabilities": [
+    "Search Mercado Pago integration docs",
+    "Evaluate integration quality",
+    "Create test applications and credentials"
+  ],
+  "official": {
+    "evidence": "https://mcp.mercadopago.com.br/"
+  },
+  "docs": "https://mcp.mercadopago.com.br/",
+  "remote": {
+    "url": "https://mcp.mercadopago.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "simpleIcons": "mercadopago",
+    "color": "#00B1EA"
+  },
+  "supportedBy": ["docker"]
+}

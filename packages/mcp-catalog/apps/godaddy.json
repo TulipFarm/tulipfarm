@@ -1,0 +1,26 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "godaddy",
+  "name": "GoDaddy",
+  "maker": "GoDaddy",
+  "homepage": "https://www.godaddy.com",
+  "category": "cloud-and-infrastructure",
+  "teams": ["everyone"],
+  "summary": "Check domain name availability",
+  "capabilities": ["Search for available domain names", "Suggest alternative domains and extensions"],
+  "official": {
+    "evidence": "https://developer.godaddy.com/en/docs/api-users/mcp"
+  },
+  "docs": "https://developer.godaddy.com/en/docs/api-users/mcp",
+  "remote": {
+    "url": "https://mcp.godaddy.com",
+    "transport": "streamable-http",
+    "auth": "none",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "simpleIcons": "godaddy",
+    "color": "#1BDBDB"
+  },
+  "supportedBy": ["chatgpt", "claude", "microsoft-copilot", "manus", "lindy", "relevance-ai"]
+}

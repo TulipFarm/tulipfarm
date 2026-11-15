@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { mcpHttpId } from './workspace-mcp-http.ts';
+import { mcpCatalogPackageSchema } from './workspace-mcp-catalog-cache.ts';
 
 const version = z.number().int().nonnegative();
 const revision = z.string().min(1).max(512);
@@ -11,6 +12,7 @@ export const mcpCapabilitiesSchema = z.discriminatedUnion('enabled', [
     canManageShared: z.boolean(),
     integrationsEnabled: z.boolean(),
     dispatchEnabled: z.boolean(),
+    hosted: z.boolean(),
   }),
 ]);
 export const mcpCatalogSchema = z.strictObject({
@@ -27,6 +29,8 @@ export const mcpCatalogSchema = z.strictObject({
         description: z.string(),
         version: z.string(),
         endpoint: z.string(),
+        transport: z.enum(['streamable-http', 'sse']).nullable(),
+        package: mcpCatalogPackageSchema.nullable(),
         compatibility: z.enum(['eligible', 'unknown', 'unsupported']),
         reason: z.string().nullable(),
         authentication: z.enum(['none', 'headers', 'bearer', 'oauth', 'unknown']),
@@ -44,7 +48,17 @@ export const mcpIntegrationSchema = z.strictObject({
   ownership: z.enum(['personal', 'shared']),
   endpoint: z.string(),
   accountLabel: z.string().nullable(),
-  authMethod: z.enum(['none', 'headers', 'bearer', 'oauth', 'secret-bearer', 'secret-headers']),
+  authMethod: z.enum(['none', 'headers', 'bearer', 'oauth', 'secret-bearer', 'secret-headers', 'hosted']),
+  kind: z.enum(['remote', 'hosted']),
+  package: z
+    .strictObject({
+      registry: z.enum(['npm', 'pypi']),
+      name: z.string(),
+      version: z.string(),
+      arguments: z.array(z.string()).optional(),
+    })
+    .nullable(),
+  egress: z.array(z.string()).nullable(),
   status: z.enum([
     'setup',
     'oauth-pending',
@@ -67,7 +81,13 @@ export const mcpIntegrationSchema = z.strictObject({
 export const mcpGrantSchema = z.strictObject({ kind: z.enum(['member', 'team']), id: mcpHttpId });
 export const mcpToolViewSchema = z.strictObject({
   name: z.string(),
+  /** The server's display name for the tool, when it gives one. */
+  title: z.string().nullable(),
   description: z.string(),
+  /** The server says the tool only reads data, so it may run without asking. */
+  readOnly: z.boolean(),
+  /** The server says the tool may delete or overwrite data. */
+  destructive: z.boolean(),
   revision,
   previousRevision: revision.nullable(),
   inputSchema: z.json(),
@@ -82,6 +102,8 @@ export const mcpIntegrationDetailSchema = z.strictObject({
   integration: mcpIntegrationSchema,
   tools: z.array(mcpToolViewSchema).max(200),
   grants: z.array(mcpGrantSchema),
+  /** Shared with every current and future member of the workspace. */
+  workspace: z.boolean(),
   managers: z.array(mcpGrantSchema),
   grantOptions: z.array(mcpGrantSchema.extend({ label: z.string() })),
   descriptor: z.discriminatedUnion('kind', [
@@ -111,6 +133,17 @@ export const mcpAuthenticationSchema = z.discriminatedUnion('kind', [
       .refine(ids => new Set(ids).size === ids.length),
   }),
   z.strictObject({
+    kind: z.literal('hosted'),
+    env: z
+      .array(
+        z.union([
+          z.strictObject({ name: z.string().min(1).max(128), value: z.string().max(4096) }),
+          z.strictObject({ name: z.string().min(1).max(128), secretId: mcpHttpId, reveal: z.boolean().optional() }),
+        ]),
+      )
+      .max(20),
+  }),
+  z.strictObject({
     kind: z.literal('oauth'),
     client: z
       .strictObject({
@@ -124,8 +157,20 @@ export const mcpAuthenticationSchema = z.discriminatedUnion('kind', [
 export const mcpSetupSchema = z.strictObject({
   requestId: mcpHttpId,
   name: z.string().trim().min(1).max(120),
-  endpoint: z.url().max(2048),
+  /** A remote server's URL. A hosted server has a package instead. */
+  endpoint: z.url().max(2048).optional(),
+  package: z
+    .strictObject({
+      registry: z.enum(['npm', 'pypi']),
+      name: z.string().min(1).max(214),
+      version: z.string().min(1).max(128),
+      arguments: z.array(z.string().max(512)).max(16).optional(),
+    })
+    .optional(),
+  egress: z.array(z.string().min(1).max(253)).max(20).optional(),
   ownership: z.enum(['personal', 'shared']),
+  /** For a new shared integration: share it with every current and future member of the workspace. */
+  shareWithWorkspace: z.boolean().optional(),
   catalogEntryId: revision.optional(),
   auth: mcpAuthenticationSchema,
   expectedVersion: version.optional(),
@@ -155,6 +200,8 @@ export const mcpReviewSchema = mcpMutationSchema.extend({
 });
 export const mcpGrantsSchema = mcpMutationSchema.extend({
   grants: z.array(mcpGrantSchema).max(200),
+  /** Shares with every current and future member of the workspace. */
+  workspace: z.boolean().optional(),
   managers: z.array(mcpGrantSchema).max(200).optional(),
 });
 export const mcpLifecycleSchema = mcpMutationSchema.extend({
@@ -255,6 +302,7 @@ export const mcpActionSchema = z.discriminatedUnion('visibility', [
       requester: z.string(),
       endpoint: z.string(),
       accountLabel: z.string().nullable(),
+      package: mcpIntegrationSchema.shape.package,
       authorizationEpoch: version,
       toolName: z.string(),
       toolRevision: revision,

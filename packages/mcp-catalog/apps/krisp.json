@@ -1,0 +1,29 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "krisp",
+  "name": "Krisp",
+  "maker": "Krisp",
+  "homepage": "https://krisp.ai",
+  "category": "chat",
+  "teams": ["everyone"],
+  "summary": "Search Krisp meeting notes and transcripts",
+  "capabilities": [
+    "Search meeting transcripts",
+    "Read meeting notes and action items",
+    "Find meetings by date or topic"
+  ],
+  "official": {
+    "evidence": "https://help.krisp.ai/hc/en-us/articles/25396920405148-Krisp-MCP"
+  },
+  "docs": "https://help.krisp.ai/hc/en-us/articles/25396920405148-Krisp-MCP",
+  "remote": {
+    "url": "https://mcp.krisp.ai/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#6E44FF"
+  },
+  "supportedBy": ["chatgpt", "claude", "manus", "gumloop", "glean"]
+}

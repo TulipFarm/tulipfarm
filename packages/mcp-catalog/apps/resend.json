@@ -1,0 +1,30 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "resend",
+  "name": "Resend",
+  "maker": "Resend",
+  "homepage": "https://resend.com",
+  "category": "email-and-calendar",
+  "teams": ["engineering"],
+  "summary": "Send email and manage domains in Resend",
+  "capabilities": [
+    "Send transactional and broadcast email",
+    "Manage contacts and audiences",
+    "Check domains and sending status"
+  ],
+  "official": {
+    "evidence": "https://resend.com/docs/mcp-server"
+  },
+  "docs": "https://resend.com/docs/mcp-server",
+  "remote": {
+    "url": "https://mcp.resend.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "simpleIcons": "resend",
+    "color": "#000000"
+  },
+  "supportedBy": ["claude", "manus", "lindy", "relevance-ai", "make", "docker"]
+}

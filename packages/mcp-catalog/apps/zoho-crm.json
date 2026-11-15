@@ -1,0 +1,30 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "zoho-crm",
+  "name": "Zoho CRM",
+  "maker": "Zoho",
+  "homepage": "https://www.zoho.com/crm/",
+  "category": "crm-and-sales",
+  "teams": ["sales"],
+  "summary": "Read and update records in Zoho CRM",
+  "capabilities": [
+    "Search leads, contacts, accounts, and deals",
+    "Create, update, and delete CRM records",
+    "Add notes and related records"
+  ],
+  "official": {
+    "evidence": "https://www.zoho.com/crm/developer/docs/mcp/overview.html"
+  },
+  "docs": "https://www.zoho.com/crm/developer/docs/mcp/setup/claude.html",
+  "remote": {
+    "url": "https://zoho-crm-data-operations-60065097786.zohomcp.in/mcp/fe46ddbc48fec3713c8754cea8ec9ac5/message",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "simpleIcons": "zoho",
+    "color": "#E42527"
+  },
+  "supportedBy": ["chatgpt", "claude", "gemini", "lindy", "relevance-ai", "zapier", "make", "n8n"]
+}

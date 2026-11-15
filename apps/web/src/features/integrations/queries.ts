@@ -23,7 +23,7 @@ import {
 import { atlassianApi } from '@/lib/atlassian';
 import { loadOwnMembership } from '@/lib/governance';
 import { listWorkspaces } from '@/lib/workspaces';
-import { loadSlackStatus } from './slack';
+import { loadSlackStatus } from './slack-status';
 import { z } from 'zod';
 import { apiOrigin } from '@/lib/auth';
 import { jsonResponse, readJson, requestSignal } from '@/lib/http';

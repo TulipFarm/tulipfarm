@@ -1,0 +1,47 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "perplexity",
+  "name": "Perplexity",
+  "maker": "Perplexity",
+  "homepage": "https://www.perplexity.ai",
+  "category": "search-and-research",
+  "teams": ["everyone"],
+  "summary": "Search and research with Perplexity answers",
+  "capabilities": [
+    "Search the web for ranked results",
+    "Ask questions answered with sources",
+    "Run deep research on a topic"
+  ],
+  "official": {
+    "evidence": "https://github.com/perplexityai/modelcontextprotocol",
+    "repository": "https://github.com/perplexityai/modelcontextprotocol"
+  },
+  "docs": "https://docs.perplexity.ai/guides/mcp-server",
+  "remote": {
+    "url": "https://api.perplexity.ai/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "packages": [
+    {
+      "registry": "npm",
+      "name": "@perplexity-ai/mcp-server",
+      "env": [
+        {
+          "name": "PERPLEXITY_API_KEY",
+          "description": "Perplexity API key",
+          "secret": true,
+          "required": true
+        }
+      ]
+    }
+  ],
+  "icons": {
+    "lobehub": "Perplexity",
+    "simpleIcons": "perplexity",
+    "color": "#1FB8CD"
+  },
+  "supportedBy": ["manus", "lindy", "gumloop", "relevance-ai", "make", "n8n", "docker"],
+  "featured": true
+}

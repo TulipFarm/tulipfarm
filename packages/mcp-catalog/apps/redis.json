@@ -1,0 +1,45 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "redis",
+  "name": "Redis",
+  "maker": "Redis",
+  "homepage": "https://redis.io",
+  "category": "data-and-databases",
+  "teams": ["engineering"],
+  "summary": "Read and write data in a Redis database",
+  "capabilities": [
+    "Get and set strings, hashes, lists, and sets",
+    "Search with vector and JSON queries",
+    "Publish messages and work with streams"
+  ],
+  "official": {
+    "evidence": "https://redis.io/docs/latest/integrate/redis-mcp/",
+    "repository": "https://github.com/redis/mcp-redis"
+  },
+  "docs": "https://redis.io/docs/latest/integrate/redis-mcp/",
+  "packages": [
+    {
+      "registry": "pypi",
+      "name": "redis-mcp-server",
+      "env": [
+        {
+          "name": "REDIS_HOST",
+          "description": "Redis host",
+          "secret": false,
+          "required": false
+        },
+        {
+          "name": "REDIS_PWD",
+          "description": "Redis password",
+          "secret": true,
+          "required": false
+        }
+      ]
+    }
+  ],
+  "icons": {
+    "simpleIcons": "redis",
+    "color": "#FF4438"
+  },
+  "supportedBy": ["n8n", "docker"]
+}

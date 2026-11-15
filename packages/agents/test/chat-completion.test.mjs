@@ -1209,34 +1209,6 @@ for (const format of formats)
     assert.deepEqual(outcomes, ['skipped_no_tools', 'skipped_no_tools']);
   });
 
-test('a reply that only updated Bud skips the completion check', async t => {
-  const outcomes = checkOutcomes(t);
-  const replies = [
-    nativeReply('anthropic', { calls: [{ name: 'bud_state', input: { name: 'Bud', state: 'Waving' } }] }),
-    nativeReply('anthropic', { text: 'Hi there.' }),
-  ];
-  const requests = [],
-    updates = [];
-  t.mock.method(globalThis, 'fetch', async (_url, init) => {
-    requests.push(JSON.parse(init.body));
-    return Response.json(replies.shift());
-  });
-  const result = await inferWithTools(
-    nativeRoutes.anthropic,
-    [{ role: 'user', text: 'hey' }],
-    () => assert.fail('No business tool expected'),
-    undefined,
-    false,
-    null,
-    { avatar: { update: value => updates.push(value.avatar.state) } },
-  );
-  assert.deepEqual(result, { text: 'Hi there.', avatar: { name: 'Bud', state: 'Waving' } });
-  assert.deepEqual(updates, ['Thinking', 'Waving']);
-  assert.equal(requests.length, 2);
-  assert.ok(!requests.some(isCompletionRequest));
-  assert.deepEqual(outcomes, ['skipped_no_tools']);
-});
-
 test('a reply that reports an action outcome is checked even without a tool call', () => {
   for (const text of [
     'A review card is ready for you to approve the new orders table with the specified fields and CSV import.',
@@ -2266,7 +2238,6 @@ test('a skipped check ends the reply in the same state as a check that returns d
   const run = async (priorCalls, queue) => {
     replies = queue;
     const previews = [],
-      avatars = [],
       usage = [];
     const result = await inferWithTools(
       nativeRoutes.azure,
@@ -2278,20 +2249,16 @@ test('a skipped check ends the reply in the same state as a check that returns d
       {
         priorCalls,
         answerText: update => previews.push(update.text),
-        avatar: { update: value => avatars.push(value.avatar) },
       },
     );
     assert.equal(replies.length, 0);
-    return { result, preview: previews.at(-1), avatars, settled: usage.every(kind => kind === 'known') };
+    return { result, preview: previews.at(-1), settled: usage.every(kind => kind === 'known') };
   };
   const answer = () => nativeReply('azure', { text: 'Hello. How can I help?' });
   const skipped = await run(0, [answer()]);
   const checked = await run(1, [answer(), selectReply('azure', verdict())]);
   assert.deepEqual(skipped, checked);
-  assert.deepEqual(skipped.result, {
-    text: 'Hello. How can I help?',
-    avatar: { name: 'Bud', state: 'Idle' },
-  });
+  assert.deepEqual(skipped.result, { text: 'Hello. How can I help?' });
 });
 
 test('completion evidence is trimmed oldest first to fit, keeping the latest request and the candidate', () => {

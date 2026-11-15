@@ -1,0 +1,70 @@
+# Keeps packages/mcp-catalog fresh, every Monday:
+# 1. Probes every hosted server: records the day it answered, marks servers it can't reach
+#    (apps hide them), and fills in sign-in types that are still `unknown`.
+# 2. Refreshes the lists of valid @lobehub/icons and simple-icons keys.
+# 3. Lists new servers in the official MCP Registry under company domains, for a person to review.
+# Opens or updates one pull request with the changes and the report. Nothing merges on its own.
+#
+# Setup: secret SPROUT_UPGRADE_TOKEN (the tulipfarm-dot bot token also used by sprout-upgrade.yml),
+# with Contents and Pull requests read and write, so the pull request's CI runs.
+name: MCP catalog refresh
+
+on:
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mcp-catalog-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .node-version
+      - name: Install pnpm
+        run: npm install --global pnpm@11.5.3
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Refresh the catalog
+        working-directory: packages/mcp-catalog
+        run: |
+          {
+            node scripts/probe.mjs
+            echo
+            node scripts/icon-keys.mjs
+            node scripts/discover.mjs 8
+          } > "$RUNNER_TEMP/report.md"
+          pnpm exec oxfmt apps icon-keys
+          pnpm test
+
+      - name: Open the pull request
+        env:
+          GH_TOKEN: ${{ secrets.SPROUT_UPGRADE_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ -z "$(git status --porcelain -- packages/mcp-catalog)" ]; then
+            echo 'Nothing changed.' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          {
+            echo 'Weekly refresh of the MCP catalog: server checks, sign-in types and icon keys.'
+            echo
+            cat "$RUNNER_TEMP/report.md"
+            echo
+            echo "Opened by the [MCP catalog refresh workflow]($RUN_URL)."
+          } | head -c 60000 > "$RUNNER_TEMP/body.md"
+          url=$(BRANCH=mcp-catalog/refresh BASE=main PASSED=true TITLE='chore(mcp-catalog): weekly refresh' \
+            BODY_FILE="$RUNNER_TEMP/body.md" bash .github/sprout-upgrade/open-pr.sh)
+          echo "Pull request: $url" >> "$GITHUB_STEP_SUMMARY"

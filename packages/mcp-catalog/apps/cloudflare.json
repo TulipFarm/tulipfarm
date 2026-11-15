@@ -1,0 +1,34 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "cloudflare",
+  "name": "Cloudflare",
+  "maker": "Cloudflare",
+  "homepage": "https://www.cloudflare.com",
+  "category": "cloud-and-infrastructure",
+  "teams": ["engineering"],
+  "summary": "Manage Cloudflare Workers, DNS, and other services",
+  "capabilities": [
+    "Manage Workers, KV, R2, and D1",
+    "Update DNS records and zones",
+    "Search Cloudflare documentation",
+    "Read analytics and logs"
+  ],
+  "official": {
+    "evidence": "https://developers.cloudflare.com/agents/model-context-protocol/cloudflare/servers-for-cloudflare/",
+    "repository": "https://github.com/cloudflare/mcp"
+  },
+  "docs": "https://developers.cloudflare.com/agents/model-context-protocol/cloudflare/servers-for-cloudflare/",
+  "remote": {
+    "url": "https://mcp.cloudflare.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "lobehub": "Cloudflare",
+    "simpleIcons": "cloudflare",
+    "color": "#F38020"
+  },
+  "supportedBy": ["microsoft-copilot", "manus", "lindy", "gumloop", "relevance-ai", "glean", "docker"],
+  "featured": true
+}

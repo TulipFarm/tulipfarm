@@ -1,0 +1,39 @@
+{
+  "name": "@tulipfarm/gateway",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./preview": {
+      "types": "./dist/preview.d.ts",
+      "default": "./dist/preview.js"
+    },
+    "./preview-environment": {
+      "types": "./dist/preview-environment.d.ts",
+      "default": "./dist/preview-environment.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test --test-concurrency=1 test/*.test.mjs",
+    "start": "node dist/server.js"
+  },
+  "dependencies": {
+    "@fastify/rate-limit": "11.2.0",
+    "@tulipfarm/apps": "workspace:*",
+    "@tulipfarm/build-info": "workspace:*",
+    "@tulipfarm/config": "workspace:*",
+    "@tulipfarm/extensions": "workspace:*",
+    "@tulipfarm/observability": "workspace:*",
+    "@tulipfarm/workspace-storage": "workspace:*",
+    "@tulipfarm/workspaces": "workspace:*",
+    "fastify": "5.12.5",
+    "pg": "8.23.0",
+    "zod": "4.6.6"
+  },
+  "devDependencies": {
+    "@tulipfarm/typescript-config": "workspace:*",
+    "@types/node": "26.6.3",
+    "@types/pg": "8.23.1"
+  }
+}

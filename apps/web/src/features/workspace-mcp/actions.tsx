@@ -7,7 +7,7 @@ import { Textarea } from '@tulipfarm/sprout/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@tulipfarm/sprout/select';
 import { useMcpActions } from './queries';
 import type { McpApi } from './api';
-import type { Action, Capabilities } from './contracts';
+import { packageLabel, type Action, type Capabilities } from './contracts';
 import { McpCommandFeedback, McpRead, useMcpCommand } from './state';
 
 const labels: Record<Action['status'], string> = {
@@ -151,14 +151,23 @@ function ActionReview({
       {action.visibility === 'full' ? (
         <>
           <dl className="grid min-w-0 gap-3 break-all sm:grid-cols-2">
-            <div>
-              <dt className="text-sm text-muted-foreground">Destination endpoint</dt>
-              <dd>{action.exact.endpoint}</dd>
-            </div>
-            <div>
-              <dt className="text-sm text-muted-foreground">External account</dt>
-              <dd>{action.exact.accountLabel ?? 'No verified account label'}</dd>
-            </div>
+            {action.exact.package ? (
+              <div>
+                <dt className="text-sm text-muted-foreground">Package</dt>
+                <dd>{packageLabel(action.exact.package)} in a TulipFarm sandbox</dd>
+              </div>
+            ) : (
+              <>
+                <div>
+                  <dt className="text-sm text-muted-foreground">Destination endpoint</dt>
+                  <dd>{action.exact.endpoint}</dd>
+                </div>
+                <div>
+                  <dt className="text-sm text-muted-foreground">External account</dt>
+                  <dd>{action.exact.accountLabel ?? 'No verified account label'}</dd>
+                </div>
+              </>
+            )}
             <div>
               <dt className="text-sm text-muted-foreground">Tool revision</dt>
               <dd>{action.exact.toolRevision}</dd>

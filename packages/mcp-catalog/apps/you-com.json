@@ -1,0 +1,31 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "you-com",
+  "name": "You.com",
+  "maker": "You.com",
+  "homepage": "https://you.com",
+  "category": "search-and-research",
+  "teams": ["everyone"],
+  "summary": "Search the web and get answers from You.com",
+  "capabilities": ["Search the web and news", "Get cited answers to questions", "Fetch the content of web pages"],
+  "official": {
+    "evidence": "https://github.com/youdotcom-oss/mcp",
+    "repository": "https://github.com/youdotcom-oss/mcp"
+  },
+  "docs": "https://github.com/youdotcom-oss/mcp",
+  "remote": {
+    "url": "https://api.you.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "packages": [
+    {
+      "registry": "npm",
+      "name": "@youdotcom-oss/mcp"
+    }
+  ],
+  "icons": {
+    "color": "#6B4CF6"
+  }
+}

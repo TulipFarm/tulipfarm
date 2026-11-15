@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { inferWithTools } from '../src/inference.ts';
-import { nonWorkToolNames } from '../src/non-work-tools.ts';
 import { completionReply, isCompletionRequest, nativeReply, nativeRoutes, use } from './native-fixture.mjs';
 
 const format = 'anthropic';
@@ -37,26 +36,6 @@ test('a greeting without tools reports thinking, then done, with no tool or step
   assert.ok(!events.includes('completion-request'), 'a tool-free reply skips the completion check');
   assert.equal(events.at(-1).status, 'done', 'the reply ends done, with no title request after it');
   assert.ok(!events.includes('request-2'));
-});
-
-test('bud_state alone is not tool work: no tool status and no step', async t => {
-  assert.ok(nonWorkToolNames.has('bud_state'));
-  const { result, events } = run(
-    t,
-    [
-      nativeReply(format, { calls: [{ name: 'bud_state', input: { name: 'Bud', state: 'Waving' } }] }),
-      nativeReply(format, { calls: [{ name: 'bud_state', input: { name: 'Bud', state: 'Idle' } }] }),
-      nativeReply(format, { text: 'Hello!' }),
-    ],
-    { avatar: { update: () => {} } },
-  );
-  assert.equal((await result).text, 'Hello!');
-  const reported = statuses(events);
-  assert.deepEqual(
-    reported.map(({ status, round }) => `${status}:${round}`),
-    ['thinking:1', 'thinking:2', 'thinking:3', 'done:3'],
-  );
-  assert.ok(reported.every(update => update.toolRounds === 0 && !('tool' in update)));
 });
 
 test('two work tools report their display names, and steps count only finished tool rounds', async t => {

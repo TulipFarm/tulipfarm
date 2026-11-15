@@ -1,0 +1,49 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "monday",
+  "name": "monday.com",
+  "maker": "monday.com",
+  "homepage": "https://monday.com",
+  "category": "projects-and-issues",
+  "teams": ["everyone", "operations"],
+  "summary": "Read and update monday.com boards and items",
+  "capabilities": [
+    "Search boards, items and updates",
+    "Create and update items and columns",
+    "Post updates and manage board structure"
+  ],
+  "official": {
+    "evidence": "https://developer.monday.com/apps/docs/mondaycom-mcp-integration",
+    "repository": "https://github.com/mondaycom/mcp"
+  },
+  "docs": "https://developer.monday.com/apps/docs/mondaycom-mcp-integration",
+  "remote": {
+    "url": "https://mcp.monday.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "com.monday/monday.com",
+  "icons": {
+    "color": "#6161FF"
+  },
+  "supportedBy": [
+    "chatgpt",
+    "claude",
+    "gemini",
+    "microsoft-copilot",
+    "copilot-studio",
+    "manus",
+    "lindy",
+    "gumloop",
+    "relevance-ai",
+    "dust",
+    "glean",
+    "zapier",
+    "make",
+    "n8n",
+    "docker",
+    "github-registry"
+  ],
+  "featured": true
+}

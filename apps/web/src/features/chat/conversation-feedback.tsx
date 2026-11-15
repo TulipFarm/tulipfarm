@@ -52,7 +52,7 @@ export function ConversationRead<T>({
 }
 
 // The timeline already shows the result of these commands.
-const quietCommands = new Set(['send', 'retry', 'cancel', 'resume-maintenance']);
+const quietCommands = new Set(['send', 'layout-action', 'retry', 'cancel', 'resume-maintenance']);
 
 export function CommandFeedback({
   write,
@@ -89,13 +89,15 @@ export function CommandFeedback({
       <Alert variant="destructive">
         <AlertDescription>
           {state.kind === 'uncertain'
-            ? uncertainCopy(state.command.kind === 'send', state.offline, state.updating)
+            ? state.unsent
+              ? "Your message hasn't been sent. Try again."
+              : uncertainCopy(state.command.kind === 'send', state.offline, state.updating)
             : state.message}
         </AlertDescription>
       </Alert>
       <div className="flex flex-wrap gap-2">
         {state.kind === 'uncertain' ? (
-          state.command.kind === 'send' && !state.offline && !state.updating ? (
+          state.command.kind === 'send' && !state.offline && !state.updating && !state.unsent ? (
             <Button variant="outline" onClick={() => void write.recover()}>
               Check message status
             </Button>

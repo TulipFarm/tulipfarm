@@ -213,3 +213,34 @@ test('a write abandoned while held is never sent after the check confirms', asyn
     },
   );
 });
+
+test('a write held by a failed check waits for a newer check that replaced it, and fails only if that fails too', async () => {
+  await withServer(
+    (_attempt, _request, response) => {
+      response.writeHead(204);
+      response.end();
+    },
+    async (url, attempts) => {
+      let fail!: (error: Error) => void;
+      holdWrites(new Promise<void>((_resolve, reject) => (fail = reject)));
+      const write = jsonResponse(url, { method: 'PUT', body: {}, signal: requestSignal() });
+      let confirm!: () => void;
+      holdWrites(new Promise<void>(resolve => (confirm = resolve)));
+      fail(new DOMException('This operation was aborted', 'AbortError'));
+      await delay(50);
+      assert.equal(attempts(), 0, 'The write waits for the newer check');
+      confirm();
+      assert.equal((await write).status, 204);
+      assert.equal(attempts(), 1);
+
+      holdWrites(new Promise<void>((_resolve, reject) => (fail = reject)));
+      const refused = jsonResponse(url, { method: 'PUT', body: {}, signal: requestSignal() });
+      let failLatest!: (error: Error) => void;
+      holdWrites(new Promise<void>((_resolve, reject) => (failLatest = reject)));
+      fail(new Error('aborted'));
+      failLatest(new Error('Workspace access changed'));
+      await assert.rejects(refused, /Could not confirm your workspace access/);
+      assert.equal(attempts(), 1);
+    },
+  );
+});

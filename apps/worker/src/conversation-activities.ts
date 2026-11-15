@@ -68,6 +68,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { conversationCompactor, projectReminder } from './conversation-compactor.ts';
 import type { ConversationCompactor } from '@tulipfarm/conversations/compaction';
 import { compactionDefaults } from '@tulipfarm/config/compaction';
+import { isPlanProvider, type PlanProvider } from '@tulipfarm/config';
 import { withFileSources, type FileContent, type GoogleFileReader } from '@tulipfarm/conversations/file-references';
 import type { FileOutputStore } from '@tulipfarm/conversations/file-outputs';
 import type { ImageOutputStore } from '@tulipfarm/conversations/image-outputs';
@@ -77,12 +78,23 @@ import { chatSkills } from '@tulipfarm/agents/chat-skills';
 import { createReplyTextPublisher } from '@tulipfarm/conversations/event-publisher';
 import { isFeatureEnabled } from '@tulipfarm/observability';
 import { beginReplySession } from './reply-session.ts';
+import {
+  memberPlans,
+  planCredentialsFromEnvironment,
+  type PlanCredentials,
+  subscriptionsFromEnvironment,
+  turnCaller,
+} from './member-plans.ts';
+import type { Subscriptions } from '@tulipfarm/integrations/subscriptions';
 import { conversationTitleActivity } from './conversation-title.ts';
 import type { ConversationTitleWork } from '@tulipfarm/conversations/titles';
 import { conversationInventoryReads, type ConversationInventoryReads } from './conversation-inventory.ts';
 import { secretsServices } from './secrets-composition.ts';
 import { heldSecrets } from '@tulipfarm/secrets/send';
 import { resumeApiCall, type ApiCallFiles } from '@tulipfarm/api-calls';
+import type { AppPages } from '@tulipfarm/agents/app-page-tools';
+import type { AppEditing } from '@tulipfarm/agents/app-tools';
+import { finishAppTurn, workerAppPages } from './app-editing-composition.ts';
 
 /** The first-turn title is short, so it uses the title role's family. Without a model for it, the title uses the chat model. */
 export function chatTitleModel(env: NodeJS.ProcessEnv = process.env): ConversationModel | undefined {
@@ -110,6 +122,12 @@ export type MeteredReplyOptions = {
   outputs?: (FileOutputStore & Partial<Pick<ImageOutputStore, 'read'>>) | undefined;
   skillExecution?: SkillExecutionFactory | undefined;
   chatExecution?: ChatExecution | undefined;
+  /** Runs `coding.run` agents; without it, chat does not offer the tool. */
+  codingRuns?: CodingRuns | undefined;
+  /** Edits the public app of an app's own chat; without it, chat does not offer the app file tools. */
+  apps?: AppEditing | undefined;
+  /** Edits the private app of an app's own chat; without it, chat does not offer the app page tools. */
+  appPages?: AppPages | undefined;
   wakePlan?: PlanWake | undefined;
   wakeTask?: TaskWake | undefined;
   /** Delivers per-card Stop requests to running sub-agents. */
@@ -122,6 +140,10 @@ export type MeteredReplyOptions = {
   chatFiles?: Omit<ChatFiles, 'imageInput'> | undefined;
   /** Reads a workspace's web address so replies can link to its workflows. */
   workspaceSlug?: ((workspaceId: string) => Promise<string | undefined>) | undefined;
+  /** Members' plan connections by provider; null when the deployment turned that plan off. Read from the environment when left out. */
+  planCredentials?: Partial<Record<PlanProvider, PlanCredentials | null>> | undefined;
+  /** Who may use which members' plans. */
+  subscriptions?: Subscriptions | undefined;
 };
 /** A paused family's replacement may not read images that the pinned family would have. */
 function withoutImages(messages: Parameters<ConversationReply>[0]['messages']) {
@@ -152,6 +174,9 @@ export function meteredReply(
     outputs,
     skillExecution,
     chatExecution,
+    codingRuns,
+    apps,
+    appPages,
     wakePlan,
     wakeTask,
     subagentStops = (sharedSubagentStops ??= createSubagentStops()),
@@ -159,9 +184,17 @@ export function meteredReply(
     compactor,
     chatFiles,
     workspaceSlug,
+    planCredentials,
+    subscriptions = subscriptionsFromEnvironment(runtime),
   }: MeteredReplyOptions = {},
 ): ConversationReply {
   const secretServices = secretsServices(runtime);
+  // Built on the first plan reply, so deployments without a credential keyring still construct replies.
+  const credentials: Partial<Record<PlanProvider, PlanCredentials | null>> = { ...planCredentials };
+  const credentialsFor = (provider: PlanProvider) =>
+    provider in credentials
+      ? (credentials[provider] ?? null)
+      : (credentials[provider] = planCredentialsFromEnvironment(runtime, provider));
   const webOrigin = URL.canParse(process.env.WEB_ORIGIN ?? '') ? process.env.WEB_ORIGIN : undefined;
   return async ({
     model,
@@ -181,6 +214,7 @@ export function meteredReply(
     priorReviewCards = [],
     earlierMessages = false,
     chatFiles: chatFilesOffered = false,
+    codingRuns: codingRunsOffered = false,
     builtinSkills,
     waitingCards,
     waitingRowCards,
@@ -198,9 +232,26 @@ export function meteredReply(
       : null;
     const chat = chatReplyModel(replacement ?? model);
     if (!chat) throw new Error('conversation-model-unavailable');
-    const validatedRoute = inferenceRouteSchema.parse(chat.route);
+    // A plan model (ChatGPT, Claude or Copilot) runs on the first plan the requester may use: their own, then one shared with them, their
+    // teams or the workspace. Slack and project chats use workspace shares only. When every plan is spent, the
+    // workspace's fallback model answers. Tokens are read here, inside the activity, so they never enter workflow history.
+    const plans = isPlanProvider(chat.route.provider)
+      ? await memberPlans({
+          provider: chat.route.provider,
+          credentials: credentialsFor(chat.route.provider),
+          subscriptions,
+          workspaceId: fence.workspaceId,
+          caller: externalContext || project ? null : await turnCaller(runtime, fence),
+          model: chat.route.model,
+        })
+      : null;
+    const validatedRoute = inferenceRouteSchema.parse(
+      plans?.token ? { ...chat.route, accessToken: plans.token } : chat.route,
+    );
     const fallback = chatFallbackModel(chat.price.familyId);
-    const completionCheck = roleModel('completion-check') ?? undefined;
+    // A plan also runs the completion check, so a plan chat sends nothing extra to a model the workspace pays for.
+    const completionCheck = plans ? undefined : (roleModel('completion-check') ?? undefined);
+    const nextPlanCredential = plans ? { nextPlanCredential: plans.next } : {};
     const slug = await workspaceSlug?.(fence.workspaceId);
     const replyContext = {
       builtinSkills,
@@ -299,27 +350,20 @@ export function meteredReply(
       ? undefined
       : ({ step, text }: { step: number; text: string }) => publisher.update(step, text);
     const progress: ToolInferenceContext['progress'] = update => publisher.progress(update);
-    // Bud's expressions cost extra model rounds, so the avatar runs only where the bud-avatar flag is on.
-    const budUser = externalContext || project ? null : requester;
-    const budAvatar =
-      !!budUser &&
-      (await observeChatDetail('feature-flag', () =>
-        isFeatureEnabled('bud-avatar', { id: budUser.userId }, { id: fence.workspaceId }),
-      ));
-    const avatar = budAvatar
-      ? {
-          update: ({
-            step,
-            avatar,
-          }: {
-            step: number;
-            avatar: import('@tulipfarm/conversations/results').AvatarSnapshot;
-          }) => publisher.avatar(step, avatar),
-        }
-      : undefined;
     const layout = generativeUi ? (externalContext ? { slack: { interactive: true } } : true) : undefined;
+    const layoutPreview: ToolInferenceContext['layoutPreview'] =
+      project || layout !== true ? undefined : ({ step, json }) => publisher.layout(step, json);
     const subagentPool = observeChatDetailSync('subagent-pool', () => createSubagentPool());
     let delegations = 0;
+    // A coding run uses the member's own plan and GitHub account, so only in their own chat in the app.
+    const codingRunTools = requester && !externalContext && !project ? codingRuns : undefined;
+    const appChat =
+      requester?.kind === 'human' && !externalContext && !project
+        ? { workspaceId: fence.workspaceId, actor: requester, conversationId: fence.conversationId }
+        : undefined;
+    const appTools = apps && appChat && (await apps.admitted(appChat)) ? apps : undefined;
+    const pageTools = !appTools && appPages && appChat && (await appPages.admitted(appChat)) ? appPages : undefined;
+    const appKind = appTools ? 'public' : pageTools ? 'private' : undefined;
     const chatToolOptions = (
       toolRuntime: Parameters<typeof createChatTools>[0],
       tool?: string,
@@ -342,6 +386,9 @@ export function meteredReply(
       outputs: outputs ? { files: outputs, autonomous: !requester } : undefined,
       skillExecution,
       chatExecution,
+      codingRuns: codingRunTools,
+      apps: appTools,
+      appPages: pageTools,
       telemetryRuntime: externalContext ? 'slack' : 'chat',
       wakePlan,
       agentSetup: slackAgentSetupFromEnvironment(toolRuntime),
@@ -478,7 +525,6 @@ export function meteredReply(
         timeZone,
         mcp && requester && !externalContext
           ? {
-              ...(avatar ? { avatar } : {}),
               ...(layout ? { layout } : {}),
               priorCalls,
               priorToolCalls,
@@ -491,10 +537,14 @@ export function meteredReply(
               waitingCards,
               waitingRowCards,
               chatFiles: chatFilesOffered && Boolean(chatFiles),
+              codingRuns: codingRunsOffered && Boolean(codingRunTools),
+              apps: appKind,
               ...(answerText ? { answerText } : {}),
+              ...(layoutPreview ? { layoutPreview } : {}),
               progress,
               ...replyContext,
               completionCheck: completionCheck?.route,
+              ...nextPlanCredential,
               ...(fallback
                 ? {
                     fallback: {
@@ -512,7 +562,6 @@ export function meteredReply(
               ...(session.catalog ? { catalog: session.catalog } : {}),
             }
           : {
-              ...(avatar ? { avatar } : {}),
               ...(layout ? { layout } : {}),
               priorCalls,
               priorToolCalls,
@@ -525,11 +574,15 @@ export function meteredReply(
               waitingCards,
               waitingRowCards,
               chatFiles: chatFilesOffered && Boolean(chatFiles),
+              codingRuns: codingRunsOffered && Boolean(codingRunTools),
+              apps: appKind,
               ...(externalContext ? { preloadedTools: ['slack.thread.react'] } : {}),
               ...(answerText ? { answerText } : {}),
+              ...(layoutPreview ? { layoutPreview } : {}),
               progress,
               ...replyContext,
               completionCheck: completionCheck?.route,
+              ...nextPlanCredential,
               ...(fallback
                 ? {
                     fallback: {
@@ -549,7 +602,11 @@ export function meteredReply(
         sourceMessages,
       );
       // A lost lease ends the reply with its storage failure at once, even while a model call is still pending.
-      return await session.whileLeased(reply);
+      return await session.whileLeased(reply).catch(async (error: unknown) => {
+        if (error instanceof Error && /^model-(chatgpt|claude|copilot)-reconnect$/.test(error.message))
+          await plans?.retire('reconnect');
+        throw error;
+      });
     } finally {
       session.close();
       await observeChatDetail('publisher-close', () => publisher.close());
@@ -570,6 +627,9 @@ export function createConversationActivities(
   wakeTask?: TaskWake,
   workspaceSlug?: (workspaceId: string) => Promise<string | undefined>,
   chatExecution?: ChatExecution,
+  codingRuns?: CodingRunsFactory,
+  apps?: AppEditing,
+  appPages: AppPages | undefined = workerAppPages(storage),
 ) {
   const runtime = withFileSources(withKnowledgeSourceAuthorization(withGitHubSourceAuthorization(storage)));
   const slack = slackActionsFromEnvironment()?.(runtime);
@@ -581,6 +641,7 @@ export function createConversationActivities(
     fileDocument: (...args) => (google ??= googleOperations(runtime)).fileDocument(...args),
   };
   const turnFiles = objects ? chatTurnFiles(runtime, objects) : undefined;
+  const coding = codingRuns?.(runtime);
   const generateTitle = conversationTitleActivity(storage);
   const run = <T>(
     work: unknown,
@@ -603,6 +664,9 @@ export function createConversationActivities(
             outputs: files,
             skillExecution,
             chatExecution,
+            codingRuns: coding,
+            apps,
+            appPages,
             wakePlan,
             wakeTask,
             inventory,
@@ -676,8 +740,11 @@ export function createConversationActivities(
           if (resumed.state === 'waiting') return resumed;
           return { ...resumed, sources: apiCallSources(resumed.result, context.conversationId) };
         },
+        coding,
       );
-      return process(executor, parsed);
+      const result = await process(executor, parsed);
+      await finishAppTurn(storage, { apps, pages: appPages }, parsed);
+      return result;
     });
   return {
     processConversationReply: (work: Parameters<ReturnType<typeof createConversationExecutor>['process']>[0]) =>
@@ -693,3 +760,5 @@ export function createConversationActivities(
 }
 import type { SkillExecutionFactory } from '@tulipfarm/agents/skill-execution';
 import type { ChatExecution } from '@tulipfarm/agents/chat-execution';
+import type { CodingRuns } from '@tulipfarm/agents/coding-runs';
+import type { CodingRunsFactory } from './coding-runs.ts';

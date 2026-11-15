@@ -206,6 +206,19 @@ jobs:
         run: |
           pnpm --filter @tulipfarm/api exec node --test --test-name-pattern='workspace HTTP conceals' test/governance.integration.mjs
           pnpm --filter @tulipfarm/workspace-storage exec node --test --test-name-pattern='membership admission' test/integration/runtime.test.mjs
+      - name: Check app tables, app credits and app names
+        run: |
+          pnpm --filter @tulipfarm/workspace-storage exec node --test --test-concurrency=1 test/integration/apps.test.mjs test/integration/app-credits.test.mjs
+          pnpm --filter @tulipfarm/database exec node --test test/integration/app-hostnames.test.mjs
+          pnpm --filter @tulipfarm/apps run test:integration
+          pnpm --filter @tulipfarm/worker run test:apps
+          pnpm --filter @tulipfarm/api run test:apps
+      - name: Check that one chat at a time edits an app and only a finished turn saves
+        run: pnpm --filter @tulipfarm/agents exec node --test --test-concurrency=1 test/app-tools.integration.mjs
+      - name: Check that an app chat replaces pages only at the revision it read
+        run: pnpm --filter @tulipfarm/agents exec node --test --test-concurrency=1 test/app-page-tools.integration.mjs
+      - name: Check that an app chat turn saves its app edits only when it completes
+        run: pnpm --filter @tulipfarm/worker exec node --test --test-concurrency=1 test/app-editing.integration.mjs
       - name: Check row and project review drafts
         env:
           XAI_API_KEY: synthetic-not-secret

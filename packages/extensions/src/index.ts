@@ -1,5 +1,10 @@
 export type * from './slots.ts';
 export {
+  appBuilder,
+  appHost,
+  AppHostConflictError,
+  AppHostUnavailableError,
+  appPublisher,
   captureAnalytics,
   configuredExecutionBackend,
   creditGate,
@@ -14,6 +19,7 @@ export {
   identifyAnalyticsGroup,
   identifyAnalyticsPerson,
   loadedExtensions,
+  mcpHost,
   providerCostPricing,
   recordUsage,
   registerExtension,
@@ -21,6 +27,7 @@ export {
   resetExtensions,
   shutdownExtensions,
   socialPlatformApps,
+  unavailableAppHost,
   unlimitedCredits,
 } from './registry.ts';
 export {

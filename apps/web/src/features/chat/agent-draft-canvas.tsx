@@ -11,16 +11,9 @@ import type { AgentContext } from '@/features/agents/api';
 import { KeepsEditsContext, samePage } from '@/features/tables/feedback';
 import { AuthoringDraftCard } from './authoring-draft-card';
 import { conversationApi, type ConversationApi } from './conversation-api';
-import { useCanvas, type CanvasItem } from './canvas-state';
+import { useCanvas } from './canvas-state';
+import { agentDraftCanvasItem } from './workflow-canvas';
 import { useAuthoringDraft, useConversationChanges } from './queries';
-
-export function agentDraftCanvasItem(workspaceId: string, chatId: string, draftId: string): CanvasItem {
-  return {
-    id: `agent:draft:${chatId}:${draftId}`,
-    title: 'Agent draft',
-    content: { kind: 'agent-draft', workspaceId, chatId, draftId },
-  };
-}
 
 export function AgentDraftCanvas({
   workspaceId,

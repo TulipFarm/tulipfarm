@@ -1,0 +1,46 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "postman",
+  "name": "Postman",
+  "maker": "Postman",
+  "homepage": "https://www.postman.com",
+  "category": "code",
+  "teams": ["engineering"],
+  "summary": "Manage Postman collections, APIs, and environments",
+  "capabilities": [
+    "Find and read collections, requests, and specs",
+    "Create and update collections and environments",
+    "Run collections and check monitors"
+  ],
+  "official": {
+    "evidence": "https://learning.postman.com/docs/reference/postman-api/postman-mcp-server/overview",
+    "repository": "https://github.com/postmanlabs/postman-mcp-server"
+  },
+  "docs": "https://learning.postman.com/docs/reference/postman-api/postman-mcp-server/overview",
+  "remote": {
+    "url": "https://mcp.postman.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "packages": [
+    {
+      "registry": "npm",
+      "name": "@postman/postman-mcp-server",
+      "env": [
+        {
+          "name": "POSTMAN_API_KEY",
+          "description": "Postman API key",
+          "secret": true,
+          "required": true
+        }
+      ]
+    }
+  ],
+  "registryName": "com.postman/postman-mcp-server",
+  "icons": {
+    "simpleIcons": "postman",
+    "color": "#FF6C37"
+  },
+  "supportedBy": ["claude", "manus", "lindy", "gumloop", "relevance-ai", "glean", "docker", "github-registry"]
+}

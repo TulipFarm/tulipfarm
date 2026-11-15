@@ -1,0 +1,31 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "lusha",
+  "name": "Lusha",
+  "maker": "Lusha",
+  "homepage": "https://www.lusha.com",
+  "category": "crm-and-sales",
+  "teams": ["sales"],
+  "summary": "Find and enrich B2B contacts with Lusha",
+  "capabilities": [
+    "Search contacts and companies",
+    "Enrich people with emails and phone numbers",
+    "Find prospects by role and firmographics"
+  ],
+  "official": {
+    "evidence": "https://github.com/lusha-oss/lusha-mcp-plugin",
+    "repository": "https://github.com/lusha-oss/lusha-mcp-plugin"
+  },
+  "docs": "https://docs.lusha.com/mcp",
+  "remote": {
+    "url": "https://mcp.lusha.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "com.lusha.mcp/mcp",
+  "icons": {
+    "color": "#5A3FFF"
+  },
+  "supportedBy": ["chatgpt", "claude", "lindy", "relevance-ai"]
+}

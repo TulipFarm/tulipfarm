@@ -19,6 +19,7 @@ const sourceRoots = [
   'apps/render-worker/src',
   'apps/database/src',
   'apps/snippet-broker/src',
+  'apps/gateway/src',
   ...readdirSync(join(root, 'packages'))
     .filter(name => name !== 'secrets')
     .map(name => `packages/${name}/src`),

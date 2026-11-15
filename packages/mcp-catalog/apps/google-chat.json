@@ -1,0 +1,27 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "google-chat",
+  "name": "Google Chat",
+  "maker": "Google",
+  "homepage": "https://workspace.google.com",
+  "category": "chat",
+  "teams": ["everyone"],
+  "summary": "Read and send messages in Google Chat",
+  "capabilities": ["List spaces and read messages", "Send messages to spaces", "Search conversations"],
+  "official": {
+    "evidence": "https://developers.google.com/workspace/guides/configure-mcp-servers"
+  },
+  "docs": "https://developers.google.com/workspace/guides/configure-mcp-servers",
+  "remote": {
+    "url": "https://chatmcp.googleapis.com/mcp/v1",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "lobehub": "Google",
+    "simpleIcons": "googlechat",
+    "color": "#34A853"
+  },
+  "supportedBy": ["gemini", "lindy", "glean", "zapier", "n8n"]
+}

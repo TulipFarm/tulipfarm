@@ -1,0 +1,28 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "baserow",
+  "name": "Baserow",
+  "maker": "Baserow",
+  "homepage": "https://baserow.io",
+  "category": "docs-and-files",
+  "teams": ["operations"],
+  "summary": "Read and change Baserow tables and rows",
+  "capabilities": ["List databases, tables and fields", "Search and read rows", "Create, update and delete rows"],
+  "official": {
+    "evidence": "https://baserow.io/user-docs/mcp-server",
+    "repository": "https://github.com/baserow/baserow-mcp"
+  },
+  "docs": "https://baserow.io/user-docs/mcp-server",
+  "remote": {
+    "url": "https://api.baserow.io/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "io.baserow/baserow",
+  "icons": {
+    "simpleIcons": "baserow",
+    "color": "#5190EF"
+  },
+  "supportedBy": ["lindy", "relevance-ai", "make", "n8n", "github-registry"]
+}

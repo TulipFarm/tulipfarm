@@ -1,0 +1,45 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "wix",
+  "name": "Wix",
+  "maker": "Wix",
+  "homepage": "https://www.wix.com",
+  "category": "marketing",
+  "teams": ["marketing", "design"],
+  "summary": "Build and manage Wix sites, stores, and bookings",
+  "capabilities": [
+    "Create and edit sites and pages",
+    "Manage store products, orders, and bookings",
+    "Search Wix developer documentation"
+  ],
+  "official": {
+    "evidence": "https://dev.wix.com/docs/sdk/articles/use-the-wix-mcp/about-the-wix-mcp",
+    "repository": "https://github.com/wix/wix-mcp"
+  },
+  "docs": "https://dev.wix.com/docs/sdk/articles/use-the-wix-mcp/about-the-wix-mcp",
+  "remote": {
+    "url": "https://mcp.wix.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "com.wix/mcp",
+  "icons": {
+    "simpleIcons": "wix",
+    "color": "#0C6EFC"
+  },
+  "supportedBy": [
+    "chatgpt",
+    "claude",
+    "gemini",
+    "copilot-studio",
+    "manus",
+    "lindy",
+    "gumloop",
+    "relevance-ai",
+    "glean",
+    "zapier",
+    "docker",
+    "github-registry"
+  ]
+}

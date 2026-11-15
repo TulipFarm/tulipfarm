@@ -1,0 +1,43 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "pandadoc",
+  "name": "PandaDoc",
+  "maker": "PandaDoc",
+  "homepage": "https://www.pandadoc.com",
+  "category": "docs-and-files",
+  "teams": ["sales", "operations"],
+  "summary": "Create, send, and track documents",
+  "capabilities": [
+    "Create documents from templates",
+    "Send documents for signature",
+    "Track document status and search documents"
+  ],
+  "official": {
+    "evidence": "https://developers.pandadoc.com/docs/how-to-use-the-pandadoc-mcp-server",
+    "repository": "https://github.com/PandaDoc/mcp-server-guide"
+  },
+  "docs": "https://developers.pandadoc.com/docs/getting-started-with-mcp",
+  "remote": {
+    "url": "https://mcp.pandadoc.com/v1/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "com.pandadoc.mcp/mcp",
+  "icons": {
+    "color": "#248567"
+  },
+  "supportedBy": [
+    "chatgpt",
+    "claude",
+    "gemini",
+    "microsoft-copilot",
+    "manus",
+    "lindy",
+    "gumloop",
+    "relevance-ai",
+    "zapier",
+    "make",
+    "github-registry"
+  ]
+}

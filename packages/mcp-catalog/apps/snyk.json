@@ -1,0 +1,33 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "snyk",
+  "name": "Snyk",
+  "maker": "Snyk",
+  "homepage": "https://snyk.io",
+  "category": "security",
+  "teams": ["engineering"],
+  "summary": "Scan code and dependencies for vulnerabilities",
+  "capabilities": [
+    "Scan dependencies for known vulnerabilities",
+    "Scan source code for security issues",
+    "Scan containers and infrastructure as code"
+  ],
+  "official": {
+    "evidence": "https://docs.snyk.io/agent-security",
+    "repository": "https://github.com/snyk/studio-mcp"
+  },
+  "docs": "https://docs.snyk.io/agent-security",
+  "packages": [
+    {
+      "registry": "npm",
+      "name": "snyk",
+      "env": []
+    }
+  ],
+  "registryName": "io.snyk/mcp",
+  "icons": {
+    "simpleIcons": "snyk",
+    "color": "#4C4A73"
+  },
+  "supportedBy": ["lindy", "relevance-ai", "github-registry"]
+}

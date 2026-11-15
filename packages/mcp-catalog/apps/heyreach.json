@@ -1,0 +1,26 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "heyreach",
+  "name": "HeyReach",
+  "maker": "HeyReach",
+  "homepage": "https://www.heyreach.io",
+  "category": "crm-and-sales",
+  "teams": ["sales"],
+  "summary": "Run LinkedIn outreach campaigns in HeyReach",
+  "capabilities": ["List and manage LinkedIn campaigns", "Add leads to campaigns", "Read conversations and stats"],
+  "official": {
+    "evidence": "https://www.heyreach.io/mcp"
+  },
+  "docs": "https://www.heyreach.io/mcp",
+  "remote": {
+    "url": "https://mcp.heyreach.io/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "io.heyreach/mcp",
+  "icons": {
+    "color": "#4A3AFF"
+  },
+  "supportedBy": ["lindy", "relevance-ai"]
+}

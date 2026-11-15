@@ -1,0 +1,31 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "zoominfo",
+  "name": "ZoomInfo",
+  "maker": "ZoomInfo",
+  "homepage": "https://www.zoominfo.com",
+  "category": "crm-and-sales",
+  "teams": ["sales", "marketing"],
+  "summary": "Search companies and contacts in ZoomInfo",
+  "capabilities": [
+    "Search companies and contacts by firmographics",
+    "Enrich contact and company records",
+    "Find intent and buying signals"
+  ],
+  "official": {
+    "evidence": "https://github.com/Zoominfo/zoominfo-mcp-plugin",
+    "repository": "https://github.com/Zoominfo/zoominfo-mcp-plugin"
+  },
+  "docs": "https://github.com/Zoominfo/zoominfo-mcp-plugin",
+  "remote": {
+    "url": "https://mcp.zoominfo.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "io.github.Zoominfo/zoominfo-mcp",
+  "icons": {
+    "color": "#E10600"
+  },
+  "supportedBy": ["chatgpt", "claude", "copilot-studio", "gumloop", "relevance-ai", "glean"]
+}

@@ -1,0 +1,32 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "gitlab",
+  "name": "GitLab",
+  "maker": "GitLab",
+  "homepage": "https://gitlab.com",
+  "category": "code",
+  "teams": ["engineering"],
+  "summary": "Work with GitLab projects, issues, and merge requests",
+  "capabilities": [
+    "Find and read issues and merge requests",
+    "Create issues and merge requests",
+    "Check pipeline and job status",
+    "Search across projects and code"
+  ],
+  "official": {
+    "evidence": "https://docs.gitlab.com/user/model_context_protocol/mcp_server/"
+  },
+  "docs": "https://docs.gitlab.com/user/model_context_protocol/mcp_server/",
+  "remote": {
+    "url": "https://gitlab.com/api/v4/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "com.gitlab/mcp",
+  "icons": {
+    "simpleIcons": "gitlab",
+    "color": "#FC6D26"
+  },
+  "supportedBy": ["microsoft-copilot", "lindy", "gumloop", "relevance-ai", "glean", "n8n", "docker"]
+}

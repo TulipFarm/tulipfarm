@@ -1,0 +1,29 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "biorender",
+  "name": "BioRender",
+  "maker": "BioRender",
+  "homepage": "https://www.biorender.com",
+  "category": "design",
+  "teams": ["everyone"],
+  "summary": "Find and draft scientific figures in BioRender",
+  "capabilities": [
+    "Search the template and icon library",
+    "Find your own and shared files",
+    "Draft a new figure from a description"
+  ],
+  "official": {
+    "evidence": "https://help.biorender.com/hc/en-gb/articles/39961737589277-Use-BioRender-with-AI-assistants"
+  },
+  "docs": "https://help.biorender.com/hc/en-gb/articles/39961737589277-Use-BioRender-with-AI-assistants",
+  "remote": {
+    "url": "https://mcp.services.biorender.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#2E7DF6"
+  },
+  "supportedBy": ["chatgpt", "claude", "microsoft-copilot", "gumloop", "glean"]
+}

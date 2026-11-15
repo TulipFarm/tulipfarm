@@ -1,0 +1,29 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "sprout-social",
+  "name": "Sprout Social",
+  "maker": "Sprout Social",
+  "homepage": "https://sproutsocial.com",
+  "category": "marketing",
+  "teams": ["marketing", "support"],
+  "summary": "Analyse social performance and messages in Sprout",
+  "capabilities": [
+    "Report on social profile and post performance",
+    "Search inbox messages",
+    "Review listening and engagement data"
+  ],
+  "official": {
+    "evidence": "https://support.sproutsocial.com/hc/en-us/articles/41236268336653-ChatGPT-Integration-Overview-and-Setup"
+  },
+  "docs": "https://support.sproutsocial.com/hc/en-us/articles/41236268336653-ChatGPT-Integration-Overview-and-Setup",
+  "remote": {
+    "url": "https://mcp.sproutsocial.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#59CB59"
+  },
+  "supportedBy": ["chatgpt", "gumloop"]
+}

@@ -1,0 +1,45 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "google-analytics",
+  "name": "Google Analytics",
+  "maker": "Google",
+  "homepage": "https://marketingplatform.google.com/about/analytics/",
+  "category": "monitoring-and-analytics",
+  "teams": ["marketing", "product"],
+  "summary": "Run Google Analytics reports",
+  "capabilities": [
+    "List accounts and properties",
+    "Run standard and realtime reports",
+    "Read custom dimensions and metrics"
+  ],
+  "official": {
+    "evidence": "https://developers.google.com/analytics/devguides/MCP",
+    "repository": "https://github.com/googleanalytics/google-analytics-mcp"
+  },
+  "docs": "https://developers.google.com/analytics/devguides/MCP",
+  "packages": [
+    {
+      "registry": "pypi",
+      "name": "analytics-mcp",
+      "env": [
+        {
+          "name": "GOOGLE_APPLICATION_CREDENTIALS",
+          "description": "Path to Google credentials file",
+          "secret": false,
+          "required": false
+        },
+        {
+          "name": "GOOGLE_PROJECT_ID",
+          "description": "Google Cloud project ID",
+          "secret": false,
+          "required": false
+        }
+      ]
+    }
+  ],
+  "icons": {
+    "simpleIcons": "googleanalytics",
+    "color": "#E37400"
+  },
+  "supportedBy": ["lindy", "gumloop", "relevance-ai", "make", "n8n"]
+}

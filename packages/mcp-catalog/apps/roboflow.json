@@ -1,0 +1,26 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "roboflow",
+  "name": "Roboflow",
+  "maker": "Roboflow",
+  "homepage": "https://roboflow.com",
+  "category": "ai-and-media",
+  "teams": ["engineering"],
+  "summary": "Build and run computer vision models with Roboflow",
+  "capabilities": ["Create projects and upload images", "Train and deploy vision models", "Run inference on images"],
+  "official": {
+    "evidence": "https://docs.roboflow.com/agents/mcp-server"
+  },
+  "docs": "https://docs.roboflow.com/agents/mcp-server",
+  "remote": {
+    "url": "https://mcp.roboflow.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "com.roboflow/roboflow-mcp",
+  "icons": {
+    "color": "#6706CE"
+  },
+  "supportedBy": ["claude", "manus", "lindy", "relevance-ai"]
+}

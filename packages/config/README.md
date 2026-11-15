@@ -227,10 +227,15 @@ catalog`. `loadModelCatalog(env)` returns the served catalog and
   `gen_ai_model_fallback` and logged as `chat.model-fallback` with a bounded
   `model_fallback` outcome (`used`, `not_configured`, `not_eligible`,
   `failed`), labelled with the failed model (`gen_ai.request.model`) and the
-  fallback (`fallback.provider`, `fallback.model`). A chat reply a fallback
+  fallback (`fallback.provider`, `fallback.model`), and who pays for each:
+  `billing.source` and `fallback.billing.source` are `plan` for a member's
+  subscription plan route (ChatGPT, Claude, GitHub Copilot) and `hosted` for
+  the deployment's own provider keys. A chat reply a fallback
   answered adds `model_fallback="used"` to `cloud_chat_reply_duration`, and its
   `chat.reply.summary` log names the chat's model as `gen_ai.request.model`
-  and the one that answered as `fallback.model`.
+  and the one that answered as `fallback.model`. Every summary carries the
+  `billing.source` of the chat's model, and `fallback.billing.source` when a
+  fallback answered.
 - **Usage.** Chat-completions usage is read from any streamed chunk, including a
   final usage-only chunk, and tolerates null or missing detail objects and
   `total_tokens`. When `total_tokens` is reported, it decides whether reasoning
@@ -243,6 +248,17 @@ catalog`. `loadModelCatalog(env)` returns the served catalog and
   each request: built-in provider and Azure Foundry hosts are implicit, every
   other host must be in `MODEL_ENDPOINT_HOSTS`, and http is allowed only on
   loopback outside `NODE_ENV=production`.
+- **ChatGPT plan.** A `chatgpt` route runs on the requesting member's own
+  ChatGPT plan through Sign in with ChatGPT; its endpoint is always
+  `https://api.openai.com/v1` with the `responses` API and streaming. It is
+  offered while the workspace's `chatgpt-plan` feature flag is on (the
+  default) and needs no key. `claude` and `copilot` routes work the same way
+  with the `claude-plan` and `copilot-plan` flags. Its models
+  must be `"pricing": "unmetered"`, can't be the default, hold a role or be a
+  fallback, and don't count as the catalog's served model, so a provider key is
+  still required. Members see them only after connecting a plan whose ChatGPT
+  model list includes the route's `model`. See
+  [`self-host/README.md`](../../self-host/README.md#chatgpt-plan).
 - **Removed settings.** `MODEL_FAMILIES`, `MODEL_PAUSED_FAMILIES`,
   `MODEL_DEFAULT_FAMILY`, `MODEL_CATALOG_MODE` and the `*_MODEL_FAMILY` role
   settings stop startup, naming what replaces each in the catalog

@@ -1,0 +1,39 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "gong",
+  "name": "Gong",
+  "maker": "Gong",
+  "homepage": "https://www.gong.io",
+  "category": "crm-and-sales",
+  "teams": ["sales"],
+  "summary": "Search calls, deals, and insights in Gong",
+  "capabilities": [
+    "Search call recordings and transcripts",
+    "Review deal and account activity",
+    "Summarise customer conversations"
+  ],
+  "official": {
+    "evidence": "https://help.gong.io/docs/about-gong-mcp-server"
+  },
+  "docs": "https://help.gong.io/docs/create-an-integration-to-connect-to-the-mcp-server",
+  "remote": {
+    "url": "https://mcp.gong.io/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#8039DF"
+  },
+  "supportedBy": [
+    "chatgpt",
+    "claude",
+    "microsoft-copilot",
+    "copilot-studio",
+    "lindy",
+    "gumloop",
+    "relevance-ai",
+    "dust",
+    "glean"
+  ]
+}

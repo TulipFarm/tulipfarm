@@ -1,0 +1,47 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "hubspot",
+  "name": "HubSpot",
+  "maker": "HubSpot",
+  "homepage": "https://www.hubspot.com",
+  "category": "crm-and-sales",
+  "teams": ["sales", "marketing", "support"],
+  "summary": "Search and update CRM records in HubSpot",
+  "capabilities": [
+    "Search contacts, companies, deals, and tickets",
+    "Create and update CRM records",
+    "Read engagement history and associations"
+  ],
+  "official": {
+    "evidence": "https://developers.hubspot.com/docs/build-with-ai/remote-mcp-server"
+  },
+  "docs": "https://developers.hubspot.com/docs/build-with-ai/remote-mcp-server",
+  "remote": {
+    "url": "https://mcp.hubspot.com",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "simpleIcons": "hubspot",
+    "color": "#FF7A59"
+  },
+  "supportedBy": [
+    "chatgpt",
+    "claude",
+    "microsoft-copilot",
+    "notion-ai",
+    "manus",
+    "perplexity",
+    "lindy",
+    "gumloop",
+    "relevance-ai",
+    "dust",
+    "glean",
+    "zapier",
+    "make",
+    "n8n",
+    "docker"
+  ],
+  "featured": true
+}

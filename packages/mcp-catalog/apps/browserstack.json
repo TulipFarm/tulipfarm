@@ -1,0 +1,52 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "browserstack",
+  "name": "BrowserStack",
+  "maker": "BrowserStack",
+  "homepage": "https://www.browserstack.com",
+  "category": "code",
+  "teams": ["engineering"],
+  "summary": "Run and debug tests on real browsers and devices",
+  "capabilities": [
+    "Run tests on real browsers and mobile devices",
+    "Debug failed test runs",
+    "Manage test cases and test runs",
+    "Check pages for accessibility issues"
+  ],
+  "official": {
+    "evidence": "https://github.com/browserstack/mcp-server",
+    "repository": "https://github.com/browserstack/mcp-server"
+  },
+  "docs": "https://github.com/browserstack/mcp-server",
+  "remote": {
+    "url": "https://mcp.browserstack.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "packages": [
+    {
+      "registry": "npm",
+      "name": "@browserstack/mcp-server",
+      "env": [
+        {
+          "name": "BROWSERSTACK_USERNAME",
+          "description": "BrowserStack username",
+          "secret": false,
+          "required": true
+        },
+        {
+          "name": "BROWSERSTACK_ACCESS_KEY",
+          "description": "BrowserStack access key",
+          "secret": true,
+          "required": true
+        }
+      ]
+    }
+  ],
+  "registryName": "io.github.browserstack/mcp-server",
+  "icons": {
+    "color": "#F48120"
+  },
+  "supportedBy": ["claude", "lindy", "relevance-ai", "github-registry"]
+}

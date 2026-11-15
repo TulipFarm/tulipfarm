@@ -1,0 +1,47 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "microsoft-365",
+  "name": "Microsoft 365 (Work IQ)",
+  "maker": "Microsoft",
+  "homepage": "https://www.microsoft.com/microsoft-365",
+  "category": "docs-and-files",
+  "teams": ["everyone"],
+  "summary": "Work with Outlook, Teams, SharePoint and OneDrive",
+  "capabilities": [
+    "Search and read mail, calendar and chats",
+    "Find files in SharePoint and OneDrive",
+    "Send messages and create Word documents"
+  ],
+  "official": {
+    "evidence": "https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/tools/work-iq"
+  },
+  "docs": "https://learn.microsoft.com/en-us/microsoft-agent-365/tooling-servers-overview",
+  "remote": {
+    "url": "https://workiq.svc.cloud.microsoft/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "lobehub": "Microsoft",
+    "color": "#0078D4"
+  },
+  "supportedBy": [
+    "chatgpt",
+    "claude",
+    "microsoft-copilot",
+    "copilot-studio",
+    "notion-ai",
+    "manus",
+    "perplexity",
+    "lindy",
+    "gumloop",
+    "relevance-ai",
+    "dust",
+    "glean",
+    "zapier",
+    "make",
+    "n8n"
+  ],
+  "featured": true
+}

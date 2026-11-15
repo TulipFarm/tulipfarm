@@ -1,0 +1,54 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "grafana",
+  "name": "Grafana",
+  "maker": "Grafana Labs",
+  "homepage": "https://grafana.com",
+  "category": "monitoring-and-analytics",
+  "teams": ["engineering"],
+  "summary": "Query Grafana dashboards, metrics, logs, and alerts",
+  "capabilities": [
+    "Search dashboards and data sources",
+    "Run Prometheus and Loki queries",
+    "Check alerts and incidents",
+    "Manage on-call schedules"
+  ],
+  "official": {
+    "evidence": "https://grafana.com/docs/grafana-cloud/ai-tools/mcp-servers/oss-mcp/",
+    "repository": "https://github.com/grafana/mcp-grafana"
+  },
+  "docs": "https://grafana.com/docs/grafana-cloud/ai-tools/mcp-servers/oss-mcp/",
+  "remote": {
+    "url": "https://mcp.grafana.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "packages": [
+    {
+      "registry": "oci",
+      "name": "docker.io/grafana/mcp-grafana",
+      "env": [
+        {
+          "name": "GRAFANA_URL",
+          "description": "Grafana instance URL",
+          "secret": false,
+          "required": true
+        },
+        {
+          "name": "GRAFANA_SERVICE_ACCOUNT_TOKEN",
+          "description": "Grafana service account token",
+          "secret": true,
+          "required": true
+        }
+      ]
+    }
+  ],
+  "registryName": "io.github.grafana/mcp-grafana",
+  "icons": {
+    "simpleIcons": "grafana",
+    "color": "#F46800"
+  },
+  "supportedBy": ["claude", "manus", "lindy", "relevance-ai", "glean", "docker"],
+  "featured": true
+}

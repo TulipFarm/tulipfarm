@@ -1,0 +1,28 @@
+{
+  "name": "@tulipfarm/mcp-catalog",
+  "private": true,
+  "type": "module",
+  "description": "Official MCP servers for popular apps, with categories, sign-in type and icon keys.",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./app.v1.schema.json": "./schemas/app.v1.json"
+  },
+  "scripts": {
+    "bundle": "node scripts/bundle.mjs",
+    "build": "node scripts/bundle.mjs && tsc -p tsconfig.json",
+    "typecheck": "node scripts/bundle.mjs && tsc -p tsconfig.json --noEmit",
+    "test": "node --test test/*.test.mjs",
+    "probe": "node scripts/probe.mjs",
+    "icon-keys": "node scripts/icon-keys.mjs"
+  },
+  "dependencies": {
+    "zod": "4.6.6"
+  },
+  "devDependencies": {
+    "@tulipfarm/typescript-config": "workspace:*",
+    "@types/node": "26.6.3"
+  }
+}

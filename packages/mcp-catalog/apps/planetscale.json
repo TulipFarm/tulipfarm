@@ -1,0 +1,30 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "planetscale",
+  "name": "PlanetScale",
+  "maker": "PlanetScale",
+  "homepage": "https://planetscale.com",
+  "category": "data-and-databases",
+  "teams": ["engineering"],
+  "summary": "Query PlanetScale databases and inspect branches",
+  "capabilities": [
+    "List organizations, databases, and branches",
+    "Run read-only SQL queries",
+    "Review schema and query insights"
+  ],
+  "official": {
+    "evidence": "https://planetscale.com/docs/connect/mcp"
+  },
+  "docs": "https://planetscale.com/docs/connect/mcp",
+  "remote": {
+    "url": "https://mcp.pscale.dev/mcp/planetscale",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "simpleIcons": "planetscale",
+    "color": "#000000"
+  },
+  "supportedBy": ["claude", "manus", "gumloop", "glean"]
+}

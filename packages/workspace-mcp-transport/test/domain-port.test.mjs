@@ -32,6 +32,13 @@ test('custom digest uses the domain version and exact reviewed fields', () => {
       ...tool,
       inputSchema: { ...tool.inputSchema, $schema: 'https://json-schema.org/draft/2020-12/schema' },
     }).compatibility,
+    'compatible',
+  );
+  assert.equal(
+    customToolRevision({
+      ...tool,
+      inputSchema: { ...tool.inputSchema, $schema: 'https://json-schema.org/draft/2019-09/schema' },
+    }).compatibility,
     'unsupported',
   );
   function canonical(value) {
@@ -110,7 +117,7 @@ test('domain port discovers contracts and preserves exact request ID, argument s
     credential: { kind: 'headers', headers: { 'X-Api-Key': 'second-secret' } },
   };
   const discovered = await f.port.discover(first);
-  assert.deepEqual(discovered, { tools: [tool] });
+  assert.deepEqual(discovered, { tools: [tool], transport: 'streamable-http' });
   const args = { text: 'original' };
   const pending = f.port.call({ ...first, tool, arguments: args, requestId: 'durable-action-1' });
   args.text = 'mutated';

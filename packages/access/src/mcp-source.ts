@@ -31,8 +31,8 @@ export async function requireMcpSource(
     `SELECT c.id FROM ${table(tx, 'tf_mcp_integrations')} c
     WHERE c.id=$1 AND c.authorization_epoch=$2 AND c.lifecycle='active' AND c.credential IS NOT NULL
       AND ((c.ownership='personal' AND c.owner_membership_id=$3)
-        OR (c.ownership='shared' AND (
-          EXISTS (SELECT 1 FROM ${table(tx, 'tf_mcp_member_grants')} g WHERE g.integration_id=c.id AND g.membership_id=$3)
+        OR (c.ownership='shared' AND (c.shared_with_workspace
+          OR EXISTS (SELECT 1 FROM ${table(tx, 'tf_mcp_member_grants')} g WHERE g.integration_id=c.id AND g.membership_id=$3)
           OR EXISTS (SELECT 1 FROM ${table(tx, 'tf_mcp_team_grants')} g JOIN ${table(tx, 'tf_member_teams')} m ON m.team_id=g.team_id WHERE g.integration_id=c.id AND m.membership_id=$3))))
     FOR SHARE OF c`,
     [source.integrationId, source.authorizationEpoch, actor.membershipId],

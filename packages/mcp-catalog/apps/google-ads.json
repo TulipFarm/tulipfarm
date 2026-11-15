@@ -1,0 +1,51 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "google-ads",
+  "name": "Google Ads",
+  "maker": "Google",
+  "homepage": "https://ads.google.com",
+  "category": "marketing",
+  "teams": ["marketing"],
+  "summary": "Report on Google Ads campaigns and accounts",
+  "capabilities": [
+    "Query campaign, ad group, and keyword performance",
+    "List accessible customer accounts",
+    "Run Google Ads Query Language reports"
+  ],
+  "official": {
+    "evidence": "https://developers.google.com/google-ads/api/docs/developer-toolkit/mcp-server",
+    "repository": "https://github.com/googleads/google-ads-mcp"
+  },
+  "docs": "https://github.com/googleads/google-ads-mcp",
+  "packages": [
+    {
+      "registry": "pypi",
+      "name": "google-ads-mcp",
+      "env": [
+        {
+          "name": "GOOGLE_APPLICATION_CREDENTIALS",
+          "description": "Path to Google credentials JSON with Ads access",
+          "secret": false,
+          "required": true
+        },
+        {
+          "name": "GOOGLE_PROJECT_ID",
+          "description": "Google Cloud project ID",
+          "secret": false,
+          "required": true
+        },
+        {
+          "name": "GOOGLE_ADS_LOGIN_CUSTOMER_ID",
+          "description": "Manager account customer ID, if used",
+          "secret": false,
+          "required": false
+        }
+      ]
+    }
+  ],
+  "icons": {
+    "simpleIcons": "googleads",
+    "color": "#4285F4"
+  },
+  "supportedBy": ["gemini", "manus", "lindy", "gumloop", "relevance-ai", "zapier", "n8n"]
+}

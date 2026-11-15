@@ -1,0 +1,45 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "octopus-deploy",
+  "name": "Octopus Deploy",
+  "maker": "Octopus Deploy",
+  "homepage": "https://octopus.com",
+  "category": "code",
+  "teams": ["engineering"],
+  "summary": "Check Octopus deployments, releases, and projects",
+  "capabilities": [
+    "List projects, environments, and releases",
+    "Check deployment status and task logs",
+    "Find deployment problems"
+  ],
+  "official": {
+    "evidence": "https://octopus.com/docs/octopus-ai/mcp",
+    "repository": "https://github.com/OctopusDeploy/mcp-server"
+  },
+  "docs": "https://octopus.com/docs/octopus-ai/mcp",
+  "packages": [
+    {
+      "registry": "npm",
+      "name": "@octopusdeploy/mcp-server",
+      "env": [
+        {
+          "name": "OCTOPUS_API_KEY",
+          "description": "Octopus API key",
+          "secret": true,
+          "required": true
+        },
+        {
+          "name": "OCTOPUS_SERVER_URL",
+          "description": "Octopus server URL",
+          "secret": false,
+          "required": true
+        }
+      ]
+    }
+  ],
+  "icons": {
+    "simpleIcons": "octopusdeploy",
+    "color": "#2F93E0"
+  },
+  "supportedBy": ["lindy", "relevance-ai", "github-registry"]
+}

@@ -1,0 +1,25 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "incident-io",
+  "name": "incident.io",
+  "maker": "incident.io",
+  "homepage": "https://incident.io",
+  "category": "monitoring-and-analytics",
+  "teams": ["engineering", "operations"],
+  "summary": "Manage incident.io incidents and on-call",
+  "capabilities": ["Find and read incidents", "Create and update incidents", "Check on-call schedules"],
+  "official": {
+    "evidence": "https://docs.incident.io/ai/remote-mcp"
+  },
+  "docs": "https://docs.incident.io/ai/remote-mcp",
+  "remote": {
+    "url": "https://mcp.incident.io/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#F25533"
+  },
+  "supportedBy": ["claude", "manus", "gumloop", "glean", "docker"]
+}

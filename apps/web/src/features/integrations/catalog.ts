@@ -65,12 +65,24 @@ export const makerOf = (app: Integration) =>
 
 export const categories = [
   'Email and calendar',
+  'Chat and meetings',
   'Docs and files',
-  'Chat',
-  'Code',
   'Projects and issues',
-  'CRM and support',
+  'Code',
+  'Cloud and infrastructure',
+  'Data and databases',
+  'Monitoring and analytics',
+  'CRM and sales',
+  'Customer support',
+  'Marketing and social',
   'Payments and commerce',
+  'Finance and accounting',
+  'HR and recruiting',
+  'Design',
+  'Search and research',
+  'Automation',
+  'AI and media',
+  'Security',
 ] as const;
 export type Category = (typeof categories)[number];
 
@@ -126,7 +138,7 @@ export const integrations: Integration[] = [
     id: 'slack',
     name: 'Slack',
     brand: 'slack',
-    category: 'Chat',
+    category: 'Chat and meetings',
     provider: 'slack',
     blurb: 'Chat with agents in Slack',
     prompts: ['Post the weekly update in #team', 'Answer questions in #support', 'DM me when a big order lands'],
@@ -228,19 +240,10 @@ export const integrations: Integration[] = [
     prompts: ['Move done cards to Shipped', 'Add a card for each new lead', 'What is stuck in Review?'],
   },
   {
-    id: 'notion',
-    name: 'Notion',
-    brand: 'notion',
-    category: 'Docs and files',
-    provider: 'soon',
-    blurb: 'Start workflows from new pages',
-    prompts: [],
-  },
-  {
     id: 'google-forms',
     name: 'Google Forms',
     brand: 'google-forms',
-    category: 'CRM and support',
+    category: 'Marketing and social',
     provider: 'soon',
     blurb: 'Start workflows from responses',
     prompts: [],
@@ -249,7 +252,7 @@ export const integrations: Integration[] = [
     id: 'hubspot',
     name: 'HubSpot',
     brand: 'hubspot',
-    category: 'CRM and support',
+    category: 'CRM and sales',
     provider: 'soon',
     blurb: 'Start workflows from new CRM records',
     prompts: [],
@@ -282,28 +285,10 @@ export const integrations: Integration[] = [
     prompts: [],
   },
   {
-    id: 'airtable',
-    name: 'Airtable',
-    brand: 'airtable',
-    category: 'Docs and files',
-    provider: 'soon',
-    blurb: 'Read and update bases',
-    prompts: [],
-  },
-  {
-    id: 'figma',
-    name: 'Figma',
-    brand: 'figma',
-    category: 'Docs and files',
-    provider: 'soon',
-    blurb: 'Read files and comments',
-    prompts: [],
-  },
-  {
     id: 'discord',
     name: 'Discord',
     brand: 'discord',
-    category: 'Chat',
+    category: 'Chat and meetings',
     provider: 'soon',
     blurb: 'Chat with agents in Discord',
     prompts: [],
@@ -315,15 +300,6 @@ export const integrations: Integration[] = [
     category: 'Code',
     provider: 'soon',
     blurb: 'Read issues and merge requests',
-    prompts: [],
-  },
-  {
-    id: 'linear',
-    name: 'Linear',
-    brand: 'linear',
-    category: 'Projects and issues',
-    provider: 'soon',
-    blurb: 'Read and update issues',
     prompts: [],
   },
   {
@@ -348,18 +324,9 @@ export const integrations: Integration[] = [
     id: 'zendesk',
     name: 'Zendesk',
     brand: 'zendesk',
-    category: 'CRM and support',
+    category: 'Customer support',
     provider: 'soon',
     blurb: 'Triage support tickets',
-    prompts: [],
-  },
-  {
-    id: 'stripe',
-    name: 'Stripe',
-    brand: 'stripe',
-    category: 'Payments and commerce',
-    provider: 'soon',
-    blurb: 'Read payments and invoices',
     prompts: [],
   },
   {
@@ -373,7 +340,16 @@ export const integrations: Integration[] = [
   },
 ];
 
-export const integrationTabs = ['overview', 'accounts', 'knowledge', 'channels', 'settings', 'advanced'] as const;
+export const integrationTabs = [
+  'overview',
+  'tools',
+  'access',
+  'accounts',
+  'knowledge',
+  'channels',
+  'settings',
+  'advanced',
+] as const;
 export type IntegrationTab = (typeof integrationTabs)[number];
 
 const legacyHashes: Record<string, { id: string; tab: IntegrationTab }> = {

@@ -79,6 +79,8 @@ import {
   transientStorageFailure,
 } from './error-codes.ts';
 import {
+  billingSource,
+  billingSources,
   modelCallDiagnostics,
   modelErrorClasses,
   modelFallbackOutcomes,
@@ -89,6 +91,7 @@ import {
   safeProviderCode,
   safeUsageShape,
   usageShape,
+  type BillingSource,
   type ModelFallbackOutcome,
   type ModelUsageUnknownReason,
 } from './model-errors.ts';
@@ -107,6 +110,8 @@ export {
   type ResolvedFlagContext,
 } from './flag-subjects.ts';
 export {
+  billingSource,
+  billingSources,
   fallbackEligibleClasses,
   ModelCallError,
   modelCallDiagnostics,
@@ -121,6 +126,7 @@ export {
   retryRateLimitedModel,
   sanitizeProviderMessage,
   usageShape,
+  type BillingSource,
   type ModelCallDiagnostics,
   type ModelErrorClass,
   type ModelFallbackOutcome,
@@ -259,6 +265,8 @@ const spanAttributes = new Set([
   'model_fallback',
   'fallback.provider',
   'fallback.model',
+  'billing.source',
+  'fallback.billing.source',
   'model_usage',
   'usage.unknown_reason',
   ...mediaAttributeKeys,
@@ -344,6 +352,8 @@ function safeAttribute(key: string, value: unknown, logLine = false): boolean {
   if (key === 'output_started') return typeof value === 'boolean';
   if (key === 'attempt') return typeof value === 'number' && Number.isSafeInteger(value) && value > 0;
   if (key === 'model_fallback') return (modelFallbackOutcomes as readonly unknown[]).includes(value);
+  if (key === 'billing.source' || key === 'fallback.billing.source')
+    return (billingSources as readonly unknown[]).includes(value);
   if (key === 'model_usage') return (modelUsageOutcomes as readonly unknown[]).includes(value);
   if (key === 'usage.unknown_reason') return (modelUsageUnknownReasons as readonly unknown[]).includes(value);
   if (key === 'error.reason') return safeErrorReason(value);
@@ -991,6 +1001,43 @@ export function recordAgentSetup(status: string, errorCode: string | null, error
   }
 }
 
+/**
+ * What an app reconcile repaired: a route, an edge projection, a stale name claim, an unreferenced release, a server
+ * endpoint left on the wrong host or a server host nothing uses.
+ */
+export const appReconcileRepairs = [
+  'route-applied',
+  'route-removed',
+  'edge-projected',
+  'claim-retired',
+  'release-discarded',
+  'endpoint-switched',
+  'host-removed',
+] as const;
+export type AppReconcileRepair = (typeof appReconcileRepairs)[number];
+
+/** Counts one repair of drift the app reconcile found. A reconcile that finds no drift adds nothing. */
+export function recordAppReconcileRepair(kind: AppReconcileRepair) {
+  metrics
+    .getMeter(scope)
+    .createCounter('cloud_app_reconcile_repairs', { description: 'Drift the app reconcile repaired, by kind' })
+    .add(1, { ...dimensions, kind });
+}
+
+/**
+ * Counts a build that settled, with its failure code when it failed, and marks the active span with the same outcome.
+ * A failed build is the app's outcome, not a server error, so the span status stays unset.
+ */
+export function recordAppBuild(failureCode: string | null) {
+  const outcome = failureCode === null ? 'succeeded' : 'failed';
+  const code = failureCode === null ? 'none' : safeFailureCode(failureCode) ? failureCode : 'unknown';
+  metrics
+    .getMeter(scope)
+    .createCounter('cloud_app_builds', { description: 'App builds that settled, by outcome and failure code' })
+    .add(1, { ...dimensions, outcome, failure_code: code });
+  trace.getActiveSpan()?.setAttributes({ outcome, ...(failureCode === null ? {} : { failure_code: code }) });
+}
+
 export interface KnowledgeSyncSnapshot {
   failedItems: number;
   failedSources: number;
@@ -1332,6 +1379,7 @@ export const backgroundJobs = [
   'onboarding-expiry',
   'abuse-expiry',
   'mcp-catalog-refresh',
+  'mcp-hosted-sweep',
   'conversation-stream-expiry',
   'object-cleanup',
   'table-search',
@@ -1346,6 +1394,8 @@ export const backgroundJobs = [
   'member-profile-projection',
   'social-publisher',
   'social-refresh',
+  'app-reconcile',
+  'app-usage',
 ] as const;
 export type BackgroundJob = (typeof backgroundJobs)[number];
 
@@ -1726,8 +1776,10 @@ type ChatReplyClock = {
   /** Route model of the first reply request that streamed output, else of the first reply request; labels `first_text`. */
   model?: string | undefined;
   requested?: string | undefined;
-  /** Route models of the chat call that failed and of the fallback that then answered the reply. */
-  fallback?: { from: string; to: string } | undefined;
+  /** Who pays for `model`, else for `requested`. */
+  billing?: BillingSource | undefined;
+  /** Route models of the chat call that failed and of the fallback that then answered the reply, with who pays for each. */
+  fallback?: { from: string; to: string; fromBilling: BillingSource; toBilling: BillingSource } | undefined;
 };
 type ChatDatabase = { transactions: number; milliseconds: number };
 type ChatMeasurement = {
@@ -1852,7 +1904,10 @@ function finishChatReply(clock: ChatReplyClock) {
     'chat.reply.tools': tools,
     'chat.reply.attempts': attempts,
     'gen_ai.request.model': fallback?.from ?? model,
-    ...(fallback ? { model_fallback: 'used', 'fallback.model': fallback.to } : {}),
+    ...((fallback?.fromBilling ?? clock.billing) ? { 'billing.source': fallback?.fromBilling ?? clock.billing } : {}),
+    ...(fallback
+      ? { model_fallback: 'used', 'fallback.model': fallback.to, 'fallback.billing.source': fallback.toBilling }
+      : {}),
     ...fields,
   });
   if (status === 'failed') recordChatReplyStopped(clock.final.errorCode, clock.final.runtime ?? 'chat', clock.cause);
@@ -2890,13 +2945,25 @@ export function recordModelFallback(
     ...dimensions,
     'gen_ai.provider.name': primary.provider,
     'gen_ai.request.model': primary.model,
+    'billing.source': billingSource(primary.provider),
     ...(telemetryErrorCode(primary.errorClass) ? { 'error.type': primary.errorClass } : {}),
     model_fallback: outcome,
-    ...(fallback ? { 'fallback.provider': fallback.provider, 'fallback.model': fallback.model } : {}),
+    ...(fallback
+      ? {
+          'fallback.provider': fallback.provider,
+          'fallback.model': fallback.model,
+          'fallback.billing.source': billingSource(fallback.provider),
+        }
+      : {}),
   };
   const measured = chatMeasurement.getStore();
   if (outcome === 'used' && fallback && measured?.purpose === 'reply')
-    measured.reply.fallback = { from: primary.model, to: fallback.model };
+    measured.reply.fallback = {
+      from: primary.model,
+      to: fallback.model,
+      fromBilling: billingSource(primary.provider),
+      toBilling: billingSource(fallback.provider),
+    };
   try {
     metrics
       .getMeter(scope)
@@ -2938,7 +3005,10 @@ export async function observeInference<T>(
   };
   const measured = chatMeasurement.getStore();
   const reply = model.operation === 'chat' && measured?.purpose === 'reply' ? measured.reply : undefined;
-  if (reply) reply.requested ??= model.model;
+  if (reply && reply.requested === undefined) {
+    reply.requested = model.model;
+    reply.billing ??= billingSource(model.provider);
+  }
   return trace
     .getTracer(scope)
     .startActiveSpan(
@@ -2982,6 +3052,7 @@ export async function observeInference<T>(
             ...media,
             ...spanDetails,
             ...(diagnostics?.providerCode ? { 'provider.error_code': diagnostics.providerCode } : {}),
+            ...(diagnostics?.providerRequestId ? { 'provider.request_id': diagnostics.providerRequestId } : {}),
             ...(diagnostics?.providerMessage ? { 'provider.error_message': diagnostics.providerMessage } : {}),
             ...(diagnostics?.rejection ? { 'response.rejection': diagnostics.rejection } : {}),
             ...(diagnostics?.finishReason ? { 'response.finish_reason': diagnostics.finishReason } : {}),
@@ -2996,7 +3067,10 @@ export async function observeInference<T>(
             firstToken() {
               if (firstToken) return;
               firstToken = true;
-              if (reply) reply.model ??= model.model;
+              if (reply && reply.model === undefined) {
+                reply.model = model.model;
+                reply.billing = billingSource(model.provider);
+              }
               meter
                 .createHistogram('gen_ai_client_time_to_first_token', { unit: 's' })
                 .record((performance.now() - start) / 1000, { ...dimensions, ...attributes });

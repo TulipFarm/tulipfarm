@@ -4,19 +4,23 @@ import { BranchDown } from 'reicon-react/icons/BranchDown';
 import { Button } from '@tulipfarm/sprout/button';
 import { ResultCard } from '@tulipfarm/sprout/result-card';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
-import {
-  WorkflowDefinition,
-  WorkflowRead,
-  WorkflowRun,
-  type WorkflowReference,
-} from '@/features/workflows/workflow-detail';
-import { NamedWorkflowViewer } from '@/features/workflows/named-viewer';
+import type { WorkflowReference } from '@/features/workflows/workflow-detail';
 import { conversationApi, type ConversationMessage } from './conversation-api';
 import { succeeded } from './live-tools';
 import { useAuthoringDraft } from './queries';
 import { useCanvas, type CanvasItem } from './canvas-state';
-import { agentDraftCanvasItem } from './agent-draft-canvas';
 import { workspaceRoute } from '@/router';
+
+import { lazyCard } from '@/components/lazy-card';
+
+const WorkflowDefinition = lazyCard(() =>
+  import('@/features/workflows/workflow-detail').then(module => module.WorkflowDefinition),
+);
+const WorkflowRead = lazyCard(() => import('@/features/workflows/workflow-detail').then(module => module.WorkflowRead));
+const WorkflowRun = lazyCard(() => import('@/features/workflows/workflow-detail').then(module => module.WorkflowRun));
+const NamedWorkflowViewer = lazyCard(() =>
+  import('@/features/workflows/named-viewer').then(module => module.NamedWorkflowViewer),
+);
 
 // Opens a workflow or agent draft made while this chat is open; drafts already in the chat when it loads stay closed.
 export function NewChatDrafts({
@@ -62,6 +66,13 @@ export function NewChatDrafts({
   return null;
 }
 
+export function agentDraftCanvasItem(workspaceId: string, chatId: string, draftId: string): CanvasItem {
+  return {
+    id: `agent:draft:${chatId}:${draftId}`,
+    title: 'Agent draft',
+    content: { kind: 'agent-draft', workspaceId, chatId, draftId },
+  };
+}
 export function workflowCanvasItem(workspaceId: string, reference: WorkflowReference): CanvasItem {
   const key =
     reference.kind === 'draft'

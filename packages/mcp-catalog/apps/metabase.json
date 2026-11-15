@@ -1,0 +1,36 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "metabase",
+  "name": "Metabase",
+  "maker": "Metabase",
+  "homepage": "https://www.metabase.com",
+  "category": "data-and-databases",
+  "teams": ["operations", "product"],
+  "summary": "Search and query Metabase questions and data",
+  "capabilities": [
+    "Search dashboards, questions, and tables",
+    "Run saved questions and queries",
+    "Build new queries from your data"
+  ],
+  "official": {
+    "evidence": "https://www.metabase.com/docs/latest/ai/mcp"
+  },
+  "docs": "https://www.metabase.com/docs/latest/ai/mcp",
+  "remote": {
+    "url": "https://{metabase-url}/api/metabase-mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "variables": [
+      {
+        "name": "metabase-url",
+        "description": "Your Metabase host",
+        "example": "metabase.example.com"
+      }
+    ]
+  },
+  "icons": {
+    "simpleIcons": "metabase",
+    "color": "#509EE3"
+  },
+  "supportedBy": ["claude", "manus", "lindy", "relevance-ai", "docker"]
+}

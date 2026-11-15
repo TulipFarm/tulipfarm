@@ -1,0 +1,30 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "dataforseo",
+  "name": "DataForSEO",
+  "maker": "DataForSEO",
+  "homepage": "https://dataforseo.com",
+  "category": "marketing",
+  "teams": ["marketing"],
+  "summary": "Pull SEO data from search results and keywords",
+  "capabilities": [
+    "Fetch live search results",
+    "Research keywords and search volume",
+    "Analyse backlinks and on-page SEO"
+  ],
+  "official": {
+    "evidence": "https://dataforseo.com/model-context-protocol",
+    "repository": "https://github.com/dataforseo/mcp-server-typescript"
+  },
+  "docs": "https://dataforseo.com/model-context-protocol",
+  "remote": {
+    "url": "https://mcp.dataforseo.com/v3/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#1A4BA6"
+  },
+  "supportedBy": ["manus", "lindy", "gumloop", "relevance-ai"]
+}

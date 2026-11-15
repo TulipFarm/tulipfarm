@@ -121,9 +121,9 @@ test('a snapshot evaluates every registered flag for one subject', async t => {
       Object.keys(featureFlags).map(name => [name, name === flag || featureFlags[name].default === true]),
     ),
   );
-  await withProvider(t, name => (name === 'bud-avatar' ? true : undefined));
+  await withProvider(t, name => (name === 'soul-repository-explorer' ? true : undefined));
   const snapshot = await featureFlagSnapshot(user, { id: 'w1' }, { NODE_ENV: 'production' });
-  assert.equal(snapshot['bud-avatar'], true);
+  assert.equal(snapshot['soul-repository-explorer'], true);
   assert.equal(snapshot[flag], false);
   assert.equal(snapshot['default-connection-knowledge'], true);
   assert.deepEqual(JSON.parse(JSON.stringify(snapshot)), snapshot);
@@ -180,8 +180,8 @@ test('the resolver fills missing attributes, caller values win, and lookups are 
     };
   });
   await Promise.all([
-    isFeatureEnabled('bud-avatar', { id: userId }, { id: workspaceId }),
-    isFeatureEnabled('bud-avatar', { id: userId }, { id: workspaceId, name: 'Renamed' }),
+    isFeatureEnabled('soul-repository-explorer', { id: userId }, { id: workspaceId }),
+    isFeatureEnabled('soul-repository-explorer', { id: userId }, { id: workspaceId, name: 'Renamed' }),
   ]);
   assert.equal(lookups.length, 1, 'concurrent cold lookups share one request');
   assert.deepEqual(lookups[0], { userId, workspaceId });
@@ -196,8 +196,8 @@ test('the resolver fills missing attributes, caller values win, and lookups are 
   assert.equal(renamed[1].workspace.name, 'Renamed');
   await isFeatureEnabled('social-publishing', { id: userId }, { id: workspaceId });
   assert.deepEqual(lookups[1], { workspaceId }, 'a workspace flag never looks up the user');
-  await isFeatureEnabled('bud-avatar', { id: 'social-publisher' }, { id: workspaceId });
-  await isFeatureEnabled('bud-avatar', { id: userId }, { id: workspaceId });
+  await isFeatureEnabled('soul-repository-explorer', { id: 'social-publisher' }, { id: workspaceId });
+  await isFeatureEnabled('soul-repository-explorer', { id: userId }, { id: workspaceId });
   assert.equal(lookups.length, 2, 'synthetic user IDs are never looked up, and repeats come from the cache');
 });
 
@@ -233,7 +233,7 @@ test('without a provider the resolver is never called', async t => {
     count++;
     return {};
   });
-  await isFeatureEnabled('bud-avatar', { id: userId }, { id: workspaceId });
+  await isFeatureEnabled('soul-repository-explorer', { id: userId }, { id: workspaceId });
   await featureFlagSnapshot({ id: userId }, { id: workspaceId });
   assert.equal(count, 0);
 });
@@ -250,7 +250,7 @@ test('a snapshot uses evaluateMany once per scope; false decides and missing fal
     {
       evaluateMany: async (flags, subject) => {
         batches.push([flags, subject.scope]);
-        if (subject.scope === 'user') return { 'bud-avatar': false, 'google-calendar-canvas': true };
+        if (subject.scope === 'user') return { 'soul-repository-explorer': false, 'google-calendar-canvas': true };
         if (subject.scope === 'global') throw new Error('down');
         return { 'social-publishing': true };
       },
@@ -262,9 +262,9 @@ test('a snapshot uses evaluateMany once per scope; false decides and missing fal
   assert.equal(singles.length, 0);
   assert.deepEqual(batches.map(([, scope]) => scope).sort(), ['global', 'user', 'workspace']);
   for (const [flags, scope] of batches) for (const name of flags) assert.equal(featureFlags[name].scope, scope);
-  assert.equal(snapshot['bud-avatar'], false);
+  assert.equal(snapshot['soul-repository-explorer'], false);
   assert.equal(snapshot['google-calendar-canvas'], true);
-  assert.equal(snapshot['soul-repository-explorer'], false, 'a missing answer falls back to the default');
+  assert.equal(snapshot['default-connection-knowledge'], true, 'a missing answer falls back to the default');
   assert.equal(snapshot['social-publishing'], true);
   assert.equal(snapshot['public-tulipfarm-guide'], false, 'a failed batch falls back');
 });

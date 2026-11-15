@@ -1,6 +1,16 @@
 import { z } from 'zod';
 
-export const modelProviderSchema = z.enum(['anthropic', 'openai', 'xai', 'google', 'azure', 'openai-compatible']);
+export const modelProviderSchema = z.enum([
+  'anthropic',
+  'openai',
+  'xai',
+  'google',
+  'azure',
+  'openai-compatible',
+  'chatgpt',
+  'claude',
+  'copilot',
+]);
 export type ModelProvider = z.infer<typeof modelProviderSchema>;
 
 export const modelCapabilitiesSchema = z
@@ -9,7 +19,7 @@ export const modelCapabilitiesSchema = z
       .enum(['chat-completions', 'responses', 'anthropic-messages', 'gemini'])
       .optional()
       .describe(
-        'Wire API. OpenAI, xAI, Azure and OpenAI-compatible endpoints support chat-completions and responses; Anthropic anthropic-messages; Google gemini',
+        'Wire API. OpenAI, xAI, Azure and OpenAI-compatible endpoints support chat-completions and responses; Anthropic anthropic-messages; Google gemini; ChatGPT plan responses only',
       ),
     toolChoice: z
       .enum(['auto', 'forced'])
@@ -63,6 +73,12 @@ export const providerModelCapabilities: Readonly<Record<ModelProvider, ModelCapa
   google: Object.freeze({ ...base, api: 'gemini', streaming: true }),
   azure: Object.freeze({ ...base, api: 'chat-completions', streaming: true }),
   'openai-compatible': Object.freeze({ ...base, api: 'chat-completions', streaming: true }),
+  // A member's ChatGPT plan: the OpenAI Responses API, always streamed.
+  chatgpt: Object.freeze({ ...base, api: 'responses', streaming: true }),
+  // A member's Claude or GitHub Copilot plan runs through the vendor's agent SDK, one tool round at a time. The SDK
+  // cannot force a tool; the adapter streams each round's words as the model writes them.
+  claude: Object.freeze({ ...base, api: 'anthropic-messages', toolChoice: 'auto', streaming: true }),
+  copilot: Object.freeze({ ...base, api: 'chat-completions', toolChoice: 'auto', streaming: true }),
 });
 const providerApis: Readonly<Record<ModelProvider, readonly ModelCapabilities['api'][]>> = {
   anthropic: ['anthropic-messages'],
@@ -71,6 +87,9 @@ const providerApis: Readonly<Record<ModelProvider, readonly ModelCapabilities['a
   google: ['gemini'],
   azure: ['chat-completions', 'responses'],
   'openai-compatible': ['chat-completions', 'responses'],
+  chatgpt: ['responses'],
+  claude: ['anthropic-messages'],
+  copilot: ['chat-completions'],
 };
 
 export function modelApiSupported(provider: ModelProvider, api: ModelCapabilities['api'] | undefined) {

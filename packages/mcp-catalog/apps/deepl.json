@@ -1,0 +1,31 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "deepl",
+  "name": "DeepL",
+  "maker": "DeepL",
+  "homepage": "https://www.deepl.com",
+  "category": "ai-and-media",
+  "teams": ["everyone"],
+  "summary": "Translate and rephrase text with DeepL",
+  "capabilities": [
+    "Translate text between languages",
+    "Rephrase and improve writing",
+    "Use your glossaries for consistent terms"
+  ],
+  "official": {
+    "evidence": "https://developers.deepl.com/docs/mcp"
+  },
+  "docs": "https://developers.deepl.com/docs/mcp",
+  "remote": {
+    "url": "https://mcp.deepl.com/v1/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "lobehub": "DeepL",
+    "simpleIcons": "deepl",
+    "color": "#0F2B46"
+  },
+  "supportedBy": ["claude", "microsoft-copilot", "lindy", "relevance-ai", "n8n"]
+}

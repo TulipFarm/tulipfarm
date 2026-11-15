@@ -1,0 +1,26 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "evernote",
+  "name": "Evernote",
+  "maker": "Evernote",
+  "homepage": "https://evernote.com",
+  "category": "docs-and-files",
+  "teams": ["everyone"],
+  "summary": "Search, read, and create notes in Evernote",
+  "capabilities": ["Search notes and notebooks", "Read note content", "Create and update notes"],
+  "official": {
+    "evidence": "https://dev.evernote.com/mcp"
+  },
+  "docs": "https://dev.evernote.com/mcp",
+  "remote": {
+    "url": "https://mcp.evernote.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "simpleIcons": "evernote",
+    "color": "#00A82D"
+  },
+  "supportedBy": ["claude", "manus", "lindy", "relevance-ai", "glean"]
+}

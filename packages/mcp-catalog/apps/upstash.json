@@ -1,0 +1,26 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "upstash",
+  "name": "Upstash",
+  "maker": "Upstash",
+  "homepage": "https://upstash.com",
+  "category": "data-and-databases",
+  "teams": ["engineering"],
+  "summary": "Manage Upstash Redis databases",
+  "capabilities": ["Create and list Redis databases", "Run Redis commands", "Read usage stats and backups"],
+  "official": {
+    "evidence": "https://github.com/upstash/mcp-server",
+    "repository": "https://github.com/upstash/mcp-server"
+  },
+  "docs": "https://github.com/upstash/mcp-server",
+  "packages": [
+    {
+      "registry": "npm",
+      "name": "@upstash/mcp-server"
+    }
+  ],
+  "icons": {
+    "simpleIcons": "upstash",
+    "color": "#00E9A3"
+  }
+}

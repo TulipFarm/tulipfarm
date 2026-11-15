@@ -1,0 +1,29 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "bill",
+  "name": "BILL",
+  "maker": "BILL",
+  "homepage": "https://www.bill.com",
+  "category": "finance-and-accounting",
+  "teams": ["finance"],
+  "summary": "Review payables, receivables, and card spend",
+  "capabilities": [
+    "Search bills by vendor, due date, or status",
+    "Track outgoing payments and invoices",
+    "Review card spend"
+  ],
+  "official": {
+    "evidence": "https://developer.bill.com/docs/bill-mcp-server"
+  },
+  "docs": "https://developer.bill.com/docs/bill-mcp-server",
+  "remote": {
+    "url": "https://gateway.prod.bill.com/ai-mcp-server/v1",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#FF5A00"
+  },
+  "supportedBy": ["chatgpt", "claude", "relevance-ai"]
+}

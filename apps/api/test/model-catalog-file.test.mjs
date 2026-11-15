@@ -36,7 +36,7 @@ async function catalog(t, configuration) {
   const runtime = {
     async transaction(_id, _compatibility, operation) {
       return operation({
-        schema: 'catalog_test',
+        schema: 'ws_11111111111141118111111111111111',
         client: {
           async query(sql) {
             if (sql.includes('tf_model_availability')) return { rows: [], rowCount: 0 };

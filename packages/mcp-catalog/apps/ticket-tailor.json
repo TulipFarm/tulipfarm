@@ -1,0 +1,27 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "ticket-tailor",
+  "name": "Ticket Tailor",
+  "maker": "Ticket Tailor",
+  "homepage": "https://www.tickettailor.com",
+  "category": "payments-and-commerce",
+  "teams": ["operations", "marketing"],
+  "summary": "Manage events, tickets, and orders",
+  "capabilities": ["List events and ticket types", "Look up orders and attendees", "Create and update events"],
+  "official": {
+    "evidence": "https://developers.tickettailor.com/docs/mcp/"
+  },
+  "docs": "https://developers.tickettailor.com/docs/mcp/",
+  "remote": {
+    "url": "https://mcp.tickettailor.ai/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "ai.tickettailor/mcp",
+  "icons": {
+    "simpleIcons": "tickettailor",
+    "color": "#222432"
+  },
+  "supportedBy": ["claude", "manus", "lindy", "gumloop", "relevance-ai"]
+}

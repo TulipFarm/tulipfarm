@@ -38,8 +38,11 @@ import { Popover, PopoverContent, PopoverTrigger } from '@tulipfarm/sprout/popov
 import { ModelSelector, type ModelSelectorModel } from '@tulipfarm/sprout/model-selector';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@tulipfarm/sprout/tooltip';
 import { type Model, type Agent, type Mode, type Persona } from './composer-options';
+import type { PlanProvider } from '@/features/models/chatgpt-plan-api';
+import { planLabels } from './reply-failure-copy';
 
-export type ComposerModel = Model & { disabled?: boolean; unavailableReason?: string };
+/** `plan` marks a model billed to the member's own ChatGPT, Claude or Copilot plan. */
+export type ComposerModel = Model & { disabled?: boolean; unavailableReason?: string; plan?: PlanProvider };
 
 type ComposerProps = {
   compact?: boolean;
@@ -420,10 +423,12 @@ function selectorModel(model: ComposerModel): ModelSelectorModel {
     label: model.label,
     brand: model.brand ?? undefined,
     icon: model.brand ? undefined : <model.logo size={16} aria-hidden="true" />,
-    description: model.disabled ? `Unavailable: ${model.unavailableReason ?? 'not offered here'}` : undefined,
+    description: model.disabled
+      ? `Unavailable: ${model.unavailableReason ?? 'not offered here'}`
+      : model.plan
+        ? `${planLabels[model.plan]} plan`
+        : undefined,
     disabled: model.disabled,
-    speed: model.speed,
-    quality: model.quality,
     cost: model.cost,
   };
 }

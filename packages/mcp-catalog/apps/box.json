@@ -1,0 +1,46 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "box",
+  "name": "Box",
+  "maker": "Box",
+  "homepage": "https://www.box.com",
+  "category": "docs-and-files",
+  "teams": ["everyone"],
+  "summary": "Search, read and manage files in Box",
+  "capabilities": [
+    "Search files and folders",
+    "Read and summarise file content",
+    "Ask Box AI about documents and hubs"
+  ],
+  "official": {
+    "evidence": "https://developer.box.com/guides/box-mcp/remote/",
+    "repository": "https://github.com/box/mcp-server-box-remote"
+  },
+  "docs": "https://developer.box.com/guides/box-mcp/remote/",
+  "remote": {
+    "url": "https://mcp.box.com",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "simpleIcons": "box",
+    "color": "#0061D5"
+  },
+  "supportedBy": [
+    "chatgpt",
+    "claude",
+    "microsoft-copilot",
+    "copilot-studio",
+    "notion-ai",
+    "manus",
+    "perplexity",
+    "lindy",
+    "gumloop",
+    "relevance-ai",
+    "glean",
+    "n8n",
+    "docker",
+    "github-registry"
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "hootsuite",
+  "name": "Hootsuite",
+  "maker": "Hootsuite",
+  "homepage": "https://www.hootsuite.com",
+  "category": "marketing",
+  "teams": ["marketing"],
+  "summary": "Plan and review social posts in Hootsuite",
+  "capabilities": [
+    "Draft and schedule social posts",
+    "Review published posts and analytics",
+    "Work across connected social accounts"
+  ],
+  "official": {
+    "evidence": "https://www.hootsuite.com/integrations/mcp"
+  },
+  "docs": "https://www.hootsuite.com/integrations/mcp",
+  "remote": {
+    "url": "https://mcp.hootsuite.com/perch",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "simpleIcons": "hootsuite",
+    "color": "#FF4C46"
+  },
+  "supportedBy": ["gemini", "lindy", "relevance-ai"]
+}

@@ -496,11 +496,24 @@ button together; repository configuration belongs in a separate panel.
 Default badges have a tinted green fill and green text. Feedback
 variants use the corresponding semantic colors.
 
-Integrations is a directory, not a sheet. The list page has a `SearchField`, an
-outline `ToggleGroup` filter (All, Connected, Needs attention) with fixed-width
-counts, then one bordered list per section in stable catalog order. Each row is a
-link with a `BrandIcon`, name, one-line blurb, and a fixed-width status column
-(Sprout `Status` mark, label, detail) so rows never move while statuses load.
+Integrations is a directory, not a sheet. The list page has a `SearchField`, then
+a category rail beside a card grid. The rail lists Your apps, Needs attention
+(with a count) and each category that has apps, with fixed-width counts; the
+open view lives in the `view` search param and switching it replaces the
+history entry. On phones the rail becomes a sideways strip. Cards are links with
+a `BrandIcon`, name, one-line blurb or owner, and a status line in a fixed
+position, so cards never move while statuses load. Searching replaces the
+current view with results across every category.
+
+Adding an app that isn't listed opens one setup dialog (`SetupDialog`, Sprout
+`Dialog` size `form`, placement `top`), from the header's "Add custom app"
+action, chat connect cards, and reconnect. It opens from the top and reserves
+its scrollbar, so fields that appear as you choose never move anything above
+them; options never add helper text when chosen. The link field comes first
+and fills the name; "Who can use it" and "How it signs in" are stacked radio
+`ChoiceGroup`s, and rarer settings sit under Advanced. The primary action lives
+in the footer and submits through the native `form` attribute; results such as
+"Taking you to sign in" appear inside the same dialog.
 
 Each app opens its own page at `/$workspaceSlug/integrations/<id>`, with a
 breadcrumb, a hero (`BrandIcon` xl, name, status badge, maker and category, blurb,
@@ -814,6 +827,28 @@ is the reference. Full-page reviews outside the Canvas can stay more explicit.
 
 Use UI states for feedback and recovery, and the
 shared component policy for composition.
+
+### Reply layouts
+
+An assistant reply can carry a saved A2UI 1.0 layout, drawn by Sprout's
+`A2uiSurface` with the `sprout/basic@2` and `tulipfarm/chat@2` catalogs. A
+`chat` layout draws inline; a `canvas` layout shows its summary and a button
+that opens it in Canvas, which opens by itself while it is the latest reply on
+a wide screen. Invalid layouts fall back to the reply's text.
+
+- Buttons send their `userMessage` as the person's next message, with the
+  action and its values stored beside it. The sent message shows those words
+  with the values listed underneath, and starts a reply like the composer.
+- Each layout answers once. Its controls are read-only after an action from it
+  was sent, while a reply is running, or when the chat can't send.
+- `searchRows` and `listMembers` lookups fill form choices under the viewer's
+  own access. They never start a reply or call a model.
+- The agent's screen actions (`openInCanvas`, `focusComponent`) run only on the
+  live reply, never when a saved reply is reopened.
+- While a layout streams, a `chat` layout draws each component as it arrives,
+  with Sprout's placeholders for the rest and every control read-only. A
+  `canvas` layout shows only a status line naming the report until it is saved,
+  so it never flashes in the chat first.
 
 ### Chat Canvas activity
 

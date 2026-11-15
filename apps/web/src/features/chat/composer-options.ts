@@ -29,8 +29,6 @@ export type Model = {
   label: string;
   logo: Icon;
   brand: ModelBrand | null;
-  speed?: number | undefined;
-  quality?: number | undefined;
   cost?: number | undefined;
 };
 
@@ -79,8 +77,6 @@ const model = (family: ModelCatalogFamily): Model => ({
   label: family.displayName,
   logo: modelLogo(family.vendor),
   brand: modelBrand(family.vendor),
-  speed: family.speed ?? undefined,
-  quality: family.quality ?? undefined,
   cost: familyCost(family),
 });
 

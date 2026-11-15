@@ -1,0 +1,34 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "context7",
+  "name": "Context7",
+  "maker": "Upstash",
+  "homepage": "https://context7.com",
+  "category": "code",
+  "teams": ["engineering"],
+  "summary": "Look up current docs for code libraries",
+  "capabilities": ["Find a library by name", "Fetch up-to-date docs and code examples for a library"],
+  "official": {
+    "evidence": "https://context7.com/docs/overview",
+    "repository": "https://github.com/upstash/context7"
+  },
+  "docs": "https://context7.com/docs/overview",
+  "remote": {
+    "url": "https://mcp.context7.com/mcp",
+    "transport": "streamable-http",
+    "auth": "none",
+    "checked": "2026-11-14"
+  },
+  "packages": [
+    {
+      "registry": "npm",
+      "name": "@upstash/context7-mcp",
+      "env": []
+    }
+  ],
+  "registryName": "io.github.upstash/context7",
+  "icons": {
+    "color": "#059669"
+  },
+  "supportedBy": ["chatgpt", "claude", "microsoft-copilot", "manus", "gumloop", "docker", "github-registry"]
+}

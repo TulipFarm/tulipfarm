@@ -1,0 +1,30 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "personio",
+  "name": "Personio",
+  "maker": "Personio",
+  "homepage": "https://www.personio.com",
+  "category": "hr-and-recruiting",
+  "teams": ["hr", "everyone"],
+  "summary": "Look up employees, absences, and HR data",
+  "capabilities": [
+    "Search employees and their details",
+    "Check absences and attendance",
+    "Answer HR questions from Personio data"
+  ],
+  "official": {
+    "evidence": "https://support.personio.de/hc/en-us/articles/38314656674333"
+  },
+  "docs": "https://support.personio.de/hc/en-us/articles/38314656674333",
+  "remote": {
+    "url": "https://app.personio.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "simpleIcons": "personio",
+    "color": "#000000"
+  },
+  "supportedBy": ["lindy", "relevance-ai"]
+}

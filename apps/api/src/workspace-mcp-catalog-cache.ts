@@ -3,6 +3,21 @@ import { mkdir, open, readdir, rename, unlink } from 'node:fs/promises';
 import { join, isAbsolute } from 'node:path';
 import { z } from 'zod';
 
+const catalogPackage = z.strictObject({
+  registry: z.enum(['npm', 'pypi']),
+  name: z.string().max(512),
+  version: z.string().max(256),
+  environment: z
+    .array(
+      z.strictObject({
+        name: z.string().max(128),
+        description: z.string().max(4096),
+        required: z.boolean(),
+        secret: z.boolean(),
+      }),
+    )
+    .max(20),
+});
 const entrySchema = z.strictObject({
   id: z.string().max(1024),
   name: z.string().max(512),
@@ -10,10 +25,13 @@ const entrySchema = z.strictObject({
   description: z.string().max(16384),
   version: z.string().max(256),
   endpoint: z.string().max(4096),
+  transport: z.enum(['streamable-http', 'sse']).optional(),
   status: z.enum(['active', 'deprecated']),
   compatibility: z.enum(['unverified', 'template-required']),
   authentication: z.enum(['unknown', 'headers-required']),
+  package: catalogPackage.optional(),
 });
+export { catalogPackage as mcpCatalogPackageSchema };
 export const publicMcpSnapshotSchema = z.strictObject({
   policyVersion: z.literal('latest-usable-v1'),
   syncedAt: z.iso.datetime(),

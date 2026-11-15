@@ -1,0 +1,24 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "folk",
+  "name": "folk",
+  "maker": "folk",
+  "homepage": "https://www.folk.app",
+  "category": "crm-and-sales",
+  "teams": ["sales"],
+  "summary": "Manage contacts, companies, and deals in folk",
+  "capabilities": ["Search people and companies", "Create and update contacts and deals", "Add notes and reminders"],
+  "official": {
+    "evidence": "https://developer.folk.app/mcp"
+  },
+  "docs": "https://developer.folk.app/mcp",
+  "remote": {
+    "url": "https://mcp.folk.app/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#1D1D1D"
+  }
+}

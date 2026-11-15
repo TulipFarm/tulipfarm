@@ -103,6 +103,7 @@ const WorkspaceSetupStatusPage = lazyRouteComponent(
 const JoinWorkspacePage = lazyRouteComponent(() => import('@/pages/governance-invitations'), 'JoinWorkspacePage');
 const SlackLinkPage = lazyRouteComponent(() => import('@/pages/slack-link'), 'SlackLinkPage');
 const GoogleCallbackPage = lazyRouteComponent(() => import('@/pages/google-callback'), 'GoogleCallbackPage');
+const McpCallbackPage = lazyRouteComponent(() => import('@/pages/mcp-callback'), 'McpCallbackPage');
 const GitHubCallbackPage = lazyRouteComponent(() => import('@/pages/github-callback'), 'GitHubCallbackPage');
 const AtlassianCallbackPage = lazyRouteComponent(() => import('@/pages/atlassian-callback'), 'AtlassianCallbackPage');
 const WorkspaceHomePage = lazyRouteComponent(() => import('@/pages/workspace-home'), 'WorkspaceHomePage');
@@ -404,11 +405,26 @@ export const googleCallbackRoute = createRoute({
     return result.success ? result.data : googleCallbackResultSchema.parse({ outcome: 'invalid-request' });
   },
 });
+export const mcpCallbackRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/mcp/callback',
+  component: McpCallbackPage,
+  validateSearch: search =>
+    z
+      .object({
+        outcome: z.enum(['connected', 'sign-in-required', 'denied', 'expired', 'failed']).catch('failed'),
+        workspaceId: z.uuid().optional().catch(undefined),
+        integrationId: z.uuid().optional().catch(undefined),
+      })
+      .parse(search),
+});
 // TanStack Router preloads route components only after every beforeLoad settles. Session
 // gates start the matched routes' code at once so it downloads during the session check.
 // This fetches public bundle code only; private data still waits for the guards.
-function preloadRouteCode(pathname: string): void {
-  for (const route of router.getMatchedRoutes(pathname)[0]) void route.options.component?.preload?.();
+export function preloadRouteCode(pathname: string): Promise<unknown> {
+  return Promise.all(
+    router.getMatchedRoutes(pathname)[0].map(route => route.options.component?.preload?.()?.catch(() => {})),
+  );
 }
 type PageReadModule = typeof import('@/features/chat/early-reads');
 let pageReadModule: Promise<PageReadModule> | null = null;
@@ -541,8 +557,9 @@ const admissionSnapshotSchema = z.object({
  * if they are young enough to show before the session and membership checks return.
  */
 async function provisionalAdmission(identity: SessionIdentity, slug: string, pathname: string) {
-  // Integration controls change workspace connections, so those pages always wait for the checks.
-  if (onIntegrationsPage(slug, pathname)) return null;
+  // An integration's own page changes its connection, so it always waits for the checks. The
+  // directory only lists statuses and links, and its writes already wait like any other page's.
+  if (pathname.startsWith(`/${slug}/integrations/`)) return null;
   const read = async () => {
     const [, snapshot] = await Promise.all([
       loadPageReads(),
@@ -792,6 +809,9 @@ export const workspaceRoute = createRoute({
           ? snapshot.read.workspace
           : null;
       const navigating = snapshot.kind === 'admitted' && snapshot.read.pathname !== location.pathname;
+      // A page shown at once hands these reads to its background check, which outlives this load, so a
+      // newer load must not cancel them. Otherwise they end with this load.
+      const earlyAbort = new AbortController();
       const earlyReads =
         navigating && previousWorkspace && snapshot.kind === 'admitted'
           ? {
@@ -800,9 +820,9 @@ export const workspaceRoute = createRoute({
               workspace: getWorkspace(params.workspaceSlug),
               membership:
                 previousWorkspace.status === 'ready'
-                  ? loadOwnMembership(previousWorkspace.id, abortController.signal)
+                  ? loadOwnMembership(previousWorkspace.id, earlyAbort.signal)
                   : null,
-              list: cause === 'stay' ? listWorkspaces(abortController.signal) : null,
+              list: cause === 'stay' ? listWorkspaces(earlyAbort.signal) : null,
             }
           : null;
       if (earlyReads) {
@@ -981,6 +1001,65 @@ export const workspaceRoute = createRoute({
           if (!signal.aborted && !temporaryAdmissionError(error)) context.workspaceAccess.clear();
           throw error;
         });
+
+      // Moving between pages of an admitted workspace shows the next page at once with the last
+      // admission. The full check runs behind it, writes wait for it, and any change re-runs this load.
+      const shown =
+        earlyReads && !verified && loadCause === 'stay'
+          ? (router.state.matches.find(match => match.routeId === workspaceRoute.id)?.context as
+              | Partial<WorkspaceContext>
+              | undefined)
+          : undefined;
+      if (
+        earlyReads &&
+        shown?.workspace?.slug === params.workspaceSlug &&
+        shown.workspace.id === previousWorkspace?.id &&
+        shown.user?.id === earlyReads.userId &&
+        shown.sessionId === earlyReads.sessionId &&
+        shown.workspaceProvisional === false &&
+        shown.workspaceStale === false
+      ) {
+        const shownContext = shown as WorkspaceContext;
+        const check = earlyAbort;
+        const verification = retryAdmission(
+          fresh => profile(check.signal).then(session => admit(session, check.signal, fresh)),
+          check.signal,
+        );
+        const fingerprint = (result: WorkspaceContext) =>
+          JSON.stringify([
+            result.user,
+            result.sessionId,
+            result.accessRevision,
+            result.membership,
+            result.workspace,
+            result.workspaces,
+          ]);
+        holdWrites(
+          verification.then(result => {
+            if (result.workspace.id !== shownContext.workspace.id || result.membershipId !== shownContext.membershipId)
+              throw new Error('Workspace access changed');
+          }),
+        );
+        void verification
+          .then(
+            result => (fingerprint(result) === fingerprint(shownContext) ? undefined : { context: result }),
+            () => ({ context: null }),
+          )
+          .then(outcome => {
+            if (!outcome) return;
+            verifiedAdmissions.set(context.workspaceAccess, {
+              ...outcome,
+              slug: params.workspaceSlug,
+              pathname: location.pathname,
+              revision: context.workspaceAccess.getSnapshot().revision,
+            });
+            void router.invalidate();
+          });
+        return shownContext;
+      }
+      const endEarlyReads = () => earlyAbort.abort(abortController.signal.reason);
+      if (abortController.signal.aborted) endEarlyReads();
+      else abortController.signal.addEventListener('abort', endEarlyReads, { once: true });
 
       const provisional =
         last && !verified && !earlyReads && cause !== 'stay' && snapshot.kind !== 'admitted'
@@ -1324,11 +1403,64 @@ const workspaceSoulRoute = createRoute({
   path: 'settings/soul',
   component: lazyRouteComponent(() => import('@/pages/soul-explorer'), 'SoulExplorerPage'),
 });
+const appsRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  path: 'apps',
+  component: lazyRouteComponent(() => import('@/features/apps/list'), 'AppsPage'),
+});
+const newAppRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  path: 'apps/new',
+  component: lazyRouteComponent(() => import('@/features/apps/new'), 'NewAppPage'),
+});
+const appPageSearch = z.object({ row: z.uuid().optional().catch(undefined) });
+const appRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  path: 'apps/$appSlug',
+  validateSearch: search => appPageSearch.parse(search),
+  component: lazyRouteComponent(() => import('@/features/apps/pages/route'), 'AppHomePage'),
+});
+const appVersionsRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  path: 'apps/$appSlug/versions',
+  component: lazyRouteComponent(() => import('@/features/apps/versions'), 'AppVersionsPage'),
+});
+const appEditRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  path: 'apps/$appSlug/edit',
+  validateSearch: search =>
+    appPageSearch.extend({ page: z.string().max(80).optional().catch(undefined) }).parse(search),
+  component: lazyRouteComponent(() => import('@/features/apps/edit/page'), 'AppEditPage'),
+});
+const appSettingsRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  path: 'apps/$appSlug/settings',
+  component: lazyRouteComponent(() => import('@/features/apps/settings'), 'AppSettingsPage'),
+});
+const appPageRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  path: 'apps/$appSlug/$page',
+  validateSearch: search => appPageSearch.parse(search),
+  component: lazyRouteComponent(() => import('@/features/apps/pages/route'), 'AppPagePage'),
+});
 export const workspaceModelsRoute = createRoute({
   getParentRoute: () => workspaceRoute,
   path: 'settings/models',
   validateSearch: search =>
-    z.object({ tab: z.enum(['access', 'compaction', 'images']).optional().catch(undefined) }).parse(search),
+    z
+      .object({
+        // The model source or setting shown: a plan shared with the member is `plan:<connection id>`.
+        tab: z
+          .union([
+            z.enum(['access', 'chatgpt', 'claude', 'copilot', 'keys', 'compaction', 'images']),
+            z.templateLiteral(['plan:', z.uuid()]),
+          ])
+          .optional()
+          .catch(undefined),
+        // The outcome of a ChatGPT sign-in that finished on this server's loopback address.
+        chatgpt: z.string().max(64).optional().catch(undefined),
+      })
+      .parse(search),
   component: ModelsPage,
 });
 const workspaceAccountRoute = createRoute({
@@ -1417,7 +1549,13 @@ export const knowledgeRoute = createRoute({
 export const integrationsRoute = createRoute({
   getParentRoute: () => workspaceRoute,
   path: 'integrations',
-  validateSearch: search => z.object({ returnChat: z.uuid().optional().catch(undefined) }).parse(search),
+  validateSearch: search =>
+    z
+      .object({
+        returnChat: z.uuid().optional().catch(undefined),
+        view: z.string().max(64).optional().catch(undefined),
+      })
+      .parse(search),
   component: IntegrationsPage,
 });
 export const integrationDetailRoute = createRoute({
@@ -1426,7 +1564,10 @@ export const integrationDetailRoute = createRoute({
   validateSearch: search =>
     z
       .object({
-        tab: z.enum(['accounts', 'knowledge', 'channels', 'settings', 'advanced']).optional().catch(undefined),
+        tab: z
+          .enum(['tools', 'access', 'accounts', 'knowledge', 'channels', 'settings', 'advanced'])
+          .optional()
+          .catch(undefined),
         returnChat: z.uuid().optional().catch(undefined),
       })
       .parse(search),
@@ -1453,6 +1594,7 @@ export const router = createRouter({
     indexRoute,
     chatRedirectRoute,
     googleCallbackRoute,
+    mcpCallbackRoute,
     githubCallbackRoute,
     githubSetupRoute,
     atlassianCallbackRoute,
@@ -1519,6 +1661,13 @@ export const router = createRouter({
       newTableRoute,
       tableDetailRoute,
       tableEditRoute,
+      appsRoute,
+      newAppRoute,
+      appRoute,
+      appVersionsRoute,
+      appEditRoute,
+      appSettingsRoute,
+      appPageRoute,
     ]),
   ]),
   defaultNotFoundComponent: NotFoundPage,

@@ -45,6 +45,9 @@ import { SlackAccount, SlackIntegration, SlackKnowledge } from '@/features/integ
 import { SlackBotChannels } from '@/features/integrations/slack-channels';
 import { SlackChannelContentPrototype } from '@/features/integrations/slack-channel-content-prototype';
 import { statusOf, useIntegrationStatus, type Status } from '@/features/integrations/status';
+import { mcpAppById, mcpPagePrefix } from '@/features/integrations/mcp-apps';
+import { ToolGroup } from '@/features/integrations/tools-list';
+import { McpAppPage } from '@/features/workspace-mcp/app-page';
 import { WorkspaceRefreshNotice } from '@/features/integrations/workspace-refresh';
 import { useFlag } from '@/lib/feature-flags';
 import { integrationDetailRoute, workspaceRoute } from '@/router';
@@ -52,6 +55,19 @@ import { integrationDetailRoute, workspaceRoute } from '@/router';
 export function IntegrationDetailPage() {
   const { workspace, user, sessionId } = workspaceRoute.useRouteContext();
   const { integrationId } = integrationDetailRoute.useParams();
+  const curated = mcpAppById(integrationId);
+  const connectionId = integrationId.startsWith(mcpPagePrefix) ? integrationId.slice(mcpPagePrefix.length) : undefined;
+  if (curated || connectionId)
+    return (
+      <McpAppPage
+        key={`${workspace.id}:${user.id}:${sessionId}:${integrationId}`}
+        workspaceId={workspace.id}
+        slug={workspace.slug}
+        app={curated}
+        id={connectionId}
+        missing={<Missing slug={workspace.slug} />}
+      />
+    );
   const app = integrationById(integrationId);
   if (!app) return <Missing slug={workspace.slug} />;
   return (
@@ -230,6 +246,13 @@ function Detail({ app, workspaceId, slug }: { app: Integration; workspaceId: str
                 />
               </Pane>
             </TabsContent>
+            {tabs.includes('tools') && (
+              <TabsContent value="tools">
+                <Pane>
+                  <BuiltInTools app={app} />
+                </Pane>
+              </TabsContent>
+            )}
             {tabs.includes('accounts') && (
               <TabsContent value="accounts">
                 <Pane>
@@ -305,6 +328,33 @@ function Panel({ title, id, children }: { title: string; id: string; children: R
       </h2>
       {children}
     </section>
+  );
+}
+
+function BuiltInTools({ app }: { app: Integration }) {
+  if (app.provider === 'soon') return null;
+  const all = [...(app.can ?? []), ...providers[app.provider].can];
+  const rows = (items: typeof all) => items.map(item => ({ key: item.text, title: item.text, description: '' }));
+  return (
+    <div className="max-w-4xl space-y-5">
+      <p className="max-w-prose text-muted-foreground">
+        TulipFarm built these tools for {app.name}, so they’re always on.
+      </p>
+      <ToolGroup
+        id="reads"
+        title="Reads data"
+        note="Runs on its own"
+        rows={rows(all.filter(item => !item.asksFirst))}
+        expanded
+      />
+      <ToolGroup
+        id="changes"
+        title="Changes data"
+        note="Asks you in chat first"
+        rows={rows(all.filter(item => item.asksFirst))}
+        expanded
+      />
+    </div>
   );
 }
 

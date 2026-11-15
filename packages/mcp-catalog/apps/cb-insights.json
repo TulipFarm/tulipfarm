@@ -1,0 +1,29 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "cb-insights",
+  "name": "CB Insights",
+  "maker": "CB Insights",
+  "homepage": "https://www.cbinsights.com",
+  "category": "search-and-research",
+  "teams": ["finance", "sales"],
+  "summary": "Research companies, markets, and deals",
+  "capabilities": [
+    "Look up company profiles and funding",
+    "Find investors, deals, and acquisitions",
+    "Read market maps and analyst research"
+  ],
+  "official": {
+    "evidence": "https://mcp.cbinsights.com/docs-portal.md"
+  },
+  "docs": "https://mcp.cbinsights.com/docs-portal.md",
+  "remote": {
+    "url": "https://mcp.cbinsights.com",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#006DE9"
+  },
+  "supportedBy": ["chatgpt", "claude", "microsoft-copilot", "gumloop", "glean"]
+}

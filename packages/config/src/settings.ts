@@ -1,5 +1,5 @@
 // The application configuration contract: every environment variable that the api,
-// worker, storage-worker, snippet-broker, and database setup read, plus the Compose
+// worker, storage-worker, snippet-broker, gateway, and database setup read, plus the Compose
 // inputs of the self-hosted stack. Applications read plain environment variables only;
 // operators deliver them with any tool. `pnpm config:docs` renders
 // self-host/.env.example from this list, and
@@ -13,6 +13,7 @@ export const settingServices = [
   'storage-worker',
   'render-worker',
   'snippet-broker',
+  'gateway',
   'database',
   'compose',
 ] as const;
@@ -358,7 +359,7 @@ export const settings: readonly Setting[] = [
   {
     name: 'HOST',
     group: 'Runtime',
-    services: ['api', 'snippet-broker'],
+    services: ['api', 'snippet-broker', 'gateway'],
     requirement: 'optional',
     secret: false,
     default: '127.0.0.1',
@@ -367,10 +368,10 @@ export const settings: readonly Setting[] = [
   {
     name: 'PORT',
     group: 'Runtime',
-    services: ['api', 'snippet-broker'],
+    services: ['api', 'snippet-broker', 'gateway'],
     requirement: 'optional',
     secret: false,
-    default: '3001 (api), 8090 (snippet-broker)',
+    default: '3001 (api), 8090 (snippet-broker), 3002 (gateway)',
     description: 'Listen port.',
   },
   {
@@ -423,6 +424,16 @@ export const settings: readonly Setting[] = [
     description: '`direct`, `reverse-proxy`, or `azure-container-apps`: which proxy headers to trust.',
   },
   {
+    name: 'GATEWAY_PROXY_MODE',
+    group: 'Runtime',
+    services: ['gateway'],
+    requirement: 'optional',
+    secret: false,
+    default: 'direct',
+    description:
+      '`direct`, `reverse-proxy` (one load balancer), or `cloudfront` (CloudFront, then a load balancer): which forwarded hops the gateway trusts for the client address.',
+  },
+  {
     name: 'TEMPORAL_UI_URL',
     group: 'Runtime',
     services: ['api'],
@@ -436,7 +447,7 @@ export const settings: readonly Setting[] = [
   {
     name: 'TULIPFARM_EXTENSIONS',
     group: 'Runtime',
-    services: apps,
+    services: [...apps, 'gateway'],
     requirement: 'optional',
     secret: false,
     description:
@@ -472,9 +483,18 @@ export const settings: readonly Setting[] = [
       'Public API origin used for auth callbacks and as the Workspace MCP OAuth client ID and redirect origin. The worker needs it for social token refresh and skips social publishing in production without it.',
   },
   {
+    name: 'TULIPFARM_APP_SITES_DOMAIN',
+    group: 'Public origins',
+    services: [...apiWorker, 'gateway'],
+    requirement: 'optional',
+    secret: false,
+    description:
+      'Domain that serves published apps as subdomains; point a wildcard record at the API. It must differ from the web app domain. Unset leaves apps unpublished unless an extension serves them. The gateway answers apps that run a server on it.',
+  },
+  {
     name: 'WEB_ORIGIN',
     group: 'Public origins',
-    services: apiWorker,
+    services: [...apiWorker, 'gateway'],
     requirement: 'production',
     secret: false,
     description: 'Public web app origin.',
@@ -551,7 +571,7 @@ export const settings: readonly Setting[] = [
   {
     name: 'DATABASE_URL',
     group: 'Database',
-    services: ['api', 'database'],
+    services: ['api', 'gateway', 'database'],
     requirement: 'production',
     secret: true,
     generated: true,
@@ -814,6 +834,24 @@ export const settings: readonly Setting[] = [
     default: 'tulipfarm-files',
     description:
       'Bucket for user files and chat attachments. Unset in services falls back to CHAT_R2_*, or disables Files.',
+  },
+  {
+    name: 'TULIPFARM_OBJECT_STORAGE_APPS_BUCKET',
+    group: 'Object storage',
+    services: [...apiWorker, 'gateway'],
+    requirement: 'optional',
+    secret: false,
+    description:
+      'Bucket for app build files and published app sites. Unset turns off app builds and publishing. With TULIPFARM_APP_PREVIEW_DOMAIN set, editors can open draft builds.',
+  },
+  {
+    name: 'TULIPFARM_APP_PREVIEW_DOMAIN',
+    group: 'Object storage',
+    services: ['api', 'gateway'],
+    requirement: 'optional',
+    secret: false,
+    description:
+      'Parent domain for draft builds, served at <app host key>.<domain> by the gateway, or by the API while the wildcard record points at it. The gateway requires it.',
   },
   {
     name: 'R2_ENDPOINT',
@@ -1099,6 +1137,16 @@ export const settings: readonly Setting[] = [
     description:
       'Comma-separated host names (no scheme, port or path; exact match, no wildcards) that model credentials may be sent to, besides the built-in provider APIs and Azure Foundry resource hosts. Required for every `*_BASE_URL` on another host and every `openai-compatible` catalog endpoint. Endpoints use https; http is allowed only for localhost, 127.0.0.1 and ::1 outside production. URLs must not contain credentials.',
     selfHost: { section: 'models', example: 'gateway.example.com', commented: true },
+  },
+  {
+    name: 'COPILOT_GITHUB_CLIENT_ID',
+    group: 'Models',
+    services: apps,
+    requirement: 'optional',
+    secret: false,
+    description:
+      'Client ID of a GitHub OAuth app with device flow turned on. Members sign in to their GitHub Copilot plan with it. Unset uses the GitHub App in GITHUB_OAUTH_CLIENT_ID and GITHUB_OAUTH_CLIENT_SECRET, which also needs device flow turned on and renews its expiring tokens. With neither, members paste a fine-grained token instead.',
+    selfHost: { section: 'models', example: 'Ov23li0000000000000', commented: true },
   },
   {
     name: 'MODEL_CATALOG_FILE',

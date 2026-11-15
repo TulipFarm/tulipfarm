@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import type { WorkspaceRuntime } from '@tulipfarm/workspaces/storage';
 import { createWorkspaceTableConfirmation } from '@tulipfarm/workspaces/table-confirmation';
 import { registerAgents } from './agents.ts';
+import { registerAppPages } from './app-pages.ts';
 import { registerGovernance } from './governance.ts';
 import { registerWorkspaceMembers } from './workspace-members.ts';
 import { registerWorkspaceSettings } from './workspace-settings.ts';
@@ -14,6 +15,7 @@ import { recommendationEligibility } from '@tulipfarm/recommendations/configurat
 import { registerTableDispatch } from './table-dispatch.ts';
 import { createReplyDispatch, registerConversationDispatch } from './conversation-dispatch.ts';
 import { createApiCallReviews, registerApiCalls } from './api-calls.ts';
+import { createCodingRunReviews, registerCodingRuns } from './coding-runs.ts';
 import { registerIntegrations } from './integrations.ts';
 import { integrationCredentialKeyring, createIntegrationService } from '@tulipfarm/integrations';
 import type { registerAuth } from './auth.ts';
@@ -25,6 +27,10 @@ import { pinTurnImageModels, recognitionAvailability } from '@tulipfarm/agents/i
 import { isFeatureEnabled } from '@tulipfarm/observability';
 import { registerConversations } from './conversations.ts';
 import { registerFollowUps } from './follow-ups.ts';
+import { registerLayoutInteractions } from './layout-interactions.ts';
+import { humanReadableTableFiles } from '@tulipfarm/agents/table-sources';
+import { executionCompatibility } from '@tulipfarm/tables/execution';
+import { createTableService } from '@tulipfarm/tables/service';
 import { createFollowUps } from '@tulipfarm/agents/follow-ups';
 import { createConversationEventHub } from './conversation-events.ts';
 import { registerProjects } from './projects.ts';
@@ -305,6 +311,15 @@ export function registerStorageComposition(
       wakeTask,
     }),
   );
+  registerCodingRuns(
+    app,
+    dependencies.auth,
+    createCodingRunReviews({
+      runtime,
+      resolveConfirmationCredential: confirmation.resolveConfirmationCredential,
+      wakeChat: replies.sent,
+    }),
+  );
   const conversations = createConversations(runtime, chatSkills, {
     pinTurn: async (tx, workspaceId, familyId) =>
       (await isFeatureEnabled('images', null, { id: workspaceId })) ? pinTurnImageModels(tx, familyId) : null,
@@ -321,6 +336,24 @@ export function registerStorageComposition(
     identity: dependencies.pool,
     events,
     replies,
+  });
+  registerLayoutInteractions(app, {
+    auth: dependencies.auth,
+    service: conversations,
+    tables: createTableService(runtime, { readableFiles: humanReadableTableFiles }, executionCompatibility),
+    replies,
+  });
+  const appAgentTasks = createAgentTasks(runtime);
+  registerAppPages(app, {
+    auth: dependencies.auth,
+    runtime,
+    tables: createTableService(runtime, { readableFiles: humanReadableTableFiles }, executionCompatibility),
+    startWorkflow: workflows.start,
+    askAgent: async (workspaceId, userId, input) => {
+      const task = await appAgentTasks.start(workspaceId, userId, input);
+      await wakeTask(workspaceId, task.id);
+      return { taskId: task.id };
+    },
   });
   registerProjects(app, {
     auth: dependencies.auth,

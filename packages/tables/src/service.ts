@@ -769,7 +769,11 @@ export function createTableService(
     const field = source.definition.fields.find(item => item.id === fieldId);
     if (field?.kind !== 'relationship')
       throw new TableQueryError([{ code: 'unknown-field', message: 'Choose a link field from this table.' }]);
-    const target = await activeFor(tx, actor, field.targetTableId, undefined, true);
+    return namedRecords(tx, actor, field.targetTableId, lookup, limit);
+  }
+
+  async function namedRecords(tx: TableTransaction, actor: Actor, tableId: string, lookup: Lookup, limit: number) {
+    const target = await activeFor(tx, actor, tableId, undefined, true);
     const named = nameField(target.definition),
       parameters: unknown[] = [];
     const physical = (id: string) => `"f_${id.replaceAll('-', '')}"`;
@@ -968,9 +972,59 @@ export function createTableService(
     });
   }
 
+  /** Rows of one table whose name matches the search, as IDs and names, under the reader's access to the table. */
+  async function search(
+    workspaceId: string,
+    principal: string | Actor,
+    input: { tableId: string; search?: string; limit?: number },
+  ) {
+    const request = z
+      .object({
+        tableId: tableIdSchema,
+        search: z.string().trim().max(255).optional(),
+        limit: z.int().min(1).max(50).default(20),
+      })
+      .parse(input);
+    return authorized(workspaceId, principal, async (tx, actor) => ({
+      choices: await namedRecords(
+        tx,
+        actor,
+        request.tableId,
+        request.search ? { search: request.search } : {},
+        request.limit,
+      ),
+    }));
+  }
+
+  /** Workspace members whose name or email matches, from the members table, under the reader's access to it. */
+  async function searchMembers(
+    workspaceId: string,
+    principal: string | Actor,
+    input: { search?: string; limit?: number },
+  ) {
+    const request = z
+      .object({ search: z.string().trim().max(255).optional(), limit: z.int().min(1).max(50).default(20) })
+      .parse(input);
+    return authorized(workspaceId, principal, async (tx, actor) => {
+      const members = await store.workspaceMembersTable(tx);
+      if (!members) return { choices: [] };
+      return {
+        choices: await namedRecords(
+          tx,
+          actor,
+          members.coreDefinition.id,
+          request.search ? { search: request.search } : {},
+          request.limit,
+        ),
+      };
+    });
+  }
+
   return {
     read,
     list,
+    search,
+    searchMembers,
     listPage,
     mutate,
     mutateMember,

@@ -1,0 +1,41 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "rootly",
+  "name": "Rootly",
+  "maker": "Rootly",
+  "homepage": "https://rootly.com",
+  "category": "monitoring-and-analytics",
+  "teams": ["engineering", "operations"],
+  "summary": "Manage Rootly incidents and on-call",
+  "capabilities": ["Find and read incidents", "Find similar past incidents", "Check on-call schedules and alerts"],
+  "official": {
+    "evidence": "https://docs.rootly.com/integrations/mcp-server",
+    "repository": "https://github.com/rootlyhq/rootly-mcp-server"
+  },
+  "docs": "https://docs.rootly.com/integrations/mcp-server",
+  "remote": {
+    "url": "https://mcp.rootly.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "packages": [
+    {
+      "registry": "pypi",
+      "name": "rootly-mcp-server",
+      "env": [
+        {
+          "name": "ROOTLY_API_TOKEN",
+          "description": "Rootly API token",
+          "secret": true,
+          "required": true
+        }
+      ]
+    }
+  ],
+  "registryName": "com.rootly/mcp-server",
+  "icons": {
+    "color": "#6D55BD"
+  },
+  "supportedBy": ["claude", "manus", "lindy", "glean"]
+}

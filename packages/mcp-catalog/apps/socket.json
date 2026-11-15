@@ -1,0 +1,27 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "socket",
+  "name": "Socket",
+  "maker": "Socket",
+  "homepage": "https://socket.dev",
+  "category": "security",
+  "teams": ["engineering"],
+  "summary": "Check open source packages for supply chain risk",
+  "capabilities": ["Score npm, PyPI, and other packages for security risk", "Check dependencies before installing"],
+  "official": {
+    "evidence": "https://github.com/SocketDev/socket-mcp",
+    "repository": "https://github.com/SocketDev/socket-mcp"
+  },
+  "docs": "https://github.com/SocketDev/socket-mcp",
+  "remote": {
+    "url": "https://mcp.socket.dev/",
+    "transport": "streamable-http",
+    "auth": "none",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "simpleIcons": "socket",
+    "color": "#C93CD7"
+  },
+  "supportedBy": ["claude", "lindy", "glean"]
+}

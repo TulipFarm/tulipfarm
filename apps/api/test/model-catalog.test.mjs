@@ -85,7 +85,7 @@ function fixture(t, eligible, resolve = trustedResolution, snapshot) {
         if (state.brokenStorage) throw new Error('postgres://private-password');
         state.checked = false;
         return operation({
-          schema: 'catalog_test',
+          schema: 'ws_11111111111141118111111111111111',
           client: {
             async query(sql, values) {
               if (sql.includes('tf_model_availability')) return { rows: [], rowCount: 0 };
@@ -93,7 +93,7 @@ function fixture(t, eligible, resolve = trustedResolution, snapshot) {
                 assert.match(sql, /FOR SHARE OF authorization_lock$/);
                 return { rows: [{ id: 1 }], rowCount: 1 };
               }
-              assert.match(sql, /"catalog_test"\."tf_memberships"/);
+              assert.match(sql, /"ws_11111111111141118111111111111111"\."tf_memberships"/);
               assert.match(sql, /removed_at IS NULL/);
               const checkingCurrent = sql.includes('WHERE id = $1');
               assert.deepEqual(values, checkingCurrent ? [membershipId, userId] : [userId]);
@@ -178,7 +178,7 @@ test('catalog prices and families are visible but disabled without trusted eligi
   );
   assert.deepEqual(catalog.families[0], {
     id: 'claude-haiku',
-    displayName: 'Claude Haiku',
+    displayName: 'Claude Haiku 4.5',
     vendor: 'anthropic',
     currentVersion: 'claude-haiku-4-5',
     provider: 'anthropic',
@@ -216,7 +216,7 @@ test('members and admins receive only eligible, directional non-self fallback pa
       families.find(family => family.id === 'gpt-astra'),
       {
         id: 'gpt-astra',
-        displayName: 'GPT Astra',
+        displayName: 'GPT-6 Astra',
         vendor: 'openai',
         currentVersion: 'gpt-6-astra',
         provider: 'azure',
@@ -311,7 +311,7 @@ test('trusted rollback supplies the displayed version and prices instead of the 
     response.json().families.find(family => family.id === 'grok'),
     {
       id: 'grok',
-      displayName: 'Grok',
+      displayName: 'Grok 4.6',
       vendor: 'xai',
       currentVersion: 'grok-4',
       provider: 'azure',
@@ -383,7 +383,7 @@ test('trusted future bundle versions and prices are projected without original-p
     modelCatalogSchema.parse(response.json()).families.find(family => family.id === 'grok'),
     {
       id: 'grok',
-      displayName: 'Grok',
+      displayName: 'Grok 4.6',
       vendor: 'xai',
       currentVersion: 'grok-next',
       provider: 'azure',
@@ -600,7 +600,7 @@ test('paused families stay listed as temporarily unavailable and keep fallback o
   assert.equal(response.statusCode, 200);
   const families = modelCatalogSchema.parse(response.json()).families;
   const opus = families.find(family => family.id === 'claude-opus');
-  assert.equal(opus.displayName, 'Claude Opus');
+  assert.equal(opus.displayName, 'Claude Opus 5.5');
   assert.equal(opus.available, false);
   assert.equal(opus.unavailableReason, 'model-family-paused');
   assert.deepEqual(opus.fallbackFor, []);

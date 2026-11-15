@@ -1,0 +1,45 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "asana",
+  "name": "Asana",
+  "maker": "Asana",
+  "homepage": "https://asana.com",
+  "category": "projects-and-issues",
+  "teams": ["everyone", "operations", "marketing"],
+  "summary": "Manage Asana tasks, projects and goals",
+  "capabilities": [
+    "Search tasks, projects and portfolios",
+    "Create and update tasks and comments",
+    "Read goals and project status"
+  ],
+  "official": {
+    "evidence": "https://developers.asana.com/docs/using-asanas-mcp-server"
+  },
+  "docs": "https://developers.asana.com/docs/using-asanas-mcp-server",
+  "remote": {
+    "url": "https://mcp.asana.com/v2/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "simpleIcons": "asana",
+    "color": "#F06A6A"
+  },
+  "supportedBy": [
+    "chatgpt",
+    "claude",
+    "microsoft-copilot",
+    "manus",
+    "perplexity",
+    "lindy",
+    "gumloop",
+    "relevance-ai",
+    "dust",
+    "glean",
+    "zapier",
+    "make",
+    "n8n",
+    "docker"
+  ]
+}

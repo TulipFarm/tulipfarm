@@ -6,6 +6,7 @@ import { ConversationConflict } from '@tulipfarm/conversations';
 import {
   McpHttpError,
   mcpActionParams,
+  mcpCallbackRedirect,
   mcpCallbackSchema,
   mcpIntegrationParams,
   mcpHttpId,
@@ -451,9 +452,14 @@ export function registerWorkspaceMcp(
           mcpCallbackSchema,
         ),
       },
-      request => {
+      async (request, reply) => {
         const session = http.session(request);
-        return api().oauth.complete(session.userId, session.sessionId, mcpCallbackSchema.parse(request.query));
+        const result = await api().oauth.complete(
+          session.userId,
+          session.sessionId,
+          mcpCallbackSchema.parse(request.query),
+        );
+        return mcpCallbackRedirect(reply, { outcome: 'connected', ...result });
       },
     );
   });

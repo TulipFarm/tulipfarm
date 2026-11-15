@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import type { z } from 'zod';
 import {
   defaultImageInputLimits,
+  isPlanProvider,
   modelCatalogFileSchema,
   modelProviderDefaults,
   type ImageModelApi,
@@ -20,6 +21,7 @@ import {
   normalizeModelEndpoint,
 } from './model-endpoints.ts';
 import { modelPriceSchema, type ModelPrice } from './model-continuity.ts';
+import { planCatalogModel, planModelOfFamily } from './plan-models.ts';
 
 // Reads the model catalog (MODEL_CATALOG_FILE, MODEL_CATALOG, or the shipped catalog) and works out which of its
 // models this deployment serves with the provider keys it has.
@@ -99,6 +101,7 @@ export function readModelCatalog(env: Env = process.env): ReadCatalog {
 }
 
 type BaseUrlProvider = keyof typeof defaultModelEndpoints;
+type BuiltInType = keyof typeof modelProviderDefaults;
 // Paths the request URLs append to these base URLs; a base URL that already ends in one would double it.
 const appendedPaths: Partial<Record<BaseUrlProvider, string>> = { anthropic: '/v1/', google: '/v1beta/' };
 
@@ -133,6 +136,10 @@ export type ServedModelCatalog = {
   readonly skipped: readonly string[];
   /** New chats, new agents and features without a model of their own use this model. */
   readonly defaultModel: ServedModel;
+  /**
+   * The served model `id`: a catalog model, or a model a member's plan lists under the id `planModelFamilyId` derives
+   * (served when the catalog lists a route for that plan; whether the member has it is checked when it runs).
+   */
   model(id: string): ServedModel | undefined;
   /** The served model with `role`, or null when none has it. */
   role(role: ModelCatalogRole): ServedModel | null;
@@ -160,9 +167,12 @@ const unmeteredRates: readonly ModelPrice[] = Object.freeze([
 ]);
 
 function providerOf(catalog: ModelCatalogFile, key: string) {
+  // Plan routes read no variable: each workspace's feature flag for the plan switches them.
+  if (isPlanProvider(key)) return { type: key as ModelProvider, apiKeyEnv: '', endpointEnv: '' };
   const declared = catalog.providers[key];
   const type = (declared?.type ?? key) as ModelProvider;
-  const defaults = type === 'openai-compatible' ? undefined : modelProviderDefaults[type];
+  const defaults =
+    type === 'openai-compatible' || isPlanProvider(type) ? undefined : modelProviderDefaults[type as BuiltInType];
   return {
     type,
     apiKeyEnv: declared?.apiKeyEnv ?? defaults!.apiKeyEnv,
@@ -175,10 +185,12 @@ export function modelCatalogEnvNames(catalog: ModelCatalogFile): readonly string
   const providers = new Set(
     [...catalog.models, ...catalog.imageModels].flatMap(model => model.routes.map(route => route.provider)),
   );
-  return [...providers].flatMap(key => {
-    const provider = providerOf(catalog, key);
-    return [provider.apiKeyEnv, provider.endpointEnv];
-  });
+  return [...providers]
+    .filter(key => !isPlanProvider(key))
+    .flatMap(key => {
+      const provider = providerOf(catalog, key);
+      return [provider.apiKeyEnv, provider.endpointEnv];
+    });
 }
 
 const publicPrefix = /^(VITE_|NEXT_PUBLIC_|PUBLIC_)/;
@@ -226,6 +238,13 @@ export function loadModelCatalog(env: Env = process.env): ServedModelCatalog {
     const needed: string[] = [];
     for (const [index, { provider: key, model: name }] of routes.entries()) {
       const provider = providerOf(catalog, key);
+      if (isPlanProvider(provider.type)) {
+        const plan = provider.type;
+        if (route) continue;
+        route = Object.freeze({ provider: key, ...provider, model: name, endpoint: defaultModelEndpoints[plan] });
+        routeIndex = index;
+        continue;
+      }
       const endpointRequired = provider.type === 'azure' || provider.type === 'openai-compatible';
       const configured = value(env, provider.endpointEnv);
       needed.push(endpointRequired ? `${provider.apiKeyEnv} and ${provider.endpointEnv}` : provider.apiKeyEnv);
@@ -268,6 +287,22 @@ export function loadModelCatalog(env: Env = process.env): ServedModelCatalog {
     else if (catalog.missingKeys === 'skip') skipped.push(model.id);
     else throw missing(`models.${index}`, model.id, needed);
   }
+  const servedPlanModels = new Map<string, ServedModel>();
+  const planModel = (id: string) => {
+    const cached = servedPlanModels.get(id);
+    if (cached) return cached;
+    const plan = planModelOfFamily(id);
+    const model = plan && planCatalogModel(catalog, plan.provider, plan.model);
+    if (!model) return undefined;
+    const served: ServedModel = Object.freeze({
+      ...model,
+      route: firstRoute(`plan model ${id}`, model.routes).route!,
+      rates: unmeteredRates,
+    });
+    if (servedPlanModels.size >= 1000) servedPlanModels.delete(servedPlanModels.keys().next().value!);
+    servedPlanModels.set(id, served);
+    return served;
+  };
   const servedImages: ServedImageModel[] = [];
   for (const [index, image] of catalog.imageModels.entries()) {
     const { route, routeIndex, needed } = firstRoute(`imageModels.${index}`, image.routes);
@@ -278,15 +313,18 @@ export function loadModelCatalog(env: Env = process.env): ServedModelCatalog {
     else if (catalog.missingKeys === 'skip') skipped.push(image.id);
     else throw missing(`imageModels.${index}`, image.id, needed);
   }
-  if (!served.length)
+  // A plan model runs only for a member who connected that plan, so it cannot be the only model.
+  if (!served.some(model => !isPlanProvider(model.route.type)))
     throw fail(
-      `no model has a route with its key set; set a provider key such as ${[...new Set(catalog.models.flatMap(model => model.routes.map(route => providerOf(catalog, route.provider).apiKeyEnv)))].join(', ')}`,
+      `no model has a route with its key set; set a provider key such as ${[...new Set(catalog.models.flatMap(model => model.routes.filter(route => !isPlanProvider(route.provider)).map(route => providerOf(catalog, route.provider).apiKeyEnv)))].join(', ')}`,
     );
   const warnings = skipped.length ? [`Models without a provider key are not served: ${skipped.join(', ')}.`] : [];
   const declared = catalog.models.find(model => model.default)!;
   let defaultModel = served.find(model => model.id === declared.id);
   if (!defaultModel) {
-    defaultModel = served.find(model => model.selectable && !model.paused && !model.featureFlag);
+    defaultModel = served.find(
+      model => model.selectable && !model.paused && !model.featureFlag && !isPlanProvider(model.route.type),
+    );
     if (!defaultModel) throw fail(`the default model "${declared.id}" is not served and no other model can replace it`);
     warnings.push(`The default model ${declared.id} is not served; ${defaultModel.id} is the default.`);
   }
@@ -296,7 +334,7 @@ export function loadModelCatalog(env: Env = process.env): ServedModelCatalog {
     models: Object.freeze(served),
     skipped: Object.freeze(skipped),
     defaultModel,
-    model: (id: string) => served.find(model => model.id === id),
+    model: (id: string) => served.find(model => model.id === id) ?? planModel(id),
     role: (role: ModelCatalogRole) => served.find(model => model.roles.includes(role)) ?? null,
     fallbacks: (id: string) => {
       const chain: string[] = [];
@@ -343,9 +381,11 @@ export function modelImageLimits(provider: ModelProvider, providerModelId: strin
 
 function catalogModel(provider: ModelProvider, providerModelId: string) {
   const { catalog } = readModelCatalog(process.env);
-  return catalog.models.find(candidate =>
-    candidate.routes.some(
-      route => route.model === providerModelId && providerOf(catalog, route.provider).type === provider,
-    ),
+  return (
+    catalog.models.find(candidate =>
+      candidate.routes.some(
+        route => route.model === providerModelId && providerOf(catalog, route.provider).type === provider,
+      ),
+    ) ?? (isPlanProvider(provider) ? (planCatalogModel(catalog, provider, providerModelId) ?? undefined) : undefined)
   );
 }

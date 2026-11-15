@@ -1,0 +1,25 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "rippling",
+  "name": "Rippling",
+  "maker": "Rippling",
+  "homepage": "https://www.rippling.com",
+  "category": "hr-and-recruiting",
+  "teams": ["hr", "operations", "everyone"],
+  "summary": "Look up people data and run HR tasks",
+  "capabilities": ["Look up employees and reporting lines", "Request time off", "Draft new hires"],
+  "official": {
+    "evidence": "https://developer.rippling.com/documentation/rippling-platform/rippling-mcp/overview"
+  },
+  "docs": "https://developer.rippling.com/documentation/rippling-platform/rippling-mcp/setup",
+  "remote": {
+    "url": "https://mcp.rippling.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#502D3C"
+  },
+  "supportedBy": ["lindy", "relevance-ai"]
+}

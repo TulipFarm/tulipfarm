@@ -1,0 +1,27 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "prisma-postgres",
+  "name": "Prisma Postgres",
+  "maker": "Prisma",
+  "homepage": "https://www.prisma.io/postgres",
+  "category": "data-and-databases",
+  "teams": ["engineering"],
+  "summary": "Create and manage Prisma Postgres databases",
+  "capabilities": ["Create, list, and delete databases", "Run SQL queries", "Create backups and connection strings"],
+  "official": {
+    "evidence": "https://www.prisma.io/docs/postgres/integrations/mcp-server"
+  },
+  "docs": "https://www.prisma.io/docs/postgres/integrations/mcp-server",
+  "remote": {
+    "url": "https://mcp.prisma.io/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "io.prisma/mcp",
+  "icons": {
+    "simpleIcons": "prisma",
+    "color": "#2D3748"
+  },
+  "supportedBy": ["manus", "lindy", "docker"]
+}

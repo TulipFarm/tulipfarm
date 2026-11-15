@@ -1,0 +1,59 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "supabase",
+  "name": "Supabase",
+  "maker": "Supabase",
+  "homepage": "https://supabase.com",
+  "category": "data-and-databases",
+  "teams": ["engineering"],
+  "summary": "Manage Supabase projects, databases, and functions",
+  "capabilities": [
+    "Run SQL and apply database migrations",
+    "Create and manage projects and branches",
+    "Deploy Edge Functions and read logs",
+    "Generate TypeScript types from the schema"
+  ],
+  "official": {
+    "evidence": "https://supabase.com/docs/guides/getting-started/mcp",
+    "repository": "https://github.com/supabase/mcp"
+  },
+  "docs": "https://supabase.com/docs/guides/getting-started/mcp",
+  "remote": {
+    "url": "https://mcp.supabase.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "packages": [
+    {
+      "registry": "npm",
+      "name": "@supabase/mcp-server-supabase",
+      "env": [
+        {
+          "name": "SUPABASE_ACCESS_TOKEN",
+          "description": "Personal access token",
+          "secret": true,
+          "required": true
+        }
+      ]
+    }
+  ],
+  "registryName": "com.supabase/mcp",
+  "icons": {
+    "simpleIcons": "supabase",
+    "color": "#3FCF8E"
+  },
+  "supportedBy": [
+    "chatgpt",
+    "claude",
+    "manus",
+    "lindy",
+    "gumloop",
+    "relevance-ai",
+    "glean",
+    "make",
+    "n8n",
+    "github-registry"
+  ],
+  "featured": true
+}

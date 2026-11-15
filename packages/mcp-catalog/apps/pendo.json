@@ -1,0 +1,29 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "pendo",
+  "name": "Pendo",
+  "maker": "Pendo",
+  "homepage": "https://www.pendo.io",
+  "category": "monitoring-and-analytics",
+  "teams": ["product"],
+  "summary": "Analyse product usage and feedback in Pendo",
+  "capabilities": [
+    "Query feature and page usage",
+    "Look up accounts and visitors",
+    "Review guides and product feedback"
+  ],
+  "official": {
+    "evidence": "https://support.pendo.io/hc/en-us/articles/41102236924955-Connect-to-the-Pendo-MCP-server"
+  },
+  "docs": "https://support.pendo.io/hc/en-us/articles/41102236924955-Connect-to-the-Pendo-MCP-server",
+  "remote": {
+    "url": "https://app.pendo.io/mcp/v0/shttp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#E9055F"
+  },
+  "supportedBy": ["chatgpt", "claude", "manus", "lindy", "relevance-ai", "glean"]
+}

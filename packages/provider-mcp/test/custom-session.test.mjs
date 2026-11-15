@@ -241,6 +241,117 @@ test('schema subset rejects references, regex bombs, exponential branches, exces
   assert.equal(validate({ value: 123 }), false);
 });
 
+test('schemas may name the draft-07 or 2020-12 dialect and use local $defs references', () => {
+  for (const $schema of ['http://json-schema.org/draft-07/schema#', 'https://json-schema.org/draft/2020-12/schema'])
+    assert.equal(
+      customToolRevision({ ...tool, inputSchema: { ...tool.inputSchema, $schema } }).compatibility,
+      'compatible',
+    );
+  assert.equal(
+    customToolRevision({ ...tool, inputSchema: { ...tool.inputSchema, $schema: 'https://example.com/dialect' } })
+      .compatibility,
+    'unsupported',
+  );
+
+  const revision = customToolRevision({
+    ...tool,
+    inputSchema: {
+      type: 'object',
+      properties: { when: { $ref: '#/$defs/When' }, zone: { $ref: '#/definitions/Zone', description: 'IANA zone' } },
+      required: ['when'],
+      $defs: { When: { type: 'object', properties: { at: { type: 'string' } }, required: ['at'] } },
+      definitions: { Zone: { type: 'string', maxLength: 64 } },
+    },
+  });
+  assert.equal(revision.compatibility, 'compatible');
+  assert.deepEqual(revision.inputSchema, {
+    type: 'object',
+    properties: {
+      when: { type: 'object', properties: { at: { type: 'string' } }, required: ['at'] },
+      zone: { description: 'IANA zone', allOf: [{ type: 'string', maxLength: 64 }] },
+    },
+    required: ['when'],
+  });
+  const validate = compileCustomSchema(revision.inputSchema);
+  assert.equal(validate({ when: { at: 'now' }, zone: 'UTC' }), true);
+  assert.equal(validate({ when: {} }), false);
+
+  for (const inputSchema of [
+    { type: 'object', properties: { x: { $ref: '#/$defs/Missing' } }, $defs: {} },
+    {
+      type: 'object',
+      properties: { x: { $ref: '#/$defs/Node' } },
+      $defs: { Node: { properties: { next: { $ref: '#/$defs/Node' } } } },
+    },
+    { type: 'object', properties: { x: { $ref: 'other.json#/$defs/X' } }, $defs: { X: { type: 'string' } } },
+    { type: 'object', $defs: [] },
+  ])
+    assert.equal(customToolRevision({ ...tool, inputSchema }).compatibility, 'unsupported');
+});
+
+async function legacyFixture(t, options = {}) {
+  const requests = [];
+  let stream;
+  const server = createServer(async (req, res) => {
+    if (req.url === '/sse' && req.method === 'POST') return res.writeHead(405).end();
+    if (req.url === '/sse' && req.method === 'GET') {
+      res.writeHead(200, { 'content-type': 'text/event-stream' });
+      res.write(`event: endpoint\ndata: ${options.endpoint ?? '/messages?session=1'}\n\n`);
+      stream = res;
+      return;
+    }
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    const request = JSON.parse(Buffer.concat(chunks));
+    requests.push(request);
+    res.writeHead(202).end();
+    if (!('id' in request)) return;
+    const result =
+      request.method === 'initialize'
+        ? { protocolVersion: '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'legacy', version: '1' } }
+        : request.method === 'tools/list'
+          ? { tools: [tool] }
+          : { content: [{ type: 'text', text: 'legacy done' }] };
+    stream.write(`event: message\ndata: ${JSON.stringify({ jsonrpc: '2.0', id: request.id, result })}\n\n`);
+  });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const client = createCustomMcpSession({
+    endpoint: `http://127.0.0.1:${server.address().port}/sse`,
+    fetcher: fetch,
+    transport: 'auto',
+  });
+  t.after(() => {
+    client.close();
+    server.closeAllConnections();
+    server.close();
+  });
+  return { client, requests };
+}
+
+test('auto transport falls back to legacy HTTP+SSE, posting to the announced endpoint', async t => {
+  const f = await legacyFixture(t);
+  const [revision] = await f.client.discover();
+  assert.equal(f.client.transport(), 'sse');
+  const result = await f.client.execute({
+    name: tool.name,
+    digest: revision.digest,
+    arguments: { value: 'x' },
+    authorize: async () => true,
+  });
+  assert.deepEqual(result, { content: [{ type: 'text', text: 'legacy done' }] });
+  assert.deepEqual(
+    f.requests.map(req => req.method),
+    ['initialize', 'notifications/initialized', 'tools/list', 'tools/list', 'tools/call'],
+  );
+});
+
+test('legacy HTTP+SSE refuses a message endpoint on another origin', async t => {
+  const f = await legacyFixture(t, { endpoint: 'http://attacker.example/messages' });
+  await assert.rejects(f.client.discover(), { code: 'unsupported-protocol' });
+  assert.equal(f.requests.length, 0);
+});
+
 test('discovery count, page, duplicate cursor and byte limits reject the whole catalog', async t => {
   for (const mode of ['count', 'duplicate', 'pages', 'bytes', 'cumulative'])
     await t.test(mode, async t => {

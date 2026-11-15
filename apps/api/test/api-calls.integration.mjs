@@ -5,6 +5,8 @@ import Fastify from 'fastify';
 import { proposeApiCall } from '@tulipfarm/api-calls';
 import { authenticatedFixture } from './auth-fixture.mjs';
 import { createApiCallReviews, registerApiCalls } from '../src/api-calls.ts';
+import { createCodingRunReviews, registerCodingRuns } from '../src/coding-runs.ts';
+import { proposeCodingRun } from '@tulipfarm/agents/coding-run-store';
 import { conversationFixture } from '../../../packages/conversations/test/fixture.mjs';
 
 test(
@@ -115,6 +117,103 @@ test(
         [[taskCall, { kind: 'task', taskId }]],
       );
       assert.deepEqual((await http(`/agent-tasks/${taskId}/api-calls`, 'GET', undefined, admin)).body, { calls: [] });
+    } finally {
+      await app.close();
+      await f.close();
+    }
+  },
+);
+
+test(
+  'only the member who asked for a coding run can see and decide it, and deciding wakes its chat',
+  { timeout: 60000 },
+  async () => {
+    let authenticated;
+    const f = await conversationFixture(undefined, async db => {
+        authenticated = await authenticatedFixture(db);
+        return { userId: authenticated.owner.id, close: () => authenticated.identity.end() };
+      }),
+      app = Fastify();
+    try {
+      const { db, table, workspace: w } = f;
+      await authenticated.addAdmin(w);
+      const { auth, owner, admin } = authenticated;
+      const woken = [];
+      registerCodingRuns(
+        app,
+        auth,
+        createCodingRunReviews({
+          runtime: f.runtime,
+          resolveConfirmationCredential: async () => db.login(w, 'confirmation'),
+          wakeChat: (workspaceId, conversationId) => woken.push({ workspaceId, conversationId }),
+        }),
+      );
+      const url = await app.listen({ host: '127.0.0.1', port: 0 });
+      const http = async (path, method = 'GET', body, human = owner) => {
+        const response = await fetch(`${url}/workspaces/${w.id}/coding-runs/${path}`, {
+          method,
+          headers: {
+            ...(human ? { cookie: human.cookie } : {}),
+            origin: 'http://localhost:5173',
+            ...(body ? { 'content-type': 'application/json' } : {}),
+          },
+          ...(body ? { body: JSON.stringify(body) } : {}),
+        });
+        return { status: response.status, body: await response.json() };
+      };
+      const conversationId = randomUUID();
+      await f.store.create(w.id, w.userId, { chatId: conversationId, commandId: randomUUID() });
+      const { turnId } = await f.store.send(w.id, w.userId, conversationId, {
+        commandId: randomUUID(),
+        messageId: randomUUID(),
+        parts: [{ kind: 'text', text: 'Fix the failing test' }],
+      });
+      await db.platform.query(`UPDATE ${table('tf_conversation_turns')} SET status='waiting' WHERE id=$1`, [turnId]);
+      const runId = randomUUID();
+      const digest = 'd'.repeat(64);
+      await proposeCodingRun(f.runtime, w.id, {
+        id: runId,
+        actor: { kind: 'human', userId: w.userId, membershipId: w.membershipId },
+        conversationId,
+        turnId,
+        generation: 0,
+        agent: 'claude-code',
+        repository: 'octo/app',
+        branch: null,
+        task: 'Fix the failing test',
+        planOwnerMembershipId: w.membershipId,
+        digest,
+      });
+
+      const view = await http(runId);
+      assert.equal(view.status, 200);
+      assert.equal(view.body.status, 'awaiting-approval');
+      assert.equal(view.body.ownPlan, true);
+      const approve = { commandId: randomUUID(), digest, decision: 'approve' };
+      assert.deepEqual(await http(runId, 'GET', undefined, admin), {
+        status: 404,
+        body: { error: 'coding-run-not-found' },
+      });
+      assert.deepEqual(await http(`${runId}/decision`, 'POST', approve, admin), {
+        status: 404,
+        body: { error: 'coding-run-not-found' },
+      });
+      assert.equal((await http(runId, 'GET', undefined, null)).status, 401);
+      assert.equal((await http(`${runId}/decision`, 'POST', { ...approve, decision: 'maybe' })).status, 400);
+      assert.deepEqual(woken, []);
+
+      const decided = await http(`${runId}/decision`, 'POST', approve);
+      assert.equal(decided.status, 200);
+      assert.equal(decided.body.status, 'approved');
+      assert.deepEqual(woken, [{ workspaceId: w.id, conversationId }]);
+      assert.equal((await http(`${runId}/decision`, 'POST', approve)).status, 200);
+      assert.deepEqual(
+        await http(`${runId}/decision`, 'POST', { ...approve, commandId: randomUUID(), decision: 'deny' }),
+        {
+          status: 409,
+          body: { error: 'coding-run-conflict' },
+        },
+      );
     } finally {
       await app.close();
       await f.close();

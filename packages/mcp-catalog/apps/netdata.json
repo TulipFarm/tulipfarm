@@ -1,0 +1,35 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "netdata",
+  "name": "Netdata",
+  "maker": "Netdata",
+  "homepage": "https://www.netdata.cloud",
+  "category": "monitoring-and-analytics",
+  "teams": ["engineering"],
+  "summary": "Query Netdata metrics, alerts, and logs",
+  "capabilities": ["Query infrastructure metrics", "Check active alerts", "Search logs and running processes"],
+  "official": {
+    "evidence": "https://learn.netdata.cloud/docs/netdata-ai/mcp",
+    "repository": "https://github.com/netdata/netdata"
+  },
+  "docs": "https://learn.netdata.cloud/docs/netdata-ai/mcp",
+  "remote": {
+    "url": "https://app.netdata.cloud/api/v1/mcp",
+    "transport": "streamable-http",
+    "auth": "api-key",
+    "headers": [
+      {
+        "name": "Authorization",
+        "value": "Bearer {key}",
+        "description": "Netdata Cloud API token"
+      }
+    ],
+    "checked": "2026-11-14"
+  },
+  "registryName": "io.github.netdata/mcp-server",
+  "icons": {
+    "simpleIcons": "netdata",
+    "color": "#00AB44"
+  },
+  "supportedBy": ["github-registry"]
+}

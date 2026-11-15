@@ -1,0 +1,30 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "devcycle",
+  "name": "DevCycle",
+  "maker": "DevCycle",
+  "homepage": "https://devcycle.com",
+  "category": "code",
+  "teams": ["engineering", "product"],
+  "summary": "Manage DevCycle feature flags",
+  "capabilities": [
+    "Create and update feature flags and variables",
+    "Change targeting across environments",
+    "Check flag usage and results"
+  ],
+  "official": {
+    "evidence": "https://docs.devcycle.com/cli-mcp/mcp-getting-started/"
+  },
+  "docs": "https://docs.devcycle.com/cli-mcp/mcp-getting-started/",
+  "remote": {
+    "url": "https://mcp.devcycle.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "com.devcycle/mcp",
+  "icons": {
+    "color": "#1534AD"
+  },
+  "supportedBy": ["lindy"]
+}

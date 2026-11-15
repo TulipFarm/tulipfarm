@@ -47,32 +47,6 @@ test('transactional receipts publish distinct running and terminal lifecycle not
   );
 });
 
-test('avatar publication carries the reply fence and monotonically ordered validated states', async () => {
-  const sent = [];
-  const runtime = {
-    async transaction(_workspaceId, _range, operation) {
-      await operation({
-        client: {
-          query: async (_sql, values) => sent.push(conversationNotificationSchema.parse(JSON.parse(values[1]))),
-        },
-      });
-    },
-  };
-  const publisher = createReplyTextPublisher(runtime, fence);
-  publisher.avatar(0, { name: 'Bud', state: 'Thinking' });
-  publisher.avatar(0, { name: 'Bud', state: 'Solving' });
-  assert.throws(() => publisher.avatar(0, { name: 'Bud', state: 'Invalid' }));
-  await publisher.close();
-  publisher.avatar(1, { name: 'Bud', state: 'Idle' });
-  assert.deepEqual(
-    sent.map(({ kind, generation, epoch, seq, avatar }) => ({ kind, generation, epoch, seq, state: avatar.state })),
-    [
-      { kind: 'avatar', generation: 2, epoch: 3, seq: 0, state: 'Thinking' },
-      { kind: 'avatar', generation: 2, epoch: 3, seq: 1, state: 'Solving' },
-    ],
-  );
-});
-
 function replay(state, payloads) {
   for (const payload of payloads) {
     assert.ok(Buffer.byteLength(JSON.stringify(payload)) <= 7000, 'payload fits in one NOTIFY');

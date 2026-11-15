@@ -1,0 +1,36 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "motherduck",
+  "name": "MotherDuck",
+  "maker": "MotherDuck",
+  "homepage": "https://motherduck.com",
+  "category": "data-and-databases",
+  "teams": ["engineering", "operations"],
+  "summary": "Query MotherDuck and DuckDB data with SQL",
+  "capabilities": [
+    "Run DuckDB SQL on cloud databases",
+    "List databases, tables, and columns",
+    "Query files in cloud storage"
+  ],
+  "official": {
+    "evidence": "https://motherduck.com/docs/sql-reference/mcp/",
+    "repository": "https://github.com/motherduckdb/mcp-server-motherduck"
+  },
+  "docs": "https://motherduck.com/docs/sql-reference/mcp/",
+  "remote": {
+    "url": "https://api.motherduck.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "packages": [
+    {
+      "registry": "pypi",
+      "name": "mcp-server-motherduck"
+    }
+  ],
+  "icons": {
+    "color": "#FF9538"
+  },
+  "supportedBy": ["chatgpt", "claude", "manus", "gumloop"]
+}

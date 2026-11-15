@@ -1,0 +1,41 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "growthbook",
+  "name": "GrowthBook",
+  "maker": "GrowthBook",
+  "homepage": "https://www.growthbook.io",
+  "category": "code",
+  "teams": ["engineering", "product"],
+  "summary": "Manage GrowthBook feature flags and experiments",
+  "capabilities": ["Create and update feature flags", "Check experiment results", "Find stale flags to clean up"],
+  "official": {
+    "evidence": "https://docs.growthbook.io/integrations/mcp",
+    "repository": "https://github.com/growthbook/growthbook-mcp"
+  },
+  "docs": "https://docs.growthbook.io/integrations/mcp",
+  "remote": {
+    "url": "https://mcp.growthbook.io/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "packages": [
+    {
+      "registry": "npm",
+      "name": "@growthbook/mcp",
+      "env": [
+        {
+          "name": "GB_API_KEY",
+          "description": "GrowthBook API key",
+          "secret": true,
+          "required": true
+        }
+      ]
+    }
+  ],
+  "registryName": "io.github.growthbook/growthbook-mcp",
+  "icons": {
+    "color": "#7817D3"
+  },
+  "supportedBy": ["claude"]
+}

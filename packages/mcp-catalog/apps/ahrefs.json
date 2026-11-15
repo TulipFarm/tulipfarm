@@ -1,0 +1,30 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "ahrefs",
+  "name": "Ahrefs",
+  "maker": "Ahrefs",
+  "homepage": "https://ahrefs.com",
+  "category": "marketing",
+  "teams": ["marketing"],
+  "summary": "Research keywords, backlinks, and rankings with Ahrefs",
+  "capabilities": [
+    "Research keywords and ranking difficulty",
+    "Analyse backlinks and referring domains",
+    "Review site rankings and organic traffic"
+  ],
+  "official": {
+    "evidence": "https://docs.ahrefs.com/en/mcp/docs/introduction"
+  },
+  "docs": "https://docs.ahrefs.com/en/mcp/docs/introduction",
+  "remote": {
+    "url": "https://api.ahrefs.com/mcp/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "com.ahrefs/mcp",
+  "icons": {
+    "color": "#054ADA"
+  },
+  "supportedBy": ["chatgpt", "claude", "microsoft-copilot", "manus", "lindy", "gumloop", "relevance-ai", "glean"]
+}

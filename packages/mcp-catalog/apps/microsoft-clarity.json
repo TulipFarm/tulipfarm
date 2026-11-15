@@ -1,0 +1,32 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "microsoft-clarity",
+  "name": "Microsoft Clarity",
+  "maker": "Microsoft",
+  "homepage": "https://clarity.microsoft.com",
+  "category": "monitoring-and-analytics",
+  "teams": ["product", "marketing"],
+  "summary": "Query Microsoft Clarity user behaviour data",
+  "capabilities": [
+    "Query dashboard metrics like scroll depth and rage clicks",
+    "Find session recordings",
+    "Read Clarity documentation"
+  ],
+  "official": {
+    "evidence": "https://github.com/microsoft/clarity-mcp-server",
+    "repository": "https://github.com/microsoft/clarity-mcp-server"
+  },
+  "docs": "https://github.com/microsoft/clarity-mcp-server",
+  "packages": [
+    {
+      "registry": "npm",
+      "name": "@microsoft/clarity-mcp-server",
+      "env": []
+    }
+  ],
+  "icons": {
+    "lobehub": "Microsoft",
+    "color": "#0078D4"
+  },
+  "supportedBy": ["claude", "manus", "github-registry"]
+}

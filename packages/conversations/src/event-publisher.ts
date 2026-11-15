@@ -3,17 +3,17 @@ import {
   conversationEventChannel,
   type ConversationNotification,
   type StreamIdentity,
+  type StreamLayoutCalls,
   type StreamProgress,
   type StreamTool,
   type SubagentCard,
 } from './events.ts';
 import type { ConversationRuntime, ReplyFence } from './runtime.ts';
 import { commonCompatibility, qualified } from '@tulipfarm/workspace-storage/runtime';
-import { avatarSnapshotSchema, type AvatarSnapshot } from './avatar.ts';
 import { log } from '@tulipfarm/observability';
 import type { SourceDependency } from '@tulipfarm/access';
 
-type TextNotification = Extract<ConversationNotification, { kind: 'text' }>;
+type TextNotification = Extract<ConversationNotification, { kind: 'text' | 'layout' }>;
 type Address = { workspaceId: string; conversationId: string };
 
 /** First common version whose turns keep the streamed preview, so a stopped reply keeps its partial text. */
@@ -30,6 +30,16 @@ export async function notifyConversationChange(
 ) {
   const payload: ConversationNotification = { kind: 'changed', ...change };
   await tx.client.query('SELECT pg_notify($1, $2)', [conversationEventChannel, JSON.stringify(payload)]);
+}
+
+/** Queues the reply's renderer calls; PostgreSQL delivers them only if the transaction that saves the reply commits. */
+export async function notifyLayoutCalls(
+  tx: Pick<AuthorizationTransaction, 'client'>,
+  update: Address & StreamLayoutCalls,
+) {
+  const payload: ConversationNotification = { kind: 'layout-calls', ...update };
+  if (payloadBytes(payload) < notificationPayloadLimit)
+    await tx.client.query('SELECT pg_notify($1, $2)', [conversationEventChannel, JSON.stringify(payload)]);
 }
 
 export async function notifyConversationTool(
@@ -50,10 +60,11 @@ export function streamTextPayloads(
   published: string | null,
   next: string,
   seq: number,
+  kind: TextNotification['kind'] = 'text',
 ): TextNotification[] {
   if (published === next) return [];
   const payload = (seq: number, offset: number, text: string): TextNotification => ({
-    kind: 'text',
+    kind,
     ...address,
     ...identity,
     seq,
@@ -85,9 +96,10 @@ export type ReplyProgress = Pick<StreamProgress, 'step' | 'round' | 'status' | '
 export type ReplyTextPublisher = {
   update(step: number, text: string): void;
   progress(update: ReplyProgress): void;
-  avatar(step: number, avatar: AvatarSnapshot): void;
   /** Live sub-agent cards of the `agents.delegate` call `id`. Bursts coalesce into the latest cards. */
   subagents(id: string, cards: readonly SubagentCard[]): void;
+  /** The `reply.render` arguments streamed so far in `step`, as JSON text that may be incomplete. */
+  layout(step: number, json: string): void;
   close(): Promise<void>;
 };
 
@@ -103,6 +115,7 @@ export function createReplyTextPublisher(
   interval = 200,
   closeTimeout = 2000,
   sources: () => readonly SourceDependency[] = () => [],
+  layoutInterval = 100,
 ): ReplyTextPublisher {
   const address = { workspaceId: fence.workspaceId, conversationId: fence.conversationId };
   let latest: { step: number; text: string } | null = null;
@@ -112,7 +125,6 @@ export function createReplyTextPublisher(
   let startedAt = -Infinity;
   let closed = false;
   let progressed: Promise<void> = Promise.resolve();
-  let avatarSeq = 0;
   let progressSeq = 0;
   const subagentCards = new Map<string, { seq: number; cards: readonly SubagentCard[] | null }>();
   let subagentTimer: ReturnType<typeof setTimeout> | null = null;
@@ -149,6 +161,63 @@ export function createReplyTextPublisher(
   }
 
   const pending = () => latest !== null && (latest.step !== sent?.step || latest.text !== sent.text);
+
+  let layoutLatest: { step: number; json: string } | null = null;
+  let layoutSent: { step: number; json: string | null; seq: number } | null = null;
+  let layoutTimer: ReturnType<typeof setTimeout> | null = null;
+  let layoutFlight: Promise<void> | null = null;
+  let layoutStartedAt = -Infinity;
+  const layoutPending = () =>
+    layoutLatest !== null && (layoutLatest.step !== layoutSent?.step || layoutLatest.json !== layoutSent.json);
+
+  async function publishLayout() {
+    if (!layoutLatest || !layoutPending()) return;
+    const { step, json } = layoutLatest;
+    const current = layoutSent?.step === step ? layoutSent : { step, json: null, seq: 0 };
+    const payloads = streamTextPayloads(
+      address,
+      { turnId: fence.turnId, generation: fence.generation, epoch: fence.epoch, step },
+      current.json,
+      json,
+      current.seq,
+      'layout',
+    );
+    layoutSent = { step, json: null, seq: current.seq + payloads.length };
+    layoutStartedAt = Date.now();
+    try {
+      await runtime.transaction(fence.workspaceId, commonCompatibility, async tx => {
+        // Readers check a preview against the sources saved with the turn's streamed text, so a layout keeps them current.
+        if (tx.commonVersion < stoppedReplyVersion) return;
+        await tx.client.query(
+          `UPDATE ${qualified(tx.schema, 'tf_conversation_turns')} SET streamed=CASE
+            WHEN (streamed->>'generation')::integer=$3 AND (streamed->>'epoch')::integer=$4 THEN jsonb_set(streamed,'{sources}',$5::jsonb)
+            ELSE jsonb_build_object('generation',$3::integer,'epoch',$4::integer,'text','','sources',$5::jsonb) END
+          WHERE id=$1 AND conversation_id=$2 AND generation=$3 AND attempt_epoch=$4 AND status='processing'`,
+          [fence.turnId, fence.conversationId, fence.generation, fence.epoch, JSON.stringify(sources())],
+        );
+        for (const payload of payloads)
+          await tx.client.query('SELECT pg_notify($1, $2)', [conversationEventChannel, JSON.stringify(payload)]);
+      });
+      layoutSent = { step, json, seq: layoutSent.seq };
+    } catch {
+      log('warn', 'activity', 'call_failed', { operation: 'chat.layout-stream', 'error.type': 'publish-failed' });
+    }
+  }
+
+  function scheduleLayout() {
+    if (closed || layoutTimer || layoutFlight || !layoutPending()) return;
+    layoutTimer = setTimeout(
+      () => {
+        layoutTimer = null;
+        layoutFlight = publishLayout().finally(() => {
+          layoutFlight = null;
+          scheduleLayout();
+        });
+      },
+      Math.max(0, layoutStartedAt + layoutInterval - Date.now()),
+    );
+    layoutTimer.unref?.();
+  }
 
   async function publish() {
     if (!latest || !pending()) return;
@@ -204,27 +273,10 @@ export function createReplyTextPublisher(
   }
 
   return {
-    avatar(step, avatar) {
+    layout(step, json) {
       if (closed) return;
-      const payload: ConversationNotification = {
-        kind: 'avatar',
-        ...address,
-        turnId: fence.turnId,
-        generation: fence.generation,
-        epoch: fence.epoch,
-        step,
-        seq: avatarSeq++,
-        avatar: avatarSnapshotSchema.parse(avatar),
-      };
-      progressed = progressed
-        .then(() =>
-          runtime.transaction(fence.workspaceId, commonCompatibility, async tx => {
-            await tx.client.query('SELECT pg_notify($1, $2)', [conversationEventChannel, JSON.stringify(payload)]);
-          }),
-        )
-        .catch(() => {
-          log('warn', 'activity', 'call_failed', { operation: 'chat.avatar-stream', 'error.type': 'publish-failed' });
-        });
+      layoutLatest = { step, json };
+      scheduleLayout();
     },
     subagents(id, cards) {
       if (closed) return;
@@ -268,6 +320,8 @@ export function createReplyTextPublisher(
       closed = true;
       if (timer) clearTimeout(timer);
       timer = null;
+      if (layoutTimer) clearTimeout(layoutTimer);
+      layoutTimer = null;
       if (subagentTimer) {
         clearTimeout(subagentTimer);
         flushSubagents();
@@ -281,6 +335,8 @@ export function createReplyTextPublisher(
           (async () => {
             await flight;
             await publish();
+            await layoutFlight;
+            await publishLayout();
             await progressed;
           })(),
           deadline,

@@ -99,6 +99,7 @@ import type { SlackActionsFactory } from './slack-actions.ts';
 import { slackResolveSchema, slackThreadReactionSchema, SlackChannelAccessError } from '@tulipfarm/slack';
 import { slackOutboundEnabled } from './slack-outbound.ts';
 import type { ChatExecution } from './chat-execution.ts';
+import { codingRunCallSchema, type CodingRuns } from './coding-runs.ts';
 import { GitHubReadError } from '@tulipfarm/github/read-contracts';
 import { GitHubSourceDenied } from '@tulipfarm/github/source-runtime';
 import { GitHubAccountError } from '@tulipfarm/github';
@@ -184,6 +185,9 @@ import { createKnowledgeDrafts } from './knowledge-drafts.ts';
 import { supportedAgentToolRuntimes, toolNameSchema } from './tool-capabilities.ts';
 import { createAgentSetup, type AgentSetupOptions } from './setup.ts';
 import { delegateCallSchema, type DelegateCall } from './subagent-contracts.ts';
+import type { AppKind } from '@tulipfarm/apps';
+import { appPageToolCallSchemas, appPageToolDescriptions, type AppPages } from './app-page-tools.ts';
+import { appToolCallSchemas, appToolDescriptions, type AppEditing } from './app-tools.ts';
 
 export type KnowledgeToolsFactory = (runtime: AgentStorage) => KnowledgeTools;
 export { readWorkspaceInventory } from './workspace-inventory.ts';
@@ -226,6 +230,7 @@ export const frameworkCallSchema = z.discriminatedUnion('tool', [
     language: z.enum(['python', 'javascript', 'typescript', 'bash']),
     code: z.string().min(1).max(32768),
   }),
+  codingRunCallSchema,
   z.strictObject({ tool: z.literal('tables.propose'), input: tableProposalInput }),
   z.strictObject({ tool: z.literal('tables.import.attachments') }),
   z.strictObject({
@@ -458,13 +463,41 @@ export const frameworkCallSchema = z.discriminatedUnion('tool', [
     endpoint: z
       .string()
       .max(2048)
+      .optional()
       .describe(
-        "The server's Streamable HTTP endpoint, from integrations.mcp.search or the service's own documentation.",
+        "A remote server's Streamable HTTP or HTTP+SSE endpoint, from integrations.mcp.search or the service's own documentation. Omit when you pass package.",
       ),
+    package: z
+      .strictObject({
+        registry: z.enum(['npm', 'pypi']),
+        name: z.string().min(1).max(214),
+        version: z.string().min(1).max(128).describe('An exact version, never a range or "latest".'),
+      })
+      .optional()
+      .describe(
+        'An npm or PyPI server package from integrations.mcp.search to run in a hosted sandbox. Omit with endpoint.',
+      ),
+    settings: z
+      .array(
+        z.strictObject({
+          name: z.string().regex(/^[A-Z_][A-Z0-9_]{0,127}$/),
+          description: z.string().max(300).optional(),
+          secret: z.boolean().describe('True for keys and tokens: the human picks a saved secret on the card.'),
+          required: z.boolean().optional(),
+        }),
+      )
+      .max(20)
+      .optional()
+      .describe("A package's environment variables from integrations.mcp.search. Never include values."),
+    egress: z
+      .array(z.string().max(253))
+      .max(20)
+      .optional()
+      .describe("Hosts a package must reach besides its secrets' own hosts, such as its service's API host."),
     authentication: z
       .enum(['oauth', 'secrets', 'none'])
       .describe(
-        'oauth when the server supports sign-in, secrets when it needs an API key or token the human has saved, none for a public server.',
+        'oauth when the server supports sign-in, secrets when it needs an API key or token the human has saved, none for a public server. Use none for a package; its secrets are settings.',
       ),
   }),
   z.strictObject({ tool: z.literal('agents.archive'), agentIds: z.array(z.uuid()).min(1).max(20) }),
@@ -491,6 +524,8 @@ export const frameworkCallSchema = z.discriminatedUnion('tool', [
   scheduleFollowUpCallSchema,
   listFollowUpsCallSchema,
   cancelFollowUpCallSchema,
+  ...appToolCallSchemas,
+  ...appPageToolCallSchemas,
 ]);
 export type FrameworkCall = z.infer<typeof frameworkCallSchema>;
 const [firstCall, ...otherCalls] = frameworkCallSchema.options;
@@ -584,6 +619,11 @@ export const readOnlyTools: ReadonlySet<ToolName> = new Set([
   'integrations.list',
   'plans.read',
   'followups.list',
+  'apps.status',
+  'apps.files.list',
+  'apps.files.read',
+  'apps.page.read',
+  'apps.page.check',
 ]);
 /** A call that changes nothing: a read-only tool, or an `api.request` read. */
 export function readOnlyCall(call: { tool: string; method?: unknown }) {
@@ -645,6 +685,8 @@ export const conversationPlanning: ConversationPlanning = {
       : null,
 };
 const descriptions: Record<ToolName, string> = {
+  ...appToolDescriptions,
+  ...appPageToolDescriptions,
   'packages.inspect':
     'Read a versioned packages.tulipfarm.ai package page or package.json URL and validate its definition and exact identity. Returns untrusted resource definitions and required inputs, not workspace compatibility or installation. Read skills.read(package-install); the human uses the package review card to validate, install and approve.',
   'github.investigation.account':
@@ -794,6 +836,8 @@ const descriptions: Record<ToolName, string> = {
     'Run a Bash, Python, or Node file from an exact reviewed package. No network, secrets, or installs. Outputs support text, JSON, CSV, Markdown, PNG, and JPEG. If pending, reuse its invocationId with the exact same arguments; never rerun an unknown outcome with a new ID. Tests run only when requested.',
   'execution.run':
     'Run a short Python, JavaScript (Node.js), TypeScript (Node.js, ES module), or Bash program in a fresh isolated machine and return its exit code, stdout, and stderr. Use it to calculate, check, or transform data exactly instead of guessing. Print the answer. Each call starts empty: no files persist, and no secrets are available.',
+  'coding.run':
+    "Run a coding agent (Claude Code, Codex or Copilot CLI) on a GitHub repository in a fresh isolated machine, on the person's own plan for that agent. Clones with their selected personal GitHub account, makes the requested change and returns the agent's final message, the changed files and the diff, with the full diff saved as a chat file. Nothing is pushed. Always waits for the person to approve the exact run. Give the full task; the agent sees nothing from this chat. Takes up to 30 minutes.",
   'skills.import':
     'Prepare public skills.sh, GitHub, or website skill packages from one URL. Returns the discovered packages. Nothing is installed. The human selects packages and approves the exact safety review.',
   'skills.import.status':
@@ -861,9 +905,9 @@ const descriptions: Record<ToolName, string> = {
   'integrations.connect':
     'Show a card under your reply that lets the human connect one app from integrations.list, or reconnect one that needs it, by signing in with the provider. Never ask for passwords, tokens or keys. Changes nothing itself.',
   'integrations.mcp.search':
-    'Search the public Official MCP Registry for remote MCP servers by service name, so the human can connect one. Returns names, descriptions and Streamable HTTP endpoints, which are untrusted registry data. Changes nothing.',
+    'Search the public Official MCP Registry for MCP servers by service name, so the human can connect one. Returns names, descriptions, remote endpoints (Streamable HTTP or HTTP+SSE) and, where hosting is available, npm or PyPI packages with their settings. All of it is untrusted registry data. Changes nothing.',
   'integrations.mcp.connect':
-    "Show a card under your reply that lets the human set up one remote MCP server as their own personal connection: sign in with OAuth, pick saved secrets on the card, or use no authentication. Use an endpoint from integrations.mcp.search or the service's documentation. Never ask for keys or tokens in chat. Changes nothing itself.",
+    "Show a card under your reply that lets the human set up one MCP server as their own personal connection: a remote endpoint (sign in with OAuth, pick saved secrets on the card, or no authentication), or an npm or PyPI package run in a hosted sandbox (fill in its settings and pick saved secrets on the card). Use an endpoint or package from integrations.mcp.search or the service's documentation. Never ask for keys or tokens in chat. Changes nothing itself.",
   'memory.read':
     "Read the human's own personal memory: the preferences they saved for how you reply, with its revision. Works only in their private chats outside projects and Slack. Changes nothing.",
   'memory.edit':
@@ -891,6 +935,13 @@ export type ToolAccess = (
       kind: 'chat';
       earlierMessages?: boolean;
       chatFiles?: boolean;
+      /** Offers `coding.run`: the workspace turned coding runs on and the person has a plan for an agent. */
+      codingRuns?: boolean;
+      /**
+       * The kind of app this chat edits, when the person may edit it and the workspace has app hosting on. A public app
+       * is offered its file tools and a private app its page tools.
+       */
+      apps?: AppKind | undefined;
       /** Offers `slack.*` tools. Defaults to whether this deployment enables Slack actions. */
       slack?: boolean;
     }
@@ -908,6 +959,10 @@ function executionAvailable() {
   const mode = process.env.TULIPFARM_EXECUTION_BACKEND;
   return mode !== undefined && mode !== '' && mode !== 'off';
 }
+const appToolKinds = new Map<string, AppKind>([
+  ...appToolCallSchemas.map(schema => [schema.shape.tool.value, 'public'] as const),
+  ...appPageToolCallSchemas.map(schema => [schema.shape.tool.value, 'private'] as const),
+]);
 function admittedToolSchemas(access: ToolAccess) {
   if (access.kind === 'agent') access = { ...access, tools: withKnowledgeRetrieveGrant(access.tools) };
   const slack = access.kind === 'chat' ? (access.slack ?? slackOutboundEnabled()) : true;
@@ -928,6 +983,13 @@ function admittedToolSchemas(access: ToolAccess) {
       .filter(schema => schema.shape.tool.value !== 'agents.delegate' || access.kind === 'chat')
       // Code runs only in a chat reply, and only when this deployment configures an execution backend.
       .filter(schema => schema.shape.tool.value !== 'execution.run' || (access.kind === 'chat' && executionAvailable()))
+      .filter(
+        schema => schema.shape.tool.value !== 'coding.run' || (access.kind === 'chat' && access.codingRuns === true),
+      )
+      .filter(schema => {
+        const kind = appToolKinds.get(schema.shape.tool.value);
+        return !kind || (access.kind === 'chat' && access.apps === kind);
+      })
       // Follow-ups belong to the chat or Slack thread a person asked in, so only a chat reply offers them.
       .filter(schema => !schema.shape.tool.value.startsWith('followups.') || access.kind === 'chat')
       // Projects belong to the person in this chat; saved agent runs cannot cite project sources.
@@ -992,6 +1054,7 @@ export function isExternalTool(tool: ToolName) {
   return (
     tool === 'skills.execute' ||
     tool === 'execution.run' ||
+    tool === 'coding.run' ||
     tool === 'skills.draft' ||
     tool === 'skills.files.read' ||
     tool === 'mcp.call' ||
@@ -1000,6 +1063,7 @@ export function isExternalTool(tool: ToolName) {
     tool === 'images.generate' ||
     tool === 'agents.delegate' ||
     tool === 'api.request' ||
+    tool.startsWith('apps.') ||
     tool.startsWith('knowledge.') ||
     tool.startsWith('web.') ||
     tool.startsWith('github.personal.') ||
@@ -1034,6 +1098,12 @@ export type ChatToolsOptions = {
   skillExecution?: SkillExecutionFactory | undefined;
   /** Runs `execution.run` code in an isolated machine; without it, the tool is refused. */
   chatExecution?: ChatExecution | undefined;
+  /** Runs `coding.run` agents; without it, the tool is refused. */
+  codingRuns?: CodingRuns | undefined;
+  /** Edits the public app of an app's own chat for its file tools; without it, those tools are refused. */
+  apps?: AppEditing | undefined;
+  /** Edits the private app of an app's own chat for `apps.page.*`; without it, those tools are refused. */
+  appPages?: AppPages | undefined;
   telemetryRuntime?: ToolRuntime | undefined;
   wakePlan?: ((workspaceId: string, planId: string) => Promise<unknown>) | undefined;
   agentSetup?: AgentSetupOptions | undefined;
@@ -1125,6 +1195,9 @@ export function createChatTools(
     outputs,
     skillExecution,
     chatExecution,
+    codingRuns,
+    apps,
+    appPages,
     telemetryRuntime = 'chat',
     wakePlan,
     agentSetup,
@@ -1851,6 +1924,39 @@ export function createChatTools(
           { conversationId: context.origin.conversationId, language: call.language, code: call.code },
           context.signal,
         );
+      case 'apps.status':
+      case 'apps.files.list':
+      case 'apps.files.read':
+      case 'apps.files.write':
+      case 'apps.files.delete':
+      // eslint-disable-next-line tulipfarm/product-copy -- A tool name, not user-facing copy.
+      case 'apps.preview.build':
+        if (!apps || !context.origin || telemetryRuntime !== 'chat') throw new AccessDenied();
+        return apps.invoke(
+          { workspaceId, actor, conversationId: context.origin.conversationId, signal: context.signal },
+          call,
+        );
+      case 'apps.page.read':
+      case 'apps.page.replace':
+      case 'apps.page.check':
+        if (!appPages || !context.origin || telemetryRuntime !== 'chat') throw new AccessDenied();
+        return appPages.invoke({ workspaceId, actor, conversationId: context.origin.conversationId }, call);
+      case 'coding.run': {
+        const origin = context.origin;
+        if (!codingRuns || !origin || origin.generation === undefined || outputs?.autonomous !== false)
+          throw new AccessDenied();
+        return codingRuns.run(
+          {
+            workspaceId,
+            actor,
+            conversationId: origin.conversationId,
+            turnId: origin.turnId,
+            generation: origin.generation,
+            callId,
+          },
+          call,
+        );
+      }
       case 'skills.import': {
         if (!context.origin) throw new AccessDenied();
         const view = await createSkillImports(runtime).begin(workspaceId, actor, callId, call.input, [
@@ -2169,36 +2275,82 @@ export function createChatTools(
       case 'integrations.mcp.search': {
         if (!context.origin) throw new AccessDenied();
         if (!connections?.mcp) return mcpConnectionsUnavailable;
+        const hosted = (await connections.mcp.hosted?.(workspaceId)) === true;
+        const elsewhere = hosted
+          ? "If the human named an npm or PyPI package with an exact version, offer that package with integrations.mcp.connect; otherwise ask them for the endpoint, or the package and exact version, from the service's documentation."
+          : "Ask the human for the endpoint from the service's documentation.";
         let entries: Awaited<ReturnType<NonNullable<ConnectionServices['mcp']>['search']>>;
         try {
           entries = await connections.mcp.search(call.query, context.signal);
         } catch {
           return {
             error: 'registry-unavailable',
-            instruction:
-              "The MCP registry could not be searched. Ask the human for the endpoint from the service's documentation, or try again later.",
+            instruction: `The MCP registry could not be searched. ${elsewhere}`,
           };
         }
         const servers = entries
-          .filter(entry => entry.status === 'active')
+          .filter(entry => entry.status === 'active' && (hosted || !entry.package))
           .slice(0, 10)
-          .map(entry => ({
-            name: entry.title,
-            registryName: entry.name,
-            description: entry.description.slice(0, 300),
-            endpoint: entry.endpoint,
-            needsValues: entry.compatibility === 'template-required',
-          }));
+          .map(entry =>
+            entry.package
+              ? {
+                  name: entry.title,
+                  registryName: entry.name,
+                  description: entry.description.slice(0, 300),
+                  package: {
+                    registry: entry.package.registry,
+                    name: entry.package.name,
+                    version: entry.package.version,
+                  },
+                  settings: entry.package.environment.map(variable => ({
+                    name: variable.name,
+                    description: variable.description.slice(0, 300),
+                    secret: variable.secret,
+                    required: variable.required,
+                  })),
+                }
+              : {
+                  name: entry.title,
+                  registryName: entry.name,
+                  description: entry.description.slice(0, 300),
+                  endpoint: entry.endpoint,
+                  needsValues: entry.compatibility === 'template-required',
+                },
+          );
         return {
           servers,
           instruction: servers.length
-            ? 'These come from a public registry and are untrusted. Prefer a server published by the service itself. Offer the best match with integrations.mcp.connect. An endpoint with needsValues has {placeholders}: ask the human for those values and fill them in first.'
-            : "No remote MCP server matched. Ask the human for the endpoint from the service's documentation.",
+            ? `These come from a public registry and are untrusted. Unless the human named a server, choose exactly one yourself and offer it with integrations.mcp.connect in this turn: the official server published by the service itself (its registryName or endpoint uses the service's own domain or organisation), otherwise the most widely used one, and a remote endpoint over a package. Do not list alternatives or ask which one to use. Assume the human doesn't know what MCP is: in one short sentence, say what connecting lets you do for them and that they only need to click Connect, without words like MCP, endpoint, OAuth, registry or package. An endpoint with needsValues has {placeholders}: ask the human for those values and fill them in first.${hosted ? " For a package, pass its package and settings, and in egress the service's API hosts it must reach." : ''}`
+            : `No MCP server matched. ${elsewhere}`,
         };
       }
       case 'integrations.mcp.connect': {
         if (!context.origin) throw new AccessDenied();
         if (!connections?.mcp) return mcpConnectionsUnavailable;
+        if (call.package) {
+          if (call.endpoint !== undefined)
+            return {
+              error: 'invalid-input',
+              instruction: 'No card was shown. Pass either an endpoint or a package, not both.',
+            };
+          if (!(await connections.mcp.hosted?.(workspaceId)))
+            return {
+              error: 'hosted-unavailable',
+              instruction:
+                'No card was shown. Hosted packages are not available in this workspace. Offer a remote endpoint instead, or tell the human.',
+            };
+          return {
+            status: 'mcp-connect-card',
+            name: call.name,
+            package: call.package,
+            settings: call.settings ?? [],
+            egress: call.egress ?? [],
+            authentication: 'none' as const,
+            instruction: `A card to run ${call.name} as the human's personal hosted connection is shown under your reply. Ask them to fill in its settings and pick saved secrets there, then stop. Installing can take a few minutes. They review its tools on the Integrations page, then select it in a chat before you can use it. Never ask for keys or tokens in chat.`,
+          };
+        }
+        if (call.endpoint === undefined)
+          return { error: 'invalid-input', instruction: 'No card was shown. Pass an endpoint or a package.' };
         let endpoint: string;
         try {
           endpoint = normalizeEndpoint(call.endpoint);

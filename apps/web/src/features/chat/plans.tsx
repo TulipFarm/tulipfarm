@@ -33,7 +33,8 @@ import { Skeleton } from '@tulipfarm/sprout/skeleton';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
 import type { StatusState } from '@tulipfarm/sprout/status';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@tulipfarm/sprout/tabs';
-import { TaskTree, type TaskTreeTask } from '@tulipfarm/sprout/task-tree';
+import type { TaskTreeTask } from '@tulipfarm/sprout/task-tree';
+import { lazyCard } from '@/components/lazy-card';
 import { TableRequestError } from '@/features/tables/request-state';
 import { apiOrigin } from '@/lib/auth';
 import { useFlag } from '@/lib/feature-flags';
@@ -46,6 +47,9 @@ import { PlanDocument } from './plan-document';
 import type { ConversationMessage } from './conversation-api';
 import { toolPresentation } from '@tulipfarm/conversations/tool-activity';
 import { resultActivityApps } from './result-activity';
+
+// The task tree draws with @xyflow, which is only needed once a plan is shown.
+const TaskTree = lazyCard(() => import('@tulipfarm/sprout/task-tree').then(module => module.TaskTree));
 
 export type PlanSummary = z.infer<typeof planListItemSchema>;
 

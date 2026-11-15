@@ -1,0 +1,30 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "bigquery",
+  "name": "BigQuery",
+  "maker": "Google",
+  "homepage": "https://cloud.google.com/bigquery",
+  "category": "data-and-databases",
+  "teams": ["engineering", "operations"],
+  "summary": "Query BigQuery datasets and tables with SQL",
+  "capabilities": [
+    "List datasets and tables and read schemas",
+    "Run SQL queries and return results",
+    "Explore table metadata"
+  ],
+  "official": {
+    "evidence": "https://cloud.google.com/bigquery/docs/use-bigquery-mcp"
+  },
+  "docs": "https://cloud.google.com/bigquery/docs/use-bigquery-mcp",
+  "remote": {
+    "url": "https://bigquery.googleapis.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "simpleIcons": "googlebigquery",
+    "color": "#669DF6"
+  },
+  "supportedBy": ["chatgpt", "gumloop", "dust", "make", "n8n"]
+}

@@ -1,0 +1,42 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "minimax",
+  "name": "MiniMax",
+  "maker": "MiniMax",
+  "homepage": "https://www.minimax.io",
+  "category": "ai-and-media",
+  "teams": ["engineering", "marketing"],
+  "summary": "Generate speech, images, video, and music with MiniMax",
+  "capabilities": ["Turn text into speech and clone voices", "Generate images and video", "Generate music"],
+  "official": {
+    "evidence": "https://github.com/MiniMax-AI/MiniMax-MCP",
+    "repository": "https://github.com/MiniMax-AI/MiniMax-MCP"
+  },
+  "docs": "https://github.com/MiniMax-AI/MiniMax-MCP",
+  "packages": [
+    {
+      "registry": "pypi",
+      "name": "minimax-mcp",
+      "env": [
+        {
+          "name": "MINIMAX_API_KEY",
+          "description": "MiniMax API key",
+          "secret": true,
+          "required": true
+        },
+        {
+          "name": "MINIMAX_API_HOST",
+          "description": "API host for your region",
+          "secret": false,
+          "required": true
+        }
+      ]
+    }
+  ],
+  "icons": {
+    "lobehub": "Minimax",
+    "simpleIcons": "minimax",
+    "color": "#E73562"
+  },
+  "supportedBy": ["manus"]
+}

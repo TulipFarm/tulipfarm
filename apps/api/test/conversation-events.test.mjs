@@ -142,29 +142,6 @@ test('successive quick call transitions reach SSE in order without becoming gene
   assert.deepEqual(other, []);
 });
 
-test('avatar snapshots stay scoped and ordered and clear when the turn settles', async t => {
-  const { hub, client } = await healthyHub(t);
-  const avatar = {
-    kind: 'avatar',
-    workspaceId,
-    conversationId,
-    turnId,
-    generation: 1,
-    epoch: 1,
-    step: 0,
-    seq: 2,
-    avatar: { name: 'Bud', state: 'Solving' },
-  };
-  client.notify(avatar);
-  client.notify({ ...avatar, seq: 1, avatar: { name: 'Bud', state: 'Thinking' } });
-  assert.equal(hub.snapshot(workspaceId, conversationId)[0].data.avatar.state, 'Solving');
-  assert.deepEqual(hub.snapshot(randomUUID(), conversationId), []);
-  client.notify({ ...avatar, seq: 3, avatar: { name: 'Other', state: 'Invented' } });
-  assert.equal(hub.snapshot(workspaceId, conversationId)[0].data.avatar.state, 'Solving');
-  client.notify({ kind: 'changed', workspaceId, conversationId, turnId, settled: true });
-  assert.deepEqual(hub.snapshot(workspaceId, conversationId), []);
-});
-
 test('recommendation signals share the listener but remain member-scoped and resync on loss', async t => {
   const { hub, client, database } = await healthyHub(t);
   const membershipId = randomUUID();

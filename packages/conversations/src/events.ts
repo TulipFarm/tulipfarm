@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { avatarSnapshotSchema } from './avatar.ts';
 import { toolPresentationSchema } from './tool-activity.ts';
 
 /** PostgreSQL channel that carries conversation notifications from every writer to every API replica. */
@@ -44,8 +43,6 @@ export const streamProgressSchema = streamIdentitySchema.extend({
   seq: count.optional(),
 });
 export type StreamProgress = z.infer<typeof streamProgressSchema>;
-export const streamAvatarSchema = streamIdentitySchema.extend({ seq: count, avatar: avatarSnapshotSchema });
-export type StreamAvatar = z.infer<typeof streamAvatarSchema>;
 
 /**
  * Something visible in the conversation changed. `settled` marks a turn that reached a final or waiting state.
@@ -118,12 +115,39 @@ export function applyStreamSubagents(state: StreamSubagents | undefined, update:
   return order <= 0 ? state : update;
 }
 
+/**
+ * A function the browser runs once on a reply it has just saved, such as opening it in Canvas. It is an A2UI
+ * `callRendererFunction` message whose surface is the reply's message ID.
+ */
+export const rendererCallSchema = z.strictObject({
+  version: z.literal('1.0'),
+  callRendererFunction: z.strictObject({
+    surfaceId: id,
+    functionCallId: id,
+    callFunction: z.strictObject({
+      '@call': z.string().min(1).max(64),
+      args: z.record(z.string(), z.string().max(128)).optional(),
+      catalogId: z.string().min(1).max(100),
+    }),
+  }),
+});
+export type RendererCall = z.infer<typeof rendererCallSchema>;
+/** Renderer calls for the saved reply `messageId`. They are sent live only, so a reload never runs them again. */
+export const streamLayoutCallsSchema = z.strictObject({
+  turnId: id,
+  messageId: id,
+  calls: z.array(rendererCallSchema).min(1).max(4),
+});
+export type StreamLayoutCalls = z.infer<typeof streamLayoutCallsSchema>;
+
 const address = { workspaceId: id, conversationId: id };
 export const conversationNotificationSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('text'), ...address, ...streamTextSchema.shape }),
+  /** The `reply.render` arguments streamed so far, as JSON text that may be incomplete. Updates work like `text`. */
+  z.strictObject({ kind: z.literal('layout'), ...address, ...streamTextSchema.shape }),
+  z.strictObject({ kind: z.literal('layout-calls'), ...address, ...streamLayoutCallsSchema.shape }),
   z.strictObject({ kind: z.literal('changed'), ...address, ...streamChangeSchema.shape }),
   z.strictObject({ kind: z.literal('progress'), ...address, ...streamProgressSchema.shape }),
-  z.strictObject({ kind: z.literal('avatar'), ...address, ...streamAvatarSchema.shape }),
   z.strictObject({ kind: z.literal('tool'), ...address, ...streamToolSchema.shape }),
   z.strictObject({ kind: z.literal('subagents'), ...address, ...streamSubagentsSchema.shape }),
   /** Asks the worker running `id`'s sub-agents to stop one of them. API replicas ignore it. */
@@ -141,11 +165,14 @@ export type ConversationNotification = z.infer<typeof conversationNotificationSc
 export const conversationStreamEvents = {
   /** `streamTextSchema` data. Sent live, and as a reset snapshot when a client connects during a reply. */
   text: 'text',
+  /** `streamTextSchema` data whose text is the partial `reply.render` arguments. Sent live and as a reset snapshot. */
+  layout: 'layout',
+  /** `streamLayoutCallsSchema` data. Sent live only. */
+  layoutCalls: 'layout-calls',
   /** `streamChangeSchema` data. Read history again. */
   changed: 'changed',
   /** `streamProgressSchema` data. Sent live, and as a snapshot when a client connects during a reply. */
   progress: 'progress',
-  avatar: 'avatar',
   tool: 'tool',
   /** `streamSubagentsSchema` data. Live sub-agent cards of a running `agents.delegate` call. */
   subagents: 'subagents',
@@ -164,11 +191,6 @@ export function applyStreamProgress(state: StreamProgress | undefined, update: S
   if (!state) return update;
   const order = compareStreamIdentity(update, state) || (update.seq ?? 0) - (state.seq ?? 0);
   return order <= 0 ? state : update;
-}
-
-export function applyStreamAvatar(state: StreamAvatar | undefined, update: StreamAvatar): StreamAvatar {
-  const order = state ? compareStreamIdentity(update, state) : 1;
-  return state && (order < 0 || (order === 0 && update.seq <= state.seq)) ? state : update;
 }
 
 /**

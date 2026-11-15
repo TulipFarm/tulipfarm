@@ -8,7 +8,7 @@ RUN printf '\nallowUnusedPatches: true\n' >> pnpm-workspace.yaml
 RUN pnpm fetch
 COPY packages/ packages/
 COPY apps/worker/ apps/worker/
-# Legacy deploy checks the whole lockfile, where sprout is a URL tarball pinned by integrity.
+# Legacy deploy checks the whole lockfile, where xlsx is a URL tarball pinned by integrity.
 RUN pnpm install --offline --frozen-lockfile --filter @tulipfarm/worker... \
     && pnpm --filter @tulipfarm/worker... build \
     && pnpm --filter @tulipfarm/worker deploy --legacy --prod --config.block-exotic-subdeps=false /out

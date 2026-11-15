@@ -212,7 +212,10 @@ export async function pinnedRequest(
 export function createPublicHttpsFetch(
   dependencies: PinnedRequestDependencies = { lookup, request },
   deadline?: number,
-  policy: { maximumBytes: number; redirects: 'deny' | 'manual' } = { maximumBytes: 2097152, redirects: 'deny' },
+  policy: { maximumBytes: number; redirects: 'deny' | 'manual'; timeoutMs?: number } = {
+    maximumBytes: 2097152,
+    redirects: 'deny',
+  },
 ): typeof fetch {
   if (
     !Number.isSafeInteger(policy.maximumBytes) ||
@@ -236,6 +239,7 @@ export function createPublicHttpsFetch(
         {
           maximumBytes: policy.maximumBytes,
           redirects: policy.redirects,
+          ...(policy.timeoutMs === undefined ? {} : { timeoutMs: policy.timeoutMs }),
           dependencies,
           ...(deadline === undefined ? {} : { deadline }),
         },

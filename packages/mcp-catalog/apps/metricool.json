@@ -1,0 +1,29 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "metricool",
+  "name": "Metricool",
+  "maker": "Metricool",
+  "homepage": "https://metricool.com",
+  "category": "marketing",
+  "teams": ["marketing"],
+  "summary": "Analyse and schedule social content in Metricool",
+  "capabilities": [
+    "Report on social and ads performance",
+    "Schedule posts across networks",
+    "Find the best times to publish"
+  ],
+  "official": {
+    "evidence": "https://metricool.com/metricool-mcp-claude/"
+  },
+  "docs": "https://metricool.com/metricool-mcp-claude/",
+  "remote": {
+    "url": "https://ai.metricool.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#1D69F5"
+  },
+  "supportedBy": ["manus", "lindy"]
+}

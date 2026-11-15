@@ -17,7 +17,7 @@ import { googleFileBindingSchema, googleFileIdSchema } from '@tulipfarm/google-w
 import { chatDocumentReferences, chatDocumentSchema, chatDocumentText } from './rich-content.ts';
 import { rowChangeSchema, rowViewSchema } from './row-view.ts';
 import { subagentCardSchema, subagentResultSchema } from './events.ts';
-import { layoutSchema } from './layout-contracts.ts';
+import { layoutActionSchema, layoutSchema } from './layout-contracts.ts';
 
 const unicodeText = z
   .string()
@@ -307,6 +307,8 @@ export const displayPartSchema = z.discriminatedUnion('kind', [
   compactionPartSchema,
   /** An assistant reply drawn as an A2UI layout. `text` is its plain-text form. */
   z.strictObject({ kind: z.literal('layout'), text: z.string(), layout: layoutSchema }),
+  /** A person's message sent by a button in an assistant layout, beside the text part with its words. */
+  z.strictObject({ kind: z.literal('layout-action'), action: layoutActionSchema }),
 ]);
 export const imageReceiptSchema = z.array(
   z.object({
@@ -333,6 +335,27 @@ export const integrationCardSchema = z.discriminatedUnion('action', [
     endpoint: z.url({ protocol: /^https$/ }).max(2048),
     authentication: z.enum(['oauth', 'secrets', 'none']),
   }),
+  /** An npm or PyPI package to run in a hosted sandbox. Settings name its environment variables, never their values. */
+  z.strictObject({
+    action: z.literal('mcp-package'),
+    name: z.string().min(1).max(120),
+    package: z.strictObject({
+      registry: z.enum(['npm', 'pypi']),
+      name: z.string().min(1).max(214),
+      version: z.string().min(1).max(128),
+    }),
+    settings: z
+      .array(
+        z.strictObject({
+          name: z.string().regex(/^[A-Z_][A-Z0-9_]{0,127}$/),
+          description: z.string().max(300).optional(),
+          secret: z.boolean(),
+          required: z.boolean().optional(),
+        }),
+      )
+      .max(20),
+    egress: z.array(z.string().max(253)).max(20),
+  }),
 ]);
 export const toolReceiptSchema = z.object({
   id: uuidSchema,
@@ -355,6 +378,8 @@ export const toolReceiptSchema = z.object({
   api: apiCallReceiptSchema.nullable().optional(),
   /** The code and output of an `execution.run` call. */
   execution: executionReceiptSchema.nullable().optional(),
+  /** A `coding.run` call recorded for its member's approval, whose review card reads the run. */
+  codingRun: z.literal(true).optional(),
   knowledge: knowledgeActivitySchema.nullable().optional(),
   fileId: uuidSchema.optional(),
   fileIds: z.array(uuidSchema).max(64).optional(),
@@ -414,7 +439,9 @@ export class ConversationConflict extends Error {
     | 'google-integration-changed'
     | 'skill-unavailable'
     | 'compaction-not-found'
-    | 'maintenance-not-resumable';
+    | 'maintenance-not-resumable'
+    | 'layout-action-unavailable'
+    | 'layout-action-sent';
   constructor(code: ConversationConflict['code']) {
     super(code);
     this.code = code;

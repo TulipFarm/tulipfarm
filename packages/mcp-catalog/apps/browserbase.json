@@ -1,0 +1,26 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "browserbase",
+  "name": "Browserbase",
+  "maker": "Browserbase",
+  "homepage": "https://www.browserbase.com",
+  "category": "automation",
+  "teams": ["engineering"],
+  "summary": "Control cloud browsers with Browserbase and Stagehand",
+  "capabilities": ["Open pages and take actions in a browser", "Extract data from pages", "Take screenshots"],
+  "official": {
+    "evidence": "https://docs.browserbase.com/integrations/mcp/setup",
+    "repository": "https://github.com/browserbase/mcp-server-browserbase"
+  },
+  "docs": "https://docs.browserbase.com/integrations/mcp/setup",
+  "remote": {
+    "url": "https://mcp.browserbase.com/mcp?browserbaseApiKey={key}",
+    "transport": "streamable-http",
+    "auth": "api-key",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#F03603"
+  },
+  "supportedBy": ["lindy", "gumloop", "relevance-ai", "docker"]
+}

@@ -1,0 +1,31 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "mural",
+  "name": "Mural",
+  "maker": "Mural",
+  "homepage": "https://www.mural.co",
+  "category": "design",
+  "teams": ["product", "design", "everyone"],
+  "summary": "Read and write on Mural collaboration boards",
+  "capabilities": [
+    "Read board content and sticky notes",
+    "Add sticky notes, shapes and text",
+    "Summarise workshops and boards"
+  ],
+  "official": {
+    "evidence": "https://www.mural.co/mcp"
+  },
+  "docs": "https://www.mural.co/mcp",
+  "remote": {
+    "url": "https://mcp-canvas.mural.co/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "co.mural/mural",
+  "icons": {
+    "simpleIcons": "mural",
+    "color": "#FF4B4B"
+  },
+  "supportedBy": ["microsoft-copilot", "lindy", "relevance-ai"]
+}

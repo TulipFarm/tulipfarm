@@ -258,6 +258,7 @@ type ContextInput =
       mcp?: McpModelCatalog | undefined;
       earlierMessages?: boolean;
       chatFiles?: boolean;
+      codingRuns?: boolean;
       personalMemory?: PersonalMemoryContext | undefined;
       inventory?: WorkspaceInventory | undefined;
     }
@@ -280,6 +281,7 @@ export function runtimeReminder(context: ContextInput, timeZone: string | null =
                 mcp: context.mcp,
                 earlierMessages: context.earlierMessages ?? false,
                 chatFiles: context.chatFiles ?? false,
+                codingRuns: context.codingRuns ?? false,
               },
         );
   const has = (name: string) => tools.some(tool => tool === name);

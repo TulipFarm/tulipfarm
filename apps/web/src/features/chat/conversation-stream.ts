@@ -8,9 +8,9 @@ import {
   type StreamProgress,
   type StreamTextState,
 } from '@tulipfarm/conversations/events';
-import { applyStreamAvatar, streamAvatarSchema, type StreamAvatar } from '@tulipfarm/conversations/events';
 import { applyStreamTool, streamToolSchema, type StreamTool } from '@tulipfarm/conversations/events';
 import { applyStreamSubagents, streamSubagentsSchema, type StreamSubagents } from '@tulipfarm/conversations/events';
+import { streamLayoutCallsSchema, type RendererCall } from '@tulipfarm/conversations/events';
 import { flushSync } from 'react-dom';
 
 export type LiveSubagents = StreamSubagents & { receivedAt: number };
@@ -20,8 +20,11 @@ export type ConversationStreamChange = { history: boolean; plans: boolean };
 export type ConversationStreamSnapshot = {
   status: ConversationStreamStatus;
   previews: ReadonlyMap<string, StreamTextState>;
+  /** Streamed `reply.render` arguments by turn, as JSON text that may be incomplete. */
+  layouts?: ReadonlyMap<string, StreamTextState>;
+  /** Renderer calls for just-saved replies, by message ID. They arrive live only. */
+  layoutCalls?: ReadonlyMap<string, readonly RendererCall[]>;
   progress: ReadonlyMap<string, StreamProgress>;
-  avatars?: ReadonlyMap<string, StreamAvatar>;
   tools?: ReadonlyMap<string, StreamTool>;
   /** Live sub-agent cards, keyed by the `agents.delegate` call id. `receivedAt` lets the page advance run times. */
   subagents?: ReadonlyMap<string, LiveSubagents>;
@@ -63,7 +66,6 @@ export function createConversationStream(
     status: 'connecting',
     previews: new Map(),
     progress: new Map(),
-    avatars: new Map(),
   };
   const listeners = new Set<() => void>();
   let source: Source | undefined;
@@ -176,25 +178,6 @@ export function createConversationStream(
         subagents: new Map(snapshot.subagents).set(update.data.id, { ...update.data, receivedAt: Date.now() }),
       });
     });
-    current.addEventListener(conversationStreamEvents.avatar, event => {
-      if (source !== current) return;
-      let data: unknown;
-      try {
-        data = JSON.parse(event.data);
-      } catch {
-        console.error('Invalid avatar stream JSON');
-        return;
-      }
-      const update = streamAvatarSchema.safeParse(data);
-      if (!update.success) {
-        console.error('Invalid avatar stream state');
-        return;
-      }
-      const previous = snapshot.avatars?.get(update.data.turnId);
-      const next = applyStreamAvatar(previous, update.data);
-      if (next === previous) return;
-      publish({ avatars: new Map(snapshot.avatars).set(update.data.turnId, next) });
-    });
     current.addEventListener(conversationStreamEvents.text, event => {
       if (source !== current) return;
       let data: unknown;
@@ -209,6 +192,33 @@ export function createConversationStream(
       const next = applyStreamText(previous, update.data);
       if (next === previous) return;
       publish({ previews: new Map(snapshot.previews).set(update.data.turnId, next) });
+    });
+    current.addEventListener(conversationStreamEvents.layout, event => {
+      if (source !== current) return;
+      let data: unknown;
+      try {
+        data = JSON.parse(event.data);
+      } catch {
+        return;
+      }
+      const update = streamTextSchema.safeParse(data);
+      if (!update.success) return;
+      const previous = snapshot.layouts?.get(update.data.turnId);
+      const next = applyStreamText(previous, update.data);
+      if (next === previous) return;
+      publish({ layouts: new Map(snapshot.layouts).set(update.data.turnId, next) });
+    });
+    current.addEventListener(conversationStreamEvents.layoutCalls, event => {
+      if (source !== current) return;
+      let data: unknown;
+      try {
+        data = JSON.parse(event.data);
+      } catch {
+        return;
+      }
+      const update = streamLayoutCallsSchema.safeParse(data);
+      if (update.success)
+        publish({ layoutCalls: new Map(snapshot.layoutCalls).set(update.data.messageId, update.data.calls) });
     });
     current.addEventListener(conversationStreamEvents.progress, event => {
       if (source !== current) return;

@@ -1,18 +1,28 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
-import { initialModelMapping, legacyModels, shippedModelCatalogPath } from '@tulipfarm/config';
+import { initialModelMapping, isPlanProvider, legacyModels, shippedModelCatalogPath } from '@tulipfarm/config';
 import { modelEnvironment } from '@tulipfarm/agents/model-environment';
 import { chatFallbackModel, chatReplyModel, conversationModel, roleModel } from '../src/conversation-model.ts';
 import { chatTitleRoute, meteredReply } from '../src/conversation-activities.ts';
 
 const runtime = { transaction: async () => assert.fail('An unavailable model must not reach storage') };
+// ChatGPT plan models run on a member's plan, not a provider credential, so they are off here.
+// Plan models are always served; these provider cases predate them, so they use the shipped catalog without them.
+const shippedCatalog = JSON.parse(readFileSync(shippedModelCatalogPath, 'utf8'));
+const planOff = {
+  MODEL_CATALOG: JSON.stringify({
+    ...shippedCatalog,
+    models: shippedCatalog.models.filter(model => !model.routes.some(route => isPlanProvider(route.provider))),
+  }),
+};
 const keys = {
+  ...planOff,
   ANTHROPIC_API_KEY: 'synthetic-key',
   AZURE_FOUNDRY_API_KEY: 'synthetic-key',
   AZURE_FOUNDRY_ENDPOINT: 'https://example.services.ai.azure.com/',
 };
-const shipped = { ANTHROPIC_API_KEY: 'synthetic-key' };
+const shipped = { ...planOff, ANTHROPIC_API_KEY: 'synthetic-key' };
 const catalogModels = JSON.parse(readFileSync(shippedModelCatalogPath, 'utf8')).models;
 const legacyModel = id => legacyModels.find(model => model.id === id);
 // A catalog of Claude Haiku and Claude Sonnet (the default) with only the `roles` given.
@@ -26,7 +36,7 @@ const claudeCatalog = roles =>
 
 function environment(t, values) {
   const previous = process.env;
-  process.env = { SLACK_OUTBOUND_ENABLED: 'false', KNOWLEDGE_EMBEDDINGS_ENABLED: 'false', ...values };
+  process.env = { ...planOff, SLACK_OUTBOUND_ENABLED: 'false', KNOWLEDGE_EMBEDDINGS_ENABLED: 'false', ...values };
   t.after(() => {
     process.env = previous;
   });
@@ -58,8 +68,11 @@ function previousModel(family) {
 }
 
 test('every enabled family keeps the route and price chat used before, and tasks use the same route', () => {
-  // Gemini families were not selectable before; their routes are covered by the default-provider tests.
-  const families = catalogModels.filter(family => family.vendor !== 'google').map(family => family.id);
+  // Gemini families were not selectable before; their routes are covered by the default-provider tests. ChatGPT,
+  // Claude and Copilot plan families are newer than the previous price list.
+  const families = catalogModels
+    .filter(family => family.vendor !== 'google' && family.routes.every(route => !isPlanProvider(route.provider)))
+    .map(family => family.id);
   const env = keys;
   for (const family of families) {
     assert.deepEqual(conversationModel(family, env), previousModel(family), family);
@@ -137,11 +150,11 @@ test('chat rejects a reply when no model can serve it', async t => {
 });
 
 const providerKeys = {
-  anthropic: { ANTHROPIC_API_KEY: 'synthetic-key' },
-  openai: { OPENAI_API_KEY: 'synthetic-key' },
-  xai: { XAI_API_KEY: 'synthetic-key' },
-  google: { GEMINI_API_KEY: 'synthetic-key' },
-  azure: { AZURE_FOUNDRY_API_KEY: 'synthetic-key', AZURE_FOUNDRY_ENDPOINT: keys.AZURE_FOUNDRY_ENDPOINT },
+  anthropic: { ...planOff, ANTHROPIC_API_KEY: 'synthetic-key' },
+  openai: { ...planOff, OPENAI_API_KEY: 'synthetic-key' },
+  xai: { ...planOff, XAI_API_KEY: 'synthetic-key' },
+  google: { ...planOff, GEMINI_API_KEY: 'synthetic-key' },
+  azure: { ...planOff, AZURE_FOUNDRY_API_KEY: 'synthetic-key', AZURE_FOUNDRY_ENDPOINT: keys.AZURE_FOUNDRY_ENDPOINT },
 };
 const providerFamilies = {
   anthropic: ['claude-haiku', 'claude-sonnet', 'claude-opus', 'claude-fable'],

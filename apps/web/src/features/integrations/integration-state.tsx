@@ -68,6 +68,7 @@ export function tabsFor(app: Integration, admin: boolean): IntegrationTab[] {
   if (app.provider === 'soon') return ['overview'];
   return [
     'overview',
+    'tools',
     ...(personal.has(app.provider) ? (['accounts'] as const) : []),
     ...(defaultKnowledgeProducts[app.id] ? (['knowledge'] as const) : []),
     ...(app.provider === 'slack' ? (['channels'] as const) : []),
@@ -78,6 +79,8 @@ export function tabsFor(app: Integration, admin: boolean): IntegrationTab[] {
 
 export const tabLabels: Record<IntegrationTab, string> = {
   overview: 'Overview',
+  tools: 'Tools',
+  access: 'Who can use it',
   accounts: 'Accounts',
   knowledge: 'Knowledge',
   channels: 'Channels',

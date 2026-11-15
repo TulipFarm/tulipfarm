@@ -1,0 +1,37 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "microsoft-learn",
+  "name": "Microsoft Learn",
+  "maker": "Microsoft",
+  "homepage": "https://learn.microsoft.com",
+  "category": "code",
+  "teams": ["engineering"],
+  "summary": "Search official Microsoft and Azure documentation",
+  "capabilities": ["Search Microsoft Learn docs", "Fetch full doc pages", "Find official code samples"],
+  "official": {
+    "evidence": "https://learn.microsoft.com/en-us/training/support/mcp",
+    "repository": "https://github.com/MicrosoftDocs/mcp"
+  },
+  "docs": "https://learn.microsoft.com/en-us/training/support/mcp",
+  "remote": {
+    "url": "https://learn.microsoft.com/api/mcp",
+    "transport": "streamable-http",
+    "auth": "none",
+    "checked": "2026-11-14"
+  },
+  "registryName": "com.microsoft/microsoft-learn-mcp",
+  "icons": {
+    "lobehub": "Microsoft",
+    "color": "#5E5E5E"
+  },
+  "supportedBy": [
+    "claude",
+    "microsoft-copilot",
+    "copilot-studio",
+    "manus",
+    "gumloop",
+    "glean",
+    "docker",
+    "github-registry"
+  ]
+}

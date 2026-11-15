@@ -1,0 +1,27 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "parallel",
+  "name": "Parallel",
+  "maker": "Parallel Web Systems",
+  "homepage": "https://parallel.ai",
+  "category": "search-and-research",
+  "teams": ["everyone"],
+  "summary": "Search the web and fetch pages with Parallel",
+  "capabilities": ["Search the web for agent-ready results", "Fetch and extract web page content"],
+  "official": {
+    "evidence": "https://github.com/parallel-web/search-mcp",
+    "repository": "https://github.com/parallel-web/search-mcp"
+  },
+  "docs": "https://docs.parallel.ai/integrations/mcp/search-mcp",
+  "remote": {
+    "url": "https://search.parallel.ai/mcp",
+    "transport": "streamable-http",
+    "auth": "none",
+    "checked": "2026-11-14"
+  },
+  "registryName": "ai.parallel/search-mcp",
+  "icons": {
+    "color": "#FB631B"
+  },
+  "supportedBy": ["manus", "lindy", "gumloop", "relevance-ai", "glean", "github-registry"]
+}

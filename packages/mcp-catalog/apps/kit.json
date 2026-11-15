@@ -1,0 +1,30 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "kit",
+  "name": "Kit",
+  "maker": "Kit",
+  "homepage": "https://kit.com",
+  "category": "marketing",
+  "teams": ["marketing"],
+  "summary": "Manage subscribers, broadcasts, and sequences in Kit",
+  "capabilities": [
+    "Look up and tag subscribers",
+    "Draft broadcasts and review performance",
+    "Build landing pages and forms"
+  ],
+  "official": {
+    "evidence": "https://help.kit.com/en/articles/14827557-how-to-connect-the-kit-mcp-to-your-ai-tools"
+  },
+  "docs": "https://help.kit.com/en/articles/14827557-how-to-connect-the-kit-mcp-to-your-ai-tools",
+  "remote": {
+    "url": "https://app.kit.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "simpleIcons": "kit",
+    "color": "#000000"
+  },
+  "supportedBy": ["claude", "lindy", "relevance-ai", "zapier", "make"]
+}

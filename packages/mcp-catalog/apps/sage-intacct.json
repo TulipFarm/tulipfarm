@@ -1,0 +1,30 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "sage-intacct",
+  "name": "Sage Intacct",
+  "maker": "Sage",
+  "homepage": "https://www.sage.com/en-us/sage-business-cloud/intacct/",
+  "category": "finance-and-accounting",
+  "teams": ["finance"],
+  "summary": "Query and update Sage Intacct financial data",
+  "capabilities": [
+    "Query general ledger and financial data",
+    "Look up vendors, customers, and invoices",
+    "Run finance workflows through the AI Gateway"
+  ],
+  "official": {
+    "evidence": "https://developer.sage.com/intacct/docs/ai/1/mcp-setup-and-connection-guide"
+  },
+  "docs": "https://developer.sage.com/intacct/docs/ai/1/mcp-setup-and-connection-guide",
+  "remote": {
+    "url": "https://mcp.intacct.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "simpleIcons": "sage",
+    "color": "#00D639"
+  },
+  "supportedBy": ["relevance-ai"]
+}

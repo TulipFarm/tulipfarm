@@ -44,6 +44,19 @@ function boundedJson(value: unknown, depth = 0, budget = { nodes: 0 }): void {
   }
 }
 
+// MCP's default dialect is 2020-12. The allowed keywords mean the same in both, since array-form `items` is refused.
+const rootDialects: unknown[] = [
+  'http://json-schema.org/draft-07/schema#',
+  'https://json-schema.org/draft/2020-12/schema',
+];
+
+function withoutDialect(entry: McpCatalogEntry): McpCatalogEntry {
+  if (!('$schema' in entry.inputSchema)) return entry;
+  const { $schema: dialect, ...inputSchema } = entry.inputSchema;
+  if (!rootDialects.includes(dialect)) throw new Error('mcp-schema-dialect-unsupported');
+  return { ...entry, inputSchema };
+}
+
 function validator(entry: McpCatalogEntry): ValidateFunction {
   if (bytes(entry) > maxModelBytes) throw new Error('mcp-tool-schema-too-large');
   if (bytes(entry.inputSchema) > 65536) throw new Error('mcp-tool-schema-too-large');
@@ -61,9 +74,6 @@ function validator(entry: McpCatalogEntry): ValidateFunction {
     useDefaults: false,
     removeAdditional: false,
   };
-  const dialect = entry.inputSchema.$schema;
-  if (dialect !== undefined && dialect !== 'http://json-schema.org/draft-07/schema#')
-    throw new Error('mcp-schema-dialect-unsupported');
   const ajv = new Ajv(options);
   const compiled = ajv.compile(entry.inputSchema);
   if (validators.size >= 128) {
@@ -123,7 +133,7 @@ export function createMcpCatalog(input: readonly McpCatalogEntry[]): {
   describe: (handle: string) => Extract<McpExecutionResult, { kind: 'catalog' }>;
 } {
   if (input.length > 2000 || bytes(input) > maxCatalogBytes) throw new Error('mcp-catalog-limit');
-  const entries = input.map(entry => mcpCatalogEntrySchema.parse(entry));
+  const entries = input.map(entry => withoutDialect(mcpCatalogEntrySchema.parse(entry)));
   const byHandle = new Map(entries.map(entry => [entry.handle, entry]));
   if (byHandle.size !== entries.length) throw new Error('mcp-catalog-duplicate');
   for (const entry of entries) validator(entry);

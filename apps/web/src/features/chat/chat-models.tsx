@@ -9,6 +9,7 @@ import { familyCost } from '@/features/models/family-cost';
 import { modelBrand } from '@/features/models/model-brand';
 import { modelLogo } from '@/features/models/model-logo';
 import { ModelSetupLink, noModelsConfigured } from '@/features/models/model-setup';
+import { familyPlan } from '@/features/models/chatgpt-plan-api';
 
 function composerModel(family: ModelCatalogFamily): ComposerModel {
   return {
@@ -16,9 +17,8 @@ function composerModel(family: ModelCatalogFamily): ComposerModel {
     label: family.displayName,
     logo: modelLogo(family.vendor),
     brand: modelBrand(family.vendor),
-    speed: family.speed ?? undefined,
-    quality: family.quality ?? undefined,
     cost: familyCost(family),
+    ...(familyPlan(family) ? { plan: familyPlan(family)! } : {}),
     disabled: !family.available,
     ...(!family.available
       ? {
@@ -39,10 +39,15 @@ function dismissedNotice(workspaceId: string) {
   }
 }
 
+/**
+ * Plan models (ChatGPT, Claude, Copilot) run only for members who can use a connected plan, so shared surfaces such as
+ * projects pass `{ plans: false }` to leave them out.
+ */
 export function useChatModels(
   workspaceId: string,
   user: Pick<typeof authClient.$Infer.Session.user, 'lastModelFamilyId'>,
   preferWorkspaceDefault = false,
+  options: { plans?: boolean } = {},
 ) {
   const catalog = useModelCatalog(workspaceId);
   const [selected, setSelected] = useState<ComposerModel | null>(null);
@@ -53,17 +58,21 @@ export function useChatModels(
   const defaultRequested = useRef(false);
   const defaultApplied = useRef(false);
   const { state } = catalog;
-  const families = state.kind === 'ready' ? state.data.families : [];
+  const plans = options.plans ?? true;
+  const families = useMemo(
+    () => (state.kind === 'ready' ? state.data.families.filter(family => plans || !familyPlan(family)) : []),
+    [state, plans],
+  );
   const saved = user.lastModelFamilyId ?? null;
   useEffect(() => {
     if (preferWorkspaceDefault) defaultRequested.current = true;
     if (state.kind !== 'ready') return;
-    const listed = (id: string | null | undefined) => state.data.families.find(family => family.id === id);
+    const listed = (id: string | null | undefined) => families.find(family => family.id === id);
     const savedFamily = listed(saved);
     const startDefault = defaultRequested.current && !defaultApplied.current;
     const workspaceDefault =
-      state.data.families.find(family => family.id === state.data.defaultChatFamilyId && family.available) ??
-      state.data.families.find(family => family.available);
+      families.find(family => family.id === state.data.defaultChatFamilyId && family.available) ??
+      families.find(family => family.available);
     const first = (!startDefault && savedFamily?.available ? savedFamily : undefined) ?? workspaceDefault;
     setSelected(current => {
       if (!startDefault && current && listed(current.id)?.available) return current;
@@ -71,12 +80,15 @@ export function useChatModels(
       return replacement ? composerModel(replacement) : null;
     });
     if (startDefault) defaultApplied.current = true;
-  }, [state, saved, preferWorkspaceDefault]);
+  }, [state, families, saved, preferWorkspaceDefault]);
   useEffect(() => setAcknowledged(dismissedNotice(workspaceId)), [workspaceId]);
   const current = families.find(family => family.id === selected?.id);
   const model = state.kind === 'unavailable' ? null : current ? composerModel(current) : selected;
   const ready = state.kind === 'ready';
-  const choices = families.map(composerModel).sort((a, b) => Number(!!a.disabled) - Number(!!b.disabled));
+  // The member's own plan models come first, before the workspace's models that use credits.
+  const choices = families
+    .map(composerModel)
+    .sort((a, b) => Number(!!a.disabled) - Number(!!b.disabled) || Number(!a.plan) - Number(!b.plan));
   // The member's remembered model can no longer be used here, so new messages use another one until they choose.
   const savedUnavailable =
     ready && !!saved && saved !== acknowledged && !families.some(family => family.id === saved && family.available);

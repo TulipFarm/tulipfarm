@@ -1,0 +1,35 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "docker-hub",
+  "name": "Docker Hub",
+  "maker": "Docker",
+  "homepage": "https://hub.docker.com",
+  "category": "code",
+  "teams": ["engineering"],
+  "summary": "Find and manage Docker Hub images and repositories",
+  "capabilities": ["Search images on Docker Hub", "List repositories and tags", "Create and update repositories"],
+  "official": {
+    "evidence": "https://github.com/docker/hub-mcp",
+    "repository": "https://github.com/docker/hub-mcp"
+  },
+  "docs": "https://github.com/docker/hub-mcp",
+  "packages": [
+    {
+      "registry": "oci",
+      "name": "mcp/dockerhub",
+      "env": [
+        {
+          "name": "HUB_PAT_TOKEN",
+          "description": "Docker Hub personal access token",
+          "secret": true,
+          "required": true
+        }
+      ]
+    }
+  ],
+  "icons": {
+    "simpleIcons": "docker",
+    "color": "#2496ED"
+  },
+  "supportedBy": ["lindy", "relevance-ai", "docker"]
+}

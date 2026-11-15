@@ -1,0 +1,30 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "docusign",
+  "name": "Docusign",
+  "maker": "Docusign",
+  "homepage": "https://www.docusign.com",
+  "category": "docs-and-files",
+  "teams": ["sales", "operations", "hr"],
+  "summary": "Send envelopes and track agreements",
+  "capabilities": [
+    "Create and send envelopes from templates",
+    "Track envelope and signing status",
+    "Search agreements and extract key terms"
+  ],
+  "official": {
+    "evidence": "https://developers.docusign.com/platform/mcp-server/"
+  },
+  "docs": "https://developers.docusign.com/platform/mcp-server/",
+  "remote": {
+    "url": "https://mcp.docusign.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#4C00FF"
+  },
+  "supportedBy": ["chatgpt", "claude", "copilot-studio", "lindy", "gumloop", "relevance-ai", "glean", "zapier", "make"],
+  "featured": true
+}

@@ -1,0 +1,29 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "auth0",
+  "name": "Auth0",
+  "maker": "Okta",
+  "homepage": "https://auth0.com",
+  "category": "security",
+  "teams": ["engineering"],
+  "summary": "Manage Auth0 applications, APIs, and actions",
+  "capabilities": ["Create and update applications and APIs", "Write and deploy actions", "Read tenant logs"],
+  "official": {
+    "evidence": "https://auth0.com/docs/get-started/auth0-mcp-server",
+    "repository": "https://github.com/auth0/auth0-mcp-server"
+  },
+  "docs": "https://auth0.com/docs/get-started/auth0-mcp-server",
+  "packages": [
+    {
+      "registry": "npm",
+      "name": "@auth0/auth0-mcp-server",
+      "env": []
+    }
+  ],
+  "registryName": "com.auth0/mcp",
+  "icons": {
+    "simpleIcons": "auth0",
+    "color": "#EB5424"
+  },
+  "supportedBy": ["relevance-ai"]
+}

@@ -1,0 +1,30 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "carta",
+  "name": "Carta",
+  "maker": "Carta",
+  "homepage": "https://carta.com",
+  "category": "finance-and-accounting",
+  "teams": ["finance"],
+  "summary": "Query cap tables, funds, and portfolio data",
+  "capabilities": [
+    "Read cap tables, SAFEs, and option grants",
+    "Look up fund performance and portfolio data",
+    "Review 409A valuations and financing history"
+  ],
+  "official": {
+    "evidence": "https://docs.carta.com/api-platform/guides/guides/claude-mcp-setup/",
+    "repository": "https://github.com/carta/plugins"
+  },
+  "docs": "https://docs.carta.com/api-platform/guides/guides/claude-mcp-setup/",
+  "remote": {
+    "url": "https://mcp.app.carta.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#000000"
+  },
+  "supportedBy": ["claude", "copilot-studio", "gumloop"]
+}

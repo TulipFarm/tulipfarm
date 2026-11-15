@@ -1,0 +1,50 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "atlassian",
+  "name": "Atlassian (Jira and Confluence)",
+  "maker": "Atlassian",
+  "homepage": "https://www.atlassian.com",
+  "category": "projects-and-issues",
+  "teams": ["engineering", "product", "everyone"],
+  "summary": "Work with Jira issues and Confluence pages",
+  "capabilities": [
+    "Search, create and update Jira issues",
+    "Read, create and edit Confluence pages",
+    "Search across Jira, Confluence and Compass"
+  ],
+  "official": {
+    "evidence": "https://support.atlassian.com/atlassian-ai-gateway/docs/get-started-with-the-atlassian-remote-mcp-server/",
+    "repository": "https://github.com/atlassian/atlassian-mcp-server"
+  },
+  "docs": "https://support.atlassian.com/atlassian-ai-gateway/docs/get-started-with-the-atlassian-remote-mcp-server/",
+  "remote": {
+    "url": "https://mcp.atlassian.com/v1/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "com.atlassian/atlassian-mcp-server",
+  "icons": {
+    "simpleIcons": "atlassian",
+    "color": "#0052CC"
+  },
+  "supportedBy": [
+    "chatgpt",
+    "claude",
+    "microsoft-copilot",
+    "notion-ai",
+    "manus",
+    "perplexity",
+    "lindy",
+    "gumloop",
+    "relevance-ai",
+    "dust",
+    "glean",
+    "zapier",
+    "make",
+    "n8n",
+    "docker",
+    "github-registry"
+  ],
+  "featured": true
+}

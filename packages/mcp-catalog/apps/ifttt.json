@@ -1,0 +1,26 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "ifttt",
+  "name": "IFTTT",
+  "maker": "IFTTT",
+  "homepage": "https://ifttt.com",
+  "category": "automation",
+  "teams": ["everyone"],
+  "summary": "Run IFTTT actions and manage Applets",
+  "capabilities": ["Run actions across connected services", "Create and manage Applets"],
+  "official": {
+    "evidence": "https://ifttt.com/mcp"
+  },
+  "docs": "https://ifttt.com/mcp",
+  "remote": {
+    "url": "https://ifttt.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "simpleIcons": "ifttt",
+    "color": "#000000"
+  },
+  "supportedBy": ["claude", "copilot-studio", "lindy", "relevance-ai"]
+}

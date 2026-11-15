@@ -1,0 +1,37 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "egnyte",
+  "name": "Egnyte",
+  "maker": "Egnyte",
+  "homepage": "https://www.egnyte.com",
+  "category": "docs-and-files",
+  "teams": ["operations", "everyone"],
+  "summary": "Search and read content stored in Egnyte",
+  "capabilities": ["Search files and folders", "Read and summarise documents", "Ask questions across Egnyte content"],
+  "official": {
+    "evidence": "https://developers.egnyte.com/integration/cfs/api-docs/remote-mcp-server"
+  },
+  "docs": "https://developers.egnyte.com/integration/cfs/api-docs/remote-mcp-server",
+  "remote": {
+    "url": "https://mcp-server.egnyte.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "com.egnyte/mcp-server",
+  "icons": {
+    "simpleIcons": "egnyte",
+    "color": "#00968F"
+  },
+  "supportedBy": [
+    "chatgpt",
+    "claude",
+    "microsoft-copilot",
+    "copilot-studio",
+    "manus",
+    "lindy",
+    "gumloop",
+    "relevance-ai",
+    "glean"
+  ]
+}

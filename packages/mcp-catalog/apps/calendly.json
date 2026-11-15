@@ -1,0 +1,30 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "calendly",
+  "name": "Calendly",
+  "maker": "Calendly",
+  "homepage": "https://calendly.com",
+  "category": "email-and-calendar",
+  "teams": ["sales", "everyone"],
+  "summary": "Manage Calendly event types and bookings",
+  "capabilities": [
+    "List event types and scheduled events",
+    "Create single-use scheduling links",
+    "Read invitee details"
+  ],
+  "official": {
+    "evidence": "https://developer.calendly.com/docs/mcp/calendly-mcp-server"
+  },
+  "docs": "https://developer.calendly.com/docs/mcp/calendly-mcp-server",
+  "remote": {
+    "url": "https://mcp.calendly.com",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "simpleIcons": "calendly",
+    "color": "#006BFF"
+  },
+  "supportedBy": ["chatgpt", "claude", "manus", "lindy", "gumloop", "relevance-ai", "zapier", "make"]
+}

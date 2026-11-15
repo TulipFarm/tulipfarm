@@ -1,0 +1,31 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "jina-ai",
+  "name": "Jina AI",
+  "maker": "Jina AI",
+  "homepage": "https://jina.ai",
+  "category": "search-and-research",
+  "teams": ["engineering", "everyone"],
+  "summary": "Read web pages and search the web with Jina",
+  "capabilities": [
+    "Read any URL as clean markdown",
+    "Search the web, arXiv, and images",
+    "Rerank and deduplicate results"
+  ],
+  "official": {
+    "evidence": "https://github.com/jina-ai/MCP",
+    "repository": "https://github.com/jina-ai/MCP"
+  },
+  "docs": "https://github.com/jina-ai/MCP",
+  "remote": {
+    "url": "https://mcp.jina.ai/v1",
+    "transport": "streamable-http",
+    "auth": "none",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "lobehub": "Jina",
+    "color": "#009191"
+  },
+  "supportedBy": ["lindy", "n8n"]
+}

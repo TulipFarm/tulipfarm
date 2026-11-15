@@ -1,0 +1,30 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "jam",
+  "name": "Jam",
+  "maker": "Jam",
+  "homepage": "https://jam.dev",
+  "category": "code",
+  "teams": ["engineering", "product"],
+  "summary": "Read bug reports with logs and replays from Jam",
+  "capabilities": [
+    "Get bug report details and repro steps",
+    "Read console logs and network requests",
+    "Review user events from a recording"
+  ],
+  "official": {
+    "evidence": "https://jam.dev/docs/jam-mcp"
+  },
+  "docs": "https://jam.dev/docs/jam-mcp",
+  "remote": {
+    "url": "https://mcp.jam.dev/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "dev.jam/jam",
+  "icons": {
+    "color": "#E85A9C"
+  },
+  "supportedBy": ["chatgpt", "claude", "microsoft-copilot", "manus", "gumloop", "glean"]
+}

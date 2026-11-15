@@ -95,6 +95,13 @@ export function secretsApi(workspaceId: string) {
     save: (id: string, expectedPolicyVersion: number, input: { name?: string; expiresAt?: string | null }) =>
       write(`${secret(id)}/save`, 'POST', { expectedPolicyVersion, ...input }),
     remove: (id: string, expectedVersion: number) => write(secret(id), 'DELETE', { expectedVersion }),
+    /** Packages whose hosted sandbox may read this secret's value. Only the owner sees or changes them. */
+    reveals: async (id: string, signal: AbortSignal) =>
+      z
+        .object({ reveals: z.array(z.object({ serverIdentity: z.string(), grantedAt: z.string() })) })
+        .parse(await request(`${secret(id)}/reveals`, signal)).reveals,
+    setReveal: (id: string, input: { serverIdentity: string; revealed: boolean }) =>
+      request(`${secret(id)}/reveals`, AbortSignal.timeout(15_000), 'PUT', input),
     forTask: async (taskId: string, signal: AbortSignal) =>
       taskSecretRequestsSchema.parse(
         await request(`${workspace}/agent-tasks/${encodeURIComponent(taskId)}/secret-requests`, signal),

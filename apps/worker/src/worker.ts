@@ -5,7 +5,9 @@ import { NativeConnection, Runtime, Worker } from '@temporalio/worker';
 import { temporalConnectionOptions } from '@tulipfarm/config/temporal';
 import { publicWebConfiguration } from '@tulipfarm/config/public-web';
 import { apiCallPrivateHosts } from '@tulipfarm/api-calls';
+import { appBuilders } from '@tulipfarm/apps';
 import { executionConfiguration } from '@tulipfarm/config/execution';
+import type { ExecutionBackend, ExecutionConfiguration } from '@tulipfarm/execution-contract';
 import {
   captureException,
   createBackgroundJob,
@@ -15,7 +17,13 @@ import {
   registerFlagSubjectResolver,
   startTelemetry,
 } from '@tulipfarm/observability';
-import { configuredExecutionBackend, shutdownExtensions, startExtensions } from '@tulipfarm/extensions';
+import {
+  appBuilder,
+  appHost,
+  configuredExecutionBackend,
+  shutdownExtensions,
+  startExtensions,
+} from '@tulipfarm/extensions';
 import { temporalSlotReadings, workerTelemetry } from './telemetry.ts';
 import { loadModelCatalog } from '@tulipfarm/config';
 import { readBuildInfo } from '@tulipfarm/build-info/node';
@@ -54,15 +62,18 @@ import { createDefaultKnowledgeWorker } from './knowledge-defaults-composition.t
 import { createDefaultKnowledgeGate, withKnowledgeSourceAuthorization } from '@tulipfarm/knowledge';
 import { createWorkflowAgentTasks } from './workflow-agent-tasks.ts';
 import { createSkillActivities } from './skill-activities.ts';
-import { createWorkspaceMcpDiscoveryActivities } from './workspace-mcp-composition.ts';
+import { createWorkspaceMcpDiscoveryActivities, createWorkspaceMcpHostedSweep } from './workspace-mcp-composition.ts';
 import { configuredSkillClient } from '@tulipfarm/workflow-snippets/client';
 import { createSkillExecutionFactory } from '@tulipfarm/agents/skill-execution';
 import { createChatExecution, type ChatExecution } from '@tulipfarm/agents/chat-execution';
+import { codingRunsFactory, createCodingRunActivities, createCodingRunDispatcher } from './coding-runs.ts';
 import { slackActionsFromEnvironment } from '@tulipfarm/agents/slack-environment';
 import { createRecommendationComposition } from './recommendation-activities.ts';
 import { createMemberProfileComposition } from './member-profile-composition.ts';
 import { createSocialPublisherComposition } from './social-publisher-composition.ts';
 import { createSecretsSweep } from './secrets-sweep.ts';
+import { createAppComposition, repeatFromStart } from './app-composition.ts';
+import { appEditingFromEnvironment, createAppBuildDispatcher } from './app-editing-composition.ts';
 import { workerRole, workerTelemetryService } from './worker-role.ts';
 import { workspaceSchemaPending } from '@tulipfarm/workspace-storage/runtime';
 
@@ -71,6 +82,7 @@ const service = workerTelemetryService(role);
 // Bare package names in TULIPFARM_EXTENSIONS resolve from this app.
 await startExtensions('worker', { resolve: specifier => import.meta.resolve(specifier), service });
 let chatExecution: ChatExecution | undefined;
+let coding: { backend: ExecutionBackend; configuration: Exclude<ExecutionConfiguration, { mode: 'off' }> } | undefined;
 let snippets: SnippetClient | undefined;
 if (role !== 'knowledge') {
   try {
@@ -78,6 +90,7 @@ if (role !== 'knowledge') {
     const backend = configuredExecutionBackend(configuration);
     if (backend && configuration.mode !== 'off') {
       chatExecution = createChatExecution(backend, configuration);
+      coding = { backend, configuration };
       snippets = createExecutionSnippetClient(backend, configuration);
     }
   } catch (error) {
@@ -118,6 +131,8 @@ async function run() {
   let tasks: ReturnType<typeof createTaskComposition> | undefined;
   let modelBundles: ReturnType<typeof createModelBundleRegistry> | undefined;
   let taskDispatch: ReturnType<typeof createTaskDispatcher> | undefined;
+  let codingDispatch: ReturnType<typeof createCodingRunDispatcher> | undefined;
+  let appBuilds: ReturnType<typeof createAppBuildDispatcher> | undefined;
   let planDispatch: ReturnType<typeof createPlanDispatcher> | undefined;
   let documentDispatch: ReturnType<typeof createPlanDocumentDispatcher> | undefined;
   let slack: Awaited<ReturnType<typeof createSlackPromptComposition>>;
@@ -125,6 +140,12 @@ async function run() {
   let importCleanup: ReturnType<typeof createObjectCleanupSweep> | undefined;
   let importSweep: Promise<void> | undefined;
   let importTimer: ReturnType<typeof setInterval> | undefined;
+  let hostedSweep: Promise<void> | undefined;
+  let hostedTimer: ReturnType<typeof setInterval> | undefined;
+  const hostedAbort = new AbortController();
+  let apps: ReturnType<typeof createAppComposition>;
+  const appJobs: ReturnType<typeof repeatFromStart>[] = [];
+  const appAbort = new AbortController();
   const sweepTelemetry: ReturnType<typeof createBackgroundJob>[] = [];
   let knowledgeEmbeddings: Awaited<ReturnType<typeof createKnowledgeEmbeddingWorker>>;
   let recommendations: ReturnType<typeof createRecommendationComposition> | undefined;
@@ -202,6 +223,46 @@ async function run() {
       importTimer = setInterval(sweep, 60_000);
       importTimer.unref();
       sweep();
+      const sweepHosted = createWorkspaceMcpHostedSweep(coreResources.runtime);
+      if (sweepHosted) {
+        const hostedJob = createBackgroundJob('mcp-hosted-sweep', 300);
+        sweepTelemetry.push(hostedJob);
+        const tick = () => {
+          hostedSweep ??= hostedJob
+            .run(() => sweepHosted(hostedAbort.signal))
+            .catch(() => Runtime.instance().logger.error('Hosted MCP sweep failed'))
+            .finally(() => {
+              hostedSweep = undefined;
+            });
+        };
+        hostedTimer = setInterval(tick, 5 * 60_000);
+        hostedTimer.unref();
+      }
+      const appWork = (apps = createAppComposition({
+        runtime: coreResources.runtime,
+        discover: coreResources.readyTaskWorkspaces,
+      }));
+      if (appWork) {
+        const schedule = (
+          name: 'reconcile' | 'usage',
+          job: ReturnType<typeof createBackgroundJob>,
+          seconds: number,
+        ) => {
+          sweepTelemetry.push(job);
+          const work = name === 'reconcile' ? appWork.reconcile : appWork.meter;
+          appJobs.push(
+            repeatFromStart(
+              () =>
+                job
+                  .run(() => work(appAbort.signal))
+                  .catch(error => Runtime.instance().logger.error(`App ${name} failed`, errorAttributes(error))),
+              seconds * 1000,
+            ),
+          );
+        };
+        schedule('reconcile', createBackgroundJob('app-reconcile', 300), 300);
+        schedule('usage', createBackgroundJob('app-usage', 3600), 3600);
+      }
     }
     if (
       (process.env.SLACK_LINK_PROMPTS_ENABLED === 'true' || process.env.SLACK_DIRECT_MESSAGES_ENABLED === 'true') &&
@@ -273,6 +334,12 @@ async function run() {
       guarded && chatObjects
         ? createSkillActivities(guarded, chatObjects, () => skillClient?.available?.() ?? false)
         : undefined;
+    codingDispatch = coreResources && coding ? createCodingRunDispatcher() : undefined;
+    const codingRuns =
+      coding && codingDispatch
+        ? codingRunsFactory(coding.backend, coding.configuration, codingDispatch.start)
+        : undefined;
+    appBuilds = coreResources ? createAppBuildDispatcher() : undefined;
     const conversations = coreResources
       ? createConversationActivities(
           coreResources.runtime,
@@ -287,6 +354,11 @@ async function run() {
           (workspaceId, taskId) => taskDispatch?.wake(workspaceId, taskId) ?? Promise.resolve(),
           async workspaceId => (await coreResources.flagContext({ workspaceId })).workspace?.slug,
           chatExecution,
+          codingRuns,
+          appEditingFromEnvironment(coreResources.runtime, {
+            start: appBuilds!.start,
+            builders: () => appBuilders(appBuilder(), appHost()),
+          }),
         )
       : undefined;
     const gmail = coreResources ? createGoogleHeartbeatActivities(coreResources.runtime) : undefined;
@@ -337,9 +409,18 @@ async function run() {
                 : {}),
               ...workflows,
               ...slack?.activities,
+              ...apps?.activities,
               ...gmail,
               ...skillImports,
               ...(coreResources ? createWorkspaceMcpDiscoveryActivities(coreResources.runtime) : {}),
+              ...(coreResources && coding
+                ? createCodingRunActivities(
+                    coreResources.runtime,
+                    coding.backend,
+                    coding.configuration,
+                    chatObjects ? createFiles(coreResources.runtime, chatObjects) : undefined,
+                  )
+                : {}),
             },
             ...workerTelemetry(telemetry),
             shutdownGraceTime: '5 seconds',
@@ -467,7 +548,13 @@ async function run() {
     await recommendations?.close();
     await knowledgeEmbeddings?.close();
     clearInterval(importTimer);
+    clearInterval(hostedTimer);
+    hostedAbort.abort();
     await importSweep;
+    await hostedSweep;
+    appAbort.abort();
+    await Promise.all(appJobs.map(job => job.stop()));
+    await apps?.close();
     await importCleanup?.close();
     for (const job of sweepTelemetry) job.close();
     chatObjects?.close();
@@ -478,6 +565,8 @@ async function run() {
     await tasks?.close();
     await modelBundles?.close();
     await taskDispatch?.close();
+    await codingDispatch?.close();
+    await appBuilds?.close();
     await planDispatch?.close();
     await documentDispatch?.close();
   }

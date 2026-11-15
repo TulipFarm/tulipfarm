@@ -67,7 +67,7 @@ function workspace() {
       throw new Error(`unexpected query: ${sql}`);
     },
   };
-  const tx = { client, schema: 'workspace' };
+  const tx = { client, schema: 'ws_11111111111141118111111111111111' };
   return { tx, usage, runtime: { transaction: async (_workspace, _compatibility, operation) => operation(tx) } };
 }
 

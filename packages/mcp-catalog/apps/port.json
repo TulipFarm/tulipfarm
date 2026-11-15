@@ -1,0 +1,26 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "port",
+  "name": "Port",
+  "maker": "Port",
+  "homepage": "https://www.port.io",
+  "category": "cloud-and-infrastructure",
+  "teams": ["engineering"],
+  "summary": "Query and act on your Port developer portal",
+  "capabilities": ["Search the software catalog", "Run self-service actions", "Check scorecards and ownership"],
+  "official": {
+    "evidence": "https://docs.port.io/agent-management/port-mcp-server/installation/",
+    "repository": "https://github.com/port-labs/remote-mcp-server"
+  },
+  "docs": "https://docs.port.io/agent-management/port-mcp-server/installation/",
+  "remote": {
+    "url": "https://mcp.port.io/v1",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#6C5CE7"
+  },
+  "supportedBy": ["github-registry"]
+}

@@ -1,0 +1,27 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "bitly",
+  "name": "Bitly",
+  "maker": "Bitly",
+  "homepage": "https://bitly.com",
+  "category": "marketing",
+  "teams": ["marketing"],
+  "summary": "Create and track short links with Bitly",
+  "capabilities": ["Shorten and customise links", "Create QR codes", "Read click metrics for links"],
+  "official": {
+    "evidence": "https://dev.bitly.com/bitly-mcp/"
+  },
+  "docs": "https://dev.bitly.com/bitly-mcp/",
+  "remote": {
+    "url": "https://api-ssl.bitly.com/v4/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "com.bitly/mcp",
+  "icons": {
+    "simpleIcons": "bitly",
+    "color": "#EE6123"
+  },
+  "supportedBy": ["claude", "manus", "lindy", "gumloop", "relevance-ai", "glean", "n8n"]
+}

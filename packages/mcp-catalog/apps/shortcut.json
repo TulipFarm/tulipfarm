@@ -1,0 +1,26 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "shortcut",
+  "name": "Shortcut",
+  "maker": "Shortcut",
+  "homepage": "https://www.shortcut.com",
+  "category": "projects-and-issues",
+  "teams": ["engineering", "product"],
+  "summary": "Manage Shortcut stories, epics and iterations",
+  "capabilities": ["Search stories, epics and iterations", "Create and update stories", "Comment on and assign work"],
+  "official": {
+    "evidence": "https://www.shortcut.com/help/integrations/mcp-server/"
+  },
+  "docs": "https://www.shortcut.com/help/integrations/mcp-server/",
+  "remote": {
+    "url": "https://mcp.shortcut.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "simpleIcons": "shortcut",
+    "color": "#494BCB"
+  },
+  "supportedBy": ["microsoft-copilot", "lindy", "relevance-ai", "glean"]
+}

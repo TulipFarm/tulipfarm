@@ -1,0 +1,27 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "raygun",
+  "name": "Raygun",
+  "maker": "Raygun",
+  "homepage": "https://raygun.com",
+  "category": "monitoring-and-analytics",
+  "teams": ["engineering"],
+  "summary": "Investigate Raygun errors and performance",
+  "capabilities": ["Find and read error groups", "Update error group status", "Check deployments and performance"],
+  "official": {
+    "evidence": "https://github.com/MindscapeHQ/mcp-server-raygun",
+    "repository": "https://github.com/MindscapeHQ/mcp-server-raygun"
+  },
+  "docs": "https://github.com/MindscapeHQ/mcp-server-raygun",
+  "remote": {
+    "url": "https://api.raygun.com/v3/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "io.github.MindscapeHQ/mcp-server-raygun",
+  "icons": {
+    "color": "#2A5BDC"
+  },
+  "supportedBy": ["github-registry"]
+}

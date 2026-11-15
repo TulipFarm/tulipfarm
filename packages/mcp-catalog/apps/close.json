@@ -1,0 +1,30 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "close",
+  "name": "Close",
+  "maker": "Close",
+  "homepage": "https://www.close.com",
+  "category": "crm-and-sales",
+  "teams": ["sales"],
+  "summary": "Work with leads, contacts, and deals in Close",
+  "capabilities": [
+    "Search leads, contacts, and opportunities",
+    "Create and update leads and tasks",
+    "Review calls, emails, and activity history"
+  ],
+  "official": {
+    "evidence": "https://help.close.com/integrations/close-mcp-server"
+  },
+  "docs": "https://help.close.com/integrations/close-mcp-server",
+  "remote": {
+    "url": "https://mcp.close.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "com.close/close-mcp",
+  "icons": {
+    "color": "#1463FF"
+  },
+  "supportedBy": ["chatgpt", "claude", "manus", "lindy", "gumloop", "relevance-ai", "glean", "zapier", "make", "docker"]
+}

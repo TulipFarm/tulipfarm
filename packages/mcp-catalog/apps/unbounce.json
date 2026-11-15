@@ -1,0 +1,29 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "unbounce",
+  "name": "Unbounce",
+  "maker": "Unbounce",
+  "homepage": "https://unbounce.com",
+  "category": "marketing",
+  "teams": ["marketing"],
+  "summary": "Build, test, and publish landing pages in Unbounce",
+  "capabilities": [
+    "Build and edit landing pages",
+    "Set up A/B tests and traffic splits",
+    "Publish pages and review performance"
+  ],
+  "official": {
+    "evidence": "https://documentation.unbounce.com/hc/en-us/articles/52207464102804-The-Unbounce-MCP-Server"
+  },
+  "docs": "https://documentation.unbounce.com/hc/en-us/articles/52207464102804-The-Unbounce-MCP-Server",
+  "remote": {
+    "url": "https://mcp.unbounce.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#0033FF"
+  },
+  "supportedBy": ["lindy", "relevance-ai", "zapier"]
+}

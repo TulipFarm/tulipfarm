@@ -1,0 +1,26 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "expo",
+  "name": "Expo",
+  "maker": "Expo",
+  "homepage": "https://expo.dev",
+  "category": "code",
+  "teams": ["engineering"],
+  "summary": "Build and ship Expo and React Native apps",
+  "capabilities": ["Search Expo documentation", "Check EAS builds and updates", "Add Expo libraries to a project"],
+  "official": {
+    "evidence": "https://docs.expo.dev/mcp/"
+  },
+  "docs": "https://docs.expo.dev/mcp/",
+  "remote": {
+    "url": "https://mcp.expo.dev/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "simpleIcons": "expo",
+    "color": "#1C2024"
+  },
+  "supportedBy": ["claude"]
+}

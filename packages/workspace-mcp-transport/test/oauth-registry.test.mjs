@@ -589,6 +589,7 @@ test('Registry rejects cursor loops atomically, filters unsafe endpoints, marks 
     'name',
     'status',
     'title',
+    'transport',
     'version',
   ]);
   assert.equal(JSON.stringify(retained).includes('do-not-copy'), false);
@@ -1051,7 +1052,7 @@ test('Registry follows official promotion with old timestamps and never falls ba
   );
   for (const remotes of [
     [],
-    [{ type: 'sse', url: 'https://example.test/mcp' }],
+    [{ type: 'websocket', url: 'https://example.test/mcp' }],
     [{ type: 'streamable-http', url: 'http://127.0.0.1/mcp' }],
   ]) {
     latest = record('org/promoted', { version: 'package-only-latest' });
@@ -1146,8 +1147,11 @@ test('Registry search asks the registry once and keeps only usable remote endpoi
     'https://registry.modelcontextprotocol.io/v0.1/servers?search=posthog&version=latest&limit=30',
   ]);
   assert.deepEqual(
-    found.map(entry => [entry.name, entry.endpoint, entry.status]),
-    [['io.github.PostHog/mcp', 'https://mcp.posthog.com/mcp', 'active']],
+    found.map(entry => [entry.name, entry.endpoint, entry.transport, entry.status]),
+    [
+      ['io.github.PostHog/mcp', 'https://mcp.posthog.com/mcp', 'streamable-http', 'active'],
+      ['io.github.PostHog/mcp', 'https://mcp.posthog.com/sse', 'sse', 'active'],
+    ],
   );
   await assert.rejects(searchRegistry('posthog', { fetcher: async () => new Response('busy', { status: 503 }) }), {
     code: 'catalog-http',

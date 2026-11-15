@@ -165,6 +165,7 @@ export function workspaceMcpActions(options: {
         requester: info.identity.requester.userId,
         endpoint: integration.endpoint,
         accountLabel: null,
+        package: integration.package,
         authorizationEpoch: source.authorizationEpoch,
         toolName: full.toolName,
         toolRevision: full.toolRevision,

@@ -41,6 +41,9 @@ import {
 } from './contracts.ts';
 import { secretCipher, type SecretKeyring } from './cipher.ts';
 
+/** The storage version that added hosted MCP reveal permissions. */
+const revealsVersion = 69;
+
 export type SecretsRuntime = Pick<ReturnType<typeof createWorkspaceRuntime>, 'transaction'>;
 export type SecretsPrincipal = string | HumanActor;
 export type SecretsOptions = {
@@ -497,6 +500,7 @@ export function createSecrets(options: SecretsOptions) {
       [row.id],
     );
     await tx.client.query(`DELETE FROM ${table(tx, 'grants')} WHERE secret_id = $1`, [row.id]);
+    await clearReveals(tx, row.id);
     await event(tx, row.id, actorMembershipId, operation);
   }
 
@@ -678,6 +682,7 @@ export function createSecrets(options: SecretsOptions) {
           checkVersion(row.policy_version, input.expectedPolicyVersion);
           const list = normalizeDestinations(z.array(destinationInputSchema).parse(input.destinations), privateHosts);
           await writeDestinations(tx, row.id, list);
+          await clearReveals(tx, row.id);
           await bumpPolicy(tx, row.id);
           await event(tx, row.id, actor.membershipId, 'destinations-changed', { destinations: list });
           return one(tx, actor, row.id);
@@ -858,9 +863,77 @@ export function createSecrets(options: SecretsOptions) {
       });
     },
 
+    /** The hosted MCP servers the secret's owner lets read its value, by server identity. */
+    async reveals(workspaceId: string, principal: SecretsPrincipal, id: string) {
+      return authorized(workspaceId, principal, async (tx, actor) => {
+        const row = await load(tx, id, 'none');
+        if (!(await access(tx, actor.membershipId, row)).owner) throw new AccessDenied();
+        if (!revealStorage(tx)) return [];
+        return z
+          .array(z.object({ server_identity: z.string(), granted_at: z.date() }))
+          .parse(
+            (
+              await tx.client.query(
+                `SELECT server_identity, granted_at FROM ${table(tx, 'reveals')} WHERE secret_id = $1 ORDER BY granted_at`,
+                [row.id],
+              )
+            ).rows,
+          )
+          .map(reveal => ({ serverIdentity: reveal.server_identity, grantedAt: reveal.granted_at.toISOString() }));
+      });
+    },
+
+    /**
+     * Lets one hosted MCP server read the secret's real value, or stops it. Only the owner may decide, and replacing
+     * or deleting the secret, or changing its destinations, takes the permission away again.
+     */
+    async setReveal(
+      workspaceId: string,
+      principal: SecretsPrincipal,
+      id: string,
+      input: { serverIdentity: string; revealed: boolean },
+    ) {
+      requireEnabled();
+      const { serverIdentity, revealed } = z
+        .strictObject({ serverIdentity: z.string().regex(/^[0-9a-f]{64}$/), revealed: z.boolean() })
+        .parse(input);
+      return authorized(workspaceId, principal, async (tx, actor) => {
+        const row = await load(tx, id);
+        const rights = await access(tx, actor.membershipId, row);
+        if (!rights.owner) throw new AccessDenied();
+        if (rights.status !== 'active' || row.lifetime !== 'saved' || !revealStorage(tx))
+          throw new SecretError('unavailable');
+        const changed = revealed
+          ? await tx.client.query(
+              `INSERT INTO ${table(tx, 'reveals')} (secret_id, server_identity, granted_by) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`,
+              [row.id, serverIdentity, actor.membershipId],
+            )
+          : await tx.client.query(`DELETE FROM ${table(tx, 'reveals')} WHERE secret_id = $1 AND server_identity = $2`, [
+              row.id,
+              serverIdentity,
+            ]);
+        if (changed.rowCount) {
+          // Hosted MCP servers that hold the value check the policy version, so a revoked one is stopped.
+          if (!revealed) await bumpPolicy(tx, row.id);
+          await event(tx, row.id, actor.membershipId, revealed ? 'reveal-granted' : 'reveal-revoked', {
+            serverIdentity,
+          });
+        }
+        return { serverIdentity, revealed };
+      });
+    },
+
     /** Internal pieces for `send.ts` and the request flow; not for the API. */
     internal: { load, access, event, cipher, insert, command, authorized },
   };
+
+  function revealStorage(tx: SecretTransaction) {
+    return ((tx as { commonVersion?: number }).commonVersion ?? revealsVersion) >= revealsVersion;
+  }
+
+  async function clearReveals(tx: SecretTransaction, id: string) {
+    if (revealStorage(tx)) await tx.client.query(`DELETE FROM ${table(tx, 'reveals')} WHERE secret_id = $1`, [id]);
+  }
 
   async function bumpPolicy(tx: SecretTransaction, id: string) {
     await tx.client.query(`UPDATE ${table(tx, 'secrets')} SET policy_version = policy_version + 1 WHERE id = $1`, [id]);
@@ -883,6 +956,7 @@ export function createSecrets(options: SecretsOptions) {
       [row.id, version, JSON.stringify(credential), owner, row.version, variableName],
     );
     if (updated.rowCount !== 1) throw new SecretError('conflict');
+    await clearReveals(tx, row.id);
   }
 }
 export type Secrets = ReturnType<typeof createSecrets>;

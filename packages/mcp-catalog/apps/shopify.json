@@ -1,0 +1,31 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "shopify",
+  "name": "Shopify",
+  "maker": "Shopify",
+  "homepage": "https://www.shopify.com",
+  "category": "payments-and-commerce",
+  "teams": ["engineering"],
+  "summary": "Search Shopify docs and API schemas for developers",
+  "capabilities": [
+    "Search Shopify developer docs",
+    "Explore Admin and Storefront GraphQL schemas",
+    "Validate GraphQL queries and Liquid code"
+  ],
+  "official": {
+    "evidence": "https://shopify.dev/docs/apps/build/devmcp"
+  },
+  "docs": "https://shopify.dev/docs/apps/build/devmcp",
+  "packages": [
+    {
+      "registry": "npm",
+      "name": "@shopify/dev-mcp",
+      "env": []
+    }
+  ],
+  "icons": {
+    "simpleIcons": "shopify",
+    "color": "#7AB55C"
+  },
+  "supportedBy": ["chatgpt", "claude", "gemini", "manus", "lindy", "gumloop", "relevance-ai", "zapier", "make", "n8n"]
+}

@@ -1,0 +1,30 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "dovetail",
+  "name": "Dovetail",
+  "maker": "Dovetail",
+  "homepage": "https://dovetail.com",
+  "category": "search-and-research",
+  "teams": ["product", "design"],
+  "summary": "Search customer research and insights in Dovetail",
+  "capabilities": [
+    "Search interviews, notes, and highlights",
+    "Read insights and project summaries",
+    "Pull customer quotes for a topic"
+  ],
+  "official": {
+    "evidence": "https://developers.dovetail.com/docs/mcp"
+  },
+  "docs": "https://developers.dovetail.com/docs/mcp",
+  "remote": {
+    "url": "https://dovetail.com/api/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "simpleIcons": "dovetail",
+    "color": "#190041"
+  },
+  "supportedBy": ["chatgpt", "claude", "microsoft-copilot", "manus", "lindy", "relevance-ai"]
+}

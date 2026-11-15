@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { layoutProtocol, tulipfarmCatalogId } from '@tulipfarm/conversations/layout-contracts';
+import { layoutProtocol } from '@tulipfarm/conversations/layout-contracts';
 import { reportText, slackLayoutPresentation } from '../src/slack-layout-delivery.ts';
 import { parseSlackRender } from '../src/slack-render.ts';
 
@@ -14,7 +14,7 @@ const rendered = parseSlackRender(
   },
   { interactive: true },
 );
-const layout = { protocol: layoutProtocol, catalogId: tulipfarmCatalogId, ...rendered.input };
+const layout = { protocol: layoutProtocol, ...rendered.input };
 
 test('a report without a canvas is posted in full instead of its summary blocks', async () => {
   const message = await slackLayoutPresentation({

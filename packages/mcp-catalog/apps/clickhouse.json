@@ -1,0 +1,58 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "clickhouse",
+  "name": "ClickHouse",
+  "maker": "ClickHouse",
+  "homepage": "https://clickhouse.com",
+  "category": "data-and-databases",
+  "teams": ["engineering", "operations"],
+  "summary": "Query ClickHouse Cloud services with SQL",
+  "capabilities": [
+    "List databases, tables, and schemas",
+    "Run read-only SQL queries",
+    "Inspect ClickHouse Cloud services"
+  ],
+  "official": {
+    "evidence": "https://clickhouse.com/docs/use-cases/AI/MCP/remote_mcp",
+    "repository": "https://github.com/ClickHouse/mcp-clickhouse"
+  },
+  "docs": "https://clickhouse.com/docs/use-cases/AI/MCP/remote_mcp",
+  "remote": {
+    "url": "https://mcp.clickhouse.cloud/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "packages": [
+    {
+      "registry": "pypi",
+      "name": "mcp-clickhouse",
+      "env": [
+        {
+          "name": "CLICKHOUSE_HOST",
+          "description": "Host",
+          "secret": false,
+          "required": true
+        },
+        {
+          "name": "CLICKHOUSE_USER",
+          "description": "User",
+          "secret": false,
+          "required": true
+        },
+        {
+          "name": "CLICKHOUSE_PASSWORD",
+          "description": "Password",
+          "secret": true,
+          "required": true
+        }
+      ]
+    }
+  ],
+  "registryName": "io.github.ClickHouse/mcp-clickhouse",
+  "icons": {
+    "simpleIcons": "clickhouse",
+    "color": "#FFCC01"
+  },
+  "supportedBy": ["claude", "notion-ai", "manus", "gumloop", "docker", "github-registry"]
+}

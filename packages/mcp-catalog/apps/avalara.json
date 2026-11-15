@@ -1,0 +1,27 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "avalara",
+  "name": "Avalara",
+  "maker": "Avalara",
+  "homepage": "https://www.avalara.com",
+  "category": "finance-and-accounting",
+  "teams": ["finance"],
+  "summary": "Calculate sales tax and manage tax transactions",
+  "capabilities": ["Calculate tax for transactions", "Validate addresses for tax", "Look up tax codes and rates"],
+  "official": {
+    "evidence": "https://github.com/avadev/mcp",
+    "repository": "https://github.com/avadev/mcp"
+  },
+  "docs": "https://github.com/avadev/mcp",
+  "remote": {
+    "url": "https://mcp.avalara.com/avatax",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "com.avalara/avatax",
+  "icons": {
+    "color": "#FC6600"
+  },
+  "supportedBy": ["github-registry"]
+}

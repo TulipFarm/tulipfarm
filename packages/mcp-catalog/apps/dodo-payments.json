@@ -1,0 +1,30 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "dodo-payments",
+  "name": "Dodo Payments",
+  "maker": "Dodo Payments",
+  "homepage": "https://dodopayments.com",
+  "category": "payments-and-commerce",
+  "teams": ["engineering", "finance"],
+  "summary": "Manage payments, subscriptions, and refunds",
+  "capabilities": [
+    "Create payments and checkout sessions",
+    "Manage subscriptions and customers",
+    "Issue refunds and search docs"
+  ],
+  "official": {
+    "evidence": "https://docs.dodopayments.com/developer-resources/mcp-server"
+  },
+  "docs": "https://docs.dodopayments.com/developer-resources/mcp-server",
+  "remote": {
+    "url": "https://mcp.dodopayments.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "simpleIcons": "dodopayments",
+    "color": "#C6FE1E"
+  },
+  "supportedBy": ["docker"]
+}

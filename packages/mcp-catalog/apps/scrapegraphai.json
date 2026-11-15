@@ -1,0 +1,39 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "scrapegraphai",
+  "name": "ScrapeGraphAI",
+  "maker": "ScrapeGraphAI",
+  "homepage": "https://scrapegraphai.com",
+  "category": "search-and-research",
+  "teams": ["engineering", "marketing"],
+  "summary": "Extract structured data from websites with AI",
+  "capabilities": [
+    "Turn web pages into markdown",
+    "Extract data from pages with a prompt",
+    "Run AI-guided web searches"
+  ],
+  "official": {
+    "evidence": "https://github.com/ScrapeGraphAI/scrapegraph-mcp",
+    "repository": "https://github.com/ScrapeGraphAI/scrapegraph-mcp"
+  },
+  "docs": "https://github.com/ScrapeGraphAI/scrapegraph-mcp",
+  "packages": [
+    {
+      "registry": "pypi",
+      "name": "scrapegraph-mcp",
+      "env": [
+        {
+          "name": "SGAI_API_KEY",
+          "description": "ScrapeGraphAI API key",
+          "secret": true,
+          "required": true
+        }
+      ]
+    }
+  ],
+  "registryName": "io.github.ScrapeGraphAI/scrapegraph-mcp",
+  "icons": {
+    "color": "#AC6DFF"
+  },
+  "supportedBy": ["lindy", "relevance-ai", "docker", "github-registry"]
+}

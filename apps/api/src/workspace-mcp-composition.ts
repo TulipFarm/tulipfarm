@@ -2,7 +2,9 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { integrationCredentialKeyring } from '@tulipfarm/integrations';
 import { createWorkspaceMcp } from '@tulipfarm/workspace-mcp';
-import { bindMcpSecrets, createSecrets } from '@tulipfarm/secrets';
+import { bindHostedMcpSecrets, bindMcpSecrets, createSecrets } from '@tulipfarm/secrets';
+import { mcpHost } from '@tulipfarm/extensions';
+import { isFeatureEnabled } from '@tulipfarm/observability';
 import { apiCallPrivateHosts } from '@tulipfarm/api-calls';
 import type { createTemporalClient } from './temporal.ts';
 import { createWorkspaceMcpTransport, MCP_OAUTH_CLIENT_METADATA } from '@tulipfarm/workspace-mcp-transport';
@@ -65,6 +67,9 @@ export function workspaceMcpApi(
   const admissionEnabled = flag('WORKSPACE_MCP_ADMISSION_ENABLED');
   const dispatchEnabled = flag('WORKSPACE_MCP_DISPATCH_ENABLED');
   const transport = createWorkspaceMcpTransport();
+  // The host runs in the worker, but its extension registers here too so the API offers hosted setup only when it can run.
+  const hostedEnabled = async (workspaceId: string) =>
+    !!mcpHost() && (await isFeatureEnabled('hosted-mcp', null, { id: workspaceId }));
   const service = createWorkspaceMcp({
     runtime,
     keyring: integrationCredentialKeyring(env),
@@ -86,6 +91,8 @@ export function workspaceMcpApi(
     authorizeSelection: authorizeMcpSelection,
     // The API only checks who may send saved secrets; the worker decrypts them.
     secrets: { bind: (tx, input) => bindMcpSecrets(secrets, tx, input) },
+    hostedSecrets: { bind: (tx, input) => bindHostedMcpSecrets(secrets, tx, input) },
+    hostedEnabled,
     resolveConfirmationCredential,
     admissionEnabled,
     dispatchEnabled,
@@ -105,6 +112,7 @@ export function workspaceMcpApi(
     catalog,
     admissionEnabled,
     dispatchEnabled,
+    hostedEnabled,
     permissions,
     authorizeSelection: authorizeMcpSelection,
     authorizeSources: authorizeMcpSources,

@@ -1,5 +1,13 @@
 import { z } from 'zod';
-import { loadModelCatalog, readModelCatalog, type ServedModelCatalog } from '@tulipfarm/config';
+import {
+  isPlanProvider,
+  loadModelCatalog,
+  planProviderNames,
+  planProviders,
+  readModelCatalog,
+  type PlanProvider,
+  type ServedModelCatalog,
+} from '@tulipfarm/config';
 import { isFeatureEnabled } from '@tulipfarm/observability';
 import { workspaceIdFromSchema } from '@tulipfarm/workspace-storage/runtime';
 import { relation, type AgentTransaction } from './store.ts';
@@ -18,17 +26,23 @@ export async function modelAvailability(tx: AgentTransaction) {
   // Every catalog model and image model, served or not, so workspace choices survive a missing key.
   const { catalog } = readModelCatalog();
   const flaggedOff = await flaggedOffModels(tx);
-  return [...catalog.models, ...catalog.imageModels]
-    .filter(family => !flaggedOff.has(family.id))
-    .map(
-      family =>
-        rows.find(row => row.familyId === family.id) ?? {
-          familyId: family.id,
-          enabled: true,
-          revision: 0,
-          lastDisabledRevision: 0,
-        },
-    );
+  const plans = await plansOn(tx);
+  const offered = (provider: string) => !isPlanProvider(provider) || plans.has(provider);
+  return (
+    [...catalog.models, ...catalog.imageModels]
+      .filter(family => !flaggedOff.has(family.id))
+      // A plan model whose feature flag, such as chatgpt-plan, is off is not offered at all.
+      .filter(family => !('routes' in family) || family.routes.every(route => offered(route.provider)))
+      .map(
+        family =>
+          rows.find(row => row.familyId === family.id) ?? {
+            familyId: family.id,
+            enabled: true,
+            revision: 0,
+            lastDisabledRevision: 0,
+          },
+      )
+  );
 }
 
 /**
@@ -47,6 +61,20 @@ export async function flaggedOffModels(tx: Pick<AgentTransaction, 'schema'>): Pr
     ).filter(Boolean),
   );
   return new Set(flagged.filter(model => !on.has(model.featureFlag!)).map(model => model.id));
+}
+
+/** The member plans, such as ChatGPT, that the catalog offers and whose feature flag is on for the transaction's workspace. */
+export async function plansOn(tx: Pick<AgentTransaction, 'schema'>): Promise<Set<PlanProvider>> {
+  const { catalog } = readModelCatalog();
+  const listed = planProviderNames.filter(plan =>
+    catalog.models.some(model => model.routes.some(route => route.provider === plan)),
+  );
+  if (!listed.length) return new Set();
+  const workspace = { id: workspaceIdFromSchema(tx.schema) };
+  const on = await Promise.all(
+    listed.map(async plan => ((await isFeatureEnabled(planProviders[plan].flag, null, workspace)) ? plan : null)),
+  );
+  return new Set(on.filter(plan => plan !== null));
 }
 
 /**
@@ -88,6 +116,8 @@ export async function stepFamilyAvailable(
   catalog: Pick<ServedModelCatalog, 'model'> = loadModelCatalog(),
 ) {
   const served = catalog.model(familyId);
+  // Plan steps do not run for a member, so a model on a member's plan cannot serve them.
+  if (served && isPlanProvider(served.route.type)) return false;
   return Boolean(served && !served.paused) && (await modelFamilyEnabled(tx, familyId));
 }
 

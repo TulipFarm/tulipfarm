@@ -1,0 +1,24 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "cartesia",
+  "name": "Cartesia",
+  "maker": "Cartesia",
+  "homepage": "https://cartesia.ai",
+  "category": "ai-and-media",
+  "teams": ["engineering", "marketing"],
+  "summary": "Generate speech and manage voices with Cartesia",
+  "capabilities": ["Turn text into speech", "Clone and manage voices", "Change voices in recordings"],
+  "official": {
+    "evidence": "https://docs.cartesia.ai/integrations/mcp"
+  },
+  "docs": "https://docs.cartesia.ai/integrations/mcp",
+  "remote": {
+    "url": "https://mcp.cartesia.ai/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#309D4B"
+  }
+}

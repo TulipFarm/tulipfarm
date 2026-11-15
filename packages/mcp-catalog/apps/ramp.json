@@ -1,0 +1,30 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "ramp",
+  "name": "Ramp",
+  "maker": "Ramp",
+  "homepage": "https://ramp.com",
+  "category": "finance-and-accounting",
+  "teams": ["finance"],
+  "summary": "Review spend, bills, and reimbursements",
+  "capabilities": [
+    "Search card transactions and spend",
+    "Look up bills, vendors, and reimbursements",
+    "Analyse spend by team, merchant, or category"
+  ],
+  "official": {
+    "evidence": "https://docs.ramp.com/developer-api/v1/ramp-mcp"
+  },
+  "docs": "https://docs.ramp.com/developer-api/v1/ramp-mcp",
+  "remote": {
+    "url": "https://mcp.ramp.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#E4F222"
+  },
+  "supportedBy": ["chatgpt", "claude", "notion-ai", "manus", "lindy", "gumloop", "relevance-ai", "glean"],
+  "featured": true
+}

@@ -220,6 +220,65 @@ test('chat finds remote MCP servers and offers a personal setup card', async t =
     );
 });
 
+test('chat offers npm and PyPI packages only where hosting is available', async t => {
+  const pkg = {
+    id: 'io.github.example/time@1:0',
+    name: 'io.github.example/time',
+    version: '1',
+    title: 'Time',
+    description: 'Time tools',
+    status: 'active',
+    compatibility: 'unverified',
+    authentication: 'unknown',
+    package: {
+      registry: 'pypi',
+      name: 'mcp-server-time',
+      version: '2026.1.1',
+      environment: [{ name: 'TIME_KEY', description: 'Key', secret: true, required: true }],
+    },
+  };
+  for (const hosted of [true, false]) {
+    const tool = await setup(t, { ...connections, mcp: { search: async () => [pkg], hosted: async () => hosted } });
+    const found = await tool({ tool: 'integrations.mcp.search', query: 'time' });
+    const connect = await tool({
+      tool: 'integrations.mcp.connect',
+      name: 'Time',
+      package: { registry: 'pypi', name: 'mcp-server-time', version: '2026.1.1' },
+      settings: [{ name: 'TIME_KEY', secret: true }],
+      authentication: 'none',
+    });
+    if (!hosted) {
+      assert.deepEqual(found.servers, []);
+      assert.match(found.instruction, /endpoint from the service's documentation/);
+      assert.equal(connect.error, 'hosted-unavailable');
+      continue;
+    }
+    assert.deepEqual(found.servers, [
+      {
+        name: 'Time',
+        registryName: 'io.github.example/time',
+        description: 'Time tools',
+        package: { registry: 'pypi', name: 'mcp-server-time', version: '2026.1.1' },
+        settings: [{ name: 'TIME_KEY', description: 'Key', secret: true, required: true }],
+      },
+    ]);
+    assert.equal(connect.status, 'mcp-connect-card');
+    assert.deepEqual(connect.package, { registry: 'pypi', name: 'mcp-server-time', version: '2026.1.1' });
+    assert.equal(
+      (
+        await tool({
+          tool: 'integrations.mcp.connect',
+          name: 'Both',
+          endpoint: 'https://mcp.example.com/mcp',
+          package: { registry: 'npm', name: 'x', version: '1.0.0' },
+          authentication: 'none',
+        })
+      ).error,
+      'invalid-input',
+    );
+  }
+});
+
 test('chat MCP tools explain when custom MCP connections are off', async t => {
   const tool = await setup(t);
   assert.equal((await tool({ tool: 'integrations.mcp.search', query: 'posthog' })).error, 'mcp-unavailable');

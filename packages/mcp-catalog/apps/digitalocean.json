@@ -1,0 +1,47 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "digitalocean",
+  "name": "DigitalOcean",
+  "maker": "DigitalOcean",
+  "homepage": "https://www.digitalocean.com",
+  "category": "cloud-and-infrastructure",
+  "teams": ["engineering"],
+  "summary": "Manage DigitalOcean apps, droplets, and databases",
+  "capabilities": [
+    "Deploy and manage App Platform apps",
+    "Create and manage droplets",
+    "Manage databases and networking"
+  ],
+  "official": {
+    "evidence": "https://docs.digitalocean.com/reference/mcp/",
+    "repository": "https://github.com/digitalocean-labs/mcp-digitalocean"
+  },
+  "docs": "https://docs.digitalocean.com/reference/mcp/",
+  "remote": {
+    "url": "https://mcp.digitalocean.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "packages": [
+    {
+      "registry": "npm",
+      "name": "@digitalocean/mcp",
+      "env": [
+        {
+          "name": "DIGITALOCEAN_API_TOKEN",
+          "description": "DigitalOcean API token",
+          "secret": true,
+          "required": true
+        }
+      ]
+    }
+  ],
+  "registryName": "com.digitalocean/mcp",
+  "icons": {
+    "lobehub": "DigitalOcean",
+    "simpleIcons": "digitalocean",
+    "color": "#0080FF"
+  },
+  "supportedBy": ["chatgpt", "lindy", "relevance-ai"]
+}

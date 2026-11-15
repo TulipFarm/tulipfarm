@@ -1,0 +1,29 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "15five",
+  "name": "15Five",
+  "maker": "15Five",
+  "homepage": "https://www.15five.com",
+  "category": "hr-and-recruiting",
+  "teams": ["hr"],
+  "summary": "Query reviews, objectives, and check-ins",
+  "capabilities": [
+    "Read review cycles and submitted reviews",
+    "Track objectives and key results",
+    "Review check-ins and pulse data"
+  ],
+  "official": {
+    "evidence": "https://www.15five.com/mcp"
+  },
+  "docs": "https://success.15five.com/hc/en-us/articles/56696529866651-15Five-MCP-Feature-Overview",
+  "remote": {
+    "url": "https://my.15five.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#FF5A36"
+  },
+  "supportedBy": ["microsoft-copilot", "lindy", "relevance-ai", "glean"]
+}

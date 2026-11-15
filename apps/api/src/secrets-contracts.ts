@@ -138,3 +138,10 @@ export const taskSecretRequestsSchema = z.strictObject({
     }),
   ),
 });
+
+const serverIdentity = z.string().regex(/^[0-9a-f]{64}$/);
+export const secretRevealsSchema = z.strictObject({
+  reveals: z.array(z.strictObject({ serverIdentity, grantedAt: z.string() })),
+});
+export const secretRevealBody = z.strictObject({ serverIdentity, revealed: z.boolean() });
+export const secretRevealSchema = secretRevealBody;

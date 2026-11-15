@@ -1,3 +1,5 @@
+import { isPlanProvider } from '@tulipfarm/config/model-catalog-file';
+
 /**
  * Bounded classification of a failed model call. It is the only model failure value that becomes `error.code`,
  * `error.type` or a metric label; provider codes and messages stay in logs.
@@ -42,6 +44,18 @@ export const modelFailureClasses = Object.freeze({
   transport: 'network',
   'provider-error': 'unknown',
   'request-failed': 'unknown',
+  'chatgpt-usage-limit': 'quota_exceeded',
+  'chatgpt-reconnect': 'auth',
+  'chatgpt-not-eligible': 'auth',
+  'chatgpt-member-required': 'not_found',
+  'claude-usage-limit': 'quota_exceeded',
+  'claude-reconnect': 'auth',
+  'claude-not-eligible': 'auth',
+  'claude-member-required': 'not_found',
+  'copilot-usage-limit': 'quota_exceeded',
+  'copilot-reconnect': 'auth',
+  'copilot-not-eligible': 'auth',
+  'copilot-member-required': 'not_found',
 } as const satisfies Record<string, ModelErrorClass>);
 export type ModelFailureReason = keyof typeof modelFailureClasses;
 
@@ -69,6 +83,13 @@ export const fallbackEligibleClasses: ReadonlySet<ModelErrorClass> = new Set([
 
 export const modelFallbackOutcomes = Object.freeze(['used', 'not_configured', 'not_eligible', 'failed'] as const);
 export type ModelFallbackOutcome = (typeof modelFallbackOutcomes)[number];
+
+/** Who pays for a model call: `plan`, a member's subscription plan; `hosted`, the deployment's own provider keys. */
+export const billingSources = Object.freeze(['plan', 'hosted'] as const);
+export type BillingSource = (typeof billingSources)[number];
+export function billingSource(provider: string): BillingSource {
+  return isPlanProvider(provider) ? 'plan' : 'hosted';
+}
 
 /** Whether a successful model call reported token usage the runtime could read. */
 export const modelUsageOutcomes = Object.freeze(['reported', 'unknown'] as const);
@@ -183,6 +204,8 @@ export type ModelCallDiagnostics = {
   /** HTTP status of the provider response; absent when no response arrived. */
   status?: number | undefined;
   providerCode?: string | undefined;
+  /** The provider's request id, such as `x-request-id`, for support requests. */
+  providerRequestId?: string | undefined;
   /** Already sanitised. Logs only; never a span attribute or label. */
   providerMessage?: string | undefined;
   /** Whether any answer text was produced before the call failed. */
@@ -239,6 +262,9 @@ export class ModelCallError extends Error {
         ? { finishReason: safeProviderCode(diagnostics.finishReason) }
         : {}),
       ...(diagnostics.retryAfterMs === undefined ? {} : { retryAfterMs: diagnostics.retryAfterMs }),
+      ...(diagnostics.providerRequestId && /^[A-Za-z0-9._:-]{1,128}$/.test(diagnostics.providerRequestId)
+        ? { providerRequestId: diagnostics.providerRequestId }
+        : {}),
     };
     const message = sanitizeProviderMessage(diagnostics.providerMessage, diagnostics.request);
     if (message) this.modelDiagnostics.providerMessage = message;

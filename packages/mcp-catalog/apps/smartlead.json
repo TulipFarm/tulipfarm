@@ -1,0 +1,25 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "smartlead",
+  "name": "Smartlead",
+  "maker": "Smartlead",
+  "homepage": "https://www.smartlead.ai",
+  "category": "crm-and-sales",
+  "teams": ["sales"],
+  "summary": "Manage cold email campaigns in Smartlead",
+  "capabilities": ["Read campaign stats and lead data", "Run deliverability diagnostics", "Review sending accounts"],
+  "official": {
+    "evidence": "https://helpcenter.smartlead.ai/en/articles/300-smartlead-mcp-server"
+  },
+  "docs": "https://helpcenter.smartlead.ai/en/articles/300-smartlead-mcp-server",
+  "remote": {
+    "url": "https://mcp.smartlead.ai/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#5B3CF5"
+  },
+  "supportedBy": ["lindy", "relevance-ai"]
+}

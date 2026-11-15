@@ -1,0 +1,60 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "stripe",
+  "name": "Stripe",
+  "maker": "Stripe",
+  "homepage": "https://stripe.com",
+  "category": "payments-and-commerce",
+  "teams": ["finance", "engineering"],
+  "summary": "Manage payments, customers, and subscriptions",
+  "capabilities": [
+    "Create customers, products, prices, and payment links",
+    "Look up payments, refunds, invoices, and subscriptions",
+    "Search Stripe docs and knowledge base"
+  ],
+  "official": {
+    "evidence": "https://docs.stripe.com/mcp",
+    "repository": "https://github.com/stripe/ai"
+  },
+  "docs": "https://docs.stripe.com/mcp",
+  "remote": {
+    "url": "https://mcp.stripe.com",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "packages": [
+    {
+      "registry": "npm",
+      "name": "@stripe/mcp",
+      "env": [
+        {
+          "name": "STRIPE_SECRET_KEY",
+          "description": "Stripe secret or restricted API key",
+          "secret": true,
+          "required": true
+        }
+      ]
+    }
+  ],
+  "registryName": "com.stripe/mcp",
+  "icons": {
+    "simpleIcons": "stripe",
+    "color": "#635BFF"
+  },
+  "supportedBy": [
+    "chatgpt",
+    "claude",
+    "notion-ai",
+    "manus",
+    "lindy",
+    "gumloop",
+    "relevance-ai",
+    "zapier",
+    "make",
+    "n8n",
+    "docker",
+    "github-registry"
+  ],
+  "featured": true
+}

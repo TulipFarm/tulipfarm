@@ -1,0 +1,29 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "read-ai",
+  "name": "Read AI",
+  "maker": "Read AI",
+  "homepage": "https://www.read.ai",
+  "category": "chat",
+  "teams": ["everyone", "sales"],
+  "summary": "Search Read AI meeting reports and transcripts",
+  "capabilities": [
+    "Search meeting reports",
+    "Read transcripts, summaries and action items",
+    "Ask questions across meetings"
+  ],
+  "official": {
+    "evidence": "https://support.read.ai/hc/en-us/articles/49381158409491-MCP-Server"
+  },
+  "docs": "https://support.read.ai/hc/en-us/articles/49381158409491-MCP-Server",
+  "remote": {
+    "url": "https://api.read.ai/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#5A44FF"
+  },
+  "supportedBy": ["chatgpt", "claude", "copilot-studio", "manus", "lindy", "gumloop"]
+}

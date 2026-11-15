@@ -231,6 +231,7 @@ export function createDockerExecutionBackend(
       const profile = policy.profiles.find(profile => profile.id === input.profile.id);
       if (
         !profile ||
+        input.secrets?.length ||
         JSON.stringify(profile) !== JSON.stringify(input.profile) ||
         profile.resources.kind !== 'limited' ||
         input.baseRevision !== policy.baseRevision ||

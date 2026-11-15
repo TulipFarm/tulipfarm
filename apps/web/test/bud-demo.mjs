@@ -28,7 +28,7 @@ export async function startBudDemo({ port = 4320, respond, apiKey = process.env.
   const clients = new Map();
   const snapshots = new Map();
   const emit = (chatId, event, data) => {
-    if (event === 'avatar' || event === 'progress' || event === 'text') {
+    if (event === 'progress' || event === 'text') {
       const current = snapshots.get(chatId) ?? new Map();
       current.set(event, data);
       snapshots.set(chatId, current);
@@ -49,12 +49,12 @@ export async function startBudDemo({ port = 4320, respond, apiKey = process.env.
         [
           {
             role: 'user',
-            text: 'This is a local avatar demo. Chat naturally and use Bud expressions. There is no workspace data or business tool execution. Never claim to search external sources, send messages, or modify records here. You may solve questions from the supplied text.',
+            text: 'This is a local Bud demo. Chat naturally. There is no workspace data or business tool execution. Never claim to search external sources, send messages, or modify records here. You may solve questions from the supplied text.',
           },
           ...messages,
         ],
         async () => ({
-          result: { status: 'unavailable', message: 'Business tools are disabled in this local avatar demo.' },
+          result: { status: 'unavailable', message: 'Business tools are disabled in this local Bud demo.' },
           sources: [],
         }),
         undefined,
@@ -81,7 +81,6 @@ export async function startBudDemo({ port = 4320, respond, apiKey = process.env.
             .join('\n'),
         })),
         {
-          avatar: { update: ({ step, avatar }) => publish('avatar', { ...identity, step, seq: seq++, avatar }) },
           progress: ({ step, round }) => publish('progress', { ...identity, step, round }),
           answerText: ({ step, text }) =>
             publish('text', { ...identity, step, seq: seq++, offset: 0, reset: true, text }),
@@ -128,7 +127,7 @@ export async function startBudDemo({ port = 4320, respond, apiKey = process.env.
               user: { id: 'demo', name: 'Local demo', email: 'demo@example.test', lastModelFamilyId: 'claude-haiku' },
             });
           if (path === '/v1/user/visit') return json({ firstSession: false });
-          if (path === '/v1/feature-flags') return json({ 'bud-avatar': true });
+          if (path === '/v1/feature-flags') return json({});
           if (path === '/v1/workspaces') return json([workspace]);
           if (path === '/v1/workspaces/bud-demo') return json(workspace);
           if (path.endsWith('/governance/me')) return json(membership);

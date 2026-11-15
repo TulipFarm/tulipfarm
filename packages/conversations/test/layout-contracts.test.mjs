@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
+  checkAppSurface,
   checkLayout,
+  followUpAction,
+  layoutActionRequestSchema,
+  layoutAwaitsInput,
   layoutFromReply,
   layoutText,
   packageInstallRequest,
@@ -16,8 +20,8 @@ const reply = (components, extra = {}) =>
     title: 'Signups',
     summary: 'Signups grew this week.',
     messages: [
-      { version: 'v0.9.1', createSurface: { surfaceId: 'model-chosen', catalogId: 'other/catalog' } },
-      { version: 'v0.9.1', updateComponents: { surfaceId: 'model-chosen', components } },
+      { version: '1.0', createSurface: { surfaceId: 'model-chosen', catalogId: 'other/catalog' } },
+      { version: '1.0', updateComponents: { surfaceId: 'model-chosen', components } },
     ],
     ...extra,
   });
@@ -76,7 +80,7 @@ test('a reply layout takes the reply surface and catalog, whatever the model sen
   const built = layoutFromReply(reply(valid), surfaceId);
   assert.equal(built.ok, true);
   const [create, update] = built.layout.messages;
-  assert.deepEqual(create.createSurface, { surfaceId, catalogId: 'tulipfarm/chat@1' });
+  assert.deepEqual(create.createSurface, { surfaceId, catalogId: 'sprout/basic@2' });
   assert.equal(update.updateComponents.surfaceId, surfaceId);
   assert.equal(checkLayout(built.layout, surfaceId).ok, true);
   assert.deepEqual(errors(checkLayout(built.layout, '22222222-2222-4222-8222-222222222222')), [
@@ -88,16 +92,32 @@ test('layouts outside the TulipFarm catalog or its link rules are refused', () =
   const refused = components => layoutFromReply(reply(components), surfaceId);
   assert.match(errors(refused([{ id: 'root', component: 'Image', src: 'https://example.com/a.png' }]))[0], /Image/);
   assert.match(errors(refused([{ id: 'root', component: 'Text', text: '[go](javascript:alert(1))' }]))[0], /Link/);
-  assert.equal(errors(refused([{ id: 'text', component: 'Text', text: 'No root' }])).length, 1);
+  assert.ok(
+    errors(refused([{ id: 'text', component: 'Text', text: 'No root' }])).includes(
+      'One component must have the ID "root".',
+    ),
+  );
+  assert.equal(
+    refused([
+      { id: 'root', component: 'Embed', '@catalogId': 'tulipfarm/chat@2', ref: { kind: 'plan', planId: surfaceId } },
+    ]).ok,
+    true,
+    'Embed is part of the TulipFarm catalog',
+  );
   assert.equal(
     refused([{ id: 'root', component: 'Embed', ref: { kind: 'plan', planId: surfaceId } }]).ok,
-    true,
-    'Embed is part of the catalog',
+    false,
+    'Embed must name the TulipFarm catalog',
   );
-  assert.equal(refused([{ id: 'root', component: 'Embed', ref: { kind: 'plan', planId: 'not-a-uuid' } }]).ok, false);
+  assert.equal(
+    refused([
+      { id: 'root', component: 'Embed', '@catalogId': 'tulipfarm/chat@2', ref: { kind: 'plan', planId: 'not-a-uuid' } },
+    ]).ok,
+    false,
+  );
   assert.equal(replyRenderInputSchema.safeParse({ ...reply(valid), placement: 'sidebar' }).success, false);
   assert.equal(replyRenderInputSchema.safeParse({ ...reply(valid), summary: '   ' }).success, false);
-  assert.equal(checkLayout({ ...layoutFromReply(reply(valid), surfaceId).layout, protocol: 'a2ui/1.0' }).ok, false);
+  assert.equal(checkLayout({ ...layoutFromReply(reply(valid), surfaceId).layout, protocol: 'a2ui/0.9' }).ok, false);
 });
 
 test('layout text is the summary followed by the surface, without repeating a summary-only body', () => {
@@ -114,4 +134,75 @@ test('long layout text and text-layout summaries are cut within their limits at 
   assert.ok(new TextEncoder().encode(text).length <= 65536);
   assert.ok(text.endsWith('…'));
   assert.doesNotMatch(text, /[\uD800-\uDBFF]…$/u);
+});
+
+test('a layout awaits input only when a button sends an action other than a follow-up message', () => {
+  const awaits = components => layoutAwaitsInput(layoutFromReply(reply(components), surfaceId).layout.messages);
+  const form = action => [
+    { id: 'root', component: 'Column', children: ['name', 'send'] },
+    { id: 'name', component: 'TextField', label: 'Name', value: { '@path': '/name' } },
+    { id: 'send', component: 'Button', label: 'Send', action },
+  ];
+  assert.equal(
+    awaits(form({ event: { name: 'submit_name', context: { name: { '@path': '/name' } }, userMessage: 'Sent' } })),
+    true,
+  );
+  assert.equal(awaits(form(followUpAction('Tell me more'))), false);
+  assert.equal(awaits(valid), false);
+});
+
+test('an action may carry the labels shown for its values, but only for values it sends', () => {
+  const request = {
+    commandId: crypto.randomUUID(),
+    sentMessageId: crypto.randomUUID(),
+    surfaceId: crypto.randomUUID(),
+    name: 'assign',
+    sourceComponentId: 'assign_button',
+    context: { deal: ['ec55d1f3-6015-5c9e-8ba9-6c2eac12d08a'] },
+    userMessage: 'Assign',
+  };
+  assert.deepEqual(layoutActionRequestSchema.parse({ ...request, labels: { deal: 'Globex pilot' } }).labels, {
+    deal: 'Globex pilot',
+  });
+  assert.equal(layoutActionRequestSchema.parse(request).labels, undefined);
+  assert.equal(layoutActionRequestSchema.safeParse({ ...request, labels: { owner: 'Dev User' } }).success, false);
+});
+
+test('app surfaces use Sprout components, file and workflow cards and lookups, but no chat-only functions', () => {
+  const surface = components => [
+    { version: '1.0', createSurface: { surfaceId: 'home', catalogId: 'tulipfarm/apps@1', components } },
+  ];
+  const tableId = '11111111-1111-4111-8111-111111111111';
+  const checked = checkAppSurface(
+    surface([
+      { id: 'root', component: 'Column', children: ['owner', 'file'] },
+      {
+        id: 'owner',
+        component: 'ChoicePicker',
+        label: 'Owner',
+        value: { '@path': '/form/owner' },
+        options: { '@call': 'searchRows', args: { tableId } },
+      },
+      { id: 'file', component: 'Embed', ref: { kind: 'workspace-file', fileId: tableId } },
+    ]),
+    'home',
+  );
+  assert.equal(checked.ok, true);
+  assert.deepEqual([...checked.surface.components.keys()], ['root', 'owner', 'file']);
+
+  const canvas = { functionCall: { '@call': 'openInCanvas' } };
+  assert.deepEqual(
+    checkAppSurface(surface([{ id: 'root', component: 'Button', label: 'Open', action: canvas }]), 'home'),
+    {
+      ok: false,
+      errors: [
+        {
+          code: 'INVALID_FUNCTION_CALL',
+          surfaceId: 'home',
+          path: '/0/createSurface/components/0/action/functionCall/@call',
+          message: 'Unknown function "openInCanvas" in "tulipfarm/apps@1".',
+        },
+      ],
+    },
+  );
 });

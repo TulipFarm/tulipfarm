@@ -1,0 +1,33 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "azure-devops",
+  "name": "Azure DevOps",
+  "maker": "Microsoft",
+  "homepage": "https://azure.microsoft.com/products/devops",
+  "category": "code",
+  "teams": ["engineering", "product"],
+  "summary": "Work with Azure Boards, Repos, and Pipelines",
+  "capabilities": [
+    "Find and update work items in Azure Boards",
+    "Review pull requests and browse repos",
+    "Check and run pipelines",
+    "Read wiki pages and test plans"
+  ],
+  "official": {
+    "evidence": "https://learn.microsoft.com/en-us/azure/devops/mcp-server/mcp-server-overview",
+    "repository": "https://github.com/microsoft/azure-devops-mcp"
+  },
+  "docs": "https://learn.microsoft.com/en-us/azure/devops/mcp-server/remote-mcp-server",
+  "packages": [
+    {
+      "registry": "npm",
+      "name": "@azure-devops/mcp",
+      "env": []
+    }
+  ],
+  "icons": {
+    "lobehub": "Azure",
+    "color": "#0078D7"
+  },
+  "supportedBy": ["microsoft-copilot", "copilot-studio", "lindy", "relevance-ai", "glean", "github-registry"]
+}

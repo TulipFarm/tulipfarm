@@ -1,0 +1,29 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "polar",
+  "name": "Polar",
+  "maker": "Polar",
+  "homepage": "https://polar.sh",
+  "category": "payments-and-commerce",
+  "teams": ["engineering", "finance"],
+  "summary": "Manage products, customers, and subscriptions",
+  "capabilities": [
+    "Create and update products and benefits",
+    "Look up customers, orders, and subscriptions",
+    "Issue refunds and read metrics"
+  ],
+  "official": {
+    "evidence": "https://polar.sh/docs/integrate/mcp"
+  },
+  "docs": "https://polar.sh/docs/integrate/mcp",
+  "remote": {
+    "url": "https://mcp.polar.sh/mcp/polar-mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#0062FF"
+  },
+  "supportedBy": ["lindy"]
+}

@@ -446,6 +446,7 @@ export async function resultSources(
     case 'skills.import.status':
     case 'skills.import.select':
     case 'execution.run':
+    case 'coding.run':
       return [];
     case 'atlassian.sources':
       return [];
@@ -490,6 +491,16 @@ export async function resultSources(
     case 'followups.schedule':
     case 'followups.list':
     case 'followups.cancel':
+    case 'apps.status':
+    case 'apps.files.list':
+    case 'apps.files.read':
+    case 'apps.files.write':
+    case 'apps.files.delete':
+    // eslint-disable-next-line tulipfarm/product-copy -- A tool name, not user-facing copy.
+    case 'apps.preview.build':
+    case 'apps.page.read':
+    case 'apps.page.replace':
+    case 'apps.page.check':
       return [];
     case 'bud.preference.ask':
     case 'bud.preference.propose':

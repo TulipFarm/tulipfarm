@@ -72,6 +72,7 @@ import { discoverToolNames, readOnlyCall, readOnlyTools, type FrameworkCall } fr
 import { toolNameSchema } from './tool-capabilities.ts';
 import { builtinSkillTools } from './skills.ts';
 import { providerFetch } from './provider-fetch.ts';
+import { planSessionFetch, type PlanSessionProvider } from './plan-sessions.ts';
 import {
   agentInstructionsPrompt,
   getSystemPrompt,
@@ -106,7 +107,6 @@ import {
   type CalendarTextBinding,
 } from './calendar-text-check.ts';
 import type { WorkspaceInventory } from './workspace-inventory.ts';
-import { budReminder, budTool, budToolName, parseBudState } from './bud.ts';
 import { generativeUiPrompt, parseReplyRender, replyRenderTool, replyRenderToolName } from './reply-render.ts';
 import {
   parseSlackRender,
@@ -116,7 +116,7 @@ import {
   slackRenderTool,
   slackRenderToolName,
 } from './slack-render.ts';
-import type { ReplyRenderInput } from '@tulipfarm/conversations/layout-contracts';
+import { layoutAwaitsInput, type ReplyRenderInput } from '@tulipfarm/conversations/layout-contracts';
 import { isWorkTool } from './non-work-tools.ts';
 import {
   cappedOutput,
@@ -134,8 +134,8 @@ import {
   toolResultReadTool,
   type ReplyContextLimits,
 } from './reply-context.ts';
-import type { AvatarSnapshot } from '@tulipfarm/conversations/results';
 import type { ReplyStatus } from '@tulipfarm/conversations/events';
+import type { AppKind } from '@tulipfarm/apps';
 import { toolDisplayName } from '@tulipfarm/conversations/tool-activity';
 import { modelCallTimeoutMs } from '@tulipfarm/config/timeouts';
 export { serverSentEvents } from './inference-stream.ts';
@@ -154,6 +154,11 @@ export const inferenceRouteSchema = z
     z.strictObject({ provider: z.literal('openai'), ...routeFields, apiKey: credentialSchema }),
     z.strictObject({ provider: z.literal('xai'), ...routeFields, apiKey: credentialSchema }),
     z.strictObject({ provider: z.literal('google'), ...routeFields, apiKey: credentialSchema }),
+    // A member's ChatGPT plan: the worker adds the member's OAuth access token per reply; routes without one fail.
+    z.strictObject({ provider: z.literal('chatgpt'), ...routeFields, accessToken: credentialSchema.optional() }),
+    // A member's Claude or GitHub Copilot plan, answered through the vendor's agent SDK with the member's token.
+    z.strictObject({ provider: z.literal('claude'), ...routeFields, accessToken: credentialSchema.optional() }),
+    z.strictObject({ provider: z.literal('copilot'), ...routeFields, accessToken: credentialSchema.optional() }),
     z.strictObject({
       provider: z.literal('openai-compatible'),
       ...routeFields,
@@ -188,13 +193,31 @@ type CapableRoute = Parameters<typeof routeCapabilities>[0];
 export type InferenceRoute = z.input<typeof inferenceRouteSchema>;
 type ParsedRoute = z.output<typeof inferenceRouteSchema>;
 /** Azure Foundry, OpenAI, xAI and OpenAI-compatible endpoints share the chat-completions and responses wire format. */
-export type OpenAiShapedRoute = Extract<ParsedRoute, { provider: 'azure' | 'openai' | 'xai' | 'openai-compatible' }>;
+export type OpenAiShapedRoute = Extract<
+  ParsedRoute,
+  { provider: 'azure' | 'openai' | 'xai' | 'openai-compatible' | 'chatgpt' | 'copilot' }
+>;
+/** Routes that run on a member's own plan and carry that member's token per reply. */
+export const planRouteProviders = ['chatgpt', 'claude', 'copilot'] as const;
+export type PlanRouteProvider = (typeof planRouteProviders)[number];
+export function isPlanRoute<T extends { provider: string }>(
+  route: T,
+): route is Extract<T, { provider: PlanRouteProvider }> {
+  return (planRouteProviders as readonly string[]).includes(route.provider);
+}
+const planSessionRoute = (route: { provider: string }): route is { provider: PlanSessionProvider } =>
+  route.provider === 'claude' || route.provider === 'copilot';
+/** The Anthropic key header; a Claude plan route answers through the SDK and sends none. */
+const anthropicKey = (config: Extract<ParsedRoute, { provider: 'anthropic' | 'claude' }>) =>
+  config.provider === 'claude' ? {} : { 'x-api-key': config.apiKey };
 
 /**
  * Base URL of the OpenAI-shaped APIs and the credential header of the route. An endpoint without a path gets `v1/`;
  * one with a path, such as a gateway's `https://gateway.example/openai/`, is the API base itself.
  */
 export function openAiWire(config: OpenAiShapedRoute) {
+  if (config.provider === 'chatgpt' || config.provider === 'copilot')
+    return { base: config.endpoint, auth: { authorization: 'Bearer ' + (config.accessToken ?? '') } };
   if (config.provider !== 'azure')
     return {
       base: new URL(config.endpoint).pathname === '/' ? `${config.endpoint}v1/` : config.endpoint,
@@ -261,7 +284,19 @@ export type InferenceFailure =
   | 'cancelled'
   | 'timeout'
   | 'transport'
-  | 'provider-error';
+  | 'provider-error'
+  | PlanRouteFailure;
+/** Why a subscription plan could not answer, so the next plan the requester may use is tried. */
+export type PlanFailure = 'usage-limit' | 'reconnect' | 'not-eligible';
+const planFailurePattern = /^model-(?:chatgpt|claude|copilot)-(usage-limit|reconnect|not-eligible)$/;
+export function planFailure(error: unknown): PlanFailure | undefined {
+  return error instanceof Error ? (planFailurePattern.exec(error.message)?.[1] as PlanFailure | undefined) : undefined;
+}
+
+/** Failures of a member's plan route; the conversation shows each with its own recovery action. */
+export type PlanRouteFailure = `${PlanRouteProvider}-${PlanFailure | 'member-required'}`;
+export type ChatGptFailure = Extract<PlanRouteFailure, `chatgpt-${string}`>;
+const memberRequired = (provider: PlanRouteProvider): PlanRouteFailure => `${provider}-member-required`;
 type Attribution = { actualModel: string | null; requestId: string | null; usage: InferenceUsage };
 export type InferenceResult = Attribution &
   (
@@ -303,12 +338,17 @@ const errorSchema = z.union([
       type: z.string().optional(),
       status: z.string().optional(),
       message: z.string().optional(),
+      param: z.string().nullish(),
     }),
   }),
+  // ChatGPT plan admission answers `{ detail }` before a Responses request starts.
+  z.object({ detail: z.string() }).transform(({ detail }) => ({
+    error: { code: undefined, message: detail, type: undefined, status: undefined, param: undefined },
+  })),
   // xAI reports `{ code, error: "<message>" }`.
-  z
-    .object({ error: z.string(), code: z.union([z.string(), z.number()]).optional() })
-    .transform(({ error, code }) => ({ error: { code, message: error, type: undefined, status: undefined } })),
+  z.object({ error: z.string(), code: z.union([z.string(), z.number()]).optional() }).transform(({ error, code }) => ({
+    error: { code, message: error, type: undefined, status: undefined, param: undefined },
+  })),
   // Azure Foundry rejects a prompt its content filter blocks with a completion whose choice carries the error.
   z
     .object({
@@ -323,7 +363,7 @@ const errorSchema = z.union([
         .min(1),
     })
     .transform(({ choices }) => ({
-      error: { ...choices[0]!.content_filter_results.error, type: undefined, status: undefined },
+      error: { ...choices[0]!.content_filter_results.error, type: undefined, status: undefined, param: undefined },
     })),
 ]);
 
@@ -569,7 +609,8 @@ function usage(route: CapableRoute, body: unknown): InferenceUsage {
     cacheWrite1h: 0,
   } satisfies InferenceUsage;
   switch (route.provider) {
-    case 'anthropic': {
+    case 'anthropic':
+    case 'claude': {
       const parsed = anthropicUsageSchema.safeParse(body);
       if (!parsed.success) return unknown;
       const u = parsed.data.usage;
@@ -586,6 +627,8 @@ function usage(route: CapableRoute, body: unknown): InferenceUsage {
         cacheWrite1h: ttl?.ephemeral_1h_input_tokens ?? 0,
       };
     }
+    case 'chatgpt':
+    case 'copilot':
     case 'openai':
     case 'xai':
     case 'openai-compatible':
@@ -668,11 +711,13 @@ function googleQuotaSignal(body: unknown, message: string): boolean {
 export function providerErrorDetail(body: unknown): { code?: string; message?: string } {
   const error = errorSchema.safeParse(body);
   if (!error.success) return {};
-  const { code, type, status, message } = error.data.error;
+  const { code, type, status, message, param } = error.data.error;
   const named = [code, type, status].find(value => value !== undefined && value !== '');
+  // `param` names the unsupported input of a ChatGPT plan request.
+  const text = param ? `${message ?? ''} (param ${param})`.trim() : message;
   return {
     ...(named === undefined ? {} : { code: String(named) }),
-    ...(message ? { message } : {}),
+    ...(text ? { message: text } : {}),
   };
 }
 
@@ -690,10 +735,25 @@ export function modelHttpError(
     status: response.status,
     retryAfterMs: retryAfterMs ?? undefined,
     providerCode: detail.code,
+    providerRequestId: response.headers.get('x-request-id') ?? undefined,
     providerMessage: detail.message,
     outputStarted,
     request,
   });
+}
+
+/** ChatGPT plan codes with their own recovery; others fall through to the general mapping. */
+function chatGptFailure(status: number, codes: readonly string[]): InferenceFailure | undefined {
+  const has = (...values: string[]) => values.some(value => codes.includes(value));
+  if (has('subscription_sharing_usage_limit_exceeded')) return 'chatgpt-usage-limit';
+  if (has('subscription_sharing_user_not_eligible')) return 'chatgpt-not-eligible';
+  if (has('subscription_sharing_usage_unavailable', 'subscription_sharing_user_unavailable')) return 'unavailable';
+  if (has('subscription_sharing_unsupported_capability')) return 'invalid-request';
+  if (has('subscription_sharing_route_not_supported') || codes.some(code => code.startsWith('chatpass_v2_')))
+    return 'permission';
+  // Admission answers `{"detail": "..."}` without a code; a 401 there is a rejected sign-in.
+  if (has('subscription_sharing_invalid_user') || status === 401) return 'chatgpt-reconnect';
+  return undefined;
 }
 
 export function httpFailure(
@@ -710,6 +770,17 @@ export function httpFailure(
     : [];
   const has = (...values: string[]) => values.some(value => codes.includes(value));
   const message = error.success ? (error.data.error.message ?? '') : '';
+  if (provider === 'chatgpt') {
+    const failure = chatGptFailure(status, codes);
+    if (failure) return failure;
+  }
+  // Claude and Copilot plan sessions answer their failures with these codes.
+  if (provider === 'claude' || provider === 'copilot') {
+    if (has('plan_usage_limit')) return `${provider}-usage-limit`;
+    if (has('plan_reconnect')) return `${provider}-reconnect`;
+    if (has('plan_not_eligible')) return `${provider}-not-eligible`;
+    if (has('plan_unavailable')) return 'unavailable';
+  }
   if (status === 401 || has('authentication_error', 'unauthenticated', 'invalid_api_key')) return 'authentication';
   // xAI answers a wrong key with 400 "Incorrect API key provided".
   if (provider === 'xai' && status === 400 && /api key/i.test(message)) return 'authentication';
@@ -837,7 +908,8 @@ function decision(
   const answer = (text: string) =>
     text.trim() ? { kind: 'decision' as const, value: { decision: { kind: 'answer', text } } } : invalid;
   switch (route.provider) {
-    case 'anthropic': {
+    case 'anthropic':
+    case 'claude': {
       const parsed = anthropicResponseSchema.safeParse(body);
       if (!parsed.success) return invalid;
       const data = parsed.data;
@@ -851,6 +923,8 @@ function decision(
       if (data.stop_reason !== 'tool_use' || calls.length !== 1 || call?.name !== 'select_action') return invalid;
       return { kind: 'decision', value: call.input };
     }
+    case 'chatgpt':
+    case 'copilot':
     case 'openai':
     case 'xai':
     case 'openai-compatible':
@@ -952,6 +1026,9 @@ export async function inferDecision(
   if (callerSignal?.aborted) return { ...failure('cancelled', null), dispatch: 'not-started' };
   const config = inferenceRouteSchema.safeParse(route);
   if (!config.success) return { ...failure('configuration', null), dispatch: 'not-started' };
+  // Agent decisions never run for a member, so they cannot use a member's plan.
+  if (isPlanRoute(config.data))
+    return { ...failure(memberRequired(config.data.provider), null), dispatch: 'not-started' };
   const parsedInput = agentModelInputSchema.safeParse(input);
   if (!parsedInput.success) return { ...failure('invalid-request', null), dispatch: 'not-started' };
   return withChatModelRequest('reply', async () => {
@@ -1223,6 +1300,7 @@ function googleParts(route: CapableRoute, turn: ChatTurn) {
   return turnContent(route, turn) as object[];
 }
 function routeStreamFormat(route: CapableRoute): StreamFormat | null {
+  if (route.provider === 'chatgpt') return 'responses';
   const capabilities = routeCapabilities(route);
   if (!capabilities.streaming) return null;
   return capabilities.api === 'anthropic-messages' ? 'anthropic' : capabilities.api;
@@ -1245,9 +1323,10 @@ function chatWire(
   const description = 'Answer or select a tool for server execution.';
   switch (config.provider) {
     case 'anthropic':
+    case 'claude':
       return {
         url: `${config.endpoint}v1/messages`,
-        headers: { ...headers, 'x-api-key': config.apiKey, 'anthropic-version': '2023-06-01' },
+        headers: { ...headers, ...anthropicKey(config), 'anthropic-version': '2023-06-01' },
         body: {
           model: config.model,
           max_tokens: config.maxOutputTokens,
@@ -1264,6 +1343,8 @@ function chatWire(
             : {}),
         },
       };
+    case 'chatgpt':
+    case 'copilot':
     case 'openai':
     case 'xai':
     case 'openai-compatible':
@@ -1314,7 +1395,6 @@ export type ToolModelMeter = (attempt: {
   model: string;
 }) => Promise<(usage: InferenceUsage, outcome?: { rejected: boolean }) => Promise<void>>;
 export type ToolInferenceContext = {
-  avatar?: { update: (update: { step: number; avatar: AvatarSnapshot }) => void };
   /**
    * The model answers with a layout (the generative-ui flag): `reply_render` A2UI for the web, or `slack_render` Block
    * Kit for a Slack reply. `interactive` allows follow-up buttons, choices and forms, which only the default agent handles.
@@ -1336,6 +1416,10 @@ export type ToolInferenceContext = {
   earlierMessages?: boolean;
   /** The workspace reads chat files with the images reader, so the model may call `files.read`. */
   chatFiles?: boolean;
+  /** The person may run coding agents here, so the model may call `coding.run`. */
+  codingRuns?: boolean;
+  /** The kind of app this chat edits, when the person may edit it, so the model may call that kind's `apps.*` tools. */
+  apps?: AppKind | undefined;
   /** Deferred chat tools, by framework name, offered from the first round without a `tools_search`. */
   preloadedTools?: readonly string[];
   /** Built-in procedures resolved by the server for this request, not names extracted from message text. */
@@ -1343,6 +1427,8 @@ export type ToolInferenceContext = {
   agentBuilderUrl?: string;
   /** Receives the full visible answer so far whenever it changes while a step streams. `step` matches the meter's step. */
   answerText?: (update: { step: number; text: string }) => void;
+  /** Receives the `reply_render` arguments streamed so far, as incomplete JSON, whenever they grow. */
+  layoutPreview?: (update: { step: number; json: string }) => void;
   /**
    * Reports what the reply is doing: before each model decision (`thinking`), while work tools run (`tool`, with the
    * tool's display name), after an answer (`finishing`), and once the checked answer is final (`done`). `round` counts
@@ -1362,6 +1448,12 @@ export type ToolInferenceContext = {
    * another model can fix. `label` names it in the result. Absent, failures are not retried on another model.
    */
   fallback?: { route: InferenceRoute; label: string } | undefined;
+  /**
+   * For a subscription plan route: the access token of the next plan the requester may use, after the current one hit
+   * its usage limit, lost its sign-in or was refused, before the step produced output. Null when no plan is left; the
+   * configured `fallback` then answers as for any other failure.
+   */
+  nextPlanCredential?: ((failure: PlanFailure, retryAfterMs?: number) => Promise<string | null>) | undefined;
   /**
    * Counts the requester's undecided review and approval cards in this chat, read fresh from storage. A reply may point
    * to such a card without a tool call; without this read, every card claim needs a card made in the reply.
@@ -1426,15 +1518,7 @@ const rowAnswerReadTools = new Set(
   ),
 );
 /** Why the reply loop returned a tool request unrun, as logged. */
-type ToolRejection =
-  | 'bud-batch'
-  | 'bud-limit'
-  | 'bud-invalid'
-  | 'render-batch'
-  | 'unknown-tool'
-  | 'invalid-arguments'
-  | 'write-batch'
-  | 'mcp-invalid';
+type ToolRejection = 'render-batch' | 'unknown-tool' | 'invalid-arguments' | 'write-batch' | 'mcp-invalid';
 type NativeStep =
   | { kind: 'step'; text: string; calls: NativeCall[]; raw: unknown }
   | { kind: 'failure'; reason: InferenceFailure; rejection?: ResponseRejection };
@@ -1442,15 +1526,6 @@ type NativeStep =
 /** A successful response the reply loop cannot use: malformed or empty, or tool requests written as text. */
 const unusableStep = (step: NativeStep) =>
   step.kind === 'failure' ? step.reason === 'invalid-decision' : containsToolEnvelope(step.text);
-
-// Without Bud, bud_state is never offered. A request for it alone is dropped so avatar state cannot cost a round:
-// any text is the answer, and an otherwise empty reply is malformed.
-function withoutBudOnlyCalls(step: NativeStep): NativeStep {
-  if (step.kind !== 'step' || !step.calls.length || step.calls.some(call => call.name !== budToolName)) return step;
-  return step.text.trim()
-    ? { kind: 'step', text: step.text, calls: [], raw: step.raw }
-    : { kind: 'failure', reason: 'invalid-decision' };
-}
 
 const anthropicNativeSchema = z.object({
   stop_reason: z.string(),
@@ -1557,7 +1632,8 @@ function nativeStep(route: CapableRoute, body: unknown): NativeStep {
     return cleaned.trim() || calls.length ? { kind: 'step', text: cleaned, calls, raw } : invalid('empty');
   };
   switch (route.provider) {
-    case 'anthropic': {
+    case 'anthropic':
+    case 'claude': {
       const parsed = anthropicNativeSchema.safeParse(body);
       if (!parsed.success) return invalid('schema');
       const data = parsed.data;
@@ -1570,6 +1646,8 @@ function nativeStep(route: CapableRoute, body: unknown): NativeStep {
       );
       return step(data.content.flatMap(block => (block.type === 'text' ? [block.text] : [])).join(''), calls, null);
     }
+    case 'chatgpt':
+    case 'copilot':
     case 'openai':
     case 'xai':
     case 'openai-compatible':
@@ -1687,7 +1765,8 @@ function nativeWire(
   const headers: Record<string, string> = { 'content-type': 'application/json' };
   const system = blocks.join('\n\n');
   switch (config.provider) {
-    case 'anthropic': {
+    case 'anthropic':
+    case 'claude': {
       const messages = items.map(item => {
         if (item.kind === 'turn') return { role: item.turn.role, content: turnContent(config, item.turn) };
         if (item.kind === 'model')
@@ -1710,7 +1789,7 @@ function nativeWire(
       });
       return {
         url: `${config.endpoint}v1/messages`,
-        headers: { ...headers, 'x-api-key': config.apiKey, 'anthropic-version': '2023-06-01' },
+        headers: { ...headers, ...anthropicKey(config), 'anthropic-version': '2023-06-01' },
         body: {
           model: config.model,
           max_tokens: config.maxOutputTokens,
@@ -1731,6 +1810,8 @@ function nativeWire(
         },
       };
     }
+    case 'chatgpt':
+    case 'copilot':
     case 'openai':
     case 'xai':
     case 'openai-compatible':
@@ -1955,6 +2036,7 @@ Set tableLookupRequired to true when the reply makes a table-state claim without
 Use completed for a sufficient informational answer or an action result supported by receipts; waiting for a necessary human question or approval; refused for a refusal; blocked for an explicit, accurate account of incomplete work and what stops it or an exhausted budget.
 For a question, use waiting only when required user input stops the requested work and no safe default exists; name the specific missing input in reason. Generic closers such as "Would you like me to try again?", "What else can I help you with?" or "Would you like me to do anything else?" are not required input. Use continue for those when requested work remains incomplete, even if they are the reply's only sentence.
 Use continue when the reply merely promises, narrates, or plans work that remains possible, or claims outcomes unsupported by receipts. A reply that reports a new review card, proposal or proposal version, approval, denial, or created, imported or changed data needs a matching successful receipt among this reply's own tool results; it may restate an earlier outcome only as earlier and only when an earlier receipt in the conversation shows it. Without that receipt use continue, even when the reply asks the person to review or approve. waitingCards, when present, is the server's count of the person's review or approval cards from earlier in this chat that are still undecided: a reply may say such a card is ready or still waiting, and ask the person to approve or dismiss it, without a receipt in this reply, but it may not say this reply made a new one. While one waits, a reply that says the person must approve or dismiss it before more changes to that table can be made states what stops the work. Saying an incomplete action will not be activated does not itself establish a blocker. Asking whether to go ahead with work the person already asked for is not a necessary question, so use continue: a review or approval card is itself the person's confirmation step, and a request to see the review first means create that card.
+layoutAwaitingInput, when true, means the candidate renders a form whose buttons send the person's entries back in a later turn. A request for a form asks for the form, not an immediate row change or row review: set rowWriteRequested and rowReviewRequested to false for it, and use waiting when the form is what was requested.
 Judge the content and the work, not the presentation: never use continue only because the reply lacks a layout, render tool, buttons, form, chart or table, or because a presentation tool failed; the reply is laid out separately.
 Do not demand tools for ordinary answers, questions, or refusals. Do not mistake a clarification answer for action approval. Explain the evidence gap in one short sentence, at most 240 characters.`;
 
@@ -3293,6 +3375,101 @@ async function observeProviderResponse<T>(call: () => Promise<T>, failed: (resul
   }
 }
 
+/** Responses fields a ChatGPT plan request must not send. */
+const chatGptOmittedFields = [
+  'background',
+  'conversation',
+  'max_output_tokens',
+  'max_tool_calls',
+  'metadata',
+  'moderation',
+  'multi_agent',
+  'previous_response_id',
+  'prompt',
+  'prompt_cache_retention',
+  'safety_identifier',
+  'temperature',
+  'top_logprobs',
+  'top_p',
+  'truncation',
+  'user',
+];
+/** ChatGPT plan requests group function tools in one namespace. */
+export const chatGptToolNamespace = 'tulipfarm';
+const recordOf = (value: unknown): Record<string, unknown> | undefined =>
+  value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
+function messageText(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content
+    .map(part => recordOf(part)?.text)
+    .filter((text): text is string => typeof text === 'string')
+    .join('\n');
+}
+
+/**
+ * A Responses body as a ChatGPT plan request: system text moves to `instructions`, unsupported fields go, function
+ * tools sit in the `tulipfarm` namespace, and the request is unstored and streamed. A forced function becomes the only
+ * tool with `tool_choice: "required"`, as a function choice cannot name a namespace.
+ */
+export function chatGptRequestBody(body: object): Record<string, unknown> {
+  const { input, tools, tool_choice: choice, parallel_tool_calls: parallel, ...rest } = body as Record<string, unknown>;
+  for (const field of chatGptOmittedFields) delete rest[field];
+  const items = Array.isArray(input) ? input : [];
+  const system = (item: unknown) => ['system', 'developer'].includes(String(recordOf(item)?.role));
+  const instructions = items
+    .filter(system)
+    .map(item => messageText(recordOf(item)?.content))
+    .filter(Boolean)
+    .join('\n\n');
+  const kept = items
+    .filter(item => !system(item))
+    .map(item =>
+      recordOf(item)?.type === 'function_call' ? { ...recordOf(item), namespace: chatGptToolNamespace } : item,
+    );
+  const forced = recordOf(choice)?.type === 'function' ? String(recordOf(choice)?.name) : undefined;
+  const functions = (Array.isArray(tools) ? tools : []).filter(
+    tool => recordOf(tool)?.type === 'function' && (forced === undefined || recordOf(tool)?.name === forced),
+  );
+  return {
+    ...rest,
+    ...(instructions ? { instructions } : {}),
+    input: kept,
+    ...(functions.length
+      ? {
+          tools: [
+            {
+              type: 'namespace',
+              name: chatGptToolNamespace,
+              description: 'TulipFarm workspace tools.',
+              tools: functions,
+            },
+          ],
+          tool_choice: forced === undefined ? (choice ?? 'auto') : 'required',
+          ...(parallel === undefined ? {} : { parallel_tool_calls: parallel }),
+        }
+      : {}),
+    store: false,
+    stream: true,
+  };
+}
+
+/** A ChatGPT plan response with function calls named as the tools were declared, whether or not it qualified them. */
+function chatGptResponse(body: unknown): unknown {
+  const response = recordOf(body);
+  if (!response || !Array.isArray(response.output)) return body;
+  const prefix = `${chatGptToolNamespace}.`;
+  return {
+    ...response,
+    output: response.output.map(item => {
+      const call = recordOf(item);
+      if (call?.type !== 'function_call' || typeof call.name !== 'string') return item;
+      const { namespace: _namespace, ...rest } = call;
+      return { ...rest, name: call.name.startsWith(prefix) ? call.name.slice(prefix.length) : call.name };
+    }),
+  };
+}
+
 async function sendChatRequest<T>(
   target: z.output<typeof inferenceRouteSchema>,
   step: number,
@@ -3308,10 +3485,17 @@ async function sendChatRequest<T>(
   onOutput?: () => void,
   onSettled?: (measure: RequestMeasure, usage: InferenceUsage) => void,
   signal?: AbortSignal,
+  layoutPreview?: ToolInferenceContext['layoutPreview'],
 ) {
+  if (isPlanRoute(target) && !target.accessToken)
+    throw new ModelCallError(memberRequired(target.provider), { outputStarted: false });
   const streamFormat = routeStreamFormat(target);
   const serialized = serializeChatRequest(
-    streamFormat ? { ...wire.body, ...streamRequestFields(streamFormat) } : wire.body,
+    target.provider === 'chatgpt'
+      ? chatGptRequestBody(wire.body)
+      : streamFormat
+        ? { ...wire.body, ...streamRequestFields(streamFormat) }
+        : wire.body,
   );
   const measure = measureRequest(target, serialized, wire.turns);
   const onUsage = await observeChatDetail('reserve', async () =>
@@ -3351,19 +3535,24 @@ async function sendChatRequest<T>(
       });
     const {
       response,
-      body: json,
+      body: received,
       error,
     } = await observeProviderResponse(
       async () => {
-        const response = await providerFetch(streamFormat ? streamUrl(streamFormat, wire.url) : wire.url, {
-          method: 'POST',
-          headers: wire.headers,
-          body: serialized,
-          redirect: 'manual',
-          signal: signal
-            ? AbortSignal.any([AbortSignal.timeout(target.timeoutMs), signal])
-            : AbortSignal.timeout(target.timeoutMs),
-        }).catch(async (error: unknown) => {
+        const deadline = signal
+          ? AbortSignal.any([AbortSignal.timeout(target.timeoutMs), signal])
+          : AbortSignal.timeout(target.timeoutMs);
+        const response = await (
+          planSessionRoute(target)
+            ? planSessionFetch(target.provider, target.accessToken ?? '', serialized, deadline)
+            : providerFetch(streamFormat ? streamUrl(streamFormat, wire.url) : wire.url, {
+                method: 'POST',
+                headers: wire.headers,
+                body: serialized,
+                redirect: 'manual',
+                signal: deadline,
+              })
+        ).catch(async (error: unknown) => {
           await observeChatDetail('settle', async () => onUsage?.({ kind: 'unknown' }, { rejected: true })).catch(
             () => undefined,
           );
@@ -3377,6 +3566,13 @@ async function sendChatRequest<T>(
           onText,
           onFirstToken: report.firstToken,
           onEvent: () => events++,
+          ...(layoutPreview
+            ? {
+                onToolInput: (_id: string, name: string, json: string) => {
+                  if (name === replyRenderToolName) layoutPreview({ step, json });
+                },
+              }
+            : {}),
         }).catch((error: unknown) => {
           report.error(
             new ModelCallError(
@@ -3391,12 +3587,17 @@ async function sendChatRequest<T>(
       },
       result => !result.response.ok || result.body === null || result.error !== null,
     );
+    const json = target.provider === 'chatgpt' ? chatGptResponse(received) : received;
     const value = observeChatDetailSync('response-parse', () => usage(target, json));
     reportUsage(report, value, json);
     const billed = billedUsage(response.ok && !error, value, measure, { body: json, events });
     await observeChatDetail('settle', async () => onUsage?.(billed, { rejected: billed.kind !== 'known' }));
     onSettled?.(measure, response.ok ? value : { kind: 'unknown' });
     if (!response.ok || error) throw modelHttpError(response, error ?? json, target.provider, published, serialized);
+    // A ChatGPT plan failure can arrive mid-stream as `response.failed` with the same error codes.
+    const failed = target.provider === 'chatgpt' ? recordOf(json) : undefined;
+    if (failed?.status === 'failed')
+      throw modelHttpError(response, { error: failed.error ?? {} }, target.provider, published, serialized);
     const selected = observeChatDetailSync('decision-parse', () => select(json));
     if (selected.failed)
       report.error(
@@ -3466,7 +3667,8 @@ export type ContentInferenceResult =
 
 function contentAnswer(route: CapableRoute, body: unknown): ContentInferenceResult | undefined {
   switch (route.provider) {
-    case 'anthropic': {
+    case 'anthropic':
+    case 'claude': {
       const parsed = anthropicResponseSchema.safeParse(body);
       if (!parsed.success) return undefined;
       const text = parsed.data.content.flatMap(block => (block.type === 'text' ? [block.text] : [])).join('');
@@ -3474,6 +3676,8 @@ function contentAnswer(route: CapableRoute, body: unknown): ContentInferenceResu
       if (parsed.data.stop_reason === 'max_tokens') return { kind: 'truncated', text };
       return parsed.data.stop_reason === 'end_turn' ? { kind: 'answer', text } : undefined;
     }
+    case 'chatgpt':
+    case 'copilot':
     case 'openai':
     case 'xai':
     case 'openai-compatible':
@@ -3630,7 +3834,6 @@ export async function inferWithTools(
   sourceMessages: readonly ChatTurn[] = messages,
 ): Promise<{
   text: string;
-  avatar?: AvatarSnapshot;
   fallback?: string;
   layout?: ReplyRenderInput;
   layoutFailed?: true;
@@ -3729,8 +3932,6 @@ export async function inferWithTools(
   let carried = '';
   let requestStep = 0;
   let budgetSpent = false;
-  let avatar: AvatarSnapshot = { name: 'Bud', state: 'Thinking' };
-  let expressionCalls = 0;
   let layoutFailures = 0;
   let layoutAsked = false;
   // The next request must call the layout tool, after an answer came back as text instead of a layout call.
@@ -3916,7 +4117,6 @@ export async function inferWithTools(
     return {
       text,
       ...layout,
-      ...(tools?.avatar ? { avatar } : {}),
       ...(answeredBy ? { fallback: answeredBy } : {}),
     };
   };
@@ -3974,8 +4174,6 @@ export async function inferWithTools(
     } while (after);
     return completeReply(names.size ? [...names.values()].join('\n') : fileListingEmpty, true);
   };
-  const updateAvatar = () => tools?.avatar?.update({ step: Math.max(0, requestStep - 1), avatar });
-  if (tools?.avatar) tools.avatar.update({ step: 0, avatar });
   // Reaching the budget ends the turn with a reply. It is expected, so it logs one warning rather than a failed reply.
   const toolBudgetSpent = (reason: 'tool-limit' | 'tool-loop' | 'tool-rejections') => {
     if (budgetSpent) return;
@@ -4013,6 +4211,7 @@ export async function inferWithTools(
         },
         settled,
         signal,
+        renderer?.name === replyRenderToolName ? tools?.layoutPreview : undefined,
       );
     } catch (error) {
       // An aborted request fails as a transport error; the reply ends with the reason it was stopped instead.
@@ -4102,6 +4301,32 @@ export async function inferWithTools(
       first = { error };
       diagnostics = modelCallDiagnostics(error);
       if (!diagnostics) throw error;
+    }
+    // A plan that ran out or lost its sign-in hands the step to the next plan the requester may use, before any fallback.
+    let planFailed = 'error' in first ? planFailure(first.error) : undefined;
+    while (
+      planFailed &&
+      tools?.nextPlanCredential &&
+      !diagnostics.outputStarted &&
+      !outputProduced &&
+      answeredBy === undefined
+    ) {
+      const token = await tools.nextPlanCredential(planFailed, diagnostics.retryAfterMs);
+      if (!token || !isPlanRoute(config)) break;
+      config = { ...config, accessToken: token };
+      try {
+        const value = await call(config);
+        if (outputProduced || !invalid?.(value)) return value;
+        first = { value };
+        diagnostics = { errorClass: 'invalid_response', outputStarted: false };
+        planFailed = undefined;
+      } catch (error) {
+        const next = modelCallDiagnostics(error);
+        if (!next) throw error;
+        first = { error };
+        diagnostics = next;
+        planFailed = planFailure(error);
+      }
     }
     // A rate limit that asks for only a short wait is retried once on the same model; any other goes to the fallback now.
     if (
@@ -4361,7 +4586,6 @@ export async function inferWithTools(
               (!activeBuiltinSkills.has('agent-authoring') || tool.name !== 'agents_delegate'),
           ),
           ...(rereadOffered ? [toolResultReadTool] : []),
-          ...(tools?.avatar && expressionCalls < 6 ? [budTool] : []),
           ...(renderer ? [renderer.tool] : []),
         ];
   const roundBlocks = () => [
@@ -4373,7 +4597,6 @@ export async function inferWithTools(
         ]
       : []),
     ...(renderer ? [renderer.prompt] : []),
-    ...(tools?.avatar ? [budReminder(avatar)] : []),
   ];
   /**
    * Estimated input tokens: the last round's reported prompt plus a quarter of the text bytes and the image bounds
@@ -4469,7 +4692,14 @@ export async function inferWithTools(
     if (older.length) rereadOffered = true;
     for (const name of idle) loaded.delete(name);
     if (idle.length) {
-      catalog = nativeChatTools(mcp, tools?.earlierMessages ?? false, loaded, tools?.chatFiles ?? false);
+      catalog = nativeChatTools(
+        mcp,
+        tools?.earlierMessages ?? false,
+        loaded,
+        tools?.chatFiles ?? false,
+        tools?.codingRuns ?? false,
+        tools?.apps,
+      );
       chatToolNameMention = toolNamePattern(catalog.tools);
       previousCatalog = catalogKey(mcp);
     }
@@ -4715,7 +4945,14 @@ export async function inferWithTools(
         if (!catalog || previousCatalog !== currentCatalogKey) {
           catalogChanged = true;
           catalog = observeChatDetailSync('tool-schemas', () =>
-            nativeChatTools(mcp, tools?.earlierMessages ?? false, loaded, tools?.chatFiles ?? false),
+            nativeChatTools(
+              mcp,
+              tools?.earlierMessages ?? false,
+              loaded,
+              tools?.chatFiles ?? false,
+              tools?.codingRuns ?? false,
+              tools?.apps,
+            ),
           );
           chatToolNameMention = toolNamePattern(catalog.tools);
           previousCatalog = currentCatalogKey;
@@ -4732,6 +4969,7 @@ export async function inferWithTools(
                   mcp,
                   earlierMessages: tools?.earlierMessages ?? false,
                   chatFiles: tools?.chatFiles ?? false,
+                  codingRuns: tools?.codingRuns ?? false,
                   personalMemory,
                   inventory,
                 },
@@ -4855,7 +5093,7 @@ export async function inferWithTools(
       const selected = await sendRound();
       outputProduced = true;
       return {
-        selected: tools?.avatar ? selected : withoutBudOnlyCalls(selected),
+        selected,
         mcp,
         answerStep,
         activeCatalog,
@@ -5098,10 +5336,6 @@ export async function inferWithTools(
           inventoryAnswerChecked = true;
           preview(candidate);
         }
-        if (tools?.avatar && avatar.state === 'Thinking') {
-          avatar = { name: 'Bud', state: 'Idle' };
-          updateAvatar();
-        }
         if (fileCheckNeeded) preview(candidate, true);
         return rendered
           ? finish(rendered.input.summary, true, { layout: rendered.input })
@@ -5260,6 +5494,21 @@ export async function inferWithTools(
         recordChatCompletionCheck('done', 'review card receipt');
         return accept();
       }
+      // A form whose buttons send the person's input back is waiting for that input, like a review card.
+      if (
+        rendered &&
+        !rowReviewCheckNeeded &&
+        !rowReviewMissing &&
+        !unbacked &&
+        !writeUnbacked &&
+        !idAsked &&
+        !misdescribed &&
+        !fileCheckNeeded &&
+        layoutAwaitsInput(rendered.input.messages)
+      ) {
+        recordChatCompletionCheck('done', 'layout form awaiting input');
+        return accept();
+      }
       const localCorrection: z.infer<typeof completionCheckSchema>['decision'] | undefined =
         unbacked ?? writeUnbacked ?? idAsked ?? misdescribed;
       let checked: z.infer<typeof completionCheckSchema>['decision'] | undefined =
@@ -5294,9 +5543,13 @@ export async function inferWithTools(
                 waiting,
               ),
             );
+            const formEvidence =
+              rendered && layoutAwaitsInput(rendered.input.messages)
+                ? JSON.stringify({ ...JSON.parse(evidence), layoutAwaitingInput: true })
+                : evidence;
             const inventoryEvidence: string = tableCheckNeeded
-              ? JSON.stringify({ ...JSON.parse(evidence), tableInventory })
-              : evidence;
+              ? JSON.stringify({ ...JSON.parse(formEvidence), tableInventory })
+              : formEvidence;
             const directoryEvidence: string = directoryCheckNeeded
               ? JSON.stringify({
                   evidence: JSON.parse(inventoryEvidence),
@@ -5690,6 +5943,7 @@ export async function inferWithTools(
             mcp,
             earlierMessages: tools?.earlierMessages ?? false,
             chatFiles: tools?.chatFiles ?? false,
+            codingRuns: tools?.codingRuns ?? false,
           }),
         );
         if (instruction && value && typeof value === 'object') value = { ...value, instruction };
@@ -5740,33 +5994,6 @@ export async function inferWithTools(
         ...(reviewCard ? { reviewCard } : {}),
       };
     };
-    if (tools?.avatar && selected.calls.some(call => call.name === budToolName)) {
-      const only = selected.calls.length === 1 && selected.calls[0];
-      if (!only || expressionCalls >= 6) {
-        reject(
-          selected.calls.map(call =>
-            result(
-              call,
-              'Not run. Update Bud once on its own, within the six-update limit, then continue with business tools or your answer.',
-              true,
-            ),
-          ),
-          only ? 'bud-limit' : 'bud-batch',
-          [budToolName],
-        );
-        continue;
-      }
-      const parsed = parseBudState(only.input);
-      if (!parsed.ok) {
-        reject([result(only, parsed.error, true)], 'bud-invalid', [budToolName]);
-        continue;
-      }
-      expressionCalls++;
-      avatar = parsed.avatar;
-      updateAvatar();
-      items.push({ kind: 'results', results: [result(only, JSON.stringify(avatar), false)] });
-      continue;
-    }
     guard.round();
     const active = activeCatalog;
     if (selected.calls.some(call => call.name === toolSearchName)) {
@@ -6143,6 +6370,22 @@ export async function inferSpecialist(
     const request = (config: z.infer<typeof inferenceRouteSchema>) =>
       withChatModelRequest('reply', async () => {
         const wire = observeChatDetailSync('serialize', () => nativeRequest(config, [system], items, catalog.tools));
+        // A helper of a plan reply sends its request the way the plan's main loop does.
+        if (isPlanRoute(config))
+          return sendChatRequest(
+            config,
+            step + extraRequests,
+            meter,
+            wire,
+            body => {
+              const parsed = nativeStep(config, body);
+              return { value: parsed, failed: parsed.kind === 'failure' };
+            },
+            undefined,
+            undefined,
+            undefined,
+            live?.signal,
+          );
         const serialized = serializeChatRequest(wire.body);
         const measure = measureRequest(config, serialized, wire.turns);
         const onUsage = await observeChatDetail('reserve', () =>
@@ -6404,6 +6647,7 @@ export async function inferWithSystem(
     const parsed = inferenceRouteSchema.safeParse(route);
     if (!parsed.success) throw new ModelRequestNotDispatched();
     const config = parsed.data;
+    if (isPlanRoute(config)) throw new ModelCallError(memberRequired(config.provider), { outputStarted: false });
     const { headers, url, body } = observeChatDetailSync('serialize', () => chatRequest(config, messages, system));
     const serialized = serializeChatRequest(body);
     const onUsage = await observeChatDetail('reserve', async () =>
@@ -6462,6 +6706,7 @@ export async function inferText(
     const parsed = inferenceRouteSchema.safeParse(route);
     if (!parsed.success) throw new ModelRequestNotDispatched();
     const config = parsed.data;
+    if (isPlanRoute(config)) throw new ModelCallError(memberRequired(config.provider), { outputStarted: false });
     const context: ChatTurn[] = [
       { role: 'user', text: observeChatDetailSync('render', () => runtimeReminder({ kind: 'text' })) },
       ...messages,

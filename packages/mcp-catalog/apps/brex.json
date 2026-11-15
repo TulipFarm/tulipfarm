@@ -1,0 +1,30 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "brex",
+  "name": "Brex",
+  "maker": "Brex",
+  "homepage": "https://www.brex.com",
+  "category": "finance-and-accounting",
+  "teams": ["finance"],
+  "summary": "Review card spend, expenses, and budgets",
+  "capabilities": [
+    "Look up card transactions and expenses",
+    "Check budgets and spend limits",
+    "Find missing receipts and memos"
+  ],
+  "official": {
+    "evidence": "https://developer.brex.com/docs/mcp"
+  },
+  "docs": "https://developer.brex.com/docs/mcp",
+  "remote": {
+    "url": "https://api.brex.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "simpleIcons": "brex",
+    "color": "#212121"
+  },
+  "supportedBy": ["chatgpt", "claude", "manus", "lindy", "gumloop", "relevance-ai"]
+}

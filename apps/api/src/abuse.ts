@@ -46,6 +46,8 @@ const mutations = new Map<string, Policy>([
   ['submitAgentChatV1', { name: 'agent-chat', max: 20, windowMs: 60_000 }],
   ['createConversationV1', { name: 'conversation-create', max: 20, windowMs: 60_000 }],
   ['sendConversationMessageV1', { name: 'conversation-send', max: 60, windowMs: 60_000 }],
+  ['sendConversationLayoutActionV1', { name: 'conversation-send', max: 60, windowMs: 60_000 }],
+  ['callConversationLayoutFunctionV1', { name: 'conversation-lookup', max: 120, windowMs: 60_000 }],
   ['retryConversationTurnV1', { name: 'conversation-control', max: 30, windowMs: 60_000 }],
   ['cancelConversationTurnV1', { name: 'conversation-control', max: 30, windowMs: 60_000 }],
   ['stopConversationSubagentV1', { name: 'conversation-control', max: 30, windowMs: 60_000 }],

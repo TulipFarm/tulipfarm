@@ -1,0 +1,29 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "harmonic",
+  "name": "Harmonic",
+  "maker": "Harmonic",
+  "homepage": "https://harmonic.ai",
+  "category": "search-and-research",
+  "teams": ["finance", "sales"],
+  "summary": "Research startups, investors, and people",
+  "capabilities": [
+    "Search companies by sector, stage, and growth",
+    "Look up founders, employees, and investors",
+    "Get funding history and headcount trends"
+  ],
+  "official": {
+    "evidence": "https://support.harmonic.ai/en/articles/12785899-harmonic-mcp-server-getting-started-guide"
+  },
+  "docs": "https://support.harmonic.ai/en/articles/12785899-harmonic-mcp-server-getting-started-guide",
+  "remote": {
+    "url": "https://mcp.api.harmonic.ai",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#5B4CF0"
+  },
+  "supportedBy": ["chatgpt", "claude", "manus", "lindy", "gumloop", "relevance-ai", "glean"]
+}

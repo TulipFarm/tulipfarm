@@ -1,0 +1,26 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "circleback",
+  "name": "Circleback",
+  "maker": "Circleback",
+  "homepage": "https://circleback.ai",
+  "category": "chat",
+  "teams": ["everyone", "sales"],
+  "summary": "Search Circleback meeting notes and action items",
+  "capabilities": ["Search meeting notes and transcripts", "Read action items", "Find meetings by attendee"],
+  "official": {
+    "evidence": "https://circleback.ai/docs/mcp"
+  },
+  "docs": "https://circleback.ai/docs/mcp",
+  "remote": {
+    "url": "https://app.circleback.ai/api/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "ai.circleback/circleback",
+  "icons": {
+    "color": "#000000"
+  },
+  "supportedBy": ["chatgpt", "claude", "manus", "gumloop", "glean"]
+}

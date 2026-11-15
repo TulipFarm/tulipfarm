@@ -1,0 +1,27 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "opusclip",
+  "name": "OpusClip",
+  "maker": "OpusClip",
+  "homepage": "https://www.opus.pro",
+  "category": "ai-and-media",
+  "teams": ["marketing"],
+  "summary": "Turn long videos into short clips with OpusClip",
+  "capabilities": ["Create short clips from long videos", "Check clip status and get results"],
+  "official": {
+    "evidence": "https://github.com/opus-pro/opusclip-mcp",
+    "repository": "https://github.com/opus-pro/opusclip-mcp"
+  },
+  "docs": "https://github.com/opus-pro/opusclip-mcp",
+  "remote": {
+    "url": "https://mcp.opus.pro/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "io.github.opus-pro/opusclip",
+  "icons": {
+    "color": "#FD4C3C"
+  },
+  "supportedBy": ["claude", "github-registry"]
+}

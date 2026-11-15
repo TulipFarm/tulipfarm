@@ -1,0 +1,26 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "coda",
+  "name": "Coda",
+  "maker": "Coda",
+  "homepage": "https://coda.io",
+  "category": "docs-and-files",
+  "teams": ["everyone"],
+  "summary": "Read and edit Coda docs, pages and tables",
+  "capabilities": ["Search docs and pages", "Read and update table rows", "Create pages and add content"],
+  "official": {
+    "evidence": "https://help.coda.io/hc/en-us/articles/44722661982989-Connect-to-the-Coda-MCP"
+  },
+  "docs": "https://help.coda.io/hc/en-us/articles/44722661982989-Connect-to-the-Coda-MCP",
+  "remote": {
+    "url": "https://coda.io/apis/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "simpleIcons": "coda",
+    "color": "#F46A54"
+  },
+  "supportedBy": ["chatgpt", "microsoft-copilot", "manus", "lindy", "gumloop", "relevance-ai", "glean"]
+}

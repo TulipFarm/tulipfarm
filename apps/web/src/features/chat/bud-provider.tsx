@@ -27,8 +27,7 @@ import { Button } from '@tulipfarm/sprout/button';
 import { Popover, PopoverContent, PopoverTitle, PopoverDescription, PopoverTrigger } from '@tulipfarm/sprout/popover';
 import { BudLauncher } from '@/components/bud-launcher';
 import { PopoverClose } from '@/components/ui/popover-close';
-import { TulipAvatar } from '@/components/tulip-avatar';
-import { bud } from '@tulipfarm/conversations/avatar';
+import { Bud } from './bud';
 import { BudContext, type BudCommand } from './bud-context';
 import { ChatHeaderContext } from './header-context';
 import { createRecommendationStream } from './recommendation-stream';
@@ -383,15 +382,7 @@ export function BudProvider({ children, headerActions }: { children: ReactNode; 
           else void reveal();
         }}
       >
-        <TulipAvatar
-          name={bud.name}
-          character={bud.character}
-          color={bud.color}
-          view={bud.view}
-          state={nudge ? 'Listening' : 'Idle'}
-          size={docked ? 24 : 32}
-          variant="plain"
-        />
+        <Bud size={docked ? 24 : 32} />
         {docked ? (
           <span className="hidden md:inline">Bud</span>
         ) : (

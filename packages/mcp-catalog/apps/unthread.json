@@ -1,0 +1,25 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "unthread",
+  "name": "Unthread",
+  "maker": "Unthread",
+  "homepage": "https://unthread.io",
+  "category": "support",
+  "teams": ["support"],
+  "summary": "Search and manage support tickets in Unthread",
+  "capabilities": ["Find conversations and tickets", "Update ticket status and assignees", "Summarise customer issues"],
+  "official": {
+    "evidence": "https://docs.unthread.io/docs/unthread-mcp"
+  },
+  "docs": "https://docs.unthread.io/docs/unthread-mcp",
+  "remote": {
+    "url": "https://app.unthread.io/api/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#4F46E5"
+  },
+  "supportedBy": ["claude", "manus", "lindy", "gumloop", "relevance-ai", "glean"]
+}

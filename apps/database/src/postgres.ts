@@ -122,6 +122,13 @@ export async function grantApplicationAccess(
     { table: 'github_event_bodies', privileges: 'SELECT, INSERT' },
     { table: 'github_workflow_subscriptions', privileges: 'SELECT, INSERT, UPDATE, DELETE' },
     { table: 'github_workflow_subscription_repositories', privileges: 'SELECT, INSERT, DELETE' },
+    { table: 'deployment_identity', privileges: 'SELECT, INSERT' },
+    {
+      table: 'app_hostnames',
+      privileges: 'SELECT, INSERT, UPDATE (state, release_id, status, edge_version, retired_at)',
+    },
+    { table: 'app_preview_hosts', privileges: 'SELECT, INSERT, DELETE' },
+    { table: 'app_preview_sessions', privileges: 'SELECT, INSERT, UPDATE (token_sha256, redeemed_at), DELETE' },
     {
       table: 'github_event_dispatches',
       privileges: 'SELECT, INSERT, UPDATE (status, reason, lease_id, lease_until, completed_lease_id, next_attempt_at)',
@@ -173,6 +180,15 @@ export async function grantApplicationAccess(
   ) {
     await client.query('GRANT SELECT (creation_name, settings_revision) ON app.workspaces TO tulipfarm');
     await client.query('GRANT SELECT ON app.workspace_settings_commands TO tulipfarm');
+  }
+  if (
+    (
+      await client.query(
+        "SELECT 1 FROM information_schema.columns WHERE table_schema = 'app' AND table_name = 'app_hostnames' AND column_name = 'kind'",
+      )
+    ).rowCount
+  ) {
+    await client.query('GRANT UPDATE (kind) ON app.app_hostnames TO tulipfarm');
   }
 }
 

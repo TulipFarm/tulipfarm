@@ -1,0 +1,28 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "pleo",
+  "name": "Pleo",
+  "maker": "Pleo",
+  "homepage": "https://www.pleo.io",
+  "category": "finance-and-accounting",
+  "teams": ["finance"],
+  "summary": "Review company card spend and expenses",
+  "capabilities": [
+    "Search expenses and card transactions",
+    "Find missing receipts",
+    "Review spend by team or category"
+  ],
+  "official": {
+    "evidence": "https://developers.pleo.io/docs/current/pleo-mcp/how-tos/installation/custom-mcp"
+  },
+  "docs": "https://developers.pleo.io/docs/current/pleo-mcp/how-tos/installation/custom-mcp",
+  "remote": {
+    "url": "https://mcp.pleo.io/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#FF5A3C"
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "fal",
+  "name": "fal",
+  "maker": "fal",
+  "homepage": "https://fal.ai",
+  "category": "ai-and-media",
+  "teams": ["engineering", "marketing", "design"],
+  "summary": "Generate images, video, and audio with fal models",
+  "capabilities": ["Search fal models", "Generate images and video", "Run audio and other media models"],
+  "official": {
+    "evidence": "https://docs.fal.ai/model-apis/mcp"
+  },
+  "docs": "https://docs.fal.ai/model-apis/mcp",
+  "remote": {
+    "url": "https://mcp.fal.ai/mcp-relay",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "lobehub": "Fal",
+    "color": "#7A4DFF"
+  },
+  "supportedBy": ["chatgpt", "manus", "lindy", "gumloop", "relevance-ai"]
+}

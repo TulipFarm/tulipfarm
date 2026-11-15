@@ -1,0 +1,42 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "fireflies",
+  "name": "Fireflies.ai",
+  "maker": "Fireflies.ai",
+  "homepage": "https://fireflies.ai",
+  "category": "chat",
+  "teams": ["sales", "everyone"],
+  "summary": "Search Fireflies meeting transcripts and summaries",
+  "capabilities": [
+    "Search meeting transcripts",
+    "Read summaries and action items",
+    "Find meetings by attendee or date"
+  ],
+  "official": {
+    "evidence": "https://docs.fireflies.ai/getting-started/mcp-configuration"
+  },
+  "docs": "https://docs.fireflies.ai/getting-started/mcp-configuration",
+  "remote": {
+    "url": "https://api.fireflies.ai/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "ai.fireflies/fireflies",
+  "icons": {
+    "color": "#E62D69"
+  },
+  "supportedBy": [
+    "chatgpt",
+    "claude",
+    "microsoft-copilot",
+    "manus",
+    "lindy",
+    "gumloop",
+    "relevance-ai",
+    "glean",
+    "zapier",
+    "make",
+    "docker"
+  ]
+}

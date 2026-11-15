@@ -1,0 +1,49 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "zendesk",
+  "name": "Zendesk",
+  "maker": "Zendesk",
+  "homepage": "https://www.zendesk.com",
+  "category": "support",
+  "teams": ["support"],
+  "summary": "Search and update tickets in Zendesk",
+  "capabilities": [
+    "Search and read tickets",
+    "Create and update tickets and comments",
+    "Look up users and organizations"
+  ],
+  "official": {
+    "evidence": "https://support.zendesk.com/hc/en-us/articles/11400026079130-Connecting-external-AI-agents-to-Zendesk-EAP"
+  },
+  "docs": "https://support.zendesk.com/hc/en-us/articles/11400026079130-Connecting-external-AI-agents-to-Zendesk-EAP",
+  "remote": {
+    "url": "https://{subdomain}.zendesk.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "variables": [
+      {
+        "name": "subdomain",
+        "description": "Your Zendesk subdomain",
+        "example": "acme"
+      }
+    ]
+  },
+  "icons": {
+    "simpleIcons": "zendesk",
+    "color": "#03363D"
+  },
+  "supportedBy": [
+    "microsoft-copilot",
+    "copilot-studio",
+    "manus",
+    "lindy",
+    "gumloop",
+    "relevance-ai",
+    "dust",
+    "glean",
+    "zapier",
+    "make",
+    "n8n"
+  ],
+  "featured": true
+}

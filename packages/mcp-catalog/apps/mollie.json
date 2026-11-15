@@ -1,0 +1,29 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "mollie",
+  "name": "Mollie",
+  "maker": "Mollie",
+  "homepage": "https://www.mollie.com",
+  "category": "payments-and-commerce",
+  "teams": ["finance", "operations"],
+  "summary": "Look up payments, refunds, and settlements",
+  "capabilities": [
+    "Find payments and their status",
+    "Review refunds, chargebacks, and settlements",
+    "Check balances and payment methods"
+  ],
+  "official": {
+    "evidence": "https://docs.mollie.com/docs/mollie-mcp-server"
+  },
+  "docs": "https://docs.mollie.com/docs/mollie-mcp-server",
+  "remote": {
+    "url": "https://mcp.mollie.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#000000"
+  },
+  "supportedBy": ["chatgpt", "claude", "relevance-ai"]
+}

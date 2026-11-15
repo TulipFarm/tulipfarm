@@ -1,0 +1,29 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "customer-io",
+  "name": "Customer.io",
+  "maker": "Customer.io",
+  "homepage": "https://customer.io",
+  "category": "marketing",
+  "teams": ["marketing", "product"],
+  "summary": "Work with customers, campaigns, and messages",
+  "capabilities": [
+    "Look up people, segments, and activity",
+    "Review campaigns and message metrics",
+    "Manage workspace objects"
+  ],
+  "official": {
+    "evidence": "https://docs.customer.io/ai/mcp-server"
+  },
+  "docs": "https://docs.customer.io/ai/mcp-server",
+  "remote": {
+    "url": "https://mcp.customer.io/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#7131FF"
+  },
+  "supportedBy": ["claude", "microsoft-copilot", "manus", "lindy", "gumloop", "relevance-ai", "glean"]
+}

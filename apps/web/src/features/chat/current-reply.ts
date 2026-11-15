@@ -57,7 +57,15 @@ export function currentReply({ messages, outgoing, command, stream }: ReplyInput
     previewText && (running || (progress && preview && preview.identity.step < progress.step)) ? previewText : '';
   // A saved tool row shows the same text in the activity list, so the live note steps aside.
   const narration = tools.some(tool => tool.narration?.includes(stepText.trim())) ? '' : stepText;
-  const answerText = stepText ? '' : previewText;
+  const layoutState = turn && stream.layouts?.get(turn.id);
+  // A layout from an earlier step than the latest text was given up for a text answer.
+  const layoutJson =
+    layoutState &&
+    layoutState.identity.generation === turn?.generation &&
+    (!preview || layoutState.identity.step >= preview.identity.step)
+      ? layoutState.text
+      : '';
+  const answerText = stepText || layoutJson ? '' : previewText;
   const activity = thinkingOf(running, tools.length > 0, progress);
   const queuedKey = turn?.status === 'queued' ? `${turn.id}:${turn.generation}` : null;
   const processingKey =
@@ -70,6 +78,7 @@ export function currentReply({ messages, outgoing, command, stream }: ReplyInput
           progress?.toolRounds,
           tools.map(tool => tool.activityStatus ?? tool.status).join(','),
           previewText.length,
+          layoutJson.length,
         ].join(':')
       : null;
   return {
@@ -86,6 +95,8 @@ export function currentReply({ messages, outgoing, command, stream }: ReplyInput
     since: replying?.createdAt ?? pending?.at,
     narration,
     answerText,
+    /** The streaming `reply.render` arguments of the current reply, drawn as a layout preview. */
+    layoutJson,
     activity,
     /** The worker's reported status. Without one, labels fall back to rounds and saved tools. */
     status: progress?.status,
@@ -150,6 +161,6 @@ export function useCurrentReply(input: ReplyInput) {
   return {
     ...reply,
     stalledTurn: queuedKey && stalledKey === queuedKey ? reply.turn : null,
-    slowTurn: processingKey && slowKey === processingKey && !reply.answerText ? reply.turn : null,
+    slowTurn: processingKey && slowKey === processingKey && !reply.answerText && !reply.layoutJson ? reply.turn : null,
   };
 }

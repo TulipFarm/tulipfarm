@@ -1,0 +1,34 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "zapier",
+  "name": "Zapier",
+  "maker": "Zapier",
+  "homepage": "https://zapier.com",
+  "category": "automation",
+  "teams": ["everyone", "operations"],
+  "summary": "Run actions across thousands of apps with Zapier",
+  "capabilities": [
+    "Run actions in 8,000+ connected apps",
+    "Choose which actions the agent can use",
+    "Trigger and manage Zaps"
+  ],
+  "official": {
+    "evidence": "https://docs.zapier.com/mcp/home",
+    "repository": "https://github.com/zapier/zapier-mcp"
+  },
+  "docs": "https://docs.zapier.com/mcp/home",
+  "remote": {
+    "url": "https://mcp.zapier.com/api/v1/connect",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "zapier/zapier-mcp",
+  "icons": {
+    "lobehub": "Zapier",
+    "simpleIcons": "zapier",
+    "color": "#FF4F00"
+  },
+  "supportedBy": ["claude", "copilot-studio", "manus", "gumloop", "github-registry"],
+  "featured": true
+}

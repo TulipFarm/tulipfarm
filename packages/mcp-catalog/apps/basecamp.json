@@ -1,0 +1,31 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "basecamp",
+  "name": "Basecamp",
+  "maker": "37signals",
+  "homepage": "https://basecamp.com",
+  "category": "projects-and-issues",
+  "teams": ["everyone"],
+  "summary": "Work with Basecamp projects, to-dos and messages",
+  "capabilities": [
+    "Read projects, to-dos and message boards",
+    "Create and complete to-dos",
+    "Post messages and comments"
+  ],
+  "official": {
+    "evidence": "https://basecamp.com/mcp"
+  },
+  "docs": "https://basecamp.com/mcp",
+  "remote": {
+    "url": "https://mcp.basecamp.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "com.basecamp/mcp",
+  "icons": {
+    "simpleIcons": "basecamp",
+    "color": "#1D2D35"
+  },
+  "supportedBy": ["lindy", "relevance-ai"]
+}

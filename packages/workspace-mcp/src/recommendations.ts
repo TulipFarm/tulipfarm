@@ -36,6 +36,7 @@ export async function mcpRecommendations(tx: AuthorizationTransaction, id: strin
       SELECT owner_membership_id AS membership_id,'use' AS permission FROM ${table('tf_mcp_integrations')} WHERE id=$1 AND ownership='personal'
       UNION SELECT owner_membership_id,'manage' FROM ${table('tf_mcp_integrations')} WHERE id=$1 AND ownership='personal'
       UNION SELECT membership_id,'use' FROM ${table('tf_mcp_member_grants')} WHERE integration_id=$1
+      UNION SELECT m.id,'use' FROM ${table('tf_memberships')} m JOIN ${table('tf_mcp_integrations')} c ON c.id=$1 AND c.shared_with_workspace WHERE m.removed_at IS NULL
       UNION SELECT mt.membership_id,'use' FROM ${table('tf_mcp_team_grants')} g JOIN ${table('tf_member_teams')} mt ON mt.team_id=g.team_id WHERE g.integration_id=$1
       UNION SELECT m.id,'manage' FROM ${table('tf_mcp_managers')} g JOIN ${table('tf_memberships')} m ON
         (m.id=g.membership_id OR EXISTS (SELECT 1 FROM ${table('tf_member_teams')} mt WHERE mt.membership_id=m.id AND mt.team_id=g.team_id)) WHERE g.integration_id=$1

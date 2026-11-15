@@ -39,7 +39,10 @@
               "xai",
               "google",
               "azure",
-              "openai-compatible"
+              "openai-compatible",
+              "chatgpt",
+              "claude",
+              "copilot"
             ],
             "description": "API this provider speaks"
           },
@@ -92,7 +95,7 @@
                 "provider": {
                   "type": "string",
                   "pattern": "^[a-z][a-z0-9-]{0,49}$",
-                  "description": "A key in `providers`, or a built-in provider (anthropic, openai, xai, google, azure) with its standard variables"
+                  "description": "A key in `providers`, or a built-in provider (anthropic, openai, xai, google, azure) with its standard variables, or chatgpt, claude or copilot for a member's own plan"
                 },
                 "model": {
                   "type": "string",
@@ -158,6 +161,8 @@
               {
                 "type": "string",
                 "enum": [
+                  "app-hosting",
+                  "hosted-mcp",
                   "images",
                   "default-connection-knowledge",
                   "social-publishing",
@@ -166,7 +171,11 @@
                   "anthropic-models",
                   "openai-image-models",
                   "generative-ui",
-                  "slack-reactions"
+                  "slack-reactions",
+                  "chatgpt-plan",
+                  "claude-plan",
+                  "copilot-plan",
+                  "coding-runs"
                 ]
               },
               {
@@ -246,7 +255,7 @@
             "type": "object",
             "properties": {
               "api": {
-                "description": "Wire API. OpenAI, xAI, Azure and OpenAI-compatible endpoints support chat-completions and responses; Anthropic anthropic-messages; Google gemini",
+                "description": "Wire API. OpenAI, xAI, Azure and OpenAI-compatible endpoints support chat-completions and responses; Anthropic anthropic-messages; Google gemini; ChatGPT plan responses only",
                 "type": "string",
                 "enum": [
                   "chat-completions",
@@ -468,7 +477,7 @@
                 "provider": {
                   "type": "string",
                   "pattern": "^[a-z][a-z0-9-]{0,49}$",
-                  "description": "A key in `providers`, or a built-in provider (anthropic, openai, xai, google, azure) with its standard variables"
+                  "description": "A key in `providers`, or a built-in provider (anthropic, openai, xai, google, azure) with its standard variables, or chatgpt, claude or copilot for a member's own plan"
                 },
                 "model": {
                   "type": "string",
@@ -512,6 +521,8 @@
               {
                 "type": "string",
                 "enum": [
+                  "app-hosting",
+                  "hosted-mcp",
                   "images",
                   "default-connection-knowledge",
                   "social-publishing",
@@ -520,7 +531,11 @@
                   "anthropic-models",
                   "openai-image-models",
                   "generative-ui",
-                  "slack-reactions"
+                  "slack-reactions",
+                  "chatgpt-plan",
+                  "claude-plan",
+                  "copilot-plan",
+                  "coding-runs"
                 ]
               },
               {

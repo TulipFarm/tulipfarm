@@ -1,6 +1,5 @@
 import { randomUUID } from 'node:crypto';
 import { createBackgroundJob } from '@tulipfarm/observability';
-import { applyStreamAvatar, type StreamAvatar } from '@tulipfarm/conversations/events';
 import {
   applyStreamProgress,
   applyStreamText,
@@ -8,6 +7,7 @@ import {
   conversationNotificationSchema,
   conversationStreamEvents,
   type StreamChange,
+  type StreamLayoutCalls,
   type StreamProgress,
   type StreamText,
   type StreamTextState,
@@ -27,9 +27,10 @@ export type ListenClient = {
 
 export type ConversationStreamEvent =
   | { event: typeof conversationStreamEvents.text; data: StreamText }
+  | { event: typeof conversationStreamEvents.layout; data: StreamText }
+  | { event: typeof conversationStreamEvents.layoutCalls; data: StreamLayoutCalls }
   | { event: typeof conversationStreamEvents.changed; data: StreamChange }
   | { event: typeof conversationStreamEvents.progress; data: StreamProgress }
-  | { event: typeof conversationStreamEvents.avatar; data: StreamAvatar }
   | { event: typeof conversationStreamEvents.tool; data: StreamTool }
   | { event: typeof conversationStreamEvents.subagents; data: StreamSubagents }
   | { event: typeof conversationStreamEvents.resync; data: Record<string, never> };
@@ -37,7 +38,8 @@ export type ConversationStreamEvent =
 export function concealStreamDetails(event: ConversationStreamEvent): ConversationStreamEvent {
   switch (event.event) {
     case 'text':
-      return { event: 'text', data: { ...event.data, text: '', offset: 0, reset: true } };
+    case 'layout':
+      return { event: event.event, data: { ...event.data, text: '', offset: 0, reset: true } };
     case 'tool':
       return { event: 'tool', data: { ...event.data, presentation: { label: 'Used a tool', brand: null } } };
     case 'progress':
@@ -79,7 +81,7 @@ export type ConversationEventHub = {
     membershipId: string,
     listener: (event: RecommendationStreamEvent) => void,
   ): () => void;
-  /** Latest progress and complete preview text of each turn still replying, with text as reset updates. */
+  /** Latest progress, complete preview text and layout of each turn still replying, with text as reset updates. */
   snapshot(workspaceId: string, conversationId: string): ConversationStreamEvent[];
   close(): void;
 };
@@ -96,8 +98,8 @@ export type ConversationEventHubOptions = {
 type Preview = {
   address: string;
   state?: StreamTextState;
+  layout?: StreamTextState;
   progress?: StreamProgress;
-  avatar?: StreamAvatar;
   touched: number;
 };
 type Status = 'connecting' | 'healthy' | 'closed';
@@ -165,17 +167,22 @@ export function createConversationEventHub(options: ConversationEventHubOptions)
       broadcast({ event: conversationStreamEvents.tool, data: update }, target);
       return;
     }
-    if (result.data.kind === 'avatar') {
+    if (result.data.kind === 'layout-calls') {
+      const { kind: _kind, workspaceId: _workspaceId, conversationId: _conversationId, ...update } = result.data;
+      broadcast({ event: conversationStreamEvents.layoutCalls, data: update }, target);
+      return;
+    }
+    if (result.data.kind === 'layout') {
       const { kind: _kind, workspaceId: _workspaceId, conversationId: _conversationId, ...update } = result.data;
       const key = `${target}:${update.turnId}`;
       const previous = previews.get(key);
       touch(key, {
         ...previous,
         address: target,
-        avatar: applyStreamAvatar(previous?.avatar, update),
+        layout: applyStreamText(previous?.layout, update),
         touched: Date.now(),
       });
-      broadcast({ event: conversationStreamEvents.avatar, data: update }, target);
+      broadcast({ event: conversationStreamEvents.layout, data: update }, target);
       return;
     }
     if (result.data.kind === 'text') {
@@ -318,14 +325,21 @@ export function createConversationEventHub(options: ConversationEventHubOptions)
       const target = address(workspaceId, conversationId);
       return [...previews.values()]
         .filter(preview => preview.address === target)
-        .flatMap(({ state, progress, avatar }): ConversationStreamEvent[] => [
+        .flatMap(({ state, layout, progress }): ConversationStreamEvent[] => [
           ...(progress ? [{ event: conversationStreamEvents.progress, data: progress }] : []),
-          ...(avatar ? [{ event: conversationStreamEvents.avatar, data: avatar }] : []),
           ...(state?.complete
             ? [
                 {
                   event: conversationStreamEvents.text,
                   data: { ...state.identity, seq: state.seq, offset: 0, text: state.text, reset: true },
+                },
+              ]
+            : []),
+          ...(layout?.complete
+            ? [
+                {
+                  event: conversationStreamEvents.layout,
+                  data: { ...layout.identity, seq: layout.seq, offset: 0, text: layout.text, reset: true },
                 },
               ]
             : []),

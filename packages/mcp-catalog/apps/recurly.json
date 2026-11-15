@@ -1,0 +1,25 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "recurly",
+  "name": "Recurly",
+  "maker": "Recurly",
+  "homepage": "https://recurly.com",
+  "category": "payments-and-commerce",
+  "teams": ["finance", "engineering"],
+  "summary": "Search Recurly docs and API reference",
+  "capabilities": ["Answer questions from Recurly product docs", "Look up Recurly API endpoints and fields"],
+  "official": {
+    "evidence": "https://docs.recurly.com/recurly-subscriptions/docs/compass-public-mcp-server"
+  },
+  "docs": "https://docs.recurly.com/recurly-subscriptions/docs/compass-public-mcp-server",
+  "remote": {
+    "url": "https://mcp.recurly.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#6C2BD9"
+  },
+  "supportedBy": ["lindy", "relevance-ai"]
+}

@@ -1,0 +1,34 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "magic-hour",
+  "name": "Magic Hour",
+  "maker": "Magic Hour",
+  "homepage": "https://magichour.ai",
+  "category": "ai-and-media",
+  "teams": ["marketing", "design"],
+  "summary": "Generate AI videos and images with Magic Hour",
+  "capabilities": ["Generate video from text or images", "Generate and edit images", "Swap faces and sync lips"],
+  "official": {
+    "evidence": "https://github.com/magichourhq/magic-hour-mcp",
+    "repository": "https://github.com/magichourhq/magic-hour-mcp"
+  },
+  "docs": "https://github.com/magichourhq/magic-hour-mcp",
+  "remote": {
+    "url": "https://mcp.magichour.ai/",
+    "transport": "streamable-http",
+    "auth": "api-key",
+    "headers": [
+      {
+        "name": "Authorization",
+        "value": "Bearer {key}",
+        "description": "Magic Hour API key"
+      }
+    ],
+    "checked": "2026-11-14"
+  },
+  "registryName": "io.github.magichourhq/magic-hour",
+  "icons": {
+    "color": "#2B5797"
+  },
+  "supportedBy": ["github-registry"]
+}

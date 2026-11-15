@@ -1,0 +1,30 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "google-contacts",
+  "name": "Google Contacts",
+  "maker": "Google",
+  "homepage": "https://contacts.google.com",
+  "category": "email-and-calendar",
+  "teams": ["everyone"],
+  "summary": "Look up contacts and people in your organisation",
+  "capabilities": [
+    "Search your Google contacts",
+    "Find people in your Workspace directory",
+    "Get contact details such as email and phone"
+  ],
+  "official": {
+    "evidence": "https://developers.google.com/workspace/guides/configure-mcp-servers"
+  },
+  "docs": "https://developers.google.com/workspace/guides/configure-mcp-servers",
+  "remote": {
+    "url": "https://people.googleapis.com/mcp/v1",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "lobehub": "Google",
+    "color": "#4285F4"
+  },
+  "supportedBy": ["chatgpt", "microsoft-copilot", "lindy", "gumloop", "relevance-ai", "zapier", "make", "n8n"]
+}

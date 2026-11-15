@@ -10,6 +10,16 @@ One version identifies all apps and images of a release.
 
 ### Changed
 
+- Member plans are switched by workspace feature flags instead of deployment
+  settings: `chatgpt-plan` and `copilot-plan` (on by default) and
+  `claude-plan` (off by default). `CHATGPT_PLAN`, `CLAUDE_PLAN` and
+  `COPILOT_PLAN` are removed; use `FEATURE_FLAG_CHATGPT_PLAN`,
+  `FEATURE_FLAG_CLAUDE_PLAN` and `FEATURE_FLAG_COPILOT_PLAN` to override a
+  flag without a flag provider. Members can still disconnect a plan while its
+  flag is off.
+- The web app keeps its page shell in a service worker, so a return visit
+  starts without waiting for the server. The shell refreshes in the background
+  and the next visit uses the new release.
 - When TulipFarm refuses a Slack send from chat, the warning log now records
   where the refusal came from (`error.site`: function, file and line only), so
   the failing access check can be found without guessing.
@@ -478,6 +488,11 @@ One version identifies all apps and images of a release.
 
 ### Removed
 
+- Bud's 3D face, its animated expressions and three.js. Bud now shows a
+  monster avatar like the other agents. The `bud-avatar` feature flag
+  (`FEATURE_FLAG_BUD_AVATAR`), the model's `bud_state` tool and the chat
+  stream's `avatar` event are gone. The face loaded a 145 KB script and kept
+  drawing frames while idle.
 - `AUTH_EMAIL_PASSWORD`. Set `AUTH_METHODS=password` (with any other methods)
   instead; the api refuses to start while the old variable is set.
 - The unused `AGENT_MODEL_ENDPOINT`, `AGENT_MODEL_DEPLOYMENT`, `AGENT_MODEL_AUTH`,

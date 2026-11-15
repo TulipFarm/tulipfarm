@@ -383,6 +383,15 @@ async function savedToolStatus(
     if (call?.status === 'awaiting-approval') return call.decision ? 'queued' : 'waiting';
   }
   if (
+    row.tool === 'coding.run' &&
+    (await tx.client.query('SELECT to_regclass($1) AS name', [table('tf_coding_runs')])).rows[0]?.name
+  ) {
+    const run = (await tx.client.query(`SELECT status, decision FROM ${table('tf_coding_runs')} WHERE id=$1`, [row.id]))
+      .rows[0];
+    if (run?.status === 'running') return 'running';
+    if (run?.status === 'waiting') return run.decision === 'pending' ? 'waiting' : 'queued';
+  }
+  if (
     row.status === 'waiting' &&
     [
       'google.read',

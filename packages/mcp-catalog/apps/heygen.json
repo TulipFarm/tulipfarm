@@ -1,0 +1,29 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "heygen",
+  "name": "HeyGen",
+  "maker": "HeyGen",
+  "homepage": "https://www.heygen.com",
+  "category": "ai-and-media",
+  "teams": ["marketing", "sales"],
+  "summary": "Create AI avatar videos with HeyGen",
+  "capabilities": [
+    "Generate avatar videos from scripts",
+    "List avatars and voices",
+    "Check video status and get links"
+  ],
+  "official": {
+    "evidence": "https://developers.heygen.com/mcp/overview"
+  },
+  "docs": "https://developers.heygen.com/mcp/overview",
+  "remote": {
+    "url": "https://mcp.heygen.com/mcp/v1/",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#7559FF"
+  },
+  "supportedBy": ["chatgpt", "manus", "lindy"]
+}

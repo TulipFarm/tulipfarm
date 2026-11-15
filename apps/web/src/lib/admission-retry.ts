@@ -42,7 +42,10 @@ export async function retryAdmission<T>(
       return await attempt(failures === 0);
     } catch (error) {
       const delay = retryDelay(failures, error);
-      if (signal.aborted || !temporaryAdmissionError(error) || Date.now() + delay > deadline) throw error;
+      // While this admission's own signal is live, an abort came from a read it shared with a load that has since ended.
+      const sharedReadAborted = error instanceof DOMException && error.name === 'AbortError';
+      if (signal.aborted || !(temporaryAdmissionError(error) || sharedReadAborted) || Date.now() + delay > deadline)
+        throw error;
       await pause(delay, signal);
     }
   }

@@ -1,0 +1,27 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "jotform",
+  "name": "Jotform",
+  "maker": "Jotform",
+  "homepage": "https://www.jotform.com",
+  "category": "marketing",
+  "teams": ["marketing", "operations"],
+  "summary": "Create forms and read submissions in Jotform",
+  "capabilities": ["Create and edit forms", "Read and filter submissions", "List forms and their details"],
+  "official": {
+    "evidence": "https://www.jotform.com/developers/mcp/",
+    "repository": "https://github.com/jotform/mcp-server"
+  },
+  "docs": "https://www.jotform.com/developers/mcp/",
+  "remote": {
+    "url": "https://mcp.jotform.com/",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "com.jotform/mcp",
+  "icons": {
+    "color": "#FF6100"
+  },
+  "supportedBy": ["chatgpt", "claude", "manus", "lindy", "gumloop", "relevance-ai", "zapier", "make"]
+}

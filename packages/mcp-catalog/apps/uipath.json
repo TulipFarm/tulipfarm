@@ -1,0 +1,47 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "uipath",
+  "name": "UiPath",
+  "maker": "UiPath",
+  "homepage": "https://www.uipath.com",
+  "category": "automation",
+  "teams": ["operations", "engineering"],
+  "summary": "Run UiPath automations, agents, and processes",
+  "capabilities": [
+    "Start UiPath processes and robots",
+    "Call agents and API workflows",
+    "Use tools from your Orchestrator folder"
+  ],
+  "official": {
+    "evidence": "https://docs.uipath.com/orchestrator/automation-cloud/latest/user-guide/about-mcp-servers"
+  },
+  "docs": "https://docs.uipath.com/orchestrator/automation-cloud/latest/user-guide/about-mcp-servers",
+  "remote": {
+    "url": "https://cloud.uipath.com/{org}/{tenant}/agenthub_/mcp/{folder-id}/{server-name}",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "variables": [
+      {
+        "name": "org",
+        "description": "Your UiPath organization name"
+      },
+      {
+        "name": "tenant",
+        "description": "Your UiPath tenant name"
+      },
+      {
+        "name": "folder-id",
+        "description": "Folder ID of the MCP server"
+      },
+      {
+        "name": "server-name",
+        "description": "Name of the MCP server"
+      }
+    ]
+  },
+  "icons": {
+    "simpleIcons": "uipath",
+    "color": "#FA4616"
+  },
+  "supportedBy": ["lindy", "relevance-ai"]
+}

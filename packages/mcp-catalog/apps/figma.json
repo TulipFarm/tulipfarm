@@ -1,0 +1,33 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "figma",
+  "name": "Figma",
+  "maker": "Figma",
+  "homepage": "https://www.figma.com",
+  "category": "design",
+  "teams": ["design", "engineering"],
+  "summary": "Bring Figma designs and context into code",
+  "capabilities": [
+    "Read frames, components and variables",
+    "Generate code from selected designs",
+    "Fetch screenshots and design tokens"
+  ],
+  "official": {
+    "evidence": "https://developers.figma.com/docs/figma-mcp-server/remote-server-installation/"
+  },
+  "docs": "https://developers.figma.com/docs/figma-mcp-server/remote-server-installation/",
+  "remote": {
+    "url": "https://mcp.figma.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "registryName": "com.figma.mcp/mcp",
+  "icons": {
+    "lobehub": "Figma",
+    "simpleIcons": "figma",
+    "color": "#F24E1E"
+  },
+  "supportedBy": ["chatgpt", "claude", "notion-ai", "lindy", "relevance-ai", "github-registry"],
+  "featured": true
+}

@@ -1,0 +1,30 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "klaviyo",
+  "name": "Klaviyo",
+  "maker": "Klaviyo",
+  "homepage": "https://www.klaviyo.com",
+  "category": "marketing",
+  "teams": ["marketing"],
+  "summary": "Analyse and manage email and SMS marketing in Klaviyo",
+  "capabilities": [
+    "Report on campaign and flow performance",
+    "Look up profiles, lists, and segments",
+    "Create campaigns and email templates"
+  ],
+  "official": {
+    "evidence": "https://developers.klaviyo.com/en/docs/klaviyo_mcp_server"
+  },
+  "docs": "https://developers.klaviyo.com/en/docs/klaviyo_mcp_server",
+  "remote": {
+    "url": "https://mcp.klaviyo.com/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#232426"
+  },
+  "supportedBy": ["chatgpt", "claude", "manus", "lindy", "gumloop", "relevance-ai", "glean", "zapier", "make"],
+  "featured": true
+}

@@ -15,8 +15,10 @@ import { mcpExecutionResultSchema } from '@tulipfarm/agents/mcp-contracts';
 import type { McpExecutionContext, McpExecutionFactory, McpExecutionPort } from '@tulipfarm/agents/mcp-runtime';
 import { sourceDependenciesSchema } from '@tulipfarm/conversations/results';
 import { canonicalJson } from '@tulipfarm/tables/canonical';
-import { bindMcpSecrets, createSecrets } from '@tulipfarm/secrets';
-import { mcpSecretSends } from '@tulipfarm/secrets/send';
+import { bindHostedMcpSecrets, bindMcpSecrets, createSecrets } from '@tulipfarm/secrets';
+import { hostedMcpSecretSends, mcpSecretSends } from '@tulipfarm/secrets/send';
+import { mcpHost } from '@tulipfarm/extensions';
+import { isFeatureEnabled } from '@tulipfarm/observability';
 import { apiCallPrivateHosts } from '@tulipfarm/api-calls';
 
 export function createMcpExecution(
@@ -156,20 +158,33 @@ export function createMcpExecution(
 
 type McpServiceOptions = Omit<
   WorkspaceMcpOptions,
-  'runtime' | 'authorizeOrigin' | 'authorizeSources' | 'authorizeSelection' | 'secrets'
+  'runtime' | 'authorizeOrigin' | 'authorizeSources' | 'authorizeSelection' | 'secrets' | 'hostedSecrets'
 >;
+
+function workerSecrets(runtime: WorkspaceMcpOptions['runtime'], env: NodeJS.ProcessEnv) {
+  return createSecrets({
+    runtime,
+    keyring: () => integrationCredentialKeyring(env),
+    privateHosts: apiCallPrivateHosts(env),
+  });
+}
 
 /** Lets MCP requests send saved secrets. Only the worker decrypts them, inside the dispatch transaction. */
 export function mcpSecretsPort(
   runtime: WorkspaceMcpOptions['runtime'],
   env: NodeJS.ProcessEnv = process.env,
 ): NonNullable<WorkspaceMcpOptions['secrets']> {
-  const secrets = createSecrets({
-    runtime,
-    keyring: () => integrationCredentialKeyring(env),
-    privateHosts: apiCallPrivateHosts(env),
-  });
+  const secrets = workerSecrets(runtime, env);
   return { bind: (tx, input) => bindMcpSecrets(secrets, tx, input), ...mcpSecretSends(secrets) };
+}
+
+/** Lets hosted packages read saved secrets as settings, decrypted only here, just before their sandbox starts. */
+export function mcpHostedSecretsPort(
+  runtime: WorkspaceMcpOptions['runtime'],
+  env: NodeJS.ProcessEnv = process.env,
+): NonNullable<WorkspaceMcpOptions['hostedSecrets']> {
+  const secrets = workerSecrets(runtime, env);
+  return { bind: (tx, input) => bindHostedMcpSecrets(secrets, tx, input), ...hostedMcpSecretSends(secrets) };
 }
 
 export function workspaceMcpService(options: McpServiceOptions, runtime: WorkspaceMcpOptions['runtime']) {
@@ -177,6 +192,7 @@ export function workspaceMcpService(options: McpServiceOptions, runtime: Workspa
     ...options,
     runtime,
     secrets: mcpSecretsPort(runtime),
+    hostedSecrets: mcpHostedSecretsPort(runtime),
     authorizeOrigin: authorizeMcpOrigin,
     authorizeSources: authorizeMcpSources,
     authorizeSelection: authorizeMcpSelection,
@@ -193,10 +209,12 @@ function mcpOptionsFromEnvironment(env: NodeJS.ProcessEnv): McpServiceOptions | 
   const flag = z.enum(['true', 'false']).default('false');
   const transport = createWorkspaceMcpTransport();
   function context(input: Parameters<WorkspaceMcpOptions['protocol']['discover']>[0]) {
-    const credential = input.credential;
-    if (credential.kind !== 'oauth') return { ...input, credential };
-    const { clientSecret, ...rest } = credential;
-    return { ...input, credential: { ...rest, ...(clientSecret ? { clientSecret } : {}) } };
+    const { hostTarget, ...rest } = input;
+    const credential = rest.credential;
+    const target = hostTarget ? { hostTarget } : {};
+    if (credential.kind !== 'oauth') return { ...rest, ...target, credential };
+    const { clientSecret, ...oauth } = credential;
+    return { ...rest, ...target, credential: { ...oauth, ...(clientSecret ? { clientSecret } : {}) } };
   }
   const protocol: WorkspaceMcpOptions['protocol'] = {
     discover: input => transport.discover(context(input)),
@@ -222,7 +240,26 @@ function mcpOptionsFromEnvironment(env: NodeJS.ProcessEnv): McpServiceOptions | 
     protocol,
     admissionEnabled: flag.parse(env.WORKSPACE_MCP_ADMISSION_ENABLED) === 'true',
     dispatchEnabled: flag.parse(env.WORKSPACE_MCP_DISPATCH_ENABLED) === 'true',
+    ...hostedOptions(),
   };
+}
+
+/** The extension's package host, when one is registered. Without it hosted integrations stay unavailable. */
+function hostedOptions(): Pick<McpServiceOptions, 'host' | 'hostedEnabled'> {
+  const host = mcpHost();
+  if (!host) return {};
+  return { host, hostedEnabled: workspaceId => isFeatureEnabled('hosted-mcp', null, { id: workspaceId }) };
+}
+
+/** Removes sandboxes whose integration was deleted, disabled, replaced or lost a secret's permission. */
+export function createWorkspaceMcpHostedSweep(
+  runtime: WorkspaceMcpOptions['runtime'],
+  env: NodeJS.ProcessEnv = process.env,
+) {
+  const options = mcpOptionsFromEnvironment(env);
+  if (!options?.host) return undefined;
+  const service = workspaceMcpService(options, runtime);
+  return (signal: AbortSignal) => service.sweepHosted(signal);
 }
 
 export function workspaceMcpFromEnvironment(env: NodeJS.ProcessEnv = process.env): McpExecutionFactory | undefined {
@@ -233,6 +270,9 @@ export function workspaceMcpFromEnvironment(env: NodeJS.ProcessEnv = process.env
 const failureReasons: Partial<Record<string, string>> = {
   'credential-unavailable': 'A saved secret could not be read. Check that it is still saved and names this endpoint.',
   'discovery-failed': 'The server did not return a usable tool list.',
+  'install-failed': 'The package could not be installed or did not start. Check its name, version and settings.',
+  limit: 'This workspace started too many package installs today. Try again tomorrow.',
+  disabled: 'Hosted packages are not available in this workspace.',
   'secret-denied':
     'A saved secret is not shared with everyone who uses this integration, or does not name its endpoint.',
 };

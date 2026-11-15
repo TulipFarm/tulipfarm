@@ -1,0 +1,29 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "pipedream",
+  "name": "Pipedream",
+  "maker": "Pipedream",
+  "homepage": "https://pipedream.com",
+  "category": "automation",
+  "teams": ["engineering", "operations"],
+  "summary": "Use thousands of app APIs through Pipedream",
+  "capabilities": [
+    "Run actions in 2,800+ connected apps",
+    "Connect app accounts securely",
+    "Call any app API with managed auth"
+  ],
+  "official": {
+    "evidence": "https://pipedream.com/docs/connect/mcp/users"
+  },
+  "docs": "https://pipedream.com/docs/connect/mcp/users",
+  "remote": {
+    "url": "https://mcp.pipedream.net/v2",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#00D57F"
+  },
+  "supportedBy": ["relevance-ai"]
+}

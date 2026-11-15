@@ -1,5 +1,4 @@
-import { ApiCallReviewCard } from '@/features/api-calls/review-card';
-import { emptyChatIntro } from './bud-state';
+import { emptyChatIntro } from './empty-chat';
 import {
   lazy,
   memo,
@@ -28,16 +27,16 @@ import { Sparkle } from 'reicon-react/icons/Sparkle';
 import { Alert, AlertDescription, AlertTitle } from '@tulipfarm/sprout/alert';
 import { Button } from '@tulipfarm/sprout/button';
 import { ChatCanvasToggle, ChatWithCanvas } from './canvas-items';
-import { CanvasProvider, useCanvas, useResultAttention } from './canvas-state';
+import { CanvasProvider, useCanvas, useResultAttention, type LayoutHost } from './canvas-state';
 import { NewChatDrafts, WorkflowCanvasButton, workflowCanvasItem } from './workflow-canvas';
 import { useWorkflowHandoff, WorkflowHandoffNotice } from './workflow-handoff';
 import type { WorkflowReference } from '@/features/workflows/workflow-detail';
-import { RecordChangesCard, RowViewCard, RowViewResponse } from './records-canvas';
 import { recordChangesForTools } from './record-changes';
 import { workflowResults } from './workflow-results';
 import type { RowView } from '@tulipfarm/conversations/row-view';
 
 import { ChatHeaderContext } from './header-context';
+import { takeEarlyComposer } from '@/lib/early-composer';
 import { Input } from '@tulipfarm/sprout/input';
 import {
   DropdownMenu,
@@ -49,11 +48,8 @@ import { Popover, PopoverContent, PopoverTitle, PopoverTrigger } from '@tulipfar
 import { Label } from '@tulipfarm/sprout/label';
 import { Message, MessageBubble, MessageContent } from '@tulipfarm/sprout/message';
 import { useSidebar } from '@tulipfarm/sprout/sidebar';
-import { GitHubChatResponse } from './github-download';
 import { MessageActions, type MessageActionsStats } from '@tulipfarm/sprout/message-actions';
-import { LayoutReply } from './layout-reply';
 import { ToolActivity } from '@tulipfarm/sprout/tool-activity';
-import { SubagentFanout } from './subagent-fanout';
 import { toolActivityItems, visibleActivityTools } from './tool-labels';
 import { StepNarration } from './step-details';
 import { newestTools, reconcileLiveTools, succeeded, unclaimedToolTurns } from './live-tools';
@@ -76,10 +72,10 @@ import { CommandFeedback, ConversationRead } from './conversation-feedback';
 import { useConversationCommand } from './conversation-state';
 import { useConversationChanges, useConversationHistory } from './queries';
 import { useConversationStream } from './use-conversation-stream';
+import { queueRendererCalls } from './layout-calls';
 import { ConversationAttachment, StagedAttachments, useConversationAttachments } from './conversation-attachments';
 import { Composer } from './composer';
 import { ConversationFileReference, ConversationGoogleFileReference, useRichFileMentions } from './file-mentions';
-import { ImageCards } from './image-cards';
 import { SentSkill, SkillUse, StagedSkill, useRichSkillPicker } from './skill-picker';
 import { keywordAccounts, type RichTextEditorHandle, type RichTextValue } from '@tulipfarm/sprout/rich-text-editor';
 import { emptyChatDocument } from './editor-extensions';
@@ -95,23 +91,11 @@ import {
   useChatPackages,
   type PackageChatContextValue,
 } from '@/features/packages/chat-packages';
-import { InteractionCard } from './interaction-card';
-import { AuthoringDraftCard } from './authoring-draft-card';
-import { WaitingRowDraft } from './waiting-row-draft';
-import { AgentDraftLink } from './agent-draft-canvas';
-import { FollowUpCard } from './follow-up-card';
 import { Welcome } from './welcome';
 import { agentApi } from '@/features/agents/api';
 import { skillApi } from '@/features/skills/api';
 import { TableHandoffNotice, useTableHandoff } from './table-handoff';
 import { SlackAction } from '@/features/agents/slack-action';
-import { PendingGoogleActions } from './pending-google-actions';
-import { CalendarReadCard, ChatGoogleProposal } from './calendar-canvas';
-import { IntegrationCard } from './integration-card';
-import { GitHubAccountCard } from './github-account-card';
-import { GitHubInvestigationCard } from './github-investigation-card';
-import { GitHubBatches } from './github-batches';
-import { TableProposalCard } from './table-proposal-card';
 import { ApprovalDock, ApprovalDockProvider } from './approval-dock';
 import { PendingQuestionsProvider, usePendingQuestion } from './pending-question';
 import { McpChatActions } from '@/features/workspace-mcp/selection';
@@ -123,10 +107,43 @@ import { compactCommand, compactCommandError } from './compaction-copy';
 import { ReplyFooter, turnLabels } from './reply-footer';
 import { replyStats } from './reply-stats';
 import { MoveToProjectDialog, ProjectScopeSelect, useWorkspaceProjects } from '@/features/projects/project-scope';
-import { Bud, BudWelcome, budState } from './bud';
+import { Bud } from './bud';
 import { useBud } from './bud-context';
 import { BudPreferences } from './bud-preferences';
 import './conversation.css';
+import { lazyCard } from '@/components/lazy-card';
+
+const LayoutReply = lazyCard(() => import('./layout-reply').then(module => module.LayoutReply));
+const LayoutPreview = lazyCard(() => import('./layout-reply').then(module => module.LayoutPreview));
+const RecordChangesCard = lazyCard(() => import('./records-canvas').then(module => module.RecordChangesCard));
+const RowViewCard = lazyCard(() => import('./records-canvas').then(module => module.RowViewCard));
+const RowViewResponse = lazyCard(() => import('./records-canvas').then(module => module.RowViewResponse));
+const GitHubChatResponse = lazyCard(() => import('./github-download').then(module => module.GitHubChatResponse));
+const SubagentFanout = lazyCard(() => import('./subagent-fanout').then(module => module.SubagentFanout));
+const InteractionCard = lazyCard(() => import('./interaction-card').then(module => module.InteractionCard));
+const AuthoringDraftCard = lazyCard(() => import('./authoring-draft-card').then(module => module.AuthoringDraftCard));
+const WaitingRowDraft = lazyCard(() => import('./waiting-row-draft').then(module => module.WaitingRowDraft));
+const AgentDraftLink = lazyCard(() => import('./agent-draft-canvas').then(module => module.AgentDraftLink));
+const FollowUpCard = lazyCard(() => import('./follow-up-card').then(module => module.FollowUpCard));
+const PendingGoogleActions = lazyCard(() =>
+  import('./pending-google-actions').then(module => module.PendingGoogleActions),
+);
+const CalendarReadCard = lazyCard(() => import('./calendar-canvas').then(module => module.CalendarReadCard));
+const ChatGoogleProposal = lazyCard(() => import('./calendar-canvas').then(module => module.ChatGoogleProposal));
+const IntegrationCard = lazyCard(() => import('./integration-card').then(module => module.IntegrationCard));
+const GitHubAccountCard = lazyCard(() => import('./github-account-card').then(module => module.GitHubAccountCard));
+const GitHubInvestigationCard = lazyCard(() =>
+  import('./github-investigation-card').then(module => module.GitHubInvestigationCard),
+);
+const GitHubBatches = lazyCard(() => import('./github-batches').then(module => module.GitHubBatches));
+const TableProposalCard = lazyCard(() => import('./table-proposal-card').then(module => module.TableProposalCard));
+const ApiCallReviewCard = lazyCard(() =>
+  import('@/features/api-calls/review-card').then(module => module.ApiCallReviewCard),
+);
+const CodingRunReviewCard = lazyCard(() =>
+  import('@/features/coding-runs/review-card').then(module => module.CodingRunReviewCard),
+);
+const ImageCards = lazyCard(() => import('./image-cards').then(module => module.ImageCards));
 
 const ApprovalPreview = import.meta.env.DEV ? lazy(() => import('./approval-mock')) : null;
 const CanvasMockControls = import.meta.env.DEV ? lazy(() => import('./canvas-mock')) : null;
@@ -218,6 +235,8 @@ type NewChatPrefill = {
   prompt: string;
   placeholder?: string;
   autoSend?: boolean;
+  /** Typed by the person before the app loaded, so it keeps the caret instead of being selected. */
+  typed?: boolean;
   skill?: { id: string; revision: string };
   workflow?: WorkflowReference;
 };
@@ -253,6 +272,7 @@ function ConversationWorkspace({ api }: { api: ConversationApi }) {
     searchIntent.tableId ?? null,
   );
   const workflowHandoff = useWorkflowHandoff(workspace.id, intent === 'edit-workflow', searchIntent.workflowId ?? null);
+  const [early, setEarly] = useState(takeEarlyComposer);
   const prefill: NewChatPrefill | null =
     intent === 'install-package' && searchIntent.packageName && searchIntent.packageVersion
       ? {
@@ -288,7 +308,9 @@ function ConversationWorkspace({ api }: { api: ConversationApi }) {
                     ? { prompt: workflowHandoff.prompt, workflow: workflowHandoff.reference }
                     : tableHandoff?.kind === 'ready'
                       ? { prompt: tableHandoff.prompt }
-                      : null;
+                      : early
+                        ? { prompt: early.text, autoSend: early.send, typed: true }
+                        : null;
   const consumePrefill = () => {
     // Dropping the handled request from the link keeps this draft mounted, so the draft's leave guard does not apply.
     void navigate({
@@ -318,6 +340,9 @@ function ConversationWorkspace({ api }: { api: ConversationApi }) {
     [api, changes, draftChatId, project],
   );
   const draft = !chatId;
+  useEffect(() => {
+    if (chatId) setEarly(null);
+  }, [chatId]);
   const activeChatId = chatId ?? draftChatId;
   const activeApi = chatId && chatId !== draftChatId ? api : draftApi;
   useLayoutEffect(() => {
@@ -370,7 +395,7 @@ function ConversationWorkspace({ api }: { api: ConversationApi }) {
                 draftProjectId={project}
                 scope={draft ? scope : undefined}
                 prefill={draft ? prefill : null}
-                onPrefillApplied={consumePrefill}
+                onPrefillApplied={prefill?.typed ? () => setEarly(null) : consumePrefill}
                 notice={
                   draft && tableHandoff ? (
                     <TableHandoffNotice handoff={tableHandoff} workspaceSlug={workspaceSlug} />
@@ -432,6 +457,9 @@ function ConversationDetail({
   });
   const [pages, setPages] = useState(1);
   const stream = useConversationStream(api, chatId, !draft);
+  useEffect(() => {
+    for (const [messageId, calls] of stream.layoutCalls ?? []) queueRendererCalls(messageId, calls);
+  }, [stream.layoutCalls]);
   const modelFamilies = workspaceModels.state.kind === 'ready' ? workspaceModels.state.data.families : [];
   const imagesReader = useFlag('images');
   const read = useConversationHistory(api, chatId, pages, stream);
@@ -493,11 +521,12 @@ function ConversationDetail({
   const appliedPrefill = useRef(false);
   // A link can open a new chat before its editor shows the prompt, so wait for it. Selecting the prompt lets the
   // person send it as is, or type their own message over it instead of after it.
-  const selectPrefill = (prompt: string, frames = 10) =>
+  const selectPrefill = (prompt: string, typed = false, frames = 10) =>
     requestAnimationFrame(() => {
       const editor = composerInput.current?.editor();
-      if (editor && editor.state.doc.textContent === prompt) editor.chain().focus().selectAll().run();
-      else if (frames > 1) selectPrefill(prompt, frames - 1);
+      if (editor && editor.state.doc.textContent === prompt)
+        (typed ? editor.chain().focus('end') : editor.chain().focus().selectAll()).run();
+      else if (frames > 1) selectPrefill(prompt, typed, frames - 1);
       else composerInput.current?.focus();
     });
   const [skillHandoffError, setSkillHandoffError] = useState('');
@@ -512,7 +541,7 @@ function ConversationDetail({
       // A link's request that arrives after the person started typing, such as a slow table handoff, never joins their text.
       if (!text.trim()) {
         setContent(textDocument(prefill.prompt));
-        selectPrefill(prefill.prompt);
+        selectPrefill(prefill.prompt, prefill.typed);
       }
       onPrefillApplied?.();
       if (prefill.workflow) canvas.show(workflowCanvasItem(workspace.id, prefill.workflow));
@@ -762,6 +791,69 @@ function ConversationDetail({
     const reply = `I selected GitHub account ${login}. Continue my previous GitHub request with it.`;
     if (!locked && models.usable) post(textDocument(reply), [{ kind: 'text', text: reply }]);
   }
+  function sendLayoutAction(replyId: string, action: Parameters<LayoutHost['send']>[1]) {
+    if (draft || locked || posting.current || !models.usable) return;
+    posting.current = true;
+    const sentMessageId = crypto.randomUUID();
+    setOutgoing({
+      id: sentMessageId,
+      content: textDocument(action.userMessage),
+      references: [],
+      skill: null,
+      at: Date.now(),
+    });
+    followLatest.current = 'following';
+    setRefreshed(false);
+    void write
+      .submit({
+        kind: 'layout-action',
+        chatId,
+        commandId: crypto.randomUUID(),
+        replyId,
+        sentMessageId,
+        surfaceId: replyId,
+        ...action,
+      })
+      .finally(() => {
+        posting.current = false;
+      });
+  }
+  const layoutActions = useRef({ send: sendLayoutAction, api, chatId });
+  layoutActions.current = { send: sendLayoutAction, api, chatId };
+  const answeredLayouts = (data?.messages ?? [])
+    .flatMap(message => message.parts.flatMap(part => (part.kind === 'layout-action' ? [part.action.messageId] : [])))
+    .join(',');
+  const replyRunning = !!data?.messages.some(
+    message => message.turn && ['queued', 'processing', 'waiting', 'reconciling'].includes(message.turn.status),
+  );
+  const layoutsLocked =
+    draft ||
+    locked ||
+    replyRunning ||
+    !models.usable ||
+    !data ||
+    data.chat.isClosed ||
+    !!(
+      data.chat.projectId &&
+      projects.state.kind === 'ready' &&
+      projects.state.data.find(item => item.id === data.chat.projectId)?.archived
+    );
+  const { setLayoutHost } = canvas;
+  useEffect(() => {
+    const answered = new Set(answeredLayouts.split(','));
+    setLayoutHost({
+      send: (replyId, action) => layoutActions.current.send(replyId, action),
+      lookup: (replyId, call) =>
+        layoutActions.current.api.layoutFunction(
+          layoutActions.current.chatId,
+          replyId,
+          call,
+          AbortSignal.timeout(15000),
+        ),
+      readOnly: replyId => layoutsLocked || answered.has(replyId),
+    });
+  }, [answeredLayouts, layoutsLocked, setLayoutHost]);
+  useEffect(() => () => setLayoutHost(null), [setLayoutHost]);
   function post(
     shown: ChatDocument,
     parts: ConversationPart[],
@@ -879,6 +971,7 @@ function ConversationDetail({
     thinking,
     narration,
     answerText,
+    layoutJson,
     activity,
     status,
     stalledTurn,
@@ -959,7 +1052,7 @@ function ConversationDetail({
           headerElement &&
           createPortal(
             <>
-              {!empty && !sharedChat && (draft || data) && <Bud state={budState(data?.messages, !!pending, stream)} />}
+              {!empty && !sharedChat && (draft || data) && <Bud />}
               {data ? (
                 <>
                   <h1
@@ -1150,7 +1243,7 @@ function ConversationDetail({
                       <p className="text-sm text-muted-foreground">What can I help you with?</p>
                     ) : (
                       <div className="flex items-center gap-4">
-                        {sharedChat ? <Sparkle size={28} aria-hidden="true" /> : <BudWelcome />}
+                        {sharedChat ? <Sparkle size={28} aria-hidden="true" /> : <Bud size={64} />}
                         <div className="min-w-0 space-y-1">
                           <h2 className="text-2xl font-medium tracking-tight">
                             <Greeting />
@@ -1229,6 +1322,11 @@ function ConversationDetail({
                                   followLatest.current = 'inspecting';
                                 }}
                               />
+                              {message.turn?.status === 'waiting' &&
+                                (() => {
+                                  const note = message.tools.filter(tool => tool.narration).at(-1)?.narration;
+                                  return note ? <StepNarration text={note} /> : null;
+                                })()}
                               {message.parts.map((part, index) =>
                                 part.kind === 'request' ? (
                                   <InteractionCard key={index} api={api} chatId={chatId} reference={part} />
@@ -1326,7 +1424,11 @@ function ConversationDetail({
                                   </p>
                                 )}
                                 {unconfirmed && (
-                                  <p className="self-end text-xs text-muted-foreground">Not confirmed sent</p>
+                                  <p className="self-end text-xs text-muted-foreground">
+                                    {write.state.kind === 'uncertain' && write.state.unsent
+                                      ? 'Not sent'
+                                      : 'Not confirmed sent'}
+                                  </p>
                                 )}
                               </MessageContent>
                             </Message>
@@ -1370,7 +1472,12 @@ function ConversationDetail({
                           />
                         </li>
                       )}
-                      {answerText ? (
+                      {layoutJson && turn ? (
+                        <li aria-busy={!read.uncertain}>
+                          <span className="sr-only">TulipFarm said</span>
+                          <LayoutPreview chatId={chatId} turnId={turn.id} json={layoutJson} />
+                        </li>
+                      ) : answerText ? (
                         <li aria-busy={!read.uncertain}>
                           <Message align="start">
                             <MessageContent>
@@ -1794,6 +1901,37 @@ const EntryActions = memo(function EntryActions({
   );
 });
 
+function layoutValue(value: unknown): string {
+  if (value === null || value === undefined || value === '') return '—';
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+  if (typeof value === 'number') return value.toLocaleString();
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) return value.map(layoutValue).join(', ');
+  return JSON.stringify(value);
+}
+
+/** The values a person sent with a button in a reply's layout, listed under the words the button sent. */
+function SentLayoutValues({
+  context,
+  labels = {},
+}: {
+  context: Record<string, unknown>;
+  labels?: Record<string, string> | undefined;
+}) {
+  const entries = Object.entries(context);
+  if (!entries.length) return null;
+  return (
+    <dl className="space-y-1 text-xs text-muted-foreground">
+      {entries.map(([key, value]) => (
+        <div key={key} className="flex min-w-0 gap-3">
+          <dt className="shrink-0 font-medium">{key.replace(/[_-]+/g, ' ')}</dt>
+          <dd className="min-w-0 break-words">{labels[key] ?? layoutValue(value)}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
 function ConversationEntry({
   api,
   chatId,
@@ -1903,6 +2041,8 @@ function ConversationEntry({
                     />
                   </PackageChatContext>
                 );
+              case 'layout-action':
+                return <SentLayoutValues key={index} context={part.action.context} labels={part.action.labels} />;
               case 'text':
                 return message.followUp ? (
                   <MessageBubble key={index} variant="secondary">
@@ -1974,6 +2114,7 @@ function ConversationEntry({
               disabled={disabled}
               control={control}
               modelName={modelName}
+              workspaceSlug={slug}
             />
           )}
         </MessageContent>
@@ -2004,6 +2145,7 @@ function ConversationTools({
   const { workspace, user, membershipId } = workspaceRoute.useRouteContext();
   const slack = useMemo(() => agentApi(workspace.id), [workspace.id]);
   const recordChanges = useMemo(() => recordChangesForTools(message.id, message.tools), [message.id, message.tools]);
+  const codingRuns = useFlag('coding-runs');
   return (
     <section aria-label={`Activity for message ${message.sequence}`} className="space-y-3">
       {message.tools
@@ -2141,6 +2283,17 @@ function ConversationTools({
         .map(tool => (
           <ApiCallReviewCard key={`api:${tool.id}`} workspaceId={workspace.id} callId={tool.id} />
         ))}
+      {codingRuns &&
+        message.tools
+          .filter(tool => tool.tool === 'coding.run' && tool.codingRun)
+          .map(tool => (
+            <CodingRunReviewCard
+              key={`coding:${tool.id}`}
+              workspaceId={workspace.id}
+              runId={tool.id}
+              onSettled={changed}
+            />
+          ))}
       {message.tools
         .filter(tool => tool.images?.length)
         .map(tool => (

@@ -1,0 +1,29 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "fiscal-ai",
+  "name": "Fiscal.ai",
+  "maker": "Fiscal.ai",
+  "homepage": "https://fiscal.ai",
+  "category": "search-and-research",
+  "teams": ["finance"],
+  "summary": "Get company financials and filings",
+  "capabilities": [
+    "Get financial statements and key metrics",
+    "Read filings and earnings data",
+    "Compare companies over time"
+  ],
+  "official": {
+    "evidence": "https://docs.fiscal.ai/docs/guides/mcp-integration"
+  },
+  "docs": "https://docs.fiscal.ai/docs/guides/mcp-integration",
+  "remote": {
+    "url": "https://api.fiscal.ai/mcp",
+    "transport": "streamable-http",
+    "auth": "oauth",
+    "checked": "2026-11-14"
+  },
+  "icons": {
+    "color": "#0A0A0A"
+  },
+  "supportedBy": ["chatgpt", "claude", "microsoft-copilot", "manus", "gumloop"]
+}

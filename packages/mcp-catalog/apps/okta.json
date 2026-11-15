@@ -1,0 +1,64 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "okta",
+  "name": "Okta",
+  "maker": "Okta",
+  "homepage": "https://www.okta.com",
+  "category": "security",
+  "teams": ["engineering", "operations"],
+  "summary": "Manage Okta users, groups, and apps",
+  "capabilities": [
+    "Find, create, and update users",
+    "Manage groups and memberships",
+    "Manage applications and policies",
+    "Read system logs"
+  ],
+  "official": {
+    "evidence": "https://developer.okta.com/docs/concepts/mcp-server/",
+    "repository": "https://github.com/okta/okta-mcp-server"
+  },
+  "docs": "https://developer.okta.com/docs/concepts/mcp-server/",
+  "packages": [
+    {
+      "registry": "pypi",
+      "name": "okta-mcp-server",
+      "env": [
+        {
+          "name": "OKTA_ORG_URL",
+          "description": "Okta org URL",
+          "secret": false,
+          "required": true
+        },
+        {
+          "name": "OKTA_CLIENT_ID",
+          "description": "Okta API service app client ID",
+          "secret": false,
+          "required": true
+        },
+        {
+          "name": "OKTA_SCOPES",
+          "description": "Okta API scopes",
+          "secret": false,
+          "required": true
+        },
+        {
+          "name": "OKTA_PRIVATE_KEY",
+          "description": "Private key for the service app",
+          "secret": true,
+          "required": false
+        },
+        {
+          "name": "OKTA_KEY_ID",
+          "description": "Key ID for the private key",
+          "secret": false,
+          "required": false
+        }
+      ]
+    }
+  ],
+  "icons": {
+    "simpleIcons": "okta",
+    "color": "#007DC1"
+  },
+  "supportedBy": ["lindy", "relevance-ai", "glean", "docker"]
+}

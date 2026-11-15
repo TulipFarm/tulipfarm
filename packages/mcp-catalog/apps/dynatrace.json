@@ -1,0 +1,35 @@
+{
+  "$schema": "../schemas/app.v1.json",
+  "id": "dynatrace",
+  "name": "Dynatrace",
+  "maker": "Dynatrace",
+  "homepage": "https://www.dynatrace.com",
+  "category": "monitoring-and-analytics",
+  "teams": ["engineering"],
+  "summary": "Query Dynatrace problems, logs, and metrics",
+  "capabilities": ["Find problems and vulnerabilities", "Run DQL queries on logs and metrics", "Check entity health"],
+  "official": {
+    "evidence": "https://docs.dynatrace.com/docs/dynatrace-intelligence/dynatrace-mcp",
+    "repository": "https://github.com/dynatrace-oss/dynatrace-mcp"
+  },
+  "docs": "https://docs.dynatrace.com/docs/dynatrace-intelligence/dynatrace-mcp",
+  "packages": [
+    {
+      "registry": "npm",
+      "name": "@dynatrace-oss/dynatrace-mcp-server",
+      "env": [
+        {
+          "name": "DT_ENVIRONMENT",
+          "description": "Dynatrace environment URL",
+          "secret": false,
+          "required": true
+        }
+      ]
+    }
+  ],
+  "icons": {
+    "simpleIcons": "dynatrace",
+    "color": "#1496FF"
+  },
+  "supportedBy": ["claude", "lindy", "relevance-ai", "glean", "docker", "github-registry"]
+}

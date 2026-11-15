@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { modelApiSupported, modelCapabilitiesSchema, modelProviderSchema } from './model-capabilities.ts';
-import { featureFlagNames, featureFlags } from './feature-flags.ts';
+import { featureFlagNames, featureFlags, type FeatureFlag } from './feature-flags.ts';
 import { modelFamilyIdSchema, modelIdentifierSchema } from './model-identifier.ts';
 
 // The model catalog file: every model a deployment serves, how each is reached, what it costs, and which one is the
@@ -38,6 +38,25 @@ export const modelProviderDefaults = Object.freeze({
 } as const);
 type BuiltInProvider = keyof typeof modelProviderDefaults;
 const builtInProviders = Object.keys(modelProviderDefaults) as BuiltInProvider[];
+
+/**
+ * The built-in route provider for a member's own ChatGPT plan. It has no key: each request uses the credential of the
+ * member who connected ChatGPT, and the workspace's `chatgpt-plan` feature flag decides whether its models are offered.
+ */
+export const chatGptProvider = 'chatgpt';
+
+/**
+ * Built-in route providers that run on a member's own plan. Each has no key: each request uses the credential of a member
+ * who connected that plan, and the workspace's feature flag for the plan decides whether its models are offered.
+ */
+export const planProviders = Object.freeze({
+  chatgpt: { flag: 'chatgpt-plan', label: 'ChatGPT' },
+  claude: { flag: 'claude-plan', label: 'Claude' },
+  copilot: { flag: 'copilot-plan', label: 'GitHub Copilot' },
+} as const satisfies Record<string, { flag: FeatureFlag; label: string }>);
+export type PlanProvider = keyof typeof planProviders;
+export const planProviderNames = Object.keys(planProviders) as PlanProvider[];
+export const isPlanProvider = (provider: string): provider is PlanProvider => Object.hasOwn(planProviders, provider);
 
 const envName = z
   .string()
@@ -100,7 +119,7 @@ const routeSchema = z
       .string()
       .regex(/^[a-z][a-z0-9-]{0,49}$/)
       .describe(
-        'A key in `providers`, or a built-in provider (anthropic, openai, xai, google, azure) with its standard variables',
+        "A key in `providers`, or a built-in provider (anthropic, openai, xai, google, azure) with its standard variables, or chatgpt, claude or copilot for a member's own plan",
       ),
     model: z
       .string()
@@ -335,7 +354,7 @@ function rateProblems(rates: readonly z.infer<typeof rateSchema>[]): Issue[] {
 }
 
 const providerType = (catalog: CatalogShape, key: string) =>
-  catalog.providers[key]?.type ?? builtInProviders.find(name => name === key);
+  isPlanProvider(key) ? key : (catalog.providers[key]?.type ?? builtInProviders.find(name => name === key));
 
 /** A model's `fallback` names another chat model, offered to every workspace, and following them never loops. */
 function fallbackProblems(catalog: CatalogShape): Issue[] {
@@ -384,6 +403,11 @@ function catalogProblems(catalog: CatalogShape): Issue[] {
   for (const [key, provider] of Object.entries(catalog.providers)) {
     if ((builtInProviders as string[]).includes(key) && provider.type !== key)
       issues.push({ path: ['providers', key, 'type'], message: `Provider "${key}" must have type "${key}"` });
+    if (isPlanProvider(key) || isPlanProvider(provider.type))
+      issues.push({
+        path: ['providers', key, 'type'],
+        message: `Plan routes use the built-in "${isPlanProvider(key) ? key : provider.type}" provider; do not declare it`,
+      });
     if (provider.type === 'openai-compatible')
       for (const field of ['apiKeyEnv', 'endpointEnv'] as const)
         if (!provider[field])
@@ -411,6 +435,24 @@ function catalogProblems(catalog: CatalogShape): Issue[] {
         });
       return type;
     });
+    const plan = types.find(type => type && isPlanProvider(type)) as PlanProvider | undefined;
+    if (plan) {
+      const label = planProviders[plan].label;
+      if (model.routes.length !== 1)
+        issues.push({ path: at('routes'), message: `A ${label} plan model has only its "${plan}" route` });
+      if (model.default)
+        issues.push({
+          path: at('default'),
+          message: `A ${label} plan model runs on a member's plan; it cannot be the default`,
+        });
+      if (model.roles.length)
+        issues.push({
+          path: at('roles'),
+          message: `A ${label} plan model runs on a member's plan; it cannot hold roles`,
+        });
+      if (model.pricing !== 'unmetered')
+        issues.push({ path: at('pricing'), message: `A ${label} plan model is "unmetered"` });
+    }
     if (model.default && model.paused)
       issues.push({ path: at('paused'), message: 'The default model cannot be paused' });
     if (model.default && !model.selectable)
