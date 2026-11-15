@@ -2925,6 +2925,65 @@ for (const mode of ['after-lookup', 'review-first', 'untrusted-content', 'permis
     );
   });
 
+test('a locally corrected write claim keeps checked row intent for the recovery batch', async t => {
+  const executed = [];
+  const forced = [];
+  let checks = 0;
+  let claimed = false;
+  t.mock.method(globalThis, 'fetch', async (_url, init) => {
+    const body = JSON.parse(init.body);
+    if (isCompletionRequest(body)) {
+      checks++;
+      return Response.json(
+        selectReply('azure', {
+          ...verdict(executed.includes('rows.create.batch') ? 'completed' : 'waiting'),
+          rowWriteRequested: true,
+          smallRowBatchRequested: true,
+          tableLookupRequired: !executed.length,
+        }),
+      );
+    }
+    const tool = forcedTool(body);
+    forced.push(tool);
+    assert.ok(forced.length <= 6, 'recovery remains bounded');
+    // The first forced batch round claims the write without calling the tool.
+    const claim = tool === 'rows_create_batch' && !claimed;
+    if (claim) claimed = true;
+    return stream(
+      nativeReply(
+        'azure',
+        executed.includes('rows.create.batch')
+          ? { text: 'Rose 3 and Pear 2 were added to Other Ledger.' }
+          : tool === 'schema_inspect'
+            ? { calls: [use('schema.inspect', { tableId: otherLedger })] }
+            : claim
+              ? { text: 'I added 2 rows to the Other Ledger table.' }
+              : tool === 'rows_create_batch'
+                ? { calls: [use('rows.create.batch', twoRows)] }
+                : { text: 'What is the exact applied revision for Other Ledger?' },
+      ),
+    );
+  });
+  const result = await inferWithTools(
+    { ...nativeRoutes.azure, model: 'grok-4.3' },
+    approvedRowRequest,
+    async call => {
+      executed.push(call.tool);
+      return call.tool === 'schema.inspect'
+        ? approvedLedger
+        : { records: twoRows.rows.map((row, index) => ({ id: `row-${index}`, values: row.values })) };
+    },
+    undefined,
+    false,
+    null,
+    approvedRowTools,
+  );
+  assert.deepEqual(executed, ['schema.inspect', 'rows.create.batch']);
+  assert.deepEqual(forced, [undefined, 'schema_inspect', 'rows_create_batch', 'rows_create_batch', undefined]);
+  assert.equal(checks, 2, 'the local correction adds no completion check');
+  assert.equal(result.text, 'Rose 3 and Pear 2 were added to Other Ledger.');
+});
+
 test('exhausted table recovery never releases a checked internal revision question', async t => {
   const candidate = 'What is the exact applied revision for Other Ledger?';
   let rounds = 0;
