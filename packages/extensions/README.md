@@ -104,7 +104,9 @@ the endpoint has not moved since, and otherwise throws `AppHostConflictError`.
 deletes a host, and `list` reports every host for reconciliation. The optional
 `usage` reports each app's compute in a closed hourly window, priced in credit
 units. The worker adds it to the app's hosting charge for that window, only for
-apps that hold a public name; without `usage`, server compute is not charged.
+apps the window's traffic billing charges; without `usage`, server compute is
+not charged. When `usage` throws, traffic is still charged, and a later run
+charges that window's compute once `usage` answers, up to 48 hours back.
 Without a registered host, `appHost()` returns `unavailableAppHost`.
 
 ### Credits

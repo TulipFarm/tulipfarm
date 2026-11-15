@@ -40,7 +40,13 @@ import type {
   AppServerBuildOutput,
   CreditGate,
 } from '@tulipfarm/extensions';
-import { recordAppBuild, recordAppReconcileRepair } from '@tulipfarm/observability';
+import {
+  errorAttributes,
+  log,
+  recordAppBuild,
+  recordAppReconcileRepair,
+  recordAppUsageReadFailure,
+} from '@tulipfarm/observability';
 import { escapeIdentifier } from 'pg';
 import { appManifest, untar, type AppBuiltFile } from './app-files.ts';
 
@@ -54,11 +60,11 @@ const settledBefore = (now: number) => Math.floor((now - APP_USAGE_SETTLE_MS) / 
 
 type UsageWindow = { readonly start: string; readonly end: string };
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-/** Delivered traffic per public name, and server compute per app id, in one window. */
-type Usage = {
-  readonly traffic: Map<string, { requests: number; bytes: number; units: bigint }>;
-  readonly compute: Map<string, bigint>;
-};
+type Traffic = { requests: number; bytes: number; units: bigint };
+/** Server compute per app id in one window, or undefined while the host cannot report it. */
+type Compute = Map<string, bigint> | undefined;
+/** An app's share of a window: its traffic, or undefined when the window's traffic was charged by an earlier run. */
+type AppUsage = { readonly workspaceId: string; readonly appId: string; readonly traffic?: Traffic };
 
 export type PlatformClient = {
   query(text: string, values?: unknown[]): Promise<{ rows: any[]; rowCount: number | null }>;
@@ -378,84 +384,122 @@ export function createAppActivities(work: AppWork) {
     for (const appId of lifted) await projectEdge({ workspaceId, appId }, signal);
   }
 
-  async function readUsage(window: UsageWindow, signal: AbortSignal): Promise<Usage> {
-    const usage: Usage = { traffic: new Map(), compute: new Map() };
+  async function readTraffic(window: UsageWindow, signal: AbortSignal) {
+    const traffic = new Map<string, Traffic>();
     for await (const used of publisher!.usage(window, signal)) {
-      const total = usage.traffic.get(used.name) ?? { requests: 0, bytes: 0, units: 0n };
-      usage.traffic.set(used.name, {
+      const total = traffic.get(used.name) ?? { requests: 0, bytes: 0, units: 0n };
+      traffic.set(used.name, {
         requests: total.requests + used.requests,
         bytes: total.bytes + used.bytes,
         units: total.units + used.units,
       });
     }
-    if (work.host.usage)
+    return traffic;
+  }
+
+  /** A host that cannot report the window is logged and counted, not thrown, so traffic billing goes on without it. */
+  async function readCompute(window: UsageWindow, signal: AbortSignal): Promise<Compute> {
+    const compute = new Map<string, bigint>();
+    if (!work.host.usage) return compute;
+    try {
       for await (const used of work.host.usage(window, signal)) {
         const appId = used.appId.toLowerCase();
-        if (uuid.test(appId)) usage.compute.set(appId, (usage.compute.get(appId) ?? 0n) + used.units);
+        if (uuid.test(appId)) compute.set(appId, (compute.get(appId) ?? 0n) + used.units);
       }
-    return usage;
+      return compute;
+    } catch (error) {
+      signal.throwIfAborted();
+      recordAppUsageReadFailure('compute');
+      log('error', 'dependency', 'call_failed', { operation: 'app.compute_usage', ...errorAttributes(error) });
+      return undefined;
+    }
   }
 
   /**
-   * Charges one closed window of delivered traffic and server compute per app, whatever the workspace's app-hosting
-   * flag, since billing follows serving. Only apps that hold or held a public name are charged. A window already
-   * recorded is skipped, so running it again charges nothing. An app whose workspace runs out of credits or passes its
-   * monthly limit is paused.
+   * The apps traffic billing charges for a window, whatever the workspace's app-hosting flag, since billing follows
+   * serving: each app with traffic on any of its names, and each app served now, so the next run knows where to resume.
    */
-  async function chargeWindow(window: UsageWindow, { traffic, compute }: Usage, signal: AbortSignal) {
-    // Every served app records the window, with no traffic too, so the next run knows where to resume.
+  async function trafficByApp(traffic: Map<string, Traffic>) {
     const { rows: owners } = await platform.query(
       `SELECT name, workspace_id, app_id FROM app.app_hostnames
-       WHERE name = ANY($1::text[]) OR app_id = ANY($2::uuid[]) OR (state = 'current' AND status IS NOT NULL)`,
-      [[...traffic.keys()], [...compute.keys()]],
+       WHERE name = ANY($1::text[]) OR (state = 'current' AND status IS NOT NULL)`,
+      [[...traffic.keys()]],
     );
-    const perApp = new Map<
-      string,
-      { workspaceId: string; appId: string; requests: number; bytes: number; units: bigint }
-    >();
+    const perApp = new Map<string, AppUsage & { traffic: Traffic }>();
     for (const owner of owners as { name: string; workspace_id: string; app_id: string }[]) {
       const used = traffic.get(owner.name) ?? { requests: 0, bytes: 0, units: 0n };
       const key = `${owner.workspace_id}/${owner.app_id}`;
-      // An app's compute is counted once, on the first of its names.
-      const total = perApp.get(key) ?? {
+      const total = perApp.get(key)?.traffic ?? { requests: 0, bytes: 0, units: 0n };
+      perApp.set(key, {
         workspaceId: owner.workspace_id,
         appId: owner.app_id,
-        requests: 0,
-        bytes: 0,
-        units: compute.get(owner.app_id) ?? 0n,
-      };
-      perApp.set(key, {
-        ...total,
-        requests: total.requests + used.requests,
-        bytes: total.bytes + used.bytes,
-        units: total.units + used.units,
+        traffic: {
+          requests: total.requests + used.requests,
+          bytes: total.bytes + used.bytes,
+          units: total.units + used.units,
+        },
       });
     }
+    return perApp;
+  }
+
+  /**
+   * Records an app's traffic for a window with its compute when the host reported it, and debits both at once. Once
+   * the traffic is recorded, only compute still unsettled is charged, so a window's compute only ever lands on an app
+   * traffic billing charged. Each part is charged once however often this runs. An app whose workspace runs out of
+   * credits or passes its monthly limit is paused.
+   */
+  async function chargeApp(window: UsageWindow, used: AppUsage, compute: Compute, signal: AbortSignal) {
+    const computed = compute && (compute.get(used.appId) ?? 0n);
+    if (!used.traffic && computed === undefined) return;
+    const paused = await transact(used.workspaceId, async tx => {
+      const windows = table(tx, 'tf_app_usage_windows');
+      let charge: { readonly id: string; readonly units: bigint } | undefined;
+      if (used.traffic) {
+        const units = used.traffic.units + (computed ?? 0n);
+        const inserted = await tx.client.query(
+          `INSERT INTO ${windows} (app_id, window_start, requests, bytes, units, compute_units)
+           VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT DO NOTHING`,
+          [
+            used.appId,
+            window.start,
+            used.traffic.requests,
+            used.traffic.bytes,
+            units.toString(),
+            computed?.toString() ?? null,
+          ],
+        );
+        if (inserted.rowCount === 1) charge = { id: `app-hosting:${used.appId}:${window.start}`, units };
+      }
+      if (!charge && computed !== undefined) {
+        const settled = await tx.client.query(
+          `UPDATE ${windows} SET compute_units = $3, units = units + $3
+           WHERE app_id = $1 AND window_start = $2 AND compute_units IS NULL`,
+          [used.appId, window.start, computed.toString()],
+        );
+        if (settled.rowCount === 1)
+          charge = { id: `app-hosting:${used.appId}:${window.start}:compute`, units: computed };
+      }
+      if (!charge || charge.units === 0n) return false;
+      await work.credits.debit(tx, charge.units, { id: charge.id, activity: 'app-hosting' });
+      const app = await readApp(tx, used.appId as AppId, true);
+      if (!app || app.stops.budgetPausedAt || !(await overBudget(tx, app, window.start))) return false;
+      await tx.client.query(
+        `UPDATE ${table(tx, 'tf_apps')} SET budget_paused_at = clock_timestamp(), edge_version = edge_version + 1
+         WHERE id = $1 AND budget_paused_at IS NULL`,
+        [used.appId],
+      );
+      return true;
+    });
+    if (paused) await projectEdge(used, signal);
+  }
+
+  async function chargeWindow(window: UsageWindow, apps: Iterable<AppUsage>, compute: Compute, signal: AbortSignal) {
     const failures: unknown[] = [];
-    for (const used of perApp.values()) {
+    for (const used of apps) {
       signal.throwIfAborted();
       try {
-        const paused = await transact(used.workspaceId, async tx => {
-          const inserted = await tx.client.query(
-            `INSERT INTO ${table(tx, 'tf_app_usage_windows')} (app_id, window_start, requests, bytes, units)
-             VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING`,
-            [used.appId, window.start, used.requests, used.bytes, used.units.toString()],
-          );
-          if (inserted.rowCount !== 1 || used.units === 0n) return false;
-          await work.credits.debit(tx, used.units, {
-            id: `app-hosting:${used.appId}:${window.start}`,
-            activity: 'app-hosting',
-          });
-          const app = await readApp(tx, used.appId as AppId, true);
-          if (!app || app.stops.budgetPausedAt || !(await overBudget(tx, app, window.start))) return false;
-          await tx.client.query(
-            `UPDATE ${table(tx, 'tf_apps')} SET budget_paused_at = clock_timestamp(), edge_version = edge_version + 1
-             WHERE id = $1 AND budget_paused_at IS NULL`,
-            [used.appId],
-          );
-          return true;
-        });
-        if (paused) await projectEdge(used, signal);
+        await chargeApp(window, used, compute, signal);
       } catch (error) {
         failures.push(error);
       }
@@ -464,7 +508,9 @@ export function createAppActivities(work: AppWork) {
   }
 
   async function meterWindow(window: UsageWindow, signal: AbortSignal) {
-    if (publisher) await chargeWindow(window, await readUsage(window, signal), signal);
+    if (!publisher) return;
+    const apps = await trafficByApp(await readTraffic(window, signal));
+    await chargeWindow(window, apps.values(), await readCompute(window, signal), signal);
   }
 
   return {
@@ -774,8 +820,9 @@ export function createAppActivities(work: AppWork) {
     /**
      * Meters the newest settled hour, so traffic on a name retired in it is charged, and each earlier one a served app
      * has not recorded, resuming after its newest recorded hour and reaching back at most 48 hours. Metering stops at
-     * the first hour that fails, so no later hour is recorded ahead of it. Returns the hour whose usage the publisher
-     * or the host could not read; the next run reads it again.
+     * the first hour whose traffic the publisher cannot read, so no later hour is recorded ahead of it, and returns
+     * that hour; the next run reads it again. Compute the host cannot report holds nothing back: its hours stay
+     * unsettled and a later run within the same 48 hours charges them.
      */
     async meterAppTraffic(now: number, signal: AbortSignal) {
       if (!publisher) return undefined;
@@ -786,11 +833,22 @@ export function createAppActivities(work: AppWork) {
         `SELECT workspace_id, array_agg(app_id) AS apps FROM app.app_hostnames
          WHERE state = 'current' AND status IS NOT NULL GROUP BY workspace_id`,
       );
+      const pending = new Map<number, Map<string, AppUsage>>();
       const failures: unknown[] = [];
       for (const { workspace_id: workspaceId, apps } of served as { workspace_id: string; apps: string[] }[]) {
         signal.throwIfAborted();
         try {
           const next = await transact(workspaceId, async tx => {
+            const { rows: unsettled } = await tx.client.query(
+              `SELECT app_id, window_start FROM ${table(tx, 'tf_app_usage_windows')}
+               WHERE compute_units IS NULL AND window_start >= $1`,
+              [new Date(floor).toISOString()],
+            );
+            for (const row of unsettled as { app_id: string; window_start: Date }[]) {
+              const unsettledApps = pending.get(row.window_start.getTime()) ?? new Map<string, AppUsage>();
+              unsettledApps.set(`${workspaceId}/${row.app_id}`, { workspaceId, appId: row.app_id });
+              pending.set(row.window_start.getTime(), unsettledApps);
+            }
             const { rows } = await tx.client.query(
               `SELECT MIN(COALESCE(
                  (SELECT MAX(w.window_start) + interval '1 hour' FROM ${table(tx, 'tf_app_usage_windows')} w
@@ -808,16 +866,27 @@ export function createAppActivities(work: AppWork) {
       }
       // Without every workspace's resume point, a metered hour could pass one that still has earlier hours to record.
       if (failures.length) throw new AggregateError(failures, 'App usage metering failed');
-      for (let start = from; start + hour <= settled; start += hour) {
+      const starts = new Set(pending.keys());
+      for (let start = from; start + hour <= settled; start += hour) starts.add(start);
+      let hostReports = true;
+      for (const start of [...starts].sort((a, b) => a - b)) {
         const window = { start: new Date(start).toISOString(), end: new Date(start + hour).toISOString() };
-        let usage: Usage;
-        try {
-          usage = await readUsage(window, signal);
-        } catch (error) {
-          signal.throwIfAborted();
-          return { window, error };
+        const apps = pending.get(start) ?? new Map<string, AppUsage>();
+        if (start >= from) {
+          let traffic: Map<string, Traffic>;
+          try {
+            traffic = await readTraffic(window, signal);
+          } catch (error) {
+            signal.throwIfAborted();
+            recordAppUsageReadFailure('traffic');
+            return { window, error };
+          }
+          for (const [key, used] of await trafficByApp(traffic)) apps.set(key, used);
         }
-        await chargeWindow(window, usage, signal);
+        // A host that cannot report one hour is not asked for the next in the same run, so an outage logs once a run.
+        const compute: Compute = hostReports ? await readCompute(window, signal) : undefined;
+        hostReports &&= compute !== undefined;
+        await chargeWindow(window, apps.values(), compute, signal);
       }
       return undefined;
     },

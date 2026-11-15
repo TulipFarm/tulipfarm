@@ -15,7 +15,7 @@ test(
     const db = await fixture();
     try {
       const before = db.baseline.findIndex(item => item.name === appsMigration);
-      assert.equal(db.baseline.at(-1).name, '0079_app_endpoints.sql');
+      assert.equal(db.baseline.at(-1).name, '0080_app_compute_settlement.sql');
       const upgraded = await db.create(db.baseline.slice(0, before));
       assert.equal(
         (await db.platform.query(`SELECT to_regclass($1) AS present`, [`${upgraded.names.schema}.tf_apps`])).rows[0]
@@ -220,3 +220,57 @@ test('builds, releases and source bundles change only where their lifecycle allo
     await db.close();
   }
 });
+
+test(
+  'usage windows recorded before compute settled apart count their compute as settled',
+  { timeout: 60000 },
+  async () => {
+    const db = await fixture();
+    try {
+      const workspace = await db.create(db.baseline.slice(0, -1));
+      const runtime = await connect(db.login(workspace));
+      const table = name => qualified(workspace.names.schema, name);
+      const appId = randomUUID();
+      await runtime.query(
+        `INSERT INTO ${table('tf_apps')} (id, kind, slug, title, created_by) VALUES ($1, 'public', 'jobs', 'Jobs', $2)`,
+        [appId, workspace.membershipId],
+      );
+      await runtime.query(
+        `INSERT INTO ${table('tf_app_usage_windows')} (app_id, window_start, requests, bytes, units)
+       VALUES ($1, '2026-11-14T05:00:00Z', 2, 100, 37)`,
+        [appId],
+      );
+      const rollout = await rolloutCommonMigrations({
+        connectionString: db.connectionString,
+        migrations: db.baseline,
+        listWorkspaceIds: async () => [workspace.id],
+      });
+      assert.deepEqual(rollout.results, [{ workspaceId: workspace.id, status: 'applied', errorCode: null }]);
+      await runtime.query(
+        `INSERT INTO ${table('tf_app_usage_windows')} (app_id, window_start, requests, bytes, units)
+       VALUES ($1, '2026-11-14T06:00:00Z', 1, 50, 7)`,
+        [appId],
+      );
+      await runtime.query(
+        `UPDATE ${table('tf_app_usage_windows')} SET compute_units = 30, units = units + 30
+       WHERE app_id = $1 AND compute_units IS NULL`,
+        [appId],
+      );
+      assert.deepEqual(
+        (
+          await runtime.query(
+            `SELECT window_start, units::text, compute_units::text FROM ${table('tf_app_usage_windows')}
+           ORDER BY window_start`,
+          )
+        ).rows.map(row => ({ ...row, window_start: row.window_start.toISOString() })),
+        [
+          { window_start: '2026-11-14T05:00:00.000Z', units: '37', compute_units: '0' },
+          { window_start: '2026-11-14T06:00:00.000Z', units: '37', compute_units: '30' },
+        ],
+      );
+      await runtime.end();
+    } finally {
+      await db.close();
+    }
+  },
+);

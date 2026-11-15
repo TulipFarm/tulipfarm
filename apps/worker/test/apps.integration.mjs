@@ -801,14 +801,12 @@ test('app builds, publishes, reconciles and meters converge however often they r
     await promoteAppName(db.platform, named);
     await db.platform.query('COMMIT');
     const window = { start: '2026-11-15T05:00:00.000Z', end: '2026-11-15T06:00:00.000Z' };
-    const unsettled = { start: '2026-11-15T06:00:00.000Z', end: '2026-11-15T07:00:00.000Z' };
     const unnamed = randomUUID();
     const metered = createAppActivities({
       ...options(true),
       host: {
         ...unavailableAppHost,
-        async *usage(read) {
-          if (read.start === unsettled.start) throw new Error('Compute usage for this hour is not complete');
+        async *usage() {
           yield { appId: server.id.toUpperCase(), units: 30n };
           yield { appId: unnamed, units: 900n };
           yield { appId: 'not-an-app', units: 900n };
@@ -818,20 +816,99 @@ test('app builds, publishes, reconciles and meters converge however often they r
     publisher.traffic = [{ name: 'acme-jobs', requests: 2, bytes: 100, units: 7n }];
     await metered.meterAppUsage(window, signal());
     await metered.meterAppUsage(window, signal());
-    await assert.rejects(metered.meterAppUsage(unsettled, signal()), /not complete/);
 
     const usage = await db.platform.query(
-      `SELECT window_start, requests::int, bytes::int, units::text FROM "${schema}".tf_app_usage_windows
-       WHERE app_id = $1 ORDER BY window_start`,
+      `SELECT window_start, requests::int, bytes::int, units::text, compute_units::text
+       FROM "${schema}".tf_app_usage_windows WHERE app_id = $1 ORDER BY window_start`,
       [server.id],
     );
     assert.deepEqual(
       usage.rows.map(row => ({ ...row, window_start: row.window_start.toISOString() })),
-      [{ window_start: window.start, requests: 2, bytes: 100, units: '37' }],
+      [{ window_start: window.start, requests: 2, bytes: 100, units: '37', compute_units: '30' }],
     );
     const debits = await db.platform.query(
       `SELECT id, units::text FROM "${schema}".test_credit_entries WHERE id LIKE '%2026-11-15T0%' ORDER BY id`,
     );
     assert.deepEqual(debits.rows, [{ id: `app-hosting:${server.id}:${window.start}`, units: '37' }]);
   });
+
+  await t.test(
+    'traffic is charged while the host cannot report compute, and the compute is charged once it can',
+    async () => {
+      const named = async (slug, promote) => {
+        const created = (
+          await transact(tx =>
+            createApp(tx, { id: randomUUID(), kind: 'public', slug, title: slug, createdBy: workspace.membershipId }),
+          )
+        ).app;
+        const claimed = { name: `acme-${slug}`, workspaceId: workspace.id, appId: created.id };
+        assert.deepEqual(await claimAppName(db.platform, claimed), { ok: true });
+        await transact(tx => setAppPublicName(tx, created.id, claimed.name));
+        if (promote) {
+          await db.platform.query('BEGIN');
+          await promoteAppName(db.platform, claimed);
+          await db.platform.query('COMMIT');
+          await work.projectAppEdge({ ...input, appId: created.id });
+        }
+        return created;
+      };
+      const cron = await named('cron', true);
+      const draft = await named('draft', false);
+      let hostDown = true;
+      const metered = createAppActivities({
+        ...options(true),
+        host: {
+          ...unavailableAppHost,
+          async *usage() {
+            if (hostDown) throw new Error('The host usage API refused the key');
+            yield { appId: cron.id, units: 30n };
+            yield { appId: draft.id, units: 900n };
+          },
+        },
+      });
+      publisher.traffic = [{ name: 'acme-cron', requests: 2, bytes: 100, units: 7n }];
+      const charged = async () =>
+        (
+          await db.platform.query(
+            `SELECT id, units::text FROM "${schema}".test_credit_entries WHERE id LIKE $1 OR id LIKE $2 ORDER BY id`,
+            [`app-hosting:${cron.id}:%`, `app-hosting:${draft.id}:%`],
+          )
+        ).rows.map(row => [row.id.replace(`app-hosting:${cron.id}:`, 'cron ').replace(draft.id, 'draft'), row.units]);
+
+      assert.equal(await metered.meterAppTraffic(Date.parse('2026-11-14T18:05:00.000Z'), signal()), undefined);
+      assert.deepEqual(await charged(), [['cron 2026-11-14T15:00:00.000Z', '7']]);
+      assert.deepEqual(await telemetry.points('cloud_app_usage_read_failures'), [
+        { source: 'traffic', value: 1 },
+        { source: 'compute', value: 1 },
+      ]);
+
+      hostDown = false;
+      const later = Date.parse('2026-11-14T19:05:00.000Z');
+      assert.equal(await metered.meterAppTraffic(later, signal()), undefined);
+      assert.equal(await metered.meterAppTraffic(later, signal()), undefined);
+
+      assert.deepEqual(await charged(), [
+        ['cron 2026-11-14T15:00:00.000Z', '7'],
+        ['cron 2026-11-14T15:00:00.000Z:compute', '30'],
+        ['cron 2026-11-14T16:00:00.000Z', '37'],
+      ]);
+      const { rows } = await db.platform.query(
+        `SELECT app_id, window_start, units::text, compute_units::text FROM "${schema}".tf_app_usage_windows
+         WHERE app_id = ANY($1::uuid[]) ORDER BY window_start`,
+        [[cron.id, draft.id]],
+      );
+      assert.deepEqual(
+        rows.map(row => [
+          row.app_id === cron.id ? 'cron' : 'draft',
+          row.window_start.toISOString(),
+          row.units,
+          row.compute_units,
+        ]),
+        [
+          ['cron', '2026-11-14T15:00:00.000Z', '37', '30'],
+          ['cron', '2026-11-14T16:00:00.000Z', '37', '30'],
+        ],
+      );
+    },
+  );
 });
