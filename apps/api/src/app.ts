@@ -48,6 +48,7 @@ import { protectExpectedSession } from './authenticated-routes.ts';
 import { registerApps } from './apps.ts';
 import { appHostingFromEnvironment, temporalAppWorkflows } from './apps-hosting.ts';
 import { routeAppSites } from './apps-sites.ts';
+import { lazySerializers } from './lazy-serializers.ts';
 import { appBuilders } from '@tulipfarm/apps';
 import { appBuilder, appHost } from '@tulipfarm/extensions';
 import type { Pool } from 'pg';
@@ -75,6 +76,7 @@ export function buildApp(
       },
     },
     logController: new LogController({ disableRequestLogging: true }),
+    schemaController: { compilersFactory: { buildSerializer: lazySerializers() } },
   });
   let appPlatform: Pick<Pool, 'query'> | undefined;
   const appHosting = appHostingFromEnvironment(process.env, () => appPlatform);
