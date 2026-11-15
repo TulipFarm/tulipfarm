@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { escapeIdentifier } from 'pg';
 import { z } from 'zod';
-import { AccessDenied, type Actor, type AuthorizationTransaction } from './index.ts';
+import { AccessDenied, McpEgressDenied, type Actor, type AuthorizationTransaction } from './index.ts';
 import {
   fileReadReceiptSchema,
   sourceDependencySchema,
@@ -40,7 +40,7 @@ export async function mcpSourceClosure(tx: AuthorizationTransaction, sources: un
       source => source.kind === 'unknown' || source.kind === 'unavailable' || source.kind === 'personal-memory',
     )
   )
-    throw new AccessDenied();
+    throw new McpEgressDenied();
   return mcp;
 }
 
@@ -475,13 +475,27 @@ export async function withMcpSourceContext<T>(
 }
 
 export function denyMcpEgress() {
-  if (context.getStore()?.length) throw new AccessDenied();
+  if (context.getStore()?.length) throw new McpEgressDenied();
+}
+
+/**
+ * Whether `sources` carry data from a connected MCP integration, so steps that send data out would be refused. A
+ * closure that cannot be checked counts as MCP-derived.
+ */
+export async function hasMcpDerivedSources(tx: AuthorizationTransaction, sources: unknown): Promise<boolean> {
+  if (context.getStore()?.length) return true;
+  try {
+    return (await mcpSourceClosure(tx, sources)).length > 0;
+  } catch (error) {
+    if (error instanceof AccessDenied) return true;
+    throw error;
+  }
 }
 
 export async function requireNoMcpDerived(tx: AuthorizationTransaction, sources: unknown = [], actor?: Actor) {
   denyMcpEgress();
   if (unboundedReferencesSchema.parse(sources).some(source => source.kind === 'private-task')) throw new AccessDenied();
-  if ((await mcpSourceClosure(tx, sources)).length) throw new AccessDenied();
+  if ((await mcpSourceClosure(tx, sources)).length) throw new McpEgressDenied();
   if (actor?.kind === 'agent') {
     const installed = installedSchema.parse(
       (await tx.client.query('SELECT to_regclass($1) IS NOT NULL AS installed', [table(tx, 'tf_agent_task_runs')]))
@@ -494,6 +508,6 @@ export async function requireNoMcpDerived(tx: AuthorizationTransaction, sources:
     );
     for (const task of tasks.rows)
       if ((await mcpSourceClosure(tx, [{ kind: 'task', taskId: task.task_id, throughSequence: task.sequence }])).length)
-        throw new AccessDenied();
+        throw new McpEgressDenied();
   }
 }

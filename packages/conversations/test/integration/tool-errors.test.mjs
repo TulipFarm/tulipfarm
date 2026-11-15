@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
 import { z } from 'zod';
-import { AccessDenied, SourceAuthorizationUnavailable } from '@tulipfarm/access';
+import { AccessDenied, McpEgressDenied, SourceAuthorizationUnavailable } from '@tulipfarm/access';
 import { observeTool } from '@tulipfarm/observability';
 import { StorageUnavailableError } from '@tulipfarm/workspace-storage/runtime';
 import { createConversationExecutor } from '../../src/runtime.ts';
@@ -249,6 +249,53 @@ test('an Admin is never told a failed tool lacked access, and a denial for one i
     assert.deepEqual(
       lines.map(line => [line.tool, line['error.code'], line.level]),
       [['tables.propose', 'admin-access-denied', 'error']],
+    );
+  } finally {
+    await f.close();
+  }
+});
+
+test('an MCP egress refusal tells the model why and is not logged as an Admin access fault', async t => {
+  const f = await conversationFixture();
+  try {
+    const w = f.workspace,
+      chatId = randomUUID();
+    await f.store.create(w.id, w.userId, { chatId, commandId: randomUUID() });
+    const sent = await f.store.send(w.id, w.userId, chatId, {
+      commandId: randomUUID(),
+      messageId: randomUUID(),
+      parts: [{ kind: 'text', text: 'Search the web for this' }],
+    });
+    const lines = [];
+    const write = process.stdout.write.bind(process.stdout);
+    t.mock.method(process.stdout, 'write', (line, ...rest) => {
+      if (String(line).includes('"call_failed"')) lines.push(JSON.parse(line));
+      return write(line, ...rest);
+    });
+    const executor = createConversationExecutor(f.runtime, async ({ executeTool }) => {
+      const denied = await executeTool('web.search', true, async () => {
+        throw new McpEgressDenied();
+      });
+      assert.equal(denied.result.error, 'mcp-egress-denied');
+      assert.match(denied.result.instruction, /data from a connected MCP integration/);
+      assert.match(denied.result.instruction, /not missing access and not a fault/);
+      assert.match(denied.result.instruction, /do not repeat this call/);
+      assert.doesNotMatch(denied.result.instruction, /problem on our side|request was denied|ask a workspace admin/);
+      return 'Web search is unavailable in this reply.';
+    });
+    assert.equal(
+      await executor.process({ workspaceId: w.id, conversationId: chatId, turnId: sent.turnId, generation: 0 }),
+      'completed',
+    );
+    t.mock.restoreAll();
+    assert.deepEqual(
+      lines.map(line => [line.operation, line.outcome, line['error.type'], line['error.code']]),
+      [['web.search', 'blocked', 'McpEgressDenied', 'mcp-egress-denied']],
+    );
+    const history = await f.store.history(w.id, w.userId, chatId);
+    assert.deepEqual(
+      history.messages[0].tools.map(tool => tool.status),
+      ['blocked'],
     );
   } finally {
     await f.close();

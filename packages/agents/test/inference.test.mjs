@@ -1157,6 +1157,40 @@ for (const model of ['claude-opus-5-5', 'claude-fable-5-1', 'claude-sonnet-5', '
     assert.equal((await inferDecision(route, input)).reason, 'output-limit');
   });
 
+test('a round whose context holds MCP-derived data does not offer the web tools', async t => {
+  let round = 0;
+  const wire = await boundary(t, (_req, res) =>
+    res.end(
+      JSON.stringify(
+        nativeReply(
+          'anthropic',
+          round++ === 0 ? { calls: [use('tables.definitions', {})] } : { text: 'A completed answer.' },
+        ),
+      ),
+    ),
+  );
+  const withheld = [true, false];
+  const result = await inferWithTools(
+    routes.anthropic,
+    [{ role: 'user', text: 'Answer' }],
+    async () => ({ tables: [] }),
+    undefined,
+    false,
+    null,
+    { catalog: async () => undefined, webWithheld: async () => withheld.shift() ?? false },
+  );
+  assert.equal(result.text, 'A completed answer.');
+  const offered = request => request.body.tools.map(tool => tool.name);
+  const notes = request => request.body.system.map(block => block.text).join('\n');
+  assert.equal(offered(wire.received[0]).includes('web_search'), false);
+  assert.equal(offered(wire.received[0]).includes('web_fetch'), false);
+  assert.ok(offered(wire.received[0]).includes('tables_definitions'));
+  assert.match(notes(wire.received[0]), /Web search and page fetching are not available in this reply/);
+  assert.ok(offered(wire.received[1]).includes('web_search'));
+  assert.ok(offered(wire.received[1]).includes('web_fetch'));
+  assert.doesNotMatch(notes(wire.received[1]), /Web search and page fetching are not available/);
+});
+
 test('an agent accepts native text and rejects malformed native arguments', async t => {
   let body = nativeReply('anthropic', { text: answer.text });
   await boundary(t, (_req, res) => {

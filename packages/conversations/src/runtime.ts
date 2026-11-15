@@ -12,6 +12,7 @@ import { toolPresentation } from './tool-activity.ts';
 import { marketplacePackagesInPrompt } from '@tulipfarm/config/package-links';
 import {
   AccessDenied,
+  McpEgressDenied,
   SourceAuthorizationUnavailable,
   currentMember,
   lockAuthorization,
@@ -2770,6 +2771,8 @@ export function createConversationExecutor(
               'error.type': 'invalid-arguments',
               'error.issues': error.issues.map(issue => `${issue.path.join('.')}:${issue.code}`),
             });
+          // An MCP egress refusal is a data-protection rule that applies to every role, so it is never an Admin fault.
+          const egress = error instanceof McpEgressDenied;
           // Dispatch failures were already logged by observeTool; this logs only failures in the receipt and source checks around it.
           if (!toolFailureLogged(error))
             log('error', 'tool', 'call_failed', {
@@ -2778,13 +2781,14 @@ export function createConversationExecutor(
               operation: name,
               outcome: status === 'blocked' ? 'blocked' : 'error',
               'error.type': errorType(error),
+              ...(egress ? { 'error.code': error.code } : {}),
               ...(error instanceof z.ZodError
                 ? { 'error.issues': error.issues.map(issue => `${issue.path.join('.')}:${issue.code}`) }
                 : {}),
             });
           // An Admin holds every workspace permission, so a denial for one is a TulipFarm fault, never a missing grant.
           const admin =
-            !planningFailure && !(error instanceof SourceAuthorizationUnavailable)
+            !planningFailure && !egress && !(error instanceof SourceAuthorizationUnavailable)
               ? await transaction(
                   fence.workspaceId,
                   async tx =>
@@ -2814,6 +2818,13 @@ export function createConversationExecutor(
                     }
                   : null) ??
                 skillFailure(name, error) ??
+                (egress
+                  ? {
+                      error: 'mcp-egress-denied',
+                      instruction:
+                        'This step was not run. This reply includes data from a connected MCP integration, such as its tool descriptions or results, and TulipFarm does not pass that data to other tools or outside services. This is a data-protection rule, not missing access and not a fault. Tell the person plainly that this step is unavailable in this reply and that nothing changed. Do not mention permissions, roles or admins, and do not repeat this call in this reply. Answer with what you already have.',
+                    }
+                  : null) ??
                 (error instanceof SourceAuthorizationUnavailable
                   ? {
                       error: 'source-unavailable',

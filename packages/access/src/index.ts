@@ -79,6 +79,13 @@ export class SkillUnavailable extends AccessDenied {
 }
 /** Refuses another member's personal memory, so callers can say why instead of reporting a missing resource. */
 export class PersonalMemoryDenied extends AccessDenied {}
+/**
+ * Refuses a step that could carry data from a connected MCP integration to another tool or outside service. It is a
+ * data-protection rule, not missing access, so callers can explain it instead of reporting a missing resource.
+ */
+export class McpEgressDenied extends AccessDenied {
+  readonly code = 'mcp-egress-denied';
+}
 
 function table(transaction: AuthorizationTransaction, name: string) {
   return `${escapeIdentifier(transaction.schema)}.${escapeIdentifier(name)}`;

@@ -39,7 +39,7 @@ import {
 } from '@tulipfarm/observability';
 import { atlassianChatOperations } from './atlassian-composition.ts';
 import { githubChatReads } from './github-composition.ts';
-import { mergeSources } from '@tulipfarm/conversations/results';
+import { mergeSources, type SourceDependency } from '@tulipfarm/conversations/results';
 import { googleOperations } from './google-composition.ts';
 import { chatConnections } from './connection-composition.ts';
 import { integrationCredentialKeyring, createIntegrationService } from '@tulipfarm/integrations';
@@ -52,7 +52,7 @@ import {
   type ConversationModel,
 } from './conversation-model.ts';
 import { pausedFamilyReplacement } from '@tulipfarm/agents/model-policy';
-import { withMcpSourceContext } from '@tulipfarm/access';
+import { hasMcpDerivedSources, withMcpSourceContext } from '@tulipfarm/access';
 import { withKnowledgeSourceAuthorization } from '@tulipfarm/knowledge';
 import type { ChatFiles, KnowledgeToolsFactory } from '@tulipfarm/agents/tools';
 import { createKnowledgeTools } from './knowledge-tools-composition.ts';
@@ -429,6 +429,8 @@ export function meteredReply(
             }
           : undefined,
     });
+    const mcpDerived = (sources: SourceDependency[]) =>
+      runtime.transaction(fence.workspaceId, commonCompatibility, tx => hasMcpDerivedSources(tx, sources));
     try {
       const reply = respondToConversation(
         { ...validatedRoute, maxOutputTokens: chat.price.maxOutputTokens },
@@ -558,6 +560,7 @@ export function meteredReply(
               projectInstructions: project?.instructions,
               sources: session.sources,
               checkpoint: session.checkpoint,
+              mcpDerived,
               signal: session.leaseSignal,
               ...(session.catalog ? { catalog: session.catalog } : {}),
             }
@@ -596,6 +599,7 @@ export function meteredReply(
               projectInstructions: project?.instructions,
               sources: session.sources,
               checkpoint: session.checkpoint,
+              mcpDerived,
               signal: session.leaseSignal,
             },
         retainedSources,

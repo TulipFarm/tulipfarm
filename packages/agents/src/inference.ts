@@ -1404,6 +1404,11 @@ export type ToolInferenceContext = {
   /** Runtime-owned, ephemeral read for each model step; never retained in loop history. */
   readPersonalMemory?: (() => Promise<PersonalMemoryContext | undefined>) | undefined;
   catalog?: () => Promise<McpModelCatalog | undefined>;
+  /**
+   * Read before each round: true when the reply's context holds data from a connected MCP integration, so the web tools,
+   * which send data to outside services and would be refused, are not offered that round.
+   */
+  webWithheld?: (() => Promise<boolean>) | undefined;
   priorCalls?: number;
   priorToolCalls?: readonly unknown[];
   priorFileResults?: readonly { call: unknown; result: unknown }[];
@@ -1512,6 +1517,8 @@ type LoopItem =
 const nativeFrameworkToolNames = new Set(toolNameSchema.options.map(nativeToolName));
 const presentChoiceName = nativeToolName('present.choice');
 const webToolNames = new Set(['web.search', 'web.fetch'].map(nativeToolName));
+const webWithheldPrompt =
+  'Web search and page fetching are not available in this reply, because it includes data from a connected MCP integration and TulipFarm does not send that data to outside services. If the person asks for something online, say plainly that web lookups are unavailable here and answer with what you have.';
 const rowAnswerReadTools = new Set(
   ['web.search', 'web.fetch', 'knowledge.search', 'knowledge.read', 'files.read', 'tables.query', 'rows.list'].map(
     nativeToolName,
@@ -4495,6 +4502,7 @@ export async function inferWithTools(
   let previousMemory: string | undefined;
   let previousInventory: string | undefined;
   let catalog: ReturnType<typeof nativeChatTools> | undefined;
+  let webWithheld = false;
   const activeBuiltinSkills = new Set(tools?.builtinSkills);
   let authoringContextRead = false;
   let authoringDraftMade = false;
@@ -4583,7 +4591,8 @@ export async function inferWithTools(
           ...active.tools.filter(
             tool =>
               (!slackLayout || tool.name !== presentChoiceName) &&
-              (!activeBuiltinSkills.has('agent-authoring') || tool.name !== 'agents_delegate'),
+              (!activeBuiltinSkills.has('agent-authoring') || tool.name !== 'agents_delegate') &&
+              (!webWithheld || !webToolNames.has(tool.name)),
           ),
           ...(rereadOffered ? [toolResultReadTool] : []),
           ...(renderer ? [renderer.tool] : []),
@@ -4591,6 +4600,7 @@ export async function inferWithTools(
   const roundBlocks = () => [
     ...chatSystemBlocks(tools?.projectInstructions, tools?.chatFiles),
     ...(catalog?.discovery ? [catalog.discovery] : []),
+    ...(webWithheld ? [webWithheldPrompt] : []),
     ...(tools?.agentBuilderUrl && activeBuiltinSkills.has('agent-authoring')
       ? [
           `If an agent setup cannot be prepared, say why plainly at the first failed prerequisite, stop without repeated helpers, and link to [Configure manually](${tools.agentBuilderUrl}). Do not expose internal tool names.`,
@@ -4913,6 +4923,7 @@ export async function inferWithTools(
       const mcp = await observeChatDetail('round-prepare', async () => {
         await tools?.beforeRound?.();
         const mcp = await observeChatDetail('catalog', async () => tools?.catalog?.());
+        webWithheld = (await tools?.webWithheld?.()) ?? false;
         const currentCatalogKey = observeChatDetailSync('serialize', () => catalogKey(mcp));
         const personalMemory =
           tools?.projectInstructions === undefined
