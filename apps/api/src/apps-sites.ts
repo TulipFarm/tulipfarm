@@ -5,17 +5,16 @@ import { errorAttributes } from '@tulipfarm/observability';
 
 /**
  * Answers `<name>.<domain>` from the built-in publisher before any shell route, header or session hook runs, so
- * app pages never carry the shell's cookies or policies. Hosts under `excluded` belong to the preview gateway.
+ * app pages never carry the shell's cookies or policies.
  */
 export function routeAppSites(
   app: FastifyInstance,
-  options: { readonly publisher: HostHeaderPublisher; readonly domain: string; readonly excluded?: string | undefined },
+  options: { readonly publisher: HostHeaderPublisher; readonly domain: string },
 ) {
   const suffix = `.${options.domain.toLowerCase()}`;
-  const excluded = options.excluded ? `.${options.excluded.toLowerCase()}` : null;
   app.addHook('onRequest', async (request, reply) => {
     const host = (request.headers.host ?? '').toLowerCase().replace(/:\d+$/, '').replace(/\.$/, '');
-    if (!host.endsWith(suffix) || (excluded && (host.endsWith(excluded) || `.${host}` === excluded))) return;
+    if (!host.endsWith(suffix)) return;
     if (request.method !== 'GET' && request.method !== 'HEAD')
       return reply.code(405).header('Allow', 'GET, HEAD').header('Cache-Control', 'no-store').send();
     const path = request.url.split('?')[0]!;
