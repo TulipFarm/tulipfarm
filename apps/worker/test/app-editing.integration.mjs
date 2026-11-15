@@ -233,7 +233,7 @@ test('an app chat turn edits its app, and only a turn that completes saves', { t
   await t.test('building the app starts the build and reports how it ended', async () => {
     const recorded = captureMetrics(t);
     const builder = {
-      id: 'test-node22@1',
+      id: 'test-node26@1',
       async build(input) {
         if (input.recipe.command === 'npm run broken') return { ok: false, code: 'build-failed', log: '', units: 0n };
         return { ok: true, output: input.source, log: '', units: 0n };
@@ -261,7 +261,7 @@ test('an app chat turn edits its app, and only a turn that completes saves', { t
     const on = { workspaceId: w.id, actor, conversationId: editing };
     // eslint-disable-next-line tulipfarm/product-copy -- A tool name, not user-facing copy.
     const build = () => apps.invoke(on, { tool: 'apps.preview.build' });
-    const recipe = command => ({ kind: 'command', runtime: 'node22', command, output: 'dist' });
+    const recipe = command => ({ kind: 'command', runtime: 'node26', command, output: 'dist' });
     const builderOf = async id =>
       (await f.db.platform.query(`SELECT builder FROM ${f.table('tf_app_builds')} WHERE id = $1`, [id])).rows[0]
         .builder;
@@ -274,7 +274,7 @@ test('an app chat turn edits its app, and only a turn that completes saves', { t
     const built = await build();
     assert.deepEqual(
       { status: built.status, files: built.files, builder: await builderOf(built.buildId) },
-      { status: 'succeeded', files: 2, builder: 'test-node22@1' },
+      { status: 'succeeded', files: 2, builder: 'test-node26@1' },
     );
 
     await apps.invoke(on, {
@@ -295,7 +295,7 @@ test('an app chat turn edits its app, and only a turn that completes saves', { t
     await apps.invoke(on, {
       tool: 'apps.files.write',
       path: 'app.json',
-      content: JSON.stringify({ kind: 'server', runtime: 'node22', serve: { port: 3000, start: 'node server.js' } }),
+      content: JSON.stringify({ kind: 'server', runtime: 'node26', serve: { port: 3000, start: 'node server.js' } }),
     });
     const server = await build();
     assert.deepEqual(

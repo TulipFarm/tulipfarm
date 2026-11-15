@@ -13,7 +13,7 @@ import { appPublisherContract, memoryAppPublisher, testAppPublisher } from '../s
 
 const context = { app: 'worker', env: {} };
 const builder = {
-  id: 'sandbox-node22-v1',
+  id: 'sandbox-node26-v1',
   build: async () => ({ ok: false, code: 'build-failed', log: 'npm ERR! missing script: build', units: 7n }),
 };
 
@@ -33,7 +33,7 @@ test('app builder and publisher read as undefined until an extension registers t
     },
     context,
   );
-  assert.equal(appBuilder().id, 'sandbox-node22-v1');
+  assert.equal(appBuilder().id, 'sandbox-node26-v1');
   assert.deepEqual(await appBuilder().build({}, new AbortController().signal), {
     ok: false,
     code: 'build-failed',
@@ -69,7 +69,7 @@ test('a second app builder or publisher fails startup and leaves the first in pl
       message: 'Extension "other" cannot set the app publisher: "hosted" already set it',
     },
   );
-  assert.equal(appBuilder().id, 'sandbox-node22-v1');
+  assert.equal(appBuilder().id, 'sandbox-node26-v1');
   assert.equal(appPublisher(), publisher);
 });
 

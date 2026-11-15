@@ -307,7 +307,7 @@ export type AppFile = {
 /** The `command` build recipe from an app's `app.json`, as parsed by @tulipfarm/apps. */
 export type AppCommandRecipe = {
   readonly kind: 'command';
-  readonly runtime: 'node22';
+  readonly runtime: 'node26';
   readonly install?: string | undefined;
   readonly command: string;
   readonly output: string;
@@ -316,7 +316,7 @@ export type AppCommandRecipe = {
 /** The `server` recipe from an app's `app.json`: optional build steps, then a command that listens on `port`. */
 export type AppServerRecipe = {
   readonly kind: 'server';
-  readonly runtime: 'node22';
+  readonly runtime: 'node26';
   readonly install?: string | undefined;
   readonly command?: string | undefined;
   /** `port` is an integer from 1024 to 65535 and `start` is a non-empty command. */
@@ -367,7 +367,7 @@ export type AppServerBuildResult =
  * with `builder-unavailable` and `server` recipes fail with `host-unavailable`.
  */
 export type AppBuilder = {
-  /** Stable identifier folded into the build id, such as `sandbox-node22-v1`. Changing it rebuilds every app. */
+  /** Stable identifier folded into the build id, such as `sandbox-node26-v1`. Changing it rebuilds every app. */
   readonly id: string;
   build(input: AppBuildInput, signal: AbortSignal): Promise<AppBuildResult>;
   /** Runs a `server` recipe's build steps and packages the tree. TulipFarm does not call it yet. */

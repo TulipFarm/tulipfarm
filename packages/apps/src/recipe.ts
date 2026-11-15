@@ -21,14 +21,14 @@ export const appRecipeSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('copy'), root: treePathSchema.default('.') }),
   z.strictObject({
     kind: z.literal('command'),
-    runtime: z.enum(['node22']),
+    runtime: z.enum(['node26']),
     install: stepSchema.optional(),
     command: stepSchema,
     output: treePathSchema,
   }),
   z.strictObject({
     kind: z.literal('server'),
-    runtime: z.enum(['node22']),
+    runtime: z.enum(['node26']),
     install: stepSchema.optional(),
     command: stepSchema.optional(),
     serve: z.strictObject({

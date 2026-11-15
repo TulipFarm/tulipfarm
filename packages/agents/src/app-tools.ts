@@ -66,11 +66,11 @@ export const appRecipeExamples = [
   ['Serve a folder as it is', { kind: 'copy', root: 'site' }],
   [
     'Run a build, then serve its output folder',
-    { kind: 'command', runtime: 'node22', install: 'npm install', command: 'npm run build', output: 'dist' },
+    { kind: 'command', runtime: 'node26', install: 'npm install', command: 'npm run build', output: 'dist' },
   ],
   [
     'Run a Node server that listens on serve.port',
-    { kind: 'server', runtime: 'node22', install: 'npm install', serve: { port: 8080, start: 'node server.js' } },
+    { kind: 'server', runtime: 'node26', install: 'npm install', serve: { port: 8080, start: 'node server.js' } },
   ],
 ] as const satisfies readonly (readonly [string, z.input<typeof appRecipeSchema>])[];
 
