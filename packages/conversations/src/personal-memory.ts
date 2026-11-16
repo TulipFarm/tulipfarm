@@ -68,24 +68,23 @@ export function createPersonalMemoryService(runtime: ConversationRuntime) {
   async function human<T>(
     workspaceId: string,
     userId: string,
-    write: boolean,
     operation: (tx: AuthorizationTransaction, actor: HumanActor) => Promise<T>,
   ) {
     denyMcpEgress();
     return runtime.transaction(uuidSchema.parse(workspaceId), compatibility, async tx => {
-      await lockAuthorization(tx, write ? 'write' : 'read');
+      await lockAuthorization(tx, 'read');
       const actor = await resolveHuman(tx, userId);
       await currentMember(tx, actor);
       return operation(tx, actor);
     });
   }
   async function replace(workspaceId: string, userId: string, nextContent: string, expectedRevision: number) {
-    return human(workspaceId, userId, true, (tx, actor) =>
+    return human(workspaceId, userId, (tx, actor) =>
       replaceOwnPersonalMemory(tx, actor, nextContent, expectedRevision),
     );
   }
   return {
-    read: (workspaceId: string, userId: string) => human(workspaceId, userId, false, readPersonalMemory),
+    read: (workspaceId: string, userId: string) => human(workspaceId, userId, readPersonalMemory),
     save: (workspaceId: string, userId: string, value: unknown) => {
       const input = savePersonalMemorySchema.parse(value);
       return replace(workspaceId, userId, input.content, input.expectedRevision);

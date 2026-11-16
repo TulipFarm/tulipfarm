@@ -765,7 +765,7 @@ export const settings: readonly Setting[] = [
     services: apps,
     requirement: 'optional',
     secret: false,
-    default: '100',
+    default: '1000',
     description: 'Workspace transactions each runtime replica queues before rejecting more.',
   },
   {

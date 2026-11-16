@@ -193,7 +193,7 @@ export function oauthMethods(options: WorkspaceMcpOptions, store: McpStore) {
       });
     },
     async claimRefresh(workspaceId: string, principal: McpPrincipal, id: string) {
-      const result = await store.authorized(workspaceId, principal, async (tx, actor) => {
+      const result = await store.acting.authorized(workspaceId, principal, async (tx, actor) => {
         const row = await store.load(tx, id);
         const caps = await store.capabilities(tx, actor, row);
         if (!caps.manage && !caps.use) throw new AccessDenied();
@@ -244,7 +244,7 @@ export function oauthMethods(options: WorkspaceMcpOptions, store: McpStore) {
       input: unknown,
     ) {
       const credential = oauthCredentialSchema.parse(input);
-      const result = await store.authorized(workspaceId, principal, async (tx, actor) => {
+      const result = await store.acting.authorized(workspaceId, principal, async (tx, actor) => {
         const row = await store.load(tx, id);
         const caps = await store.capabilities(tx, actor, row);
         if (!caps.manage && !caps.use) throw new AccessDenied();
@@ -281,7 +281,7 @@ export function oauthMethods(options: WorkspaceMcpOptions, store: McpStore) {
       return result;
     },
     failRefresh(workspaceId: string, principal: McpPrincipal, id: string, claim: RefreshClaim) {
-      return store.authorized(workspaceId, principal, async (tx, actor) => {
+      return store.acting.authorized(workspaceId, principal, async (tx, actor) => {
         const row = await store.load(tx, id);
         const caps = await store.capabilities(tx, actor, row);
         if (!caps.manage && !caps.use) throw new AccessDenied();

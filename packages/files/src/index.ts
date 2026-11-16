@@ -1295,7 +1295,7 @@ export function createFiles(
     });
   }
   async function recordRecentUse(workspaceId: string, userId: string, id: string) {
-    return transaction(workspaceId, userId, true, (tx, actor) => recordFileUse(tx, actor, id));
+    return transaction(workspaceId, userId, false, (tx, actor) => recordFileUse(tx, actor, id));
   }
   async function share(workspaceId: string, userId: string, id: string, value: unknown, role: FileRole | null) {
     id = uuidSchema.parse(id);

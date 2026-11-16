@@ -123,11 +123,11 @@ export function createAgentTasks(
   async function transaction<T>(
     workspaceId: string,
     user: string,
-    write: boolean,
     operation: (tx: AgentTransaction & { commonVersion: number }, actor: HumanActor) => Promise<T>,
+    mode: 'read' | 'write' = 'read',
   ) {
     return runtime.transaction(uuidSchema.parse(workspaceId), commonCompatibility, async tx => {
-      await lockAuthorization(tx, write ? 'write' : 'read');
+      await lockAuthorization(tx, mode);
       return operation(tx, await resolveHuman(tx, user));
     });
   }
@@ -336,6 +336,9 @@ export function createAgentTasks(
       );
   }
   async function requireCapacity(tx: AgentTransaction, actor: HumanActor) {
+    await tx.client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 648298))', [
+      `${tx.schema}:${actor.membershipId}`,
+    ]);
     const count = z
       .number()
       .parse(
@@ -432,63 +435,72 @@ export function createAgentTasks(
     )
       throw new AccessDenied();
     if (input.mcpSelection && !claimMcpSelection) throw new AccessDenied();
-    return transaction(workspaceId, user, true, async (tx, actor) => {
-      const command = await previous(tx, actor, input.requestId, {
-        kind: 'start',
-        ...input,
-        ...(knowledgeOrigin ? { knowledgeOrigin } : {}),
-      });
-      if (command.receipt) {
-        await owned(tx, actor, command.receipt.id);
-        return command.receipt;
-      }
-      await guard?.(tx);
-      const activation = await admit(tx, actor, input.agentId, input.activationId);
-      const own = await bindGoogleInputs(tx, actor, input.sources);
-      const sources = [...own, ...carried];
-      await sourcesAllowed(tx, actor, sources);
-      await referencesFit(tx, own);
-      const requested = useActivationScope ? activation.scope : (input.scope ?? activation.scope);
-      const scope = await effectiveAgentScope(tx, actor, input.agentId, activation.scope, requested, activation.id);
-      const unavailable = await unavailableTableMessage(tx, actor, requested, scope);
-      const task = await insert(tx, actor, activation, {
-        ...input,
-        scope,
-        limits: await clampLimits(tx, input.agentId, input.limits),
-        sources,
-        ...(subagent
-          ? {
-              delegationDepth: 1,
-              // Selected skills load through skills.read even when the definition does not list it.
-              delegationTools: [
-                ...new Set([
-                  ...activation.definition.tools,
-                  ...(activation.definition.skills?.length ? ['skills.read' as const] : []),
-                ]),
-              ].filter(tool => !chatTools || chatTools.includes(tool)),
-            }
-          : {}),
-      });
-      if (unavailable) {
-        await tx.client.query(
-          `UPDATE ${relation(tx, 'tf_agent_tasks')} SET status='failed'${recordsTaskFailure(tx) ? ",failure_reason='authority-revoked'" : ''} WHERE id=$1`,
-          [task.id],
-        );
-        await append(tx, task, unavailable, [], 'agent');
-        task.status = 'failed';
-        taskTransition(tx, 'failed', 1, task.id);
-      }
-      if (tx.commonVersion >= 1 && knowledgeOrigin) {
-        const root = await knowledgeRootForRequest(tx, actor, knowledgeOrigin);
-        await tx.client.query(`UPDATE ${relation(tx, 'tf_agent_tasks')} SET knowledge_root=$2 WHERE id=$1`, [
-          task.id,
-          root ? JSON.stringify(root) : null,
+    return transaction(
+      workspaceId,
+      user,
+      async (tx, actor) => {
+        await tx.client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 648298))', [
+          `${tx.schema}:${actor.membershipId}`,
         ]);
-      }
-      if (input.mcpSelection && claimMcpSelection)
-        await claimMcpSelection(tx, actor, { ...input.mcpSelection, taskId: task.id, agentId: input.agentId });
-      return saveReceipt(tx, actor, input.requestId, command.digest, task);
-    });
+        const command = await previous(tx, actor, input.requestId, {
+          kind: 'start',
+          ...input,
+          ...(knowledgeOrigin ? { knowledgeOrigin } : {}),
+        });
+        if (command.receipt) {
+          await owned(tx, actor, command.receipt.id);
+          return command.receipt;
+        }
+        await guard?.(tx);
+        const activation = await admit(tx, actor, input.agentId, input.activationId);
+        const own = await bindGoogleInputs(tx, actor, input.sources);
+        const sources = [...own, ...carried];
+        await sourcesAllowed(tx, actor, sources);
+        await referencesFit(tx, own);
+        const requested = useActivationScope ? activation.scope : (input.scope ?? activation.scope);
+        const scope = await effectiveAgentScope(tx, actor, input.agentId, activation.scope, requested, activation.id);
+        const unavailable = await unavailableTableMessage(tx, actor, requested, scope);
+        const task = await insert(tx, actor, activation, {
+          ...input,
+          scope,
+          limits: await clampLimits(tx, input.agentId, input.limits),
+          sources,
+          ...(subagent
+            ? {
+                delegationDepth: 1,
+                // Selected skills load through skills.read even when the definition does not list it.
+                delegationTools: [
+                  ...new Set([
+                    ...activation.definition.tools,
+                    ...(activation.definition.skills?.length ? ['skills.read' as const] : []),
+                  ]),
+                ].filter(tool => !chatTools || chatTools.includes(tool)),
+              }
+            : {}),
+        });
+        if (unavailable) {
+          await tx.client.query(
+            `UPDATE ${relation(tx, 'tf_agent_tasks')} SET status='failed'${recordsTaskFailure(tx) ? ",failure_reason='authority-revoked'" : ''} WHERE id=$1`,
+            [task.id],
+          );
+          await append(tx, task, unavailable, [], 'agent');
+          task.status = 'failed';
+          taskTransition(tx, 'failed', 1, task.id);
+        }
+        if (tx.commonVersion >= 1 && knowledgeOrigin) {
+          const root = await knowledgeRootForRequest(tx, actor, knowledgeOrigin);
+          await tx.client.query(`UPDATE ${relation(tx, 'tf_agent_tasks')} SET knowledge_root=$2 WHERE id=$1`, [
+            task.id,
+            root ? JSON.stringify(root) : null,
+          ]);
+        }
+        if (input.mcpSelection && claimMcpSelection)
+          await claimMcpSelection(tx, actor, { ...input.mcpSelection, taskId: task.id, agentId: input.agentId });
+        return saveReceipt(tx, actor, input.requestId, command.digest, task);
+        // Claiming an integration selection takes the exclusive lock, and a transaction must never move up to it.
+      },
+      input.mcpSelection ? 'write' : 'read',
+    );
   }
   async function delegate(
     workspaceId: string,
@@ -502,8 +514,11 @@ export function createAgentTasks(
     parentRunId = uuidSchema.parse(parentRunId);
     requestId = uuidSchema.parse(requestId);
     const input = delegatedTaskInputSchema.parse(value);
-    return transaction(workspaceId, user, true, async (tx, actor) => {
+    return transaction(workspaceId, user, async (tx, actor) => {
       await tx.client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 648291))', [`${tx.schema}:${parentId}`]);
+      await tx.client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 648298))', [
+        `${tx.schema}:${actor.membershipId}`,
+      ]);
       const parent = await owned(tx, actor, parentId);
       if (
         !(
@@ -651,7 +666,7 @@ export function createAgentTasks(
   async function readResult(workspaceId: string, user: string, id: string, parentId?: string) {
     id = uuidSchema.parse(id);
     if (parentId) parentId = uuidSchema.parse(parentId);
-    return transaction(workspaceId, user, false, async (tx, actor) => {
+    return transaction(workspaceId, user, async (tx, actor) => {
       const task = await owned(tx, actor, id);
       if (parentId) {
         const parent = await owned(tx, actor, parentId);
@@ -680,7 +695,8 @@ export function createAgentTasks(
   async function reopen(workspaceId: string, user: string, id: string, value: unknown) {
     id = uuidSchema.parse(id);
     const input = reopenTaskSchema.parse(value);
-    return transaction(workspaceId, user, true, async (tx, actor) => {
+    return transaction(workspaceId, user, async (tx, actor) => {
+      await tx.client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 648291))', [`${tx.schema}:${id}`]);
       const task = await owned(tx, actor, id);
       const command = await previous(tx, actor, input.requestId, { kind: 'reopen', id, ...input });
       if (command.receipt) return command.receipt;
@@ -738,7 +754,8 @@ export function createAgentTasks(
   async function continueTask(workspaceId: string, user: string, id: string, value: unknown) {
     id = uuidSchema.parse(id);
     const input = continueTaskSchema.parse(value);
-    return transaction(workspaceId, user, true, async (tx, actor) => {
+    return transaction(workspaceId, user, async (tx, actor) => {
+      await tx.client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 648291))', [`${tx.schema}:${id}`]);
       const task = await owned(tx, actor, id);
       const command = await previous(tx, actor, input.requestId, { kind: 'continue', id, ...input });
       if (command.receipt) return command.receipt;
@@ -795,7 +812,7 @@ export function createAgentTasks(
   }
   async function read(workspaceId: string, user: string, id: string) {
     id = uuidSchema.parse(id);
-    return transaction(workspaceId, user, false, async (tx, actor) => {
+    return transaction(workspaceId, user, async (tx, actor) => {
       const task = await owned(tx, actor, id);
       await retainedSources(tx, actor, id);
       const value = await summary(tx, task);
@@ -841,7 +858,10 @@ export function createAgentTasks(
   }
   async function pause(workspaceId: string, user: string, id: string, value: unknown) {
     const input = z.strictObject({ expectedGeneration: z.number().int().nonnegative() }).parse(value);
-    return transaction(workspaceId, user, true, async (tx, actor) => {
+    return transaction(workspaceId, user, async (tx, actor) => {
+      await tx.client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 648291))', [
+        `${tx.schema}:${uuidSchema.parse(id)}`,
+      ]);
       const task = await owned(tx, actor, uuidSchema.parse(id));
       if (task.generation !== input.expectedGeneration) throw new AgentTaskError('generation-conflict');
       if (task.status === 'failed') await requireCapacity(tx, actor);
@@ -877,7 +897,7 @@ export function createAgentTasks(
     const query = taskListQuerySchema.parse(value);
     const position = query.after ? readTaskListCursor(query.after) : null;
     const scanLimit = query.search ? 1000 : query.limit + 1;
-    return transaction(workspaceId, user, false, async (tx, actor) => {
+    return transaction(workspaceId, user, async (tx, actor) => {
       const rows = z
         .array(storedSchema.extend({ cursorCreatedAt: z.iso.datetime({ precision: 6 }) }))
         .parse(
@@ -942,7 +962,7 @@ export function createAgentTasks(
   async function history(workspaceId: string, user: string, id: string, value: unknown = {}) {
     id = uuidSchema.parse(id);
     const query = taskHistoryQuerySchema.parse(value);
-    return transaction(workspaceId, user, false, (tx, actor) => readHistory(tx, actor, id, query));
+    return transaction(workspaceId, user, (tx, actor) => readHistory(tx, actor, id, query));
   }
   async function readHistory(
     tx: AgentTransaction,
@@ -969,7 +989,7 @@ export function createAgentTasks(
     return { messages, nextCursor: rows.length > query.limit ? (messages.at(-1)?.sequence ?? null) : null };
   }
   async function recent(workspaceId: string, user: string) {
-    return transaction(workspaceId, user, false, async (tx, actor) => {
+    return transaction(workspaceId, user, async (tx, actor) => {
       const tasks = relation(tx, 'tf_agent_tasks');
       const titles = new Map<string, string>();
       const page = await visiblePage(
@@ -1001,7 +1021,7 @@ export function createAgentTasks(
   async function attachment(workspaceId: string, user: string, id: string, attachmentId: string) {
     id = uuidSchema.parse(id);
     attachmentId = uuidSchema.parse(attachmentId);
-    return transaction(workspaceId, user, false, async (tx, actor) => {
+    return transaction(workspaceId, user, async (tx, actor) => {
       await owned(tx, actor, id);
       await retainedSources(tx, actor, id);
       const rows = z
@@ -1046,7 +1066,7 @@ export function createAgentTasks(
   async function checkSources(workspaceId: string, user: string, value: unknown, runId: string) {
     runId = uuidSchema.parse(runId);
     const sources = taskSourcesSchema.parse(value);
-    return transaction(workspaceId, user, false, async (tx, actor) => {
+    return transaction(workspaceId, user, async (tx, actor) => {
       await requireCurrentActor(tx, { kind: 'agent', runId });
       return sourcesAllowed(tx, actor, sources, new Set(), 0, { remaining: 1000 }, runId);
     });

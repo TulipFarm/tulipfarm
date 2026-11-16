@@ -210,11 +210,10 @@ export function createPlanDocumentStore(runtime: AgentStorage) {
   const humanTransaction = <T>(
     workspaceId: string,
     user: string,
-    write: boolean,
     operation: (tx: PlanTransaction, actor: HumanActor) => Promise<T>,
   ) =>
     transaction(workspaceId, async tx => {
-      await lockAuthorization(tx, write ? 'write' : 'read');
+      await lockAuthorization(tx);
       return operation(tx, await resolveHuman(tx, user));
     });
   async function readablePlan(tx: PlanTransaction, actor: HumanActor, planId: string, lock = false) {
@@ -665,7 +664,7 @@ export function createPlanDocumentStore(runtime: AgentStorage) {
      * open the plan's PDF (P16).
      */
     async page(workspaceId: string, user: string, planId: string, revision: number) {
-      return humanTransaction(workspaceId, user, false, async (tx, actor) => {
+      return humanTransaction(workspaceId, user, async (tx, actor) => {
         const plan = await readablePlan(tx, actor, planId);
         const page = z
           .object({
@@ -699,7 +698,7 @@ export function createPlanDocumentStore(runtime: AgentStorage) {
      * or null when it isn't failed or was too large, since the same revision renders to the same size.
      */
     async retry(workspaceId: string, user: string, planId: string): Promise<PlanDocumentMode | null> {
-      return humanTransaction(workspaceId, user, true, async (tx, actor) => {
+      return humanTransaction(workspaceId, user, async (tx, actor) => {
         const plan = await readablePlan(tx, actor, planId, true);
         if (!isStarter(plan, actor)) throw new AgentPlanError('not-starter');
         const at = await target(tx, planId, plan.revision);
@@ -711,7 +710,7 @@ export function createPlanDocumentStore(runtime: AgentStorage) {
     },
     /** Lets the starter file a new PDF after moving the old one to Trash or deleting it (P20). */
     async recreate(workspaceId: string, user: string, planId: string): Promise<PlanDocumentMode> {
-      return humanTransaction(workspaceId, user, true, async (tx, actor) => {
+      return humanTransaction(workspaceId, user, async (tx, actor) => {
         const plan = await readablePlan(tx, actor, planId, true);
         if (!isStarter(plan, actor)) throw new AgentPlanError('not-starter');
         if (plan.fileId && !plan.fileDetached && !(await fileGone(tx, plan.fileId)))

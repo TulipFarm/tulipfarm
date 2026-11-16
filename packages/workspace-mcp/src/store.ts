@@ -52,13 +52,25 @@ export function sourceUnion(...groups: McpSourceDependency[][]) {
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([, source]) => source);
 }
+type McpLockMode = 'read' | 'action' | 'write';
 export function createStore(options: WorkspaceMcpOptions) {
   const cipher = mcpCredentialCipher(options.keyring);
   const workspaces = new WeakMap<AuthorizationTransaction, string>();
-  async function transaction<T>(workspaceId: string, operation: (tx: AuthorizationTransaction) => Promise<T>) {
+  const unlocked = new WeakSet<AuthorizationTransaction>();
+  // 'write' is for policy changes: who may use an integration, its lifecycle, credential, tools and selections.
+  // 'read' shares the workspace lock and takes no row lock, so it can never wait behind, or deadlock with, an action.
+  // 'action' also shares it, and takes each integration row it loads exclusively, which orders the claims and
+  // discovery saved for that integration without stopping the rest of the workspace.
+  async function transaction<T>(
+    workspaceId: string,
+    operation: (tx: AuthorizationTransaction) => Promise<T>,
+    mode: McpLockMode = 'write',
+  ) {
     return options.runtime.transaction(z.uuid().parse(workspaceId), workspaceMcpCompatibility, async tx => {
       workspaces.set(tx, workspaceId);
-      await lockAuthorization(tx, 'write');
+      if (mode === 'read') unlocked.add(tx);
+      else unlocked.delete(tx);
+      await lockAuthorization(tx, mode === 'write' ? 'write' : 'read');
       return operation(tx);
     });
   }
@@ -66,12 +78,17 @@ export function createStore(options: WorkspaceMcpOptions) {
     workspaceId: string,
     principal: McpPrincipal,
     operation: (tx: AuthorizationTransaction, actor: HumanActor) => Promise<T>,
+    mode: McpLockMode = 'write',
   ) {
-    return transaction(workspaceId, async tx => {
-      const actor = typeof principal === 'string' ? await resolveHuman(tx, principal) : principal;
-      await currentMember(tx, actor);
-      return operation(tx, actor);
-    });
+    return transaction(
+      workspaceId,
+      async tx => {
+        const actor = typeof principal === 'string' ? await resolveHuman(tx, principal) : principal;
+        await currentMember(tx, actor);
+        return operation(tx, actor);
+      },
+      mode,
+    );
   }
   async function confirmation<T>(
     workspaceId: string,
@@ -97,9 +114,10 @@ export function createStore(options: WorkspaceMcpOptions) {
       .optional()
       .parse(
         (
-          await tx.client.query(`SELECT * FROM ${table(tx, 'integrations')} WHERE id=$1 FOR UPDATE`, [
-            z.uuid().parse(id),
-          ])
+          await tx.client.query(
+            `SELECT * FROM ${table(tx, 'integrations')} WHERE id=$1 ${unlocked.has(tx) ? '' : 'FOR UPDATE'}`,
+            [z.uuid().parse(id)],
+          )
         ).rows[0],
       );
     if (!row) throw new AccessDenied();
@@ -411,9 +429,20 @@ export function createStore(options: WorkspaceMcpOptions) {
     );
     return result;
   }
+  const as = (mode: McpLockMode) => ({
+    transaction: <T>(workspaceId: string, operation: (tx: AuthorizationTransaction) => Promise<T>) =>
+      transaction(workspaceId, operation, mode),
+    authorized: <T>(
+      workspaceId: string,
+      principal: McpPrincipal,
+      operation: (tx: AuthorizationTransaction, actor: HumanActor) => Promise<T>,
+    ) => authorized(workspaceId, principal, operation, mode),
+  });
   return {
     transaction,
     authorized,
+    reading: as('read'),
+    acting: as('action'),
     confirmation,
     load,
     capabilities,

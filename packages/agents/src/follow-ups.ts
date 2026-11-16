@@ -329,12 +329,15 @@ export function createFollowUps(runtime: AgentStorage, capture?: (sources: reado
     origin: FollowUpOrigin,
     call: ScheduleFollowUpCall,
   ) {
-    return withHuman(runtime, workspaceId, actor, 'write', async (tx, actor) => {
+    return withHuman(runtime, workspaceId, actor, 'read', async (tx, actor) => {
       if (Number(tx.commonVersion ?? 0) < followUpSourcesVersion)
         return refused(
           'unavailable',
           'Follow-ups are not available in this workspace yet. Tell the person it could not be scheduled, and do not do the deferred work now.',
         );
+      await tx.client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 648295))', [
+        `${tx.schema}:${actor.membershipId}`,
+      ]);
       const id = deterministicId(`follow-up:${origin.turnId}:${callId}`);
       const existing = await readRow(tx, id);
       if (existing)
@@ -480,7 +483,7 @@ export function createFollowUps(runtime: AgentStorage, capture?: (sources: reado
 
   /** The agent's cancel: only the requester's own follow-ups of this chat or thread. */
   async function cancel(workspaceId: string, actor: HumanActor, origin: FollowUpOrigin, followUpId: string) {
-    return withHuman(runtime, workspaceId, actor, 'write', async (tx, actor) => {
+    return withHuman(runtime, workspaceId, actor, 'read', async (tx, actor) => {
       if (!installed(tx)) return { status: 'not-found' as const };
       const binding = await bind(tx, actor, origin);
       if (!binding) return { status: 'not-found' as const };
@@ -509,7 +512,7 @@ export function createFollowUps(runtime: AgentStorage, capture?: (sources: reado
   }
 
   async function cancelInChat(workspaceId: string, userId: string, chatId: string, followUpId: string) {
-    return withHuman(runtime, workspaceId, userId, 'write', async (tx, actor) => {
+    return withHuman(runtime, workspaceId, userId, 'read', async (tx, actor) => {
       if (!installed(tx)) throw new AccessDenied();
       return protectedView(tx, actor, await cancelRow(tx, actor, followUpId, 'conversation_id=$3', [chatId]), capture);
     });
@@ -522,7 +525,7 @@ export function createFollowUps(runtime: AgentStorage, capture?: (sources: reado
     clicker: { appId: string; teamId: string; slackUserId: string },
   ) {
     return runtime.transaction(workspaceId, commonCompatibility, async tx => {
-      await lockAuthorization(tx, 'write');
+      await lockAuthorization(tx);
       if (!installed(tx)) throw new AccessDenied();
       const owner = z
         .object({ user_id: z.string(), membership_id: z.uuid() })
@@ -554,7 +557,11 @@ export function createFollowUps(runtime: AgentStorage, capture?: (sources: reado
   async function due(workspaceId: string, send: ChatFollowUpSend) {
     const claimed = await runtime.transaction(workspaceId, commonCompatibility, async tx => {
       if (!installed(tx)) return [];
-      await lockAuthorization(tx, 'write');
+      await lockAuthorization(tx);
+      const sweeping = await tx.client.query('SELECT pg_try_advisory_xact_lock(hashtextextended($1, 648296)) AS ok', [
+        `${tx.schema}:follow-up-sweep`,
+      ]);
+      if (!sweeping.rows[0]?.ok) return [];
       const lost = await tx.client.query(
         `UPDATE ${relation(tx, 'tf_follow_ups')} f SET status='skipped',failure_reason='requester-access-lost',finished_at=clock_timestamp()
         WHERE f.status IN ('pending','claimed') AND f.due_at<=clock_timestamp()

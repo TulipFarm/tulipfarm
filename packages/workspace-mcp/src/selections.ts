@@ -91,7 +91,7 @@ export function selectionMethods(options: WorkspaceMcpOptions, store: McpStore) 
   return {
     selectionFor(workspaceId: string, principal: McpPrincipal, input: McpSelectionSubject) {
       const subject = mcpSelectionSubjectSchema.parse(input);
-      return store.authorized(workspaceId, principal, async (tx, actor) => {
+      return store.reading.authorized(workspaceId, principal, async (tx, actor) => {
         const authority = await authorize(tx, actor, subject);
         const value = await load(tx, actor, subject);
         let stale = false;
@@ -186,7 +186,7 @@ export function selectionMethods(options: WorkspaceMcpOptions, store: McpStore) 
       return { version: value.version, bindings: old.bindings };
     },
     async reviewedDescriptors(workspaceId: string, principal: McpPrincipal) {
-      return store.authorized(workspaceId, principal, async (tx, actor) => {
+      return store.reading.authorized(workspaceId, principal, async (tx, actor) => {
         const ids = z
           .array(z.object({ id: z.uuid() }))
           .parse(
