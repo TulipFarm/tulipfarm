@@ -23,19 +23,27 @@ function mintThroughGateway() {
   return { stored, mint: () => store.mint(request) };
 }
 
-test('a handle the gateway mints verifies as the app it serves, and only its digest is stored', async () => {
+test('a handle the gateway mints verifies as the app it serves and its mint time, and only its digest is stored', async t => {
   const { stored, mint } = mintThroughGateway();
+  t.mock.timers.enable({ apis: ['Date'], now: 1_800_000_000_500 });
   const handle = await mint();
+  t.mock.timers.reset();
   assert.match(handle, /^tfr_[A-Za-z0-9_-]{64}$/);
-  assert.deepEqual(verifyRequestHandle(requestHandleKey(env), handle), { handle, appId: request.appId });
+  assert.deepEqual(verifyRequestHandle(requestHandleKey(env), handle), {
+    handle,
+    appId: request.appId,
+    mintedAt: 1_800_000_000,
+  });
   assert.deepEqual(stored, [
     [createHash('sha256').update(handle).digest(), request.workspaceId, request.appId, request.releaseId, 60],
   ]);
   assert.notEqual(await mint(), handle, 'each request gets its own handle');
 });
 
-test('a tampered handle, or one signed with another key, does not verify', async () => {
+test('a tampered handle, or one signed with another key, does not verify', async t => {
+  t.mock.timers.enable({ apis: ['Date'], now: 1_800_000_000_000 });
   const handle = await mintThroughGateway().mint();
+  t.mock.timers.reset();
   const key = requestHandleKey(env);
   const bytes = Buffer.from(handle.slice(4), 'base64url');
   const flipped = offset => {
@@ -45,13 +53,14 @@ test('a tampered handle, or one signed with another key, does not verify', async
   };
   for (const [offset, part] of [
     [0, 'app id'],
-    [20, 'random'],
+    [18, 'mint time'],
+    [24, 'random'],
     [47, 'signature'],
   ])
     assert.equal(verifyRequestHandle(key, flipped(offset)), null, part);
   const other = requestHandleKey({ ...env, WORKSPACE_RUNTIME_KEY: '22'.repeat(32) });
   assert.equal(verifyRequestHandle(other, handle), null, 'another key');
-  assert.deepEqual(verifyRequestHandle(key, handle), { handle, appId: request.appId });
+  assert.deepEqual(verifyRequestHandle(key, handle), { handle, appId: request.appId, mintedAt: 1_800_000_000 });
 });
 
 test('without the runtime key the gateway refuses to start', () => {
