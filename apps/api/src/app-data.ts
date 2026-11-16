@@ -1,12 +1,21 @@
-import type { FastifyInstance, FastifyRequest } from 'fastify';
+import { createHash } from 'node:crypto';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Pool } from 'pg';
 import { z } from 'zod';
 import { AccessDenied, type AppActor } from '@tulipfarm/access';
-import { resolveRequestHandle, type LiveAppRequest } from '@tulipfarm/apps/store';
+import {
+  liveRequestSeconds,
+  resolveRequestHandle,
+  verifyRequestHandle,
+  type LiveAppRequest,
+  type RequestHandleKey,
+  type SignedRequestHandle,
+} from '@tulipfarm/apps/store';
 import { TableValidationError } from '@tulipfarm/tables/definition';
 import type { createTableService } from '@tulipfarm/tables/service';
-import { isFeatureEnabled } from '@tulipfarm/observability';
-import type { createAbuseLimiter } from './abuse.ts';
+import { featureFlagAnswer } from '@tulipfarm/observability';
+import { busy, createFairSlots } from './app-data-slots.ts';
+import { createExpiringMap, createWindows } from './app-data-windows.ts';
 import { routeValidation } from './route-validation.ts';
 import { requestBoundaryError } from './security.ts';
 
@@ -50,21 +59,94 @@ const operations = {
   },
 };
 
-const requestPolicy = { name: 'app-data-request', max: 200, windowMs: 60_000 };
-const appPolicy = { name: 'app-data-app', max: 6_000, windowMs: 60_000 };
+/** The app data lookup pool's size. Its connections serve only request handle lookups, at most this many at once. */
+export const appDataLookupConnections = 3;
+
+type Verdict = { readonly live: LiveAppRequest; readonly checkedAt: number } | { readonly live: null };
 
 /**
  * Routes a public app's server calls while it serves a visitor. The `TulipFarm-Request` header the gateway added to
  * that visitor's request is the only authority; no session, cookie or body field can name the app or its release.
+ *
+ * Every app's sandbox reaches the API from the same address, so nothing here is limited by client address. A handle
+ * the gateway did not sign is refused before any other work. A signed handle is looked up on `lookups`, a pool of
+ * `appDataLookupConnections` that nothing else uses, and this process keeps the verdict per handle: a live one for 5 s,
+ * a closed one for 2 minutes. Lookups wait up to 100 ms for a connection, taking turns between apps, and get 503
+ * after that. An old handle this process has not seen live is live only if a long stream renews it, so each one found
+ * closed spends its app's `oldLookups` a minute, and once they are spent the app's unseen old handles get 429. Only a
+ * live request spends its own call limit, then its app's, and only its refusals count towards the app's `refusals` a
+ * minute. Every limit lives in this process.
  */
 export function registerAppData(
   app: FastifyInstance,
   dependencies: {
-    platform: Pick<Pool, 'query'>;
+    lookups: Pick<Pool, 'query'>;
+    handles: RequestHandleKey;
     tables: ViewTables;
-    limit: ReturnType<typeof createAbuseLimiter>;
+    limits?: { request?: number; app?: number; refusals?: number; oldLookups?: number };
   },
 ) {
+  const {
+    request: perRequest = 200,
+    app: perApp = 6_000,
+    refusals = 600,
+    oldLookups = 120,
+  } = dependencies.limits ?? {};
+  const windowMs = 60_000;
+  // A handle older than this is live only while the gateway renews it for a long stream. The 10 s cover clock skew.
+  const freshSeconds = liveRequestSeconds + 10;
+  // A live verdict lets a handle keep access for up to 5 s after it closes, and costs a busy request one lookup per 5 s.
+  const liveMs = 5_000;
+  // A closed handle never opens again. Keeping its verdict 2 minutes covers a fresh handle until it turns old, and
+  // keeping a live one that long marks its long stream as seen across the gateway's 20 s renewals. An entry is about
+  // 200 bytes, so the cap holds this map near 20 MB.
+  const verdicts = createExpiringMap<Verdict>({ ttlMs: 120_000, entries: 100_000 });
+  const oldClosed = createWindows({ max: oldLookups, windowMs });
+  const handleCalls = createWindows({ max: perRequest, windowMs });
+  const appCalls = createWindows({ max: perApp, windowMs });
+  const appRefusals = createWindows({ max: refusals, windowMs });
+  // One app holds at most 2 connections, so another app always waits for one turn at most per waiting app.
+  const slots = createFairSlots({ slots: appDataLookupConnections, perKey: 2, waitMs: 100 });
+  const inFlight = new Map<string, Promise<LiveAppRequest | null | typeof busy>>();
+  const lookUp = (signed: SignedRequestHandle, digest: string, unseenOld: boolean) => {
+    let lookup = inFlight.get(digest);
+    if (lookup) return lookup;
+    lookup = slots
+      .run(signed.appId, async () => {
+        // Calls that waited for this slot passed the budget check before the lookups ahead of them spent it.
+        if (unseenOld && oldClosed.wait(signed.appId) > 0) return busy;
+        const found = await resolveRequestHandle(dependencies.lookups, signed);
+        verdicts.set(digest, found ? { live: found, checkedAt: Date.now() } : { live: null });
+        if (!found && unseenOld) oldClosed.spend(signed.appId);
+        return found;
+      })
+      .finally(() => inFlight.delete(digest));
+    inFlight.set(digest, lookup);
+    return lookup;
+  };
+  // The flag provider may evaluate remotely, so each workspace's answer is kept for 30 s and shared by calls in flight.
+  // Turning app hosting on or off takes effect within that. A fallback after a failure is not kept.
+  const hosting = createExpiringMap<Promise<boolean>>({ ttlMs: 30_000, entries: 10_000 });
+  const appHosting = (workspaceId: string) => {
+    const held = hosting.get(workspaceId);
+    if (held) return held;
+    const forget = () => {
+      if (hosting.get(workspaceId) === enabled) hosting.delete(workspaceId);
+    };
+    const enabled = featureFlagAnswer('app-hosting', null, { id: workspaceId }).then(
+      answer => {
+        if (!answer.fromProvider) forget();
+        return answer.enabled;
+      },
+      error => {
+        forget();
+        throw error;
+      },
+    );
+    hosting.set(workspaceId, enabled);
+    return enabled;
+  };
+
   app.register(async routes => {
     const validation = routeValidation({
       target: 'openapi-3.0',
@@ -73,26 +155,57 @@ export function registerAppData(
     });
     validation.install(routes);
     const serving = new WeakMap<FastifyRequest, LiveAppRequest>();
+    const closed = (reply: FastifyReply) => reply.code(401).send({ error: 'request-closed' });
+    const tooMany = (reply: FastifyReply, ms: number) =>
+      reply
+        .code(429)
+        .header('Retry-After', Math.ceil(ms / 1000))
+        .send({ error: 'rate-limit-exceeded' });
 
     routes.addHook('onRequest', async (request, reply) => {
       reply.header('Cache-Control', 'no-store');
-      const header = request.headers['tulipfarm-request'];
-      const live = await resolveRequestHandle(dependencies.platform, header);
-      if (!live) return reply.code(401).send({ error: 'request-closed' });
-      if (!(await isFeatureEnabled('app-hosting', null, { id: live.workspaceId })))
+      const signed = verifyRequestHandle(dependencies.handles, request.headers['tulipfarm-request']);
+      if (!signed) return closed(reply);
+      const digest = createHash('sha256').update(signed.handle).digest('base64url');
+      const { appId } = signed;
+      const verdict = verdicts.get(digest);
+      if (verdict && !verdict.live) return closed(reply);
+      const unseenOld = !verdict && Date.now() / 1000 - signed.mintedAt > freshSeconds;
+      const wait = Math.max(
+        handleCalls.wait(digest),
+        appCalls.wait(appId),
+        appRefusals.wait(appId),
+        unseenOld ? oldClosed.wait(appId) : 0,
+      );
+      if (wait > 0) return tooMany(reply, wait);
+      const live =
+        verdict?.live && Date.now() - verdict.checkedAt < liveMs
+          ? verdict.live
+          : await lookUp(signed, digest, unseenOld);
+      if (live === busy) {
+        const spent = unseenOld ? oldClosed.wait(appId) : 0;
+        if (spent > 0) return tooMany(reply, spent);
+        return reply.code(503).header('Retry-After', 1).send({ error: 'temporarily-unavailable' });
+      }
+      if (!live) return closed(reply);
+      const retry = handleCalls.spend(digest) || appCalls.spend(live.appId);
+      if (retry > 0) {
+        appRefusals.spend(live.appId);
+        return tooMany(reply, retry);
+      }
+      if (!(await appHosting(live.workspaceId))) {
+        appRefusals.spend(live.appId);
         return reply.code(403).send({ error: 'denied' });
-      for (const [policy, identity] of [
-        [requestPolicy, String(header)],
-        [appPolicy, live.appId],
-      ] as const) {
-        const retry = await dependencies.limit(policy, identity);
-        if (retry !== null) return reply.code(429).header('Retry-After', retry).send({ error: 'rate-limit-exceeded' });
       }
       serving.set(request, live);
     });
 
     routes.setErrorHandler((error, request, reply) => {
-      if (error instanceof AccessDenied) return reply.code(403).send({ error: 'denied' });
+      if (error instanceof AccessDenied) {
+        const live = serving.get(request);
+        if (live) appRefusals.spend(live.appId);
+        return reply.code(403).send({ error: 'denied' });
+      }
       if (error instanceof TableValidationError)
         return reply.code(422).send({ error: 'invalid-value', fieldId: error.fieldId ?? null, message: error.message });
       if (error instanceof z.ZodError || (typeof error === 'object' && error !== null && 'validation' in error))

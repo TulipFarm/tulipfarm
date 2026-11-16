@@ -172,33 +172,34 @@ export async function appDataFixture(t) {
     },
   );
 
-  const created = await http(lead, 'POST', '', {
-    requestId: '11111111-1111-4111-8111-111111111111',
-    kind: 'public',
-    title: 'Blog',
-  });
-  const appId = created.body.id;
-  for (const [who, role] of [
-    [membership.editor, 'edit'],
-    [membership.reader, 'use'],
-  ])
-    assert.equal((await http(lead, 'PUT', `/${appId}/grants/member:${who}`, { role })).status, 200);
-  const live = randomUUID();
-  const build = randomUUID().replaceAll('-', '').padEnd(64, '0');
-  await db.platform.query(
-    `INSERT INTO ${schema}.tf_app_builds(id,app_id,commit,recipe,builder,status,manifest_digest,requested_by)
-    VALUES($1,$2,$3,'{}','test','succeeded',$4,$5)`,
-    [build, appId, 'c'.repeat(40), 'd'.repeat(64), membership.lead],
-  );
-  await db.platform.query(
-    `INSERT INTO ${schema}.tf_app_releases(id,app_id,number,build_id,commit,manifest_digest,published_by)
-    VALUES($1,$2,1,$3,$4,$5,$6)`,
-    [live, appId, build, 'c'.repeat(40), 'd'.repeat(64), membership.lead],
-  );
-  await db.platform.query(
-    `UPDATE ${schema}.tf_apps SET public_name='Blog', approval_state='approved', live_release_id=$2 WHERE id=$1`,
-    [appId, live],
-  );
+  /** Creates a public app on a live release; the editor may edit it and the reader may use it. */
+  const publishApp = async title => {
+    const created = await http(lead, 'POST', '', { requestId: randomUUID(), kind: 'public', title });
+    const appId = created.body.id;
+    for (const [who, role] of [
+      [membership.editor, 'edit'],
+      [membership.reader, 'use'],
+    ])
+      assert.equal((await http(lead, 'PUT', `/${appId}/grants/member:${who}`, { role })).status, 200);
+    const live = randomUUID();
+    const build = randomUUID().replaceAll('-', '').padEnd(64, '0');
+    await db.platform.query(
+      `INSERT INTO ${schema}.tf_app_builds(id,app_id,commit,recipe,builder,status,manifest_digest,requested_by)
+      VALUES($1,$2,$3,'{}','test','succeeded',$4,$5)`,
+      [build, appId, 'c'.repeat(40), 'd'.repeat(64), membership.lead],
+    );
+    await db.platform.query(
+      `INSERT INTO ${schema}.tf_app_releases(id,app_id,number,build_id,commit,manifest_digest,published_by)
+      VALUES($1,$2,1,$3,$4,$5,$6)`,
+      [live, appId, build, 'c'.repeat(40), 'd'.repeat(64), membership.lead],
+    );
+    await db.platform.query(
+      `UPDATE ${schema}.tf_apps SET public_name=$3, approval_state='approved', live_release_id=$2 WHERE id=$1`,
+      [appId, live, title],
+    );
+    return { appId, live, build };
+  };
+  const { appId, live, build } = await publishApp('Blog');
   return {
     cleanup,
     db,
@@ -220,5 +221,6 @@ export async function appDataFixture(t) {
     appId,
     live,
     build,
+    publishApp,
   };
 }

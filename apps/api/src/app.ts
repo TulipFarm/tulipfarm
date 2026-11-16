@@ -50,10 +50,12 @@ import { registerApps } from './apps.ts';
 import { appHostingFromEnvironment, temporalAppWorkflows } from './apps-hosting.ts';
 import { routeAppSites } from './apps-sites.ts';
 import { appBuilders } from '@tulipfarm/apps';
+import { requestHandleKey } from '@tulipfarm/apps/store';
 import { appBuilder, appHost } from '@tulipfarm/extensions';
 import type { Pool } from 'pg';
 import { registerPreviewTickets } from './app-preview-tickets.ts';
-import { registerAppData } from './app-data.ts';
+import { appDataLookupConnections, registerAppData } from './app-data.ts';
+import { createIdentityPool } from './identity-pool.ts';
 import { createTableService } from '@tulipfarm/tables/service';
 
 export function buildApp(
@@ -118,7 +120,7 @@ export function buildApp(
       registerUserVisits(v1, auth, authConfig().webOrigin);
       const models = createModelConfiguration({ pool: auth.pool });
       if (options.agentModel === undefined) v1.addHook('onReady', models.registerModelBundle);
-      const limit = registerAbuseProtection(v1, auth.auth);
+      registerAbuseProtection(v1, auth.auth);
       registerPublicGuide(v1, auth);
       v1.register(async business => {
         protectBusinessRequests(business);
@@ -222,7 +224,11 @@ export function buildApp(
           { readableFiles: async () => new Set() },
           commonCompatibility,
         );
-        registerAppData(data, { platform: auth.pool, tables, limit });
+        registerAppData(data, {
+          lookups: createIdentityPool(data, appDataLookupConnections),
+          handles: requestHandleKey(process.env),
+          tables,
+        });
       });
     },
     { prefix: '/v1' },

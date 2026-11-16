@@ -4,6 +4,7 @@ export * from './drafts.ts';
 export * from './grants.ts';
 export * from './live-requests.ts';
 export * from './names.ts';
+export * from './request-handles.ts';
 export * from './operations.ts';
 export * from './preview.ts';
 export * from './runtimes.ts';

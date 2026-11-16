@@ -1,17 +1,15 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { appIdSchema, releaseIdSchema, type AppId, type AppReleaseId } from '../ids.ts';
+import {
+  signRequestHandle,
+  type RequestHandle,
+  type RequestHandleKey,
+  type SignedRequestHandle,
+} from './request-handles.ts';
 import type { SqlClient } from './sql.ts';
 
 export const liveRequestSeconds = 60;
-
-const requestHandleSchema = z
-  .string()
-  .regex(/^tfr_[A-Za-z0-9_-]{43}$/)
-  .brand<'RequestHandle'>();
-
-/** The opaque handle the gateway gives an app server for one visitor request it is serving. */
-export type RequestHandle = z.infer<typeof requestHandleSchema>;
 
 /** The app and release serving a visitor request. */
 export type LiveAppRequest = {
@@ -29,9 +27,10 @@ const digest = (handle: RequestHandle) => createHash('sha256').update(handle).di
 /** Opens a request for `liveRequestSeconds`. The handle is returned once; only its digest is stored. */
 export async function mintRequestHandle(
   platform: SqlClient,
+  key: RequestHandleKey,
   request: LiveAppRequest,
 ): Promise<{ readonly handle: RequestHandle }> {
-  const handle = requestHandleSchema.parse(`tfr_${randomBytes(32).toString('base64url')}`);
+  const handle = signRequestHandle(key, request.appId);
   await platform.query(
     `INSERT INTO app.app_live_requests (handle_sha256, workspace_id, app_id, release_id, expires_at)
      VALUES ($1, $2, $3, $4, clock_timestamp() + make_interval(secs => $5))`,
@@ -55,15 +54,16 @@ export async function closeRequestHandle(platform: SqlClient, handle: RequestHan
   await platform.query('DELETE FROM app.app_live_requests WHERE handle_sha256 = $1', [digest(handle)]);
 }
 
-/** Reads the request an untrusted handle names, or null when it is malformed, unknown, expired or closed. */
-export async function resolveRequestHandle(platform: SqlClient, input: unknown): Promise<LiveAppRequest | null> {
-  const handle = requestHandleSchema.safeParse(input);
-  if (!handle.success) return null;
+/** Reads the request a verified handle names, or null when it is unknown, expired or closed. */
+export async function resolveRequestHandle(
+  platform: SqlClient,
+  { handle, appId }: SignedRequestHandle,
+): Promise<LiveAppRequest | null> {
   const [row] = (
     await platform.query(
       `SELECT workspace_id, app_id, release_id FROM app.app_live_requests
-       WHERE handle_sha256 = $1 AND expires_at > clock_timestamp()`,
-      [digest(handle.data)],
+       WHERE handle_sha256 = $1 AND app_id = $2 AND expires_at > clock_timestamp()`,
+      [digest(handle), appId],
     )
   ).rows;
   return row ? liveRequestRowSchema.parse(row) : null;
