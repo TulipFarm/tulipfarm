@@ -293,8 +293,9 @@ test('an app server reaches an approved view only while a visitor request is ope
     assert.equal(limiterQueries - before, 0);
   });
 
+  const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
   const until = async ready => {
-    while (!ready()) await new Promise(resolve => setTimeout(resolve, 5));
+    while (!ready()) await sleep(1);
   };
   const otherApp = async name => {
     const other = await publishApp(name);
@@ -321,32 +322,36 @@ test('an app server reaches an approved view only while a visitor request is ope
     return { platform, of: app => looked.get(app) ?? 0 };
   };
 
-  await t.test('one app holds at most two of the four lookup slots, so another app still gets one', async () => {
-    const other = await otherApp('Counter');
-    const otherHandle = await other.open();
-    let waiting = 0;
-    let most = 0;
+  const gatedPool = () => {
     let release;
     const gate = new Promise(resolve => (release = resolve));
-    const gated = {
+    const state = { waiting: 0, most: 0, release };
+    state.platform = {
       query: async (...args) => {
-        most = Math.max(most, ++waiting);
+        state.most = Math.max(state.most, ++state.waiting);
         await gate;
-        waiting--;
+        state.waiting--;
         return pool.query(...args);
       },
     };
-    const server = await serve(undefined, gated);
+    return state;
+  };
+
+  await t.test('a lookup that waits longer than 100 ms is refused, and another app still gets a slot', async () => {
+    const other = await otherApp('Counter');
+    const otherHandle = await other.open();
+    const gated = gatedPool();
+    const server = await serve(undefined, gated.platform);
     const flood = await Promise.all(Array.from({ length: 10 }, () => open()));
     let answered = 0;
     const calls = flood.map(request => call(request, 'list', list, nat, viewId, server).finally(() => answered++));
-    await until(() => waiting + answered === 10);
-    let settled = false;
-    const theirs = call(otherHandle, 'list', list, nat, other.view, server).finally(() => (settled = true));
-    await until(() => waiting === 3 || settled);
-    release();
+    await until(() => gated.waiting === 2);
+    const theirs = call(otherHandle, 'list', list, nat, other.view, server);
+    await until(() => gated.waiting === 3);
+    await until(() => answered === 8);
+    gated.release();
     const responses = await Promise.all(calls);
-    assert.equal(most, 3, 'two lookups for the flooding app and one for the other');
+    assert.equal(gated.most, 3, 'two lookups for the flooding app and one for the other');
     assert.deepEqual(
       responses.map(response => response.status).sort(),
       [200, 200, 503, 503, 503, 503, 503, 503, 503, 503],
@@ -358,31 +363,113 @@ test('an app server reaches an approved view only while a visitor request is ope
     assert.equal((await theirs).status, 200, 'the other app is served');
   });
 
+  await t.test('a busy app whose lookups wait briefly on a slow pool gets no 503', async () => {
+    const gated = gatedPool();
+    const server = await build(undefined, gated.platform);
+    const visitors = await Promise.all(Array.from({ length: 20 }, () => open()));
+    const calls = visitors.map(visitor => inject(server, visitor));
+    await until(() => gated.waiting === 2);
+    await sleep(30);
+    gated.release();
+    assert.deepEqual(
+      (await Promise.all(calls)).map(response => response.status),
+      Array(20).fill(200),
+    );
+  });
+
+  await t.test("a tenant flooding from many apps cannot fail another app's call", async () => {
+    const other = await otherApp('Market');
+    const otherHandle = await other.open();
+    const slow = { query: async (...args) => (await sleep(3), pool.query(...args)) };
+    const server = await build(undefined, slow);
+    let flooding = true;
+    const flooded = new Set();
+    const flood = Array.from({ length: 20 }, () => randomUUID()).flatMap(app =>
+      Array.from({ length: 10 }, async () => {
+        while (flooding) {
+          flooded.add((await inject(server, signRequestHandle(handles, app))).status);
+          await sleep(1);
+        }
+      }),
+    );
+    await sleep(50);
+    const theirs = [];
+    for (let index = 0; index < 5; index++) {
+      theirs.push((await inject(server, otherHandle, other.view)).status);
+      await sleep(10);
+    }
+    flooding = false;
+    await Promise.all(flood);
+    assert.deepEqual([...flooded].sort(), [401, 503], 'the flood outran its lookups');
+    assert.deepEqual(theirs, [200, 200, 200, 200, 200], 'the other app is served within the wait');
+  });
+
   await t.test("one request's parallel calls share one lookup", async () => {
-    let waiting = 0;
-    let most = 0;
-    let release;
-    const gate = new Promise(resolve => (release = resolve));
-    const gated = {
-      query: async (...args) => {
-        most = Math.max(most, ++waiting);
-        await gate;
-        waiting--;
-        return pool.query(...args);
-      },
-    };
-    const server = await build(undefined, gated);
+    const gated = gatedPool();
+    const server = await build(undefined, gated.platform);
     const parallel = await open();
-    let answered = 0;
-    const calls = Array.from({ length: 5 }, () => inject(server, parallel).finally(() => answered++));
-    await until(() => waiting + answered >= 1);
-    await new Promise(resolve => setTimeout(resolve, 50));
-    release();
+    const calls = Array.from({ length: 5 }, () => inject(server, parallel));
+    await until(() => gated.waiting === 1);
+    await sleep(50);
+    gated.release();
     assert.deepEqual(
       (await Promise.all(calls)).map(response => response.status),
       [200, 200, 200, 200, 200],
     );
-    assert.equal(most, 1);
+    assert.equal(gated.most, 1);
+  });
+
+  await t.test("a live request's calls share one lookup every five seconds", async t => {
+    const lookups = lookupsByApp();
+    const server = await build({ request: 1_000 }, lookups.platform);
+    t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
+    const busy = await open();
+    const statuses = new Set();
+    for (let index = 0; index < 500; index++) {
+      t.mock.timers.tick(10);
+      statuses.add((await inject(server, busy)).status);
+    }
+    assert.deepEqual([...statuses], [200]);
+    assert.ok(lookups.of(appId) <= 2, `${lookups.of(appId)} lookups for 500 calls in 5 s`);
+  });
+
+  await t.test(
+    "a leaked old handle replayed 1000 times costs one lookup a window and leaves its app's long streams served",
+    async t => {
+      const lookups = lookupsByApp();
+      const server = await build(undefined, lookups.platform);
+      t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
+      const streams = [await open(), await open()];
+      for (const stream of streams) assert.equal((await inject(server, stream)).status, 200);
+      const leaked = await open();
+      await closeRequestHandle(pool, leaked);
+      for (let window = 0; window < 2; window++) {
+        t.mock.timers.tick(window === 0 ? 71_000 : 121_000);
+        for (const stream of streams) assert.equal(await renewRequestHandle(pool, stream), true);
+        const before = lookups.of(appId);
+        const statuses = new Set();
+        for (let index = 0; index < 1000; index++) statuses.add((await inject(server, leaked)).status);
+        assert.deepEqual([...statuses], [401], `window ${window + 1}`);
+        assert.ok(lookups.of(appId) - before <= 1, `${lookups.of(appId) - before} lookups in window ${window + 1}`);
+        for (const stream of streams)
+          assert.equal((await inject(server, stream)).status, 200, `a long stream in window ${window + 1}`);
+      }
+    },
+  );
+
+  await t.test("an app's cleanup calls after its visitors leave do not cut off its long streams", async t => {
+    const server = await build();
+    t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
+    const streams = [await open(), await open()];
+    const visitors = await Promise.all(Array.from({ length: 300 }, () => open()));
+    for (const request of [...streams, ...visitors]) assert.equal((await inject(server, request)).status, 200);
+    t.mock.timers.tick(71_000);
+    for (const stream of streams) assert.equal(await renewRequestHandle(pool, stream), true);
+    for (const visitor of visitors) await closeRequestHandle(pool, visitor);
+    const cleanup = new Set();
+    for (const visitor of visitors) cleanup.add((await inject(server, visitor)).status);
+    assert.deepEqual([...cleanup], [401], 'every cleanup call within one minute is refused as closed');
+    for (const stream of streams) assert.equal((await inject(server, stream)).status, 200);
   });
 
   await t.test('a stockpile of closed handles larger than the memo cannot exhaust lookups', async t => {
@@ -401,7 +488,7 @@ test('an app server reaches an approved view only while a visitor request is ope
     assert.deepEqual(await replay(), { lookups: 10_001, statuses: [401] }, 'each new handle is looked up once');
     assert.deepEqual(await replay(), { lookups: 0, statuses: [401] }, 'and then refused from memory');
 
-    t.mock.timers.tick(71_000);
+    t.mock.timers.tick(121_000);
     const before = lookups.of(appId);
     const theirs = new Set();
     const ours = [];
@@ -415,7 +502,11 @@ test('an app server reaches an approved view only while a visitor request is ope
       lookups.of(appId) - before <= 122,
       `${lookups.of(appId) - before} lookups once the handles are old: the budget and two in flight`,
     );
-    assert.deepEqual([...theirs].sort(), [401, 429, 503]);
+    assert.ok(theirs.has(401) && theirs.has(429), [...theirs].join());
+    assert.ok(
+      [...theirs].every(status => [401, 429, 503].includes(status)),
+      [...theirs].join(),
+    );
     assert.deepEqual(ours, Array(11).fill(200), 'the other app is never refused');
     const after = lookups.of(appId);
     assert.deepEqual(outcome(await inject(server, stockpile[0])), tooMany);
@@ -443,9 +534,12 @@ test('an app server reaches an approved view only while a visitor request is ope
     const server = await build({ oldLookups: 5 }, lookups.platform);
     t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
     const stream = await open();
+    const unseen = await open();
     const otherStream = await other.open();
+    assert.equal((await inject(server, stream)).status, 200);
     const stale = Array.from({ length: 20 }, () => signRequestHandle(handles, appId));
     t.mock.timers.tick(71_000);
+    const before = lookups.of(appId);
     const statuses = [];
     for (const replayed of stale) {
       const refused = await inject(server, replayed);
@@ -453,8 +547,9 @@ test('an app server reaches an approved view only while a visitor request is ope
       if (refused.status === 429) assert.ok(Number(refused.headers['retry-after']) > 0);
     }
     assert.deepEqual(statuses, [...Array(5).fill(401), ...Array(15).fill(429)]);
-    assert.equal(lookups.of(appId), 5, 'refused from memory once the budget is spent');
-    assert.deepEqual(outcome(await inject(server, stream)), tooMany, "the app's own long streams wait");
+    assert.equal(lookups.of(appId) - before, 5, 'refused from memory once the budget is spent');
+    assert.equal((await inject(server, stream)).status, 200, 'a long stream this process has seen live is served');
+    assert.deepEqual(outcome(await inject(server, unseen)), tooMany, 'a long stream it has not seen waits');
     assert.equal((await inject(server, await open())).status, 200, 'its new requests are still served');
     assert.equal((await inject(server, otherStream, other.view)).status, 200, "another app's long stream is served");
   });
@@ -603,9 +698,14 @@ test('an app server reaches an approved view only while a visitor request is ope
     assert.equal((await call(handle, 'list', list)).status, 200);
   });
 
-  await t.test('a closed request has no authority', async () => {
+  await t.test('a closed request loses its authority within five seconds', async t => {
+    const server = await build();
+    t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
+    assert.equal((await inject(server, handle)).status, 200);
     await closeRequestHandle(pool, handle);
-    assert.deepEqual(outcome(await call(handle, 'list', list)), closed);
+    assert.equal((await inject(server, handle)).status, 200, 'the verdict is kept for five seconds');
+    t.mock.timers.tick(5_000);
+    assert.deepEqual(outcome(await inject(server, handle)), closed);
     assert.deepEqual(outcome(await call(handle, 'read', { ...ada, recordId: helloId })), closed);
   });
 });
