@@ -105,7 +105,7 @@ async function servingRelease(tx: TableTransaction, appId: string) {
   const row = (
     await tx.client.query(
       `SELECT live_release_id FROM ${table(tx, 'tf_apps')} WHERE id=$1 AND kind='public' AND approval_state='approved'
-        AND disabled_at IS NULL AND archived_at IS NULL AND budget_paused_at IS NULL`,
+        AND disabled_at IS NULL AND archived_at IS NULL AND editor_paused_at IS NULL AND budget_paused_at IS NULL`,
       [appId],
     )
   ).rows[0] as { live_release_id: string | null } | undefined;
