@@ -51,7 +51,7 @@ import { ToolActivity } from '@tulipfarm/sprout/tool-activity';
 import { toolActivityItems, visibleActivityTools } from './tool-labels';
 import { StepNarration } from './step-details';
 import { newestTools, reconcileLiveTools, succeeded, unclaimedToolTurns } from './live-tools';
-import { useCurrentReply, type OutgoingMessage } from './current-reply';
+import { useCurrentReply, useRotatingLabel, type OutgoingMessage } from './current-reply';
 import { useSmoothText } from './smooth-text';
 import { TypedText } from '@tulipfarm/sprout/typed-text';
 import { UnsavedChanges } from '@/features/tables/feedback';
@@ -1008,12 +1008,13 @@ function ConversationDetail({
         })
     : undefined;
   const currentTool = activityTools.find(tool => (tool.activityStatus ?? tool.status) === 'running');
-  const activityLabel =
+  const baseActivityLabel =
     currentTool && !status
       ? currentTool.activity?.trim() || currentTool.presentation?.label || toolActivityItems([currentTool])[0]?.label
       : thinking
         ? activity.label
         : null;
+  const activityLabel = useRotatingLabel(baseActivityLabel);
   const empty = data?.messages.length === 0 && !pending && incomingTurns.length === 0 && !packages.active;
   startScreen.current = !compact && empty;
   const latestId = pending?.id ?? data?.messages.at(-1)?.id;

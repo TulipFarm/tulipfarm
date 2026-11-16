@@ -164,3 +164,19 @@ export function useCurrentReply(input: ReplyInput) {
     slowTurn: processingKey && slowKey === processingKey && !reply.answerText && !reply.layoutJson ? reply.turn : null,
   };
 }
+
+const idlePhrases = ['Thinking', 'Reading your request', 'Gathering context', 'Working it out', 'Putting it together'];
+
+/** Rotates the generic "Thinking" label so a long wait still looks like progress; real tool labels pass through. */
+export function useRotatingLabel(label: string | null) {
+  const [tick, setTick] = useState(0);
+  const generic = label !== null && /^(Thinking|Planning next step)/.test(label);
+  useEffect(() => {
+    if (!generic) return;
+    const timer = setInterval(() => setTick(value => value + 1), 3000);
+    return () => clearInterval(timer);
+  }, [generic]);
+  if (!generic || tick === 0) return label;
+  const suffix = / · Step \d+$/.exec(label)?.[0] ?? '';
+  return `${idlePhrases[tick % idlePhrases.length]}${suffix}`;
+}
