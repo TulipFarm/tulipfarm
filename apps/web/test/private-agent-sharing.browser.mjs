@@ -125,7 +125,9 @@ test('personal agent creation and manager sharing retain inputs across failures'
     await page.getByRole('textbox', { name: 'Instructions', exact: true }).fill('Use only my permitted data.');
     await page.getByRole('button', { name: 'Save draft', exact: true }).click();
     // A saved draft offers Continue editing rather than a link to the agent (cloud builder.tsx:37,179,184).
-    await page.getByText('Draft saved. Slack channels and schedules are not started.', { exact: true }).waitFor();
+    await page
+      .getByText('Draft saved. Slack channels and workflow triggers are not started.', { exact: true })
+      .waitFor();
     assert.equal(writes.length, 1);
     assert.equal(writes[0].owningTeamId, null);
     await page.goto(`${origin}/${workspace.slug}/agents/${agentId}`);

@@ -5,7 +5,7 @@ import { chromium } from 'playwright';
 import { notifyChange } from './chat-query.fixture.mjs';
 import { governanceSnapshot } from './governance-snapshot.mjs';
 import { catalogFamily } from '../src/features/models/catalog-fixture.ts';
-import { modelOption } from './browser-controls.mjs';
+import { clearEditor, modelOption } from './browser-controls.mjs';
 
 const port = Number(process.env.FIRST_RESULT_PORT ?? 5317);
 const cdpPort = port + 4000;
@@ -86,6 +86,7 @@ try {
               user: { id: 'ada', name: 'Ada', email: 'ada@example.com' },
             }
           : null;
+      else if (path === '/v1/auth/update-user') json = { status: true };
       else if (path === '/v1/workspaces') json = [workspace];
       else if (path === '/v1/workspaces/acme') json = workspace;
       else if (path.endsWith('/credits'))
@@ -240,32 +241,35 @@ try {
     await page.keyboard.press('Escape');
     await page.goto(`${origin}/acme/integrations`);
     await page.getByRole('heading', { name: 'Integrations', exact: true }).waitFor();
-    await page.getByRole('button', { name: 'Gmail', exact: true }).waitFor();
+    await page.getByRole('link', { name: 'Gmail', exact: true }).waitFor();
     await screenshot('integrations');
     if (before) {
       await context.close();
       continue;
     }
 
-    for (const [hash, name, panel] of [
-      ['github-integrations', 'GitHub', 'Your account'],
-      ['atlassian-heading', 'Jira', 'Your account'],
+    // Old sheet links open the integration's own page on its Accounts tab.
+    for (const [hash, id, name] of [
+      ['github-integrations', 'github', 'GitHub'],
+      ['atlassian-heading', 'jira', 'Jira'],
     ]) {
       await page.goto(`${origin}/acme/integrations#${hash}`);
+      await page.waitForURL(`${origin}/acme/integrations/${id}?tab=accounts`);
       assert.equal(
         await page
-          .getByRole('dialog', { name })
-          .getByRole('button', { name: panel, exact: true })
-          .getAttribute('aria-expanded'),
+          .getByRole('tablist', { name: `${name} sections` })
+          .getByRole('tab', { name: 'Accounts', exact: true })
+          .getAttribute('aria-selected'),
         'true',
       );
     }
     role = 'member';
-    await page.goto(`${origin}/acme/integrations#gmail`);
+    await page.goto(`${origin}/acme/integrations/gmail`);
     await page.reload();
-    await page.getByRole('dialog').getByRole('button', { name: 'Your account', exact: true }).waitFor();
+    const sections = page.getByRole('tablist', { name: 'Gmail sections' });
+    await sections.getByRole('tab', { name: 'Accounts', exact: true }).waitFor();
     assert.equal(
-      await page.getByRole('dialog').getByRole('region', { name: 'Settings', exact: true }).count(),
+      await sections.getByRole('tab', { name: 'Settings', exact: true }).count(),
       0,
       'Workspace settings are admin-only',
     );
@@ -276,16 +280,25 @@ try {
     const send = page.getByRole('button', { name: 'Send message', exact: true });
     await page.getByRole('combobox', { name: 'Model: Claude Sonnet', exact: true }).click();
     await modelOption(page, 'Gemini Flash').click();
-    // Cloud 8f05815c (#856) sends a starter on click from a new chat (private-conversations.tsx:454); a draft still disables starters.
+    // A starter card sends on click from a new chat (private-conversations.tsx); a draft still disables starters.
+    const starters = page.getByRole('region', { name: 'Recommended for you', exact: true });
+    const sendEnabled = enabled =>
+      page.waitForFunction(
+        enabled => document.querySelector('[aria-label="Send message"]')?.disabled === !enabled,
+        enabled,
+      );
     await message.fill('My own draft');
+    // The editor registers typed text asynchronously; clearing it before then would act on the old, empty draft.
+    await sendEnabled(true);
     assert.equal(
-      await page.getByRole('button', { name: 'Draft a support reply', exact: true }).isEnabled(),
+      await starters.getByRole('button', { name: /Draft a support reply/ }).isEnabled(),
       false,
       'A starter cannot overwrite a draft',
     );
-    await message.fill('');
+    await clearEditor(message);
+    await sendEnabled(false);
     assert.equal(sends.length, 0, 'Typing a draft does not submit');
-    await page.getByRole('button', { name: 'Plan customer follow-ups', exact: true }).click();
+    await starters.getByRole('button', { name: /Plan customer follow-ups/ }).click();
     await page.getByText(/^Help me plan customer follow-ups\./).waitFor();
     await page
       .getByText(
@@ -305,11 +318,11 @@ try {
         : item,
     );
     await notifyChange(page, workspace.id, 'ada', 'catalog');
-    await page.getByText(/Claude Sonnet is disabled in this workspace/).waitFor();
-    assert.equal(await send.isEnabled(), false);
+    // A selection that becomes unavailable is replaced with an available model, keeping the draft.
+    await page.getByRole('combobox', { name: 'Model: Gemini Flash', exact: true }).waitFor();
     assert.equal(await message.textContent(), 'Keep this draft while checking models.');
     await screenshot('model-disabled');
-    await page.getByRole('combobox', { name: 'Model: Claude Sonnet', exact: true }).click();
+    await page.getByRole('combobox', { name: 'Model: Gemini Flash', exact: true }).click();
     assert.equal(
       await page.getByRole('option', { name: /^Claude Sonnet .*disabled in workspace/ }).getAttribute('aria-disabled'),
       'true',
@@ -347,13 +360,15 @@ try {
     await notifyChange(page, workspace.id, 'ada', 'catalog');
     await page.getByText(/No models configured/).waitFor();
     assert.equal(await message.textContent(), 'Keep this draft while checking models.');
-    await message.fill('');
+    await clearEditor(message);
     await page.goto(`${origin}/acme`);
     await page.getByText(/No models configured/).waitFor();
     assert.equal(await send.isEnabled(), false);
     catalogStatus = 503;
     await page.reload();
-    await page.getByText(/No models configured/).waitFor();
+    // A fresh page has no catalog to show while the failing read retries, so it reports the check in progress.
+    await page.getByText('Checking available models…', { exact: true }).waitFor();
+    assert.equal(await send.isEnabled(), false);
     await notifyChange(page, workspace.id, 'ada', 'catalog');
     await page.getByText(/Could not check model availability/).waitFor();
     catalogStatus = 200;

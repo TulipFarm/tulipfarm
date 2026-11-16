@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { BrandIcon } from '@tulipfarm/sprout/brand-icon';
 import type { RichTextKeyword, RichTextKeywordAccount } from '@tulipfarm/sprout/rich-text-editor';
@@ -107,6 +107,9 @@ export function useIntegrationKeywords(
       },
     ];
   });
+  // Chat messages read the keywords through context, so a new array on every render would re-render each message.
+  const signature = JSON.stringify(keywords, (key, value: unknown) => (key === 'icon' ? undefined : value));
+  const stableKeywords = useMemo(() => keywords, [signature]);
   const connect = (keyword: RichTextKeyword) =>
     void navigate({
       to: '/$workspaceSlug/integrations',
@@ -141,5 +144,5 @@ export function useIntegrationKeywords(
     if (draftChoice) await select(chatId, draftChoice);
     if (slackDraftChoice === 'app') await selectSlack(chatId, 'app');
   };
-  return { keywords, connect, switchAccount, applyDraft };
+  return { keywords: stableKeywords, connect, switchAccount, applyDraft };
 }

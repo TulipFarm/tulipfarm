@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { stripVTControlCharacters } from 'node:util';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
@@ -272,6 +273,10 @@ test('models in the actual Vite app through a local HTTP API fixture', { timeout
             preferences: [],
           });
         if (path === `${base}/recommendations/events`) return send({ error: 'recommendations-unavailable' }, 503);
+        // The sidebar lists pinned chats, recent chats and recent agents.
+        if (path === `${base}/conversations/pinned`) return send({ chats: [] });
+        if (path === `${base}/conversations`) return send({ chats: [], nextCursor: null });
+        if (path === `${base}/agents/recent`) return send([]);
         if (path === `${base}/settings`) return send({ error: 'forbidden' }, 403);
         if (path === `${base}/credits`)
           return send({ available: 1000, granted: 1000, used: 0, held: 0, days: [], breakdown: [], series: [] });
@@ -506,16 +511,17 @@ test('models in the actual Vite app through a local HTTP API fixture', { timeout
     vite.on('error', error => {
       output += String(error);
     });
-    for (let attempt = 0; ; attempt++) {
+    for (let attempt = 0, last = 'no response'; ; attempt++) {
       assert.equal(vite.exitCode, null, `Vite exited. ${output}`);
       const ready =
-        output.includes(`http://127.0.0.1:${webPort}`) &&
+        // On CI Vite colours its output, styling the port separately.
+        stripVTControlCharacters(output).includes(`http://127.0.0.1:${webPort}`) &&
         (await fetch(origin, { signal: AbortSignal.timeout(1000) }).then(
-          response => response.ok,
-          () => false,
+          response => ((last = `HTTP ${response.status}`), response.ok),
+          error => ((last = String(error.cause ?? error)), false),
         ));
       if (ready) break;
-      assert.ok(attempt < 150, `Vite did not start. ${output}`);
+      assert.ok(attempt < 600, `Vite did not start (last probe: ${last}). ${output}`);
       await delay(100);
     }
     browser = await chromium.launch({ headless: true });
@@ -634,6 +640,17 @@ test('models in the actual Vite app through a local HTTP API fixture', { timeout
       fixture.requests.filter(request => request.method === 'GET' && request.path === `${base}/compaction-policy`)
         .length;
     const policyWrites = fixture => writes(fixture).filter(request => request.path === `${base}/compaction-policy`);
+    // Holds the retry's read until the button shows it is busy, so the read can't still be running when the
+    // test changes the fixture's answer.
+    async function failedRetry(retry, fixture) {
+      const reads = policyReads(fixture);
+      fixture.compactionGate = gate();
+      await retry.click();
+      await eventually(() => policyReads(fixture) > reads, true);
+      await eventually(() => retry.isEnabled(), false);
+      fixture.compactionGate.release();
+      await eventually(() => retry.isEnabled(), true);
+    }
     async function compaction(page) {
       await models(page, 'compaction');
       await eventually(() => trigger(page).isEnabled(), true);
@@ -704,8 +721,7 @@ test('models in the actual Vite app through a local HTTP API fixture', { timeout
       await retry.waitFor();
       assert.equal(await trigger(page).inputValue(), '85');
       assert.equal(await saveCompaction(page).getAttribute('aria-disabled'), 'true');
-      await retry.click();
-      await eventually(() => retry.isEnabled(), true);
+      await failedRetry(retry, fixture);
       assert.equal(await trigger(page).inputValue(), '85');
       fixture.compactionStatus = 200;
       await retry.click();
@@ -777,8 +793,7 @@ test('models in the actual Vite app through a local HTTP API fixture', { timeout
         fixture.compactionGate.release();
         const retry = page.getByRole('button', { name: 'Retry compaction settings', exact: true });
         await retry.waitFor();
-        await retry.click();
-        await eventually(() => retry.isEnabled(), true);
+        await failedRetry(retry, fixture);
         assert.equal(await trigger(page).count(), 0);
         fixture.compactionStatus = 200;
         await retry.click();
@@ -1017,7 +1032,8 @@ test('models in the actual Vite app through a local HTTP API fixture', { timeout
       await page.getByRole('heading', { name: 'Could not load workspace models' }).waitFor();
       await eventually(
         () => fixture.requests.filter(request => request.path.endsWith('/model-catalog')).length,
-        count + 3,
+        // Three read attempts, each resent once after the 503 gateway answer.
+        count + 6,
       );
       assert.equal(await page.evaluate(() => window.modelEmptySeen), false);
       fixture.catalogStatus = 200;
@@ -1724,7 +1740,9 @@ test('models in the actual Vite app through a local HTTP API fixture', { timeout
           .getByRole('textbox', { name: 'Instructions', exact: true })
           .fill('Read rows and summarize outstanding work.');
         await page.getByRole('button', { name: 'Save agent', exact: true }).click();
-        await page.getByText('Agent saved.', { exact: true }).waitFor();
+        await page
+          .getByText('Saved. Research assistant does not run until you activate a version.', { exact: true })
+          .waitFor();
         assert.equal(writes(fixture).length, 1);
         assert.equal(writes(fixture)[0].path, `${base}/agents/${agentId}`);
         assert.deepEqual(writes(fixture)[0].body.definition, {
@@ -1768,7 +1786,9 @@ test('models in the actual Vite app through a local HTTP API fixture', { timeout
           .getByRole('textbox', { name: 'Instructions', exact: true })
           .fill('Summarize the supplied rows without changing model preference.');
         await page.getByRole('button', { name: 'Save agent', exact: true }).click();
-        await page.getByText('Agent saved.', { exact: true }).waitFor();
+        await page
+          .getByText('Saved. Research assistant does not run until you activate a version.', { exact: true })
+          .waitFor();
         assert.equal(writes(fixture).length, 1);
         assert.equal(writes(fixture)[0].path, `${base}/agents/${agentId}`);
         assert.deepEqual(writes(fixture)[0].body.definition, {
@@ -1824,7 +1844,9 @@ test('models in the actual Vite app through a local HTTP API fixture', { timeout
         await inherited.getByText('Inherited fallback: secondary. Rule revision 2.', { exact: true }).waitFor();
         assert.equal(await inherited.getByRole('combobox').count(), 0);
         await page.getByRole('button', { name: 'Save agent', exact: true }).click();
-        await page.getByText('Agent saved.', { exact: true }).waitFor();
+        await page
+          .getByText('Saved. Research assistant does not run until you activate a version.', { exact: true })
+          .waitFor();
         assert.equal(writes(fixture).length, 1);
         const write = writes(fixture)[0];
         assert.equal(write.path, `${base}/agents/${agentId}`);
@@ -1873,7 +1895,9 @@ test('models in the actual Vite app through a local HTTP API fixture', { timeout
         );
         assert.equal(writes(fixture).length, 1);
         await page.getByRole('button', { name: 'Save agent', exact: true }).click();
-        await page.getByText('Agent saved.', { exact: true }).waitFor();
+        await page
+          .getByText('Saved. Research assistant does not run until you activate a version.', { exact: true })
+          .waitFor();
         assert.equal(writes(fixture)[1].body.expectedSavedRevision, 'e'.repeat(40));
         assert.equal(writes(fixture)[1].body.definition.modelFamilyId, 'secondary');
       },

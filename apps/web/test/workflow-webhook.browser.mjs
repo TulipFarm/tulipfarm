@@ -507,7 +507,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
 
       await showWorkflowSettings(page);
       await page.getByRole('button', { name: 'Disable workflow' }).click();
-      await page.getByRole('button', { name: 'Activate saved revision' }).waitFor();
+      await page.getByRole('button', { name: 'Activate workflow' }).waitFor();
       await log.getByText('Activate the revision with this webhook to send a test event.').waitFor();
       assert.equal(await log.getByRole('button', { name: 'Send test event' }).isDisabled(), true);
 

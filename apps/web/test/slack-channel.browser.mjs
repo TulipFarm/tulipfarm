@@ -125,7 +125,7 @@ try {
     await page.emulateMedia({ colorScheme });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     await page.screenshot({
-      path: `/var/folders/7d/qk8p6t3d1jvfnh4503bz0msr0000gn/T/opencode/channel-agent-${colorScheme}.png`,
+      path: `reports/screenshots/channel-agent-${colorScheme}.png`,
       fullPage: true,
     });
   }

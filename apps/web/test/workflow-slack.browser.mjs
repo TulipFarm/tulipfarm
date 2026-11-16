@@ -28,6 +28,8 @@ test(
     try {
       process.env.WEB_ORIGIN = origin;
       await f.db.platform.query(`DELETE FROM ${f.table('tf_grants')} WHERE asset_id=$1`, [f.destinationId]);
+      // Workflow Slack steps now post directly; actions prepared before that still wait for a decision.
+      await f.legacyApproval();
       const service = createWorkflows(f.runtime, { slackActions: f.service });
       const id = randomUUID(),
         revision = randomUUID();
@@ -123,11 +125,17 @@ test(
       page.on('pageerror', error => errors.push(String(error)));
       await page.goto(`${origin}/slack-proof/workflows`);
       await page.getByRole('link', { name: 'Tickets to Slack', exact: true }).click();
-      await page.getByRole('heading', { name: '1. Send a Slack message', exact: true }).waitFor();
-      await page.getByText('#tech · Slack workspace TTEST', { exact: true }).waitFor();
-      await page.getByText(`Destination ID: ${f.destinationId}`, { exact: true }).waitFor();
-      await page.getByRole('combobox', { name: 'Slack destination', exact: true }).waitFor();
-      await page.getByText(/Saving or activating this workflow does not approve messages/).waitFor();
+      // Workflows are read-only on this page, so the Slack step is checked in the definition's step details.
+      const definition = page.getByRole('region', { name: 'Workflow definition' });
+      await definition.getByRole('button', { name: 'Steps', exact: true }).click();
+      await definition
+        .getByRole('list', { name: 'Workflow steps' })
+        .getByRole('button', { name: /Send a Slack message/ })
+        .click();
+      const details = definition.getByRole('region', { name: 'Step details' });
+      await details.getByRole('heading', { name: 'Send a Slack message', exact: true }).waitFor();
+      await details.getByText('#tech', { exact: true }).waitFor();
+      await details.getByText('Slack account of the person running this workflow', { exact: true }).waitFor();
       if (cdpPort) {
         await mkdir('reports/check/workflow-slack', { recursive: true });
         execFileSync(

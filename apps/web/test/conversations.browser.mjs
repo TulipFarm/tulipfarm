@@ -296,11 +296,12 @@ try {
   assert.equal(await page.getByLabel('Message', { exact: true }).innerText(), 'Hello 🌱');
   dropWrite = true;
   await page.getByRole('button', { name: 'Send message', exact: true }).dblclick();
-  await page.getByRole('button', { name: 'Check message status', exact: true }).waitFor();
+  // The message is sent only after its chat is created, so a lost create response leaves it certainly unsent.
+  await page.getByText("Your message hasn't been sent. Try again.", { exact: true }).waitFor();
   const createRequest = writes[0];
   const chatId = chats[0].id;
   assert.equal(writes.length, 1, 'A double send creates only one chat');
-  await page.getByRole('button', { name: 'Check message status', exact: true }).click();
+  await page.getByRole('button', { name: 'Try again', exact: true }).click();
   await page.waitForURL(`${origin}/acme/chat/${chatId}`);
   await page.getByRole('button', { name: 'Stop reply' }).waitFor();
   assert.deepEqual(writes[1], createRequest, 'A lost create response retries the same chat and command');
@@ -401,10 +402,11 @@ try {
     { id: randomUUID(), tool: 'web.fetch', status: 'failed' },
   );
   await notifyChange(page, workspace.id, userId, 'detail', chatId);
-  await page
-    .getByText('Access denied. This step needs Update rows on the table. Ask a workspace admin', { exact: false })
-    .waitFor();
+  // The fixture viewer is an admin, who already holds every table permission.
   await openToolActivity();
+  await page
+    .getByText('Access denied. As a workspace admin you already have every table permission', { exact: false })
+    .waitFor();
   assert.match(await page.getByRole('list', { name: 'Tool activity' }).textContent(), /Completed/);
   // Cloud baac8cab (#1001) labels a failed page read by its outcome (tool-labels.tsx:50).
   await page.getByRole('list', { name: 'Tool activity' }).getByText('Page read failed', { exact: true }).waitFor();
@@ -474,12 +476,18 @@ try {
   assert.equal(await page.locator('main header').count(), 1, 'The chat title and navigation share a single top bar');
   await chatAction('Archive chat');
   await page.getByText('This chat is archived.', { exact: false }).waitFor();
+  // Leaving while the write is still saving asks to keep editing, so wait for it to settle.
+  await page.getByText('Saving your change…', { exact: true }).waitFor({ state: 'detached' });
   await openChatList(page);
   await page.getByRole('heading', { name: 'Chats', exact: true }).waitFor();
   await page.getByRole('button', { name: 'Archived chats', exact: true }).click();
-  await page.getByRole('button', { name: 'Saved conversation', exact: true }).click();
+  await page
+    .getByRole('region', { name: 'Chat list', exact: true })
+    .getByRole('link', { name: 'Saved conversation', exact: true })
+    .click();
   await chatAction('Restore chat');
   await page.getByText('This chat is archived.', { exact: false }).waitFor({ state: 'detached' });
+  await page.getByText('Saving your change…', { exact: true }).waitFor({ state: 'detached' });
   await openChatList(page);
   await page.getByRole('button', { name: 'Archived chats', exact: true }).click();
   await page.getByRole('heading', { name: 'No archived chats', exact: true }).waitFor();
@@ -488,11 +496,20 @@ try {
   await page.getByLabel('Search chat titles').press('Enter');
   await page.getByRole('heading', { name: 'No matching chats' }).waitFor();
   await page.getByRole('button', { name: 'Clear search' }).first().click();
-  await page.getByRole('button', { name: 'Saved conversation', exact: true }).waitFor();
+  await page
+    .getByRole('region', { name: 'Chat list', exact: true })
+    .getByRole('link', { name: 'Saved conversation', exact: true })
+    .waitFor();
   listStatus = 503;
   await notifyChange(page, workspace.id, userId, 'list');
   await page.getByRole('button', { name: 'Retry refresh', exact: true }).waitFor();
-  assert.equal(await page.getByRole('button', { name: 'Saved conversation', exact: true }).isVisible(), true);
+  assert.equal(
+    await page
+      .getByRole('region', { name: 'Chat list', exact: true })
+      .getByRole('link', { name: 'Saved conversation', exact: true })
+      .isVisible(),
+    true,
+  );
   listStatus = 200;
   await page.getByRole('button', { name: 'Retry refresh', exact: true }).click();
   await page.getByRole('button', { name: 'Retry refresh', exact: true }).waitFor({ state: 'detached' });
@@ -503,8 +520,14 @@ try {
   }
   await notifyChange(page, workspace.id, userId, 'list');
   await page.getByRole('button', { name: 'Load more chats' }).click();
-  await page.getByRole('button', { name: 'Older chat 50', exact: true }).waitFor();
-  await page.getByRole('button', { name: 'Saved conversation', exact: true }).click();
+  await page
+    .getByRole('region', { name: 'Chat list', exact: true })
+    .getByRole('link', { name: 'Older chat 50', exact: true })
+    .waitFor();
+  await page
+    .getByRole('region', { name: 'Chat list', exact: true })
+    .getByRole('link', { name: 'Saved conversation', exact: true })
+    .click();
   assert.equal(await page.getByRole('complementary', { name: 'Chat history' }).count(), 0);
   for (let index = 4; index <= 54; index++)
     history.push({
@@ -554,7 +577,9 @@ try {
   writeStatus = 409;
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await page.getByRole('button', { name: 'Refresh before editing' }).click();
-  await page.getByRole('button', { name: 'Review retained input' }).click();
+  // A refreshed send puts its draft straight back in the composer; only other edits offer a review step.
+  await page.getByRole('button', { name: 'Refresh before editing' }).waitFor({ state: 'detached' });
+  assert.equal(await page.getByRole('button', { name: 'Review retained input' }).count(), 0);
   assert.equal(await page.getByLabel('Message', { exact: true }).innerText(), 'Retain my draft');
   writeStatus = 200;
   // Editor keys keep ProseMirror's state in step; a DOM fill('') can empty the text while the draft stays dirty.
@@ -578,6 +603,8 @@ try {
   await page.getByLabel('Chat title', { exact: true }).fill('Long title '.repeat(4));
   await page.getByRole('button', { name: 'Save title' }).click();
   await page.getByRole('heading', { name: 'Long title '.repeat(4).trim(), exact: true }).waitFor();
+  // The heading shows the new title at once; leaving is blocked until the server confirms it and the form closes.
+  await page.getByLabel('Chat title', { exact: true }).waitFor({ state: 'hidden' });
   await page.setViewportSize({ width: 390, height: 844 });
   await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
   await page.waitForFunction(() => {
@@ -613,7 +640,9 @@ try {
         fullPage: true,
       });
   }
-  const row = page.getByRole('button', { name: 'Long title '.repeat(4).trim(), exact: true });
+  const row = page
+    .getByRole('region', { name: 'Chat list', exact: true })
+    .getByRole('link', { name: 'Long title '.repeat(4).trim(), exact: true });
   assert.equal(
     await row.evaluate(
       element => element.getBoundingClientRect().width === element.parentElement.getBoundingClientRect().width,
@@ -621,10 +650,21 @@ try {
     true,
     'Chat rows fill their reading column',
   );
-  // The activity time sits beside the title button and shows the day then the time (cloud 1f8cf59a #1028, pages/workspace-chats.tsx:135-138).
-  assert.equal(await page.getByRole('row').filter({ has: row }).locator('time > span').first().textContent(), 'Today');
+  // The activity time sits beside the title link and shows the day then the time (pages/workspace-chats.tsx:135-138).
+  assert.equal(
+    await page
+      .getByRole('row')
+      .filter({ has: page.getByRole('link', { name: 'Long title '.repeat(4).trim(), exact: true }) })
+      .locator('time > span')
+      .first()
+      .textContent(),
+    'Today',
+  );
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.getByRole('button', { name: 'Long title '.repeat(4).trim(), exact: true }).click();
+  await page
+    .getByRole('region', { name: 'Chat list', exact: true })
+    .getByRole('link', { name: 'Long title '.repeat(4).trim(), exact: true })
+    .click();
   await page.goBack();
   await page.getByRole('heading', { name: 'Chats', exact: true }).waitFor();
   await page.goForward();
@@ -726,10 +766,14 @@ try {
       await setTimeout(20);
     }
   };
-  await advance(115_000);
-  const readsBeforeTwoMinutes = laterReads;
+  // The live stream is unavailable here, so the chat checks the pending reply a few times, then says it is unsure
+  // instead of polling for ever.
   await advance(10_000);
-  assert.ok(laterReads > readsBeforeTwoMinutes, 'the chat still checks a pending reply after two minutes');
+  const uncertain = later.getByText("We couldn't confirm whether this reply finished.", { exact: true });
+  await uncertain.waitFor();
+  const readsAfterRecovery = laterReads;
+  await advance(115_000);
+  assert.equal(laterReads, readsAfterRecovery, 'a lost stream stops checking after its recovery budget');
   history[1].turn.status = 'completed';
   history.push({
     id: randomUUID(),
@@ -739,8 +783,9 @@ try {
     parts: [{ kind: 'text', text: 'Finished after two minutes.' }],
     turn: null,
   });
-  await advance(6000);
+  await later.getByRole('button', { name: 'Retry', exact: true }).click();
   await later.getByText('Finished after two minutes.', { exact: true }).waitFor();
+  await uncertain.waitFor({ state: 'detached' });
   assert.equal(await later.getByText('Automatic checks stopped', { exact: false }).count(), 0);
   assert.equal(await later.getByRole('button', { name: 'Check chat status' }).count(), 0);
   await later.getByRole('button', { name: 'Chat actions' }).click();
@@ -757,6 +802,8 @@ try {
   await notifyChange(page, workspace.id, userId, 'detail', chatId);
   await page.getByRole('button', { name: 'Stop reply' }).waitFor();
   historyStatus = 404;
+  // Pending replies are no longer polled indefinitely, so a change notice prompts the denied read.
+  await notifyChange(page, workspace.id, userId, 'detail', chatId);
   await page.getByRole('heading', { name: 'Personal chats unavailable' }).waitFor();
   assert.equal(await page.getByText('🌱 olleH', { exact: true }).count(), 0);
   assert.equal(await page.getByLabel('Message', { exact: true }).count(), 0);

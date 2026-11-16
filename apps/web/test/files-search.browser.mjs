@@ -157,6 +157,9 @@ test(
           }
           const shell = new Map([
             ...workspaceShellReads(workspace.id),
+            [`/v1/workspaces/${workspace.id}/conversations/pinned`, { chats: [] }],
+            [`/v1/workspaces/${workspace.id}/conversations`, { chats: [], nextCursor: null }],
+            [`/v1/workspaces/${workspace.id}/agents/recent`, []],
             ['/v1/auth/get-session', session],
             ['/v1/user/visit', { firstSession: false }],
             ['/v1/workspaces', [workspace]],
@@ -248,6 +251,7 @@ test(
       await page.goto(`${origin}/${workspace.slug}/files?folder=${reports}`);
       await main.getByRole('link', { name: 'Q3 budget.xlsx' }).waitFor();
       await main.getByRole('combobox', { name: 'Owner', exact: true }).first().click();
+      await page.getByRole('listbox').getByRole('option').first().waitFor();
       assert.deepEqual(await page.getByRole('listbox').getByRole('option').allTextContents(), [
         'Anyone',
         'Owned by me',

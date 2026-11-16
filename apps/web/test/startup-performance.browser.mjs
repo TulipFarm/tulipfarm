@@ -150,7 +150,7 @@ try {
     if (process.env.PERF_BASELINE !== '1') {
       assert.deepEqual(
         scriptRequests.filter(file =>
-          /\/(?:editor-extensions|attachment|file-mentions|catalog|draft-files|auth)-[^/]+\.js$/.test(file),
+          /\/(?:editor-extensions|attachment|file-mentions|catalog|draft-files|auth-screens)-[^/]+\.js$/.test(file),
         ),
         [],
         'Sign-in must not load rich editor, attachment, integration catalog, logout storage, or other auth screens',

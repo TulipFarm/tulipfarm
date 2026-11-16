@@ -127,8 +127,8 @@ if (import.meta.env.DEV && /^\/soul-explorer-mock(?:\/|$)/.test(window.location.
       if (scenario === 'refresh-denied' && reads > 1)
         return Response.json({ error: 'soul-not-found' }, { status: 404 });
       if (scenario === 'oversized') return Response.json({ error: 'soul-snapshot-too-large' }, { status: 503 });
-      if (scenario === 'error' && !failed) {
-        failed = true;
+      // The transport resends a read once after a 503, so the first read and its resend both fail.
+      if (scenario === 'error' && reads <= 2) {
         return Response.json({ error: 'soul-unavailable' }, { status: 503 });
       }
       if (scenario === 'slow' && !failed) {

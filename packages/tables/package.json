@@ -61,6 +61,10 @@
       "types": "./dist/identities.d.ts",
       "default": "./dist/identities.js"
     },
+    "./workspace-member-id": {
+      "types": "./dist/workspace-member-id.d.ts",
+      "default": "./dist/workspace-member-id.js"
+    },
     "./workspace-members": {
       "types": "./dist/workspace-members.d.ts",
       "default": "./dist/workspace-members.js"

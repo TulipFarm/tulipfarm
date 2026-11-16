@@ -162,7 +162,6 @@ const listSearches = [],
   writes = [],
   effectRequests = [],
   recordWrites = [],
-  grantWrites = [],
   tableReads = [],
   customerReads = [],
   fileReads = [],
@@ -258,17 +257,14 @@ let historyStatus = 200,
 let readStatus = 503,
   liveTurn = false,
   dropDecision = true,
-  recordConflict = false,
-  grants = [];
+  recordConflict = false;
 let listStatus = 200,
   emptyList = false,
   emptyRecords = false,
   recordStatus = 200,
   dropRecord = false,
   listDelay = 0;
-let grantStatus = 200,
-  grantWriteStatus = 200,
-  effectsStatus = 200;
+let effectsStatus = 200;
 const governance = {
   actorMembershipId: memberId,
   members: [{ id: memberId, userId: 'ada', role: 'admin', name: 'Ada', email: 'ada@example.com' }],
@@ -388,20 +384,7 @@ try {
       json = { items: ids.flatMap(id => (files.has(id) ? [files.get(id)] : [])) };
     } else if (path.endsWith('/governance/me'))
       json = { membershipId: memberId, role: 'admin', teams, capabilities: { manageGovernance: true, canLeave: true } };
-    else if (path.endsWith('/governance/person-grants')) {
-      if (request.method() === 'PUT') {
-        const body = request.postDataJSON();
-        grantWrites.push(body);
-        if (grantWriteStatus !== 200)
-          return route.fulfill({ status: grantWriteStatus, json: { error: 'invalid-grant' } });
-        grants = body.granted ? [{ membershipId: body.membershipId, target: body.target }] : [];
-        json = { ok: true };
-      } else {
-        if (grantStatus !== 200)
-          return route.fulfill({ status: grantStatus, json: { error: 'person-grants-unavailable' } });
-        json = { grants };
-      }
-    } else if (path.endsWith('/governance')) json = governance;
+    else if (path.endsWith('/governance')) json = governance;
     else if (path.includes('/table-changes/')) {
       if (request.method() === 'PUT') {
         const body = request.postDataJSON();
@@ -414,16 +397,17 @@ try {
           proposalControlSchema.parse(body);
         }
         await delay(150);
+        // A lost request that was never recorded keeps the proposal pending, so the outcome stays unknown.
+        if (dropDecision) {
+          dropDecision = false;
+          return route.abort('failed');
+        }
         if ('decision' in body) {
           view.decision = body.decision;
           view.status = body.decision === 'approve' ? 'approved' : 'rejected';
         } else {
           view.cancelled = body.operation === 'cancel';
           view.status = view.cancelled ? 'cancelled' : 'approved';
-        }
-        if (dropDecision) {
-          dropDecision = false;
-          return route.abort('failed');
         }
         json = view;
       } else if (path.endsWith('/outcome')) json = { kind: 'proposal' };
@@ -736,6 +720,8 @@ try {
     if (process.env.TABLE_UI_SCREENSHOTS)
       await page.screenshot({ path: `${process.env.TABLE_UI_SCREENSHOTS}/table-header-375-${view.toLowerCase()}.png` });
   }
+  // The table remembers its last view, so return to the grid the later steps use.
+  await headerViews.getByRole('tab', { name: 'Table', exact: true }).click();
   await page.getByRole('button', { name: 'More table options', exact: true }).click();
   await page.getByRole('menuitem', { name: 'Change fields in chat', exact: true }).waitFor();
   await page.keyboard.press('Escape');
@@ -746,6 +732,8 @@ try {
   await page.keyboard.press('Escape');
   await page.goto(`${origin}/acme/chat/${chatId}`);
   const card = page.getByRole('region', { name: 'Table change proposal' });
+  // A proposal whose status is unknown stays compact in the transcript until it is opened for review.
+  await page.getByRole('button', { name: 'Review changes', exact: true }).click();
   await card.getByText('Could not load tables', { exact: true }).waitFor();
   assert.equal(await card.getByRole('button', { name: /^Approve/ }).count(), 0);
   await card.getByRole('button', { name: 'Try again', exact: true }).click();
@@ -767,10 +755,12 @@ try {
   assert.deepEqual(effectRequests.slice(0, 2), [-1, 19]);
   await card.getByRole('button', { name: 'Previous effects' }).click();
   await card.getByText('First subject', { exact: true }).last().waitFor();
+  // The latest pending schema proposal opens its schema in Canvas by itself on a wide screen.
+  await page.getByRole('figure', { name: 'Schema diagram for Change Support tickets table' }).waitFor();
   assert.equal(
     await page.getByRole('button', { name: 'Close canvas' }).count(),
-    0,
-    'A proposal in loaded history leaves the canvas closed',
+    1,
+    'A pending proposal opens the canvas once it loads',
   );
   await page.setViewportSize({ width: 1440, height: 1000 });
   await card.getByRole('button', { name: 'Open schema' }).click();
@@ -785,12 +775,12 @@ try {
   await page.getByRole('button', { name: 'Close canvas' }).click();
   liveTurn = true;
   await page.reload();
-  // A live proposal stays in chat; the schema opens only on request (cloud 856d6a73 #1026, apps/web/DESIGN.md:536).
   await card.getByRole('button', { name: 'Open schema' }).waitFor();
+  await page.getByRole('figure', { name: 'Schema diagram for Change Support tickets table' }).waitFor();
   assert.equal(
     await page.getByRole('button', { name: 'Close canvas' }).count(),
-    0,
-    'Live work leaves the canvas closed',
+    1,
+    'A pending proposal reopens its schema after a reload',
   );
   await card.getByRole('button', { name: 'Open schema' }).click();
   await page.getByRole('figure', { name: 'Schema diagram for Change Support tickets table' }).waitFor();
@@ -804,6 +794,8 @@ try {
   liveTurn = false;
   await page.reload();
   await card.getByRole('button', { name: /^Approve/ }).waitFor();
+  // The pending schema reopens in Canvas by itself; close it so the phone view shows the chat.
+  await page.getByRole('button', { name: 'Close canvas' }).click();
   for (const theme of ['light', 'dark']) {
     await page.emulateMedia({ colorScheme: theme });
     await page.setViewportSize({ width: 390, height: 844 });
@@ -909,7 +901,10 @@ try {
   proposalViewSchema.parse(view);
   await card.getByRole('button', { name: 'Check proposal status' }).click();
   await card
-    .getByText('Failed. Reference access-denied. 8 of 21 rows imported. 13 not yet imported.', { exact: true })
+    .getByText(
+      'Failed. Access to this change or one of its sources was denied. Check that you can still read its sources and that any skills it uses are enabled, then retry. 8 of 21 rows imported. 13 not yet imported.',
+      { exact: true },
+    )
     .waitFor();
   await card.getByRole('button', { name: 'Approval details', exact: true }).click();
   await card.getByText(/Imports apply in batches, and imported rows stay applied if later work stops/).waitFor();
@@ -966,6 +961,8 @@ try {
   assert.equal(await card.getByText('First subject', { exact: true }).count(), 0);
   assert.equal(await card.getByText(digest, { exact: true }).count(), 1);
   await page.reload();
+  // A decided proposal stays compact in the transcript until it is opened for review.
+  await page.getByRole('button', { name: 'Review changes', exact: true }).click();
   await card.getByText(/History values expired/).waitFor();
   assert.equal(effectRequests.length, effectCountBeforeRedaction);
   assert.equal(writes.length, writesBeforeRedaction);
@@ -1149,7 +1146,7 @@ try {
   // The grid holds this one record, and its actions are named after its changing values.
   const rowAction = async item => {
     await page
-      .getByRole('region', { name: 'Support tickets rows', exact: true })
+      .getByRole('region', { name: 'Support tickets', exact: true })
       .getByRole('button', { name: /^Actions for / })
       .click();
     await page.getByRole('menuitem', { name: item, exact: true }).click();
@@ -1746,43 +1743,10 @@ try {
     '/acme?intent=create-table',
   );
   assert.equal(await page.getByRole('button', { name: 'Save schema', exact: true }).count(), 0);
-  grantStatus = 503;
-  await page.goto(`${origin}/acme/grants`);
-  const person = page
-    .locator('section')
-    .filter({ has: page.getByRole('heading', { name: 'Individual table grants', exact: true }) })
-    .last();
-  await person.getByRole('button', { name: 'Try again', exact: true }).waitFor();
-  grantStatus = 200;
-  await person.getByRole('button', { name: 'Try again', exact: true }).click();
-  await page.getByLabel('Person receiving access').click();
-  await page.getByRole('option', { name: 'Ada (ada@example.com)', exact: true }).click();
-  assert.equal(await page.getByLabel('Person receiving access').innerText(), 'Ada (ada@example.com)');
-  // A grant for yourself saves without reloading workspace access, so the selected person stays.
-  await person.getByRole('checkbox', { name: 'Read rows', exact: true }).click();
-  await person.getByRole('status').filter({ hasText: 'Individual grant saved.' }).waitFor();
-  assert.equal(await page.getByLabel('Person receiving access').innerText(), 'Ada (ada@example.com)');
-  assert.equal(await person.getByRole('checkbox', { name: 'Read rows', exact: true }).isChecked(), true);
-  assert.deepEqual(grantWrites[0], {
-    membershipId: memberId,
-    target: { kind: 'table', id: tableId, permission: 'table.row.read' },
-    granted: true,
-  });
-  grantWriteStatus = 409;
-  await person.getByRole('checkbox', { name: 'Read rows', exact: true }).click();
-  await person.getByRole('button', { name: 'Reload individual grants', exact: true }).waitFor();
-  assert.equal(await person.getByRole('checkbox', { name: 'Read rows', exact: true }).isChecked(), true);
-  grantWriteStatus = 200;
-  await person.getByRole('button', { name: 'Reload individual grants', exact: true }).click();
-  await person.getByRole('checkbox', { name: 'Read rows', exact: true }).click();
-  await person.getByRole('status').filter({ hasText: 'Individual grant saved.' }).waitFor();
-  assert.equal(await page.getByLabel('Person receiving access').innerText(), 'Ada (ada@example.com)');
-  assert.equal(await person.getByRole('checkbox', { name: 'Read rows', exact: true }).isChecked(), false);
-  assert.equal(grantWrites.at(-1).granted, false);
   assert.deepEqual(singleFileReads, [], 'Table views read file names in batches, never one file at a time');
   assert.deepEqual(errors, []);
   console.log(
-    'Table UI HTTP-stub proof passed. API-schema-validated mutations, proposal recovery, exact effects, token edits, row and file pickers, uploads, unavailable references, file denial, request reconciliation, deleted discovery pagination and tombstone restore, expiry/conflict errors, transform history, saved/active and redacted definitions, migration status and schema pagination, denied refresh clearing, responsive themes, and person grants. Not end-to-end backend proof.',
+    'Table UI HTTP-stub proof passed. API-schema-validated mutations, proposal recovery, exact effects, token edits, row and file pickers, uploads, unavailable references, file denial, request reconciliation, deleted discovery pagination and tombstone restore, expiry/conflict errors, transform history, saved/active and redacted definitions, migration status and schema pagination, denied refresh clearing, and responsive themes. Not end-to-end backend proof.',
   );
 } catch (error) {
   await page?.screenshot({ path: '/tmp/table-ui-failure.png', fullPage: true });

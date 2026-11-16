@@ -363,7 +363,11 @@ test('existing-agent instructions save and activation in the real app', { timeou
       await page.getByText('Activation revoked.', { exact: true }).waitFor();
       state.activationError = null;
       await page.getByRole('tab', { name: 'Instructions', exact: true }).click();
-      await page.getByRole('button', { name: 'Activate saved instructions', exact: true }).click();
+      // Execution has its own Activate button, which stays visible until the tab change commits.
+      await page
+        .getByRole('region', { name: 'Agent editor', exact: true })
+        .getByRole('button', { name: 'Activate saved instructions', exact: true })
+        .click();
       await page.getByRole('alertdialog').getByRole('button', { name: 'Activate this version', exact: true }).click();
       await live(page).waitFor();
       assert.equal(state.writes.filter(write => write.kind === 'save').length, 1);

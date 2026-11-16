@@ -189,6 +189,19 @@ export async function startFixture() {
       else if (path === `${base}/google-workspace/operations/proposals`) json = { proposals: [], nextCursor: null };
       else if (path === `${base}/google-workspace/availability`) json = { configured: true };
       else if (path === `${base}/google-workspace`) json = { status: 'disconnected' };
+      // The chat lists its package installations; none are pending.
+      else if (path === `${base}/system-package-installations`) json = { installations: [], nextCursor: null };
+      // Settings reads secret, knowledge and model-plan access for its tabs.
+      else if (path === `${base}/secrets/capabilities`) json = { enabled: false };
+      else if (path === `${base}/knowledge/settings`) json = { mediaRecognition: false, canManage: false };
+      else if (path === `${base}/governance/directory`) json = { members: [] };
+      else if (path === `${base}/subscriptions`) json = { subscriptions: [] };
+      else if (path === `${base}/chatgpt/connection`)
+        json = { state: 'not-connected', email: null, planUsage: false, welcomePending: false, models: [] };
+      else if (path === `${base}/claude/connection` || path === `${base}/copilot/connection`) {
+        status = 404;
+        json = { error: `${path.split('/').at(-2)}-plan-disabled` };
+      }
     }
     const shell = json === undefined && status === undefined ? shellRead(req.method, path, workspace) : undefined;
     if (shell) ({ json, status = 200 } = shell);

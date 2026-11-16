@@ -5,7 +5,7 @@ import { setTimeout } from 'node:timers/promises';
 import { chromium } from 'playwright';
 import { chatCatalog } from './chat-catalog.fixture.mjs';
 import { membership, credits } from './chat-query.fixture.mjs';
-import { openChatList } from './browser-controls.mjs';
+import { clearEditor, openChatList } from './browser-controls.mjs';
 
 const port = Number(process.env.CHAT_TITLE_BROWSER_PORT ?? 5297);
 const origin = `http://127.0.0.1:${port}`;
@@ -61,6 +61,8 @@ try {
     let historyStatus = 200;
     let readDelay = 200;
     let completeDuringHistory = false;
+    // Holds the first history read until the test has seen the loading header, which a fixed delay can miss on a busy machine.
+    let historyGate = Promise.withResolvers();
     // History reads the chat and its messages in parallel (conversation-api.ts:200-203), so whichever arrives first sees the completed reply.
     const complete = () => {
       if (!completeDuringHistory) return;
@@ -93,6 +95,7 @@ try {
       else if (path.endsWith('/credits')) json = credits;
       else if (path.endsWith('/model-catalog')) json = chatCatalog;
       else if (path.endsWith(`/conversations/${chat.id}/messages`)) {
+        await historyGate?.promise;
         complete();
         await setTimeout(readDelay);
         status = historyStatus;
@@ -124,6 +127,8 @@ try {
     const visible = header.locator('h1 [aria-hidden="true"]');
     await page.goto(`${origin}/acme/chat/${chat.id}`);
     await header.getByText('Loading chat…', { exact: true }).waitFor();
+    historyGate.resolve();
+    historyGate = null;
     await header.getByRole('heading', { name: chat.title, exact: true }).waitFor();
     assert.equal(await visible.textContent(), chat.title);
     assert.equal(await page.title(), `${chat.title} · TulipFarm`);
@@ -152,7 +157,7 @@ try {
       await page.getByRole('list', { name: 'Messages', exact: true }).getByText(chat.title, { exact: true }).count(),
       0,
     );
-    await page.getByLabel('Message', { exact: true }).fill('');
+    await clearEditor(page.getByLabel('Message', { exact: true }));
     await page.reload();
     await header.getByRole('heading', { name: chat.title, exact: true }).waitFor();
     assert.equal(await visible.textContent(), chat.title, 'Saved titles render immediately');
@@ -181,7 +186,7 @@ try {
     assert.equal(await visible.textContent(), 'My chosen title', 'Manual titles render without typing');
     assert.equal(await page.title(), 'My chosen title · TulipFarm');
     await openChatList(page);
-    await page.getByRole('button', { name: 'My chosen title', exact: true }).waitFor();
+    await page.getByRole('link', { name: 'My chosen title', exact: true }).waitFor();
     assert.deepEqual(errors, []);
     await page.close();
   }

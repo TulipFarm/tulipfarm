@@ -342,7 +342,9 @@ try {
 
   const rows = page
     .locator('section')
-    .filter({ has: page.getByRole('heading', { name: 'Rows', exact: true, includeHidden: true }) })
+    .filter({
+      has: page.getByRole('heading', { name: /^(Rows|[\d,]+\+? (matching )?rows?)$/, includeHidden: true }),
+    })
     .last();
   const loadingRows = async size => {
     const table = rows.locator('table[aria-busy="true"]');
@@ -381,8 +383,17 @@ try {
   };
   const addRow = rows.getByRole('button', { name: 'Add row', exact: true });
   const dialog = page.getByRole('alertdialog');
-  const rowActions = id => rows.getByRole('button', { name: `Actions for row ${id.slice(0, 8)}`, exact: true });
+  const rowName = id => {
+    const values = records.get(id)?.values ?? {};
+    const subject = values[subjectId]?.value;
+    return subject ? `Actions for ${subject}` : 'Actions for Untitled row';
+  };
+  const rowActions = id => rows.locator(`button[data-row-control="actions"][data-row-id="${id}"]`);
   const rowAction = async (id, item) => {
+    assert.ok(
+      (await rowActions(id).getAttribute('aria-label')).startsWith(rowName(id)),
+      'Each row menu is named by its title',
+    );
     await rowActions(id).click();
     await page.getByRole('menuitem', { name: item, exact: true }).click();
   };
@@ -628,7 +639,6 @@ try {
   await editor.waitFor({ state: 'detached' });
 
   const target = [...records.values()].find(row => row.values[subjectId].value === 'Printer offline');
-  const short = target.id.slice(0, 8);
   await rowAction(target.id, 'Edit row');
   const editRow = page.getByRole('form', { name: 'Edit row', exact: true });
   await editRow.getByLabel('Subject', { exact: true }).fill('Keep existing-row edits');
@@ -646,7 +656,7 @@ try {
   assert.equal(writes.length, 2, 'Keeping the row sends nothing');
   assert.equal(
     await page.evaluate(() => document.activeElement?.getAttribute('aria-label')),
-    `Actions for row ${short}`,
+    'Actions for Printer offline',
     'Focus returns to the row menu that opened the dialog',
   );
 
@@ -689,10 +699,14 @@ try {
     { kind: 'delete', recordId: target.id, expectedToken: target.token },
     'Delete uses the row token',
   );
-  assert.equal(
-    await page.evaluate(() => document.activeElement?.textContent),
-    'Rows',
-    'Focus moves to the rows heading after the deleted row disappears',
+  const deletedFocus = await page.evaluate(() => ({
+    control: document.activeElement?.getAttribute('data-row-control'),
+    rowId: document.activeElement?.getAttribute('data-row-id'),
+  }));
+  assert.equal(deletedFocus.control, 'edit', 'Focus moves to the nearest row after the deleted row disappears');
+  assert.ok(
+    deletedFocus.rowId !== target.id && records.has(deletedFocus.rowId),
+    'Focus lands on a remaining row, not the deleted one',
   );
   await openPanel('Deleted rows');
   const deletedRows = page.getByRole('region', { name: 'Deleted rows', exact: true });
@@ -890,9 +904,10 @@ try {
     assert.deepEqual(await subjects(), expected, message ?? 'Rows match');
   };
   const lastRead = () => pageReads.at(-1);
-  const tools = rows.getByRole('group', { name: 'Table tools', exact: true }),
-    filters = rows.getByRole('group', { name: 'Filters', exact: true });
-  const searchButton = tools.getByRole('button', { name: /^(Search|“.*”)$/ });
+  const filters = rows.getByRole('group', { name: 'Filters', exact: true });
+  const searchButton = rows
+    .getByRole('group', { name: 'Search', exact: true })
+    .getByRole('button', { name: /^(Search|“.*”)$/ });
   const searchRows = page.getByRole('searchbox', { name: 'Search rows', exact: true });
   const openSearch = async () => {
     await searchButton.click();
@@ -952,7 +967,9 @@ try {
   await openSearch();
   await searchRows.fill('PRINTER');
   await page.waitForURL(url => url.searchParams.get('q') === 'PRINTER');
-  await rows.getByRole('status').filter({ hasText: '2 matching rows' }).waitFor();
+  const matching = rows.getByRole('heading', { name: '2 matching rows', exact: true });
+  await matching.waitFor();
+  assert.equal(await matching.getAttribute('aria-live'), 'polite', 'The match count is announced');
   assert.equal(lastRead().search, 'PRINTER', 'Search runs on the server');
   assert.equal(lastRead().after, undefined);
   assert.deepEqual((await subjects()).sort(), ['Alpha printer', 'Charlie printer'], 'Search narrows the rows');

@@ -88,7 +88,7 @@ try {
     });
     const shellHeader = page.locator('header[aria-label="Workspace header"]');
     const nav = page.getByRole('navigation', { name: 'Workspace navigation', exact: true });
-    const toggle = page.getByRole('button', { name: 'Toggle Sidebar', exact: true });
+    const toggle = page.getByRole('button', { name: 'Toggle sidebar', exact: true });
     const openNavigation = async () => {
       if (mobile) await toggle.click();
     };
@@ -110,16 +110,23 @@ try {
       if (mobile) {
         for (const link of await nav.getByRole('link').all()) assert.ok((await link.boundingBox()).height >= 44);
         await page.getByRole('button', { name: 'Close', exact: true }).click();
-        await page.waitForFunction(() => document.activeElement?.getAttribute('data-slot') === 'sidebar-trigger');
+        await page.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === 'Toggle sidebar');
         assert.equal(await toggle.evaluate(element => element === document.activeElement), true);
-        assert.equal(await shellHeader.getByText('Acme', { exact: true }).isVisible(), true);
+        // On a phone, page actions take the workspace name's place so the page title keeps its room.
+        const pageActions = await shellHeader.locator('[data-slot="page-actions"]').count();
+        assert.equal(await shellHeader.getByText('Acme', { exact: true }).isVisible(), pageActions === 0, path);
       }
     }
     if (!mobile) {
       await page.goto(`${origin}/acme/agents`);
+      await nav.getByRole('button', { name: 'More', exact: true }).click();
       await nav.getByRole('link', { name: 'Teams', exact: true }).waitFor();
       await page.waitForTimeout(500);
-      assert.equal(await nav.getByRole('link', { name: 'Members', exact: true }).count(), 0, 'only admins get Members');
+      assert.equal(
+        await nav.getByRole('link', { name: 'Members & teams', exact: true }).count(),
+        0,
+        'only admins get Members',
+      );
     }
     await page.goto(`${origin}/acme`);
     await shellHeader.getByRole('heading', { name: 'New chat', exact: true }).waitFor();
@@ -148,9 +155,9 @@ try {
       assert.ok(Math.abs(a.y + a.height / 2 - (b.y + b.height / 2)) <= 1, 'Header controls align');
       await toggle.click();
       await page.reload();
-      await page.locator('[data-slot="sidebar"][data-state="collapsed"]').waitFor();
+      await page.locator('[data-sprout-sidebar][data-state="collapsed"]').waitFor();
     } else await openNavigation();
-    await page.getByRole('button', { name: 'Jump to…', exact: true }).click();
+    await nav.getByRole('button', { name: 'Search', exact: true }).click();
     const dialog = page.getByRole('dialog', { name: 'Jump to…', exact: true });
     await dialog.waitFor();
     assert.equal(await dialog.getByRole('group', { name: 'Filter by type' }).count(), 0);
@@ -214,7 +221,7 @@ try {
     }
     if (mobile) {
       await openNavigation();
-      await page.getByRole('dialog', { name: 'Workspace navigation' }).waitFor();
+      await page.getByRole('dialog', { name: 'Workspace sidebar' }).waitFor();
       await nav.getByRole('link', { name: 'Agents', exact: true }).waitFor();
       if (process.env.SHELL_SCREENSHOT_DIR)
         await page.screenshot({ path: `${process.env.SHELL_SCREENSHOT_DIR}/shell-mobile-drawer.png` });
@@ -224,12 +231,12 @@ try {
     } else {
       await toggle.click();
       await page.reload();
-      await page.locator('[data-slot="sidebar"][data-state="expanded"]').waitFor();
+      await page.locator('[data-sprout-sidebar][data-state="expanded"]').waitFor();
       if (process.env.SHELL_SCREENSHOT_DIR)
         await page.screenshot({ path: `${process.env.SHELL_SCREENSHOT_DIR}/shell-desktop-expanded.png` });
       await page.context().addCookies([{ name: 'sidebar_state', value: 'invalid', url: origin }]);
       await page.reload();
-      await page.locator('[data-slot="sidebar"][data-state="expanded"]').waitFor();
+      await page.locator('[data-sprout-sidebar][data-state="expanded"]').waitFor();
     }
     assert.deepEqual(errors, []);
     await context.close();

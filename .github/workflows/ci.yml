@@ -104,6 +104,80 @@ jobs:
           pnpm exec turbo run build --filter='@tulipfarm/web^...' --concurrency=2
           pnpm --filter @tulipfarm/web test:shell-accessibility
 
+  # Every apps/web/test/*.browser.mjs, run one at a time in each shard: tests share Vite's dependency cache and
+  # fixed ports, and some read and write a disposable database.
+  web-browser:
+    name: web-browser (${{ matrix.shard }}/6)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.2-pg18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: local-postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 3s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      TEST_ADMIN_DATABASE_URL: postgres://postgres:local-postgres@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .node-version
+      - name: Install pnpm
+        run: npm install --global pnpm@11.5.3
+      - name: Cache pnpm store
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.pnpm-store
+          key: pnpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pnpm-lock.yaml', '.node-version') }}
+          restore-keys: |
+            pnpm-${{ runner.os }}-${{ runner.arch }}-
+      - name: Install repository dependencies
+        run: pnpm install --frozen-lockfile --store-dir "$HOME/.pnpm-store"
+      - name: Cache Playwright browsers
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            playwright-${{ runner.os }}-${{ runner.arch }}-
+      - name: Install Chromium
+        run: pnpm --filter @tulipfarm/web exec playwright install --with-deps chromium
+      - name: Create the local database roles
+        run: psql "$TEST_ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -f infra/postgres/init.sql
+      - name: Build the web app and the API and worker code the tests run
+        run: |
+          pnpm exec turbo run build --filter='@tulipfarm/web^...' --filter=@tulipfarm/api --filter=@tulipfarm/worker --concurrency=2
+          VITE_API_URL= pnpm --filter @tulipfarm/web build
+      - name: Run browser tests
+        env:
+          SHARD: ${{ matrix.shard }}/6
+        run: pnpm --filter @tulipfarm/web test:browser --shard="$SHARD"
+      - name: Upload failure screenshots
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: web-browser-failures-${{ matrix.shard }}
+          path: |
+            reports/check/
+            apps/web/reports/
+          if-no-files-found: ignore
+
   skill-authoring:
     name: skill-authoring
     needs: changes

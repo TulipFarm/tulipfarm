@@ -73,10 +73,10 @@ export async function captureEvidence(page, path) {
   );
 }
 
-/** A model picker row: its accessible name starts with the model's name, then any unavailable note and meters. */
+/** A model picker row: its accessible name starts with the model's name, then any unavailable note and its cost meter. */
 export function modelOption(page, name) {
   const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return page.getByRole('option', { name: new RegExp(`^${escaped}(?= Unavailable| Speed|$)`) });
+  return page.getByRole('option', { name: new RegExp(`^${escaped}(?= Unavailable| Speed| Cost|$)`) });
 }
 
 /** Open the chat list through the sidebar's Chats link, expanding the collapsed mobile sidebar first. */
@@ -88,4 +88,13 @@ export async function openChatList(page) {
       .first()
       .click();
   await link.click();
+}
+
+/**
+ * Empty a rich-text editor the way a person does. `fill('')` selects the text in the DOM and presses Delete at once;
+ * under load the key can arrive before ProseMirror reads that selection, so the draft survives the clear.
+ */
+export async function clearEditor(editor) {
+  await editor.press('ControlOrMeta+a');
+  await editor.press('Delete');
 }

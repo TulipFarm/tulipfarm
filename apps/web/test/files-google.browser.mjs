@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { mkdir, readFile } from 'node:fs/promises';
 import { test } from 'node:test';
+import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { createServer } from 'vite';
@@ -95,7 +96,7 @@ const pages = {
   b: { root: [[drive.b.docB]] },
 };
 
-test('Google Drive browsing and viewing over mocked Google file routes', { timeout: 240000 }, async () => {
+test('Google Drive browsing and viewing over mocked Google file routes', { timeout: 360000 }, async () => {
   const { workspace, session } = createWorkspaceFixture({ slug: 'drive-qa', name: 'Drive QA' });
   const root = fileURLToPath(new URL('..', import.meta.url));
   const server = await createServer({
@@ -324,6 +325,9 @@ test('Google Drive browsing and viewing over mocked Google file routes', { timeo
         }
         const shell = new Map([
           ...workspaceShellReads(workspace.id),
+          [`/v1/workspaces/${workspace.id}/conversations/pinned`, { chats: [] }],
+          [`/v1/workspaces/${workspace.id}/conversations`, { chats: [], nextCursor: null }],
+          [`/v1/workspaces/${workspace.id}/agents/recent`, []],
           ['/v1/auth/get-session', session],
           ['/v1/user/visit', { firstSession: false }],
           ['/v1/workspaces', [workspace]],
@@ -417,7 +421,8 @@ test('Google Drive browsing and viewing over mocked Google file routes', { timeo
     assert.equal(await button('Reconnect Google').isEnabled(), true);
 
     state.status = 'connected';
-    fail('status', 503, 'integrations-unavailable', 3);
+    // The query tries a read three times and the HTTP layer retries each 503 once.
+    fail('status', 503, 'integrations-unavailable', 6);
     await page.goto(`${files}?section=google`);
     await heading('Couldn’t check your Google integration').waitFor();
     await button('Check integration again').click();
@@ -505,9 +510,10 @@ test('Google Drive browsing and viewing over mocked Google file routes', { timeo
     await link('Q3 plan').waitFor();
     assert.equal(await main.getByRole('searchbox', { name: 'Search Google Drive' }).inputValue(), '');
 
-    fail('list', 429, 'transfer-busy', 3);
+    // A rate-limited read retries five times with backoff (about a minute) before the page reports it.
+    fail('list', 429, 'transfer-busy', 6);
     await page.goto(`${files}?section=google&drive=projA`);
-    await heading('Google is busy right now').waitFor();
+    await heading('Google is busy right now').waitFor({ timeout: 120_000 });
     assert.equal(
       await heading('Couldn’t load Google Drive').count(),
       0,
@@ -555,12 +561,19 @@ test('Google Drive browsing and viewing over mocked Google file routes', { timeo
     assert.equal(await open.getAttribute('target'), '_blank');
     const pdfReads = () => bodies.filter(item => item.kind === 'content' && item.body.fileId === 'docQ3').length;
     const before = pdfReads();
+    const viewerSource = await content.locator('iframe').getAttribute('src');
     const download = page.waitForEvent('download');
     await button('Download PDF').click();
     const saved = await download;
     assert.equal(saved.suggestedFilename(), 'Q3 plan.pdf');
     assert.deepEqual(await readFile(await saved.path()), pdf);
     assert.equal(pdfReads(), before + 1, 'download re-reads the export under current authorization');
+    await delay(500);
+    assert.equal(
+      await content.locator('iframe').getAttribute('src'),
+      viewerSource,
+      'downloading an unchanged file keeps the open viewer instead of reloading it',
+    );
     await page.setViewportSize({ width: 1280, height: 850 });
     await assertRenderedPdf(page);
     await shot('google-doc-1280');
@@ -753,7 +766,13 @@ test('Google Drive browsing and viewing over mocked Google file routes', { timeo
     );
     await shot('google-doc-320');
 
-    const shellReads = new Set(workspaceShellReads(workspace.id).map(([path]) => `GET ${path}`));
+    const shellReads = new Set([
+      ...workspaceShellReads(workspace.id).map(([path]) => `GET ${path}`),
+      // The sidebar lists recent chats and agents on every page.
+      ...['conversations/pinned', 'conversations', 'agents/recent'].map(
+        path => `GET /v1/workspaces/${workspace.id}/${path}`,
+      ),
+    ]);
     const forbidden = requests.filter(
       item =>
         !shellReads.has(item) &&

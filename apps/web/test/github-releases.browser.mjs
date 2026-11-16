@@ -61,6 +61,8 @@ try {
   browser = await chromium.launch({ headless: true });
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
   page.setDefaultTimeout(20000);
+  // The first visit waits for Vite to transform the whole app on a cold server.
+  page.setDefaultNavigationTimeout(60000);
   const errors = [];
   page.on('pageerror', error => errors.push(String(error)));
   let failReads = false,
@@ -120,36 +122,37 @@ try {
     return route.fulfill({ status: json ? 200 : 404, json: json ?? { error: 'not-found' } });
   });
   const invalid = { tool: 'github.personal.propose', actions: [{ ...upload, name: 'binary.bin.' }] };
-  f.decide([invalid, invalid, invalid]);
+  f.decide([invalid, invalid, invalid], 'No upload was proposed because binary.bin. is not a valid asset filename.');
   const invalidTurn = await f.store.send(f.one.id, f.member.userId, f.chatId, {
     commandId: randomUUID(),
     messageId: randomUUID(),
     model: 'claude-sonnet',
     parts: [{ kind: 'text', text: 'Upload binary.bin.' }],
   });
-  await f.db.platform.query(`UPDATE ${f.table('tf_conversation_turns')} SET attempts=4 WHERE id=$1`, [
-    invalidTurn.turnId,
-  ]);
-  assert.equal(await f.process(f.chatId, invalidTurn.turnId), 'failed');
+  assert.equal(await f.process(f.chatId, invalidTurn.turnId), 'completed');
   await page.goto(`${origin}/${workspace.slug}/chat/${f.chatId}`);
   await page
-    .getByText(
-      'The model could not produce a valid answer or tool request. Retry uses the original model. To use another model, select it and send a new message.',
-      { exact: true },
-    )
+    .getByText('No upload was proposed because binary.bin. is not a valid asset filename.', { exact: true })
     .waitFor();
   assert.equal(await page.getByRole('button', { name: 'Approve exact batch' }).count(), 0);
   assert.deepEqual((await f.batches.list(f.one.id, f.member.userId, f.chatId)).batches, []);
   assert.equal(f.effects.length, 0);
   await page.screenshot({
-    path: '/var/folders/7d/qk8p6t3d1jvfnh4503bz0msr0000gn/T/opencode/github-release-invalid-filename.png',
+    path: 'reports/screenshots/github-release-invalid-filename.png',
     fullPage: true,
   });
   f.decide(
     [{ tool: 'github.personal.propose', actions: [upload] }],
     'Review the corrected filename binary.bin before approving.',
   );
-  await page.getByRole('button', { name: 'Retry reply', exact: true }).click();
+  const correctedTurn = await f.store.send(f.one.id, f.member.userId, f.chatId, {
+    commandId: randomUUID(),
+    messageId: randomUUID(),
+    model: 'claude-sonnet',
+    parts: [{ kind: 'text', text: 'Upload it as binary.bin.' }],
+  });
+  assert.equal(await f.process(f.chatId, correctedTurn.turnId), 'completed');
+  await page.reload();
   await page.getByRole('button', { name: 'View GitHub changes', exact: true }).waitFor();
   const batch = (await f.batches.list(f.one.id, f.member.userId, f.chatId)).batches[0];
   await openGitHubReview(page, batch.snapshot.id);
@@ -181,7 +184,7 @@ try {
   await publishReview.getByText(/makes the draft available to repository readers/).waitFor();
   assert.deepEqual(JSON.parse(await publishReview.locator('pre').first().innerText()), publish.snapshot.actions[0]);
   await page.screenshot({
-    path: '/var/folders/7d/qk8p6t3d1jvfnh4503bz0msr0000gn/T/opencode/github-release-publish.png',
+    path: 'reports/screenshots/github-release-publish.png',
     fullPage: true,
   });
   await publishReview.getByRole('button', { name: 'Approve exact batch' }).click();
@@ -262,7 +265,7 @@ try {
   await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   await page.screenshot({
-    path: '/var/folders/7d/qk8p6t3d1jvfnh4503bz0msr0000gn/T/opencode/github-release-unknown-mobile.png',
+    path: 'reports/screenshots/github-release-unknown-mobile.png',
     fullPage: true,
   });
   assert.deepEqual(errors, []);

@@ -200,9 +200,12 @@ try {
       await activity.getByText(label, { exact: true }).waitFor();
       assert.equal(await activity.locator(`[data-brand="${brand}"]`).count(), 1);
     }
+    // Old #gmail links now open Gmail's own integration page.
     await page.goto(`${origin}/${fixture.workspace.slug}/integrations#gmail`);
-    const sheet = page.getByRole('dialog', { name: 'Gmail', exact: true });
-    const connect = sheet.getByRole('button', { name: 'Connect Gmail', exact: true });
+    await page.waitForURL(`${origin}/${fixture.workspace.slug}/integrations/gmail`);
+    const summary = page.getByRole('region', { name: 'Gmail summary', exact: true });
+    const sheet = page.locator('body');
+    const connect = summary.getByRole('button', { name: 'Connect Gmail', exact: true });
     await connect.waitFor();
     assert.doesNotMatch(await sheet.innerText(), /tester-only|test-user list/);
     assert.equal(await connect.getAttribute('aria-describedby'), null);
@@ -240,7 +243,7 @@ try {
       scopes: googleAppScopes.gmail,
     };
     await page.goto(`${origin}/google-workspace/callback?outcome=connected&workspaceId=${id}`);
-    await sheet.getByText('Connected', { exact: true }).waitFor();
+    await summary.getByText('Connected', { exact: true }).waitFor();
     assert.equal(await connect.count(), 0);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     assert.deepEqual(errors, []);

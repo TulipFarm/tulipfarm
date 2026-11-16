@@ -1,4 +1,13 @@
-import { createContext, useContext, useMemo, useState } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useLayoutEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from 'react';
 import {
   marketplacePackage,
   marketplacePackagesInPrompt,
@@ -61,10 +70,35 @@ export type PackageChatContextValue = {
   foreground: boolean;
 };
 
-export const PackageChatContext = createContext<PackageChatContextValue | null>(null);
+type PackageChatStore = { value: PackageChatContextValue; listeners: Set<() => void> };
+
+// The provider wraps the whole message list and its value changes every render; a store keeps
+// React from walking every message to find the few package replies that read it.
+const PackageChatContext = createContext<PackageChatStore | null>(null);
+
+export function PackageChatProvider({ value, children }: { value: PackageChatContextValue; children: ReactNode }) {
+  const [store] = useState<PackageChatStore>(() => ({ value, listeners: new Set() }));
+  useLayoutEffect(() => {
+    store.value = value;
+    for (const listener of store.listeners) listener();
+  });
+  return <PackageChatContext value={store}>{children}</PackageChatContext>;
+}
+
+function usePackageChat() {
+  const store = useContext(PackageChatContext);
+  const subscribe = useCallback(
+    (listener: () => void) => {
+      store?.listeners.add(listener);
+      return () => store?.listeners.delete(listener);
+    },
+    [store],
+  );
+  return useSyncExternalStore(subscribe, () => store?.value ?? null);
+}
 
 export function PackageInstallationReply({ url, chatId }: { url: string; chatId: string }) {
-  const context = useContext(PackageChatContext);
+  const context = usePackageChat();
   const link = marketplacePackage(url);
   if (!context || context.chatId !== chatId || !link)
     return (

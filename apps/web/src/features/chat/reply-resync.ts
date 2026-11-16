@@ -143,12 +143,11 @@ export function useReplyResync(
       if (progress.status) activity.set(`status:${progress.step}:${progress.round}`, statusPosition[progress.status]);
       activity.set(`tools:${progress.step}`, progress.toolRounds ?? 0);
     }
-    for (const tool of stream.tools?.values() ?? []) {
-      if (tool.turnId === turn?.id && tool.generation === turn.generation)
-        activity.set(`tool:${tool.id}`, tool.status === 'running' ? 1 : 2);
-    }
+    // Live and saved tools both count, so a reply seen progressing only through history reads keeps being checked.
+    for (const tool of message?.tools ?? [])
+      activity.set(`tool:${tool.id}`, (tool.activityStatus ?? tool.status) === 'running' ? 1 : 2);
     return activity;
-  }, [preview, progress, stream.tools, turn?.id, turn?.generation]);
+  }, [preview, progress, message?.tools]);
   const needsRecovery = stream.status !== 'open' || (!!preview?.text && !running && progress?.status !== 'done');
   useEffect(() => {
     const sync = () => {

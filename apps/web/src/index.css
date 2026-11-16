@@ -393,7 +393,10 @@
   *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
+    /* No transitions at all: transition-property defaults to all, so a tiny forced duration would start one on
+       every property of every element, and Chromium re-runs scrollbar-color ones on each style recalculation. */
+    transition-duration: 0s !important;
+    transition-delay: 0s !important;
     scroll-behavior: auto !important;
   }
 }

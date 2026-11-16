@@ -10,6 +10,9 @@ import { createConversations } from '@tulipfarm/conversations';
 import { knowledgeFixture } from '../../api/test/knowledge-fixture.mjs';
 import { createWorkspaceFixture, serveWorkspaceShellEvent, workspaceShellReads } from './workspace.fixture.mjs';
 
+// Sending a chat message resolves the default model, which needs a provider key.
+process.env.ANTHROPIC_API_KEY ??= 'test-key';
+
 const shots = process.env.FILES_SCREENSHOTS ?? 'reports/check/files-browser';
 
 test(
@@ -104,6 +107,9 @@ test(
           }
           const shell = new Map([
             ...workspaceShellReads(workspace.id),
+            [`/v1/workspaces/${workspace.id}/conversations/pinned`, { chats: [] }],
+            [`/v1/workspaces/${workspace.id}/conversations`, { chats: [], nextCursor: null }],
+            [`/v1/workspaces/${workspace.id}/agents/recent`, []],
             ['/v1/feature-flags', {}],
             ['/v1/auth/get-session', session],
             ['/v1/user/visit', { firstSession: false }],
@@ -138,7 +144,8 @@ test(
       await mkdir(shots, { recursive: true });
 
       await page.goto(`${origin}/${workspace.slug}/files`);
-      await page.getByRole('link', { name: 'Delivery notes.txt', exact: true }).click();
+      // The first visit waits for Vite to transform the whole app on a cold server.
+      await page.getByRole('link', { name: 'Delivery notes.txt', exact: true }).click({ timeout: 90000 });
       await page.waitForURL(new RegExp(`/files/${attachmentId}$`));
       await page.getByRole('heading', { name: 'Delivery notes.txt', level: 1 }).waitFor();
       await page.getByText('Deliver the orchids to the north greenhouse on Friday.').waitFor();

@@ -245,7 +245,7 @@ test('automatic integration Knowledge disclosure, status and controls in Chromiu
       await route.fulfill({ status, json, headers }).catch(() => {});
     });
     const open = async app => {
-      await page.goto(`${origin}/${workspace.slug}/integrations#${app}`);
+      await page.goto(`${origin}/${workspace.slug}/integrations/${app}?tab=knowledge`);
       const section = page.getByRole('region', { name: 'Automatic Knowledge', exact: true });
       await section.waitFor();
       return section;
@@ -295,7 +295,11 @@ test('automatic integration Knowledge disclosure, status and controls in Chromiu
           .waitFor();
         state.listStatus.length = 0;
         await section.getByRole('button', { name: 'Retry automatic Knowledge status' }).click();
-        await section.getByText('640 searchable · 0 queued · 0 failed · 0 skipped · 0 over limit').waitFor();
+        await section
+          .getByRole('img', {
+            name: '640 of 640 items searchable. 640 searchable, 0 queued, 0 failed, 0 skipped, 0 over limit.',
+          })
+          .waitFor();
       },
       {
         items: [intent(2, 'gmail', 'ada@example.test', { counts: counts(640) })],
@@ -309,9 +313,9 @@ test('automatic integration Knowledge disclosure, status and controls in Chromiu
     await fixture(
       async ({ page }) => {
         const read = page.waitForResponse(response => response.url().endsWith('/knowledge/defaults'));
-        await page.goto(`${origin}/${workspace.slug}/integrations#gmail`);
+        await page.goto(`${origin}/${workspace.slug}/integrations/gmail?tab=knowledge`);
         await read;
-        await page.getByRole('region', { name: 'What it can do', exact: true }).waitFor();
+        await page.getByRole('tab', { name: 'Knowledge', selected: true }).waitFor();
         await page.waitForTimeout(300);
         assert.equal(await page.getByRole('region', { name: 'Automatic Knowledge', exact: true }).count(), 0);
       },
@@ -327,7 +331,11 @@ test('automatic integration Knowledge disclosure, status and controls in Chromiu
           .getByRole('status')
           .filter({ hasText: 'Finding sources. Your integration is ready to use now.' })
           .waitFor();
-        await row.getByText('212 searchable · 96 queued · 0 failed · 0 skipped · 0 over limit').waitFor();
+        await row
+          .getByRole('img', {
+            name: '212 of 308 items searchable. 212 searchable, 96 queued, 0 failed, 0 skipped, 0 over limit.',
+          })
+          .waitFor();
         await row.getByRole('button', { name: 'Stop automatic Knowledge' }).click();
         await row.getByRole('button', { name: 'Confirm stop' }).waitFor();
         assert.equal(await focused(), 'Confirm stop');
@@ -655,7 +663,7 @@ test('automatic integration Knowledge disclosure, status and controls in Chromiu
         const github = (await open('github')).getByRole('listitem', { name: 'GitHub ada-dev' });
         await github
           .getByText(
-            /This GitHub login is no longer connected here\. Connect it again in GitHub accounts below, then choose Retry now\./,
+            /This GitHub login is no longer connected here\. Connect it again in Accounts, then choose Retry now\./,
           )
           .waitFor();
         assert.equal(await github.getByRole('button', { name: /^Reconnect/ }).count(), 0);

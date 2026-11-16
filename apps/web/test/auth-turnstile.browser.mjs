@@ -23,6 +23,11 @@ test(
           return route.fulfill({ json: { turnstileSiteKey: 'fixture-site-key', google: true, magicLink: true } });
         throw new Error(`Unexpected auth request: ${pathname}`);
       });
+      const checkedSlugs = [];
+      await context.route('**/v1/onboarding/availability', async route => {
+        checkedSlugs.push(route.request().postDataJSON().slug);
+        await route.fulfill({ json: { available: true } });
+      });
       await page.goto(`${origin}/register?redirect=%2F`);
       await page.getByLabel('Workspace name', { exact: true }).fill('Acme Partners');
       const url = page.getByLabel('Workspace URL', { exact: true });
@@ -39,6 +44,7 @@ test(
         .getByRole('main')
         .getByText(`${new URL(origin).host}/acme-team`, { exact: true })
         .waitFor();
+      assert.equal(checkedSlugs.at(-1), 'acme-team', 'Continue checks the chosen address is free');
       const submit = await page.getByRole('button', { name: 'Create workspace with email' }).boundingBox();
       assert.ok(
         submit && submit.y + submit.height <= 720,
@@ -46,13 +52,14 @@ test(
       );
       assert.equal(await page.getByRole('link', { name: 'log in' }).getAttribute('href'), '/login?redirect=%2F');
       const demo = page.locator('aside[aria-hidden="true"]');
-      await demo.evaluate(async aside => {
+      await demo.locator(':scope > *').waitFor();
+      // The demo keeps ticking, so read both layout heights (untransformed by its entry animation) in one frame.
+      const { before, after } = await demo.evaluate(aside => {
         document.documentElement.dataset.analyticsConsent = 'open';
-        void getComputedStyle(aside).paddingBottom;
-        await Promise.all(aside.getAnimations().map(animation => animation.finished));
+        const content = aside.firstElementChild;
+        if (!(content instanceof HTMLElement)) throw new Error('The demo has no content');
+        return { before: aside.offsetHeight, after: content.offsetHeight };
       });
-      const before = (await demo.boundingBox())?.height ?? 0;
-      const after = (await demo.locator(':scope > *').boundingBox())?.height ?? 0;
       assert.ok(before - after >= 256, `Demo keeps ${after}px of ${before}px beside the consent notice`);
     } finally {
       await context.close();

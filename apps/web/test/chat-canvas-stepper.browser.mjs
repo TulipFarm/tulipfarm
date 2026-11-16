@@ -100,12 +100,16 @@ test(
           await conversation().locator('[data-tool-id][data-status="running"]').waitFor();
           assert.equal(await conversation().locator('[data-tool-id]').count(), 2);
           assert.equal(
-            await conversation().locator('[data-status="completed"] .sprout-tool-activity-mark-completed').count(),
+            await conversation()
+              .locator(
+                '[data-status="completed"] .sprout-tool-activity-mark [data-slot="status"][data-state="success"]',
+              )
+              .count(),
             1,
           );
           assert.equal(
             await conversation()
-              .locator('[data-status="running"] svg circle')
+              .locator('[data-status="running"] svg .sprout-status-spin')
               .last()
               .evaluate(element => getComputedStyle(element).animationName),
             'none',
@@ -316,8 +320,9 @@ test(
         assert.equal(await canvas().count(), 0);
         await expand();
         await conversation().locator(`[data-tool-id][data-status="${scenario}"]`).waitFor();
+        // The failed reply kept a completed tool, so retrying resumes from it.
         if (scenario === 'failed')
-          await conversation().getByRole('button', { name: 'Retry reply', exact: true }).waitFor();
+          await conversation().getByRole('button', { name: 'Continue', exact: true }).waitFor();
       }
 
       await load('history');
@@ -356,7 +361,7 @@ test(
       await page.emulateMedia({ reducedMotion: 'no-preference' });
       assert.notEqual(
         await conversation()
-          .locator('[data-status="running"] svg circle')
+          .locator('[data-status="running"] svg .sprout-status-spin')
           .last()
           .evaluate(element => getComputedStyle(element).animationName),
         'none',

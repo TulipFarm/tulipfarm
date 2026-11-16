@@ -267,15 +267,8 @@ test(
           .catch(() => {});
       });
       const open = async (product = 'Confluence') => {
-        await page.goto(`${origin}/${workspace.slug}/integrations`);
-        await page
-          .getByRole('listitem')
-          .filter({ has: page.getByRole('button', { name: product, exact: true }) })
-          .getByRole('button', { name: product, exact: true })
-          .first()
-          .click();
-        const toggle = page.getByRole('dialog').getByRole('button', { name: 'Your account', exact: true });
-        if ((await toggle.count()) && (await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+        await page.goto(`${origin}/${workspace.slug}/integrations/${product.toLowerCase()}?tab=knowledge`);
+        await page.getByRole('tab', { name: 'Knowledge', selected: true }).waitFor();
         await page.getByRole('heading', { name: `${product} knowledge sources`, exact: true }).waitFor();
       };
       const select = async (product = 'Confluence') => {
@@ -416,11 +409,11 @@ test(
             assert.equal(
               await f.page.getByRole('listitem', { name: item.title, exact: true }).count(),
               0,
-              'Confluence sources stay in the Confluence sheet',
+              'Confluence sources stay on the Confluence page',
             );
             await f.page
               .getByRole('listitem', { name: 'Operations', exact: true })
-              .getByText('Project: Operations (OPS)')
+              .getByText(/^OPS · /)
               .waitFor();
             await f.select('Jira');
             await f.page.getByRole('checkbox', { name: 'Operations (OPS)' }).click();
@@ -433,27 +426,40 @@ test(
             });
             await f.open();
             const row = () => f.page.getByRole('listitem', { name: item.title, exact: true });
-            await row().getByText('The source owner can no longer view this in Atlassian.', { exact: false }).waitFor();
-            await row().getByText('Blocked', { exact: true }).waitFor();
-            await row().getByText('Page: Roadmap and child pages').waitFor();
-            await row().getByText('3 ready · 1 failed · 4 pages discovered').waitFor();
+            // Source actions live in the row's More actions menu.
+            const act = async name => {
+              await row()
+                .getByRole('button', { name: `More actions for ${item.title}`, exact: true })
+                .click();
+              await f.page.getByRole('menuitem', { name, exact: true }).click();
+            };
+            await row()
+              .getByText('Space SUP is blocked. The source owner can no longer view this in Atlassian.', {
+                exact: false,
+              })
+              .waitFor();
+            await row().getByText('Needs attention', { exact: true }).waitFor();
+            await row().getByText('Page and child pages, SUP', { exact: false }).waitFor();
+            await row().getByText('3 of 4 pages · 1 failed').waitFor();
             f.faults.refresh = 503;
-            await row().getByRole('button', { name: 'Refresh my access' }).click();
+            await act('Refresh my access');
             await row()
               .getByText('Could not refresh your access. No current authorization is confirmed.', { exact: false })
               .waitFor();
             f.faults.refresh = 200;
-            await row().getByRole('button', { name: 'Retry access refresh' }).click();
+            await act('Retry access refresh');
             await row().getByText('Checked 4 pages: 3 confirmed, 1 unavailable to you.', { exact: false }).waitFor();
-            await row().getByRole('button', { name: 'Pause source' }).click();
-            await row().getByRole('button', { name: 'Resume source' }).click();
-            await row().getByRole('button', { name: 'Retry source' }).click();
+            await act('Pause source');
+            await row().getByText('Paused', { exact: true }).waitFor();
+            await act('Resume source');
+            await row().getByText('Needs attention', { exact: true }).waitFor();
+            await act('Retry source');
             await row().getByText('Queued', { exact: true }).waitFor();
             f.faults.manage = 409;
-            await row().getByRole('button', { name: 'Pause source' }).click();
+            await act('Pause source');
             await row().getByRole('button', { name: 'Check source status' }).waitFor();
             f.faults.manage = 200;
-            await row().getByRole('button', { name: 'Remove source' }).click();
+            await act('Remove source');
             await row().getByText('The content stays in Confluence.', { exact: false }).waitFor();
             await row().getByRole('button', { name: 'Confirm remove source' }).click();
             await f.page.getByText('No Confluence sources selected', { exact: true }).waitFor();
@@ -522,7 +528,7 @@ test(
           await row.getByText('Only the source owner can pause, resume, retry, or remove it.').waitFor();
           assert.equal(await row.getByRole('button', { name: 'Pause source' }).count(), 0);
           assert.equal(await row.getByRole('list', { name: 'Selected content' }).count(), 0);
-          await row.getByRole('button', { name: 'View import details' }).click();
+          await row.getByRole('button', { name: 'View pages', exact: true }).click();
           await f.page.getByText('This item exceeds the 1 MB or 1,000-comment limit and is not searchable.').waitFor();
           const download = f.page.waitForEvent('download');
           await f.page
@@ -580,7 +586,7 @@ test(
             await f.open();
             await f.page
               .getByRole('listitem', { name: item.title, exact: true })
-              .getByRole('button', { name: 'View import details' })
+              .getByRole('button', { name: 'View pages', exact: true })
               .click();
             const replaced = f.page.getByRole('listitem', { name: 'Roadmap root', exact: true });
             await replaced.getByText('Import failed', { exact: true }).waitFor();

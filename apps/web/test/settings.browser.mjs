@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { stripVTControlCharacters } from 'node:util';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
@@ -143,6 +144,9 @@ test('workspace settings in the real Vite app with HTTP fixtures', { timeout: 24
         if (path === `${base}/knowledge/settings`) return send({ mediaRecognition: false, canManage: false });
         if (path === `${base}/governance/directory`) return send({ members: [] });
         if (path === `${base}/subscriptions`) return send({ subscriptions: [] });
+        // Model sources read the Claude and Copilot token plans, which are off here.
+        for (const provider of ['claude', 'copilot'])
+          if (path === `${base}/${provider}/connection`) return send({ error: `${provider}-plan-disabled` }, 404);
         if (path === `${base}/chatgpt/connection`)
           return send({ state: 'not-connected', email: null, planUsage: false, welcomePending: false, models: [] });
         if (path === `${base}/recommendations/events`) {
@@ -353,17 +357,18 @@ test('workspace settings in the real Vite app with HTTP fixtures', { timeout: 24
     vite.stderr.on('data', data => {
       output = (output + data).slice(-16000);
     });
-    for (let i = 0; ; i++) {
+    for (let i = 0, last = 'no response'; ; i++) {
       assert.equal(vite.exitCode, null, output);
       if (
-        output.includes(origin) &&
+        // On CI Vite colours its output, styling the port separately.
+        stripVTControlCharacters(output).includes(origin) &&
         (await fetch(origin).then(
-          r => r.ok,
-          () => false,
+          r => ((last = `HTTP ${r.status}`), r.ok),
+          error => ((last = String(error.cause ?? error)), false),
         ))
       )
         break;
-      assert.ok(i < 150, output);
+      assert.ok(i < 600, `Vite did not serve the app (last probe: ${last}). ${output}`);
       await delay(100);
     }
     browser = await chromium.launch({ headless: true });
@@ -438,17 +443,19 @@ test('workspace settings in the real Vite app with HTTP fixtures', { timeout: 24
           assert.equal(reads().length, 0, 'Restoration must wait for a deliberate check');
           await check.click();
           await page.getByText(/Could not check whether your change was saved/).waitFor();
+          // The transport resends a GET once after a 503, so one deliberate check makes two requests.
+          assert.equal(reads().length, 2, 'One deliberate check and its single transport resend');
           await page.evaluate(() => {
             window.dispatchEvent(new Event('focus'));
             window.dispatchEvent(new Event('online'));
           });
           await delay(3500);
-          assert.equal(reads().length, 1, 'Failed receipt checks do not retry on timers, focus or reconnect');
+          assert.equal(reads().length, 2, 'Failed receipt checks do not retry on timers, focus or reconnect');
           assert.equal(f.writes.length, 0);
           f.receiptStatus = 404;
           await check.click();
           await page.getByText(/No saved result is visible/).waitFor();
-          assert.equal(reads().length, 2);
+          assert.equal(reads().length, 3);
           assert.equal(await page.getByRole('button', { name: 'Retry same request' }).count(), 0);
           const retained = await page.evaluate(() =>
             Object.keys(sessionStorage)
@@ -485,7 +492,7 @@ test('workspace settings in the real Vite app with HTTP fixtures', { timeout: 24
               { exact: true },
             )
             .waitFor();
-          assert.equal(reads().length, 3, 'Each deliberate check reaches the server');
+          assert.equal(reads().length, 4, 'Each deliberate check reaches the server');
           assert.ok(reads().every(request => request.path.endsWith(`/${requestId}`)));
           assert.equal(f.writes.length, 0);
           assert.equal(
@@ -505,7 +512,7 @@ test('workspace settings in the real Vite app with HTTP fixtures', { timeout: 24
       f.readGate = gate();
       await page.goto(`${origin}/acme/settings`);
       await page.getByRole('status', { name: 'Loading workspace settings', exact: true }).waitFor();
-      assert.equal(await nav(page).getByRole('link').count(), 6);
+      assert.equal(await nav(page).getByRole('link').count(), 5);
       f.readGate.release();
       await page.getByLabel('Workspace name', { exact: true }).waitFor();
       assert.equal(
@@ -628,19 +635,24 @@ test('workspace settings in the real Vite app with HTTP fixtures', { timeout: 24
     await scenario('unsaved navigation asks before discarding and common sections remain linked', async page => {
       await general(page);
       await page.getByLabel('Workspace name', { exact: true }).fill('Unsaved');
-      await nav(page).getByRole('link', { name: 'Teams', exact: true }).click();
+      await nav(page).getByRole('link', { name: 'Members & teams', exact: true }).click();
       await page.getByRole('heading', { name: 'Leave these edits?' }).waitFor();
       await page.getByRole('button', { name: 'Keep editing' }).click();
       assert.equal(await page.getByLabel('Workspace name', { exact: true }).inputValue(), 'Unsaved');
       await page.getByRole('button', { name: 'Reset name' }).click();
-      for (const [label, heading] of [
-        ['Teams', 'Teams'],
+      // Members and Teams share one link; the Teams tab keeps that link current.
+      for (const [label, heading, tab] of [
+        ['Members & teams', 'Members', 'Teams'],
         ['Table access', 'Table access'],
-        ['Members', 'Members'],
+        ['Members & teams', 'Members'],
         ['General', 'General'],
       ]) {
         await nav(page).getByRole('link', { name: label, exact: true }).click();
         await page.getByRole('heading', { name: heading, exact: true, level: 1 }).waitFor();
+        if (tab) {
+          await page.getByRole('tab', { name: tab, exact: true }).click();
+          await page.waitForURL(/\/teams$/);
+        }
         assert.equal(
           await nav(page).getByRole('link', { name: label, exact: true }).getAttribute('aria-current'),
           'page',
@@ -655,7 +667,7 @@ test('workspace settings in the real Vite app with HTTP fixtures', { timeout: 24
       await page.getByRole('heading', { name: 'workspace settings unavailable', exact: true }).waitFor();
       assert.equal(await page.getByLabel('Workspace name', { exact: true }).count(), 0);
       assert.equal(await page.getByLabel('Workspace ID', { exact: true }).count(), 0);
-      assert.equal(await nav(page).getByRole('link').count(), 6);
+      assert.equal(await nav(page).getByRole('link').count(), 5);
       f.settingsStatus = 200;
       await page.getByRole('button', { name: 'Reload workspace settings' }).click();
       await page.getByLabel('Workspace name', { exact: true }).waitFor();
@@ -700,7 +712,10 @@ test('workspace settings in the real Vite app with HTTP fixtures', { timeout: 24
       await workspaceChange(page, workspaceId, f.userId, [['governance', 'membership'], ['settings']]);
       await eventually(() => page.getByRole('button', { name: 'Leave workspace', exact: true }).isEnabled(), true);
       await page.getByRole('button', { name: 'Leave workspace', exact: true }).click();
-      await page.getByRole('button', { name: 'Confirm leave workspace', exact: true }).click();
+      await page
+        .getByRole('dialog', { name: 'Leave this workspace?', exact: true })
+        .getByRole('button', { name: 'Leave workspace', exact: true })
+        .click();
       await page.waitForURL('**/create-workspace');
       assert.equal(f.writes[0].path, `${base}/governance/leave`);
     });
@@ -767,7 +782,7 @@ test('workspace settings in the real Vite app with HTTP fixtures', { timeout: 24
       assert.equal(f.writes[1].input.expectedRevision, 3);
       f.role = 'member';
       await notifyChange(page, workspaceId, f.userId, 'models');
-      await page.getByText(/You have read-only access/).waitFor();
+      await page.getByText(/Only workspace admins can change TulipFarm model access/).waitFor();
       assert.equal(await page.getByRole('switch', { name: 'Allow Primary family', checked: false }).count(), 0);
     });
     await scenario('model access failure retries into an honest empty state', async (page, f) => {
@@ -820,7 +835,7 @@ test('workspace settings in the real Vite app with HTTP fixtures', { timeout: 24
           await page.getByRole('heading', { name: 'workspace models unavailable', exact: true }).waitFor();
         else if (denied === 'list')
           await page.getByRole('heading', { name: 'model access unavailable', exact: true }).waitFor();
-        else await page.getByText(/You have read-only access/).waitFor();
+        else await page.getByText(/Only workspace admins can change TulipFarm model access/).waitFor();
         await page.getByRole('button', { name: 'Check command status' }).click();
         await page.getByText('Model access saved.', { exact: true }).waitFor();
         assert.equal(f.writes.length, 1);
@@ -928,7 +943,7 @@ test('workspace settings in the real Vite app with HTTP fixtures', { timeout: 24
       assert.equal(f.writes.length, 1);
       f.role = 'member';
       await notifyChange(page, workspaceId, f.userId, 'models');
-      await page.getByText(/You have read-only access/).waitFor();
+      await page.getByText(/Only workspace admins can change TulipFarm model access/).waitFor();
       assert.equal(await page.getByRole('button', { name: 'Retry same request' }).isDisabled(), true);
       f.role = 'admin';
       await notifyChange(page, workspaceId, f.userId, 'models');
@@ -1049,7 +1064,7 @@ test('workspace settings in the real Vite app with HTTP fixtures', { timeout: 24
               path: `${process.env.SETTINGS_SCREENSHOTS}/settings-${theme}.png`,
               fullPage: true,
             });
-          await page.getByRole('button', { name: 'Toggle Sidebar', exact: true }).click();
+          await page.getByRole('button', { name: 'Toggle sidebar', exact: true }).click();
           await page.getByRole('link', { name: 'Models', exact: true }).click();
           await page.getByRole('switch', { name: 'Allow Primary family', checked: true }).waitFor();
           assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);

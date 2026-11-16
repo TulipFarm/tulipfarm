@@ -192,10 +192,15 @@ test('chat integration links preserve the chat and recover from status failures'
           const popupPromise = page.waitForEvent('popup');
           await page.keyboard.press('Enter');
           const popup = await popupPromise;
+          // Google's link opens Gmail's own page on its Accounts tab, keeping the way back to the chat.
           await popup
-            .getByRole('dialog', { name: 'Gmail' })
+            .getByRole('tabpanel', { name: 'Accounts' })
             .getByRole('button', { name: 'Connect Gmail', exact: true })
             .waitFor();
+          const opened = new URL(popup.url());
+          assert.equal(opened.pathname, `/${workspace.slug}/integrations/gmail`);
+          assert.equal(opened.searchParams.get('tab'), 'accounts');
+          assert.equal(opened.searchParams.get('returnChat'), id);
           assert.equal(await input.textContent(), 'Keep my unsent draft');
           assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
           assert.equal(page.url(), `${origin}/${workspace.slug}/chat/${id}`);
@@ -219,13 +224,16 @@ test('chat integration links preserve the chat and recover from status failures'
             0,
             'failed refresh cannot retain a stale integration action',
           );
+          const beforeRetry = state.requests.length;
           await region.getByRole('button', { name: 'Check Google integration again' }).click();
+          // The failed retry must finish before the service recovers, or it would already succeed.
+          while (!state.requests.slice(beforeRetry).some(path => path.endsWith('/google-workspace'))) await delay(50);
           await region.getByRole('alert').waitFor();
           await page.waitForFunction(
             () =>
-              ![...document.querySelectorAll('button')].find(
+              [...document.querySelectorAll('button')].find(
                 button => button.textContent === 'Check Google integration again',
-              )?.disabled,
+              )?.disabled === false,
           );
           state.status = 200;
           state.google = connected;

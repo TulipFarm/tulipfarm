@@ -213,7 +213,8 @@ export function createGoogleResultsMock(scenario: string) {
       if (method === 'GET') {
         reads++;
         if (scenario === 'slides-slow') await new Promise(resolve => setTimeout(resolve, 2000));
-        if (scenario === 'slides-error' && reads <= 3)
+        // Fail every attempt of the first read: three query tries, each retried once by the HTTP layer.
+        if (scenario === 'slides-error' && reads <= 6)
           return Response.json({ error: 'demo-status-unavailable' }, { status: 503 });
         return Response.json(await proposal);
       }

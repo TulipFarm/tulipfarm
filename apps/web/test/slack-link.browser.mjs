@@ -98,7 +98,7 @@ try {
     }, theme);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     await page.screenshot({
-      path: `${process.env.SCREENSHOT_DIR ?? '/var/folders/7d/qk8p6t3d1jvfnh4503bz0msr0000gn/T/opencode'}/slack-link-${theme}.png`,
+      path: `${process.env.SCREENSHOT_DIR ?? 'reports/screenshots'}/slack-link-${theme}.png`,
       fullPage: true,
     });
   }

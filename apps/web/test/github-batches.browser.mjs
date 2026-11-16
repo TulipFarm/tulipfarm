@@ -156,7 +156,7 @@ try {
   assert.equal(effects.length, 0);
   assert.equal(await page.getByText('Post as', { exact: true }).count(), 0);
   await page.screenshot({
-    path: '/var/folders/7d/qk8p6t3d1jvfnh4503bz0msr0000gn/T/opencode/github-batches-desktop.png',
+    path: 'reports/screenshots/github-batches-desktop.png',
     fullPage: true,
   });
   failRead = true;
@@ -286,7 +286,7 @@ try {
   assert.deepEqual(reviewed, merge);
   await mergeReview.getByRole('button', { name: 'Approve exact batch' }).scrollIntoViewIfNeeded();
   await page.screenshot({
-    path: '/var/folders/7d/qk8p6t3d1jvfnh4503bz0msr0000gn/T/opencode/github-pull-merge-review.png',
+    path: 'reports/screenshots/github-pull-merge-review.png',
     fullPage: true,
   });
   await mergeReview.getByRole('button', { name: 'Approve exact batch' }).click();
@@ -319,7 +319,7 @@ try {
   await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   await page.screenshot({
-    path: '/var/folders/7d/qk8p6t3d1jvfnh4503bz0msr0000gn/T/opencode/github-batches-mobile.png',
+    path: 'reports/screenshots/github-batches-mobile.png',
     fullPage: true,
   });
   assert.deepEqual(errors, []);

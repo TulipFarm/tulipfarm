@@ -24,6 +24,8 @@ test(
       page.setDefaultTimeout(15000);
       const url = `${origin}/soul-explorer-mock/settings/soul`;
       await page.goto(`${origin}/soul-explorer-mock/settings`);
+      // The mock API loads dynamically; wrap fetch only after it is in place so its reads are counted.
+      await page.getByRole('link', { name: 'Open Soul', exact: true }).waitFor();
       await page.evaluate(() => {
         window.soulRequests = [];
         const fetch = window.fetch.bind(window);

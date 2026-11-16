@@ -154,14 +154,10 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       await page.getByRole('button', { name: 'Archive workflow' }).click();
       await dialog.getByRole('button', { name: 'Archive workflow' }).click();
       // While the archive request is in flight the button is blocked with a reason, not relabelled.
-      await page.getByText('Finish or retry the current request first.', { exact: true }).waitFor();
-      assert.equal(
-        await page
-          .getByRole('region', { name: 'Danger zone', exact: true })
-          .getByRole('button', { name: 'Archive workflow', exact: true })
-          .isDisabled(),
-        true,
-      );
+      // The page's other actions show the same reason, so read it from the Danger zone.
+      const danger = page.getByRole('region', { name: 'Danger zone', exact: true });
+      await danger.getByText('Finish or retry the current request first.', { exact: true }).waitFor();
+      assert.equal(await danger.getByRole('button', { name: 'Archive workflow', exact: true }).isDisabled(), true);
       release();
       await page
         .getByRole('alert')

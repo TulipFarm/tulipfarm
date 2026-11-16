@@ -878,7 +878,8 @@ test('chat reply streaming and polling fallback in Chromium', { timeout: 240000 
           turn: null,
         });
         await open();
-        const dock = page.getByRole('region', { name: 'Questions', exact: true });
+        // Questions sit inline in the conversation, labelled by their prompt.
+        const dock = page.getByRole('region', { name: 'Which day works?', exact: true });
         await dock.getByRole('radio', { name: /Tuesday/ }).waitFor();
         let accept;
         state.sendGate = new Promise(resolve => (accept = resolve));

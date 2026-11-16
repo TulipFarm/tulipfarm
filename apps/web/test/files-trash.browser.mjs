@@ -91,6 +91,9 @@ test(
           }
           const shell = new Map([
             ...workspaceShellReads(workspace.id),
+            [`/v1/workspaces/${workspace.id}/conversations/pinned`, { chats: [] }],
+            [`/v1/workspaces/${workspace.id}/conversations`, { chats: [], nextCursor: null }],
+            [`/v1/workspaces/${workspace.id}/agents/recent`, []],
             ['/v1/feature-flags', {}],
             ['/v1/auth/get-session', session],
             ['/v1/user/visit', { firstSession: false }],

@@ -434,6 +434,10 @@ export function useRichFileMentions(
     if (!initialized.current && !documentReferences.length) return;
     initialized.current = true;
     const keys = new Set(documentReferences.map(referenceKey));
+    // `content` can trail the editor by a render, so a chip inserted since then must not lose its file.
+    input.current?.editor()?.state.doc.descendants(node => {
+      if (node.type.name === 'fileReference') keys.add(referenceKey({ source: node.attrs.source, id: node.attrs.id }));
+    });
     // Each parse yields a new document, so keep the same array when nothing was removed or this effect re-renders forever.
     setReferences(current =>
       current.every(reference => keys.has(referenceKey(reference)))
@@ -500,8 +504,9 @@ export function useRichFileMentions(
                   setNotice(`Add up to ${referenceLimit} files per message. Remove one to add another.`);
                   return;
                 }
-                setReferences(current => [
-                  ...current,
+                // The chip's node view reads the ref as soon as it is inserted, before React re-renders.
+                referencesRef.current = [
+                  ...referencesRef.current,
                   {
                     source: 'tulipfarm',
                     id: item.id,
@@ -509,7 +514,8 @@ export function useRichFileMentions(
                     mediaType: item.mediaType ?? '',
                     size: item.size,
                   },
-                ]);
+                ];
+                setReferences(referencesRef.current);
                 editor
                   .chain()
                   .focus()
@@ -537,8 +543,8 @@ export function useRichFileMentions(
                   setNotice(`Add up to ${referenceLimit} files per message. Remove one to add another.`);
                   return;
                 }
-                setReferences(current => [
-                  ...current,
+                referencesRef.current = [
+                  ...referencesRef.current,
                   {
                     source: 'google',
                     id: item.id,
@@ -546,7 +552,8 @@ export function useRichFileMentions(
                     mediaType: item.mimeType,
                     binding: currentGoogle.binding,
                   },
-                ]);
+                ];
+                setReferences(referencesRef.current);
                 editor
                   .chain()
                   .focus()

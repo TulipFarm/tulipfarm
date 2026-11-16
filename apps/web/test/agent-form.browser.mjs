@@ -68,11 +68,12 @@ async function environment(t, { width = 1440, height = 1000, floating = false, w
   });
   await page.goto(`${server.origin}/${fixture.workspace.slug}/agents/new`);
   const form = page.getByRole('form', { name: 'Agent setup', exact: true });
-  const step = name =>
-    page
-      .getByRole('tab', { name: new RegExp(name) })
-      .first()
-      .click();
+  // Wait for the step to open: the other steps' panels stay mounted, and may share field names.
+  const step = async name => {
+    const tab = page.getByRole('tab', { name: new RegExp(name) }).first();
+    await tab.click();
+    await page.waitForFunction(tab => tab.getAttribute('aria-selected') === 'true', await tab.elementHandle());
+  };
   try {
     await form.getByLabel('Agent name', { exact: true }).waitFor({ timeout: 30000 });
   } catch (error) {
@@ -88,7 +89,11 @@ test('table access selects a granting team and shows an editable access source',
   await form.getByLabel('Agent name', { exact: true }).fill('Customer reader');
   await form.getByRole('textbox', { name: 'Instructions', exact: true }).fill('Count the customer rows.');
   await step('Access');
-  await form.getByRole('checkbox', { name: 'Customers', exact: true }).check();
+  // Basics also offers the business tables, so pick the table in the Access step's data section.
+  await form
+    .getByLabel('What data it can use', { exact: true })
+    .getByRole('checkbox', { name: 'Customers', exact: true })
+    .check();
   await form.getByText('Uses access from People Ops.', { exact: true }).waitFor();
   await form.getByRole('button', { name: 'Change teams used for access', exact: true }).click();
   const enrollment = form.getByRole('group', { name: 'Teams whose permissions the agent may use', exact: true });
@@ -120,7 +125,11 @@ test('table access blocks a plain member with the manager needed before activati
   await form.getByLabel('Agent name', { exact: true }).fill('Customer reader');
   await form.getByRole('textbox', { name: 'Instructions', exact: true }).fill('Count the customer rows.');
   await step('Access');
-  await form.getByRole('checkbox', { name: 'Customers', exact: true }).check();
+  // Basics also offers the business tables, so pick the table in the Access step's data section.
+  await form
+    .getByLabel('What data it can use', { exact: true })
+    .getByRole('checkbox', { name: 'Customers', exact: true })
+    .check();
   await form
     .getByRole('alert')
     .getByText('You need a manager of People Ops to give this agent access.', { exact: true })
@@ -145,7 +154,16 @@ for (const width of [375, 390, 414, 768, 1440])
       floating: true,
     });
     const scroller = page.locator('[data-viewport-content]');
-    const bottom = () => scroller.evaluate(node => (node.scrollTop = node.scrollHeight));
+    // Sections can still grow after a fill; keep scrolling until the height holds for a few frames.
+    const bottom = () =>
+      scroller.evaluate(async node => {
+        for (let stable = 0, height = -1; stable < 3;) {
+          node.scrollTop = node.scrollHeight;
+          await new Promise(requestAnimationFrame);
+          stable = node.scrollHeight === height ? stable + 1 : 0;
+          height = node.scrollHeight;
+        }
+      });
     const choose = async name => {
       if (width < 640) {
         await page.getByRole('combobox', { name: 'Setup section', exact: true }).click();
@@ -333,7 +351,7 @@ test(
       assert.equal(setup.slackChannels.length, 2);
       assert.deepEqual(setup.triggers, []);
       assert.deepEqual(setup.policy, { grants: [], personGrants: [] }, 'placement never silently shares');
-      assert.equal(saves[0].body.consent.sponsor, false, 'saving needs no sponsor approval');
+      assert.equal('sponsor' in saves[0].body.consent, false, 'saving needs no sponsor approval');
       // Triggers come from chat; the builder reviews and sponsors those already on the draft.
       const trigger = {
         id: randomUUID(),
@@ -359,7 +377,8 @@ test(
       await page.getByRole('region', { name: 'Run agent now', exact: true }).waitFor();
       assert.equal(fixture.publications.size, 2);
       const activation = [...fixture.publications.values()].find(item => item.body.decision === 'activate');
-      assert.equal(activation.body.consent.sponsor, true);
+      // Activating is the consent: the workflow runs as the reviewer, so no separate sponsor flag is sent.
+      assert.equal('sponsor' in activation.body.consent, false);
       assert.deepEqual([...fixture.setups.values()][0].setup.triggers, [trigger]);
       assert.equal([...fixture.setups.values()][0].setup.prompt, prompt);
       assert.deepEqual(errors, []);

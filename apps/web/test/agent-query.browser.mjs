@@ -62,6 +62,7 @@ test(
           id: 'task',
           generation: 0,
           status: 'pending',
+          agentLifecycle: 'active',
           cost: { chargedCreditUnits: '0', heldCreditUnits: '100' },
         };
         let taskError = 0,
@@ -91,10 +92,10 @@ test(
             });
             return Response.json({
               id: '20000000-0000-4000-8000-000000000001',
-              version: 1,
+              version: 2,
               savedRevision: 'a'.repeat(64),
-              activeRevision: null,
-              enabled: false,
+              activeRevision: 'a'.repeat(64),
+              enabled: true,
             });
           }
           if (url.includes('view=reviewed')) calls.reviewed++;
@@ -124,14 +125,10 @@ test(
           const api = useSkillApi(scope.workspaceId);
           save = () =>
             api.send('20000000-0000-4000-8000-000000000001', {
-              kind: 'save',
+              kind: 'enable',
               requestId: '30000000-0000-4000-8000-000000000001',
-              expectedVersion: 0,
-              definition: {
-                name: 'Procedure',
-                description: 'Follow the procedure steps.',
-                instructions: 'Follow steps.',
-              },
+              expectedVersion: 1,
+              enabled: true,
             });
           return null;
         }

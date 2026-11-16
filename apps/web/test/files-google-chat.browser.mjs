@@ -6,7 +6,7 @@ import { createServer } from 'vite';
 import { chromium } from 'playwright';
 import { createWorkspaceFixture } from './workspace.fixture.mjs';
 import { chatCatalog } from './chat-catalog.fixture.mjs';
-import { membership, credits } from './chat-query.fixture.mjs';
+import { membership, credits, governance } from './chat-query.fixture.mjs';
 
 const scope = name => `https://www.googleapis.com/auth/${name}`;
 const binding = { integrationId: '0a000000-0000-4000-8000-00000000000a', accountId: 'google-a', generation: 3 };
@@ -278,6 +278,9 @@ test(
             });
           if (path === `${base}/agent-tasks/${memo.id}/proposals`)
             return route.fulfill({ json: { proposals: [], nextCursor: null } });
+          if (path === `${base}/agent-tasks/${memo.id}/api-calls`) return route.fulfill({ json: { calls: [] } });
+          if (path === `${base}/agent-tasks/${memo.id}/secret-requests`)
+            return route.fulfill({ json: { requests: [] } });
           if (path === `${base}/agent-tasks/${memo.id}`) return route.fulfill({ json: memo });
           if (method === 'GET' && path === '/v1/feature-flags') return route.fulfill({ json: {} });
           if (path.endsWith('/last-used')) return route.fulfill({ status: 204 });
@@ -305,6 +308,12 @@ test(
             return route.fulfill({
               json: { state: 'disconnected', teamId: null, canManage: false, linked: false, scopes: [] },
             });
+          if (method === 'GET' && path.endsWith('/agents/recent')) return route.fulfill({ json: [] });
+          if (method === 'GET' && path.endsWith('/governance')) return route.fulfill({ json: governance });
+          if (method === 'GET' && /\/github\/chats\/[\w-]+\/selection$/.test(path))
+            return route.fulfill({ json: { accountId: null, generation: null, version: 0 } });
+          if (method === 'GET' && path.endsWith('/system-package-installations'))
+            return route.fulfill({ json: { installations: [], nextCursor: null } });
           throw new Error(`Unexpected API request ${method} ${path}`);
         });
         const origin = server.resolvedUrls.local[0];
@@ -366,11 +375,15 @@ test(
           await composer.getByText(doc.name, { exact: true }).waitFor();
           await message.click();
           await message.press('End');
+          const sendsBefore = state.sends.length;
           await message.press('Enter');
           await page.waitForURL(/\/chat\//);
           // Cloud 505e926b (#833) opens the new chat before the send settles (private-conversations.tsx:326-333), so read the request once history shows it.
           const messages = page.getByRole('list', { name: 'Messages' });
           await messages.getByRole('button', { name: `Inspect ${doc.name}` }).waitFor();
+          // History shows the message while its send is still on the way.
+          for (const deadline = Date.now() + 15000; state.sends.length === sendsBefore && Date.now() < deadline;)
+            await new Promise(resolve => setTimeout(resolve, 50));
           const sent = state.sends.at(-1);
           assert.deepEqual(sent.body.parts.at(-1), {
             kind: 'google-file',

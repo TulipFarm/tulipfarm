@@ -124,7 +124,7 @@ export function SkillsPage() {
           value={search}
           onChange={pages.setSearch}
         />
-        <div className="flex shrink-0 gap-2">
+        <div className="flex min-w-0 flex-wrap gap-2">
           <Button
             variant="outline"
             nativeButton={false}

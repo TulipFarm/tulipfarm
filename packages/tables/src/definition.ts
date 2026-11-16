@@ -1,4 +1,7 @@
 import { z } from 'zod';
+import { recordIdSchema } from './record-id.ts';
+
+export { recordIdSchema };
 
 export const tableIdSchema = z
   .uuid()
@@ -10,11 +13,6 @@ export const fieldIdSchema = z
   .toLowerCase()
   .brand<'FieldId'>()
   .meta({ description: 'Stable UUID identifying a field; input is normalized to lowercase.' });
-export const recordIdSchema = z
-  .uuid()
-  .toLowerCase()
-  .brand<'RecordId'>()
-  .meta({ description: 'Stable UUID identifying one row; input is normalized to lowercase.' });
 export const revisionSchema = z
   .string()
   .regex(/^[a-f0-9]{40}$/)

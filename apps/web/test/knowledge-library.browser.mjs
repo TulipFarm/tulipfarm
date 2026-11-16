@@ -97,6 +97,9 @@ async function environment(t, { entries = [], enabled = true, otherMember = fals
       });
     else if (new Map(workspaceShellReads(workspace.id)).has(path))
       response = answer(new Map(workspaceShellReads(workspace.id)).get(path));
+    else if (path === `${base}/conversations/pinned`) response = answer({ chats: [] });
+    else if (path === `${base}/conversations`) response = answer({ chats: [], nextCursor: null });
+    else if (path === `${base}/agents/recent`) response = answer([]);
     else if (path === `${base}/knowledge/defaults`) response = answer({ enabled, items: [] });
     else if (/\/knowledge\/(github|google|slack|atlassian)\/sources$/.test(path)) response = answer({ items: [] });
     else if (path === `${base}/files/suggestions`) response = answer({ items: [file], next: null });

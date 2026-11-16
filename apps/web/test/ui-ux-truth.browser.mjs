@@ -592,20 +592,15 @@ for (const [reason, label, recovery] of [
 test('table grants stay discoverable for one person when the workspace has no teams', async () => {
   const { page, errors, close } = await open('/acme/grants', { teams: [] });
   await evidence(page, 'a07-grants-no-teams', async () => {
-    await page.getByRole('heading', { name: 'Team table grants', exact: true }).waitFor();
-    await page.getByRole('heading', { name: 'No team grants yet', exact: true }).waitFor();
+    await page.getByRole('heading', { name: 'Table access', exact: true, level: 1 }).waitFor();
     await page
       .getByText(
-        'Team grants give everyone in a team the same table access. Create a team to grant access to several people at once, or give one person access in Individual table grants below.',
+        'To change access, open the team or member and edit their access policies. Admins can use every table.',
         { exact: true },
       )
       .waitFor();
-    await page.getByRole('heading', { name: 'Individual table grants', exact: true }).waitFor();
-    await page
-      .getByText("A person's table access combines their teams' grants with any individual grants below.", {
-        exact: false,
-      })
-      .waitFor();
+    await page.getByRole('heading', { name: 'Customers', exact: true }).waitFor();
+    await page.getByText('Only admins can use this table.', { exact: true }).waitFor();
     assert.equal(
       await page.getByText('Table access is granted to teams, not to individual people.', { exact: false }).count(),
       0,

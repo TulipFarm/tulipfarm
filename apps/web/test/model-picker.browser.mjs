@@ -41,6 +41,9 @@ try {
       const preferences = new Map();
       let saveStatus = 200;
       let saves = 0;
+      // While set, preference saves and catalog reads wait until the test has seen their pending state.
+      let holdSave = null;
+      let holdCatalog = Promise.withResolvers();
       await page.route('**/v1/**', async route => {
         const path = new URL(route.request().url()).pathname;
         if (path.endsWith('/governance/me')) return route.fulfill({ json: membership });
@@ -48,6 +51,7 @@ try {
         if (path === '/v1/auth/update-user') {
           saves++;
           await delay(150);
+          await holdSave?.promise;
           if (saveStatus === 200) preferences.set(userId, route.request().postDataJSON().lastModelFamilyId);
           return route.fulfill({
             status: saveStatus,
@@ -56,6 +60,7 @@ try {
         }
         if (path.endsWith('/model-catalog')) {
           await delay(wait);
+          await holdCatalog?.promise;
           return route.fulfill({
             status,
             json: status === 200 ? { families: items, defaultChatFamilyId } : { error: 'unavailable' },
@@ -83,6 +88,8 @@ try {
       });
       await page.goto(`${origin}/acme`);
       await page.getByText('Checking available models…', { exact: true }).waitFor();
+      holdCatalog.resolve();
+      holdCatalog = null;
       await page.getByRole('combobox', { name: defaultModelName, exact: true }).click();
       await page.getByRole('option').first().waitFor();
       assert.equal(await page.getByRole('option').count(), 13);
@@ -110,11 +117,14 @@ try {
       await search.fill('no-such-model');
       await page.getByText('No models found.', { exact: true }).waitFor();
       await search.fill('Grok 4.3 Fast');
+      holdSave = Promise.withResolvers();
       await page.keyboard.press('ArrowDown');
       await page.keyboard.press('Enter');
       await page.getByRole('combobox', { name: 'Model: Grok 4.3 Fast', exact: true }).waitFor();
       await page.getByText('Saving your default model…', { exact: true }).waitFor();
       assert.equal(await page.getByRole('combobox', { name: 'Model: Grok 4.3 Fast', exact: true }).isDisabled(), true);
+      holdSave.resolve();
+      holdSave = null;
       await page.getByText('Saving your default model…', { exact: true }).waitFor({ state: 'hidden' });
       assert.equal(preferences.get('ada'), 'grok-fast');
       await page.reload();
@@ -181,9 +191,12 @@ try {
           : family,
       );
       await notifyChange(page, workspace.id, userId, 'catalog');
+      // A selection that becomes disabled falls back to the workspace default and says so.
+      await page.getByRole('combobox', { name: defaultModelName, exact: true }).waitFor();
       await page
-        .getByText('Claude Haiku 4.5 is disabled in this workspace. Choose another model.', { exact: true })
+        .getByText('Your last model is no longer available. New messages use Claude Sonnet 5.', { exact: true })
         .waitFor();
+      assert.equal(await message.innerText(), 'Keep this draft');
       assert.equal(preferences.get('ada'), 'claude-haiku');
       items = catalog.filter(family => family.id !== 'claude-haiku');
       await notifyChange(page, workspace.id, userId, 'catalog');

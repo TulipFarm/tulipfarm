@@ -9,7 +9,7 @@ import { githubChatFixture } from '../../worker/test/github-read-fixture.mjs';
 import { registerGitHubAccounts } from '../../api/src/github-accounts.ts';
 import { registerConversations } from '../../api/src/conversations.ts';
 import { chatCatalog } from './chat-catalog.fixture.mjs';
-import { openChatList } from './browser-controls.mjs';
+import { clearEditor, openChatList } from './browser-controls.mjs';
 
 const port = 5229,
   origin = `http://127.0.0.1:${port}`;
@@ -119,18 +119,22 @@ try {
   await page.goto(`${origin}/${workspace.slug}/chat/${chatId}`);
   await page.getByRole('textbox', { name: 'Message', exact: true }).waitFor();
   assert.equal(await page.getByRole('button', { name: 'GitHub account selection' }).count(), 0);
-  // The workspace shell's reauthorization banner reads the account list once (cloud reauthorization-banner.tsx:26-29, mounted in workspace.tsx); chat adds no GitHub reads of its own.
+  // The workspace shell's reauthorization banner reads the account list, and the composer's GitHub chip reads the
+  // chat's chosen account. Chat loads no batches, investigations or other GitHub data of its own.
   const githubReads = requests.filter(request => request.path.includes('/github/'));
+  const accountReads = githubReads.filter(request => request.path.endsWith('/github/accounts'));
+  const selectionReads = githubReads.filter(request => request.path.endsWith(`/github/chats/${chatId}/selection`));
   assert.ok(
-    githubReads.every(request => request.method === 'GET' && request.path.endsWith('/github/accounts')),
-    'Ordinary chat does not load GitHub selections',
+    githubReads.every(request => request.method === 'GET' && [...accountReads, ...selectionReads].includes(request)),
+    'Ordinary chat loads only the GitHub accounts and the chat selection',
   );
-  assert.ok(githubReads.length <= 1, 'Ordinary chat does not load GitHub accounts beyond the shell banner');
+  assert.ok(accountReads.length <= 1, 'Ordinary chat does not load GitHub accounts more than once');
+  assert.ok(selectionReads.length <= 1, 'Ordinary chat does not load its GitHub selection more than once');
   f.decide([call, { tool: 'github.personal.account' }], 'Pick a GitHub account below.');
   await page.getByRole('textbox', { name: 'Message', exact: true }).fill('Read my GitHub repository.');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await page.getByText('Pick a GitHub account below.', { exact: true }).waitFor();
-  await page.getByText('Loading GitHub accounts…').waitFor();
+  // The shell and composer already read the accounts and selection, so the card renders them without a loading state.
   await cards.last().getByRole('button', { name: 'person-123', exact: true }).waitFor();
   delay = 0;
   const beforeFocus = requests.length;
@@ -146,10 +150,11 @@ try {
     await page.getByRole('textbox', { name: 'Message', exact: true }).textContent(),
     'Keep account-card draft',
   );
-  await page.getByRole('textbox', { name: 'Message', exact: true }).fill('');
+  await clearEditor(page.getByRole('textbox', { name: 'Message', exact: true }));
   assert.equal(f.providerCalls.length, 0);
   assert.equal((await f.reads.selection(f.one.id, f.member.userId, chatId)).accountId, null);
-  assert.equal(requests.filter(request => request.method === 'GET' && request.path.endsWith('/selection')).length, 1);
+  // The composer reads the selection once and the account card re-reads it once when it appears.
+  assert.equal(requests.filter(request => request.method === 'GET' && request.path.endsWith('/selection')).length, 2);
   assert.equal(
     requests.filter(request => request.method === 'GET' && request.path.endsWith('/github/accounts')).length,
     1,

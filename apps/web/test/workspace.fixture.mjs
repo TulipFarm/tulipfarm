@@ -31,6 +31,9 @@ export function workspaceShellReads(workspaceId) {
     [`${base}/github/accounts`, { configured: false, accounts: [] }],
     [`${base}/atlassian/accounts`, { accounts: [], providers: [] }],
     [`${base}/workspace-mcp/capabilities`, { enabled: false }],
+    // The sidebar's Recents section reads pinned chats and recent agents.
+    [`${base}/conversations/pinned`, { chats: [] }],
+    [`${base}/agents/recent`, []],
     [
       `${base}/bud`,
       {

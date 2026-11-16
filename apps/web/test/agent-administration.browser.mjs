@@ -290,7 +290,7 @@ test(
 
         assert.deepEqual(
           await describedTexts(ownership.getByRole('combobox', { name: 'Team placement', exact: true })),
-          ['Placement grants no access. Share the agent below to grant access.', 'Optional'],
+          ['Placement grants no access. Share the agent below to grant access.'],
         );
         assert.equal(await page.getByText(/Unsaved administration changes|Showing saved administration/).count(), 0);
         const sharing = ownership.getByRole('region', { name: 'Definition sharing', exact: true });

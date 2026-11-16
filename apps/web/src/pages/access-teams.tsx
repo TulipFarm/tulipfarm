@@ -75,6 +75,7 @@ function CreateTeam({ page, open, setOpen }: { page: AccessPage; open: boolean; 
   const [details, setDetails] = useState<Details>({ name: '', description: '' });
   const [error, setError] = useState<FieldError>(null);
   const [saving, setSaving] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
   // An unconfirmed create retries with the same id, so it never makes two teams.
   const command = useRef<string | null>(null);
   async function create() {
@@ -85,11 +86,19 @@ function CreateTeam({ page, open, setOpen }: { page: AccessPage; open: boolean; 
       return;
     }
     setSaving(true);
+    setFailure(null);
     const id = command.current ?? crypto.randomUUID();
     command.current = id;
     const result = await page.change(`/teams/${id}`, 'PUT', { name, description: details.description.trim() });
     setSaving(false);
     setError(fieldError(result));
+    // Field errors show on the field; anything else is explained at the top of the page, behind this dialog.
+    if (result !== 'saved' && !fieldError(result))
+      setFailure(
+        result === 'uncertain'
+          ? `We couldn’t confirm ${name} was created. Close this to see why.`
+          : `${name} wasn’t created. Close this to see why.`,
+      );
     if (result === 'uncertain') return;
     command.current = null;
     if (result !== 'saved') return;
@@ -101,7 +110,10 @@ function CreateTeam({ page, open, setOpen }: { page: AccessPage; open: boolean; 
     <Dialog
       open={open}
       onOpenChange={value => {
-        if (!saving) setOpen(value);
+        if (!saving) {
+          setOpen(value);
+          if (!value) setFailure(null);
+        }
       }}
     >
       <DialogContent size="form">
@@ -119,8 +131,20 @@ function CreateTeam({ page, open, setOpen }: { page: AccessPage; open: boolean; 
           }}
         >
           <TeamFields id="new-team" details={details} setDetails={setDetails} disabled={saving} error={error} />
+          {failure && (
+            <Alert variant="destructive">
+              <AlertDescription>{failure}</AlertDescription>
+            </Alert>
+          )}
           <DialogFooter>
-            <Button variant="ghost" disabled={saving} onClick={() => setOpen(false)}>
+            <Button
+              variant="ghost"
+              disabled={saving}
+              onClick={() => {
+                setOpen(false);
+                setFailure(null);
+              }}
+            >
               Cancel
             </Button>
             <Button type="submit" disabled={saving || page.busy} aria-busy={saving}>

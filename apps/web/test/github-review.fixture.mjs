@@ -2,7 +2,8 @@ export async function openGitHubReview(page, id) {
   await page
     .locator(`[id="github-batch:${id}"]`)
     .getByRole('button', { name: 'View GitHub changes', exact: true })
-    .click();
+    // The batch appears once the worker's turn is delivered, which a busy machine can slow.
+    .click({ timeout: 60_000 });
 }
 
 export async function openGitHubDetails(review) {

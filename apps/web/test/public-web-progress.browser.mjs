@@ -11,6 +11,8 @@ import { createChatTools, isExternalTool } from '../../../packages/agents/src/to
 import { chatCatalog } from './chat-catalog.fixture.mjs';
 import { credits } from './chat-query.fixture.mjs';
 
+// Sending a chat message resolves the default model, which needs a provider key.
+process.env.ANTHROPIC_API_KEY ??= 'test-key';
 const port = Number(process.env.PUBLIC_WEB_PROGRESS_PORT ?? 5497);
 const origin = `http://127.0.0.1:${port}`;
 const url = 'https://www.cloudflare.com/products/artifacts/';
@@ -163,6 +165,9 @@ try {
       };
     else if (path.endsWith('/credits')) json = credits;
     else if (path.endsWith('/model-catalog')) json = chatCatalog;
+    // Each short stream opens and ends, so the page rereads saved history as a server stream reconnect would.
+    else if (path.endsWith(`/conversations/${chatId}/events`))
+      return route.fulfill({ contentType: 'text/event-stream', body: ': connected\n\n' });
     else if (path.endsWith(`/conversations/${chatId}/messages`))
       json = await f.store.history(f.workspace.id, f.workspace.userId, chatId);
     else if (path.includes(`/conversations/${chatId}/messages/`) && request.method() === 'PUT') {
@@ -200,6 +205,34 @@ try {
     'favicon_test=synthetic',
     'Browser permits the seeded third-party cookie for a non-anonymous request',
   );
+  await page.getByText('Earlier answer.', { exact: true }).first().waitFor();
+  // Content that grows again before pinning's scroll event arrives must not read as the reader scrolling away.
+  const followGap = await page.getByRole('region', { name: 'Conversation', exact: true }).evaluate(async element => {
+    const content = element.firstElementChild;
+    const frame = () => new Promise(resolve => requestAnimationFrame(resolve));
+    for (let previous = -1; previous !== element.scrollHeight; await frame(), await frame())
+      previous = element.scrollHeight;
+    const grow = height => {
+      const block = document.createElement('div');
+      block.style.height = `${height}px`;
+      block.dataset.followProbe = '';
+      content.append(block);
+    };
+    let resizes = 0;
+    const observer = new ResizeObserver(() => {
+      if (++resizes === 2) grow(405);
+    });
+    observer.observe(content);
+    await frame();
+    await frame();
+    grow(100);
+    await new Promise(resolve => setTimeout(resolve, 500));
+    observer.disconnect();
+    const gap = element.scrollHeight - element.scrollTop - element.clientHeight;
+    for (const block of content.querySelectorAll('[data-follow-probe]')) block.remove();
+    return gap;
+  });
+  assert.ok(followGap < 2, `Growth during a pin keeps following latest. Bottom gap ${followGap}px`);
   await page.getByLabel('Message', { exact: true }).fill(`summarize - ${url}`);
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
   // Cloud 856d6a73 (#1026) shows a pending reply as transcript ToolActivity progress (tool-activity.tsx:141-142).
@@ -280,6 +313,8 @@ try {
   await page.reload();
   const toggle = page.getByRole('button', { name: 'Tool activity · 2 tools · Some work failed', exact: true });
   await toggle.waitFor();
+  // Saved replies appear once their lazily loaded renderer arrives, which grows the transcript.
+  await page.getByText('Earlier answer.', { exact: true }).first().waitFor();
   await timeline.evaluate(element => {
     element.scrollTop = element.scrollHeight;
   });
@@ -292,7 +327,7 @@ try {
     () => document.querySelector('[data-slot="source-favicon"]')?.getAttribute('data-status') === 'failed',
   );
   assert.equal(await favicon.locator('img').count(), 0);
-  assert.equal(await favicon.locator('svg').count(), 1, 'Failed icon keeps the globe');
+  assert.equal(await favicon.innerText(), 'C', "Failed icon falls back to the site's first letter");
   assert.equal(await activity.locator('[data-slot="spinner"]').count(), 0);
   await delay(100);
   const afterToggle = await toggle.evaluate(element => element.getBoundingClientRect().top);

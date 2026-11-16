@@ -1,8 +1,11 @@
 import type { Workspace } from '@tulipfarm/workspaces/contracts';
-import { persistedReads } from './query/persisted-reads';
 import type { SessionIdentity } from './query/scope';
 
 const sessionKey = 'tulipfarm:last-session';
+
+// Loaded on demand so signed-out pages, which have nothing persisted to clear, skip the cache code.
+const clearPersistedReads = (userId: string) =>
+  import('./query/persisted-reads').then(module => module.persistedReads.clear(userId));
 
 /**
  * The session this browser last confirmed. A fresh page load uses it to start workspace reads, and to
@@ -30,7 +33,7 @@ export function rememberSession(identity: SessionIdentity) {
   const previous = lastSession();
   if (previous?.userId === identity.userId && previous.sessionId === identity.sessionId) return;
   // Another person signed in on this browser: nothing the previous one saved may be shown to them.
-  if (previous && previous.userId !== identity.userId) void persistedReads.clear(previous.userId);
+  if (previous && previous.userId !== identity.userId) void clearPersistedReads(previous.userId);
   try {
     window.localStorage.setItem(sessionKey, JSON.stringify(identity));
   } catch {
@@ -46,7 +49,7 @@ export function forgetSession() {
   } catch {
     /* Storage can be disabled by the browser. */
   }
-  return previous ? persistedReads.clear(previous.userId) : Promise.resolve();
+  return previous ? clearPersistedReads(previous.userId) : Promise.resolve();
 }
 
 function storageKey(userId: string) {

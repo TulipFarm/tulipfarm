@@ -29,7 +29,12 @@ import { AnalyticsConsent } from './components/analytics-consent';
 startAnalytics();
 router.subscribe('onResolved', trackPage);
 router.subscribe('onResolved', () => {
-  if (!router.state.matches.some(match => match.routeId === workspaceHomeRoute.id && match.status === 'success'))
+  const { matches } = router.state;
+  // A denied re-check keeps the home's earlier successful match under the workspace's not-found page.
+  if (
+    matches.some(match => match.status === 'notFound' || match.status === 'error') ||
+    !matches.some(match => match.routeId === workspaceHomeRoute.id && match.status === 'success')
+  )
     takeEarlyComposer();
 });
 trackAssetLoadErrors();

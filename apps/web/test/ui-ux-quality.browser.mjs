@@ -108,13 +108,30 @@ function fixture(route) {
   return send({ error: 'fixture-unavailable' }, 404);
 }
 
-const luminance = rgb => {
-  const [r, g, b] = rgb
-    .match(/[\d.]+/g)
+// Sprout tokens compute to oklch(), so convert through OKLab to linear sRGB before measuring.
+const linearRgb = color => {
+  const [x, y, z] = color
+    .match(/-?[\d.]+/g)
     .slice(0, 3)
-    .map(Number)
-    .map(v => v / 255)
-    .map(v => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+    .map(Number);
+  if (!color.startsWith('ok'))
+    return [x, y, z]
+      .map(v => (color.startsWith('color(srgb') ? v : v / 255))
+      .map(v => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+  const [a, b] = color.startsWith('oklch')
+    ? [y * Math.cos((z * Math.PI) / 180), y * Math.sin((z * Math.PI) / 180)]
+    : [y, z];
+  const l = (x + 0.3963377774 * a + 0.2158037573 * b) ** 3,
+    m = (x - 0.1055613458 * a - 0.0638541728 * b) ** 3,
+    s = (x - 0.0894841775 * a - 1.291485548 * b) ** 3;
+  return [
+    4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+    -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+    -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s,
+  ].map(v => Math.min(1, Math.max(0, v)));
+};
+const luminance = color => {
+  const [r, g, b] = linearRgb(color);
   return 0.2126 * r + 0.7152 * g + 0.0722 * b;
 };
 const contrast = (a, b) => {
@@ -122,7 +139,7 @@ const contrast = (a, b) => {
   return (x + 0.05) / (y + 0.05);
 };
 
-// Reduced motion keeps a 0.01ms transition on every property, so read styles after the next frames.
+// Read styles after the next frames, once React has committed and the browser has restyled.
 const settle = page =>
   page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
 
@@ -173,8 +190,17 @@ for (const theme of ['light', 'dark']) {
     const { page, errors, close } = await open(`/acme/chat/${cid}`, { theme });
     const timeline = page.getByRole('region', { name: 'Conversation', exact: true });
     await timeline.waitFor();
-    await timeline.click();
+    // Click the timeline's own padding: its centre holds the empty chat's start screen and its buttons.
+    assert.equal(
+      await timeline.evaluate(node => {
+        const box = node.getBoundingClientRect();
+        return document.elementFromPoint(box.x + 4, box.y + 4) === node;
+      }),
+      true,
+    );
+    await timeline.click({ position: { x: 4, y: 4 } });
     await settle(page);
+    assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('aria-label')), 'Conversation');
     assert.equal(
       await timeline.evaluate(node => getComputedStyle(node).outlineStyle),
       'none',
@@ -318,8 +344,9 @@ test('clearing the chat list search keeps focus in the search box', async () => 
 
 test('coarse pointers get 44px select options while fine pointers keep compact options', async () => {
   for (const coarse of [true, false]) {
-    const { page, errors, close } = await open('/acme/grants', { coarse });
-    await page.getByLabel('Team receiving access').click();
+    // Access pages no longer pick a team from a select; the agent builder still does.
+    const { page, errors, close } = await open('/acme/agents/new', { coarse });
+    await page.getByRole('combobox', { name: 'Team placement', exact: true }).click();
     const option = page.getByRole('option', { name: 'Sales', exact: true });
     await option.waitFor();
     const { height } = await option.boundingBox();
@@ -333,9 +360,9 @@ test('coarse pointers get 44px select options while fine pointers keep compact o
 
 test('the whole choice row toggles its checkbox', async () => {
   const { page, errors, close } = await open('/acme/agents/new', { coarse: true });
-  // Actions sit on the builder's Access step, chosen from a select below sm (cloud 3e124b0f #1004, features/agents/builder-layout.tsx:49-50).
+  // Actions sit on the builder's Access step, chosen from a select below sm (features/agents/builder-layout.tsx).
   await page.getByRole('combobox', { name: 'Setup section', exact: true }).click();
-  await page.getByRole('option', { name: '3. Access', exact: true }).click();
+  await page.getByRole('option', { name: '2. Access', exact: true }).click();
   await page.getByRole('button', { name: 'More actions', exact: true }).click();
   const group = page.getByRole('region', { name: 'Tables actions', exact: true });
   await group.getByRole('button').first().click();

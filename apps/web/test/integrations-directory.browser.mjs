@@ -122,7 +122,8 @@ test('the integrations directory lists every app with one action per row', { tim
 
   try {
     await page.goto(`${origin}/${workspace.slug}/integrations`);
-    await tab('Needs attention 1').waitFor();
+    // The first visit waits for Vite to transform the whole app on a cold server.
+    await tab('Needs attention 1').waitFor({ timeout: 90000 });
 
     await t.test('tabs count the apps in each state and filter the list', async () => {
       const [all, connected, available] = [await count('All'), await count('Connected'), await count('Available')];

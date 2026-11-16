@@ -219,9 +219,12 @@ export function useRichSkillPicker(
         char: '/',
         label: 'Skills you can use',
         allowSpaces: true,
+        debounce: 150,
+        // Like the plain picker, a slash followed by a space, another trigger or a long run of text is just text, and
+        // chats without skills, such as project chats, open no picker at all.
+        allow: query => current.current.enabled && skillAt(`/${query}`, query.length + 1) !== null,
         items: async (query, signal, editor) => {
-          const { api, enabled } = current.current;
-          if (!enabled) return [];
+          const { api } = current.current;
           // `/compact` is a whole-message command, so it is offered only at the start of the draft. Once typed with a space
           // the draft is the command itself: no suggestions remain, so Enter sends it.
           const name = query.trimStart().toLowerCase();
@@ -268,7 +271,18 @@ export function useRichSkillPicker(
     extension,
     suggestion,
     panel:
-      suggestion && !command ? <EditorSuggestionPanel state={suggestion} empty="No reviewed skills match." /> : null,
+      suggestion && !command ? (
+        <EditorSuggestionPanel
+          state={suggestion}
+          loading="Loading skills…"
+          empty={query =>
+            query.trim()
+              ? `No skills match “${query.trim()}”.`
+              : 'No reviewed skills yet. An admin reviews skills in Skills.'
+          }
+          error={{ message: 'Couldn’t load skills. Check your connection, then retry.', retry: 'Retry skills' }}
+        />
+      ) : null,
     remove: () => {
       setStaged(null);
       input.current?.focus();

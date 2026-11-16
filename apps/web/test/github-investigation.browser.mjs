@@ -64,7 +64,8 @@ test('private investigation chooser states on real chat and task screens', { tim
           const page = await context.newPage();
           const errors = [];
           page.on('pageerror', error => errors.push(String(error)));
-          page.setDefaultTimeout(12000);
+          // The first visit waits for Vite to transform the whole app on a cold server.
+          page.setDefaultTimeout(!task && scenario === 'choice' ? 60000 : 12000);
           try {
             await page.goto(
               `${base}/github-investigation-mock/${task ? 'agent-tasks' : 'chat'}/${id}?scenario=${scenario}${scenario === 'slow' ? '&hold=1' : ''}`,

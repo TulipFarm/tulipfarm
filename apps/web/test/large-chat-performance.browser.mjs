@@ -127,8 +127,8 @@ try {
     await cdp.send('Performance.enable');
     await page.goto(`${origin}/${workspace.slug}/chat`);
     await page.waitForFunction(() =>
-      [...document.querySelectorAll('[role="table"][aria-label="Chats"] button')].some(
-        button => button.textContent === 'Customer review 49',
+      [...document.querySelectorAll('[role="table"][aria-label="Chats"] a')].some(
+        link => link.textContent === 'Customer review 49',
       ),
     );
     const listStarted = performance.now();

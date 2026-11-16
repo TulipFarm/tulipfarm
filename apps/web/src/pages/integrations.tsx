@@ -117,7 +117,9 @@ function useMcpDirectory(workspaceId: string) {
   const list = useMcpIntegrations(api, !!capabilities);
   const servers = useMemo(() => (list.state.kind === 'ready' ? list.state.data.integrations : []), [list.state]);
   const loading = read.state.kind === 'loading' || (!!capabilities && list.state.kind === 'loading');
-  return { api, capabilities, servers, loading, refresh: list.refresh };
+  const failed = !!capabilities && list.state.kind === 'error' ? list.state.message : null;
+  const refreshing = list.state.kind === 'ready' && list.state.refreshing;
+  return { api, capabilities, servers, loading, failed, refreshing, refresh: list.refresh };
 }
 
 function IntegrationsContent({ workspaceId, slug }: { workspaceId: string; slug: string }) {
@@ -146,7 +148,12 @@ function IntegrationsContent({ workspaceId, slug }: { workspaceId: string; slug:
     return () => window.clearTimeout(timer);
   }, []);
   const holding = loading && patient && !needle;
-  const errors = Object.entries(statuses).filter(([, status]) => status.kind === 'error');
+  // Only providers with an app in the directory can be named in the notice.
+  const errors = Object.entries(statuses).flatMap(([provider, status]) => {
+    const names = available.filter(app => app.provider === provider).map(app => app.name);
+    return status.kind === 'error' && names.length ? [{ provider, names, detail: status.detail }] : [];
+  });
+  const checking = refreshing || mcp.refreshing;
   const servers = mcp.servers;
 
   // One list, no categories: what needs attention, then what's connected, then everything else.
@@ -251,24 +258,26 @@ function IntegrationsContent({ workspaceId, slug }: { workspaceId: string; slug:
             />
           )}
           <div className="space-y-6">
-            {errors.length > 0 && (
+            {(errors.length > 0 || mcp.failed) && (
               <Alert variant="destructive">
                 <AlertDescription>
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <ul className="space-y-1">
-                      {errors.map(([provider, status]) => (
+                      {errors.map(({ provider, names, detail }) => (
                         <li key={provider}>
-                          Couldn’t check{' '}
-                          {available
-                            .filter(app => app.provider === provider)
-                            .map(app => app.name)
-                            .join(', ')}
-                          . {status.kind === 'error' && status.detail}
+                          Couldn’t check {names.join(', ')}. {detail}
                         </li>
                       ))}
+                      {mcp.failed && <li>Couldn’t load your custom apps. {mcp.failed}</li>}
                     </ul>
-                    <Button variant="outline" size="sm" disabled={refreshing} aria-busy={refreshing} onClick={refresh}>
-                      {refreshing ? 'Checking…' : 'Check again'}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={checking}
+                      aria-busy={checking}
+                      onClick={() => void Promise.all([refresh(), mcp.failed ? mcp.refresh() : null])}
+                    >
+                      {checking ? 'Checking…' : 'Check again'}
                     </Button>
                   </div>
                 </AlertDescription>

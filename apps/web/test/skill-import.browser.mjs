@@ -173,8 +173,9 @@ test(
       assert.deepEqual(attempts[1], attempts[0]);
       assert.equal(fixture.installed.length, 0);
       assert.equal(
-        fixture.requests.some(request => request.path.includes('/conversations')),
+        fixture.requests.some(request => request.method !== 'GET' && request.path.includes('/conversations')),
         false,
+        'creating a skill never starts or changes a chat',
       );
       const draft = fixture.requests.find(request => request.path.endsWith('/draft'));
       assert.equal(draft.body.name, 'Monthly close');
@@ -293,7 +294,7 @@ test(
       assert.deepEqual(savedModels, ['grok-fast']);
       await page.goto(`${server.origin}/${fixture.workspace.slug}`);
       await page.getByRole('combobox', { name: 'Model: Grok 4.3 Fast', exact: true }).waitFor();
-      await page.getByRole('link', { name: 'Skills', exact: true }).click();
+      await page.goto(`${server.origin}/${fixture.workspace.slug}/skills`);
       await page.getByRole('link', { name: 'New skill', exact: true }).click();
       await page.getByRole('combobox', { name: /Model: Grok 4.3 Fast/ }).click();
       await page.getByRole('option', { name: /Kimi K2.6/ }).click();
@@ -303,7 +304,7 @@ test(
       await page.getByRole('combobox', { name: /Model: Kimi K2.6/ }).waitFor();
       await page.goto(`${server.origin}/${fixture.workspace.slug}`);
       await page.getByRole('combobox', { name: 'Model: Kimi K2.6', exact: true }).waitFor();
-      await page.getByRole('link', { name: 'Skills', exact: true }).click();
+      await page.goto(`${server.origin}/${fixture.workspace.slug}/skills`);
       await page.getByRole('link', { name: 'New skill', exact: true }).click();
       await page.getByRole('combobox', { name: 'Model: Grok 4.3 Fast', exact: true }).click();
       await page.getByRole('option', { name: /Kimi K2.6/ }).click();

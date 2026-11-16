@@ -49,6 +49,21 @@ test(
     });
     const messages = Array.from({ length: 75 }, (_, index) => message(index + 1));
     const reads = { before: [], cursor: [], known: [] };
+    // A settled command has updated the query cache; the hooks under test show it on their next render.
+    const rendered = async (page, key, expected) => {
+      await page
+        .waitForFunction(
+          ([key, expected]) =>
+            JSON.stringify(window.pagination[key].state.data.chats.map(chat => chat.id)) === JSON.stringify(expected),
+          [key, expected],
+          { timeout: 5000 },
+        )
+        .catch(() => {});
+      assert.deepEqual(
+        await page.evaluate(key => window.pagination[key].state.data.chats.map(chat => chat.id), key),
+        expected,
+      );
+    };
     try {
       const page = await browser.newPage();
       await page.route('**/v1/**', async route => {
@@ -219,13 +234,8 @@ test(
           }),
         uuid(1),
       );
-      assert.deepEqual(
-        await page.evaluate(() => window.pagination.list.state.data.chats.map(chat => chat.id)),
-        [1, 6, 5, 4, 3, 2].map(uuid),
-      );
-      assert.deepEqual(await page.evaluate(() => window.pagination.search.state.data.chats.map(chat => chat.id)), [
-        uuid(1),
-      ]);
+      await rendered(page, 'list', [1, 6, 5, 4, 3, 2].map(uuid));
+      await rendered(page, 'search', [uuid(1)]);
       await page.evaluate(
         id =>
           window.pagination.write.submit({
@@ -236,13 +246,8 @@ test(
           }),
         uuid(5),
       );
-      assert.deepEqual(
-        await page.evaluate(() => window.pagination.list.state.data.chats.map(chat => chat.id)),
-        [1, 6, 4, 3, 2].map(uuid),
-      );
-      assert.deepEqual(await page.evaluate(() => window.pagination.archive.state.data.chats.map(chat => chat.id)), [
-        uuid(5),
-      ]);
+      await rendered(page, 'list', [1, 6, 4, 3, 2].map(uuid));
+      await rendered(page, 'archive', [uuid(5)]);
       await page.evaluate(
         id =>
           window.pagination.write.submit({
@@ -254,7 +259,7 @@ test(
           }),
         uuid(1),
       );
-      assert.deepEqual(await page.evaluate(() => window.pagination.search.state.data.chats), []);
+      await rendered(page, 'search', []);
       for (const [userId, membershipId] of [
         ['pagination', 'replacement-member'],
         ['other-user', 'other-member'],
@@ -549,6 +554,9 @@ test(
       await page.getByText('Available model restored', { exact: true }).first().waitFor();
       assert.equal(requests, 1);
       await snapshot('valid');
+      gate = new Promise(resolve => {
+        release = resolve;
+      });
       await page.reload();
       assert.equal(
         await page.locator('output').count(),
@@ -556,8 +564,14 @@ test(
         'no saved model is displayed before admission mounts the feature',
       );
       await mount();
+      // The network read is held, so the model shown here comes from the disk snapshot.
       await page.getByText('Available model restored', { exact: true }).first().waitFor();
-      assert.equal(requests, 1, 'fresh disk snapshot serves both consumers without a network read');
+      await page.waitForTimeout(150);
+      assert.equal(requests, 2, 'fresh disk snapshot serves both consumers and is re-read once per page load');
+      const reread = page.waitForResponse('**/v1/**/model-catalog');
+      release();
+      await reread;
+      await page.waitForTimeout(100);
       await snapshot('stale');
       gate = new Promise(resolve => {
         release = resolve;
@@ -566,9 +580,10 @@ test(
       await mount();
       await page.getByText('Available model restored', { exact: true }).first().waitFor();
       await page.waitForTimeout(150);
-      assert.equal(requests, 2, 'stale original timestamp causes one shared refresh');
+      assert.equal(requests, 3, 'stale original timestamp causes one shared refresh');
+      const restaled = page.waitForResponse('**/v1/**/model-catalog');
       release();
-      await page.waitForResponse('**/v1/**/model-catalog');
+      await restaled;
       await page.waitForTimeout(100);
       for (const mode of ['expired', 'wrong-user', 'wrong-version', 'corrupt']) {
         await snapshot(mode);

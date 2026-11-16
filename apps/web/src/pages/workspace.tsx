@@ -211,6 +211,15 @@ const settingsPages: Page[] = [
   ...usage,
   soul,
 ];
+// Pages without a sidebar entry still resolve as the current page, so New chat isn't marked current on them.
+const unlistedPages: Page[] = [
+  { label: 'Calendar', to: '/$workspaceSlug/calendar' },
+  { label: 'Projects', to: '/$workspaceSlug/projects' },
+  { label: 'My agent tasks', to: '/$workspaceSlug/agent-tasks' },
+  { label: 'Skills', to: '/$workspaceSlug/skills' },
+  { label: 'Packages', to: '/$workspaceSlug/packages' },
+  { label: 'Knowledge', to: '/$workspaceSlug/knowledge' },
+];
 const pages = [
   newChat,
   chats,
@@ -224,6 +233,7 @@ const pages = [
   { label: 'Help and support', to: '/$workspaceSlug/help' } satisfies Page,
   ...administrationPages,
   ...workspacePages,
+  ...unlistedPages,
 ];
 export const searchPages = [
   newChat,
@@ -549,6 +559,19 @@ function AdminPeopleItem() {
   return <NavItem page={admin ? membersAndTeams : teams} />;
 }
 
+// A collapsed sidebar stays collapsed on the next visit.
+const navigationCookie = 'sidebar_state';
+function savedNavigationOpen() {
+  const saved = document.cookie
+    .split('; ')
+    .find(cookie => cookie.startsWith(`${navigationCookie}=`))
+    ?.split('=')[1];
+  return saved !== 'false';
+}
+function saveNavigationOpen(open: boolean) {
+  document.cookie = `${navigationCookie}=${open}; path=/; max-age=${60 * 60 * 24 * 365}; SameSite=Lax`;
+}
+
 function WorkspaceNavigation({ onSearch }: { onSearch: () => void }) {
   const { workspace } = workspaceRoute.useRouteContext();
   const { setOpenMobile } = useSidebar();
@@ -736,7 +759,7 @@ function WorkspaceShellContent() {
   const currentPage = useCurrentPage(),
     onCalendar = currentPage.to === '/$workspaceSlug/calendar';
   const onNewChat = currentPage === newChat;
-  const [navigationOpen, setNavigationOpen] = useState(true);
+  const [navigationOpen, setNavigationOpen] = useState(savedNavigationOpen);
   const [calendarNavigationOpen, setCalendarNavigationOpen] = useState(false);
   useEffect(() => {
     if (onNewChat) document.title = 'New chat · TulipFarm';
@@ -758,7 +781,14 @@ function WorkspaceShellContent() {
       <div className="workspace-viewport grid h-svh grid-rows-1 overflow-hidden">
         <SidebarProvider
           open={onCalendar ? calendarNavigationOpen : navigationOpen}
-          onOpenChange={onCalendar ? setCalendarNavigationOpen : setNavigationOpen}
+          onOpenChange={
+            onCalendar
+              ? setCalendarNavigationOpen
+              : open => {
+                  setNavigationOpen(open);
+                  saveNavigationOpen(open);
+                }
+          }
         >
           <WorkspaceNavigation onSearch={() => setSearchOpen(true)} />
           <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden bg-background">

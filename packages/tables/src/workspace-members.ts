@@ -3,13 +3,13 @@ import {
   definitionSchema,
   fieldIdSchema,
   optionIdSchema,
-  recordIdSchema,
   revisionSchema,
   tableIdSchema,
   valuesSchema,
   type TableDefinition,
   type TableValues,
 } from './definition.ts';
+import { workspaceMemberIdSchema, type WorkspaceMemberId } from './workspace-member-id.ts';
 
 export const workspaceMemberFields = {
   name: fieldIdSchema.parse('4de907c4-8590-49f1-9c45-694e9fc36101'),
@@ -26,8 +26,7 @@ export const workspaceMemberAccess = {
   active: optionIdSchema.parse('9670894c-cb62-45ab-8171-4e118c5cce03'),
 } as const;
 
-export const workspaceMemberIdSchema = recordIdSchema.brand<'WorkspaceMemberId'>();
-export type WorkspaceMemberId = z.infer<typeof workspaceMemberIdSchema>;
+export { workspaceMemberIdSchema, type WorkspaceMemberId };
 
 type MemberLabelValues = Readonly<Record<string, { kind: string; value?: string | boolean } | null | undefined>>;
 export function workspaceMemberLabel(values: MemberLabelValues): string {

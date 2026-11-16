@@ -211,7 +211,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
         ),
         page.getByRole('button', { name: 'Refresh workflows', exact: true }).click(),
       ]);
-      await page.getByRole('button', { name: 'Activate saved revision' }).click();
+      await page.getByRole('button', { name: 'Activate workflow' }).click();
       await page.getByRole('button', { name: 'Disable workflow' }).waitFor();
       await page.getByRole('tab', { name: 'Runs', exact: true }).click();
       const upcoming = page.getByRole('region', { name: 'Upcoming record dates' });
@@ -266,7 +266,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       await page.getByRole('link', { name: 'Renewal reminder', exact: true }).click();
       await page
         .getByText(
-          'Disabled automatically because the table, watched fields, or filter its trigger uses is no longer available. Edit the trigger in chat. Once its sponsor accepts the new revision, activate it.',
+          'Disabled automatically because the table, watched fields, or filter its trigger uses is no longer available. Edit the trigger in chat, then activate the new revision.',
           { exact: true },
         )
         .waitFor();

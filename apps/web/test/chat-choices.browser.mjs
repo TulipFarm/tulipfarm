@@ -72,6 +72,7 @@ test(
       let failRead = true,
         failWrite = 'lost',
         historyLength = 0,
+        requestReads = 0,
         showRequest = true,
         inlineRequest = false;
       page.on('pageerror', error => errors.push(String(error)));
@@ -90,6 +91,7 @@ test(
           json = { state: 'active', teamId: 'TCHOICES', canManage: false, linked: true, scopes: [] };
         else if (path.includes(`/requests/${requestId}`)) {
           if (request.method() === 'GET') {
+            requestReads++;
             if (failRead) return route.fulfill({ status: 503, json: { error: 'unavailable' } });
             json = view;
           } else {
@@ -265,9 +267,9 @@ test(
       assert.equal(rowStyle[0].radius, rowStyle[1].radius);
       assert.equal(rowStyle[0].width, rowStyle[1].width, 'answer rows share one reading edge');
       assert.equal(
-        await rows.first().locator('[data-slot="badge"][data-variant="info"]').textContent(),
+        await rows.first().locator('[data-slot="badge"][data-variant="success"]').textContent(),
         'Recommended',
-        'recommendation has a distinct info badge',
+        'recommendation has a distinct success badge',
       );
       const input = page.locator('[contenteditable="true"]').first();
       const questionBox = await dock.boundingBox(),
@@ -415,28 +417,26 @@ test(
       await load();
       await recommended.waitFor();
       await page.clock.runFor(61_000);
-      await dock.getByText('Automatic status checks paused', { exact: true }).waitFor();
+      // Status checks stop quietly once the polling budget is spent; only a failed check shows a notice.
+      let spent = -1;
+      for (let round = 0; round < 40 && requestReads !== spent; round++) {
+        spent = requestReads;
+        await page.clock.runFor(10_000);
+        await delay(500);
+      }
+      assert.equal(requestReads, spent, 'status checks pause after their budget');
+      assert.equal(await dock.locator('[data-slot="request-status"]').count(), 0);
       const footer = dock.locator('[data-slot="form-footer"]');
+      await footer.waitFor();
       assert.equal(
         await footer.getByRole('button', { name: 'Details', exact: true }).count(),
         0,
         'request details stay outside answer controls',
       );
       assert.equal(
-        await footer.getByRole('button', { name: 'Try again', exact: true }).count(),
+        await dock.getByRole('button', { name: 'Try again', exact: true }).count(),
         0,
-        'polling recovery stays outside answer controls',
-      );
-      assert.equal(
-        await dock
-          .locator('[data-slot="request-status"]')
-          .getByText('Automatic status checks paused', { exact: true })
-          .isVisible(),
-        true,
-      );
-      assert.equal(
-        await dock.locator('[data-slot="request-status"]').getByRole('button', { name: 'Try again' }).isVisible(),
-        true,
+        'spent polling does not add a recovery control',
       );
       assert.equal(
         await dock.getByRole('button', { name: 'Continue', exact: true }).isEnabled(),
@@ -468,7 +468,6 @@ test(
         else await page.screenshot({ path });
       }
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
-      await dock.getByRole('button', { name: 'Try again', exact: true }).click();
       await dock.getByRole('button', { name: 'Skip', exact: true }).click();
       await page.clock.runFor(1000);
       await page.getByText('This request was cancelled without an answer.', { exact: true }).waitFor();

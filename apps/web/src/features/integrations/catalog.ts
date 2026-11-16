@@ -1,5 +1,6 @@
 import { googleAppScopes, type GoogleApp } from '@tulipfarm/google-workspace/public-contracts';
 import type { Brand } from '@tulipfarm/sprout/brand-icon';
+import { currentIntegrationId } from './former-ids';
 
 export type Provider = 'google' | 'slack' | 'github' | 'github-personal' | 'atlassian' | 'trello' | 'workflow' | 'soon';
 /** `alsoNeeds` names another Google app whose access this permission depends on. */
@@ -368,7 +369,5 @@ export function integrationFromHash(hash: string) {
   const app = integrations.find(item => item.id === (legacy?.id ?? hash));
   return app ? { app, tab: legacy?.tab ?? ('overview' as const) } : null;
 }
-// Old links and stored chat cards still name the integration by its former id.
-const formerIds: Record<string, string> = { 'github-personal': 'github' };
-export const currentIntegrationId = (id: string) => formerIds[id] ?? id;
+export { currentIntegrationId };
 export const integrationById = (id: string) => integrations.find(item => item.id === currentIntegrationId(id));

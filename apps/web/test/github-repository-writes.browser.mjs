@@ -129,7 +129,7 @@ try {
   assert.deepEqual(JSON.parse(await review.locator('pre').nth(1).innerText()), deletion);
   assert.equal(f.effects.length, 0);
   await page.screenshot({
-    path: '/var/folders/7d/qk8p6t3d1jvfnh4503bz0msr0000gn/T/opencode/github-repository-delete-review.png',
+    path: 'reports/screenshots/github-repository-delete-review.png',
     fullPage: true,
   });
   await review.getByRole('button', { name: 'Approve exact batch' }).focus();
@@ -154,13 +154,18 @@ try {
   await page.getByText('Action 3: succeeded', { exact: true }).waitFor();
   assert.equal(await page.getByText(/Delete octocat\/private, repository ID/).count(), 0);
   assert.equal(await page.getByRole('button', { name: 'Approve exact batch' }).count(), 0);
+  // Let this check finish while access is still denied, or its late answer would reveal the details early.
+  const denied = page.waitForResponse(
+    response => response.request().method() === 'GET' && new URL(response.url()).pathname.endsWith('/batches'),
+  );
   await page.getByRole('button', { name: 'Check private details' }).click();
+  await denied;
   await page.getByRole('heading', { name: 'GitHub batch status', exact: true }).waitFor();
   await page.setViewportSize({ width: 390, height: 844 });
   await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   await page.screenshot({
-    path: '/var/folders/7d/qk8p6t3d1jvfnh4503bz0msr0000gn/T/opencode/github-repository-status-mobile.png',
+    path: 'reports/screenshots/github-repository-status-mobile.png',
     fullPage: true,
   });
   f.allowOutside();

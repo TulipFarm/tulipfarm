@@ -83,12 +83,7 @@ import { ChatModelStatus, useChatModelFor, useChatModels } from './chat-models';
 import { useFlag } from '@/lib/feature-flags';
 import { StartingTasks } from './starting-tasks';
 import { ChatPlans } from './plans';
-import {
-  ChatPackages,
-  PackageChatContext,
-  useChatPackages,
-  type PackageChatContextValue,
-} from '@/features/packages/chat-packages';
+import { ChatPackages, PackageChatProvider, useChatPackages } from '@/features/packages/chat-packages';
 import { HomeWelcome } from './welcome';
 import { agentApi } from '@/features/agents/api';
 import { modelName } from '@/features/models/model-name';
@@ -243,6 +238,17 @@ type NewChatPrefill = {
 function Greeting() {
   const { user, sessionId } = workspaceRoute.useRouteContext();
   return <HomeWelcome key={`${user.id}:${sessionId}`} name={user.name} />;
+}
+
+// The mobile canvas is a modal sheet: it keeps focus until it has closed, then returns focus to its opener.
+function afterCanvasSheetCloses(run: () => void) {
+  const deadline = performance.now() + 1000;
+  const check = () => {
+    const sheet = document.querySelector('.sprout-canvas-sheet')?.closest('[data-slot="sheet-viewport"]');
+    if (!sheet || sheet.hasAttribute('hidden') || performance.now() > deadline) requestAnimationFrame(run);
+    else requestAnimationFrame(check);
+  };
+  requestAnimationFrame(check);
 }
 
 /** Morphs the start screen into the new conversation where the browser supports view transitions. */
@@ -465,7 +471,7 @@ function ConversationDetail({
   useEffect(() => {
     for (const [messageId, calls] of stream.layoutCalls ?? []) queueRendererCalls(messageId, calls);
   }, [stream.layoutCalls]);
-  const modelFamilies = workspaceModels.state.kind === 'ready' ? workspaceModels.state.data.families : [];
+  const modelFamilies = workspaceModels.state.kind === 'ready' ? workspaceModels.state.data.families : noModelFamilies;
   const imagesReader = useFlag('images');
   const read = useConversationHistory(api, chatId, pages, stream);
   const savedData = read.state.kind === 'ready' ? read.state.data : null;
@@ -580,21 +586,25 @@ function ConversationDetail({
         doc: { ...current.doc, content: [...paragraphs, ...(request.caretAtPrompt && blank ? [] : existing)] },
       };
     });
-    if (window.matchMedia('(max-width: 767px)').matches) canvas.setOpen(false);
-    if (request.caretAtPrompt)
-      // The editor takes the new draft on its next render; place the caret after that.
-      requestAnimationFrame(() => {
-        const editor = composerInput.current?.editor();
-        const prompt = editor?.state.doc.firstChild;
-        if (editor && prompt)
-          editor
-            .chain()
-            .focus()
-            .setTextSelection(prompt.nodeSize - 1)
-            .run();
-        else composerInput.current?.focus();
-      });
-    else composerInput.current?.focus();
+    const focusPrompt = () => {
+      const editor = composerInput.current?.editor();
+      const prompt = editor?.state.doc.firstChild;
+      if (editor && prompt)
+        editor
+          .chain()
+          .focus()
+          .setTextSelection(prompt.nodeSize - 1)
+          .run();
+      else composerInput.current?.focus();
+    };
+    const focus = request.caretAtPrompt ? focusPrompt : () => composerInput.current?.focus();
+    if (window.matchMedia('(max-width: 767px)').matches) {
+      canvas.setOpen(false);
+      afterCanvasSheetCloses(focus);
+    }
+    // The editor takes the new draft on its next render; place the caret after that.
+    else if (request.caretAtPrompt) requestAnimationFrame(focus);
+    else focus();
     canvas.consumeComposer(request.id);
   }, [canvas.composerRequest, canvas.consumeComposer]);
   const skills = useRichSkillPicker(workspace.id, composerInput, privateChat || (draft && !sharedChat));
@@ -671,8 +681,16 @@ function ConversationDetail({
   const [unseenUpdates, setUnseenUpdates] = useState(false);
   // The start screen reads from the top, so it never follows the latest message.
   const startScreen = useRef(false);
+  const pinnedTop = useRef<number | null>(null);
   const pinLatest = (element: HTMLElement) => {
-    if (!startScreen.current) element.scrollTop = element.scrollHeight;
+    if (startScreen.current) return;
+    element.scrollTop = element.scrollHeight;
+    pinnedTop.current = element.scrollTop;
+  };
+  // Toggling activity holds the view in place, except opening the live activity at latest, which keeps following.
+  const inspectActivity = (live: boolean) => {
+    const element = timeline.current;
+    if (!live || !element || !nearLatest(element)) followLatest.current = 'inspecting';
   };
   const syncLatest = (element: HTMLElement) => {
     const near = startScreen.current || nearLatest(element);
@@ -1019,6 +1037,27 @@ function ConversationDetail({
         : null;
   const activityLabel = useRotatingLabel(baseActivityLabel);
   const empty = data?.messages.length === 0 && !pending && incomingTurns.length === 0 && !packages.active;
+  // Typing re-renders this component, so saved entries get stable props and skip rendering again.
+  const commands: { retryHandoff: (compactionId: string) => void; control: ControlTurn } = {
+    retryHandoff: compactionId => {
+      if (!locked && models.usable) post(textDocument('Retry handoff'), [{ kind: 'compact', compactionId }], null, []);
+    },
+    control: (message, kind) => {
+      if (message.turn)
+        submit({
+          kind,
+          chatId,
+          commandId: crypto.randomUUID(),
+          turnId: message.turn.id,
+          expectedGeneration: message.turn.generation,
+        });
+    },
+  };
+  const entryCommands = useRef(commands);
+  entryCommands.current = commands;
+  const retryHandoff = useCallback((compactionId: string) => entryCommands.current.retryHandoff(compactionId), []);
+  const controlEntry = useCallback<ControlTurn>((message, kind) => entryCommands.current.control(message, kind), []);
+  const entryModelName = useCallback((id: string) => modelName(modelFamilies, id), [modelFamilies]);
   startScreen.current = !compact && empty;
   const latestId = pending?.id ?? data?.messages.at(-1)?.id;
   const firstId = data?.messages.at(0)?.id;
@@ -1157,7 +1196,9 @@ function ConversationDetail({
           }
           onScroll={event => {
             const element = event.currentTarget;
-            if (followLatest.current !== 'inspecting' && !startScreen.current)
+            // Pinning fires its scroll event a frame later, after the content may have grown again.
+            if (followLatest.current === 'following' && element.scrollTop === pinnedTop.current) pinLatest(element);
+            else if (followLatest.current !== 'inspecting' && !startScreen.current)
               followLatest.current = nearLatest(element) ? 'following' : 'scrolled';
             syncLatest(element);
           }}
@@ -1257,195 +1298,240 @@ function ConversationDetail({
                       <Greeting />
                     )
                   ) : (
-                    <ol aria-label="Messages" className={compact ? 'space-y-3' : 'space-y-8'}>
-                      {[
-                        ...history.messages.map((message, index) =>
-                          answerOnly(message) ? null : (
+                    <PackageChatProvider
+                      value={{
+                        packages,
+                        chatId,
+                        disabled: history.chat.isClosed || projectArchived,
+                        foreground: visible && !compact,
+                      }}
+                    >
+                      <ol aria-label="Messages" className={compact ? 'space-y-3' : 'space-y-8'}>
+                        {[
+                          ...history.messages.map((message, index) =>
+                            answerOnly(message) ? null : (
+                              <li
+                                key={
+                                  message.id === sentId.current
+                                    ? 'pending'
+                                    : message.turn
+                                      ? `turn:${message.turn.id}`
+                                      : message.id
+                                }
+                                className="space-y-3"
+                              >
+                                <ConversationEntry
+                                  api={api}
+                                  chatId={chatId}
+                                  slug={workspaceSlug}
+                                  message={message}
+                                  latest={index === history.messages.length - 1}
+                                  rowViews={entryDetails(history.messages, modelFamilies).rowViews[index]!}
+                                  stats={entryDetails(history.messages, modelFamilies).stats[index]}
+                                  modelName={entryModelName}
+                                  disabled={locked}
+                                  retryHandoff={retryHandoff}
+                                  control={controlEntry}
+                                />
+                                {queuedMessages.includes(message) && message.turn && (
+                                  <div className="flex flex-col items-end gap-2">
+                                    <p role="status" className="text-sm text-muted-foreground">
+                                      {queueLabel}
+                                    </p>
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      disabled={locked}
+                                      onClick={() =>
+                                        submit({
+                                          kind: 'cancel',
+                                          chatId,
+                                          commandId: crypto.randomUUID(),
+                                          turnId: message.turn!.id,
+                                          expectedGeneration: message.turn!.generation,
+                                        })
+                                      }
+                                    >
+                                      Remove queued message
+                                    </Button>
+                                  </div>
+                                )}
+                                <ToolActivity
+                                  key="activity"
+                                  variant="transcript"
+                                  items={toolActivityItems(message.tools, { admin })}
+                                  active={thinking && !read.uncertain && !!turn && message.turn?.id === turn.id}
+                                  activityLabel={message.turn?.id === turn?.id ? activityLabel : undefined}
+                                  onToggle={() => inspectActivity(thinking && !!turn && message.turn?.id === turn.id)}
+                                />
+                                {message.turn?.status === 'waiting' &&
+                                  (() => {
+                                    const note = message.tools.filter(tool => tool.narration).at(-1)?.narration;
+                                    return note ? <StepNarration text={note} /> : null;
+                                  })()}
+                                {message.parts.map((part, index) =>
+                                  part.kind === 'request' ? (
+                                    <InteractionCard key={index} api={api} chatId={chatId} reference={part} />
+                                  ) : null,
+                                )}
+                                {message.tools.map(tool => {
+                                  const replyTurn = message.turn;
+                                  return tool.tool === 'agents.delegate' ? (
+                                    <SubagentFanout
+                                      key={`subagents:${tool.id}`}
+                                      tool={tool}
+                                      live={stream.subagents?.get(tool.id)}
+                                      families={modelFamilies}
+                                      stop={
+                                        replyTurn?.status === 'processing'
+                                          ? key =>
+                                              api.stopSubagent(
+                                                chatId,
+                                                replyTurn.id,
+                                                tool.id,
+                                                key,
+                                                AbortSignal.timeout(15_000),
+                                              )
+                                          : undefined
+                                      }
+                                    />
+                                  ) : null;
+                                })}
+                                <ConversationTools
+                                  api={api}
+                                  chatId={chatId}
+                                  slug={workspaceSlug}
+                                  message={message}
+                                  changed={read.refresh}
+                                  githubLocked={
+                                    locked ||
+                                    history.messages.some(
+                                      item =>
+                                        item.turn && !['completed', 'cancelled', 'blocked'].includes(item.turn.status),
+                                    )
+                                  }
+                                  pickGitHub={pickGitHub}
+                                  correct={() => composerInput.current?.focus()}
+                                />
+                                {message.turn?.status === 'cancelled' &&
+                                  !history.messages.some(item => item.stoppedTurnId === message.turn?.id) && (
+                                    <Message align="start">
+                                      <MessageContent>
+                                        <p className="text-xs text-muted-foreground">{turnLabels.cancelled}</p>
+                                      </MessageContent>
+                                    </Message>
+                                  )}
+                              </li>
+                            ),
+                          ),
+                          pending ? (
                             <li
-                              key={
-                                message.id === sentId.current
-                                  ? 'pending'
-                                  : message.turn
-                                    ? `turn:${message.turn.id}`
-                                    : message.id
-                              }
-                              className="space-y-3"
+                              key="pending"
+                              className={`space-y-3 ${!compact && visible ? 'chat-sent-transition' : ''}`.trim()}
                             >
-                              <ConversationEntry
-                                api={api}
-                                chatId={chatId}
-                                slug={workspaceSlug}
-                                message={message}
-                                latest={index === history.messages.length - 1}
-                                rowViews={rowViewsForMessage(history.messages, message)}
-                                stats={replyStats(history.messages, index, modelFamilies)}
-                                modelName={id => modelName(modelFamilies, id)}
-                                disabled={locked}
-                                packageContext={{
-                                  packages,
-                                  chatId,
-                                  disabled: history.chat.isClosed || projectArchived,
-                                  foreground: visible && !compact,
-                                }}
-                                retryHandoff={compactionId => {
-                                  if (!locked && models.usable)
-                                    post(textDocument('Retry handoff'), [{ kind: 'compact', compactionId }], null, []);
-                                }}
-                                control={kind => {
-                                  if (message.turn)
-                                    submit({
-                                      kind,
-                                      chatId,
-                                      commandId: crypto.randomUUID(),
-                                      turnId: message.turn.id,
-                                      expectedGeneration: message.turn.generation,
-                                    });
-                                }}
-                              />
-                              {queuedMessages.includes(message) && message.turn && (
-                                <div className="flex flex-col items-end gap-2">
-                                  <p role="status" className="text-sm text-muted-foreground">
-                                    {queueLabel}
-                                  </p>
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    disabled={locked}
-                                    onClick={() =>
-                                      submit({
-                                        kind: 'cancel',
-                                        chatId,
-                                        commandId: crypto.randomUUID(),
-                                        turnId: message.turn!.id,
-                                        expectedGeneration: message.turn!.generation,
-                                      })
-                                    }
-                                  >
-                                    Remove queued message
-                                  </Button>
-                                </div>
+                              <Message align="end">
+                                <MessageContent>
+                                  {pending.skill && <SentSkill skill={pending.skill} />}
+                                  <MessageBubble variant="secondary">
+                                    <RichMessage
+                                      content={pending.content}
+                                      file={reference =>
+                                        reference.source === 'tulipfarm' ? (
+                                          <ConversationFileReference
+                                            workspaceId={workspace.id}
+                                            slug={workspaceSlug}
+                                            fileId={reference.id}
+                                          />
+                                        ) : (
+                                          (() => {
+                                            const item = pending.references.find(
+                                              candidate =>
+                                                candidate.source === 'google' && candidate.id === reference.id,
+                                            );
+                                            return item?.source === 'google' ? (
+                                              <ConversationGoogleFileReference
+                                                slug={workspaceSlug}
+                                                fileId={item.id}
+                                                name={item.name}
+                                                mimeType={item.mediaType}
+                                              />
+                                            ) : null;
+                                          })()
+                                        )
+                                      }
+                                    />
+                                  </MessageBubble>
+                                  {waiting && (
+                                    <p className="self-end text-xs text-muted-foreground">Sending when ready</p>
+                                  )}
+                                  {pendingQueued && (
+                                    <p role="status" className="self-end text-sm text-muted-foreground">
+                                      {queueLabel}
+                                    </p>
+                                  )}
+                                  {unconfirmed && (
+                                    <p className="self-end text-xs text-muted-foreground">
+                                      {write.state.kind === 'uncertain' && write.state.unsent
+                                        ? 'Not sent'
+                                        : 'Not confirmed sent'}
+                                    </p>
+                                  )}
+                                </MessageContent>
+                              </Message>
+                              {!waiting && !pendingQueued && !turn && !incomingTurns.length && (
+                                <ToolActivity
+                                  key="activity"
+                                  variant="transcript"
+                                  items={[]}
+                                  active={thinking && !read.uncertain}
+                                  activityLabel={activityLabel}
+                                />
                               )}
+                            </li>
+                          ) : null,
+                          ...incomingTurns.map(incoming => (
+                            <li key={`turn:${incoming.id}`}>
                               <ToolActivity
                                 key="activity"
                                 variant="transcript"
-                                items={toolActivityItems(message.tools, { admin })}
-                                active={thinking && !read.uncertain && !!turn && message.turn?.id === turn.id}
-                                activityLabel={message.turn?.id === turn?.id ? activityLabel : undefined}
-                                onToggle={() => {
-                                  followLatest.current = 'inspecting';
-                                }}
+                                items={toolActivityItems(incoming.tools, { admin })}
+                                active={thinking && !read.uncertain}
+                                activityLabel={activityLabel}
+                                onToggle={() => inspectActivity(thinking)}
                               />
-                              {message.turn?.status === 'waiting' &&
-                                (() => {
-                                  const note = message.tools.filter(tool => tool.narration).at(-1)?.narration;
-                                  return note ? <StepNarration text={note} /> : null;
-                                })()}
-                              {message.parts.map((part, index) =>
-                                part.kind === 'request' ? (
-                                  <InteractionCard key={index} api={api} chatId={chatId} reference={part} />
-                                ) : null,
-                              )}
-                              {message.tools.map(tool => {
-                                const replyTurn = message.turn;
-                                return tool.tool === 'agents.delegate' ? (
+                              {incoming.tools.map(tool =>
+                                tool.tool === 'agents.delegate' ? (
                                   <SubagentFanout
                                     key={`subagents:${tool.id}`}
                                     tool={tool}
                                     live={stream.subagents?.get(tool.id)}
                                     families={modelFamilies}
-                                    stop={
-                                      replyTurn?.status === 'processing'
-                                        ? key =>
-                                            api.stopSubagent(
-                                              chatId,
-                                              replyTurn.id,
-                                              tool.id,
-                                              key,
-                                              AbortSignal.timeout(15_000),
-                                            )
-                                        : undefined
+                                    stop={key =>
+                                      api.stopSubagent(chatId, incoming.id, tool.id, key, AbortSignal.timeout(15_000))
                                     }
                                   />
-                                ) : null;
-                              })}
-                              <ConversationTools
-                                api={api}
-                                chatId={chatId}
-                                slug={workspaceSlug}
-                                message={message}
-                                changed={read.refresh}
-                                githubLocked={
-                                  locked ||
-                                  history.messages.some(
-                                    item =>
-                                      item.turn && !['completed', 'cancelled', 'blocked'].includes(item.turn.status),
-                                  )
-                                }
-                                pickGitHub={pickGitHub}
-                                correct={() => composerInput.current?.focus()}
-                              />
-                              {message.turn?.status === 'cancelled' &&
-                                !history.messages.some(item => item.stoppedTurnId === message.turn?.id) && (
-                                  <Message align="start">
-                                    <MessageContent>
-                                      <p className="text-xs text-muted-foreground">{turnLabels.cancelled}</p>
-                                    </MessageContent>
-                                  </Message>
-                                )}
+                                ) : null,
+                              )}
                             </li>
-                          ),
-                        ),
-                        pending ? (
-                          <li
-                            key="pending"
-                            className={`space-y-3 ${!compact && visible ? 'chat-sent-transition' : ''}`.trim()}
-                          >
-                            <Message align="end">
+                          )),
+                        ]}
+                        {layoutJson && turn ? (
+                          <li aria-busy={!read.uncertain}>
+                            <span className="sr-only">TulipFarm said</span>
+                            <LayoutPreview chatId={chatId} turnId={turn.id} json={layoutJson} />
+                          </li>
+                        ) : answerText ? (
+                          <li aria-busy={!read.uncertain}>
+                            <Message align="start">
                               <MessageContent>
-                                {pending.skill && <SentSkill skill={pending.skill} />}
-                                <MessageBubble variant="secondary">
-                                  <RichMessage
-                                    content={pending.content}
-                                    file={reference =>
-                                      reference.source === 'tulipfarm' ? (
-                                        <ConversationFileReference
-                                          workspaceId={workspace.id}
-                                          slug={workspaceSlug}
-                                          fileId={reference.id}
-                                        />
-                                      ) : (
-                                        (() => {
-                                          const item = pending.references.find(
-                                            candidate => candidate.source === 'google' && candidate.id === reference.id,
-                                          );
-                                          return item?.source === 'google' ? (
-                                            <ConversationGoogleFileReference
-                                              slug={workspaceSlug}
-                                              fileId={item.id}
-                                              name={item.name}
-                                              mimeType={item.mediaType}
-                                            />
-                                          ) : null;
-                                        })()
-                                      )
-                                    }
-                                  />
-                                </MessageBubble>
-                                {waiting && (
-                                  <p className="self-end text-xs text-muted-foreground">Sending when ready</p>
-                                )}
-                                {pendingQueued && (
-                                  <p role="status" className="self-end text-sm text-muted-foreground">
-                                    {queueLabel}
-                                  </p>
-                                )}
-                                {unconfirmed && (
-                                  <p className="self-end text-xs text-muted-foreground">
-                                    {write.state.kind === 'uncertain' && write.state.unsent
-                                      ? 'Not sent'
-                                      : 'Not confirmed sent'}
-                                  </p>
-                                )}
+                                <span className="sr-only">TulipFarm said</span>
+                                <AssistantText
+                                  workspaceId={workspace.id}
+                                  chatId={chatId}
+                                  text={answerText}
+                                  streaming={!read.uncertain}
+                                  rowViews={entryDetails(history.messages, modelFamilies).rowViews.at(-1) ?? []}
+                                />
                               </MessageContent>
                             </Message>
                             {!waiting && !pendingQueued && !turn && !incomingTurns.length && (
@@ -1458,69 +1544,69 @@ function ConversationDetail({
                               />
                             )}
                           </li>
-                        ) : null,
-                        ...incomingTurns.map(incoming => (
-                          <li key={`turn:${incoming.id}`}>
-                            <ToolActivity
-                              key="activity"
-                              variant="transcript"
-                              items={toolActivityItems(incoming.tools, { admin })}
-                              active={thinking && !read.uncertain}
-                              activityLabel={activityLabel}
-                              onToggle={() => {
-                                followLatest.current = 'inspecting';
-                              }}
-                            />
-                            {incoming.tools.map(tool =>
-                              tool.tool === 'agents.delegate' ? (
-                                <SubagentFanout
-                                  key={`subagents:${tool.id}`}
-                                  tool={tool}
-                                  live={stream.subagents?.get(tool.id)}
-                                  families={modelFamilies}
-                                  stop={key =>
-                                    api.stopSubagent(chatId, incoming.id, tool.id, key, AbortSignal.timeout(15_000))
-                                  }
-                                />
-                              ) : null,
-                            )}
+                        ) : (
+                          thinking &&
+                          !read.uncertain && (
+                            <li aria-busy="true" className="space-y-2">
+                              {narration && <StepNarration text={narration} />}
+                              {slowTurn && (
+                                <div className="flex flex-wrap items-center gap-3">
+                                  <p role="status" className="text-sm text-muted-foreground">
+                                    This step is taking longer than usual. The reply continues, or you can stop it.
+                                  </p>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    disabled={locked}
+                                    onClick={() =>
+                                      submit({
+                                        kind: 'cancel',
+                                        chatId,
+                                        commandId: crypto.randomUUID(),
+                                        turnId: slowTurn.id,
+                                        expectedGeneration: slowTurn.generation,
+                                      })
+                                    }
+                                  >
+                                    Stop reply
+                                  </Button>
+                                </div>
+                              )}
+                            </li>
+                          )
+                        )}
+                        {read.uncertain && (
+                          <li>
+                            <Alert>
+                              <AlertDescription>We couldn't confirm whether this reply finished.</AlertDescription>
+                              <div className="mt-2 flex flex-wrap gap-2">
+                                <Button
+                                  variant="outline"
+                                  disabled={read.state.kind === 'ready' && read.state.refreshing}
+                                  onClick={() => {
+                                    stream.retry();
+                                    read.retryStatus();
+                                  }}
+                                >
+                                  Retry
+                                </Button>
+                                {stopReply && (text || staged) && (
+                                  <Button variant="outline" disabled={locked} onClick={stopReply}>
+                                    Stop reply
+                                  </Button>
+                                )}
+                              </div>
+                            </Alert>
                           </li>
-                        )),
-                      ]}
-                      {layoutJson && turn ? (
-                        <li aria-busy={!read.uncertain}>
-                          <span className="sr-only">TulipFarm said</span>
-                          <LayoutPreview chatId={chatId} turnId={turn.id} json={layoutJson} />
-                        </li>
-                      ) : answerText ? (
-                        <li aria-busy={!read.uncertain}>
-                          <Message align="start">
-                            <MessageContent>
-                              <span className="sr-only">TulipFarm said</span>
-                              <AssistantText
-                                workspaceId={workspace.id}
-                                chatId={chatId}
-                                text={answerText}
-                                streaming={!read.uncertain}
-                                rowViews={
-                                  history.messages.at(-1)
-                                    ? rowViewsForMessage(history.messages, history.messages.at(-1)!)
-                                    : []
-                                }
-                              />
-                            </MessageContent>
-                          </Message>
-                        </li>
-                      ) : (
-                        thinking &&
-                        !read.uncertain && (
-                          <li aria-busy="true" className="space-y-2">
-                            {narration && <StepNarration text={narration} />}
-                            {slowTurn && (
-                              <div className="flex flex-wrap items-center gap-3">
-                                <p role="status" className="text-sm text-muted-foreground">
-                                  This step is taking longer than usual. The reply continues, or you can stop it.
-                                </p>
+                        )}
+                        {stalledTurn && (
+                          <li>
+                            <Alert>
+                              <AlertTitle>Reply is taking too long</AlertTitle>
+                              <AlertDescription>
+                                The reply has not started after 1 minute. Cancel it, then send your message again.
+                              </AlertDescription>
+                              <div className="mt-2 flex flex-wrap gap-2">
                                 <Button
                                   size="sm"
                                   variant="outline"
@@ -1530,71 +1616,19 @@ function ConversationDetail({
                                       kind: 'cancel',
                                       chatId,
                                       commandId: crypto.randomUUID(),
-                                      turnId: slowTurn.id,
-                                      expectedGeneration: slowTurn.generation,
+                                      turnId: stalledTurn.id,
+                                      expectedGeneration: stalledTurn.generation,
                                     })
                                   }
                                 >
-                                  Stop reply
+                                  Cancel reply
                                 </Button>
                               </div>
-                            )}
+                            </Alert>
                           </li>
-                        )
-                      )}
-                      {read.uncertain && (
-                        <li>
-                          <Alert>
-                            <AlertDescription>We couldn't confirm whether this reply finished.</AlertDescription>
-                            <div className="mt-2 flex flex-wrap gap-2">
-                              <Button
-                                variant="outline"
-                                disabled={read.state.kind === 'ready' && read.state.refreshing}
-                                onClick={() => {
-                                  stream.retry();
-                                  read.retryStatus();
-                                }}
-                              >
-                                Retry
-                              </Button>
-                              {stopReply && (text || staged) && (
-                                <Button variant="outline" disabled={locked} onClick={stopReply}>
-                                  Stop reply
-                                </Button>
-                              )}
-                            </div>
-                          </Alert>
-                        </li>
-                      )}
-                      {stalledTurn && (
-                        <li>
-                          <Alert>
-                            <AlertTitle>Reply is taking too long</AlertTitle>
-                            <AlertDescription>
-                              The reply has not started after 1 minute. Cancel it, then send your message again.
-                            </AlertDescription>
-                            <div className="mt-2 flex flex-wrap gap-2">
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                disabled={locked}
-                                onClick={() =>
-                                  submit({
-                                    kind: 'cancel',
-                                    chatId,
-                                    commandId: crypto.randomUUID(),
-                                    turnId: stalledTurn.id,
-                                    expectedGeneration: stalledTurn.generation,
-                                  })
-                                }
-                              >
-                                Cancel reply
-                              </Button>
-                            </div>
-                          </Alert>
-                        </li>
-                      )}
-                    </ol>
+                        )}
+                      </ol>
+                    </PackageChatProvider>
                   )}
                   {!draft && (
                     <ChatPackages
@@ -1847,6 +1881,27 @@ function answerOnly(message: ConversationMessage) {
   );
 }
 
+type ModelFamilies = Parameters<typeof replyStats>[2];
+const noModelFamilies: never[] = [];
+type ControlTurn = (message: ConversationMessage, kind: 'retry' | 'cancel') => void;
+
+// Each entry's row views and reply stats stay the same objects while the history does, so entries can skip rendering.
+const entryDetailsCache = new WeakMap<
+  ConversationMessage[],
+  { families: ModelFamilies; rowViews: RowView[][]; stats: (MessageActionsStats | undefined)[] }
+>();
+function entryDetails(messages: ConversationMessage[], families: ModelFamilies) {
+  const cached = entryDetailsCache.get(messages);
+  if (cached?.families === families) return cached;
+  const details = {
+    families,
+    rowViews: messages.map(message => rowViewsForMessage(messages, message)),
+    stats: messages.map((_, index) => replyStats(messages, index, families)),
+  };
+  entryDetailsCache.set(messages, details);
+  return details;
+}
+
 function rowViewsForMessage(messages: ConversationMessage[], message: ConversationMessage): RowView[] {
   const source =
     message.author === 'human'
@@ -1945,7 +2000,7 @@ function SentLayoutValues({
   );
 }
 
-function ConversationEntry({
+const ConversationEntry = memo(function ConversationEntry({
   api,
   chatId,
   slug,
@@ -1953,7 +2008,6 @@ function ConversationEntry({
   latest,
   rowViews,
   disabled,
-  packageContext,
   retryHandoff,
   control,
   stats,
@@ -1966,9 +2020,8 @@ function ConversationEntry({
   latest: boolean;
   rowViews: RowView[];
   disabled: boolean;
-  packageContext: PackageChatContextValue;
   retryHandoff: (compactionId: string) => void;
-  control: (kind: 'retry' | 'cancel') => void;
+  control: ControlTurn;
   stats?: MessageActionsStats | undefined;
   modelName: (id: string) => string;
 }) {
@@ -1987,6 +2040,7 @@ function ConversationEntry({
   );
   const skill = message.parts.find(part => part.kind === 'skill');
   const entry = useRef<HTMLDivElement>(null);
+  const controlTurn = useCallback((kind: 'retry' | 'cancel') => control(message, kind), [control, message]);
   if (message.parts.every(part => part.kind === 'request' || part.kind === 'response')) return null;
   return (
     <div className="space-y-3">
@@ -2044,15 +2098,14 @@ function ConversationEntry({
                 );
               case 'layout':
                 return (
-                  <PackageChatContext value={packageContext} key={index}>
-                    <LayoutReply
-                      chatId={chatId}
-                      messageId={message.id}
-                      latest={latest}
-                      text={part.text}
-                      value={part.layout}
-                    />
-                  </PackageChatContext>
+                  <LayoutReply
+                    key={index}
+                    chatId={chatId}
+                    messageId={message.id}
+                    latest={latest}
+                    text={part.text}
+                    value={part.layout}
+                  />
                 );
               case 'layout-action':
                 return <SentLayoutValues key={index} context={part.action.context} labels={part.action.labels} />;
@@ -2125,7 +2178,7 @@ function ConversationEntry({
               tools={message.tools}
               skillName={skill?.name}
               disabled={disabled}
-              control={control}
+              control={controlTurn}
               modelName={modelName}
               workspaceSlug={slug}
             />
@@ -2134,7 +2187,7 @@ function ConversationEntry({
       </Message>
     </div>
   );
-}
+});
 
 function ConversationTools({
   api,

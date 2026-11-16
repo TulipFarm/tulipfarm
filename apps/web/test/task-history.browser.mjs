@@ -99,6 +99,8 @@ test(
         if (path === `${base}/agent-tasks/${task.id}/api-calls`) return send({ calls: [] });
         if (path === `${base}/slack/tasks/${task.id}/actions`) return send({ actions: [] });
       }
+      if (path === `${base}/conversations/pinned`) return send({ chats: [] });
+      if (path === `${base}/conversations`) return send({ chats: [], nextCursor: null });
       if (path.endsWith('/recent')) return send([]);
       if (shell.has(path)) return send(shell.get(path));
       const response = fixture.respond(req.method(), req.url(), req.postDataJSON());
@@ -216,6 +218,8 @@ for (const lifecycle of ['deleted', 'archived']) {
       if (path === `${base}/agent-tasks/${task.id}/secret-requests`) return send({ requests: [] });
       if (path === `${base}/agent-tasks/${task.id}/api-calls`) return send({ calls: [] });
       if (path === `${base}/slack/tasks/${task.id}/actions`) return send({ actions: [] });
+      if (path === `${base}/conversations/pinned`) return send({ chats: [] });
+      if (path === `${base}/conversations`) return send({ chats: [], nextCursor: null });
       if (path.endsWith('/recent')) return send([]);
       if (shell.has(path)) return send(shell.get(path));
       const response = fixture.respond(req.method(), req.url(), req.postDataJSON());
@@ -386,6 +390,8 @@ test('task outcomes come first and connected-tool controls match the task state'
             return send(selection);
           }
           if (path.endsWith('/batches')) return send({ batches: [] });
+          if (path === `${base}/conversations/pinned`) return send({ chats: [] });
+          if (path === `${base}/conversations`) return send({ chats: [], nextCursor: null });
           if (path.endsWith('/recent')) return send([]);
           if (shell.has(path)) return send(shell.get(path));
           const response = fixture.respond(req.method(), req.url(), req.postDataJSON());

@@ -61,6 +61,9 @@ try {
     if (path === '/v1/auth/get-session') json = session;
     else if (path === '/v1/workspaces') json = [workspace];
     else if (path === `/v1/workspaces/${workspace.slug}`) json = workspace;
+    else if (path.endsWith('/conversations/pinned')) json = { chats: [] };
+    else if (path.endsWith('/conversations')) json = { chats: [], nextCursor: null };
+    else if (path.endsWith('/agents/recent')) json = [];
     else if (path.endsWith('/governance/me'))
       json = {
         membershipId: memberId,
@@ -123,7 +126,7 @@ try {
     await route.fulfill({ status, json });
   });
   await page.goto(`${origin}/${workspace.slug}/integrations#slack`);
-  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByRole('tab', { name: 'Settings', exact: true }).click();
   assert.equal(await page.getByRole('heading', { name: 'Slack workspace connected', exact: true }).count(), 0);
   assert.equal(await page.getByText('Connected to TONE.', { exact: false }).count(), 0);
   await page.getByRole('heading', { name: 'Could not load Slack sharing' }).waitFor();
@@ -192,9 +195,9 @@ try {
   admin = false;
   await page.goto(`${origin}/${workspace.slug}/integrations#slack`);
   await page.reload();
-  await page.getByRole('button', { name: 'Your account', exact: true }).waitFor();
+  await page.getByRole('tab', { name: 'Accounts', exact: true }).waitFor();
   assert.equal(
-    await page.getByRole('region', { name: 'Settings', exact: true }).count(),
+    await page.getByRole('tab', { name: 'Settings', exact: true }).count(),
     0,
     'Members cannot open workspace Slack settings or sharing',
   );
@@ -232,7 +235,7 @@ try {
   admin = true;
   await page.goto(`${origin}/${workspace.slug}/integrations#slack`);
   await page.reload();
-  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByRole('tab', { name: 'Settings', exact: true }).click();
   await page.getByRole('heading', { name: 'Slack integration unavailable' }).waitFor();
   assert.equal(await page.getByRole('region', { name: 'Slack sharing', exact: true }).count(), 0);
   assert.deepEqual(errors, []);
@@ -243,7 +246,7 @@ try {
   const page = browser?.contexts()[0]?.pages()[0];
   if (page) {
     await page.screenshot({ path: `${screenshot}-failure.png` });
-    console.error(await page.getByRole('dialog').ariaSnapshot());
+    console.error(await page.getByRole('main').ariaSnapshot());
   }
   console.error(errors);
   throw error;

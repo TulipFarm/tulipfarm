@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { z } from 'zod';
 import { filesSearchSchema, viewerSearchSchema } from '@/features/files/search';
 import { tableListSearchSchema, tableRowsSearchSchema } from '@/features/tables/table-search';
@@ -27,122 +27,109 @@ import {
   safeAuthRedirect,
   sessionIdentity,
 } from '@/lib/auth';
-import {
-  forgetSession,
-  forgetWorkspace,
-  forgetWorkspaceId,
-  lastSession,
-  rememberSession,
-  rememberWorkspaceId,
-  workspaceDestination,
-  workspaceIdHint,
-} from '@/lib/last-workspace';
+import { forgetSession } from '@/lib/last-workspace';
+import { loadSignedInSession, requireProfile } from '@/lib/profile-guard';
+import { loadSessionLayer, useSessionLayer } from '@/lib/session-layer';
 import { pendingInvitationDestination } from '@/lib/pending-invitation';
 import { Spinner } from '@tulipfarm/sprout/spinner';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
 import { workspaceSlugError } from '@/lib/workspace-slug';
-import { currentIntegrationId } from '@/features/integrations/catalog';
-import { getWorkspace, listWorkspaces, WorkspaceRequestError } from '@/lib/workspaces';
-import { readWorkspaceList, sessionRuntime, WorkspaceListQueryBridge } from '@/features/workspaces/queries';
-import { reconcileMembership } from '@/features/governance/queries';
-import {
-  invitationTokenSchema,
-  ownMembershipSchema,
-  type OwnMembership,
-} from '@tulipfarm/workspaces/governance-contracts';
-import { workspaceListSchema, workspaceSchema } from '@tulipfarm/workspaces/contracts';
-import { RecoveryNotice, WorkspaceRecoveryPage } from '@/pages/workspace-recovery';
+import { currentIntegrationId } from '@/features/integrations/former-ids';
+import { invitationTokenSchema } from '@tulipfarm/workspaces/invitation-token';
 import { workspacePageScroller } from '@/lib/page-scroller';
 import { accountCallbackResultSchema } from '@tulipfarm/atlassian/callback-contracts';
 import { googleCallbackResultSchema } from '@tulipfarm/google-workspace/callback-contracts';
 import { workflowPageSearch } from '@/features/workflows/page-search';
-import { calendarSearchSchema } from '@/features/calendar/model';
+import { calendarSearchSchema } from '@/features/calendar/search';
 import { agentTabValues } from '@/features/agents/tab-values';
 import { createWorkspaceAccess } from '@/lib/workspace-access';
-import { loadOwnMembership, GovernanceRequestError } from '@/lib/governance';
-import { hashKey } from '@tanstack/react-query';
-import {
-  SessionQueryProvider,
-  type FeatureScope,
-  type QueryKey,
-  type SessionIdentity,
-  type WorkspaceScope,
-} from '@/lib/query';
-import { startEarlyReads } from '@/lib/query/early-reads';
-import { persistedReads } from '@/lib/query/persisted-reads';
-import { holdWrites } from '@/lib/http';
+import type { FeatureScope } from '@/lib/query/scope';
 import { measureWorkspaceAdmission } from '@/lib/navigation-performance';
-import { UserVisitProvider } from '@/lib/user-visit';
+import type { WorkspaceContext } from '@/session-layer';
 import { analytics, overrides } from '@/extensions';
 import { isAssetLoadError, reloadOnceForAssetError } from '@/lib/asset-recovery';
 import { routeErrorEvent, routeErrorProperties } from '@/lib/route-error-report';
 import { onWindowReturn } from '@/lib/window-return';
-import { retryAdmission, temporaryAdmissionError } from '@/lib/admission-retry';
 
 // Admission and 401/403 responses already catch revocation; this only bounds how long a
 // background tab can keep showing a workspace after another person removes access.
 const accessCheckInterval = 60_000;
 
-const MembersPage = lazyRouteComponent(() => import('@/pages/governance'), 'MembersPage');
-const InboxPage = lazyRouteComponent(() => import('@/pages/workspace'), 'InboxPage');
-const WorkspaceShell = lazyRouteComponent(() => import('@/pages/workspace'), 'WorkspaceShell');
-const LoginPage = lazyRouteComponent(() => import('@/pages/login'), 'LoginPage');
-const RegisterPage = lazyRouteComponent(() => import('@/pages/auth'), 'RegisterPage');
-const ForgotPasswordPage = lazyRouteComponent(() => import('@/pages/password'), 'ForgotPasswordPage');
-const ResetPasswordPage = lazyRouteComponent(() => import('@/pages/password'), 'ResetPasswordPage');
-const VerifyEmailPage = lazyRouteComponent(() => import('@/pages/auth'), 'VerifyEmailPage');
-const LogoutPage = lazyRouteComponent(() => import('@/pages/auth'), 'LogoutPage');
-const CompleteProfilePage = lazyRouteComponent(() => import('@/pages/auth'), 'CompleteProfilePage');
-const CreateWorkspacePage = lazyRouteComponent(() => import('@/pages/create-workspace'), 'CreateWorkspacePage');
-const OnboardingPage = lazyRouteComponent(() => import('@/pages/onboarding'), 'OnboardingPage');
-const OnboardingChatPage = lazyRouteComponent(() => import('@/pages/onboarding'), 'OnboardingChatPage');
-const WorkspaceSetupStatusPage = lazyRouteComponent(
-  () => import('@/pages/workspace-setup-status'),
-  'WorkspaceSetupStatusPage',
+type RoutePages = typeof import('./route-pages');
+let routePages: Promise<RoutePages> | null = null;
+/** A page's loader. Page loaders live in their own module, fetched the first time a page other than sign-in loads. */
+function routePage<K extends keyof RoutePages>(name: K): RoutePages[K] {
+  const load = () => {
+    routePages ??= import('./route-pages').catch(error => {
+      routePages = null;
+      throw error;
+    });
+    return routePages.then(pages => (pages[name] as () => Promise<unknown>)());
+  };
+  return load as unknown as RoutePages[K];
+}
+
+const MembersPage = lazyRouteComponent(routePage('governance'), 'MembersPage');
+const InboxPage = lazyRouteComponent(routePage('workspace'), 'InboxPage');
+const WorkspaceShell = lazyRouteComponent(routePage('workspace'), 'WorkspaceShell');
+const WorkspaceRecoveryPage = lazyRouteComponent(routePage('workspaceRecovery'), 'WorkspaceRecoveryPage');
+const RecoveryNotice = lazy(() =>
+  routePage('workspaceRecovery')().then(module => ({ default: module.RecoveryNotice })),
 );
-const JoinWorkspacePage = lazyRouteComponent(() => import('@/pages/governance-invitations'), 'JoinWorkspacePage');
-const SlackLinkPage = lazyRouteComponent(() => import('@/pages/slack-link'), 'SlackLinkPage');
-const GoogleCallbackPage = lazyRouteComponent(() => import('@/pages/google-callback'), 'GoogleCallbackPage');
-const McpCallbackPage = lazyRouteComponent(() => import('@/pages/mcp-callback'), 'McpCallbackPage');
-const GitHubCallbackPage = lazyRouteComponent(() => import('@/pages/github-callback'), 'GitHubCallbackPage');
-const AtlassianCallbackPage = lazyRouteComponent(() => import('@/pages/atlassian-callback'), 'AtlassianCallbackPage');
-const WorkspaceHomePage = lazyRouteComponent(() => import('@/pages/workspace-home'), 'WorkspaceHomePage');
-const WorkspaceChatsPage = lazyRouteComponent(() => import('@/pages/workspace-chats'), 'WorkspaceChatsPage');
-const TeamsPage = lazyRouteComponent(() => import('@/pages/governance'), 'TeamsPage');
-const GrantsPage = lazyRouteComponent(() => import('@/pages/governance'), 'GrantsPage');
-const InviteMembersPage = lazyRouteComponent(() => import('@/pages/governance'), 'InviteMembersPage');
-const EditInvitePage = lazyRouteComponent(() => import('@/pages/governance'), 'EditInvitePage');
-const MembersSettingsPage = lazyRouteComponent(() => import('@/pages/governance'), 'MembersSettingsPage');
-const MemberDetailPage = lazyRouteComponent(() => import('@/pages/governance'), 'MemberDetailPage');
-const TeamDetailPage = lazyRouteComponent(() => import('@/pages/governance'), 'TeamDetailPage');
-const TablesPage = lazyRouteComponent(() => import('@/pages/tables'), 'TablesPage');
-const TableDetailPage = lazyRouteComponent(() => import('@/pages/tables'), 'TableDetailPage');
-const NewTablePage = lazyRouteComponent(() => import('@/pages/tables'), 'NewTablePage');
-const EditTablePage = lazyRouteComponent(() => import('@/pages/tables'), 'EditTablePage');
-const AgentsPage = lazyRouteComponent(() => import('@/pages/agents'), 'AgentsPage');
-const NewAgentPage = lazyRouteComponent(() => import('@/pages/agents'), 'NewAgentPage');
-const AgentDetailPage = lazyRouteComponent(() => import('@/pages/agents'), 'AgentDetailPage');
-const ProjectsPage = lazyRouteComponent(() => import('@/pages/projects'), 'ProjectsPage');
-const FilesPage = lazyRouteComponent(() => import('@/pages/files'), 'FilesPage');
-const FilePage = lazyRouteComponent(() => import('@/pages/file'), 'FilePage');
-const GoogleFilePage = lazyRouteComponent(() => import('@/pages/google-file'), 'GoogleFilePage');
-const ProjectDetailPage = lazyRouteComponent(() => import('@/pages/projects'), 'ProjectDetailPage');
-const ProjectSettingsPage = lazyRouteComponent(() => import('@/pages/projects'), 'ProjectSettingsPage');
-const SkillsPage = lazyRouteComponent(() => import('@/pages/skills'), 'SkillsPage');
-const SystemPackagesPage = lazyRouteComponent(() => import('@/pages/system-packages'), 'SystemPackagesPage');
-const PublicPackagePage = lazyRouteComponent(() => import('@/pages/system-packages'), 'PublicPackagePage');
-const SystemPackagePage = lazyRouteComponent(() => import('@/pages/system-packages'), 'SystemPackagePage');
-const ImportSkillPage = lazyRouteComponent(() => import('@/features/skills/import-flow'), 'ImportSkillPage');
-const SkillImportPage = lazyRouteComponent(() => import('@/features/skills/import-flow'), 'SkillImportPage');
-const SkillDetailPage = lazyRouteComponent(() => import('@/pages/skills'), 'SkillDetailPage');
-const AgentTasksPage = lazyRouteComponent(() => import('@/pages/agent-tasks'), 'AgentTasksPage');
-const AgentTaskPage = lazyRouteComponent(() => import('@/pages/agent-tasks'), 'AgentTaskPage');
-const IntegrationsPage = lazyRouteComponent(() => import('@/pages/integrations'), 'IntegrationsPage');
-const IntegrationDetailPage = lazyRouteComponent(() => import('@/pages/integration-detail'), 'IntegrationDetailPage');
-const ModelsPage = lazyRouteComponent(() => import('@/pages/models'), 'ModelsPage');
-const SettingsPage = lazyRouteComponent(() => import('@/pages/settings'), 'SettingsPage');
-const AccountSettingsPage = lazyRouteComponent(() => import('@/pages/account-settings'), 'AccountSettingsPage');
-const SecretsSettingsPage = lazyRouteComponent(() => import('@/pages/secrets-settings'), 'SecretsSettingsPage');
+const LoginPage = lazyRouteComponent(() => import('@/pages/login'), 'LoginPage');
+const RegisterPage = lazyRouteComponent(routePage('auth'), 'RegisterPage');
+const ForgotPasswordPage = lazyRouteComponent(routePage('password'), 'ForgotPasswordPage');
+const ResetPasswordPage = lazyRouteComponent(routePage('password'), 'ResetPasswordPage');
+const VerifyEmailPage = lazyRouteComponent(routePage('auth'), 'VerifyEmailPage');
+const LogoutPage = lazyRouteComponent(routePage('auth'), 'LogoutPage');
+const CompleteProfilePage = lazyRouteComponent(routePage('auth'), 'CompleteProfilePage');
+const CreateWorkspacePage = lazyRouteComponent(routePage('createWorkspace'), 'CreateWorkspacePage');
+const OnboardingPage = lazyRouteComponent(routePage('onboarding'), 'OnboardingPage');
+const OnboardingChatPage = lazyRouteComponent(routePage('onboarding'), 'OnboardingChatPage');
+const WorkspaceSetupStatusPage = lazyRouteComponent(routePage('workspaceSetupStatus'), 'WorkspaceSetupStatusPage');
+const JoinWorkspacePage = lazyRouteComponent(routePage('governanceInvitations'), 'JoinWorkspacePage');
+const SlackLinkPage = lazyRouteComponent(routePage('slackLink'), 'SlackLinkPage');
+const GoogleCallbackPage = lazyRouteComponent(routePage('googleCallback'), 'GoogleCallbackPage');
+const McpCallbackPage = lazyRouteComponent(routePage('mcpCallback'), 'McpCallbackPage');
+const GitHubCallbackPage = lazyRouteComponent(routePage('githubCallback'), 'GitHubCallbackPage');
+const AtlassianCallbackPage = lazyRouteComponent(routePage('atlassianCallback'), 'AtlassianCallbackPage');
+const WorkspaceHomePage = lazyRouteComponent(routePage('workspaceHome'), 'WorkspaceHomePage');
+const WorkspaceChatsPage = lazyRouteComponent(routePage('workspaceChats'), 'WorkspaceChatsPage');
+const TeamsPage = lazyRouteComponent(routePage('governance'), 'TeamsPage');
+const GrantsPage = lazyRouteComponent(routePage('governance'), 'GrantsPage');
+const InviteMembersPage = lazyRouteComponent(routePage('governance'), 'InviteMembersPage');
+const EditInvitePage = lazyRouteComponent(routePage('governance'), 'EditInvitePage');
+const MembersSettingsPage = lazyRouteComponent(routePage('governance'), 'MembersSettingsPage');
+const MemberDetailPage = lazyRouteComponent(routePage('governance'), 'MemberDetailPage');
+const TeamDetailPage = lazyRouteComponent(routePage('governance'), 'TeamDetailPage');
+const TablesPage = lazyRouteComponent(routePage('tables'), 'TablesPage');
+const TableDetailPage = lazyRouteComponent(routePage('tables'), 'TableDetailPage');
+const NewTablePage = lazyRouteComponent(routePage('tables'), 'NewTablePage');
+const EditTablePage = lazyRouteComponent(routePage('tables'), 'EditTablePage');
+const AgentsPage = lazyRouteComponent(routePage('agents'), 'AgentsPage');
+const NewAgentPage = lazyRouteComponent(routePage('agents'), 'NewAgentPage');
+const AgentDetailPage = lazyRouteComponent(routePage('agents'), 'AgentDetailPage');
+const ProjectsPage = lazyRouteComponent(routePage('projects'), 'ProjectsPage');
+const FilesPage = lazyRouteComponent(routePage('files'), 'FilesPage');
+const FilePage = lazyRouteComponent(routePage('file'), 'FilePage');
+const GoogleFilePage = lazyRouteComponent(routePage('googleFile'), 'GoogleFilePage');
+const ProjectDetailPage = lazyRouteComponent(routePage('projects'), 'ProjectDetailPage');
+const ProjectSettingsPage = lazyRouteComponent(routePage('projects'), 'ProjectSettingsPage');
+const SkillsPage = lazyRouteComponent(routePage('skills'), 'SkillsPage');
+const SystemPackagesPage = lazyRouteComponent(routePage('systemPackages'), 'SystemPackagesPage');
+const PublicPackagePage = lazyRouteComponent(routePage('systemPackages'), 'PublicPackagePage');
+const SystemPackagePage = lazyRouteComponent(routePage('systemPackages'), 'SystemPackagePage');
+const ImportSkillPage = lazyRouteComponent(routePage('skillsImportFlow'), 'ImportSkillPage');
+const SkillImportPage = lazyRouteComponent(routePage('skillsImportFlow'), 'SkillImportPage');
+const SkillDetailPage = lazyRouteComponent(routePage('skills'), 'SkillDetailPage');
+const AgentTasksPage = lazyRouteComponent(routePage('agentTasks'), 'AgentTasksPage');
+const AgentTaskPage = lazyRouteComponent(routePage('agentTasks'), 'AgentTaskPage');
+const IntegrationsPage = lazyRouteComponent(routePage('integrations'), 'IntegrationsPage');
+const IntegrationDetailPage = lazyRouteComponent(routePage('integrationDetail'), 'IntegrationDetailPage');
+const ModelsPage = lazyRouteComponent(routePage('models'), 'ModelsPage');
+const SettingsPage = lazyRouteComponent(routePage('settings'), 'SettingsPage');
+const AccountSettingsPage = lazyRouteComponent(routePage('accountSettings'), 'AccountSettingsPage');
+const SecretsSettingsPage = lazyRouteComponent(routePage('secretsSettings'), 'SecretsSettingsPage');
 
 function NotFoundPanel() {
   return (
@@ -251,30 +238,18 @@ function SessionLayout() {
       if (!slug || !admitted?.user || !admitted.sessionId || Date.now() - checkedAt < accessCheckInterval) return;
       checkedAt = Date.now();
       const deny = admitted.workspaceAccess.observe({ slug, userId: admitted.user.id, sessionId: admitted.sessionId });
-      try {
-        const workspace = await getWorkspace(slug);
-        if (workspace.status === 'ready') {
-          const membership = await loadOwnMembership(workspace.id, AbortSignal.timeout(15_000));
-          if (membership.membershipId !== admitted.membershipId) {
-            deny(403);
-            void router.invalidate();
-          } else if (
-            reconcileMembership(
-              { userId: admitted.user.id, sessionId: admitted.sessionId },
-              workspace.id,
-              admitted.membership,
-              membership,
-            )
-          )
-            void router.invalidate();
-        }
-      } catch (error) {
-        if (
-          (error instanceof WorkspaceRequestError || error instanceof GovernanceRequestError) &&
-          [401, 403, 404].includes(error.status)
-        )
-          deny(error.status);
-      }
+      const layer = await loadSessionLayer().catch(() => null);
+      await layer?.recheckWorkspaceAccess(
+        slug,
+        {
+          userId: admitted.user.id,
+          sessionId: admitted.sessionId,
+          membership: admitted.membership,
+          membershipId: admitted.membershipId,
+        },
+        deny,
+        refresh,
+      );
     };
     const stopReturn = onWindowReturn(() => {
       void checkAccess();
@@ -310,18 +285,22 @@ function SessionLayout() {
     admission?.sessionId === queryIdentity?.sessionId
       ? admission?.workspaces
       : undefined;
+  const layer = useSessionLayer(queryIdentity !== null);
+  if (!queryIdentity || !layer) return <Outlet />;
   return (
-    <SessionQueryProvider identity={queryIdentity} onAuthorityLost={queryAuthorityLost}>
-      <UserVisitProvider identity={queryIdentity}>
-        {queryIdentity && (
-          <WorkspaceListQueryBridge initialWorkspaces={initialWorkspaces} onChanged={workspaceListChanged} />
-        )}
-        {session && !isPending && !error && showRecovery && (
+    <layer.SessionScope
+      identity={queryIdentity}
+      onAuthorityLost={queryAuthorityLost}
+      initialWorkspaces={initialWorkspaces}
+      onWorkspaceListChanged={workspaceListChanged}
+    >
+      {session && !isPending && !error && showRecovery && (
+        <Suspense fallback={null}>
           <RecoveryNotice key={session.user.id} userId={session.user.id} />
-        )}
-        <Outlet />
-      </UserVisitProvider>
-    </SessionQueryProvider>
+        </Suspense>
+      )}
+      <Outlet />
+    </layer.SessionScope>
   );
 }
 
@@ -426,195 +405,9 @@ export function preloadRouteCode(pathname: string): Promise<unknown> {
     router.getMatchedRoutes(pathname)[0].map(route => route.options.component?.preload?.()?.catch(() => {})),
   );
 }
-type PageReadModule = typeof import('@/features/chat/early-reads');
-let pageReadModule: Promise<PageReadModule> | null = null;
-function loadPageReads() {
-  pageReadModule ??= import('@/features/chat/early-reads').then(
-    module => {
-      persistedReads.configure(module.persistedPageReads);
-      return module;
-    },
-    error => {
-      pageReadModule = null;
-      throw error;
-    },
-  );
-  return pageReadModule;
-}
-function cachedRead(identity: SessionIdentity, workspaceId: string, key: QueryKey) {
-  const scope = ['user', identity.userId, 'workspace', workspaceId];
-  const hash = hashKey(key);
-  return !!sessionRuntime(identity)
-    ?.client.getQueryCache()
-    .findAll({ queryKey: scope })
-    .some(query => query.state.data !== undefined && hashKey(query.queryKey.slice(scope.length + 2)) === hash);
-}
-/**
- * Starts the reads the destination page makes first, once the workspace id is known, so they
- * overlap membership admission instead of waiting for the frame to mount. Reads the cache already
- * holds are skipped, and the page only uses a response after admission binds it to the membership.
- * Reads still waiting for their code when admission settles never start, so they cannot race the
- * page's own reads.
- */
-function startPageReads(
-  identity: SessionIdentity,
-  workspaceId: string,
-  slug: string,
-  location: { pathname: string; search: Record<string, unknown> },
-) {
-  let settled = false;
-  let reads: ReturnType<typeof startEarlyReads> | null = null;
-  void loadPageReads().then(
-    module => {
-      if (settled) return;
-      const pending = module
-        .workspacePageReads(workspaceId, slug, location.pathname, location.search)
-        .filter(read => !cachedRead(identity, workspaceId, read.key));
-      if (pending.length) reads = startEarlyReads(identity, workspaceId, pending);
-    },
-    () => {},
-  );
-  return {
-    workspaceId,
-    admit(membershipId: string) {
-      settled = true;
-      reads?.admit(membershipId);
-    },
-    discard() {
-      settled = true;
-      reads?.discard();
-    },
-  };
-}
-async function requireProfile(destination: string) {
-  const session = await loadSession();
-  if (!session) {
-    void forgetSession();
-    const error = new URL(destination, 'http://localhost').searchParams.get('error');
-    throw redirect({
-      to: '/login',
-      search: { redirect: safeAuthRedirect(destination), ...(error !== null && { error }) },
-      replace: true,
-    });
-  }
-  rememberSession({ userId: session.user.id, sessionId: session.session.id });
-  if (!session.user.name.trim())
-    throw redirect({ to: '/complete-profile', search: { redirect: safeAuthRedirect(destination) }, replace: true });
-  return session;
-}
-type AuthSession = NonNullable<Awaited<ReturnType<typeof loadSession>>>;
-type WorkspaceRead = Awaited<ReturnType<typeof getWorkspace>>;
-type WorkspaceContext = {
-  user: AuthSession['user'];
-  sessionId: string;
-  accessRevision: number;
-  membershipId: string | null;
-  membership: OwnMembership | null;
-  workspace: WorkspaceRead;
-  workspaces: WorkspaceRead[];
-  workspaceStale: boolean;
-  /** Shown from disk while the session and membership are still being checked. Writes wait for the check. */
-  workspaceProvisional: boolean;
-};
-const onIntegrationsPage = (slug: string, pathname: string) =>
-  pathname === `/${slug}/integrations` || pathname.startsWith(`/${slug}/integrations/`);
-/** Workspace reads for a remembered session, started before the session check confirms it. */
-function startAdmissionReads(
-  identity: SessionIdentity,
-  slug: string,
-  location: { pathname: string; search: Record<string, unknown> },
-  cause: string,
-) {
-  const controller = new AbortController();
-  const hintedId = workspaceIdHint(identity.userId, slug);
-  const reads = {
-    identity,
-    hintedId,
-    workspace: getWorkspace(slug, controller.signal),
-    list: cause === 'stay' ? listWorkspaces(controller.signal) : readWorkspaceList(identity),
-    membership: hintedId ? loadOwnMembership(hintedId, controller.signal) : null,
-    pageReads: hintedId ? startPageReads(identity, hintedId, slug, location) : null,
-  };
-  for (const read of [reads.workspace, reads.list, reads.membership]) void read?.catch(() => {});
-  return {
-    ...reads,
-    discard() {
-      controller.abort();
-      reads.pageReads?.discard();
-    },
-  };
-}
-// Disk reads that take longer than this fall back to waiting for the network.
-const provisionalWait = 300;
-const admissionSnapshotSchema = z.object({
-  user: z.looseObject({ id: z.string().min(1), name: z.string().trim().min(1), email: z.string() }),
-  workspace: workspaceSchema,
-  workspaces: workspaceListSchema,
-  membership: ownMembershipSchema,
-});
-/**
- * The workspace admission this session last confirmed for the slug, and the reads persisted with it,
- * if they are young enough to show before the session and membership checks return.
- */
-async function provisionalAdmission(identity: SessionIdentity, slug: string, pathname: string) {
-  // An integration's own page changes its connection, so it always waits for the checks. The
-  // directory only lists statuses and links, and its writes already wait like any other page's.
-  if (pathname.startsWith(`/${slug}/integrations/`)) return null;
-  const read = async () => {
-    const [, snapshot] = await Promise.all([
-      loadPageReads(),
-      persistedReads.restoreAdmission(identity.userId, slug, admissionSnapshotSchema),
-    ]);
-    if (
-      !snapshot ||
-      snapshot.sessionId !== identity.sessionId ||
-      snapshot.read.user.id !== identity.userId ||
-      snapshot.read.workspace.status !== 'ready' ||
-      snapshot.read.workspace.slug !== slug
-    )
-      return null;
-    const scope: WorkspaceScope = {
-      kind: 'workspace',
-      userId: identity.userId,
-      workspaceId: snapshot.read.workspace.id,
-      membershipId: snapshot.read.membership.membershipId,
-    };
-    return {
-      identity,
-      scope,
-      reads: await persistedReads.restore(scope),
-      read: { ...snapshot.read, user: snapshot.read.user as AuthSession['user'] },
-    };
-  };
-  return Promise.race([
-    read().catch(() => null),
-    new Promise<null>(resolve => setTimeout(resolve, provisionalWait, null)),
-  ]);
-}
-type VerifiedAdmission = { context: WorkspaceContext | null; slug: string; pathname: string; revision: number };
-const verifiedAdmissions = new WeakMap<ReturnType<typeof createWorkspaceAccess>, VerifiedAdmission>();
-/** A settled provisional check, once, if nothing has admitted or denied the workspace since. */
-function takeVerifiedAdmission(access: ReturnType<typeof createWorkspaceAccess>, slug: string, pathname: string) {
-  const verified = verifiedAdmissions.get(access);
-  if (!verified || verified.slug !== slug) return null;
-  verifiedAdmissions.delete(access);
-  const snapshot = access.getSnapshot();
-  if (verified.pathname !== pathname || snapshot.revision !== verified.revision) return null;
-  return verified.context && snapshot.kind === 'admitted' && snapshot.revision === verified.context.accessRevision
-    ? verified
-    : { ...verified, context: null };
-}
 async function defaultWorkspaceDestination(destination: string) {
   const session = await requireProfile(destination);
-  let workspaces;
-  try {
-    workspaces = await readWorkspaceList({ userId: session.user.id, sessionId: session.session.id });
-  } catch (error) {
-    if (error instanceof WorkspaceRequestError && error.status === 401)
-      throw redirect({ to: '/login', search: { redirect: destination }, replace: true });
-    throw error;
-  }
-  return workspaceDestination(session.user.id, workspaces);
+  return (await loadSessionLayer()).defaultWorkspaceDestination(destination, session);
 }
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -641,7 +434,7 @@ const createWorkspaceRoute = createRoute({
   validateSearch: authSearch,
   beforeLoad: async ({ location }) => {
     preloadRouteCode(location.pathname);
-    const session = await loadSession();
+    const session = await loadSignedInSession();
     if (session && !session.user.name.trim())
       throw redirect({ to: '/complete-profile', search: { redirect: location.href }, replace: true });
   },
@@ -739,7 +532,7 @@ const logoutRoute = createRoute({
   validateSearch: authSearch,
   beforeLoad: async ({ search, location }) => {
     preloadRouteCode(location.pathname);
-    if (!(await loadSession()))
+    if (!(await loadSignedInSession()))
       throw redirect({ to: '/login', search: { redirect: safeAuthRedirect(search.redirect) }, replace: true });
   },
 });
@@ -750,7 +543,7 @@ const completeProfileRoute = createRoute({
   validateSearch: authSearch,
   beforeLoad: async ({ search, location }) => {
     preloadRouteCode(location.pathname);
-    const session = await loadSession();
+    const session = await loadSignedInSession();
     if (!session)
       throw redirect({ to: '/login', search: { redirect: safeAuthRedirect(search.redirect) }, replace: true });
     if (session.user.name.trim()) throw redirect({ href: safeAuthRedirect(search.redirect), replace: true });
@@ -780,7 +573,7 @@ const inviteRoute = createRoute({
     const legacyToken = invitationTokenSchema.safeParse(location.hash.replace(/^#/, ''));
     if (legacyToken.success) throw redirect({ href: `/invite?token=${legacyToken.data}`, replace: true });
     preloadRouteCode(location.pathname);
-    const session = await loadSession();
+    const session = await loadSignedInSession();
     if (session && !session.user.name.trim())
       throw redirect({ to: '/complete-profile', search: { redirect: safeAuthRedirect(location.href) }, replace: true });
   },
@@ -794,352 +587,19 @@ export const workspaceRoute = createRoute({
     measureWorkspaceAdmission(async (): Promise<WorkspaceContext> => {
       if (workspaceSlugError(params.workspaceSlug)) throw notFound();
       preloadRouteCode(location.pathname);
-      void loadPageReads().catch(() => {});
-      const snapshot = context.workspaceAccess.getSnapshot();
-      // A provisional render's check has settled: use its admission, or, when it did not confirm one,
-      // admit again exactly as a fresh load would.
-      const verified =
-        cause === 'preload'
-          ? null
-          : takeVerifiedAdmission(context.workspaceAccess, params.workspaceSlug, location.pathname);
-      if (verified?.context) return verified.context;
-      const loadCause = verified ? 'enter' : cause;
-      const previousWorkspace =
-        snapshot.kind === 'admitted' && snapshot.read.workspace.slug === params.workspaceSlug
-          ? snapshot.read.workspace
-          : null;
-      const navigating = snapshot.kind === 'admitted' && snapshot.read.pathname !== location.pathname;
-      // A page shown at once hands these reads to its background check, which outlives this load, so a
-      // newer load must not cancel them. Otherwise they end with this load.
-      const earlyAbort = new AbortController();
-      const earlyReads =
-        navigating && previousWorkspace && snapshot.kind === 'admitted'
-          ? {
-              userId: snapshot.authority.userId,
-              sessionId: snapshot.authority.sessionId,
-              workspace: getWorkspace(params.workspaceSlug),
-              membership:
-                previousWorkspace.status === 'ready'
-                  ? loadOwnMembership(previousWorkspace.id, earlyAbort.signal)
-                  : null,
-              list: cause === 'stay' ? listWorkspaces(earlyAbort.signal) : null,
-            }
-          : null;
-      if (earlyReads) {
-        const deny = context.workspaceAccess.observe({
-          userId: earlyReads.userId,
-          sessionId: earlyReads.sessionId,
-          slug: params.workspaceSlug,
-        });
-        for (const read of [earlyReads.workspace, earlyReads.membership, earlyReads.list])
-          void read?.catch(error => {
-            if (
-              (error instanceof WorkspaceRequestError || error instanceof GovernanceRequestError) &&
-              [401, 403, 404].includes(error.status)
-            )
-              deny(error.status);
-          });
-      }
-      // The API checks the session cookie on every read, so a fresh load starts the workspace reads for
-      // the session this browser last confirmed while the session check runs. They are only used if
-      // the check returns that same session.
-      const last = earlyReads ? null : lastSession();
-      const speculative = last ? startAdmissionReads(last, params.workspaceSlug, location, loadCause) : null;
-
-      // A retry starts its reads again: the early and speculative reads have already failed.
-      const admit = async (session: AuthSession, signal: AbortSignal, reuse = true): Promise<WorkspaceContext> => {
-        signal.throwIfAborted();
-        const access = context.workspaceAccess.begin({
-          userId: session.user.id,
-          sessionId: session.session.id,
-          slug: params.workspaceSlug,
-        });
-        const denied = (error: unknown) => {
-          if (
-            (error instanceof WorkspaceRequestError || error instanceof GovernanceRequestError) &&
-            [401, 403, 404].includes(error.status)
-          )
-            access.deny(error.status);
-          throw error;
-        };
-        const identity = { userId: session.user.id, sessionId: session.session.id };
-        let pageReads: ReturnType<typeof startPageReads> | null = null;
-        const reads =
-          reuse && earlyReads?.userId === session.user.id && earlyReads.sessionId === session.session.id
-            ? earlyReads
-            : null;
-        const started =
-          reuse &&
-          speculative?.identity.userId === session.user.id &&
-          speculative.identity.sessionId === session.session.id
-            ? speculative
-            : null;
-        if (!started) speculative?.discard();
-        // On a fresh load, the id this slug had last time lets membership and page reads start
-        // alongside the workspace read. Neither is used unless the workspace read returns that id.
-        const hintedId = reads
-          ? null
-          : started
-            ? started.hintedId
-            : workspaceIdHint(session.user.id, params.workspaceSlug);
-        try {
-          const hintedMembership = started ? started.membership : hintedId ? loadOwnMembership(hintedId, signal) : null;
-          void hintedMembership?.catch(() => {});
-          if (started) pageReads = started.pageReads;
-          else if (hintedId) pageReads = startPageReads(identity, hintedId, params.workspaceSlug, location);
-          const workspaceRequest = (reads?.workspace ?? started?.workspace ?? getWorkspace(params.workspaceSlug)).catch(
-            denied,
-          );
-          const membershipRequest = workspaceRequest.then(workspace => {
-            if (workspace.status !== 'ready') return null;
-            if (!reads && pageReads?.workspaceId !== workspace.id) {
-              pageReads?.discard();
-              pageReads = startPageReads(identity, workspace.id, params.workspaceSlug, location);
-            }
-            return (
-              reads?.membership && previousWorkspace?.id === workspace.id
-                ? reads.membership
-                : hintedMembership && hintedId === workspace.id
-                  ? hintedMembership
-                  : loadOwnMembership(workspace.id, signal)
-            ).catch(denied);
-          });
-          void membershipRequest.catch(() => {});
-          const [workspaceRead, listRead] = await Promise.allSettled([
-            workspaceRequest,
-            (
-              reads?.list ??
-              started?.list ??
-              (loadCause === 'stay'
-                ? listWorkspaces(signal)
-                : readWorkspaceList({ userId: session.user.id, sessionId: session.session.id }))
-            ).catch(denied),
-          ]);
-          for (const read of [workspaceRead, listRead]) {
-            if (
-              read.status === 'rejected' &&
-              read.reason instanceof WorkspaceRequestError &&
-              [401, 403, 404].includes(read.reason.status)
-            )
-              throw read.reason;
-          }
-          if (workspaceRead.status === 'rejected') throw workspaceRead.reason;
-          if (listRead.status === 'rejected') throw listRead.reason;
-          const workspace = workspaceRead.value;
-          const workspaces = listRead.value;
-          const membership = await membershipRequest;
-          if (!signal.aborted) access.admit({ pathname: location.pathname, workspace, workspaces, membership });
-          if (membership && !signal.aborted && pageReads?.workspaceId === workspace.id)
-            pageReads.admit(membership.membershipId);
-          else pageReads?.discard();
-          if (workspace.status === 'ready') rememberWorkspaceId(session.user.id, params.workspaceSlug, workspace.id);
-          if (workspace.status === 'ready' && membership && !signal.aborted)
-            void persistedReads.saveAdmission(
-              identity,
-              params.workspaceSlug,
-              workspace.id,
-              new Date(session.session.expiresAt).getTime(),
-              { user: session.user, workspace, workspaces, membership },
-            );
-          return {
-            user: session.user,
-            sessionId: session.session.id,
-            accessRevision: access.revision,
-            membershipId: membership?.membershipId ?? null,
-            membership,
-            workspace,
-            workspaces,
-            workspaceStale: false,
-            workspaceProvisional: false,
-          };
-        } catch (error) {
-          pageReads?.discard();
-          if (
-            (error instanceof WorkspaceRequestError || error instanceof GovernanceRequestError) &&
-            [403, 404].includes(error.status)
-          ) {
-            forgetWorkspace(session.user.id);
-            forgetWorkspaceId(session.user.id, params.workspaceSlug);
-            void persistedReads.forgetAdmission(session.user.id, params.workspaceSlug);
-            if (hintedId) void persistedReads.clear(session.user.id, hintedId);
-            if (loadCause === 'stay') throw redirect({ to: '/', replace: true });
-            throw notFound();
-          }
-          if (
-            (error instanceof WorkspaceRequestError || error instanceof GovernanceRequestError) &&
-            error.status === 401
-          ) {
-            void forgetSession();
-            throw redirect({ to: '/login', search: { redirect: location.href }, replace: true });
-          }
-          const temporary = temporaryAdmissionError(error);
-          const previous = access.retained(location.pathname);
-          if (temporary && !signal.aborted && loadCause === 'stay' && previous) {
-            // Integration controls change workspace connections, so those pages confirm the
-            // membership again before showing them. Elsewhere the last admitted read is enough.
-            const membership = onIntegrationsPage(params.workspaceSlug, location.pathname)
-              ? await loadOwnMembership(previous.workspace.id, signal).catch(denied)
-              : previous.membership;
-            return {
-              user: session.user,
-              sessionId: session.session.id,
-              accessRevision: access.revision,
-              membershipId: membership?.membershipId ?? null,
-              membership,
-              workspace: previous.workspace,
-              workspaces: previous.workspaces,
-              workspaceStale: true,
-              workspaceProvisional: false,
-            };
-          }
-          throw error;
-        }
-      };
-      const profile = (signal: AbortSignal) =>
-        requireProfile(location.href).catch(error => {
-          // A busy or unreachable API has not changed the session, so the admitted view stays while admission retries.
-          if (!signal.aborted && !temporaryAdmissionError(error)) context.workspaceAccess.clear();
-          throw error;
-        });
-
-      // Moving between pages of an admitted workspace shows the next page at once with the last
-      // admission. The full check runs behind it, writes wait for it, and any change re-runs this load.
-      // That holds while the shown admission is still provisional or stale, except on an integration's
-      // own page, which changes its connection and so waits for a confirmed check.
-      const shown =
-        earlyReads && !verified && loadCause === 'stay'
-          ? (router.state.matches.find(match => match.routeId === workspaceRoute.id)?.context as
-              | Partial<WorkspaceContext>
-              | undefined)
-          : undefined;
-      const unconfirmed = shown?.workspaceProvisional !== false || shown.workspaceStale !== false;
-      if (
-        earlyReads &&
-        shown?.workspace?.slug === params.workspaceSlug &&
-        shown.workspace.id === previousWorkspace?.id &&
-        shown.user?.id === earlyReads.userId &&
-        shown.sessionId === earlyReads.sessionId &&
-        typeof shown.workspaceProvisional === 'boolean' &&
-        typeof shown.workspaceStale === 'boolean' &&
-        !(unconfirmed && location.pathname.startsWith(`/${params.workspaceSlug}/integrations/`))
-      ) {
-        const shownContext = shown as WorkspaceContext;
-        const check = earlyAbort;
-        const verification = retryAdmission(
-          fresh => profile(check.signal).then(session => admit(session, check.signal, fresh)),
-          check.signal,
-        );
-        const fingerprint = (result: WorkspaceContext) =>
-          JSON.stringify([
-            result.user,
-            result.sessionId,
-            result.accessRevision,
-            result.membership,
-            result.workspace,
-            result.workspaces,
-          ]);
-        holdWrites(
-          verification.then(result => {
-            if (result.workspace.id !== shownContext.workspace.id || result.membershipId !== shownContext.membershipId)
-              throw new Error('Workspace access changed');
-          }),
-        );
-        void verification
-          .then(
-            // A provisional or stale admission is replaced once confirmed, even when nothing else changed.
-            result =>
-              fingerprint(result) === fingerprint(shownContext) && !unconfirmed ? undefined : { context: result },
-            () => ({ context: null }),
-          )
-          .then(outcome => {
-            if (!outcome) return;
-            verifiedAdmissions.set(context.workspaceAccess, {
-              ...outcome,
-              slug: params.workspaceSlug,
-              pathname: location.pathname,
-              revision: context.workspaceAccess.getSnapshot().revision,
-            });
-            void router.invalidate();
-          });
-        return shownContext;
-      }
-      const endEarlyReads = () => earlyAbort.abort(abortController.signal.reason);
-      if (abortController.signal.aborted) endEarlyReads();
-      else abortController.signal.addEventListener('abort', endEarlyReads, { once: true });
-
-      const provisional =
-        last && !verified && !earlyReads && cause !== 'stay' && snapshot.kind !== 'admitted'
-          ? await provisionalAdmission(last, params.workspaceSlug, location.pathname)
-          : null;
-      if (provisional && !abortController.signal.aborted) {
-        const { identity, scope, read } = provisional;
-        persistedReads.beginProvisional(identity, scope, provisional.reads);
-        const access = context.workspaceAccess.begin({ ...identity, slug: params.workspaceSlug });
-        access.admit({ pathname: location.pathname, ...read });
-        if (speculative?.pageReads?.workspaceId === scope.workspaceId) speculative.pageReads.admit(scope.membershipId);
-        // The check runs on after this load returns, so leaving the page does not cancel it.
-        const check = new AbortController();
-        const verification = retryAdmission(
-          fresh => profile(check.signal).then(session => admit(session, check.signal, fresh)),
-          check.signal,
-        );
-        const same = (result: WorkspaceContext) =>
-          result.user.id === identity.userId &&
-          result.sessionId === identity.sessionId &&
-          result.workspace.id === scope.workspaceId &&
-          result.membershipId === scope.membershipId;
-        holdWrites(
-          verification.then(result => {
-            if (!same(result)) throw new Error('Workspace access changed');
-          }),
-        );
-        void verification
-          .then(
-            result => {
-              persistedReads.endProvisional();
-              if (same(result)) sessionRuntime(identity)?.persistScope(scope);
-              else void persistedReads.clear(scope.userId, scope.workspaceId);
-              return { context: result };
-            },
-            () => {
-              persistedReads.endProvisional();
-              return { context: null };
-            },
-          )
-          .then(outcome => {
-            verifiedAdmissions.set(context.workspaceAccess, {
-              ...outcome,
-              slug: params.workspaceSlug,
-              pathname: location.pathname,
-              revision: context.workspaceAccess.getSnapshot().revision,
-            });
-            void router.invalidate();
-          });
-        return {
-          user: read.user,
-          sessionId: identity.sessionId,
-          accessRevision: access.revision,
-          membershipId: scope.membershipId,
-          membership: read.membership,
-          workspace: read.workspace,
-          workspaces: read.workspaces,
-          workspaceStale: false,
-          workspaceProvisional: true,
-        };
-      }
-      const discard = () => speculative?.discard();
-      abortController.signal.addEventListener('abort', discard, { once: true });
-      try {
-        return await retryAdmission(async fresh => {
-          const session = await profile(abortController.signal).catch(error => {
-            discard();
-            throw error;
-          });
-          return await admit(session, abortController.signal, fresh);
-        }, abortController.signal);
-      } finally {
-        abortController.signal.removeEventListener('abort', discard);
-      }
+      const layer = await loadSessionLayer();
+      return layer.admitWorkspace({
+        params,
+        location,
+        cause,
+        context,
+        abortController,
+        shownAdmission: () =>
+          router.state.matches.find(match => match.routeId === workspaceRoute.id)?.context as
+            | Partial<WorkspaceContext>
+            | undefined,
+        invalidate: () => void router.invalidate(),
+      });
     }),
   component: WorkspaceShell,
   notFoundComponent: WorkspaceNotFoundPage,
@@ -1229,7 +689,7 @@ const workspaceInboxRoute = createRoute({ getParentRoute: () => workspaceRoute, 
 const workspaceHelpRoute = createRoute({
   getParentRoute: () => workspaceRoute,
   path: 'help',
-  component: lazyRouteComponent(() => import('./pages/help'), 'HelpPage'),
+  component: lazyRouteComponent(routePage('help'), 'HelpPage'),
 });
 const workspaceAgentsRoute = createRoute({
   getParentRoute: () => workspaceRoute,
@@ -1245,7 +705,7 @@ export const workspaceCalendarRoute = createRoute({
   getParentRoute: () => workspaceRoute,
   path: 'calendar',
   validateSearch: search => calendarSearchSchema.parse(search),
-  component: lazyRouteComponent(() => import('./pages/calendar')),
+  component: lazyRouteComponent(routePage('calendar')),
 });
 export const agentTaskRoute = createRoute({
   getParentRoute: () => workspaceRoute,
@@ -1345,7 +805,7 @@ export const systemPackageRoute = createRoute({
 const newSkillRoute = createRoute({
   getParentRoute: () => workspaceRoute,
   path: 'skills/new',
-  component: lazyRouteComponent(() => import('@/features/skills/create-form'), 'CreateSkillPage'),
+  component: lazyRouteComponent(routePage('skillsCreateForm'), 'CreateSkillPage'),
 });
 const importSkillRoute = createRoute({
   getParentRoute: () => workspaceRoute,
@@ -1392,7 +852,7 @@ export const workspaceWorkflowsRoute = createRoute({
   getParentRoute: () => workspaceRoute,
   path: 'workflows',
   validateSearch: search => workflowPageSearch.parse(search),
-  component: lazyRouteComponent(() => import('./pages/workflows')),
+  component: lazyRouteComponent(routePage('workflows')),
 });
 // The workflows page reads this param itself, so opening a workflow keeps the page mounted.
 export const workspaceWorkflowRoute = createRoute({
@@ -1407,47 +867,47 @@ const workspaceSettingsRoute = createRoute({
 const workspaceSoulRoute = createRoute({
   getParentRoute: () => workspaceRoute,
   path: 'settings/soul',
-  component: lazyRouteComponent(() => import('@/pages/soul-explorer'), 'SoulExplorerPage'),
+  component: lazyRouteComponent(routePage('soulExplorer'), 'SoulExplorerPage'),
 });
 const appsRoute = createRoute({
   getParentRoute: () => workspaceRoute,
   path: 'apps',
-  component: lazyRouteComponent(() => import('@/features/apps/list'), 'AppsPage'),
+  component: lazyRouteComponent(routePage('appsList'), 'AppsPage'),
 });
 const newAppRoute = createRoute({
   getParentRoute: () => workspaceRoute,
   path: 'apps/new',
-  component: lazyRouteComponent(() => import('@/features/apps/new'), 'NewAppPage'),
+  component: lazyRouteComponent(routePage('appsNew'), 'NewAppPage'),
 });
 const appPageSearch = z.object({ row: z.uuid().optional().catch(undefined) });
 const appRoute = createRoute({
   getParentRoute: () => workspaceRoute,
   path: 'apps/$appSlug',
   validateSearch: search => appPageSearch.parse(search),
-  component: lazyRouteComponent(() => import('@/features/apps/pages/route'), 'AppHomePage'),
+  component: lazyRouteComponent(routePage('appsPagesRoute'), 'AppHomePage'),
 });
 const appVersionsRoute = createRoute({
   getParentRoute: () => workspaceRoute,
   path: 'apps/$appSlug/versions',
-  component: lazyRouteComponent(() => import('@/features/apps/versions'), 'AppVersionsPage'),
+  component: lazyRouteComponent(routePage('appsVersions'), 'AppVersionsPage'),
 });
 const appEditRoute = createRoute({
   getParentRoute: () => workspaceRoute,
   path: 'apps/$appSlug/edit',
   validateSearch: search =>
     appPageSearch.extend({ page: z.string().max(80).optional().catch(undefined) }).parse(search),
-  component: lazyRouteComponent(() => import('@/features/apps/edit/page'), 'AppEditPage'),
+  component: lazyRouteComponent(routePage('appsEditPage'), 'AppEditPage'),
 });
 const appSettingsRoute = createRoute({
   getParentRoute: () => workspaceRoute,
   path: 'apps/$appSlug/settings',
-  component: lazyRouteComponent(() => import('@/features/apps/settings'), 'AppSettingsPage'),
+  component: lazyRouteComponent(routePage('appsSettings'), 'AppSettingsPage'),
 });
 const appPageRoute = createRoute({
   getParentRoute: () => workspaceRoute,
   path: 'apps/$appSlug/$page',
   validateSearch: search => appPageSearch.parse(search),
-  component: lazyRouteComponent(() => import('@/features/apps/pages/route'), 'AppPagePage'),
+  component: lazyRouteComponent(routePage('appsPagesRoute'), 'AppPagePage'),
 });
 export const workspaceModelsRoute = createRoute({
   getParentRoute: () => workspaceRoute,
@@ -1550,7 +1010,7 @@ const workspaceGrantsRoute = createRoute({
 export const knowledgeRoute = createRoute({
   getParentRoute: () => workspaceRoute,
   path: 'knowledge',
-  component: lazyRouteComponent(() => import('./pages/knowledge')),
+  component: lazyRouteComponent(routePage('knowledge')),
 });
 export const integrationsRoute = createRoute({
   getParentRoute: () => workspaceRoute,

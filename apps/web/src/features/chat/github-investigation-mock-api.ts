@@ -124,7 +124,8 @@ if (
       if (method === 'GET') document.documentElement.dataset.investigationReads = String(++investigationReads);
       if (scenario === 'slow') await (slowResponse ?? new Promise(resolve => window.setTimeout(resolve, 1600)));
       if (scenario === 'denied') return Response.json({ error: 'investigation-unavailable' }, { status: 404 });
-      if (scenario === 'error' && failures++ < 3)
+      // Fail every attempt of the first read: three query tries, each retried once by the HTTP layer.
+      if (scenario === 'error' && failures++ < 6)
         return Response.json({ error: 'investigation-unavailable' }, { status: 503 });
       if (method === 'PUT') {
         const body = selectInvestigationSchema.parse(JSON.parse(String(init?.body)));

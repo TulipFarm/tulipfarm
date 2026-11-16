@@ -62,6 +62,7 @@ function afterLifecycle(
   return editListedIn(data, 'workspace', id, () => null);
 }
 export function useSkillApi(workspaceId: string) {
+  const { change } = useFeatureChanges();
   const changed = useSkillChanges();
   const accessChanged = useAgentAccessChanges();
   const optimistic = useOptimisticUpdate();
@@ -82,7 +83,9 @@ export function useSkillApi(workspaceId: string) {
           result = await api.send(...args);
         } catch (error) {
           undo();
-          void changed(id);
+          // An unconfirmed delete may have removed the skill; keep its detail mounted so the outcome dialog can check status.
+          if (command.kind === 'lifecycle' && command.lifecycle === 'deleted') void change({ keys: [skillKeys.lists] });
+          else void changed(id);
           throw error;
         }
         if (command.kind === 'enable' && !command.enabled) void accessChanged(affected(id));
@@ -90,5 +93,5 @@ export function useSkillApi(workspaceId: string) {
         return result;
       },
     };
-  }, [workspaceId, changed, accessChanged, optimistic]);
+  }, [workspaceId, change, changed, accessChanged, optimistic]);
 }

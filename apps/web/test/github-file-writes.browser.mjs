@@ -197,7 +197,7 @@ try {
   assert.equal(await review.getByLabel('Exact text for new.txt').textContent(), text);
   assert.equal(f.effects.length, preparationEffects);
   await page.screenshot({
-    path: '/var/folders/7d/qk8p6t3d1jvfnh4503bz0msr0000gn/T/opencode/github-file-review.png',
+    path: 'reports/screenshots/github-file-review.png',
     fullPage: true,
   });
   await review.getByRole('button', { name: 'Approve exact batch' }).focus();
@@ -235,7 +235,7 @@ try {
   await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   await page.screenshot({
-    path: '/var/folders/7d/qk8p6t3d1jvfnh4503bz0msr0000gn/T/opencode/github-file-receipt-mobile.png',
+    path: 'reports/screenshots/github-file-receipt-mobile.png',
     fullPage: true,
   });
   assert.deepEqual(errors, []);

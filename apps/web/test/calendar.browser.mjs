@@ -156,7 +156,7 @@ test('calendar home and shared chat rows', { timeout: 180000 }, async t => {
         } else if (/\/messages\/[\w-]+$/.test(path)) {
           const body = request.postDataJSON();
           state.sends.push(body);
-          state.accepted.set(body.commandId, { ...body, id: path.split('/').at(-1) });
+          state.accepted.set(body.commandId, { ...body, id: path.split('/').at(-1), chatId: path.split('/').at(-3) });
           if (state.uncertain) {
             state.uncertain = false;
             return route.abort('failed');
@@ -413,27 +413,27 @@ test('calendar home and shared chat rows', { timeout: 180000 }, async t => {
           assert.equal(await show.isDisabled(), true);
           assert.equal(await input.textContent(), 'Unrelated draft');
           await input.fill('');
+          await f.page.waitForFunction(button => !button.disabled, await show.elementHandle());
           f.state.uncertain = true;
           await show.evaluate(button => {
             button.click();
             button.click();
           });
-          await f.page.getByRole('button', { name: 'Try again', exact: true }).waitFor();
-          assert.equal(f.state.sends.length, 1);
-          await f.page.getByRole('button', { name: 'Try again', exact: true }).click();
+          // The response is lost after the server saved the message; the chat's history confirms it without a resend.
+          await f.page.getByRole('region', { name: 'Google Calendar result', exact: true }).waitFor();
           await f.page.waitForURL(/\/chat\/[\w-]+$/);
-          assert.equal(f.state.sends.length, 2);
-          assert.deepEqual(f.state.sends[0], f.state.sends[1]);
+          const [sent] = f.state.accepted.values();
+          assert.equal(new URL(f.page.url()).pathname.split('/').at(-1), sent.chatId);
+          assert.equal(f.state.sends.length, 1);
           assert.equal(f.state.accepted.size, 1);
+          assert.equal(await f.page.getByText(/next 12 hours/).count(), 1);
           assert.match(f.state.sends[0].parts[0].text, /next 12 hours/);
           assert.equal(f.state.sends[0].timeZone, 'America/New_York');
           // Saved results render as a chat card that opens Canvas on request (cloud 51d9a255 #1053, features/chat/calendar-canvas.tsx:48).
           await f.page.getByRole('button', { name: 'Open calendar', exact: true }).click();
-          await f.page.getByRole('region', { name: 'Canvas', exact: true }).waitFor();
-          assert.equal(
-            await f.page.getByRole('region', { name: 'Canvas', exact: true }).getByRole('listitem').count(),
-            8,
-          );
+          const canvas = f.page.getByRole('region', { name: 'Canvas', exact: true });
+          await canvas.getByRole('listitem').first().waitFor();
+          assert.equal(await canvas.getByRole('listitem').count(), 8);
           await f.page.getByText('More events are available. Ask in chat for the next page.').waitFor();
           await f.page.reload();
           await f.page.getByRole('button', { name: 'Open calendar', exact: true }).click();

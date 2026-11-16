@@ -54,6 +54,8 @@ async function mockAuth(context, options) {
         : json({ code: 'INVALID_TOKEN', message: 'Invalid token' }, 400);
     throw new Error(`Unexpected auth request: ${path}`);
   });
+  // Signup checks that the workspace URL is free before the account step.
+  await context.route('**/v1/onboarding/availability', route => route.fulfill({ json: { available: true } }));
   return calls;
 }
 

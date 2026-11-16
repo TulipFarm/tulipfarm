@@ -144,13 +144,13 @@ try {
     // "step / status" lines (pages/workflows.tsx:183,190).
     await history.getByRole('status').getByText('Running workflow', { exact: true }).waitFor();
     assert.equal(
-      await history.getByRole('button', { name: '1 workflow steps', exact: true }).getAttribute('aria-expanded'),
+      await history.getByRole('button', { name: '1 workflow step', exact: true }).getAttribute('aria-expanded'),
       'false',
     );
     run.status = 'completed';
     run.steps[0].status = 'completed';
     await history.getByRole('status').getByText('Completed', { exact: true }).waitFor();
-    await history.getByRole('button', { name: '1 workflow steps', exact: true }).click();
+    await history.getByRole('button', { name: '1 workflow step', exact: true }).click();
     await history.getByText('review / Completed', { exact: true }).waitFor();
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     assert.deepEqual(errors, []);

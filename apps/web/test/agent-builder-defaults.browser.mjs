@@ -53,11 +53,12 @@ async function environment(t, fromDirectory = false) {
     );
     throw error;
   }
-  const step = name =>
-    page
-      .getByRole('tab', { name: new RegExp(name) })
-      .first()
-      .click();
+  // Wait for the step to open: the other steps' panels stay mounted, and may share field names.
+  const step = async name => {
+    const tab = page.getByRole('tab', { name: new RegExp(name) }).first();
+    await tab.click();
+    await page.waitForFunction(tab => tab.getAttribute('aria-selected') === 'true', await tab.elementHandle());
+  };
   return { page, fixture, form, step, errors, openBuilder };
 }
 

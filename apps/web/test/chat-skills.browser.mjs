@@ -3,9 +3,11 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
 import { chromium } from 'playwright';
-import { createWorkspaceFixture } from './workspace.fixture.mjs';
+import { createWorkspaceFixture, serveWorkspaceShellEvent, workspaceShellReads } from './workspace.fixture.mjs';
 import { chatCatalog } from './chat-catalog.fixture.mjs';
-import { membership, credits } from './chat-query.fixture.mjs';
+import { fallbackRecommendations } from '@tulipfarm/recommendations';
+import { membership, credits, governance } from './chat-query.fixture.mjs';
+import { clearEditor } from './browser-controls.mjs';
 
 const qualify = {
   id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
@@ -60,6 +62,13 @@ const human = (parts, turn) => ({
   calendarResults: [],
 });
 
+// The rich composer sends its document alongside the plain text.
+const sentText = text => ({
+  kind: 'text',
+  text,
+  content: { version: 1, doc: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] } },
+});
+
 test('/ stages one reviewed skill, send it, and show which skill the reply used', { timeout: 180000 }, async () => {
   const { workspace, session } = createWorkspaceFixture();
   const base = `/v1/workspaces/${workspace.id}`;
@@ -81,6 +90,7 @@ test('/ stages one reviewed skill, send it, and show which skill the reply used'
       });
       const page = await context.newPage();
       page.setDefaultTimeout(10000);
+      page.setDefaultNavigationTimeout(60000);
       const errors = [];
       const unexpected = [];
       const loads = [];
@@ -111,11 +121,26 @@ test('/ stages one reviewed skill, send it, and show which skill the reply used'
         [projectChat, { chat: chatOf(projectChat, projectId), messages: [] }],
         [archivedProjectChat, { chat: chatOf(archivedProjectChat, archivedProjectId), messages: [] }],
       ]);
+      const shell = new Map(workspaceShellReads(workspace.id));
+      shell.delete(`${base}/workspace-mcp/capabilities`);
       await page.route('**/v1/**', async route => {
         const request = route.request();
         const url = new URL(request.url());
         const path = url.pathname;
         const method = request.method();
+        if (await serveWorkspaceShellEvent(route, workspace)) return;
+        const shellRead = shell.get(path);
+        if (shellRead !== undefined && method === 'GET') return route.fulfill({ json: shellRead });
+        if (path === `${base}/governance`) return route.fulfill({ json: governance });
+        if (path === `${base}/integrations`) return route.fulfill({ json: { integrations: [] } });
+        if (path === `${base}/recommendations`)
+          return route.fulfill({
+            json: { onboarding: false, status: 'ready', version: 1, items: fallbackRecommendations },
+          });
+        if (path === `${base}/system-package-installations`)
+          return route.fulfill({ json: { installations: [], nextCursor: null } });
+        if (/^\/v1\/workspaces\/[\w-]+\/github\/chats\/[\w-]+\/selection$/.test(path))
+          return route.fulfill({ json: { accountId: null, generation: null, version: 0 } });
         if (path === '/v1/auth/get-session') return route.fulfill({ json: session });
         if (path === '/v1/user/visit') return route.fulfill({ json: { firstSession: false } });
         if (path === '/v1/workspaces') return route.fulfill({ json: [workspace] });
@@ -141,7 +166,7 @@ test('/ stages one reviewed skill, send it, and show which skill the reply used'
             skills === 'none' ? [] : list.filter(skill => skill.name.toLowerCase().includes(query));
           return route.fulfill({ json: { workspace: matching([qualify, tradeShow]), nextCursor: null } });
         }
-        if (path === `${base}/files` && method === 'GET')
+        if (path === `${base}/files/suggestions` && method === 'GET')
           return route.fulfill({
             json: {
               items: [revenue].filter(item =>
@@ -195,6 +220,9 @@ test('/ stages one reviewed skill, send it, and show which skill the reply used'
               json: { messages: stored.messages, nextBefore: null, hasGitHubProposals: false },
             });
           if (stored && method === 'GET' && !rest) return route.fulfill({ json: stored.chat });
+          if (stored && method === 'GET' && rest === '/plans')
+            return route.fulfill({ json: { plans: [], nextCursor: null } });
+          if (stored && method === 'GET' && rest === '/events') return route.fulfill({ status: 204 });
         }
         unexpected.push(`${method} ${path}${url.search}`);
         return route.fulfill({ status: 501, json: { error: 'unexpected-test-request' } });
@@ -212,6 +240,8 @@ test('/ stages one reviewed skill, send it, and show which skill the reply used'
         const fitsWidth = () => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth);
 
         await page.goto(`${origin}${workspace.slug}`);
+        // The dev server compiles the chat module on first load.
+        await message.waitFor({ timeout: 60000 });
         await message.click();
         skillGate = Promise.withResolvers();
         skills = 'failing';
@@ -233,7 +263,7 @@ test('/ stages one reviewed skill, send it, and show which skill the reply used'
         await page.getByRole('button', { name: 'Retry skills' }).click();
         await page
           .getByRole('status')
-          .filter({ hasText: '2 skills you can use. Use Up and Down to choose, Enter to use, Escape to close.' })
+          .filter({ hasText: '2 options. Use Up and Down to choose, Enter to select, Escape to close.' })
           .waitFor();
         assert.deepEqual(
           await options.allInnerTexts(),
@@ -262,11 +292,15 @@ test('/ stages one reviewed skill, send it, and show which skill the reply used'
         await noMatch;
         await page.getByRole('status').filter({ hasText: 'No skills match “zzz”.' }).waitFor();
         const typed = skillSearches.length;
-        for (let index = 0; index < 3; index++) await message.press('Backspace');
         const qualifying = searched('?view=reviewed&search=qual&limit=8');
-        await message.pressSequentially('qual');
+        // Edit in one burst of input events: separate key presses can exceed the debounce on a loaded machine.
+        await message.evaluate(element => {
+          element.focus();
+          for (let index = 0; index < 3; index++) document.execCommand('delete');
+          for (const letter of 'qual') document.execCommand('insertText', false, letter);
+        });
         await qualifying;
-        await page.getByRole('status').filter({ hasText: '2 skills you can use.' }).waitFor();
+        await page.getByRole('status').filter({ hasText: '2 options.' }).waitFor();
         assert.deepEqual(
           skillSearches.slice(typed),
           ['?view=reviewed&search=qual&limit=8'],
@@ -298,7 +332,7 @@ test('/ stages one reviewed skill, send it, and show which skill the reply used'
         await message.pressSequentially('1 / 2');
         assert.equal(await message.textContent(), '1 / 2');
         assert.equal(await skillList.count(), 0, 'a slash between words is text, not a trigger');
-        await message.fill('');
+        await clearEditor(message);
         await message.pressSequentially('Acme Corp wants a demo.');
         if (shots)
           await page.screenshot({
@@ -317,13 +351,18 @@ test('/ stages one reviewed skill, send it, and show which skill the reply used'
           .waitFor();
         assert.deepEqual(sends.at(-1).parts, [
           { kind: 'skill', skillId: qualify.id, revision: qualify.revision },
-          { kind: 'text', text: 'Acme Corp wants a demo.' },
+          sentText('Acme Corp wants a demo.'),
         ]);
         assert.equal(await message.textContent(), 'Acme Corp wants a demo.', 'a rejected send keeps the draft');
         await staged.waitFor();
+        // A rejected send recovers in place: the error clears and the draft and skill stay in the composer.
         await page.getByRole('button', { name: 'Refresh before editing' }).click();
-        await page.getByRole('button', { name: 'Review retained input' }).click();
+        await page
+          .getByRole('alert')
+          .filter({ hasText: 'This skill is no longer available.' })
+          .waitFor({ state: 'detached' });
         await page.getByRole('button', { name: 'Remove skill Qualify lead' }).waitFor();
+        assert.equal(await message.textContent(), 'Acme Corp wants a demo.', 'recovery keeps the draft');
 
         sendStatus = 200;
         sendGate = Promise.withResolvers();
@@ -342,7 +381,7 @@ test('/ stages one reviewed skill, send it, and show which skill the reply used'
         await page.waitForURL(/\/chat\//);
         assert.deepEqual(sends.at(-1).parts, [
           { kind: 'skill', skillId: qualify.id, revision: qualify.revision },
-          { kind: 'text', text: 'Acme Corp wants a demo.' },
+          sentText('Acme Corp wants a demo.'),
         ]);
         await messages.getByText('Used skill Qualify lead · Version 3f2a9c1b', { exact: true }).waitFor();
         await sentChip.waitFor();
@@ -370,7 +409,7 @@ test('/ stages one reviewed skill, send it, and show which skill the reply used'
         );
 
         const useSkill = () => message.pressSequentially('/');
-        await message.fill('');
+        await clearEditor(message);
         await useSkill();
         await skillList.waitFor();
         assert.equal(await message.textContent(), '/');
@@ -415,8 +454,10 @@ test('/ stages one reviewed skill, send it, and show which skill the reply used'
         await fileList.getByRole('option', { name: /Q3 revenue summary\.pdf/ }).waitFor();
         assert.equal(await skillList.count(), 0);
         await message.press('Enter');
-        await page.getByRole('button', { name: `Inspect ${revenue.name}` }).waitFor();
-        assert.equal(await message.textContent(), 'Compare ');
+        // The chosen file becomes an inline chip in place of the @ query.
+        await message.getByText(revenue.name, { exact: true }).waitFor();
+        // The chip's text also holds its file-type badge, such as "PDF".
+        assert.match((await message.textContent()).replace(/\s+/g, ' '), /^Compare [A-Z]*Q3 revenue summary\.pdf $/);
 
         const searchesBefore = skillSearches.length;
         await page.goto(`${origin}${workspace.slug}/chat/${projectChat}`);

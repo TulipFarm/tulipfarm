@@ -1,4 +1,4 @@
-import { invitationTokenSchema } from '@tulipfarm/workspaces/governance-contracts';
+import { invitationTokenSchema } from '@tulipfarm/workspaces/invitation-token';
 import { z } from 'zod';
 
 const storageKey = 'tulipfarm.pending-invitation';

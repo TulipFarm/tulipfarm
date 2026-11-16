@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { after, test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { registerHooks } from 'node:module';
 import { IDBFactory, IDBKeyRange } from 'fake-indexeddb';
@@ -24,7 +24,8 @@ const { persistedMaxAge } = await import('../src/lib/query/persistence.ts');
 const { forgetSession, lastSession, rememberSession } = await import('../src/lib/last-workspace.ts');
 const { createFeatureClient } = await import('../src/lib/query/client.ts');
 const { featureReadOptions } = await import('../src/lib/query/options.ts');
-hooks.deregister();
+// `last-workspace` loads the read cache on demand, so its import still needs the resolver.
+after(() => hooks.deregister());
 
 const scope: WorkspaceScope = { kind: 'workspace', userId: 'alice', workspaceId: 'workspace', membershipId: 'member' };
 const chats = z.object({ items: z.array(z.string()) });

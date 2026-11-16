@@ -4,6 +4,7 @@ import { mkdir } from 'node:fs/promises';
 import { test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { chromium } from 'playwright';
+import { clearEditor } from './browser-controls.mjs';
 
 test(
   'grouped knowledge activity shows real outcomes without implying Slides creation',
@@ -79,7 +80,7 @@ test(
             await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1),
           );
           await capture(`grouped-${width}-${colorScheme}`);
-          await composer.fill('');
+          await clearEditor(composer);
         }
       for (const [scenario, label] of [
         ['knowledge-partial', 'Read partial knowledge evidence'],

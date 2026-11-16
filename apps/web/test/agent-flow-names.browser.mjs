@@ -4,6 +4,7 @@ import { mkdir } from 'node:fs/promises';
 import { test } from 'node:test';
 import { chromium } from 'playwright';
 import { startBuiltApp, builderBrowserOptions, captureBrowserFailure } from './built-app.fixture.mjs';
+import { reviewDefinition } from './workflow-definition.fixture.mjs';
 
 const uuid = n => `${n.repeat(8)}-${n.repeat(4)}-4${n.repeat(3)}-8${n.repeat(3)}-${n.repeat(12)}`;
 const [wid, mid, teamId, aid, tableId, activationId, taskId, chatId, fileId, draftId, priorId, fileChatId] =
@@ -63,6 +64,21 @@ const chat = {
   activityAt: at,
   createdAt: at,
   projectId: null,
+};
+// The agent's own workflow starts it when a row is added to the table, so its trigger names that table.
+const rowTrigger = { kind: 'row', tableId, event: 'created' };
+const agentWorkflow = {
+  id: uuid('d'),
+  revision: uuid('d'),
+  activeRevision: uuid('d'),
+  enabled: true,
+  generation: 1,
+  nextRunAt: null,
+  activeTriggers: [{ id: 'row', ...rowTrigger }],
+  triggers: [{ id: 'row', kind: 'row', enabled: true, summary: 'Row change', nextRunAt: null, webhook: null }],
+  capabilities: { read: true, invoke: true, manage: true },
+  definition: reviewDefinition('Customer review', rowTrigger),
+  agentId: aid,
 };
 const policy = {
   version: 1,
@@ -200,24 +216,15 @@ test('agent flows resolve permitted names without changing commands or approvals
             : send({ error: 'agent-unavailable' }, agentStatus);
         }
         if (path.endsWith('/policy')) return send(policy);
-        if (path.endsWith('/schedules'))
-          return send([
-            {
-              id: uuid('d'),
-              activationId,
-              action: { kind: 'inspect', tableId },
-              trigger: { kind: 'interval', minutes: 60 },
-              sponsorMembershipId: mid,
-              historyAudience: [],
-              enabled: true,
-              revoked: false,
-              paused: false,
-              pauseReason: null,
-              revision: 'b'.repeat(64),
-              nextRunAt: at,
-              lastRun: null,
-            },
-          ]);
+        if (path === `/v1/workspaces/${wid}/workflows`) return send([agentWorkflow]);
+        if (path.endsWith(`/agents/${aid}/linked-workflow`))
+          return send({
+            workflowId: agentWorkflow.id,
+            revision: agentWorkflow.revision,
+            generation: 1,
+            archived: false,
+            separateWorkflowIds: [],
+          });
         if (path.endsWith('/slack/destinations')) return send({ destinations: [] });
         if (path.endsWith('/knowledge/slack/discover')) {
           assert.equal(url.searchParams.get('kind'), 'channels');
@@ -518,9 +525,13 @@ test('agent flows resolve permitted names without changing commands or approvals
         await page.reload();
       }
       await openTab('Triggers');
-      const schedules = page.getByRole('list', { name: 'Agent schedule list', exact: true });
-      await schedules.getByText('Customers', { exact: true }).waitFor();
+      const schedules = page.getByRole('list', { name: 'Triggers', exact: true });
+      await schedules.getByText('When a row is added to Customers', { exact: true }).waitFor();
       assert.doesNotMatch(await schedules.innerText(), new RegExp(tableId));
+      assert.doesNotMatch(
+        await page.getByRole('list', { name: "This agent's workflow", exact: true }).innerText(),
+        new RegExp(tableId),
+      );
       await schedules.scrollIntoViewIfNeeded();
       await capture('inspection-schedule');
       await openTab('Slack');

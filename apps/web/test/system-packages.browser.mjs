@@ -8,6 +8,7 @@ import { packageInstallationLayout } from '../../../packages/conversations/src/l
 import { fallbackRecommendations } from '../../../packages/recommendations/src/rules.ts';
 import { captureBrowserFailure, startBuiltApp } from './built-app.fixture.mjs';
 import { createWorkspaceFixture, workspaceShellReads, serveWorkspaceShellEvent } from './workspace.fixture.mjs';
+import { clearEditor } from './browser-controls.mjs';
 
 async function packageFixture(browser, { legacy = false, adminWithoutTeams = false } = {}) {
   const { workspace, session } = createWorkspaceFixture({ slug: 'packages-qa', name: 'Packages QA' });
@@ -199,6 +200,9 @@ async function packageFixture(browser, { legacy = false, adminWithoutTeams = fal
         json: { chat: state.chat, pages: [{ digest: 'd'.repeat(64), value: history() }] },
       });
     if (path.endsWith('/plans')) return route.fulfill({ json: { plans: [], nextCursor: null } });
+    if (path.endsWith('/agents/recent')) return route.fulfill({ json: [] });
+    if (/\/github\/chats\/[\w-]+\/selection$/.test(path) && request.method() === 'GET')
+      return route.fulfill({ json: { accountId: null, generation: null, version: 0 } });
     if (path.endsWith('/governance/me'))
       return route.fulfill({
         json: adminWithoutTeams
@@ -303,7 +307,7 @@ test(
       await page.getByRole('textbox', { name: 'Message', exact: true }).fill('Tell me about leave policies.');
       assert.equal(await page.getByRole('button', { name: 'Send message', exact: true }).isDisabled(), true);
       assert.equal(state.chatCreates.length, 0, 'ordinary chat still requires an available model');
-      await page.getByRole('textbox', { name: 'Message', exact: true }).fill('');
+      await clearEditor(page.getByRole('textbox', { name: 'Message', exact: true }));
       await page.goto(`${server.origin}/${workspace.slug}/packages`);
       await page
         .getByRole('link', { name: new RegExp(pkg.package.title) })

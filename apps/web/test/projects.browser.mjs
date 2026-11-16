@@ -302,6 +302,10 @@ function projectServer() {
     }
     const shell = shellRead(method, path);
     if (shell) return route.fulfill(shell);
+    // The chat composer lists workspace integrations, and the admin invite nudge reads governance.
+    if (method === 'GET' && path === `${base}/integrations`) return route.fulfill({ json: { integrations: [] } });
+    if (method === 'GET' && path === `${base}/governance`)
+      return route.fulfill({ status: 404, json: { error: 'not-found' } });
     state.unexpected.push(`${method} ${path}`);
     return route.fulfill({ status: 500, json: { error: 'unexpected-request' } });
   }
@@ -370,9 +374,9 @@ async function projectChat(run, options = {}) {
   }
 }
 const sendMessage = page => page.getByRole('button', { name: 'Send message', exact: true }).click();
+// Refreshing confirms a rejected send never landed and hands the retained draft back for editing.
 async function reviewProjectDraft(page) {
   await page.getByRole('button', { name: 'Refresh before editing', exact: true }).click();
-  await page.getByRole('button', { name: 'Review retained input', exact: true }).click();
   await page.locator('[contenteditable=true]').first().waitFor();
 }
 test(
@@ -416,15 +420,22 @@ for (const status of [408, 429, 503])
         api.state.sendStatus = status;
         api.state.commitUncertain = committed;
         await sendMessage(page);
-        const retry = page.getByRole('button', { name: 'Try again', exact: true });
-        await retry.waitFor();
-        assert.equal(await editor.textContent(), 'Do not send this twice.');
-        assert.equal(await editor.getAttribute('contenteditable'), 'false');
-        assert.equal(await page.getByRole('button', { name: 'Review retained input', exact: true }).count(), 0);
-        api.state.sendStatus = 200;
-        await retry.click();
-        await page.waitForURL(`**/chat/${api.state.chatCreates[0].id}`);
-        assert.deepEqual(api.state.sends[1], api.state.sends[0]);
+        if (committed) {
+          // The status check after the failed response finds the stored message, so nothing is sent again.
+          await page.waitForURL(`**/chat/${api.state.chatCreates[0].id}`);
+          assert.equal(api.state.sends.length, 1);
+        } else {
+          // The message is missing, so checking its status replays the exact same send.
+          const check = page.getByRole('button', { name: 'Check message status', exact: true });
+          await check.waitFor();
+          assert.equal(await editor.textContent(), 'Do not send this twice.');
+          assert.equal(await editor.getAttribute('contenteditable'), 'false');
+          assert.equal(await page.getByRole('button', { name: 'Review retained input', exact: true }).count(), 0);
+          api.state.sendStatus = 200;
+          await check.click();
+          await page.waitForURL(`**/chat/${api.state.chatCreates[0].id}`);
+          assert.deepEqual(api.state.sends[1], api.state.sends[0]);
+        }
         assert.equal(api.state.chatCreates.length, 1);
         assert.equal(api.state.messages.size, 1);
       });
@@ -761,7 +772,9 @@ test(
       const check = page.getByRole('button', { name: 'Check status again' });
       const retry = page.getByRole('button', { name: 'Retry same operation' });
       await instructions.fill('Quote prices in euros.');
+      // The save lands but its response is lost, and the re-read after it fails, so the outcome stays unknown.
       api.state.lostEdits = 1;
+      api.state.failedReads = 1;
       await save.click();
       await page
         .getByText(
@@ -784,6 +797,7 @@ test(
       };
       await instructions.fill(command.instructions);
       api.state.lostEdits = 1;
+      api.state.failedReads = 1;
       await save.click();
       await retry.click();
       await retry.waitFor({ state: 'detached' });
@@ -834,8 +848,12 @@ test('archive and upload results reach cached project views after the page close
     await until(() => api.state.edits.length === 1, 'the archive starts');
     await page.goBack();
     await back.click();
-    await page.getByRole('table', { name: 'Active projects' }).getByRole('link', { name: 'Spring launch' }).waitFor();
+    // The lists show the pending archive optimistically, before the server confirms it.
+    const active = page.getByRole('table', { name: 'Active projects' });
+    await active.getByRole('link', { name: 'Autumn launch' }).waitFor();
+    assert.equal(await active.getByRole('link', { name: 'Spring launch' }).count(), 0);
     archived();
+    await until(() => api.state.project.archived, 'the archive finishes after the page closed');
     await page.getByRole('group', { name: 'Project status' }).getByRole('button', { name: 'Archived' }).click();
     await page.getByRole('table', { name: 'Archived projects' }).getByRole('link', { name: 'Spring launch' }).waitFor();
     await project.click();

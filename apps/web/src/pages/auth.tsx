@@ -212,6 +212,10 @@ export function VerifyEmailPage() {
   );
 }
 
+// Signing in always loads a new page, so one sign-out per page is enough. The logout route can mount again while the
+// session ends; signing out again would ask to leave a second time, or leave after the person chose to stay.
+let signedOut = false;
+
 export function LogoutPage() {
   const destination = safeAuthRedirect(new URLSearchParams(window.location.search).get('redirect'));
   const [pending, setPending] = useState(true);
@@ -226,6 +230,7 @@ export function LogoutPage() {
       const result = await authClient.signOut();
       if (result.error) setError('Could not log out. Please try again.');
       else {
+        signedOut = true;
         clearDraftFiles();
         // Cached chats must not outlive the session on this device; a stuck database must not hold up logout.
         await Promise.race([
@@ -242,7 +247,7 @@ export function LogoutPage() {
     }
   }, [destination]);
   useEffect(() => {
-    void signOut();
+    if (!signedOut) void signOut();
   }, [signOut]);
   return (
     <AuthLayout

@@ -31,12 +31,16 @@ test(
         other: '44444444-4444-4444-8444-444444444444',
       };
       const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60_000).toISOString();
-      const state = { user: 'viewer', sessionId: 'session', hold: false, membershipStatus: 200 };
+      const state = { user: 'viewer', sessionId: 'session', hold: false, membershipStatus: 200, signedOut: false };
       let held = [];
       let log = [];
       const respond = async route => {
         const path = new URL(route.request().url()).pathname;
         if (path === '/v1/auth/get-session') {
+          if (state.signedOut) {
+            await route.fulfill({ json: null });
+            return;
+          }
           await route.fulfill({
             json: {
               session: { id: state.sessionId, userId: state.user, expiresAt },
@@ -50,6 +54,7 @@ test(
           return;
         }
         if (path === '/v1/auth/sign-out') {
+          state.signedOut = true;
           await route.fulfill({ json: { success: true } });
           return;
         }
@@ -149,7 +154,8 @@ test(
             await composer.waitFor();
           }
         }
-        assert.ok(held.length > 0, 'The workspace shows while its access checks are still pending');
+        // The session request leaves after the provisional render; held requests stay unanswered until release.
+        await waitFor(() => held.length > 0, 'The workspace shows while its access checks are still pending');
       };
 
       await confirmedVisit();

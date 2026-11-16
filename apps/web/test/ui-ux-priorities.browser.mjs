@@ -358,6 +358,7 @@ try {
             })),
         ),
         [],
+        `${page.url()} overflows sideways`,
       );
     }
     await visit('/acme/agent-tasks');
@@ -432,27 +433,27 @@ try {
     await visit('/acme/integrations');
     await shot('integrations');
     if (!baseline) {
-      const panel = async (name, open = true) => {
-        const toggle = page.getByRole('dialog').getByRole('button', { name, exact: true });
-        if (((await toggle.getAttribute('aria-expanded')) === 'true') !== open) await toggle.click();
-      };
-      await page.getByRole('button', { name: 'Gmail', exact: true }).click();
-      await panel('Settings');
-      await page.getByRole('button', { name: 'Connect Gmail', exact: true }).waitFor();
+      // Each integration has its own page with tabs; the directory row opens it.
+      const tab = name => page.getByRole('tab', { name, exact: true }).click();
+      await visit('/acme/integrations#gmail');
+      await page.waitForURL('**/acme/integrations/gmail');
+      await page
+        .getByRole('region', { name: 'Gmail summary', exact: true })
+        .getByRole('button', { name: 'Connect Gmail', exact: true })
+        .waitFor();
       assert.equal(await page.getByLabel('Bearer token for new source or rotation').isVisible(), false);
       await shot('google');
-      await panel('Your account');
+      await tab('Accounts');
       await page.getByRole('heading', { name: 'No Google proposals', exact: true }).waitFor();
       await shot('approvals');
+      // GitHub team integrations are retired; members connect their own GitHub account.
       await visit('/acme/integrations#github');
-      await panel('Settings');
-      await page.getByRole('button', { name: 'Add GitHub integration', exact: true }).click();
-      await page.getByLabel('Integration name', { exact: true }).fill('Customer repositories');
-      await panel('Settings', false);
-      await panel('Settings');
-      assert.equal(await page.getByLabel('Integration name', { exact: true }).inputValue(), 'Customer repositories');
+      await page.waitForURL('**/acme/integrations/github');
+      await tab('Accounts');
+      assert.equal(await page.getByRole('button', { name: 'Add GitHub integration', exact: true }).count(), 0);
       await visit('/acme/integrations#jira');
-      await panel('Your account');
+      await page.waitForURL('**/acme/integrations/jira');
+      await tab('Accounts');
       await page.getByRole('heading', { name: 'Jira and Confluence integration', exact: true }).waitFor();
     }
     await visit('/acme/agents/new');

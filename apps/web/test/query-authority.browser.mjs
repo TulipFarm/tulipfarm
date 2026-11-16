@@ -151,6 +151,8 @@ test(
             });
             return React.createElement('output', { id: 'navigation' }, JSON.stringify(read.state));
           }
+          // No live stream runs here, so replies are read from history alone.
+          const noStream = { status: 'unavailable', previews: new Map(), progress: new Map() };
           function Chat({ id }) {
             const api = {
               history: async () => {
@@ -164,6 +166,7 @@ test(
                     {
                       id,
                       content: `PRIVATE CHAT ${id} ${generation}`,
+                      tools: [],
                       turn: { id, status: id === 'running' ? 'processing' : 'completed', generation: 0 },
                     },
                   ],
@@ -171,7 +174,7 @@ test(
                 };
               },
             };
-            const read = useConversationHistory(api, id, 1, false);
+            const read = useConversationHistory(api, id, 1, noStream);
             return React.createElement('output', { id }, JSON.stringify(read.state));
           }
           function Features() {
@@ -297,7 +300,7 @@ test(
         await first.evaluate(
           async () => (await window.proof.runtime.catalog.restore(window.proof.scope, () => true))?.data,
         ),
-        { families: [] },
+        { families: [], imageModels: [] },
       );
       await first.evaluate(() => window.proof.navigate(false));
       await first.waitForFunction(() =>

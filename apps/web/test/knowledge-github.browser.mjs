@@ -109,7 +109,6 @@ test(
         documents = new Map();
       const faults = {
         accounts: [personal, work],
-        accountsGate: null,
         configured: true,
         discovery: 200,
         discoveryError: null,
@@ -164,7 +163,6 @@ test(
         else if (path.endsWith('/credits'))
           json = { available: 1000, granted: 1000, used: 0, held: 0, days: [], breakdown: [], series: [] };
         else if (path.endsWith('/github/accounts') && request.method() === 'GET') {
-          await faults.accountsGate;
           json = { configured: faults.configured, accounts: faults.accounts };
         } else if (path.endsWith('/knowledge/github/members')) {
           status = faults.members;
@@ -295,6 +293,8 @@ test(
             },
           });
         else if (path.endsWith('/knowledge/defaults')) json = { enabled: true, items: [] };
+        else if (/\/knowledge\/sources\/[^/]+\/failures$/.test(path))
+          json = { sourceId: path.split('/').at(-2), syncedAt: null, items: [], truncated: false };
         else {
           if (path.includes('/knowledge/')) unknown.push(`${request.method()} ${path}`);
           status = 404;
@@ -313,59 +313,9 @@ test(
           .catch(() => {});
       });
       const open = async () => {
-        await page.goto(`${origin}/${workspace.slug}/integrations#github-accounts`);
-        await page.getByRole('region', { name: 'Personal GitHub accounts' }).waitFor();
+        await page.goto(`${origin}/${workspace.slug}/integrations/github?tab=knowledge`);
+        await page.getByRole('tab', { name: 'Knowledge', selected: true }).waitFor();
         await page.getByRole('heading', { name: 'Repositories in Knowledge', exact: true }).waitFor();
-        const prompts = page.getByRole('region', { name: 'Things to ask with GitHub', exact: true });
-        assert.deepEqual(await prompts.locator('[data-slot="gradient-banner-panel"]').allTextContents(), [
-          'What changed in main this week?',
-          'List my open pull requests',
-          'Find issues assigned to me',
-        ]);
-        assert.deepEqual(
-          await prompts
-            .locator('[data-slot="gradient-banner"]')
-            .evaluateAll(cards => cards.map(card => card.dataset.variant)),
-          ['lagoon', 'iris', 'mint'],
-        );
-        assert.ok(
-          await prompts.evaluate(element =>
-            Boolean(
-              document.querySelector('[aria-label="Personal GitHub accounts"]').compareDocumentPosition(element) &
-              Node.DOCUMENT_POSITION_PRECEDING,
-            ),
-          ),
-        );
-        const surfaces = page.locator('[data-slot="card"][data-surface="raised"]');
-        assert.equal(await surfaces.count(), 2);
-        const colors = await surfaces.evaluateAll(cards => ({
-          sheet: getComputedStyle(document.querySelector('[data-slot="sheet-content"]')).backgroundColor,
-          cards: cards.map(card => getComputedStyle(card).backgroundColor),
-          dark: matchMedia('(prefers-color-scheme: dark)').matches,
-        }));
-        for (const color of colors.cards) {
-          assert.notEqual(color, colors.sheet, 'Settings panels must be distinct from the sheet');
-          if (colors.dark) {
-            const brightness = value =>
-              value
-                .match(/[\d.]+/g)
-                .slice(0, 3)
-                .reduce((sum, channel) => sum + Number(channel), 0);
-            assert.ok(
-              brightness(color) > brightness(colors.sheet),
-              'Dark settings panels must be lighter than the sheet',
-            );
-          }
-        }
-        const manage = page.getByRole('button', { name: 'Manage accounts', exact: true });
-        if (await manage.count()) {
-          assert.equal(await manage.evaluate(element => getComputedStyle(element).borderStyle), 'solid');
-          assert.notEqual(await manage.evaluate(element => getComputedStyle(element).borderColor), 'rgba(0, 0, 0, 0)');
-          assert.notEqual(
-            await manage.evaluate(element => getComputedStyle(element).backgroundColor),
-            'rgba(0, 0, 0, 0)',
-          );
-        }
       };
       const select = async () => {
         await page.getByRole('button', { name: 'Add repositories', exact: true }).click();
@@ -385,53 +335,6 @@ test(
     }
 
     try {
-      await t.test('sheet opening focuses its title during account loading and preserves keyboard focus cues', () =>
-        fixture(async f => {
-          const gate = Promise.withResolvers();
-          f.faults.accountsGate = gate.promise;
-          const about = f.page.getByRole('button', { name: 'About this integration', exact: true });
-          const titleFocused = () =>
-            f.page.waitForFunction(() => document.activeElement?.matches('[data-slot="sheet-title"]'));
-          try {
-            await f.page.goto(`${origin}/${workspace.slug}/integrations#github-accounts`, {
-              waitUntil: 'domcontentloaded',
-            });
-            await f.page.getByText('Loading GitHub accounts…', { exact: true }).waitFor();
-            await titleFocused();
-            assert.equal(await about.evaluate(element => element.matches(':focus-visible')), false);
-          } finally {
-            gate.resolve();
-          }
-          await f.page.getByRole('button', { name: 'Manage accounts', exact: true }).waitFor();
-          await titleFocused();
-          assert.equal(await about.evaluate(element => element.matches(':focus-visible')), false);
-          for (let step = 0; step < 8 && !(await about.evaluate(element => element === document.activeElement)); step++)
-            await f.page.keyboard.press('Tab');
-          assert.equal(
-            await about.evaluate(element => element === document.activeElement && element.matches(':focus-visible')),
-            true,
-          );
-          // sprout accordion.css paints the keyboard focus cue as a 2px outline rather than a box-shadow ring.
-          assert.equal(
-            await about.evaluate(element => {
-              const style = getComputedStyle(element);
-              return style.outlineStyle !== 'none' && parseFloat(style.outlineWidth) > 0;
-            }),
-            true,
-          );
-          await f.page.keyboard.press('Enter');
-          assert.equal(await about.getAttribute('aria-expanded'), 'true');
-          await f.page.getByRole('button', { name: 'Close', exact: true }).click();
-          const trigger = f.page.getByRole('button', { name: 'GitHub', exact: true });
-          await trigger.click();
-          await titleFocused();
-          assert.equal(await about.evaluate(element => element.matches(':focus-visible')), false);
-          await f.page.keyboard.press('Escape');
-          await trigger.waitFor();
-          await f.page.waitForFunction(element => element === document.activeElement, await trigger.elementHandle());
-          assert.equal(await trigger.evaluate(element => element === document.activeElement), true);
-        }),
-      );
       await t.test(
         'delayed discovery, retry after failure, scope explanation, empty state, pagination and uncertain save replay',
         () =>
@@ -464,13 +367,13 @@ test(
             await f.page.getByRole('button', { name: 'Add to Knowledge', exact: true }).click();
             await f.page.getByText('Choose at least one GitHub repository before saving.').waitFor();
             assert.equal(f.writes.filter(write => write.kind === 'save').length, 0);
-            await f.page.getByRole('checkbox', { name: 'acme/leadership (private)' }).click();
+            await f.page.getByRole('checkbox', { name: 'acme/leadership Private' }).click();
             await f.page.getByRole('searchbox', { name: 'Find repositories' }).fill('archive');
-            await f.page.getByRole('checkbox', { name: 'acme/archive (internal)' }).click();
+            await f.page.getByRole('checkbox', { name: 'acme/archive Internal' }).click();
             assert.ok(f.reads.some(read => read.query.cursor === '2'));
             await f.page.getByText('2 / 1,000 selected').waitFor();
             await f.page.getByRole('searchbox', { name: 'Find repositories' }).fill('');
-            await f.page.getByRole('checkbox', { name: 'acme/handbook (private)' }).click();
+            await f.page.getByRole('checkbox', { name: 'acme/handbook Private' }).click();
             await importSettings(f.page);
             await f.page.getByRole('checkbox', { name: 'Discussions' }).click();
             f.faults.save = 503;
@@ -541,16 +444,11 @@ test(
             f.faults.failedCursor = null;
             await f.page.getByRole('button', { name: 'Retry loading GitHub repositories' }).click();
             await f.page.getByText('260 repositories', { exact: true }).waitFor();
-            const footer = f.page.getByRole('group', { name: 'Repository selection actions', exact: true });
-            const before = await footer.boundingBox();
-            assert.ok(before && before.y + before.height <= f.page.viewportSize().height);
             const repositoryList = f.page.getByRole('region', { name: 'Available repositories', exact: true });
             assert.equal(await repositoryList.evaluate(element => getComputedStyle(element).overflowY), 'visible');
-            await f.page.getByRole('button', { name: 'Show more repositories', exact: true }).scrollIntoViewIfNeeded();
-            const afterScroll = await footer.boundingBox();
-            assert.equal(afterScroll.y, before.y, 'selection actions stay fixed while the drawer scrolls');
+            await f.page.getByRole('button', { name: 'Show more repositories', exact: true }).waitFor();
             assert.equal(
-              await footer
+              await f.page
                 .getByRole('button', { name: 'Add to Knowledge', exact: true })
                 .evaluate(button => button.form?.getAttribute('aria-label')),
               'Add repositories to Knowledge',
@@ -558,7 +456,7 @@ test(
             assert.equal(await f.page.getByLabel('Use GitHub account', { exact: true }).count(), 0);
             const search = f.page.getByRole('searchbox', { name: 'Find repositories' });
             await search.fill('tulipfarm-cloud');
-            await f.page.getByRole('checkbox', { name: 'TulipFarm/tulipfarm-cloud (private)' }).click();
+            await f.page.getByRole('checkbox', { name: 'TulipFarm/tulipfarm-cloud Private' }).click();
             await search.fill('');
             await f.page.getByRole('combobox', { name: 'Repository owner' }).click();
             await f.page.getByRole('option', { name: 'octo-owner', exact: true }).click();
@@ -584,7 +482,7 @@ test(
           fixture(async f => {
             await f.open();
             await f.choose();
-            await f.page.getByRole('checkbox', { name: 'acme/handbook (private)' }).click();
+            await f.page.getByRole('checkbox', { name: 'acme/handbook Private' }).click();
             await chooseAccount(f.page, '@octo-work');
             await f.page.getByRole('button', { name: 'Keep this account', exact: true }).click();
             await f.page.getByRole('button', { name: 'Remove acme/handbook', exact: true }).waitFor();
@@ -665,7 +563,10 @@ test(
           assert.equal(await f.page.getByRole('button', { name: 'Add repositories', exact: true }).isDisabled(), true);
           f.faults.configured = false;
           await f.page.reload();
+          await f.page.getByRole('tab', { name: 'Accounts' }).click();
           await f.page.getByRole('heading', { name: 'GitHub is not configured' }).waitFor();
+          await f.page.getByRole('tab', { name: 'Knowledge' }).click();
+          await f.page.getByRole('region', { name: 'Automatic Knowledge', exact: true }).waitFor();
           assert.equal(
             await f.page.getByRole('heading', { name: 'Repositories in Knowledge', exact: true }).count(),
             0,
@@ -690,7 +591,7 @@ test(
           await row().getByText('8 ready · 1 failed · 9 items discovered').waitFor();
           await row().getByRole('button', { name: 'Edit settings' }).click();
           const settings = row().getByRole('region', { name: 'GitHub source settings', exact: true });
-          await settings.getByRole('checkbox', { name: 'acme/leadership (private)' }).uncheck();
+          await settings.getByRole('checkbox', { name: 'acme/leadership Private' }).uncheck();
           await settings.getByText('1 of 2 repositories included', { exact: true }).waitFor();
           await settings.getByRole('checkbox', { name: 'Discussions' }).check();
           await settings.getByLabel('Exclude file paths').fill('^vendor/');
@@ -760,7 +661,11 @@ test(
           await row().getByText('0 active · 2 need permission', { exact: true }).waitFor();
           assert.equal(await row().getByText('Needs permission', { exact: true }).count(), 2);
           await row().getByText('cannot read issues, pull requests in this repository', { exact: false }).waitFor();
-          await row().getByText('Reconnect it with repository access, then retry.', { exact: false }).waitFor();
+          await row()
+            .getByText('Ask an organization owner to install the TulipFarm GitHub App on it, then retry.', {
+              exact: false,
+            })
+            .waitFor();
           await row().getByRole('button', { name: 'Reconnect GitHub', exact: true }).click();
           await delay(300);
           assert.ok(
@@ -972,7 +877,7 @@ test(
 
       for (const width of [320, 375, 414, 768, 1440])
         await t.test(
-          `${width}px ${width < 768 ? 'dark' : 'light'} long names, fixed actions, keyboard selection and focus return`,
+          `${width}px ${width < 768 ? 'dark' : 'light'} long names, reachable actions, keyboard selection and focus return`,
           () =>
             fixture(
               async f => {
@@ -992,12 +897,11 @@ test(
                   await f.page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
                   true,
                 );
-                const footer = f.page.getByRole('group', { name: 'Repository selection actions', exact: true });
-                const box = await footer.boundingBox();
-                assert.ok(box && box.y >= 0 && box.y + box.height <= f.page.viewportSize().height);
-                assert.equal(await footer.evaluate(element => element.scrollWidth <= element.clientWidth), true);
-                const scroll = f.page.locator('[data-github-scroll]');
-                assert.equal(await scroll.evaluate(element => element.scrollWidth <= element.clientWidth), true);
+                const form = f.page.getByRole('form', { name: 'Add repositories to Knowledge', exact: true });
+                assert.equal(await form.evaluate(element => element.scrollWidth <= element.clientWidth), true);
+                await form.getByRole('button', { name: 'Add to Knowledge', exact: true }).scrollIntoViewIfNeeded();
+                const box = await form.getByRole('button', { name: 'Add to Knowledge', exact: true }).boundingBox();
+                assert.ok(box && box.x >= 0 && box.x + box.width <= f.page.viewportSize().width);
                 await f.page
                   .getByRole('region', { name: 'GitHub knowledge sources', exact: true })
                   .scrollIntoViewIfNeeded();

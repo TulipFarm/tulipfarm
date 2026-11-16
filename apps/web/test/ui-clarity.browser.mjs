@@ -137,8 +137,6 @@ try {
     const rowCursors = [];
     const tablePages = [];
     const agentPages = [];
-    const grants = [];
-    const grantWrites = [];
     const tableSearches = [];
     await page.route('**/v1/**', async route => {
       const url = new URL(route.request().url());
@@ -181,7 +179,6 @@ try {
           teams,
           capabilities: { manageGovernance: true, canLeave: true },
         };
-      else if (path.endsWith('/governance/person-grants')) json = { grants: [] };
       else if (path.endsWith('/governance'))
         json = governanceSnapshotSchema.parse({
           actorMembershipId: memberId,
@@ -190,14 +187,9 @@ try {
           directory: [{ id: memberId, name: 'Ada', email: 'ada@example.com', image: null }],
           tableTeamIds: [teamId, otherTeamId],
           tables: [{ id: tableId, name: 'Customers', owningTeamId: teamId }],
-          grants,
+          grants: [],
         });
-      else if (path.endsWith('/governance/grants')) {
-        const input = route.request().postDataJSON();
-        grantWrites.push(input);
-        if (input.granted) grants.push({ teamId: input.teamId, target: input.target });
-        json = { ok: true };
-      } else if (path.endsWith(`/tables/${tableId}`))
+      else if (path.endsWith(`/tables/${tableId}`))
         json = {
           id: tableId,
           saved: null,
@@ -294,10 +286,11 @@ try {
         { stdio: 'inherit' },
       );
     }
-    await page.goto(`${origin}/acme`);
+    // The dev server compiles the app and chat module on first visit, which can exceed the default wait.
+    await page.goto(`${origin}/acme`, { timeout: 30000 });
     await page
       .getByRole('combobox', { name: 'Model: Claude Sonnet', exact: true })
-      .click()
+      .click({ timeout: 30000 })
       .catch(async error => {
         console.error(await page.locator('body').innerText(), errors);
         throw error;
@@ -355,10 +348,17 @@ try {
           .getAttribute('href'),
         '/acme/tables',
       );
-      assert.equal(
-        await page.getByRole('link', { name: 'Change fields in chat', exact: true }).getAttribute('href'),
-        `/acme?intent=edit-table&tableId=${tableId}`,
-      );
+      // Phones keep the table name in the header and move this action into the More menu.
+      if (mobile) {
+        await page.getByRole('button', { name: 'More table options', exact: true }).click();
+        await page.getByRole('menuitem', { name: 'Change fields in chat', exact: true }).waitFor();
+        await page.keyboard.press('Escape');
+        await page.getByRole('menu').waitFor({ state: 'detached' });
+      } else
+        assert.equal(
+          await page.getByRole('link', { name: 'Change fields in chat', exact: true }).getAttribute('href'),
+          `/acme?intent=edit-table&tableId=${tableId}`,
+        );
       await rows.getByRole('button', { name: 'Sort by Customer name', exact: true }).waitFor();
       const noteCell = rows.getByRole('cell', { name: notes, exact: true });
       assert.equal(
@@ -464,20 +464,10 @@ try {
       await page.getByRole('link', { name: 'Back to tables', exact: true }).click();
       await page.waitForURL(`${origin}/acme/tables`);
       await page.getByRole('heading', { level: 1, name: 'Tables', exact: true }).waitFor();
-      await page.goto(`${origin}/acme/grants`);
-      await page.getByRole('combobox', { name: 'Team receiving access' }).click();
-      await page.getByRole('option', { name: 'Operations', exact: true }).click();
-      if (mobile)
-        assert.ok((await page.getByRole('combobox', { name: 'Team receiving access' }).boundingBox()).height >= 44);
-      await page.getByText('Changes save immediately. There is no separate Save button.').waitFor();
-      await page.getByRole('checkbox', { name: 'Create rows', exact: true }).click();
-      await page.getByText('Create rows for Customers granted to Operations.', { exact: true }).waitFor();
-      assert.equal(grantWrites.length, 1);
-      assert.equal(await page.getByRole('checkbox', { name: 'Read rows', exact: true }).isChecked(), false);
     }
     await page.goto(`${origin}/acme/chat`);
     await page.getByRole('region', { name: 'Chat list' }).waitFor();
-    await page.getByRole('button', { name: 'Plan customer follow-ups', exact: true }).waitFor();
+    await page.getByRole('link', { name: 'Plan customer follow-ups', exact: true }).waitFor();
     await screenshot('chats');
     if (!before) await page.getByRole('textbox', { name: 'Search chat titles' }).waitFor();
     await page.goto(`${origin}/acme/agents`);
@@ -508,37 +498,19 @@ try {
       );
     }
     await screenshot('agents');
+    // Teams open on their own page since the access-policy redesign; the name and description form lives on its Settings tab.
     await page.goto(`${origin}/acme/teams`);
-    await page.getByRole('button', { name: 'View Operations details' }).click();
-    await page.getByRole('heading', { name: 'Operations details' }).waitFor();
-    await page.getByLabel('Description (optional)', { exact: true }).last().fill('Retained team draft');
+    await page.getByRole('link', { name: 'Operations', exact: true }).click();
+    await page.getByRole('heading', { name: 'Operations', exact: true }).waitFor();
+    await page.getByRole('tab', { name: 'Settings', exact: true }).click();
+    const description = page.getByLabel('Description (optional)', { exact: true });
+    await description.fill('Retained team draft');
     await screenshot('team-edits');
     if (!before) {
-      await page.getByRole('button', { name: 'View Support details' }).click();
-      await page.getByRole('button', { name: 'Keep editing' }).click();
-      assert.equal(
-        await page.getByLabel('Description (optional)', { exact: true }).last().inputValue(),
-        'Retained team draft',
-      );
-      if (mobile) await page.getByRole('button', { name: 'Toggle Sidebar', exact: true }).first().click();
-      // The settings sidebar navigation is named Settings (cloud 0461cae5 #858, apps/web/src/pages/workspace.tsx:271).
-      await page.getByRole('navigation', { name: 'Settings' }).getByText('General', { exact: true }).click();
-      await page.getByRole('button', { name: 'Keep editing' }).click();
-      assert.equal(
-        await page.getByLabel('Description (optional)', { exact: true }).last().inputValue(),
-        'Retained team draft',
-      );
-      await page.getByRole('button', { name: 'Close details' }).click();
-      await page.getByRole('button', { name: 'Discard edits' }).click();
-      await page.waitForFunction(
-        () => document.activeElement?.getAttribute('aria-label') === 'View Operations details',
-      );
-      assert.equal(
-        await page
-          .getByRole('button', { name: 'View Operations details' })
-          .evaluate(node => node === document.activeElement),
-        true,
-      );
+      assert.equal(await page.getByRole('button', { name: 'Save', exact: true }).isEnabled(), true);
+      await page.getByRole('button', { name: 'Discard changes', exact: true }).click();
+      assert.equal(await description.inputValue(), 'Daily customer operations');
+      assert.equal(await page.getByRole('button', { name: 'Save', exact: true }).isDisabled(), true);
     }
     await page.goto(`${origin}/acme/settings`);
     if (!before) {

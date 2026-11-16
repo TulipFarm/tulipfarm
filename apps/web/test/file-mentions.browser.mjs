@@ -5,7 +5,7 @@ import { createServer } from 'vite';
 import { chromium } from 'playwright';
 import { createWorkspaceFixture } from './workspace.fixture.mjs';
 import { chatCatalog } from './chat-catalog.fixture.mjs';
-import { membership, credits } from './chat-query.fixture.mjs';
+import { membership, credits, governance } from './chat-query.fixture.mjs';
 
 const file = (id, name, mediaType, size) => ({
   id,
@@ -145,6 +145,12 @@ test(
           return route.fulfill({
             json: { state: 'disconnected', teamId: null, canManage: false, linked: false, scopes: [] },
           });
+        if (method === 'GET' && path.endsWith('/agents/recent')) return route.fulfill({ json: [] });
+        if (method === 'GET' && path.endsWith('/governance')) return route.fulfill({ json: governance });
+        if (method === 'GET' && /\/github\/chats\/[\w-]+\/selection$/.test(path))
+          return route.fulfill({ json: { accountId: null, generation: null, version: 0 } });
+        if (method === 'GET' && path.endsWith('/system-package-installations'))
+          return route.fulfill({ json: { installations: [], nextCursor: null } });
         throw new Error(`Unexpected API request ${method} ${path}`);
       });
 
@@ -164,8 +170,13 @@ test(
       await editor.press('Enter');
       await list.waitFor({ state: 'detached' });
       assert.match(await editor.textContent(), /Q3 revenue summary\.pdf/);
+      const sent = page.waitForResponse(
+        response =>
+          response.request().method() === 'PUT' && /\/messages\/[\w-]+$/.test(new URL(response.url()).pathname),
+      );
       await editor.press('Enter');
       await page.getByRole('list', { name: 'Messages' }).waitFor();
+      await sent;
 
       assert.equal(sends.length, 1);
       const [textPart, filePart] = sends[0].parts;

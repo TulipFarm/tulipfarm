@@ -2,7 +2,7 @@ import { createAuthClient } from 'better-auth/react';
 import { inferAdditionalFields, magicLinkClient } from 'better-auth/client/plugins';
 import { resolveApiOrigin } from './api-origin';
 import { workspaceSlugError } from './workspace-slug';
-import { invitationTokenSchema } from '@tulipfarm/workspaces/governance-contracts';
+import { invitationTokenSchema } from '@tulipfarm/workspaces/invitation-token';
 import { workspaceSetupSchema } from '@tulipfarm/workspaces/contracts';
 
 export const apiOrigin =

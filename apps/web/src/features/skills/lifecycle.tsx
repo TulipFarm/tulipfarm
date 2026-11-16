@@ -102,6 +102,8 @@ export function SkillLifecycle({
       : { archived, version };
   const pending = write.state.kind === 'sending' ? write.state.input.lifecycle : null;
   const locked = write.state.kind === 'sending' || write.state.kind === 'uncertain';
+  // The detail flips optimistically, so keep the control being used on screen until the server answers.
+  const archivedView = pending === 'archived' ? false : pending === 'active' ? true : current.archived;
   const submit = (command: SkillLifecycleCommand) => {
     setMessage('');
     void write.submit(command);
@@ -112,15 +114,15 @@ export function SkillLifecycle({
   return (
     <section aria-labelledby="skill-lifecycle-heading" className="space-y-3 border-t pt-6">
       <h2 id="skill-lifecycle-heading" className="text-lg font-medium">
-        {current.archived ? 'Restore or delete' : 'Archive or delete'}
+        {archivedView ? 'Restore or delete' : 'Archive or delete'}
       </h2>
       <p>
-        {current.archived
+        {archivedView
           ? 'Restoring shows this skill in skill lists and pickers again.'
           : 'Archiving hides this skill from skill lists and pickers. Agents that pin it keep working.'}
       </p>
       <div className="flex flex-wrap gap-2">
-        {current.archived ? (
+        {archivedView ? (
           <Button disabled={locked} aria-busy={pending === 'active'} onClick={() => request('active', current.version)}>
             {pending === 'active' ? busyLabels.active : 'Restore skill'}
           </Button>
