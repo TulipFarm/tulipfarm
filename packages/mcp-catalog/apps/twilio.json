@@ -6,12 +6,8 @@
   "homepage": "https://www.twilio.com",
   "category": "code",
   "teams": ["engineering"],
-  "summary": "Look up and call Twilio APIs",
-  "capabilities": [
-    "Search Twilio API endpoints and docs",
-    "Get exact request schemas for an endpoint",
-    "Call Twilio APIs from your account with the local server"
-  ],
+  "summary": "Search Twilio API docs and request schemas",
+  "capabilities": ["Search Twilio API endpoints and docs", "Get exact request and response schemas for an endpoint"],
   "official": {
     "evidence": "https://www.twilio.com/docs/ai/mcp",
     "repository": "https://github.com/twilio-labs/mcp"
@@ -21,7 +17,7 @@
     "url": "https://mcp.twilio.com/docs",
     "transport": "streamable-http",
     "auth": "none",
-    "checked": "2026-11-14"
+    "checked": "2026-11-16"
   },
   "packages": [
     {

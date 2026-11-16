@@ -299,7 +299,7 @@ export const taglines: Record<string, string> = {
   todoist: 'Manage tasks & projects',
   trello: 'Manage boards & cards',
   'triple-whale': 'Ask about ecommerce & ads',
-  twilio: 'Look up & call Twilio APIs',
+  twilio: 'Search Twilio API docs',
   typeform: 'Create forms & read replies',
   uberall: 'Manage listings & reviews',
   uipath: 'Run automations & agents',

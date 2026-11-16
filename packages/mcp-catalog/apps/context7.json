@@ -16,8 +16,8 @@
   "remote": {
     "url": "https://mcp.context7.com/mcp",
     "transport": "streamable-http",
-    "auth": "none",
-    "checked": "2026-11-14"
+    "auth": "oauth",
+    "checked": "2026-11-16"
   },
   "packages": [
     {

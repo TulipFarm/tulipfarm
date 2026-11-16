@@ -59,7 +59,9 @@ export const probe = async ({ url: template, transport }) => {
     const challenge = response.headers.get('www-authenticate') ?? '';
     return challenge.includes('resource_metadata') || (await protectedResource(url)) ? 'oauth' : 'api-key';
   }
-  return response.ok ? 'none' : 'unreachable';
+  if (!response.ok) return 'unreachable';
+  // Some servers answer without a token but offer sign-in for their full tools, or require it on each call.
+  return (await protectedResource(url)) ? 'oauth' : 'none';
 };
 
 const notes = [];
