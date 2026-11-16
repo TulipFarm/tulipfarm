@@ -42,11 +42,10 @@ export function concealStreamDetails(event: ConversationStreamEvent): Conversati
       return { event: event.event, data: { ...event.data, text: '', offset: 0, reset: true } };
     case 'tool':
       return { event: 'tool', data: { ...event.data, presentation: { label: 'Used a tool', brand: null } } };
-    case 'progress':
-      return {
-        event: 'progress',
-        data: { ...event.data, ...(event.data.tool ? { tool: 'Used a tool' } : {}) },
-      };
+    case 'progress': {
+      const { tool: _tool, ...data } = event.data;
+      return { event: 'progress', data };
+    }
     case 'subagents':
       return {
         event: 'subagents',

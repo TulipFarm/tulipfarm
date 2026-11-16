@@ -51,7 +51,7 @@ import { ToolActivity } from '@tulipfarm/sprout/tool-activity';
 import { toolActivityItems, visibleActivityTools } from './tool-labels';
 import { StepNarration } from './step-details';
 import { newestTools, reconcileLiveTools, succeeded, unclaimedToolTurns } from './live-tools';
-import { useCurrentReply, type OutgoingMessage } from './current-reply';
+import { useCurrentReply, useRotatingLabel, type OutgoingMessage } from './current-reply';
 import { useSmoothText } from './smooth-text';
 import { TypedText } from '@tulipfarm/sprout/typed-text';
 import { UnsavedChanges } from '@/features/tables/feedback';
@@ -997,6 +997,9 @@ function ConversationDetail({
     command: write.state,
     stream,
   });
+  // The saved copy of a just-sent message keeps the optimistic row's key, so the Thinking row is not remounted.
+  const sentId = useRef<string | null>(null);
+  if (pending) sentId.current = pending.id;
   const stopReply = turn
     ? () =>
         submit({
@@ -1008,12 +1011,13 @@ function ConversationDetail({
         })
     : undefined;
   const currentTool = activityTools.find(tool => (tool.activityStatus ?? tool.status) === 'running');
-  const activityLabel =
+  const baseActivityLabel =
     currentTool && !status
       ? currentTool.activity?.trim() || currentTool.presentation?.label || toolActivityItems([currentTool])[0]?.label
       : thinking
         ? activity.label
         : null;
+  const activityLabel = useRotatingLabel(baseActivityLabel);
   const empty = data?.messages.length === 0 && !pending && incomingTurns.length === 0 && !packages.active;
   startScreen.current = !compact && empty;
   const latestId = pending?.id ?? data?.messages.at(-1)?.id;
@@ -1257,7 +1261,16 @@ function ConversationDetail({
                       {[
                         ...history.messages.map((message, index) =>
                           answerOnly(message) ? null : (
-                            <li key={message.turn ? `turn:${message.turn.id}` : message.id} className="space-y-3">
+                            <li
+                              key={
+                                message.id === sentId.current
+                                  ? 'pending'
+                                  : message.turn
+                                    ? `turn:${message.turn.id}`
+                                    : message.id
+                              }
+                              className="space-y-3"
+                            >
                               <ConversationEntry
                                 api={api}
                                 chatId={chatId}
@@ -1383,7 +1396,10 @@ function ConversationDetail({
                           ),
                         ),
                         pending ? (
-                          <li key="pending" className={!compact && visible ? 'chat-sent-transition' : undefined}>
+                          <li
+                            key="pending"
+                            className={`space-y-3 ${!compact && visible ? 'chat-sent-transition' : ''}`.trim()}
+                          >
                             <Message align="end">
                               <MessageContent>
                                 {pending.skill && <SentSkill skill={pending.skill} />}
@@ -1432,6 +1448,15 @@ function ConversationDetail({
                                 )}
                               </MessageContent>
                             </Message>
+                            {!waiting && !pendingQueued && !turn && !incomingTurns.length && (
+                              <ToolActivity
+                                key="activity"
+                                variant="transcript"
+                                items={[]}
+                                active={thinking && !read.uncertain}
+                                activityLabel={activityLabel}
+                              />
+                            )}
                           </li>
                         ) : null,
                         ...incomingTurns.map(incoming => (
@@ -1462,16 +1487,6 @@ function ConversationDetail({
                           </li>
                         )),
                       ]}
-                      {pending && !waiting && !pendingQueued && !turn && !incomingTurns.length && (
-                        <li>
-                          <ToolActivity
-                            variant="transcript"
-                            items={[]}
-                            active={thinking && !read.uncertain}
-                            activityLabel={activityLabel}
-                          />
-                        </li>
-                      )}
                       {layoutJson && turn ? (
                         <li aria-busy={!read.uncertain}>
                           <span className="sr-only">TulipFarm said</span>
