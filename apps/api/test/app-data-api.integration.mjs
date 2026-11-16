@@ -24,7 +24,15 @@ test('an app server reaches an approved view only while a visitor request is ope
     live,
   } = await appDataFixture(t);
   const app = Fastify();
-  registerSecurity(app, authConfig().webOrigin);
+  const perAddress = process.env.API_RATE_LIMIT_PER_MINUTE;
+  process.env.API_RATE_LIMIT_PER_MINUTE = '5';
+  try {
+    registerSecurity(app, authConfig().webOrigin);
+  } finally {
+    if (perAddress === undefined) delete process.env.API_RATE_LIMIT_PER_MINUTE;
+    else process.env.API_RATE_LIMIT_PER_MINUTE = perAddress;
+  }
+  app.get('/v1/ordinary', async () => ({}));
   app.register(
     async routes =>
       registerAppData(routes, { platform: pool, tables: service, limit: createAbuseLimiter(pool, 'test-secret') }),
@@ -172,6 +180,9 @@ test('an app server reaches an approved view only while a visitor request is ope
     assert.deepEqual(outcome(refused), { status: 429, body: { error: 'rate-limit-exceeded' } });
     assert.ok(Number(refused.headers.get('retry-after')) > 0);
     assert.equal((await call(handle, 'list', list)).status, 200, 'other requests keep their own budget');
+    const ordinary = [];
+    for (let index = 0; index < 6; index++) ordinary.push((await fetch(`${address}/v1/ordinary`)).status);
+    assert.deepEqual([ordinary[0], ordinary[5]], [200, 429], 'the per-address budget still covers other routes');
   });
 
   await t.test('revoking the view denies the next call of an open request', async () => {
