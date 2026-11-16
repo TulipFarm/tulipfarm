@@ -51,7 +51,7 @@ export function useChatModels(
 ) {
   const catalog = useModelCatalog(workspaceId);
   const [selected, setSelected] = useState<ComposerModel | null>(null);
-  const [preferenceSave, setPreferenceSave] = useState<'idle' | 'saving' | 'error'>('idle');
+  const [preferenceSave, setPreferenceSave] = useState<'idle' | 'saving'>('idle');
   // The remembered model the member already acknowledged here, by dismissing the notice, choosing or sending.
   const [acknowledged, setAcknowledged] = useState(() => dismissedNotice(workspaceId));
   const saving = useRef(false);
@@ -97,11 +97,11 @@ export function useChatModels(
     saving.current = true;
     setPreferenceSave('saving');
     try {
-      const result = await authClient.updateUser({ lastModelFamilyId: id }, { signal: AbortSignal.timeout(15_000) });
-      setPreferenceSave(result.error ? 'error' : 'idle');
+      await authClient.updateUser({ lastModelFamilyId: id }, { signal: AbortSignal.timeout(15_000) });
     } catch {
-      setPreferenceSave('error');
+      // The default is a convenience; the choice still applies to this chat, so a failed save stays silent.
     } finally {
+      setPreferenceSave('idle');
       saving.current = false;
     }
   }
@@ -109,9 +109,6 @@ export function useChatModels(
     ...catalog,
     model,
     preferenceSave,
-    retryPreference: () => {
-      if (selected) void savePreference(selected.id);
-    },
     choices: ready && preferenceSave !== 'saving' ? choices : [],
     replacedModel: savedUnavailable && model && !model.disabled && model.id !== saved ? model.label : null,
     usable: ready && !!current?.available,
@@ -227,14 +224,6 @@ export function ChatModelStatus({
         <p role="status" className="text-sm text-muted-foreground">
           Saving your default model…
         </p>
-      )}
-      {catalog.preferenceSave === 'error' && !failed && !quiet && (
-        <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-          <p role="alert">Could not save your default model. Your selection works for this chat.</p>
-          <Button size="sm" variant="outline" onClick={catalog.retryPreference}>
-            Retry saving default
-          </Button>
-        </div>
       )}
     </>
   );
