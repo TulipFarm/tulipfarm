@@ -96,7 +96,16 @@ import {
 import { isMcpCall, mcpExecutionResultSchema, type McpModelCatalog } from './mcp-contracts.ts';
 import { validateMcpCall } from './mcp-catalog.ts';
 import { mcpCatalogPrompt, outboundRefusal } from './mcp-catalog-egress.ts';
-import { readModelResponse, streamRequestFields, streamUrl, type StreamFormat } from './inference-stream.ts';
+import {
+  readModelResponse,
+  StreamReadError,
+  responsesError,
+  streamRequestFields,
+  streamTrace,
+  streamUrl,
+  type StreamFormat,
+  type StreamTrace,
+} from './inference-stream.ts';
 import { containsToolEnvelope, toolTextPreview, writesLayoutCall } from './tool-text.ts';
 import { withoutReasoningMarkup } from './reasoning-markup.ts';
 import {
@@ -731,6 +740,7 @@ export function modelHttpError(
   provider: InferenceRoute['provider'],
   outputStarted = false,
   request?: string,
+  stream?: StreamTrace,
 ) {
   const detail = providerErrorDetail(body);
   const retryAfterMs = headerRetryAfterMs(response.headers);
@@ -742,6 +752,7 @@ export function modelHttpError(
     providerMessage: detail.message,
     outputStarted,
     request,
+    stream,
   });
 }
 
@@ -3528,7 +3539,8 @@ async function sendChatRequest<T>(
     // The streamed answer is a preview; a failing consumer must not affect the turn.
     let held = false;
     let published = false;
-    let events = 0;
+    const streamed = streamTrace();
+    let readFailure: ModelCallError | undefined;
     let previousText: string | undefined;
     const publish = (text: string) => {
       if (previousText === text) return;
@@ -3579,10 +3591,12 @@ async function sendChatRequest<T>(
             { cause: error },
           );
         });
+        streamed.response(response);
         const result = await readModelResponse(response, streamFormat, {
           onText,
           onFirstToken: report.firstToken,
-          onEvent: () => events++,
+          onEvent: streamed.observe,
+          onBytes: streamed.received,
           ...(layoutPreview
             ? {
                 onToolInput: (_id: string, name: string, json: string) => {
@@ -3591,14 +3605,21 @@ async function sendChatRequest<T>(
               }
             : {}),
         }).catch((error: unknown) => {
-          report.error(
-            new ModelCallError(
-              timedOut(error) ? 'timeout' : 'transport',
-              { status: response.status, outputStarted: published },
-              { cause: error },
-            ),
+          const cause = error instanceof StreamReadError ? error.cause : error;
+          streamed.failed(cause);
+          readFailure = new ModelCallError(
+            timedOut(cause) ? 'timeout' : 'transport',
+            {
+              status: response.status,
+              outputStarted: published,
+              providerRequestId: response.headers.get('x-request-id') ?? undefined,
+              stream: streamed.trace,
+              request: serialized,
+            },
+            { cause },
           );
-          return { body: null, error: null };
+          // An error event that arrived before the break still names the failure.
+          return { body: null, error: error instanceof StreamReadError ? error.partial.error : null };
         });
         return { response, ...result };
       },
@@ -3607,14 +3628,35 @@ async function sendChatRequest<T>(
     const json = target.provider === 'chatgpt' ? chatGptResponse(received) : received;
     const value = observeChatDetailSync('response-parse', () => usage(target, json));
     reportUsage(report, value, json);
-    const billed = billedUsage(response.ok && !error, value, measure, { body: json, events });
+    const billed = billedUsage(response.ok && !error, value, measure, { body: json, events: streamed.trace.events });
     await observeChatDetail('settle', async () => onUsage?.(billed, { rejected: billed.kind !== 'known' }));
     onSettled?.(measure, response.ok ? value : { kind: 'unknown' });
-    if (!response.ok || error) throw modelHttpError(response, error ?? json, target.provider, published, serialized);
+    if (!response.ok || error)
+      throw modelHttpError(response, error ?? json, target.provider, published, serialized, streamed.trace);
     // A ChatGPT plan failure can arrive mid-stream as `response.failed` with the same error codes.
     const failed = target.provider === 'chatgpt' ? recordOf(json) : undefined;
     if (failed?.status === 'failed')
-      throw modelHttpError(response, { error: failed.error ?? {} }, target.provider, published, serialized);
+      throw modelHttpError(
+        response,
+        responsesError(failed.error),
+        target.provider,
+        published,
+        serialized,
+        streamed.trace,
+      );
+    // A ChatGPT plan stream that broke fails the call so the plan retry sends it again; other providers keep the
+    // malformed-reply correction.
+    if (readFailure && target.provider === 'chatgpt') throw readFailure;
+    if (readFailure) report.error(readFailure);
+    // A plan stream that closed before `response.completed` broke in transit; the plan retry sends it again.
+    if (target.provider === 'chatgpt' && received === null)
+      throw new ModelCallError('transport', {
+        status: response.status,
+        outputStarted: published,
+        providerRequestId: response.headers.get('x-request-id') ?? undefined,
+        stream: streamed.trace,
+        request: serialized,
+      });
     const selected = observeChatDetailSync('decision-parse', () => select(json));
     if (selected.failed)
       report.error(

@@ -283,6 +283,16 @@ const logOnlyAttributes = new Set([
   'response.rejection',
   'response.finish_reason',
   'provider.error_message',
+  'provider.request_id',
+  'stream.events',
+  'stream.last_event',
+  'stream.read_error',
+  'stream.event_error',
+  'stream.bytes',
+  'stream.content_type',
+  'stream.processing_ms',
+  'stream.edge_request_id',
+  'stream.body_preview',
   'usage.shape',
   'slack.event_id',
   'github.ratelimit_remaining',
@@ -336,6 +346,14 @@ function safeAttribute(key: string, value: unknown, logLine = false): boolean {
     if (key === 'provider.error_code' || key === 'response.finish_reason') return safeProviderCode(value) === value;
     if (key === 'response.rejection') return (responseRejections as readonly unknown[]).includes(value);
     if (key === 'usage.shape') return safeUsageShape(value);
+    if (key === 'stream.events' || key === 'stream.bytes')
+      return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+    if (key === 'stream.content_type')
+      return typeof value === 'string' && /^[\w.+-]{1,64}\/[\w.+-]{1,64}(; ?[\w-]{1,32}=[\w.-]{1,32})?$/.test(value);
+    if (key === 'stream.processing_ms') return typeof value === 'string' && /^\d{1,9}$/.test(value);
+    if (key === 'provider.request_id') return typeof value === 'string' && /^[A-Za-z0-9._:-]{1,128}$/.test(value);
+    if (key === 'stream.edge_request_id') return typeof value === 'string' && /^[A-Za-z0-9-]{1,64}$/.test(value);
+    if (key === 'stream.last_event') return safeProviderCode(value) === value;
     if (key === 'slack.event_id') return typeof value === 'string' && rowIdPattern.test(value);
     if (key === 'task.id') return typeof value === 'string' && rowIdPattern.test(value);
     if (key === 'github.ratelimit_resource') return typeof value === 'string' && /^[a-z_]{1,32}$/.test(value);
@@ -3097,6 +3115,23 @@ export async function observeInference<T>(
             ...(diagnostics?.providerMessage ? { 'provider.error_message': diagnostics.providerMessage } : {}),
             ...(diagnostics?.rejection ? { 'response.rejection': diagnostics.rejection } : {}),
             ...(diagnostics?.finishReason ? { 'response.finish_reason': diagnostics.finishReason } : {}),
+            ...(diagnostics?.stream
+              ? {
+                  'stream.events': diagnostics.stream.events,
+                  ...(diagnostics.stream.lastEvent ? { 'stream.last_event': diagnostics.stream.lastEvent } : {}),
+                  ...(diagnostics.stream.readError ? { 'stream.read_error': diagnostics.stream.readError } : {}),
+                  ...(diagnostics.stream.eventError ? { 'stream.event_error': diagnostics.stream.eventError } : {}),
+                  ...(diagnostics.stream.bytes === undefined ? {} : { 'stream.bytes': diagnostics.stream.bytes }),
+                  ...(diagnostics.stream.contentType ? { 'stream.content_type': diagnostics.stream.contentType } : {}),
+                  ...(diagnostics.stream.processingMs
+                    ? { 'stream.processing_ms': diagnostics.stream.processingMs }
+                    : {}),
+                  ...(diagnostics.stream.edgeRequestId
+                    ? { 'stream.edge_request_id': diagnostics.stream.edgeRequestId }
+                    : {}),
+                  ...(diagnostics.stream.bodyPreview ? { 'stream.body_preview': diagnostics.stream.bodyPreview } : {}),
+                }
+              : {}),
           });
         };
         try {

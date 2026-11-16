@@ -216,6 +216,28 @@ export type ModelCallDiagnostics = {
   finishReason?: string | undefined;
   /** How long the provider asked the caller to wait before retrying, when it said. */
   retryAfterMs?: number | undefined;
+  /** What a streamed response carried before it failed. Already sanitised. Logs only. */
+  stream?: StreamDiagnostics | undefined;
+};
+
+export type StreamDiagnostics = {
+  events: number;
+  /** The type of the last event received, such as `response.created`. */
+  lastEvent?: string | undefined;
+  /** Why reading the stream failed: the error's name, code and message, and its cause's. */
+  readError?: string | undefined;
+  /** The code and message of an `error`, `response.failed` or `response.incomplete` event. */
+  eventError?: string | undefined;
+  /** Body bytes received. */
+  bytes?: number | undefined;
+  /** The response's `content-type`. */
+  contentType?: string | undefined;
+  /** The provider's processing time header, such as `openai-processing-ms`. */
+  processingMs?: string | undefined;
+  /** The edge network's request id, such as Cloudflare's `cf-ray`. */
+  edgeRequestId?: string | undefined;
+  /** The start of a body that was neither an event stream nor JSON, such as an error page. Sanitised. */
+  bodyPreview?: string | undefined;
 };
 
 /** The longest wait a rate-limited model is given before the call moves to its fallback model instead. */
@@ -237,10 +259,11 @@ export class ModelCallError extends Error {
   readonly modelDiagnostics: ModelCallDiagnostics;
   constructor(
     reason: string,
-    diagnostics: Omit<ModelCallDiagnostics, 'errorClass'> & {
+    diagnostics: Omit<ModelCallDiagnostics, 'errorClass' | 'stream'> & {
       errorClass?: ModelErrorClass;
       /** The serialized request, used only to redact provider messages that quote it; never stored. */
       request?: string | undefined;
+      stream?: (Omit<StreamDiagnostics, 'readError'> & { readError?: unknown }) | undefined;
     },
     options?: { cause?: unknown },
   ) {
@@ -268,7 +291,56 @@ export class ModelCallError extends Error {
     };
     const message = sanitizeProviderMessage(diagnostics.providerMessage, diagnostics.request);
     if (message) this.modelDiagnostics.providerMessage = message;
+    if (diagnostics.stream) this.modelDiagnostics.stream = streamDiagnostics(diagnostics.stream, diagnostics.request);
   }
+}
+
+function streamDiagnostics(
+  stream: Omit<StreamDiagnostics, 'readError'> & { readError?: unknown },
+  request: string | undefined,
+): StreamDiagnostics {
+  const lastEvent = safeProviderCode(stream.lastEvent);
+  const readError = sanitizeProviderMessage(
+    typeof stream.readError === 'string' ? stream.readError : describeError(stream.readError),
+    request,
+  );
+  const eventError = sanitizeProviderMessage(stream.eventError, request);
+  const bodyPreview = sanitizeProviderMessage(stream.bodyPreview?.replace(/\s+/g, ' '), request);
+  const contentType = /^[\w.+-]{1,64}\/[\w.+-]{1,64}(; ?[\w-]{1,32}=[\w.-]{1,32})?$/.test(stream.contentType ?? '')
+    ? stream.contentType
+    : undefined;
+  const processingMs = /^\d{1,9}$/.test(stream.processingMs ?? '') ? stream.processingMs : undefined;
+  const edgeRequestId = /^[A-Za-z0-9-]{1,64}$/.test(stream.edgeRequestId ?? '') ? stream.edgeRequestId : undefined;
+  const count = (value: number | undefined) =>
+    value !== undefined && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+  const bytes = count(stream.bytes);
+  return {
+    events: count(stream.events) ?? 0,
+    ...(bytes === undefined ? {} : { bytes }),
+    ...(lastEvent ? { lastEvent } : {}),
+    ...(readError ? { readError } : {}),
+    ...(eventError ? { eventError } : {}),
+    ...(contentType ? { contentType } : {}),
+    ...(processingMs ? { processingMs } : {}),
+    ...(edgeRequestId ? { edgeRequestId } : {}),
+    ...(bodyPreview ? { bodyPreview } : {}),
+  };
+}
+
+/** An error and its causes as `name code: message < cause name code: message`, for sanitising into a log. */
+export function describeError(error: unknown): string | undefined {
+  const parts: string[] = [];
+  for (let value = error, depth = 0; value && depth < 4; depth++) {
+    if (typeof value !== 'object') {
+      parts.push(String(value));
+      break;
+    }
+    const { name, code, message } = value as { name?: unknown; code?: unknown; message?: unknown };
+    const label = [name, code].filter(part => typeof part === 'string' || typeof part === 'number').join(' ');
+    parts.push([label, typeof message === 'string' ? message : ''].filter(Boolean).join(': '));
+    value = (value as { cause?: unknown }).cause;
+  }
+  return parts.filter(Boolean).join(' < ') || undefined;
 }
 
 /** The diagnostics of a model call failure anywhere in an error's cause chain. */

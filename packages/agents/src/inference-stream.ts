@@ -7,6 +7,105 @@ export type StreamFormat = 'anthropic' | 'chat-completions' | 'responses' | 'gem
 export type StreamedResponse = { body: unknown; error: unknown };
 export type ServerSentEvent = { event: string; data: string };
 
+/** A stream that broke while it was read, with what was assembled before the break. */
+export class StreamReadError extends Error {
+  readonly partial: StreamedResponse;
+  constructor(partial: StreamedResponse, cause: unknown) {
+    super('stream-read-failed', { cause });
+    this.name = 'StreamReadError';
+    this.partial = partial;
+  }
+}
+
+/** A successful response to a streaming request that is neither an event stream nor JSON, such as an error page. */
+export class UnexpectedBodyError extends Error {
+  /** The start of the body. It comes from the provider, not the request; logs sanitise it before use. */
+  readonly preview: string;
+  constructor(text: string) {
+    super('response-not-event-stream');
+    this.name = 'UnexpectedBodyError';
+    this.preview = text.slice(0, 200);
+  }
+}
+
+/** What a streamed response carried, for failure logs. Never answer or request text. */
+export type StreamTrace = {
+  events: number;
+  bytes: number;
+  lastEvent?: string | undefined;
+  /** The type, code and message of an `error`, `response.failed` or `response.incomplete` event. */
+  eventError?: string | undefined;
+  contentType?: string | undefined;
+  processingMs?: string | undefined;
+  edgeRequestId?: string | undefined;
+  readError?: unknown;
+  bodyPreview?: string | undefined;
+};
+
+const eventTypePattern = /"type"\s*:\s*"([\w.:-]{1,64})"/;
+const failureEventPattern = /"type"\s*:\s*"(error|response\.failed|response\.incomplete)"/;
+
+/** Follows one streamed response for {@link StreamTrace}. */
+export function streamTrace() {
+  const trace: StreamTrace = { events: 0, bytes: 0 };
+  return {
+    trace,
+    response(response: Response) {
+      trace.contentType = response.headers.get('content-type') ?? undefined;
+      trace.processingMs = response.headers.get('openai-processing-ms') ?? undefined;
+      trace.edgeRequestId = response.headers.get('cf-ray') ?? undefined;
+    },
+    received(bytes: number) {
+      trace.bytes += bytes;
+    },
+    observe({ event, data }: ServerSentEvent) {
+      trace.events++;
+      const head = data.slice(0, 200);
+      trace.lastEvent = event !== 'message' ? event : (eventTypePattern.exec(head)?.[1] ?? trace.lastEvent);
+      if (!failureEventPattern.test(head) && !['error', 'response.failed', 'response.incomplete'].includes(event))
+        return;
+      const json = eventJson(data);
+      const value = json.ok ? (json.value as Record<string, unknown> | null) : null;
+      trace.eventError = failureSummary(value) ?? trace.eventError;
+    },
+    failed(error: unknown) {
+      trace.readError = error;
+      if (error instanceof UnexpectedBodyError) trace.bodyPreview = error.preview;
+    },
+  };
+}
+
+function failureSummary(value: Record<string, unknown> | null): string | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const field = (from: unknown, key: string) =>
+    from && typeof from === 'object' ? (from as Record<string, unknown>)[key] : undefined;
+  const response = field(value, 'response');
+  const error = field(value, 'error') ?? field(response, 'error') ?? value;
+  const parts = [
+    String(value.type ?? ''),
+    field(error, 'type'),
+    field(error, 'code'),
+    field(field(response, 'incomplete_details'), 'reason'),
+    field(error, 'message'),
+  ].filter(part => (typeof part === 'string' && part) || typeof part === 'number');
+  return parts.length ? parts.join(': ') : undefined;
+}
+
+/**
+ * A Responses error, from an `error` event in either shape or a failed response, as an `{ error }` envelope holding
+ * only its type, code, message and param.
+ */
+export function responsesError(value: unknown): { error: Record<string, string | number> } {
+  const error: Record<string, string | number> = {};
+  const source = value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
+  for (const key of ['type', 'code', 'message', 'param']) {
+    const field = source[key];
+    if (typeof field === 'string' || (key === 'code' && typeof field === 'number' && Number.isFinite(field)))
+      error[key] = field;
+  }
+  return { error };
+}
+
 /** Body fields that ask for a streamed response; Gemini streams through its `streamGenerateContent?alt=sse` URL instead. */
 export function streamRequestFields(format: StreamFormat) {
   if (format === 'gemini') return {};
@@ -18,7 +117,10 @@ export function streamUrl(format: StreamFormat, url: string) {
   return format === 'gemini' ? url.replace(/:generateContent$/, ':streamGenerateContent?alt=sse') : url;
 }
 
-export async function* serverSentEvents(body: ReadableStream<Uint8Array>): AsyncGenerator<ServerSentEvent> {
+export async function* serverSentEvents(
+  body: ReadableStream<Uint8Array>,
+  onBytes?: (count: number) => void,
+): AsyncGenerator<ServerSentEvent> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
@@ -42,6 +144,7 @@ export async function* serverSentEvents(body: ReadableStream<Uint8Array>): Async
   try {
     for (;;) {
       const { done, value } = await reader.read();
+      if (value) onBytes?.(value.byteLength);
       buffer += done ? decoder.decode() : decoder.decode(value, { stream: true });
       for (;;) {
         const end = buffer.search(/[\r\n]/);
@@ -339,14 +442,14 @@ const responsesEventSchema = z.object({
     .optional(),
   item_id: z.string().optional(),
   delta: z.string().optional(),
-  code: z.string().nullish(),
-  message: z.string().optional(),
+  code: z.union([z.string(), z.number()]).nullish(),
+  message: z.string().nullish(),
+  error: record.nullish(),
 });
 
 function responsesAssembler(): Assembler {
   let final: Record<string, unknown> | null = null;
   let error: unknown = null;
-  let broken = false;
   let calling = false;
   let text = '';
   const calls = new Map<string, ToolInput>();
@@ -354,10 +457,8 @@ function responsesAssembler(): Assembler {
     push({ data }) {
       const json = eventJson(data);
       const parsed = json.ok ? responsesEventSchema.safeParse(json.value) : undefined;
-      if (!parsed?.success) {
-        broken = true;
-        return;
-      }
+      // Like Codex, skip one malformed event; a missing terminal event still fails the reply.
+      if (!parsed?.success) return;
       const event = parsed.data;
       if (['response.completed', 'response.incomplete', 'response.failed'].includes(event.type))
         final = event.response ?? null;
@@ -369,8 +470,7 @@ function responsesAssembler(): Assembler {
         const call = calls.get(event.item_id);
         if (call) call.json += event.delta ?? '';
       } else if (event.type === 'response.output_text.delta') text += event.delta ?? '';
-      else if (event.type === 'error')
-        error = { error: { type: 'error', code: event.code ?? undefined, message: event.message } };
+      else if (event.type === 'error') error = responsesError(event.error ?? event);
       return (
         [
           'response.output_text.delta',
@@ -389,7 +489,7 @@ function responsesAssembler(): Assembler {
       return text || undefined;
     },
     result() {
-      return { body: broken ? null : final, error };
+      return { body: final, error };
     },
   };
 }
@@ -533,20 +633,40 @@ export async function readModelResponse(
   options: {
     onText: ((text: string) => void) | undefined;
     onFirstToken?: () => void;
-    onEvent?: () => void;
+    onEvent?: (event: ServerSentEvent) => void;
     /** Each change of a tool call's arguments while they stream, as possibly incomplete JSON. */
     onToolInput?: (callId: string, name: string, partialJson: string) => void;
+    /** The size of each body chunk as it arrives. */
+    onBytes?: (count: number) => void;
   },
 ): Promise<StreamedResponse> {
   if (!response.ok) return { body: await rejectionBody(response), error: null };
-  if (!format || !response.body || !/^text\/event-stream\b/i.test(response.headers.get('content-type') ?? ''))
-    return { body: await response.json(), error: null };
+  const contentType = response.headers.get('content-type') ?? '';
+  if (!format || !contentType || /\bjson\b/i.test(contentType)) return { body: await response.json(), error: null };
+  let body = response.body;
+  let counted = false;
+  if (!body || !/^text\/event-stream\b/i.test(contentType)) {
+    let text: string;
+    try {
+      text = await response.text();
+    } catch (error) {
+      throw new StreamReadError({ body: null, error: null }, error);
+    }
+    options.onBytes?.(new TextEncoder().encode(text).byteLength);
+    const json = eventJson(text);
+    if (json.ok) return { body: json.value, error: null };
+    // Some gateways send an event stream without its content type.
+    if (!/^\s*(event|data|id|retry)?:/.test(text))
+      throw new StreamReadError({ body: null, error: null }, new UnexpectedBodyError(text));
+    body = new Response(text).body!;
+    counted = true;
+  }
   const assembler = assemblers[format]();
   let shown = '';
   let firstToken = false;
   const inputs = new Map<string, string>();
-  for await (const event of serverSentEvents(response.body)) {
-    options.onEvent?.();
+  for await (const event of readEvents(body, assembler, counted ? undefined : options.onBytes)) {
+    options.onEvent?.(event);
     if (assembler.push(event) && !firstToken) {
       firstToken = true;
       options.onFirstToken?.();
@@ -577,4 +697,23 @@ export async function readModelResponse(
     if (text !== shown) options.onText(text);
   }
   return assembler.result();
+}
+
+/** The stream's events; a failed read throws {@link StreamReadError} with what was assembled so far. */
+async function* readEvents(body: ReadableStream<Uint8Array>, assembler: Assembler, onBytes?: (count: number) => void) {
+  const events = serverSentEvents(body, onBytes);
+  try {
+    for (;;) {
+      let next: IteratorResult<ServerSentEvent>;
+      try {
+        next = await events.next();
+      } catch (error) {
+        throw new StreamReadError(assembler.result(), error);
+      }
+      if (next.done) return;
+      yield next.value;
+    }
+  } finally {
+    await events.return(undefined);
+  }
 }
