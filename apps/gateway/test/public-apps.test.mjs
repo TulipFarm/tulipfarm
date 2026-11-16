@@ -42,7 +42,13 @@ async function sandbox(t, options = {}) {
     const chunks = [];
     for await (const chunk of incoming) chunks.push(chunk);
     response
-      .writeHead(201, { 'Content-Type': 'application/json', 'X-App': 'menu', 'X-Spawnbox-Route': 'internal' })
+      .writeHead(201, {
+        'Content-Type': 'application/json',
+        'X-App': 'menu',
+        'X-Spawnbox-Route': 'internal',
+        'tulipfarm-request': 'tfr_echoed',
+        'TulipFarm-Anything': 'leaked',
+      })
       .end(
         JSON.stringify({ method: incoming.method, url: incoming.url, body: Buffer.concat(chunks).toString('utf8') }),
       );
@@ -55,7 +61,7 @@ async function sandbox(t, options = {}) {
       .update(`${incoming.headers['sec-websocket-key']}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`)
       .digest('base64');
     socket.write(
-      `HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`,
+      `HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\nX-App: live\r\ntulipfarm-request: tfr_echoed\r\nTulipFarm-Anything: leaked\r\n\r\n`,
     );
     socket.on('end', () => socket.end());
     socket.on('data', async frame => {
@@ -272,6 +278,20 @@ test('the client cannot steer the forwarding layer, and TulipFarm cookies and he
   assert.equal(seen['x-forwarded-proto'], 'http');
 });
 
+test('TulipFarm- headers are taken out on the way to the app and on the way back, over HTTP and WebSocket', async t => {
+  const { port, upstream } = await gatewayFor(t, { running: true });
+  const headers = { 'TulipFarm-Request': 'tfr_forged', 'TULIPFARM-anything': 'forged', 'x-visitor': 'kept' };
+  const named = (seen, pattern) => Object.fromEntries(Object.entries(seen).filter(([name]) => pattern.test(name)));
+  const http = await call(port, { headers });
+  const socket = await echo(port, 'ping', headers);
+  assert.deepEqual(
+    upstream.seen.map(seen => named(seen, /^(tulipfarm-|x-visitor$)/)),
+    [{ 'x-visitor': 'kept' }, { 'x-visitor': 'kept' }],
+  );
+  assert.deepEqual(named(http.headers, /^(tulipfarm-|x-app$)/), { 'x-app': 'menu' });
+  assert.deepEqual(named(socket.headers, /^(tulipfarm-|x-app$)/), { 'x-app': 'live' });
+});
+
 test('HEAD requests and bots do not wake a stopped app', async t => {
   const { port, upstream } = await gatewayFor(t);
   const head = await call(port, { method: 'HEAD' });
@@ -334,7 +354,11 @@ function echo(port, text, headers = {}) {
       socket.write(Buffer.concat([Buffer.from([0x81, 0x80 | payload.length]), mask, payload]));
       socket.once('data', frame => {
         socket.destroy();
-        resolve({ status: response.statusCode, text: frame.subarray(2, 2 + frame[1]).toString() });
+        resolve({
+          status: response.statusCode,
+          text: frame.subarray(2, 2 + frame[1]).toString(),
+          headers: response.headers,
+        });
       });
     });
     outgoing.on('error', reject);
@@ -344,7 +368,8 @@ function echo(port, text, headers = {}) {
 
 test('a WebSocket reaches the app and echoes', async t => {
   const { port, upstream } = await gatewayFor(t);
-  assert.deepEqual(await echo(port, 'ping'), { status: 101, text: 'ping' });
+  const { status, text } = await echo(port, 'ping');
+  assert.deepEqual({ status, text }, { status: 101, text: 'ping' });
   assert.equal(upstream.wakes, 1);
   assert.equal(upstream.seen[0]['x-spawnbox-target'], appId);
   assert.equal(upstream.seen[0].cookie, undefined);
@@ -459,7 +484,8 @@ test('behind CloudFront and a load balancer the client is the second forwarded h
     await t.test(mode, async t => {
       const { port, upstream } = await gatewayFor(t, { ...proxied(mode), running: true });
       assert.equal((await call(port, { headers: throughEdge('203.0.113.7') })).status, 201);
-      assert.deepEqual(await echo(port, 'ping', throughEdge('203.0.113.7')), { status: 101, text: 'ping' });
+      const { status, text } = await echo(port, 'ping', throughEdge('203.0.113.7'));
+      assert.deepEqual({ status, text }, { status: 101, text: 'ping' });
       assert.deepEqual(
         upstream.seen.map(seen => seen['x-forwarded-for']),
         [forwardedFor, forwardedFor],
@@ -488,7 +514,8 @@ test('the app sees only the forwarding headers the gateway derived, over HTTP an
         running: true,
       });
       assert.equal((await call(port, { headers })).status, 201);
-      assert.deepEqual(await echo(port, 'ping', headers), { status: 101, text: 'ping' });
+      const { status, text } = await echo(port, 'ping', headers);
+      assert.deepEqual({ status, text }, { status: 101, text: 'ping' });
       const forwarding = seen =>
         Object.fromEntries(
           Object.entries(seen).filter(([name]) => /^(x-forwarded-|x-real-ip$|forwarded$|x-spawnbox-)/.test(name)),
