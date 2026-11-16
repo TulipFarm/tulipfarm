@@ -159,7 +159,14 @@ async function gatewayFor(t, options = {}) {
 function liveStore(options = {}) {
   const ttlMs = options.ttlMs ?? 60_000;
   const open = new Map();
-  const state = { release: options.release === undefined ? releaseId : options.release, mints: 0, failing: false };
+  const state = {
+    release: options.release === undefined ? releaseId : options.release,
+    mints: 0,
+    renews: 0,
+    failing: false,
+    held: null,
+    reads: 0,
+  };
   const resolve = handle => {
     const found = open.get(handle);
     return found !== undefined && found.until > Date.now() ? found.request : null;
@@ -167,6 +174,8 @@ function liveStore(options = {}) {
   const store = {
     async dataRelease(app) {
       assert.deepEqual(app, { workspaceId, appId });
+      state.reads += 1;
+      await state.held;
       return state.release;
     },
     async mint(request) {
@@ -177,6 +186,7 @@ function liveStore(options = {}) {
       return handle;
     },
     async renew(handle) {
+      state.renews += 1;
       if (!resolve(handle)) return false;
       open.get(handle).until = Date.now() + ttlMs;
       return true;
@@ -702,6 +712,62 @@ test('a WebSocket holds a handle until it closes', async t => {
   assert.deepEqual(upstream.live, [served]);
   await until(() => live.resolve(handle) === null);
   assert.equal(live.open.size, 0);
+});
+
+/** Holds the route lookup's data view read until `release` is called, so a client can leave while it is pending. */
+function holdLookup(live) {
+  let release;
+  live.state.held = new Promise(resolve => (release = resolve));
+  return () => {
+    live.state.held = null;
+    release();
+  };
+}
+
+test('a visitor who leaves while the app is looked up leaves no live handle behind', async t => {
+  await t.test('an HTTP request', async t => {
+    const live = liveStore({ renewMs: 10 });
+    const { port, upstream } = await gatewayFor(t, { running: true, live });
+    const release = holdLookup(live);
+    const outgoing = request({ host: '127.0.0.1', port, path: '/events', headers: { host } });
+    outgoing.on('error', () => {});
+    outgoing.end();
+    await until(() => live.state.reads === 1);
+    outgoing.destroy();
+    await new Promise(resolve => setTimeout(resolve, 50));
+    release();
+    await new Promise(resolve => setTimeout(resolve, 100));
+    assert.equal(live.open.size, 0);
+    assert.equal(live.state.renews, 0);
+    assert.deepEqual(upstream.seen, []);
+  });
+  await t.test('a WebSocket upgrade', async t => {
+    const live = liveStore({ renewMs: 10 });
+    const { port, upstream } = await gatewayFor(t, { running: true, live });
+    const release = holdLookup(live);
+    const outgoing = request({
+      host: '127.0.0.1',
+      port,
+      path: '/live',
+      headers: {
+        host,
+        connection: 'Upgrade',
+        upgrade: 'websocket',
+        'sec-websocket-key': randomBytes(16).toString('base64'),
+        'sec-websocket-version': '13',
+      },
+    });
+    outgoing.on('error', () => {});
+    outgoing.end();
+    await until(() => live.state.reads === 1);
+    outgoing.destroy();
+    await new Promise(resolve => setTimeout(resolve, 50));
+    release();
+    await new Promise(resolve => setTimeout(resolve, 100));
+    assert.equal(live.open.size, 0);
+    assert.equal(live.state.renews, 0);
+    assert.deepEqual(upstream.seen, []);
+  });
 });
 
 test('apps without approved data views get no handle, and a failed mint relays without one', async t => {

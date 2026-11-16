@@ -1,3 +1,4 @@
+import type { EventEmitter } from 'node:events';
 import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
 import rateLimit from '@fastify/rate-limit';
@@ -95,11 +96,25 @@ export function buildPublicAppsGateway(dependencies: PublicAppsDependencies, ser
     key: appId,
     connect: signal => dependencies.host.connect({ appId }, signal),
   });
-  /** A handle for one visitor request to an app with data views, closed by `close` once the client is done. */
-  const liveRequest = (app: Extract<PublicApp, { kind: 'server' }>) =>
-    live && app.dataViews
-      ? openLiveRequest(live.store, app.app, { renewMs: live.renewMs ?? renewMs, log: logLiveRequest })
-      : null;
+  /**
+   * A handle for one visitor request to an app with data views, closed once `connection` closes. A connection that
+   * closed while the app was looked up already fired 'close', so `gone` is checked as well.
+   */
+  const liveRequest = (
+    app: Extract<PublicApp, { kind: 'server' }>,
+    connection: Pick<EventEmitter, 'once'>,
+    gone: () => boolean,
+  ) => {
+    if (!live || !app.dataViews) return null;
+    const opened = openLiveRequest(live.store, app.app, {
+      renewMs: live.renewMs ?? renewMs,
+      gone,
+      log: logLiveRequest,
+    });
+    connection.once('close', opened.close);
+    if (gone()) opened.close();
+    return opened;
+  };
   if (live) {
     const sweeping = setInterval(() => {
       live.store.sweep().catch(logLiveRequest);
@@ -124,14 +139,16 @@ export function buildPublicAppsGateway(dependencies: PublicAppsDependencies, ser
           return answer(request, reply, app.kind === 'missing' ? 'not-found' : 'unavailable', {
             frameAncestors: unframed,
           });
-        const opened = liveRequest(app);
-        if (opened) reply.raw.once('close', opened.close);
+        const gone = () => reply.raw.destroyed || reply.raw.writableEnded;
+        const opened = liveRequest(app, reply.raw, gone);
+        const handle = (await opened?.handle) ?? null;
+        if (opened && gone()) return reply.hijack();
         const forwarded = await relay.request(
           request,
           reply,
           clientOf(request.raw, serverOptions.trustProxy),
           destination(app.app.appId),
-          (await opened?.handle) ?? null,
+          handle,
         );
         if (forwarded.kind === 'answer')
           return answer(request, reply, forwarded.answer, {
@@ -164,9 +181,11 @@ export function buildPublicAppsGateway(dependencies: PublicAppsDependencies, ser
       return rawAnswer(socket, 'unavailable');
     }
     if (app.kind !== 'server') return rawAnswer(socket, app.kind === 'missing' ? 'not-found' : 'unavailable');
-    const opened = liveRequest(app);
-    if (opened) socket.once('close', opened.close);
-    await relay.upgrade(request, socket, head, client, destination(app.app.appId), (await opened?.handle) ?? null);
+    const gone = () => socket.destroyed || !socket.readable;
+    const opened = liveRequest(app, socket, gone);
+    const handle = (await opened?.handle) ?? null;
+    if (opened && gone()) return socket.destroy();
+    await relay.upgrade(request, socket, head, client, destination(app.app.appId), handle);
   }
 
   return { http: gateway, upgrade };

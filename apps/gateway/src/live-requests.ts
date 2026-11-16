@@ -20,13 +20,13 @@ export type LiveRequest = { readonly handle: Promise<RequestHandle | null>; read
 
 /**
  * Opens a live request for a visitor request: reads the serving release, mints a handle for it and renews it every
- * `renewMs` until `close`. A failure leaves the request without a handle. Closing before the mint settles closes the
- * handle as soon as it exists.
+ * `renewMs` until `close` or until `gone` reports the visitor's connection has ended. A failure leaves the request
+ * without a handle. A request closed or gone before the mint settles gets no handle, and the minted one is closed.
  */
 export function openLiveRequest(
   store: LiveRequestStore,
   app: ServedApp,
-  options: { readonly renewMs: number; readonly log: (error: unknown) => void },
+  options: { readonly renewMs: number; readonly gone: () => boolean; readonly log: (error: unknown) => void },
 ): LiveRequest {
   let closed = false;
   let renewing: NodeJS.Timeout | undefined;
@@ -37,14 +37,22 @@ export function openLiveRequest(
   })().then(
     minted => {
       if (!minted) return null;
-      if (closed) {
+      if (closed || options.gone()) {
+        closed = true;
         void end(minted);
         return null;
       }
+      let pending = false;
       renewing = setInterval(() => {
-        store.renew(minted).then(live => {
-          if (!live) clearInterval(renewing);
-        }, options.log);
+        if (options.gone()) return live.close();
+        if (pending) return;
+        pending = true;
+        store
+          .renew(minted)
+          .then(renewed => {
+            if (!renewed) clearInterval(renewing);
+          }, options.log)
+          .finally(() => (pending = false));
       }, options.renewMs).unref();
       return minted;
     },
@@ -53,7 +61,7 @@ export function openLiveRequest(
       return null;
     },
   );
-  return {
+  const live: LiveRequest = {
     handle,
     close() {
       if (closed) return;
@@ -62,4 +70,5 @@ export function openLiveRequest(
       void handle.then(minted => minted && end(minted));
     },
   };
+  return live;
 }
