@@ -104,7 +104,7 @@ async function previewFor(t, options = {}) {
       },
       recheckMs: options.recheckMs ?? 100,
     },
-    apps: null,
+    apps: options.apps ?? null,
     serverOptions: options.serverOptions ?? {},
     previewServerOptions: options.previewServerOptions,
     identity: { version: 'development', commit: 'development' },
@@ -193,6 +193,39 @@ test("an editor's draft request reaches the draft's server", async t => {
   socket.socket.destroy();
   assert.equal(upstream.sockets, 1);
   assert.equal(upstream.seen[1].cookie, 'theme=dark');
+});
+
+test("a draft's server never gets a request handle, even for an app whose live release has data views", async t => {
+  const mints = [];
+  const apps = {
+    domain: 'apps.tulipfarm.test',
+    route: async () => ({ workspaceId: session.workspaceId, appId, route: null }),
+    enabled: async () => true,
+    host: {},
+    liveRequests: {
+      store: {
+        dataRelease: async () => '44444444-4444-4444-8444-444444444444',
+        async mint(request) {
+          mints.push(request);
+          return `tfr_${randomBytes(32).toString('base64url')}`;
+        },
+        renew: async () => true,
+        close: async () => {},
+        sweep: async () => 0,
+      },
+    },
+  };
+  const { port, upstream } = await previewFor(t, { apps });
+  const forged = { 'TulipFarm-Request': 'tfr_forged' };
+  assert.equal((await call(port, { headers: { origin, ...forged } })).status, 200);
+  const socket = await connect(port, forged);
+  assert.equal(socket.status, 101);
+  socket.socket.destroy();
+  assert.deepEqual(
+    upstream.seen.map(seen => seen['tulipfarm-request']),
+    [undefined, undefined],
+  );
+  assert.deepEqual(mints, []);
 });
 
 test('a WebSocket handshake carries only the cookies a draft may set', async t => {

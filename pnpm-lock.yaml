@@ -305,6 +305,9 @@ importers:
       '@tulipfarm/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@tulipfarm/tables':
+        specifier: workspace:*
+        version: link:../../packages/tables
       '@tulipfarm/workspace-storage':
         specifier: workspace:*
         version: link:../../packages/workspace-storage

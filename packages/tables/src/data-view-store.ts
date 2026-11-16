@@ -112,6 +112,18 @@ async function servingRelease(tx: TableTransaction, appId: string) {
   return row?.live_release_id ?? null;
 }
 
+/** The release serving the app now when an admin has approved at least one of its views, otherwise null. */
+export async function dataViewRelease(tx: TableTransaction, appId: string): Promise<string | null> {
+  const release = await servingRelease(tx, uuidSchema.parse(appId));
+  if (release === null) return null;
+  const { rowCount } = await tx.client.query(
+    `SELECT 1 FROM ${table(tx, 'tf_app_data_views')} v JOIN ${table(tx, 'tf_app_data_view_grants')} g ON g.view_id=v.id
+    WHERE v.app_id=$1 AND g.approved_by IS NOT NULL LIMIT 1`,
+    [appId],
+  );
+  return rowCount ? release : null;
+}
+
 /**
  * Everything that stops `view` serving now, in the order a member would fix them. An approval is a recorded decision: it
  * keeps serving after the people who shared and approved it leave or lose rights, until it is revoked.

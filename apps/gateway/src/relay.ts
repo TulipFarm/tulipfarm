@@ -1,6 +1,7 @@
 import { STATUS_CODES, type IncomingMessage, type OutgoingHttpHeaders } from 'node:http';
 import type { Duplex } from 'node:stream';
 import type { FastifyReply, FastifyRequest, FastifyServerOptions } from 'fastify';
+import type { RequestHandle } from '@tulipfarm/apps/store';
 import { AppHostUnavailableError } from '@tulipfarm/extensions';
 import {
   clientHeaders,
@@ -255,12 +256,16 @@ export function createRelay(options: {
   }
 
   return {
-    /** Forwards an HTTP request and resolves with the app's response, or with what to answer instead. */
+    /**
+     * Forwards an HTTP request and resolves with the app's response, or with what to answer instead. Every attempt
+     * carries the same `requestHandle`.
+     */
     async request(
       request: FastifyRequest,
       reply: FastifyReply,
       client: Client,
       destination: Destination,
+      requestHandle: RequestHandle | null,
     ): Promise<
       | { readonly kind: 'response'; readonly response: IncomingMessage }
       | { readonly kind: 'answer'; readonly answer: Answer; readonly retryAfterSeconds: number | null }
@@ -279,7 +284,7 @@ export function createRelay(options: {
             {
               method: request.method,
               path: request.url,
-              headers: upstreamHeaders(request.headers, { client, endpoint, wake, upgrade: false }),
+              headers: upstreamHeaders(request.headers, { client, endpoint, wake, upgrade: false, requestHandle }),
             },
             replayable ? undefined : request.raw,
             sender.signal,
@@ -312,6 +317,7 @@ export function createRelay(options: {
       head: Buffer,
       client: Client,
       destination: Destination,
+      requestHandle: RequestHandle | null,
       responseHeaders: (headers: OutgoingHttpHeaders) => OutgoingHttpHeaders = headers => headers,
     ): Promise<{ app: Duplex; frames: FrameCursor | null } | null> {
       let outcome: Outcome;
@@ -326,7 +332,13 @@ export function createRelay(options: {
               {
                 method: request.method ?? 'GET',
                 path: request.url ?? '/',
-                headers: upstreamHeaders(request.headers, { client, endpoint, wake: true, upgrade: true }),
+                headers: upstreamHeaders(request.headers, {
+                  client,
+                  endpoint,
+                  wake: true,
+                  upgrade: true,
+                  requestHandle,
+                }),
               },
               undefined,
               sender.signal,

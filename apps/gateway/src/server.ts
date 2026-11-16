@@ -35,7 +35,7 @@ if (!preview) throw new Error('Set TULIPFARM_APP_PREVIEW_DOMAIN and TULIPFARM_OB
 
 const server = buildGateway({
   preview,
-  apps: publicAppsFromEnvironment(process.env, pool),
+  apps: publicAppsFromEnvironment(process.env, pool, storage),
   serverOptions: gatewayServerOptions(process.env),
   previewServerOptions: previewServerOptions(process.env),
   identity: { version: buildInfo.version, commit: buildInfo.commit },

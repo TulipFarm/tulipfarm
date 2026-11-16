@@ -1,3 +1,4 @@
+import type { EventEmitter } from 'node:events';
 import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
 import rateLimit from '@fastify/rate-limit';
@@ -7,6 +8,7 @@ import type { CurrentAppRoute } from '@tulipfarm/apps/store';
 import { AppHostUnavailableError, type AppHost } from '@tulipfarm/extensions';
 import { clientHeaders, type Client } from './forward.ts';
 import { registerObservability, requestBoundaryError } from './http.ts';
+import { openLiveRequest, type LiveRequestStore, type ServedApp } from './live-requests.ts';
 import { answer, cached, clientOf, createRelay, rawAnswer, type Destination } from './relay.ts';
 
 export type PublicAppsDependencies = {
@@ -20,15 +22,27 @@ export type PublicAppsDependencies = {
   readonly wakeBudgetMs?: number;
   /** How long a WebSocket may carry nothing from the app before the gateway sends the client a keepalive frame. */
   readonly keepaliveMs?: number | undefined;
+  /** Gives visitor requests to apps with approved data views a handle. Without it, no request gets one. */
+  readonly liveRequests?:
+    | {
+        readonly store: LiveRequestStore;
+        /** How often an open request is kept live; well inside the store's expiry. */
+        readonly renewMs?: number;
+        /** How often expired requests are deleted. */
+        readonly sweepMs?: number;
+      }
+    | undefined;
 };
 
 /** What a public name leads to. Static apps are served by the edge, so the gateway has nothing for them. */
 type PublicApp =
   | { readonly kind: 'missing' }
   | { readonly kind: 'unavailable' }
-  | { readonly kind: 'server'; readonly appId: string };
+  | { readonly kind: 'server'; readonly app: ServedApp; readonly dataViews: boolean };
 
 const lookupMs = 15_000;
+const renewMs = 20_000;
+const sweepMs = 60_000;
 const unframed = "'none'";
 
 export function appNameOf(host: string | undefined, domain: string): string | null | undefined {
@@ -55,11 +69,24 @@ export function buildPublicAppsGateway(dependencies: PublicAppsDependencies, ser
   gateway.removeAllContentTypeParsers();
   gateway.addContentTypeParser('*', (_request, _payload, done) => done(null));
 
+  const live = dependencies.liveRequests;
+  const logLiveRequest = (error: unknown) => gateway.log.error({ err: error }, 'App request handle failed');
+  const hasDataViews = async (app: ServedApp) => {
+    if (!live) return false;
+    try {
+      return (await live.store.dataRelease(app)) !== null;
+    } catch (error) {
+      logLiveRequest(error);
+      return false;
+    }
+  };
   const lookups = cached<PublicApp>(lookupMs);
   const findApp = async (name: string): Promise<PublicApp> => {
     const found = await dependencies.route(name);
     if (found?.route?.kind !== 'server' || !(await dependencies.enabled(found.workspaceId))) return { kind: 'missing' };
-    return found.route.status === 'active' ? { kind: 'server', appId: found.appId } : { kind: 'unavailable' };
+    if (found.route.status !== 'active') return { kind: 'unavailable' };
+    const app = { workspaceId: found.workspaceId, appId: found.appId };
+    return { kind: 'server', app, dataViews: await hasDataViews(app) };
   };
   const resolve = (host: string | undefined): Promise<PublicApp> => {
     const name = appNameOf(host, domain);
@@ -69,6 +96,31 @@ export function buildPublicAppsGateway(dependencies: PublicAppsDependencies, ser
     key: appId,
     connect: signal => dependencies.host.connect({ appId }, signal),
   });
+  /**
+   * A handle for one visitor request to an app with data views, closed once `connection` closes. A connection that
+   * closed while the app was looked up already fired 'close', so `gone` is checked as well.
+   */
+  const liveRequest = (
+    app: Extract<PublicApp, { kind: 'server' }>,
+    connection: Pick<EventEmitter, 'once'>,
+    gone: () => boolean,
+  ) => {
+    if (!live || !app.dataViews) return null;
+    const opened = openLiveRequest(live.store, app.app, {
+      renewMs: live.renewMs ?? renewMs,
+      gone,
+      log: logLiveRequest,
+    });
+    connection.once('close', opened.close);
+    if (gone()) opened.close();
+    return opened;
+  };
+  if (live) {
+    const sweeping = setInterval(() => {
+      live.store.sweep().catch(logLiveRequest);
+    }, live.sweepMs ?? sweepMs).unref();
+    gateway.addHook('onClose', async () => clearInterval(sweeping));
+  }
   const relay = createRelay({
     wakeBudgetMs: dependencies.wakeBudgetMs ?? 30_000,
     keepaliveMs: dependencies.keepaliveMs,
@@ -87,11 +139,16 @@ export function buildPublicAppsGateway(dependencies: PublicAppsDependencies, ser
           return answer(request, reply, app.kind === 'missing' ? 'not-found' : 'unavailable', {
             frameAncestors: unframed,
           });
+        const gone = () => reply.raw.destroyed || reply.raw.writableEnded;
+        const opened = liveRequest(app, reply.raw, gone);
+        const handle = (await opened?.handle) ?? null;
+        if (opened && gone()) return reply.hijack();
         const forwarded = await relay.request(
           request,
           reply,
           clientOf(request.raw, serverOptions.trustProxy),
-          destination(app.appId),
+          destination(app.app.appId),
+          handle,
         );
         if (forwarded.kind === 'answer')
           return answer(request, reply, forwarded.answer, {
@@ -124,7 +181,11 @@ export function buildPublicAppsGateway(dependencies: PublicAppsDependencies, ser
       return rawAnswer(socket, 'unavailable');
     }
     if (app.kind !== 'server') return rawAnswer(socket, app.kind === 'missing' ? 'not-found' : 'unavailable');
-    await relay.upgrade(request, socket, head, client, destination(app.appId));
+    const gone = () => socket.destroyed || !socket.readable;
+    const opened = liveRequest(app, socket, gone);
+    const handle = (await opened?.handle) ?? null;
+    if (opened && gone()) return socket.destroy();
+    await relay.upgrade(request, socket, head, client, destination(app.app.appId), handle);
   }
 
   return { http: gateway, upgrade };
