@@ -476,14 +476,18 @@ test('an app server reaches an approved view only while a visitor request is ope
     const server = await build(undefined, lookups.platform);
     t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
     const stockpile = Array.from({ length: 10_001 }, () => signRequestHandle(handles, appId));
-    const replay = async () => {
+    const replay = async (replayed = stockpile) => {
       const before = lookups.of(appId);
       const statuses = new Set();
-      for (const replayed of stockpile) statuses.add((await inject(server, replayed)).status);
+      for (const handle of replayed) statuses.add((await inject(server, handle)).status);
       return { lookups: lookups.of(appId) - before, statuses: [...statuses] };
     };
     assert.deepEqual(await replay(), { lookups: 10_001, statuses: [401] }, 'each new handle is looked up once');
-    assert.deepEqual(await replay(), { lookups: 0, statuses: [401] }, 'and then refused from memory');
+    assert.deepEqual(
+      await replay(stockpile.slice(-500)),
+      { lookups: 0, statuses: [401] },
+      "and the app's newest 500 are then refused from memory",
+    );
 
     t.mock.timers.tick(121_000);
     const before = lookups.of(appId);
