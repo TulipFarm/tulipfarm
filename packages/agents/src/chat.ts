@@ -160,8 +160,11 @@ export function createAgentChat(
     const input = chatInputSchema.parse(value);
     if (!model) throw new AgentError('model-not-configured', 503);
     return runtime.transaction(workspaceId, compatibility, async tx => {
-      await lockAuthorization(tx, 'write');
+      await lockAuthorization(tx);
       const actor = await resolveHuman(tx, user);
+      await tx.client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 648293))', [
+        `${tx.schema}:${actor.membershipId}`,
+      ]);
       if (!externalGuard?.record) await requireChatInvocation(tx, workspaceId, actor, agentId, input.id, externalGuard);
       await requireHumanRun(tx, input.id);
       await requireExternalRun(tx, workspaceId, input.id, externalGuard);
@@ -332,7 +335,7 @@ export function createAgentChat(
     const input = retryModelSchema.parse(value);
     if (!model) throw new AgentError('model-not-configured', 503);
     return runtime.transaction(workspaceId, compatibility, async tx => {
-      await lockAuthorization(tx, 'write');
+      await lockAuthorization(tx);
       const actor = await resolveHuman(tx, user);
       const raw = (
         await tx.client.query(

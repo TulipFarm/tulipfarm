@@ -134,7 +134,8 @@ export function createSkillExecutionFactory(bytes: FileBytes, client?: SkillClie
       )
         throw new SkillPackageError('runtime-unavailable');
       const prior = await runtime.transaction(context.workspaceId, skillPackageCompatibility, async tx => {
-        await lockAuthorization(tx, 'write');
+        await lockAuthorization(tx);
+        await tx.client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 648294))', [`${tx.schema}:${id}`]);
         const row = await verify(tx);
         if (row) return row.result ? skillExecutionResultSchema.parse(row.result) : null;
         if (suppliedId) throw new AccessDenied();
@@ -261,7 +262,7 @@ export function createSkillExecutionFactory(bytes: FileBytes, client?: SkillClie
       }
       if (output.status !== 'pending')
         await runtime.transaction(context.workspaceId, skillPackageCompatibility, async tx => {
-          await lockAuthorization(tx, 'write');
+          await lockAuthorization(tx);
           await verify(tx);
           await tx.client.query(
             `UPDATE ${relation(tx, 'tf_skill_invocations')} SET result=$2 WHERE id=$1 AND result IS NULL`,

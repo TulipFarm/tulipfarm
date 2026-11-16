@@ -713,7 +713,7 @@ export function createConversationExecutor(
   async function transaction<T>(workspaceId: string, operation: (tx: RuntimeTransaction) => Promise<T>) {
     return guardChatReplyFinal(() =>
       runtime.transaction(workspaceId, { minimum: 1, maximum: commonCompatibility.maximum }, async tx => {
-        await lockAuthorization(tx, resumeMcp ? 'write' : 'read');
+        await lockAuthorization(tx);
         return operation(bindFileSources(tx));
       }),
     );

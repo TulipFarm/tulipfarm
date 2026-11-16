@@ -514,12 +514,11 @@ export function createAgentPlans(
   async function transaction<T>(
     workspaceId: string,
     user: string,
-    write: boolean,
     operation: (tx: AgentTransaction & { commonVersion: number }, actor: HumanActor) => Promise<T>,
     compatibility: { minimum: number; maximum: number } = planCompatibility,
   ) {
     return runtime.transaction(uuidSchema.parse(workspaceId), compatibility, async tx => {
-      await lockAuthorization(tx, write ? 'write' : 'read');
+      await lockAuthorization(tx);
       return operation(tx, await resolveHuman(tx, user));
     });
   }
@@ -773,7 +772,7 @@ export function createAgentPlans(
     ) {
       const command = createPlanSchema.parse(input);
       const documents = command.document !== undefined && (await planDocumentsEnabled(workspaceId));
-      return transaction(workspaceId, user, true, async (tx, actor) => {
+      return transaction(workspaceId, user, async (tx, actor) => {
         await requireChat(tx, actor, chatId, 'turn');
         const revisions = tx.commonVersion >= planApprovalVersion;
         const inputDigest = digest({ chatId, command });
@@ -885,7 +884,7 @@ export function createAgentPlans(
     ) {
       const command = updatePlanSchema.parse(input);
       const documents = await planDocumentsEnabled(workspaceId);
-      return transaction(workspaceId, user, true, async (tx, actor) => {
+      return transaction(workspaceId, user, async (tx, actor) => {
         const plan = await loadPlan(tx, actor, planId, true);
         requireStarter(plan, actor);
         const revisions = tx.commonVersion >= planApprovalVersion;
@@ -1024,7 +1023,7 @@ export function createAgentPlans(
     async control(workspaceId: string, user: string, planId: string, input: unknown, sourceTurnId?: string) {
       const { requestId, ...command } = planControlSchema.parse(input);
       const documents = command.action === 'start' && (await planDocumentsEnabled(workspaceId));
-      return transaction(workspaceId, user, true, async (tx, actor) => {
+      return transaction(workspaceId, user, async (tx, actor) => {
         const plan = await loadPlan(tx, actor, planId, true);
         requireStarter(plan, actor);
         const inputDigest = digest({ control: command });
@@ -1207,7 +1206,7 @@ export function createAgentPlans(
       let approverUserId: string | undefined;
       // Reading is repeatable, so remote source checks run between its transactions instead of holding them open.
       const projection = await deferRemoteSourceChecks(() =>
-        transaction(workspaceId, user, false, async (tx, actor) => {
+        transaction(workspaceId, user, async (tx, actor) => {
           const plan = await loadPlan(tx, actor, planId, false);
           for (const check of plan.planning?.prerequisites ?? [])
             await requirePlanEvidence(tx, actor, plan, check.evidence, false);
@@ -1266,7 +1265,7 @@ export function createAgentPlans(
      * access, so only the starter receives results; a saved agent's result also depends on its private task.
      */
     async results(workspaceId: string, user: string, planId: string) {
-      return transaction(workspaceId, user, false, async (tx, actor) => {
+      return transaction(workspaceId, user, async (tx, actor) => {
         const plan = await loadPlan(tx, actor, planId, false);
         requireStarter(plan, actor);
         const rows = z
@@ -1302,7 +1301,6 @@ export function createAgentPlans(
       return transaction(
         workspaceId,
         user,
-        false,
         async (tx, actor) => {
           await requireChat(tx, actor, chatId, 'read');
           if (tx.commonVersion < planCompatibility.minimum) return [];

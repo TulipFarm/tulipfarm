@@ -277,7 +277,7 @@ export function createTaskRuntime(
   runtime = withTaskTelemetry(runtime);
   async function locked<T>(workspaceId: string, taskId: string, operation: (tx: Transaction) => Promise<T>) {
     return runtime.transaction(z.uuid().parse(workspaceId), compatibility, async tx => {
-      await lockAuthorization(tx, mcp ? 'write' : 'read');
+      await lockAuthorization(tx);
       await lockTask(tx, z.uuid().parse(taskId));
       return operation(tx);
     });

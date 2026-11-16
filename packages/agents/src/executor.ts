@@ -211,7 +211,7 @@ export function createAgentExecutor(options: Options) {
     parallel = false,
   ): Promise<T> {
     return runtime.transaction(ids.workspaceId, agentCompatibility, async tx => {
-      await lockAuthorization(tx, options.mcp ? 'write' : 'read');
+      await lockAuthorization(tx);
       const binding = await taskRun(tx, ids.runId);
       if (binding && !parallel) await lockTask(tx, binding.task_id);
       await tx.client.query(
@@ -1121,7 +1121,7 @@ export function createAgentExecutor(options: Options) {
               transaction: (workspaceId, range, action) =>
                 runtime.transaction(workspaceId, range, async tx => {
                   if (workspaceId !== ids.workspaceId) throw new AccessDenied();
-                  await lockAuthorization(tx, 'write');
+                  await lockAuthorization(tx);
                   const binding = await taskRun(tx, ids.runId);
                   if (!binding) throw new AccessDenied();
                   await lockTask(tx, binding.task_id);

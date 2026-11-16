@@ -117,49 +117,41 @@ export async function lockInternalFence(tx: AuthorizationTransaction, input: Int
 
 export function createInternalConversations(runtime: ConversationRuntime) {
   const fence = lockInternalFence;
-  async function transaction<T>(
-    workspaceId: string,
-    operation: (tx: AuthorizationTransaction) => Promise<T>,
-    mode: 'read' | 'write' = 'read',
-  ) {
+  async function transaction<T>(workspaceId: string, operation: (tx: AuthorizationTransaction) => Promise<T>) {
     return runtime.transaction(workspaceId, internalCompatibility, async tx => {
-      await lockAuthorization(tx, mode);
+      await lockAuthorization(tx);
       return operation(tx);
     });
   }
 
   async function claim(value: unknown): Promise<InternalFence | null> {
     const input = claimSchema.parse(value);
-    return transaction(
-      input.workspaceId,
-      async tx => {
-        await origin(tx, input);
-        await tx.client.query(
-          `INSERT INTO ${table(tx, 'tf_internal_conversations')} (id, origin_conversation_id, origin_turn_id) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`,
-          [input.runId, input.origin.conversationId, input.origin.turnId],
+    return transaction(input.workspaceId, async tx => {
+      await origin(tx, input);
+      await tx.client.query(
+        `INSERT INTO ${table(tx, 'tf_internal_conversations')} (id, origin_conversation_id, origin_turn_id) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`,
+        [input.runId, input.origin.conversationId, input.origin.turnId],
+      );
+      await root(tx, input);
+      const previous = claimRowSchema
+        .optional()
+        .parse(
+          (
+            await tx.client.query(
+              `SELECT owner_id, epoch, lease_until > clock_timestamp() AS live FROM ${table(tx, 'tf_conversation_runtime_claims')} WHERE conversation_id = $1 FOR UPDATE`,
+              [input.runId],
+            )
+          ).rows[0],
         );
-        await root(tx, input);
-        const previous = claimRowSchema
-          .optional()
-          .parse(
-            (
-              await tx.client.query(
-                `SELECT owner_id, epoch, lease_until > clock_timestamp() AS live FROM ${table(tx, 'tf_conversation_runtime_claims')} WHERE conversation_id = $1 FOR UPDATE`,
-                [input.runId],
-              )
-            ).rows[0],
-          );
-        if (previous?.live && previous.owner_id !== input.ownerId) return null;
-        if (previous?.live) return { ...input, epoch: previous.epoch };
-        const epoch = (previous?.epoch ?? 0) + 1;
-        await tx.client.query(
-          `INSERT INTO ${table(tx, 'tf_conversation_runtime_claims')} (conversation_id, owner_id, epoch, lease_until) VALUES ($1,$2,$3,clock_timestamp() + interval '60 seconds') ON CONFLICT (conversation_id) DO UPDATE SET owner_id = EXCLUDED.owner_id, epoch = EXCLUDED.epoch, lease_until = EXCLUDED.lease_until`,
-          [input.runId, input.ownerId, epoch],
-        );
-        return { ...input, epoch };
-      },
-      'write',
-    );
+      if (previous?.live && previous.owner_id !== input.ownerId) return null;
+      if (previous?.live) return { ...input, epoch: previous.epoch };
+      const epoch = (previous?.epoch ?? 0) + 1;
+      await tx.client.query(
+        `INSERT INTO ${table(tx, 'tf_conversation_runtime_claims')} (conversation_id, owner_id, epoch, lease_until) VALUES ($1,$2,$3,clock_timestamp() + interval '60 seconds') ON CONFLICT (conversation_id) DO UPDATE SET owner_id = EXCLUDED.owner_id, epoch = EXCLUDED.epoch, lease_until = EXCLUDED.lease_until`,
+        [input.runId, input.ownerId, epoch],
+      );
+      return { ...input, epoch };
+    });
   }
 
   async function renew(value: unknown) {

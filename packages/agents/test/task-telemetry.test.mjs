@@ -154,6 +154,7 @@ test('task telemetry reports actual transitions without private data or replay d
               activation_rank: '1',
             },
           ]);
+        if (sql.startsWith('SELECT pg_advisory_xact_lock(')) return result();
         if (sql.includes('SELECT task_limits')) return result();
         if (/^(SAVEPOINT|RELEASE SAVEPOINT|ROLLBACK TO SAVEPOINT)/.test(sql)) return result();
         if (

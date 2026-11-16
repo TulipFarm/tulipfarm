@@ -274,11 +274,10 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
     workspaceId: string,
     userId: string,
     operation: (tx: AuthorizationTransaction & { commonVersion: number }, actor: HumanActor) => Promise<T>,
-    lock: 'read' | 'write' = 'read',
   ) {
     return runtime.transaction(workspaceId, commonCompatibility, async tx => {
       const actor = await observeChatDetail('actor', async () => {
-        await lockAuthorization(tx, lock);
+        await lockAuthorization(tx);
         return resolveHuman(tx, userId);
       });
       return operation(bindFileSources(tx), actor);
@@ -424,14 +423,10 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
     recorded?: () => void,
     arrivedAt?: number,
   ) {
-    return human(
-      workspaceId,
-      userId,
-      (tx, actor) =>
-        observeChatDetail('send-write', () =>
-          sendInTransaction(tx, actor, workspaceId, chatIdInput, value, recorded, arrivedAt),
-        ),
-      'write',
+    return human(workspaceId, userId, (tx, actor) =>
+      observeChatDetail('send-write', () =>
+        sendInTransaction(tx, actor, workspaceId, chatIdInput, value, recorded, arrivedAt),
+      ),
     );
   }
 
@@ -713,31 +708,27 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
     const replyMessageId = uuidSchema.parse(replyMessageIdInput);
     const request = layoutActionRequestSchema.parse(value);
     if (request.surfaceId !== replyMessageId) throw new ConversationConflict('layout-action-unavailable');
-    return human(
-      workspaceId,
-      userId,
-      (tx, actor) =>
-        sendInTransaction(
-          tx,
-          actor,
-          workspaceId,
-          chatIdInput,
-          {
-            commandId: request.commandId,
-            messageId: request.sentMessageId,
-            parts: [{ kind: 'text', text: request.userMessage }],
-          },
-          undefined,
-          arrivedAt,
-          {
-            messageId: replyMessageId,
-            name: request.name,
-            sourceComponentId: request.sourceComponentId,
-            context: request.context,
-            ...(request.labels && Object.keys(request.labels).length ? { labels: request.labels } : {}),
-          },
-        ),
-      'write',
+    return human(workspaceId, userId, (tx, actor) =>
+      sendInTransaction(
+        tx,
+        actor,
+        workspaceId,
+        chatIdInput,
+        {
+          commandId: request.commandId,
+          messageId: request.sentMessageId,
+          parts: [{ kind: 'text', text: request.userMessage }],
+        },
+        undefined,
+        arrivedAt,
+        {
+          messageId: replyMessageId,
+          name: request.name,
+          sourceComponentId: request.sourceComponentId,
+          context: request.context,
+          ...(request.labels && Object.keys(request.labels).length ? { labels: request.labels } : {}),
+        },
+      ),
     );
   }
 
