@@ -1,3 +1,4 @@
+import type { Pool } from 'pg';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { integrationCredentialKeyring } from '@tulipfarm/integrations';
@@ -56,6 +57,7 @@ export function workspaceMcpApi(
   runtime: WorkspaceRuntime,
   resolveConfirmationCredential: (workspaceId: string) => Promise<string>,
   temporal?: ReturnType<typeof createTemporalClient>,
+  identity?: Pick<Pool, 'query'>,
   env: NodeJS.ProcessEnv = process.env,
 ) {
   const secrets = createSecrets({
@@ -116,6 +118,7 @@ export function workspaceMcpApi(
     permissions,
     authorizeSelection: authorizeMcpSelection,
     authorizeSources: authorizeMcpSources,
+    ...(identity ? { identity } : {}),
     ...(temporal
       ? {
           queueDiscovery: async ({ workspaceId, userId, integrationId, requestId, expectedVersion }) => {

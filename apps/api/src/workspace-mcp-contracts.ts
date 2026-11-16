@@ -105,7 +105,7 @@ export const mcpIntegrationDetailSchema = z.strictObject({
   /** Shared with every current and future member of the workspace. */
   workspace: z.boolean(),
   managers: z.array(mcpGrantSchema),
-  grantOptions: z.array(mcpGrantSchema.extend({ label: z.string() })),
+  grantOptions: z.array(mcpGrantSchema.extend({ label: z.string(), detail: z.string().optional() })),
   descriptor: z.discriminatedUnion('kind', [
     z.strictObject({ kind: z.literal('chat-only'), reason: z.string() }),
     z.strictObject({ kind: z.literal('reviewable'), id: revision, label: z.string(), identity: z.string() }),

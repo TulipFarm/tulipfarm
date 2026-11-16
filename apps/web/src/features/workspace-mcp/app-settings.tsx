@@ -122,6 +122,7 @@ export function McpAccessTab({
                       onCheckedChange={checked => edit({ grants: toggle(current.grants, grant, checked === true) })}
                     />
                     {option.label}
+                    {option.detail && <span className="text-muted-foreground"> · {option.detail}</span>}
                     {option.kind === 'team' && <span className="text-muted-foreground"> · team</span>}
                   </Label>
                   <Label>

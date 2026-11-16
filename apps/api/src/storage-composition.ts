@@ -149,7 +149,7 @@ export function registerStorageComposition(
     services.knowledge,
   );
   registerSystemPackages(app, { auth: dependencies.auth, service: services.systemPackages });
-  const mcp = workspaceMcpApi(app, runtime, confirmation.resolveConfirmationCredential, temporal);
+  const mcp = workspaceMcpApi(app, runtime, confirmation.resolveConfirmationCredential, temporal, dependencies.pool);
   registerWorkspaceMcp(app, dependencies.auth, mcp, wakeTaskAction);
   registerSecrets(app, dependencies.auth, secretsServices(runtime), wakeTask);
   const github = githubAccounts(runtime);
