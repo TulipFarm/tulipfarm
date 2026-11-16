@@ -420,16 +420,14 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
       [row.id, names],
     );
     // Tools are on as soon as they are found, or found changed; read-only ones also run without asking each time.
-    const kept = new Map(
+    const kept = new Set(
       (await policies(tx, row.id))
         .filter(policy => policy.present)
-        .map(policy => [`${policy.name}\n${policy.discovered_revision}`, policy.enabled_revision !== null]),
+        .map(policy => `${policy.name}\n${policy.discovered_revision}`),
     );
-    let budget = mcpLimits.selectedTools - tools.filter(tool => kept.get(`${tool.name}\n${toolRevision(tool)}`)).length;
     for (const tool of tools) {
       const revision = toolRevision(tool);
-      const automatic = budget > 0 && !kept.has(`${tool.name}\n${revision}`) && toolCompatibility(tool) === null;
-      if (automatic) budget--;
+      const automatic = !kept.has(`${tool.name}\n${revision}`) && toolCompatibility(tool) === null;
       const readOnly = tool.annotations?.readOnlyHint === true && tool.annotations.destructiveHint !== true;
       await tx.client.query(
         `INSERT INTO ${table(tx, 'tool_revisions')} (integration_id,name,revision,tool,compatibility_reason) VALUES ($1,$2,$3,$4,$5)
@@ -938,7 +936,6 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
             const existing = await policies(tx, id);
             const recommendations = await watchIntegrationRecommendations(tx, id, () => mcpRecommendations(tx, id));
             if (new Set(value.map(tool => tool.name)).size !== value.length) throw new McpError('invalid-input');
-            const enabled = new Set(existing.filter(policy => policy.enabled_revision).map(policy => policy.name));
             for (const tool of value) {
               const policy = existing.find(policy => policy.name === tool.name);
               if (
@@ -949,14 +946,11 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
                 (!tool.enabled && tool.standingException)
               )
                 throw new McpError('incompatible-tool');
-              if (tool.enabled) enabled.add(tool.name);
-              else enabled.delete(tool.name);
               await tx.client.query(
                 `UPDATE ${table(tx, 'tool_policies')} SET enabled_revision=$3,standing_exception=$4,policy_version=policy_version+1 WHERE integration_id=$1 AND name=$2`,
                 [id, tool.name, tool.enabled ? tool.revision : null, tool.standingException],
               );
             }
-            if (enabled.size > mcpLimits.selectedTools) throw new McpError('limit');
             await tx.client.query(`UPDATE ${table(tx, 'integrations')} SET version=version+1 WHERE id=$1`, [id]);
             await recommendations();
             return policies(tx, id);
