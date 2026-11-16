@@ -41,68 +41,20 @@ const viewRowSchema = z
     }),
   );
 
-const grantRequestSchema = z.strictObject({ appId: uuidSchema, releaseId: uuidSchema, viewId: uuidSchema });
+const grantRequestSchema = z.strictObject({ appId: uuidSchema, viewId: uuidSchema });
 
-/** Why a grant serves no requests now. A grant with none serves its release while that release is live. */
-export type DataViewBlocker =
-  | 'app-not-serving'
-  | 'release-not-live'
-  | 'not-approved'
-  | 'approver-lost-access'
-  | 'sharer-lost-access'
-  | 'view-unresolvable';
+/** Why a view serves no requests now. A view with none serves whichever release of its app is live. */
+export type DataViewBlocker = 'app-not-serving' | 'not-approved' | 'view-unresolvable';
 
-export type DataViewGrant = {
-  releaseId: string;
-  releaseNumber: number;
-  sharedBy: string;
-  sharedAt: Date;
+export type DataViewEntry = DataView & {
+  createdBy: string;
+  createdAt: Date;
+  sharedBy: string | null;
+  sharedAt: Date | null;
   approvedBy: string | null;
   approvedAt: Date | null;
   blockers: DataViewBlocker[];
 };
-
-export type DataViewEntry = DataView & { createdBy: string; createdAt: Date; grants: DataViewGrant[] };
-
-const grantRowSchema = z
-  .object({
-    release_id: z.uuid(),
-    release_number: z.number(),
-    shared_by: z.uuid(),
-    shared_at: z.date(),
-    approved_by: z.uuid().nullable(),
-    approved_at: z.date().nullable(),
-  })
-  .transform(row => ({
-    releaseId: row.release_id,
-    releaseNumber: row.release_number,
-    sharedBy: row.shared_by,
-    sharedAt: row.shared_at,
-    approvedBy: row.approved_by,
-    approvedAt: row.approved_at,
-  }));
-type GrantRecord = z.output<typeof grantRowSchema>;
-
-/** The member, if still current, behind `membershipId`. */
-async function memberActor(tx: TableTransaction, membershipId: string): Promise<HumanActor | null> {
-  const row = (
-    await tx.client.query(`SELECT user_id FROM ${table(tx, 'tf_memberships')} WHERE id=$1 AND removed_at IS NULL`, [
-      membershipId,
-    ])
-  ).rows[0];
-  return row ? { kind: 'human', userId: z.string().parse(row.user_id), membershipId } : null;
-}
-
-async function isCurrentAdmin(tx: TableTransaction, membershipId: string) {
-  return Boolean(
-    (
-      await tx.client.query(
-        `SELECT 1 FROM ${table(tx, 'tf_memberships')} WHERE id=$1 AND removed_at IS NULL AND role='admin'`,
-        [membershipId],
-      )
-    ).rowCount,
-  );
-}
 
 /** Sharing a view needs authority over its table: schema management plus every row permission the view uses. */
 async function maySharePermissions(
@@ -148,30 +100,26 @@ async function readView(tx: TableTransaction, appId: string, viewId: string) {
   return viewRowSchema.parse(row);
 }
 
-/**
- * Everything that stops `grant` serving now, in the order a member would fix them. Approval provenance does not keep
- * authority alive: the approver must still be an admin and the sharer must still hold the table permissions the view
- * uses.
- */
-async function grantBlockers(
-  tx: TableTransaction,
-  view: DataView,
-  grant: Pick<GrantRecord, 'releaseId' | 'sharedBy' | 'approvedBy'>,
-) {
-  const blockers: DataViewBlocker[] = [];
-  const app = (
+/** The live release of `appId` while the app serves public requests, otherwise null. */
+async function servingRelease(tx: TableTransaction, appId: string) {
+  const row = (
     await tx.client.query(
       `SELECT live_release_id FROM ${table(tx, 'tf_apps')} WHERE id=$1 AND kind='public' AND approval_state='approved'
         AND disabled_at IS NULL AND archived_at IS NULL AND budget_paused_at IS NULL`,
-      [view.appId],
+      [appId],
     )
   ).rows[0] as { live_release_id: string | null } | undefined;
-  if (!app) blockers.push('app-not-serving');
-  else if (app.live_release_id !== grant.releaseId) blockers.push('release-not-live');
-  if (grant.approvedBy === null) blockers.push('not-approved');
-  else if (!(await isCurrentAdmin(tx, grant.approvedBy))) blockers.push('approver-lost-access');
-  const sharer = await memberActor(tx, grant.sharedBy);
-  if (!sharer || !(await maySharePermissions(tx, sharer, view))) blockers.push('sharer-lost-access');
+  return row?.live_release_id ?? null;
+}
+
+/**
+ * Everything that stops `view` serving now, in the order a member would fix them. An approval is a recorded decision: it
+ * keeps serving after the people who shared and approved it leave or lose rights, until it is revoked.
+ */
+async function viewBlockers(tx: TableTransaction, view: DataView, approved: boolean) {
+  const blockers: DataViewBlocker[] = [];
+  if ((await servingRelease(tx, view.appId)) === null) blockers.push('app-not-serving');
+  if (!approved) blockers.push('not-approved');
   if (!(await resolves(tx, view))) blockers.push('view-unresolvable');
   return blockers;
 }
@@ -220,113 +168,102 @@ export async function createDataView(
   return readView(tx, view.appId, view.id);
 }
 
-/** Grants a view to one release of its app. The grant serves nothing until an admin approves it. */
+/** Shares a view with its app, for every release. The share serves nothing until an admin approves it. */
 export async function shareDataView(tx: TableTransaction, sharer: HumanActor, input: unknown) {
-  const { appId, releaseId, viewId } = grantRequestSchema.parse(input);
+  const { appId, viewId } = grantRequestSchema.parse(input);
   await currentMember(tx, sharer);
   const view = await readView(tx, appId, viewId);
-  const release = (
+  const app = (
     await tx.client.query(
-      `SELECT 1 FROM ${table(tx, 'tf_app_releases')} r JOIN ${table(tx, 'tf_apps')} a ON a.id=r.app_id
-      WHERE r.id=$1 AND r.app_id=$2 AND a.kind='public' AND a.archived_at IS NULL`,
-      [releaseId, view.appId],
+      `SELECT 1 FROM ${table(tx, 'tf_apps')} WHERE id=$1 AND kind='public' AND archived_at IS NULL`,
+      [view.appId],
     )
   ).rowCount;
-  if (!release) throw new AccessDenied();
+  if (!app) throw new AccessDenied();
   await requireShareable(tx, view);
   if (!(await maySharePermissions(tx, sharer, view))) throw new AccessDenied();
   await tx.client.query(
-    `INSERT INTO ${table(tx, 'tf_app_data_view_grants')} (release_id,view_id,shared_by) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`,
-    [releaseId, viewId, sharer.membershipId],
+    `INSERT INTO ${table(tx, 'tf_app_data_view_grants')} (view_id,shared_by) VALUES ($1,$2) ON CONFLICT DO NOTHING`,
+    [viewId, sharer.membershipId],
   );
 }
 
-/** An admin approves a shared view for a release. Approving twice keeps the first decision. */
+/** An admin approves a shared view. Approving twice keeps the first decision. */
 export async function approveDataView(tx: TableTransaction, admin: HumanActor, input: unknown) {
-  const { appId, releaseId, viewId } = grantRequestSchema.parse(input);
+  const { appId, viewId } = grantRequestSchema.parse(input);
   if ((await currentMember(tx, admin)).role !== 'admin') throw new AccessDenied();
   const view = await readView(tx, appId, viewId);
-  const grant = (
-    await tx.client.query(
-      `SELECT shared_by FROM ${table(tx, 'tf_app_data_view_grants')} WHERE release_id=$1 AND view_id=$2 FOR UPDATE`,
-      [releaseId, viewId],
-    )
-  ).rows[0];
-  if (!grant) throw new AccessDenied();
-  const sharer = await memberActor(tx, uuidSchema.parse(grant.shared_by));
-  if (!sharer || !(await maySharePermissions(tx, sharer, view))) throw new AccessDenied();
   await requireShareable(tx, view);
+  const { rowCount } = await tx.client.query(
+    `SELECT 1 FROM ${table(tx, 'tf_app_data_view_grants')} WHERE view_id=$1 FOR UPDATE`,
+    [viewId],
+  );
+  if (!rowCount) throw new AccessDenied();
   await tx.client.query(
-    `UPDATE ${table(tx, 'tf_app_data_view_grants')} SET approved_by=$3,approved_at=clock_timestamp() WHERE release_id=$1 AND view_id=$2 AND approved_by IS NULL`,
-    [releaseId, viewId, admin.membershipId],
+    `UPDATE ${table(tx, 'tf_app_data_view_grants')} SET approved_by=$2,approved_at=clock_timestamp() WHERE view_id=$1 AND approved_by IS NULL`,
+    [viewId, admin.membershipId],
   );
 }
 
 /**
- * Removes a view's grant to a release, approved or not. It takes the authorization lock for writing, so it waits for
+ * Removes a view's share and approval for every release. It takes the authorization lock for writing, so it waits for
  * app requests already running and every later request sees the grant gone. Revoking a missing grant does nothing.
  */
 export async function revokeDataView(tx: TableTransaction, member: HumanActor, input: unknown) {
-  const { appId, releaseId, viewId } = grantRequestSchema.parse(input);
+  const { appId, viewId } = grantRequestSchema.parse(input);
   await lockAuthorization(tx, 'write');
   await currentMember(tx, member);
   await readView(tx, appId, viewId);
-  await tx.client.query(`DELETE FROM ${table(tx, 'tf_app_data_view_grants')} WHERE release_id=$1 AND view_id=$2`, [
-    releaseId,
-    viewId,
-  ]);
+  await tx.client.query(`DELETE FROM ${table(tx, 'tf_app_data_view_grants')} WHERE view_id=$1`, [viewId]);
 }
 
-/** The app's views, oldest first, each with its grants, newest release first, and what stops each grant serving. */
+const entryRowSchema = z.object({
+  created_by: z.uuid(),
+  created_at: z.date(),
+  shared_by: z.uuid().nullable(),
+  shared_at: z.date().nullable(),
+  approved_by: z.uuid().nullable(),
+  approved_at: z.date().nullable(),
+});
+
+/** The app's views, oldest first, each with who shared and approved it and what stops it serving. */
 export async function listDataViews(tx: TableTransaction, appId: string, viewId?: string): Promise<DataViewEntry[]> {
   const { rows } = await tx.client.query(
-    `SELECT id,app_id,table_id,field_ids,predicate,actions,created_by,created_at FROM ${table(tx, 'tf_app_data_views')}
-    WHERE app_id=$1 AND ($2::uuid IS NULL OR id=$2) ORDER BY created_at, id`,
+    `SELECT v.id,v.app_id,v.table_id,v.field_ids,v.predicate,v.actions,v.created_by,v.created_at,
+      g.shared_by,g.shared_at,g.approved_by,g.approved_at
+    FROM ${table(tx, 'tf_app_data_views')} v LEFT JOIN ${table(tx, 'tf_app_data_view_grants')} g ON g.view_id=v.id
+    WHERE v.app_id=$1 AND ($2::uuid IS NULL OR v.id=$2) ORDER BY v.created_at, v.id`,
     [uuidSchema.parse(appId), viewId === undefined ? null : uuidSchema.parse(viewId)],
   );
   const entries: DataViewEntry[] = [];
-  for (const row of rows as { created_by: string; created_at: Date }[]) {
+  for (const row of rows) {
     const view = viewRowSchema.parse(row);
-    const grants = z.array(grantRowSchema).parse(
-      (
-        await tx.client.query(
-          `SELECT g.release_id,r.number AS release_number,g.shared_by,g.shared_at,g.approved_by,g.approved_at
-          FROM ${table(tx, 'tf_app_data_view_grants')} g JOIN ${table(tx, 'tf_app_releases')} r ON r.id=g.release_id
-          WHERE g.view_id=$1 ORDER BY r.number DESC`,
-          [view.id],
-        )
-      ).rows,
-    );
+    const grant = entryRowSchema.parse(row);
     entries.push({
       ...view,
-      createdBy: row.created_by,
-      createdAt: row.created_at,
-      grants: await Promise.all(
-        grants.map(async grant => ({ ...grant, blockers: await grantBlockers(tx, view, grant) })),
-      ),
+      createdBy: grant.created_by,
+      createdAt: grant.created_at,
+      sharedBy: grant.shared_by,
+      sharedAt: grant.shared_at,
+      approvedBy: grant.approved_by,
+      approvedAt: grant.approved_at,
+      blockers: await viewBlockers(tx, view, grant.approved_by !== null),
     });
   }
   return entries;
 }
 
 /**
- * The view `actor` may use now: granted to the actor's release, which is the live release of a public, approved app,
- * and approved, with nothing blocking the grant. A viewer adds nothing.
+ * The view `actor` may use now: an approved view of the actor's app, which is public and serving, from the release that
+ * is live now. A host still running an older release is refused. A viewer adds nothing.
  */
 export async function approvedDataView(tx: TableTransaction, actor: AppActor, viewId: string) {
   const view = await readView(tx, actor.appId, uuidSchema.parse(viewId));
-  const grant = (
-    await tx.client.query(
-      `SELECT release_id,shared_by,approved_by FROM ${table(tx, 'tf_app_data_view_grants')} WHERE release_id=$1 AND view_id=$2`,
-      [actor.releaseId, view.id],
-    )
-  ).rows[0] as { release_id: string; shared_by: string; approved_by: string | null } | undefined;
-  if (!grant) throw new AccessDenied();
-  const blockers = await grantBlockers(tx, view, {
-    releaseId: grant.release_id,
-    sharedBy: grant.shared_by,
-    approvedBy: grant.approved_by,
-  });
-  if (blockers.length) throw new AccessDenied();
+  if ((await servingRelease(tx, view.appId)) !== actor.releaseId) throw new AccessDenied();
+  const { rowCount } = await tx.client.query(
+    `SELECT 1 FROM ${table(tx, 'tf_app_data_view_grants')} WHERE view_id=$1 AND approved_by IS NOT NULL`,
+    [view.id],
+  );
+  if ((await viewBlockers(tx, view, Boolean(rowCount))).length) throw new AccessDenied();
   return view;
 }

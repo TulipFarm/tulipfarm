@@ -75,7 +75,7 @@ import {
   buildView,
   createBody,
   dataViewBody,
-  dataViewGrantParams,
+  dataViewParams,
   dataViewView,
   failure,
   failureStatus,
@@ -866,11 +866,7 @@ export function registerApps(app: FastifyInstance, dependencies: AppRouteDepende
       if (found.role !== 'edit' && !member.admin) throw failure('forbidden', 'You need edit access to this app');
       return found;
     };
-    const grantOf = ({ appId, viewId, releaseId }: z.infer<typeof dataViewGrantParams>) => ({
-      appId,
-      viewId,
-      releaseId,
-    });
+    const grantOf = ({ appId, viewId }: z.infer<typeof dataViewParams>) => ({ appId, viewId });
     const dataView = async (tx: WorkspaceTransaction, appId: AppId, viewId: string) => {
       const [entry] = await listDataViews(tx, appId, viewId);
       if (!entry) throw failure('not-found', 'Data view not found');
@@ -915,9 +911,9 @@ export function registerApps(app: FastifyInstance, dependencies: AppRouteDepende
 
     route(
       'PUT',
-      '/:appId/data-views/:viewId/releases/:releaseId',
+      '/:appId/data-views/:viewId/share',
       'shareAppDataViewV1',
-      { params: dataViewGrantParams },
+      { params: dataViewParams },
       ({ workspaceId, userId, params }) =>
         transaction(workspaceId, async tx => {
           const member = await memberOf(tx, userId);
@@ -929,9 +925,9 @@ export function registerApps(app: FastifyInstance, dependencies: AppRouteDepende
 
     route(
       'PUT',
-      '/:appId/data-views/:viewId/releases/:releaseId/approval',
+      '/:appId/data-views/:viewId/approval',
       'approveAppDataViewV1',
-      { params: dataViewGrantParams },
+      { params: dataViewParams },
       ({ workspaceId, userId, params }) =>
         transaction(workspaceId, async tx => {
           const member = await memberOf(tx, userId);
@@ -943,9 +939,9 @@ export function registerApps(app: FastifyInstance, dependencies: AppRouteDepende
 
     route(
       'DELETE',
-      '/:appId/data-views/:viewId/releases/:releaseId',
+      '/:appId/data-views/:viewId/share',
       'revokeAppDataViewV1',
-      { params: dataViewGrantParams },
+      { params: dataViewParams },
       async ({ workspaceId, userId, params }, reply) => {
         await transaction(workspaceId, async tx => {
           const member = await memberOf(tx, userId);
