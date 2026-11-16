@@ -2901,13 +2901,14 @@ const flagFailure = (operation: string) => (error: unknown) =>
   log('warn', 'dependency', 'call_failed', { operation, outcome: 'fallback', ...errorAttributes(error) });
 
 // A workspace flag ignores the user, so its lookup and cache are shared by every member.
-function contextFor(scope: FeatureFlagScope, user: FlagUserInput | null, workspace: FlagWorkspaceInput | undefined) {
+function contextFor(
+  scope: FeatureFlagScope,
+  user: FlagUserInput | null,
+  workspace: FlagWorkspaceInput | undefined,
+  onError = flagFailure('feature-flag.subject'),
+) {
   if (scope === 'global') return Promise.resolve({});
-  return resolveFlagContext(
-    scope === 'user' ? (user ?? undefined) : undefined,
-    workspace,
-    flagFailure('feature-flag.subject'),
-  );
+  return resolveFlagContext(scope === 'user' ? (user ?? undefined) : undefined, workspace, onError);
 }
 
 /**
@@ -2923,21 +2924,42 @@ export async function isFeatureEnabled(
   workspace?: FlagWorkspaceInput,
   env: NodeJS.ProcessEnv = process.env,
 ) {
-  if (!isFeatureFlag(flag)) return false;
+  return (await featureFlagAnswer(flag, user, workspace, env)).enabled;
+}
+
+/**
+ * {@link isFeatureEnabled} plus whether the registered provider answered for a fully resolved
+ * subject. Only such an answer is worth caching: an env answer costs nothing, and a fallback after
+ * a provider or subject failure should be retried.
+ */
+export async function featureFlagAnswer(
+  flag: FeatureFlag,
+  user: FlagUserInput | null,
+  workspace?: FlagWorkspaceInput,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<{ readonly enabled: boolean; readonly fromProvider: boolean }> {
+  if (!isFeatureFlag(flag)) return { enabled: false, fromProvider: false };
   const provider = flagProvider();
   if (provider) {
     const { scope } = featureFlags[flag];
-    const subject = flagSubject(scope, await contextFor(scope, user, workspace));
+    let resolved = true;
+    const subject = flagSubject(
+      scope,
+      await contextFor(scope, user, workspace, error => {
+        resolved = false;
+        flagFailure('feature-flag.subject')(error);
+      }),
+    );
     if (subject) {
       try {
         const answer = await provider.isEnabled(flag, subject);
-        if (typeof answer === 'boolean') return answer;
+        if (typeof answer === 'boolean') return { enabled: answer, fromProvider: resolved };
       } catch (error) {
         flagFailure(`feature-flag.${flag}`)(error);
       }
     }
   }
-  return configuredFeatureFlag(flag, env);
+  return { enabled: configuredFeatureFlag(flag, env), fromProvider: false };
 }
 
 /**

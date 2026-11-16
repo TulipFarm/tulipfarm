@@ -12,7 +12,7 @@ import {
 } from '@tulipfarm/apps/store';
 import { TableValidationError } from '@tulipfarm/tables/definition';
 import type { createTableService } from '@tulipfarm/tables/service';
-import { isFeatureEnabled } from '@tulipfarm/observability';
+import { featureFlagAnswer } from '@tulipfarm/observability';
 import { createWindows } from './app-data-windows.ts';
 import { routeValidation } from './route-validation.ts';
 import { requestBoundaryError } from './security.ts';
@@ -87,6 +87,36 @@ export function registerAppData(
   // primary-key read, so 4 in flight keep up with app traffic and always leave 6 connections for everything else.
   const platformSlots = 4;
   let platformWork = 0;
+  // The flag provider may evaluate remotely, so each workspace's answer is kept for 30 s and shared by calls in flight.
+  // Turning app hosting on or off takes effect within that. A fallback after a failure is not kept.
+  const flagMs = 30_000;
+  const hosting = new Map<string, { endsAt: number; enabled: Promise<boolean> }>();
+  const appHosting = (workspaceId: string) => {
+    const held = hosting.get(workspaceId);
+    if (held && held.endsAt > Date.now()) return held.enabled;
+    const forget = () => {
+      if (hosting.get(workspaceId) === entry) hosting.delete(workspaceId);
+    };
+    const entry = {
+      endsAt: Date.now() + flagMs,
+      enabled: featureFlagAnswer('app-hosting', null, { id: workspaceId }).then(
+        answer => {
+          if (!answer.fromProvider) forget();
+          return answer.enabled;
+        },
+        error => {
+          forget();
+          throw error;
+        },
+      ),
+    };
+    hosting.delete(workspaceId);
+    if (hosting.size >= 10_000)
+      for (const [stale, kept] of hosting) if (kept.endsAt <= Date.now()) hosting.delete(stale);
+    if (hosting.size >= 10_000) hosting.delete(hosting.keys().next().value!);
+    hosting.set(workspaceId, entry);
+    return entry.enabled;
+  };
 
   app.register(async routes => {
     const validation = routeValidation({
@@ -114,25 +144,26 @@ export function registerAppData(
       if (platformWork >= platformSlots)
         return reply.code(503).header('Retry-After', 1).send({ error: 'temporarily-unavailable' });
       platformWork++;
+      let live: LiveAppRequest | null;
       try {
-        const live = await resolveRequestHandle(dependencies.platform, signed);
-        if (!live) {
-          closedHandles.spend(handle);
-          return closed(reply);
-        }
-        const retry = handleCalls.spend(handle) || appCalls.spend(live.appId);
-        if (retry > 0) {
-          appRefusals.spend(live.appId);
-          return tooMany(reply, retry);
-        }
-        if (!(await isFeatureEnabled('app-hosting', null, { id: live.workspaceId }))) {
-          appRefusals.spend(live.appId);
-          return reply.code(403).send({ error: 'denied' });
-        }
-        serving.set(request, live);
+        live = await resolveRequestHandle(dependencies.platform, signed);
       } finally {
         platformWork--;
       }
+      if (!live) {
+        closedHandles.spend(handle);
+        return closed(reply);
+      }
+      const retry = handleCalls.spend(handle) || appCalls.spend(live.appId);
+      if (retry > 0) {
+        appRefusals.spend(live.appId);
+        return tooMany(reply, retry);
+      }
+      if (!(await appHosting(live.workspaceId))) {
+        appRefusals.spend(live.appId);
+        return reply.code(403).send({ error: 'denied' });
+      }
+      serving.set(request, live);
     });
 
     routes.setErrorHandler((error, request, reply) => {

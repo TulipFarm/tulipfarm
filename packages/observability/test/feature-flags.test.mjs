@@ -2,7 +2,13 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { registerExtension, resetExtensions } from '@tulipfarm/extensions';
 import { featureFlags } from '@tulipfarm/config/feature-flags';
-import { featureFlagSnapshot, isFeatureEnabled, registerFlagSubjectResolver, resetFlagSubjects } from '../src/index.ts';
+import {
+  featureFlagAnswer,
+  featureFlagSnapshot,
+  isFeatureEnabled,
+  registerFlagSubjectResolver,
+  resetFlagSubjects,
+} from '../src/index.ts';
 
 const user = { id: 'u1', email: 'a@example.com' };
 const flag = 'google-calendar-canvas';
@@ -224,6 +230,31 @@ test('a failing resolver is logged, not cached, and evaluation continues with ca
   await isFeatureEnabled('social-publishing', null, { id: workspaceId });
   assert.equal(count, 2);
   assert.equal(calls[1][1].workspace.slug, 'acme');
+});
+
+test('an answer comes from the provider only when the provider and the subject lookup both succeed', async t => {
+  let provider = 'up';
+  let resolver = 'down';
+  await withProvider(t, () => {
+    if (provider === 'down') throw new Error('flag service down');
+    return true;
+  });
+  registerFlagSubjectResolver(async () => {
+    if (resolver === 'down') throw new Error('database down');
+    return {};
+  });
+  t.mock.method(process.stdout, 'write', () => true);
+  const answer = () => featureFlagAnswer('app-hosting', null, { id: workspaceId }, { NODE_ENV: 'production' });
+  const answers = [await answer()];
+  resolver = 'up';
+  answers.push(await answer());
+  provider = 'down';
+  answers.push(await answer());
+  assert.deepEqual(answers, [
+    { enabled: true, fromProvider: false },
+    { enabled: true, fromProvider: true },
+    { enabled: false, fromProvider: false },
+  ]);
 });
 
 test('without a provider the resolver is never called', async t => {
