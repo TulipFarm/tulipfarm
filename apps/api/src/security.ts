@@ -97,6 +97,8 @@ export function registerSecurity(app: FastifyInstance, webOrigin: string) {
   app.register(rateLimit, { global: false, max, timeWindow: 60_000, cache: 10_000 });
   app.register(cors, {
     delegator: (request, callback) => {
+      // App servers call app data routes from their own process; a browser must never be granted them.
+      if (request.url?.startsWith('/v1/app-data/')) return callback(null, { origin: false });
       const guide = /^\/v1\/public\/guide\/(?:options|session|messages|signup)(?:\?|$)/.test(request.url);
       callback(null, {
         origin: guide ? publicGuideOrigins() : webOrigin,

@@ -29,6 +29,9 @@ export const sessionIndependentOperations: ReadonlySet<string> = new Set([
   'receiveGitHubEventV1',
   'receiveWorkflowWebhookV1',
   'receiveWorkflowTriggerWebhookV1',
+  'listAppDataV1',
+  'readAppDataV1',
+  'mutateAppDataV1',
 ]);
 
 export const sessionIndependentRoutes: ReadonlySet<string> = new Set([

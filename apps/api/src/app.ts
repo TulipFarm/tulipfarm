@@ -53,6 +53,8 @@ import { appBuilders } from '@tulipfarm/apps';
 import { appBuilder, appHost } from '@tulipfarm/extensions';
 import type { Pool } from 'pg';
 import { registerPreviewTickets } from './app-preview-tickets.ts';
+import { registerAppData } from './app-data.ts';
+import { createTableService } from '@tulipfarm/tables/service';
 
 export function buildApp(
   options: {
@@ -116,7 +118,7 @@ export function buildApp(
       registerUserVisits(v1, auth, authConfig().webOrigin);
       const models = createModelConfiguration({ pool: auth.pool });
       if (options.agentModel === undefined) v1.addHook('onReady', models.registerModelBundle);
-      registerAbuseProtection(v1, auth.auth);
+      const limit = registerAbuseProtection(v1, auth.auth);
       registerPublicGuide(v1, auth);
       v1.register(async business => {
         protectBusinessRequests(business);
@@ -212,6 +214,15 @@ export function buildApp(
                 }
               : {}),
           });
+      });
+      v1.register(async data => {
+        if (!workspaceStorage) return;
+        const tables = createTableService(
+          workspaceStorage,
+          { readableFiles: async () => new Set() },
+          commonCompatibility,
+        );
+        registerAppData(data, { platform: auth.pool, tables, limit });
       });
     },
     { prefix: '/v1' },

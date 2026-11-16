@@ -39,6 +39,9 @@ const expectedSessionIndependentOperations = [
   'receiveGitHubEventV1',
   'receiveWorkflowWebhookV1',
   'receiveWorkflowTriggerWebhookV1',
+  'listAppDataV1',
+  'readAppDataV1',
+  'mutateAppDataV1',
 ];
 const expectedSessionIndependentRoutes = [
   '/v1/auth/*',
@@ -221,6 +224,9 @@ for (const isolated of [false, true]) {
             'receiveWorkflowTriggerWebhookV1',
             'completeGoogleWorkspaceOAuthV1',
             'completeWorkspaceMcpOAuthV1',
+            'listAppDataV1',
+            'readAppDataV1',
+            'mutateAppDataV1',
           ]
         : []),
     ]);
