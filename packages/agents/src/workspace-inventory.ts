@@ -1,4 +1,5 @@
 import { AccessDenied, currentMember, type HumanActor, type SourceDependency } from '@tulipfarm/access';
+import { teamLabel } from '@tulipfarm/workspace-storage/team-labels';
 import { StorageUnavailableError } from '@tulipfarm/workspace-storage/runtime';
 import { createAgentRecordTools } from './record-tools.ts';
 import { createSavedAgentService } from './saved-service.ts';
@@ -128,10 +129,7 @@ async function listWorkspaceInventory(runtime: AgentStorage, workspaceId: string
       members: members
         .filter(member => !member.name.includes('@') && member.name !== 'Unnamed member')
         .map(member => member.name),
-      teams:
-        teamNames.length <= directoryNameLimit
-          ? teamNames.map(team => (team.name === '_admin' ? 'Workspace admins' : team.name))
-          : [],
+      teams: teamNames.length <= directoryNameLimit ? teamNames.map(team => teamLabel(team.name)) : [],
     };
     const inherited: SourceDependency[] = [];
     async function keep<T>(items: readonly T[], sourceOf: (item: T) => SourceDependency) {

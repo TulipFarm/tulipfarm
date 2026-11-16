@@ -43,6 +43,7 @@ function installInviteMembersMock() {
     grants: [],
     tableTeamIds: [],
     adminTeamId: null,
+    everyoneTeamId: null,
     teamNames: [],
     personGrants: [],
   };

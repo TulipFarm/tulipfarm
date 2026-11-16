@@ -58,7 +58,7 @@ test('directory admission names respect visible directory facts and stay bounded
   }
   t.diagnostic(`Inventory fixture latency: ${elapsed.map(ms => ms.toFixed(2)).join(', ')} ms`);
   assert.deepEqual(names?.members.toSorted(), people.map(actor => actor.name).toSorted());
-  assert.deepEqual(names.teams.toSorted(), ['Operations', 'Workspace admins']);
+  assert.deepEqual(names.teams.toSorted(), ['Admin', 'Everyone', 'Operations']);
   for (const actor of people.slice(1)) {
     const result = await readWorkspaceInventory(f.runtime, w.id, human(actor));
     const visible = await f.runtime.transaction(w.id, commonCompatibility, tx => findMembers(tx, human(actor)));

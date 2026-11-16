@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { teamLabel } from '@tulipfarm/workspace-storage/team-labels';
 import { activeGeneration, GenerationError, readRecords, workspaceMembersTable } from '@tulipfarm/tables/store';
 import { workspaceMemberFields } from '@tulipfarm/tables/workspace-members';
 import { currentMember, type HumanActor } from '@tulipfarm/access';
@@ -74,8 +75,7 @@ export async function workspaceTeams(tx: AgentTransaction, teamIds?: readonly st
 
 const limit = 20;
 const rosterLimit = 50;
-// The workspace admins team is stored under an internal name; the app shows it as "Workspace admins".
-const teamName = (name: string) => (name === '_admin' ? 'Workspace admins' : name);
+const teamName = teamLabel;
 
 type Roster = { membershipId: string; name: string; role: 'member' | 'manager' };
 

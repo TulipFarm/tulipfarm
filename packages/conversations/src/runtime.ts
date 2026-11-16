@@ -2480,7 +2480,13 @@ export function createConversationExecutor(
                 {
                   producerId: callId,
                   prompt: choice.prompt,
-                  answerSchema: { kind: 'choices', choices: choice.choices, multiple: false, allowText: true },
+                  answerSchema: {
+                    kind: 'choices',
+                    choices: choice.choices,
+                    multiple: false,
+                    allowText: true,
+                    ...(choice.searchable && { searchable: true }),
+                  },
                 },
                 mergeSources([...context.origin.sources, ...fileSources]),
               );

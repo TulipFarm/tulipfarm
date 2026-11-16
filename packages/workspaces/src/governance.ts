@@ -245,7 +245,7 @@ export function createGovernanceService(dependencies: {
   // Grants may also go to the internal team of workspace admins, which is never a table owner or destination.
   async function grantTeamExists(transaction: Transaction, id: string) {
     const result = await transaction.client.query(
-      `SELECT id FROM ${table(transaction, 'tf_teams')} t WHERE t.id = $1 AND (${notInternal('t')} OR t.name = '_admin')`,
+      `SELECT id FROM ${table(transaction, 'tf_teams')} t WHERE t.id = $1 AND (${notInternal('t')} OR t.name IN ('_admin', '_everyone'))`,
       [z.uuid().parse(id)],
     );
     if (!result.rowCount) throw new AccessDenied();
@@ -508,7 +508,7 @@ export function createGovernanceService(dependencies: {
           admin
             ? (
                 await transaction.client.query(
-                  `SELECT t.id, t.name FROM ${table(transaction, 'tf_teams')} t WHERE ${notInternal('t')} OR t.name = '_admin' ORDER BY t.id`,
+                  `SELECT t.id, t.name FROM ${table(transaction, 'tf_teams')} t WHERE ${notInternal('t')} OR t.name IN ('_admin', '_everyone') ORDER BY t.id`,
                 )
               ).rows
             : [],
@@ -529,8 +529,9 @@ export function createGovernanceService(dependencies: {
             })
           : [],
         directory: (await directory(transaction)).members,
-        tableTeamIds: tableTeams.filter(team => team.name !== '_admin').map(team => team.id),
+        tableTeamIds: tableTeams.filter(team => !['_admin', '_everyone'].includes(team.name)).map(team => team.id),
         adminTeamId: tableTeams.find(team => team.name === '_admin')?.id ?? null,
+        everyoneTeamId: tableTeams.find(team => team.name === '_everyone')?.id ?? null,
         teams: teams.map(team => ({
           id: team.id,
           name: team.name,

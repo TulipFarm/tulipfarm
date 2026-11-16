@@ -484,7 +484,7 @@ test('an admin with only the internal admin team is not asked for an owning team
     await page.getByRole('option', { name: 'You (installation owner)', exact: true }).click();
     await offer.getByRole('button', { name: 'Continue', exact: true }).click();
     await offer.getByText('Ready for your approval', { exact: true }).waitFor();
-    await offer.getByText('Owning team: Workspace admins', { exact: true }).waitFor();
+    await offer.getByText('Owning team: Admin', { exact: true }).waitFor();
     assert.equal(await offer.getByRole('button', { name: 'Change Owning team', exact: true }).count(), 0);
     assert.deepEqual(state.validations, [{ package: pkg, bindings: installation.bindings }]);
     assert.deepEqual(state.unexpected, []);

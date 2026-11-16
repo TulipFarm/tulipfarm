@@ -186,6 +186,7 @@ export function createSecretsMock(scenario: string) {
         role: 'member',
         teams: [{ id: teamId, name: 'Finance', role: 'member' }],
         adminTeamId: null,
+        everyoneTeamId: null,
         capabilities: { manageGovernance: false, canLeave: false },
       });
     if (method === 'GET' && path.endsWith('/governance/directory')) return Response.json({ members });
