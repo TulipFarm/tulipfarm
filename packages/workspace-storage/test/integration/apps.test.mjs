@@ -45,6 +45,8 @@ test(
         [
           'tf_app_broken_references',
           'tf_app_builds',
+          'tf_app_data_view_grants',
+          'tf_app_data_views',
           'tf_app_draft_changes',
           'tf_app_drafts',
           'tf_app_grants',
