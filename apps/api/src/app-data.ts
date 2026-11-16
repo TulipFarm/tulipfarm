@@ -1,8 +1,10 @@
+import { createHash } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Pool } from 'pg';
 import { z } from 'zod';
 import { AccessDenied, type AppActor } from '@tulipfarm/access';
 import {
+  liveRequestSeconds,
   resolveRequestHandle,
   verifyRequestHandle,
   type LiveAppRequest,
@@ -11,8 +13,7 @@ import {
 import { TableValidationError } from '@tulipfarm/tables/definition';
 import type { createTableService } from '@tulipfarm/tables/service';
 import { isFeatureEnabled } from '@tulipfarm/observability';
-import type { createAbuseLimiter } from './abuse.ts';
-import { createRefusalBudget } from './app-data-refusals.ts';
+import { createWindows } from './app-data-windows.ts';
 import { routeValidation } from './route-validation.ts';
 import { requestBoundaryError } from './security.ts';
 
@@ -61,9 +62,10 @@ const operations = {
  * that visitor's request is the only authority; no session, cookie or body field can name the app or its release.
  *
  * Every app's sandbox reaches the API from the same address, so nothing here is limited by client address. A handle
- * the gateway did not sign is refused before any other work. A signed handle names its app, so every other refusal is
- * charged to that app: once `refusals` of its calls are refused within a minute, or once its call limit or a
- * request's call limit is reached, this process refuses them from memory until the limit resets.
+ * the gateway did not sign is refused before any other work. A signed handle that no longer resolves is refused from
+ * memory for a request's lifetime and charged to nobody, so replaying an old handle cannot spend its app's limits.
+ * Only a live request spends its own call limit, then its app's, and only its refusals count towards the app's
+ * `refusals` a minute. Every limit lives in this process.
  */
 export function registerAppData(
   app: FastifyInstance,
@@ -71,14 +73,15 @@ export function registerAppData(
     platform: Pick<Pool, 'query'>;
     handles: RequestHandleKey;
     tables: ViewTables;
-    limit: ReturnType<typeof createAbuseLimiter>;
     limits?: { request?: number; app?: number; refusals?: number };
   },
 ) {
   const { request: perRequest = 200, app: perApp = 6_000, refusals = 600 } = dependencies.limits ?? {};
-  const appPolicy = { name: 'app-data-app', max: perApp, windowMs: 60_000 };
-  const requestPolicy = { name: 'app-data-request', max: perRequest, windowMs: 60_000 };
-  const budget = createRefusalBudget({ refusals });
+  const windowMs = 60_000;
+  const closedHandles = createWindows({ max: 0, windowMs: liveRequestSeconds * 1000 });
+  const handleCalls = createWindows({ max: perRequest, windowMs });
+  const appCalls = createWindows({ max: perApp, windowMs });
+  const appRefusals = createWindows({ max: refusals, windowMs });
 
   app.register(async routes => {
     const validation = routeValidation({
@@ -88,6 +91,7 @@ export function registerAppData(
     });
     validation.install(routes);
     const serving = new WeakMap<FastifyRequest, LiveAppRequest>();
+    const closed = (reply: FastifyReply) => reply.code(401).send({ error: 'request-closed' });
     const tooMany = (reply: FastifyReply, ms: number) =>
       reply
         .code(429)
@@ -97,29 +101,23 @@ export function registerAppData(
     routes.addHook('onRequest', async (request, reply) => {
       reply.header('Cache-Control', 'no-store');
       const signed = verifyRequestHandle(dependencies.handles, request.headers['tulipfarm-request']);
-      if (!signed) return reply.code(401).send({ error: 'request-closed' });
-      const wait = budget.wait(signed);
+      if (!signed) return closed(reply);
+      const handle = createHash('sha256').update(signed.handle).digest('base64url');
+      if (closedHandles.wait(handle) > 0) return closed(reply);
+      const wait = Math.max(handleCalls.wait(handle), appCalls.wait(signed.appId), appRefusals.wait(signed.appId));
       if (wait > 0) return tooMany(reply, wait);
-      // The app's limit comes first so every signed call spends it, whichever request it names.
-      const appRetry = await dependencies.limit(appPolicy, signed.appId);
-      if (appRetry !== null) {
-        budget.holdApp(signed.appId, appRetry);
-        budget.refuse(signed.appId);
-        return tooMany(reply, appRetry);
-      }
-      const requestRetry = await dependencies.limit(requestPolicy, signed.handle);
-      if (requestRetry !== null) {
-        budget.holdHandle(signed.handle, requestRetry);
-        budget.refuse(signed.appId);
-        return tooMany(reply, requestRetry);
-      }
       const live = await resolveRequestHandle(dependencies.platform, signed);
       if (!live) {
-        budget.refuse(signed.appId);
-        return reply.code(401).send({ error: 'request-closed' });
+        closedHandles.spend(handle);
+        return closed(reply);
+      }
+      const retry = handleCalls.spend(handle) || appCalls.spend(live.appId);
+      if (retry > 0) {
+        appRefusals.spend(live.appId);
+        return tooMany(reply, retry);
       }
       if (!(await isFeatureEnabled('app-hosting', null, { id: live.workspaceId }))) {
-        budget.refuse(signed.appId);
+        appRefusals.spend(live.appId);
         return reply.code(403).send({ error: 'denied' });
       }
       serving.set(request, live);
@@ -128,7 +126,7 @@ export function registerAppData(
     routes.setErrorHandler((error, request, reply) => {
       if (error instanceof AccessDenied) {
         const live = serving.get(request);
-        if (live) budget.refuse(live.appId);
+        if (live) appRefusals.spend(live.appId);
         return reply.code(403).send({ error: 'denied' });
       }
       if (error instanceof TableValidationError)

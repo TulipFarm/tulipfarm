@@ -119,7 +119,7 @@ export function buildApp(
       registerUserVisits(v1, auth, authConfig().webOrigin);
       const models = createModelConfiguration({ pool: auth.pool });
       if (options.agentModel === undefined) v1.addHook('onReady', models.registerModelBundle);
-      const limit = registerAbuseProtection(v1, auth.auth);
+      registerAbuseProtection(v1, auth.auth);
       registerPublicGuide(v1, auth);
       v1.register(async business => {
         protectBusinessRequests(business);
@@ -223,7 +223,7 @@ export function buildApp(
           { readableFiles: async () => new Set() },
           commonCompatibility,
         );
-        registerAppData(data, { platform: auth.pool, handles: requestHandleKey(process.env), tables, limit });
+        registerAppData(data, { platform: auth.pool, handles: requestHandleKey(process.env), tables });
       });
     },
     { prefix: '/v1' },

@@ -144,7 +144,6 @@ export function registerAbuseProtection(app: FastifyInstance, auth: ReturnType<t
     await pool.end();
   });
   registerAbuseHooks(app, consume, auth);
-  return consume;
 }
 
 export function registerAbuseHooks(
