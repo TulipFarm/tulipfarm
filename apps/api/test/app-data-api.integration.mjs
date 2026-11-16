@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomBytes, randomUUID } from 'node:crypto';
+import { connect, createServer } from 'node:net';
 import test from 'node:test';
 import Fastify from 'fastify';
 import {
@@ -10,14 +11,16 @@ import {
   signRequestHandle,
 } from '@tulipfarm/apps/store';
 import { registerExtension, resetExtensions } from '@tulipfarm/extensions';
-import { registerAppData } from '../src/app-data.ts';
+import { appDataLookupPool, registerAppData } from '../src/app-data.ts';
 import { authConfig } from '../src/auth.ts';
+import { createIdentityPool } from '../src/identity-pool.ts';
 import { registerSecurity } from '../src/security.ts';
 import { appDataFixture } from './app-data-fixture.mjs';
 
 test('an app server reaches an approved view only while a visitor request is open', { timeout: 180000 }, async t => {
   const {
     cleanup,
+    db,
     pool,
     service,
     workspace,
@@ -547,6 +550,93 @@ test('an app server reaches an approved view only while a visitor request is ope
     assert.deepEqual(outcome(await inject(server, unseen)), tooMany, 'a long stream it has not seen waits');
     assert.equal((await inject(server, await open())).status, 200, 'its new requests are still served');
     assert.equal((await inject(server, otherStream, other.view)).status, 200, "another app's long stream is served");
+  });
+
+  await t.test(
+    "an app flooding distinct handles cannot cut off another app's long stream or cleanup calls",
+    async t => {
+      const flooder = randomUUID();
+      const platform = { query: (sql, values) => (values[1] === flooder ? { rows: [] } : pool.query(sql, values)) };
+      const server = await build(undefined, platform);
+      t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
+      const stream = await open();
+      const visitors = await Promise.all(Array.from({ length: 300 }, () => open()));
+      for (const request of [stream, ...visitors]) assert.equal((await inject(server, request)).status, 200);
+      t.mock.timers.tick(71_000);
+      assert.equal(await renewRequestHandle(pool, stream), true);
+      for (const visitor of visitors) await closeRequestHandle(pool, visitor);
+      const flooded = new Set();
+      for (let start = 0; start < 100_001; start += 2) {
+        const pair = [signRequestHandle(handles, flooder), signRequestHandle(handles, flooder)];
+        for (const response of await Promise.all(pair.map(flood => inject(server, flood))))
+          flooded.add(response.status);
+      }
+      assert.deepEqual([...flooded], [401], 'every flood call was looked up and found closed');
+      const ended = new Set();
+      for (const visitor of visitors) ended.add((await inject(server, visitor)).status);
+      assert.deepEqual(
+        { cleanup: [...ended], stream: (await inject(server, stream)).status },
+        { cleanup: [401], stream: 200 },
+      );
+    },
+  );
+
+  const stallingProxy = async target => {
+    const sockets = new Set();
+    const server = createServer(client => {
+      const upstream = connect(Number(target.port), target.hostname);
+      for (const socket of [client, upstream]) {
+        sockets.add(socket);
+        socket.on('error', () => {});
+        socket.on('close', () => sockets.delete(socket));
+      }
+      client.pipe(upstream).pipe(client);
+    });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    const url = new URL(target);
+    url.hostname = '127.0.0.1';
+    url.port = String(server.address().port);
+    return {
+      url: url.toString(),
+      // The connections open now stop passing bytes but stay open, as half-dead connections do. New ones work.
+      stall: () => {
+        for (const socket of sockets) socket.unpipe().pause();
+      },
+      close: async () => {
+        for (const socket of sockets) socket.destroy();
+        await new Promise(resolve => server.close(resolve));
+      },
+    };
+  };
+
+  await t.test('a lookup stuck on a half-dead connection frees its slot after two seconds', async () => {
+    const proxy = await stallingProxy(new URL(db.connectionString));
+    const owner = Fastify();
+    const url = process.env.DATABASE_URL;
+    process.env.DATABASE_URL = proxy.url;
+    let lookups;
+    try {
+      lookups = createIdentityPool(owner, appDataLookupPool);
+    } finally {
+      if (url === undefined) delete process.env.DATABASE_URL;
+      else process.env.DATABASE_URL = url;
+    }
+    const server = await build(undefined, lookups);
+    cleanup.push(() => owner.close(), proxy.close);
+    const warm = await Promise.all([inject(server, await open()), inject(server, await open())]);
+    assert.deepEqual(
+      warm.map(response => response.status),
+      [200, 200],
+      'two connections through the proxy',
+    );
+    proxy.stall();
+    const stuck = [inject(server, await open()), inject(server, await open())];
+    await sleep(2_500);
+    assert.equal((await inject(server, await open())).status, 200, 'a new lookup gets a freed slot');
+    assert.deepEqual(
+      (await Promise.all(stuck)).map(response => response.status),
+      [503, 503],
+    );
   });
 
   const flagProvider = async (t, isEnabled) => {
