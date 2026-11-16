@@ -29,3 +29,22 @@ test('the handle key is derived from the runtime key and required', () => {
   assert.deepEqual(verifyRequestHandle(same, handle), { handle, appId }, 'only the key bytes matter');
   assert.throws(() => requestHandleKey({}), /WORKSPACE_RUNTIME encryption key configuration is invalid/);
 });
+
+test('a rotated runtime key still accepts handles signed under its previous keys', () => {
+  const before = { WORKSPACE_RUNTIME_KEY_ID: 'one', WORKSPACE_RUNTIME_KEY: 'ab'.repeat(32) };
+  const after = {
+    WORKSPACE_RUNTIME_KEY_ID: 'two',
+    WORKSPACE_RUNTIME_KEY: 'cd'.repeat(32),
+    WORKSPACE_RUNTIME_PREVIOUS_KEYS: JSON.stringify({ one: 'ab'.repeat(32) }),
+  };
+  const old = signRequestHandle(requestHandleKey(before), appId);
+  const rotated = requestHandleKey(after);
+  assert.deepEqual(verifyRequestHandle(rotated, old), { handle: old, appId }, 'signed before the rotation');
+  const fresh = signRequestHandle(rotated, appId);
+  assert.deepEqual(verifyRequestHandle(rotated, fresh), { handle: fresh, appId });
+  assert.equal(verifyRequestHandle(requestHandleKey(before), fresh), null, 'new handles use only the current key');
+  assert.equal(
+    verifyRequestHandle(requestHandleKey({ ...after, WORKSPACE_RUNTIME_PREVIOUS_KEYS: undefined }), old),
+    null,
+  );
+});
