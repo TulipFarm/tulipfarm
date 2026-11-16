@@ -51,7 +51,7 @@ test('shared limits are atomic across replicas, expire, and protect real auth re
     Array.from({ length: 30 }, (_, index) => limiters[index % 2](policy, 'private@example.com')),
   );
   assert.equal(results.filter(result => result === null).length, 5);
-  assert.equal(results.filter(result => result > 0 && result <= 60_000).length, 25);
+  assert.equal(results.filter(result => result > 0 && result <= 60).length, 25);
   const rows = (await pools[0].query('SELECT * FROM app.api_rate_limits')).rows;
   assert.equal(rows.length, 1);
   assert.equal(rows[0].hits, 6);

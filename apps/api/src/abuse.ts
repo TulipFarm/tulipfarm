@@ -76,7 +76,6 @@ const refused = new WeakMap<FastifyRequest, string>();
 /** The webhook budget that refused a delivery before its handler ran, if any. Only the per-workflow budget is spent by verified deliveries alone. */
 export const webhookRefusal = (request: FastifyRequest) => refused.get(request);
 
-/** Spends, checks or refunds one call against `policy` for `identity`. Returns null when allowed, else the milliseconds until its window resets. */
 export function createAbuseLimiter(pool: Pool, secret: string) {
   return async (policy: Policy, identity: string, mode: LimitMode = 'spend') => {
     const key = createHmac('sha256', secret).update(`${policy.name}:${identity}`).digest('hex');
@@ -97,7 +96,7 @@ export function createAbuseLimiter(pool: Pool, secret: string) {
       ).rows[0];
       if (!row) return null;
       const { current, ttl } = counterSchema.parse(row);
-      return current >= policy.max ? ttl : null;
+      return current >= policy.max ? Math.ceil(ttl / 1000) : null;
     }
     const result = await pool.query(
       `INSERT INTO app.api_rate_limits AS limits (key, hits, expires_at)
@@ -109,7 +108,7 @@ export function createAbuseLimiter(pool: Pool, secret: string) {
       [key, policy.windowMs, policy.max],
     );
     const { current, ttl } = counterSchema.parse(result.rows[0]);
-    return current > policy.max ? ttl : null;
+    return current > policy.max ? Math.ceil(ttl / 1000) : null;
   };
 }
 
@@ -166,10 +165,7 @@ export function registerAbuseHooks(
     try {
       const retry = await consume(policy, identity, mode);
       if (retry !== null) {
-        reply
-          .code(429)
-          .header('Retry-After', Math.ceil(retry / 1000))
-          .send({ error: 'rate-limit-exceeded' });
+        reply.code(429).header('Retry-After', retry).send({ error: 'rate-limit-exceeded' });
         return false;
       }
       refused.delete(reply.request);

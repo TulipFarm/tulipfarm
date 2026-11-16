@@ -466,7 +466,7 @@ test('business limits use verified user identity across workspaces and sessions'
     app,
     async (policy, identity) => {
       calls.push([policy.name, identity]);
-      return 30_000;
+      return 30;
     },
     { api: { getSession: async () => ({ user: { id: 'verified-user' } }) } },
   );
@@ -487,7 +487,7 @@ test('email protection cannot be skipped through a different email validation ru
     async (policy, identity) => {
       if (policy.name !== 'email-recipient') return null;
       recipients.push(identity);
-      return 60_000;
+      return 60;
     },
     {},
   );
