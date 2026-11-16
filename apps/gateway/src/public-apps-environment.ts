@@ -5,7 +5,9 @@ import {
   mintRequestHandle,
   readCurrentAppRoute,
   renewRequestHandle,
+  requestHandleKey,
   sweepExpiredRequestHandles,
+  type RequestHandleKey,
 } from '@tulipfarm/apps/store';
 import { appHost } from '@tulipfarm/extensions';
 import { isFeatureEnabled } from '@tulipfarm/observability';
@@ -16,7 +18,8 @@ import type { PublicAppsDependencies } from './public-apps.ts';
 
 /**
  * Public app dependencies from the environment, or null when no apps domain is configured. Without workspace storage
- * the gateway cannot read data views, so no request gets a handle.
+ * the gateway cannot read data views, so no request gets a handle. With it, handles are signed with a key derived from
+ * the workspace runtime key, and a missing key fails startup.
  */
 export function publicAppsFromEnvironment(
   env: NodeJS.ProcessEnv,
@@ -31,19 +34,27 @@ export function publicAppsFromEnvironment(
     enabled: workspaceId => isFeatureEnabled('app-hosting', null, { id: workspaceId }),
     // The registered host is read per call so the gateway can be built before extensions finish starting.
     host: { connect: (input, signal) => appHost().connect(input, signal) },
-    liveRequests: storage && {
-      store: {
-        dataRelease: async app => {
-          const release = await storage.runtime.transaction(app.workspaceId, commonCompatibility, tx =>
-            dataViewRelease(tx, app.appId),
-          );
-          return release === null ? null : releaseIdSchema.parse(release);
-        },
-        mint: async request => (await mintRequestHandle(platform, request)).handle,
-        renew: handle => renewRequestHandle(platform, handle),
-        close: handle => closeRequestHandle(platform, handle),
-        sweep: () => sweepExpiredRequestHandles(platform),
+    liveRequests: storage && liveRequests(platform, storage, requestHandleKey(env)),
+  };
+}
+
+function liveRequests(
+  platform: Pick<Pool, 'query'>,
+  storage: PreviewStorage,
+  key: RequestHandleKey,
+): NonNullable<PublicAppsDependencies['liveRequests']> {
+  return {
+    store: {
+      dataRelease: async app => {
+        const release = await storage.runtime.transaction(app.workspaceId, commonCompatibility, tx =>
+          dataViewRelease(tx, app.appId),
+        );
+        return release === null ? null : releaseIdSchema.parse(release);
       },
+      mint: async request => (await mintRequestHandle(platform, key, request)).handle,
+      renew: handle => renewRequestHandle(platform, handle),
+      close: handle => closeRequestHandle(platform, handle),
+      sweep: () => sweepExpiredRequestHandles(platform),
     },
   };
 }

@@ -50,6 +50,7 @@ import { registerApps } from './apps.ts';
 import { appHostingFromEnvironment, temporalAppWorkflows } from './apps-hosting.ts';
 import { routeAppSites } from './apps-sites.ts';
 import { appBuilders } from '@tulipfarm/apps';
+import { requestHandleKey } from '@tulipfarm/apps/store';
 import { appBuilder, appHost } from '@tulipfarm/extensions';
 import type { Pool } from 'pg';
 import { registerPreviewTickets } from './app-preview-tickets.ts';
@@ -222,7 +223,7 @@ export function buildApp(
           { readableFiles: async () => new Set() },
           commonCompatibility,
         );
-        registerAppData(data, { platform: auth.pool, tables, limit });
+        registerAppData(data, { platform: auth.pool, handles: requestHandleKey(process.env), tables, limit });
       });
     },
     { prefix: '/v1' },

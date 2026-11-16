@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { randomBytes, randomUUID } from 'node:crypto';
 import test from 'node:test';
 import Fastify from 'fastify';
-import { closeRequestHandle, mintRequestHandle } from '@tulipfarm/apps/store';
+import { closeRequestHandle, mintRequestHandle, requestHandleKey } from '@tulipfarm/apps/store';
 import { createAbuseLimiter } from '../src/abuse.ts';
 import { registerAppData } from '../src/app-data.ts';
 import { authConfig } from '../src/auth.ts';
@@ -23,6 +23,7 @@ test('an app server reaches an approved view only while a visitor request is ope
     appId,
     live,
   } = await appDataFixture(t);
+  const handles = requestHandleKey({ WORKSPACE_RUNTIME_KEY_ID: 'app-data', WORKSPACE_RUNTIME_KEY: 'cd'.repeat(32) });
   let queries = 0;
   const counted = { query: (...args) => (queries++, pool.query(...args)) };
   const serve = async (secret = randomUUID()) => {
@@ -38,7 +39,12 @@ test('an app server reaches an approved view only while a visitor request is ope
     app.get('/v1/ordinary', async () => ({}));
     app.register(
       async routes =>
-        registerAppData(routes, { platform: counted, tables: service, limit: createAbuseLimiter(counted, secret) }),
+        registerAppData(routes, {
+          platform: counted,
+          handles,
+          tables: service,
+          limit: createAbuseLimiter(counted, secret),
+        }),
       { prefix: '/v1' },
     );
     cleanup.push(() => app.close());
@@ -75,7 +81,7 @@ test('an app server reaches an approved view only while a visitor request is ope
     return { status: response.status, body: await response.json(), headers: response.headers };
   };
   const open = async (releaseId = live) =>
-    (await mintRequestHandle(pool, { workspaceId: workspace.id, appId, releaseId })).handle;
+    (await mintRequestHandle(pool, handles, { workspaceId: workspace.id, appId, releaseId })).handle;
   const text = value => ({ kind: 'text', value });
   const ada = { parameters: { owner: 'ada' } };
   const list = { ...ada, query: { limit: 10 } };

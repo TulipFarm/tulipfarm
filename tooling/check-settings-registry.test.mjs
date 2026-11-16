@@ -187,6 +187,11 @@ const computedReads = {
     sites: 1,
     names: ['EMAIL_DELIVERY_KEY_ID', 'EMAIL_DELIVERY_KEY', 'EMAIL_DELIVERY_PREVIOUS_KEYS'],
   },
+  // Derives the request handle key from the workspace runtime key.
+  'packages/apps/src/store/request-handles.ts': {
+    sites: 1,
+    names: ['WORKSPACE_RUNTIME_KEY_ID', 'WORKSPACE_RUNTIME_KEY', 'WORKSPACE_RUNTIME_PREVIOUS_KEYS'],
+  },
   'packages/integrations/src/credentials.ts': {
     sites: 1,
     names: ['INTEGRATION_CREDENTIAL_KEY_ID', 'INTEGRATION_CREDENTIAL_KEY', 'INTEGRATION_CREDENTIAL_PREVIOUS_KEYS'],

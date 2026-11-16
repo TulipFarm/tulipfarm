@@ -2,7 +2,12 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { Pool } from 'pg';
 import { z } from 'zod';
 import { AccessDenied, type AppActor } from '@tulipfarm/access';
-import { resolveRequestHandle, type LiveAppRequest } from '@tulipfarm/apps/store';
+import {
+  resolveRequestHandle,
+  verifyRequestHandle,
+  type LiveAppRequest,
+  type RequestHandleKey,
+} from '@tulipfarm/apps/store';
 import { TableValidationError } from '@tulipfarm/tables/definition';
 import type { createTableService } from '@tulipfarm/tables/service';
 import { isFeatureEnabled } from '@tulipfarm/observability';
@@ -61,6 +66,7 @@ export function registerAppData(
   app: FastifyInstance,
   dependencies: {
     platform: Pick<Pool, 'query'>;
+    handles: RequestHandleKey;
     tables: ViewTables;
     limit: ReturnType<typeof createAbuseLimiter>;
   },
@@ -76,13 +82,15 @@ export function registerAppData(
 
     routes.addHook('onRequest', async (request, reply) => {
       reply.header('Cache-Control', 'no-store');
-      const header = request.headers['tulipfarm-request'];
-      const live = await resolveRequestHandle(dependencies.platform, header);
+      // A handle the gateway did not sign is refused before any database work.
+      const signed = verifyRequestHandle(dependencies.handles, request.headers['tulipfarm-request']);
+      if (!signed) return reply.code(401).send({ error: 'request-closed' });
+      const live = await resolveRequestHandle(dependencies.platform, signed);
       if (!live) return reply.code(401).send({ error: 'request-closed' });
       if (!(await isFeatureEnabled('app-hosting', null, { id: live.workspaceId })))
         return reply.code(403).send({ error: 'denied' });
       for (const [policy, identity] of [
-        [requestPolicy, String(header)],
+        [requestPolicy, signed.handle],
         [appPolicy, live.appId],
       ] as const) {
         const retry = await dependencies.limit(policy, identity);

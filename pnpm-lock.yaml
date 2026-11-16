@@ -940,6 +940,9 @@ importers:
       '@tulipfarm/extensions':
         specifier: workspace:*
         version: link:../extensions
+      '@tulipfarm/keyring':
+        specifier: workspace:*
+        version: link:../keyring
       '@tulipfarm/tables':
         specifier: workspace:*
         version: link:../tables
