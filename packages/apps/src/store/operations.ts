@@ -177,13 +177,15 @@ export function admitPublish(
   input: Request & { readonly buildId: AppBuildId },
 ): Promise<Admission> {
   return admitRelease(tx, input, 'publish', async app => {
-    const [build] = await rows<{ commit: string; manifest_digest: string }>(
+    // The share lock waits out a cleanup that is discarding the build's server output, which clears `manifest_key`.
+    const [build] = await rows<{ commit: string; manifest_digest: string; manifest_key: string | null }>(
       tx,
-      `SELECT commit, manifest_digest FROM ${table(tx, 'tf_app_builds')}
-       WHERE id = $1 AND app_id = $2 AND status = 'succeeded'`,
+      `SELECT commit, manifest_digest, manifest_key FROM ${table(tx, 'tf_app_builds')}
+       WHERE id = $1 AND app_id = $2 AND status = 'succeeded' FOR SHARE`,
       [input.buildId, app.id],
     );
     if (!build) return failed('not-found', 'This build has not finished');
+    if (build.manifest_key === null) return failed('not-found', 'This build is no longer kept. Build the app again.');
     return {
       ok: true,
       releaseId: async () => {

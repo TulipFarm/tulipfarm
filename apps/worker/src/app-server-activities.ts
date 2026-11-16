@@ -1,4 +1,11 @@
-import type { AppFailure, AppId, AppOperationId, AppReleaseId, AppServerSize } from '@tulipfarm/apps';
+import {
+  appLimits,
+  type AppFailure,
+  type AppId,
+  type AppOperationId,
+  type AppReleaseId,
+  type AppServerSize,
+} from '@tulipfarm/apps';
 import {
   failOperation,
   markOperationStaging,
@@ -25,7 +32,7 @@ import {
 } from '@tulipfarm/extensions';
 import { recordAppReconcileRepair } from '@tulipfarm/observability';
 import { escapeIdentifier } from 'pg';
-import { collect, heartbeating, serverOutputKey, type AppWork } from './app-activities.ts';
+import { collect, heartbeating, releaseUnretained, serverOutputKey, type AppWork } from './app-activities.ts';
 
 /** Seconds requests on a replaced host get to finish. */
 export const SERVER_DRAIN_S = 30;
@@ -36,6 +43,11 @@ export const SERVER_SWITCH_MS = 120_000;
 const SERVER_REMOVE_MS = 60_000;
 /** The most endpoint repairs, and separately host removals, one reconcile makes. The next run continues. */
 export const SERVER_RECONCILE_BATCH = 50;
+/**
+ * How old an unreferenced server artifact must be before it is discarded. A build made after the reconcile read its
+ * workspace is in no keep list, so this must outlast one reconcile run.
+ */
+export const SERVER_ARTIFACT_GRACE_MS = 60 * 60_000;
 
 type OperationInput = { readonly workspaceId: string; readonly operationId: string };
 
@@ -366,6 +378,74 @@ export function createAppServerActivities(work: AppWork) {
         }
       }
       if (failures.length) throw new AggregateError(failures, 'App server reconcile failed');
+    },
+
+    /**
+     * Discards server build outputs nothing can run again. A server release that rollback no longer needs loses
+     * `staged_at`, by the rule static releases follow. A succeeded server build that no such release, unfinished
+     * operation or draft head uses, finished over an hour ago, loses `manifest_key`, so publishing it builds it again.
+     * Once every workspace was read, the builder deletes the artifact of every build that is neither in flight nor
+     * still holds its output.
+     */
+    async sweepServerArtifacts(signal: AbortSignal, now = Date.now()) {
+      const builder = work.builder;
+      if (!builder?.discardServerArtifacts) return;
+      const keep = new Set<string>();
+      const failures: unknown[] = [];
+      let releases = 0;
+      for await (const workspaceId of work.workspaces()) {
+        signal.throwIfAborted();
+        try {
+          const kept = await transact(workspaceId, async tx => {
+            const builds = table(tx, 'tf_app_builds');
+            const releaseTable = table(tx, 'tf_app_releases');
+            const operations = table(tx, 'tf_app_operations');
+            const server = `b.recipe->>'kind' = 'server'`;
+            // Each lock is taken in its own statement, so the next one reads every rollback or publish admitted before.
+            const { rows: staged } = await tx.client.query(
+              `SELECT r.id FROM ${releaseTable} r JOIN ${builds} b ON b.id = r.build_id
+               WHERE r.staged_at IS NOT NULL AND ${server} ORDER BY r.id FOR UPDATE OF r`,
+            );
+            const discarded = await tx.client.query(
+              `UPDATE ${releaseTable} r SET staged_at = NULL FROM ${table(tx, 'tf_apps')} a
+               WHERE a.id = r.app_id AND r.id = ANY($1::uuid[]) AND ${releaseUnretained(tx, '$2')}`,
+              [(staged as { id: string }[]).map(row => row.id), appLimits.retainedReleases],
+            );
+            releases += discarded.rowCount ?? 0;
+            const { rows: held } = await tx.client.query(
+              `SELECT b.id FROM ${builds} b
+               WHERE ${server} AND b.status = 'succeeded' AND b.manifest_key IS NOT NULL ORDER BY b.id FOR UPDATE`,
+            );
+            await tx.client.query(
+              `UPDATE ${builds} b SET manifest_key = NULL
+               WHERE b.id = ANY($1::text[]) AND b.finished_at <= clock_timestamp() - interval '1 hour'
+                 AND NOT EXISTS (
+                   SELECT 1 FROM ${releaseTable} r JOIN ${table(tx, 'tf_apps')} a ON a.id = r.app_id
+                   WHERE r.build_id = b.id
+                     AND (r.staged_at IS NOT NULL OR r.id = a.live_release_id
+                          OR EXISTS (SELECT 1 FROM ${operations} o
+                                     WHERE o.target_release_id = r.id AND o.status IN ('admitted', 'staging'))))
+                 AND NOT EXISTS (SELECT 1 FROM ${table(tx, 'tf_app_drafts')} d
+                                 WHERE d.app_id = b.app_id AND d.head_commit = b.commit)`,
+              [(held as { id: string }[]).map(row => row.id)],
+            );
+            const { rows: kept } = await tx.client.query(
+              `SELECT b.id FROM ${builds} b
+               WHERE ${server} AND (b.status IN ('queued', 'running') OR b.manifest_key IS NOT NULL)`,
+            );
+            return (kept as { id: string }[]).map(row => row.id);
+          });
+          for (const id of kept) keep.add(id);
+        } catch (error) {
+          failures.push(error);
+        }
+      }
+      if (releases) recordAppReconcileRepair('release-discarded', releases);
+      // A workspace that was not read may hold builds whose artifacts are still needed.
+      if (failures.length) throw new AggregateError(failures, 'Server artifact sweep failed');
+      const before = new Date(now - SERVER_ARTIFACT_GRACE_MS).toISOString();
+      const { discarded } = await builder.discardServerArtifacts({ keep, before }, signal);
+      if (discarded) recordAppReconcileRepair('server-output-discarded', discarded);
     },
   };
 }

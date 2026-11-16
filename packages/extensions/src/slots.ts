@@ -375,6 +375,15 @@ export type AppBuilder = {
     input: Omit<AppBuildInput, 'recipe'> & { readonly recipe: AppServerRecipe },
     signal: AbortSignal,
   ): Promise<AppServerBuildResult>;
+  /**
+   * Deletes the server artifact of every build whose id is not in `keep` and that was made before `before`, an ISO
+   * 8601 instant, unless a host or a build still uses it. Returns how many it deleted. Without it, server artifacts
+   * are kept forever.
+   */
+  discardServerArtifacts?(
+    input: { readonly keep: ReadonlySet<string>; readonly before: string },
+    signal: AbortSignal,
+  ): Promise<{ readonly discarded: number }>;
 };
 
 export type AppEdgeStatus = 'active' | 'paused' | 'disabled';

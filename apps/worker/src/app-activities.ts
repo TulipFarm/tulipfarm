@@ -198,6 +198,27 @@ export async function collect(stream: AsyncIterable<Uint8Array>, limit: number) 
 /** Where a server build's output is kept: the artifact and the contract that starts it, as JSON. */
 export const serverOutputKey = (buildId: string) => `builds/${buildId}/server.json`;
 
+/**
+ * SQL true for a release `r` of app `a` that rollback no longer needs. A release is kept while it is live, the target
+ * of an unfinished operation, among the newest `retained` (a query parameter) switched releases of its app, or recently
+ * created.
+ */
+export const releaseUnretained = (tx: AppTransaction, retained: string) => {
+  const releases = table(tx, 'tf_app_releases');
+  const operations = table(tx, 'tf_app_operations');
+  return `r.id IS DISTINCT FROM a.live_release_id
+    AND r.created_at <= clock_timestamp() - interval '1 hour'
+    AND NOT EXISTS (SELECT 1 FROM ${operations} o
+                    WHERE o.target_release_id = r.id AND o.status IN ('admitted', 'staging'))
+    AND r.id NOT IN (
+      SELECT id FROM (
+        SELECT s.id, row_number() OVER (PARTITION BY s.app_id ORDER BY s.number DESC) AS rank
+        FROM ${releases} s
+        WHERE EXISTS (SELECT 1 FROM ${operations} o
+                      WHERE o.target_release_id = s.id AND o.status = 'switched')
+      ) ranked WHERE rank <= ${retained})`;
+};
+
 export async function* bytesOf(object: Buffer): AsyncIterable<Uint8Array> {
   yield object;
 }
@@ -800,28 +821,15 @@ export function createAppActivities(work: AppWork) {
           try {
             const { found, discarded } = await transact(workspaceId, async tx => {
               const releases = table(tx, 'tf_app_releases');
-              const operations = table(tx, 'tf_app_operations');
               // Locked in its own statement so the next one reads every rollback admitted before the lock was taken.
               const { rows: found } = await tx.client.query(
                 `SELECT id FROM ${releases} WHERE id::text = ANY($1::text[]) ORDER BY id FOR UPDATE`,
                 [staged],
               );
-              // A release is kept while it is live, the target of an unfinished operation, among the newest switched
-              // releases of its app, or recently created. Clearing staged_at stops a rollback from choosing it.
+              // Clearing staged_at stops a rollback from choosing the release.
               const { rows: discarded } = await tx.client.query(
                 `UPDATE ${releases} r SET staged_at = NULL FROM ${table(tx, 'tf_apps')} a
-                 WHERE a.id = r.app_id AND r.id::text = ANY($1::text[])
-                   AND r.id IS DISTINCT FROM a.live_release_id
-                   AND r.created_at <= clock_timestamp() - interval '1 hour'
-                   AND NOT EXISTS (SELECT 1 FROM ${operations} o
-                                   WHERE o.target_release_id = r.id AND o.status IN ('admitted', 'staging'))
-                   AND r.id NOT IN (
-                     SELECT id FROM (
-                       SELECT s.id, row_number() OVER (PARTITION BY s.app_id ORDER BY s.number DESC) AS rank
-                       FROM ${releases} s
-                       WHERE EXISTS (SELECT 1 FROM ${operations} o
-                                     WHERE o.target_release_id = s.id AND o.status = 'switched')
-                     ) ranked WHERE rank <= $2)
+                 WHERE a.id = r.app_id AND r.id::text = ANY($1::text[]) AND ${releaseUnretained(tx, '$2')}
                  RETURNING r.id`,
                 [staged, appLimits.retainedReleases],
               );

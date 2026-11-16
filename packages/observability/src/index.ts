@@ -1003,8 +1003,8 @@ export function recordAgentSetup(status: string, errorCode: string | null, error
 
 /**
  * What an app reconcile repaired: a route, an edge projection, a stale name claim, a name a deleted workspace held,
- * an unreferenced release, a server endpoint left on the wrong host or a server host nothing uses or whose workspace
- * was deleted.
+ * an unreferenced release, a server endpoint left on the wrong host, a server host nothing uses or whose workspace
+ * was deleted, or a server build output nothing can run again.
  */
 export const appReconcileRepairs = [
   'route-applied',
@@ -1015,15 +1015,16 @@ export const appReconcileRepairs = [
   'release-discarded',
   'endpoint-switched',
   'host-removed',
+  'server-output-discarded',
 ] as const;
 export type AppReconcileRepair = (typeof appReconcileRepairs)[number];
 
 /** Counts one repair of drift the app reconcile found. A reconcile that finds no drift adds nothing. */
-export function recordAppReconcileRepair(kind: AppReconcileRepair) {
+export function recordAppReconcileRepair(kind: AppReconcileRepair, count = 1) {
   metrics
     .getMeter(scope)
     .createCounter('cloud_app_reconcile_repairs', { description: 'Drift the app reconcile repaired, by kind' })
-    .add(1, { ...dimensions, kind });
+    .add(count, { ...dimensions, kind });
 }
 
 /**

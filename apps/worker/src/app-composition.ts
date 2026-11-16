@@ -64,12 +64,14 @@ export function createAppComposition(options: {
     enabled: workspaceId => isFeatureEnabled('app-hosting', null, { id: workspaceId }),
   };
   const { reconcileApps, meterAppTraffic, meterAppUsage: _meterWindow, ...activities } = createAppActivities(work);
-  const { reconcileAppServers, ...serverActivities } = createAppServerActivities(work);
+  const { reconcileAppServers, sweepServerArtifacts, ...serverActivities } = createAppServerActivities(work);
   return {
     activities: { ...activities, ...serverActivities },
-    /** Repairs static delivery and server hosts; one failing does not stop the other. */
+    /** Repairs static delivery and server hosts and discards unused server outputs; one failing does not stop another. */
     async reconcile(signal: AbortSignal) {
-      const failures = (await Promise.allSettled([reconcileApps(signal), reconcileAppServers(signal)]))
+      const failures = (
+        await Promise.allSettled([reconcileApps(signal), reconcileAppServers(signal), sweepServerArtifacts(signal)])
+      )
         .filter(result => result.status === 'rejected')
         .map(result => result.reason);
       if (failures.length) throw new AggregateError(failures, 'App reconcile failed');
