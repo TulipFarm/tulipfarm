@@ -163,8 +163,6 @@ function Connect({
   );
 }
 
-const maxToolsOn = 100;
-
 /** A connection that exists. It shows "Connected" once tools are on, and offers one click for anything else. */
 function Connected({
   api,
@@ -184,14 +182,7 @@ function Connected({
   const live = state?.integration ?? integration;
   const turnOn = () => {
     if (!state) return;
-    // The server turns on at most 100 tools per app, so reads go first.
-    const on = new Set(
-      state.tools
-        .filter(tool => tool.compatibility === 'compatible')
-        .sort((a, b) => Number(b.readOnly) - Number(a.readOnly))
-        .slice(0, maxToolsOn)
-        .map(tool => tool.name),
-    );
+    const on = new Set(state.tools.filter(tool => tool.compatibility === 'compatible').map(tool => tool.name));
     void command.run(
       () =>
         api.integrationCommand(live.id, 'tools', {

@@ -6,7 +6,6 @@ import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 
 export const mcpLimits = {
   integrations: 20,
-  selectedTools: 100,
   discoveredTools: 200,
   discoveryPages: 20,
   argumentBytes: 128 * 1024,

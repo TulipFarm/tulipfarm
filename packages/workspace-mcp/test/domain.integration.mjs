@@ -927,7 +927,7 @@ test('same-server task slots cannot lend write authority to the read-only bound 
   }
 });
 
-test('team removal and reenrollment never restore old selections or approvals', async () => {
+test('team removal voids old approvals but keeps the app tools on', async () => {
   const f = await mcpFixture();
   try {
     const actor = f.members[0],
@@ -973,13 +973,12 @@ test('team removal and reenrollment never restore old selections or approvals', 
     });
     const after = await f.service.status(f.one.id, actor, integration.id);
     assert.ok(after.authorizationEpoch > before.authorizationEpoch);
-    assert.ok(
-      (await f.service.tools(f.one.id, actor, integration.id)).every(
-        tool => !tool.enabled_revision && !tool.standing_exception,
-      ),
-    );
+    const on = async () =>
+      (await f.service.tools(f.one.id, f.admin, integration.id)).every(
+        tool => tool.enabled_revision === tool.discovered_revision,
+      );
+    assert.ok(await on(), 'leaving a team keeps the app tools on for everyone');
     await assert.rejects(f.service.dispatch(f.one.id, action.id), /Resource not found/);
-    await review();
     assert.deepEqual((await f.service.catalog(f.one.id, actor, action.origin)).sources, [
       { kind: 'mcp-integration', integrationId: integration.id, authorizationEpoch: after.authorizationEpoch },
     ]);
@@ -989,6 +988,12 @@ test('team removal and reenrollment never restore old selections or approvals', 
     await f.approve(fresh);
     assert.equal((await f.service.dispatch(f.one.id, fresh.id)).status, 'succeeded');
     assert.equal(f.calls.length, 1);
+    await f.service.setGrants(f.one.id, f.admin, integration.id, {
+      expectedVersion: (await f.service.status(f.one.id, f.admin, integration.id)).grantsVersion,
+      memberIds: [],
+      teamIds: [],
+    });
+    assert.ok(await on(), 'removing a team grant keeps the app tools on');
   } finally {
     await f.close();
   }
@@ -1091,7 +1096,7 @@ test('expired claims recover with dispatch off after requester removal without e
   }
 });
 
-test('tool review accepts every discovered entry and limits only the enabled set', async () => {
+test('tool review accepts every discovered entry and can turn them all on', async () => {
   const f = await mcpFixture();
   try {
     const actor = f.members[0];
@@ -1121,10 +1126,11 @@ test('tool review accepts every discovered entry and limits only the enabled set
         })),
       });
     const enabledNames = policies => policies.filter(policy => policy.enabled_revision).map(policy => policy.name);
+    assert.equal(enabledNames(discovered).length, 200, 'discovery turns every compatible tool on');
+    assert.deepEqual(enabledNames(await review(200, 0)), []);
     assert.deepEqual(enabledNames(await review(101, 1)), ['tool-000']);
     assert.deepEqual(enabledNames(await review(200, 2)), ['tool-000', 'tool-001']);
-    await assert.rejects(review(200, 101), /limit/);
-    assert.equal(enabledNames(await review(200, 100)).length, 100);
+    assert.equal(enabledNames(await review(200, 200)).length, 200);
     await assert.rejects(
       async () =>
         f.service.reviewTools(
