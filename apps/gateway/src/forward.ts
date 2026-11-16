@@ -6,6 +6,7 @@ import {
 } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import type { Duplex, Readable } from 'node:stream';
+import type { RequestHandle } from '@tulipfarm/apps/store';
 
 /** Where an app's endpoint answers, as `AppHost.connect` returns it. */
 export type Endpoint = { readonly url: string; readonly headers: Readonly<Record<string, string>> };
@@ -82,12 +83,18 @@ export function appCookies(cookie: string | undefined): string | undefined {
 }
 
 /**
- * The headers sent upstream: the client's own, less hop-by-hop, forged and TulipFarm headers, plus who asked and the
- * endpoint's credentials. `upgrade` keeps the WebSocket handshake headers.
+ * The headers sent upstream: the client's own, less hop-by-hop, forged and TulipFarm headers, plus who asked, the
+ * endpoint's credentials and the gateway's request handle. `upgrade` keeps the WebSocket handshake headers.
  */
 export function upstreamHeaders(
   headers: IncomingHttpHeaders,
-  options: { readonly client: Client; readonly endpoint: Endpoint; readonly wake: boolean; readonly upgrade: boolean },
+  options: {
+    readonly client: Client;
+    readonly endpoint: Endpoint;
+    readonly wake: boolean;
+    readonly upgrade: boolean;
+    readonly requestHandle: RequestHandle | null;
+  },
 ): OutgoingHttpHeaders {
   const named = connectionTokens(headers);
   const forwarded: OutgoingHttpHeaders = {};
@@ -106,7 +113,10 @@ export function upstreamHeaders(
   forwarded['x-forwarded-proto'] = options.client.protocol;
   forwarded['x-forwarded-host'] = options.client.host;
   if (!options.wake) forwarded['x-spawnbox-wake'] = 'never';
-  return { ...forwarded, ...options.endpoint.headers };
+  for (const [name, value] of Object.entries(options.endpoint.headers))
+    if (!tulipfarmHeader(name.toLowerCase())) forwarded[name] = value;
+  if (options.requestHandle) forwarded['tulipfarm-request'] = options.requestHandle;
+  return forwarded;
 }
 
 /** The app's response headers for the client, less hop-by-hop, forwarding-layer and TulipFarm headers. */

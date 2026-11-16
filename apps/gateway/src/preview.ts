@@ -334,7 +334,7 @@ export function buildPreviewGateway(dependencies: PreviewGatewayDependencies, se
         if (found.kind === 'server') {
           const { appId, hostRef } = found;
           if (hostRef === null) return page(reply, shellOrigin, 503, notRunning);
-          const forwarded = await relay.request(request, reply, client, destination(appId, hostRef));
+          const forwarded = await relay.request(request, reply, client, destination(appId, hostRef), null);
           if (forwarded.kind === 'answer')
             return answer(request, reply, forwarded.answer, {
               retryAfterSeconds: forwarded.retryAfterSeconds,
@@ -392,7 +392,7 @@ export function buildPreviewGateway(dependencies: PreviewGatewayDependencies, se
     if (found.kind !== 'server') return rawStatus(socket, 404);
     const { appId, hostRef } = found;
     if (hostRef === null) return rawStatus(socket, 503);
-    const relayed = await relay.upgrade(request, socket, head, client, destination(appId, hostRef), draftCookies);
+    const relayed = await relay.upgrade(request, socket, head, client, destination(appId, hostRef), null, draftCookies);
     if (!relayed) return;
     const { app, frames } = relayed;
     const stop = watch(request.headers, hostRef, () => {

@@ -11,6 +11,7 @@ import { appNameOf, buildPublicAppsGateway } from '../src/public-apps.ts';
 
 const workspaceId = '11111111-1111-4111-8111-111111111111';
 const appId = '22222222-2222-4222-8222-222222222222';
+const releaseId = '44444444-4444-4444-8444-444444444444';
 const host = 'acme-api.apps.tulipfarm.test';
 const browser = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 Safari/605.1.15';
 
@@ -19,12 +20,20 @@ const browser = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.
  * wakes a stopped sandbox for any request that allows it, and answers with what the app received.
  */
 async function sandbox(t, options = {}) {
-  const state = { running: options.running === true, wakes: 0, requests: 0, keys: new Set(['key-1']), seen: [] };
+  const state = {
+    running: options.running === true,
+    wakes: 0,
+    requests: 0,
+    keys: new Set(['key-1']),
+    seen: [],
+    live: [],
+  };
   const refuse = (response, code, status = 503) =>
     response.writeHead(status, { 'X-Spawnbox-Error': code, 'Retry-After': '1' }).end();
   async function admit(incoming) {
     state.requests += 1;
     state.seen.push(incoming.headers);
+    state.live.push(options.live?.resolve(incoming.headers['tulipfarm-request']) ?? null);
     if (!state.keys.has(incoming.headers['x-spawnbox-key'])) return 'unauthorized';
     if (incoming.headers['x-spawnbox-target'] !== appId) return 'forbidden';
     if (state.running) return null;
@@ -39,6 +48,12 @@ async function sandbox(t, options = {}) {
     const refused = await admit(incoming);
     if (refused) return refuse(response, refused, refused === 'unauthorized' ? 401 : 503);
     if (incoming.url === '/slow') await new Promise(resolve => setTimeout(resolve, 3_000));
+    if (incoming.url === '/events') {
+      response.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      const ticker = setInterval(() => response.write('data: tick\n\n'), 20);
+      response.on('close', () => clearInterval(ticker));
+      return;
+    }
     const chunks = [];
     for await (const chunk of incoming) chunks.push(chunk);
     response
@@ -113,12 +128,21 @@ async function gatewayFor(t, options = {}) {
           if (options.hostless) throw new AppHostUnavailableError();
           return {
             url: upstream.url,
-            headers: { 'X-Spawnbox-Key': `key-${calls.connects}`, 'X-Spawnbox-Target': appId },
+            headers: {
+              'X-Spawnbox-Key': `key-${calls.connects}`,
+              'X-Spawnbox-Target': appId,
+              ...options.endpointHeaders,
+            },
           };
         },
       },
       wakeBudgetMs: 1_500,
       keepaliveMs: options.keepaliveMs,
+      liveRequests: options.live && {
+        store: options.live.store,
+        renewMs: options.live.renewMs,
+        sweepMs: options.live.sweepMs,
+      },
     },
     serverOptions: options.serverOptions ?? {},
     identity: { version: 'development', commit: 'development' },
@@ -127,6 +151,49 @@ async function gatewayFor(t, options = {}) {
   t.after(() => gateway.close());
   return { port: gateway.server.address().port, upstream: upstream.state, calls };
 }
+
+/**
+ * Stands in for the live request store, keeping handles in memory: each expires `ttlMs` after it was minted or last
+ * renewed, as the database's would after a minute.
+ */
+function liveStore(options = {}) {
+  const ttlMs = options.ttlMs ?? 60_000;
+  const open = new Map();
+  const state = { release: options.release === undefined ? releaseId : options.release, mints: 0, failing: false };
+  const resolve = handle => {
+    const found = open.get(handle);
+    return found !== undefined && found.until > Date.now() ? found.request : null;
+  };
+  const store = {
+    async dataRelease(app) {
+      assert.deepEqual(app, { workspaceId, appId });
+      return state.release;
+    },
+    async mint(request) {
+      if (state.failing) throw new Error('connect ECONNREFUSED');
+      state.mints += 1;
+      const handle = `tfr_${randomBytes(32).toString('base64url')}`;
+      open.set(handle, { request, until: Date.now() + ttlMs });
+      return handle;
+    },
+    async renew(handle) {
+      if (!resolve(handle)) return false;
+      open.get(handle).until = Date.now() + ttlMs;
+      return true;
+    },
+    async close(handle) {
+      open.delete(handle);
+    },
+    async sweep() {
+      const expired = [...open].filter(([, found]) => found.until <= Date.now());
+      for (const [handle] of expired) open.delete(handle);
+      return expired.length;
+    },
+  };
+  return { store, state, open, resolve, renewMs: options.renewMs, sweepMs: options.sweepMs };
+}
+
+const served = { workspaceId, appId, releaseId };
 
 function call(port, { method = 'GET', path = '/', headers = {}, body } = {}) {
   return new Promise((resolve, reject) => {
@@ -200,8 +267,12 @@ function trickle(port) {
   };
 }
 
-async function until(condition) {
-  while (!condition()) await new Promise(resolve => setTimeout(resolve, 10));
+async function until(condition, ms = 5_000) {
+  const deadline = Date.now() + ms;
+  while (!condition()) {
+    assert.ok(Date.now() < deadline, 'the condition held in time');
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
 }
 
 test('a POST whose body is still arriving does not hold back other requests', async t => {
@@ -567,4 +638,111 @@ test('two clients behind the same CloudFront edge have separate WebSocket limits
   for (let opened = 0; opened < 120; opened += 1) assert.equal(await open('203.0.113.7'), 404);
   assert.equal(await open('203.0.113.7'), 429);
   assert.equal(await open('203.0.113.8'), 404);
+});
+
+test('a visitor request to an app with data views carries a live handle until its response ends', async t => {
+  const live = liveStore();
+  const { port, upstream } = await gatewayFor(t, { running: true, live });
+  const response = await call(port, { headers: { 'TulipFarm-Request': 'tfr_forged' } });
+  assert.equal(response.status, 201);
+  const handle = upstream.seen[0]['tulipfarm-request'];
+  assert.match(handle, /^tfr_[A-Za-z0-9_-]{43}$/);
+  assert.deepEqual(upstream.live, [served]);
+  assert.equal(response.headers['tulipfarm-request'], undefined);
+  await until(() => live.resolve(handle) === null);
+  assert.equal(live.open.size, 0);
+});
+
+test('a request sent again to a fresh endpoint keeps its one handle', async t => {
+  const live = liveStore();
+  const { port, upstream, calls } = await gatewayFor(t, { running: true, live });
+  upstream.keys = new Set(['key-2']);
+  assert.equal((await call(port)).status, 201);
+  assert.equal(calls.connects, 2);
+  const [first, second] = upstream.seen.map(seen => seen['tulipfarm-request']);
+  assert.match(first, /^tfr_/);
+  assert.equal(second, first);
+  assert.equal(live.state.mints, 1);
+  assert.deepEqual(upstream.live, [served, served]);
+});
+
+test('a stream stays live past the expiry while its client is connected, and ends when the client drops', async t => {
+  const live = liveStore({ ttlMs: 150, renewMs: 40 });
+  const { port, upstream } = await gatewayFor(t, { running: true, live });
+  const outgoing = request({ host: '127.0.0.1', port, path: '/events', headers: { host } });
+  outgoing.on('error', () => {});
+  t.after(() => outgoing.destroy());
+  const ticks = new Promise(resolve => {
+    outgoing.on('response', response => {
+      let received = '';
+      response.on('data', chunk => {
+        received += chunk;
+        if (received.split('tick').length > 20) resolve(received);
+      });
+    });
+  });
+  outgoing.end();
+  await ticks;
+  const handle = upstream.seen[0]['tulipfarm-request'];
+  assert.deepEqual(live.resolve(handle), served);
+  await new Promise(resolve => setTimeout(resolve, 300));
+  assert.deepEqual(live.resolve(handle), served);
+  outgoing.destroy();
+  await until(() => live.resolve(handle) === null);
+  assert.equal(live.open.size, 0);
+});
+
+test('a WebSocket holds a handle until it closes', async t => {
+  const live = liveStore();
+  const { port, upstream } = await gatewayFor(t, { running: true, live });
+  const { status, text } = await echo(port, 'ping', { 'TulipFarm-Request': 'tfr_forged' });
+  assert.deepEqual({ status, text }, { status: 101, text: 'ping' });
+  const handle = upstream.seen[0]['tulipfarm-request'];
+  assert.match(handle, /^tfr_[A-Za-z0-9_-]{43}$/);
+  assert.deepEqual(upstream.live, [served]);
+  await until(() => live.resolve(handle) === null);
+  assert.equal(live.open.size, 0);
+});
+
+test('apps without approved data views get no handle, and a failed mint relays without one', async t => {
+  await t.test('no approved data view', async t => {
+    const live = liveStore({ release: null });
+    const { port, upstream } = await gatewayFor(t, { running: true, live });
+    assert.equal((await call(port, { headers: { 'TulipFarm-Request': 'tfr_forged' } })).status, 201);
+    assert.equal((await echo(port, 'ping')).text, 'ping');
+    assert.deepEqual(
+      upstream.seen.map(seen => seen['tulipfarm-request']),
+      [undefined, undefined],
+    );
+    assert.equal(live.state.mints, 0);
+  });
+  await t.test('the store is down', async t => {
+    const live = liveStore();
+    live.state.failing = true;
+    const { port, upstream } = await gatewayFor(t, { running: true, live });
+    const response = await call(port, { headers: { 'TulipFarm-Request': 'tfr_forged' } });
+    assert.equal(response.status, 201);
+    assert.equal(upstream.seen[0]['tulipfarm-request'], undefined);
+  });
+});
+
+test('an endpoint cannot set the request handle', async t => {
+  const live = liveStore();
+  const { port, upstream } = await gatewayFor(t, {
+    running: true,
+    live,
+    endpointHeaders: { 'TulipFarm-Request': 'tfr_from_endpoint' },
+  });
+  assert.equal((await call(port)).status, 201);
+  assert.deepEqual(upstream.live, [served]);
+  assert.equal(live.state.mints, 1);
+});
+
+test('expired handles are swept on a timer', async t => {
+  const live = liveStore({ sweepMs: 20 });
+  await gatewayFor(t, { running: true, live });
+  live.open.set('tfr_expired', { request: served, until: Date.now() - 1 });
+  live.open.set('tfr_open', { request: served, until: Date.now() + 60_000 });
+  await until(() => !live.open.has('tfr_expired'));
+  assert.deepEqual([...live.open.keys()], ['tfr_open']);
 });

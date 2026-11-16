@@ -25,6 +25,7 @@
     "@tulipfarm/config": "workspace:*",
     "@tulipfarm/extensions": "workspace:*",
     "@tulipfarm/observability": "workspace:*",
+    "@tulipfarm/tables": "workspace:*",
     "@tulipfarm/workspace-storage": "workspace:*",
     "@tulipfarm/workspaces": "workspace:*",
     "fastify": "5.12.5",
