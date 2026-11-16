@@ -24,7 +24,7 @@ import { useConfirmation } from '@/features/access/confirm';
 import { accessPolicies, joinList, type PolicyRow } from '@/features/access/policies';
 import { NoPolicies, PolicyEditor, PolicyTable, scopeChoices, type ScopeChoice } from '@/features/access/policy-table';
 import type { PolicyPermission } from '@tulipfarm/workspaces/governance-contracts';
-import { leaveConfirmation, leaveReason, personName } from './access-members';
+import { failed, leaveConfirmation, leaveReason, personName } from './access-members';
 import type { AccessPage } from './governance';
 
 export function MemberDetail({ page, membershipId }: { page: AccessPage; membershipId: string }) {
@@ -89,8 +89,6 @@ function Detail({ page, access, stale }: { page: AccessPage; access: MemberAcces
   const addable = page.data.teams.filter(
     team => (page.admin || team.canManage) && !access.teams.some(own => own.id === team.id),
   );
-  const failed = (result: Awaited<ReturnType<AccessPage['change']>>) =>
-    result === 'saved' ? null : 'Nothing changed. Close this to see why.';
   const teamAction = async (path: string, body: unknown, notice: string) => {
     const result = await page.change(path, 'PUT', body);
     if (result === 'saved') page.notify(notice);

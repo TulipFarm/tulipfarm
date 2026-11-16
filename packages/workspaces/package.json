@@ -99,6 +99,10 @@
       "types": "./dist/members.d.ts",
       "default": "./dist/members.js"
     },
+    "./invitation-token": {
+      "types": "./dist/invitation-token.d.ts",
+      "default": "./dist/invitation-token.js"
+    },
     "./governance-contracts": {
       "types": "./dist/governance-contracts.d.ts",
       "default": "./dist/governance-contracts.js"

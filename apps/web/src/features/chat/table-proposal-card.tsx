@@ -133,8 +133,11 @@ export function TableProposalCard({
   const { workspaceSlug } = workspaceRoute.useParams();
   const api = useMemo(() => proposalApi(workspaceId, chatId, id), [workspaceId, chatId, id]);
   const read = useTableProposalOutcome(api, { chatId, proposalId: id });
+  const shown = useRef(false);
+  if (read.state.kind === 'ready') shown.current = true;
   // A call the tool rejected as invalid saved no proposal; the assistant corrects it and proposes again.
-  if (read.state.kind === 'unavailable' && read.state.status === 404) return null;
+  // A proposal that was shown and then became unavailable says so instead of vanishing.
+  if (read.state.kind === 'unavailable' && read.state.status === 404 && !shown.current) return null;
   return (
     <section aria-label={read.state.kind === 'ready' ? undefined : 'Table change proposal'}>
       <TableRead state={read.state} refresh={read.refresh}>

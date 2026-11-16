@@ -494,6 +494,10 @@ test('chat sends reconcile transport failures and recover without reloading', { 
           const chats = page
             .getByRole('navigation', { name: 'Workspace navigation' })
             .getByRole('link', { name: 'Chats', exact: true });
+          // Reading the last admission also loads the page-read code, which a cached production bundle has
+          // ready at once but the dev server sends module by module. Starting it with the document keeps
+          // the reload inside the brief window for reading the admission on a busy machine.
+          await page.addInitScript(() => void import('/src/features/chat/early-reads.ts'));
           let release;
           // Reopening shows the workspace from its last admission while the startup check waits. The
           // dev server can miss the brief window for reading it, so a reload that waits is tried again.

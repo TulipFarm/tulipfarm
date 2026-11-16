@@ -386,7 +386,13 @@ try {
   await dialog.getByRole('heading', { name: 'Edit policy for Operations' }).waitFor();
   await dialog.getByRole('checkbox', { name: 'Delete rows', exact: true }).click();
   await dialog.getByRole('button', { name: 'Save policy', exact: true }).click();
-  await dialog.getByText('We couldn’t confirm the change.', { exact: false }).waitFor();
+  // The failed save is read back at once, so the "checking" notice can be brief; wait for the outcome.
+  await dialog
+    .getByText(
+      'Your change wasn’t saved. The policy for Operations on Invoices is unchanged: Read rows, Create rows. Try again.',
+      { exact: true },
+    )
+    .waitFor();
   assert.equal(await dialog.getByRole('checkbox', { name: 'Delete rows', exact: true }).isChecked(), true);
   assert.equal(snapshot.grants.length, 2);
   writeFails = false;

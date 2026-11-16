@@ -5,6 +5,7 @@ import { chromium } from 'playwright';
 import { chatCatalog } from './chat-catalog.fixture.mjs';
 import { serveWorkspaceShellEvent, workspaceShellReads } from './workspace.fixture.mjs';
 import { assertConfiguration, reviewDefinition } from './workflow-definition.fixture.mjs';
+import { clearEditor } from './browser-controls.mjs';
 
 const port = Number(process.env.P1_BROWSER_PORT ?? 5307);
 const origin = `http://127.0.0.1:${port}`;
@@ -342,7 +343,7 @@ try {
       .getByRole('textbox', { name: 'Message', exact: true })
       .getByText(/^Help me create a workflow\./)
       .waitFor();
-    await page.getByRole('textbox', { name: 'Message', exact: true }).fill('');
+    await clearEditor(page.getByRole('textbox', { name: 'Message', exact: true }));
     await page.goto(`${origin}/acme/workflows?workflow=${workflows[0].id}`);
     {
       const viewer = page.getByRole('region', { name: 'Expense review workflow', exact: true });

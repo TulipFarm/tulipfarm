@@ -44,7 +44,7 @@ import { googleReadable } from '@/features/chat/file-mentions';
 import { formatFileSize, renderableType } from '@/lib/file-viewer';
 import { useFeatureRead, useFeatureScope } from '@/lib/query';
 import { useIsMobile } from '@/hooks/use-mobile';
-import { loadView, unreadable } from '@/features/google/file-view';
+import { loadView, sameBinary, unreadable } from '@/features/google/file-view';
 
 const modified = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' });
 type Search = FilesSearch & GoogleFilesSearch;
@@ -165,7 +165,12 @@ function Opened({
   useEffect(() => {
     if (block === 'reconnect' || block === 'grant') void drive.refresh();
   }, [block]);
-  const binary = data?.kind === 'ok' && data.value.view.kind === 'binary' ? data.value.view : null;
+  const readBinary = data?.kind === 'ok' && data.value.view.kind === 'binary' ? data.value.view : null;
+  // A download re-reads the file into the cache; unchanged bytes keep the open viewer instead of reloading it.
+  const kept = useRef(readBinary);
+  if (kept.current !== readBinary && !(kept.current && readBinary && sameBinary(kept.current, readBinary)))
+    kept.current = readBinary;
+  const binary = kept.current;
   const [rendered, setRendered] = useState<{ source: typeof binary; url: string } | null>(null);
   useEffect(() => {
     if (!binary) {

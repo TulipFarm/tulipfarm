@@ -215,7 +215,10 @@ test(
             lost,
             notices,
             channel,
-            signal,
+            // The read starts its load after checking for an early read, so the signal arrives later.
+            get signal() {
+              return signal;
+            },
           };
         });
       await page.evaluate(() => {
@@ -309,7 +312,12 @@ test(
         runtime.stop();
         return result;
       });
-      assert.deepEqual(persisted, { timestamp: true, data: { families: [] }, revoked: true, diskCleared: true });
+      assert.deepEqual(persisted, {
+        timestamp: true,
+        data: { families: [], imageModels: [] },
+        revoked: true,
+        diskCleared: true,
+      });
     } finally {
       await browser.close();
       await server.close();

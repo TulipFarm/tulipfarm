@@ -201,31 +201,37 @@ try {
 
     await page.goto(`${origin}/acme`);
     await region.getByRole('button', { name: /Connect Slack, Google, or GitHub/ }).waitFor();
-    assert.equal(
-      await region.getByRole('region', { name: 'Start with a task', exact: true }).getByRole('button').count(),
-      3,
-      'Business tasks have their own group',
-    );
-    assert.equal(
-      await region
-        .getByRole('region', { name: 'Set up your workspace (optional)', exact: true })
-        .getByRole('button')
-        .count(),
-      1,
-      'Setup starts with one next step',
-    );
-    await region.getByText('More setup options (1)', { exact: true }).click();
-    assert.equal(
-      await region.getByRole('listitem').getByRole('button').count(),
-      5,
-      'The saved complete list contains exactly five items',
-    );
-    assert.equal(await region.getByRole('img', { name: 'Gmail' }).count(), 1, 'Connected providers show their brand');
-    assert.equal(await region.getByRole('button', { name: /Plan customer follow-ups/ }).count(), 0);
+    // The home shows three suggested tasks as bento cards, then the first setup step as one more card.
+    const cards = region.getByRole('button');
+    const chipLabels = () =>
+      cards.evaluateAll(buttons =>
+        buttons.map(button => button.querySelector(':scope > span:last-child > span:nth-child(2)').textContent.trim()),
+      );
     assert.deepEqual(
-      await region.getByRole('listitem').evaluateAll(rows => rows.map(row => row.getBoundingClientRect().height)),
-      Array(5).fill(mobile ? 44 : 32),
-      'Rows stay compact on desktop and retain touch targets on mobile',
+      await chipLabels(),
+      ['Triage my unread email', 'Draft a support reply', 'Plan my week', 'Connect Slack, Google, or GitHub'],
+      'Three task cards, then setup starts with one next step',
+    );
+    assert.deepEqual(
+      await cards.evaluateAll(buttons =>
+        buttons.map(button => button.querySelector(':scope > span:last-child > span:first-child').textContent),
+      ),
+      ['Suggested for you', 'Suggested task', 'Suggested task', 'Set up your workspace'],
+      'Each card names what kind of suggestion it is',
+    );
+    assert.equal(await region.getByRole('button', { name: /Automate a repeated task/ }).count(), 0);
+    assert.equal(await region.getByRole('button', { name: /Plan customer follow-ups/ }).count(), 0);
+    assert.equal(
+      await cards.evaluateAll(buttons => buttons.filter(button => button.querySelector('.rounded-xl svg')).length),
+      4,
+      'Each card leads with its task icon',
+    );
+    const chipHeights = await cards.evaluateAll(buttons =>
+      buttons.map(button => button.getBoundingClientRect().height),
+    );
+    assert.ok(
+      chipHeights.every(height => height >= 44) && chipHeights[0] >= Math.max(...chipHeights.slice(1)),
+      `Cards keep touch targets and the featured card is the tallest: ${chipHeights}`,
     );
     await shot('recommendations');
 
@@ -304,18 +310,10 @@ try {
       };
       await emit('changed', 7);
       await region.getByRole('button', { name: /Plan customer follow-ups/ }).waitFor();
-      // Three tasks stay primary; the rest sit behind More tasks (cloud 21d61168 #1131, features/chat/starting-task-priority.ts:1-5, starting-tasks.tsx:47,66-71).
-      assert.equal(
-        await region.getByRole('button').count(),
-        4,
-        'Three primary generic prompts and the More tasks toggle',
-      );
-      await region.getByRole('button', { name: 'More tasks (2)', exact: true }).click();
-      await region.getByRole('button', { name: 'Fewer tasks', exact: true }).waitFor();
-      assert.equal(
-        await region.getByRole('button').count(),
-        6,
-        'An unavailable saved list keeps all five generic prompts',
+      assert.deepEqual(
+        await chipLabels(),
+        ['Plan customer follow-ups', 'Draft a support reply', 'Plan my week'],
+        'An unavailable saved list offers the first three generic prompts and no setup step',
       );
       assert.equal(
         await page.getByText('Personal recommendations are not available. You can use these general prompts.').count(),

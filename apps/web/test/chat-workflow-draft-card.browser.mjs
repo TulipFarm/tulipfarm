@@ -759,11 +759,17 @@ test(
           );
           if (mobile) {
             await canvas.waitFor({ state: 'hidden' });
-            assert.equal(
-              await composer.evaluate(
-                element => element === document.activeElement || element.contains(document.activeElement),
-              ),
-              true,
+            await composer.evaluate(
+              element =>
+                new Promise((resolve, reject) => {
+                  const deadline = performance.now() + 5000;
+                  const check = () => {
+                    if (element === document.activeElement || element.contains(document.activeElement)) resolve();
+                    else if (performance.now() > deadline) reject(new Error('Edit in chat focuses the composer'));
+                    else requestAnimationFrame(check);
+                  };
+                  check();
+                }),
             );
             await page.getByRole('button', { name: /^Show canvas/ }).click();
           }

@@ -9,10 +9,10 @@ import {
   startOfMonth,
   startOfWeek,
 } from 'date-fns';
-import { z } from 'zod';
+import type { CalendarView } from './search.ts';
 
-export const calendarViews = ['day', 'week', 'month', 'agenda'] as const;
-export type CalendarView = (typeof calendarViews)[number];
+export { calendarSearchSchema, calendarViews, zoneSchema, type CalendarView } from './search.ts';
+
 export const calendarKinds = ['meeting', 'task', 'workflow'] as const;
 export type CalendarKind = (typeof calendarKinds)[number];
 export const kindLabels: Record<CalendarKind, string> = {
@@ -20,19 +20,6 @@ export const kindLabels: Record<CalendarKind, string> = {
   task: 'Tasks',
   workflow: 'Workflow runs',
 };
-export const zoneSchema = z.string().refine(value => {
-  try {
-    new Intl.DateTimeFormat('en', { timeZone: value });
-    return true;
-  } catch {
-    return false;
-  }
-});
-export const calendarSearchSchema = z.object({
-  view: z.enum(calendarViews).optional().catch(undefined),
-  date: z.iso.date().optional().catch(undefined),
-  zone: zoneSchema.optional().catch(undefined),
-});
 export type CalendarItem = {
   id: string;
   title: string;

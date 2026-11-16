@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import {
   calendarEventOverlaps,
   parseCalendarRead,
@@ -6,7 +6,6 @@ import {
 } from '@tulipfarm/google-workspace/calendar-events';
 import { googleAppScopes } from '@tulipfarm/google-workspace/public-contracts';
 import { readUpcomingCalendar } from './calendar-read';
-import { useIsFetching } from '@tanstack/react-query';
 import { slackSenderApi } from '@/lib/slack-sender';
 import { useFeatureRead, useFeatureChanges, featureKey } from '@/lib/query';
 import type { ReadIssue } from '@tulipfarm/integrations/contracts';
@@ -37,7 +36,11 @@ import { onWindowReturn } from '@/lib/window-return';
 
 function useReadResult<T>(read: ReturnType<typeof useFeatureRead<T>>, key: QueryKey) {
   const { runtime, scope, current } = useFeatureContext();
-  const fetching = useIsFetching({ queryKey: featureKey(scope, key), exact: true }) > 0;
+  const cache = runtime.client.getQueryCache();
+  const fetching = useSyncExternalStore(
+    useCallback(change => cache.subscribe(change), [cache]),
+    () => runtime.client.getQueryState(featureKey(scope, key))?.fetchStatus === 'fetching',
+  );
   return {
     ...read,
     data: read.state.kind === 'ready' ? read.state.data : null,
@@ -350,7 +353,13 @@ export function useGitHubInvestigation(workspaceId: string, id: string, task = f
     load: signal => githubApi.investigation(workspaceId, id, task, signal),
   });
 }
-export function useGitHubSelection(workspaceId: string, chatId: string, task = false, enabled = true) {
+export function useGitHubSelection(
+  workspaceId: string,
+  chatId: string,
+  task = false,
+  enabled = true,
+  staleTime?: number,
+) {
   useIntegrationAuthority('github-personal');
   useProviderAuthority(
     integrationKeys.selectionAuthority(chatId, task),
@@ -360,6 +369,7 @@ export function useGitHubSelection(workspaceId: string, chatId: string, task = f
   return useFeatureRead({
     key: integrationKeys.selection(chatId, task),
     enabled,
+    ...(staleTime === undefined ? {} : { staleTime }),
     load: signal => (task ? githubApi.taskSelection : githubApi.selection)(workspaceId, chatId, signal),
   });
 }

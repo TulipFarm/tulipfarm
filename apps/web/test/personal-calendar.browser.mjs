@@ -319,11 +319,11 @@ test(
       await capture('week-desktop');
       const sidebar = page.getByRole('complementary', { name: 'Workspace sidebar', exact: true });
       assert.ok((await sidebar.boundingBox()).width < 80, 'calendar starts with compact navigation');
-      await page.locator('[data-slot="sidebar-trigger"]').click();
+      await page.getByRole('button', { name: 'Toggle sidebar', exact: true }).click();
       await page.waitForFunction(
         () => document.querySelector('aside[aria-label="Workspace sidebar"]')?.getBoundingClientRect().width > 200,
       );
-      await page.locator('[data-slot="sidebar-trigger"]').click();
+      await page.getByRole('button', { name: 'Toggle sidebar', exact: true }).click();
       await page.waitForFunction(
         () => document.querySelector('aside[aria-label="Workspace sidebar"]')?.getBoundingClientRect().width < 80,
       );
@@ -332,11 +332,13 @@ test(
         'true',
         'calendar compact mode does not overwrite the shared preference',
       );
-      await page.locator(`a[href="/${workspace.slug}/integrations"]`).first().click();
+      // Calendar has no sidebar entry; leave through the sidebar and return through history.
+      await sidebar.getByRole('button', { name: 'More', exact: true }).click();
+      await sidebar.getByRole('link', { name: 'Integrations', exact: true }).click();
       await page.waitForFunction(
         () => document.querySelector('aside[aria-label="Workspace sidebar"]')?.getBoundingClientRect().width > 200,
       );
-      await page.getByRole('link', { name: 'Calendar', exact: true }).click();
+      await page.goBack();
       await button('Design review').waitFor();
       assert.ok((await sidebar.boundingBox()).width < 80, 'calendar keeps its own compact state');
       await page.getByRole('button', { name: 'Choose date', exact: true }).click();

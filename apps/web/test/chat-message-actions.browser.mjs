@@ -5,7 +5,7 @@ import { createServer } from 'vite';
 import { chromium } from 'playwright';
 import { createWorkspaceFixture } from './workspace.fixture.mjs';
 import { chatCatalog } from './chat-catalog.fixture.mjs';
-import { membership, credits } from './chat-query.fixture.mjs';
+import { membership, credits, governance } from './chat-query.fixture.mjs';
 
 test(
   'message actions stay hidden until hover, show time, and copy keeps formatting with each link once',
@@ -25,6 +25,8 @@ test(
     });
     const page = await context.newPage();
     page.setDefaultTimeout(10000);
+    // The dev server compiles the chat route on first load, which can take longer than one action.
+    page.setDefaultNavigationTimeout(60000);
     const shots = process.env.MESSAGE_ACTIONS_SCREENSHOTS;
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
@@ -46,7 +48,8 @@ test(
         sequence: 1,
         author: 'human',
         createdAt: '2026-10-06T10:00:00.000Z',
-        parts: [{ kind: 'text', text: 'Where are the docs?' }],
+        // Integration keywords such as "docs" render as chips, so this text avoids them.
+        parts: [{ kind: 'text', text: 'Where is the guide?' }],
         turn: turn('completed'),
         tools: [],
         calendarResults: [],
@@ -62,7 +65,7 @@ test(
             text: 'Read **the guide**: [https://example.com/guide](https://example.com/guide) and [the API](https://example.com/api).',
           },
         ],
-        turn: turn('completed'),
+        turn: null,
         tools: [],
         calendarResults: [],
       },
@@ -80,6 +83,8 @@ test(
         if (path === `/v1/workspaces/${workspace.slug}/last-used` && method === 'PUT')
           return route.fulfill({ status: 204 });
         if (path.endsWith('/governance/me')) return route.fulfill({ json: membership });
+        if (path.endsWith('/governance')) return route.fulfill({ json: governance });
+        if (path.endsWith('/integrations')) return route.fulfill({ json: { integrations: [] } });
         if (path.endsWith('/credits')) return route.fulfill({ json: credits });
         if (path.endsWith('/model-catalog')) return route.fulfill({ json: chatCatalog });
         if (path.endsWith('/google-workspace/availability')) return route.fulfill({ json: { configured: false } });
@@ -122,6 +127,12 @@ test(
           return route.fulfill({ json: { workspace: [], nextCursor: null } });
         if (path.endsWith('/conversations') && method === 'GET')
           return route.fulfill({ json: { chats: [chat], nextCursor: null } });
+        if (path.endsWith('/agents/recent')) return route.fulfill({ json: [] });
+        if (path.endsWith('/conversations/pinned')) return route.fulfill({ json: { chats: [] } });
+        if (path.endsWith('/selection'))
+          return route.fulfill({ json: { accountId: null, generation: null, version: 0 } });
+        if (path.endsWith('/system-package-installations'))
+          return route.fulfill({ json: { installations: [], nextCursor: null } });
         const conversation = /\/conversations\/([\w-]+)(\/.*)?$/.exec(path);
         if (conversation) {
           const [, , rest = ''] = conversation;
@@ -136,7 +147,7 @@ test(
 
       await page.goto(`${server.resolvedUrls.local[0]}${workspace.slug}/chat/${chatId}`);
       const messages = page.getByRole('list', { name: 'Messages' });
-      await messages.getByText('Where are the docs?').waitFor();
+      await messages.getByText('Where is the guide?').waitFor({ timeout: 60000 });
       const copyUser = page.getByRole('button', { name: 'Copy message' });
       const copyReply = page.getByRole('button', { name: 'Copy response' });
       const hidden = async locator =>
@@ -145,7 +156,7 @@ test(
       assert.ok(await hidden(copyReply), 'assistant actions are hidden before hover');
       if (shots) await page.screenshot({ path: `${shots}/message-actions-idle.png` });
 
-      await messages.getByText('Where are the docs?').hover();
+      await messages.getByText('Where is the guide?').hover();
       await page.waitForFunction(() =>
         [...document.querySelectorAll('[data-slot=message-actions] [role=group]')].some(
           group => getComputedStyle(group).opacity === '1',
@@ -154,17 +165,16 @@ test(
       const timestamp = copyUser.locator('xpath=..').locator('time');
       await timestamp.waitFor();
       assert.equal(await timestamp.getAttribute('datetime'), history[0].createdAt);
-      assert.equal(
-        await timestamp.getAttribute('title'),
-        await page.evaluate(
-          createdAt => new Date(createdAt).toLocaleString([], { dateStyle: 'full', timeStyle: 'medium' }),
-          history[0].createdAt,
-        ),
+      const fullDate = await page.evaluate(
+        createdAt => new Date(createdAt).toLocaleString([], { dateStyle: 'full', timeStyle: 'medium' }),
+        history[0].createdAt,
       );
+      await timestamp.hover();
+      await page.getByText(fullDate, { exact: true }).waitFor();
       if (shots) await page.screenshot({ path: `${shots}/message-actions-user-hover.png` });
       await copyUser.click();
       await page.getByRole('button', { name: 'Message copied' }).waitFor();
-      assert.equal(await page.evaluate(() => navigator.clipboard.readText()), 'Where are the docs?');
+      assert.equal(await page.evaluate(() => navigator.clipboard.readText()), 'Where is the guide?');
 
       await messages.getByText('Read').hover();
       await copyReply.click();

@@ -213,7 +213,9 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       const scheduledRuns = page.getByRole('region', { name: 'Scheduled runs', exact: true });
       await scheduledRuns.getByRole('checkbox', { name: 'You', exact: true }).check();
       await page.getByRole('button', { name: 'Save scheduled runs', exact: true }).click();
-      await page.getByText('Saved. Activate the saved revision to start scheduled runs.', { exact: true }).waitFor();
+      await page
+        .getByText('Scheduled runs saved. Activate the saved revision to start scheduled runs.', { exact: true })
+        .waitFor();
       await page.getByRole('button', { name: 'Activate workflow', exact: true }).click();
       await page.getByRole('button', { name: 'Disable workflow', exact: true }).waitFor();
       await db.platform.query(
@@ -252,12 +254,12 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       await page.getByRole('button', { name: 'Refresh workflows', exact: true }).click();
       await page
         .getByText(
-          'Disabled automatically because its sponsor lost access needed to run it. Ask a workflow manager to restore access or update its trigger.',
+          'Disabled automatically because the person who turned it on lost access needed to run it. Ask a workflow manager to restore access or update its trigger.',
           { exact: true },
         )
         .waitFor();
       await showWorkflowList(page);
-      await page.getByText('Disabled: sponsor lost access', { exact: true }).waitFor();
+      await page.getByText('Disabled: access lost', { exact: true }).waitFor();
       assert.deepEqual(errors, []);
     } finally {
       await browser?.close();

@@ -8,7 +8,7 @@ import { execFileSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { createWorkspaceFixture, workspaceShellReads } from './workspace.fixture.mjs';
 import { chatCatalog } from './chat-catalog.fixture.mjs';
-import { membership, credits } from './chat-query.fixture.mjs';
+import { membership, credits, governance } from './chat-query.fixture.mjs';
 
 const screenshots = process.env.CODE_FENCE_SCREENSHOTS;
 const modifier = process.platform === 'darwin' ? 'Meta' : 'Control';
@@ -131,6 +131,10 @@ async function openComposer(run, { project = false } = {}) {
         if (method === 'GET' && !rest) return route.fulfill({ json: chat });
         if (method === 'GET') return route.fulfill({ json: [] });
       }
+      if (path.endsWith('/agents/recent') && method === 'GET') return route.fulfill({ json: [] });
+      if (/\/github\/chats\/[\w-]+\/selection$/.test(path) && method === 'GET')
+        return route.fulfill({ json: { accountId: null, generation: null, version: 0 } });
+      if (path.endsWith('/governance') && method === 'GET') return route.fulfill({ json: governance });
       throw new Error(`Unexpected API request ${method} ${path}`);
     });
     await page.goto(

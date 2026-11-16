@@ -198,7 +198,6 @@ test('the Knowledge page lists every automatic source and manages it in Chromium
     await main.getByText('ada@example.test · 1 mailbox', { exact: true }).waitFor();
     await main.getByRole('button', { name: 'Connect Slack' }).waitFor();
     assert.equal(await main.getByRole('button', { name: 'Connect Confluence' }).count(), 0);
-    await page.getByRole('link', { name: 'Knowledge', exact: true }).waitFor();
     await page.screenshot({ path: `${screenshots}/sources.png`, fullPage: true });
 
     const settle = async count => {

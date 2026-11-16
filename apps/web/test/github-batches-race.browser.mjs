@@ -28,6 +28,8 @@ const batch = {
   digest: 'b'.repeat(64),
   expired: false,
   decision: null,
+  author: null,
+  bot: false,
   actions: [{ ordinal: 0, status: 'unattempted', result: null, reconciliation: null }],
 };
 let browser;

@@ -6,6 +6,7 @@ import { chromium } from 'playwright';
 import { createWorkspaceFixture } from './workspace.fixture.mjs';
 import { chatCatalog } from './chat-catalog.fixture.mjs';
 import { membership, credits } from './chat-query.fixture.mjs';
+import { shellRead } from './shell-reads.mjs';
 
 test('composer project badge searches, recovers, and opens project creation', { timeout: 90000 }, async () => {
   const { workspace, session } = createWorkspaceFixture();
@@ -73,6 +74,8 @@ test('composer project badge searches, recovers, and opens project creation', { 
         }
         if (path.endsWith('/conversations')) return route.fulfill({ json: { chats: [], nextCursor: null } });
         if (path.endsWith('/candidates')) return route.fulfill({ json: [] });
+        // The admin's invite-members nudge reads the roster; this test does not exercise it.
+        if (path.endsWith('/governance')) return route.fulfill({ status: 404, json: { error: 'not-found' } });
         if (path.endsWith('/governance/directory')) return route.fulfill({ json: { members: [] } });
         if (path.endsWith('/last-used')) return route.fulfill({ status: 204 });
         if (path.endsWith('/bud'))
@@ -97,6 +100,8 @@ test('composer project badge searches, recovers, and opens project creation', { 
           return route.fulfill({
             json: { state: 'disconnected', teamId: null, canManage: false, linked: false, scopes: [] },
           });
+        const shell = shellRead(request.method(), path, workspace);
+        if (shell) return route.fulfill(shell);
         throw new Error(`Unexpected API request ${path}`);
       });
       try {

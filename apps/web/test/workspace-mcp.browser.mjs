@@ -276,6 +276,7 @@ try {
         }
         if (suffix.endsWith('/grants')) {
           detail.grants = body.grants;
+          detail.workspace = body.workspace;
           detail.managers = body.managers;
           detail.integration.version++;
         }
@@ -493,117 +494,137 @@ try {
   enabled = true;
   listStatus = 503;
   await page.reload();
-  await page.getByRole('heading', { name: 'MCP integrations could not load' }).waitFor();
-  await page.getByRole('button', { name: 'Check mcp integrations again' }).click();
-  await page.getByRole('heading', { name: 'MCP integrations could not load' }).waitFor();
+  // A failed custom app read is reported with the other apps it couldn't check, and Check again retries it.
+  const unloaded = page.getByText(/^Couldn’t load your custom apps\./);
+  await unloaded.waitFor();
+  const failedReads = mcpReads.filter(read => read === '/integrations').length;
+  await page.getByRole('button', { name: 'Check again', exact: true }).click();
+  await page.waitForFunction(() => !document.querySelector('[aria-busy="true"]'));
+  assert.ok(mcpReads.filter(read => read === '/integrations').length > failedReads);
+  await unloaded.waitFor();
   listStatus = 200;
-  await page.getByRole('button', { name: 'Check mcp integrations again' }).click();
-  await page.getByRole('button', { name: `Manage ${integration.name}` }).waitFor();
+  await page.getByRole('button', { name: 'Check again', exact: true }).click();
+  await page.getByRole('link', { name: integration.name, exact: true }).waitFor();
+  assert.equal(await unloaded.count(), 0);
+  assert.equal(await page.getByText(/^Couldn’t check \./).count(), 0);
   const beforeFocus = mcpReads.length;
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
   await setTimeout(300);
   assert.equal(mcpReads.length, beforeFocus, 'window focus does not bypass MCP query freshness');
+  const directory = page.getByRole('searchbox', { name: 'Search apps' });
   catalogDelay = 500;
-  await page.getByRole('button', { name: 'Find MCP servers' }).click();
-  await page.getByRole('status', { name: 'Loading mcp catalog' }).waitFor();
-  await page.getByText(/The Registry snapshot is stale/).waitFor();
-  assert.equal(
-    await page.getByRole('link', { name: 'mcpservers.org' }).getAttribute('href'),
-    'https://mcpservers.org/',
-  );
+  await directory.fill('Registry customer');
+  await page.getByRole('status', { name: 'Searching the MCP Registry' }).waitFor();
   catalogDelay = 0;
-  catalogStatus = 503;
-  await changed('catalog');
-  await page.getByRole('button', { name: 'Check mcp catalog again' }).waitFor();
-  await page.getByRole('heading', { name: 'Registry customer server' }).waitFor();
-  await page.getByRole('button', { name: 'Add MCP endpoint' }).click();
-  await page.getByRole('textbox', { name: 'Integration name', exact: true }).fill('No auth proof');
-  await page.getByRole('textbox', { name: 'MCP endpoint' }).fill(integration.endpoint);
-  await select('Authentication', 'No authentication');
+  await page.getByRole('heading', { name: 'Community', exact: true }).waitFor();
+  await directory.fill('no-match');
+  await page.getByRole('heading', { name: 'No apps match “no-match”' }).waitFor();
+  await page.getByRole('button', { name: 'Clear search', exact: true }).and(page.getByText('Clear search')).click();
+  assert.equal(await directory.inputValue(), '');
+  const addApp = async (name, endpoint, signIn) => {
+    await page.getByRole('button', { name: 'Add custom app', exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: 'Add a custom app' });
+    await dialog.getByLabel('Server link', { exact: true }).fill(endpoint);
+    await dialog.getByLabel('Name', { exact: true }).fill(name);
+    await dialog.getByRole('radio', { name: signIn, exact: true }).check();
+    return dialog;
+  };
+  const connected = async dialog => {
+    await dialog.getByRole('button', { name: /^Open / }).waitFor();
+    await dialog.getByRole('button', { name: 'Close', exact: true }).last().click();
+    await dialog.waitFor({ state: 'hidden' });
+  };
+  let dialog = await addApp('No auth proof', integration.endpoint, 'No sign-in');
   const count = writes.length;
-  await page.getByRole('button', { name: 'Verify and discover tools' }).dblclick();
-  await page.getByRole('button', { name: 'Review integration', exact: true }).waitFor();
+  await dialog.getByRole('button', { name: 'Connect', exact: true }).dblclick();
+  await dialog.getByRole('button', { name: 'Open No auth proof', exact: true }).waitFor();
   assert.equal(writes.length, count + 1);
   assert.deepEqual(writes.at(-1).body.auth, { kind: 'none' });
-  await page.getByRole('button', { name: 'Close setup' }).click();
-  catalogStatus = 200;
-  await page.getByRole('button', { name: 'Check mcp catalog again' }).click();
-  await page.getByRole('searchbox', { name: 'Search MCP Registry' }).fill('no-match');
-  await page.getByRole('button', { name: 'Search catalog' }).click();
-  await page.getByRole('heading', { name: 'No matching remote servers' }).waitFor();
-  await page.getByRole('button', { name: 'Clear search', exact: true }).last().click();
-  await page.getByRole('button', { name: 'Set up Registry customer server' }).click();
-  await page.getByText(/missing metadata does not mean no authentication/).waitFor();
-  await select('Authentication', 'Bearer token');
-  await page.getByLabel('Bearer token', { exact: true }).fill('fixture-secret');
-  await page.getByRole('button', { name: 'Verify and discover tools' }).click();
-  await page.getByRole('button', { name: 'Review integration', exact: true }).waitFor();
-  assert.equal(writes.at(-1).body.auth.token, 'fixture-secret');
-  assert.equal(await page.getByLabel('Bearer token', { exact: true }).inputValue(), '');
-  await page.getByRole('button', { name: 'Close setup' }).click();
-  await page.getByRole('button', { name: 'Add MCP endpoint' }).click();
-  await page.getByLabel('Integration name', { exact: true }).fill('Headers proof');
-  await page.getByLabel('MCP endpoint').fill(integration.endpoint);
-  await select('Authentication', 'Secret headers / API key');
-  await page.getByLabel('Header name 1').fill('X-Api-Key');
-  await page.getByLabel('Header secret 1').fill('header-secret');
-  await page.getByRole('button', { name: 'Verify and discover tools' }).click();
-  await page.getByRole('button', { name: 'Review integration', exact: true }).waitFor();
+  await connected(dialog);
+  dialog = await addApp('Key proof', integration.endpoint, 'API key');
+  const key = dialog.locator('input[type="password"]').and(dialog.getByLabel('API key', { exact: true }));
+  await key.fill('fixture-secret');
+  await dialog.getByRole('button', { name: 'Connect', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Open Key proof', exact: true }).waitFor();
+  assert.deepEqual(writes.at(-1).body.auth, { kind: 'bearer', token: 'fixture-secret' });
+  assert.equal(await key.inputValue(), '');
+  await connected(dialog);
+  dialog = await addApp('Headers proof', integration.endpoint, 'API key');
+  await dialog.getByRole('button', { name: 'Advanced' }).click();
+  await select('Send the key as', 'Custom headers');
+  await dialog.getByLabel('Header name', { exact: true }).fill('X-Api-Key');
+  await dialog.getByLabel('Value', { exact: true }).fill('header-secret');
+  await dialog.getByRole('button', { name: 'Connect', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Open Headers proof', exact: true }).waitFor();
   assert.deepEqual(writes.at(-1).body.auth.headers, [{ name: 'X-Api-Key', value: 'header-secret' }]);
-  await page.getByRole('button', { name: 'Close setup' }).click();
+  await connected(dialog);
+  // OAuth sends this tab to the provider; the fixture provider page stands in for it.
+  await page.route('https://provider.example/**', route =>
+    route.fulfill({ contentType: 'text/html', body: '<h1>Provider sign-in</h1>' }),
+  );
+  const signedIn = async () => {
+    await page.waitForURL('https://provider.example/authorize');
+    await go('/integrations');
+    await page.getByRole('heading', { name: 'Integrations', exact: true }).waitFor();
+  };
   setupMode = 'registration-required';
-  await page.getByRole('button', { name: 'Add MCP endpoint' }).click();
-  await page.getByLabel('Integration name', { exact: true }).fill('OAuth proof');
-  await page.getByLabel('MCP endpoint').fill(integration.endpoint);
-  await select('Authentication', 'OAuth');
-  await page.getByRole('button', { name: 'Start OAuth setup' }).click();
-  await page.getByRole('heading', { name: 'Register an OAuth client' }).waitFor();
-  await page.getByLabel('Registered client ID, if required').fill('registered-client');
+  dialog = await addApp('OAuth proof', integration.endpoint, 'Sign in with the app');
+  await dialog.getByRole('button', { name: 'Connect and sign in', exact: true }).click();
+  await dialog.getByText('Register an OAuth app with OAuth proof first', { exact: true }).waitFor();
+  await dialog.getByText('https://api.tulipfarm.ai/mcp/callback', { exact: true }).waitFor();
+  await dialog.getByLabel('Client ID', { exact: true }).fill('registered-client');
   setupMode = 'oauth';
-  await page.getByRole('button', { name: 'Start OAuth setup' }).click();
-  await page.getByRole('heading', { name: 'Authorization pending' }).waitFor();
-  assert.equal(await page.locator('a[href="https://provider.example/authorize"]').getAttribute('target'), '_blank');
-  await page.getByRole('button', { name: 'Close setup' }).click();
-  await page.getByRole('button', { name: `Manage ${integration.name}` }).click();
-  await page.getByText('Changed, paused until reviewed', { exact: true }).waitFor();
-  await page.getByRole('checkbox', { name: `Enable reviewed tool ${longTool}` }).check();
-  await page.getByRole('checkbox', { name: `Standing exception for ${longTool}` }).check();
-  await page.getByRole('button', { name: 'Save reviewed tools' }).click();
-  await page.getByText('Reviewed', { exact: true }).waitFor();
-  assert.equal(details.get(integration.id).tools[0].standingException, true);
-  await page.getByRole('button', { name: 'Approve account-independent descriptor' }).click();
-  await page.getByText('Descriptor approved').waitFor();
-  await page.getByRole('button', { name: 'Disable integration', exact: true }).click();
-  await page.getByRole('button', { name: 'Enable integration', exact: true }).waitFor();
-  await page.getByRole('button', { name: 'Enable integration', exact: true }).click();
-  await page.getByRole('button', { name: 'Disable integration', exact: true }).waitFor();
-  await page.getByRole('button', { name: 'Close integration details' }).click();
-  await page.getByRole('button', { name: `Manage ${shared.name}` }).click();
-  await page.getByRole('checkbox', { name: 'Ada (member)', exact: true }).check();
-  await page.getByRole('checkbox', { name: 'Operations (team)', exact: true }).check();
-  await page.getByRole('checkbox', { name: 'Allow Ada to manage and share', exact: true }).check();
-  await page.getByRole('button', { name: 'Save shared grants' }).click();
-  await page.getByText('Change confirmed by the server.', { exact: true }).waitFor();
-  assert.equal(details.get(shared.id).grants.length, 2);
-  assert.deepEqual(details.get(shared.id).managers, [{ kind: 'member', id: 'membership-incarnation-1' }]);
+  await dialog.getByRole('button', { name: 'Connect and sign in', exact: true }).click();
+  await signedIn();
+  assert.ok(writes.at(-1).suffix.endsWith('/setup'));
+  assert.equal(writes.at(-1).body.auth.client.clientId, 'registered-client');
   for (const [method, label] of [
-    ['none', 'none, public client'],
-    ['client_secret_basic', 'client_secret_basic, HTTP Basic'],
-    ['client_secret_post', 'client_secret_post, request body'],
+    ['none', 'No secret (public client)'],
+    ['client_secret_basic', 'Client secret, HTTP Basic'],
+    ['client_secret_post', 'Client secret, request body'],
   ]) {
-    await page.getByRole('button', { name: 'Add MCP endpoint' }).click();
-    await page.getByLabel('Integration name', { exact: true }).fill(`Registered ${method}`);
-    await page.getByLabel('MCP endpoint').fill('https://both-methods.example/mcp');
-    await select('Authentication', 'OAuth');
-    await page.getByLabel('Registered client ID, if required').fill(`client-${method}`);
-    await select('Registered client authentication method', label);
-    if (method !== 'none') await page.getByLabel('Client secret, if required').fill('registered-secret');
-    await page.getByRole('button', { name: 'Start OAuth setup' }).click();
-    await page.getByRole('heading', { name: 'Authorization pending' }).waitFor();
+    dialog = await addApp(`Registered ${method}`, 'https://both-methods.example/mcp', 'Sign in with the app');
+    await dialog.getByRole('button', { name: 'Advanced' }).click();
+    await dialog.getByLabel('Client ID', { exact: true }).fill(`client-${method}`);
+    await select('Client authentication', label);
+    if (method !== 'none') await dialog.getByLabel('Client secret', { exact: true }).fill('registered-secret');
+    await dialog.getByRole('button', { name: 'Connect and sign in', exact: true }).click();
+    await signedIn();
     assert.equal(writes.at(-1).body.auth.client.authMethod, method);
     assert.equal(writes.at(-1).body.endpoint, 'https://both-methods.example/mcp');
-    await page.getByRole('button', { name: 'Close setup' }).click();
   }
+  setupMode = 'saved';
+  const words = longTool.replace(/_+/g, ' ').trim();
+  const longTitle = words[0].toUpperCase() + words.slice(1);
+  await go(`/integrations/mcp-${integration.id}?tab=tools`);
+  await page.getByText('Changed', { exact: true }).waitFor();
+  await page.getByRole('switch', { name: `Use ${longTitle}` }).click();
+  await select(`When ${longTitle} runs`, 'Runs on its own');
+  await page.waitForFunction(() => document.body.innerText.includes('Saved'));
+  await page
+    .getByRole('combobox', { name: `When ${longTitle} runs` })
+    .filter({ hasText: 'Runs on its own' })
+    .waitFor();
+  assert.deepEqual(
+    [details.get(integration.id).tools[0].enabled, details.get(integration.id).tools[0].standingException],
+    [true, true],
+  );
+  await page.getByRole('tab', { name: 'Advanced', exact: true }).click();
+  await page.getByRole('button', { name: 'Allow in saved agents', exact: true }).click();
+  await page.getByText('Allowed in saved agents', { exact: true }).waitFor();
+  await page.getByRole('button', { name: `Turn ${integration.name} off`, exact: true }).click();
+  await page.getByRole('button', { name: `Turn ${integration.name} on`, exact: true }).click();
+  await page.getByRole('button', { name: `Turn ${integration.name} off`, exact: true }).waitFor();
+  assert.equal(details.get(integration.id).integration.status, 'ready');
+  await go(`/integrations/mcp-${shared.id}?tab=access`);
+  const people = page.getByRole('region', { name: 'People and teams' });
+  await people.getByRole('checkbox', { name: 'Ada', exact: true }).check();
+  await people.getByRole('checkbox', { name: 'Operations · team', exact: true }).check();
+  await people.getByRole('listitem').filter({ hasText: 'Ada' }).getByRole('checkbox', { name: 'Can manage' }).check();
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('button', { name: 'Save', exact: true }).and(page.locator(':disabled')).waitFor();
+  assert.equal(details.get(shared.id).grants.length, 2);
+  assert.deepEqual(details.get(shared.id).managers, [{ kind: 'member', id: 'membership-incarnation-1' }]);
 
   await go(`/chat/${chatId}`);
   await page.getByText('Retained confidential answer', { exact: false }).waitFor();
@@ -697,7 +718,7 @@ try {
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   }
   await page.screenshot({
-    path: '/var/folders/7d/qk8p6t3d1jvfnh4503bz0msr0000gn/T/opencode/workspace-mcp-mobile.png',
+    path: 'reports/screenshots/workspace-mcp-mobile.png',
     fullPage: true,
   });
   actionStatus = 403;
@@ -725,7 +746,7 @@ try {
     .getByRole('textbox', { name: 'Instructions', exact: true })
     .fill('Inspect carefully without changing MCP permissions.');
   await page.getByRole('button', { name: 'Save agent', exact: true }).click();
-  await page.getByText('Agent saved.', { exact: true }).waitFor();
+  await page.getByText('Saved. Runs still use the active version.', { exact: true }).waitFor();
   assert.deepEqual(writes.find(write => write.suffix === '/ordinary-agent-save').body.definition.mcp, [
     { id: slot.slotId, serverIdentity: slot.serverIdentity, tools: slot.tools },
   ]);
@@ -748,7 +769,7 @@ try {
   await start.getByText('Change confirmed by the server.', { exact: true }).waitFor();
   assert.equal(await start.getByText(/Save your MCP integration selection/).count(), 0);
   await page.screenshot({
-    path: '/var/folders/7d/qk8p6t3d1jvfnh4503bz0msr0000gn/T/opencode/workspace-mcp-desktop.png',
+    path: 'reports/screenshots/workspace-mcp-desktop.png',
     fullPage: true,
   });
   await start.getByRole('button', { name: 'Start task', exact: true }).click();

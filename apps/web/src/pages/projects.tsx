@@ -645,6 +645,22 @@ function ProjectComposer({ project }: { project: Project }) {
     await Promise.all([read.refresh(), models.refresh()]);
     setRefreshed(true);
   }
+  // A rejected send unlocks only after the project refreshes, so lost access or an archive shows first.
+  const [unlocking, setUnlocking] = useState(false);
+  useEffect(() => {
+    if (!unlocking || !refreshed || read.state.kind !== 'ready' || read.state.refreshing) return;
+    setUnlocking(false);
+    if (ready) void write.recover();
+  }, [unlocking, refreshed, read.state, ready]);
+  const feedback = {
+    ...write,
+    recover: async () => {
+      if (write.state.kind !== 'rejected') return write.recover();
+      reviewing.current = true;
+      setUnlocking(true);
+      await refresh();
+    },
+  };
   const parsed = parseChatDraft(content);
   const text = parsed.success ? chatDocumentText(parsed.data) : '';
   const validation = parsed.success
@@ -704,7 +720,7 @@ function ProjectComposer({ project }: { project: Project }) {
         integrations={{ keywords: integrations.keywords, onConnect: integrations.connect }}
       />
       <CommandFeedback
-        write={write}
+        write={feedback}
         refresh={() => void refresh()}
         refreshed={refreshed && ready}
         review={() => {

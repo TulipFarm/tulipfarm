@@ -3,8 +3,10 @@ import { spawn } from 'node:child_process';
 import { mkdir } from 'node:fs/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 import { chromium } from 'playwright';
+import { normalizeQueryRequest } from '@tulipfarm/tables/query';
 import { assertConfiguration, showWorkflowList } from './workflow-definition.fixture.mjs';
 import { governanceSnapshot } from './governance-snapshot.mjs';
+import { clearEditor } from './browser-controls.mjs';
 
 const baseline = process.env.UI_BASELINE === '1';
 const output = new URL('../../../docs/evidence/ui-ux-remaining/', import.meta.url);
@@ -13,6 +15,8 @@ const port = 5459,
   origin = `http://127.0.0.1:${port}`;
 const server = spawn('pnpm', ['exec', 'vite', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
   cwd: process.env.UI_APP_ROOT ?? new URL('..', import.meta.url),
+  // The Help page shows its contact section only when a support address is configured.
+  env: { ...process.env, VITE_SUPPORT_EMAIL: 'hello@tulipfarm.ai' },
   stdio: 'ignore',
 });
 const ids = Array.from(
@@ -70,6 +74,15 @@ const definition = {
   revision: 'a'.repeat(40),
   tableName: `r_${rid.replaceAll('-', '')}`,
   fields: [field],
+};
+// The table page reads the applied definition in its current format.
+const appliedTable = {
+  formatVersion: 2,
+  id: rid,
+  owningTeamId: tid,
+  label: definition.label,
+  fields: [{ id: sid, label: field.label, kind: 'text', required: true, maxLength: 200 }],
+  uniqueKeys: [],
 };
 const capabilities = {
   manageSchema: true,
@@ -269,9 +282,22 @@ try {
           capabilities,
         });
       if (p.endsWith('/tables')) return send({ tables: [resource], total: 1, nextCursor: null });
-      if (p.endsWith(`/tables/${rid}`)) return send(resource);
-      if (p.endsWith('/rows/query'))
-        return send({ records: [{ id: cid, values: { [sid]: 'Northwind Traders' } }], total: '1', nextCursor: null });
+      if (p.endsWith(`/tables/${rid}`))
+        return send({
+          id: rid,
+          saved: null,
+          applied: { revision: definition.revision, definition: appliedTable, appliedAt: at },
+          rowPermissions: { create: true, update: true, delete: true },
+        });
+      if (p.endsWith(`/tables/${rid}/query`))
+        return send({
+          mode: 'rows',
+          ...normalizeQueryRequest(appliedTable, route.request().postDataJSON().request),
+          references: {},
+          records: [{ id: cid, token: taskId, values: { [sid]: { kind: 'text', value: 'Northwind Traders' } } }],
+          total: '1',
+          nextCursor: null,
+        });
       if (p.endsWith('/migrations')) return send([]);
       if (p.endsWith('/agents/authoring-context'))
         return send({ currentSoulRevision: 'a'.repeat(40), teams, admin: true });
@@ -384,6 +410,16 @@ try {
     }
     await visit('/acme/agents/new');
     if (!baseline) {
+      // Actions sit on the builder's Access step, chosen from a select on narrow screens.
+      const steps = page.getByRole('combobox', { name: 'Setup section', exact: true });
+      const tab = page.getByRole('tab', { name: /Access/ }).first();
+      await steps.or(tab).first().waitFor();
+      if (await steps.isVisible()) {
+        await steps.click();
+        await page.getByRole('option', { name: '2. Access', exact: true }).click();
+      } else await tab.click();
+      await page.getByRole('button', { name: 'More actions', exact: true }).click();
+      await page.getByRole('region', { name: 'Tables actions', exact: true }).getByRole('button').first().click();
       await page.getByRole('checkbox', { name: 'Find rows', exact: true }).waitFor();
       await page.getByRole('checkbox', { name: 'Update rows', exact: true }).waitFor();
     }
@@ -395,9 +431,9 @@ try {
     await visit('/acme/agents');
     if (!baseline) {
       await page.getByRole('searchbox', { name: 'Find agents', exact: true }).fill('follow-up');
-      await page.getByRole('button', { name: agent.name, exact: true }).waitFor();
+      await page.getByRole('link', { name: agent.name, exact: true }).waitFor();
       assert.ok(searches.includes('follow-up'));
-      await page.getByRole('button', { name: agent.name, exact: true }).click();
+      await page.getByRole('link', { name: agent.name, exact: true }).click();
       await page.getByRole('link', { name: 'Back to agents' }).click();
       assert.equal(await page.getByRole('searchbox', { name: 'Find agents', exact: true }).inputValue(), 'follow-up');
       await page.getByRole('searchbox', { name: 'Find agents', exact: true }).fill('No matching name');
@@ -408,8 +444,12 @@ try {
     await visit('/acme/skills');
     await shot('skills');
     if (!baseline) {
-      await page.getByRole('button', { name: 'Read Define business rows' }).click();
-      await page.getByText(/Discover tables first/).waitFor();
+      // The skills list shows workspace skills only; each name opens its review page.
+      await page
+        .getByRole('table', { name: 'Workspace skills', exact: true })
+        .getByRole('link', { name: skill.definition.name, exact: true })
+        .click();
+      await page.waitForURL(`**/acme/skills/${sid}`);
     }
     await visit(`/acme/skills/${sid}`);
     if (!baseline) await page.getByRole('region', { name: 'Procedure comparison' }).scrollIntoViewIfNeeded();
@@ -440,31 +480,28 @@ try {
         .getByRole('textbox', { name: 'Message', exact: true })
         .getByText(/^Help me create a workflow\./)
         .waitFor();
-      await page.getByRole('textbox', { name: 'Message', exact: true }).fill('');
+      await clearEditor(page.getByRole('textbox', { name: 'Message', exact: true }));
     }
     await visit(`/acme/tables/${rid}`);
     await shot('records');
     if (!baseline) {
+      await page.getByText('Northwind Traders', { exact: true }).first().waitFor();
       assert.equal(await page.getByRole('navigation', { name: 'Row pages' }).count(), 0);
       assert.equal(await page.getByText('Northwind Traders', { exact: true }).count(), 1);
-      await page.getByRole('button', { name: 'Filters', exact: true }).click();
-      await page.getByLabel('Filter field', { exact: true }).waitFor();
+      await page.getByRole('button', { name: 'Add filter', exact: true }).click();
+      await page.getByRole('combobox', { name: 'Field', exact: true }).waitFor();
     }
     await visit(`/acme/tables/${rid}/edit`);
-    if (!baseline)
-      assert.equal(await page.getByRole('combobox', { name: 'Change', exact: true }).innerText(), 'Add field');
-    await page.getByRole('combobox', { name: 'Change', exact: true }).scrollIntoViewIfNeeded();
+    // Field changes happen in chat, so the edit page points there.
+    if (!baseline) await page.getByRole('link', { name: 'Change fields in chat', exact: true }).waitFor();
     await shot('schema-label');
     await visit('/acme/settings');
     await shot('settings');
-    if (!baseline && device.name === 'mobile') {
-      await page.getByLabel('Settings section').selectOption('models');
-      await page.getByRole('heading', { name: 'Models', exact: true }).waitFor();
-    } else await visit('/acme/settings/models');
+    await visit('/acme/settings/models');
     await shot('models');
     await visit('/acme/grants');
-    await page.getByLabel('Team receiving access').click();
-    await page.getByRole('option', { name: 'Customer Operations', exact: true }).click();
+    // Table access lists each table's access; teams and members hold the editable policies.
+    await page.getByRole('heading', { name: 'Table access', level: 1 }).waitFor();
     await shot('permissions');
     await visit(`/acme/chat/${cid}`);
     if (!baseline) assert.equal(await page.getByRole('navigation', { name: 'Pending Google actions' }).count(), 0);
@@ -480,10 +517,12 @@ try {
     }
     longMember = true;
     await visit('/acme/members');
-    await page.getByRole('button', { name: 'Make admin', exact: true }).click();
+    // Role changes sit in each member's action menu and open a confirmation dialog.
+    await page.getByRole('button', { name: /^Actions for International customer support coordinator/ }).click();
+    await page.getByRole('menuitem', { name: /^Make International customer support coordinator .* an admin$/ }).click();
     if (!baseline) {
       await page.setViewportSize({ width: 320, height: 400 });
-      const dialog = page.getByRole('dialog');
+      const dialog = page.getByRole('alertdialog');
       await dialog.waitFor();
       const bounds = await dialog.boundingBox();
       assert.ok(bounds.y >= 0 && bounds.y + bounds.height <= 400);

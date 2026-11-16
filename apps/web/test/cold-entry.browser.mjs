@@ -58,6 +58,9 @@ test('cold admission overlaps discovery and membership without admitting partial
             });
           if (path === '/v1/user/visit') return route.fulfill({ json: { firstSession: false } });
           if (path === '/v1/feature-flags') return route.fulfill({ json: {} });
+          // The sidebar lists recent chats on every page.
+          if (path === `/v1/workspaces/${workspace.id}/conversations`)
+            return route.fulfill({ json: { chats: [], nextCursor: null } });
           const shell = shellRead(route.request().method(), path, workspace);
           if (shell) return route.fulfill(shell);
           throw new Error(`Unexpected request ${path}`);
@@ -78,10 +81,15 @@ test('cold admission overlaps discovery and membership without admitting partial
           list.resolve();
           if (status === 200) await page.getByRole('heading', { name: 'Help and support', exact: true }).waitFor();
           else if (status === 503) {
-            await page.getByRole('heading', { name: 'Could not open TulipFarm' }).waitFor();
-            await delay(500);
+            // A busy API keeps the page opening and checks membership again instead of failing at once.
+            const retried = () =>
+              page.waitForRequest(request => new URL(request.url()).pathname.endsWith('/governance/me'));
+            await retried();
+            await retried();
+            await page.getByRole('status').getByText('Opening TulipFarm…', { exact: true }).waitFor();
+            assert.equal(await page.getByRole('heading', { name: 'Could not open TulipFarm' }).count(), 0);
+            assert.equal(await page.getByRole('heading', { name: 'Help and support', exact: true }).count(), 0);
             memberStatus = 200;
-            await page.getByRole('button', { name: 'Try again', exact: true }).click();
             await page.getByRole('heading', { name: 'Help and support', exact: true }).waitFor();
           } else {
             // Cold-entry denial renders the workspace not-found boundary at the requested URL.
@@ -184,6 +192,9 @@ test('cold chat routes read during admission, reuse those reads and never show t
       const chat = chats.find(chat => path.startsWith(`${base}/conversations/${chat.id}`));
       // Left open so the chat stream never connects and refreshes the history it would reread.
       if (chat && path.endsWith('/events')) return;
+      // An open chat reads which GitHub account it uses; without an answer it conceals and rereads the chat.
+      if (chats.some(chat => path === `${base}/github/chats/${chat.id}/selection`))
+        return route.fulfill({ json: { accountId: null, generation: null, version: 0 } });
       if (chat && path.endsWith('/messages'))
         return route.fulfill({ json: { messages: [message(chat)], nextBefore: null } });
       if (chat && path === `${base}/conversations/${chat.id}`) return route.fulfill({ json: chat });
@@ -201,6 +212,9 @@ test('cold chat routes read during admission, reuse those reads and never show t
       return route.fulfill({ status: 404, json: { error: 'not-found' } });
     });
     const count = suffix => requests.filter(path => path === `/v1/workspaces/${workspace.id}${suffix}`).length;
+    // The sidebar's recent chats read the same first page of the list for themselves, so a page
+    // that reuses its admission read makes two list reads in all, and one that reads again makes three.
+    const listReads = () => count('/conversations') - 1;
     // Resolves once the reads have started while membership is still unanswered.
     const started = (...suffixes) =>
       Promise.all(
@@ -209,7 +223,7 @@ test('cold chat routes read during admission, reuse those reads and never show t
         ),
       );
     const visit = page.goto(`${origin}${path}`);
-    return { context, page, membership, count, started, visit, requests, unexpected, errors };
+    return { context, page, membership, count, listReads, started, visit, requests, unexpected, errors };
   }
 
   try {
@@ -221,7 +235,7 @@ test('cold chat routes read during admission, reuse those reads and never show t
           run.membership.resolve();
           await run.page.getByRole('link', { name: chats[0].title, exact: true }).first().waitFor();
           await delay(300);
-          assert.equal(run.count('/conversations'), 1);
+          assert.equal(run.listReads(), 1);
           assert.equal(run.count('/projects'), 1);
           assert.deepEqual(await hints(run.page), { [workspace.slug]: workspace.id });
           assert.deepEqual(run.unexpected, []);
@@ -260,7 +274,7 @@ test('cold chat routes read during admission, reuse those reads and never show t
         run.membership.resolve();
         await run.page.getByRole('link', { name: chats[0].title, exact: true }).first().waitFor();
         await delay(300);
-        assert.equal(run.count('/conversations'), 1);
+        assert.equal(run.listReads(), 1);
         assert.deepEqual(await hints(run.page), { [workspace.slug]: workspace.id });
         assert.deepEqual(run.errors, []);
       } finally {
@@ -292,7 +306,8 @@ test('cold chat routes read during admission, reuse those reads and never show t
           [chats[0], button => button.hover()],
           [chats[1], button => button.focus()],
         ]) {
-          const button = run.page.getByRole('link', { name: chat.title, exact: true }).first();
+          // The chat list's row, not the sidebar's recent-chat link, which does not preload.
+          const button = run.page.getByRole('main').getByRole('link', { name: chat.title, exact: true });
           await button.waitFor();
           const prefetched = run.started(`/conversations/${chat.id}/messages`, `/conversations/${chat.id}`);
           await intent(button);

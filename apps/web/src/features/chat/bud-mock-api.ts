@@ -335,9 +335,10 @@ function installBudMock() {
         onboarding: start !== 'empty',
         status: 'ready',
         version: 1,
+        // The saved list always holds five items; without setup steps it is general prompts only.
         items:
           start === 'empty'
-            ? []
+            ? tasks
             : start === 'mixed'
               ? [...tasks.slice(0, 3), ...setup.slice(1, 3)]
               : start === 'sparse'

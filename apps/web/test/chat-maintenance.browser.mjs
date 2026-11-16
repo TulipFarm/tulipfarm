@@ -231,10 +231,19 @@ test(
         });
         await page.mouse.move(0, 0);
         await manual.hover();
-        assert.equal(
-          await shine.evaluate(element => element.getAnimations().some(animation => animation.playState === 'running')),
-          true,
-          'leaving and hovering again replays the shine',
+        // :hover restarts the animation on a later style recalculation, so wait for it instead of reading once.
+        await shine.evaluate(
+          element =>
+            new Promise((resolve, reject) => {
+              const timeout = setTimeout(() => reject(new Error('leaving and hovering again replays the shine')), 2000);
+              const check = () => {
+                if (element.getAnimations().some(animation => animation.playState === 'running')) {
+                  clearTimeout(timeout);
+                  resolve();
+                } else requestAnimationFrame(check);
+              };
+              check();
+            }),
         );
         await page.mouse.move(0, 0);
         await page.emulateMedia({ reducedMotion: 'reduce' });

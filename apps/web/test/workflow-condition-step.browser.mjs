@@ -24,7 +24,7 @@ const { chromium } = await import(
 );
 
 test(
-  'Chromium describes a condition step in the editor, and run history names the branch a run took and an incomparable condition',
+  'Chromium describes a condition step in the workflow definition, and run history names the branch a run took and an incomparable condition',
   { timeout: 120000 },
   async () => {
     const db = await fixture();
@@ -140,41 +140,24 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
 
       await page.goto(`${origin}/condition-step-proof/workflows`);
       await page.getByRole('link', { name: 'Big order check', exact: true }).click();
-      const editor = page.getByRole('region', { name: 'Workflow editor' });
-      await editor.getByRole('heading', { name: '1. Check a condition' }).waitFor();
-      await editor
-        .getByText(
-          'If the workflow input, field total is greater than the fixed value 100. Then runs step 2 (Prepare information). Otherwise runs step 3 (Prepare information).',
-          { exact: true },
-        )
-        .waitFor();
-      assert.equal(
-        await editor.getByLabel('Test', { exact: true }).locator('[data-slot="select-value"]').textContent(),
-        'is greater than',
-      );
-      assert.equal(
-        await editor
-          .getByLabel('When step 2 runs', { exact: true })
-          .locator('[data-slot="select-value"]')
-          .textContent(),
-        'Runs only when the condition is met',
-      );
-      assert.equal(
-        await editor
-          .getByLabel('When step 3 runs', { exact: true })
-          .locator('[data-slot="select-value"]')
-          .textContent(),
-        'Runs only when it is not met',
-      );
-      assert.equal(
-        await editor
-          .getByLabel('When step 4 runs', { exact: true })
-          .locator('[data-slot="select-value"]')
-          .textContent(),
-        'Always runs',
-        'a step outside both branches always runs',
-      );
-      await editor.getByRole('heading', { name: '4. Prepare information' }).waitFor();
+      // Workflows are read-only on this page and change through chat, so the condition is described in the
+      // definition's step details rather than in an editor.
+      const definition = page.getByRole('region', { name: 'Workflow definition' });
+      await definition.getByRole('button', { name: 'Steps', exact: true }).click();
+      const steps = definition.getByRole('list', { name: 'Workflow steps' });
+      // The trigger is listed first, then all four steps, including the one outside both branches.
+      assert.equal(await steps.getByRole('listitem').count(), 5);
+      await steps.getByRole('button', { name: /Check a condition/ }).click();
+      const details = definition.getByRole('region', { name: 'Step details' });
+      await details.getByRole('heading', { name: 'Check a condition' }).waitFor();
+      await details.getByText('Only the selected steps continue', { exact: true }).waitFor();
+      await details.getByText('Checks', { exact: true }).waitFor();
+      const checks = await details
+        .locator('dt', { hasText: 'Checks' })
+        .locator('xpath=following-sibling::dd')
+        .textContent();
+      assert.match(checks, /total.* is greater than .*100/, checks);
+      await definition.getByText('Yes / No branches', { exact: true }).waitFor();
 
       const advance = async runId => {
         for (let step = 0; step < 10 && (await service.advance({ workspaceId: w.id, runId })).kind !== 'done'; step++);

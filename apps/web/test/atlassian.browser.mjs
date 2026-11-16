@@ -367,7 +367,11 @@ try {
   await page.goto(`${origin}/atlassian/callback?outcome=error`);
   await page.getByRole('heading', { name: 'Could not confirm your integration' }).waitFor();
   await page.goto(`${origin}/acme/integrations#confluence`);
-  await page.getByRole('dialog').getByRole('button', { name: 'Your account', exact: true }).click();
+  // Confluence has its own page; connecting your account lives on its Accounts tab.
+  await page
+    .getByRole('tablist', { name: 'Confluence sections', exact: true })
+    .getByRole('tab', { name: 'Accounts', exact: true })
+    .click();
   await section.getByText(/Sign in with Atlassian to connect Jira and Confluence together/).waitFor();
   const screenshotDir = process.env.ATLASSIAN_SCREENSHOT_DIR;
   if (screenshotDir) {

@@ -131,7 +131,7 @@ test('people archive, restore, and delete a skill, and agents name an archived p
       const unexpected = [];
       page.on('pageerror', error => errors.push(error.message));
       const skills = skillServer();
-      let flakyReads = 0;
+      let flakyRecovered = false;
       const base = `/v1/workspaces/${workspace.id}`;
       const agent = {
         id: agentId,
@@ -180,8 +180,8 @@ test('people archive, restore, and delete a skill, and agents name an archived p
           return reply(skills.list(url.searchParams.get('view'), url.searchParams.get('search') ?? ''));
         if (path === `${base}/skills/${missingId}`) return reply({ error: 'skill-not-found' }, 404);
         if (path === `${base}/skills/${flakyId}`) {
-          flakyReads++;
-          if (flakyReads <= 3) return reply({ error: 'skill-operation-unavailable' }, 503);
+          // Automatic resends and query retries all fail; only the person's retry recovers.
+          if (!flakyRecovered) return reply({ error: 'skill-operation-unavailable' }, 503);
           return reply({
             id: flakyId,
             revision,
@@ -214,6 +214,9 @@ test('people archive, restore, and delete a skill, and agents name an archived p
           });
         if (path === `${base}/agents/${agentId}` && method === 'GET') return reply(agent);
         if (path === `${base}/agents/${agentId}/chat`) return reply({ configured: true });
+        // The sidebar lists recent chats and the admin's invite-members nudge reads the roster; neither is exercised here.
+        if (path === `${base}/conversations` && method === 'GET') return reply({ chats: [], nextCursor: null });
+        if (path === `${base}/governance`) return reply({ error: 'not-found' }, 404);
         // Skill detail reads its sharing (cloud features/skills/api.ts:49); the agent page reads sharing candidates, its setup draft and Slack channels (cloud features/agents/api.ts:41, pages/agents.tsx:190, features/integrations/slack-knowledge-api.ts:65).
         if (path === `${base}/skills/${skillId}/sharing` && method === 'GET')
           return reply({ version: 1, grants: [], personGrants: [] });
@@ -443,7 +446,10 @@ test('people archive, restore, and delete a skill, and agents name an archived p
         await selected.nth(1).getByText('Unavailable skill', { exact: true }).waitFor();
         await selected.nth(1).getByText(missingId, { exact: true }).waitFor();
         await page.getByRole('button', { name: `Remove skill ${missingId}`, exact: true }).waitFor();
-        await flaky.getByRole('button', { name: 'Retry skill name' }).click();
+        const retryName = flaky.getByRole('button', { name: 'Retry skill name' });
+        await retryName.waitFor();
+        flakyRecovered = true;
+        await retryName.click();
         await flaky.getByText('Renewal check', { exact: true }).waitFor();
         await flaky.getByText('Disabled', { exact: true }).waitFor();
         assert.equal(

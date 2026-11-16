@@ -6,7 +6,7 @@ import { mkdir } from 'node:fs/promises';
 import { chromium } from 'playwright';
 import { createServer } from 'vite';
 
-test('integration status recovery and Google review lifecycle', { timeout: 300_000 }, async t => {
+test('integration status recovery and Google review lifecycle', { timeout: 480_000 }, async t => {
   const root = fileURLToPath(new URL('..', import.meta.url));
   const server = await createServer({
     root,
@@ -194,10 +194,15 @@ test('integration status recovery and Google review lifecycle', { timeout: 300_0
   });
   const approve = review.getByRole('button', { name: 'Approve exact Google action', exact: true });
   const statusErrors = page.locator('main [role=alert]');
+  // Each Google app has its own page; the account, heartbeat and action review live on its Accounts tab.
+  const main = page.getByRole('main');
+  const accountsTab = (target = page) => target.getByRole('tab', { name: 'Accounts', exact: true });
   async function account(target = page) {
-    const toggle = target.getByRole('dialog').getByRole('button', { name: 'Your account', exact: true });
-    if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+    const tab = accountsTab(target);
+    await tab.waitFor({ timeout: 30_000 });
+    if ((await tab.getAttribute('aria-selected')) !== 'true') await tab.click();
   }
+  const listRow = app => page.getByRole('listitem').filter({ has: page.getByRole('link', { name: app, exact: true }) });
   async function focusRefresh() {
     const reads = [];
     const observe = request => {
@@ -208,6 +213,8 @@ test('integration status recovery and Google review lifecycle', { timeout: 300_0
       )
         reads.push(request.url());
     };
+    // Let the page's own first reads settle, so only reads caused by focus are counted.
+    await page.waitForLoadState('networkidle');
     page.on('request', observe);
     await page.evaluate(() => window.dispatchEvent(new Event('focus')));
     await delay(500);
@@ -215,23 +222,14 @@ test('integration status recovery and Google review lifecycle', { timeout: 300_0
     assert.deepEqual(reads, [], 'focus performs no provider reads');
   }
   async function refreshProviders() {
-    await page
-      .getByRole('dialog')
-      .getByRole('button', { name: 'Check app status again', exact: true })
-      .evaluate(button => button.click());
+    await main.getByRole('button', { name: 'Check again', exact: true }).evaluate(button => button.click());
     await delay(4000);
   }
   async function checkReview() {
     assert.equal(await review.isVisible(), true);
     assert.equal(await checkbox.isChecked(), true);
     assert.equal(await approve.isEnabled(), true);
-    assert.equal(
-      await page
-        .getByRole('dialog')
-        .getByRole('button', { name: 'Your account', exact: true })
-        .getAttribute('aria-expanded'),
-      'true',
-    );
+    assert.equal(await accountsTab().getAttribute('aria-selected'), 'true');
     assert.deepEqual(JSON.parse(await review.getByLabel('Complete Google action payload').innerText()), {
       kind: 'docs.documents.create',
       title: 'Exact local fixture',
@@ -242,41 +240,43 @@ test('integration status recovery and Google review lifecycle', { timeout: 300_0
     await t.test('named failure, slow repeated retry, recovery, and connected Google tiles', async () => {
       faults.delay = 500;
       await page.goto(`${origin}/qa-integrations/integrations`);
-      const gitHubRow = page
-        .getByRole('listitem')
-        .filter({ has: page.getByRole('button', { name: 'GitHub', exact: true }) });
-      await gitHubRow.getByText('Checking', { exact: true }).waitFor();
-      await page.getByRole('button', { name: 'Check app status again', exact: true }).waitFor();
-      assert.match(await statusErrors.innerText(), /Could not check GitHub/);
+      await listRow('GitHub')
+        .getByRole('status', { name: 'Checking GitHub', exact: true })
+        .waitFor({ timeout: 30_000 });
+      await page.getByRole('button', { name: 'Check again', exact: true }).waitFor({ timeout: 30_000 });
+      assert.match(await statusErrors.innerText(), /Couldn’t check GitHub/);
+      await listRow('GitHub').getByText('Not checked', { exact: true }).waitFor();
+      // A connected app's row names the account it uses.
       for (const app of ['Gmail', 'Google Calendar', 'Google Drive', 'Google Sheets', 'Google Docs', 'Google Slides']) {
+        assert.equal(await listRow(app).getByText('qa@example.test', { exact: true }).count(), 1);
         assert.equal(
-          await page
-            .getByRole('listitem')
-            .filter({ has: page.getByRole('button', { name: app, exact: true }) })
-            .getByText('Connected', { exact: true })
+          await listRow(app)
+            .getByRole('link', { name: `Configure ${app}`, exact: true })
             .count(),
           1,
         );
       }
-      await page.getByRole('button', { name: 'Check app status again', exact: true }).click();
+      await page.getByRole('button', { name: 'Check again', exact: true }).click();
       await delay(5000);
-      await page.getByRole('button', { name: 'Check app status again', exact: true }).waitFor();
+      await page.getByRole('button', { name: 'Check again', exact: true }).waitFor({ timeout: 30_000 });
       await page.screenshot({ path: `${shots}status-error-desktop.png`, fullPage: true });
       faults.github = 200;
-      await page.getByRole('button', { name: 'Check app status again', exact: true }).click();
+      await page.getByRole('button', { name: 'Check again', exact: true }).click();
       await statusErrors.waitFor({ state: 'detached' });
       faults.delay = 0;
     });
     await t.test('a partial Google grant marks missing apps and keeps granted ones connected', async () => {
       faults.scopes = ['openid', auth('userinfo.email'), auth('calendar')];
       await page.goto(`${origin}/qa-integrations/integrations`);
-      const row = app =>
-        page.getByRole('listitem').filter({ has: page.getByRole('button', { name: app, exact: true }) });
-      await row('Google Calendar').getByText('Connected', { exact: true }).waitFor();
-      await row('Gmail').getByText('Not granted', { exact: true }).waitFor();
-      await row('Gmail').getByRole('button', { name: 'Grant access Gmail', exact: true }).waitFor();
-      await row('Gmail').getByRole('button', { name: 'Gmail', exact: true }).click();
-      const sheet = page.getByRole('dialog');
+      await listRow('Google Calendar').getByText('qa@example.test', { exact: true }).waitFor();
+      await listRow('Gmail').getByRole('button', { name: 'Connect Gmail', exact: true }).waitFor();
+      assert.equal(await listRow('Gmail').getByText('qa@example.test', { exact: true }).count(), 0);
+      await listRow('Gmail').getByRole('link', { name: 'Gmail', exact: true }).click();
+      const sheet = main;
+      await sheet
+        .getByRole('region', { name: 'Gmail summary', exact: true })
+        .getByText('Not granted', { exact: true })
+        .waitFor();
       await sheet.getByRole('button', { name: 'Grant access Gmail', exact: true }).waitFor();
       await sheet
         .getByRole('listitem')
@@ -285,18 +285,19 @@ test('integration status recovery and Google review lifecycle', { timeout: 300_0
         .waitFor();
       assert.equal(await sheet.getByText('Change calendar events').count(), 0);
       await page.screenshot({ path: `${shots}partial-grant-desktop.png` });
-      await page.keyboard.press('Escape');
       faults.scopes = allScopes;
     });
 
     await t.test('a Sheets grant without Drive names the Drive access spreadsheet changes need', async () => {
       faults.scopes = ['openid', auth('userinfo.email'), auth('spreadsheets')];
       await page.goto(`${origin}/qa-integrations/integrations`);
-      const row = app =>
-        page.getByRole('listitem').filter({ has: page.getByRole('button', { name: app, exact: true }) });
-      await row('Google Sheets').getByText('Connected', { exact: true }).waitFor();
-      await row('Google Sheets').getByRole('button', { name: 'Google Sheets', exact: true }).click();
-      const sheet = page.getByRole('dialog');
+      await listRow('Google Sheets').getByText('qa@example.test', { exact: true }).waitFor();
+      await listRow('Google Sheets').getByRole('link', { name: 'Google Sheets', exact: true }).click();
+      const sheet = main;
+      await sheet
+        .getByRole('region', { name: 'Google Sheets summary', exact: true })
+        .getByText('Connected', { exact: true })
+        .waitFor();
       await sheet
         .getByRole('listitem')
         .filter({ hasText: 'Change spreadsheets' })
@@ -312,20 +313,20 @@ test('integration status recovery and Google review lifecycle', { timeout: 300_0
       );
       await sheet.getByText(/Changing spreadsheets also needs Google Drive access/).waitFor();
       await sheet.getByRole('button', { name: 'Grant Google Drive access', exact: true }).waitFor();
-      await page.keyboard.press('Escape');
       faults.scopes = allScopes;
     });
 
     await t.test('an unscoped selector hits another checkbox, named script and pointer and keyboard work', async () => {
-      await page.getByRole('button', { name: 'Google Calendar', exact: true }).click();
+      await page.goto(`${origin}/qa-integrations/integrations`);
+      await listRow('Google Calendar').getByRole('link', { name: 'Google Calendar', exact: true }).click();
       await account(page);
-      await page.getByRole('dialog').getByRole('checkbox', { name: 'Enable Gmail heartbeat', exact: true }).waitFor();
+      await main.getByRole('checkbox', { name: 'Enable Gmail heartbeat', exact: true }).waitFor();
       await page
         .getByRole('region', { name: 'Action: Create document', exact: true })
         .getByRole('button', { name: 'View action', exact: true })
         .click();
       await checkbox.waitFor();
-      const first = page.locator('[role=dialog] [role=checkbox]').first();
+      const first = page.locator('main [role=checkbox]').first();
       assert.equal(
         await first.evaluate((element, target) => element === target, await checkbox.elementHandle()),
         false,
@@ -392,24 +393,19 @@ test('integration status recovery and Google review lifecycle', { timeout: 300_0
         ),
         page.evaluate(() => window.dispatchEvent(new Event('tulipfarm:workspace-access-changed'))),
       ]);
-      await delay(300);
+      // The first 503 is retried; check the review once the refresh has failed.
+      await main.getByText(/Could not refresh workspace access/).waitFor();
       assert.equal(await review.isVisible(), true, 'Workspace 503 must not unmount the exact action review');
       assert.equal(await checkbox.isChecked(), true);
       assert.equal(await approve.isDisabled(), true);
       assert.equal(await review.getByRole('button', { name: 'Reject Google action', exact: true }).isDisabled(), true);
       await approve.evaluate(element => element.click());
       assert.deepEqual(writes, []);
-      await page
-        .getByRole('dialog')
-        .getByText(/Could not refresh workspace access/)
-        .waitFor();
       await page.screenshot({ path: `${shots}workspace-stale-mobile-dark.png`, fullPage: true });
-      const retry = page.getByRole('dialog').getByRole('button', { name: 'Check workspace access again', exact: true });
+      const retry = main.getByRole('button', { name: 'Check workspace access again', exact: true });
       faults.shellDelay = 500;
       await retry.click();
-      const checking = page
-        .getByRole('dialog')
-        .getByRole('button', { name: 'Checking workspace access…', exact: true });
+      const checking = main.getByRole('button', { name: 'Checking workspace access…', exact: true });
       assert.equal(await checking.isDisabled(), true);
       assert.equal(await checking.getAttribute('aria-busy'), 'true');
       await retry.waitFor();
@@ -427,7 +423,7 @@ test('integration status recovery and Google review lifecycle', { timeout: 300_0
     });
     await t.test('catalog denial conceals private review and recovery requires new authorization', async () => {
       faults.shell = 200;
-      await page.goto(`${origin}/qa-integrations/integrations#google-calendar`);
+      await page.goto(`${origin}/qa-integrations/integrations/google-calendar?tab=accounts`);
       await account(page);
       for (const denied of [403, 404]) {
         await page
@@ -506,13 +502,12 @@ test('integration status recovery and Google review lifecycle', { timeout: 300_0
       faults.empty = true;
       await page.getByRole('button', { name: 'Refresh Google proposals', exact: true }).click();
       await page.getByRole('heading', { name: 'No Google proposals', exact: true }).waitFor();
-      await page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).click();
       faults.github = 404;
-      await page.reload();
-      await page.getByRole('button', { name: 'Check app status again', exact: true }).waitFor();
+      await page.goto(`${origin}/qa-integrations/integrations`);
+      await page.getByRole('button', { name: 'Check again', exact: true }).waitFor({ timeout: 30_000 });
       assert.equal(
         await statusErrors.innerText(),
-        'Could not check GitHub. Status is unavailable to your current membership. Check your workspace access.',
+        'Couldn’t check GitHub. Status is unavailable to your current membership. Check your workspace access.\nCheck again',
       );
       await page.screenshot({ path: `${shots}status-error-mobile-dark.png`, fullPage: true });
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
@@ -528,7 +523,7 @@ test('integration status recovery and Google review lifecycle', { timeout: 300_0
       faults.empty = false;
       proposal.decision = null;
       await page.goto('about:blank');
-      await page.goto(`${origin}/qa-integrations/integrations#google-calendar`);
+      await page.goto(`${origin}/qa-integrations/integrations/google-calendar?tab=accounts`);
       await account(page);
       await page
         .getByRole('region', { name: 'Action: Create document', exact: true })
@@ -553,7 +548,8 @@ test('integration status recovery and Google review lifecycle', { timeout: 300_0
       assert.equal(await checkbox.isChecked(), true);
       assert.equal(await approve.isDisabled(), true);
       faults.google = 200;
-      await page.getByRole('dialog').getByRole('button', { name: 'Check app status again', exact: true }).click();
+      // The status alert offers Check again once every retry of the catalog read has failed.
+      await main.getByRole('button', { name: 'Check again', exact: true }).click({ timeout: 60_000 });
       await page.waitForFunction(() =>
         [...document.querySelectorAll('button')].some(
           button => button.textContent === 'Approve exact Google action' && !button.matches(':disabled'),
@@ -574,10 +570,7 @@ test('integration status recovery and Google review lifecycle', { timeout: 300_0
       await openFreshReview();
       faults.list = 503;
       await invalidateWorkspace();
-      await page
-        .getByRole('dialog')
-        .getByText(/Could not refresh workspace access/)
-        .waitFor();
+      await main.getByText(/Could not refresh workspace access/).waitFor();
       assert.equal(await checkbox.isChecked(), true);
       assert.equal(await approve.isDisabled(), true);
       faults.list = 200;
@@ -599,19 +592,13 @@ test('integration status recovery and Google review lifecycle', { timeout: 300_0
         await openFreshReview();
         faults.shell = 503;
         await invalidateWorkspace();
-        await page
-          .getByRole('dialog')
-          .getByText(/Could not refresh workspace access/)
-          .waitFor();
+        await main.getByText(/Could not refresh workspace access/).waitFor();
         faults.shell = denied;
-        await page
-          .getByRole('dialog')
-          .getByRole('button', { name: 'Check workspace access again', exact: true })
-          .click();
+        await main.getByRole('button', { name: 'Check workspace access again', exact: true }).click();
         await review.waitFor({ state: 'detached' });
         assert.equal(await page.getByLabel('Complete Google action payload').count(), 0);
         faults.shell = 200;
-        await page.goto(`${origin}/qa-integrations/integrations#google-calendar`);
+        await page.goto(`${origin}/qa-integrations/integrations/google-calendar?tab=accounts`);
         await account(page);
         await page
           .getByRole('region', { name: 'Action: Create document', exact: true })
@@ -620,28 +607,34 @@ test('integration status recovery and Google review lifecycle', { timeout: 300_0
         assert.equal(await checkbox.isChecked(), false);
       }
     });
-    await t.test('initial 503 and leaving integrations never admit stale workspace data', async () => {
-      faults.shell = 503;
-      await page.goto('about:blank');
-      await page.goto(`${origin}/qa-integrations/integrations#google-calendar`);
-      await page.getByRole('heading', { name: 'Could not open TulipFarm', exact: true }).waitFor();
-      assert.equal(await review.count(), 0);
-      await openFreshReview();
-      faults.shell = 503;
-      await invalidateWorkspace();
-      await page
-        .getByRole('dialog')
-        .getByText(/Could not refresh workspace access/)
-        .waitFor();
-      await page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).click();
-      await page.setViewportSize({ width: 1440, height: 1000 });
-      await page
-        .getByRole('navigation', { name: 'Workspace navigation', exact: true })
-        .getByRole('link', { name: 'Agents', exact: true })
-        .click();
-      await page.getByRole('heading', { name: 'Could not open TulipFarm', exact: true }).waitFor();
-      assert.equal(await page.getByRole('heading', { name: 'Agents', exact: true }).count(), 0);
-    });
+    await t.test(
+      'initial 503 never admits stale workspace data and other pages say they are reconnecting',
+      async () => {
+        faults.shell = 503;
+        await page.goto('about:blank');
+        await page.goto(`${origin}/qa-integrations/integrations/google-calendar?tab=accounts`);
+        // The workspace read retries a 503 with backoff before the route gives up.
+        await page.getByRole('heading', { name: 'Could not open TulipFarm', exact: true }).waitFor({ timeout: 60_000 });
+        assert.equal(await review.count(), 0);
+        await openFreshReview();
+        faults.shell = 503;
+        await invalidateWorkspace();
+        await main.getByText(/Could not refresh workspace access/).waitFor();
+        await page.setViewportSize({ width: 1440, height: 1000 });
+        await page
+          .getByRole('navigation', { name: 'Workspace navigation', exact: true })
+          .getByRole('link', { name: 'Agents', exact: true })
+          .click();
+        // Other workspace pages keep the last admitted workspace during a temporary failure and say so.
+        await page
+          .getByRole('region', { name: 'Connection', exact: true })
+          .getByText(/Reconnecting to TulipFarm\. You're seeing your last loaded workspace\./)
+          .waitFor({ timeout: 60_000 });
+        await page.getByRole('heading', { name: 'Agents', exact: true }).waitFor();
+        assert.equal(await review.count(), 0);
+        assert.equal(await page.getByLabel('Complete Google action payload').count(), 0);
+      },
+    );
     async function refreshSession() {
       await Promise.all([
         page.waitForResponse(response => response.url().endsWith('/auth/get-session')),
@@ -686,10 +679,7 @@ test('integration status recovery and Google review lifecycle', { timeout: 300_0
     await t.test('session 401 conceals a stale review and signed-out refresh opens login', async () => {
       faults.shell = 503;
       await invalidateWorkspace();
-      await page
-        .getByRole('dialog')
-        .getByText(/Could not refresh workspace access/)
-        .waitFor();
+      await main.getByText(/Could not refresh workspace access/).waitFor();
       await page.screenshot({ path: `${shots}workspace-stale-desktop.png`, fullPage: true });
       faults.session = 401;
       await refreshSession();

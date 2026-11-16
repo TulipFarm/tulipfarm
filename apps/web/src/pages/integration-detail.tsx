@@ -608,19 +608,24 @@ function Accounts({
       {primary}
     </StatePanel>
   );
-  if (app.provider === 'google')
+  if (app.provider === 'google') {
+    const disconnected = status?.kind === 'off' && !status.granted;
     return (
       <div className="space-y-8">
-        {status?.kind === 'off' && !status.granted ? (
-          empty
-        ) : (
-          <Panel title="Your Google account" id="accounts-google">
-            <GoogleAccount workspaceId={workspaceId} />
-          </Panel>
-        )}
+        {disconnected && empty}
+        {/* The account stays mounted after a disconnect so its follow-up notice isn't lost. */}
+        <section aria-labelledby={disconnected ? undefined : 'accounts-google'} className="space-y-3 empty:hidden">
+          {!disconnected && (
+            <h2 id="accounts-google" className="text-base font-semibold">
+              Your Google account
+            </h2>
+          )}
+          <GoogleAccount workspaceId={workspaceId} />
+        </section>
         <GoogleApprovals workspaceId={workspaceId} />
       </div>
     );
+  }
   if (app.provider === 'slack') return <SlackAccount workspaceId={workspaceId} knowledge={false} />;
   if (app.provider === 'github-personal')
     return <GitHubAccounts workspaceId={workspaceId} workspaceSlug={slug} onChanged={onChanged} />;

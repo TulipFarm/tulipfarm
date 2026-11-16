@@ -159,6 +159,7 @@ test(
           if (path.endsWith('/system-package-installations'))
             return route.fulfill({ json: { installations: [], nextCursor: null } });
           if (path.endsWith('/governance')) return route.fulfill({ status: 404, json: { error: 'not-found' } });
+          if (path.endsWith('/agents/recent')) return route.fulfill({ json: [] });
           throw new Error(`Unexpected API request ${method} ${path}`);
         });
 

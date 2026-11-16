@@ -119,7 +119,7 @@ try {
   assert.equal(f.effects.length, 0);
   await review.getByText(/may consume runner minutes or trigger deployment steps/).waitFor();
   await page.screenshot({
-    path: '/var/folders/7d/qk8p6t3d1jvfnh4503bz0msr0000gn/T/opencode/github-actions-dispatch.png',
+    path: 'reports/screenshots/github-actions-dispatch.png',
     fullPage: true,
   });
   await review.getByRole('button', { name: 'Approve exact batch' }).focus();
@@ -221,7 +221,7 @@ try {
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   await unknown.getByRole('button', { name: 'Reconcile with GitHub' }).scrollIntoViewIfNeeded();
   await page.screenshot({
-    path: `/var/folders/7d/qk8p6t3d1jvfnh4503bz0msr0000gn/T/opencode/github-actions-${recoveryKind}-unknown-mobile.png`,
+    path: `reports/screenshots/github-actions-${recoveryKind}-unknown-mobile.png`,
     fullPage: true,
   });
   assert.deepEqual(errors, []);

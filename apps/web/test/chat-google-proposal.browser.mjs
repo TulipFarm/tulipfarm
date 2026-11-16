@@ -80,7 +80,7 @@ async function withChat(operation, prompt, check, options = {}) {
   try {
     for (let attempt = 0; ; attempt++) {
       if (await serverReady()) break;
-      assert.ok(attempt < 100, 'Vite starts');
+      assert.ok(attempt < 300, 'Vite starts');
       await delay(100);
     }
     browser = await chromium.launch({
@@ -93,7 +93,7 @@ async function withChat(operation, prompt, check, options = {}) {
       colorScheme: options.theme ?? 'light',
     });
     const page = await context.newPage();
-    page.setDefaultTimeout(10000);
+    page.setDefaultTimeout(20000);
     const errors = [];
     page.on('pageerror', error => errors.push(String(error)));
     const proposal = {

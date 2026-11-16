@@ -186,8 +186,11 @@ test(
       await page.getByRole('menuitemradio', { name: /^Plan/ }).click();
       await page.getByRole('textbox', { name: 'Message' }).fill('Check access before making the plan.');
       await page.getByRole('button', { name: 'Send message' }).click();
-      await page.getByRole('button', { name: 'Try again', exact: true }).click();
-      await page.getByRole('button', { name: 'Try again', exact: true }).waitFor({ state: 'detached' });
+      // A dropped send is uncertain; checking its status resends the exact command when it wasn't saved.
+      const check = page.getByRole('button', { name: 'Check message status', exact: true });
+      await check.click();
+      await check.waitFor({ state: 'detached' });
+      await page.getByText('Not confirmed sent', { exact: true }).waitFor({ state: 'detached' });
       assert.equal(sends.length, 2);
       assert.deepEqual(sends[0], sends[1], 'failed sends retain the exact request and mode');
       assert.equal(sends[0].mode, 'plan');
@@ -249,6 +252,8 @@ test(
       }
       await publish();
       await reference.getByRole('button', { name: 'Open plan' }).click();
+      // The canvas leads with the task tree; the outline with verification sits behind a disclosure (plans.tsx).
+      await canvas.getByRole('button', { name: 'Plan details and verification', exact: true }).click();
       await canvas.getByText('Verified', { exact: true }).first().waitFor();
       await canvas.getByRole('button', { name: /Verify first and repeat alerts/ }).click();
       await canvas.getByText('Verification details').click();

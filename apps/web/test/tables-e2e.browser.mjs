@@ -115,7 +115,7 @@ export async function proveTableBrowser(input) {
     await history.getByRole('button', { name: 'Close history', exact: true }).click();
     const searchRows = page.getByRole('searchbox', { name: 'Search rows', exact: true });
     await page
-      .getByRole('group', { name: 'Table tools', exact: true })
+      .getByRole('group', { name: 'Search', exact: true })
       .getByRole('button', { name: /^(Search|“.*”)$/ })
       .click();
     await searchRows.fill('PRINTER');
@@ -130,7 +130,7 @@ export async function proveTableBrowser(input) {
     await page.waitForURL(url => /^-[0-9a-f-]{36}$/.test(url.searchParams.get('order') ?? ''));
     await page.getByRole('cell', { name: 'printer', exact: true }).first().waitFor();
     await page
-      .getByRole('group', { name: 'Table tools', exact: true })
+      .getByRole('group', { name: 'Search', exact: true })
       .getByRole('button', { name: '“PRINTER”', exact: true })
       .click();
     await page.getByRole('button', { name: 'Clear search', exact: true }).click();

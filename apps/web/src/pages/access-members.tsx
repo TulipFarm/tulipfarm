@@ -26,8 +26,13 @@ import type { AccessPage } from './governance';
 const date = (value: string) =>
   new Date(value).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
 export const personName = (person: { name: string; email: string }) => person.name || person.email;
-const failed = (result: Awaited<ReturnType<AccessPage['change']>>) =>
-  result === 'saved' ? null : 'Nothing changed. Close this to see why.';
+/** What a confirmation dialog says when its change didn't save; the page shows the reason behind the dialog. */
+export const failed = (result: Awaited<ReturnType<AccessPage['change']>>) =>
+  result === 'saved'
+    ? null
+    : result === 'uncertain'
+      ? 'We couldn’t confirm this change. Close this to see why.'
+      : 'Nothing changed. Close this to see why.';
 
 type Row = {
   id: string;

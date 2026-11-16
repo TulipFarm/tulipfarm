@@ -45,6 +45,8 @@ test('focus applies same-membership authority changes to loaded administration',
   async function fixture(run) {
     const page = await browser.newPage();
     page.setDefaultTimeout(10_000);
+    // The first visit waits for Vite to transform the whole app on a cold server.
+    page.setDefaultNavigationTimeout(60_000);
     await page.clock.install();
     const state = { role: 'admin', held: null, inflight: 0, adminReads: [], errors: [], unexpected: [] };
     page.on('pageerror', error => state.errors.push(error.message));
@@ -86,7 +88,16 @@ test('focus applies same-membership authority changes to loaded administration',
           updatedAt: null,
           budgetFamilies: [],
         };
-      else if (shellRead(request.method(), path, workspace))
+      else if (path === `/v1/workspaces/${workspace.id}/secrets/capabilities`) json = { enabled: false };
+      else if (path === `/v1/workspaces/${workspace.id}/governance/directory`) json = { members: [] };
+      else if (path === `/v1/workspaces/${workspace.id}/subscriptions`) json = { subscriptions: [] };
+      else if (path === `/v1/workspaces/${workspace.id}/chatgpt/connection`)
+        json = { state: 'not-connected', email: null, planUsage: false, welcomePending: false, models: [] };
+      else if (/\/(claude|copilot)\/connection$/.test(path) && path.startsWith(`/v1/workspaces/${workspace.id}/`)) {
+        const provider = path.split('/').at(-2);
+        status = 404;
+        json = { error: `${provider}-plan-disabled` };
+      } else if (shellRead(request.method(), path, workspace))
         ({ status = 200, json } = shellRead(request.method(), path, workspace));
       else {
         state.unexpected.push(`${request.method()} ${path}`);
@@ -125,12 +136,14 @@ test('focus applies same-membership authority changes to loaded administration',
   try {
     await t.test('Members conceals administration on demotion and keeps it when authority is unchanged', () =>
       fixture(async ({ page, state, focusCheck, settled }) => {
-        const search = page.getByLabel('Search members');
-        const invitations = page.getByRole('tab', { name: 'Invitations', exact: true });
+        const search = page.getByRole('searchbox', { name: 'Search by name or email', exact: true });
+        const invite = page.getByRole('link', { name: 'Invite members', exact: true });
         await page.goto(`${origin}/acme/members`);
+        // The first visit waits for Vite to transform the whole app on a cold server.
+        await search.waitFor({ timeout: 60_000 });
         await search.fill('Ada');
-        await invitations.click();
-        await page.getByRole('heading', { name: 'No invitations yet' }).waitFor();
+        await invite.waitFor();
+        await settled();
         const readsBeforeUnchanged = state.adminReads.length;
         assert.deepEqual(await focusCheck(), membership.admin);
         await settled();
@@ -152,14 +165,13 @@ test('focus applies same-membership authority changes to loaded administration',
           }),
         ]);
         await page.getByText('Loading workspace access…', { exact: true }).waitFor();
-        assert.equal(await invitations.count(), 0, 'the demotion conceals administration before its re-read returns');
-        assert.equal(await page.getByRole('button', { name: 'Invite members', exact: true }).count(), 0);
+        assert.equal(await invite.count(), 0, 'the demotion conceals administration before its re-read returns');
         state.held = null;
         demoted.release.resolve();
-        await page.getByText('Your role is member.', { exact: true }).waitFor();
+        await search.waitFor();
         await settled();
-        assert.equal(await invitations.count(), 0);
-        assert.equal(await search.count(), 0);
+        assert.equal(await invite.count(), 0);
+        assert.equal(await search.inputValue(), '', 'the demotion discards the administrator’s editor state');
         const demotedReads = state.adminReads.slice(readsBeforeUnchanged);
         assert.ok(
           demotedReads.some(read => read.path === '/' && read.status === 200),
@@ -173,24 +185,29 @@ test('focus applies same-membership authority changes to loaded administration',
 
         state.role = 'admin';
         assert.deepEqual(await focusCheck(), membership.admin);
-        await invitations.waitFor();
-        assert.equal(await page.getByText('Your role is member.', { exact: true }).count(), 0);
+        await invite.waitFor();
       }),
     );
 
     await t.test('Models revalidates admin controls without a loaded governance view', () =>
       fixture(async ({ page, state, focusCheck, settled }) => {
-        const readOnly = page.getByText('You have read-only access. Only workspace admins can change these settings.', {
-          exact: true,
-        });
+        const readOnly = page.getByText(
+          'Only workspace admins can change TulipFarm model access and workspace settings. You can still connect and share your own plans.',
+          { exact: true },
+        );
         await page.goto(`${origin}/acme/settings/models`);
-        await page.getByText('No models configured yet', { exact: false }).first().waitFor();
+        await page.getByText('No models configured yet', { exact: false }).first().waitFor({ timeout: 60_000 });
         await settled();
         assert.equal(await readOnly.count(), 0);
         state.role = 'member';
         assert.deepEqual(await focusCheck(), membership.member);
         await readOnly.waitFor();
-        assert.deepEqual(state.adminReads, [], 'Models never loads governance administration');
+        // Only an admin's invite-members prompt counts members; Models itself never loads administration.
+        assert.deepEqual(
+          state.adminReads.filter(read => read.path !== '/' || read.role !== 'admin'),
+          [],
+          'Models never loads governance administration',
+        );
       }),
     );
   } finally {

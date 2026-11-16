@@ -40,6 +40,8 @@ try {
     activityAt: workspace.createdAt,
     createdAt: workspace.createdAt,
   };
+  // One membership for the whole session: a changed membership id means access was revoked.
+  const membershipId = randomUUID();
   const messages = [];
   const sends = [];
   const retries = [];
@@ -57,7 +59,7 @@ try {
     // The workspace route reads the caller's membership and treats a 404 as not found (cloud router.tsx:402-409).
     else if (path.endsWith('/governance/me'))
       json = {
-        membershipId: randomUUID(),
+        membershipId,
         role: 'member',
         teams: [],
         capabilities: { manageGovernance: false, canLeave: true },
@@ -68,6 +70,12 @@ try {
     else if (request.method() === 'PUT' && path.includes('/messages/')) {
       const body = request.postDataJSON();
       sends.push(body);
+      // The dropped send never reaches the server, so a re-read can't confirm it and the outcome stays uncertain.
+      if (drop) {
+        drop = false;
+        await route.abort('failed');
+        return;
+      }
       if (!messages.length)
         messages.push({
           id: path.split('/').at(-1),
@@ -78,11 +86,6 @@ try {
           turn: { id: randomUUID(), generation: 5, status: 'failed', errorCode: 'model-invalid-decision' },
           tools: [],
         });
-      if (drop) {
-        drop = false;
-        await route.abort('failed');
-        return;
-      }
       json = { messageId: messages[0].id, turnId: messages[0].turn.id, sequence: 1 };
     } else if (path.endsWith('/retry')) {
       retries.push(request.postDataJSON());
@@ -103,7 +106,14 @@ try {
   await modelOption(page, 'DeepSeek V4 Flash').click();
   await page.getByLabel('Message', { exact: true }).fill('Show my events for today.');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
-  await page.getByRole('button', { name: 'Retry same operation' }).click();
+  // An unconfirmed send keeps the exact command; checking its status finds it missing and replays it unchanged.
+  await page
+    .getByText(
+      "We couldn't confirm your message was sent. Check your connection, then try again. Trying again won't send it twice.",
+      { exact: true },
+    )
+    .waitFor();
+  await page.getByRole('button', { name: 'Check message status', exact: true }).click();
   await page.getByRole('button', { name: 'Retry reply', exact: true }).waitFor();
   assert.equal(sends[0].timeZone, 'America/Los_Angeles');
   assert.deepEqual(sends[1], sends[0]);

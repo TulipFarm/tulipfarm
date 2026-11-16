@@ -179,22 +179,28 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
 
       await page.goto(`${origin}/table-steps-proof/workflows`);
       await page.getByRole('link', { name: 'Add lead', exact: true }).click();
-      const editor = page.getByRole('region', { name: 'Workflow editor' });
-      await editor.getByRole('heading', { name: '1. Add a table row' }).waitFor();
-      await editor.getByText('Add mapped field', { exact: true }).first().waitFor();
-      await editor.getByText('Company', { exact: true }).first().waitFor();
-      await editor.getByText('Stage', { exact: true }).first().waitFor();
-      await editor.getByRole('heading', { name: '2. Find table rows' }).waitFor();
-      await editor.getByText('Add filter field', { exact: true }).waitFor();
-      await editor.getByText('Row to update', { exact: true }).waitFor();
-      await editor.getByRole('button', { name: 'Add find rows' }).click();
-      await editor.getByRole('heading', { name: '4. Find table rows' }).waitFor();
-      const addedFind = editor
-        .getByRole('listitem')
-        .filter({ has: page.getByRole('heading', { name: '4. Find table rows' }) });
-      await addedFind.getByLabel('Table', { exact: true }).click();
-      await page.getByRole('option', { name: 'Leads', exact: true }).click();
-      await addedFind.getByText('Add filter field', { exact: true }).waitFor();
+      // Workflows are read-only on this page and change through chat, so each table step is described in the
+      // definition's step details with its table and field names.
+      const definition = page.getByRole('region', { name: 'Workflow definition' });
+      await definition.getByRole('button', { name: 'Steps', exact: true }).click();
+      const steps = definition.getByRole('list', { name: 'Workflow steps' });
+      const details = definition.getByRole('region', { name: 'Step details' });
+      const fact = label => details.locator('dt', { hasText: label }).locator('xpath=following-sibling::dd');
+      const inspect = async title => {
+        await steps.getByRole('button', { name: new RegExp(title) }).click();
+        await details.getByRole('heading', { name: title }).waitFor();
+        await details.getByText('Leads', { exact: true }).waitFor();
+      };
+      await inspect('Create a row');
+      assert.match(await fact('Company').textContent(), /company/);
+      assert.match(await fact('Stage').textContent(), /Open/);
+      await inspect('Find matching rows');
+      assert.equal(await fact('Maximum rows').textContent(), '5');
+      assert.match(await fact('Company').textContent(), /^eq .*company/);
+      await inspect('Update a row');
+      await details.getByText('Row', { exact: true }).waitFor();
+      assert.match(await fact('Stage').textContent(), /Won/);
+      assert.equal(await details.getByText('Unavailable field').count(), 0);
 
       const { runId } = await service.start(w.id, w.userId, workflowId, {
         requestId: randomUUID(),

@@ -308,27 +308,15 @@ function FlowPath({
   );
 }
 
-function WorkflowViewport() {
+// Resizing refits the diagram until the person pans or zooms it; after that it keeps their view and only recenters.
+function WorkflowViewport({ adjusted }: { adjusted: RefObject<boolean> }) {
   const width = useStore(state => state.width),
     height = useStore(state => state.height);
   const flow = useReactFlow();
   const fitted = useRef<{ width: number; height: number } | null>(null);
   useEffect(() => {
     if (!flow.viewportInitialized || !width || !height) return;
-    if (fitted.current) {
-      const previous = fitted.current;
-      if (previous.width === width && previous.height === height) return;
-      const viewport = flow.getViewport();
-      fitted.current = { width, height };
-      void flow.setViewport({
-        ...viewport,
-        x: viewport.x + (width - previous.width) / 2,
-        y: viewport.y + (height - previous.height) / 2,
-      });
-      return;
-    }
-    // Wait for the opening Canvas to reach its measured size; later reads must not reset pan/zoom.
-    const timer = window.setTimeout(() => {
+    const fit = () => {
       fitted.current = { width, height };
       const bounds = flow.getNodesBounds(flow.getNodes());
       const zoom = Math.max(
@@ -340,9 +328,24 @@ function WorkflowViewport() {
         y: Math.max(40, (height - bounds.height * zoom) / 2) - bounds.y * zoom,
         zoom,
       });
-    }, 220);
+    };
+    if (fitted.current) {
+      const previous = fitted.current;
+      if (previous.width === width && previous.height === height) return;
+      if (!adjusted.current) return fit();
+      const viewport = flow.getViewport();
+      fitted.current = { width, height };
+      void flow.setViewport({
+        ...viewport,
+        x: viewport.x + (width - previous.width) / 2,
+        y: viewport.y + (height - previous.height) / 2,
+      });
+      return;
+    }
+    // Wait for the opening Canvas to reach its measured size; later reads must not reset pan/zoom.
+    const timer = window.setTimeout(fit, 220);
     return () => window.clearTimeout(timer);
-  }, [width, height, flow]);
+  }, [width, height, flow, adjusted]);
   return null;
 }
 
@@ -386,6 +389,7 @@ export function WorkflowDiagram({
 }) {
   const element = useRef<HTMLDivElement>(null);
   const motion = useVisibleMotion(element);
+  const adjusted = useRef(false);
   const height = Math.min(maxDiagramHeight, Math.max(420, ...steps.map(step => step.position.y + 136 + 96)));
   const nodes = useMemo(
     () =>
@@ -448,10 +452,19 @@ export function WorkflowDiagram({
         zoomOnDoubleClick={false}
         preventScrolling={false}
         proOptions={{ hideAttribution: true }}
+        onMoveStart={event => {
+          if (event) adjusted.current = true;
+        }}
       >
         <Background gap={20} size={1} />
-        <WorkflowViewport />
-        <Controls showInteractive={false} position="bottom-right" />
+        <WorkflowViewport adjusted={adjusted} />
+        <Controls
+          showInteractive={false}
+          position="bottom-right"
+          onZoomIn={() => (adjusted.current = true)}
+          onZoomOut={() => (adjusted.current = true)}
+          onFitView={() => (adjusted.current = false)}
+        />
       </ReactFlow>
     </div>
   );

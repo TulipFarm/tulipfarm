@@ -95,7 +95,9 @@ test('workflow page and chat show inspectable, immutable diagrams', async t => {
       assert.equal(await page.locator('.react-flow__edgeupdater').count(), 0);
       await page.getByRole('button', { name: /^Inspect .*Notify engineering/ }).click();
       assert.equal(await inspect.locator('[data-brand="slack"]').count(), 1);
-      await inspect.getByText('The requester or sponsor approves each exact message before it is sent.').waitFor();
+      // Workflow Slack messages post without a per-send approval, so the step names who it posts as.
+      await inspect.getByText('Posts as', { exact: true }).waitFor();
+      await inspect.getByText('TulipFarm app', { exact: true }).waitFor();
       assert.equal(await inspect.locator('pre').count(), 0, 'raw configuration starts collapsed');
       await inspect.getByRole('button', { name: 'Details', exact: true }).click();
       await inspect.locator('pre').waitFor();
@@ -107,8 +109,8 @@ test('workflow page and chat show inspectable, immutable diagrams', async t => {
       await load('agent', 'running');
       await fit();
       await page.locator('.workflow-path-marker').waitFor();
-      await page.locator('.workflow-node[data-step-id="research"] [data-slot="avatar-image"]').waitFor();
-      await inspect.locator('[data-slot="avatar-image"]').waitFor();
+      await page.locator('.workflow-node[data-step-id="research"] [data-slot="monster-avatar"]').waitFor();
+      await inspect.locator('[data-slot="monster-avatar"]').waitFor();
       await page.getByRole('button', { name: 'Zoom In', exact: true }).click();
       await delay(300);
       const zoomed = await viewport();
@@ -247,7 +249,13 @@ test('workflow page and chat show inspectable, immutable diagrams', async t => {
               .locator('.workflow-node')
               .first()
               .evaluate(el => getComputedStyle(el).backgroundColor),
-            'rgb(22, 23, 26)',
+            await page.evaluate(() => {
+              const probe = document.body.appendChild(document.createElement('div'));
+              probe.style.background = 'var(--card)';
+              const color = getComputedStyle(probe).backgroundColor;
+              probe.remove();
+              return color;
+            }),
             'graph uses the app dark palette',
           );
         await page.setViewportSize({ width: 1440, height: 1000 });

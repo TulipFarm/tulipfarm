@@ -73,7 +73,8 @@ export function SidebarMockNavItem({ page }: { page: Page }) {
         </SidebarMenuButton>
       </SidebarMenuItem>
     );
-  const entries = (location.scenario === 'empty' ? [] : names).map((name, index) => {
+  // Like the live loaders, the mock shows only the three most recent samples.
+  const entries = (location.scenario === 'empty' ? [] : names.slice(0, 3)).map((name, index) => {
     const id = idFor(index);
     const href = `${base}/${id}`;
     return {

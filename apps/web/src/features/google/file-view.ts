@@ -16,6 +16,17 @@ export type GoogleView =
   | { kind: 'grant-sheets' }
   | { kind: 'details'; reason: Unreadable };
 
+type BinaryView = Extract<GoogleView, { kind: 'binary' }>;
+
+/** True when a fresh read returned the same file, so its viewer can stay open where the reader left it. */
+export function sameBinary(a: BinaryView, b: BinaryView) {
+  if (a.filename !== b.filename || a.mediaType !== b.mediaType || a.bytes.byteLength !== b.bytes.byteLength)
+    return false;
+  const left = new Uint8Array(a.bytes);
+  const right = new Uint8Array(b.bytes);
+  return left.every((byte, index) => byte === right[index]);
+}
+
 export async function loadView(
   api: GoogleFilesApi,
   scopes: readonly string[],

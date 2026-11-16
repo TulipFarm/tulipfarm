@@ -19,6 +19,7 @@ if (import.meta.env.DEV && /^\/memory-mock(?:\/|$)/.test(window.location.pathnam
     revision: 1,
   };
   let failed = false;
+  let readFailures = 0;
   const original = window.fetch.bind(window);
   window.fetch = async (input, init) => {
     const url = new URL(input instanceof Request ? input.url : String(input), window.location.origin);
@@ -28,8 +29,9 @@ if (import.meta.env.DEV && /^\/memory-mock(?:\/|$)/.test(window.location.pathnam
     if (path.endsWith('/personal-memory')) {
       if (scenario === 'denied') return Response.json({ error: 'personal-memory-not-found' }, { status: 404 });
       if (method === 'GET') {
-        if (scenario === 'error' && !failed) {
-          failed = true;
+        // Reads resend a 503 once, so the first load fails only when both answers do.
+        if (scenario === 'error' && readFailures < 2) {
+          readFailures++;
           return Response.json({ error: 'personal-memory-unavailable' }, { status: 503 });
         }
         if (scenario === 'slow' && !failed) {

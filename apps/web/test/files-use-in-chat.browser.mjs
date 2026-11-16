@@ -7,7 +7,7 @@ import { chromium } from 'playwright';
 import { taskSummarySchema } from '@tulipfarm/agents/task-contracts';
 import { createWorkspaceFixture } from './workspace.fixture.mjs';
 import { chatCatalog } from './chat-catalog.fixture.mjs';
-import { membership, credits } from './chat-query.fixture.mjs';
+import { membership, credits, governance } from './chat-query.fixture.mjs';
 import { libraryItem } from './files-library.fixture.mjs';
 
 const me = membership.membershipId;
@@ -196,6 +196,16 @@ test(
               },
             });
           if (path === `${base}/files/${plan.id}`) return route.fulfill({ json: plan });
+          if (path === `${base}/files/${plan.id}/details`)
+            return route.fulfill({
+              json: {
+                item: plan,
+                owner: { membershipId: other, name: 'Omar Haddad' },
+                path: [],
+                pathRestricted: false,
+              },
+            });
+          if (path === `${base}/integrations`) return route.fulfill({ json: { integrations: [] } });
           if (path === `${base}/files/${plan.id}/content`)
             return route.fulfill({
               body: 'Launch on 9 December.',
@@ -331,6 +341,12 @@ test(
             if (method === 'GET') return route.fulfill({ json: [] });
           }
           if (method === 'GET' && path === '/v1/feature-flags') return route.fulfill({ json: {} });
+          if (method === 'GET' && path.endsWith('/agents/recent')) return route.fulfill({ json: [] });
+          if (method === 'GET' && path.endsWith('/governance')) return route.fulfill({ json: governance });
+          if (method === 'GET' && /\/github\/chats\/[\w-]+\/selection$/.test(path))
+            return route.fulfill({ json: { accountId: null, generation: null, version: 0 } });
+          if (method === 'GET' && path.endsWith('/system-package-installations'))
+            return route.fulfill({ json: { installations: [], nextCursor: null } });
           throw new Error(`Unexpected API request ${method} ${path}`);
         });
         const origin = server.resolvedUrls.local[0];

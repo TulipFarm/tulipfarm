@@ -17,6 +17,15 @@ const textPart = text => ({
   text,
   content: { version: 1, doc: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] } },
 });
+// A new chat's composer shows empty while its first message sends (features/chat/private-conversations.tsx `draftSent`),
+// so the send is accepted only once the empty composer is editable again.
+const sendAccepted = page =>
+  page.waitForFunction(() => {
+    const input = document.querySelector('[role="textbox"][aria-label="Message"]');
+    return input?.textContent === '' && input.getAttribute('contenteditable') === 'true';
+  });
+// The dev server compiles each lazily loaded card on first use, which is slow on a busy machine.
+const coldLoad = 60_000;
 const { workspace, session } = createWorkspaceFixture();
 const chat = {
   id,
@@ -53,6 +62,8 @@ const batch = {
   digest: 'b'.repeat(64),
   expired: false,
   decision: null,
+  author: null,
+  bot: false,
   actions: [{ ordinal: 0, status: 'unattempted', result: null, reconciliation: null }],
 };
 
@@ -196,7 +207,7 @@ test('chat readiness and relevant GitHub approvals', async t => {
           try {
             f.state.turn = { id, status: 'processing', generation: 0 };
             await f.page.goto(`${origin}/${workspace.slug}/chat/${id}`);
-            await f.page.getByText(message.parts[0].text, { exact: true }).waitFor();
+            await f.page.getByText(message.parts[0].text, { exact: true }).waitFor({ timeout: coldLoad });
             assert.equal(await f.page.locator('[data-slot="tool-activity"]').count(), 0);
             f.state.tools = [
               { id: toolId, tool: 'google.read', status: 'running', activity: 'Searching Gmail messages' },
@@ -224,7 +235,11 @@ test('chat readiness and relevant GitHub approvals', async t => {
                 fullPage: true,
               });
             f.state.tools[0].status = 'completed';
-            await activity.getByRole('listitem').getByText('· Completed', { exact: true }).waitFor();
+            // Sprout gives each row a screen-reader status label (tool-activity.js statusText) instead of a visible "· Completed".
+            await activity
+              .getByRole('listitem')
+              .locator('[data-slot="tool-status-label"]', { hasText: /^Completed$/ })
+              .waitFor({ state: 'attached' });
             assert.equal(
               await trigger.getAttribute('aria-expanded'),
               'true',
@@ -248,7 +263,9 @@ test('chat readiness and relevant GitHub approvals', async t => {
             await notifyChange(f.page, workspace.id, 'ada', 'chat', id);
             assert.equal(await trigger.getAttribute('aria-expanded'), 'true', 'refresh preserves a manual expansion');
             await f.page.reload();
-            await activity.getByRole('button', { name: 'Tool activity · 2 tools', exact: true }).waitFor();
+            await activity
+              .getByRole('button', { name: 'Tool activity · 2 tools', exact: true })
+              .waitFor({ timeout: coldLoad });
             assert.equal(await trigger.getAttribute('aria-expanded'), 'false', 'completed history starts collapsed');
             f.state.tools[1].status = 'failed';
             f.state.turn.status = 'failed';
@@ -261,9 +278,10 @@ test('chat readiness and relevant GitHub approvals', async t => {
               .waitFor();
             f.state.tools[1].status = 'blocked';
             await notifyChange(f.page, workspace.id, 'ada', 'chat', id);
+            // The viewer is a workspace admin, whose denials name a changed resource rather than a missing grant (tool-labels.tsx).
             await activity
               .getByText(
-                'Access denied. Your role doesn’t allow this step. Ask a workspace admin to give you the access it needs, or ask someone who has it to do it.',
+                'Access denied. Something this step used changed or isn’t available to this chat, such as a file, table or connected account. Ask again to retry.',
                 { exact: true },
               )
               .waitFor();
@@ -299,7 +317,9 @@ test('chat readiness and relevant GitHub approvals', async t => {
             );
             f.state.tools[2].activityStatus = 'unknown';
             await notifyChange(f.page, workspace.id, 'ada', 'chat', id);
-            await activity.getByText('· Outcome unknown', { exact: true }).waitFor();
+            await activity
+              .locator('[data-slot="tool-status-label"]', { hasText: /^Outcome unknown$/ })
+              .waitFor({ state: 'attached' });
             f.state.tools[2].activityStatus = 'cancelled';
             f.state.tools[2].status = 'failed';
             await notifyChange(f.page, workspace.id, 'ada', 'chat', id);
@@ -350,9 +370,7 @@ test('chat readiness and relevant GitHub approvals', async t => {
               f.state.modelGate.resolve();
               await f.page.waitForFunction(() => !document.querySelector('button[aria-label="Send message"]').disabled);
               await f.page.keyboard.press('Enter');
-              await f.page.waitForFunction(
-                () => document.querySelector('[role="textbox"][aria-label="Message"]')?.textContent === '',
-              );
+              await sendAccepted(f.page);
               assert.equal(f.state.sends.length, 1);
               assert.deepEqual(f.state.sends[0].parts, [textPart('First message')]);
             } finally {
@@ -389,9 +407,7 @@ test('chat readiness and relevant GitHub approvals', async t => {
             await input.click();
             await f.page.keyboard.press('Enter');
             await f.page.waitForURL(/\/chat\/[\w-]+$/);
-            await f.page.waitForFunction(
-              () => document.querySelector('[role="textbox"][aria-label="Message"]')?.textContent === '',
-            );
+            await sendAccepted(f.page);
             assert.equal(f.state.sends.length, 1);
             assert.deepEqual(f.state.sends[0].parts, [textPart('My first business task')]);
             assert.equal(await input.textContent(), '');
@@ -409,7 +425,9 @@ test('chat readiness and relevant GitHub approvals', async t => {
           try {
             f.state.createGate = Promise.withResolvers();
             await f.page.goto(`${origin}/${workspace.slug}`);
-            await f.page.getByRole('combobox', { name: 'Model: Claude Sonnet 5', exact: true }).waitFor();
+            await f.page
+              .getByRole('combobox', { name: 'Model: Claude Sonnet 5', exact: true })
+              .waitFor({ timeout: coldLoad });
             const input = f.page.getByRole('textbox', { name: 'Message', exact: true });
             await input.click();
             await f.page.keyboard.type('Keep this pending');
@@ -441,9 +459,7 @@ test('chat readiness and relevant GitHub approvals', async t => {
                 fullPage: true,
               });
             f.state.createGate.resolve();
-            await f.page.waitForFunction(
-              () => document.querySelector('[role="textbox"][aria-label="Message"]')?.textContent === '',
-            );
+            await sendAccepted(f.page);
             await f.page.goBack();
             await f.page.waitForURL(new RegExp(`/${workspace.slug}$`));
             await f.page.getByRole('textbox', { name: 'Message', exact: true }).waitFor();
@@ -459,17 +475,16 @@ test('chat readiness and relevant GitHub approvals', async t => {
         try {
           f.state.createStatus = 503;
           await f.page.goto(`${origin}/${workspace.slug}`);
-          await f.page.getByRole('combobox', { name: 'Model: Claude Sonnet 5', exact: true }).waitFor();
+          await f.page
+            .getByRole('combobox', { name: 'Model: Claude Sonnet 5', exact: true })
+            .waitFor({ timeout: coldLoad });
           const input = f.page.getByRole('textbox', { name: 'Message', exact: true });
           await input.click();
           await f.page.keyboard.type('Retry this chat');
           await f.page.keyboard.press('Enter');
           await f.page.waitForURL(/\/chat\/[\w-]+$/);
-          await f.page
-            .getByText(
-              "We couldn't confirm your message was sent. Check your connection, then try again. Trying again won't send it twice.",
-            )
-            .waitFor();
+          // Creation failed, so the message certainly was not sent (conversation-feedback.tsx).
+          await f.page.getByText("Your message hasn't been sent. Try again.", { exact: true }).waitFor();
           assert.equal(
             await f.page.getByText('Packages unavailable').count(),
             0,
@@ -478,9 +493,7 @@ test('chat readiness and relevant GitHub approvals', async t => {
           f.state.createStatus = 200;
           await f.page.getByRole('button', { name: 'Try again', exact: true }).click();
           await f.page.getByRole('button', { name: 'Try again', exact: true }).waitFor({ state: 'detached' });
-          await f.page.waitForFunction(
-            () => document.querySelector('[role="textbox"][aria-label="Message"]')?.textContent === '',
-          );
+          await sendAccepted(f.page);
           assert.equal(f.state.creates, 2);
           assert.equal(f.state.sends.length, 1);
           assert.deepEqual(f.state.sends[0].parts, [textPart('Retry this chat')]);
@@ -494,7 +507,9 @@ test('chat readiness and relevant GitHub approvals', async t => {
         const f = await fixture();
         try {
           await f.page.goto(`${origin}/${workspace.slug}`);
-          await f.page.getByRole('combobox', { name: 'Model: Claude Sonnet 5', exact: true }).waitFor();
+          await f.page
+            .getByRole('combobox', { name: 'Model: Claude Sonnet 5', exact: true })
+            .waitFor({ timeout: coldLoad });
           const input = f.page.getByRole('textbox', { name: 'Message', exact: true });
           await input.click();
           await f.page.keyboard.type('Send me when online');
@@ -513,9 +528,7 @@ test('chat readiness and relevant GitHub approvals', async t => {
             'offline errors name the connection in plain words',
           );
           await f.page.context().setOffline(false);
-          await f.page.waitForFunction(
-            () => document.querySelector('[role="textbox"][aria-label="Message"]')?.textContent === '',
-          );
+          await sendAccepted(f.page);
           await f.page.getByText("You're offline", { exact: false }).waitFor({ state: 'detached' });
           assert.equal(f.state.creates, 1);
           assert.equal(f.state.sends.length, 1, 'the message is sent once after reconnecting');
@@ -533,7 +546,7 @@ test('chat readiness and relevant GitHub approvals', async t => {
           const f = await fixture();
           try {
             await f.page.goto(`${origin}/${workspace.slug}/chat/${id}`);
-            await f.page.getByText(message.parts[0].text, { exact: true }).waitFor();
+            await f.page.getByText(message.parts[0].text, { exact: true }).waitFor({ timeout: coldLoad });
             await f.page.getByRole('combobox', { name: 'Model: Claude Sonnet 5', exact: true }).waitFor();
             await delay(100);
             assert.equal(
@@ -574,7 +587,9 @@ test('chat readiness and relevant GitHub approvals', async t => {
             f.state.tools = [];
             f.state.nextBefore = 51;
             await f.page.reload();
-            await f.page.getByRole('button', { name: 'Load older messages', exact: true }).waitFor();
+            await f.page
+              .getByRole('button', { name: 'Load older messages', exact: true })
+              .waitFor({ timeout: coldLoad });
             await f.page.getByRole('button', { name: 'View GitHub changes', exact: true }).click();
             await f.page.getByRole('button', { name: 'Approve exact batch', exact: true }).waitFor();
             assert.equal(

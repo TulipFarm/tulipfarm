@@ -79,12 +79,12 @@ try {
     await route.fulfill({ status, json });
   });
   const section = page.getByRole('region', { name: 'Channels', exact: true });
-  const settings = page.getByRole('region', { name: 'Settings', exact: true });
-  const openSettings = () => settings.getByRole('button', { name: 'Settings' }).click();
-  await page.goto(`${origin}/${workspace.slug}/integrations#slack`);
-  const account = page.getByRole('region', { name: 'Your account', exact: true });
-  await account.getByRole('button', { name: 'Your account' }).click();
-  await account.getByRole('region', { name: 'Your Slack account' }).waitFor();
+  // Slack has its own page; the bot's channel list sits on the admin-only Settings tab.
+  const settings = page.getByRole('tab', { name: 'Settings', exact: true });
+  const openSettings = () => settings.click();
+  await page.goto(`${origin}/${workspace.slug}/integrations/slack`);
+  await page.getByRole('tab', { name: 'Accounts', exact: true }).click();
+  await page.getByRole('region', { name: 'Your Slack account' }).waitFor();
   assert.equal(await settings.count(), 0);
   assert.equal(await section.count(), 0);
   assert.equal(channelRequests, 0);
@@ -153,7 +153,7 @@ try {
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   assert.deepEqual(errors, []);
   console.log(
-    'PASS Slack bot channels: members see Your account without Settings or channel requests, admin Settings shows failed load/retry, public and private icons, partial scopes, truncation, refresh failure keeps list, empty, no scopes, unavailable, mobile width.',
+    'PASS Slack bot channels: members see their Slack account without the Settings tab or channel requests, admin Settings shows failed load/retry, public and private icons, partial scopes, truncation, refresh failure keeps list, empty, no scopes, unavailable, mobile width.',
   );
 } finally {
   await browser?.close();

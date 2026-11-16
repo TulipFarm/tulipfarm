@@ -2,7 +2,7 @@ import { Extension, Node, mergeAttributes, type Editor, type Range } from '@tipt
 import type { ChatDocument } from '@tulipfarm/conversations/rich-content';
 import { NodeViewWrapper, ReactNodeViewRenderer, type NodeViewProps } from '@tiptap/react';
 import Suggestion, { type SuggestionKeyDownProps, type SuggestionProps } from '@tiptap/suggestion';
-import { PluginKey } from '@tiptap/pm/state';
+import { Plugin, PluginKey } from '@tiptap/pm/state';
 import type { ReactNode } from 'react';
 import { FileTypeIcon } from '@tulipfarm/sprout/attachment';
 import { MentionList, MentionOption, MentionStatus } from '@tulipfarm/sprout/mention-list';
@@ -18,8 +18,12 @@ export type EditorSuggestionItem = {
 export type EditorSuggestionState = {
   key: string;
   label: string;
+  query: string;
   items: readonly EditorSuggestionItem[];
   active: number;
+  loading: boolean;
+  failed: boolean;
+  retry: () => void;
   select: (index: number) => void;
 } | null;
 
@@ -27,23 +31,23 @@ export const emptyChatDocument: ChatDocument['doc'] = { type: 'doc', content: [{
 
 export function EditorSuggestionPanel({
   state,
-  loading = false,
+  loading = 'Searching…',
   empty,
-  error,
+  error = { message: 'Couldn’t load suggestions. Check your connection, then retry.', retry: 'Retry' },
 }: {
   state: NonNullable<EditorSuggestionState>;
-  loading?: boolean;
-  empty: string;
-  error?: { message: string; retry: () => void };
+  loading?: string;
+  empty: string | ((query: string) => string);
+  error?: { message: string; retry: string };
 }) {
-  const status = error ? (
-    <MentionStatus tone="error" action={{ label: 'Retry', onAction: error.retry }}>
+  const status = state.failed ? (
+    <MentionStatus tone="error" action={{ label: error.retry, onAction: state.retry }}>
       {error.message}
     </MentionStatus>
-  ) : loading ? (
-    <MentionStatus tone="loading">Searching…</MentionStatus>
-  ) : state.items.length ? undefined : (
-    <MentionStatus tone="empty">{empty}</MentionStatus>
+  ) : state.items.length ? undefined : state.loading ? (
+    <MentionStatus tone="loading">{loading}</MentionStatus>
+  ) : (
+    <MentionStatus tone="empty">{typeof empty === 'string' ? empty : empty(state.query)}</MentionStatus>
   );
   return (
     <MentionList
@@ -106,17 +110,33 @@ export function fileReferenceExtension(resolve: (source: string, id: string) => 
   });
 }
 
+/**
+ * The composer is read-only while a message sends. A read-only editor is no longer focusable, so the
+ * browser would move focus to the page; staying focusable keeps the writer's place for the next message.
+ */
+export const keepFocusExtension = Extension.create({
+  name: 'keepFocus',
+  addProseMirrorPlugins() {
+    return [new Plugin({ props: { attributes: { tabindex: '0' } } })];
+  },
+});
+
 export function suggestionExtension(options: {
   key: string;
   char: string;
   label: string;
   allowSpaces?: boolean;
+  /** Waits this many milliseconds after the last keystroke before loading items. */
+  debounce?: number;
+  /** Whether the text typed after the trigger character still counts as a query. */
+  allow?: (query: string) => boolean;
   items: (query: string, signal: AbortSignal, editor: Editor) => Promise<EditorSuggestionItem[]>;
   onState: (state: EditorSuggestionState) => void;
 }) {
   return Extension.create({
     name: `${options.key}Suggestion`,
     addProseMirrorPlugins() {
+      let failed = false;
       return [
         Suggestion<EditorSuggestionItem>({
           editor: this.editor,
@@ -124,19 +144,65 @@ export function suggestionExtension(options: {
           char: options.char,
           allowSpaces: options.allowSpaces ?? true,
           startOfLine: false,
-          items: ({ query, signal, editor }) => options.items(query, signal, editor),
+          debounce: options.debounce ?? 0,
+          ...(options.allow && {
+            allow: ({ state, range }) =>
+              options.allow!(state.doc.textBetween(range.from + options.char.length, range.to)),
+          }),
+          items: async ({ query, signal, editor }) => {
+            failed = false;
+            try {
+              return await options.items(query, signal, editor);
+            } catch (error) {
+              if (!signal.aborted) failed = true;
+              throw error;
+            }
+          },
           command: ({ editor, range, props }) => props.apply(editor, range),
           render: () => {
             let current: SuggestionProps<EditorSuggestionItem> | null = null;
             let active = 0;
+            let retrying: AbortController | null = null;
+            const stopRetry = () => {
+              retrying?.abort();
+              retrying = null;
+            };
+            const retry = () => {
+              const props = current;
+              if (!props) return;
+              stopRetry();
+              const controller = new AbortController();
+              retrying = controller;
+              failed = false;
+              publish();
+              options.items(props.query, controller.signal, props.editor).then(
+                items => {
+                  if (retrying !== controller || !current) return;
+                  retrying = null;
+                  current = { ...current, items };
+                  active = 0;
+                  publish();
+                },
+                () => {
+                  if (retrying !== controller) return;
+                  retrying = null;
+                  failed = true;
+                  publish();
+                },
+              );
+            };
             const publish = () => {
               if (!current) return;
               const selected = Math.min(active, Math.max(0, current.items.length - 1));
               options.onState({
                 key: options.key,
                 label: options.label,
+                query: current.query,
                 items: current.items,
                 active: selected,
+                loading: current.loading || retrying !== null,
+                failed: !current.loading && retrying === null && failed,
+                retry,
                 select: index => {
                   const item = current?.items[index];
                   if (item) current?.command(item);
@@ -145,11 +211,13 @@ export function suggestionExtension(options: {
             };
             return {
               onStart: props => {
+                stopRetry();
                 current = props;
                 active = 0;
                 publish();
               },
               onUpdate: props => {
+                stopRetry();
                 current = props;
                 active = 0;
                 publish();
@@ -172,6 +240,7 @@ export function suggestionExtension(options: {
                 return false;
               },
               onExit: () => {
+                stopRetry();
                 current = null;
                 options.onState(null);
               },

@@ -44,6 +44,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@tulipfarm/sprout/dropdown-menu';
+import { tableLabels } from '@/features/governance/table-labels';
+import { teamLabel } from '@/features/governance/team-labels';
 import {
   joinList,
   permissionGroups,
@@ -81,11 +83,12 @@ async function settled(result: SaveResult, onChecking: (message: string | null) 
   }
 }
 
-export function scopeChoices(data: Pick<GovernanceSnapshot, 'tables' | 'teams' | 'teamNames'>) {
-  const teams = new Map([...data.teamNames, ...data.teams].map(team => [team.id, team.name]));
+export function scopeChoices(data: Pick<GovernanceSnapshot, 'tables' | 'teams' | 'teamNames' | 'adminTeamId'>) {
+  const teams = new Map([...data.teamNames, ...data.teams].map(team => [team.id, teamLabel(team.name)]));
+  const tables = tableLabels(data.tables, [...data.teamNames, ...data.teams], data.adminTeamId);
   return {
     tables: data.tables
-      .map(table => ({ kind: 'table' as const, id: table.id, name: table.name }))
+      .map(table => ({ kind: 'table' as const, id: table.id, name: tables.get(table.id) ?? table.name }))
       .sort((a, b) => a.name.localeCompare(b.name)),
     teams: [...teams]
       .map(([id, name]) => ({ kind: 'collection' as const, id, name }))

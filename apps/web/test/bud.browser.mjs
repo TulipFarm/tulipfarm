@@ -37,9 +37,10 @@ test(
       const launcher = page.getByRole('button', { name: /Open quick chat$/ }).locator('[data-slot="monster-avatar"]');
       const portrait = monsters.and(page.locator(':not(button) > span > [data-slot="monster-avatar"]'));
       await page.getByRole('heading', { level: 2 }).waitFor();
-      assert.equal(await monsters.count(), 2, 'the welcome Bud and the launcher Bud');
+      // A new chat greets with text only; Bud is the launcher until the chat has a reply.
+      assert.equal(await monsters.count(), 1, 'only the launcher Bud');
       assert.equal(await launcher.count(), 1);
-      assert.equal((await portrait.boundingBox()).width, 64);
+      assert.equal(await portrait.count(), 0);
       assert.equal(await page.locator('canvas').count(), 0, 'Bud draws no canvas');
       const assertHeaderAlignment = async () => {
         const box = await portrait.boundingBox();

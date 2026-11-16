@@ -128,7 +128,7 @@ test('ordinary editor retains optional family through save and uncertain retry',
       );
       assert.equal(await page.getByRole('button', { name: 'Save agent', exact: true }).isDisabled(), true);
       await page.getByRole('button', { name: 'Retry same operation', exact: true }).click();
-      await page.getByText('Agent saved.', { exact: true }).waitFor();
+      await page.getByText('Saved. Assistant does not run until you activate a version.', { exact: true }).waitFor();
       assert.equal(writes.length, 2);
       assert.deepEqual(writes[1], writes[0]);
       assert.deepEqual(detail.definition, {

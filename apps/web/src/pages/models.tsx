@@ -49,7 +49,8 @@ function WorkspaceModels({ workspaceId, userId }: { workspaceId: string; userId:
       imageModels: catalog.state.data.imageModels,
       membership: membership.state.data,
     });
-    setAccessVersion(previous => previous + 1);
+    // The first snapshot is where access starts, not a change to it, so reads already under way keep their result.
+    if (snapshot) setAccessVersion(previous => previous + 1);
   }, [
     catalog.state.kind,
     catalog.state.kind === 'ready' && catalog.state.data,

@@ -164,10 +164,10 @@ try {
     }
     await screenshot(page, 'availability', theme);
 
-    items = catalogFixture([]);
     const setupGuide = 'https://tulipfarm.ai/docs/self-hosting/models/';
     await page.goto(`${origin}/acme`);
     await page.getByRole('combobox', { name: 'Model: Acme Chat 1', exact: true }).waitFor();
+    items = catalogFixture([]);
     await notifyChange(page, workspace.id, 'ada', 'catalog');
     await page
       .getByText('No models configured. An operator needs to set up a model provider.', { exact: true })

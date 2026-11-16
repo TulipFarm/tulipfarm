@@ -191,15 +191,17 @@ try {
     async function toList() {
       await clearDraft();
       await openChatList(page);
-      await page.getByRole('button', { name: chat.title, exact: true }).waitFor();
+      await page
+        .getByRole('table', { name: 'Chats', exact: true })
+        .getByRole('link', { name: chat.title, exact: true })
+        .waitFor();
     }
     async function navigateLink(path) {
-      // Use a real router link, including the collapsed mobile sidebar and workspace menu, without a document reload.
+      // Use a real router link, including the collapsed mobile sidebar and its More section, without a document reload.
       const link = page.locator(`a[href="/${workspace.slug}${path}"]`).first();
       if (!(await link.isVisible()) && mobile)
-        await page.getByRole('button', { name: 'Toggle Sidebar', exact: true }).first().click();
-      if (!(await link.isVisible()))
-        await page.getByRole('button', { name: `${workspace.name}, workspace menu`, exact: true }).click();
+        await page.getByRole('button', { name: 'Toggle sidebar', exact: true }).first().click();
+      if (!(await link.isVisible())) await page.getByRole('button', { name: 'More', exact: true }).first().click();
       await link.click();
     }
     try {
@@ -209,9 +211,13 @@ try {
         count(fixture.state.requests.slice(-result.phases[0].requests), '/model-catalog') === 1,
         'one chat model catalog GET',
       );
+      // The reauthorization banner reads GitHub accounts and the composer reads the chat's repository selection.
+      const github = cold.rows.filter(row => row.path.includes('/github/')).map(row => row.path);
       check(
-        'ordinary chat leaves GitHub account reads on demand',
-        !cold.rows.some(row => row.path.includes('/github/')),
+        'ordinary chat reads GitHub accounts and its selection once each',
+        github.length === 2 &&
+          github.includes(`/v1/workspaces/${id}/github/accounts`) &&
+          github.includes(`/v1/workspaces/${id}/github/chats/${id}/selection`),
         cold.phase.byPath,
       );
       await clearDraft();
@@ -236,9 +242,20 @@ try {
         650,
       );
       result.observations.draftAfterFocus = await input.textContent();
+      // Returning resumes the chat stream, which rereads the chat's durable state once, and Bud refreshes its nudge.
+      const focusReads = {
+        [`/conversations/${id}`]: 1,
+        [`/conversations/${id}/messages`]: 1,
+        [`/conversations/${id}/plans`]: 1,
+        [`/conversations/${id}/events`]: 1,
+        '/bud': 2,
+        '/recommendations/events': 1,
+      };
+      const focusGets = focus.rows.filter(row => row.method === 'GET' && !isAuthority(row.path));
       check(
-        'focus has zero feature GETs',
-        focus.rows.filter(row => row.method === 'GET' && !isAuthority(row.path)).length === 0,
+        'focus rereads only the chat, Bud and recommendations, within budget',
+        focusGets.every(row => row.path.slice(`/v1/workspaces/${id}`.length) in focusReads) &&
+          Object.entries(focusReads).every(([path, limit]) => count(focusGets, `/v1/workspaces/${id}${path}`) <= limit),
         focus.phase.byPath,
       );
       check('focus retains draft', (await input.textContent()) === draftText, result.observations.draftAfterFocus);
@@ -250,14 +267,22 @@ try {
       await toList();
       await measure(
         'fresh-revisit',
-        () => page.getByRole('button', { name: chat.title, exact: true }).click(),
+        () =>
+          page
+            .getByRole('table', { name: 'Chats', exact: true })
+            .getByRole('link', { name: chat.title, exact: true })
+            .click(),
         usableChat,
       );
       await toList();
       await delay(31000);
       await measure(
         'stale-revisit',
-        () => page.getByRole('button', { name: chat.title, exact: true }).click(),
+        () =>
+          page
+            .getByRole('table', { name: 'Chats', exact: true })
+            .getByRole('link', { name: chat.title, exact: true })
+            .click(),
         usableChat,
       );
       await clearDraft();
@@ -351,11 +376,16 @@ try {
       });
       const chatRows = resumed.rows.filter(row => row.path.endsWith('/messages'));
       result.observations.resumedChatDelaysMs = chatRows.map(row => rounded(row.startedAt - resumed.start));
+      // Without a live stream, returning rereads the chat at once, then follows the bounded 1 s, 2 s, 5 s
+      // recovery schedule: rereads stay at least 2 s apart and stop well before the 17 s window ends.
+      const resumedDelays = chatRows.map(row => row.startedAt - resumed.start);
       check(
-        'return waits full chat interval then resumes',
-        chatRows.length > 0 &&
-          chatRows[0].startedAt - resumed.start >= 1900 &&
-          chatRows[0].startedAt - resumed.start < 3500,
+        'return rereads at once then follows the bounded recovery schedule',
+        resumedDelays.length >= 2 &&
+          resumedDelays.length <= 3 &&
+          resumedDelays[0] < 500 &&
+          resumedDelays.slice(1).every((at, i) => at - resumedDelays[i] >= 1900) &&
+          resumedDelays.at(-1) < 8000,
         result.observations.resumedChatDelaysMs,
       );
       assert.deepEqual(errors, [], 'No browser runtime errors');

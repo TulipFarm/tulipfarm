@@ -101,7 +101,8 @@ test(
       await page.getByRole('button', { name: 'Check proposal' }).click();
       await page.locator('[data-reader="one"][data-error="true"]').waitFor();
       assert.equal(await page.locator('[data-reader="one"]').innerText(), 'Private generation 1');
-      assert.equal(reads, 4, 'transient read gets at most two retries');
+      // Each query attempt is one request plus the HTTP layer's single quick retry of a 503 read.
+      assert.equal(reads, 7, 'transient read gets at most two retries');
       fail = false;
       const other = await context.newPage();
       await other.goto(`${origin}proof`);

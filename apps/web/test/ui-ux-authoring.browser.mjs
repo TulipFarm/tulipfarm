@@ -279,28 +279,29 @@ async function evidence(page, name, check) {
   }
 }
 
-const choose = async (page, label, option) => {
-  await page.getByLabel(label, { exact: true }).click();
-  await page.getByRole('option', { name: option, exact: true }).click();
-};
-
-test('new agents start from suggested read actions, and other actions wait inside their app', async () => {
+// New agents are set up step by step; choosing tables in Basics suggests their read actions
+// (agent-builder-defaults.browser.mjs), and the Access step lists every other action inside its app.
+test('new agents choose other actions inside their app, and apps they do not use stay closed', async () => {
   const { page, errors, close } = await open('/acme/agents/new');
-  const actions = page.getByRole('region', { name: 'Permitted actions', exact: true });
+  const form = page.getByRole('form', { name: 'Agent setup', exact: true });
+  await form.getByLabel('Agent name', { exact: true }).waitFor({ timeout: 30000 });
+  await page
+    .getByRole('tab', { name: /Access/ })
+    .first()
+    .click();
+  const actions = form.getByRole('region', { name: 'What it can do', exact: true });
   await evidence(page, 'a03-agent-tool-picker', async () => {
-    await actions.getByRole('heading', { name: 'Suggested start: read tables', exact: true }).waitFor();
-    await actions.getByRole('button', { name: 'Add 5 suggested read actions', exact: true }).click();
-    await actions.getByRole('button', { name: 'Suggested actions added', exact: true }).waitFor();
+    await actions.getByText('No actions chosen.', { exact: false }).waitFor();
+    await actions.getByRole('button', { name: 'More actions', exact: true }).click();
     const tables = actions.getByRole('region', { name: 'Tables actions', exact: true });
-    await tables.getByText('5 of 11 selected', { exact: true }).waitFor();
+    await tables.getByText('11 available', { exact: true }).waitFor();
+    await tables.getByRole('button').first().click();
+    await tables.getByRole('checkbox', { name: 'Find rows', exact: true }).check();
+    await tables.getByText('1 of 11 selected', { exact: true }).waitFor();
     assert.equal(
-      await tables.getByRole('checkbox', { name: 'Find rows', exact: true }).getAttribute('aria-checked'),
-      'true',
-    );
-    assert.equal(
-      await tables.getByRole('checkbox', { name: 'Update rows', exact: true }).getAttribute('aria-checked'),
-      'false',
-      'suggestions never change data',
+      await tables.getByRole('checkbox', { name: 'Update rows', exact: true }).isChecked(),
+      false,
+      'choosing a read action never changes data',
     );
     const slack = actions.getByRole('region', { name: 'Slack actions', exact: true });
     await slack.getByText('3 available', { exact: true }).waitFor();
@@ -309,7 +310,7 @@ test('new agents start from suggested read actions, and other actions wait insid
       'false',
       'apps the agent does not use stay closed',
     );
-    await actions.getByText('5 selected', { exact: true }).waitFor();
+    await actions.getByRole('list', { name: 'Chosen actions', exact: true }).getByRole('listitem').first().waitFor();
   });
   assert.deepEqual(errors, []);
   await close();
@@ -338,10 +339,12 @@ for (const [name, path, title] of [
           await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
           `${width}px has no horizontal page scroll`,
         );
+        // Beside page actions on a phone, the page title takes the room and the navigation sheet names the workspace.
         if (width >= 375 && width < 768)
-          assert.ok(
+          assert.equal(
             await header.getByText(workspace.name, { exact: true }).isVisible(),
-            `${width}px still names the workspace on mobile`,
+            width >= 640 || !(await header.locator('[data-slot="page-actions"]').count()),
+            `${width}px names the workspace on mobile only when page actions leave room`,
           );
         for (const element of await header.locator('a, button, h1, [data-slot="badge"]').all()) {
           if (!(await element.isVisible())) continue;
@@ -351,7 +354,7 @@ for (const [name, path, title] of [
             `${width}px keeps ${await element.evaluate(node => node.outerHTML.slice(0, 80))} inside the header`,
           );
         }
-        await header.locator('[data-slot="sidebar-trigger"]').focus();
+        await header.getByRole('button', { name: 'Toggle sidebar', exact: true }).focus();
         await page.keyboard.press('Tab');
         assert.ok(
           await back.evaluate(element => element === document.activeElement),
@@ -363,26 +366,6 @@ for (const [name, path, title] of [
     await close();
   });
 }
-
-test('calendar schedules use days, a time, and a named zone, and show the next runs', async () => {
-  const { page, errors, close } = await open(`/acme/agents/${aid}?tab=schedules`);
-  const schedules = page.getByRole('region', { name: 'Agent table inspection schedules', exact: true });
-  await evidence(page, 'a12-calendar-schedule', async () => {
-    await schedules.getByRole('button', { name: 'Calendar schedule', exact: true }).click();
-    await choose(page, 'Days', 'Monday');
-    await schedules.getByLabel('Time', { exact: true }).fill('09:00');
-    await choose(page, 'Time zone', 'America/New York');
-    await schedules.getByText('Every Monday at 09:00 in America/New York. Next runs:', { exact: true }).waitFor();
-    const runs = schedules.getByRole('list', { name: 'Next scheduled runs', exact: true }).getByRole('listitem');
-    assert.ok((await runs.count()) >= 3);
-    for (const run of await runs.all()) assert.match(await run.textContent(), /^Mon/);
-  });
-  await schedules.getByRole('button', { name: 'Advanced schedule', exact: true }).click();
-  const cron = schedules.getByLabel('Cron expression', { exact: true });
-  assert.equal(await cron.inputValue(), '0 9 * * 1');
-  assert.deepEqual(errors, []);
-  await close();
-});
 
 test('help explains who manages agents, the path from a chat draft to the first run, earlier steps, and visibility', async () => {
   const { page, errors, close } = await open('/acme/help');

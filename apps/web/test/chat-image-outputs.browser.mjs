@@ -5,7 +5,7 @@ import { createServer } from 'vite';
 import { chromium } from 'playwright';
 import { createWorkspaceFixture, serveWorkspaceShellEvent, workspaceShellReads } from './workspace.fixture.mjs';
 import { chatCatalog } from './chat-catalog.fixture.mjs';
-import { membership, credits } from './chat-query.fixture.mjs';
+import { membership, credits, governance } from './chat-query.fixture.mjs';
 
 const chatId = '12121212-1212-4212-8212-121212121212';
 const turnId = '88888888-8888-4888-8888-888888888888';
@@ -52,6 +52,7 @@ async function serveShell(route, workspace, session, path) {
   ]);
   const suffixes = [
     ['/governance/me', membership],
+    ['/governance', governance],
     ['/credits', credits],
     ['/model-catalog', chatCatalog],
     ['/google-workspace/availability', { configured: false }],
@@ -60,6 +61,8 @@ async function serveShell(route, workspace, session, path) {
     ['/google-workspace/operations/proposals', { proposals: [], nextCursor: null }],
     ['/candidates', []],
     ['/integrations', { integrations: [] }],
+    ['/selection', { accountId: null, generation: null, version: 0 }],
+    ['/system-package-installations', { installations: [], nextCursor: null }],
   ];
   const body = shell.has(path) ? shell.get(path) : suffixes.find(([suffix]) => path.endsWith(suffix))?.[1];
   if (body !== undefined) {
@@ -225,6 +228,9 @@ test(
               },
             },
           });
+        // The sidebar's Recents section lists chats.
+        if (path === `/v1/workspaces/${workspace.id}/conversations` && method === 'GET')
+          return route.fulfill({ json: { chats: [], nextCursor: null } });
         throw new Error(`Unexpected API request ${method} ${path}`);
       });
       await page.goto(`${origin}${workspace.slug}/files/${generated.id}`);

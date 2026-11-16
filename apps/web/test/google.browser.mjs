@@ -48,7 +48,8 @@ test(
       modelInputs = [],
       responses = [];
     const faults = {
-      initial: 3,
+      // The page's first status read fails all six attempts: three query tries, each retried once by the HTTP layer.
+      initial: 6,
       slow: 0,
       availability: true,
       status: 200,
@@ -186,6 +187,8 @@ test(
         configLoader: 'native',
         envDir: false,
         logLevel: 'warn',
+        // A separate output keeps the shared dist, which other browser tests serve, built for the default API.
+        build: { outDir: 'node_modules/.cache/google-browser-dist', emptyOutDir: true },
       };
       await build({ ...config, define: { 'import.meta.env.VITE_API_URL': JSON.stringify(apiOrigin) } });
       if (priorNodeEnv === undefined) delete process.env.NODE_ENV;
@@ -257,19 +260,17 @@ test(
         return page;
       }
       const page = await newPage('member');
-      const section = page.getByRole('dialog');
+      // Gmail has its own integration page; the account, heartbeat and approvals live on its Accounts tab.
+      const section = page.getByRole('main');
       const account = section.getByRole('region', { name: 'Google account', exact: true });
-      const button = name => section.getByRole('button', { name, exact: true });
+      // Connect Gmail appears both in the page header and in the empty Accounts panel.
+      const button = name => section.getByRole('button', { name, exact: true }).first();
       async function settings(target = page) {
-        const toggle = target.getByRole('dialog').getByRole('button', { name: 'Your account', exact: true });
-        if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+        const tab = target.getByRole('tab', { name: 'Accounts', exact: true });
+        if ((await tab.getAttribute('aria-selected')) !== 'true') await tab.click();
       }
       async function click(name) {
-        if (
-          !['Check Google status', 'Check app status again', 'Connect Gmail', 'Reconnect Gmail', 'Disconnect'].includes(
-            name,
-          )
-        )
+        if (!['Check Google status', 'Check again', 'Connect Gmail', 'Reconnect Gmail', 'Disconnect'].includes(name))
           await settings();
         await button(name).click();
       }
@@ -414,16 +415,22 @@ test(
         async () => {
           stage = 'integration recovery';
           await page.goto(`${origin}/${workspace.slug}/integrations#google-workspace`);
-          await button('Check app status again').waitFor();
+          await page.waitForURL(
+            url =>
+              url.pathname === `/${workspace.slug}/integrations/gmail` && url.searchParams.get('tab') === 'accounts',
+          );
+          await button('Check again').waitFor();
           assert.equal(await button('Connect Gmail').count(), 0);
-          faults.initial = 3;
-          await click('Check app status again');
+          faults.initial = 6;
+          await click('Check again');
           await delay(4000);
-          await button('Check app status again').waitFor();
+          await button('Check again').waitFor();
           faults.slow = 500;
           faults.availability = false;
-          await click('Check app status again');
-          await section.getByText('Checking', { exact: true }).waitFor();
+          await click('Check again');
+          await section.getByRole('status', { name: 'Checking status', exact: true }).waitFor();
+          await section.getByText('Unavailable', { exact: true }).waitFor();
+          await page.getByRole('tab', { name: 'Overview', exact: true }).click();
           await section.getByText('Not set up on this server.', { exact: true }).waitFor();
           assert.equal(await button('Connect Gmail').count(), 0);
           faults.availability = true;
@@ -436,7 +443,7 @@ test(
           await page.goto(
             `${apiOrigin}/v1/google-workspace/callback?state=${encodeURIComponent(consentUrl.searchParams.get('state'))}&code=synthetic-code`,
           );
-          await page.waitForURL(url => url.pathname === `/${workspace.slug}/integrations` && url.hash === '#gmail');
+          await page.waitForURL(url => url.pathname === `/${workspace.slug}/integrations/gmail`);
           await settings();
           await account.getByText('member@example.com', { exact: true }).waitFor();
           await section.getByRole('heading', { name: 'No heartbeat results yet' }).waitFor();
@@ -1104,14 +1111,14 @@ test(
         await click('Newest proposals');
         faults.status = 403;
         await page.reload();
-        await button('Check app status again').waitFor();
+        await button('Check again').waitFor();
         assert.equal(await section.getByLabel('Complete Google action payload').count(), 0);
         assert.equal(
           await section.getByRole('heading', { name: 'Your private heartbeat results', exact: true }).count(),
           0,
         );
         faults.status = 200;
-        await click('Check app status again');
+        await click('Check again');
         await account.getByText('member@example.com', { exact: true }).waitFor();
         await settings();
         await section.getByRole('checkbox', { name: 'Enable Gmail heartbeat', exact: true }).check();
@@ -1134,7 +1141,7 @@ test(
           await page.goto(`${origin}/google-workspace/callback?outcome=${outcome}&workspaceId=${f.workspace.id}`);
           await page.getByRole('heading', { level: 1 }).waitFor();
           assert.notEqual(await page.getByRole('heading', { level: 1 }).innerText(), 'Page not found');
-          if (outcome === 'connected') await page.waitForURL(url => url.hash === '#gmail');
+          if (outcome === 'connected') await page.waitForURL(url => url.pathname.endsWith('/integrations/gmail'));
           else await page.getByRole('link', { name: 'Return to Integrations', exact: true }).waitFor();
         }
         await page.goto(`${origin}/google-workspace/callback?outcome=bogus&returnTo=https://evil.test`);
@@ -1146,7 +1153,7 @@ test(
         await page.goto(
           `${apiOrigin}/v1/google-workspace/callback?state=${encodeURIComponent(url.searchParams.get('state'))}&code=synthetic-reconnect`,
         );
-        await page.waitForURL(url => url.hash === '#gmail');
+        await page.waitForURL(url => url.pathname.endsWith('/integrations/gmail'));
         await settings();
         await section.getByRole('heading', { name: 'Your private heartbeat results', exact: true }).waitFor();
         assert.equal(

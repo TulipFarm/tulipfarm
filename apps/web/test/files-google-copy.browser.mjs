@@ -177,6 +177,9 @@ test(
           }
           const shell = new Map([
             ...workspaceShellReads(workspace.id),
+            [`/v1/workspaces/${workspace.id}/conversations/pinned`, { chats: [] }],
+            [`/v1/workspaces/${workspace.id}/conversations`, { chats: [], nextCursor: null }],
+            [`/v1/workspaces/${workspace.id}/agents/recent`, []],
             ['/v1/auth/get-session', session],
             ['/v1/user/visit', { firstSession: false }],
             ['/v1/workspaces', [workspace]],
@@ -246,6 +249,7 @@ test(
       await dialog.getByRole('button', { name: 'Contracts' }).waitFor();
       assert.equal(await dialog.getByLabel('Name').inputValue(), 'Q3 plan.docx');
       await dialog.getByLabel('Format').click();
+      await page.getByRole('option').first().waitFor();
       assert.deepEqual(await page.getByRole('option').allTextContents(), ['Word document (.docx)', 'PDF (.pdf)']);
       await page.keyboard.press('Escape');
       await dialog.getByText('Saving to My files').waitFor();
@@ -260,7 +264,8 @@ test(
       await dialog.getByText('You can view this folder but can’t add to it.').waitFor();
       assert.equal(await save.isDisabled(), true, 'a view-only folder is not a destination');
       await dialog.getByRole('group', { name: 'Location' }).getByRole('button', { name: 'Shared with me' }).click();
-      failures.set('library', { status: 503, times: 3 });
+      // The query tries a read three times and the HTTP layer retries each 503 once.
+      failures.set('library', { status: 503, times: 6 });
       await dialog.getByRole('button', { name: /Team drop/ }).click();
       await dialog.getByRole('heading', { name: 'Couldn’t load folders' }).waitFor();
       await dialog.getByRole('button', { name: 'Retry loading folders' }).click();

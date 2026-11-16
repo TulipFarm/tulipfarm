@@ -6,7 +6,7 @@ import { createServer } from 'vite';
 import { chromium } from 'playwright';
 import { createWorkspaceFixture } from './workspace.fixture.mjs';
 import { chatCatalog } from './chat-catalog.fixture.mjs';
-import { membership, credits } from './chat-query.fixture.mjs';
+import { membership, credits, governance } from './chat-query.fixture.mjs';
 import { libraryItem } from './files-library.fixture.mjs';
 
 const me = membership.membershipId;
@@ -79,7 +79,8 @@ test(
         page.on('pageerror', error => errors.push(error.message));
         const base = `/v1/workspaces/${workspace.id}`;
         const state = {
-          listFailures: 1,
+          // The HTTP layer and the query both retry, so the list fails until the error shows.
+          listFailures: Infinity,
           entries: new Map(),
           polls: new Map(),
           adds: [],
@@ -137,6 +138,11 @@ test(
           if (path === `${base}/files/library`)
             return route.fulfill({ json: { items: [budget, notes, scan], next: null, breadcrumbs: [], owners: [] } });
           if (path === `${base}/files/${budget.id}`) return route.fulfill({ json: budget });
+          if (path === `${base}/integrations`) return route.fulfill({ json: { integrations: [] } });
+          if (path === `${base}/files/${budget.id}/details`)
+            return route.fulfill({
+              json: { item: budget, owner: { membershipId: me, name: 'Ada' }, path: [], pathRestricted: false },
+            });
           if (path === `${base}/files/${budget.id}/recent-use` && method === 'POST')
             return route.fulfill({ json: { ok: true } });
           if (path === `${base}/files/${budget.id}/content`)
@@ -277,6 +283,9 @@ test(
               },
             });
           if (method === 'GET' && path === '/v1/feature-flags') return route.fulfill({ json: {} });
+          if (method === 'GET' && path.endsWith('/agents/recent')) return route.fulfill({ json: [] });
+          if (method === 'GET' && path.endsWith('/governance')) return route.fulfill({ json: governance });
+          if (method === 'GET' && path.endsWith('/conversations/pinned')) return route.fulfill({ json: { chats: [] } });
           throw new Error(`Unexpected API request ${method} ${path}`);
         });
         const origin = server.resolvedUrls.local[0];
@@ -299,6 +308,7 @@ test(
           await menu.click();
           await page.getByRole('menuitem', { name: 'Add to Knowledge' }).click();
           await knowledge.getByRole('heading', { name: 'Couldn’t check your Knowledge' }).waitFor();
+          state.listFailures = 0;
           await knowledge.getByRole('button', { name: 'Check again' }).click();
           await knowledge.getByText('Your Knowledge', { exact: true }).waitFor();
           await knowledge.getByText('Only you. Your chats and agents can search it; other people can’t.').waitFor();
@@ -333,7 +343,9 @@ test(
           }
           await knowledge.getByRole('heading', { name: 'Add 2 files to Knowledge' }).waitFor();
           await knowledge
-            .getByText('This file has scanned pages. TulipFarm can’t read text from images yet.')
+            .getByText(
+              'This file has only images, and image reading is off or unavailable. TulipFarm will try again when it’s on.',
+            )
             .waitFor();
           await knowledge.getByRole('button', { name: 'Add 1 file' }).click();
           await knowledge.getByRole('button', { name: `Retry extraction for ${budget.name}` }).waitFor();

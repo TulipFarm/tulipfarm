@@ -64,7 +64,7 @@ export function createChatsMock(scenario: string) {
     if (method === 'GET' && path.endsWith('/conversations')) {
       reads++;
       if (scenario === 'chats-loading') await new Promise(resolve => setTimeout(resolve, 2000));
-      if (scenario === 'chats-error' && reads <= 3)
+      if (scenario === 'chats-error' && reads <= 5)
         return Response.json({ error: 'demo-list-unavailable' }, { status: 400 });
       const query = (url.searchParams.get('query') ?? '').toLocaleLowerCase();
       const archived = url.searchParams.get('archived') === 'true';

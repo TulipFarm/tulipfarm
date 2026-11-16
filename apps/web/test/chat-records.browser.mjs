@@ -323,8 +323,10 @@ test(
       assert.equal(await canvas().count(), 0, 'new results also wait for an explicit open');
       await open();
       await canvas().getByText('Sample ticket 9', { exact: true }).filter({ visible: true }).waitFor();
-      await canvas().getByRole('tab').nth(1).waitFor();
-      assert.equal(await canvas().getByRole('tab').count(), 2, 'each explicitly opened call keeps its own tab');
+      // Records views have their own tab list inside the panel.
+      const canvasTabs = canvas().getByRole('tablist', { name: 'Open in canvas', exact: true }).getByRole('tab');
+      await canvasTabs.nth(1).waitFor();
+      assert.equal(await canvasTabs.count(), 2, 'each explicitly opened call keeps its own tab');
       await canvas().getByRole('button', { name: 'Close Tickets', exact: true }).first().click();
       await close();
       await broadcast([['conversations']]);

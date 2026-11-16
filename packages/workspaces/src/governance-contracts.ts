@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import { workspaceMemberIdSchema } from '@tulipfarm/tables/workspace-members';
+import { workspaceMemberIdSchema } from '@tulipfarm/tables/workspace-member-id';
+import { invitationTokenSchema } from './invitation-token.ts';
 
 export const memberRoleSchema = z.enum(['admin', 'member']);
 export const teamInputSchema = z.strictObject({
@@ -204,9 +205,7 @@ export const invitationSchema = z.object({
     .default([]),
   skipped: skippedChoicesSchema.nullable().default(null),
 });
-export const invitationTokenSchema = z
-  .string()
-  .regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.[A-Za-z0-9_-]{43}$/);
+export { invitationTokenSchema };
 export const redeemInvitationSchema = z.strictObject({ token: invitationTokenSchema });
 /** What a signed-out holder of an invitation link learns; the details appear only while the invitation is active. */
 export const invitationDetailsSchema = z.discriminatedUnion('status', [

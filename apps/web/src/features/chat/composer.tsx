@@ -2,6 +2,7 @@ import { useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type
 import type { Extensions } from '@tiptap/core';
 import { editorDocument, type ChatDraft } from './editor-document';
 import { packageReferenceExtension } from './package-reference';
+import { keepFocusExtension } from './editor-extensions';
 import { usePendingQuestion } from './pending-question';
 import { ArrowUp } from 'reicon-react/icons/ArrowUp';
 import { Stop3 } from 'reicon-react/icons/Stop3';
@@ -136,6 +137,7 @@ export function Composer({
   const editorExtensions = useMemo(
     () => [
       packageReferenceExtension,
+      keepFocusExtension,
       ...(compact ? (extensions?.filter(extension => extension.type !== 'extension') ?? []) : (extensions ?? [])),
     ],
     [compact, extensions],

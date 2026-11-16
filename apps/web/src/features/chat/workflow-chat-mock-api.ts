@@ -56,7 +56,7 @@ export function createWorkflowChatMock(scenario: string) {
     definition: {
       version: 1,
       name: 'TulipFarm pull request summaries to tech',
-      trigger: { kind: 'webhook' },
+      triggers: [{ id: 'webhook', kind: 'webhook' }],
       steps: [
         {
           id: 'notify',
@@ -79,7 +79,7 @@ export function createWorkflowChatMock(scenario: string) {
     response: null,
   };
   let definitionReads = 0;
-  let actionReads = 0;
+  const actionReads = new Map<string, number>();
   const commands = new Map<string, unknown>();
   return async (url: URL, method: string, input: RequestInfo | URL, init?: RequestInit): Promise<Response | null> => {
     const path = url.pathname;
@@ -91,8 +91,11 @@ export function createWorkflowChatMock(scenario: string) {
         dispatchEnabled: false,
       });
     if (method === 'GET' && path.endsWith('/workspace-mcp/actions')) {
-      actionReads++;
-      if (scenario === 'workflow-errors' && actionReads <= 3)
+      const origin = url.searchParams.get('originId') ?? '';
+      const reads = (actionReads.get(origin) ?? 0) + 1;
+      actionReads.set(origin, reads);
+      // A read retries a 503 once and the query retries twice; eight failures also cover a remount's extra read.
+      if (scenario === 'workflow-errors' && reads <= 8)
         return Response.json({ error: 'demo-actions-unavailable' }, { status: 503 });
       return Response.json({ actions: [], nextCursor: null });
     }
@@ -107,7 +110,7 @@ export function createWorkflowChatMock(scenario: string) {
     if (method === 'GET' && path.endsWith(`/workflows/${workflowId}`)) {
       definitionReads++;
       if (scenario === 'workflow-loading') await new Promise(resolve => setTimeout(resolve, 2000));
-      if (scenario === 'workflow-errors' && definitionReads <= 3)
+      if (scenario === 'workflow-errors' && definitionReads <= 8)
         return Response.json({ error: 'demo-workflow-unavailable' }, { status: 503 });
       if (scenario === 'workflow-unavailable') return Response.json({ error: 'not-found' }, { status: 404 });
       return Response.json(detail);

@@ -132,7 +132,9 @@ try {
   const applied = 'Priority>=3';
   await page.goto(`${origin}/acme/tables/${tableId}?where=${encodeURIComponent(applied)}`);
   await page.getByRole('heading', { name: 'Support tickets', exact: true }).waitFor();
-  const searchButton = page.getByRole('button', { name: /^(Search|“.*”)$/ });
+  const searchButton = page
+    .getByRole('group', { name: 'Search', exact: true })
+    .getByRole('button', { name: /^(Search|“.*”)$/ });
   const tab = name => page.getByRole('tab', { name, exact: true });
   const rsql = page.getByRole('textbox', { name: /^RSQL query/ });
   const where = () => new URL(page.url()).searchParams.get('where');

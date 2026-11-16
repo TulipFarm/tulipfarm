@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
 import { chromium } from 'playwright';
+import { clearEditor } from './browser-controls.mjs';
 
 // The compact choice list is sprout's ChoiceList layout="compact" (cloud's app-local .choice-options-compact).
 test(
@@ -27,8 +28,8 @@ test(
           await page.goto(
             `${server.resolvedUrls.local[0]}bud-mock/chat/12121212-1212-4212-8212-121212121212?start=workflow-four-choices`,
           );
-          const dock = page.getByRole('region', { name: 'Questions', exact: true });
-          await dock.getByRole('radio').first().waitFor();
+          const dock = page.getByRole('region', { name: 'Who should send the Slack notification?', exact: true });
+          await dock.getByRole('radio').first().waitFor({ timeout: 30000 });
           await page.waitForFunction(() =>
             document.querySelector('[aria-label="Message composer"]')?.hasAttribute('data-condensed'),
           );
@@ -89,11 +90,15 @@ test(
           const questionBox = await dock.boundingBox();
           const composerBox = await page.getByRole('form', { name: 'Message composer' }).boundingBox();
           assert.equal(
-            composerBox.y - questionBox.y - questionBox.height,
-            4,
-            'question and composer form a compact input group',
+            await page
+              .getByRole('region', { name: 'Conversation', exact: true })
+              .locator('section.question-panel')
+              .count(),
+            1,
+            'question is answered inline in the transcript',
           );
-          const recommendation = dock.locator('[data-slot="badge"][data-variant="info"]');
+          assert.ok(questionBox.y + questionBox.height <= composerBox.y, 'question sits above the composer');
+          const recommendation = dock.locator('[data-slot="badge"][data-variant="success"]');
           assert.equal(await recommendation.textContent(), 'Recommended');
           assert.equal(await dock.getByRole('radio').first().isChecked(), false, 'recommendation is not a selection');
           if (process.env.WORKFLOW_CHAT_SCREENSHOTS) {
@@ -116,10 +121,18 @@ test(
             true,
             'short screens scroll the options, not the action footer',
           );
-          const before = await dock.getByRole('button', { name: 'Continue', exact: true }).boundingBox();
+          // Both boxes are read in one frame: the transcript may still be scrolling after the resize.
+          const footerOffset = async () =>
+            dock
+              .getByRole('button', { name: 'Continue', exact: true })
+              .evaluate(
+                (button, region) => button.getBoundingClientRect().y - region.getBoundingClientRect().y,
+                await dock.elementHandle(),
+              );
+          const before = await footerOffset();
           await dock.getByRole('radio').last().check();
+          assert.equal(await footerOffset(), before, 'selecting the last scrolled option keeps actions in place');
           const after = await dock.getByRole('button', { name: 'Continue', exact: true }).boundingBox();
-          assert.equal(after.y, before.y, 'selecting the last scrolled option keeps actions in place');
           assert.ok(after.y + after.height <= 600, 'Continue remains on screen');
           await dock.getByRole('button', { name: 'Continue', exact: true }).click();
           await page.locator('[data-slot="choice-summary"]').getByText('Team account', { exact: true }).waitFor();
@@ -157,7 +170,7 @@ test(
       .getByRole('region', { name: 'Workflow: TulipFarm pull request summaries to tech', exact: true })
       .getByRole('button', { name: 'View workflow', exact: true });
     const canvas = page.getByRole('region', { name: 'Canvas', exact: true });
-    const dock = page.getByRole('region', { name: 'Questions', exact: true });
+    const dock = page.getByRole('region', { name: 'Who should send the Slack notification?', exact: true });
     const diagram = page.getByRole('figure', { name: 'Read-only workflow diagram' });
     const settle = () =>
       page.waitForFunction(() => {
@@ -255,12 +268,14 @@ test(
       const retryWorkflow = canvas.getByRole('button', { name: 'Retry loading workflow', exact: true });
       await retryWorkflow.waitFor();
       for (let attempt = 0; attempt < 3 && (await retryWorkflow.isVisible()); attempt++) {
-        await retryWorkflow.click();
+        // An automatic re-read can recover between the visibility check and the click.
+        await retryWorkflow.click({ timeout: 2000 }).catch(() => {});
         await page.waitForLoadState('networkidle');
       }
       await diagram.waitFor();
       for (let attempt = 0; attempt < 3 && (await retryActions.isVisible()); attempt++) {
-        await retryActions.click();
+        // An automatic re-read can recover between the visibility check and the click.
+        await retryActions.click({ timeout: 2000 }).catch(() => {});
         await page.waitForLoadState('networkidle');
       }
       assert.equal(await retryActions.count(), 0, 'successful empty action list clears its error');
@@ -310,7 +325,7 @@ for (const colorScheme of ['light', 'dark']) {
           });
           page.setDefaultTimeout(10000);
           page.on('pageerror', error => errors.push(error.message));
-          const dock = page.getByRole('region', { name: 'Questions', exact: true });
+          const dock = page.getByRole('region', { name: 'Who should send the Slack notification?', exact: true });
           for (const [scenario, count] of [
             ['workflow', 2],
             ['workflow-three-choices', 3],
@@ -321,7 +336,7 @@ for (const colorScheme of ['light', 'dark']) {
               `${server.resolvedUrls.local[0]}bud-mock/chat/12121212-1212-4212-8212-121212121212?start=${scenario}`,
             );
             const options = dock.getByRole('radio');
-            await options.first().waitFor();
+            await options.first().waitFor({ timeout: 30000 });
             assert.equal(await options.count(), count);
             const geometry = await options.evaluateAll(elements =>
               elements.map(element => element.getBoundingClientRect().toJSON()),
@@ -375,7 +390,7 @@ for (const colorScheme of ['light', 'dark']) {
               true,
               'expanding never remounts the editor',
             );
-            await editor.fill('');
+            await clearEditor(editor);
             assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
             await options.first().focus();
             await page.keyboard.press('ArrowRight');

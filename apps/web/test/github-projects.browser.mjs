@@ -122,7 +122,7 @@ try {
   await openGitHubDetails(review);
   assert.deepEqual(JSON.parse(await review.locator('pre').first().innerText()), create.snapshot.actions[0]);
   assert.equal(f.effects.length, 0);
-  await review.getByText(/Project owner octocat/).waitFor();
+  await review.getByText(/Project owner company, organization, node O_9\./).waitFor();
   await review.getByRole('button', { name: 'Approve exact batch' }).focus();
   await page.keyboard.press('Enter');
   await article('1. project.create · succeeded').waitFor();
@@ -159,7 +159,7 @@ try {
   await openGitHubDetails(editReview);
   assert.deepEqual(JSON.parse(await editReview.locator('pre').first().innerText()), edits.snapshot.actions[0]);
   await page.screenshot({
-    path: '/var/folders/7d/qk8p6t3d1jvfnh4503bz0msr0000gn/T/opencode/github-projects-review.png',
+    path: 'reports/screenshots/github-projects-review.png',
     fullPage: true,
   });
   await editReview.getByRole('button', { name: 'Approve exact batch' }).click();
@@ -273,7 +273,7 @@ try {
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   await unknown.getByRole('button', { name: 'Reconcile with GitHub' }).scrollIntoViewIfNeeded();
   await page.screenshot({
-    path: '/var/folders/7d/qk8p6t3d1jvfnh4503bz0msr0000gn/T/opencode/github-projects-unknown-mobile.png',
+    path: 'reports/screenshots/github-projects-unknown-mobile.png',
     fullPage: true,
   });
   assert.deepEqual(errors, []);

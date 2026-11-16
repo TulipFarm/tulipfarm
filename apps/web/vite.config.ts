@@ -123,7 +123,18 @@ export default defineConfig(({ command }) => {
     ],
     // Lazy chunks can import each other in a cycle (recharts split across `chart` and `surface`).
     // Without strict order, the chunk loaded first runs before its dependency and throws.
-    build: { rolldownOptions: { output: { strictExecutionOrder: true } } },
+    build: {
+      rolldownOptions: {
+        output: {
+          strictExecutionOrder: true,
+          // The auth screens page and the sign-in client chunk would both be named `auth`.
+          chunkFileNames: chunk =>
+            chunk.moduleIds.some(id => id.endsWith('/src/pages/auth.tsx'))
+              ? 'assets/auth-screens-[hash].js'
+              : 'assets/[name]-[hash].js',
+        },
+      },
+    },
     // Web extensions live in other packages, where pnpm can install a second Sprout or React
     // copy. A second copy has its own React contexts, so its sidebar parts crash outside <Sidebar>.
     resolve: {

@@ -99,6 +99,8 @@ test('split chat list retains loading, recovery, filters, pagination, and denial
       }
       throw new Error(`Unexpected API request ${path}`);
     });
+    // Each chat is a link in the main list; the sidebar's Recents may list the same chat.
+    const chatRow = name => page.getByRole('main').getByRole('link', { name, exact: true });
     await page.goto(`${origin}/${workspace.slug}/chat`);
     await page.getByRole('status', { name: 'Loading chats', exact: true }).waitFor();
     assert.equal(await page.getByText('No chats yet', { exact: true }).count(), 0);
@@ -123,19 +125,19 @@ test('split chat list retains loading, recovery, filters, pagination, and denial
     await page.getByRole('button', { name: 'Clear search', exact: true }).first().click();
     await page.getByRole('heading', { name: 'No chats yet' }).waitFor();
     await page.reload();
-    await page.getByRole('button', { name: 'Saved chat', exact: true }).waitFor();
+    await chatRow('Saved chat').waitFor();
     await page.getByRole('button', { name: 'Load more chats' }).click();
-    await page.getByRole('button', { name: 'Older chat', exact: true }).waitFor();
-    assert.equal(await page.getByRole('button', { name: 'Saved chat', exact: true }).count(), 1);
+    await chatRow('Older chat').waitFor();
+    assert.equal(await chatRow('Saved chat').count(), 1);
     await page.getByRole('button', { name: 'Archived chats', exact: true }).click();
     await page.getByRole('heading', { name: 'No archived chats' }).waitFor();
     await page.getByRole('button', { name: 'Show active chats' }).click();
-    await page.getByRole('button', { name: 'Saved chat', exact: true }).waitFor();
+    await chatRow('Saved chat').waitFor();
     status = 403;
     await page.getByLabel('Search chat titles').fill('denied');
     await page.getByLabel('Search chat titles').press('Enter');
     await page.getByRole('heading', { name: 'Personal chats unavailable' }).waitFor();
-    assert.equal(await page.getByRole('button', { name: 'Saved chat', exact: true }).count(), 0);
+    assert.equal(await chatRow('Saved chat').count(), 0);
     assert.equal(
       requests.some(path => path.endsWith('/model-catalog')),
       false,

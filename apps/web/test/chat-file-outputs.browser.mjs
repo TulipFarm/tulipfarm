@@ -5,7 +5,7 @@ import { createServer } from 'vite';
 import { chromium } from 'playwright';
 import { createWorkspaceFixture, serveWorkspaceShellEvent, workspaceShellReads } from './workspace.fixture.mjs';
 import { chatCatalog } from './chat-catalog.fixture.mjs';
-import { membership, credits } from './chat-query.fixture.mjs';
+import { membership, credits, governance } from './chat-query.fixture.mjs';
 
 const chatId = '12121212-1212-4212-8212-121212121212';
 const created = {
@@ -101,6 +101,7 @@ test('a file created in a reply shows as a card that opens the Files viewer', { 
         if (path === '/v1/workspaces') return route.fulfill({ json: [workspace] });
         if (path === `/v1/workspaces/${workspace.slug}`) return route.fulfill({ json: workspace });
         if (path.endsWith('/governance/me')) return route.fulfill({ json: membership });
+        if (path.endsWith('/governance')) return route.fulfill({ json: governance });
         if (path.endsWith('/credits')) return route.fulfill({ json: credits });
         if (path.endsWith('/model-catalog')) return route.fulfill({ json: chatCatalog });
         if (path.endsWith('/google-workspace/availability')) return route.fulfill({ json: { configured: false } });
@@ -112,6 +113,11 @@ test('a file created in a reply shows as a card that opens the Files viewer', { 
           return route.fulfill({ status: 404, json: { error: 'not-found' } });
         if (path.endsWith('/candidates')) return route.fulfill({ json: [] });
         if (path.endsWith('/integrations')) return route.fulfill({ json: { integrations: [] } });
+        if (path.endsWith('/agents/recent')) return route.fulfill({ json: [] });
+        if (path.endsWith('/selection'))
+          return route.fulfill({ json: { accountId: null, generation: null, version: 0 } });
+        if (path.endsWith('/system-package-installations'))
+          return route.fulfill({ json: { installations: [], nextCursor: null } });
         if (path === `/v1/workspaces/${workspace.id}/files/${created.id}`)
           return detailsStatus === 200
             ? route.fulfill({ json: created })

@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
 import { chromium } from 'playwright';
+import { clearEditor } from './browser-controls.mjs';
 
 test(
   'new chat separates tasks and setup, updates placeholders, and preserves Bud drafts',
@@ -21,11 +22,24 @@ test(
     const origin = server.resolvedUrls.local[0];
     try {
       await page.goto(`${origin}bud-mock?start=setup`);
-      const tasks = page.getByRole('region', { name: 'Start with a task', exact: true });
-      const setup = page.getByRole('region', { name: 'Set up your workspace (optional)', exact: true });
-      await setup.waitFor();
-      assert.equal(await tasks.getByRole('button').count(), 3);
-      assert.equal(await setup.getByRole('button').count(), 1);
+      // The home offers three suggested tasks and the first setup step as bento cards.
+      const recommended = page.getByRole('region', { name: 'Recommended for you', exact: true });
+      const chips = recommended.getByRole('button');
+      const labels = () =>
+        chips.evaluateAll(buttons =>
+          buttons.map(button => button.querySelector(':scope > span:last-child > span:nth-child(2)').textContent),
+        );
+      const starters = ['Plan customer follow-ups', 'Draft a support reply', 'Plan my week'];
+      await recommended.getByRole('button', { name: /Set how Bud replies to you/ }).waitFor();
+      assert.deepEqual(await labels(), [...starters, 'Set how Bud replies to you']);
+      assert.deepEqual(
+        await chips.evaluateAll(buttons =>
+          buttons.map(button => button.querySelector(':scope > span:last-child > span:first-child').textContent),
+        ),
+        ['Suggested for you', 'Suggested task', 'Suggested task', 'Set up your workspace'],
+      );
+      assert.equal(await recommended.getByRole('heading').count(), 0, 'The cards need no section headings');
+      assert.equal(await page.getByText(/More setup options/).count(), 0, 'Setup shows one next step');
       const composer = page
         .getByRole('region', { name: 'Personal conversations' })
         .getByRole('textbox', { name: 'Message' });
@@ -35,39 +49,9 @@ test(
         'Personal chat',
       );
       assert.equal(await page.getByRole('button', { name: 'Send message', exact: true }).isDisabled(), true);
-      for (const heading of ['Daily work', 'Agents & workflows', 'Data & integrations']) {
-        assert.equal(await page.getByText(heading, { exact: true }).count(), 1);
-      }
-      const more = page.getByText('More setup options (4)', { exact: true });
       const composerBounds = await composer.boundingBox();
-      const greeting = page.locator('.home-greeting h2');
-      const greetingBounds = await greeting.boundingBox();
-      await more.focus();
-      await page.keyboard.press('Enter');
-      const fewer = page.getByRole('button', { name: 'Fewer setup options', exact: true });
-      await fewer.waitFor();
-      assert.equal(await fewer.getAttribute('aria-expanded'), 'true');
-      const moreSetup = page.getByRole('region', { name: 'More setup options', exact: true });
-      await moreSetup.waitFor();
-      assert.equal(await moreSetup.getByRole('button').count(), 4);
-      assert.equal(
-        await page.getByRole('region', { name: 'Recommended for you' }).getByRole('heading').count(),
-        2,
-        'Only tasks and setup have headings',
-      );
-      assert.ok(
-        Math.abs((await composer.boundingBox()).y - composerBounds.y) <= 1,
-        'Expanding setup does not move the composer',
-      );
-      assert.ok(
-        Math.abs((await greeting.boundingBox()).y - greetingBounds.y) <= 1,
-        'Expanding setup does not move the greeting',
-      );
-      assert.equal(await moreSetup.getByRole('img', { name: 'Google', exact: true }).count(), 1);
-      const slack = moreSetup.getByRole('button', { name: 'Choose Slack channels for knowledge' });
-      const labelBounds = await slack.boundingBox();
-      const brandBounds = await moreSetup.getByRole('img', { name: 'Slack' }).boundingBox();
-      assert.ok(brandBounds.x - labelBounds.x - labelBounds.width <= 16, 'Provider icon stays beside its label');
+      const lastCard = await chips.last().boundingBox();
+      assert.ok(lastCard.y + lastCard.height <= composerBounds.y, 'The composer sits below the suggestions');
 
       await page.getByRole('button', { name: /Open quick chat$/ }).click();
       const popup = page.getByRole('dialog');
@@ -80,21 +64,23 @@ test(
       await page.getByRole('button', { name: /Open quick chat$/ }).click();
       assert.equal(await budEditor.innerText(), 'Keep this private draft');
       await page.getByRole('button', { name: 'Minimize chat', exact: true }).click();
+      await popup.waitFor({ state: 'hidden' });
 
+      const disabled = () => chips.evaluateAll(buttons => buttons.map(button => button.disabled));
       await composer.fill('Help me plan a customer follow-up');
       assert.equal(await page.getByRole('button', { name: 'Send message', exact: true }).isEnabled(), true);
-      assert.equal(
-        await tasks.getByRole('button').first().isDisabled(),
-        true,
-        'Task choices cannot replace an existing draft',
-      );
-      await composer.fill('');
-      assert.equal(await tasks.getByRole('button').first().isEnabled(), true);
+      assert.deepEqual(await disabled(), [true, true, true, true], 'Chips cannot replace an existing draft');
+      await clearEditor(composer);
+      assert.deepEqual(await disabled(), [false, false, false, false]);
       const warning = page.getByRole('region', { name: 'Integration authorization', exact: true });
       assert.match(await warning.innerText(), /GitHub reads and actions with this account need renewed access/);
-      const launcher = page.getByRole('button', { name: /Open quick chat$/ });
-      assert.equal(await launcher.getByText('Bud quick chat', { exact: true }).count(), 1);
-      assert.equal(await launcher.getByText('Separate private chat', { exact: true }).count(), 1);
+      // The home keeps the composer at the bottom, so Bud docks in the header instead of a corner.
+      const launcher = page.getByRole('button', { name: 'Bud. Open quick chat', exact: true });
+      assert.equal(
+        await page.locator('[aria-label="Workspace header"] [aria-label="Bud assistant"]').getByRole('button').count(),
+        1,
+      );
+      assert.equal(await launcher.getAttribute('title'), 'Your separate private quick chat');
 
       for (const colorScheme of ['light', 'dark']) {
         await page.emulateMedia({ colorScheme });
@@ -118,43 +104,24 @@ test(
             true,
             `${colorScheme} composer fits ${width}px`,
           );
+          assert.equal(
+            await recommended.evaluate(element => element.scrollWidth <= element.clientWidth),
+            true,
+            `${colorScheme} cards fit within ${width}px`,
+          );
           assert.equal(await page.getByRole('button', { name: /Open quick chat$/ }).isVisible(), true);
         }
         await page.setViewportSize({ width: 1440, height: 1000 });
-        assert.equal(
-          await fewer.getAttribute('aria-expanded'),
-          'true',
-          `${colorScheme} setup stays expanded across screen sizes`,
-        );
-        await fewer.click();
-        await more.waitFor();
-        assert.equal(await more.getAttribute('aria-expanded'), 'false');
-        const collapsed = await composer.boundingBox();
-        await more.click();
-        await fewer.waitFor();
-        await moreSetup.waitFor();
-        assert.ok(
-          Math.abs((await composer.boundingBox()).y - collapsed.y) <= 1,
-          `${colorScheme} expansion keeps input still`,
-        );
-        await fewer.click();
-        await more.waitFor();
-        assert.equal(await more.getAttribute('aria-expanded'), 'false');
-        assert.ok(
-          Math.abs((await composer.boundingBox()).y - collapsed.y) <= 1,
-          `${colorScheme} collapse keeps input still`,
-        );
         await page.mouse.move(0, 0);
-        const rows = await tasks.locator('li').evaluateAll(elements =>
+        const rows = await chips.evaluateAll(elements =>
           elements.map(element => ({
-            arrowOpacity: getComputedStyle(element.querySelector('.sprout-prompt-list-arrow')).opacity,
-            arrowTransform: getComputedStyle(element.querySelector('.sprout-prompt-list-arrow')).transform,
-            cursor: getComputedStyle(element.querySelector('button')).cursor,
+            icon: getComputedStyle(element.querySelector('.rounded-xl svg')).visibility,
+            cursor: getComputedStyle(element).cursor,
           })),
         );
         assert.ok(
-          rows.every(row => row.arrowOpacity === '1' && row.arrowTransform === 'none' && row.cursor === 'pointer'),
-          `${colorScheme} task actions are visible before hover`,
+          rows.length === 4 && rows.every(row => row.icon === 'visible' && row.cursor === 'pointer'),
+          `${colorScheme} cards show their icon and pointer before hover`,
         );
         const contrast = await composer.evaluate(element => {
           const group = element.closest('[data-variant="composer"]');
@@ -183,47 +150,52 @@ test(
               b = luminance(surface);
             return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
           }
-          const pageBackground = rgba(getComputedStyle(document.body).backgroundColor);
+          const chipButtons = [...document.querySelectorAll('[aria-label="Recommended for you"] button')];
+          const surface = button => rgba(getComputedStyle(button).backgroundColor);
           return {
             placeholder: ratio(getComputedStyle(element.querySelector('[data-placeholder]'), '::before').color),
             border: ratio(style.borderTopColor),
-            icon: ratio(getComputedStyle(document.querySelector('.sprout-prompt-list-icon')).color, pageBackground),
-            setupDivider: ratio(
-              getComputedStyle(document.querySelector('[aria-label="Recommended for you"] > .border-t')).borderTopColor,
-              pageBackground,
+            icon: Math.min(
+              ...chipButtons.map(button => {
+                const tile = button.querySelector('.rounded-xl');
+                return ratio(
+                  getComputedStyle(tile.querySelector('svg')).color,
+                  rgba(getComputedStyle(tile).backgroundColor),
+                );
+              }),
+            ),
+            label: Math.min(
+              ...chipButtons.map(button =>
+                ratio(
+                  getComputedStyle(button.querySelector(':scope > span:last-child > span:nth-child(2)')).color,
+                  surface(button),
+                ),
+              ),
             ),
           };
         });
         assert.ok(contrast.placeholder >= 4.5, `${colorScheme} placeholder contrast ${contrast.placeholder} >= 4.5`);
         assert.ok(contrast.border >= 1.5, `${colorScheme} composer edge contrast ${contrast.border} >= 1.5`);
-        assert.ok(contrast.icon >= 4.5, `${colorScheme} task icon contrast ${contrast.icon} >= 4.5`);
-        assert.ok(
-          contrast.setupDivider >= 1.5,
-          `${colorScheme} setup divider contrast ${contrast.setupDivider} >= 1.5`,
-        );
+        assert.ok(contrast.icon >= 4.5, `${colorScheme} card icon contrast ${contrast.icon} >= 4.5`);
+        assert.ok(contrast.label >= 4.5, `${colorScheme} card label contrast ${contrast.label} >= 4.5`);
         await page.setViewportSize({ width: 375, height: 500 });
-        await more.click();
-        await moreSetup.waitFor();
-        await moreSetup.getByRole('button').last().scrollIntoViewIfNeeded();
-        const last = await moreSetup.getByRole('button').last().boundingBox();
+        await chips.last().scrollIntoViewIfNeeded();
+        const last = await chips.last().boundingBox();
         assert.ok(last.y >= 0 && last.y + last.height <= 500, `${colorScheme} setup stays reachable on a short phone`);
       }
       await page.goto(`${origin}bud-mock?start=empty`);
-      await tasks.getByRole('button', { name: 'Plan customer follow-ups', exact: true }).waitFor();
-      assert.equal(await setup.count(), 0, 'No invented setup when the saved list is empty');
-      // Cloud 21d61168 (#1116) shows three starter tasks and keeps the rest behind More tasks (starting-task-priority.ts:1, starting-tasks.tsx:65-71).
-      assert.equal(await tasks.getByRole('button').count(), 3);
-      await page.getByRole('button', { name: 'More tasks (2)', exact: true }).click();
-      assert.equal(await page.getByRole('button', { name: 'Write down a business process', exact: true }).count(), 1);
+      await recommended.getByRole('button', { name: /Plan customer follow-ups/ }).waitFor();
+      // Three starter tasks show; the rest of the saved list stays off the home (starting-task-priority.ts).
+      assert.deepEqual(await labels(), starters, 'No invented setup when the saved list is empty');
       await page.goto(`${origin}bud-mock?start=sparse`);
-      await setup.waitFor();
+      await recommended.getByRole('button', { name: /Set how Bud replies to you/ }).waitFor();
       assert.deepEqual(
-        await tasks.getByRole('button').allInnerTexts(),
-        ['Plan customer follow-ups', 'Draft a support reply', 'Plan my week'],
+        await labels(),
+        [...starters, 'Set how Bud replies to you'],
         'A one-item saved list is topped up with general prompts, without repeating a label',
       );
       await page.setViewportSize({ width: 390, height: 844 });
-      const lastControl = page.getByRole('button', { name: /^More setup options/ });
+      const lastControl = chips.last();
       await lastControl.scrollIntoViewIfNeeded();
       await page
         .getByRole('region', { name: 'Personal conversations' })
@@ -231,7 +203,10 @@ test(
       const lastBounds = await lastControl.boundingBox();
       const launcherBounds = await page.getByRole('button', { name: /Open quick chat$/ }).boundingBox();
       assert.ok(
-        lastBounds.y + lastBounds.height <= launcherBounds.y,
+        lastBounds.y >= launcherBounds.y + launcherBounds.height ||
+          lastBounds.y + lastBounds.height <= launcherBounds.y ||
+          lastBounds.x >= launcherBounds.x + launcherBounds.width ||
+          lastBounds.x + lastBounds.width <= launcherBounds.x,
         'Bud quick chat never covers the last setup control',
       );
       assert.deepEqual(errors, []);

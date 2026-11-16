@@ -457,6 +457,18 @@ export function createMemberTablesMock(
       });
     if (suffix === '/query-capabilities')
       return Response.json({ tableId, revision, ...queryCapabilities(table.definition, memberTableId) });
+    if (suffix === '/query/references' && method === 'GET') {
+      const search = (url.searchParams.get('search') ?? '').toLowerCase();
+      const ids = url.searchParams.get('ids')?.split(',');
+      return Response.json({
+        choices: memberRows
+          .map(row => {
+            const name = row.values[fields.name];
+            return { id: row.id, label: name?.kind === 'text' ? name.value : 'Member' };
+          })
+          .filter(choice => (!ids || ids.includes(choice.id)) && choice.label.toLowerCase().includes(search)),
+      });
+    }
     if ((suffix === '/query' || suffix === '/query/validate') && method === 'POST') {
       if (scenario === 'rows-error' && readsFailed++ === 0)
         return Response.json({ error: 'workspace-unavailable' }, { status: 503 });
@@ -594,6 +606,11 @@ export function createWorkspaceMembersMock(scenario?: string) {
           preferences: [],
         });
       if (path === `${root}/workspace-mcp/capabilities`) return Response.json({ enabled: false });
+      if (path === `${root}/agents/recent`) return Response.json([]);
+      if (path === `${root}/conversations/pinned`) return Response.json({ chats: [] });
+      if (path === `${root}/conversations`) return Response.json({ chats: [], nextCursor: null });
+      if (path === '/v1/auth/options')
+        return Response.json({ turnstileSiteKey: null, emailPassword: false, google: true, magicLink: true });
       if (path === `${root}/credits`)
         return Response.json({ available: 0, granted: 0, used: 0, held: 0, days: [], breakdown: [], series: [] });
     }

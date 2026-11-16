@@ -22,6 +22,7 @@ try {
     let broken = true;
     let moduleRequests = 0;
     let documents = 0;
+    let workspaceReads = 0;
     page.on('request', request => {
       if (request.isNavigationRequest() && request.frame() === page.mainFrame()) documents++;
     });
@@ -45,6 +46,7 @@ try {
       if (path.endsWith('/get-session')) json = session;
       else if (path === '/v1/workspaces') json = [workspace];
       else if (path === `/v1/workspaces/${workspace.slug}`) {
+        workspaceReads++;
         if (failure === 'workspace-api' && broken) {
           await route.fulfill({ status: 503, json: { error: 'unavailable' } });
           return;
@@ -67,6 +69,7 @@ try {
     });
     const help = page.getByRole('heading', { name: 'Help and support', exact: true });
     const failed = page.getByRole('heading', { name: 'Could not open TulipFarm' });
+    if (failure === 'workspace-api') await page.clock.install();
     await page.goto(`${origin}/${workspace.slug}/help`);
 
     if (failure === 'stale-chunk-once') {
@@ -94,7 +97,15 @@ try {
       settled = documents;
       await page.waitForTimeout(1500);
     }
-    await failed.waitFor();
+    if (failure === 'workspace-api') {
+      // Admission retries an unavailable API for a minute before it gives up, so skip ahead past that budget.
+      // The transport resends a failed read once, so a third read is admission trying again.
+      for (const deadline = Date.now() + 10_000; workspaceReads < 3; await page.waitForTimeout(100))
+        assert.ok(Date.now() < deadline, 'Admission retries the workspace read');
+      assert.equal(await failed.count(), 0, 'Admission keeps retrying while the API is briefly unavailable');
+      await page.clock.fastForward(60_000);
+      await failed.waitFor();
+    } else await failed.waitFor();
     const documentsBeforeRetry = documents;
     const modulesBeforeRetry = moduleRequests;
     if (failure === 'missing-chunk-persistent') {

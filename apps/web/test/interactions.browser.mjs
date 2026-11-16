@@ -204,11 +204,12 @@ try {
     else await page.goto(`${origin}/acme/chat/${chat.id}`);
   };
   await open();
-  await page.getByRole('heading', { name: 'Could not load request' }).waitFor();
+  // A failed read is retried with backoff before the error shows.
+  await page.getByRole('heading', { name: 'Could not load request' }).waitFor({ timeout: 30_000 });
   assert.equal(await page.getByText('Response needed', { exact: true }).count(), 0);
   await page.getByRole('button', { name: 'Retry loading request' }).click();
   await page.getByRole('status', { name: 'Loading request' }).waitFor();
-  await page.getByRole('heading', { name: 'Could not load request' }).waitFor();
+  await page.getByRole('heading', { name: 'Could not load request' }).waitFor({ timeout: 30_000 });
   readStatus = 200;
   delay = 400;
   await page.getByRole('button', { name: 'Retry loading request' }).click();
@@ -358,7 +359,7 @@ try {
     true,
     'Long chat-list titles must not overflow their mobile region',
   );
-  await page.getByRole('button', { name: chat.title, exact: true }).click();
+  await page.getByRole('link', { name: chat.title, exact: true }).click();
   await page.getByRole('heading', { name: item.prompt, exact: true }).waitFor();
   if (process.env.CONVERSATION_SCREENSHOT_DIR)
     await page.screenshot({

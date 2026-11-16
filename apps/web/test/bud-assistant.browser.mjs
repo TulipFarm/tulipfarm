@@ -9,6 +9,7 @@ import { budGreeting } from '@tulipfarm/conversations/bud-contracts';
 import { fallbackRecommendations } from '@tulipfarm/recommendations';
 import { chatCatalog } from './chat-catalog.fixture.mjs';
 import { membership, credits, notifyChange } from './chat-query.fixture.mjs';
+import { clearEditor } from './browser-controls.mjs';
 
 test(
   'Bud has a compact drag-only popup, retaining chat, approvals and preference consent',
@@ -266,11 +267,12 @@ test(
           'popup opens inward from its corner',
         );
       };
-      await page.goto(`${origin}/acme`);
+      // The new-chat home docks Bud in the header, so the floating launcher is checked on the chats list.
+      await page.goto(`${origin}/acme/chat`);
       await page.getByRole('button', { name: /Open quick chat$/ }).waitFor();
       while (!commands.some(command => command.kind === 'bootstrap')) await delay(50);
       await delay(1000);
-      assert.equal(new URL(page.url()).pathname, '/acme', 'a new member is not sent to a Bud chat');
+      assert.equal(new URL(page.url()).pathname, '/acme/chat', 'a new member is not sent to a Bud chat');
       assert.equal(history.length, 0, 'no greeting before the member opens Bud');
       assert.equal(state?.conversationId, null, 'no Bud thread before the member opens Bud');
       assert.equal(
@@ -289,7 +291,7 @@ test(
       await emit('changed');
       await popup.getByRole('button', { name: 'Continue', exact: true }).click();
       await popup.waitFor({ state: 'hidden' });
-      assert.equal(new URL(page.url()).pathname, '/acme', 'Continue in the popup keeps the current page');
+      assert.equal(new URL(page.url()).pathname, '/acme/chat', 'Continue in the popup keeps the current page');
       state.onboarding = 'skipped';
       await emit('changed');
       await page.getByRole('button', { name: /Open quick chat$/ }).click();
@@ -315,11 +317,7 @@ test(
       );
       await shot('bud-popup-desktop');
       await composer.fill('Keep this draft while I look around');
-      const backgroundComposer = page
-        .getByRole('textbox', { name: 'Message', exact: true })
-        .filter({ visible: true })
-        .first();
-      await backgroundComposer.click();
+      await page.getByRole('heading', { name: 'Chats', exact: true }).click();
       await popup.waitFor({ state: 'hidden' });
       await page.getByRole('button', { name: /Open quick chat$/ }).click();
       await popup.waitFor();
@@ -350,7 +348,7 @@ test(
       );
       await page.getByRole('combobox', { name: /^Model:/ }).waitFor();
       await page.getByRole('button', { name: 'Add files and more', exact: true }).waitFor();
-      await composer.fill('');
+      await clearEditor(composer);
       await page.goBack();
       await page.getByRole('button', { name: /Open quick chat$/ }).click();
       state.preferences = [
@@ -423,8 +421,8 @@ test(
       await page.emulateMedia({ colorScheme: 'light' });
       await page.keyboard.press('Escape');
       await page.getByRole('dialog').waitFor({ state: 'hidden' });
-      const homeComposer = page.getByRole('textbox', { name: 'Message', exact: true });
-      await homeComposer.fill('I am still typing');
+      const pageInput = page.getByRole('textbox', { name: 'Search chat titles', exact: true });
+      await pageInput.fill('I am still typing');
       state.nudge = {
         fingerprint: 'a'.repeat(64),
         suggestionId: 'index-github',
@@ -439,7 +437,7 @@ test(
         false,
         'typing holds the proactive bubble',
       );
-      await homeComposer.evaluate(element => element.blur());
+      await pageInput.evaluate(element => element.blur());
       await page.getByRole('region', { name: 'Bud suggestion' }).waitFor();
       assert.equal(await page.getByRole('dialog').count(), 0, 'the question never opens chat by itself');
       await shot('bud-nudge');
@@ -591,7 +589,10 @@ test(
       assert.equal(await composer.innerText(), 'Give me one quick next step', 'failed sends retain the draft');
       failSend = false;
       await popup.getByRole('button', { name: 'Refresh before editing', exact: true }).click();
-      await popup.getByRole('button', { name: 'Review retained input', exact: true }).click();
+      // A rejected send recovers in place: the alert clears and the draft stays in the composer.
+      await popup.getByRole('alert').filter({ hasText: 'server rejected this input' }).waitFor({ state: 'hidden' });
+      assert.equal(await composer.innerText(), 'Give me one quick next step');
+      assert.equal(await popup.getByRole('button', { name: 'Review retained input', exact: true }).count(), 0);
       await popup.getByRole('button', { name: 'Send message', exact: true }).click();
       await popup.getByRole('button', { name: 'Stop reply', exact: true }).waitFor();
       assert.equal(sends.length, 1);
@@ -617,7 +618,7 @@ test(
       await popup.getByRole('button', { name: /Working… Reading a row/ }).click();
       await popup.getByText('Reading a row', { exact: true }).waitFor();
       assert.equal(await popup.locator('[data-slot="canvas"]').count(), 0, 'tool activity cannot open Canvas');
-      assert.equal(new URL(page.url()).pathname, '/acme', 'background work stays in the popup');
+      assert.equal(new URL(page.url()).pathname, '/acme/chat', 'background work stays in the popup');
       await page.evaluate(
         turnId =>
           window.budChatEvent({
@@ -681,7 +682,7 @@ test(
       assert.equal(decisions.length, 1);
       assert.equal(decisions[0].decision, 'reject');
       assert.equal(decisions[0].expectedRevision, 1);
-      assert.equal(new URL(page.url()).pathname, '/acme', 'approval is handled inline');
+      assert.equal(new URL(page.url()).pathname, '/acme/chat', 'approval is handled inline');
       history.push({
         id: randomUUID(),
         sequence: history.length + 1,
@@ -727,7 +728,11 @@ test(
       await page.keyboard.press('Escape');
       await popup.waitFor({ state: 'hidden' });
       const savedCorner = await dock.getAttribute('data-corner');
-      await page.locator('a[href="/acme/calendar"]').click();
+      // The sidebar no longer links to Calendar; change route in the app, as back and forward do, to keep its state.
+      await page.evaluate(() => {
+        history.pushState(history.state, '', '/acme/calendar');
+        dispatchEvent(new PopStateEvent('popstate', { state: history.state }));
+      });
       await page.waitForFunction(
         () => document.querySelector('[aria-label="Bud assistant"]')?.getAttribute('data-corner') === 'header',
       );
@@ -742,7 +747,10 @@ test(
       await shot('bud-calendar-docked');
       await page.keyboard.press('Escape');
       await popup.waitFor({ state: 'hidden' });
-      await page.locator('a[href="/acme"]').first().click();
+      await page.evaluate(() => {
+        history.pushState(history.state, '', '/acme/chat');
+        dispatchEvent(new PopStateEvent('popstate', { state: history.state }));
+      });
       await page.waitForFunction(
         corner => document.querySelector('[aria-label="Bud assistant"]')?.getAttribute('data-corner') === corner,
         savedCorner,

@@ -183,7 +183,7 @@ try {
       ['tables/new', 'Create a table', 'Build tables in chat'],
       ['skills', 'Skills', 'Workspace skills'],
       ['agent-tasks', 'My agent tasks', 'No agent tasks yet'],
-      ['teams', 'Teams', 'New team'],
+      ['teams', 'Members', 'Create a team'],
       ['chat', 'Chats', 'Plan customer follow-ups', 'chats'],
     ]) {
       await page.goto(`${origin}/acme/${path}`);

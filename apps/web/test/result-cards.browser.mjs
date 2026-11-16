@@ -227,9 +227,16 @@ test(
       await integrations.goto(`${origin}bud-mock/integrations`);
       const integrationTile = integrations.locator('[data-slot="brand-tile"][data-brand="gmail"]').first();
       await integrationTile.waitFor();
+      // Integration rows show the large tile; result actions use the same tile at its action size.
+      await integrationTile.evaluate(node => {
+        const copy = node.cloneNode(true);
+        copy.dataset.size = 'action';
+        copy.dataset.reference = '';
+        node.after(copy);
+      });
       assert.deepEqual(
         resultTile,
-        await integrationTile.evaluate(tileStyle),
+        await integrations.locator('[data-reference]').evaluate(tileStyle),
         'result tiles match the Integrations page frame exactly',
       );
       await integrations.close();

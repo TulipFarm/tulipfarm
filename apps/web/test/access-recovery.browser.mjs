@@ -73,6 +73,7 @@ try {
     if (path === '/v1/auth/get-session') json = anonymous ? null : session;
     else if (path === '/v1/auth/options')
       json = { turnstileSiteKey: 'fixture-site-key', google: true, magicLink: true };
+    else if (path === '/v1/onboarding/availability') json = { available: true };
     else if (path === '/v1/workspaces') json = [workspace];
     else if (path === `/v1/workspaces/${workspace.slug}`) json = workspace;
     else if (path.endsWith('/governance/me'))
@@ -116,6 +117,8 @@ try {
   await installTurnstileFixture(context);
   const page = await context.newPage();
   page.setDefaultTimeout(10000);
+  // Vite compiles the app on first load, which can take longer than any later step.
+  page.setDefaultNavigationTimeout(60000);
   page.on('pageerror', error => errors.push(String(error)));
   page.on('dialog', dialog => dialog.accept());
   const shot = async name => {
@@ -148,7 +151,8 @@ try {
     }
   anonymous = false;
   await page.goto(`${origin}/${workspace.slug}/members`);
-  const tab = page.getByRole('tab', { name: 'Invitations', exact: true });
+  // Teams is the inactive tab while All members is open.
+  const tab = page.getByRole('tablist', { name: 'Members sections' }).getByRole('tab', { name: 'Teams', exact: true });
   await tab.waitFor();
   for (const theme of ['light', 'dark']) {
     await page.evaluate(theme => {
@@ -164,8 +168,11 @@ try {
         ctx.fillRect(0, 0, 1, 1);
         return [...ctx.getImageData(0, 0, 1, 1).data];
       };
+      // The tab list is transparent, so measure against the nearest painted background behind it.
+      let painted = el.parentElement;
+      while (painted && rgb(getComputedStyle(painted).backgroundColor)[3] === 0) painted = painted.parentElement;
       const foreground = rgb(getComputedStyle(el).color),
-        background = rgb(getComputedStyle(el.parentElement).backgroundColor);
+        background = rgb(painted ? getComputedStyle(painted).backgroundColor : 'white');
       const lum = color =>
         color
           .slice(0, 3)
@@ -179,7 +186,7 @@ try {
         b = lum(background);
       return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
     });
-    assert.ok(ratio >= 4.5, `${theme} inactive Invitations contrast ${ratio}`);
+    assert.ok(ratio >= 4.5, `${theme} inactive Teams tab contrast ${ratio}`);
     await shot(`members-${theme}`);
   }
   await page.evaluate(() => {
@@ -213,69 +220,97 @@ try {
     assert.equal(writes().length, count, 'successful recovery must only read');
     readDelay = 0;
   };
-  await page.getByRole('button', { name: 'Make admin', exact: true }).click();
-  await page.getByRole('button', { name: 'Confirm role change' }).click();
-  await recover('member-role-recovery', page.getByRole('dialog'));
-  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+  const memberTable = page.getByRole('table', { name: 'Workspace members' });
+  const dialog = page.getByRole('alertdialog');
+  await memberTable.getByText('Ben', { exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Actions for Ben', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Make Ben an admin', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Make admin', exact: true }).click();
+  // An unconfirmed role change must not claim that nothing changed.
+  await dialog.getByText('We couldn’t confirm this change. Close this to see why.', { exact: true }).waitFor();
+  const roleAttempt = writes().at(-1);
+  assert.deepEqual(
+    [roleAttempt.method, roleAttempt.path],
+    ['PUT', `/v1/workspaces/${workspace.id}/governance/members/${other}/role`],
+  );
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await recover('member-role-recovery');
   await page.goto(`${origin}/${workspace.slug}/teams`);
-  await page.getByRole('button', { name: 'New team', exact: true }).click();
+  await page.getByRole('button', { name: 'Create a team', exact: true }).click();
   await page.getByLabel('New team name').fill('Draft operations');
   await page.getByRole('button', { name: 'Create team', exact: true }).click();
+  const create = page.getByRole('dialog', { name: 'Create a team' });
+  // The dialog covers the page's explanation, so it says where to find it.
+  await create.getByText('We couldn’t confirm Draft operations was created. Close this to see why.').waitFor();
   const attempt = writes().at(-1);
-  await recover('team-create-recovery', page.getByRole('dialog'));
+  await create.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await recover('team-create-recovery');
   writeFails = false;
-  await page.getByRole('button', { name: 'Retry creating team', exact: true }).click();
-  await page.getByRole('button', { name: 'View Draft operations details', exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Create a team', exact: true }).click();
+  assert.equal(await page.getByLabel('New team name').inputValue(), 'Draft operations');
+  await page.getByRole('button', { name: 'Create team', exact: true }).click();
+  await page.getByRole('heading', { name: 'Draft operations', level: 1 }).waitFor();
   assert.deepEqual(writes().at(-1), attempt, 'creation retry must retain its identity and values');
   writeFails = true;
   await page.goto(`${origin}/${workspace.slug}/teams`);
-  await page.getByRole('button', { name: 'View Operations details', exact: true }).click();
+  await page.getByRole('table', { name: 'Teams' }).getByRole('link', { name: 'Operations', exact: true }).click();
+  await page.getByRole('tab', { name: 'Settings', exact: true }).click();
   await page.getByLabel('Team name', { exact: true }).fill('Draft rename');
-  await page.getByRole('button', { name: 'Save team details', exact: true }).click();
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
   await recover('team-edit-recovery');
   assert.equal(await page.getByLabel('Team name', { exact: true }).inputValue(), 'Draft rename');
   writeFails = false;
-  await page.getByRole('button', { name: 'Save team details', exact: true }).click();
-  await page.getByRole('heading', { name: 'Draft rename details', exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await page.getByRole('heading', { name: 'Draft rename', level: 1 }).waitFor();
   writeFails = true;
-  await page.getByRole('checkbox', { name: 'Ben (ben@example.test)', exact: true }).check();
-  await page.getByRole('button', { name: 'Add selected members (1)', exact: true }).click();
+  await page.getByRole('tab', { name: 'Members', exact: true }).click();
+  await page.getByRole('button', { name: 'Add members', exact: true }).click();
+  const add = page.getByRole('dialog', { name: 'Add members to Draft rename' });
+  await add.getByRole('checkbox', { name: 'Ben', exact: true }).check();
+  await add.getByRole('button', { name: 'Add to team', exact: true }).click();
+  await add
+    .getByText('Couldn’t add Ben, so the rest weren’t added. The reason is shown at the top of the page.')
+    .waitFor();
+  await add.getByRole('button', { name: 'Cancel', exact: true }).click();
   await recover('team-membership-recovery');
-  assert.equal(await page.getByRole('checkbox', { name: 'Ben (ben@example.test)', exact: true }).isChecked(), true);
   writeFails = false;
-  await page.getByRole('button', { name: 'Add selected members (1)', exact: true }).click();
-  await page.getByRole('heading', { name: 'Team members (2)', exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Add members', exact: true }).click();
+  assert.equal(await add.getByRole('checkbox', { name: 'Ben', exact: true }).isChecked(), true);
+  await add.getByRole('button', { name: 'Add to team', exact: true }).click();
+  await page.getByRole('table', { name: 'Members of Draft rename' }).getByText('Ben', { exact: true }).waitFor();
   await page.goto(`${origin}/${workspace.slug}/members`);
-  await tab.click();
-  await page.getByText('recent@example.test', { exact: true }).waitFor();
-  const search = page.getByLabel('Search invitations', { exact: true });
+  await memberTable.getByText('recent@example.test', { exact: true }).waitFor();
+  assert.equal(await memberTable.getByText('older-match@example.test', { exact: true }).count(), 0);
+  await page.getByRole('button', { name: 'Show more invites', exact: true }).click();
+  await memberTable.getByText('older-match@example.test', { exact: true }).waitFor();
+  assert.equal(await page.getByRole('button', { name: 'Show more invites', exact: true }).count(), 0);
+  const search = page.getByLabel('Search by name or email', { exact: true });
   await search.fill('older-match');
-  await page.getByText('older-match@example.test', { exact: true }).waitFor();
-  assert.equal(await page.getByText('recent@example.test', { exact: true }).count(), 0);
-  assert.ok(requests.some(request => request.search === '?search=older-match'));
+  await memberTable.getByText('recent@example.test', { exact: true }).waitFor({ state: 'detached' });
+  await memberTable.getByText('older-match@example.test', { exact: true }).waitFor();
   await shot('invitation-search');
   await search.fill('no-match');
-  await page.getByRole('heading', { name: 'No invitations match' }).waitFor();
-  assert.equal(await page.getByRole('heading', { name: 'No invitations yet' }).count(), 0);
-  await page.getByRole('button', { name: 'Clear search', exact: true }).last().click();
-  await page.getByText('recent@example.test', { exact: true }).waitFor();
-  await page.getByRole('button', { name: 'Load older invitations' }).click();
-  await page.getByText('older-match@example.test', { exact: true }).waitFor();
+  await page.getByRole('heading', { name: 'No one matches that search' }).waitFor();
+  await page.getByRole('button', { name: 'Clear search', exact: true }).click();
+  await memberTable.getByText('recent@example.test', { exact: true }).waitFor();
   invitationFails = true;
-  await search.fill('unavailable');
-  await page.getByRole('button', { name: 'Reload invitations' }).click();
-  await page.getByRole('button', { name: 'Reload invitations' }).waitFor();
-  assert.equal(await search.inputValue(), 'unavailable');
+  await page.reload();
+  await page.getByText('Pending invites couldn’t load.').waitFor();
+  await memberTable.getByText('Ben', { exact: true }).waitFor();
+  assert.equal(await memberTable.getByText('recent@example.test', { exact: true }).count(), 0);
+  await search.fill('example.test');
   invitationFails = false;
-  await search.fill('recent');
-  await page.getByText('recent@example.test', { exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Try again', exact: true }).click();
+  await memberTable.getByText('recent@example.test', { exact: true }).waitFor();
+  assert.equal(await search.inputValue(), 'example.test');
   for (const width of [320, 375]) {
     await page.setViewportSize({ width, height: 850 });
-    await shot(`invitations-${width}`);
+    await shot(`members-${width}`);
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth));
   }
   await page.goto(`${origin}/${workspace.slug}/teams`);
-  await page.getByRole('button', { name: 'View Draft rename details', exact: true }).click();
+  await page.getByRole('table', { name: 'Teams' }).getByRole('link', { name: 'Draft rename', exact: true }).click();
+  await page.getByRole('heading', { name: 'Draft rename', level: 1 }).waitFor();
   for (const width of [320, 375]) {
     await page.setViewportSize({ width, height: 850 });
     await shot(`teams-${width}`);

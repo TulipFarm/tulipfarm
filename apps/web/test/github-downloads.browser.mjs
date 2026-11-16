@@ -154,7 +154,7 @@ try {
   assert.equal(failedDownload.status(), 409);
   await page.getByRole('alert').filter({ hasText: 'Download unavailable' }).waitFor();
   await page.screenshot({
-    path: '/var/folders/7d/qk8p6t3d1jvfnh4503bz0msr0000gn/T/opencode/github-download-error.png',
+    path: 'reports/screenshots/github-download-error.png',
     fullPage: true,
   });
   await link.click();
@@ -164,7 +164,7 @@ try {
   await link.click();
   assert.equal(await (await recovered).failure(), null);
   await page.screenshot({
-    path: '/var/folders/7d/qk8p6t3d1jvfnh4503bz0msr0000gn/T/opencode/github-downloads-desktop.png',
+    path: 'reports/screenshots/github-downloads-desktop.png',
     fullPage: true,
   });
   f.state.deny = true;
@@ -183,7 +183,7 @@ try {
   await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   await page.screenshot({
-    path: '/var/folders/7d/qk8p6t3d1jvfnh4503bz0msr0000gn/T/opencode/github-downloads-mobile.png',
+    path: 'reports/screenshots/github-downloads-mobile.png',
     fullPage: true,
   });
   assert.deepEqual(errors, []);

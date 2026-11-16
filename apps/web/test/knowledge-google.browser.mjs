@@ -132,14 +132,9 @@ test(
           .catch(() => {});
       });
       const open = async name => {
-        await page.goto(`${origin}/${workspace.slug}/integrations`);
-        await page
-          .getByRole('listitem')
-          .filter({ has: page.getByRole('button', { name, exact: true }) })
-          .getByRole('button', { name, exact: true })
-          .click();
-        const toggle = page.getByRole('dialog').getByRole('button', { name: 'Your account', exact: true });
-        if ((await toggle.count()) && (await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+        const id = name === 'Gmail' ? 'gmail' : 'google-drive';
+        await page.goto(`${origin}/${workspace.slug}/integrations/${id}?tab=knowledge`);
+        await page.getByRole('tab', { name: 'Knowledge', selected: true }).waitFor();
       };
       try {
         await run({ page, faults, sources, writes, discovered, open });
@@ -220,7 +215,7 @@ test(
         fixture(async f => {
           f.faults.google = { status: 'disconnected' };
           await f.open('Google Drive');
-          await f.page.getByRole('dialog').waitFor();
+          await f.page.getByRole('tabpanel', { name: 'Knowledge' }).waitFor();
           await delay(500);
           assert.equal(await f.page.getByRole('heading', { name: 'Google Drive knowledge', exact: true }).count(), 0);
         }),

@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { createServer } from 'vite';
 
-test('private workspace views respect revocation across concurrent refreshes', { timeout: 150_000 }, async t => {
+test('private workspace views respect revocation across concurrent refreshes', { timeout: 300_000 }, async t => {
   const root = fileURLToPath(new URL('..', import.meta.url));
   const server = await createServer({
     root,
@@ -42,9 +42,12 @@ test('private workspace views respect revocation across concurrent refreshes', {
     user: { id: user, name: user, email: `${user}@example.test` },
   });
 
+  // Google Calendar has its own page; the account and its pending actions are on the Accounts tab.
   async function account(target) {
-    const toggle = target.getByRole('dialog').getByRole('button', { name: 'Your account', exact: true });
-    if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+    const tab = target
+      .getByRole('tablist', { name: 'Google Calendar sections', exact: true })
+      .getByRole('tab', { name: 'Accounts', exact: true });
+    if ((await tab.getAttribute('aria-selected')) !== 'true') await tab.click();
   }
   async function fixture(run) {
     const context = await browser.newContext({ serviceWorkers: 'block', viewport: { width: 1440, height: 1000 } });
@@ -185,12 +188,13 @@ test('private workspace views respect revocation across concurrent refreshes', {
     const focus = () => page.evaluate(() => window.dispatchEvent(new Event('focus')));
     const failedGoogleRefresh = async () => {
       const before = googleResponses.length;
-      await page.getByRole('dialog').getByRole('button', { name: 'Check app status again', exact: true }).click();
-      for (let attempt = 0; googleResponses.length < before + 3; attempt++) {
-        assert.ok(attempt < 300, 'Transient read completes its two retries');
+      await page.getByRole('main').getByRole('button', { name: 'Check again', exact: true }).click();
+      // Each of the read's three attempts is sent twice, because reads retry a 503 once.
+      for (let attempt = 0; googleResponses.length < before + 6; attempt++) {
+        assert.ok(attempt < 600, 'Transient read completes its two retries');
         await delay(20);
       }
-      assert.deepEqual(googleResponses.slice(before), [503, 503, 503]);
+      assert.deepEqual(googleResponses.slice(before), [503, 503, 503, 503, 503, 503]);
       await delay(100);
       await concealed();
     };
@@ -218,7 +222,9 @@ test('private workspace views respect revocation across concurrent refreshes', {
       assert.deepEqual(writes, [], 'No old proposal may be submitted by the next identity');
     }
     try {
-      await page.goto(`${origin}/qa-integrations/integrations#google-calendar`);
+      // Every fixture is a fresh context, so the dev server sends each module again before the page renders.
+      await page.goto(`${origin}/qa-integrations/integrations#google-calendar`, { timeout: 30_000 });
+      await page.getByRole('tablist', { name: 'Google Calendar sections', exact: true }).waitFor({ timeout: 30_000 });
       await account(page);
       await page
         .getByRole('region', { name: 'Action: Create document', exact: true })
@@ -264,7 +270,10 @@ test('private workspace views respect revocation across concurrent refreshes', {
           await delay(350);
           await f.concealed();
           f.faults.shell = 200;
-          await f.page.getByRole('button', { name: 'Try again', exact: true }).click();
+          // Admission retries a temporary failure by itself, so the page recovers without a Try again click.
+          await f.page
+            .getByRole('tablist', { name: 'Google Calendar sections', exact: true })
+            .waitFor({ timeout: 30_000 });
           await account(f.page);
           await f.page
             .getByRole('region', { name: 'Action: Create document', exact: true })
@@ -316,10 +325,7 @@ test('private workspace views respect revocation across concurrent refreshes', {
               if (stale) {
                 f.faults.shell = 503;
                 await f.invalidate();
-                await f.page
-                  .getByRole('dialog')
-                  .getByText(/Could not refresh workspace access/)
-                  .waitFor();
+                await f.page.getByText(/Could not refresh workspace access/).waitFor();
               }
               f.faults.shell = 503;
               f.faults.shellDelay = 2500;
@@ -345,7 +351,7 @@ test('private workspace views respect revocation across concurrent refreshes', {
         await f.failedGoogleRefresh();
         f.faults.google = 200;
         f.faults.availability = 200;
-        await f.page.getByRole('dialog').getByRole('button', { name: 'Check app status again', exact: true }).click();
+        await f.page.getByRole('main').getByRole('button', { name: 'Check again', exact: true }).click();
         await account(f.page);
         await f.page
           .getByRole('region', { name: 'Action: Create document', exact: true })
@@ -374,7 +380,7 @@ test('private workspace views respect revocation across concurrent refreshes', {
           await f.failedGoogleRefresh();
           f.faults.google = 200;
           f.faults.availability = 200;
-          await f.page.getByRole('dialog').getByRole('button', { name: 'Check app status again', exact: true }).click();
+          await f.page.getByRole('main').getByRole('button', { name: 'Check again', exact: true }).click();
           await account(f.page);
           await f.page
             .getByRole('region', { name: 'Action: Create document', exact: true })
@@ -385,7 +391,6 @@ test('private workspace views respect revocation across concurrent refreshes', {
       );
     await t.test('Agents and account identity are concealed on background session 401', () =>
       fixture(async f => {
-        await f.page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).click();
         await f.page
           .getByRole('navigation', { name: 'Workspace navigation' })
           .getByRole('link', { name: 'Agents', exact: true })

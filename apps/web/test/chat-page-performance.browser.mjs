@@ -160,8 +160,10 @@ test('five-page chat request and payload budgets', { timeout: 60000 }, async () 
           const node = document.body.appendChild(document.createElement('div')),
             root = f.createRoot(node);
           p.completed = 0;
+          // Without a live stream, the pending reply is checked by polling saved history.
+          const stream = { status: 'unavailable', previews: new Map(), progress: new Map() };
           function App() {
-            const read = f.useConversationHistory(p.api, p.chatId, 5, false);
+            const read = f.useConversationHistory(p.api, p.chatId, 5, stream);
             f.React.useEffect(() => {
               if (read.state.kind === 'ready' && !read.state.refreshing && !read.state.error) p.completed++;
             }, [read.state.kind, read.state.refreshing, read.state.error]);

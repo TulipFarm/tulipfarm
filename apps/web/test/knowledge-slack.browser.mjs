@@ -235,14 +235,9 @@ test(
           .catch(() => {});
       });
       const open = async () => {
-        await page.goto(`${origin}/${workspace.slug}/integrations`);
-        await page
-          .getByRole('listitem')
-          .filter({ has: page.getByRole('button', { name: 'Slack', exact: true }) })
-          .getByRole('button', { name: 'Slack', exact: true })
-          .click();
-        const toggle = page.getByRole('dialog').getByRole('button', { name: 'Your account', exact: true });
-        if ((await toggle.count()) && (await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+        // Slack has its own page; its knowledge sources are on the Knowledge tab.
+        await page.goto(`${origin}/${workspace.slug}/integrations/slack`);
+        await page.getByRole('tab', { name: 'Knowledge', exact: true }).click();
         await page.getByRole('heading', { name: 'Slack knowledge sources', exact: true }).waitFor();
       };
       const select = async () => {
@@ -589,24 +584,17 @@ test(
           assert.equal(await f.page.getByText('#general · Expiring thread', { exact: true }).count(), 0);
           assert.equal(await f.page.getByRole('button', { name: 'Download thread' }).count(), 0);
           f.faults.slackState = 'revoked';
-          await f.page.goto(`${origin}/${workspace.slug}/integrations`);
-          await f.page
-            .getByRole('listitem')
-            .filter({ has: f.page.getByRole('button', { name: 'Slack', exact: true }) })
-            .getByRole('button', { name: 'Slack', exact: true })
-            .click();
-          const toggle = f.page.getByRole('dialog').getByRole('button', { name: 'Your account', exact: true });
-          if ((await toggle.count()) && (await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+          await f.page.goto(`${origin}/${workspace.slug}/integrations/slack`);
+          await f.page.getByRole('tab', { name: 'Accounts', exact: true }).click();
           await f.page.getByText('Slack is not connected', { exact: true }).waitFor();
           assert.equal(await f.page.getByRole('heading', { name: 'Slack knowledge sources', exact: true }).count(), 0);
-          assert.equal(
-            await f.page.getByRole('dialog').getByRole('region', { name: 'Settings', exact: true }).count(),
-            0,
-          );
+          // Only admins get the Slack workspace settings.
+          assert.equal(await f.page.getByRole('tab', { name: 'Settings', exact: true }).count(), 0);
           f.faults.role = 'admin';
           await f.page.reload();
-          await f.page.getByRole('dialog').getByRole('button', { name: 'Settings', exact: true }).click();
-          await f.page.getByText('Slack workspace needs attention', { exact: true }).waitFor();
+          await f.page.getByRole('tab', { name: 'Settings', exact: true }).click();
+          // A revoked workspace reads as disconnected, so admins are offered a fresh connection.
+          await f.page.getByText('Connect a Slack workspace', { exact: true }).waitFor();
           assert.equal(await f.page.getByRole('heading', { name: 'Slack knowledge sources', exact: true }).count(), 0);
         }),
       );
@@ -621,7 +609,8 @@ test(
               f.sources.set(item.sourceId, item);
               await f.open();
               await f.select();
-              await f.page.getByRole('checkbox', { name: /^#general-international/ }).focus();
+              // The channel icon carries the `#`, so the checkbox name starts at the channel name.
+              await f.page.getByRole('checkbox', { name: /^general-international/ }).focus();
               await f.page.keyboard.press('Space');
               await f.page.getByText('1 conversation selected.').waitFor();
               await f.page.getByRole('checkbox', { name: 'Share with selected workspace members' }).focus();

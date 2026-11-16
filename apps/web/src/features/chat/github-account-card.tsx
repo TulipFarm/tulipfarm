@@ -25,7 +25,9 @@ export function GitHubAccountCard({
   taskWorking?: boolean;
 }) {
   const accountsRead = useGitHubAccounts(workspaceId);
-  const selectionRead = useGitHubSelection(workspaceId, chatId, task);
+  // The turn that shows this card may have chosen the account on the server, so a selection the composer read
+  // earlier is re-read rather than trusted.
+  const selectionRead = useGitHubSelection(workspaceId, chatId, task, true, 0);
   const changes = useIntegrationChanges();
   const { runtime, scope, current } = useFeatureContext();
   const [saving, setSaving] = useState(false);

@@ -20,10 +20,12 @@ test('chat list keeps clear columns, responsive actions, filters, and recovery',
     await page.goto(`${origin}bud-mock/chat?start=${scenario}`);
     await page.waitForLoadState('networkidle');
   };
+  // The sidebar's Recents also link to chats, so chat links and menus are found in the page's main content.
+  const main = page.getByRole('main');
   const table = page.getByRole('table', { name: 'Chats', exact: true });
   const firstTitle = 'Prepare the weekly customer update';
-  const first = page.getByRole('link', { name: firstTitle, exact: true });
-  const menu = title => page.getByRole('button', { name: `More actions for ${title}`, exact: true });
+  const first = main.getByRole('link', { name: firstTitle, exact: true });
+  const menu = title => main.getByRole('button', { name: `More actions for ${title}`, exact: true });
   try {
     await open('chats');
     await first.waitFor();
@@ -89,23 +91,23 @@ test('chat list keeps clear columns, responsive actions, filters, and recovery',
       'Rename fits mobile',
     );
     await page.getByRole('button', { name: 'Save', exact: true }).click();
-    await page.getByRole('link', { name: 'Customer update draft', exact: true }).waitFor();
+    await main.getByRole('link', { name: 'Customer update draft', exact: true }).waitFor();
 
     await menu('Customer update draft').click();
     await page.getByRole('menuitem', { name: 'Archive', exact: true }).click();
     await page.getByRole('button', { name: 'Undo', exact: true }).waitFor();
     await page.getByRole('button', { name: 'Undo', exact: true }).click();
-    await page.getByRole('link', { name: 'Customer update draft', exact: true }).waitFor();
+    await main.getByRole('link', { name: 'Customer update draft', exact: true }).waitFor();
     await page.getByRole('button', { name: 'Archived chats', exact: true }).click();
-    await page.getByRole('link', { name: 'Last quarter’s planning notes', exact: true }).waitFor();
+    await main.getByRole('link', { name: 'Last quarter’s planning notes', exact: true }).waitFor();
     await page.getByRole('button', { name: 'Active chats', exact: true }).click();
     await page.getByLabel('Search chat titles').fill('no matching title');
     await page.getByRole('heading', { name: 'No matching chats', exact: true }).waitFor();
     await page.getByRole('button', { name: 'Clear search', exact: true }).first().click();
-    await page.getByRole('link', { name: 'Customer update draft', exact: true }).waitFor();
+    await main.getByRole('link', { name: 'Customer update draft', exact: true }).waitFor();
     await page.getByRole('button', { name: 'Show chats from: Personal chats', exact: true }).click();
     await page.getByRole('option', { name: 'Product launch', exact: true }).click();
-    await page.getByRole('link', { name: 'Launch readiness review', exact: true }).waitFor();
+    await main.getByRole('link', { name: 'Launch readiness review', exact: true }).waitFor();
     assert.equal(
       await page
         .getByText('Shared with everyone in Product launch. Most recently active first.', { exact: true })
@@ -126,7 +128,7 @@ test('chat list keeps clear columns, responsive actions, filters, and recovery',
     await first.waitFor({ state: 'detached' });
     await open('chats-error');
     await page.getByRole('heading', { name: 'Could not load chats', exact: true }).waitFor();
-    // Cloud 1f8cf59a (#1028): the demo fails the first three list reads (chats-mock-api.ts:48); the page makes two, so the first retry fails too.
+    // The demo fails the first five list reads (chats-mock-api.ts); the page makes four as it opens, so the first retry fails too.
     const retry = page.getByRole('button', { name: 'Retry loading chats', exact: true });
     await retry.click();
     await page.getByRole('heading', { name: 'Could not load chats', exact: true }).waitFor();

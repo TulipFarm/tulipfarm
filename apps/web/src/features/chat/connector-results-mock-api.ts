@@ -93,6 +93,8 @@ export function createConnectorResultsMock(scenario: string) {
     },
     digest: 'f'.repeat(64),
     decision: pending ? null : 'approve',
+    author: pending ? null : 'member',
+    bot: false,
     expired: false,
     actions: [
       {
