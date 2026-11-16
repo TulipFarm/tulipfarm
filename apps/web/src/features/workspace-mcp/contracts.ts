@@ -106,7 +106,7 @@ export const integrationDetailSchema = z.object({
   grants: z.array(grantSchema),
   workspace: z.boolean().default(false),
   managers: z.array(grantSchema).default([]),
-  grantOptions: z.array(grantSchema.extend({ label: text })),
+  grantOptions: z.array(grantSchema.extend({ label: text, detail: text.optional() })),
   descriptor: z.discriminatedUnion('kind', [
     z.object({ kind: z.literal('chat-only'), reason: text }),
     z.object({ kind: z.literal('reviewable'), id, label: text, identity: text }),

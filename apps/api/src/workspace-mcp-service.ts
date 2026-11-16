@@ -1,3 +1,4 @@
+import type { Pool } from 'pg';
 import { z } from 'zod';
 import { createConversations } from '@tulipfarm/conversations';
 import {
@@ -45,6 +46,8 @@ type Options = {
   permissions: Pick<ReturnType<typeof workspaceMcpPermissions>, 'permissions' | 'setPermissions' | 'permissionChoices'>;
   authorizeSelection: NonNullable<WorkspaceMcpOptions['authorizeSelection']>;
   authorizeSources: WorkspaceMcpOptions['authorizeSources'];
+  /** The platform users table, so access options show people by name instead of by id. */
+  identity?: Pick<Pool, 'query'>;
   /** Starts discovery in the worker, which alone may decrypt saved secrets. */
   queueDiscovery?: (input: {
     workspaceId: string;
@@ -133,6 +136,13 @@ export function createWorkspaceMcpApi(options: Options) {
       throw new McpHttpError('mcp-conflict', 409);
     return metadata;
   }
+  async function profiles(userIds: string[]) {
+    if (!options.identity || !userIds.length) return new Map<string, { name: string; email: string }>();
+    const rows = z
+      .array(z.object({ id: z.string(), name: z.string(), email: z.string() }))
+      .parse((await options.identity.query('SELECT id,name,email FROM app.users WHERE id=ANY($1)', [userIds])).rows);
+    return new Map(rows.map(row => [row.id, row]));
+  }
   async function detail(workspaceId: string, userId: string, integrationId: string) {
     const row = await service.status(workspaceId, userId, integrationId);
     const tools = await service.tools(workspaceId, userId, integrationId);
@@ -152,22 +162,19 @@ export function createWorkspaceMcpApi(options: Options) {
                   )
                 ).rows,
               );
-            const teams = z
-              .array(z.object({ id: z.uuid(), name: z.string() }))
-              .parse(
-                (
-                  await tx.client.query(
-                    `SELECT t.id,t.name FROM ${qualified(tx.schema, 'tf_teams')} t JOIN ${qualified(tx.schema, 'tf_member_teams')} mt ON mt.team_id=t.id WHERE mt.membership_id=$1 ORDER BY t.id`,
-                    [actor.membershipId],
-                  )
-                ).rows,
-              );
-            return [
-              ...members.map(member => ({ kind: 'member' as const, id: member.id, label: member.user_id })),
-              ...teams.map(team => ({ kind: 'team' as const, id: team.id, label: team.name })),
-            ];
+            const teams = z.array(z.object({ id: z.uuid(), name: z.string() })).parse(
+              (
+                await tx.client.query(
+                  // _admin is the internal team of workspace admins, not a team people pick.
+                  `SELECT t.id,t.name FROM ${qualified(tx.schema, 'tf_teams')} t JOIN ${qualified(tx.schema, 'tf_member_teams')} mt ON mt.team_id=t.id WHERE mt.membership_id=$1 AND t.name<>'_admin' ORDER BY t.name`,
+                  [actor.membershipId],
+                )
+              ).rows,
+            );
+            return { members, teams };
           })
-        : [];
+        : null;
+    const people = grantOptions ? await profiles(grantOptions.members.map(member => member.user_id)) : new Map();
     const current = await service.status(workspaceId, userId, integrationId);
     if (row.version !== current.version) throw new McpHttpError('mcp-conflict', 409);
     const metadata = await readyIntegration(workspaceId, userId, current);
@@ -206,7 +213,22 @@ export function createWorkspaceMcpApi(options: Options) {
             ...grants.managers.teamIds.map(id => ({ kind: 'team', id })),
           ]
         : [],
-      grantOptions,
+      grantOptions: grantOptions
+        ? [
+            ...grantOptions.members
+              .map(member => {
+                const person = people.get(member.user_id);
+                return {
+                  kind: 'member' as const,
+                  id: member.id,
+                  label: person?.name.trim() || person?.email || 'Workspace member',
+                  ...(person?.name.trim() && person.email ? { detail: person.email } : {}),
+                };
+              })
+              .sort((a, b) => a.label.localeCompare(b.label)),
+            ...grantOptions.teams.map(team => ({ kind: 'team' as const, id: team.id, label: team.name })),
+          ]
+        : [],
       descriptor:
         current.ownership === 'shared' || current.descriptorApproved
           ? {
