@@ -139,6 +139,12 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     tx(tx => requireNoMcpDerived(tx, [reference])),
     AccessDenied,
   );
+  const app = { kind: 'app', appId: randomUUID(), releaseId: randomUUID() };
+  await assert.rejects(
+    tx(tx => requireNoMcpDerived(tx, [reference], app)),
+    McpEgressDenied,
+  );
+  assert.equal(await tx(tx => requireNoMcpDerived(tx, [], app)), undefined);
   await tx(tx => requireDraftSources(tx, actor, [source]));
   await assert.rejects(
     tx(tx => requireDraftSources(tx, actor, [source], new Set(), undefined, true)),

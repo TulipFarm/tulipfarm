@@ -64,6 +64,11 @@ export class AccessDenied extends Error {
   }
 }
 
+/** Denies an actor kind a `switch` does not name. Typed `never` so a new kind fails the build at every such switch. */
+export function unhandledActor(_actor: never): never {
+  throw new AccessDenied();
+}
+
 export class WorkspaceMembershipDenied extends AccessDenied {
   readonly userId: string;
 
@@ -266,7 +271,25 @@ export async function canAccessAsset(
     !(await canAccessAsset(transaction, actor, assetId, 'integration.read'))
   )
     return false;
-  if (actor.kind === 'agent') return canAgentAccess(transaction, actor.runId, assetId, permission);
+  switch (actor.kind) {
+    case 'human':
+      return canMemberAccess(transaction, actor, assetId, permission);
+    case 'agent':
+      return canAgentAccess(transaction, actor.runId, assetId, permission);
+    case 'app':
+      // Asset grants are table-wide; an app reads only through its own row- and field-bounded grants.
+      return false;
+    default:
+      return unhandledActor(actor);
+  }
+}
+
+async function canMemberAccess(
+  transaction: AuthorizationTransaction,
+  actor: HumanActor,
+  assetId: string,
+  permission: AssetPermission,
+) {
   const member = await currentMember(transaction, actor);
   if (permission.startsWith('table.')) {
     if (member.role === 'admin') return true;
@@ -355,8 +378,18 @@ async function agentAuthority(transaction: AuthorizationTransaction, runId: stri
 }
 
 export async function requireCurrentActor(transaction: AuthorizationTransaction, actor: Actor) {
-  if (actor.kind === 'human') await currentMember(transaction, actor);
-  else await agentAuthority(transaction, actor.runId);
+  switch (actor.kind) {
+    case 'human':
+      await currentMember(transaction, actor);
+      return;
+    case 'agent':
+      await agentAuthority(transaction, actor.runId);
+      return;
+    case 'app':
+      throw new AccessDenied();
+    default:
+      unhandledActor(actor);
+  }
 }
 
 /** The person whose access bounds a run: its delegating member. */
@@ -368,11 +401,17 @@ export async function queryHumanContext(
   transaction: AuthorizationTransaction,
   actor: Actor,
 ): Promise<HumanActor | null> {
-  if (actor.kind === 'human') {
-    await currentMember(transaction, actor);
-    return actor;
+  switch (actor.kind) {
+    case 'human':
+      await currentMember(transaction, actor);
+      return actor;
+    case 'agent':
+      return (await agentAuthority(transaction, actor.runId)).owner;
+    case 'app':
+      return null;
+    default:
+      return unhandledActor(actor);
   }
-  return (await agentAuthority(transaction, actor.runId)).owner;
 }
 
 export async function resolveActor(transaction: AuthorizationTransaction, principal: string | Actor): Promise<Actor> {
@@ -388,7 +427,16 @@ export async function requirePersistedIssueCall(
   input: { requestId: string; integrationId: string; sourceId: string; issueNumber: number },
 ) {
   actor = actorSchema.parse(actor);
-  if (actor.kind !== 'agent') return;
+  switch (actor.kind) {
+    case 'human':
+      return;
+    case 'agent':
+      break;
+    case 'app':
+      throw new AccessDenied();
+    default:
+      unhandledActor(actor);
+  }
   await transaction.client.query(`SELECT id FROM ${table(transaction, 'tf_agent_runs')} WHERE id = $1 FOR UPDATE`, [
     actor.runId,
   ]);

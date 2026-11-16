@@ -8,6 +8,7 @@ import {
   queryHumanContext,
   requireTablePermission,
   resolveActor,
+  unhandledActor,
   type Actor,
   type HumanActor,
 } from '@tulipfarm/access';
@@ -51,12 +52,26 @@ const fileIds = (values: RecordView['values'], fieldId: string) => {
   return value && typeof value === 'object' && value.kind === 'file' ? value.fileIds : [];
 };
 
-/** File ids the actor can open now. An agent reads as its run owner, so a run without an owner opens none. */
+/** The member whose file access bounds the actor: the person, or an agent run's delegating owner. Apps have none. */
+async function recordFileOwner(tx: AgentTransaction, actor: Actor): Promise<HumanActor> {
+  switch (actor.kind) {
+    case 'human':
+      return actor;
+    case 'agent':
+      return agentRunOwner(tx, actor.runId);
+    case 'app':
+      throw new AccessDenied();
+    default:
+      return unhandledActor(actor);
+  }
+}
+
+/** File ids the actor can open now. An actor without a current owner opens none. */
 async function readableRecordFiles(tx: AgentTransaction, actor: Actor, ids: readonly string[]) {
   if (!ids.length) return new Set<string>();
   if (actor.kind === 'human') return readableTableFiles(tx, actor, ids);
   try {
-    return await readableTableFiles(tx, await agentRunOwner(tx, actor.runId), ids);
+    return await readableTableFiles(tx, await recordFileOwner(tx, actor), ids);
   } catch (error) {
     if (error instanceof AccessDenied) return new Set<string>();
     throw error;
@@ -78,8 +93,7 @@ export async function requireAgentRecordFiles(
     ),
   ];
   if (!ids.length) return;
-  const owner = actor.kind === 'human' ? actor : await agentRunOwner(tx, actor.runId);
-  const readable = await readableTableFiles(tx, owner, ids);
+  const readable = await readableTableFiles(tx, await recordFileOwner(tx, actor), ids);
   if (ids.some(id => !readable.has(id))) throw new AccessDenied();
 }
 
@@ -147,6 +161,51 @@ const agentView = (record: {
   });
 
 /** The row IDs a rows.create.batch call writes, fixed by its call ID so a repeated call finds its own rows. */
+/** A person lists every active table and keeps those their grants open; an agent lists its run scope. */
+async function listedTableIds(tx: AgentTransaction, actor: Actor) {
+  switch (actor.kind) {
+    case 'human':
+      return z
+        .array(z.object({ id: z.uuid() }))
+        .parse(
+          (await tx.client.query(`SELECT id FROM ${relation(tx, 'tf_table_catalog')} WHERE archived_at IS NULL`)).rows,
+        )
+        .map(row => row.id);
+    case 'agent':
+      return z
+        .array(z.object({ assetId: z.uuid() }))
+        .parse(
+          (await tx.client.query(`SELECT scope FROM ${relation(tx, 'tf_agent_runs')} WHERE id=$1`, [actor.runId]))
+            .rows[0]?.scope,
+        )
+        .map(item => item.assetId);
+    case 'app':
+      throw new AccessDenied();
+    default:
+      return unhandledActor(actor);
+  }
+}
+
+/** The SQL predicate for teams the actor belongs to, and its `$1` parameter. */
+function teamVisibility(tx: AgentTransaction, actor: Actor): [predicate: string, subject: string] {
+  switch (actor.kind) {
+    case 'human':
+      return [
+        `EXISTS (SELECT 1 FROM ${relation(tx, 'tf_member_teams')} mt WHERE mt.team_id = t.id AND mt.membership_id = $1)`,
+        actor.membershipId,
+      ];
+    case 'agent':
+      return [
+        `EXISTS (SELECT 1 FROM ${relation(tx, 'tf_agent_runs')} r JOIN ${relation(tx, 'tf_agent_teams')} at ON at.agent_id = r.agent_id WHERE r.id = $1 AND at.team_id = t.id)`,
+        actor.runId,
+      ];
+    case 'app':
+      throw new AccessDenied();
+    default:
+      return unhandledActor(actor);
+  }
+}
+
 export function batchRecordIds(callId: string, count: number) {
   return Array.from({ length: count }, (_, index) => {
     const hash = createHash('sha256').update(`rows.create.batch:${callId}:${index}`).digest('hex');
@@ -197,7 +256,16 @@ export function createAgentRecordTools(runtime: AgentStorage, taskCapability?: o
       {
         readableFiles: readableRecordFiles,
         admitMutation: async (transaction, actor) => {
-          if (actor.kind !== 'agent') return;
+          switch (actor.kind) {
+            case 'human':
+              return;
+            case 'agent':
+              break;
+            case 'app':
+              throw new AccessDenied();
+            default:
+              unhandledActor(actor);
+          }
           if (
             !(
               await transaction.client.query(
@@ -466,29 +534,7 @@ export function createAgentRecordTools(runtime: AgentStorage, taskCapability?: o
       return runtime.transaction(workspaceId, commonCompatibility, async tx => {
         await lockAuthorization(tx);
         await resolveActor(tx, actor);
-        // A person lists every active table and keeps those their grants open; an agent lists its run scope.
-        const ids =
-          actor.kind === 'human'
-            ? z
-                .array(z.object({ id: z.uuid() }))
-                .parse(
-                  (
-                    await tx.client.query(
-                      `SELECT id FROM ${relation(tx, 'tf_table_catalog')} WHERE archived_at IS NULL`,
-                    )
-                  ).rows,
-                )
-                .map(row => row.id)
-            : z
-                .array(z.object({ assetId: z.uuid() }))
-                .parse(
-                  (
-                    await tx.client.query(`SELECT scope FROM ${relation(tx, 'tf_agent_runs')} WHERE id=$1`, [
-                      actor.runId,
-                    ])
-                  ).rows[0]?.scope,
-                )
-                .map(item => item.assetId);
+        const ids = await listedTableIds(tx, actor);
         const visible = [];
         const only = query.ids && new Set(query.ids);
         for (const id of [...new Set(ids)].filter(id => !only || only.has(id)).sort()) {
@@ -524,17 +570,14 @@ export function createAgentRecordTools(runtime: AgentStorage, taskCapability?: o
         await lockAuthorization(tx);
         const actor = await resolveActor(tx, principal);
         // Team names stay private to members. Table administrators receive other creatable teams as opaque ids.
-        const visible =
-          actor.kind === 'human'
-            ? `EXISTS (SELECT 1 FROM ${relation(tx, 'tf_member_teams')} mt WHERE mt.team_id = t.id AND mt.membership_id = $1)`
-            : `EXISTS (SELECT 1 FROM ${relation(tx, 'tf_agent_runs')} r JOIN ${relation(tx, 'tf_agent_teams')} at ON at.agent_id = r.agent_id WHERE r.id = $1 AND at.team_id = t.id)`;
+        const [visible, subject] = teamVisibility(tx, actor);
         const teams = z
           .array(z.object({ id: z.uuid(), name: z.string(), visible: z.boolean() }))
           .parse(
             (
               await tx.client.query(
                 `SELECT t.id, t.name, ${visible} AS visible FROM ${relation(tx, 'tf_teams')} t ORDER BY t.id`,
-                [actor.kind === 'human' ? actor.membershipId : actor.runId],
+                [subject],
               )
             ).rows,
           );

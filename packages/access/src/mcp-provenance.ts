@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { escapeIdentifier } from 'pg';
 import { z } from 'zod';
-import { AccessDenied, McpEgressDenied, type Actor, type AuthorizationTransaction } from './index.ts';
+import { AccessDenied, McpEgressDenied, unhandledActor, type Actor, type AuthorizationTransaction } from './index.ts';
 import {
   fileReadReceiptSchema,
   sourceDependencySchema,
@@ -497,18 +497,29 @@ export async function requireNoMcpDerived(tx: AuthorizationTransaction, sources:
   denyMcpEgress();
   if (unboundedReferencesSchema.parse(sources).some(source => source.kind === 'private-task')) throw new AccessDenied();
   if ((await mcpSourceClosure(tx, sources)).length) throw new McpEgressDenied();
-  if (actor?.kind === 'agent') {
-    const installed = installedSchema.parse(
-      (await tx.client.query('SELECT to_regclass($1) IS NOT NULL AS installed', [table(tx, 'tf_agent_task_runs')]))
-        .rows[0],
-    ).installed;
-    if (!installed) return;
-    const tasks = await tx.client.query(
-      `SELECT r.task_id,max(m.sequence) AS sequence FROM ${table(tx, 'tf_agent_task_runs')} r JOIN ${table(tx, 'tf_agent_task_messages')} m ON m.task_id=r.task_id WHERE r.run_id=$1 GROUP BY r.task_id`,
-      [actor.runId],
-    );
-    for (const task of tasks.rows)
-      if ((await mcpSourceClosure(tx, [{ kind: 'task', taskId: task.task_id, throughSequence: task.sequence }])).length)
-        throw new McpEgressDenied();
+  if (!actor) return;
+  switch (actor.kind) {
+    case 'human':
+    case 'app':
+      return;
+    case 'agent':
+      return requireNoMcpDerivedTasks(tx, actor.runId);
+    default:
+      unhandledActor(actor);
   }
+}
+
+async function requireNoMcpDerivedTasks(tx: AuthorizationTransaction, runId: string) {
+  const installed = installedSchema.parse(
+    (await tx.client.query('SELECT to_regclass($1) IS NOT NULL AS installed', [table(tx, 'tf_agent_task_runs')]))
+      .rows[0],
+  ).installed;
+  if (!installed) return;
+  const tasks = await tx.client.query(
+    `SELECT r.task_id,max(m.sequence) AS sequence FROM ${table(tx, 'tf_agent_task_runs')} r JOIN ${table(tx, 'tf_agent_task_messages')} m ON m.task_id=r.task_id WHERE r.run_id=$1 GROUP BY r.task_id`,
+    [runId],
+  );
+  for (const task of tasks.rows)
+    if ((await mcpSourceClosure(tx, [{ kind: 'task', taskId: task.task_id, throughSequence: task.sequence }])).length)
+      throw new McpEgressDenied();
 }

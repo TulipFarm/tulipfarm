@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import { AccessDenied } from '@tulipfarm/access';
-import { createWorkspaceRuntime } from '@tulipfarm/workspace-storage/runtime';
+import { commonCompatibility, createWorkspaceRuntime } from '@tulipfarm/workspace-storage/runtime';
 import { inTransaction } from '@tulipfarm/workspace-storage/provisioning';
 import { workspaceTableMigrations } from '@tulipfarm/workspaces/table-migrations';
 import { executionCompatibility } from '@tulipfarm/tables/execution';
@@ -11,7 +11,7 @@ import { createGeneration, activateGeneration } from '@tulipfarm/tables/store';
 import { createTableService } from '@tulipfarm/tables/service';
 import { fixture, connect } from '../../workspace-storage/test/integration/fixture.mjs';
 import { humanReadableTableFiles } from '../src/table-sources.ts';
-import { createAgentRecordTools } from '../src/record-tools.ts';
+import { createAgentRecordTools, requireAgentRecordFiles } from '../src/record-tools.ts';
 import { savedTaskAgent, seedExecution } from './task-fixture.mjs';
 
 async function fileTable(t) {
@@ -360,5 +360,35 @@ test(
     const scheduled = { kind: 'agent', runId };
     await assert.rejects(records.getRecord(ws.id, scheduled, tableId, revision, recordId), AccessDenied);
     await assert.rejects(records.listRecords(ws.id, scheduled, tableId, revision, {}), AccessDenied);
+  },
+);
+
+test(
+  'an app actor reads no records and attaches no files, even with a reader as its viewer',
+  { timeout: 120000 },
+  async t => {
+    const { ws, runtime, seed, member, reader, revision, files, tableId, ownFile } = await fileTable(t);
+    const recordId = randomUUID();
+    const values = { [files.id]: { kind: 'file', fileIds: [ownFile] } };
+    await seed.mutate(ws.id, ws.userId, { kind: 'create', tableId, revision, recordId, values });
+    const records = createAgentRecordTools(runtime);
+    const viewer = { kind: 'human', userId: reader, membershipId: member };
+    const app = { kind: 'app', appId: randomUUID(), releaseId: randomUUID(), viewer };
+    const attach = actor =>
+      runtime.transaction(ws.id, commonCompatibility, tx => requireAgentRecordFiles(tx, actor, values));
+
+    assert.deepEqual((await records.getRecord(ws.id, viewer, tableId, revision, recordId)).values[files.id], {
+      kind: 'file',
+      fileIds: [ownFile],
+    });
+    await assert.rejects(records.getRecord(ws.id, app, tableId, revision, recordId), AccessDenied);
+    await assert.rejects(records.listRecords(ws.id, app, tableId, revision, {}), AccessDenied);
+    assert.deepEqual(
+      (await records.list(ws.id, viewer, { ids: [tableId] })).tables.map(table => table.id),
+      [tableId],
+    );
+    await assert.rejects(records.list(ws.id, app, { ids: [tableId] }), AccessDenied);
+    assert.equal(await attach(viewer), undefined);
+    await assert.rejects(attach(app), AccessDenied);
   },
 );
