@@ -91,7 +91,7 @@ export function guideAccess(pool: Pool, secret: string) {
   const consume = createAbuseLimiter(pool, secret);
   async function limit(name: string, identity: string, max: number, windowMs: number) {
     const retry = await consume({ name: `public-guide-${name}`, max, windowMs }, identity);
-    if (retry !== null) throw new GuideUnavailable(429, 'guide-rate-limit', retry);
+    if (retry !== null) throw new GuideUnavailable(429, 'guide-rate-limit', Math.ceil(retry / 1000));
   }
   return {
     async session(ip: string) {

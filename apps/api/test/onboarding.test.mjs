@@ -45,7 +45,7 @@ test('URL checks use a separate per-IP budget and can be retried after throttlin
       policies.push(policy);
       const current = (hits.get(identity) ?? 0) + 1;
       hits.set(identity, current);
-      return current > policy.max ? 60 : null;
+      return current > policy.max ? 60_000 : null;
     },
     auth,
   );

@@ -137,7 +137,7 @@ test('private chat mutation budgets apply to verified users before persistence',
     app,
     async (policy, userId) => {
       calls.push([policy.name, userId]);
-      return 30;
+      return 29_001;
     },
     auth,
   );
@@ -183,7 +183,7 @@ test('API_USER_RATE_LIMIT_MULTIPLIER scales the per-user chat budgets', async t 
     app,
     async policy => {
       budgets.push([policy.name, policy.max]);
-      return 30;
+      return 29_001;
     },
     auth,
   );
