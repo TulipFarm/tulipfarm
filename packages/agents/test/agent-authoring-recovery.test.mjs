@@ -34,6 +34,8 @@ const draftInput = () => ({
 const receipt = { draftId: 'draft', digest: 'd'.repeat(64), status: 'review-required' };
 const ready = 'The Records helper draft is ready for your review.';
 const stopped = "I couldn't draft this agent in chat. [Create it in the agent builder](/sample/agents/new) instead.";
+const invalidStopped =
+  "I couldn't draft this agent in chat. The setup I prepared had missing or invalid details twice, so nothing was changed. [Create it in the agent builder](/sample/agents/new) instead.";
 const options = { builtinSkills: ['agent-authoring'], agentBuilderUrl: '/sample/agents/new' };
 
 async function replay(t, replies, execute, { model = 'grok-4.3', messages, completion, ...extra } = {}) {
@@ -149,7 +151,7 @@ test('a prior-turn context receipt cannot fill missing draft guards', async t =>
       ],
     },
   );
-  assert.equal(result.text, stopped);
+  assert.equal(result.text, invalidStopped);
   assert.equal(executed, false);
 });
 
@@ -224,7 +226,7 @@ test('a second invalid draft stops with the approved builder link and logs no in
       return context;
     },
   );
-  assert.equal(result.text, stopped);
+  assert.equal(result.text, invalidStopped);
   assert.equal(requests.length, 3);
   const issues = records.flatMap(record => record['error.issues'] ?? []);
   assert.ok(issues.includes('input.definition.name:invalid_type'));
@@ -484,4 +486,23 @@ test('a necessary setup question after reading context ends without an unfinishe
     options,
   );
   assert.equal(result.text, question);
+});
+
+test('a draft tool loaded without the skill still gets one repair and the setup stop reply', async t => {
+  const input = { ...draftInput(), definition: { ...draftInput().definition, name: 7 } };
+  const { result, requests } = await replay(
+    t,
+    [
+      { calls: [use('agents.context')] },
+      { calls: [use('agents.draft', { agent: 'new', input })] },
+      { calls: [use('agents.draft', { agent: 'new', input })] },
+    ],
+    async call => {
+      assert.equal(call.tool, 'agents.context');
+      return context;
+    },
+    { builtinSkills: [], preloadedTools: ['agents.context', 'agents.draft'] },
+  );
+  assert.equal(result.text, invalidStopped);
+  assert.equal(requests.length, 3);
 });
