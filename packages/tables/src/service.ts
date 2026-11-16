@@ -1,13 +1,16 @@
 import { z } from 'zod';
 import {
   AccessDenied,
+  appActorSchema,
   canAccessTable,
   lockAuthorization,
   queryHumanContext,
   requireNoMcpDerived,
   resolveActor,
   requireTablePermission,
+  uuidSchema,
   type Actor,
+  type AppActor,
   type TablePermission,
 } from '@tulipfarm/access';
 import type { TableRuntime, TableTransaction } from './service-store.ts';
@@ -21,11 +24,23 @@ import {
   sortDirectionSchema,
   TableValidationError,
   validateRecord,
-  validateValue,
   valuesSchema,
+  type RecordQuery,
+  type TableField,
   type TableValue,
   type TableValues,
 } from './definition.ts';
+import { compileFilters, fieldColumn, scalarKinds } from './row-filters.ts';
+import { approvedDataView } from './data-view-store.ts';
+import {
+  dataViewParametersSchema,
+  dataViewScope,
+  projectValues,
+  requireViewQuery,
+  requireViewWrite,
+  type DataView,
+  type DataViewScope,
+} from './data-views.ts';
 import * as store from './store.ts';
 import {
   nameField,
@@ -59,7 +74,6 @@ async function countUpTo(tx: TableTransaction, source: string, parameters: unkno
 }
 
 const likePattern = (text: string) => `%${text.replace(/[\\%_]/g, character => `\\${character}`)}%`;
-const scalarKinds: readonly string[] = ['text', 'numeric', 'boolean', 'date', 'timestamp', 'single-select'];
 const sortCursorTupleSchema = z.tuple([fieldIdSchema, sortDirectionSchema, z.string().nullable(), recordIdSchema]);
 
 // The cursor carries the anchor's sort key so paging survives the anchor row being deleted.
@@ -73,6 +87,90 @@ function decodeCursor(cursor: string, sort: { fieldId: string; direction: 'asc' 
   if (decoded[0] !== sort.fieldId || decoded[1] !== sort.direction)
     throw new TableValidationError('Cursor does not match the sort');
   return decoded;
+}
+
+/**
+ * The rows a page may reach: `fields` bound filtering, search and sort, and `predicates` hold for every row. With
+ * `lockRows` the page locks the rows it selects, so none can change and leave `predicates` before its values are read.
+ */
+type RowScope = {
+  fields: readonly TableField[];
+  predicates: readonly string[];
+  parameters: readonly unknown[];
+  lockRows?: boolean;
+};
+
+async function queryPage(tx: TableTransaction, generation: store.Generation, query: RecordQuery, scope: RowScope) {
+  const parameters = [...scope.parameters];
+  const predicates = [...scope.predicates, ...compileFilters(scope.fields, query.filters, parameters)];
+  if (query.search) {
+    const textColumns = scope.fields.filter(field => field.kind === 'text').map(field => fieldColumn(field.id));
+    if (textColumns.length) parameters.push(likePattern(query.search));
+    predicates.push(
+      textColumns.length
+        ? `(${textColumns.map(column => `${column} ILIKE $${parameters.length}`).join(' OR ')})`
+        : 'FALSE',
+    );
+  }
+  const sortField = query.sort && scope.fields.find(field => field.id === query.sort?.fieldId);
+  if (query.sort && !sortField) throw new TableValidationError('Unknown sort field');
+  if (sortField && !scalarKinds.includes(sortField.kind)) throw new TableValidationError('Unsortable field');
+  const where = predicates.length ? predicates.join(' AND ') : 'TRUE';
+  const total = query.after
+    ? null
+    : await countUpTo(tx, `${table(tx, generation.physical_table)} WHERE ${where}`, parameters);
+  let after = 'TRUE',
+    order = 'id',
+    key = 'NULL';
+  if (query.sort && sortField) {
+    const column = fieldColumn(sortField.id),
+      direction = query.sort.direction;
+    order = `${column} ${direction.toUpperCase()} NULLS LAST, id`;
+    key = `${column}::text`;
+    if (query.after) {
+      const [, , value, anchor] = decodeCursor(query.after, query.sort);
+      parameters.push(anchor);
+      if (value === null) after = `(${column} IS NULL AND id>$${parameters.length})`;
+      else {
+        parameters.push(value);
+        after = `(${column} ${direction === 'asc' ? '>' : '<'} $${parameters.length} OR (${column}=$${parameters.length} AND id>$${parameters.length - 1}) OR ${column} IS NULL)`;
+      }
+    }
+  } else if (query.after) {
+    const anchor = recordIdSchema.safeParse(query.after);
+    if (!anchor.success) throw new TableValidationError('Cursor does not match the sort');
+    parameters.push(anchor.data);
+    after = `id>$${parameters.length}`;
+  }
+  parameters.push(query.limit + 1);
+  const rows = z
+    .array(z.object({ id: recordIdSchema, key: z.string().nullable() }))
+    .parse(
+      (
+        await tx.client.query(
+          `SELECT id,${key} AS key FROM ${table(tx, generation.physical_table)} WHERE ${where} AND ${after} ORDER BY ${order} LIMIT $${parameters.length}${scope.lockRows ? ' FOR SHARE' : ''}`,
+          parameters,
+        )
+      ).rows,
+    );
+  const page = rows.slice(0, query.limit),
+    last = page.at(-1);
+  const byId = new Map(
+    (page.length
+      ? await store.readRecords(tx, generation, { ids: page.map(row => row.id), limit: page.length })
+      : []
+    ).map(record => [record.id, record]),
+  );
+  const records = page.flatMap(row => byId.get(row.id) ?? []);
+  const nextCursor =
+    rows.length > query.limit && last
+      ? query.sort
+        ? Buffer.from(JSON.stringify([query.sort.fieldId, query.sort.direction, last.key, last.id])).toString(
+            'base64url',
+          )
+        : last.id
+      : null;
+  return { records, total, nextCursor };
 }
 
 const baseSchema = z.object({ tableId: tableIdSchema, revision: revisionSchema, recordId: recordIdSchema });
@@ -90,6 +188,17 @@ export const mutationSchema = z.discriminatedUnion('kind', [
     .strict(),
 ]);
 export type RecordMutation = z.infer<typeof mutationSchema>;
+const viewRequestSchema = z.strictObject({ viewId: uuidSchema, parameters: dataViewParametersSchema.default({}) });
+const viewMutationSchema = z.discriminatedUnion('kind', [
+  viewRequestSchema.extend({ kind: z.literal('create'), recordId: recordIdSchema, values: valuesSchema }),
+  viewRequestSchema.extend({
+    kind: z.literal('update'),
+    recordId: recordIdSchema,
+    expectedToken: z.uuid(),
+    values: valuesSchema,
+  }),
+  viewRequestSchema.extend({ kind: z.literal('delete'), recordId: recordIdSchema, expectedToken: z.uuid() }),
+]);
 const createBatchSchema = z.strictObject({
   tableId: tableIdSchema,
   revision: revisionSchema,
@@ -227,6 +336,23 @@ export function createTableService(
     if (mutation.kind !== 'restore') await permit(tx, actor, mutation.tableId, `table.row.${mutation.kind}`);
     if (actor.kind === 'agent' && !hooks.admitMutation) throw new AccessDenied();
     await hooks.admitMutation?.(tx, actor, mutation);
+    return writeRecord(
+      tx,
+      actor,
+      mutation,
+      (tableId, permission) => permit(tx, actor, tableId, permission),
+      reservedToken,
+    );
+  }
+
+  /** Writes one admitted mutation. `permitTable` authorizes restore and every linked table the write touches. */
+  async function writeRecord(
+    tx: TableTransaction,
+    actor: Actor,
+    mutation: RecordMutation,
+    permitTable: (tableId: string, permission: TablePermission) => Promise<void>,
+    reservedToken?: string,
+  ) {
     const initial = await store.activeGeneration(tx, mutation.tableId);
     if (initial.revision !== mutation.revision) throw new store.GenerationError('stale-generation');
     const before = await store.readRecord(tx, initial, mutation.recordId);
@@ -238,7 +364,7 @@ export function createTableService(
     if (mutation.kind !== 'create' && mutation.kind !== 'restore' && !before)
       throw new store.GenerationError('not-found');
     if (mutation.kind === 'restore')
-      await permit(tx, actor, mutation.tableId, before ? 'table.row.update' : 'table.row.create');
+      await permitTable(mutation.tableId, before ? 'table.row.update' : 'table.row.create');
     const next =
       mutation.kind === 'delete'
         ? null
@@ -251,7 +377,7 @@ export function createTableService(
     if (next) await addedFiles(tx, actor, before?.values ?? null, next);
     const endpoints = store.endpoints(mutation.tableId, mutation.recordId, before?.values ?? null, next);
     for (const table of [...new Set(endpoints.map(endpoint => endpoint.tableId))].sort()) {
-      if (table !== mutation.tableId) await permit(tx, actor, table, 'table.row.read');
+      if (table !== mutation.tableId) await permitTable(table, 'table.row.read');
     }
 
     await store.lockCatalogs(
@@ -359,101 +485,12 @@ export function createTableService(
       await store.lockCatalogs(tx, [request.tableId]);
       const generation = await store.readableGeneration(tx, request.tableId);
       if (generation.revision !== request.revision) throw new store.GenerationError('stale-generation');
-      const { query } = request,
-        parameters: unknown[] = [];
-      const columnOf = (id: string) => `"f_${id.replaceAll('-', '')}"`;
-      const predicates = query.filters.map(filter => {
-        const field = generation.definition.fields.find(field => field.id === filter.fieldId);
-        if (!field) throw new TableValidationError('Unknown filter field');
-        const column = columnOf(field.id);
-        if (filter.op === 'is-null' || filter.op === 'not-null')
-          return `${column} IS ${filter.op === 'not-null' ? 'NOT ' : ''}NULL`;
-        if (!('value' in filter) || !scalarKinds.includes(field.kind) || filter.value === null)
-          throw new TableValidationError('Use scalar values or explicit null filters');
-        if (field.kind === 'boolean' && filter.op !== 'eq' && filter.op !== 'ne')
-          throw new TableValidationError('Boolean ordering is unsupported');
-        if (field.kind === 'single-select' && filter.op !== 'eq' && filter.op !== 'ne')
-          throw new TableValidationError('Single-choice ordering is unsupported');
-        const value =
-          field.kind === 'single-select'
-            ? validateValue(field, { kind: field.kind, optionId: filter.value })
-            : validateValue(field, { kind: field.kind, value: filter.value });
-        if (!value || (!('value' in value) && !('optionId' in value)))
-          throw new TableValidationError('Expected scalar filter');
-        parameters.push('optionId' in value ? value.optionId : value.value);
-        const operators = { eq: '=', ne: '<>', lt: '<', lte: '<=', gt: '>', gte: '>=' };
-        return `${column} ${operators[filter.op]} $${parameters.length}`;
+      const page = await queryPage(tx, generation, request.query, {
+        fields: generation.definition.fields,
+        predicates: [],
+        parameters: [],
       });
-      if (query.search) {
-        const textColumns = generation.definition.fields
-          .filter(field => field.kind === 'text')
-          .map(field => columnOf(field.id));
-        if (textColumns.length) parameters.push(likePattern(query.search));
-        predicates.push(
-          textColumns.length
-            ? `(${textColumns.map(column => `${column} ILIKE $${parameters.length}`).join(' OR ')})`
-            : 'FALSE',
-        );
-      }
-      const sortField = query.sort && generation.definition.fields.find(field => field.id === query.sort?.fieldId);
-      if (query.sort && !sortField) throw new TableValidationError('Unknown sort field');
-      if (sortField && !scalarKinds.includes(sortField.kind)) throw new TableValidationError('Unsortable field');
-      const where = predicates.length ? predicates.join(' AND ') : 'TRUE';
-      const total = query.after
-        ? null
-        : await countUpTo(tx, `${table(tx, generation.physical_table)} WHERE ${where}`, parameters);
-      let after = 'TRUE',
-        order = 'id',
-        key = 'NULL';
-      if (query.sort && sortField) {
-        const column = columnOf(sortField.id),
-          direction = query.sort.direction;
-        order = `${column} ${direction.toUpperCase()} NULLS LAST, id`;
-        key = `${column}::text`;
-        if (query.after) {
-          const [, , value, anchor] = decodeCursor(query.after, query.sort);
-          parameters.push(anchor);
-          if (value === null) after = `(${column} IS NULL AND id>$${parameters.length})`;
-          else {
-            parameters.push(value);
-            after = `(${column} ${direction === 'asc' ? '>' : '<'} $${parameters.length} OR (${column}=$${parameters.length} AND id>$${parameters.length - 1}) OR ${column} IS NULL)`;
-          }
-        }
-      } else if (query.after) {
-        const anchor = recordIdSchema.safeParse(query.after);
-        if (!anchor.success) throw new TableValidationError('Cursor does not match the sort');
-        parameters.push(anchor.data);
-        after = `id>$${parameters.length}`;
-      }
-      parameters.push(query.limit + 1);
-      const rows = z
-        .array(z.object({ id: recordIdSchema, key: z.string().nullable() }))
-        .parse(
-          (
-            await tx.client.query(
-              `SELECT id,${key} AS key FROM ${table(tx, generation.physical_table)} WHERE ${where} AND ${after} ORDER BY ${order} LIMIT $${parameters.length}`,
-              parameters,
-            )
-          ).rows,
-        );
-      const page = rows.slice(0, query.limit),
-        last = page.at(-1);
-      const byId = new Map(
-        (page.length
-          ? await store.readRecords(tx, generation, { ids: page.map(row => row.id), limit: page.length })
-          : []
-        ).map(record => [record.id, record]),
-      );
-      const records = page.flatMap(row => byId.get(row.id) ?? []);
-      const nextCursor =
-        rows.length > query.limit && last
-          ? query.sort
-            ? Buffer.from(JSON.stringify([query.sort.fieldId, query.sort.direction, last.key, last.id])).toString(
-                'base64url',
-              )
-            : last.id
-          : null;
-      return { records: await marked(tx, actor, records), total, nextCursor };
+      return { ...page, records: await marked(tx, actor, page.records) };
     });
   }
 
@@ -1020,6 +1057,103 @@ export function createTableService(
     });
   }
 
+  /** Runs `action` for an app over one view approved for its release. The app reaches rows through nothing else. */
+  async function throughView<T>(
+    workspaceId: string,
+    principal: AppActor,
+    viewId: string,
+    action: (tx: TableTransaction, actor: AppActor, view: DataView, generation: store.Generation) => Promise<T>,
+  ) {
+    const actor = appActorSchema.parse(principal);
+    return runtime.transaction(workspaceId, compatibility, async tx => {
+      await lockAuthorization(tx);
+      const view = await approvedDataView(tx, actor, viewId);
+      await store.lockCatalogs(tx, [view.tableId]);
+      const generation = await store.activeGeneration(tx, view.tableId).catch(error => {
+        if (error instanceof store.GenerationError) throw new AccessDenied();
+        throw error;
+      });
+      return action(tx, actor, view, generation);
+    });
+  }
+
+  async function inView(
+    tx: TableTransaction,
+    generation: store.Generation,
+    scope: DataViewScope,
+    recordId: string,
+    { token, lock = false }: { token?: string; lock?: boolean } = {},
+  ) {
+    const parameters = [...scope.parameters, recordId, ...(token ? [token] : [])];
+    const conditions = [
+      ...scope.predicates,
+      `id=$${scope.parameters.length + 1}`,
+      ...(token ? [`token=$${scope.parameters.length + 2}`] : []),
+    ];
+    return Boolean(
+      (
+        await tx.client.query(
+          `SELECT 1 FROM ${table(tx, generation.physical_table)} WHERE ${conditions.join(' AND ')}${lock ? ' FOR SHARE' : ''}`,
+          parameters,
+        )
+      ).rowCount,
+    );
+  }
+
+  const viewRecord = (scope: DataViewScope, record: { id: string; token: string; values: TableValues }) => ({
+    id: record.id,
+    token: record.token,
+    values: projectValues(scope, record.values),
+  });
+
+  async function readThroughView(workspaceId: string, actor: AppActor, input: unknown) {
+    const request = viewRequestSchema.extend({ recordId: recordIdSchema }).parse(input);
+    return throughView(workspaceId, actor, request.viewId, async (tx, _actor, view, generation) => {
+      const scope = dataViewScope(view, generation.definition, 'read', request.parameters);
+      if (!(await inView(tx, generation, scope, request.recordId, { lock: true }))) return null;
+      const record = await store.readRecord(tx, generation, request.recordId);
+      return record && viewRecord(scope, record);
+    });
+  }
+
+  async function listThroughView(workspaceId: string, actor: AppActor, input: unknown) {
+    const request = viewRequestSchema.extend({ query: recordQuerySchema }).parse(input);
+    return throughView(workspaceId, actor, request.viewId, async (tx, _actor, view, generation) => {
+      const scope = dataViewScope(view, generation.definition, 'read', request.parameters);
+      requireViewQuery(scope, request.query);
+      const page = await queryPage(tx, generation, request.query, { ...scope, lockRows: true });
+      return { ...page, records: page.records.map(record => viewRecord(scope, record)) };
+    });
+  }
+
+  /** Creates, updates or deletes one row through a view. A row the write would move outside the view is refused. */
+  async function mutateThroughView(workspaceId: string, actor: AppActor, input: unknown) {
+    const request = viewMutationSchema.parse(input);
+    return throughView(workspaceId, actor, request.viewId, async (tx, actor, view, generation) => {
+      const scope = dataViewScope(view, generation.definition, request.kind, request.parameters);
+      if (request.kind !== 'delete') requireViewWrite(scope, request.values);
+      if (
+        request.kind !== 'create' &&
+        !(await inView(tx, generation, scope, request.recordId, { token: request.expectedToken }))
+      )
+        throw new AccessDenied();
+      if (request.kind === 'delete') {
+        const before = await store.readRecord(tx, generation, request.recordId);
+        if (Object.values(before?.values ?? {}).some(value => value?.kind === 'relationship' && value.recordIds.length))
+          throw new AccessDenied();
+      }
+      const { viewId: _viewId, parameters: _parameters, ...write } = request;
+      const mutation = mutationSchema.parse({ ...write, tableId: view.tableId, revision: generation.revision });
+      // A view lists no relationship field, so an update keeps every link and touches no other table.
+      const result = await writeRecord(tx, actor, mutation, async () => {
+        if (mutation.kind !== 'update') throw new AccessDenied();
+      });
+      if (!result.values) return null;
+      if (!(await inView(tx, generation, scope, result.id, { token: result.token }))) throw new AccessDenied();
+      return viewRecord(scope, { ...result, values: result.values });
+    });
+  }
+
   return {
     read,
     list,
@@ -1038,5 +1172,8 @@ export function createTableService(
     validateQuery,
     query,
     references,
+    readThroughView,
+    listThroughView,
+    mutateThroughView,
   };
 }
