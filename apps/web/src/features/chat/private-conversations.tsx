@@ -1036,6 +1036,8 @@ function ConversationDetail({
         ? activity.label
         : null;
   const activityLabel = useRotatingLabel(baseActivityLabel);
+  // A reply resumed by an answer continues below the question, so its progress shows there, not above it.
+  const continuesBelow = !!turn && replyContinuesBelow(data?.messages ?? [], turn.id);
   const empty = data?.messages.length === 0 && !pending && incomingTurns.length === 0 && !packages.active;
   // Typing re-renders this component, so saved entries get stable props and skip rendering again.
   const commands: { retryHandoff: (compactionId: string) => void; control: ControlTurn } = {
@@ -1360,8 +1362,16 @@ function ConversationDetail({
                                   key="activity"
                                   variant="transcript"
                                   items={toolActivityItems(message.tools, { admin })}
-                                  active={thinking && !read.uncertain && !!turn && message.turn?.id === turn.id}
-                                  activityLabel={message.turn?.id === turn?.id ? activityLabel : undefined}
+                                  active={
+                                    thinking &&
+                                    !read.uncertain &&
+                                    !!turn &&
+                                    message.turn?.id === turn.id &&
+                                    !continuesBelow
+                                  }
+                                  activityLabel={
+                                    message.turn?.id === turn?.id && !continuesBelow ? activityLabel : undefined
+                                  }
                                   onToggle={() => inspectActivity(thinking && !!turn && message.turn?.id === turn.id)}
                                 />
                                 {message.turn?.status === 'waiting' &&
@@ -1548,6 +1558,9 @@ function ConversationDetail({
                           thinking &&
                           !read.uncertain && (
                             <li aria-busy="true" className="space-y-2">
+                              {continuesBelow && (
+                                <ToolActivity variant="transcript" items={[]} active activityLabel={activityLabel} />
+                              )}
                               {narration && <StepNarration text={narration} />}
                               {slowTurn && (
                                 <div className="flex flex-wrap items-center gap-3">
@@ -1871,6 +1884,12 @@ function GooglePrivateOnly({
 }
 
 // The answer already shows on its request card, so a message holding only that answer adds nothing.
+/** Whether a question the reply asked is shown after the message that owns the reply. */
+export function replyContinuesBelow(messages: ConversationMessage[], turnId: string) {
+  const index = messages.findIndex(message => message.turn?.id === turnId);
+  return index >= 0 && messages.slice(index + 1).some(message => message.parts.some(part => part.kind === 'request'));
+}
+
 function answerOnly(message: ConversationMessage) {
   return (
     !message.turn &&
