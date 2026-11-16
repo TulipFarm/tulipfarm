@@ -276,54 +276,45 @@ test('workspace MCP HTTP uses real restricted domain storage and never dispatche
       );
       remote.resetTools();
     });
-    await t.test(
-      'the full review payload for a 200-tool catalog saves one enabled tool and rejects 101 enabled',
-      async () => {
-        remote.setTools(
-          Array.from({ length: 200 }, (_, index) => ({
-            name: `tool-${String(index).padStart(3, '0')}`,
-            description: 'Read a record',
-            inputSchema: { type: 'object', additionalProperties: false },
-          })),
-        );
-        const created = await request(
-          {
-            method: 'POST',
-            url: `${base}/integrations`,
-            payload: {
-              requestId: randomUUID(),
-              name: 'Large server',
-              ownership: 'personal',
-              endpoint: 'https://mcp.example.com/large',
-              auth: { kind: 'none' },
-            },
+    await t.test('the full review payload for a 200-tool catalog can turn every tool on', async () => {
+      remote.setTools(
+        Array.from({ length: 200 }, (_, index) => ({
+          name: `tool-${String(index).padStart(3, '0')}`,
+          description: 'Read a record',
+          inputSchema: { type: 'object', additionalProperties: false },
+        })),
+      );
+      const created = await request(
+        {
+          method: 'POST',
+          url: `${base}/integrations`,
+          payload: {
+            requestId: randomUUID(),
+            name: 'Large server',
+            ownership: 'personal',
+            endpoint: 'https://mcp.example.com/large',
+            auth: { kind: 'none' },
           },
-          200,
-        );
-        remote.resetTools();
-        const item = `${base}/integrations/${created.integration.id}`;
-        const detail = await request({ url: item }, 200);
-        assert.equal(detail.tools.length, 200);
-        const payload = enabled => ({
-          requestId: randomUUID(),
-          expectedVersion: detail.integration.version,
-          tools: detail.tools.map((tool, index) => ({
-            name: tool.name,
-            revision: tool.revision,
-            enabled: index < enabled,
-            standingException: false,
-          })),
-        });
-        assert.deepEqual(await request({ method: 'PUT', url: `${item}/tools`, payload: payload(101) }, 409), {
-          error: 'mcp-limit',
-        });
-        const reviewed = await request({ method: 'PUT', url: `${item}/tools`, payload: payload(1) }, 200);
-        assert.deepEqual(
-          reviewed.tools.filter(tool => tool.enabled).map(tool => tool.name),
-          ['tool-000'],
-        );
-      },
-    );
+        },
+        200,
+      );
+      remote.resetTools();
+      const item = `${base}/integrations/${created.integration.id}`;
+      const detail = await request({ url: item }, 200);
+      assert.equal(detail.tools.length, 200);
+      const payload = enabled => ({
+        requestId: randomUUID(),
+        expectedVersion: detail.integration.version,
+        tools: detail.tools.map((tool, index) => ({
+          name: tool.name,
+          revision: tool.revision,
+          enabled: index < enabled,
+          standingException: false,
+        })),
+      });
+      const reviewed = await request({ method: 'PUT', url: `${item}/tools`, payload: payload(200) }, 200);
+      assert.equal(reviewed.tools.filter(tool => tool.enabled).length, 200);
+    });
     await t.test('another member and an administrator cannot read or change personal metadata', async () => {
       for (const cookie of ['other', 'admin']) {
         const deniedHeaders = { origin, cookie };
@@ -362,11 +353,11 @@ test('workspace MCP HTTP uses real restricted domain storage and never dispatche
           name: tool.name,
           revision: tool.revision,
           enabled: true,
-          standingException: true,
+          standingException: tool.name !== 'write',
         })),
       };
       const reviewed = await request({ method: 'PUT', url: `${item}/tools`, payload }, 200);
-      assert.ok(reviewed.tools.every(tool => tool.enabled && tool.standingException));
+      assert.ok(reviewed.tools.every(tool => tool.enabled && tool.standingException === (tool.name !== 'write')));
       assert.equal(reviewed.integration.status, 'ready');
       await request({ method: 'PUT', url: `${item}/tools`, payload: { ...payload, requestId: randomUUID() } }, 409);
       integration = reviewed.integration;
@@ -376,7 +367,7 @@ test('workspace MCP HTTP uses real restricted domain storage and never dispatche
       const item = `${base}/actions/${proposed.id}`;
       const view = await request({ url: item }, 200);
       assert.equal(view.visibility, 'full');
-      assert.equal(view.exact.outboundConsentRequired, true);
+      assert.equal(view.exact.outboundConsentRequired, false);
       assert.deepEqual(view.exact.arguments, { text: 'private input' });
       await request(
         {

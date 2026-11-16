@@ -132,7 +132,12 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       workspace.id,
       actor,
       integration.id,
-      tools.map(row => ({ name: row.name, revision: row.discovered_revision, enabled: true, standingException: true })),
+      tools.map(row => ({
+        name: row.name,
+        revision: row.discovered_revision,
+        enabled: true,
+        standingException: row.name !== 'write',
+      })),
     );
     if (ownership === 'personal')
       await service.approveServerDescriptor(workspace.id, actor, integration.id, integration.serverIdentity);
@@ -230,7 +235,7 @@ for (const orphaned of [false, true])
       assert.equal(modelCalls, 1);
       const actionId = (await f.db.platform.query(`SELECT id FROM ${f.table('tf_mcp_actions')}`)).rows[0].id;
       let action = await f.domain().action(w.id, actor, actionId);
-      assert.equal(action.requiresConsent, true);
+      assert.equal(action.requiresConsent, false);
       assert.equal(action.status, 'awaiting-approval');
       assert.deepEqual(action.arguments, { text: 'Exact private payload' });
       await assert.rejects(
