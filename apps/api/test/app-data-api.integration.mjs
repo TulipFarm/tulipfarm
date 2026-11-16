@@ -3,6 +3,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import test from 'node:test';
 import Fastify from 'fastify';
 import { closeRequestHandle, mintRequestHandle, requestHandleKey } from '@tulipfarm/apps/store';
+import { registerExtension, resetExtensions } from '@tulipfarm/extensions';
 import { createAbuseLimiter } from '../src/abuse.ts';
 import { registerAppData } from '../src/app-data.ts';
 import { authConfig } from '../src/auth.ts';
@@ -314,6 +315,97 @@ test('an app server reaches an approved view only while a visitor request is ope
       assert.deepEqual(refused.body, { error: 'temporarily-unavailable' });
       assert.equal(refused.headers.get('retry-after'), '1');
     }
+  });
+
+  const until = async ready => {
+    while (!ready()) await new Promise(resolve => setTimeout(resolve, 5));
+  };
+  const flagProvider = async (t, isEnabled) => {
+    let evaluations = 0;
+    t.after(resetExtensions);
+    await registerExtension(
+      {
+        name: 'app-data-flags',
+        register(slots) {
+          slots.flagProvider({
+            isEnabled: async (flag, subject) => {
+              assert.deepEqual([flag, subject.distinctId], ['app-hosting', `workspace:${workspace.id}`]);
+              evaluations++;
+              return isEnabled();
+            },
+          });
+        },
+      },
+      { app: 'api', env: {} },
+    );
+    return () => evaluations;
+  };
+
+  await t.test('a slow flag provider holds no platform lookup slot', async t => {
+    const other = await publishApp('Kiosk');
+    const otherView = (await approvedView(other.appId)).viewId;
+    const otherHandle = await open(other.live, other.appId);
+    const flood = await open();
+    let release;
+    const gate = new Promise(resolve => (release = resolve));
+    const evaluations = await flagProvider(t, () => gate.then(() => true));
+    let looked = 0;
+    const counting = { query: (...args) => pool.query(...args).finally(() => looked++) };
+    const server = await serve(undefined, counting);
+    let answered = 0;
+    const calls = [];
+    const start = async request => {
+      const before = looked + answered;
+      calls.push(request().finally(() => answered++));
+      await until(() => looked + answered > before);
+    };
+    for (let index = 0; index < 10; index++) await start(() => call(flood, 'list', list, nat, viewId, server));
+    await start(() => call(otherHandle, 'list', list, nat, otherView, server));
+    release();
+    assert.deepEqual(
+      (await Promise.all(calls)).map(response => response.status),
+      [200, 200, 200, 200, 200, 200, 200, 200, 200, 200, 200],
+      'every call waits for the flag without holding a lookup slot',
+    );
+    assert.equal(evaluations(), 1, 'one evaluation for the workspace');
+  });
+
+  await t.test('the flag is evaluated once per workspace every 30 seconds', async t => {
+    let enabled = false;
+    const evaluations = await flagProvider(t, () => enabled);
+    const server = await serve();
+    const busy = await open();
+    t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
+    const statuses = [];
+    const three = async () => {
+      for (let index = 0; index < 3; index++)
+        statuses.push((await call(busy, 'list', list, nat, viewId, server)).status);
+    };
+    await three();
+    enabled = true;
+    await three();
+    t.mock.timers.tick(30_000);
+    await three();
+    assert.deepEqual(statuses, [403, 403, 403, 403, 403, 403, 200, 200, 200], 'turning the flag on takes 30 s');
+    assert.equal(evaluations(), 2);
+  });
+
+  await t.test('a failing flag provider denies the call and is asked again on the next', async t => {
+    let failing = true;
+    const evaluations = await flagProvider(t, () => {
+      if (failing) throw new Error('flag provider unavailable');
+      return true;
+    });
+    delete process.env.FEATURE_FLAG_APP_HOSTING;
+    t.after(() => (process.env.FEATURE_FLAG_APP_HOSTING = 'true'));
+    const server = await serve();
+    const busy = await open();
+    const statuses = [];
+    for (let index = 0; index < 2; index++) statuses.push((await call(busy, 'list', list, nat, viewId, server)).status);
+    failing = false;
+    statuses.push((await call(busy, 'list', list, nat, viewId, server)).status);
+    assert.deepEqual(statuses, [403, 403, 200]);
+    assert.equal(evaluations(), 3, 'a failed evaluation is not remembered');
   });
 
   await t.test("an app's refused calls spend only that app's budget", async () => {
