@@ -352,6 +352,18 @@ test('members create, share, approve and revoke an app data view over HTTP', { t
     await assert.rejects(read(live), AccessDenied, 'a host still on the earlier release is refused');
   });
 
+  await t.test('an editor pause stops the app reading until it resumes', async () => {
+    assert.equal((await http(editor, 'POST', `/${appId}/pause`, { requestId: randomUUID() })).status, 200);
+    await assert.rejects(read(second), AccessDenied);
+    assert.deepEqual((await http(lead, 'GET', views)).body.views[0].blockers, ['app-not-serving']);
+    assert.equal((await http(editor, 'POST', `/${appId}/resume`, { requestId: randomUUID() })).status, 200);
+    assert.deepEqual((await http(lead, 'GET', views)).body.views[0].blockers, []);
+    assert.deepEqual(
+      (await read(second)).records.map(record => record.values),
+      hello,
+    );
+  });
+
   await t.test('revoking stops the next app request on every release', async () => {
     assert.equal((await http(reader, 'DELETE', share())).status, 403);
     assert.equal((await http(editor, 'DELETE', share())).status, 204);
