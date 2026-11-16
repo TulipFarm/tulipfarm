@@ -143,10 +143,14 @@ try {
       await page.getByRole('combobox', { name: 'Model: Grok 4.3 Fast', exact: true }).click();
       saveStatus = 503;
       await modelOption(page, 'Claude Haiku 4.5').click();
-      await page.getByRole('button', { name: 'Retry saving default', exact: true }).waitFor();
+      await page.getByText('Saving your default model…', { exact: true }).waitFor({ state: 'hidden' });
+      assert.equal(await page.getByText(/Could not save your default model/).count(), 0);
+      assert.equal(await page.getByRole('button', { name: 'Retry saving default', exact: true }).count(), 0);
+      await page.getByRole('combobox', { name: 'Model: Claude Haiku 4.5', exact: true }).waitFor();
       assert.equal(preferences.get('ada'), 'grok-fast');
       saveStatus = 200;
-      await page.getByRole('button', { name: 'Retry saving default', exact: true }).click();
+      await page.getByRole('combobox', { name: 'Model: Claude Haiku 4.5', exact: true }).click();
+      await modelOption(page, 'Claude Haiku 4.5').click();
       await page.getByText('Saving your default model…', { exact: true }).waitFor({ state: 'hidden' });
       assert.equal(preferences.get('ada'), 'claude-haiku');
       await page.reload();
