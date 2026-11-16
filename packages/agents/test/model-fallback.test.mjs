@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { inferSpecialist, inferWithTools } from '../dist/inference.js';
+import { PlanSessionError, planSessionsForTest } from '../dist/plan-sessions.js';
 import { completionReply, isCompletionRequest, nativeReply, nativeRoutes } from './native-fixture.mjs';
 
 const messages = [{ role: 'user', text: 'PRIVATE PROMPT hey' }];
@@ -61,7 +62,11 @@ test('an eligible failure before any output answers once on the fallback, which 
     anthropic: () => Response.json(nativeReply('anthropic', { text: 'Hello from the fallback' })),
   });
   const answer = await inferWithTools(primary, messages, noTools, meter, false, null, { fallback });
-  assert.deepEqual(answer, { text: 'Hello from the fallback', fallback: 'claude-fallback' });
+  assert.deepEqual(answer, {
+    text: 'Hello from the fallback',
+    fallback: 'claude-fallback',
+    fallbackReason: 'model-unavailable',
+  });
   assert.equal(calls[0], 'azure');
   assert.equal(calls.filter(call => call === 'azure').length, 1, 'the failed model is not called again');
   assert.equal(metered[0].provider, 'azure');
@@ -252,7 +257,11 @@ test('a rate limit moves to the fallback at once unless its Retry-After is short
   };
   for (const retryAfter of [null, '60']) {
     const { answer, calls } = await run(retryAfter);
-    assert.deepEqual(answer, { text: 'Hello from the fallback', fallback: 'claude-fallback' });
+    assert.deepEqual(answer, {
+      text: 'Hello from the fallback',
+      fallback: 'claude-fallback',
+      fallbackReason: 'rate-limit',
+    });
     assert.equal(calls.filter(call => call === 'azure').length, 1);
   }
   const { answer, calls } = await run('0.05');
@@ -324,4 +333,119 @@ test('a sub-agent retries a short Retry-After on its own model, and without a fa
   const unconfigured = harness(t, { azure: rateLimited(null), anthropic: () => assert.fail('No fallback') });
   await assert.rejects(runHelper(unconfigured.meter, undefined), /rate/);
   assert.equal(fallbackLogs(records).at(-1).model_fallback, 'not_configured');
+});
+
+const planRoute = {
+  provider: 'claude',
+  endpoint: 'https://api.anthropic.com/',
+  model: 'claude-haiku-4-5',
+  accessToken: 'synthetic-token',
+  timeoutMs: 300,
+};
+const planFallback = { route: primary, label: 'grok-fallback' };
+const hang = () => new Promise(() => {});
+
+/** Plays each Claude plan session's steps from `sessions`, one array per opened session, and counts them. */
+function planSessions(t, sessions) {
+  const opened = [];
+  planSessionsForTest.useVendors(async () => {
+    const steps = sessions.shift();
+    assert.ok(steps, 'no more plan sessions expected');
+    const session = { closed: false };
+    opened.push(session);
+    const next = async (_value, onText) => {
+      const step = steps.shift();
+      if (step instanceof Error) throw step;
+      if (typeof step === 'function') return step();
+      for (const words of step.words ?? []) onText?.(words);
+      if (step.failAfterWords) throw step.failAfterWords;
+      return { usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0 }, text: step.words.join(''), ...step };
+    };
+    return { send: next, resume: next, close: () => (session.closed = true) };
+  });
+  t.after(() => {
+    planSessionsForTest.useVendors();
+    planSessionsForTest.sessions.clear();
+  });
+  return opened;
+}
+
+const planFails = (code, status = 502) => new PlanSessionError(status, code, 'Plan failed. PRIVATE PROMPT hey');
+const retryLogs = records => records.filter(record => record.operation === 'chat.model-retry');
+
+for (const [name, failure] of [
+  ['a timed out', hang],
+  ['a failed', planFails('plan_unavailable')],
+])
+  test(`${name} plan step is retried once on a fresh session of the same plan before any fallback`, async t => {
+    const records = logs(t);
+    const opened = planSessions(t, [[failure], [{ kind: 'answer', words: ['Hello from ', 'the plan'] }]]);
+    const { calls, meter } = harness(t, { azure: () => assert.fail('the fallback is not asked') });
+    const answer = await inferWithTools(planRoute, messages, noTools, meter, false, null, { fallback: planFallback });
+    assert.equal(answer.text, 'Hello from the plan');
+    assert.equal(answer.fallback, undefined);
+    assert.equal(opened.length, 2, 'the retry opens a new session');
+    assert.equal(opened[0].closed, true, 'the failed session is closed');
+    assert.deepEqual(calls, []);
+    const [retry] = retryLogs(records);
+    assert.equal(retry.outcome, 'recovered');
+    assert.equal(retry['gen_ai.provider.name'], 'claude');
+    assert.equal(fallbackLogs(records).length, 0);
+    assert.ok(!JSON.stringify(records).includes('PRIVATE PROMPT'), 'no prompt content is logged');
+  });
+
+test('a plan step that fails again after its retry answers on the fallback with the reason', async t => {
+  const records = logs(t);
+  const opened = planSessions(t, [[hang], [hang]]);
+  const { calls, meter } = harness(t, {
+    azure: () => Response.json(nativeReply('azure', { text: 'Hello from the fallback' })),
+  });
+  const answer = await inferWithTools(planRoute, messages, noTools, meter, false, null, { fallback: planFallback });
+  assert.deepEqual(answer, { text: 'Hello from the fallback', fallback: 'grok-fallback', fallbackReason: 'timeout' });
+  assert.equal(opened.length, 2);
+  assert.equal(calls[0], 'azure');
+  assert.equal(retryLogs(records)[0].outcome, 'failed');
+  const [decision] = fallbackLogs(records);
+  assert.equal(decision.model_fallback, 'used');
+  assert.equal(decision['fallback.reason'], 'timeout');
+});
+
+for (const [name, error, reason] of [
+  ['a used-up plan', planFails('plan_usage_limit', 429), 'quota'],
+  ['a model the plan does not offer', planFails('plan_not_eligible', 403), 'model-unavailable'],
+])
+  test(`${name} goes to the fallback without a retry`, async t => {
+    const records = logs(t);
+    const opened = planSessions(t, [[error]]);
+    const { meter } = harness(t, {
+      azure: () => Response.json(nativeReply('azure', { text: 'Hello from the fallback' })),
+    });
+    const answer = await inferWithTools(planRoute, messages, noTools, meter, false, null, { fallback: planFallback });
+    assert.equal(answer.fallback, 'grok-fallback');
+    assert.equal(answer.fallbackReason, reason);
+    assert.equal(opened.length, 1);
+    assert.equal(retryLogs(records).length, 0);
+    assert.equal(fallbackLogs(records)[0]['fallback.reason'], reason);
+  });
+
+test('a plan step that fails after streaming words skips the quiet retry and restarts the reply in view', async t => {
+  const records = logs(t);
+  planSessions(t, [
+    [{ kind: 'answer', words: ['Hello '], failAfterWords: planFails('plan_unavailable') }],
+    [{ kind: 'answer', words: ['Hello again'] }],
+  ]);
+  const { calls, meter } = harness(t, { azure: () => assert.fail('the fallback is not asked') });
+  const streamed = [];
+  const answer = await inferWithTools(planRoute, messages, noTools, meter, false, null, {
+    fallback: planFallback,
+    answerText: update => streamed.push(update.text),
+  });
+  assert.equal(answer.text, 'Hello again');
+  assert.deepEqual(streamed.slice(0, 2), ['Hello ', ''], 'the shown words are cleared before the reply restarts');
+  assert.deepEqual(calls, []);
+  assert.equal(fallbackLogs(records)[0].model_fallback, 'not_eligible');
+  assert.ok(
+    retryLogs(records).every(record => record['gen_ai.provider.name'] === undefined),
+    'only the in-view restart ran, not the quiet plan retry',
+  );
 });

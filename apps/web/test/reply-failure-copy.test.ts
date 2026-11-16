@@ -123,6 +123,65 @@ test('a completed reply answered by the fallback names the model that answered',
   assert.equal(fallbackNote('completed', null), null);
 });
 
+test('a fallback reply says why the chat model could not answer, naming whose plan ran out', () => {
+  const name = (id: string) =>
+    ({
+      'grok-fast': 'Grok Fast',
+      kimi: 'Kimi',
+      'copilot-claude-sonnet-5': 'Claude Sonnet 5',
+      'chatgpt-sol': 'GPT Sol',
+    })[id] ?? id;
+  const note = (code: string, chat: string) =>
+    fallbackNote('completed', `model-fallback:grok-fast:${code}`, chat, name);
+  const copilot = 'copilot-claude-sonnet-5';
+  assert.equal(note('quota:own', copilot), 'Your GitHub Copilot premium quota is used up, so Grok Fast answered.');
+  assert.equal(note('quota', copilot), "The GitHub Copilot plan's premium quota is used up, so Grok Fast answered.");
+  assert.equal(
+    note('quota:own', 'claude-plan-opus'),
+    "Your Claude plan's usage limit is reached, so Grok Fast answered.",
+  );
+  assert.equal(note('quota', 'claude-plan-opus'), "The Claude plan's usage limit is reached, so Grok Fast answered.");
+  assert.equal(note('quota', 'chatgpt-sol'), "The ChatGPT plan's usage limit is reached, so Grok Fast answered.");
+  assert.equal(
+    note('rate-limit:own', copilot),
+    'GitHub Copilot is limiting requests right now, so Grok Fast answered.',
+  );
+  assert.equal(note('outage', 'claude-plan-opus'), "Claude isn't responding right now, so Grok Fast answered.");
+  assert.equal(note('timeout', 'chatgpt-sol'), 'ChatGPT took too long to respond, so Grok Fast answered.');
+  assert.equal(
+    note('model-unavailable:own', copilot),
+    "Claude Sonnet 5 isn't available on your GitHub Copilot plan, so Grok Fast answered.",
+  );
+  assert.equal(
+    note('model-unavailable', 'chatgpt-sol'),
+    "GPT Sol isn't available on the ChatGPT plan, so Grok Fast answered.",
+  );
+  assert.equal(note('sign-in:own', copilot), 'GitHub Copilot needs to be reconnected, so Grok Fast answered.');
+  assert.equal(note('kimi', copilot), 'No GitHub Copilot plan you can use could answer, so Grok Fast did.');
+
+  assert.equal(note('quota', 'kimi'), 'Kimi has no quota left with its provider, so Grok Fast answered.');
+  assert.equal(note('rate-limit', 'kimi'), "Kimi's provider is limiting requests right now, so Grok Fast answered.");
+  assert.equal(note('outage', 'kimi'), "Kimi isn't responding right now, so Grok Fast answered.");
+  assert.equal(note('timeout', 'kimi'), 'Kimi took too long to respond, so Grok Fast answered.');
+  assert.equal(note('model-unavailable', 'kimi'), "Kimi isn't available right now, so Grok Fast answered.");
+  assert.equal(note('sign-in', 'kimi'), "Kimi's provider rejected TulipFarm's credentials, so Grok Fast answered.");
+  assert.equal(
+    fallbackNote('completed', 'model-fallback:grok-fast:timeout', undefined, name),
+    'The chat model took too long to respond, so Grok Fast answered.',
+  );
+});
+
+test('an older fallback code without a reason keeps the general note and neutral plan wording', () => {
+  assert.equal(
+    fallbackNote('completed', 'model-fallback:grok-fast', 'copilot-claude-sonnet-5'),
+    'No GitHub Copilot plan you can use could answer, so grok-fast did.',
+  );
+  assert.equal(
+    fallbackNote('completed', 'model-fallback:grok-fast:something-new', 'kimi'),
+    'Answered by grok-fast because kimi was unavailable.',
+  );
+});
+
 test('a failed reply that saved a table proposal says only its text is missing', () => {
   assert.equal(
     proposalKeptNote([{}, { tableProposal: true }]),

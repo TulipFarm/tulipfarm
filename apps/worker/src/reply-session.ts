@@ -26,7 +26,7 @@ import {
 } from '@tulipfarm/conversations/source-access';
 import { turnRequester } from '@tulipfarm/conversations/turn-requester';
 import { recordUsage } from '@tulipfarm/extensions';
-import { log, observeChatDetail } from '@tulipfarm/observability';
+import { billingSource, errorSite, log, observeChatDetail } from '@tulipfarm/observability';
 import { canonicalJson } from '@tulipfarm/tables/canonical';
 import {
   CreditAttemptAlreadyDispatched,
@@ -444,15 +444,19 @@ export async function beginReplySession(input: {
         return;
       }
       const { kind, ...tokens } = usage;
-      const cost = calculateUsageCost({
-        modelId: model.price.modelId,
-        pricingRevision: model.price.pricingRevision,
-        rates: model.price.rates,
-        maxInputTokens,
-        maxOutputTokens: attempt.maxOutputTokens,
-        usage: { kind, tokens },
-        date,
-      });
+      const cost = pricedUsage(
+        {
+          modelId: model.price.modelId,
+          pricingRevision: model.price.pricingRevision,
+          rates: model.price.rates,
+          maxInputTokens,
+          maxOutputTokens: attempt.maxOutputTokens,
+          usage: { kind, tokens },
+          date,
+        },
+        needCost,
+        attempt,
+      );
       if (cost.kind === 'known') {
         call.usage = { providerPicoUsd: cost.providerPicoUsd, tokens };
         spent?.(Number(units(cost.providerPicoUsd)) / 1e12);
@@ -561,4 +565,41 @@ export async function beginReplySession(input: {
       lease.close();
     },
   };
+}
+
+/**
+ * Prices a call that already answered, so pricing never fails the reply. Usage above the hold's bound, such as a plan
+ * session's summed internal calls, or a day without a price is charged the call's held worst case, which is nothing on
+ * a member's own plan, and logged.
+ */
+export function pricedUsage(
+  input: Omit<Parameters<typeof calculateUsageCost>[0], 'usage'> & {
+    usage: { kind: 'known'; tokens: Parameters<typeof usageTokenCounts>[0] };
+  },
+  worstCase: bigint,
+  attempt: { provider: string; model: string },
+): ReturnType<typeof calculateUsageCost> {
+  try {
+    return calculateUsageCost(input);
+  } catch (error) {
+    const { tokens } = input.usage;
+    log('warn', 'activity', 'call_failed', {
+      operation: 'chat.usage-cost',
+      outcome: 'estimated',
+      'gen_ai.provider.name': attempt.provider,
+      'gen_ai.request.model': attempt.model,
+      'billing.source': billingSource(attempt.provider),
+      'gen_ai.usage.input_tokens': usageTokenCounts(tokens).inputTokens,
+      'gen_ai.usage.output_tokens': tokens.output,
+      ...(errorSite(error) ? { 'error.site': errorSite(error) } : {}),
+    });
+    return {
+      kind: 'known',
+      providerPicoUsd: worstCase.toString(),
+      pricingRevision: input.pricingRevision,
+      modelId: input.modelId,
+      date: input.date,
+      promptTokensAbove: null,
+    };
+  }
 }

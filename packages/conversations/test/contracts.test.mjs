@@ -316,3 +316,13 @@ test('a message without text takes its title from the picked skill before attach
   assert.equal(initialTitle([skill], 'q'.repeat(120)), `${'q'.repeat(49)}…`);
   assert.equal(initialTitle([{ kind: 'file', fileId: randomUUID() }]), 'Files');
 });
+
+test('a fallback code carries its reason and whether the failed plan was the requester own', async () => {
+  const { modelFallbackCode } = await import('../src/contracts.ts');
+  assert.equal(modelFallbackCode({ fallback: 'grok-fast' }), 'grok-fast');
+  assert.equal(modelFallbackCode({ fallback: 'grok-fast', fallbackReason: 'quota' }), 'grok-fast:quota');
+  assert.equal(
+    modelFallbackCode({ fallback: 'grok-fast', fallbackReason: 'quota', fallbackOwnPlan: true }),
+    'grok-fast:quota:own',
+  );
+});

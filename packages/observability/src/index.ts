@@ -95,6 +95,7 @@ import {
   type ModelFallbackOutcome,
   type ModelUsageUnknownReason,
 } from './model-errors.ts';
+import { modelFallbackReasons, type ModelFallbackReason } from '@tulipfarm/config/model-fallback';
 import { alwaysSample, chatTurnSpan, telemetrySampler } from './sampling.ts';
 
 export { context, ROOT_CONTEXT, SpanStatusCode, trace };
@@ -115,6 +116,7 @@ export {
   fallbackEligibleClasses,
   ModelCallError,
   modelCallDiagnostics,
+  modelCallReason,
   modelErrorClass,
   modelErrorClasses,
   modelFailureClasses,
@@ -269,6 +271,10 @@ const spanAttributes = new Set([
   'fallback.billing.source',
   'model_usage',
   'usage.unknown_reason',
+  'fallback.reason',
+  'plan.step.calls',
+  'plan.retry.status',
+  'plan.retry.delay_ms',
   ...mediaAttributeKeys,
 ]);
 // Provider error details help diagnose a failed model call but are free text, so they stay on log lines only.
@@ -355,6 +361,8 @@ function safeAttribute(key: string, value: unknown, logLine = false): boolean {
   if (key === 'billing.source' || key === 'fallback.billing.source')
     return (billingSources as readonly unknown[]).includes(value);
   if (key === 'model_usage') return (modelUsageOutcomes as readonly unknown[]).includes(value);
+  if (key === 'fallback.reason') return (modelFallbackReasons as readonly unknown[]).includes(value);
+  if (key.startsWith('plan.')) return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
   if (key === 'usage.unknown_reason') return (modelUsageUnknownReasons as readonly unknown[]).includes(value);
   if (key === 'error.reason') return safeErrorReason(value);
   if (key === 'error.stage') return safeErrorStage(value);
@@ -1795,7 +1803,15 @@ type ChatReplyClock = {
   /** Who pays for `model`, else for `requested`. */
   billing?: BillingSource | undefined;
   /** Route models of the chat call that failed and of the fallback that then answered the reply, with who pays for each. */
-  fallback?: { from: string; to: string; fromBilling: BillingSource; toBilling: BillingSource } | undefined;
+  fallback?:
+    | {
+        from: string;
+        to: string;
+        fromBilling: BillingSource;
+        toBilling: BillingSource;
+        reason?: ModelFallbackReason | undefined;
+      }
+    | undefined;
 };
 type ChatDatabase = { transactions: number; milliseconds: number };
 type ChatMeasurement = {
@@ -1922,7 +1938,12 @@ function finishChatReply(clock: ChatReplyClock) {
     'gen_ai.request.model': fallback?.from ?? model,
     ...((fallback?.fromBilling ?? clock.billing) ? { 'billing.source': fallback?.fromBilling ?? clock.billing } : {}),
     ...(fallback
-      ? { model_fallback: 'used', 'fallback.model': fallback.to, 'fallback.billing.source': fallback.toBilling }
+      ? {
+          model_fallback: 'used',
+          'fallback.model': fallback.to,
+          'fallback.billing.source': fallback.toBilling,
+          ...(fallback.reason ? { 'fallback.reason': fallback.reason } : {}),
+        }
       : {}),
     ...fields,
   });
@@ -2956,6 +2977,8 @@ export function recordModelFallback(
   outcome: ModelFallbackOutcome,
   primary: { provider: string; model: string; errorClass: string },
   fallback?: { provider: string; model: string },
+  /** Why the chat model failed, in the words the chat shows; never provider text. */
+  reason?: ModelFallbackReason,
 ) {
   const labels = {
     ...dimensions,
@@ -2979,6 +3002,7 @@ export function recordModelFallback(
       to: fallback.model,
       fromBilling: billingSource(primary.provider),
       toBilling: billingSource(fallback.provider),
+      ...(reason ? { reason } : {}),
     };
   try {
     metrics
@@ -2991,6 +3015,7 @@ export function recordModelFallback(
   log(outcome === 'used' ? 'warn' : outcome === 'failed' ? 'error' : 'info', 'inference', 'call_completed', {
     operation: 'chat.model-fallback',
     ...labels,
+    ...(reason ? { 'fallback.reason': reason } : {}),
   });
 }
 

@@ -9,3 +9,4 @@ export * from './model-catalog-file.ts';
 export * from './model-catalog-loader.ts';
 export * from './timeouts.ts';
 export * from './plan-models.ts';
+export * from './model-fallback.ts';

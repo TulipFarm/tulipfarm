@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { log } from '@tulipfarm/observability';
 
 // A member's Claude or GitHub Copilot plan runs through the vendor's agent SDK, not a public HTTP API. This module
 // answers the requests the tool loop sends for those routes as if it were the provider's API: Anthropic Messages for
@@ -459,9 +460,11 @@ class Session {
   private timer: NodeJS.Timeout | undefined;
 
   readonly key: string;
+  readonly provider: PlanSessionProvider;
   readonly vendor: Vendor;
-  constructor(key: string, vendor: Vendor) {
+  constructor(key: string, provider: PlanSessionProvider, vendor: Vendor) {
     this.key = key;
+    this.provider = provider;
     this.vendor = vendor;
   }
 
@@ -504,6 +507,12 @@ class Session {
         : { role: 'assistant', text: step.text, calls: [] };
     this.seen = [...conversation.messages, answered].map(shape);
     this.pending = step.kind === 'calls' ? step.calls : [];
+    log('info', 'inference', 'call_completed', {
+      operation: 'plan.session.step',
+      provider: this.provider,
+      outcome: step.kind,
+      'plan.step.calls': step.kind === 'calls' ? step.calls.length : 0,
+    });
     return step;
   }
 
@@ -538,6 +547,8 @@ type OpenVendor = (
 const vendors: OpenVendor = (provider, token, model, system, tools) =>
   provider === 'claude' ? claudeVendor(token, model, system, tools) : copilotVendor(token, model, system, tools);
 let openVendor = vendors;
+type ClaudeQuery = typeof import('@anthropic-ai/claude-agent-sdk').query;
+let claudeQuery: ClaudeQuery | undefined;
 const hash = (value: string) => createHash('sha256').update(value).digest('hex').slice(0, 32);
 
 async function claim(provider: PlanSessionProvider, token: string, conversation: Conversation) {
@@ -557,7 +568,7 @@ async function claim(provider: PlanSessionProvider, token: string, conversation:
     idle?.close();
   }
   const vendor = await openVendor(provider, token, conversation.model, startSystem(conversation), conversation.tools);
-  const session = new Session(key, vendor);
+  const session = new Session(key, provider, vendor);
   session.busy = true;
   pool.add(session);
   return session;
@@ -945,10 +956,15 @@ async function claudeVendor(token: string, model: string, system: string, tools:
   const waiting = new Map<string, Deferred<Result>>();
   let turn: Turn | undefined;
   let settleTimer: NodeJS.Timeout | undefined;
-  // Once a handler waits, the model's message is complete; a short pause lets every tool_use block arrive.
+  // Whether the model is still writing its message. Claude Code starts a tool while later tool_use blocks of the same
+  // message are still streaming, so a waiting handler does not mean the message is complete; only its message_stop
+  // does. Without stream events this stays false and a waiting handler settles the step after a short pause.
+  let streaming = false;
+  // Hands the calls that arrived to the loop once a handler waits and the message is complete. A short pause lets the
+  // last tool_use blocks reach `fresh`.
   const settle = () => {
     const current = turn;
-    if (!current || current.settled || !waiting.size || !fresh.length) return;
+    if (!current || current.settled || streaming || !waiting.size || !fresh.length) return;
     clearTimeout(settleTimer);
     settleTimer = setTimeout(() => {
       if (turn !== current || current.settled) return;
@@ -1015,7 +1031,7 @@ async function claudeVendor(token: string, model: string, system: string, tools:
     };
   })();
   const abort = new AbortController();
-  const run = query({
+  const run = (claudeQuery ?? query)({
     prompt: inbox.stream as never,
     options: {
       model,
@@ -1050,10 +1066,27 @@ async function claudeVendor(token: string, model: string, system: string, tools:
           continue;
         }
         if (!current) continue;
+        if (message.type === 'system' && message.subtype === 'api_retry') {
+          log('warn', 'inference', 'call_failed', {
+            operation: 'plan.session.api_retry',
+            provider: 'claude',
+            ...(typeof message.attempt === 'number' ? { attempt: message.attempt } : {}),
+            ...(typeof message.error_status === 'number' ? { 'plan.retry.status': message.error_status } : {}),
+            ...(typeof message.retry_delay_ms === 'number' ? { 'plan.retry.delay_ms': message.retry_delay_ms } : {}),
+            ...(typeof message.error === 'string' ? { 'provider.error_code': message.error } : {}),
+          });
+          continue;
+        }
         if (message.type === 'stream_event') {
           const event = record(message.event);
           const delta = record(event.delta);
-          if (message.parent_tool_use_id == null && event.type === 'content_block_delta' && delta.type === 'text_delta')
+          const topLevel = message.parent_tool_use_id == null;
+          if (topLevel && event.type === 'message_start') streaming = true;
+          if (topLevel && event.type === 'message_stop') {
+            streaming = false;
+            settle();
+          }
+          if (topLevel && event.type === 'content_block_delta' && delta.type === 'text_delta')
             current.words(String(delta.text ?? ''));
           continue;
         }
@@ -1086,6 +1119,7 @@ async function claudeVendor(token: string, model: string, system: string, tools:
           }
           settle();
         } else if (message.type === 'result') {
+          streaming = false;
           if (message.is_error === true || (message.subtype !== 'success' && message.subtype !== undefined))
             current.fail(limited ?? claudeError(text(message.errors ?? message.result)));
           else current.answer();
@@ -1112,6 +1146,8 @@ async function claudeVendor(token: string, model: string, system: string, tools:
         if (deferred) deferred.resolve(item);
         else answers.set(item.id, item);
       }
+      // A call whose tool_use arrived after the last step settled is still waiting; it is this step's call.
+      settle();
       return current.done.promise;
     },
     close() {
@@ -1151,5 +1187,9 @@ export const planSessionsForTest = {
   /** Replaces the vendor SDKs; pass nothing to restore them. */
   useVendors(fake?: OpenVendor) {
     openVendor = fake ?? vendors;
+  },
+  /** Replaces the Claude Agent SDK's `query` behind the real Claude vendor; pass nothing to restore it. */
+  useClaudeQuery(fake?: ClaudeQuery) {
+    claudeQuery = fake;
   },
 };
