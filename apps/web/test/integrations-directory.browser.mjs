@@ -134,9 +134,12 @@ test('the integrations directory lists every app with one action per row', { tim
       assert.equal(await rows.first().getByRole('link').first().innerText(), 'GitHub');
       await tab(/^Connected /).click();
       await page.waitForURL(/\?view=connected$/);
+      // The address changes before the list renders again.
+      await rows.nth(connected).waitFor({ state: 'detached' });
       assert.equal(await rows.count(), connected);
       await tab(/^Needs attention /).click();
       await page.waitForURL(/\?view=attention$/);
+      await rows.nth(1).waitFor({ state: 'detached' });
       assert.equal(await rows.count(), 1);
       await tab(/^All /).click();
       await page.waitForURL(url => !url.search);
