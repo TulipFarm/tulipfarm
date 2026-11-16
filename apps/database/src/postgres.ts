@@ -131,6 +131,7 @@ export async function grantApplicationAccess(
     { table: 'app_usage_cursors', privileges: 'SELECT, INSERT, UPDATE (metered_before)' },
     { table: 'app_server_owners', privileges: 'SELECT, INSERT' },
     { table: 'app_preview_sessions', privileges: 'SELECT, INSERT, UPDATE (token_sha256, redeemed_at), DELETE' },
+    { table: 'app_live_requests', privileges: 'SELECT, INSERT, UPDATE (expires_at), DELETE' },
     {
       table: 'github_event_dispatches',
       privileges: 'SELECT, INSERT, UPDATE (status, reason, lease_id, lease_until, completed_lease_id, next_attempt_at)',

@@ -69,7 +69,12 @@ test('app names stay with one app forever and the API role can never delete them
         has_column_privilege('tulipfarm', 'app.app_preview_hosts', 'app_id', 'UPDATE') AS move,
         has_column_privilege('tulipfarm', 'app.app_usage_cursors', 'metered_before', 'UPDATE') AS resume,
         has_table_privilege('tulipfarm', 'app.app_server_owners', 'INSERT') AS own,
-        has_column_privilege('tulipfarm', 'app.app_server_owners', 'workspace_id', 'UPDATE') AS transfer`)
+        has_column_privilege('tulipfarm', 'app.app_server_owners', 'workspace_id', 'UPDATE') AS transfer,
+        has_table_privilege('tulipfarm', 'app.app_live_requests', 'INSERT') AS mint,
+        has_table_privilege('tulipfarm', 'app.app_live_requests', 'SELECT') AS resolve,
+        has_table_privilege('tulipfarm', 'app.app_live_requests', 'DELETE') AS close,
+        has_column_privilege('tulipfarm', 'app.app_live_requests', 'expires_at', 'UPDATE') AS renew,
+        has_column_privilege('tulipfarm', 'app.app_live_requests', 'release_id', 'UPDATE') AS rebind`)
     ).rows[0];
     assert.deepEqual(privileges, {
       claim: true,
@@ -82,7 +87,16 @@ test('app names stay with one app forever and the API role can never delete them
       resume: true,
       own: true,
       transfer: false,
+      mint: true,
+      resolve: true,
+      close: true,
+      renew: true,
+      rebind: false,
     });
+    assert.deepEqual(
+      (await client.query(`SELECT relpersistence FROM pg_class WHERE oid = 'app.app_live_requests'::regclass`)).rows,
+      [{ relpersistence: 'u' }],
+    );
   } finally {
     await client?.end();
     await admin.query(`DROP DATABASE IF EXISTS ${escapeIdentifier(name)} WITH (FORCE)`);
