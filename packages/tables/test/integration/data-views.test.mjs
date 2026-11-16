@@ -156,16 +156,16 @@ ${await readFile(new URL('../../../../apps/database/migrations/0001_baseline.sql
   await t.test('a view serves nothing until it is shared and approved for the release', async () => {
     await assert.rejects(list(), AccessDenied);
     await assert.rejects(
-      as(member, tx => shareDataView(tx, member, { releaseId: live, viewId: view.id })),
+      as(member, tx => shareDataView(tx, member, { appId, releaseId: live, viewId: view.id })),
       AccessDenied,
     );
-    await as(admin, tx => shareDataView(tx, admin, { releaseId: live, viewId: view.id }));
+    await as(admin, tx => shareDataView(tx, admin, { appId, releaseId: live, viewId: view.id }));
     await assert.rejects(list(), AccessDenied);
     await assert.rejects(
-      as(member, tx => approveDataView(tx, member, { releaseId: live, viewId: view.id })),
+      as(member, tx => approveDataView(tx, member, { appId, releaseId: live, viewId: view.id })),
       AccessDenied,
     );
-    await as(approver, tx => approveDataView(tx, approver, { releaseId: live, viewId: view.id }));
+    await as(approver, tx => approveDataView(tx, approver, { appId, releaseId: live, viewId: view.id }));
     const grant = (
       await db.platform.query(`SELECT shared_by,approved_by,approved_at FROM ${s}.tf_app_data_view_grants`)
     ).rows;
@@ -223,8 +223,8 @@ ${await readFile(new URL('../../../../apps/database/migrations/0001_baseline.sql
 
   await t.test('another release and another view are denied', async () => {
     await assert.rejects(list({ ...app, releaseId: other }), AccessDenied);
-    await as(admin, tx => shareDataView(tx, admin, { releaseId: other, viewId: view.id }));
-    await as(approver, tx => approveDataView(tx, approver, { releaseId: other, viewId: view.id }));
+    await as(admin, tx => shareDataView(tx, admin, { appId, releaseId: other, viewId: view.id }));
+    await as(approver, tx => approveDataView(tx, approver, { appId, releaseId: other, viewId: view.id }));
     await assert.rejects(list({ ...app, releaseId: other }), AccessDenied, 'only the live release is served');
     await assert.rejects(list(app, { viewId: randomUUID(), parameters: {} }), AccessDenied);
     await assert.rejects(list({ ...app, appId: randomUUID() }), AccessDenied);
@@ -253,8 +253,8 @@ ${await readFile(new URL('../../../../apps/database/migrations/0001_baseline.sql
       actions: ['read', 'create', 'update'],
     }),
   );
-  await as(admin, tx => shareDataView(tx, admin, { releaseId: live, viewId: editor.id }));
-  await as(approver, tx => approveDataView(tx, approver, { releaseId: live, viewId: editor.id }));
+  await as(admin, tx => shareDataView(tx, admin, { appId, releaseId: live, viewId: editor.id }));
+  await as(approver, tx => approveDataView(tx, approver, { appId, releaseId: live, viewId: editor.id }));
   const edit = { viewId: editor.id, parameters: { owner: 'ada' } };
 
   await t.test('writes set only view fields and keep the row inside the predicate', async () => {
@@ -371,8 +371,8 @@ ${await readFile(new URL('../../../../apps/database/migrations/0001_baseline.sql
         actions: ['read', 'delete'],
       }),
     );
-    await as(admin, tx => shareDataView(tx, admin, { releaseId: live, viewId: deleter.id }));
-    await as(approver, tx => approveDataView(tx, approver, { releaseId: live, viewId: deleter.id }));
+    await as(admin, tx => shareDataView(tx, admin, { appId, releaseId: live, viewId: deleter.id }));
+    await as(approver, tx => approveDataView(tx, approver, { appId, releaseId: live, viewId: deleter.id }));
     const remove = (record, viewId = deleter.id) =>
       service.mutateThroughView(ws.id, app, {
         viewId,
@@ -385,6 +385,93 @@ ${await readFile(new URL('../../../../apps/database/migrations/0001_baseline.sql
     const [bobRow] = (await service.listThroughView(ws.id, app, { viewId: deleter.id, query: {} })).records;
     assert.equal(await remove(bobRow), null);
     assert.equal((await service.listThroughView(ws.id, app, { viewId: deleter.id, query: {} })).records.length, 0);
+  });
+
+  await t.test('a unique value held only outside the view is refused like any other write', async () => {
+    const code = field('Code'),
+      holder = field('Holder'),
+      note = field('Note', { required: true });
+    const coded = {
+      formatVersion: 2,
+      id: randomUUID(),
+      owningTeamId: team,
+      label: 'Codes',
+      fields: [code, holder, note],
+      uniqueKeys: [{ id: randomUUID(), fieldIds: [code.id], nulls: 'distinct' }],
+    };
+    await maintenance(async tx => {
+      const created = await createGeneration(tx, { definition: coded, revision });
+      await activateGeneration(tx, { generationId: created.id, expectedActiveGenerationId: null });
+    });
+    const taken = {
+      kind: 'create',
+      tableId: coded.id,
+      revision,
+      values: { [code.id]: text('taken'), [holder.id]: text('bob'), [note.id]: text('hidden') },
+    };
+    await service.mutate(ws.id, admin, { ...taken, recordId: randomUUID() });
+    const codes = await as(admin, tx =>
+      createDataView(tx, admin, {
+        appId,
+        tableId: coded.id,
+        fieldIds: [code.id, holder.id, note.id],
+        predicate: { all: [{ fieldId: holder.id, op: 'eq', operand: { kind: 'parameter', name: 'holder' } }] },
+        actions: ['read', 'create'],
+      }),
+    );
+    const narrow = await as(admin, tx =>
+      createDataView(tx, admin, {
+        appId,
+        tableId: coded.id,
+        fieldIds: [code.id, holder.id],
+        predicate: { all: [{ fieldId: holder.id, op: 'eq', operand: { kind: 'parameter', name: 'holder' } }] },
+        actions: ['read', 'create'],
+      }),
+    );
+    for (const viewId of [codes.id, narrow.id]) {
+      await as(admin, tx => shareDataView(tx, admin, { appId, releaseId: live, viewId }));
+      await as(approver, tx => approveDataView(tx, approver, { appId, releaseId: live, viewId }));
+    }
+    const failure = (values, viewId = codes.id) =>
+      service
+        .mutateThroughView(ws.id, app, {
+          viewId,
+          parameters: { holder: 'ada' },
+          kind: 'create',
+          recordId: randomUUID(),
+          values,
+        })
+        .then(
+          () => 'written',
+          error => [error.constructor.name, error.message],
+        );
+    const denied = ['AccessDenied', 'Resource not found'];
+    assert.deepEqual(
+      await failure({ [code.id]: text('taken'), [holder.id]: text('ada'), [note.id]: text('n') }),
+      denied,
+      'a unique conflict with a row outside the predicate',
+    );
+    assert.deepEqual(
+      await failure({ [code.id]: text('free'), [holder.id]: text('bob'), [note.id]: text('n') }),
+      denied,
+      'a row outside the predicate',
+    );
+    assert.deepEqual(
+      await failure({ [code.id]: text('other'), [holder.id]: text('ada') }, narrow.id),
+      denied,
+      'a required field the view does not list',
+    );
+    assert.deepEqual(
+      await failure({ [code.id]: text('x'.repeat(201)), [holder.id]: text('ada'), [note.id]: text('n') }),
+      ['TableValidationError', 'Text exceeds field length'],
+      'a problem with a view field value stays visible',
+    );
+    assert.equal(await failure({ [code.id]: text('mine'), [holder.id]: text('ada'), [note.id]: text('n') }), 'written');
+    await assert.rejects(
+      service.mutate(ws.id, admin, { ...taken, recordId: randomUUID() }),
+      error => error.code === 'duplicate-key',
+      'people still see the unique conflict',
+    );
   });
 
   await t.test('an archived table serves nothing', async () => {
@@ -403,7 +490,7 @@ ${await readFile(new URL('../../../../apps/database/migrations/0001_baseline.sql
           approver.membershipId,
         ])
       ).rows[0].n,
-      4,
+      6,
       'the approval stays on record',
     );
   });

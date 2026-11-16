@@ -24,6 +24,8 @@ import {
   type AppRole,
   type AppVersion,
 } from '@tulipfarm/apps/store';
+import type { DataViewEntry } from '@tulipfarm/tables/data-view-store';
+import { dataViewDraftSchema } from '@tulipfarm/tables/data-views';
 
 const requestId = z.uuid();
 const title = z.string().trim().min(1).max(120);
@@ -37,6 +39,8 @@ export const operationParams = z.strictObject({
   appId: appIdSchema,
   operationId: operationIdSchema,
 });
+const dataViewParams = z.strictObject({ workspaceId: z.uuid(), appId: appIdSchema, viewId: z.uuid() });
+export const dataViewGrantParams = dataViewParams.extend({ releaseId: releaseIdSchema });
 export const nameParams = z.strictObject({ workspaceId: z.uuid(), name: z.string().max(80) });
 
 export const requestBody = z.strictObject({ requestId });
@@ -49,6 +53,8 @@ export const createBody = z.strictObject({
 export const updateBody = z
   .strictObject({ title: title.optional(), slug: appSlugSchema.optional() })
   .refine(body => body.title !== undefined || body.slug !== undefined, { error: 'Change the title or the slug' });
+/** A view of one table for the app: the fields it shows, the rows its predicate reaches, and what the app may do. */
+export const dataViewBody = dataViewDraftSchema.omit({ appId: true }).extend({ requestId });
 export const grantBody = z.strictObject({ role: z.enum(['use', 'edit']) });
 export const filesQuery = z.strictObject({ path: appFilePathSchema.optional() });
 /** From a private app's version list. When given, a publish or restore that another one overtook fails. */
@@ -183,4 +189,15 @@ export const versionView = (version: AppVersion) => ({
   staged: true,
   live: version.live,
   createdAt: version.publishedAt,
+});
+
+/** A data view with its grants. `blockers` lists what stops a grant serving now; a grant with none is serving. */
+export const dataViewView = ({ appId: _appId, createdAt, grants, ...view }: DataViewEntry) => ({
+  ...view,
+  createdAt: createdAt.toISOString(),
+  grants: grants.map(({ sharedAt, approvedAt, ...grant }) => ({
+    ...grant,
+    sharedAt: sharedAt.toISOString(),
+    approvedAt: approvedAt?.toISOString() ?? null,
+  })),
 });
