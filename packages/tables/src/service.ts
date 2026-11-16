@@ -1126,6 +1126,25 @@ export function createTableService(
     });
   }
 
+  /**
+   * The error an app sees when a write through a view fails. A unique-key or other constraint failure, a taken or stale
+   * row id, or a problem with a field the view does not list could reveal rows outside the view, so each is the same
+   * AccessDenied as any other refused write. A problem with a value the app wrote to a view field is its own to fix.
+   */
+  function viewWriteError(scope: DataViewScope, error: unknown) {
+    if (error instanceof TableValidationError && scope.fields.some(field => field.id === error.fieldId)) return error;
+    const code = (error as { code?: unknown } | null)?.code;
+    const constraint = typeof code === 'string' && code.startsWith('23');
+    if (
+      error instanceof store.GenerationError ||
+      error instanceof TableValidationError ||
+      error instanceof z.ZodError ||
+      constraint
+    )
+      return new AccessDenied();
+    return error;
+  }
+
   /** Creates, updates or deletes one row through a view. A row the write would move outside the view is refused. */
   async function mutateThroughView(workspaceId: string, actor: AppActor, input: unknown) {
     const request = viewMutationSchema.parse(input);
@@ -1147,6 +1166,8 @@ export function createTableService(
       // A view lists no relationship field, so an update keeps every link and touches no other table.
       const result = await writeRecord(tx, actor, mutation, async () => {
         if (mutation.kind !== 'update') throw new AccessDenied();
+      }).catch(error => {
+        throw viewWriteError(scope, error);
       });
       if (!result.values) return null;
       if (!(await inView(tx, generation, scope, result.id, { token: result.token }))) throw new AccessDenied();

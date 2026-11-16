@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { fromNodeHeaders } from 'better-auth/node';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Pool } from 'pg';
@@ -55,7 +56,15 @@ import {
 import type { AppPublisher } from '@tulipfarm/extensions';
 import { errorAttributes, isFeatureEnabled } from '@tulipfarm/observability';
 import { commonCompatibility, qualified, type createWorkspaceRuntime } from '@tulipfarm/workspace-storage/runtime';
-import { AccessDenied } from '@tulipfarm/access';
+import { AccessDenied, type HumanActor } from '@tulipfarm/access';
+import {
+  approveDataView,
+  createDataView,
+  listDataViews,
+  revokeDataView,
+  shareDataView,
+} from '@tulipfarm/tables/data-view-store';
+import { TableValidationError } from '@tulipfarm/tables/definition';
 import {
   AppRouteFailure,
   appDetailView,
@@ -65,6 +74,9 @@ import {
   buildParams,
   buildView,
   createBody,
+  dataViewBody,
+  dataViewGrantParams,
+  dataViewView,
   failure,
   failureStatus,
   filesQuery,
@@ -92,6 +104,7 @@ import { routeValidation } from './route-validation.ts';
 import { requestBoundaryError } from './security.ts';
 
 type Runtime = Pick<ReturnType<typeof createWorkspaceRuntime>, 'transaction'>;
+type WorkspaceTransaction = Parameters<Parameters<Runtime['transaction']>[2]>[0];
 
 export type AppWorkflow =
   | 'appBuild'
@@ -153,7 +166,7 @@ export function registerApps(app: FastifyInstance, dependencies: AppRouteDepende
   const { runtime, platform, start } = dependencies;
   const summary = (found: AppRecord, role: AppRole | null) => appSummaryView(found, role, dependencies.sitesDomain);
 
-  const transaction = <T>(workspaceId: string, action: (tx: AppTransaction) => Promise<T>) =>
+  const transaction = <T>(workspaceId: string, action: (tx: WorkspaceTransaction) => Promise<T>) =>
     runtime.transaction(workspaceId, commonCompatibility, action);
 
   const memberOf = async (tx: AppTransaction, userId: string): Promise<Member> => {
@@ -840,6 +853,107 @@ export function registerApps(app: FastifyInstance, dependencies: AppRouteDepende
           );
           return summary(appRecord(rows[0] as AppRow), role);
         }),
+    );
+
+    const human = (userId: string, member: Member): HumanActor => ({
+      kind: 'human',
+      userId,
+      membershipId: member.membershipId,
+    });
+    /** App editors manage an app's data views; workspace admins see them to approve them. */
+    const viewAccess = async (tx: AppTransaction, member: Member, appId: AppId) => {
+      const found = await access(tx, member, appId, 'use');
+      if (found.role !== 'edit' && !member.admin) throw failure('forbidden', 'You need edit access to this app');
+      return found;
+    };
+    const grantOf = ({ appId, viewId, releaseId }: z.infer<typeof dataViewGrantParams>) => ({
+      appId,
+      viewId,
+      releaseId,
+    });
+    const dataView = async (tx: WorkspaceTransaction, appId: AppId, viewId: string) => {
+      const [entry] = await listDataViews(tx, appId, viewId);
+      if (!entry) throw failure('not-found', 'Data view not found');
+      return dataViewView(entry);
+    };
+
+    route('GET', '/:appId/data-views', 'listAppDataViewsV1', { params: appParams }, ({ workspaceId, userId, params }) =>
+      transaction(workspaceId, async tx => {
+        await viewAccess(tx, await memberOf(tx, userId), params.appId);
+        return { views: (await listDataViews(tx, params.appId)).map(dataViewView) };
+      }),
+    );
+
+    route(
+      'POST',
+      '/:appId/data-views',
+      'createAppDataViewV1',
+      { params: appParams, body: dataViewBody },
+      async ({ workspaceId, userId, params, body }, reply) => {
+        const created = await transaction(workspaceId, async tx => {
+          const member = await memberOf(tx, userId);
+          await access(tx, member, params.appId, 'edit');
+          const { requestId, ...draft } = body;
+          const id = derivedId('app-data-view', member.membershipId, requestId);
+          const view = await createDataView(tx, human(userId, member), { ...draft, appId: params.appId }, id).catch(
+            error => {
+              if (error instanceof TableValidationError)
+                throw new AppRouteFailure({ code: 'definition-invalid', message: error.message }, [
+                  { path: error.fieldId ?? '', message: error.message },
+                ]);
+              throw error;
+            },
+          );
+          if (!isDeepStrictEqual(view, { ...draft, appId: params.appId, id: view.id }))
+            throw failure('superseded', 'This request already created another data view');
+          return dataView(tx, params.appId, view.id);
+        });
+        reply.code(201);
+        return created;
+      },
+    );
+
+    route(
+      'PUT',
+      '/:appId/data-views/:viewId/releases/:releaseId',
+      'shareAppDataViewV1',
+      { params: dataViewGrantParams },
+      ({ workspaceId, userId, params }) =>
+        transaction(workspaceId, async tx => {
+          const member = await memberOf(tx, userId);
+          await access(tx, member, params.appId, 'edit');
+          await shareDataView(tx, human(userId, member), grantOf(params));
+          return dataView(tx, params.appId, params.viewId);
+        }),
+    );
+
+    route(
+      'PUT',
+      '/:appId/data-views/:viewId/releases/:releaseId/approval',
+      'approveAppDataViewV1',
+      { params: dataViewGrantParams },
+      ({ workspaceId, userId, params }) =>
+        transaction(workspaceId, async tx => {
+          const member = await memberOf(tx, userId);
+          await access(tx, member, params.appId, 'admin');
+          await approveDataView(tx, human(userId, member), grantOf(params));
+          return dataView(tx, params.appId, params.viewId);
+        }),
+    );
+
+    route(
+      'DELETE',
+      '/:appId/data-views/:viewId/releases/:releaseId',
+      'revokeAppDataViewV1',
+      { params: dataViewGrantParams },
+      async ({ workspaceId, userId, params }, reply) => {
+        await transaction(workspaceId, async tx => {
+          const member = await memberOf(tx, userId);
+          await viewAccess(tx, member, params.appId);
+          await revokeDataView(tx, human(userId, member), grantOf(params));
+        });
+        return reply.code(204).send();
+      },
     );
   });
 }

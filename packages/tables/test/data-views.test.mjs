@@ -5,6 +5,8 @@ import {
   dataViewSchema,
   dataViewScope,
   projectValues,
+  rangedHiddenField,
+  unresolvedDataViewField,
   requireViewQuery,
   requireViewWrite,
 } from '@tulipfarm/tables/data-views';
@@ -189,5 +191,43 @@ test('responses carry only view fields', () => {
       [done]: { kind: 'boolean', value: false },
     }),
     { [name]: { kind: 'text', value: 'a' } },
+  );
+});
+
+test('a parameter may compare a hidden field only for equality', async t => {
+  const compare = (fieldId, op, operand) => ({ all: [{ fieldId, op, operand }] });
+  const parameter = { kind: 'parameter', name: 'probe' };
+  for (const op of ['ne', 'lt', 'lte', 'gt', 'gte'])
+    await t.test(`${op} on a hidden field is refused`, () => {
+      const predicate = compare(secret, op, parameter);
+      assert.equal(rangedHiddenField({ fieldIds: [name], predicate }), secret);
+      assert.throws(() => view({ predicate }), /only test a field the view does not list for equality/);
+    });
+  await t.test('eq on a hidden field, a literal, and a listed field are allowed', () => {
+    const predicates = [
+      compare(secret, 'eq', parameter),
+      compare(secret, 'gt', { kind: 'value', value: 'm' }),
+      compare(name, 'gt', parameter),
+    ];
+    assert.deepEqual(
+      predicates.map(predicate => rangedHiddenField({ fieldIds: [name], predicate })),
+      [undefined, undefined, undefined],
+    );
+    assert.deepEqual(
+      predicates.map(predicate => view({ fieldIds: [name], predicate }).predicate),
+      predicates,
+    );
+  });
+});
+
+test('creation names the first field a view cannot use', () => {
+  const draft = (fieldIds, predicate = { all: [] }) => ({ fieldIds, predicate });
+  assert.equal(unresolvedDataViewField(draft([name, tags]), definition), undefined);
+  assert.equal(unresolvedDataViewField(draft([name, files]), definition), files);
+  assert.equal(unresolvedDataViewField(draft([name, team]), definition), team);
+  assert.equal(
+    unresolvedDataViewField(draft([name], { all: [{ fieldId: tags, op: 'is-null' }] }), definition),
+    tags,
+    'a multi-choice field cannot be in the predicate',
   );
 });

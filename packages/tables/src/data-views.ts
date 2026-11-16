@@ -37,8 +37,7 @@ export type RowPredicate = z.infer<typeof rowPredicateSchema>;
 
 const unique = <T>(values: readonly T[]) => new Set(values).size === values.length;
 
-/** What one app may do with one table: the listed fields, the rows `predicate` reaches, and `actions`. */
-export const dataViewSchema = z.strictObject({
+const dataViewObject = z.strictObject({
   id: uuidSchema,
   appId: uuidSchema,
   tableId: tableIdSchema,
@@ -54,6 +53,30 @@ export const dataViewSchema = z.strictObject({
       'Updating or deleting rows needs read',
     ),
 });
+
+/** A view a member asks for, before it has an id. */
+export const dataViewDraftSchema = dataViewObject.omit({ id: true });
+export type DataViewDraft = z.infer<typeof dataViewDraftSchema>;
+
+/**
+ * A field the predicate compares with a parameter by anything but `eq` although the view does not list it. An app
+ * could binary-search such a field's hidden values by varying the parameter.
+ */
+export function rangedHiddenField(view: Pick<DataViewDraft, 'fieldIds' | 'predicate'>) {
+  return view.predicate.all.find(
+    comparison =>
+      'operand' in comparison &&
+      comparison.operand.kind === 'parameter' &&
+      comparison.op !== 'eq' &&
+      !view.fieldIds.includes(comparison.fieldId),
+  )?.fieldId;
+}
+
+/** What one app may do with one table: the listed fields, the rows `predicate` reaches, and `actions`. */
+export const dataViewSchema = dataViewObject.refine(view => rangedHiddenField(view) === undefined, {
+  message: 'A parameter may only test a field the view does not list for equality',
+  path: ['predicate'],
+});
 export type DataView = z.infer<typeof dataViewSchema>;
 
 /** Values an app supplies for the predicate's parameters. They narrow the view's rows and never widen them. */
@@ -68,21 +91,22 @@ const viewKinds: readonly string[] = [...scalarKinds, 'multi-select'];
 /** One request's reach: the view's fields as the table defines them now, and its predicate as SQL. */
 export type DataViewScope = { fields: TableField[]; predicates: string[]; parameters: unknown[] };
 
-function viewFields(view: DataView, definition: TableDefinition) {
-  if (definition.id !== view.tableId) throw new AccessDenied();
-  const kinds = new Map(definition.fields.map(field => [field.id, field]));
-  const fields = view.fieldIds.map(id => kinds.get(id));
-  if (fields.some(field => !field || !viewKinds.includes(field.kind))) throw new AccessDenied();
-  for (const comparison of view.predicate.all) {
-    const field = kinds.get(comparison.fieldId);
-    if (!field || !scalarKinds.includes(field.kind)) throw new AccessDenied();
-  }
-  return fields.filter(field => field !== undefined);
+/** The first field of `view` that `definition` lacks or holds with a kind the view cannot use there. */
+export function unresolvedDataViewField(
+  view: Pick<DataViewDraft, 'fieldIds' | 'predicate'>,
+  definition: TableDefinition,
+) {
+  const kinds = new Map(definition.fields.map(field => [field.id, field.kind]));
+  return (
+    view.fieldIds.find(id => !viewKinds.includes(kinds.get(id) ?? '')) ??
+    view.predicate.all.find(comparison => !scalarKinds.includes(kinds.get(comparison.fieldId) ?? ''))?.fieldId
+  );
 }
 
-/** Throws AccessDenied unless every field and predicate field of `view` still exists in `definition` with a usable kind. */
-export function requireDataViewShape(view: DataView, definition: TableDefinition) {
-  viewFields(view, definition);
+function viewFields(view: DataView, definition: TableDefinition) {
+  if (definition.id !== view.tableId || unresolvedDataViewField(view, definition) !== undefined)
+    throw new AccessDenied();
+  return view.fieldIds.map(id => definition.fields.find(field => field.id === id)!);
 }
 
 /** Resolves `view` for `action` against the table's current `definition`. Anything that does not resolve exactly denies. */
