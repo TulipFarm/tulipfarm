@@ -1995,8 +1995,16 @@ const notRun =
   'Not run because another call in the same response was invalid. Request it again if it is still necessary.';
 const layoutFailedReply = 'The answer could not be laid out. Ask again to see it.';
 const toolLimitReply = 'The tool limit was reached. Review the completed actions before asking me to continue.';
-const toolRejectedReply =
-  "I stopped after three tries because I couldn't make a valid change, so nothing more was changed. Check anything I already finished, then ask again and name the table or fields if you can.";
+const rejectionCauses: Record<ToolRejection, string> = {
+  'render-batch': 'I tried to show the answer while other work was still running',
+  'unknown-tool': "I tried to use a step that isn't available in this chat",
+  'invalid-arguments': "the details I sent weren't in the format that step needs",
+  'write-batch': 'I tried to make several changes in one step',
+  'mcp-invalid': "my requests didn't match what the connected app accepts",
+  'ungrounded-outbound': "I tried to send something that wasn't backed by data I had read",
+};
+const toolRejectedReply = (cause: ToolRejection | undefined) =>
+  `I stopped after three tries because I couldn't make a valid change${cause ? `: ${rejectionCauses[cause]}` : ''}. Nothing more was changed. Check anything I already finished, then ask again${cause === 'invalid-arguments' ? ' and name the table or fields if you can' : ''}.`;
 const toolLoopReply =
   'I stopped because repeated tool requests were not making progress. Changes that already ran were not repeated. Review the completed actions and any unfinished work before continuing.';
 const unfinishedNote =
@@ -3982,6 +3990,7 @@ export async function inferWithTools(
   let corrections = 0;
   // Three rejected tool requests end tool use for the reply; the model then answers in plain text.
   let rejectionsSpent = false;
+  let lastRejection: ToolRejection | undefined;
   let completionCorrections = 0;
   let readOnlyFileRecovery = false;
   let fileSaveRequested = false;
@@ -4607,6 +4616,7 @@ export async function inferWithTools(
       tool: [...new Set(tools)].sort().join(','),
       attempt: corrections + 1,
     });
+    lastRejection = reason;
     if (corrections++ >= 2) rejectionsSpent = true;
     items.push({ kind: 'results', results });
   };
@@ -4626,6 +4636,7 @@ export async function inferWithTools(
   let authoringRecoveryRounds = 0;
   const authoringContexts = new Map<string, z.infer<typeof agentDraftContextSchema>>();
   let authoringRepairAttempted = false;
+  let authoringDraftInvalid = false;
   let authoringRepairPending = false;
   const authoringRecoveryLog = (outcome: string) =>
     log('info', 'inference', 'call_completed', {
@@ -4637,10 +4648,17 @@ export async function inferWithTools(
     const text =
       authoringFailure === 'context'
         ? "I couldn't read the setup details this agent needs, so I couldn't draft it."
-        : "I couldn't draft this agent in chat.";
+        : authoringDraftInvalid
+          ? "I couldn't draft this agent in chat. The setup I prepared had missing or invalid details twice, so nothing was changed."
+          : rejectionsSpent
+            ? `I couldn't finish setting up this agent. I stopped after three tries because ${rejectionCauses[lastRejection ?? 'invalid-arguments']}, so nothing was changed.`
+            : "I couldn't draft this agent in chat.";
+    const backup = answeredBy
+      ? ` ${answeredBy} answered as a backup model. Ask again when your usual model is available, or pick another model.`
+      : '';
     return tools?.agentBuilderUrl
-      ? `${text} [Create it in the agent builder](${tools.agentBuilderUrl}) instead.`
-      : text;
+      ? `${text}${backup} [Create it in the agent builder](${tools.agentBuilderUrl}) instead.`
+      : `${text}${backup}`;
   };
   const loaded = new Set(
     [...(tools?.preloadedTools ?? []), ...[...activeBuiltinSkills].flatMap(builtinSkillTools)].map(nativeToolName),
@@ -4997,7 +5015,14 @@ export async function inferWithTools(
         authoringRecoveryLog(authoringContextRead ? 'draft' : 'context');
       }
     }
-    const stoppingReply = rejectionsSpent ? toolRejectedReply : guard.stalled ? toolLoopReply : toolLimitReply;
+    const stoppingReply =
+      activeBuiltinSkills.has('agent-authoring') && rejectionsSpent
+        ? authoringStoppedReply()
+        : rejectionsSpent
+          ? toolRejectedReply(lastRejection)
+          : guard.stalled
+            ? toolLoopReply
+            : toolLimitReply;
     if (finalizing && planCreationAttempted && !planCreated) return finish(unfinishedReply, true);
     // A forced table tool runs only while no row change has been tried, and the change only after a schema that read.
     // A forced change that used a wrong table ID is forced once more, with the ID its result names.
@@ -6208,6 +6233,8 @@ export async function inferWithTools(
       });
       continue;
     }
+    // Tool search can load agents_draft without the skill; a draft call still means agent setup is under way.
+    if (selected.calls.some(call => call.name === 'agents_draft')) activeBuiltinSkills.add('agent-authoring');
     if (activeBuiltinSkills.has('agent-authoring') && selected.calls.some(call => call.name === 'agents_delegate')) {
       if (authoringRecoveryAttempted) return finish(authoringStoppedReply(), true);
       authoringRecoveryAttempted = true;
@@ -6243,7 +6270,10 @@ export async function inferWithTools(
           'error.issues': invalidDraft.resolved.issues?.map(issue => `${issue.path.join('.')}:${issue.code}`) ?? [],
           attempt: authoringRepairAttempted ? 2 : 1,
         });
-        if (authoringRepairAttempted) return finish(authoringStoppedReply(), true);
+        if (authoringRepairAttempted) {
+          authoringDraftInvalid = true;
+          return finish(authoringStoppedReply(), true);
+        }
         authoringRepairAttempted = true;
         authoringRepairPending = true;
         authoringRecovering = false;
