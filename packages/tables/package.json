@@ -39,6 +39,14 @@
       "types": "./dist/definition.d.ts",
       "default": "./dist/definition.js"
     },
+    "./data-views": {
+      "types": "./dist/data-views.d.ts",
+      "default": "./dist/data-views.js"
+    },
+    "./data-view-store": {
+      "types": "./dist/data-view-store.d.ts",
+      "default": "./dist/data-view-store.js"
+    },
     "./proposal-json-schema": {
       "types": "./dist/proposal-json-schema.d.ts",
       "default": "./dist/proposal-json-schema.js"

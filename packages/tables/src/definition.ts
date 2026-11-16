@@ -84,7 +84,7 @@ export const uniqueKeyIdSchema = z
   .toLowerCase()
   .brand<'UniqueKeyId'>()
   .meta({ description: 'Stable UUID identifying a unique key; input is normalized to lowercase.' });
-const textSchema = z
+export const textSchema = z
   .string()
   .max(10000)
   .refine(value => !value.includes('\u0000') && !/[\uD800-\uDFFF]/u.test(value), tableDefinitionMessages.wellFormedText)
@@ -488,3 +488,4 @@ export const recordQuerySchema = z
   })
   .strict();
 export type RecordQuery = z.infer<typeof recordQuerySchema>;
+export type RecordFilter = z.infer<typeof filterSchema>;
