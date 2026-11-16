@@ -18,6 +18,7 @@ import {
 import {
   approveDataView,
   createDataView,
+  dataViewRelease,
   revokeDataView,
   shareDataView,
 } from '../../../tables/dist/data-view-store.js';
@@ -157,19 +158,24 @@ ${await readFile(new URL('../../../../apps/database/migrations/0001_baseline.sql
   const list = (actor = app, request = ada) =>
     service.listThroughView(ws.id, actor, { ...request, query: { limit: 50 } });
 
+  const servedRelease = () => as(admin, tx => dataViewRelease(tx, appId));
+
   await t.test('a view serves nothing until it is shared and approved', async () => {
     await assert.rejects(list(), AccessDenied);
+    assert.equal(await servedRelease(), null, 'no request handles before a view is shared');
     await assert.rejects(
       as(member, tx => shareDataView(tx, member, { appId, viewId: view.id })),
       AccessDenied,
     );
     await as(admin, tx => shareDataView(tx, admin, { appId, viewId: view.id }));
     await assert.rejects(list(), AccessDenied);
+    assert.equal(await servedRelease(), null, 'no request handles before a share is approved');
     await assert.rejects(
       as(member, tx => approveDataView(tx, member, { appId, viewId: view.id })),
       AccessDenied,
     );
     await as(approver, tx => approveDataView(tx, approver, { appId, viewId: view.id }));
+    assert.equal(await servedRelease(), live);
     const grant = (
       await db.platform.query(`SELECT shared_by,approved_by,approved_at FROM ${s}.tf_app_data_view_grants`)
     ).rows;
@@ -506,6 +512,7 @@ ${await readFile(new URL('../../../../apps/database/migrations/0001_baseline.sql
       second = await release(3);
     await db.platform.query(`UPDATE ${s}.tf_apps SET live_release_id=$2 WHERE id=$1`, [appId, second]);
     const current = { ...app, releaseId: second };
+    assert.equal(await servedRelease(), second, 'request handles name the release live now');
     assert.deepEqual(await adaIds(current), adaPublished, 'served without a new share');
     await assert.rejects(list(app), AccessDenied, 'the earlier release is no longer live');
     await as(admin, tx => revokeDataView(tx, admin, { appId, viewId: view.id }));
