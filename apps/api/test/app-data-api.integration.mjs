@@ -10,7 +10,6 @@ import {
   signRequestHandle,
 } from '@tulipfarm/apps/store';
 import { registerExtension, resetExtensions } from '@tulipfarm/extensions';
-import { createAbuseLimiter } from '../src/abuse.ts';
 import { registerAppData } from '../src/app-data.ts';
 import { authConfig } from '../src/auth.ts';
 import { registerSecurity } from '../src/security.ts';
@@ -33,9 +32,7 @@ test('an app server reaches an approved view only while a visitor request is ope
   } = await appDataFixture(t);
   const handles = requestHandleKey({ WORKSPACE_RUNTIME_KEY_ID: 'app-data', WORKSPACE_RUNTIME_KEY: 'cd'.repeat(32) });
   let queries = 0;
-  let limiterQueries = 0;
   const counted = { query: (...args) => (queries++, pool.query(...args)) };
-  const limiterPool = { query: (...args) => (limiterQueries++, pool.query(...args)) };
   const build = async (limits, platform = counted) => {
     const app = Fastify({ trustProxy: true });
     const perAddress = process.env.API_RATE_LIMIT_PER_MINUTE;
@@ -50,10 +47,9 @@ test('an app server reaches an approved view only while a visitor request is ope
     app.register(
       async routes =>
         registerAppData(routes, {
-          platform,
+          lookups: platform,
           handles,
           tables: service,
-          limit: createAbuseLimiter(limiterPool, randomUUID()),
           limits,
         }),
       { prefix: '/v1' },
@@ -275,12 +271,11 @@ test('an app server reaches an approved view only while a visitor request is ope
     assert.equal(queries - before, 0, 'an app at its limit is refused from memory');
   });
 
-  await t.test('app data calls never touch the abuse limiter', async () => {
+  await t.test('each refusal names its reason', async () => {
     const server = await serve({ request: 1 });
     const ended = await open();
     await closeRequestHandle(pool, ended);
     const busy = await open();
-    const before = limiterQueries;
     const statuses = [];
     for (const attempt of [
       () => call(busy, 'list', list, nat, viewId, server),
@@ -290,7 +285,6 @@ test('an app server reaches an approved view only while a visitor request is ope
     ])
       statuses.push((await attempt()).status);
     assert.deepEqual(statuses, [200, 429, 401, 403]);
-    assert.equal(limiterQueries - before, 0);
   });
 
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -509,8 +503,9 @@ test('an app server reaches an approved view only while a visitor request is ope
     );
     assert.deepEqual(ours, Array(11).fill(200), 'the other app is never refused');
     const after = lookups.of(appId);
-    assert.deepEqual(outcome(await inject(server, stockpile[0])), tooMany);
-    assert.equal(lookups.of(appId), after, 'refused from memory');
+    assert.deepEqual(outcome(await inject(server, stockpile[0])), closed, 'a handle found closed stays closed');
+    assert.deepEqual(outcome(await inject(server, stockpile.at(-1))), tooMany, 'a handle not looked up waits');
+    assert.equal(lookups.of(appId), after, 'both answered from memory');
   });
 
   await t.test('a long stream keeps its data access after its handle is older than a minute', async t => {
@@ -579,7 +574,7 @@ test('an app server reaches an approved view only while a visitor request is ope
     const other = await publishApp('Kiosk');
     const otherView = (await approvedView(other.appId)).viewId;
     const otherHandle = await open(other.live, other.appId);
-    const flood = await open();
+    const flood = await Promise.all(Array.from({ length: 10 }, () => open()));
     let release;
     const gate = new Promise(resolve => (release = resolve));
     const evaluations = await flagProvider(t, () => gate.then(() => true));
@@ -593,7 +588,7 @@ test('an app server reaches an approved view only while a visitor request is ope
       calls.push(request().finally(() => answered++));
       await until(() => looked + answered > before);
     };
-    for (let index = 0; index < 10; index++) await start(() => call(flood, 'list', list, nat, viewId, server));
+    for (const visitor of flood) await start(() => call(visitor, 'list', list, nat, viewId, server));
     await start(() => call(otherHandle, 'list', list, nat, otherView, server));
     release();
     assert.deepEqual(
