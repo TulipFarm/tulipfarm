@@ -359,6 +359,7 @@
     "@tulipfarm/google-workspace": "workspace:*",
     "@tulipfarm/integrations": "workspace:*",
     "@tulipfarm/knowledge": "workspace:*",
+    "@tulipfarm/mcp-catalog": "workspace:*",
     "@tulipfarm/media": "workspace:*",
     "@tulipfarm/observability": "workspace:*",
     "@tulipfarm/plan-documents": "workspace:*",

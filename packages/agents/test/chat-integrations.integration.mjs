@@ -183,9 +183,14 @@ test('chat finds remote MCP servers and offers a personal setup card', async t =
   const found = await tool({ tool: 'integrations.mcp.search', query: 'posthog' });
   assert.deepEqual(queries, ['posthog']);
   assert.deepEqual(
-    found.servers.map(server => [server.registryName, server.endpoint, server.needsValues, server.description.length]),
+    found.servers.map(server => [
+      server.registryName,
+      server.endpoint,
+      server.needsValues,
+      server.verified ?? server.description.length,
+    ]),
     [
-      ['io.github.PostHog/mcp', 'https://mcp.posthog.com/mcp', false, 300],
+      [undefined, 'https://mcp.posthog.com/mcp', false, true],
       ['example/tenant', 'https://{tenant}.example.com/mcp', true, 300],
     ],
   );
@@ -218,6 +223,40 @@ test('chat finds remote MCP servers and offers a personal setup card', async t =
       'endpoint-denied',
       endpoint,
     );
+});
+
+test('chat offers reviewed official servers before public registry results', async t => {
+  let down = false;
+  const tool = await setup(t, {
+    ...connections,
+    mcp: {
+      search: async () => {
+        if (down) throw new Error('registry down');
+        return ['https://aws-mcp.us-east-1.api.aws/mcp', 'https://knowledge-mcp.global.api.aws'].map(endpoint => ({
+          id: `${endpoint}@1:0`,
+          name: endpoint,
+          version: '1',
+          title: 'AWS',
+          description: 'AWS',
+          endpoint,
+          status: 'active',
+          compatibility: 'unverified',
+          authentication: 'unknown',
+        }));
+      },
+    },
+  });
+  const found = await tool({ tool: 'integrations.mcp.search', query: 'aws' });
+  assert.deepEqual(
+    found.servers.map(server => [server.endpoint, server.authentication, server.verified]),
+    [
+      ['https://aws-mcp.us-east-1.api.aws/mcp', 'oauth', true],
+      ['https://knowledge-mcp.global.api.aws', undefined, undefined],
+    ],
+  );
+  down = true;
+  assert.equal((await tool({ tool: 'integrations.mcp.search', query: 'aws' })).servers[0].verified, true);
+  assert.deepEqual((await tool({ tool: 'integrations.mcp.search', query: 'gmail' })).error, 'registry-unavailable');
 });
 
 test('chat offers npm and PyPI packages only where hosting is available', async t => {

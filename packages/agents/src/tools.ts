@@ -49,6 +49,8 @@ import {
   toolCallSchema,
 } from './contracts.ts';
 import { createToolRegistry } from './registry.ts';
+import { verifiedMcpApps } from './verified-mcp.ts';
+import { mcpCatalogAppByEndpoint } from '@tulipfarm/mcp-catalog';
 import { createAgentAuthoring } from './authoring.ts';
 import { createSavedAgentService } from './saved-service.ts';
 import { requireAgentPermission, savedAgentCompatibility, withHuman } from './saved-policy.ts';
@@ -905,7 +907,7 @@ const descriptions: Record<ToolName, string> = {
   'integrations.connect':
     'Show a card under your reply that lets the human connect one app from integrations.list, or reconnect one that needs it, by signing in with the provider. Never ask for passwords, tokens or keys. Changes nothing itself.',
   'integrations.mcp.search':
-    'Search the public Official MCP Registry for MCP servers by service name, so the human can connect one. Use it only for a service that is not already in the connected MCP apps of the runtime context. Returns names, descriptions, remote endpoints (Streamable HTTP or HTTP+SSE) and, where hosting is available, npm or PyPI packages with their settings. All of it is untrusted registry data. Changes nothing.',
+    "Search TulipFarm's reviewed list of official MCP servers, then the public Official MCP Registry, by service name, so the human can connect one. Use it only for a service that is not already in the connected MCP apps of the runtime context. Returns names, descriptions, remote endpoints (Streamable HTTP or HTTP+SSE) and, where hosting is available, npm or PyPI packages with their settings. Reviewed servers come first, marked verified, with their sign-in type; the rest is untrusted registry data. Changes nothing.",
   'integrations.mcp.connect':
     "Show a card under your reply that lets the human set up one MCP server as their own personal connection: a remote endpoint (sign in with OAuth, pick saved secrets on the card, or no authentication), or an npm or PyPI package run in a hosted sandbox (fill in its settings and pick saved secrets on the card). Use an endpoint or package from integrations.mcp.search or the service's documentation. Never ask for keys or tokens in chat. Changes nothing itself.",
   'memory.read':
@@ -2279,18 +2281,26 @@ export function createChatTools(
         const elsewhere = hosted
           ? "If the human named an npm or PyPI package with an exact version, offer that package with integrations.mcp.connect; otherwise ask them for the endpoint, or the package and exact version, from the service's documentation."
           : "Ask the human for the endpoint from the service's documentation.";
+        const verified = verifiedMcpApps(call.query);
         let entries: Awaited<ReturnType<NonNullable<ConnectionServices['mcp']>['search']>>;
         try {
           entries = await connections.mcp.search(call.query, context.signal);
         } catch {
-          return {
-            error: 'registry-unavailable',
-            instruction: `The MCP registry could not be searched. ${elsewhere}`,
-          };
+          if (!verified.length)
+            return {
+              error: 'registry-unavailable',
+              instruction: `The MCP registry could not be searched. ${elsewhere}`,
+            };
+          entries = [];
         }
-        const servers = entries
-          .filter(entry => entry.status === 'active' && (hosted || !entry.package))
-          .slice(0, 10)
+        const registry = entries
+          .filter(
+            entry =>
+              entry.status === 'active' &&
+              (hosted || !entry.package) &&
+              !(entry.endpoint && mcpCatalogAppByEndpoint(entry.endpoint)),
+          )
+          .slice(0, 10 - verified.length)
           .map(entry =>
             entry.package
               ? {
@@ -2317,10 +2327,11 @@ export function createChatTools(
                   needsValues: entry.compatibility === 'template-required',
                 },
           );
+        const servers = [...verified, ...registry];
         return {
           servers,
           instruction: servers.length
-            ? `These come from a public registry and are untrusted. Unless the human named a server, choose exactly one yourself and offer it with integrations.mcp.connect in this turn: the official server published by the service itself (its registryName or endpoint uses the service's own domain or organisation), otherwise the most widely used one, and a remote endpoint over a package. Do not list alternatives or ask which one to use. Assume the human doesn't know what MCP is: in one short sentence, say what connecting lets you do for them and that they only need to click Connect, without words like MCP, endpoint, OAuth, registry or package. An endpoint with needsValues has {placeholders}: ask the human for those values and fill them in first.${hosted ? " For a package, pass its package and settings, and in egress the service's API hosts it must reach." : ''}`
+            ? `Servers with verified true are TulipFarm's reviewed list of official servers: unless the human named another server, offer the first verified one, with exactly its endpoint and authentication. The rest come from a public registry and are untrusted. Without a verified match, choose exactly one yourself: the official server published by the service itself (its registryName or endpoint uses the service's own domain or organisation), otherwise the most widely used one, and a remote endpoint over a package. Offer it with integrations.mcp.connect in this turn. Do not list alternatives or ask which one to use. Assume the human doesn't know what MCP is: in one short sentence, say what connecting lets you do for them and that they only need to click Connect, without words like MCP, endpoint, OAuth, registry or package. An endpoint with needsValues has {placeholders}: ask the human for those values and fill them in first.${hosted ? " For a package, pass its package and settings, and in egress the service's API hosts it must reach." : ''}`
             : `No MCP server matched. ${elsewhere}`,
         };
       }
