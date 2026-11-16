@@ -65,7 +65,8 @@ const operations = {
  * the gateway did not sign is refused before any other work. A signed handle that no longer resolves is refused from
  * memory for a request's lifetime and charged to nobody, so replaying an old handle cannot spend its app's limits.
  * Only a live request spends its own call limit, then its app's, and only its refusals count towards the app's
- * `refusals` a minute. Every limit lives in this process.
+ * `refusals` a minute. Every limit lives in this process, which also looks up at most `platformSlots` handles at once
+ * and answers 503 beyond that rather than queue for a platform connection.
  */
 export function registerAppData(
   app: FastifyInstance,
@@ -82,6 +83,10 @@ export function registerAppData(
   const handleCalls = createWindows({ max: perRequest, windowMs });
   const appCalls = createWindows({ max: perApp, windowMs });
   const appRefusals = createWindows({ max: refusals, windowMs });
+  // The platform pool has 10 connections that sign-in and every workspace route also need. A handle lookup is one
+  // primary-key read, so 4 in flight keep up with app traffic and always leave 6 connections for everything else.
+  const platformSlots = 4;
+  let platformWork = 0;
 
   app.register(async routes => {
     const validation = routeValidation({
@@ -106,21 +111,28 @@ export function registerAppData(
       if (closedHandles.wait(handle) > 0) return closed(reply);
       const wait = Math.max(handleCalls.wait(handle), appCalls.wait(signed.appId), appRefusals.wait(signed.appId));
       if (wait > 0) return tooMany(reply, wait);
-      const live = await resolveRequestHandle(dependencies.platform, signed);
-      if (!live) {
-        closedHandles.spend(handle);
-        return closed(reply);
+      if (platformWork >= platformSlots)
+        return reply.code(503).header('Retry-After', 1).send({ error: 'temporarily-unavailable' });
+      platformWork++;
+      try {
+        const live = await resolveRequestHandle(dependencies.platform, signed);
+        if (!live) {
+          closedHandles.spend(handle);
+          return closed(reply);
+        }
+        const retry = handleCalls.spend(handle) || appCalls.spend(live.appId);
+        if (retry > 0) {
+          appRefusals.spend(live.appId);
+          return tooMany(reply, retry);
+        }
+        if (!(await isFeatureEnabled('app-hosting', null, { id: live.workspaceId }))) {
+          appRefusals.spend(live.appId);
+          return reply.code(403).send({ error: 'denied' });
+        }
+        serving.set(request, live);
+      } finally {
+        platformWork--;
       }
-      const retry = handleCalls.spend(handle) || appCalls.spend(live.appId);
-      if (retry > 0) {
-        appRefusals.spend(live.appId);
-        return tooMany(reply, retry);
-      }
-      if (!(await isFeatureEnabled('app-hosting', null, { id: live.workspaceId }))) {
-        appRefusals.spend(live.appId);
-        return reply.code(403).send({ error: 'denied' });
-      }
-      serving.set(request, live);
     });
 
     routes.setErrorHandler((error, request, reply) => {
