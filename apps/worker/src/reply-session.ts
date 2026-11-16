@@ -42,7 +42,8 @@ import type { ConversationInventory } from './conversation-inventory.ts';
 import { keepReplyLease } from './reply-lease.ts';
 
 type Tx = ReplyTransaction;
-type Actor = Awaited<ReturnType<typeof turnRequester>>;
+/** The member whose accepted message started the turn. Typed as a person, so member-only tools cannot receive another actor kind. */
+type Requester = Awaited<ReturnType<typeof turnRequester>>;
 type Inventory = Awaited<ReturnType<typeof readWorkspaceInventory>>['inventory'];
 type Catalog = Awaited<ReturnType<McpExecutionPort['catalog']>>['model'];
 type Call = {
@@ -142,7 +143,7 @@ export async function beginReplySession(input: {
     },
   });
 
-  let requester: Actor | null = null;
+  let requester: Requester | null = null;
   let inventory: Inventory | undefined;
   let inventorySources: SourceDependency[] = [];
   let catalog: Catalog | undefined;
@@ -168,7 +169,7 @@ export async function beginReplySession(input: {
     [...settledCalls, ...(hold?.calls ?? [])].reduce((total, call) => total + (call.milliseconds ?? 0), 0) -
     flushedMilliseconds;
 
-  async function readInventory(tx: Tx, slackActor: Actor | null) {
+  async function readInventory(tx: Tx, slackActor: Requester | null) {
     const row = (
       await tx.client.query(
         `SELECT project_id,EXISTS(SELECT 1 FROM ${qualified(tx.schema, 'tf_slack_default_turns')} WHERE conversation_id=$1) AS external FROM ${qualified(tx.schema, 'tf_conversations')} WHERE id=$1`,
@@ -204,7 +205,7 @@ export async function beginReplySession(input: {
   /** The source checks each model call used to run in its own transaction. */
   async function authorize(
     tx: Tx,
-    slackActor: Actor | null,
+    slackActor: Requester | null,
     sources: readonly SourceDependency[],
     drafts: SourceDependency[],
   ) {
@@ -460,7 +461,7 @@ export async function beginReplySession(input: {
   };
 
   return {
-    requester: requester as Actor | null,
+    requester: requester as Requester | null,
     destinations: started.destinations,
     meter,
     /** The reply's meter that also reports each call's credits, for a sub-agent's running total. */

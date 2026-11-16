@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { AccessDenied, type HumanActor, type SourceDependency } from '@tulipfarm/access';
+import { AccessDenied, type SourceDependency } from '@tulipfarm/access';
 import { inferSpecialist, type InferenceRoute, type ToolModelMeter } from '@tulipfarm/agents/inference';
 import { createAgentTasks } from '@tulipfarm/agents/tasks';
 import type { createChatTools, SubagentDelegation, SubagentToolContext } from '@tulipfarm/agents/tools';
@@ -146,7 +146,7 @@ export function createSubagentDelegation(options: SubagentDelegationOptions): Su
         const output = await options.tools.invokeWithSources(
           {
             workspaceId: context.workspaceId,
-            actor: context.actor as HumanActor,
+            actor: context.actor,
             callId: randomUUID(),
             signal: live.signal,
             origin: {
