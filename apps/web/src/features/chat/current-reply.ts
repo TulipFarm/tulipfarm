@@ -55,8 +55,6 @@ export function currentReply({ messages, outgoing, command, stream }: ReplyInput
   // A step ending in tool calls narrates work; only the final step's text is the answer.
   const stepText =
     previewText && (running || (progress && preview && preview.identity.step < progress.step)) ? previewText : '';
-  // A saved tool row shows the same text in the activity list, so the live note steps aside.
-  const narration = tools.some(tool => tool.narration?.includes(stepText.trim())) ? '' : stepText;
   const layoutState = turn && stream.layouts?.get(turn.id);
   // A layout from an earlier step than the latest text was given up for a text answer.
   const layoutJson =
@@ -93,7 +91,7 @@ export function currentReply({ messages, outgoing, command, stream }: ReplyInput
     queueLabel,
     unconfirmed,
     since: replying?.createdAt ?? pending?.at,
-    narration,
+    narration: stepText,
     answerText,
     /** The streaming `reply.render` arguments of the current reply, drawn as a layout preview. */
     layoutJson,
