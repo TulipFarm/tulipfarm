@@ -111,6 +111,8 @@ export function registerSecurity(app: FastifyInstance, webOrigin: string) {
       });
     },
   });
+  // Public app servers share outbound addresses, so app data calls are limited per request and per app instead.
+  const unlimited = new Set(['getLivenessV1', 'listAppDataV1', 'readAppDataV1', 'mutateAppDataV1']);
   app.after(() => {
     const general = app.createRateLimit();
     const diagnostics = app.createRateLimit({ max: 6, timeWindow: 60_000 });
@@ -118,7 +120,7 @@ export function registerSecurity(app: FastifyInstance, webOrigin: string) {
       reply.header('Cache-Control', 'no-store');
       reply.header('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
       const operation = request.routeOptions.schema?.operationId;
-      if (operation === 'getLivenessV1') return;
+      if (operation && unlimited.has(operation)) return;
       for (const limiter of operation === 'getHealthV1' ? [general, diagnostics] : [general]) {
         const result = await limiter(request);
         if (!result.isAllowed && result.isExceeded) {
