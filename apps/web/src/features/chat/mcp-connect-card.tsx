@@ -163,6 +163,8 @@ function Connect({
   );
 }
 
+const maxToolsOn = 100;
+
 /** A connection that exists. It shows "Connected" once tools are on, and offers one click for anything else. */
 function Connected({
   api,
@@ -180,8 +182,16 @@ function Connected({
   const [justConnected] = useState(() => takeMcpConnected() === integration.id);
   const state = detail.state.kind === 'ready' ? detail.state.data : null;
   const live = state?.integration ?? integration;
-  const turnOn = () =>
-    state &&
+  const turnOn = () => {
+    if (!state) return;
+    // The server turns on at most 100 tools per app, so reads go first.
+    const on = new Set(
+      state.tools
+        .filter(tool => tool.compatibility === 'compatible')
+        .sort((a, b) => Number(b.readOnly) - Number(a.readOnly))
+        .slice(0, maxToolsOn)
+        .map(tool => tool.name),
+    );
     void command.run(
       () =>
         api.integrationCommand(live.id, 'tools', {
@@ -190,12 +200,13 @@ function Connected({
           tools: state.tools.map(tool => ({
             name: tool.name,
             revision: tool.revision,
-            enabled: tool.compatibility === 'compatible',
-            standingException: tool.standingException,
+            enabled: on.has(tool.name),
+            standingException: on.has(tool.name) && tool.standingException,
           })),
         }),
       () => void detail.refresh(),
     );
+  };
   const ready = live.status === 'ready';
   const manage = (
     <Button

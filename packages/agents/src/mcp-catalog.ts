@@ -150,10 +150,25 @@ export function createMcpCatalog(input: readonly McpCatalogEntry[]): {
     return mcpModelCatalogSchema.parse({ discovery, tools });
   }
   function search(query: string, offset = 0) {
-    const terms = query.toLocaleLowerCase().split(/\s+/).filter(Boolean);
-    const matches = entries.filter(entry =>
-      terms.every(term => `${entry.name} ${entry.description}`.toLocaleLowerCase().includes(term)),
-    );
+    // Models search in their own words ("grafana alerts"), so rank tools by how many terms they contain instead of
+    // requiring all of them, and let a plural match its singular ("alerts" finds "alert_rules").
+    const terms = [
+      ...new Set(
+        query
+          .toLocaleLowerCase()
+          .split(/\s+/)
+          .filter(Boolean)
+          .map(term => (term.length > 3 && term.endsWith('s') ? term.slice(0, -1) : term)),
+      ),
+    ];
+    const matches = entries
+      .map((entry, index) => {
+        const text = `${entry.name} ${entry.description}`.toLocaleLowerCase();
+        return { entry, index, score: terms.filter(term => text.includes(term)).length };
+      })
+      .filter(match => !terms.length || match.score > 0)
+      .sort((a, b) => b.score - a.score || a.index - b.index)
+      .map(match => match.entry);
     const tools: Extract<McpExecutionResult, { kind: 'search' }>['tools'] = [];
     for (const { inputSchema: _schema, ...entry } of matches.slice(offset, offset + 10)) {
       if (tools.length && bytes([...tools, entry]) > maxModelBytes) break;
