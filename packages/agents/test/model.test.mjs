@@ -22,6 +22,18 @@ test('standalone agent runs reject personal memory while private task context tr
   assert.equal(runtimeReminder({ kind: 'agent', input }).includes('personalMemory'), false);
 });
 
+test('chat runtime context names connected MCP apps, including ones whose tools are off', () => {
+  const connected = [
+    { name: 'Grafana', ownership: 'shared', toolsOn: 100 },
+    { name: 'Grafana', ownership: 'personal', toolsOn: 0 },
+  ];
+  const reminder = runtimeReminder({ kind: 'tools', mcp: { discovery: true, tools: [], connected } });
+  const data = JSON.parse(reminder.slice(reminder.indexOf('{"source"'), reminder.lastIndexOf('\n</system-reminder>')));
+  assert.deepEqual(data.connectedMcpApps.apps, connected);
+  assert.match(data.connectedMcpApps.instruction, /mcp\.search/);
+  assert.equal(runtimeReminder({ kind: 'tools' }).includes('connectedMcpApps'), false);
+});
+
 test('model contract accepts bounded writes and rejects forged authority', () => {
   const tableId = '11111111-1111-4111-8111-111111111111';
   assert.deepEqual(

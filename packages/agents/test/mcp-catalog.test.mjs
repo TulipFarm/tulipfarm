@@ -75,6 +75,25 @@ test('large catalogs require bounded search, exact describe and described-handle
   assert.throws(() => catalog.describe('not_selected_handle'));
 });
 
+test('search ranks tools by matching words and finds singular names from plural words', () => {
+  const tool = (i, name, description) => ({
+    ...entry,
+    handle: createHash('sha256').update(String(i)).digest('hex'),
+    name,
+    description: `Account: Grafana\n${description}`,
+  });
+  const catalog = createMcpCatalog([
+    tool(0, 'search_dashboards', 'Find dashboards.'),
+    tool(1, 'alerting_rules_read', 'List alert rules.'),
+    tool(2, 'list_datasources', 'List data sources.'),
+  ]);
+  assert.deepEqual(
+    catalog.search('grafana alerts').tools.map(found => found.name),
+    ['alerting_rules_read', 'search_dashboards', 'list_datasources'],
+  );
+  assert.deepEqual(catalog.search('pagerduty').tools, []);
+});
+
 test('unsupported schemas fail visibly before model exposure', () => {
   for (const inputSchema of [
     { $ref: 'https://attacker.test/schema' },

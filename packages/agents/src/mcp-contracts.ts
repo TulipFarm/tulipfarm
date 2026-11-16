@@ -23,6 +23,17 @@ export type McpCatalogEntry = z.infer<typeof mcpCatalogEntrySchema>;
 export const mcpModelCatalogSchema = z.strictObject({
   discovery: z.boolean(),
   tools: z.array(mcpCatalogEntrySchema).max(16),
+  /** The MCP apps this requester can use here, so the model knows what is connected even when its tools sit behind mcp.search. */
+  connected: z
+    .array(
+      z.strictObject({
+        name: z.string().min(1).max(200),
+        ownership: z.enum(['personal', 'shared']),
+        toolsOn: z.int().min(0),
+      }),
+    )
+    .max(20)
+    .optional(),
 });
 export type McpModelCatalog = z.infer<typeof mcpModelCatalogSchema>;
 export const mcpExecutionResultSchema = z.discriminatedUnion('kind', [

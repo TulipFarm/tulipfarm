@@ -70,6 +70,11 @@ export function createMcpExecution(
           inputSchema: entry.tool.inputSchema,
         })),
       ),
+      connected: selected.integrations.map(({ name, ownership, toolsOn }) => ({
+        name: name.slice(0, 200),
+        ownership,
+        toolsOn,
+      })),
       // Reading the catalog needs access to each bound integration, but tool names, descriptions and schemas are not
       // data from it, so these sources never make the reply MCP-derived. Only a tool that ran returns MCP data.
       sources: sourceDependenciesSchema.parse(selected.sources.map(source => ({ ...source, catalog: true }))),
@@ -126,7 +131,10 @@ export function createMcpExecution(
     catalog: async (context, described) => {
       if (!dispatchEnabled) return { model: { discovery: false, tools: [] }, sources: [] };
       const selected = await catalog(context);
-      return { model: selected.catalog.model(described), sources: selected.sources };
+      return {
+        model: { ...selected.catalog.model(described), connected: selected.connected.slice(0, 20) },
+        sources: selected.sources,
+      };
     },
     execute: async (context, callId, call) => {
       if (call.tool === 'mcp.call') {

@@ -1007,11 +1007,15 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
         const authority = await store.origin(tx, actor, origin, 'catalog');
         const selection = await store.selection(tx, actor, origin);
         const tools = [];
+        const integrations = [];
         for (const binding of selection.bindings) {
           const row = await store.load(tx, binding.integrationId);
           await store.permit(tx, actor, row, 'use');
           store.active(row);
           if (binding.authorizationEpoch !== row.authorization_epoch) throw new AccessDenied();
+          const before = tools.length;
+          const listed = { name: row.name, ownership: row.ownership, toolsOn: 0 };
+          integrations.push(listed);
           if (await store.barrier(tx, row.id)) continue;
           for (const policy of await policies(tx, row.id))
             if (
@@ -1038,11 +1042,13 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
                 revision: policy.discovered_revision,
                 tool: policy.tool,
               });
+          listed.toolsOn = tools.length - before;
         }
         bounded(tools, mcpLimits.catalogBytes);
         return {
           selectionVersion: selection.version,
           tools,
+          integrations,
           sources: selection.bindings.map(binding => ({
             kind: 'mcp-integration' as const,
             integrationId: binding.integrationId,
