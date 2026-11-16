@@ -40,6 +40,15 @@ export function AppActions({ app, admin }: { app: AppDetail; admin: boolean }) {
           Versions
         </Button>
       )}
+      {app.kind === 'public' && (canEdit(app) || admin) && (
+        <Button
+          variant="outline"
+          nativeButton={false}
+          render={<Link to="/$workspaceSlug/apps/$appSlug/data-access" params={params} />}
+        >
+          Data access
+        </Button>
+      )}
       {(canEdit(app) || admin) && (
         <Button
           variant="outline"

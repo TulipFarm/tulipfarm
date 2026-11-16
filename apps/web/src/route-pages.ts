@@ -44,4 +44,5 @@ export const appsNew = () => import('@/features/apps/new');
 export const appsVersions = () => import('@/features/apps/versions');
 export const appsEditPage = () => import('@/features/apps/edit/page');
 export const appsSettings = () => import('@/features/apps/settings');
+export const appsDataAccess = () => import('@/features/apps/data-access');
 export const knowledge = () => import('@/pages/knowledge');

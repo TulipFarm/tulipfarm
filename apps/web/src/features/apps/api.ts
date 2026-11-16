@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { apiOrigin } from '@/lib/auth';
 import { jsonResponse, readJson } from '@/lib/http';
 import { TableRequestError } from '@/features/tables/request-state';
+import { tableDefinitionSchema } from '@/features/tables/review-contracts';
 
 const failureSchema = z.object({ code: z.string(), message: z.string(), retryable: z.boolean().optional() });
 const issuesSchema = z.object({ issues: z.array(z.object({ path: z.string(), message: z.string() })) });
@@ -104,6 +105,42 @@ const operationSchema = z.object({
   failure: failureSchema.nullable(),
 });
 export type AppOperation = z.infer<typeof operationSchema>;
+
+export const dataViewActions = ['read', 'create', 'update', 'delete'] as const;
+export type DataViewAction = (typeof dataViewActions)[number];
+export const comparisonOps = ['eq', 'ne', 'lt', 'lte', 'gt', 'gte'] as const;
+export const nullOps = ['is-null', 'not-null'] as const;
+export type RuleOp = (typeof comparisonOps)[number] | (typeof nullOps)[number];
+
+const operandSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('value'), value: z.union([z.string(), z.boolean()]) }),
+  z.object({ kind: z.literal('parameter'), name: z.string() }),
+]);
+const comparisonSchema = z.union([
+  z.object({ fieldId: z.uuid(), op: z.enum(comparisonOps), operand: operandSchema }),
+  z.object({ fieldId: z.uuid(), op: z.enum(nullOps) }),
+]);
+export type DataViewComparison = z.infer<typeof comparisonSchema>;
+
+const dataViewSchema = z.object({
+  id: z.uuid(),
+  tableId: z.uuid(),
+  fieldIds: z.array(z.uuid()),
+  predicate: z.object({ all: z.array(comparisonSchema) }),
+  actions: z.array(z.enum(dataViewActions)),
+  createdBy: z.uuid(),
+  createdAt: z.string(),
+  sharedBy: z.uuid().nullable(),
+  sharedAt: z.string().nullable(),
+  approvedBy: z.uuid().nullable(),
+  approvedAt: z.string().nullable(),
+  /** What stops the view serving now, in the order to fix them; none means the app can use it. */
+  blockers: z.array(z.enum(['app-not-serving', 'not-approved', 'view-unresolvable'])),
+  /** The table's title and the fields the view uses; null when the table is gone. */
+  table: tableDefinitionSchema.pick({ label: true, fields: true }).nullable(),
+});
+export type DataView = z.infer<typeof dataViewSchema>;
+export type DataViewDraft = Pick<DataView, 'tableId' | 'fieldIds' | 'predicate' | 'actions'>;
 
 const nameAvailabilitySchema = z.object({
   name: z.string(),
@@ -223,6 +260,18 @@ export function appApi(workspaceId: string) {
       request(`/${appId}/grants/${encodeURIComponent(granteeKey(grantee))}`, 'DELETE'),
     nameAvailability: async (name: string, signal: AbortSignal) =>
       nameAvailabilitySchema.parse(await request(`/names/${encodeURIComponent(name)}`, 'GET', undefined, signal)),
+    dataViews: async (appId: string, signal: AbortSignal) =>
+      z
+        .object({ views: z.array(dataViewSchema) })
+        .parse(await request(`/${appId}/data-views`, 'GET', undefined, signal)).views,
+    createDataView: async (appId: string, draft: DataViewDraft) =>
+      dataViewSchema.parse(await request(`/${appId}/data-views`, 'POST', withRequestId(draft))),
+    shareDataView: async (appId: string, viewId: string) =>
+      dataViewSchema.parse(await request(`/${appId}/data-views/${viewId}/share`, 'PUT')),
+    approveDataView: async (appId: string, viewId: string) =>
+      dataViewSchema.parse(await request(`/${appId}/data-views/${viewId}/approval`, 'PUT')),
+    stopSharingDataView: async (appId: string, viewId: string) =>
+      request(`/${appId}/data-views/${viewId}/share`, 'DELETE'),
     rename: async (appId: string, name: string) => request(`/${appId}/name`, 'PUT', withRequestId({ name })),
     pause: stop('pause'),
     resume: stop('resume'),

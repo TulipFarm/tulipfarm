@@ -909,6 +909,11 @@ const appSettingsRoute = createRoute({
   path: 'apps/$appSlug/settings',
   component: lazyRouteComponent(routePage('appsSettings'), 'AppSettingsPage'),
 });
+const appDataAccessRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  path: 'apps/$appSlug/data-access',
+  component: lazyRouteComponent(routePage('appsDataAccess'), 'AppDataAccessPage'),
+});
 const appPageRoute = createRoute({
   getParentRoute: () => workspaceRoute,
   path: 'apps/$appSlug/$page',
@@ -1136,6 +1141,7 @@ export const router = createRouter({
       appVersionsRoute,
       appEditRoute,
       appSettingsRoute,
+      appDataAccessRoute,
       appPageRoute,
     ]),
   ]),

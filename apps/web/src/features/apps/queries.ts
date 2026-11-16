@@ -9,6 +9,7 @@ export const appKeys = {
   chat: (id: string) => ['apps', 'chat', id] as const,
   releases: (id: string) => ['apps', 'releases', id] as const,
   grants: (id: string) => ['apps', 'grants', id] as const,
+  dataViews: (id: string) => ['apps', 'data-views', id] as const,
   operation: (appId: string, id: string) => ['apps', 'operation', appId, id] as const,
   name: (name: string) => ['apps', 'name', name] as const,
 };
@@ -59,6 +60,11 @@ export function useAppGrants(workspaceId: string, appId: string, enabled: boolea
   return useFeatureRead({ key: appKeys.grants(appId), load: signal => api.grants(appId, signal), enabled });
 }
 
+export function useAppDataViews(workspaceId: string, appId: string, enabled: boolean) {
+  const api = useAppApi(workspaceId);
+  return useFeatureRead({ key: appKeys.dataViews(appId), load: signal => api.dataViews(appId, signal), enabled });
+}
+
 const settled = (operation: AppOperation) => operation.status !== 'admitted' && operation.status !== 'staging';
 
 /** Follows a publish or rollback until it switches, fails or is overtaken by a newer one. */
@@ -79,6 +85,7 @@ export function useAppChanges() {
     () => ({
       app: (appId: string) => change({ keys: [appKeys.list, appKeys.detail(appId), appKeys.releases(appId)] }),
       grants: (appId: string) => change({ keys: [appKeys.list, appKeys.grants(appId)] }),
+      dataViews: (appId: string) => change({ keys: [appKeys.dataViews(appId)] }),
     }),
     [change],
   );
