@@ -8,6 +8,7 @@ import {
   requireTeamAssignment,
   requirePersistedIssueCall,
   resolveActor,
+  unhandledActor,
   type Actor,
   type AuthorizationTransaction,
 } from '@tulipfarm/access';
@@ -50,6 +51,43 @@ export type IntegrationStorage = Pick<ReturnType<typeof createWorkspaceRuntime>,
 export const integrationCompatibility = commonCompatibility;
 type Options = { runtime: IntegrationStorage; keyring?: IntegrationKeyring; providerFetch?: typeof fetch };
 const relation = (tx: AuthorizationTransaction, name: string) => qualified(tx.schema, name);
+
+function auditActorId(actor: Actor) {
+  switch (actor.kind) {
+    case 'human':
+      return actor.membershipId;
+    case 'agent':
+      return actor.runId;
+    case 'app':
+      throw new AccessDenied();
+    default:
+      return unhandledActor(actor);
+  }
+}
+
+/** The member who receives a new integration's grants: the person, or the member who delegated the agent run. */
+async function creatorMembership(tx: AuthorizationTransaction, actor: Actor) {
+  switch (actor.kind) {
+    case 'human':
+      return actor.membershipId;
+    case 'agent':
+      return z
+        .object({ membership_id: uuidSchema })
+        .optional()
+        .parse(
+          (
+            await tx.client.query(
+              `SELECT membership_id FROM ${relation(tx, 'tf_agent_runs')} WHERE id=$1 AND kind='delegated' AND membership_id IS NOT NULL`,
+              [actor.runId],
+            )
+          ).rows[0],
+        )?.membership_id;
+    case 'app':
+      throw new AccessDenied();
+    default:
+      return unhandledActor(actor);
+  }
+}
 const metadataRow = z.object({
   id: uuidSchema,
   owning_team_id: uuidSchema,
@@ -203,7 +241,7 @@ export function createIntegrationService(options: Options) {
   async function audit(tx: AuthorizationTransaction, actor: Actor, id: string, operation: string) {
     await tx.client.query(
       `INSERT INTO ${relation(tx, 'tf_audit_events')} (id, actor_id, operation, subject_id) VALUES ($1,$2,$3,$4)`,
-      [randomUUID(), actor.kind === 'human' ? actor.membershipId : actor.runId, `integration.${operation}`, id],
+      [randomUUID(), auditActorId(actor), `integration.${operation}`, id],
     );
   }
   async function team(tx: AuthorizationTransaction, id: string) {
@@ -379,20 +417,7 @@ export function createIntegrationService(options: Options) {
             JSON.stringify(actor),
           ],
         );
-        const creator =
-          actor.kind === 'human'
-            ? actor.membershipId
-            : z
-                .object({ membership_id: uuidSchema })
-                .optional()
-                .parse(
-                  (
-                    await tx.client.query(
-                      `SELECT membership_id FROM ${relation(tx, 'tf_agent_runs')} WHERE id=$1 AND kind='delegated' AND membership_id IS NOT NULL`,
-                      [actor.runId],
-                    )
-                  ).rows[0],
-                )?.membership_id;
+        const creator = await creatorMembership(tx, actor);
         if (!creator) throw new AccessDenied();
         for (const action of ['read', 'use', 'manage'])
           await tx.client.query(

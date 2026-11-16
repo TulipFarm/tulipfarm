@@ -473,7 +473,11 @@ export async function combineAgentWorkflows(
       ).rows[0],
     );
   if (!member || !actingMembership) throw new AgentError('combine-actor-unavailable');
-  const actor = { userId: member.user_id, membershipId: uuidSchema.parse(actingMembership) } as HumanActor;
+  const actor: HumanActor = {
+    kind: 'human',
+    userId: member.user_id,
+    membershipId: uuidSchema.parse(actingMembership),
+  };
   if (!(await managesAll(tx, actor.membershipId, olds))) return 'separate';
   const fromSetup = await setupTriggerIds(tx, agentId);
   const now = Date.now();

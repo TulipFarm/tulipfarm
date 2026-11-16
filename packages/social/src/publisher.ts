@@ -991,7 +991,8 @@ export function createSocialPublisher(options: {
       if (!context) throw new AccessDenied();
       const membershipId = await requirePublisher(tx, userId, context.channel_id);
       if (context.state !== expectedState) throw new SocialError('variant-conflict');
-      return { context, actor: { kind: 'human', userId, membershipId } as HumanActor };
+      const actor: HumanActor = { kind: 'human', userId, membershipId };
+      return { context, actor };
     });
   }
   async function view(workspaceId: string, variantId: string) {

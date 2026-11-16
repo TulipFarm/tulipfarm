@@ -8,9 +8,18 @@ export const humanActorSchema = z.strictObject({
   membershipId: uuidSchema,
 });
 export type HumanActor = z.infer<typeof humanActorSchema>;
+/** A published app serving a request. `viewer` is a member TulipFarm authenticated for that request, never one the app supplies. */
+export const appActorSchema = z.strictObject({
+  kind: z.literal('app'),
+  appId: uuidSchema,
+  releaseId: uuidSchema,
+  viewer: humanActorSchema.optional(),
+});
+export type AppActor = z.infer<typeof appActorSchema>;
 export const actorSchema = z.discriminatedUnion('kind', [
   humanActorSchema,
   z.strictObject({ kind: z.literal('agent'), runId: uuidSchema }),
+  appActorSchema,
 ]);
 export type Actor = z.infer<typeof actorSchema>;
 export const tablePermissionSchema = z.enum([

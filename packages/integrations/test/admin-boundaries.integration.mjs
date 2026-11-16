@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
 import { fixture } from './fixture.mjs';
 import { createWorkspaceMcp } from '../../workspace-mcp/dist/index.js';
-import { canAccessAsset, requireMcpSource } from '../../access/dist/index.js';
+import { AccessDenied, canAccessAsset, requireMcpSource } from '../../access/dist/index.js';
 import { createAtlassianAccounts } from '../../atlassian/dist/accounts.js';
 import { createSlackInstallations, slackCredentialCipher } from '../../slack/dist/index.js';
 import { requireSlackInstallationUse } from '../../slack/dist/installation-access.js';
@@ -15,6 +15,9 @@ test('ordinary token creator manages explicit person/team grants; unrelated admi
     const { service: s, workspaceId: w, member: creator, actor: admin, input, teamId } = f;
     const created = await s.create(w, creator, input);
     assert.deepEqual(created.capabilities, { read: true, use: true, manage: true, administer: true });
+    const app = { kind: 'app', appId: randomUUID(), releaseId: randomUUID(), viewer: creator };
+    await assert.rejects(s.get(w, app, input.id), AccessDenied);
+    await assert.rejects(s.create(w, app, { ...input, id: randomUUID() }), AccessDenied);
     assert.deepEqual(await s.list(w, admin), { integrations: [] });
     for (const operation of [
       () => s.get(w, admin, input.id),

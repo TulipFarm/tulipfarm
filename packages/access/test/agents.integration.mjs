@@ -3,7 +3,16 @@ import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
 import { fixture, connect } from '../../workspace-storage/test/integration/fixture.mjs';
 import { inTransaction } from '../../workspace-storage/src/provisioning.ts';
-import { AccessDenied, canAccessTable, lockAuthorization, queryHumanContext } from '../src/index.ts';
+import {
+  AccessDenied,
+  canAccessAsset,
+  canAccessTable,
+  lockAuthorization,
+  queryHumanContext,
+  requireCurrentActor,
+  requirePersistedIssueCall,
+  resolveActor,
+} from '../src/index.ts';
 
 test('persisted agent authorization intersects live grants, limits, activation and caller', async () => {
   const setup = await fixture();
@@ -108,6 +117,60 @@ test('persisted agent authorization intersects live grants, limits, activation a
       workspace.userId,
     ]);
     await assert.rejects(allowed(actor), AccessDenied);
+  } finally {
+    await client.end();
+    await setup.close();
+  }
+});
+
+test('an app actor holds no member authority, even with an admin as its viewer', async () => {
+  const setup = await fixture();
+  const workspace = await setup.create();
+  const client = await connect(setup.login(workspace));
+  const viewer = { kind: 'human', userId: workspace.userId, membershipId: workspace.membershipId };
+  const app = { kind: 'app', appId: randomUUID(), releaseId: randomUUID(), viewer };
+  const asset = randomUUID();
+  const issueCall = { requestId: randomUUID(), integrationId: randomUUID(), sourceId: randomUUID(), issueNumber: 1 };
+  const check = operation =>
+    inTransaction(client, async connection => {
+      const transaction = { client: connection, schema: workspace.names.schema };
+      await lockAuthorization(transaction);
+      return operation(transaction);
+    });
+  try {
+    assert.equal(await check(tx => canAccessTable(tx, viewer, asset, 'table.schema.manage')), true);
+    assert.equal(await check(tx => canAccessTable(tx, app, asset, 'table.schema.manage')), false);
+    assert.equal(await check(tx => canAccessAsset(tx, app, asset, 'table.row.read')), false);
+    assert.equal(await check(tx => canAccessAsset(tx, app, asset, 'integration.read')), false);
+
+    assert.equal(await check(tx => requireCurrentActor(tx, viewer)), undefined);
+    await assert.rejects(
+      check(tx => requireCurrentActor(tx, app)),
+      AccessDenied,
+    );
+    await assert.rejects(
+      check(tx => resolveActor(tx, app)),
+      AccessDenied,
+    );
+
+    assert.deepEqual(await check(tx => queryHumanContext(tx, viewer)), viewer);
+    assert.equal(await check(tx => queryHumanContext(tx, app)), null);
+
+    assert.equal(await check(tx => requirePersistedIssueCall(tx, viewer, issueCall)), undefined);
+    await assert.rejects(
+      check(tx => requirePersistedIssueCall(tx, app, issueCall)),
+      AccessDenied,
+    );
+
+    const unknown = { kind: 'visitor', visitorId: randomUUID() };
+    await assert.rejects(
+      check(tx => requireCurrentActor(tx, unknown)),
+      AccessDenied,
+    );
+    await assert.rejects(
+      check(tx => queryHumanContext(tx, unknown)),
+      AccessDenied,
+    );
   } finally {
     await client.end();
     await setup.close();

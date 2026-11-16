@@ -308,7 +308,7 @@ export function meteredReply(
     );
     const { requester, destinations } = session;
     const reviewCards: ToolInferenceContext['reviewCards'] =
-      requester?.kind === 'human' && !externalContext
+      requester && !externalContext
         ? references =>
             createChatTools(runtime, { objects }).reviewCards(
               fence.workspaceId,
@@ -358,7 +358,7 @@ export function meteredReply(
     // A coding run uses the member's own plan and GitHub account, so only in their own chat in the app.
     const codingRunTools = requester && !externalContext && !project ? codingRuns : undefined;
     const appChat =
-      requester?.kind === 'human' && !externalContext && !project
+      requester && !externalContext && !project
         ? { workspaceId: fence.workspaceId, actor: requester, conversationId: fence.conversationId }
         : undefined;
     const appTools = apps && appChat && (await apps.admitted(appChat)) ? apps : undefined;
