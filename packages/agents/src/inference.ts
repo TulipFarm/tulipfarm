@@ -3576,7 +3576,9 @@ async function sendChatRequest<T>(
             ? planSessionFetch(target.provider, target.accessToken ?? '', serialized, deadline)
             : providerFetch(streamFormat ? streamUrl(streamFormat, wire.url) : wire.url, {
                 method: 'POST',
-                headers: wire.headers,
+                // The ChatGPT plan streams without a content type, so ask for an event stream outright.
+                headers:
+                  target.provider === 'chatgpt' ? { ...wire.headers, accept: 'text/event-stream' } : wire.headers,
                 body: serialized,
                 redirect: 'manual',
                 signal: deadline,

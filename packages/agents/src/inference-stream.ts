@@ -35,6 +35,7 @@ export type StreamTrace = {
   lastEvent?: string | undefined;
   /** The type, code and message of an `error`, `response.failed` or `response.incomplete` event. */
   eventError?: string | undefined;
+  /** The response's content type, or `none` when it sent none. */
   contentType?: string | undefined;
   processingMs?: string | undefined;
   edgeRequestId?: string | undefined;
@@ -51,7 +52,7 @@ export function streamTrace() {
   return {
     trace,
     response(response: Response) {
-      trace.contentType = response.headers.get('content-type') ?? undefined;
+      trace.contentType = response.headers.get('content-type') ?? 'none';
       trace.processingMs = response.headers.get('openai-processing-ms') ?? undefined;
       trace.edgeRequestId = response.headers.get('cf-ray') ?? undefined;
     },
@@ -626,7 +627,11 @@ async function rejectionBody(response: Response): Promise<unknown> {
   }
 }
 
-/** Reads an SSE model response into its non-streaming body shape, reporting each change of the visible answer. Other responses parse as JSON. */
+/**
+ * Reads an SSE model response into its non-streaming body shape, reporting each change of the visible answer. Other
+ * responses parse as JSON. A streaming request's body is told apart by its first bytes, since some providers omit or
+ * mislabel its content type.
+ */
 export async function readModelResponse(
   response: Response,
   format: StreamFormat | null,
@@ -641,25 +646,30 @@ export async function readModelResponse(
   },
 ): Promise<StreamedResponse> {
   if (!response.ok) return { body: await rejectionBody(response), error: null };
+  if (!format || !response.body) return { body: await response.json(), error: null };
   const contentType = response.headers.get('content-type') ?? '';
-  if (!format || !contentType || /\bjson\b/i.test(contentType)) return { body: await response.json(), error: null };
   let body = response.body;
   let counted = false;
-  if (!body || !/^text\/event-stream\b/i.test(contentType)) {
-    let text: string;
-    try {
-      text = await response.text();
-    } catch (error) {
-      throw new StreamReadError({ body: null, error: null }, error);
+  if (!/^text\/event-stream\b/i.test(contentType)) {
+    // A missing or wrong content type says nothing, so the body's first bytes decide: an event stream still streams.
+    const sniffed = await sniffBody(body);
+    if (sniffed.kind === 'events') body = sniffed.body;
+    else {
+      let text: string;
+      try {
+        const bytes = new Uint8Array(await new Response(sniffed.body).arrayBuffer());
+        options.onBytes?.(bytes.byteLength);
+        text = new TextDecoder().decode(bytes);
+      } catch (error) {
+        throw new StreamReadError({ body: null, error: null }, error);
+      }
+      const json = eventJson(text);
+      if (json.ok) return { body: json.value, error: null };
+      if (!eventStreamStart.test(text))
+        throw new StreamReadError({ body: null, error: null }, new UnexpectedBodyError(text));
+      body = new Response(text).body!;
+      counted = true;
     }
-    options.onBytes?.(new TextEncoder().encode(text).byteLength);
-    const json = eventJson(text);
-    if (json.ok) return { body: json.value, error: null };
-    // Some gateways send an event stream without its content type.
-    if (!/^\s*(event|data|id|retry)?:/.test(text))
-      throw new StreamReadError({ body: null, error: null }, new UnexpectedBodyError(text));
-    body = new Response(text).body!;
-    counted = true;
   }
   const assembler = assemblers[format]();
   let shown = '';
@@ -697,6 +707,44 @@ export async function readModelResponse(
     if (text !== shown) options.onText(text);
   }
   return assembler.result();
+}
+
+const eventStreamStart = /^\s*(event|data|id|retry)?:/;
+
+/**
+ * Reads just enough of a body to tell an event stream from anything else, and returns the whole body again, the bytes
+ * already read included.
+ */
+async function sniffBody(
+  body: ReadableStream<Uint8Array>,
+): Promise<{ kind: 'events' | 'other'; body: ReadableStream<Uint8Array> }> {
+  const reader = body.getReader();
+  const head: Uint8Array[] = [];
+  const decoder = new TextDecoder();
+  let start = '';
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (!done) {
+        head.push(value);
+        start = (start + decoder.decode(value, { stream: true })).trimStart();
+      }
+      if (done || /^[{[]/.test(start) || start.length >= 'retry:'.length) break;
+    }
+  } catch (error) {
+    throw new StreamReadError({ body: null, error: null }, error);
+  }
+  const replay = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      const next = head.shift();
+      if (next) return controller.enqueue(next);
+      const { done, value } = await reader.read();
+      if (done) controller.close();
+      else controller.enqueue(value);
+    },
+    cancel: reason => reader.cancel(reason),
+  });
+  return { kind: eventStreamStart.test(start) ? 'events' : 'other', body: replay };
 }
 
 /** The stream's events; a failed read throws {@link StreamReadError} with what was assembled so far. */

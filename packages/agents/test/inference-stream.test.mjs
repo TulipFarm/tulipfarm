@@ -802,6 +802,73 @@ test('a JSON reply to a streaming request still parses and reports no streamed t
   assert.deepEqual({ updates, metered }, { updates: [], metered: [known] });
 });
 
+/** A 200 response whose body the test feeds chunk by chunk, with the given headers only. */
+function fed(headers = {}) {
+  let controller;
+  const body = new ReadableStream({ start: c => void (controller = c) });
+  return {
+    response: new Response(body, { status: 200, headers }),
+    push: text => controller.enqueue(encoder.encode(text)),
+    close: () => controller.close(),
+  };
+}
+const unlabeledCompleted = {
+  id: 'resp_1',
+  status: 'completed',
+  output: [{ type: 'message', id: 'msg_1', content: [{ type: 'output_text', text: 'Hello there' }] }],
+};
+const unlabeledEvents = sse([
+  { type: 'response.created', response: { id: 'resp_1', status: 'in_progress', output: [] } },
+  { type: 'response.output_item.added', output_index: 0, item: { type: 'message', id: 'msg_1', content: [] } },
+  { type: 'response.output_text.delta', item_id: 'msg_1', output_index: 0, delta: 'Hello' },
+]);
+const unlabeledRest = sse([
+  { type: 'response.output_text.delta', item_id: 'msg_1', output_index: 0, delta: ' there' },
+  { type: 'response.completed', response: unlabeledCompleted },
+]);
+
+for (const [name, headers] of [
+  ['no content type', {}],
+  ['a JSON content type', { 'content-type': 'application/json' }],
+]) {
+  test(`a Responses event stream with ${name} streams its deltas as they arrive`, async () => {
+    const body = fed(headers);
+    assert.equal(body.response.headers.get('content-type'), headers['content-type'] ?? null);
+    const shown = [];
+    let firstDelta;
+    const delta = new Promise(resolve => (firstDelta = resolve));
+    // The first event is split inside its field name, so the sniff needs a second chunk.
+    body.push(unlabeledEvents.slice(0, 3));
+    body.push(unlabeledEvents.slice(3));
+    const result = readModelResponse(body.response, 'responses', {
+      onText: text => {
+        shown.push(text);
+        firstDelta();
+      },
+    });
+    await delta;
+    assert.deepEqual(shown, ['Hello']);
+    body.push(unlabeledRest);
+    body.close();
+    assert.deepEqual(await result, { body: unlabeledCompleted, error: null });
+    assert.deepEqual(shown, ['Hello', 'Hello there']);
+  });
+}
+
+test('a JSON reply to a streaming request without a content type still parses', async () => {
+  const body = fed();
+  const json = ' {"id":"resp_1","status":"completed","output":[]}';
+  body.push(json.slice(0, 20));
+  body.push(json.slice(20));
+  body.close();
+  let bytes = 0;
+  assert.deepEqual(
+    await readModelResponse(body.response, 'responses', { onText: undefined, onBytes: count => (bytes += count) }),
+    { body: { id: 'resp_1', status: 'completed', output: [] }, error: null },
+  );
+  assert.equal(bytes, json.length);
+});
+
 test('malformed streams take the empty-or-malformed correction path', async t => {
   const requests = provider(t, [
     () =>
