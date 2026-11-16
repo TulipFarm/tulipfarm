@@ -9,19 +9,20 @@
   "summary": "Manage AWS resources and search AWS docs",
   "capabilities": [
     "Run AWS API calls to inspect and change resources",
+    "Move files in and out of S3",
     "Search and read AWS documentation",
     "Get guidance on AWS services and best practices"
   ],
   "official": {
-    "evidence": "https://docs.aws.amazon.com/agent-toolkit/latest/userguide/what-is-agent-toolkit.html",
+    "evidence": "https://docs.aws.amazon.com/agent-toolkit/latest/userguide/getting-started-aws-mcp-server.html",
     "repository": "https://github.com/awslabs/mcp"
   },
-  "docs": "https://awslabs.github.io/mcp/",
+  "docs": "https://docs.aws.amazon.com/agent-toolkit/latest/userguide/getting-started-aws-mcp-server.html",
   "remote": {
-    "url": "https://knowledge-mcp.global.api.aws",
+    "url": "https://aws-mcp.us-east-1.api.aws/mcp",
     "transport": "streamable-http",
-    "auth": "none",
-    "checked": "2026-11-14"
+    "auth": "oauth",
+    "checked": "2026-11-16"
   },
   "packages": [
     {

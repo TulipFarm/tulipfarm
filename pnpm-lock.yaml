@@ -803,6 +803,9 @@ importers:
       '@tulipfarm/knowledge':
         specifier: workspace:*
         version: link:../knowledge
+      '@tulipfarm/mcp-catalog':
+        specifier: workspace:*
+        version: link:../mcp-catalog
       '@tulipfarm/media':
         specifier: workspace:*
         version: link:../media

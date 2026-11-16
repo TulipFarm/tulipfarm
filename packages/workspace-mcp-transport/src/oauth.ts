@@ -83,6 +83,8 @@ function issuerUrl(input: string): string {
   if (url.search) throw new McpNetworkError('oauth-binding-denied');
   return input;
 }
+// `https://id.example` and `https://id.example/` name the same issuer; some providers mix the two forms.
+const sameIssuer = (a: string, b: string) => new URL(a).href === new URL(b).href;
 function validatedBinding(binding: OAuthBinding): OAuthBinding {
   return {
     ...binding,
@@ -182,7 +184,8 @@ export function createOAuthOperations({
         throw new McpNetworkError('oauth-binding-denied');
       const issuers = resource.authorization_servers.map(issuerUrl);
       const issuer = input.issuer ? issuerUrl(input.issuer) : issuers.length === 1 ? issuers[0] : undefined;
-      if (!issuer || !issuers.includes(issuer)) throw new McpNetworkError('oauth-binding-denied');
+      if (!issuer || !issuers.some(listed => sameIssuer(listed, issuer)))
+        throw new McpNetworkError('oauth-binding-denied');
       const parsedIssuer = new URL(issuer);
       const suffix = parsedIssuer.pathname === '/' ? '' : parsedIssuer.pathname;
       const locations = [
@@ -202,7 +205,7 @@ export function createOAuthOperations({
       }
       if (
         !metadata ||
-        issuerUrl(metadata.issuer) !== issuer ||
+        !sameIssuer(issuerUrl(metadata.issuer), issuer) ||
         !metadata.code_challenge_methods_supported.includes('S256') ||
         !metadata.response_types_supported.includes('code') ||
         (metadata.grant_types_supported && !metadata.grant_types_supported.includes('authorization_code'))
@@ -210,7 +213,8 @@ export function createOAuthOperations({
         throw new McpNetworkError('oauth-binding-denied');
       return validatedBinding({
         resource: endpoint,
-        issuer,
+        // The `iss` an authorization response carries is the server's own spelling.
+        issuer: metadata.issuer,
         authorizationEndpoint: metadata.authorization_endpoint,
         tokenEndpoint: metadata.token_endpoint,
         ...(metadata.registration_endpoint ? { registrationEndpoint: metadata.registration_endpoint } : {}),

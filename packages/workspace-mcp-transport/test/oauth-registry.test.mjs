@@ -176,6 +176,20 @@ test('OAuth accepts a resource that advertises more than a hundred scopes and re
   await assert.rejects(operations.discoverOAuth({ endpoint: resource }), { code: 'oauth-binding-denied' });
 });
 
+test('OAuth treats an origin issuer with and without its trailing slash as the same issuer', async t => {
+  const origin = 'https://auth.example.test';
+  const f = await httpFixture(t, (req, res) => {
+    if (req.url.pathname.includes('oauth-protected-resource'))
+      json(res, { resource, authorization_servers: [`${origin}/`] });
+    else if (req.url.pathname === '/.well-known/oauth-authorization-server')
+      json(res, { ...metadata, issuer: origin, authorization_endpoint: `${origin}/authorize` });
+    else json(res, {}, 404);
+  });
+  const operations = createOAuthOperations({ fetcher: f.fetcher });
+  assert.equal((await operations.discoverOAuth({ endpoint: resource })).issuer, origin);
+  assert.equal((await operations.discoverOAuth({ endpoint: resource, issuer: origin })).issuer, origin);
+});
+
 test('resource mismatch, issuer mix-up, missing PKCE and ambiguous issuer prevent authorization', async t => {
   for (const mode of ['resource', 'issuer', 'pkce', 'ambiguous'])
     await t.test(mode, async t => {
