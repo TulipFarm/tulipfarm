@@ -51,13 +51,16 @@ const hopByHop = new Set([
   'transfer-encoding',
   'upgrade',
 ]);
+// TulipFarm's own headers: only the gateway sets them upstream, and an app can never return them to the client.
+const tulipfarmHeader = (name: string) => name.startsWith('tulipfarm-');
 // Headers the client may not set: they would steer the forwarding layer or lie about who is asking.
 const clientForged = (name: string) =>
   name === 'host' ||
   name === 'forwarded' ||
   name === 'x-real-ip' ||
   name.startsWith('x-forwarded-') ||
-  name.startsWith('x-spawnbox-');
+  name.startsWith('x-spawnbox-') ||
+  tulipfarmHeader(name);
 const tulipfarmCookie = /^__Host-tf_/;
 
 function connectionTokens(headers: IncomingHttpHeaders) {
@@ -106,7 +109,7 @@ export function upstreamHeaders(
   return { ...forwarded, ...options.endpoint.headers };
 }
 
-/** The app's response headers for the client, less hop-by-hop and forwarding-layer headers. */
+/** The app's response headers for the client, less hop-by-hop, forwarding-layer and TulipFarm headers. */
 export function clientHeaders(
   headers: IncomingHttpHeaders,
   options: { readonly upgrade: boolean },
@@ -114,7 +117,7 @@ export function clientHeaders(
   const named = connectionTokens(headers);
   const kept: OutgoingHttpHeaders = {};
   for (const [name, value] of Object.entries(headers)) {
-    if (value === undefined || name.startsWith('x-spawnbox-')) continue;
+    if (value === undefined || name.startsWith('x-spawnbox-') || tulipfarmHeader(name)) continue;
     // A switched connection keeps the headers that confirm the switch.
     const switching = options.upgrade && (name === 'upgrade' || name === 'connection');
     if (!switching && (hopByHop.has(name) || named.has(name))) continue;
