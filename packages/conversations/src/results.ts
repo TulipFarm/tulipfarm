@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { sourceDependencySchema, type SourceDependency } from '@tulipfarm/access';
 import { modelFamilyIdSchema } from '@tulipfarm/config/model-identifier';
+import { modelFallbackReasons } from '@tulipfarm/config/model-fallback';
 import { replyRenderInputSchema } from './layout-contracts.ts';
 export {
   integrationSourceDependencySchema,
@@ -13,6 +14,8 @@ export const conversationResultSchema = z.strictObject({
   sources: z.array(sourceDependencySchema).max(1000),
   /** The configured fallback model family that answered after the chat model failed. */
   fallback: modelFamilyIdSchema.optional(),
+  /** Why the chat model failed when the fallback answered, if the cause is known. */
+  fallbackReason: z.enum(modelFallbackReasons).optional(),
   /** The reply's `reply.render` layout, checked by the responder. `text` is then its summary. */
   layout: replyRenderInputSchema.optional(),
   /** The model's layouts failed their checks; the reply is saved as one Text with a notice. */

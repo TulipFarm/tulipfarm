@@ -36,6 +36,7 @@ import {
   type ModelErrorClass,
   type ResponseRejection,
   modelCallDiagnostics,
+  modelCallReason,
   observeInference,
   observeChatDetail,
   recordModelFallback,
@@ -139,6 +140,7 @@ import type { ReplyStatus } from '@tulipfarm/conversations/events';
 import type { AppKind } from '@tulipfarm/apps';
 import { toolDisplayName } from '@tulipfarm/conversations/tool-activity';
 import { modelCallTimeoutMs } from '@tulipfarm/config/timeouts';
+import { modelFallbackReason, type ModelFallbackReason } from '@tulipfarm/config/model-fallback';
 export { serverSentEvents } from './inference-stream.ts';
 
 const credentialSchema = z.string().regex(/^[\x21-\x7e]{1,4096}$/);
@@ -3837,6 +3839,8 @@ const transientModelErrors: ReadonlySet<ModelErrorClass> = new Set([
   'rate_limited',
 ]);
 const transientRetryPauseMs = 1_500;
+/** Plan failures retried once on the same plan before any fallback; see withFallback. */
+const planRetryClasses: ReadonlySet<ModelErrorClass> = new Set(['timeout', 'server_error', 'network']);
 
 export async function inferWithTools(
   route: InferenceRoute,
@@ -3850,12 +3854,15 @@ export async function inferWithTools(
 ): Promise<{
   text: string;
   fallback?: string;
+  fallbackReason?: ModelFallbackReason;
   layout?: ReplyRenderInput;
   layoutFailed?: true;
 }> {
   // After a fallback answers a step, the rest of the turn uses its route.
   let config = inferenceRouteSchema.parse(route);
   let answeredBy: string | undefined;
+  // Why the chat model failed when the fallback took over, for the chat's note; unknown causes leave it unset.
+  let fallbackReason: ModelFallbackReason | undefined;
   // Any model output in this turn, streamed or stepped, makes a later fallback unsafe: its history is provider-native.
   let outputProduced = false;
   const items: LoopItem[] = messages.map(turn => ({ kind: 'turn', turn }));
@@ -4132,7 +4139,7 @@ export async function inferWithTools(
     return {
       text,
       ...layout,
-      ...(answeredBy ? { fallback: answeredBy } : {}),
+      ...(answeredBy ? { fallback: answeredBy, ...(fallbackReason ? { fallbackReason } : {}) } : {}),
     };
   };
   const finish = async (
@@ -4369,31 +4376,51 @@ export async function inferWithTools(
       if ('error' in first) throw first.error;
       return first.value;
     };
-    const failed = first;
-    const failure = diagnostics;
-    const primary = { provider: config.provider, model: config.model, errorClass: diagnostics.errorClass };
+    let failed = first;
+    let failure = diagnostics;
+    let primary = { provider: config.provider, model: config.model, errorClass: diagnostics.errorClass };
+    let reason = 'error' in failed ? modelFallbackReason(modelCallReason(failed.error)) : undefined;
     if (!tools?.fallback) {
-      recordModelFallback('not_configured', primary);
+      recordModelFallback('not_configured', primary, undefined, reason);
       return recoverInTurn(call, failed, failure, giveUp, invalid);
     }
     const fallback = inferenceRouteSchema.parse(tools.fallback.route);
     const target = { provider: fallback.provider, model: fallback.model };
-    if (
-      answeredBy !== undefined ||
-      (outputProduced && !switchable(fallback)) ||
-      diagnostics.outputStarted ||
-      !fallbackEligibleClasses.has(diagnostics.errorClass) ||
-      sameRoute(fallback, config) ||
-      (turnImages(loopTurns(items)).length > 0 && !routeCapabilities(fallback).imageInput)
-    ) {
-      recordModelFallback('not_eligible', primary, target);
+    const eligible = () =>
+      answeredBy === undefined &&
+      (!outputProduced || switchable(fallback)) &&
+      !failure.outputStarted &&
+      fallbackEligibleClasses.has(failure.errorClass) &&
+      !sameRoute(fallback, config) &&
+      (turnImages(loopTurns(items)).length === 0 || routeCapabilities(fallback).imageInput);
+    if (!eligible()) {
+      recordModelFallback('not_eligible', primary, target, reason);
       return recoverInTurn(call, failed, failure, giveUp, invalid);
+    }
+    // A plan that timed out or failed on the provider's side is asked once more, on a fresh session, before the
+    // fallback answers: these failures rarely repeat, and the person chose their own plan. Usage limits and models the
+    // plan doesn't offer would only fail again, and a step that already streamed words can't be repeated unseen.
+    if ('error' in failed && isPlanRoute(config) && planRetryClasses.has(failure.errorClass)) {
+      const retried = await retryPlan(call, failure.errorClass, invalid);
+      if ('value' in retried && (outputProduced || !invalid?.(retried.value))) return retried.value;
+      first = retried;
+      failed = retried;
+      failure =
+        'error' in retried
+          ? modelCallDiagnostics(retried.error)!
+          : { errorClass: 'invalid_response', outputStarted: false };
+      primary = { ...primary, errorClass: failure.errorClass };
+      reason = 'error' in retried ? modelFallbackReason(modelCallReason(retried.error)) : undefined;
+      if (!eligible()) {
+        recordModelFallback('not_eligible', primary, target, reason);
+        return recoverInTurn(call, failed, failure, giveUp, invalid);
+      }
     }
     let result: T;
     try {
       result = await call(fallback);
     } catch (second) {
-      recordModelFallback('failed', primary, target);
+      recordModelFallback('failed', primary, target, reason);
       const secondFailure = modelCallDiagnostics(second);
       // Credit and admission failures of the retry are the turn's real outcome; another model failure is secondary.
       if (!secondFailure) throw second;
@@ -4402,12 +4429,43 @@ export async function inferWithTools(
       return giveUp();
     }
     if (invalid?.(result)) {
-      recordModelFallback('failed', primary, target);
+      recordModelFallback('failed', primary, target, reason);
       return giveUp();
     }
-    switchTo(fallback);
-    recordModelFallback('used', primary, target);
+    switchTo(fallback, reason);
+    recordModelFallback('used', primary, target, reason);
     return result;
+  }
+  /**
+   * Runs a plan step once more on the same plan after a short pause. The failed request closed its session, so this one
+   * starts a fresh session that replays the conversation. Returns the step, or the retry's own model failure.
+   */
+  async function retryPlan<T>(
+    call: (target: typeof config) => Promise<T>,
+    errorClass: ModelErrorClass,
+    invalid?: (value: T) => boolean,
+  ): Promise<{ value: T } | { error: unknown }> {
+    const attributes = {
+      'error.type': errorClass,
+      'gen_ai.provider.name': config.provider,
+      'gen_ai.request.model': config.model,
+      attempt: 1,
+    };
+    await sleep(transientRetryPauseMs, undefined, signal ? { signal } : undefined);
+    let outcome: { value: T } | { error: unknown };
+    try {
+      outcome = { value: await call(config) };
+    } catch (error) {
+      if (!modelCallDiagnostics(error)) throw error;
+      outcome = { error };
+    }
+    const recovered = 'value' in outcome && (outputProduced || !invalid?.(outcome.value));
+    log('warn', 'activity', recovered ? 'call_completed' : 'call_failed', {
+      operation: 'chat.model-retry',
+      outcome: recovered ? 'recovered' : 'failed',
+      ...attributes,
+    });
+    return outcome;
   }
   const sameRoute = (a: typeof config, b: typeof config) => a.provider === b.provider && a.model === b.model;
   /**
@@ -4419,10 +4477,11 @@ export async function inferWithTools(
     (config.provider !== 'google' && target.provider !== 'google') ||
     config.provider === target.provider;
   /** Makes `target` answer the rest of the turn; the person's own model clears the fallback label. */
-  const switchTo = (target: typeof config) => {
+  const switchTo = (target: typeof config, reason?: ModelFallbackReason) => {
     const chosen = inferenceRouteSchema.parse(route);
     config = target;
     answeredBy = sameRoute(target, chosen) ? undefined : tools?.fallback?.label;
+    fallbackReason = answeredBy === undefined ? undefined : reason;
   };
   /**
    * A step that failed with a transient provider error (connection reset, 5xx, an error inside the stream, timeout, 429)
@@ -4472,8 +4531,9 @@ export async function inferWithTools(
           attempt: index + 1,
         });
         if (!sameRoute(target, config)) {
-          recordModelFallback('used', from, { provider: target.provider, model: target.model });
-          switchTo(target);
+          const reason = 'error' in failed ? modelFallbackReason(modelCallReason(failed.error)) : undefined;
+          recordModelFallback('used', from, { provider: target.provider, model: target.model }, reason);
+          switchTo(target, reason);
         }
         return value;
       } catch (error) {
@@ -4830,6 +4890,7 @@ export async function inferWithTools(
     restarted = true;
     config = fallback;
     answeredBy = tools.fallback.label;
+    fallbackReason = undefined;
     recordModelFallback('used', primary, target);
     corrections = 0;
     completionCorrections = 0;
@@ -6544,7 +6605,7 @@ export async function inferSpecialist(
         }
         config = fallback;
         fallbackUsed = true;
-        recordModelFallback('used', primary, target);
+        recordModelFallback('used', primary, target, modelFallbackReason(modelCallReason(failure)));
       }
     }
     if (selected.kind === 'failure') {

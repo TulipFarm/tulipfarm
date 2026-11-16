@@ -262,7 +262,8 @@ export const turnStatusSchema = z.enum([
 ]);
 /**
  * A completed turn's `errorCode` starts with this when a configured fallback model answered after the chat model failed;
- * the rest is that model family's id. The turn itself succeeded.
+ * the rest is that model family's id, then `:` and why the chat model failed when that is known, such as
+ * `model-fallback:grok-fast:timeout`. The turn itself succeeded.
  */
 export const modelFallbackCodePrefix = 'model-fallback:';
 export const turnSummarySchema = z.object({

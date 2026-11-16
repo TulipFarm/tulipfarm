@@ -1,3 +1,5 @@
+import { modelFallbackReasons, type ModelFallbackReason } from '@tulipfarm/config/model-fallback';
+
 // Copy for a failed reply. Model failures use `model-<reason>`; provider messages and internal codes never reach the page.
 
 // Mirrors `modelFallbackCodePrefix` in @tulipfarm/conversations/contracts.
@@ -127,25 +129,63 @@ export function replyRetrying(status: string, code: string | null | undefined): 
   return null;
 }
 
-/** A completed reply answered by the configured fallback model names that model and the chat model it replaced. */
+/** A completed turn's fallback code: the family that answered, and why the chat model failed when that is known. */
+function fallbackCode(code: string | null | undefined): { family: string; reason?: ModelFallbackReason } | null {
+  if (!code?.startsWith(modelFallbackPrefix)) return null;
+  const [family = '', reason] = code.slice(modelFallbackPrefix.length).split(':');
+  if (!family) return null;
+  return (modelFallbackReasons as readonly string[]).includes(reason ?? '')
+    ? { family, reason: reason as ModelFallbackReason }
+    : { family };
+}
+
+// Why a plan model couldn't answer; `plan` is the plan's name and `model` the chat model's.
+const planFallbackCauses: Record<ModelFallbackReason, (plan: keyof typeof planLabels, model: string) => string> = {
+  quota: plan =>
+    plan === 'copilot'
+      ? 'Your GitHub Copilot premium quota is used up'
+      : `Your ${planLabels[plan]} plan's usage limit is reached`,
+  'rate-limit': plan => `${planLabels[plan]} is limiting requests right now`,
+  outage: plan => `${planLabels[plan]} isn't responding right now`,
+  timeout: plan => `${planLabels[plan]} took too long to respond`,
+  'model-unavailable': (plan, model) => `${model} isn't available on your ${planLabels[plan]} plan`,
+  'sign-in': plan => `${planLabels[plan]} needs to be reconnected`,
+};
+// Why another chat model couldn't answer; `model` is its name.
+const modelFallbackCauses: Record<ModelFallbackReason, (model: string) => string> = {
+  quota: model => `${model} has no quota left with its provider`,
+  'rate-limit': model => `${model}'s provider is limiting requests right now`,
+  outage: model => `${model} isn't responding right now`,
+  timeout: model => `${model} took too long to respond`,
+  'model-unavailable': model => `${model} isn't available right now`,
+  'sign-in': model => `${model}'s provider rejected TulipFarm's credentials`,
+};
+
+/**
+ * A completed reply answered by the configured fallback model names that model and, when the turn knows it, why the
+ * chat model it replaced couldn't answer.
+ */
 export function fallbackNote(
   status: string,
   code: string | null | undefined,
   chatModel?: string,
   name: (id: string) => string = id => id,
 ): string | null {
-  if (status !== 'completed' || !code?.startsWith(modelFallbackPrefix)) return null;
-  const family = code.slice(modelFallbackPrefix.length);
-  if (!family) return null;
+  const fallback = status === 'completed' ? fallbackCode(code) : null;
+  if (!fallback) return null;
+  const { family, reason } = fallback;
   // Plan families are named after their provider in the catalog, such as `chatgpt-sol` or `claude-plan-opus`.
   const prefix = /^(chatgpt|claude-plan|copilot)-/.exec(chatModel ?? '')?.[1];
   const plan = prefix === 'claude-plan' ? 'claude' : (prefix as keyof typeof planLabels | undefined);
+  const replaced = chatModel && chatModel !== family ? name(chatModel) : undefined;
+  if (plan && reason)
+    return `${planFallbackCauses[reason](plan, replaced ?? 'This model')}, so ${name(family)} answered.`;
   if (plan) return `No ${planLabels[plan]} plan you can use could answer, so ${name(family)} did.`;
-  const replaced = chatModel && chatModel !== family ? name(chatModel) : 'the chat model';
-  return `Answered by ${name(family)} because ${replaced} was unavailable.`;
+  if (reason) return `${modelFallbackCauses[reason](replaced ?? 'The chat model')}, so ${name(family)} answered.`;
+  return `Answered by ${name(family)} because ${replaced ?? 'the chat model'} was unavailable.`;
 }
 
 /** The model family that wrote a reply: the configured fallback when it answered, else the chat model. */
 export function replyModel(model: string | undefined, code: string | null | undefined): string | undefined {
-  return code?.startsWith(modelFallbackPrefix) ? code.slice(modelFallbackPrefix.length) || model : model;
+  return fallbackCode(code)?.family ?? model;
 }

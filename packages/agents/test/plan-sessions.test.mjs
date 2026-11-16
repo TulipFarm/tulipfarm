@@ -192,3 +192,149 @@ test('a context overflow never reads as a sign-out, so the member keeps their to
   assert.equal(githubQuota.code, 'plan_usage_limit');
   assert.equal(githubQuota.retryAfterSeconds, 60);
 });
+
+/**
+ * Stands in for the Claude Agent SDK's `query` behind the real Claude vendor. Each user message runs the next script,
+ * which emits SDK messages and calls the session's MCP tools the way Claude Code does.
+ */
+function fakeClaude(t, scripts) {
+  planSessionsForTest.useClaudeQuery(({ prompt, options }) => {
+    const queue = [];
+    let wake;
+    let done = false;
+    const emit = message => {
+      queue.push(message);
+      wake?.();
+    };
+    const client = (async () => {
+      const [{ Client }, { InMemoryTransport }] = await Promise.all([
+        import('@modelcontextprotocol/sdk/client/index.js'),
+        import('@modelcontextprotocol/sdk/inMemory.js'),
+      ]);
+      const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+      await options.mcpServers.tulipfarm.instance.connect(serverSide);
+      const connected = new Client({ name: 'claude-code', version: '1.0.0' });
+      await connected.connect(clientSide);
+      return connected;
+    })();
+    const claude = {
+      stream: type => emit({ type: 'stream_event', parent_tool_use_id: null, event: { type } }),
+      /** Emits one tool_use block of message `msg_1` and starts running it at once, as the streaming executor does. */
+      use(id, table) {
+        emit({
+          type: 'assistant',
+          parent_tool_use_id: null,
+          message: {
+            id: 'msg_1',
+            content: [{ type: 'tool_use', id, name: `mcp__tulipfarm__${tool.name}`, input: { table } }],
+            usage: { input_tokens: 10, output_tokens: 5 },
+          },
+        });
+        return client.then(connected => connected.callTool({ name: tool.name, arguments: { table } }));
+      },
+      answer(words) {
+        emit({
+          type: 'assistant',
+          parent_tool_use_id: null,
+          message: { id: 'msg_2', content: [{ type: 'text', text: words }] },
+        });
+        emit({ type: 'result', subtype: 'success', result: words });
+      },
+    };
+    void (async () => {
+      for await (const _ of prompt) await scripts.shift()(claude);
+      done = true;
+      wake?.();
+    })();
+    options.abortController.signal.addEventListener('abort', () => {
+      done = true;
+      wake?.();
+    });
+    return (async function* () {
+      while (true) {
+        while (queue.length) yield queue.shift();
+        if (done) return;
+        await new Promise(resolve => (wake = resolve));
+      }
+    })();
+  });
+  t.after(() => {
+    planSessionsForTest.useClaudeQuery();
+    for (const pool of planSessionsForTest.sessions.values()) for (const session of pool) session.close();
+    planSessionsForTest.sessions.clear();
+  });
+}
+
+const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+/** One non-streamed Claude plan request; a lost tool call fails it within seconds instead of hanging the suite. */
+async function claudeStep(messages) {
+  const response = await planSessionFetch('claude', 'token', claudeBody(messages, false), AbortSignal.timeout(3000));
+  return response.json();
+}
+const toolUses = body => body.content.filter(block => block.type === 'tool_use');
+const resultsFor = uses => ({
+  role: 'user',
+  content: uses.map(use => ({ type: 'tool_result', tool_use_id: use.id, content: `rows of ${use.input.table}` })),
+});
+
+test('a Claude plan step waits for the whole message when Claude Code starts one tool before the next streams', async t => {
+  const seen = [];
+  fakeClaude(t, [
+    async claude => {
+      claude.stream('message_start');
+      const first = claude.use('toolu_a', 'deals');
+      // The second tool_use is still streaming while the first call waits for the loop.
+      await pause(300);
+      const second = claude.use('toolu_b', 'people');
+      claude.stream('message_delta');
+      claude.stream('message_stop');
+      for (const result of await Promise.all([first, second])) seen.push(result.content[0].text);
+      claude.answer('Two tables.');
+    },
+  ]);
+  const ask = [{ role: 'user', content: 'Which tables?' }];
+  const calls = await claudeStep(ask);
+  assert.equal(calls.stop_reason, 'tool_use');
+  const uses = toolUses(calls);
+  assert.deepEqual(
+    uses.map(use => use.id),
+    ['toolu_a', 'toolu_b'],
+  );
+  const answer = await claudeStep([...ask, { role: 'assistant', content: calls.content }, resultsFor(uses)]);
+  assert.equal(answer.stop_reason, 'end_turn');
+  assert.deepEqual(seen, ['rows of deals', 'rows of people']);
+});
+
+test('a Claude plan tool call that arrives after its step settled is the next step instead of a hang', async t => {
+  fakeClaude(t, [
+    async claude => {
+      // No stream events, so the first waiting call settles the step on its own.
+      const first = claude.use('toolu_a', 'deals');
+      await pause(200);
+      const second = claude.use('toolu_b', 'people');
+      await Promise.all([first, second]);
+      claude.answer('Two tables.');
+    },
+  ]);
+  const ask = [{ role: 'user', content: 'Which tables?' }];
+  const firstStep = await claudeStep(ask);
+  assert.deepEqual(
+    toolUses(firstStep).map(use => use.id),
+    ['toolu_a'],
+  );
+  // The loop runs the first tool while the second tool_use arrives.
+  await pause(400);
+  const asked = [...ask, { role: 'assistant', content: firstStep.content }, resultsFor(toolUses(firstStep))];
+  const secondStep = await claudeStep(asked);
+  assert.deepEqual(
+    toolUses(secondStep).map(use => use.id),
+    ['toolu_b'],
+  );
+  const answer = await claudeStep([
+    ...asked,
+    { role: 'assistant', content: secondStep.content },
+    resultsFor(toolUses(secondStep)),
+  ]);
+  assert.equal(answer.stop_reason, 'end_turn');
+  assert.deepEqual(answer.content, [{ type: 'text', text: 'Two tables.' }]);
+});

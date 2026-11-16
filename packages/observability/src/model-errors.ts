@@ -272,6 +272,15 @@ export class ModelCallError extends Error {
 }
 
 /** The diagnostics of a model call failure anywhere in an error's cause chain. */
+/** The `model-<reason>` reason of a failed model call, such as `copilot-usage-limit`, or undefined for other errors. */
+export function modelCallReason(error: unknown): string | undefined {
+  for (let value = error, depth = 0; value && typeof value === 'object' && depth < 8; depth++) {
+    if (value instanceof ModelCallError) return value.reason;
+    value = (value as { cause?: unknown }).cause;
+  }
+  return undefined;
+}
+
 export function modelCallDiagnostics(error: unknown): ModelCallDiagnostics | undefined {
   for (let value = error, depth = 0; value && typeof value === 'object' && depth < 8; depth++) {
     if (value instanceof ModelCallError) return value.modelDiagnostics;

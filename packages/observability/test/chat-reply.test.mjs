@@ -435,7 +435,7 @@ test('a reply the fallback answered labels its durations and names both models i
   for (const point of points) assert.equal(point.attributes['billing.source'], undefined, 'durations stay unsplit');
 });
 
-test('a reply summary names who pays for the model, and a plan reply that fell back to a hosted model shows both', async t => {
+test('a reply summary names who pays for the model, and a plan reply that fell back to a hosted model shows both and why', async t => {
   const { collect } = harness(t);
   const streamed = provider =>
     withChatModelRequest('reply', () =>
@@ -458,17 +458,22 @@ test('a reply summary names who pays for the model, and a plan reply that fell b
         'used',
         { provider: 'claude', model: 'claude-plan-model', errorClass: 'rate_limited' },
         { provider: 'azure', model: 'grok-4.3' },
+        'quota',
       ),
     );
     noteChatReplyFinal(chatReplyFinal(timing()));
   }, 'turn-plan-fallback');
   const { summaries } = await collect();
   assert.deepEqual(
-    summaries.map(summary => [summary['billing.source'], summary['fallback.billing.source']]),
+    summaries.map(summary => [
+      summary['billing.source'],
+      summary['fallback.billing.source'],
+      summary['fallback.reason'],
+    ]),
     [
-      ['plan', undefined],
-      ['hosted', undefined],
-      ['plan', 'hosted'],
+      ['plan', undefined, undefined],
+      ['hosted', undefined, undefined],
+      ['plan', 'hosted', 'quota'],
     ],
   );
 });
