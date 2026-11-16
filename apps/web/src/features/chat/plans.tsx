@@ -668,12 +668,7 @@ export function ChatPlans({
     if (added && foreground && !canvas.activeId && window.matchMedia('(min-width: 768px)').matches)
       canvas.show(planCanvasItem(workspaceId, chatId, added));
   }, [plans, chatId, workspaceId, foreground, canvas.activeId, canvas.show]);
-  if (read.state.kind === 'loading')
-    return (
-      <div role="status" aria-label="Loading plans" className="mt-4">
-        <Skeleton />
-      </div>
-    );
+  if (read.state.kind === 'loading') return null;
   if (read.state.kind === 'error' && read.state.updating)
     return (
       <WorkspaceUpdatingPanel
