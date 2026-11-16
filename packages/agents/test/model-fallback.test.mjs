@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { createServer } from 'node:http';
+import { once } from 'node:events';
 import { test } from 'node:test';
 import { inferSpecialist, inferWithTools } from '../dist/inference.js';
 import { PlanSessionError, planSessionsForTest } from '../dist/plan-sessions.js';
@@ -448,4 +450,141 @@ test('a plan step that fails after streaming words skips the quiet retry and res
     retryLogs(records).every(record => record['gen_ai.provider.name'] === undefined),
     'only the in-view restart ran, not the quiet plan retry',
   );
+});
+
+const realFetch = globalThis.fetch;
+const chatGptPlan = {
+  provider: 'chatgpt',
+  endpoint: 'https://api.openai.com/v1/',
+  model: 'gpt-6-luna',
+  accessToken: 'synthetic-token',
+};
+const chatGptCompleted = text => ({
+  type: 'response.completed',
+  response: {
+    id: 'resp_1',
+    model: 'gpt-6-luna',
+    status: 'completed',
+    output: [{ type: 'message', id: 'msg_1', content: [{ type: 'output_text', text }] }],
+    usage: { input_tokens: 10, output_tokens: 5, total_tokens: 15, input_tokens_details: { cached_tokens: 0 } },
+  },
+});
+const chatGptCreated = { type: 'response.created', response: { id: 'resp_1', status: 'in_progress', output: [] } };
+const sseEvents = events => events.map(event => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join('');
+
+/** Sends ChatGPT plan steps to `plan`, the fallback to azure and completion checks to a fixed answer; counts each. */
+function chatGptHarness(t, plan) {
+  const calls = [];
+  t.mock.method(globalThis, 'fetch', async (url, init) => {
+    const body = JSON.parse(init.body);
+    const chatgpt = String(url).startsWith('https://api.openai.com/');
+    if (isCompletionRequest(body)) return Response.json(completionReply(chatgpt ? 'responses' : 'azure'));
+    calls.push(chatgpt ? 'chatgpt' : 'azure');
+    if (!chatgpt) return Response.json(nativeReply('azure', { text: 'Hello from the fallback' }));
+    return plan(url, init);
+  });
+  return calls;
+}
+
+test('a ChatGPT plan stream cut after HTTP 200 is a transport failure, logged and retried on the same plan', async t => {
+  const records = logs(t);
+  const server = createServer(async (req, res) => {
+    req.resume();
+    await once(req, 'end');
+    res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'x-request-id': 'req_cut1' });
+    if (server.requests++ === 0) {
+      res.write(sseEvents([chatGptCreated]));
+      await new Promise(resolve => setTimeout(resolve, 20));
+      res.socket.destroy();
+    } else res.end(sseEvents([chatGptCreated, chatGptCompleted('Hello from the plan')]));
+  });
+  server.requests = 0;
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  t.after(() => {
+    server.closeAllConnections();
+    server.close();
+  });
+  const { port } = server.address();
+  const calls = chatGptHarness(t, (url, init) => realFetch(`http://127.0.0.1:${port}${new URL(url).pathname}`, init));
+  const answer = await inferWithTools(chatGptPlan, messages, noTools, undefined, false, null, {
+    fallback: planFallback,
+  });
+  assert.deepEqual(answer, { text: 'Hello from the plan' });
+  assert.deepEqual(calls, ['chatgpt', 'chatgpt']);
+  assert.equal(retryLogs(records)[0].outcome, 'recovered');
+  const failed = records.find(record => record.event === 'call_failed' && record['gen_ai.provider.name'] === 'chatgpt');
+  assert.equal(failed['error.type'], 'network');
+  assert.equal(failed['provider.request_id'], 'req_cut1');
+  assert.equal(failed['stream.events'], 1);
+  assert.equal(failed['stream.last_event'], 'response.created');
+  assert.ok(failed['stream.bytes'] > 0);
+  assert.equal(failed['stream.content_type'], 'text/event-stream; charset=utf-8');
+  assert.match(failed['stream.read_error'], /terminated/);
+  assert.ok(!JSON.stringify(records).includes('PRIVATE PROMPT'), 'no prompt content is logged');
+  assert.ok(!JSON.stringify(records).includes('synthetic-token'), 'no token is logged');
+});
+
+test('a ChatGPT plan usage limit in a nested stream error goes to the fallback as quota without a retry', async t => {
+  const records = logs(t);
+  const limited = {
+    type: 'error',
+    code: null,
+    message: null,
+    error: {
+      type: 'usage_limit_reached',
+      code: 'subscription_sharing_usage_limit_exceeded',
+      message: 'You have reached your plan limit.',
+      param: null,
+    },
+  };
+  const calls = chatGptHarness(
+    t,
+    () =>
+      new Response(sseEvents([chatGptCreated, limited]), {
+        headers: { 'content-type': 'text/event-stream' },
+      }),
+  );
+  const answer = await inferWithTools(chatGptPlan, messages, noTools, undefined, false, null, {
+    fallback: planFallback,
+  });
+  assert.equal(answer.fallback, 'grok-fallback');
+  assert.equal(answer.fallbackReason, 'quota');
+  assert.deepEqual(calls, ['chatgpt', 'azure']);
+  const failed = records.find(record => record.event === 'call_failed' && record['gen_ai.provider.name'] === 'chatgpt');
+  assert.equal(failed['provider.error_code'], 'subscription_sharing_usage_limit_exceeded');
+  assert.match(failed['stream.event_error'], /^error: usage_limit_reached: /);
+});
+
+test('a ChatGPT plan 200 that is not an event stream logs what came back and falls back as an outage', async t => {
+  const records = logs(t);
+  const page =
+    '<html>\n<head><title>502 Bad Gateway</title></head>\n<body>upstream connect error, token sk-abcdefghijklmnopqrstuvwx</body></html>';
+  const calls = chatGptHarness(
+    t,
+    () =>
+      new Response(page, {
+        headers: {
+          'content-type': 'text/html; charset=utf-8',
+          'x-request-id': 'req_html1',
+          'cf-ray': '8f1e2d3c4b5a6978-IAD',
+        },
+      }),
+  );
+  const answer = await inferWithTools(chatGptPlan, messages, noTools, undefined, false, null, {
+    fallback: planFallback,
+  });
+  assert.equal(answer.fallback, 'grok-fallback');
+  assert.equal(answer.fallbackReason, 'outage');
+  assert.deepEqual(calls, ['chatgpt', 'chatgpt', 'azure'], 'the plan is retried once before the fallback');
+  const failed = records.find(record => record.event === 'call_failed' && record['gen_ai.provider.name'] === 'chatgpt');
+  assert.equal(failed['error.type'], 'network');
+  assert.equal(failed['provider.request_id'], 'req_html1');
+  assert.equal(failed['stream.content_type'], 'text/html; charset=utf-8');
+  assert.equal(failed['stream.edge_request_id'], '8f1e2d3c4b5a6978-IAD');
+  assert.equal(failed['stream.bytes'], new TextEncoder().encode(page).byteLength);
+  assert.equal(failed['stream.events'], 0);
+  assert.match(failed['stream.body_preview'], /^<html> <head><title>502 Bad Gateway<\/title>/);
+  assert.match(failed['stream.read_error'], /UnexpectedBodyError/);
+  assert.ok(!JSON.stringify(records).includes('sk-abcdefghijklmnopqrstuvwx'), 'secrets in the body are redacted');
 });

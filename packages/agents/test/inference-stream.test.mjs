@@ -671,6 +671,34 @@ test('the Responses API streams output text deltas and uses the completed respon
   assert.equal(requests[0].body.stream_options, undefined);
 });
 
+test('the Responses API skips one malformed event and still answers from the completed response', async t => {
+  const completed = {
+    id: 'resp_1',
+    model: 'gpt-6-astra',
+    status: 'completed',
+    output: [{ type: 'message', id: 'msg_1', content: [{ type: 'output_text', text: 'Still here' }] }],
+    usage: { input_tokens: 13, output_tokens: 7, total_tokens: 20, input_tokens_details: { cached_tokens: 3 } },
+  };
+  const requests = provider(t, [
+    () =>
+      streamed([
+        encoder.encode(
+          sse([{ type: 'response.created', response: { id: 'resp_1', status: 'in_progress', output: [] } }]) +
+            'event: response.output_text.delta\ndata: {oops\n\n' +
+            sse([
+              { type: 'response.output_text.delta', item_id: 'msg_1', output_index: 0, delta: 'Still here' },
+              { type: 'response.completed', response: completed },
+            ]),
+        ),
+      ]),
+  ]);
+  const result = await inferWithTools(routes.astra, [{ role: 'user', text: 'Hi' }], () =>
+    assert.fail('No tool expected'),
+  );
+  assert.deepEqual(result, { text: 'Still here' });
+  assert.equal(requests.length, 1);
+});
+
 test('the Responses API blanks streamed text once a function call starts and runs the call', async t => {
   const call = {
     type: 'function_call',
