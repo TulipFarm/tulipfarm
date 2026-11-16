@@ -349,7 +349,10 @@ function safeAttribute(key: string, value: unknown, logLine = false): boolean {
     if (key === 'stream.events' || key === 'stream.bytes')
       return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
     if (key === 'stream.content_type')
-      return typeof value === 'string' && /^[\w.+-]{1,64}\/[\w.+-]{1,64}(; ?[\w-]{1,32}=[\w.-]{1,32})?$/.test(value);
+      return (
+        value === 'none' ||
+        (typeof value === 'string' && /^[\w.+-]{1,64}\/[\w.+-]{1,64}(; ?[\w-]{1,32}=[\w.-]{1,32})?$/.test(value))
+      );
     if (key === 'stream.processing_ms') return typeof value === 'string' && /^\d{1,9}$/.test(value);
     if (key === 'provider.request_id') return typeof value === 'string' && /^[A-Za-z0-9._:-]{1,128}$/.test(value);
     if (key === 'stream.edge_request_id') return typeof value === 'string' && /^[A-Za-z0-9-]{1,64}$/.test(value);
