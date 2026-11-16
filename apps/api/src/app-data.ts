@@ -62,11 +62,13 @@ const operations = {
  * that visitor's request is the only authority; no session, cookie or body field can name the app or its release.
  *
  * Every app's sandbox reaches the API from the same address, so nothing here is limited by client address. A handle
- * the gateway did not sign is refused before any other work. A signed handle that no longer resolves is refused from
- * memory for a request's lifetime and charged to nobody, so replaying an old handle cannot spend its app's limits.
- * Only a live request spends its own call limit, then its app's, and only its refusals count towards the app's
- * `refusals` a minute. Every limit lives in this process, which also looks up at most `platformSlots` handles at once
- * and answers 503 beyond that rather than queue for a platform connection.
+ * the gateway did not sign is refused before any other work. A fresh signed handle that no longer resolves is refused
+ * from memory until it turns old. An old handle is live only while a long stream renews it, so each old handle found
+ * closed spends its app's `oldLookups` a minute, and once they are spent that app's old handles are refused from
+ * memory. Neither spends the app's call limits. Only a live request spends its own call limit, then its app's, and
+ * only its refusals count towards the app's `refusals` a minute. Every limit lives in this process, which also looks
+ * up at most `platformSlots` handles at once, `appSlots` of them for one app, and answers 503 beyond that rather than
+ * queue for a platform connection.
  */
 export function registerAppData(
   app: FastifyInstance,
@@ -74,19 +76,33 @@ export function registerAppData(
     platform: Pick<Pool, 'query'>;
     handles: RequestHandleKey;
     tables: ViewTables;
-    limits?: { request?: number; app?: number; refusals?: number };
+    limits?: { request?: number; app?: number; refusals?: number; oldLookups?: number };
   },
 ) {
-  const { request: perRequest = 200, app: perApp = 6_000, refusals = 600 } = dependencies.limits ?? {};
+  const {
+    request: perRequest = 200,
+    app: perApp = 6_000,
+    refusals = 600,
+    oldLookups = 120,
+  } = dependencies.limits ?? {};
   const windowMs = 60_000;
-  const closedHandles = createWindows({ max: 0, windowMs: liveRequestSeconds * 1000 });
+  // A handle older than this is live only while the gateway renews it for a long stream. The 10 s cover clock skew.
+  const freshSeconds = liveRequestSeconds + 10;
+  // Remembers fresh handles found closed until they turn old, so a stockpile must be minted within 70 s to outrun it.
+  // An entry is about 160 bytes, so the cap holds this map near 16 MB.
+  const closedHandles = createWindows({ max: 0, windowMs: freshSeconds * 1000, entries: 100_000 });
+  const oldClosed = createWindows({ max: oldLookups, windowMs });
   const handleCalls = createWindows({ max: perRequest, windowMs });
   const appCalls = createWindows({ max: perApp, windowMs });
   const appRefusals = createWindows({ max: refusals, windowMs });
   // The platform pool has 10 connections that sign-in and every workspace route also need. A handle lookup is one
-  // primary-key read, so 4 in flight keep up with app traffic and always leave 6 connections for everything else.
+  // primary-key read, so 4 in flight keep up with app traffic and always leave 6 connections for everything else. One
+  // app holds at most 2, so another app always finds one. Calls with the same handle share its lookup.
   const platformSlots = 4;
+  const appSlots = 2;
   let platformWork = 0;
+  const appWork = new Map<string, number>();
+  const lookups = new Map<string, Promise<LiveAppRequest | null>>();
   // The flag provider may evaluate remotely, so each workspace's answer is kept for 30 s and shared by calls in flight.
   // Turning app hosting on or off takes effect within that. A fallback after a failure is not kept.
   const flagMs = 30_000;
@@ -138,22 +154,40 @@ export function registerAppData(
       const signed = verifyRequestHandle(dependencies.handles, request.headers['tulipfarm-request']);
       if (!signed) return closed(reply);
       const handle = createHash('sha256').update(signed.handle).digest('base64url');
-      if (closedHandles.wait(handle) > 0) return closed(reply);
-      const wait = Math.max(handleCalls.wait(handle), appCalls.wait(signed.appId), appRefusals.wait(signed.appId));
+      const { appId } = signed;
+      const old = Date.now() / 1000 - signed.mintedAt > freshSeconds;
+      if (!old && closedHandles.wait(handle) > 0) return closed(reply);
+      const wait = Math.max(
+        handleCalls.wait(handle),
+        appCalls.wait(appId),
+        appRefusals.wait(appId),
+        old ? oldClosed.wait(appId) : 0,
+      );
       if (wait > 0) return tooMany(reply, wait);
-      if (platformWork >= platformSlots)
-        return reply.code(503).header('Retry-After', 1).send({ error: 'temporarily-unavailable' });
-      platformWork++;
-      let live: LiveAppRequest | null;
-      try {
-        live = await resolveRequestHandle(dependencies.platform, signed);
-      } finally {
-        platformWork--;
+      let lookup = lookups.get(handle);
+      if (!lookup) {
+        const held = appWork.get(appId) ?? 0;
+        if (platformWork >= platformSlots || held >= appSlots)
+          return reply.code(503).header('Retry-After', 1).send({ error: 'temporarily-unavailable' });
+        platformWork++;
+        appWork.set(appId, held + 1);
+        lookup = resolveRequestHandle(dependencies.platform, signed)
+          .then(found => {
+            if (!found && old) oldClosed.spend(appId);
+            else if (!found) closedHandles.spend(handle);
+            return found;
+          })
+          .finally(() => {
+            platformWork--;
+            const left = appWork.get(appId)! - 1;
+            if (left) appWork.set(appId, left);
+            else appWork.delete(appId);
+            lookups.delete(handle);
+          });
+        lookups.set(handle, lookup);
       }
-      if (!live) {
-        closedHandles.spend(handle);
-        return closed(reply);
-      }
+      const live = await lookup;
+      if (!live) return closed(reply);
       const retry = handleCalls.spend(handle) || appCalls.spend(live.appId);
       if (retry > 0) {
         appRefusals.spend(live.appId);
