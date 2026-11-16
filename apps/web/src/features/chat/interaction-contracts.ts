@@ -26,6 +26,7 @@ export const informationSchema = z.object({
       kind: z.literal('choices'),
       multiple: z.boolean(),
       allowText: z.boolean().optional(),
+      searchable: z.boolean().optional(),
       choices: z
         .array(z.object({ id: z.string(), label: z.string() }))
         .min(1)

@@ -187,17 +187,16 @@ export function createAgentStore(storage: AgentStorage, externalGuard?: External
           ).rows,
         )
         .map(row => row.team_id);
-      for (const teamId of value.teamIds)
-        if (
-          !existingTeams.includes(teamId) ||
-          (
-            await transaction.client.query(
-              `SELECT 1 FROM ${relation(transaction, 'tf_teams')} WHERE id=$1 AND name='_admin'`,
-              [teamId],
-            )
-          ).rowCount
-        )
+      for (const teamId of value.teamIds) {
+        const { rows } = await transaction.client.query(
+          `SELECT name FROM ${relation(transaction, 'tf_teams')} WHERE id=$1`,
+          [teamId],
+        );
+        // Everyone has no managers and every member is in it, so any member may enrol an agent there.
+        if (rows[0]?.name === '_everyone') continue;
+        if (!existingTeams.includes(teamId) || rows[0]?.name === '_admin')
           await requireTeamAssignment(transaction, actor, teamId);
+      }
       if (
         !(
           await transaction.client.query(

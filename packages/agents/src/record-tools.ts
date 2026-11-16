@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { teamLabel } from '@tulipfarm/workspace-storage/team-labels';
 import { z } from 'zod';
 import {
   AccessDenied,
@@ -584,7 +585,9 @@ export function createAgentRecordTools(runtime: AgentStorage, taskCapability?: o
         const creatable: { id: string; name: string | null }[] = [];
         for (const team of teams)
           if (await canAccessTable(tx, actor, team.id, 'table.create'))
-            creatable.push({ id: team.id, name: team.visible ? team.name : null });
+            creatable.push({ id: team.id, name: team.visible ? teamLabel(team.name) : null });
+        // Everyone is the default owner, so it is offered first.
+        creatable.sort((a, b) => Number(b.name === 'Everyone') - Number(a.name === 'Everyone'));
         let appliedDefinition = null;
         const capabilities = {
           manageSchema: false,

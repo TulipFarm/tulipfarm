@@ -6,7 +6,7 @@ import { StatePanel } from '@tulipfarm/sprout/state-panel';
 import { Table } from '@tulipfarm/sprout/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@tulipfarm/sprout/select';
 import { tableLabels } from '@/features/governance/table-labels';
-import { teamLabel, workspaceAdminsLabel } from '@/features/governance/team-labels';
+import { everyoneLabel, teamLabel, workspaceAdminsLabel } from '@/features/governance/team-labels';
 import { permissionSummary, sortPermissions, type PolicyPermission } from '@/features/access/policies';
 import { personName } from './access-members';
 import type { AccessPage } from './governance';
@@ -31,11 +31,13 @@ export function TableAccess({ page }: { page: AccessPage }) {
   const teamName = (id: string) =>
     id === data.adminTeamId
       ? workspaceAdminsLabel
-      : teamLabel(
-          data.teams.find(team => team.id === id)?.name ??
-            data.teamNames.find(team => team.id === id)?.name ??
-            hiddenTeam,
-        );
+      : id === data.everyoneTeamId
+        ? everyoneLabel
+        : teamLabel(
+            data.teams.find(team => team.id === id)?.name ??
+              data.teamNames.find(team => team.id === id)?.name ??
+              hiddenTeam,
+          );
   /** The owning team's name for use inside a sentence. */
   const teamPhrase = (id: string) => (teamName(id) === hiddenTeam ? 'a team you can’t see' : teamName(id));
   const people = new Map(data.directory.map(member => [member.id, member]));
@@ -141,7 +143,11 @@ export function TableAccess({ page }: { page: AccessPage }) {
   const tables = [...data.tables]
     .sort((a, b) => (labels.get(a.id) ?? a.name).localeCompare(labels.get(b.id) ?? b.name))
     .filter(table => filter === 'all' || table.id === filter);
-  const destinations = [...data.teams, ...(data.adminTeamId ? [{ id: data.adminTeamId, name: '_admin' }] : [])]
+  const destinations = [
+    ...(data.everyoneTeamId ? [{ id: data.everyoneTeamId, name: '_everyone' }] : []),
+    ...data.teams,
+    ...(data.adminTeamId ? [{ id: data.adminTeamId, name: '_admin' }] : []),
+  ]
     .map(team => ({ team, rows: holders('collection', team.id) }))
     .filter(entry => entry.rows.length);
   return (
@@ -206,7 +212,11 @@ export function TableAccess({ page }: { page: AccessPage }) {
                       <SelectValue>{teamName(table.owningTeamId)}</SelectValue>
                     </SelectTrigger>
                     <SelectContent>
-                      {[...(data.adminTeamId ? [{ id: data.adminTeamId }] : []), ...data.teams].map(team => (
+                      {[
+                        ...(data.everyoneTeamId ? [{ id: data.everyoneTeamId }] : []),
+                        ...(data.adminTeamId ? [{ id: data.adminTeamId }] : []),
+                        ...data.teams,
+                      ].map(team => (
                         <SelectItem key={team.id} value={team.id}>
                           {teamName(team.id)}
                         </SelectItem>

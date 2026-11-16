@@ -165,8 +165,8 @@ export function createWorkspaceMcpApi(options: Options) {
             const teams = z.array(z.object({ id: z.uuid(), name: z.string() })).parse(
               (
                 await tx.client.query(
-                  // _admin is the internal team of workspace admins, not a team people pick.
-                  `SELECT t.id,t.name FROM ${qualified(tx.schema, 'tf_teams')} t JOIN ${qualified(tx.schema, 'tf_member_teams')} mt ON mt.team_id=t.id WHERE mt.membership_id=$1 AND t.name<>'_admin' ORDER BY t.name`,
+                  // _admin and _everyone are internal teams, not teams people pick.
+                  `SELECT t.id,t.name FROM ${qualified(tx.schema, 'tf_teams')} t JOIN ${qualified(tx.schema, 'tf_member_teams')} mt ON mt.team_id=t.id WHERE mt.membership_id=$1 AND t.name NOT IN ('_admin','_everyone') ORDER BY t.name`,
                   [actor.membershipId],
                 )
               ).rows,

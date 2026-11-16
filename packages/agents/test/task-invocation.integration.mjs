@@ -136,11 +136,11 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
   await t.test(
     'unselected admin with zero memberships and the same identity demoted to member are denied',
     async () => {
-      // Every admin also belongs to the hidden internal _admin team, which grants no agent invocation.
+      // Every admin also belongs to the hidden internal _admin and _everyone teams, which grants no agent invocation.
       assert.equal(
         (
           await db.platform.query(
-            `SELECT count(*)::int AS n FROM ${table('tf_member_teams')} m JOIN ${table('tf_teams')} t ON t.id=m.team_id WHERE m.membership_id=$1 AND t.name<>'_admin'`,
+            `SELECT count(*)::int AS n FROM ${table('tf_member_teams')} m JOIN ${table('tf_teams')} t ON t.id=m.team_id WHERE m.membership_id=$1 AND t.name NOT IN ('_admin','_everyone')`,
             [admin.membershipId],
           )
         ).rows[0].n,

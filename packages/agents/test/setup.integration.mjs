@@ -172,7 +172,10 @@ test('table enrollment requires current author membership and grants at save and
     `INSERT INTO ${f.table('tf_grants')}(team_id,asset_id,permission) VALUES($1,$2,'table.row.read')`,
     [teamId, tableId],
   );
-  assert.deepEqual((await createSavedAgentService(f.runtime).context(f.w.id, f.user)).teams, []);
+  assert.deepEqual(
+    (await createSavedAgentService(f.runtime).context(f.w.id, f.user)).teams.filter(team => team.name !== '_everyone'),
+    [],
+  );
   await assert.rejects(
     service.saveDraft(f.w.id, f.user, f.agentId, await f.input({ setup })),
     error => error.code === 'agent-team-assignment-required',
@@ -183,7 +186,7 @@ test('table enrollment requires current author membership and grants at save and
     [f.member, teamId],
   );
   const context = await createSavedAgentService(f.runtime).context(f.w.id, f.user);
-  assert.deepEqual(context.teams[0].tableScope, scope);
+  assert.deepEqual(context.teams.find(team => team.id === teamId).tableScope, scope);
   await assert.rejects(
     service.saveDraft(f.w.id, f.user, f.agentId, await f.input({ setup: { ...setup, enrollment: [] } })),
     error => error.code === 'agent-table-access-unavailable',
@@ -471,7 +474,7 @@ test('table enrollment blocks plain members in the builder and a manager can cre
     data = await tableSetup(f, 'member');
   const saved = createSavedAgentService(f.runtime);
   let context = await saved.context(f.w.id, f.user);
-  assert.equal(context.teams[0].canAssign, false);
+  assert.equal(context.teams.find(team => team.id === data.teamId).canAssign, false);
   const draft = builderDraft();
   draft.definition = data.setup.definition;
   draft.access.scope = data.scope;
@@ -489,7 +492,7 @@ test('table enrollment blocks plain members in the builder and a manager can cre
     [f.member, data.teamId],
   );
   context = await saved.context(f.w.id, f.user);
-  assert.equal(context.teams[0].canAssign, true);
+  assert.equal(context.teams.find(team => team.id === data.teamId).canAssign, true);
   draft.access.enrollment = tableAccessEnrollment(context.teams, data.scope[0], []);
   const ready = parseBuilder(draft, f.member, true, f.agentId, { teams: context.teams });
   assert.ok(ready.setup);

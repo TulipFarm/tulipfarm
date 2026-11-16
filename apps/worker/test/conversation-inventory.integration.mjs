@@ -33,7 +33,7 @@ test('table and agent inventories include all pages, including an empty workspac
     agents: [],
     workflows: [],
     skills: [],
-    directoryNames: { members: [], teams: ['Workspace admins'] },
+    directoryNames: { members: [], teams: ['Admin', 'Everyone'] },
   });
   const team = randomUUID(),
     tableIds = [],

@@ -213,14 +213,14 @@ try {
   grants.push({ teamId: hiddenTeam, target: { kind: 'table', id: tableId, permission: 'table.row.read' } });
   await page.goto(`${origin}/team-proof/grants`);
   const invoices = `Invoices · Team ${hiddenTeam.slice(0, 8)} · aaaaaaaa`,
-    namesake = 'invoices · Workspace admins · bbbbbbbb';
+    namesake = 'invoices · Admin · bbbbbbbb';
   await page.getByRole('heading', { name: invoices, exact: true }).waitFor();
   await page.getByRole('heading', { name: namesake, exact: true }).waitFor();
   assert.equal(
     await page.getByLabel(`Owning team for ${invoices}`, { exact: true }).innerText(),
     'A team you can’t see',
   );
-  assert.equal(await page.getByLabel(`Owning team for ${namesake}`, { exact: true }).innerText(), 'Workspace admins');
+  assert.equal(await page.getByLabel(`Owning team for ${namesake}`, { exact: true }).innerText(), 'Admin');
   await page
     .getByRole('table', { name: `Who can use ${invoices}` })
     .getByText('A team you can’t see')

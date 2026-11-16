@@ -152,6 +152,8 @@ export const governanceSnapshotSchema = z.object({
   tableTeamIds: z.array(z.uuid()),
   // The internal team of workspace admins; it can receive table grants and own tables. Set only for admins.
   adminTeamId: z.uuid().nullable().default(null),
+  // The internal team every member belongs to; it can receive table grants and own tables. Set only for admins.
+  everyoneTeamId: z.uuid().nullable().default(null),
   tables: z.array(z.object({ id: z.uuid(), name: z.string(), owningTeamId: z.uuid() })),
   grants: z.array(z.object({ teamId: z.uuid(), target: grantTargetSchema })),
   // Names of every team the caller may see named: all teams for admins, otherwise their teams and grant destinations.

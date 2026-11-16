@@ -9,6 +9,14 @@ import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { Button } from '@tulipfarm/sprout/button';
 import { Badge } from '@tulipfarm/sprout/badge';
 import { ChoiceList } from '@tulipfarm/sprout/choice-list';
+import {
+  Combobox,
+  ComboboxContent,
+  ComboboxEmpty,
+  ComboboxInput,
+  ComboboxItem,
+  ComboboxList,
+} from '@tulipfarm/sprout/combobox';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@tulipfarm/sprout/collapsible';
 import { ChatConfirmation, type ConfirmationState } from '@tulipfarm/sprout/chat-confirmation';
 import { Label } from '@tulipfarm/sprout/label';
@@ -405,6 +413,15 @@ function InformationCard({
             />
             <div id={`${id}-error`}>{error && <p className="text-sm text-destructive">{error}</p>}</div>
           </div>
+        ) : request.answerSchema.searchable && !request.answerSchema.multiple && !typed ? (
+          <SearchableChoice
+            id={id}
+            options={request.answerSchema.choices}
+            value={choices[0] ?? null}
+            disabled={locked}
+            error={error ?? undefined}
+            onChange={value => setChoices(value ? [value] : [])}
+          />
         ) : (
           <ChoiceList
             layout="compact"
@@ -467,6 +484,47 @@ function InformationCard({
         </FormFooter>
       </Form>
     </section>
+  );
+}
+
+function SearchableChoice({
+  id,
+  options,
+  value,
+  disabled,
+  error,
+  onChange,
+}: {
+  id: string;
+  options: { id: string; label: string }[];
+  value: string | null;
+  disabled: boolean;
+  error?: string | undefined;
+  onChange: (id: string | null) => void;
+}) {
+  const items = options.map(option => ({ value: option.id, label: option.label }));
+  return (
+    <div className="space-y-2">
+      <Combobox
+        items={items}
+        value={items.find(item => item.value === value) ?? null}
+        disabled={disabled}
+        onValueChange={item => onChange(item?.value ?? null)}
+      >
+        <ComboboxInput id={`${id}-search`} aria-label="Search answers" placeholder="Search…" showClear />
+        <ComboboxContent>
+          <ComboboxEmpty>No match.</ComboboxEmpty>
+          <ComboboxList>
+            {(item: (typeof items)[number]) => (
+              <ComboboxItem key={item.value} value={item}>
+                {item.label}
+              </ComboboxItem>
+            )}
+          </ComboboxList>
+        </ComboboxContent>
+      </Combobox>
+      {error && <p className="text-sm text-destructive">{error}</p>}
+    </div>
   );
 }
 

@@ -33,6 +33,7 @@ export async function requireTeamManager(transaction: AuthorizationTransaction, 
 
 // Sharing an asset with a team needs its manager. The internal _admin team holds every admin as a plain member and
 // has no manager, so admins may share with it; renaming it or changing its members still needs a manager.
+// Every member belongs to _everyone, so any member may share with it.
 export async function requireTeamAssignment(transaction: AuthorizationTransaction, actor: HumanActor, teamId: string) {
   if (!(await canAssignTeam(transaction, actor, teamId))) throw new AccessDenied();
 }
@@ -41,7 +42,8 @@ export async function canAssignTeam(transaction: AuthorizationTransaction, actor
   const membership = await teamMembership(transaction, actor, teamId);
   return (
     !!membership &&
-    (membership.name === '_admin' ? membership.workspaceRole === 'admin' : membership.role === 'manager')
+    (membership.name === '_everyone' ||
+      (membership.name === '_admin' ? membership.workspaceRole === 'admin' : membership.role === 'manager'))
   );
 }
 

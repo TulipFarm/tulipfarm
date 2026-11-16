@@ -46,6 +46,7 @@ export const answerDefinitionSchema = z.discriminatedUnion('kind', [
         .max(32),
       multiple: z.boolean(),
       allowText: z.boolean().optional(),
+      searchable: z.boolean().optional(),
     })
     .refine(value => new Set(value.choices.map(choice => choice.id)).size === value.choices.length),
 ]);
@@ -57,6 +58,7 @@ export const presentChoiceSchema = z.strictObject({
     .min(2)
     .max(32)
     .refine(choices => new Set(choices.map(choice => choice.id)).size === choices.length),
+  searchable: z.boolean().optional(),
 });
 export const requestInputSchema = z.strictObject({
   producerId: uuidSchema,

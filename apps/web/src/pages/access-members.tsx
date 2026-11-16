@@ -535,7 +535,7 @@ export function leaveReason(page: AccessPage) {
 }
 
 export function leaveConfirmation(page: AccessPage) {
-  const teams = page.access.teams.map(team => team.name).filter(name => name !== '_admin');
+  const teams = page.access.teams.map(team => team.name).filter(name => name !== '_admin' && name !== '_everyone');
   return {
     title: 'Leave this workspace?',
     description: `You lose access to every table, chat and team here${teams.length ? `, including ${joinList(teams)}` : ''}. An admin must invite you again to come back.`,

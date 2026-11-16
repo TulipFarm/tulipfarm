@@ -64,7 +64,11 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
   // Every admin belongs to the internal _admin team, which can own assets before anyone creates a team.
   const adminTeam = {
     id: (await db.platform.query(`SELECT id FROM ${s}.tf_teams WHERE name='_admin'`)).rows[0].id,
-    name: '_admin',
+    name: 'Admin',
+  };
+  const everyoneTeam = {
+    id: (await db.platform.query(`SELECT id FROM ${s}.tf_teams WHERE name='_everyone'`)).rows[0].id,
+    name: 'Everyone',
   };
   const tools = createChatTools(runtime);
   const context = { workspaceId: ws.id, actor, callId: randomUUID(), origin: { conversationId, turnId, sources: [] } };
@@ -101,9 +105,11 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     assert.equal(discovery.capabilityTableId, null);
     assert.deepEqual(discovery.creation, {
       allowed: true,
-      eligibleOwningTeams: [adminTeam, { id: team, name: 'qa-20261003-cloud-operations' }].sort((a, b) =>
-        a.id < b.id ? -1 : 1,
-      ),
+      // Everyone comes first so the agent offers it before any other owner.
+      eligibleOwningTeams: [
+        everyoneTeam,
+        ...[adminTeam, { id: team, name: 'qa-20261003-cloud-operations' }].sort((a, b) => (a.id < b.id ? -1 : 1)),
+      ],
     });
     assert.equal(discovery.capabilities.manageSchema, false);
     assert.equal(discovery.tableFound, undefined);
@@ -255,8 +261,8 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       ).result;
       assert.deepEqual(
         [...discovery.creation.eligibleOwningTeams].sort((a, b) => a.id.localeCompare(b.id)),
-        [adminTeam, { id: team, name: 'qa-20261003-cloud-operations' }, { id: hidden, name: null }].sort((a, b) =>
-          a.id.localeCompare(b.id),
+        [adminTeam, everyoneTeam, { id: team, name: 'qa-20261003-cloud-operations' }, { id: hidden, name: null }].sort(
+          (a, b) => a.id.localeCompare(b.id),
         ),
       );
     } finally {

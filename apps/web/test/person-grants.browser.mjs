@@ -145,9 +145,9 @@ async function waitFor(condition, timeout = 10_000) {
   }
 }
 
-test('the individual section labels a table owned by the admin team as Workspace admins', async t => {
+test('the individual section labels a table owned by the admin team as Admin', async t => {
   const { section } = await openPersonGrants(t);
-  await section.getByText(`Invoices · Workspace admins · ${adminTable.slice(0, 8)}`, { exact: true }).waitFor();
+  await section.getByText(`Invoices · Admin · ${adminTable.slice(0, 8)}`, { exact: true }).waitFor();
   await section.getByText(`Invoices · Operations · ${opsTable.slice(0, 8)}`, { exact: true }).waitFor();
   assert.equal(await section.getByText(`Team ${adminTeamId.slice(0, 8)}`).count(), 0);
 });
