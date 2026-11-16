@@ -111,13 +111,18 @@ test('sharing with the whole workspace covers people who join later and ends wit
     await f.close();
   }
 });
-test('private input requires exact confirmation despite standing policy, dispatch once and retain protected receipt', async () => {
+test('a private chat runs tools set to run without asking and waits for exact approval of the rest', async () => {
   const f = await mcpFixture();
   try {
     const integration = await f.connect();
+    const read = await f.propose(integration, f.members[0], undefined, 'read');
+    assert.equal(read.status, 'ready');
+    assert.equal(read.requiresConsent, false);
+    assert.equal((await f.service.dispatch(f.one.id, read.id)).status, 'succeeded');
+    f.calls.length = 0;
     const action = await f.propose(integration);
     assert.equal(action.status, 'awaiting-approval');
-    assert.equal(action.requiresConsent, true);
+    assert.equal(action.requiresConsent, false);
     await assert.rejects(f.service.dispatch(f.one.id, action.id), /approval-required/);
     await assert.rejects(
       f.service.decide(f.one.id, f.members[1], action.id, { digest: action.digest, decision: 'approve' }),

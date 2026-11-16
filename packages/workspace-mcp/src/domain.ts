@@ -1096,14 +1096,9 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
         const sources = sourceUnion(authority.sources, [
           { kind: 'mcp-integration', integrationId: row.id, authorizationEpoch: row.authorization_epoch },
         ]);
-        const requiresConsent =
-          value.origin.kind === 'named-task' ||
-          sources.some(
-            source =>
-              source.kind !== 'mcp-integration' ||
-              source.integrationId !== row.id ||
-              source.authorizationEpoch !== row.authorization_epoch,
-          );
+        // A requester calling their own connected app from their private chat is their consent; the tool's own
+        // "run without asking" setting decides whether it still waits. Tasks run unattended, so they always ask.
+        const requiresConsent = value.origin.kind === 'named-task';
         const hash = digest([
           'workspace-mcp-action-v1',
           value.id,

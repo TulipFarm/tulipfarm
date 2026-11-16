@@ -131,7 +131,7 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
           name: tool.name,
           revision: tool.discovered_revision,
           enabled: true,
-          standingException: true,
+          standingException: tool.name !== 'write',
         })),
       );
       return integration;
