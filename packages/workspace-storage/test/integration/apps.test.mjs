@@ -15,7 +15,6 @@ test(
     const db = await fixture();
     try {
       const before = db.baseline.findIndex(item => item.name === appsMigration);
-      assert.equal(db.baseline.at(-1).name, '0080_app_compute_settlement.sql');
       const upgraded = await db.create(db.baseline.slice(0, before));
       assert.equal(
         (await db.platform.query(`SELECT to_regclass($1) AS present`, [`${upgraded.names.schema}.tf_apps`])).rows[0]
@@ -227,7 +226,12 @@ test(
   async () => {
     const db = await fixture();
     try {
-      const workspace = await db.create(db.baseline.slice(0, -1));
+      const workspace = await db.create(
+        db.baseline.slice(
+          0,
+          db.baseline.findIndex(item => item.name === '0080_app_compute_settlement.sql'),
+        ),
+      );
       const runtime = await connect(db.login(workspace));
       const table = name => qualified(workspace.names.schema, name);
       const appId = randomUUID();
