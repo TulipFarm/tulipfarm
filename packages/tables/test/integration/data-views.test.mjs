@@ -15,9 +15,14 @@ import {
   activeGeneration,
   writeGenerationRecord,
 } from '../../../tables/dist/store.js';
-import { approveDataView, createDataView, shareDataView } from '../../../tables/dist/data-view-store.js';
+import {
+  approveDataView,
+  createDataView,
+  revokeDataView,
+  shareDataView,
+} from '../../../tables/dist/data-view-store.js';
 
-test('an app reaches rows only through a data view approved for its live release', { timeout: 120000 }, async t => {
+test('an app reaches rows only through an approved data view, from its live release', { timeout: 120000 }, async t => {
   const db = await fixture();
   let runtime, migration;
   t.after(async () => {
@@ -130,8 +135,7 @@ ${await readFile(new URL('../../../../apps/database/migrations/0001_baseline.sql
     );
     return id;
   };
-  const live = await release(1),
-    other = await release(2);
+  const live = await release(1);
   await db.platform.query(`UPDATE ${s}.tf_apps SET live_release_id=$2 WHERE id=$1`, [appId, live]);
   const app = { kind: 'app', appId, releaseId: live };
 
@@ -153,19 +157,19 @@ ${await readFile(new URL('../../../../apps/database/migrations/0001_baseline.sql
   const list = (actor = app, request = ada) =>
     service.listThroughView(ws.id, actor, { ...request, query: { limit: 50 } });
 
-  await t.test('a view serves nothing until it is shared and approved for the release', async () => {
+  await t.test('a view serves nothing until it is shared and approved', async () => {
     await assert.rejects(list(), AccessDenied);
     await assert.rejects(
-      as(member, tx => shareDataView(tx, member, { appId, releaseId: live, viewId: view.id })),
+      as(member, tx => shareDataView(tx, member, { appId, viewId: view.id })),
       AccessDenied,
     );
-    await as(admin, tx => shareDataView(tx, admin, { appId, releaseId: live, viewId: view.id }));
+    await as(admin, tx => shareDataView(tx, admin, { appId, viewId: view.id }));
     await assert.rejects(list(), AccessDenied);
     await assert.rejects(
-      as(member, tx => approveDataView(tx, member, { appId, releaseId: live, viewId: view.id })),
+      as(member, tx => approveDataView(tx, member, { appId, viewId: view.id })),
       AccessDenied,
     );
-    await as(approver, tx => approveDataView(tx, approver, { appId, releaseId: live, viewId: view.id }));
+    await as(approver, tx => approveDataView(tx, approver, { appId, viewId: view.id }));
     const grant = (
       await db.platform.query(`SELECT shared_by,approved_by,approved_at FROM ${s}.tf_app_data_view_grants`)
     ).rows;
@@ -221,11 +225,9 @@ ${await readFile(new URL('../../../../apps/database/migrations/0001_baseline.sql
     });
   });
 
-  await t.test('another release and another view are denied', async () => {
-    await assert.rejects(list({ ...app, releaseId: other }), AccessDenied);
-    await as(admin, tx => shareDataView(tx, admin, { appId, releaseId: other, viewId: view.id }));
-    await as(approver, tx => approveDataView(tx, approver, { appId, releaseId: other, viewId: view.id }));
-    await assert.rejects(list({ ...app, releaseId: other }), AccessDenied, 'only the live release is served');
+  await t.test('a release that is not live and another view are denied', async () => {
+    const next = await release(2);
+    await assert.rejects(list({ ...app, releaseId: next }), AccessDenied, 'a host still on an unpublished release');
     await assert.rejects(list(app, { viewId: randomUUID(), parameters: {} }), AccessDenied);
     await assert.rejects(list({ ...app, appId: randomUUID() }), AccessDenied);
   });
@@ -253,8 +255,8 @@ ${await readFile(new URL('../../../../apps/database/migrations/0001_baseline.sql
       actions: ['read', 'create', 'update'],
     }),
   );
-  await as(admin, tx => shareDataView(tx, admin, { appId, releaseId: live, viewId: editor.id }));
-  await as(approver, tx => approveDataView(tx, approver, { appId, releaseId: live, viewId: editor.id }));
+  await as(admin, tx => shareDataView(tx, admin, { appId, viewId: editor.id }));
+  await as(approver, tx => approveDataView(tx, approver, { appId, viewId: editor.id }));
   const edit = { viewId: editor.id, parameters: { owner: 'ada' } };
 
   await t.test('writes set only view fields and keep the row inside the predicate', async () => {
@@ -371,8 +373,8 @@ ${await readFile(new URL('../../../../apps/database/migrations/0001_baseline.sql
         actions: ['read', 'delete'],
       }),
     );
-    await as(admin, tx => shareDataView(tx, admin, { appId, releaseId: live, viewId: deleter.id }));
-    await as(approver, tx => approveDataView(tx, approver, { appId, releaseId: live, viewId: deleter.id }));
+    await as(admin, tx => shareDataView(tx, admin, { appId, viewId: deleter.id }));
+    await as(approver, tx => approveDataView(tx, approver, { appId, viewId: deleter.id }));
     const remove = (record, viewId = deleter.id) =>
       service.mutateThroughView(ws.id, app, {
         viewId,
@@ -429,8 +431,8 @@ ${await readFile(new URL('../../../../apps/database/migrations/0001_baseline.sql
       }),
     );
     for (const viewId of [codes.id, narrow.id]) {
-      await as(admin, tx => shareDataView(tx, admin, { appId, releaseId: live, viewId }));
-      await as(approver, tx => approveDataView(tx, approver, { appId, releaseId: live, viewId }));
+      await as(admin, tx => shareDataView(tx, admin, { appId, viewId }));
+      await as(approver, tx => approveDataView(tx, approver, { appId, viewId }));
     }
     const failure = (values, viewId = codes.id) =>
       service
@@ -481,18 +483,36 @@ ${await readFile(new URL('../../../../apps/database/migrations/0001_baseline.sql
     assert.ok((await list(app, edit)).records.length > 0);
   });
 
-  await t.test('an approval stops serving once the approver leaves', async () => {
+  const adaIds = async actor => (await list(actor)).records.map(record => record.id).sort();
+  const adaPublished = [rows.adaPublic.id, rows.adaDraft.id].sort();
+
+  await t.test('an approval keeps serving after the sharer and the approver leave or lose rights', async () => {
     await db.platform.query(`UPDATE ${s}.tf_memberships SET removed_at=now() WHERE id=$1`, [approver.membershipId]);
-    await assert.rejects(list(), AccessDenied);
-    assert.equal(
+    await db.platform.query(`UPDATE ${s}.tf_memberships SET role='member' WHERE id=$1`, [ws.membershipId]);
+    assert.deepEqual(await adaIds(), adaPublished);
+    assert.deepEqual(
       (
-        await db.platform.query(`SELECT count(*)::int AS n FROM ${s}.tf_app_data_view_grants WHERE approved_by=$1`, [
-          approver.membershipId,
+        await db.platform.query(`SELECT shared_by,approved_by FROM ${s}.tf_app_data_view_grants WHERE view_id=$1`, [
+          view.id,
         ])
-      ).rows[0].n,
-      6,
-      'the approval stays on record',
+      ).rows,
+      [{ shared_by: ws.membershipId, approved_by: approver.membershipId }],
     );
+    await db.platform.query(`UPDATE ${s}.tf_memberships SET role='admin' WHERE id=$1`, [ws.membershipId]);
+  });
+
+  await t.test('approved views carry to a new release and a revoke holds after a rollback', async () => {
+    const first = live,
+      second = await release(3);
+    await db.platform.query(`UPDATE ${s}.tf_apps SET live_release_id=$2 WHERE id=$1`, [appId, second]);
+    const current = { ...app, releaseId: second };
+    assert.deepEqual(await adaIds(current), adaPublished, 'served without a new share');
+    await assert.rejects(list(app), AccessDenied, 'the earlier release is no longer live');
+    await as(admin, tx => revokeDataView(tx, admin, { appId, viewId: view.id }));
+    await assert.rejects(list(current), AccessDenied);
+    await db.platform.query(`UPDATE ${s}.tf_apps SET live_release_id=$2 WHERE id=$1`, [appId, first]);
+    await assert.rejects(list(app), AccessDenied, 'a rollback does not bring back revoked access');
+    assert.ok((await list(app, edit)).records.length > 0, 'other approved views still serve');
   });
 
   await t.test('people keep their own access', async () => {

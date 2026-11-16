@@ -260,63 +260,114 @@ test('members create, share, approve and revoke an app data view over HTTP', { t
         actions: ['read'],
         createdBy: membership.lead,
         createdAt: 'string',
-        grants: [],
+        sharedBy: null,
+        sharedAt: null,
+        approvedBy: null,
+        approvedAt: null,
+        blockers: ['not-approved'],
       },
     );
     assert.deepEqual(await http(lead, 'POST', views, view), first);
     assert.equal((await http(lead, 'POST', views, { ...view, actions: ['read', 'create'] })).status, 409);
   });
 
-  const grant = () => `${views}/${viewId}/releases/${live}`;
-  const appActor = { kind: 'app', appId, releaseId: live };
-  const read = () =>
-    service.listThroughView(workspace.id, appActor, { viewId, parameters: { owner: 'ada' }, query: { limit: 10 } });
-
-  await t.test('a shared view serves the release only once an admin approves it', async () => {
-    assert.equal((await http(reader, 'PUT', grant())).status, 403);
-    assert.equal((await http(editor, 'PUT', grant())).status, 404);
-    const shared = await http(lead, 'PUT', grant());
-    assert.equal(shared.status, 200);
-    assert.deepEqual(
-      shared.body.grants.map(({ sharedAt, ...rest }) => ({ ...rest, sharedAt: typeof sharedAt })),
-      [
-        {
-          releaseId: live,
-          releaseNumber: 1,
-          sharedBy: membership.lead,
-          sharedAt: 'string',
-          approvedBy: null,
-          approvedAt: null,
-          blockers: ['not-approved'],
-        },
-      ],
+  const share = () => `${views}/${viewId}/share`;
+  const approval = () => `${views}/${viewId}/approval`;
+  const read = (releaseId = live) =>
+    service.listThroughView(
+      workspace.id,
+      { kind: 'app', appId, releaseId },
+      { viewId, parameters: { owner: 'ada' }, query: { limit: 10 } },
     );
+  const hello = [{ [fields.title.id]: { kind: 'text', value: 'Hello' } }];
+  const release = async number => {
+    const id = randomUUID();
+    await db.platform.query(
+      `INSERT INTO ${schema}.tf_app_releases(id,app_id,number,build_id,commit,manifest_digest,published_by)
+      VALUES($1,$2,$3,$4,$5,$6,$7)`,
+      [id, appId, number, build, 'c'.repeat(40), 'd'.repeat(64), membership.lead],
+    );
+    await db.platform.query(`UPDATE ${schema}.tf_apps SET live_release_id=$2 WHERE id=$1`, [appId, id]);
+    return id;
+  };
+
+  let approvedAt;
+  await t.test('a shared view serves the app only once an admin approves it', async () => {
+    assert.equal((await http(reader, 'PUT', share())).status, 403);
+    assert.equal((await http(editor, 'PUT', share())).status, 404, 'the sharer needs rights over the table');
+    const shared = await http(lead, 'PUT', share());
+    assert.equal(shared.status, 200);
+    const { sharedAt, ...pending } = shared.body;
+    assert.equal(typeof sharedAt, 'string');
+    assert.deepEqual(
+      { sharedBy: pending.sharedBy, approvedBy: pending.approvedBy, approvedAt: pending.approvedAt },
+      { sharedBy: membership.lead, approvedBy: null, approvedAt: null },
+    );
+    assert.deepEqual(pending.blockers, ['not-approved']);
     await assert.rejects(read(), AccessDenied);
-    assert.equal((await http(editor, 'PUT', `${grant()}/approval`)).status, 403);
-    const approved = await http(admin, 'PUT', `${grant()}/approval`);
+    assert.equal((await http(editor, 'PUT', approval())).status, 403);
+    assert.equal((await http(lead, 'PUT', `${views}/${randomUUID()}/approval`)).status, 404);
+    const approved = await http(admin, 'PUT', approval());
     assert.equal(approved.status, 200);
-    assert.equal(approved.body.grants[0].approvedBy, adminMembership);
-    assert.deepEqual(approved.body.grants[0].blockers, []);
+    assert.equal(approved.body.approvedBy, adminMembership);
+    assert.deepEqual(approved.body.blockers, []);
+    approvedAt = approved.body.approvedAt;
     assert.deepEqual(
       (await read()).records.map(record => record.values),
-      [{ [fields.title.id]: { kind: 'text', value: 'Hello' } }],
+      hello,
     );
   });
 
-  await t.test('the list reports a grant that stops serving when its sharer loses access', async () => {
-    await db.platform.query(`UPDATE ${schema}.tf_memberships SET role='member' WHERE id=$1`, [membership.lead]);
-    assert.deepEqual((await http(editor, 'GET', views)).body.views[0].grants[0].blockers, ['sharer-lost-access']);
-    await assert.rejects(read(), AccessDenied);
-    await db.platform.query(`UPDATE ${schema}.tf_memberships SET role='admin' WHERE id=$1`, [membership.lead]);
-    assert.deepEqual((await http(editor, 'GET', views)).body.views[0].grants[0].blockers, []);
+  await t.test('approving again keeps the first decision', async () => {
+    const again = await http(lead, 'PUT', approval());
+    assert.equal(again.status, 200);
+    assert.deepEqual(
+      { approvedBy: again.body.approvedBy, approvedAt: again.body.approvedAt },
+      { approvedBy: adminMembership, approvedAt },
+    );
   });
 
-  await t.test('revoking a grant stops the next app request', async () => {
-    assert.equal((await http(reader, 'DELETE', grant())).status, 403);
-    assert.equal((await read()).records.length, 1);
-    assert.equal((await http(editor, 'DELETE', grant())).status, 204);
-    await assert.rejects(read(), AccessDenied);
-    assert.equal((await http(editor, 'DELETE', grant())).status, 204);
-    assert.deepEqual((await http(admin, 'GET', views)).body.views[0].grants, []);
+  await t.test('an approval keeps serving after the sharer is demoted and the approver leaves', async () => {
+    await db.platform.query(`UPDATE ${schema}.tf_memberships SET role='member' WHERE id=$1`, [membership.lead]);
+    await db.platform.query(`UPDATE ${schema}.tf_memberships SET removed_at=now() WHERE id=$1`, [adminMembership]);
+    const [listed] = (await http(editor, 'GET', views)).body.views;
+    assert.deepEqual(
+      { sharedBy: listed.sharedBy, approvedBy: listed.approvedBy, blockers: listed.blockers },
+      { sharedBy: membership.lead, approvedBy: adminMembership, blockers: [] },
+    );
+    assert.deepEqual(
+      (await read()).records.map(record => record.values),
+      hello,
+    );
+    await db.platform.query(`UPDATE ${schema}.tf_memberships SET role='admin' WHERE id=$1`, [membership.lead]);
+  });
+
+  let second;
+  await t.test('a newly published release is served without a new share', async () => {
+    second = await release(2);
+    assert.deepEqual(
+      (await read(second)).records.map(record => record.values),
+      hello,
+    );
+    await assert.rejects(read(live), AccessDenied, 'a host still on the earlier release is refused');
+  });
+
+  await t.test('revoking stops the next app request on every release', async () => {
+    assert.equal((await http(reader, 'DELETE', share())).status, 403);
+    assert.equal((await http(editor, 'DELETE', share())).status, 204);
+    await assert.rejects(read(second), AccessDenied);
+    assert.equal((await http(editor, 'DELETE', share())).status, 204);
+    await db.platform.query(`UPDATE ${schema}.tf_apps SET live_release_id=$2 WHERE id=$1`, [appId, live]);
+    await assert.rejects(read(live), AccessDenied, 'a rollback does not bring back revoked access');
+    const [listed] = (await http(lead, 'GET', views)).body.views;
+    assert.deepEqual(
+      { sharedBy: listed.sharedBy, approvedBy: listed.approvedBy, blockers: listed.blockers },
+      { sharedBy: null, approvedBy: null, blockers: ['not-approved'] },
+    );
+  });
+
+  await t.test('a disabled app reports that it is not serving', async () => {
+    await db.platform.query(`UPDATE ${schema}.tf_apps SET disabled_at=now() WHERE id=$1`, [appId]);
+    assert.deepEqual((await http(lead, 'GET', views)).body.views[0].blockers, ['app-not-serving', 'not-approved']);
   });
 });

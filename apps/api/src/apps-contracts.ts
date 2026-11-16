@@ -39,8 +39,7 @@ export const operationParams = z.strictObject({
   appId: appIdSchema,
   operationId: operationIdSchema,
 });
-const dataViewParams = z.strictObject({ workspaceId: z.uuid(), appId: appIdSchema, viewId: z.uuid() });
-export const dataViewGrantParams = dataViewParams.extend({ releaseId: releaseIdSchema });
+export const dataViewParams = z.strictObject({ workspaceId: z.uuid(), appId: appIdSchema, viewId: z.uuid() });
 export const nameParams = z.strictObject({ workspaceId: z.uuid(), name: z.string().max(80) });
 
 export const requestBody = z.strictObject({ requestId });
@@ -191,13 +190,10 @@ export const versionView = (version: AppVersion) => ({
   createdAt: version.publishedAt,
 });
 
-/** A data view with its grants. `blockers` lists what stops a grant serving now; a grant with none is serving. */
-export const dataViewView = ({ appId: _appId, createdAt, grants, ...view }: DataViewEntry) => ({
+/** A data view with its share and approval. `blockers` lists what stops it serving now; a view with none is serving. */
+export const dataViewView = ({ appId: _appId, createdAt, sharedAt, approvedAt, ...view }: DataViewEntry) => ({
   ...view,
   createdAt: createdAt.toISOString(),
-  grants: grants.map(({ sharedAt, approvedAt, ...grant }) => ({
-    ...grant,
-    sharedAt: sharedAt.toISOString(),
-    approvedAt: approvedAt?.toISOString() ?? null,
-  })),
+  sharedAt: sharedAt?.toISOString() ?? null,
+  approvedAt: approvedAt?.toISOString() ?? null,
 });
