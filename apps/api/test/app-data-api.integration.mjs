@@ -284,6 +284,38 @@ test('an app server reaches an approved view only while a visitor request is ope
     assert.equal(limiterQueries - before, 0);
   });
 
+  await t.test('a flood of valid calls holds at most four platform connections', async () => {
+    let waiting = 0;
+    let most = 0;
+    let release;
+    const gate = new Promise(resolve => (release = resolve));
+    const gated = {
+      query: async (...args) => {
+        most = Math.max(most, ++waiting);
+        await gate;
+        waiting--;
+        return pool.query(...args);
+      },
+    };
+    const server = await serve(undefined, gated);
+    let answered = 0;
+    const calls = Array.from({ length: 10 }, () =>
+      call(handle, 'list', list, nat, viewId, server).finally(() => answered++),
+    );
+    while (waiting + answered < 10) await new Promise(resolve => setTimeout(resolve, 5));
+    release();
+    const responses = await Promise.all(calls);
+    assert.equal(most, 4);
+    assert.deepEqual(
+      responses.map(response => response.status).sort(),
+      [200, 200, 200, 200, 503, 503, 503, 503, 503, 503],
+    );
+    for (const refused of responses.filter(response => response.status === 503)) {
+      assert.deepEqual(refused.body, { error: 'temporarily-unavailable' });
+      assert.equal(refused.headers.get('retry-after'), '1');
+    }
+  });
+
   await t.test("an app's refused calls spend only that app's budget", async () => {
     const server = await serve({ refusals: 5 });
     const other = await publishApp('Shop');
