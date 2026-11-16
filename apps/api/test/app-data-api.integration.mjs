@@ -26,8 +26,10 @@ test('an app server reaches an approved view only while a visitor request is ope
   } = await appDataFixture(t);
   const handles = requestHandleKey({ WORKSPACE_RUNTIME_KEY_ID: 'app-data', WORKSPACE_RUNTIME_KEY: 'cd'.repeat(32) });
   let queries = 0;
+  let limiterQueries = 0;
   const counted = { query: (...args) => (queries++, pool.query(...args)) };
-  const serve = async limits => {
+  const limiterPool = { query: (...args) => (limiterQueries++, pool.query(...args)) };
+  const serve = async (limits, platform = counted) => {
     const app = Fastify({ trustProxy: true });
     const perAddress = process.env.API_RATE_LIMIT_PER_MINUTE;
     process.env.API_RATE_LIMIT_PER_MINUTE = '5';
@@ -41,10 +43,10 @@ test('an app server reaches an approved view only while a visitor request is ope
     app.register(
       async routes =>
         registerAppData(routes, {
-          platform: counted,
+          platform,
           handles,
           tables: service,
-          limit: createAbuseLimiter(counted, randomUUID()),
+          limit: createAbuseLimiter(limiterPool, randomUUID()),
           limits,
         }),
       { prefix: '/v1' },
@@ -233,19 +235,53 @@ test('an app server reaches an approved view only while a visitor request is ope
     assert.deepEqual([ordinary[0], ordinary[5]], [200, 429], 'the per-address budget still covers other routes');
   });
 
-  await t.test('the per-app call limit is checked before the handle is looked up', async () => {
-    const server = await serve({ app: 5 });
+  await t.test('a replayed closed request costs one lookup and leaves its app served', async () => {
+    const server = await serve({ app: 5, refusals: 5 });
     const ended = await open();
     await closeRequestHandle(pool, ended);
+    const before = queries;
+    for (let index = 0; index < 50; index++)
+      assert.deepEqual(outcome(await call(ended, 'list', list, nat, viewId, server)), closed, `replay ${index + 1}`);
+    assert.equal(queries - before, 1, 'one lookup for the whole window');
+    assert.equal((await call(handle, 'list', list, nat, viewId, server)).status, 200, 'a live request of the same app');
+  });
+
+  await t.test("a request spends its own call limit before its app's", async () => {
+    const server = await serve({ request: 3, app: 5 });
+    const first = await open();
     const statuses = [];
     for (let index = 0; index < 6; index++)
-      statuses.push((await call(ended, 'list', list, nat, viewId, server)).status);
-    assert.deepEqual(statuses, [401, 401, 401, 401, 401, 429]);
+      statuses.push((await call(first, 'list', list, nat, viewId, server)).status);
+    assert.deepEqual(statuses, [200, 200, 200, 429, 429, 429], 'the request stops at its own limit');
+    const second = await open();
+    statuses.length = 0;
+    for (let index = 0; index < 2; index++)
+      statuses.push((await call(second, 'list', list, nat, viewId, server)).status);
+    assert.deepEqual(statuses, [200, 200], 'the app has spent only the calls it was served');
     const before = queries;
-    const refused = await call(handle, 'list', list, nat, viewId, server);
-    assert.deepEqual(outcome(refused), tooMany, 'a live request of the same app');
+    const refused = await call(second, 'list', list, nat, viewId, server);
+    assert.deepEqual(outcome(refused), tooMany, 'the app is over its limit');
     assert.ok(Number(refused.headers.get('retry-after')) > 0 && Number(refused.headers.get('retry-after')) <= 60);
-    assert.equal(queries - before, 0, 'an app over its limit is refused from memory');
+    assert.equal((await call(await open(), 'list', list, nat, viewId, server)).status, 429, 'a fresh request too');
+    assert.equal(queries - before, 0, 'an app at its limit is refused from memory');
+  });
+
+  await t.test('app data calls never touch the abuse limiter', async () => {
+    const server = await serve({ request: 1 });
+    const ended = await open();
+    await closeRequestHandle(pool, ended);
+    const busy = await open();
+    const before = limiterQueries;
+    const statuses = [];
+    for (const attempt of [
+      () => call(busy, 'list', list, nat, viewId, server),
+      () => call(busy, 'list', list, nat, viewId, server),
+      () => call(ended, 'list', list, nat, viewId, server),
+      () => call(handle, 'list', list, nat, randomUUID(), server),
+    ])
+      statuses.push((await attempt()).status);
+    assert.deepEqual(statuses, [200, 429, 401, 403]);
+    assert.equal(limiterQueries - before, 0);
   });
 
   await t.test("an app's refused calls spend only that app's budget", async () => {
@@ -262,21 +298,23 @@ test('an app server reaches an approved view only while a visitor request is ope
       () => call(handle, 'list', list, nat, randomUUID(), server),
       () => flagOff(() => call(handle, 'list', list, nat, viewId, server)),
       () => call(handle, 'list', list, nat, randomUUID(), server),
+      () => call(handle, 'list', list, nat, randomUUID(), server),
+      () => call(handle, 'list', list, nat, randomUUID(), server),
       () => call(handle, 'list', list, nat, viewId, server),
     ])
       statuses.push((await attempt()).status);
-    assert.deepEqual(statuses, [401, 401, 403, 403, 403, 429]);
+    assert.deepEqual(statuses, [401, 401, 403, 403, 403, 403, 403, 429], 'closed requests are not charged');
 
     const before = queries;
     for (let index = 0; index < 30; index++)
-      for (const [label, attempt] of [
-        ['closed', () => call(ended, 'list', list, nat, viewId, server)],
-        ['denied', () => call(handle, 'list', list, nat, randomUUID(), server)],
-        ['valid', () => call(handle, 'list', list, nat, viewId, server)],
+      for (const [label, attempt, expected] of [
+        ['closed', () => call(ended, 'list', list, nat, viewId, server), closed],
+        ['denied', () => call(handle, 'list', list, nat, randomUUID(), server), tooMany],
+        ['valid', () => call(handle, 'list', list, nat, viewId, server), tooMany],
       ]) {
         const refused = await attempt();
-        assert.deepEqual(outcome(refused), tooMany, label);
-        assert.ok(Number(refused.headers.get('retry-after')) > 0, label);
+        assert.deepEqual(outcome(refused), expected, label);
+        if (expected === tooMany) assert.ok(Number(refused.headers.get('retry-after')) > 0, label);
       }
     assert.equal(queries - before, 0, 'a spent app costs no database work');
 
