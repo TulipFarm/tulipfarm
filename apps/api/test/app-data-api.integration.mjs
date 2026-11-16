@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import test from 'node:test';
 import Fastify from 'fastify';
 import { closeRequestHandle, mintRequestHandle } from '@tulipfarm/apps/store';
@@ -23,23 +23,28 @@ test('an app server reaches an approved view only while a visitor request is ope
     appId,
     live,
   } = await appDataFixture(t);
-  const app = Fastify();
-  const perAddress = process.env.API_RATE_LIMIT_PER_MINUTE;
-  process.env.API_RATE_LIMIT_PER_MINUTE = '5';
-  try {
-    registerSecurity(app, authConfig().webOrigin);
-  } finally {
-    if (perAddress === undefined) delete process.env.API_RATE_LIMIT_PER_MINUTE;
-    else process.env.API_RATE_LIMIT_PER_MINUTE = perAddress;
-  }
-  app.get('/v1/ordinary', async () => ({}));
-  app.register(
-    async routes =>
-      registerAppData(routes, { platform: pool, tables: service, limit: createAbuseLimiter(pool, 'test-secret') }),
-    { prefix: '/v1' },
-  );
-  const address = await app.listen({ host: '127.0.0.1', port: 0 });
-  cleanup.push(() => app.close());
+  let queries = 0;
+  const counted = { query: (...args) => (queries++, pool.query(...args)) };
+  const serve = async (secret = randomUUID()) => {
+    const app = Fastify({ trustProxy: true });
+    const perAddress = process.env.API_RATE_LIMIT_PER_MINUTE;
+    process.env.API_RATE_LIMIT_PER_MINUTE = '5';
+    try {
+      registerSecurity(app, authConfig().webOrigin);
+    } finally {
+      if (perAddress === undefined) delete process.env.API_RATE_LIMIT_PER_MINUTE;
+      else process.env.API_RATE_LIMIT_PER_MINUTE = perAddress;
+    }
+    app.get('/v1/ordinary', async () => ({}));
+    app.register(
+      async routes =>
+        registerAppData(routes, { platform: counted, tables: service, limit: createAbuseLimiter(counted, secret) }),
+      { prefix: '/v1' },
+    );
+    cleanup.push(() => app.close());
+    return app.listen({ host: '127.0.0.1', port: 0 });
+  };
+  const address = await serve();
 
   const created = await http(lead, 'POST', `/${appId}/data-views`, {
     requestId: randomUUID(),
@@ -57,8 +62,8 @@ test('an app server reaches an approved view only while a visitor request is ope
   };
   await approve();
 
-  const call = async (handle, operation, body, headers = {}, view = viewId) => {
-    const response = await fetch(`${address}/v1/app-data/views/${view}/${operation}`, {
+  const call = async (handle, operation, body, headers = {}, view = viewId, server = address) => {
+    const response = await fetch(`${server}/v1/app-data/views/${view}/${operation}`, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -142,6 +147,24 @@ test('an app server reaches an approved view only while a visitor request is ope
         { status: 400, body: { error: 'invalid-request' } },
         Object.keys(extra)[0],
       );
+  });
+
+  await t.test('a forged handle is refused before any database work', async () => {
+    const server = await serve();
+    const naming = app => Buffer.from(app.replaceAll('-', ''), 'hex');
+    const forged = [
+      `tfr_${randomBytes(32).toString('base64url')}`,
+      `tfr_${Buffer.concat([naming(appId), randomBytes(32)]).toString('base64url')}`,
+    ];
+    const before = queries;
+    for (let index = 0; index < 1000; index++)
+      assert.deepEqual(
+        outcome(await call(forged[index % 2], 'list', list, {}, viewId, server)),
+        closed,
+        `call ${index}`,
+      );
+    assert.equal(queries - before, 0, 'forged handles cost no database work');
+    assert.equal((await call(handle, 'list', list, {}, viewId, server)).status, 200, 'the live request still works');
   });
 
   await t.test('a view the app has no approval for is denied without saying why', async () => {
