@@ -653,3 +653,187 @@ test('reconcile removes every host of a deleted workspace without opening it', {
   assert.deepEqual([...memory.hosts.keys()], []);
   assert.deepEqual(await telemetry.points('cloud_app_reconcile_repairs'), [{ kind: 'host-removed', value: 3 }]);
 });
+
+test('the server output sweep keeps what can run again and discards the rest', { timeout: 120000 }, async t => {
+  const telemetry = captureMetrics(t);
+  const db = await fixture();
+  const root = await mkdtemp(join(tmpdir(), 'app-servers-sweep-'));
+  let runtime;
+  let worker;
+  t.after(async () => {
+    await runtime?.end();
+    await worker?.close();
+    await rm(root, { recursive: true, force: true });
+    await db.close();
+  });
+  worker = await migrate(db);
+  const workspace = await db.create();
+  const schema = workspace.names.schema;
+  runtime = await connect(db.login(workspace));
+  let databaseDown = false;
+  const transact = async action => {
+    if (databaseDown) throw new Error('The database is unavailable');
+    await runtime.query('BEGIN');
+    try {
+      const result = await action({ client: runtime, schema });
+      await runtime.query('COMMIT');
+      return result;
+    } catch (error) {
+      await runtime.query('ROLLBACK');
+      throw error;
+    }
+  };
+  execFileSync('git', ['init', '--quiet', '--initial-branch=main', root]);
+  const sweeps = [];
+  const builder = {
+    id: 'sandbox-node26-v1',
+    async build() {
+      throw new Error('Not used');
+    },
+    async buildServer(input) {
+      return {
+        ok: true,
+        output: { kind: 'server', artifact: `srv-${input.buildId.slice(0, 8)}`, port: 8080, start: 'node server.js' },
+        log: '',
+        units: 0n,
+      };
+    },
+    async discardServerArtifacts(input) {
+      sweeps.push({ keep: [...input.keep].sort(), before: input.before });
+      return { discarded: 2 };
+    },
+  };
+  const work = {
+    transact: (_, action) => transact(action),
+    platform: worker.client,
+    objects: memoryObjects(),
+    source: async () => root,
+    publisher: undefined,
+    builder,
+    host: memoryHost(),
+    credits: { available: async () => null, debit: async () => {} },
+    async *workspaces() {
+      yield workspace.id;
+    },
+    enabled: async () => true,
+  };
+  const builds = createAppActivities(work);
+  const servers = createAppServerActivities(work);
+  const input = { workspaceId: workspace.id };
+  const signal = () => new AbortController().signal;
+  const now = Date.parse('2026-11-16T12:00:00.000Z');
+
+  const app = (
+    await transact(tx =>
+      createApp(tx, {
+        id: randomUUID(),
+        kind: 'public',
+        slug: 'shop',
+        title: 'Shop',
+        createdBy: workspace.membershipId,
+      }),
+    )
+  ).app;
+  await db.platform.query(
+    `UPDATE "${schema}".tf_apps SET approval_state = 'approved', approval_by = $2, approval_at = now() WHERE id = $1`,
+    [app.id, workspace.membershipId],
+  );
+  const request = head =>
+    transact(tx =>
+      requestBuild(tx, {
+        appId: app.id,
+        commit: head,
+        recipe,
+        builder: builder.id,
+        requestedBy: workspace.membershipId,
+      }),
+    );
+  const build = async source => {
+    const head = await commit(root, { 'server.js': source });
+    const { id } = await request(head);
+    assert.deepEqual(await builds.buildApp({ ...input, buildId: id }), { status: 'succeeded' });
+    return { id, head };
+  };
+  const publish = buildId =>
+    transact(tx =>
+      admitPublish(tx, { appId: app.id, requestId: randomUUID(), requestedBy: workspace.membershipId, buildId }),
+    );
+  const bringUp = async buildId => {
+    const operation = { ...input, operationId: (await publish(buildId)).operation.id };
+    const target = await servers.prepareAppServer(operation);
+    const { hostRef } = await servers.provisionAppServer({ ...operation, ...target });
+    await servers.recordAppServerCandidate({ ...operation, hostRef });
+    return { operation, hostRef, releaseId: target.releaseId };
+  };
+  const serve = async buildId => {
+    const { operation, hostRef, releaseId } = await bringUp(buildId);
+    assert.equal((await servers.switchAppServer({ ...operation, hostRef })).status, 'switched');
+    return releaseId;
+  };
+
+  const previous = await build('listen(1)');
+  const previousRelease = await serve(previous.id);
+  const live = await build('listen(2)');
+  await serve(live.id);
+  // A publish whose host came up but never went live.
+  const failed = await build('listen(3)');
+  const { operation: failing, releaseId: failedRelease } = await bringUp(failed.id);
+  await servers.failAppServerOperation({ ...failing, message: 'The app server could not start. Try again.' });
+  const unreleased = await build('listen(4)');
+  const head = await build('listen(5)');
+  const queued = await request(await commit(root, { 'server.js': 'listen(6)' }));
+  await db.platform.query(
+    `UPDATE "${schema}".tf_app_builds SET finished_at = clock_timestamp() - interval '2 hours'
+     WHERE id = ANY($1::text[])`,
+    [[previous.id, live.id, failed.id, unreleased.id, head.id]],
+  );
+  await db.platform.query(`UPDATE "${schema}".tf_app_releases SET created_at = clock_timestamp() - interval '2 hours'`);
+  await db.platform.query(`UPDATE "${schema}".tf_app_drafts SET head_commit = $2 WHERE app_id = $1`, [
+    app.id,
+    head.head,
+  ]);
+  const recent = await build('listen(7)');
+
+  await t.test('a workspace that cannot be read stops the sweep before any artifact is deleted', async () => {
+    databaseDown = true;
+    await assert.rejects(servers.sweepServerArtifacts(signal(), now), /Server artifact sweep failed/);
+    databaseDown = false;
+    assert.deepEqual(sweeps, []);
+  });
+
+  await t.test('keeps the live, rollback, draft head, recent and in-flight builds', async () => {
+    await servers.sweepServerArtifacts(signal(), now);
+    assert.deepEqual(sweeps, [
+      {
+        keep: [previous.id, live.id, head.id, queued.id, recent.id].sort(),
+        before: '2026-11-16T11:00:00.000Z',
+      },
+    ]);
+    assert.deepEqual(await telemetry.points('cloud_app_reconcile_repairs'), [
+      { kind: 'release-discarded', value: 1 },
+      { kind: 'server-output-discarded', value: 2 },
+    ]);
+  });
+
+  await t.test('a rollback still reaches the previous release and not the discarded one', async () => {
+    const rollback = releaseId =>
+      transact(tx =>
+        admitRollback(tx, { appId: app.id, requestId: randomUUID(), requestedBy: workspace.membershipId, releaseId }),
+      );
+    assert.equal((await rollback(previousRelease)).ok, true);
+    assert.deepEqual(await rollback(failedRelease), {
+      ok: false,
+      failure: { code: 'not-found', message: 'Release not found', retryable: false },
+    });
+  });
+
+  await t.test('a build whose output was discarded is built again before it can be published', async () => {
+    assert.deepEqual(await publish(unreleased.id), {
+      ok: false,
+      failure: { code: 'not-found', message: 'This build is no longer kept. Build the app again.', retryable: false },
+    });
+    assert.deepEqual((await request(unreleased.head)).status, { status: 'queued' });
+    assert.deepEqual(await builds.buildApp({ ...input, buildId: unreleased.id }), { status: 'succeeded' });
+    assert.equal((await publish(unreleased.id)).ok, true);
+  });
+});
