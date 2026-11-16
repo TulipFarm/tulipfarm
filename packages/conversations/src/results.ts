@@ -16,6 +16,8 @@ export const conversationResultSchema = z.strictObject({
   fallback: modelFamilyIdSchema.optional(),
   /** Why the chat model failed when the fallback answered, if the cause is known. */
   fallbackReason: z.enum(modelFallbackReasons).optional(),
+  /** The failed plan was the requester's own, not one a teammate, team or the workspace shares. */
+  fallbackOwnPlan: z.literal(true).optional(),
   /** The reply's `reply.render` layout, checked by the responder. `text` is then its summary. */
   layout: replyRenderInputSchema.optional(),
   /** The model's layouts failed their checks; the reply is saved as one Text with a notice. */

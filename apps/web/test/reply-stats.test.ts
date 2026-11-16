@@ -26,6 +26,8 @@ test('a reply shows the stats of the message that asked for it, with the model d
 test('a fallback reply names the model that answered, and an unknown family keeps its ID', () => {
   const fallback = { id: 't', status: 'completed', errorCode: 'model-fallback:claude-sonnet', stats };
   assert.equal(replyStats([message('human', fallback), message('assistant')], 1, families)?.model, 'Claude Sonnet 5');
+  const explained = { ...fallback, errorCode: 'model-fallback:claude-sonnet:quota:own' };
+  assert.equal(replyStats([message('human', explained), message('assistant')], 1, families)?.model, 'Claude Sonnet 5');
   const unknown = { id: 't', status: 'completed', stats: { ...stats, model: 'new-model' } };
   assert.equal(replyStats([message('human', unknown), message('assistant')], 1, families)?.model, 'new-model');
 });

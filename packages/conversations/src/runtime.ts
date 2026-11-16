@@ -31,6 +31,7 @@ import {
 } from '@tulipfarm/workspace-storage/runtime';
 import {
   chatToolCallLimit,
+  modelFallbackCode,
   modelFallbackCodePrefix,
   toolReceiptSchema,
   turnStatusSchema,
@@ -3102,8 +3103,7 @@ export function createConversationExecutor(
       );
       text = answer.text || 'The model returned an empty reply.';
       answerLayout = answer.layout ? { input: answer.layout } : answer.layoutFailed ? { failed: text } : undefined;
-      fallback =
-        answer.fallback && (answer.fallbackReason ? `${answer.fallback}:${answer.fallbackReason}` : answer.fallback);
+      fallback = answer.fallback && modelFallbackCode({ ...answer, fallback: answer.fallback });
       sources = answer.sources;
       replied = true;
     }

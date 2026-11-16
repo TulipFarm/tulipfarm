@@ -262,10 +262,19 @@ export const turnStatusSchema = z.enum([
 ]);
 /**
  * A completed turn's `errorCode` starts with this when a configured fallback model answered after the chat model failed;
- * the rest is that model family's id, then `:` and why the chat model failed when that is known, such as
- * `model-fallback:grok-fast:timeout`. The turn itself succeeded.
+ * the rest is that model family's id, then `:` and why the chat model failed when that is known, then `:own` when the
+ * failed plan was the requester's own, such as `model-fallback:grok-fast:quota:own`. The turn itself succeeded.
  */
 export const modelFallbackCodePrefix = 'model-fallback:';
+/** The part of a fallback turn's code after `modelFallbackCodePrefix`. */
+export function modelFallbackCode(answer: {
+  fallback: string;
+  fallbackReason?: string | undefined;
+  fallbackOwnPlan?: true | undefined;
+}) {
+  if (!answer.fallbackReason) return answer.fallback;
+  return `${answer.fallback}:${answer.fallbackReason}${answer.fallbackOwnPlan ? ':own' : ''}`;
+}
 export const turnSummarySchema = z.object({
   id: uuidSchema,
   status: turnStatusSchema,

@@ -129,26 +129,38 @@ export function replyRetrying(status: string, code: string | null | undefined): 
   return null;
 }
 
-/** A completed turn's fallback code: the family that answered, and why the chat model failed when that is known. */
-function fallbackCode(code: string | null | undefined): { family: string; reason?: ModelFallbackReason } | null {
+/**
+ * A completed turn's fallback code: the family that answered, why the chat model failed when that is known, and
+ * whether the failed plan was the requester's own.
+ */
+function fallbackCode(
+  code: string | null | undefined,
+): { family: string; reason?: ModelFallbackReason; own: boolean } | null {
   if (!code?.startsWith(modelFallbackPrefix)) return null;
-  const [family = '', reason] = code.slice(modelFallbackPrefix.length).split(':');
+  const [family = '', reason, owner] = code.slice(modelFallbackPrefix.length).split(':');
   if (!family) return null;
   return (modelFallbackReasons as readonly string[]).includes(reason ?? '')
-    ? { family, reason: reason as ModelFallbackReason }
-    : { family };
+    ? { family, reason: reason as ModelFallbackReason, own: owner === 'own' }
+    : { family, own: false };
 }
 
-// Why a plan model couldn't answer; `plan` is the plan's name and `model` the chat model's.
-const planFallbackCauses: Record<ModelFallbackReason, (plan: keyof typeof planLabels, model: string) => string> = {
-  quota: plan =>
+// Why a plan model couldn't answer; `plan` is the plan's name, `model` the chat model's, and `own` whether the plan is
+// the requester's rather than one a teammate or the workspace shares.
+const planFallbackCauses: Record<
+  ModelFallbackReason,
+  (plan: keyof typeof planLabels, model: string, own: boolean) => string
+> = {
+  quota: (plan, _model, own) =>
     plan === 'copilot'
-      ? 'Your GitHub Copilot premium quota is used up'
-      : `Your ${planLabels[plan]} plan's usage limit is reached`,
+      ? own
+        ? 'Your GitHub Copilot premium quota is used up'
+        : "The GitHub Copilot plan's premium quota is used up"
+      : `${own ? 'Your' : 'The'} ${planLabels[plan]} plan's usage limit is reached`,
   'rate-limit': plan => `${planLabels[plan]} is limiting requests right now`,
   outage: plan => `${planLabels[plan]} isn't responding right now`,
   timeout: plan => `${planLabels[plan]} took too long to respond`,
-  'model-unavailable': (plan, model) => `${model} isn't available on your ${planLabels[plan]} plan`,
+  'model-unavailable': (plan, model, own) =>
+    `${model} isn't available on ${own ? 'your' : 'the'} ${planLabels[plan]} plan`,
   'sign-in': plan => `${planLabels[plan]} needs to be reconnected`,
 };
 // Why another chat model couldn't answer; `model` is its name.
@@ -173,13 +185,13 @@ export function fallbackNote(
 ): string | null {
   const fallback = status === 'completed' ? fallbackCode(code) : null;
   if (!fallback) return null;
-  const { family, reason } = fallback;
+  const { family, reason, own } = fallback;
   // Plan families are named after their provider in the catalog, such as `chatgpt-sol` or `claude-plan-opus`.
   const prefix = /^(chatgpt|claude-plan|copilot)-/.exec(chatModel ?? '')?.[1];
   const plan = prefix === 'claude-plan' ? 'claude' : (prefix as keyof typeof planLabels | undefined);
   const replaced = chatModel && chatModel !== family ? name(chatModel) : undefined;
   if (plan && reason)
-    return `${planFallbackCauses[reason](plan, replaced ?? 'This model')}, so ${name(family)} answered.`;
+    return `${planFallbackCauses[reason](plan, replaced ?? 'This model', own)}, so ${name(family)} answered.`;
   if (plan) return `No ${planLabels[plan]} plan you can use could answer, so ${name(family)} did.`;
   if (reason) return `${modelFallbackCauses[reason](replaced ?? 'The chat model')}, so ${name(family)} answered.`;
   return `Answered by ${name(family)} because ${replaced ?? 'the chat model'} was unavailable.`;

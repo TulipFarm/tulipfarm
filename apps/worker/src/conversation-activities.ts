@@ -606,11 +606,12 @@ export function meteredReply(
         sourceMessages,
       );
       // A lost lease ends the reply with its storage failure at once, even while a model call is still pending.
-      return await session.whileLeased(reply).catch(async (error: unknown) => {
+      const answer = await session.whileLeased(reply).catch(async (error: unknown) => {
         if (error instanceof Error && /^model-(chatgpt|claude|copilot)-reconnect$/.test(error.message))
           await plans?.retire('reconnect');
         throw error;
       });
+      return answer.fallbackReason && plans?.own() ? { ...answer, fallbackOwnPlan: true as const } : answer;
     } finally {
       session.close();
       await observeChatDetail('publisher-close', () => publisher.close());
