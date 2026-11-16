@@ -43,7 +43,8 @@ const configSchema = z.object({
   maxBackgroundTransactions: z.number().int().min(1).optional(),
   // Slots a waiting job gets ahead of queued requests (default: 1 when at least 2 slots), so jobs never starve.
   reservedBackgroundTransactions: z.number().int().nonnegative().optional(),
-  maxQueue: z.number().int().nonnegative().default(100),
+  // A waiter leaves after waitTimeoutMs, so the queue bound only caps memory.
+  maxQueue: z.number().int().nonnegative().default(1000),
   waitTimeoutMs: z.number().int().min(1).default(5_000),
   connectionTimeoutMs: z.number().int().min(1).default(5_000),
   statementTimeoutMs: z.number().int().min(1).default(30_000),
