@@ -59,8 +59,8 @@ const operations = {
   },
 };
 
-/** The app data lookup pool's size. Its connections serve only request handle lookups, at most this many at once. */
-export const appDataLookupConnections = 3;
+/** The app data lookup pool. Its connections serve only request handle lookups, at most `max` at once. */
+export const appDataLookupPool = { max: 3 };
 
 type Verdict = { readonly live: LiveAppRequest; readonly checkedAt: number } | { readonly live: null };
 
@@ -70,12 +70,12 @@ type Verdict = { readonly live: LiveAppRequest; readonly checkedAt: number } | {
  *
  * Every app's sandbox reaches the API from the same address, so nothing here is limited by client address. A handle
  * the gateway did not sign is refused before any other work. A signed handle is looked up on `lookups`, a pool of
- * `appDataLookupConnections` that nothing else uses, and this process keeps the verdict per handle: a live one for 5 s,
- * a closed one for 2 minutes. Lookups wait up to 100 ms for a connection, taking turns between apps, and get 503
- * after that. An old handle this process has not seen live is live only if a long stream renews it, so each one found
- * closed spends its app's `oldLookups` a minute, and once they are spent the app's unseen old handles get 429. Only a
- * live request spends its own call limit, then its app's, and only its refusals count towards the app's `refusals` a
- * minute. Every limit lives in this process.
+ * `appDataLookupPool.max` connections that nothing else uses, and this process keeps the verdict per handle: a live
+ * one for 5 s, a closed one for 2 minutes. Lookups wait up to 100 ms for a connection, taking turns between apps, and
+ * get 503 after that. An old handle this process has not seen live is live only if a long stream renews it, so each
+ * one found closed spends its app's `oldLookups` a minute, and once they are spent the app's unseen old handles get
+ * 429. Only a live request spends its own call limit, then its app's, and only its refusals count towards the app's
+ * `refusals` a minute. Every limit lives in this process.
  */
 export function registerAppData(
   app: FastifyInstance,
@@ -106,7 +106,7 @@ export function registerAppData(
   const appCalls = createWindows({ max: perApp, windowMs });
   const appRefusals = createWindows({ max: refusals, windowMs });
   // One app holds at most 2 connections, so another app always waits for one turn at most per waiting app.
-  const slots = createFairSlots({ slots: appDataLookupConnections, perKey: 2, waitMs: 100 });
+  const slots = createFairSlots({ slots: appDataLookupPool.max, perKey: 2, waitMs: 100 });
   const inFlight = new Map<string, Promise<LiveAppRequest | null | typeof busy>>();
   const lookUp = (signed: SignedRequestHandle, digest: string, unseenOld: boolean) => {
     let lookup = inFlight.get(digest);
