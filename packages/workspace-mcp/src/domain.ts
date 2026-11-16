@@ -532,7 +532,7 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
       });
     },
     async list(workspaceId: string, principal: McpPrincipal) {
-      return store.authorized(workspaceId, principal, async (tx, actor) => {
+      return store.reading.authorized(workspaceId, principal, async (tx, actor) => {
         const ids = z
           .array(z.object({ id: z.uuid() }))
           .parse(
@@ -552,7 +552,7 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
       });
     },
     status(workspaceId: string, principal: McpPrincipal, id: string) {
-      return store.authorized(workspaceId, principal, async (tx, actor) =>
+      return store.reading.authorized(workspaceId, principal, async (tx, actor) =>
         store.metadata(tx, actor, await store.load(tx, id)),
       );
     },
@@ -649,7 +649,7 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
       });
     },
     grants(workspaceId: string, principal: McpPrincipal, id: string) {
-      return store.authorized(workspaceId, principal, async (tx, actor) => {
+      return store.reading.authorized(workspaceId, principal, async (tx, actor) => {
         const row = await store.load(tx, id);
         await store.permit(tx, actor, row, 'manage');
         if (row.ownership !== 'shared') throw new AccessDenied();
@@ -897,7 +897,7 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
       });
     },
     tools(workspaceId: string, principal: McpPrincipal, id: string) {
-      return store.authorized(workspaceId, principal, async (tx, actor) => {
+      return store.reading.authorized(workspaceId, principal, async (tx, actor) => {
         const row = await store.load(tx, id);
         await store.permit(tx, actor, row, 'read');
         return policies(tx, id);
@@ -991,13 +991,13 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
       });
     },
     selection(workspaceId: string, principal: McpPrincipal, origin: McpOrigin) {
-      return store.authorized(workspaceId, principal, async (tx, actor) => {
+      return store.reading.authorized(workspaceId, principal, async (tx, actor) => {
         await store.origin(tx, actor, origin, 'read');
         return store.selection(tx, actor, origin);
       });
     },
     catalog(workspaceId: string, principal: McpPrincipal, origin: McpOrigin) {
-      return store.authorized(workspaceId, principal, async (tx, actor) => {
+      return store.reading.authorized(workspaceId, principal, async (tx, actor) => {
         const authority = await store.origin(tx, actor, origin, 'catalog');
         const selection = await store.selection(tx, actor, origin);
         const tools = [];
@@ -1060,7 +1060,7 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
       const selected = catalog.tools.find(tool => tool.handle === value.handle);
       if (!selected) throw new AccessDenied();
       validateArguments(selected.tool, value.arguments);
-      return store.authorized(workspaceId, principal, async (tx, actor) => {
+      return store.acting.authorized(workspaceId, principal, async (tx, actor) => {
         const row = await store.load(tx, selected.integrationId);
         await store.permit(tx, actor, row, 'use');
         store.active(row);
@@ -1154,12 +1154,12 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
       });
     },
     action(workspaceId: string, principal: McpPrincipal, id: string) {
-      return store.authorized(workspaceId, principal, async (tx, actor) =>
+      return store.reading.authorized(workspaceId, principal, async (tx, actor) =>
         actionView(tx, actor, await store.action(tx, id)),
       );
     },
     actionForOrigin(workspaceId: string, principal: McpPrincipal, origin: McpOrigin) {
-      return store.authorized(workspaceId, principal, async (tx, actor) => {
+      return store.reading.authorized(workspaceId, principal, async (tx, actor) => {
         await store.origin(tx, actor, origin, 'read');
         const found = z
           .object({ id: z.uuid() })
@@ -1176,7 +1176,7 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
       });
     },
     actionStatus(workspaceId: string, principal: McpPrincipal, id: string, metadataOnly = false) {
-      return store.authorized(workspaceId, principal, async (tx, actor) => {
+      return store.reading.authorized(workspaceId, principal, async (tx, actor) => {
         const action = await store.action(tx, id);
         if (
           !metadataOnly &&
@@ -1200,7 +1200,7 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
       const value = z
         .strictObject({ kind: z.enum(['chat', 'task', 'integration']), originId: z.uuid(), after: z.uuid().optional() })
         .parse(input);
-      const ids = await store.authorized(workspaceId, principal, async (tx, actor) => {
+      const ids = await store.reading.authorized(workspaceId, principal, async (tx, actor) => {
         return z.array(z.object({ id: z.uuid() })).parse(
           (
             await tx.client.query(
@@ -1280,7 +1280,7 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
     },
     async dispatch(workspaceId: string, id: string) {
       dispatchEnabled();
-      const prepared = await store.transaction(workspaceId, async tx => {
+      const prepared = await store.acting.transaction(workspaceId, async tx => {
         const action = await store.action(tx, id);
         const claim = (await tx.client.query(`SELECT 1 FROM ${table(tx, 'claims')} WHERE action_id=$1`, [id])).rowCount;
         if (claim) return null;
@@ -1306,7 +1306,7 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
         { ...prepared.material, values: [...prepared.material.values, ...(target?.values ?? [])] },
         target?.hostTarget,
       );
-      await store.transaction(workspaceId, async tx => {
+      await store.acting.transaction(workspaceId, async tx => {
         const row = await store.load(tx, prepared.row.id);
         if (
           row.authorization_epoch !== prepared.row.authorization_epoch ||
@@ -1315,7 +1315,9 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
           throw new McpError('conflict');
         await saveDiscovery(tx, row, discovered);
       });
-      const claimed = await store.transaction(workspaceId, async tx => {
+      const claimed = await store.acting.transaction(workspaceId, async tx => {
+        // The integration row orders this claim check against another dispatch of the same action.
+        await store.load(tx, prepared.row.id);
         if ((await tx.client.query(`SELECT 1 FROM ${table(tx, 'claims')} WHERE action_id=$1`, [id])).rowCount)
           return null;
         const action = await store.action(tx, id);
@@ -1367,7 +1369,7 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
       });
       if (!claimed) return service.dispatchStatus(workspaceId, id);
       const authorize = async () => {
-        await store.transaction(workspaceId, async tx => {
+        await store.acting.transaction(workspaceId, async tx => {
           await authorizeAction(tx, claimed.action.requester, claimed.action, 'dispatch');
           if (
             !(
@@ -1408,7 +1410,7 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
       } catch {
         result = null;
       }
-      await store.transaction(workspaceId, async tx => {
+      await store.acting.transaction(workspaceId, async tx => {
         await store.load(tx, claimed.row.id);
         const receipt = await tx.client.query(
           `INSERT INTO ${table(tx, 'receipts')} (action_id,status,result,sources) SELECT $1,$2,$3,$4 FROM ${table(tx, 'claims')} WHERE action_id=$1 AND token=$5 ON CONFLICT DO NOTHING`,
@@ -1425,7 +1427,7 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
       return service.dispatchStatus(workspaceId, id);
     },
     dispatchStatus(workspaceId: string, id: string) {
-      return store.transaction(workspaceId, async tx => {
+      return store.reading.transaction(workspaceId, async tx => {
         await store.action(tx, id);
         const receipt = receiptSchema
           .optional()
@@ -1444,7 +1446,7 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
       });
     },
     recover(workspaceId: string) {
-      return store.transaction(workspaceId, async tx => {
+      return store.acting.transaction(workspaceId, async tx => {
         const result = await tx.client.query(
           `INSERT INTO ${table(tx, 'receipts')} (action_id,status,sources) SELECT c.action_id,'outcome-unknown',a.sources FROM ${table(tx, 'claims')} c JOIN ${table(tx, 'actions')} a ON a.id=c.action_id WHERE c.deadline<=clock_timestamp() AND NOT EXISTS (SELECT 1 FROM ${table(tx, 'receipts')} r WHERE r.action_id=c.action_id) ON CONFLICT DO NOTHING RETURNING action_id`,
         );
@@ -1452,7 +1454,7 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
       });
     },
     async recoverAction(workspaceId: string, principal: McpPrincipal, id: string) {
-      await store.authorized(workspaceId, principal, async (tx, actor) => {
+      await store.acting.authorized(workspaceId, principal, async (tx, actor) => {
         const action = await store.action(tx, id);
         if (actor.membershipId !== action.requester.membershipId || actor.userId !== action.requester.userId)
           throw new AccessDenied();
@@ -1464,7 +1466,7 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
       return service.dispatchStatus(workspaceId, id);
     },
     recoveryActions(workspaceId: string, principal: McpPrincipal, integrationId: string) {
-      return store.authorized(workspaceId, principal, async (tx, actor) => {
+      return store.reading.authorized(workspaceId, principal, async (tx, actor) => {
         const integration = await store.load(tx, integrationId);
         await store.permit(tx, actor, integration, 'read');
         return z
@@ -1549,7 +1551,7 @@ export function createWorkspaceMcp(options: WorkspaceMcpOptions) {
       principal: McpPrincipal,
       source: { kind: 'mcp-integration'; integrationId: string; authorizationEpoch: number },
     ) {
-      return store.authorized(workspaceId, principal, (tx, actor) => store.sources(tx, actor, [source]));
+      return store.reading.authorized(workspaceId, principal, (tx, actor) => store.sources(tx, actor, [source]));
     },
     ...oauthMethods(options, store),
     ...selectionMethods(options, store),
