@@ -43,23 +43,28 @@ export const answerDefinitionSchema = z.discriminatedUnion('kind', [
       choices: z
         .array(z.strictObject({ id: choiceId, label: text.max(256) }))
         .min(1)
-        .max(32),
+        .max(1000),
       multiple: z.boolean(),
       allowText: z.boolean().optional(),
       searchable: z.boolean().optional(),
     })
     .refine(value => new Set(value.choices.map(choice => choice.id)).size === value.choices.length),
 ]);
-export const presentChoiceSchema = z.strictObject({
-  tool: z.literal('present.choice'),
-  prompt: text,
-  choices: z
-    .array(z.strictObject({ id: choiceId, label: text.max(256) }))
-    .min(2)
-    .max(32)
-    .refine(choices => new Set(choices.map(choice => choice.id)).size === choices.length),
-  searchable: z.boolean().optional(),
-});
+export const presentChoiceSchema = z
+  .strictObject({
+    tool: z.literal('present.choice'),
+    prompt: text,
+    choices: z
+      .array(z.strictObject({ id: choiceId, label: text.max(256) }))
+      .min(2)
+      .max(32)
+      .optional(),
+    searchable: z.boolean().optional(),
+    // The server lists the teams that can own a new table; the model never writes these options.
+    from: z.literal('owner-teams').optional(),
+  })
+  .refine(value => (value.from ? !value.choices : Boolean(value.choices)))
+  .refine(value => !value.choices || new Set(value.choices.map(choice => choice.id)).size === value.choices.length);
 export const requestInputSchema = z.strictObject({
   producerId: uuidSchema,
   prompt: text,

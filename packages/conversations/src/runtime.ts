@@ -17,9 +17,11 @@ import {
   currentMember,
   lockAuthorization,
   uuidSchema,
+  canAccessTable,
   type HumanActor,
   type AuthorizationTransaction,
 } from '@tulipfarm/access';
+import { teamLabel } from '@tulipfarm/workspace-storage/team-labels';
 import { requireCredits, CreditsExhausted, CreditAttemptAlreadyDispatched } from '@tulipfarm/workspace-storage/credits';
 import {
   qualified,
@@ -204,6 +206,26 @@ async function staged<T>(
   }
 }
 const table = (tx: AuthorizationTransaction, name: string) => qualified(tx.schema, name);
+
+// Names of teams the requester is not in stay private, as in the agent's table authoring context.
+export async function ownerTeamChoices(tx: AuthorizationTransaction, actor: HumanActor) {
+  const rows = z.array(z.object({ id: z.uuid(), name: z.string(), member: z.boolean() })).parse(
+    (
+      await tx.client.query(
+        `SELECT t.id, t.name, EXISTS (SELECT 1 FROM ${table(tx, 'tf_member_teams')} mt WHERE mt.team_id = t.id AND mt.membership_id = $1) AS member
+             FROM ${table(tx, 'tf_teams')} t ORDER BY t.name`,
+        [actor.membershipId],
+      )
+    ).rows,
+  );
+  const choices: { id: string; label: string }[] = [];
+  for (const team of rows)
+    if (await canAccessTable(tx, actor, team.id, 'table.create'))
+      choices.push({ id: team.id, label: team.member ? teamLabel(team.name) : 'Team (name hidden)' });
+  choices.sort((a, b) => Number(b.label === 'Everyone') - Number(a.label === 'Everyone'));
+  if (choices[0]?.label === 'Everyone') choices[0] = { ...choices[0], label: 'Everyone (Recommended)' };
+  return choices;
+}
 // A button press reaches the model as data beside the words it sent. to_jsonb reads the column on older schemas too.
 const modelPartText = `CASE p.kind WHEN 'layout-action' THEN E'\\n\\n[Layout action] The person used a control in your reply instead of typing: ' || (to_jsonb(p)->'layout_action')::text ELSE p.text END`;
 // Where the requester can see for themselves what a failed read would have returned.
@@ -2466,6 +2488,8 @@ export function createConversationExecutor(
             if (!interactiveChat || external) throw new AccessDenied();
             const choice = presentChoiceSchema.parse(call);
             await guarded(async (tx, context) => {
+              const choices = choice.from ? await ownerTeamChoices(tx, context.actor) : choice.choices;
+              if (!choices || choices.length < 2) throw new AccessDenied();
               if (
                 source.project &&
                 !(await projectAudienceCanRead(tx, source.project.projectId, fence.conversationId, [
@@ -2482,10 +2506,10 @@ export function createConversationExecutor(
                   prompt: choice.prompt,
                   answerSchema: {
                     kind: 'choices',
-                    choices: choice.choices,
+                    choices,
                     multiple: false,
                     allowText: true,
-                    ...(choice.searchable && { searchable: true }),
+                    ...((choice.searchable || choice.from) && { searchable: true }),
                   },
                 },
                 mergeSources([...context.origin.sources, ...fileSources]),
