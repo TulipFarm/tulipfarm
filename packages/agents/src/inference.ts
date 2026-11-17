@@ -2228,6 +2228,48 @@ export function unbackedWriteClaim(candidate: string, wrote: boolean, fileClaims
     : undefined;
 }
 
+// eslint-disable-next-line tulipfarm/product-copy -- A tool name, not user-facing copy.
+const buildTool = 'apps.preview.build';
+const appTools = {
+  public: `apps.status, apps.files.list, apps.files.read, apps.files.write, apps.files.delete and ${buildTool}`,
+  private: 'apps.page.read, apps.page.replace and apps.page.check',
+} satisfies Record<AppKind, string>;
+const toolsDenied =
+  /\btools?\b[^.]*\b(?:not available|unavailable|not offered|missing)\b|(?:\b(?:no|not have|without)|n['’]t have)(?: a| any| the)? (?:file|write|editing|build)\b[\w\s-]{0,24}\btools?\b/i;
+const buildClaim =
+  /\b(?:re)?build (?:succeeded|passed|worked|completed|finished)\b|\b(?:i|we)(?:'|’)?(?:ve| have)? (?:re)?built\b/i;
+const editClaim =
+  /\b(?:i|we)(?:'|’)?(?:ve| have)? (?:updated|edited|changed|modified|rewrote|replaced|inserted|put|wrote|deleted|removed)\b/i;
+
+/**
+ * Why an app chat's reply must do more work: it says its own tools are missing, which they never are in the app's chat,
+ * or it reports a build or file change that no successful app tool call in this reply made. `ran` names those calls.
+ */
+export function unbackedAppClaim(candidate: string, apps: AppKind | undefined, ran: ReadonlySet<string>) {
+  if (!apps) return undefined;
+  const sentences = candidate.split(/(?<=[.!?])\s+|\n+/).filter(sentence => !sentence.trim().endsWith('?'));
+  if (sentences.some(sentence => toolsDenied.test(sentence)))
+    return {
+      status: 'continue' as const,
+      reason: `This app's chat always has ${appTools[apps]}. Call them to do the work.`,
+    };
+  if (apps === 'private') return undefined;
+  const claimed = clauses(sentences.filter(sentence => !earlierOutcome.test(sentence))).find(clause => {
+    const claim = buildClaim.exec(clause) ?? editClaim.exec(clause);
+    return !!claim && !negatedClaim(clause, claim);
+  });
+  if (!claimed) return undefined;
+  const backed = buildClaim.test(claimed)
+    ? ran.has(buildTool)
+    : ran.has('apps.files.write') || ran.has('apps.files.delete');
+  return backed
+    ? undefined
+    : {
+        status: 'continue' as const,
+        reason: `The reply says "${claimed.slice(0, 60)}", but no app tool in this turn did that. Do it with apps.files.write or ${buildTool}, or say plainly that it was not done.`,
+      };
+}
+
 const verbs = String.raw`(?:list|inspect|prepare|import|create|add|update|propose|read|check|fetch|look|map|set up|start|run|load|show|build|make|draft|search|get|pull|open)`;
 const pendingWork = new RegExp(
   [
@@ -2436,6 +2478,20 @@ const wroteInReply = (items: readonly LoopItem[]) =>
           isWorkTool(result.name) &&
           !readOnlyNativeTools.has(result.name),
       ),
+  );
+
+/** The app tools that succeeded in this reply, by framework name. */
+const appToolsRan = (items: readonly LoopItem[]) =>
+  new Set(
+    items.flatMap(item =>
+      item.kind === 'results'
+        ? item.results
+            .filter(
+              result => !result.error && !/^[^{]*\{"error":/.test(result.output) && result.name.startsWith('apps_'),
+            )
+            .map(result => result.name.replaceAll('_', '.'))
+        : [],
+    ),
   );
 
 // A clause that says this reply just made a card, as opposed to pointing at one that already waits.
@@ -5607,7 +5663,8 @@ export async function inferWithTools(
       const writeUnbacked =
         otherTableSkipped || tools?.priorCalls || tools?.priorToolCalls?.length
           ? undefined
-          : unbackedWriteClaim(candidate, wroteInReply(items), !fileCheckNeeded);
+          : (unbackedWriteClaim(candidate, wroteInReply(items), !fileCheckNeeded) ??
+            unbackedAppClaim(candidate, tools?.apps, appToolsRan(items)));
       const invitesUnchecked = unbacked || writeUnbacked ? undefined : uncheckedInvitationClaim(candidate, items);
       if (directoryExpected && directoryAttempted && !directorySucceeded)
         return finish(directoryUnavailableReply, true);

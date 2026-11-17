@@ -17,6 +17,7 @@ import {
   tableIdQuestion,
   unbackedCardClaim,
   unbackedImportClaim,
+  unbackedAppClaim,
   unbackedWriteClaim,
   uncheckedTableQuestion,
   waitingCardMisdescribed,
@@ -1259,6 +1260,41 @@ test('a write claim with no write in this reply is sent back without the complet
     'The approval card was created for 9 rows.',
   ])
     assert.equal(unbackedWriteClaim(text, false), undefined, text);
+});
+
+test("an app chat's reply cannot deny its tools or claim a build or edit no tool made", () => {
+  const none = new Set();
+  for (const text of [
+    'I cannot edit the file or build the app because the required file tools are not available.',
+    'I cannot insert the view ID and rebuild the server because no file write or build tool is available.',
+    "I don't have a file editing tool in this chat.",
+  ]) {
+    assert.match(unbackedAppClaim(text, 'public', none)?.reason ?? '', /apps\.files\.write/, text);
+    assert.match(unbackedAppClaim(text, 'private', none)?.reason ?? '', /apps\.page\.replace/, text);
+  }
+  for (const text of [
+    'The build succeeded. The updated server now tracks prevHandle.',
+    'I rebuilt the app with the new view id.',
+  ]) {
+    assert.equal(unbackedAppClaim(text, 'public', none)?.status, 'continue', text);
+    // eslint-disable-next-line tulipfarm/product-copy -- A tool name, not user-facing copy.
+    assert.equal(unbackedAppClaim(text, 'public', new Set(['apps.preview.build'])), undefined, text);
+  }
+  assert.equal(unbackedAppClaim('I updated src/server.js with the view id.', 'public', none)?.status, 'continue');
+  assert.equal(
+    unbackedAppClaim('I updated src/server.js with the view id.', 'public', new Set(['apps.files.write'])),
+    undefined,
+  );
+  for (const text of [
+    'The app has one data view, on the Posts table.',
+    'The build failed: npm install found no package.json.',
+    'The last build succeeded earlier, before this change.',
+    'Should I rebuild the app?',
+    'Nothing was built yet.',
+    'I will build the app once you confirm.',
+  ])
+    assert.equal(unbackedAppClaim(text, 'public', none), undefined, text);
+  assert.equal(unbackedAppClaim('The required file tools are not available.', undefined, none), undefined);
 });
 
 test('an import presented for review needs a pending proposal receipt from this reply', () => {
