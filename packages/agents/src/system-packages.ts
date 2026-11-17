@@ -155,9 +155,10 @@ export function createSystemPackages(options: Options) {
     workspaceId: string,
     user: string,
     action: (tx: Transaction, actor: HumanActor) => Promise<T>,
+    mode: 'read' | 'write' = 'write',
   ) {
     return runtime.transaction(z.uuid().parse(workspaceId), systemPackageCompatibility, async tx => {
-      await lockAuthorization(tx, 'write');
+      await lockAuthorization(tx, mode);
       const actor = await resolveHuman(tx, user);
       await currentMember(tx, actor);
       return action(tx, actor);
@@ -1522,26 +1523,31 @@ export function createSystemPackages(options: Options) {
         ),
       ),
     read: (workspaceId: string, user: string, id: string) =>
-      transaction(workspaceId, user, async (tx, actor) => view(workspaceId, await load(tx, actor, id))),
+      transaction(workspaceId, user, async (tx, actor) => view(workspaceId, await load(tx, actor, id)), 'read'),
     list: (workspaceId: string, user: string, after?: string, chatId?: string) =>
-      transaction(workspaceId, user, async (tx, actor) => {
-        if (chatId) await chatAccess(tx, actor, z.uuid().parse(chatId));
-        const rows = z.array(rowSchema).parse(
-          (
-            await tx.client.query(
-              `SELECT ${installationColumns(tx)} FROM ${relation(tx, 'tf_system_package_installations')} installation
+      transaction(
+        workspaceId,
+        user,
+        async (tx, actor) => {
+          if (chatId) await chatAccess(tx, actor, z.uuid().parse(chatId));
+          const rows = z.array(rowSchema).parse(
+            (
+              await tx.client.query(
+                `SELECT ${installationColumns(tx)} FROM ${relation(tx, 'tf_system_package_installations')} installation
          WHERE installation.membership_id=$1 AND installation.user_id=$2
          AND ($3::uuid IS NULL OR installation.id>$3) AND ($4::uuid IS NULL OR installation.conversation_id=$4)
          ORDER BY installation.id LIMIT 26`,
-              [actor.membershipId, actor.userId, after ?? null, chatId ?? null],
-            )
-          ).rows,
-        );
-        const selected = rows.slice(0, 25);
-        return {
-          installations: selected.map(row => view(workspaceId, row)),
-          nextCursor: rows.length > 25 ? selected.at(-1)!.id : null,
-        };
-      }),
+                [actor.membershipId, actor.userId, after ?? null, chatId ?? null],
+              )
+            ).rows,
+          );
+          const selected = rows.slice(0, 25);
+          return {
+            installations: selected.map(row => view(workspaceId, row)),
+            nextCursor: rows.length > 25 ? selected.at(-1)!.id : null,
+          };
+        },
+        'read',
+      ),
   };
 }
