@@ -2896,7 +2896,7 @@ export function createWorkflows(
       return 'failed';
     }
   }
-  // ponytail: shared lock, so only the trigger-row locks and request_key uniqueness serialize sweeps. Two overlapping sweepers (a rolling deploy) can briefly overshoot run limits; isolated() absorbs a duplicate admission.
+  // Shared lock, so only the trigger-row locks and request_key uniqueness serialize sweeps. Two overlapping sweepers (a rolling deploy) can briefly overshoot run limits; isolated() absorbs a duplicate admission.
   async function due(workspaceId: string) {
     return transaction(
       workspaceId,
