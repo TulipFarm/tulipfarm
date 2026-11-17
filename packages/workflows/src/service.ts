@@ -2896,51 +2896,56 @@ export function createWorkflows(
       return 'failed';
     }
   }
+  // ponytail: shared lock, so only the trigger-row locks and request_key uniqueness serialize sweeps. Two overlapping sweepers (a rolling deploy) can briefly overshoot run limits; isolated() absorbs a duplicate admission.
   async function due(workspaceId: string) {
-    return transaction(workspaceId, async tx => {
-      // A sponsor or workflow at its run limit waits without holding admission slots that others could use.
-      const belowRunLimits = `w.sponsor_membership_id NOT IN (SELECT r.membership_id FROM ${table(tx, 'tf_workflow_runs')} r WHERE r.status IN ('queued','running','waiting') AND r.membership_id IS NOT NULL AND NOT ${parked(tx, 'r')} GROUP BY r.membership_id HAVING count(*)>=$1)
+    return transaction(
+      workspaceId,
+      async tx => {
+        // A sponsor or workflow at its run limit waits without holding admission slots that others could use.
+        const belowRunLimits = `w.sponsor_membership_id NOT IN (SELECT r.membership_id FROM ${table(tx, 'tf_workflow_runs')} r WHERE r.status IN ('queued','running','waiting') AND r.membership_id IS NOT NULL AND NOT ${parked(tx, 'r')} GROUP BY r.membership_id HAVING count(*)>=$1)
         AND w.id NOT IN (SELECT r.workflow_id FROM ${table(tx, 'tf_workflow_runs')} r WHERE r.status IN ('queued','running','waiting') AND r.sponsorship_id IS NOT NULL GROUP BY r.workflow_id HAVING count(*) FILTER (WHERE NOT ${parked(tx, 'r')})>=$2 OR count(*) FILTER (WHERE ${parked(tx, 'r')})>=$3)
         AND w.id NOT IN (SELECT e.subject_id FROM ${table(tx, 'tf_audit_events')} e WHERE e.operation='workflow.sweep-failed' AND e.created_at>clock_timestamp()-interval '${failedSweepRetry}')`;
-      const events = (
-        await tx.client.query(
-          `SELECT e.workflow_id,e.revision,e.trigger_id,e.fired_trigger_ids,e.event_key,e.payload,e.github_repository_id,r.definition,ARRAY(SELECT t.trigger_id FROM ${table(tx, 'tf_workflow_triggers')} t WHERE t.workflow_id=e.workflow_id AND t.enabled) AS enabled_ids FROM ${table(tx, 'tf_provider_events')} e JOIN ${table(tx, 'tf_workflows')} w ON w.id=e.workflow_id AND w.active_revision=e.revision JOIN ${table(tx, 'tf_workflow_revisions')} r ON r.workflow_id=w.id AND r.id=e.revision WHERE w.enabled AND NOT e.admitted AND ${belowRunLimits} ORDER BY e.created_at,e.event_key LIMIT 20`,
-          [workflowLimits.member, workflowLimits.workflow, workflowLimits.parked],
-        )
-      ).rows;
-      const failed = new Set<string>();
-      for (const event of events) {
-        const workflowId = idSchema.parse(event.workflow_id);
-        if (failed.has(workflowId)) continue;
-        const outcome = await isolated(tx, workflowId, () => admitProviderEvent(tx, workflowId, event));
-        if (outcome === 'failed') failed.add(workflowId);
-        if (outcome === 'workspace-limit') break;
-      }
-      const sweptAt = await databaseNow(tx);
-      const schedules = (
-        await tx.client.query(
-          `SELECT w.id,w.active_revision AS revision,r.definition FROM (SELECT t.workflow_id,min(t.next_run_at) AS first FROM ${table(tx, 'tf_workflow_triggers')} t WHERE t.next_run_at<=$4::timestamptz GROUP BY t.workflow_id) d JOIN ${table(tx, 'tf_workflows')} w ON w.id=d.workflow_id JOIN ${table(tx, 'tf_workflow_revisions')} r ON r.workflow_id=w.id AND r.id=w.active_revision WHERE w.enabled AND ${belowRunLimits} ORDER BY d.first,w.id LIMIT 20`,
-          [workflowLimits.member, workflowLimits.workflow, workflowLimits.parked, sweptAt.toISOString()],
-        )
-      ).rows;
-      for (const row of schedules) {
-        const workflowId = idSchema.parse(row.id);
-        if ((await isolated(tx, workflowId, () => fireWorkflow(tx, row, sweptAt))) === 'workspace-limit') break;
-      }
-      // A parked run needs no redispatch until its due time, when it stops counting as parked.
-      const rows = (
-        await tx.client.query(
-          `SELECT r.id FROM ${table(tx, 'tf_workflow_runs')} r WHERE r.status IN ('queued','running','waiting') ORDER BY ${parked(tx, 'r')},r.dispatched_at NULLS FIRST,r.created_at,r.id LIMIT 20`,
-        )
-      ).rows;
-      const result = rows.map(row => workSchema.parse({ workspaceId, runId: row.id }));
-      for (const work of result)
-        await tx.client.query(
-          `UPDATE ${table(tx, 'tf_workflow_runs')} SET dispatched_at=clock_timestamp() WHERE id=$1`,
-          [work.runId],
-        );
-      return result;
-    });
+        const events = (
+          await tx.client.query(
+            `SELECT e.workflow_id,e.revision,e.trigger_id,e.fired_trigger_ids,e.event_key,e.payload,e.github_repository_id,r.definition,ARRAY(SELECT t.trigger_id FROM ${table(tx, 'tf_workflow_triggers')} t WHERE t.workflow_id=e.workflow_id AND t.enabled) AS enabled_ids FROM ${table(tx, 'tf_provider_events')} e JOIN ${table(tx, 'tf_workflows')} w ON w.id=e.workflow_id AND w.active_revision=e.revision JOIN ${table(tx, 'tf_workflow_revisions')} r ON r.workflow_id=w.id AND r.id=e.revision WHERE w.enabled AND NOT e.admitted AND ${belowRunLimits} ORDER BY e.created_at,e.event_key LIMIT 20 FOR UPDATE OF e SKIP LOCKED`,
+            [workflowLimits.member, workflowLimits.workflow, workflowLimits.parked],
+          )
+        ).rows;
+        const failed = new Set<string>();
+        for (const event of events) {
+          const workflowId = idSchema.parse(event.workflow_id);
+          if (failed.has(workflowId)) continue;
+          const outcome = await isolated(tx, workflowId, () => admitProviderEvent(tx, workflowId, event));
+          if (outcome === 'failed') failed.add(workflowId);
+          if (outcome === 'workspace-limit') break;
+        }
+        const sweptAt = await databaseNow(tx);
+        const schedules = (
+          await tx.client.query(
+            `SELECT w.id,w.active_revision AS revision,r.definition FROM (SELECT t.workflow_id,min(t.next_run_at) AS first FROM ${table(tx, 'tf_workflow_triggers')} t WHERE t.next_run_at<=$4::timestamptz GROUP BY t.workflow_id) d JOIN ${table(tx, 'tf_workflows')} w ON w.id=d.workflow_id JOIN ${table(tx, 'tf_workflow_revisions')} r ON r.workflow_id=w.id AND r.id=w.active_revision WHERE w.enabled AND ${belowRunLimits} ORDER BY d.first,w.id LIMIT 20`,
+            [workflowLimits.member, workflowLimits.workflow, workflowLimits.parked, sweptAt.toISOString()],
+          )
+        ).rows;
+        for (const row of schedules) {
+          const workflowId = idSchema.parse(row.id);
+          if ((await isolated(tx, workflowId, () => fireWorkflow(tx, row, sweptAt))) === 'workspace-limit') break;
+        }
+        // A parked run needs no redispatch until its due time, when it stops counting as parked.
+        const rows = (
+          await tx.client.query(
+            `SELECT r.id FROM ${table(tx, 'tf_workflow_runs')} r WHERE r.status IN ('queued','running','waiting') ORDER BY ${parked(tx, 'r')},r.dispatched_at NULLS FIRST,r.created_at,r.id LIMIT 20`,
+          )
+        ).rows;
+        const result = rows.map(row => workSchema.parse({ workspaceId, runId: row.id }));
+        for (const work of result)
+          await tx.client.query(
+            `UPDATE ${table(tx, 'tf_workflow_runs')} SET dispatched_at=clock_timestamp() WHERE id=$1`,
+            [work.runId],
+          );
+        return result;
+      },
+      'read',
+    );
   }
   // A run marked running sleeps only when its wake signal was lost, so the sweep wakes it again.
   // It only reads, so it takes the shared lock: an exclusive one every 2 s per workspace would stall every reader behind it.

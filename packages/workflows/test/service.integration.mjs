@@ -418,3 +418,42 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
     }
   },
 );
+
+test('the due sweep shares the workspace lock instead of queueing behind readers', { timeout: 60000 }, async () => {
+  const db = await fixture();
+  let runtime;
+  try {
+    await db.platform.query(`SET search_path TO app; DROP TABLE IF EXISTS app.accounts;
+${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', import.meta.url), 'utf8')}`);
+    const w = await db.create(await workspaceTableMigrations());
+    runtime = createWorkspaceRuntime({
+      replicaCount: 1,
+      reservedConnections: 2,
+      databaseConnectionBudget: 20,
+      resolveCredential: async id => ({ workspaceId: id, generation: 1, connectionString: db.login(w) }),
+    });
+    const service = createWorkflows(runtime);
+    let release, held;
+    const locked = new Promise(resolve => (held = resolve)),
+      done = new Promise(resolve => (release = resolve));
+    const reader = runtime.transaction(w.id, workflowCompatibility, async tx => {
+      await lockAuthorization(tx, 'read');
+      held();
+      await done;
+    });
+    await locked;
+    try {
+      const outcome = await Promise.race([
+        service.due(w.id),
+        new Promise(resolve => setTimeout(resolve, 5000, 'blocked')),
+      ]);
+      assert.deepEqual(outcome, [], 'due finishes while a shared holder keeps the lock');
+    } finally {
+      release();
+      await reader;
+    }
+  } finally {
+    await runtime?.close();
+    await db.close();
+  }
+});
