@@ -48,6 +48,23 @@ const family = z.strictObject({
     .nullable()
     .default(null)
     .describe("Image model paired with this family; null uses the workspace's default image model"),
+  planUsage: z
+    .strictObject({
+      plan: z.enum(['own', 'shared']).describe("The member's own plan, or one shared with them"),
+      status: z
+        .enum(['available', 'limit-reached'])
+        .describe("Learned from replies: the plan's last reply refused for its usage limit, until it answers again"),
+      limitedAt: z.iso
+        .datetime({ offset: true })
+        .nullable()
+        .describe('When the plan last refused a reply for its usage limit; null while available'),
+      premiumRequests: z
+        .strictObject({ remaining: z.number().int().nonnegative(), entitlement: z.number().int().positive() })
+        .nullable()
+        .describe("GitHub Copilot's remaining premium requests this period; null when unknown or not Copilot"),
+    })
+    .optional()
+    .describe('Usage status of the plan a plan model runs on for the member; absent for models the workspace pays for'),
 });
 
 export const modelCatalogFamilySchema = z.discriminatedUnion('available', [

@@ -1,4 +1,5 @@
 import { loadModelCatalog } from '@tulipfarm/config';
+import { stickyFallbackReasons } from '@tulipfarm/config/model-fallback';
 import {
   checkLayout,
   layoutActionRequestSchema,
@@ -98,6 +99,7 @@ import {
   toolReceiptSchema,
   timeZoneSchema,
   stopSubagentSchema,
+  modelFallbackCodePrefix,
 } from './contracts.ts';
 import { conversationEventChannel, subagentResultSchema, type ConversationNotification } from './events.ts';
 
@@ -126,6 +128,10 @@ function chatModel(latest: string | null) {
   const kept = latest ? catalog.model(latest) : undefined;
   return kept?.selectable && !kept.paused ? kept.id : catalog.defaultModel.id;
 }
+// A reply the fallback model answered because the chat model failed until the member acts, such as a plan's usage
+// limit, switches the chat to that fallback model, as if the member had picked it, so the next reply doesn't retry.
+const latestModel = `CASE WHEN t.status = 'completed' AND t.error_code ~ '^${modelFallbackCodePrefix}[a-z][a-z0-9-]*:(${stickyFallbackReasons.join('|')})(:|$)'
+  THEN split_part(t.error_code, ':', 2) ELSE t.responder END`;
 const chatColumns = `id, title, title_revision AS "titleRevision", title_manual AS "titleManual", archived_at IS NOT NULL AS archived, COALESCE((to_jsonb(c)->>'is_closed')::boolean,false) AS "isClosed",
   to_char(activity_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS "activityAt",
   to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS "createdAt"`;
@@ -301,7 +307,7 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
         `SELECT ${chatColumns}, project_id AS "projectId", next_message_sequence AS "nextSequence",
       (owner_user_id = $2 AND owner_membership_id = $3) AS owner,
       ${pinnedColumn(tx, '$3')},
-      (SELECT t.responder FROM ${table(tx, 'tf_conversation_turns')} t WHERE t.conversation_id = c.id AND t.responder NOT IN ('package-install-v1','schema-revert-v1')
+      (SELECT ${latestModel} FROM ${table(tx, 'tf_conversation_turns')} t WHERE t.conversation_id = c.id AND t.responder NOT IN ('package-install-v1','schema-revert-v1')
         ORDER BY t.accepted_sequence DESC LIMIT 1) AS model
       FROM ${table(tx, 'tf_conversations')} c WHERE id = $1 AND kind = 'private' AND deleted_at IS NULL ${write ? 'FOR UPDATE' : ''}`,
         [chatId, actor.userId, actor.membershipId],

@@ -75,7 +75,7 @@ export async function turnCaller(runtime: ConversationRuntime, fence: ReplyFence
  * The plans of one provider a turn may run on, in the order they are tried: the caller's own, then those shared with them, their
  * teams and the workspace. `current` is the plan answering now; `next` retires it for the reason given and moves to the
  * next plan with a usable token, or returns null when none is left so the workspace's fallback model answers; `own`
- * tells whether the plan tried last is the caller's own. Tokens
+ * tells whether the plan tried last is the caller's own; `answered` records that the current plan wrote the reply. Tokens
  * are read here, inside the activity, so they never enter workflow history.
  */
 export async function memberPlans(input: {
@@ -128,7 +128,10 @@ export async function memberPlans(input: {
     });
     if (failure === 'reconnect')
       await credentials.requireReconnect(workspaceId, candidate.ownerMembershipId).catch(() => undefined);
-    else await subscriptions.coolDown(workspaceId, candidate.connectionId, retryAfterMs).catch(() => undefined);
+    else
+      await subscriptions
+        .coolDown(workspaceId, candidate.connectionId, retryAfterMs, failure === 'usage-limit')
+        .catch(() => undefined);
   }
 
   const first = await advance();
@@ -139,6 +142,10 @@ export async function memberPlans(input: {
       return advance();
     },
     retire,
+    /** Records that the plan answering now wrote the reply, which clears a usage limit it reported earlier. */
+    async answered() {
+      if (current) await subscriptions.answered(workspaceId, current.candidate.connectionId).catch(() => undefined);
+    },
     /** Whether the plan tried last belongs to the caller rather than a teammate, team or the workspace. */
     own: () => lastOwn,
   };

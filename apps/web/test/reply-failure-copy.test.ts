@@ -3,6 +3,8 @@ import test from 'node:test';
 
 import {
   fallbackNote,
+  fallbackStarts,
+  fallbackSummary,
   proposalKeptNote,
   replyFailure,
   replyRetrying,
@@ -10,6 +12,7 @@ import {
   retryLabel,
   unknownStop,
 } from '../src/features/chat/reply-failure-copy.ts';
+import { planUsageStatus, timeAgo } from '../src/features/chat/plan-usage.ts';
 
 const reasons = [
   'incomplete-response',
@@ -189,4 +192,88 @@ test('a failed reply that saved a table proposal says only its text is missing',
   );
   assert.equal(proposalKeptNote([{}]), null);
   assert.equal(proposalKeptNote([]), null);
+});
+
+test('a run of replies the same fallback wrote shows its chip once, and again after the chat model answers', () => {
+  const messages: unknown[] = [];
+  const exchange = (id: string, errorCode: string | null, status = 'completed') =>
+    messages.push(
+      { id: `${id}-ask`, author: 'user', turn: { status, errorCode, stats: { model: 'chatgpt-sol' } } },
+      { id, author: 'assistant' },
+    );
+  exchange('a', 'model-fallback:grok:quota:own');
+  exchange('b', 'model-fallback:grok:quota:own');
+  exchange('c', null);
+  exchange('d', 'model-fallback:grok:quota:own');
+  exchange('e', 'model-fallback:grok:outage');
+  exchange('f', 'model-fallback:kimi:outage');
+  const starts = fallbackStarts(messages as Parameters<typeof fallbackStarts>[0]);
+  assert.deepEqual([...starts.keys()], ['a', 'd', 'f']);
+  assert.equal(starts.get('a')?.errorCode, 'model-fallback:grok:quota:own');
+
+  // A reply still being written doesn't end the run it continues.
+  messages.length = 0;
+  exchange('a', 'model-fallback:grok:quota:own');
+  exchange('b', null, 'processing');
+  exchange('c', 'model-fallback:grok:quota:own');
+  assert.deepEqual([...fallbackStarts(messages as Parameters<typeof fallbackStarts>[0]).keys()], ['a']);
+});
+
+test('a fallback chip says briefly who answered and why, tinted by what the member can do', () => {
+  const name = (id: string) => ({ grok: 'Grok 4.7', 'chatgpt-sol': 'GPT Sol', kimi: 'Kimi' })[id] ?? id;
+  const summary = (code: string, chat = 'chatgpt-sol') =>
+    fallbackSummary('completed', `model-fallback:grok:${code}`, chat, name);
+  assert.deepEqual(
+    (({ short, tone, answered, chosen, plan }) => ({ short, tone, answered, chosen, plan }))(summary('quota:own')!),
+    {
+      short: 'Your ChatGPT plan limit is reached',
+      tone: 'warning',
+      answered: 'Grok 4.7',
+      chosen: 'chatgpt-sol',
+      plan: 'chatgpt',
+    },
+  );
+  assert.equal(summary('quota')?.short, 'The ChatGPT plan limit is reached');
+  assert.equal(summary('outage')?.tone, 'info');
+  assert.equal(summary('timeout', 'kimi')?.short, 'Kimi took too long');
+  assert.deepEqual(
+    [summary('sign-in:own')?.tone, summary('sign-in:own')?.short],
+    ['action', 'ChatGPT needs reconnecting'],
+  );
+  // Only the owner can reconnect a shared plan.
+  assert.deepEqual(
+    [summary('sign-in')?.tone, summary('sign-in')?.short],
+    ['warning', 'The ChatGPT plan needs reconnecting'],
+  );
+  assert.equal(summary('model-unavailable:own')?.short, "GPT Sol isn't on your ChatGPT plan");
+  assert.equal(fallbackSummary('failed', 'model-fallback:grok:quota'), null);
+  assert.equal(fallbackSummary('completed', null), null);
+});
+
+test('a plan model says whose plan it runs on and what is left of it', () => {
+  const now = Date.parse('2026-01-02T12:00:00Z');
+  const usage = { plan: 'own', status: 'available', limitedAt: null, premiumRequests: null } as const;
+  assert.deepEqual(planUsageStatus('chatgpt', usage, now), {
+    plan: 'Your ChatGPT plan',
+    using: 'Using your ChatGPT plan',
+    status: 'Available',
+    warning: false,
+    manageUrl: 'https://chatgpt.com/settings/usage',
+  });
+  const limited = { ...usage, plan: 'shared', status: 'limit-reached', limitedAt: '2026-01-02T10:00:00Z' } as const;
+  const claude = planUsageStatus('claude', limited, now);
+  assert.deepEqual([claude.plan, claude.status, claude.warning], ['The Claude plan', 'Limit reached · 2 h ago', true]);
+  const copilot = (remaining: number) =>
+    planUsageStatus('copilot', { ...usage, premiumRequests: { remaining, entitlement: 300 } }, now);
+  assert.deepEqual([copilot(212).status, copilot(212).warning], ['212 of 300 premium requests left', false]);
+  assert.equal(copilot(0).warning, true);
+  // A reached limit outranks the last count read.
+  assert.equal(
+    planUsageStatus('copilot', { ...limited, premiumRequests: { remaining: 4, entitlement: 300 } }, now).status,
+    'Limit reached · 2 h ago',
+  );
+  assert.deepEqual(
+    ['2026-01-02T11:59:30Z', '2026-01-02T11:15:00Z', '2025-12-30T12:00:00Z'].map(at => timeAgo(at, now)),
+    ['just now', '45 min ago', '3 d ago'],
+  );
 });

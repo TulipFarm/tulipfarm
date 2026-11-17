@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from '@tanstack/react-router';
 import type { ModelCatalogFamily } from '@tulipfarm/config/model-catalog';
 import { Button } from '@tulipfarm/sprout/button';
+import { ArrowUpRight } from 'reicon-react/icons/ArrowUpRight';
 import { useModelCatalog } from '@/features/models/use-model-catalog';
 import { authClient } from '@/lib/auth';
 import type { ComposerModel } from './composer';
@@ -10,6 +11,7 @@ import { modelBrand } from '@/features/models/model-brand';
 import { modelLogo } from '@/features/models/model-logo';
 import { ModelSetupLink, noModelsConfigured } from '@/features/models/model-setup';
 import { familyPlan } from '@/features/models/chatgpt-plan-api';
+import { planUsageStatus } from './plan-usage';
 
 function composerModel(family: ModelCatalogFamily): ComposerModel {
   return {
@@ -18,7 +20,7 @@ function composerModel(family: ModelCatalogFamily): ComposerModel {
     logo: modelLogo(family.vendor),
     brand: modelBrand(family.vendor),
     cost: familyCost(family),
-    ...(familyPlan(family) ? { plan: familyPlan(family)! } : {}),
+    ...(familyPlan(family) ? { plan: familyPlan(family)!, planUsage: family.planUsage ?? undefined } : {}),
     disabled: !family.available,
     ...(!family.available
       ? {
@@ -138,23 +140,27 @@ export function useChatModels(
 // quiet hides failures while a chat error is shown, so one backend outage shows one alert.
 type ChatModels = ReturnType<typeof useChatModels>;
 
-/** An open chat keeps the model of its latest reply. Picking another one also makes it the default for new chats. */
+/**
+ * An open chat keeps the model of its latest reply. Picking another one also makes it the default for new chats. When
+ * the chat's model changes after a pick, such as a switch to the fallback model, the chat's model wins.
+ */
 export function useChatModelFor(models: ChatModels, chatModel: string | null, chatId: string): ChatModels {
-  const [picked, setPicked] = useState<{ chatId: string; id: string } | null>(null);
+  const [picked, setPicked] = useState<{ chatId: string; id: string; over: string | null } | null>(null);
   const families = models.state.kind === 'ready' ? models.state.data.families : [];
-  const id = picked?.chatId === chatId ? picked.id : chatModel;
+  const id = picked?.chatId === chatId && picked.over === chatModel ? picked.id : chatModel;
   const family = id ? families.find(item => item.id === id && item.available) : undefined;
   const model = useMemo(() => (family ? composerModel(family) : null), [family]);
   const { select } = models;
   return useMemo(() => {
     const choose = (next: string) => {
-      if (models.choices.some(choice => choice.id === next && !choice.disabled)) setPicked({ chatId, id: next });
+      if (models.choices.some(choice => choice.id === next && !choice.disabled))
+        setPicked({ chatId, id: next, over: chatModel });
       select(next);
     };
     return model
       ? { ...models, model, usable: true, replacedModel: null, select: choose }
       : { ...models, select: choose };
-  }, [models, model, select, chatId]);
+  }, [models, model, select, chatId, chatModel]);
 }
 
 export function ChatModelStatus({
@@ -192,8 +198,26 @@ export function ChatModelStatus({
     !message && catalog.replacedModel
       ? `Your last model is no longer available. New messages use ${catalog.replacedModel}.`
       : null;
+  const plan = family?.available ? familyPlan(family) : null;
+  const usage = !message && plan && family?.planUsage ? planUsageStatus(plan, family.planUsage) : null;
   return (
     <>
+      {usage && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
+          <p role="status">
+            {usage.using} · <span className={usage.warning ? 'text-warning' : undefined}>{usage.status}</span>
+          </p>
+          <Button
+            size="sm"
+            variant="ghost"
+            nativeButton={false}
+            render={<a href={usage.manageUrl} target="_blank" rel="noopener noreferrer" />}
+          >
+            Manage usage
+            <ArrowUpRight size={14} aria-hidden="true" />
+          </Button>
+        </div>
+      )}
       {replaced && (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
           <p role="status">{replaced}</p>

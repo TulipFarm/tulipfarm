@@ -25,7 +25,7 @@ function useEnv(values) {
 }
 
 test(
-  'a Claude plan reply resumes one vendor session across its tool round and spends no credits',
+  'a Claude plan reply resumes one vendor session across its tool round, spends no credits and clears its usage limit',
   { timeout: 120000 },
   async t => {
     t.after(
@@ -94,6 +94,12 @@ test(
         verify: async () => ({ models: [{ slug: 'claude-sonnet-5', label: 'Claude Sonnet' }] }),
       });
       await plan.connectToken(w.id, w.userId, token);
+      // The plan refused an earlier reply for its usage limit; answering this one shows it is available again.
+      const limitedAt = async () =>
+        (await f.db.platform.query(`SELECT usage_limited_at FROM ${f.table('tf_subscription_connections')}`)).rows.map(
+          row => row.usage_limited_at,
+        );
+      await f.db.platform.query(`UPDATE ${f.table('tf_subscription_connections')} SET usage_limited_at = now()`);
       const chatId = randomUUID();
       await f.store.create(w.id, w.userId, { chatId, commandId: randomUUID() });
       const turn = await f.store.send(w.id, w.userId, chatId, {
@@ -127,6 +133,7 @@ test(
       const summary = await f.runtime.transaction(w.id, commonCompatibility, creditSummary);
       assert.equal(summary.used, 0);
       assert.equal(summary.held, 0);
+      assert.deepEqual(await limitedAt(), [null]);
     } finally {
       await f.close();
     }
