@@ -17,6 +17,7 @@ import {
   tableIdQuestion,
   unbackedCardClaim,
   unbackedImportClaim,
+  unbackedAppClaim,
   unbackedWriteClaim,
   uncheckedTableQuestion,
   waitingCardMisdescribed,
@@ -1259,6 +1260,60 @@ test('a write claim with no write in this reply is sent back without the complet
     'The approval card was created for 9 rows.',
   ])
     assert.equal(unbackedWriteClaim(text, false), undefined, text);
+});
+
+test("an app chat's reply cannot deny its tools or claim a build or edit no tool made", () => {
+  const none = new Set();
+  for (const text of [
+    'I cannot edit the file or build the app because the required file tools are not available.',
+    'I cannot insert the view ID and rebuild the server because no file write or build tool is available.',
+    "I don't have a file editing tool in this chat.",
+  ]) {
+    assert.match(unbackedAppClaim(text, 'public', none)?.reason ?? '', /apps\.files\.write/, text);
+    assert.match(unbackedAppClaim(text, 'private', none)?.reason ?? '', /apps\.page\.replace/, text);
+  }
+  for (const text of [
+    'The build succeeded. The updated server now tracks prevHandle.',
+    'I rebuilt the app with the new view id.',
+  ]) {
+    assert.equal(unbackedAppClaim(text, 'public', none)?.status, 'continue', text);
+    // eslint-disable-next-line tulipfarm/product-copy -- A tool name, not user-facing copy.
+    assert.equal(unbackedAppClaim(text, 'public', new Set(['apps.preview.build'])), undefined, text);
+  }
+  assert.equal(unbackedAppClaim('I updated src/server.js with the view id.', 'public', none)?.status, 'continue');
+  assert.equal(
+    unbackedAppClaim('I updated src/server.js with the view id.', 'public', new Set(['apps.files.write'])),
+    undefined,
+  );
+  assert.equal(
+    unbackedAppClaim('I updated src/server.js and rebuilt the app.', 'public', new Set(['apps.files.write']))?.status,
+    'continue',
+  );
+  for (const text of [
+    'Your Tools page is missing a header, so I added one in the plan below.',
+    'The app has no file upload tool yet.',
+    'Members without a build tool cannot publish.',
+    'Your build tools are not available on the free plan.',
+    'If the build succeeded, you will see a green check.',
+    'When the build succeeded, the app was published.',
+    'Here is what I changed in the code:',
+    'I wrote the CSS for you below.',
+    'The server I built listens on port 3000.',
+    'The page will not change until I have rebuilt the app.',
+    'I updated src/server.js earlier, then rebuilt the app.',
+    'The tool picker shows which parts are missing.',
+    'Your app lists tools that are not available to members.',
+    'I have put together a short summary of the files below.',
+    'I changed my recommendation: use a view instead.',
+    'The app has one data view, on the Posts table.',
+    'The build failed: npm install found no package.json.',
+    'The last build succeeded earlier, before this change.',
+    'Should I rebuild the app?',
+    'Nothing was built yet.',
+    'I will build the app once you confirm.',
+  ])
+    assert.equal(unbackedAppClaim(text, 'public', none), undefined, text);
+  assert.equal(unbackedAppClaim('The required file tools are not available.', undefined, none), undefined);
 });
 
 test('an import presented for review needs a pending proposal receipt from this reply', () => {
