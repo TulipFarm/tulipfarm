@@ -1,3 +1,5 @@
+import { useSyncExternalStore } from 'react';
+
 const returnKey = 'tulipfarm:mcp-sign-in-return';
 const connectedKey = 'tulipfarm:mcp-connected';
 
@@ -25,4 +27,31 @@ export function takeMcpConnected() {
   const id = sessionStorage.getItem(connectedKey);
   sessionStorage.removeItem(connectedKey);
   return id;
+}
+
+// Paste sign-ins live outside components, so the page that opens one keeps it when the connection's view replaces it.
+const pastes = new Map<string, string>();
+const pasteListeners = new Set<() => void>();
+const notifyPastes = () => pasteListeners.forEach(listener => listener());
+
+/** Remembers the provider sign-in for a server whose sign-in ends on an address the member pastes back. */
+export function startMcpPasteSignIn(integrationId: string, authorizationUrl: string) {
+  if (new URL(authorizationUrl).protocol !== 'https:') throw new Error('MCP sign-in must use HTTPS');
+  pastes.set(integrationId, authorizationUrl);
+  notifyPastes();
+}
+
+export function endMcpPasteSignIn(integrationId: string) {
+  if (pastes.delete(integrationId)) notifyPastes();
+}
+
+/** The sign-in link waiting for a pasted address for this connection, if any. */
+export function useMcpPasteSignIn(integrationId: string | undefined) {
+  return useSyncExternalStore(
+    listener => {
+      pasteListeners.add(listener);
+      return () => pasteListeners.delete(listener);
+    },
+    () => (integrationId ? (pastes.get(integrationId) ?? null) : null),
+  );
 }

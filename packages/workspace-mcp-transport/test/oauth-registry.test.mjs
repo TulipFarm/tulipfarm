@@ -10,6 +10,7 @@ import {
   searchRegistry,
   MCP_OAUTH_REDIRECT_URI,
   MCP_OAUTH_CLIENT_ID,
+  MCP_OAUTH_LOOPBACK_REDIRECT_URI,
 } from '../dist/index.js';
 
 const resource = 'https://mcp.example.test/tools';
@@ -240,6 +241,91 @@ test('registration preference is explicit, advertised metadata, dynamic, then vi
   await assert.rejects(operations.registerOAuthClient({ binding: { ...binding, registrationEndpoint: undefined } }), {
     code: 'oauth-registration-required',
   });
+});
+
+test('dynamic registration falls back to a loopback redirect only when the hosted one is refused', async () => {
+  const registrations = [];
+  const fetcherFor = answer => async (_url, init) => {
+    const redirect = JSON.parse(init.body).redirect_uris[0];
+    registrations.push(redirect);
+    const [status, body] = answer(redirect);
+    return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+  };
+  const registered = redirect => ({
+    client_id: 'loopback-client',
+    token_endpoint_auth_method: 'none',
+    redirect_uris: [redirect],
+  });
+
+  const loopback = await createOAuthOperations({
+    fetcher: fetcherFor(redirect =>
+      redirect === MCP_OAUTH_REDIRECT_URI ? [400, { error: 'invalid_redirect_uri' }] : [201, registered(redirect)],
+    ),
+  }).registerOAuthClient({ binding });
+  assert.deepEqual(registrations, [MCP_OAUTH_REDIRECT_URI, MCP_OAUTH_LOOPBACK_REDIRECT_URI]);
+  assert.deepEqual(loopback, {
+    clientId: 'loopback-client',
+    authMethod: 'none',
+    issuer,
+    redirectUri: MCP_OAUTH_LOOPBACK_REDIRECT_URI,
+  });
+
+  registrations.length = 0;
+  await assert.rejects(
+    createOAuthOperations({ fetcher: fetcherFor(() => [400, { error: 'invalid_redirect_uri' }]) }).registerOAuthClient({
+      binding,
+    }),
+    { code: 'oauth-registration-rejected' },
+  );
+  assert.equal(registrations.length, 2);
+
+  registrations.length = 0;
+  await assert.rejects(
+    createOAuthOperations({ fetcher: fetcherFor(() => [429, { error: 'slow_down' }]) }).registerOAuthClient({
+      binding,
+    }),
+    { code: 'oauth-discovery-failed' },
+  );
+  assert.deepEqual(registrations, [MCP_OAUTH_REDIRECT_URI]);
+});
+
+test('a loopback client authorizes and exchanges its code with the loopback redirect', async () => {
+  const exchanged = [];
+  const operations = createOAuthOperations({
+    fetcher: async (_url, init) => {
+      exchanged.push(new URLSearchParams(String(init.body)));
+      return new Response(JSON.stringify({ access_token: 'access', token_type: 'Bearer', expires_in: 3600 }), {
+        headers: { 'content-type': 'application/json' },
+      });
+    },
+  });
+  const loopbackClient = { ...client, redirectUri: MCP_OAUTH_LOOPBACK_REDIRECT_URI };
+  const authorization = operations.createOAuthAuthorization({ binding, client: loopbackClient, state: 's'.repeat(43) });
+  assert.equal(
+    new URL(authorization.authorizationUrl).searchParams.get('redirect_uri'),
+    MCP_OAUTH_LOOPBACK_REDIRECT_URI,
+  );
+  assert.equal(authorization.redirectUri, MCP_OAUTH_LOOPBACK_REDIRECT_URI);
+  await operations.exchangeOAuthCode({
+    binding,
+    client: loopbackClient,
+    code: 'one-use-code',
+    verifier: authorization.verifier,
+    redirectUri: authorization.redirectUri,
+    responseIssuer: issuer,
+  });
+  assert.equal(exchanged[0].get('redirect_uri'), MCP_OAUTH_LOOPBACK_REDIRECT_URI);
+  await assert.rejects(
+    operations.exchangeOAuthCode({
+      binding,
+      client: loopbackClient,
+      code: 'one-use-code',
+      verifier: authorization.verifier,
+      redirectUri: MCP_OAUTH_REDIRECT_URI,
+      responseIssuer: issuer,
+    }),
+    { code: 'oauth-binding-denied' },
+  );
 });
 
 test('OAuth discovery cancellation stops metadata fallback traversal with one shared deadline', async t => {

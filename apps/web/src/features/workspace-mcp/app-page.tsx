@@ -29,6 +29,7 @@ import { useMcpConnect, type Ownership } from './connect';
 import type { Capabilities, Integration, IntegrationDetail } from './contracts';
 import { useMcpCapabilities, useMcpApi, useMcpIntegration, useMcpIntegrations } from './queries';
 import { takeMcpConnected } from './sign-in';
+import { McpPasteSignIn } from './paste-sign-in';
 import { McpGate, McpRead } from './state';
 import { McpToolsTab } from './tools-tab';
 
@@ -303,6 +304,15 @@ function NewApp({ api, capabilities, slug, app, refreshList }: PageProps & { app
           </section>
         )}
         <ConnectError command={flow.command} name={app.name} />
+        {flow.paste && (
+          <McpPasteSignIn
+            api={api}
+            name={app.name}
+            signIn={flow.paste}
+            finished={refreshList}
+            restart={() => flow.connect(flow.current?.ownership ?? 'personal')}
+          />
+        )}
         <section aria-labelledby="mcp-does" className="max-w-2xl space-y-3">
           <h2 id="mcp-does" className="text-base font-semibold">
             What your agents can do
@@ -444,20 +454,21 @@ function ConnectedBody({
     (integration.reauthorizationRequired ||
       ['setup', 'oauth-pending', 'registration-required', 'disconnected'].includes(integration.status));
   const busy = flow.command.busy;
-  const action = signIn ? (
-    <Button
-      disabled={busy || blocked || !capabilities.integrationsEnabled}
-      aria-busy={busy}
-      onClick={() => flow.connect(integration.ownership)}
-    >
-      {busy && <Spinner aria-hidden="true" />}
-      {integration.status === 'registration-required' && flow.registration
-        ? 'Continue'
-        : integration.status === 'disconnected' || integration.reauthorizationRequired
-          ? `Sign in to ${name} again`
-          : `Finish connecting`}
-    </Button>
-  ) : undefined;
+  const action =
+    signIn && !flow.paste ? (
+      <Button
+        disabled={busy || blocked || !capabilities.integrationsEnabled}
+        aria-busy={busy}
+        onClick={() => flow.connect(integration.ownership)}
+      >
+        {busy && <Spinner aria-hidden="true" />}
+        {integration.status === 'registration-required' && flow.registration
+          ? 'Continue'
+          : integration.status === 'disconnected' || integration.reauthorizationRequired
+            ? `Sign in to ${name} again`
+            : `Finish connecting`}
+      </Button>
+    ) : undefined;
   const about = [
     integration.accountLabel,
     ownershipText(integration),
@@ -506,7 +517,16 @@ function ConnectedBody({
         </Alert>
       )}
       {flow.registration && <Registration name={name} flow={flow} />}
-      {connecting.includes(integration.status) && !flow.registration && (
+      {flow.paste && (
+        <McpPasteSignIn
+          api={api}
+          name={name}
+          signIn={flow.paste}
+          finished={refresh}
+          restart={() => flow.connect(integration.ownership)}
+        />
+      )}
+      {connecting.includes(integration.status) && !flow.registration && !flow.paste && (
         <p role="status" className="text-sm text-muted-foreground">
           {integration.status === 'discovering'
             ? `Finding what ${name} can do…`

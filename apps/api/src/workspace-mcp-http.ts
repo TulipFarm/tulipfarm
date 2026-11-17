@@ -2,6 +2,7 @@ import { fromNodeHeaders } from 'better-auth/node';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { AccessDenied } from '@tulipfarm/access';
+import { isLoopbackRedirectUri } from '@tulipfarm/workspace-mcp-transport';
 import { authConfig, type registerAuth } from './auth.ts';
 import { requestBoundaryError } from './security.ts';
 import { routeValidation } from './route-validation.ts';
@@ -9,7 +10,7 @@ import { routeValidation } from './route-validation.ts';
 export type McpHttpAuth = { api: Pick<ReturnType<typeof registerAuth>['auth']['api'], 'getSession'> };
 export class McpHttpError extends Error {
   readonly code: string;
-  readonly status: 400 | 403 | 404 | 409 | 410 | 503;
+  readonly status: 400 | 403 | 404 | 409 | 410 | 422 | 503;
   constructor(code: string, status: McpHttpError['status']) {
     super(code);
     this.code = code;
@@ -36,6 +37,30 @@ export const mcpCallbackSchema = z.union([
     iss: z.url().max(2048).optional(),
   }),
 ]);
+
+export const mcpPastedSignInSchema = z.strictObject({ address: z.string().min(1).max(20000) });
+const callbackKeys = ['state', 'code', 'iss', 'error', 'error_description', 'error_uri'] as const;
+/**
+ * Reads the address a provider redirected to when sign-in used a loopback redirect. It must be a loopback `http:`
+ * address; its origin and path are returned so the attempt can check they match its own redirect.
+ */
+export function parsePastedSignIn(workspaceId: string, address: string) {
+  const invalid = new McpHttpError('mcp-sign-in-address-invalid', 400);
+  const text = address.trim();
+  if (!URL.canParse(text)) throw invalid;
+  const url = new URL(text);
+  const landedAt = `${url.origin}${url.pathname}`;
+  if (!isLoopbackRedirectUri(landedAt) || url.username || url.password) throw invalid;
+  const query: Record<string, string> = {};
+  for (const key of callbackKeys) {
+    const values = url.searchParams.getAll(key);
+    if (values.length > 1) throw invalid;
+    if (values[0] !== undefined) query[key] = values[0];
+  }
+  const input = mcpCallbackSchema.safeParse(query);
+  if (!input.success || !input.data.state.startsWith(`${workspaceId}_`)) throw invalid;
+  return { input: input.data, landedAt };
+}
 
 export type McpCallbackOutcome =
   | { outcome: 'connected'; workspaceId: string; integrationId: string }
@@ -121,7 +146,7 @@ export function workspaceMcpHttp(
         ...(querystring ? { querystring: validation.json(querystring) } : {}),
         response: {
           200: validation.json(output),
-          ...Object.fromEntries([400, 401, 403, 404, 409, 410, 413, 415, 429, 503].map(status => [status, error])),
+          ...Object.fromEntries([400, 401, 403, 404, 409, 410, 413, 415, 422, 429, 503].map(status => [status, error])),
         },
       };
     },

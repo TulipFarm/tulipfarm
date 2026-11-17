@@ -23,6 +23,7 @@ import { McpCommandFeedback, useMcpCommand } from './state';
 import { useMcpSetupRecovery } from './queries';
 import { HostedSetup, type HostedSetting } from './hosted-setup';
 import { startMcpSignIn } from './sign-in';
+import { McpPasteSignIn } from './paste-sign-in';
 import { Disclosure } from '@/components/disclosure';
 import { SetupDialog } from './setup-dialog';
 
@@ -136,7 +137,8 @@ function RemoteSetup({
   const request = useRef<{ body: string; id: string } | null>(null);
   const errors = { ...validation, ...(command.state.kind === 'error' ? command.state.fields : {}) };
   const formId = `${prefix}-form`;
-  const locked = command.blocked || result?.kind === 'saved' || result?.kind === 'oauth';
+  const locked =
+    command.blocked || result?.kind === 'saved' || result?.kind === 'oauth' || result?.kind === 'oauth-paste';
   const clearSecrets = () => {
     setToken('');
     setClientSecret('');
@@ -244,7 +246,7 @@ function RemoteSetup({
     : entry || proposal
       ? `Connect ${name}`
       : 'Add a custom app';
-  const done = result?.kind === 'saved' || result?.kind === 'oauth';
+  const done = result?.kind === 'saved' || result?.kind === 'oauth' || result?.kind === 'oauth-paste';
   return (
     <SetupDialog
       title={title}
@@ -260,7 +262,7 @@ function RemoteSetup({
             <Button onClick={() => saved(result.integration.id)}>Open {result.integration.name}</Button>
           ) : result?.kind === 'oauth' ? (
             <Button onClick={() => saved(result.integration.id)}>I’ve signed in</Button>
-          ) : (
+          ) : result?.kind === 'oauth-paste' ? null : (
             <Button
               type="submit"
               form={formId}
@@ -615,6 +617,15 @@ function RemoteSetup({
               </Button>
             )}
           </div>
+        )}
+        {result?.kind === 'oauth-paste' && (
+          <McpPasteSignIn
+            api={api}
+            name={name || result.integration.name}
+            signIn={{ integrationId: result.integration.id, authorizationUrl: result.authorizationUrl }}
+            finished={saved}
+            restart={submit}
+          />
         )}
         {result?.kind === 'saved' && (
           <p role="status" className="rounded-lg border p-4 text-sm">

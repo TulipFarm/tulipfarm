@@ -2,7 +2,12 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
 import { mcpFixture } from '../../../packages/workspace-mcp/test/fixture.mjs';
-import { createOAuthOperations, MCP_OAUTH_CLIENT_ID, MCP_OAUTH_REDIRECT_URI } from '@tulipfarm/workspace-mcp-transport';
+import {
+  createOAuthOperations,
+  MCP_OAUTH_CLIENT_ID,
+  MCP_OAUTH_LOOPBACK_REDIRECT_URI,
+  MCP_OAUTH_REDIRECT_URI,
+} from '@tulipfarm/workspace-mcp-transport';
 import { createWorkspaceMcpOAuth } from '../src/workspace-mcp-oauth.ts';
 import { mcpProtocolFixture } from './workspace-mcp-protocol-fixture.mjs';
 import { workspaceMcpDiscovery } from '@tulipfarm/workspace-mcp';
@@ -325,6 +330,86 @@ test('OAuth composition consumes restricted PostgreSQL session state once before
       assert.equal(exchanges.length, before);
       assert.equal((await f.service.status(f.one.id, member, integration.id)).lifecycle, 'reconnect-required');
     });
+  } finally {
+    await f.close();
+  }
+});
+
+test('a loopback-only server finishes sign-in from the pasted loopback address', async t => {
+  const f = await mcpFixture();
+  const remote = await mcpProtocolFixture(t);
+  const service = f.make({ protocol: remote.protocol });
+  const discovery = workspaceMcpDiscovery(f.runtime, service);
+  const member = f.members[0];
+  const session = 'authenticated-login-session-1234';
+  const endpoint = 'https://mcp.example.com/loopback-tools';
+  const issuer = 'https://loopback-identity.example.com';
+  const exchanges = [];
+  const network = createOAuthOperations({
+    fetcher: async (url, init) => {
+      const target = String(url);
+      if (target === endpoint) return new Response('', { status: 401 });
+      if (target.includes('oauth-protected-resource'))
+        return Response.json({ resource: endpoint, authorization_servers: [issuer] });
+      if (target.includes('oauth-authorization-server'))
+        return Response.json({
+          issuer,
+          authorization_endpoint: `${issuer}/authorize`,
+          token_endpoint: `${issuer}/token`,
+          registration_endpoint: `${issuer}/register`,
+          code_challenge_methods_supported: ['S256'],
+          response_types_supported: ['code'],
+          token_endpoint_auth_methods_supported: ['none'],
+        });
+      if (target === `${issuer}/register`) {
+        const [redirect] = JSON.parse(init.body).redirect_uris;
+        if (redirect === MCP_OAUTH_REDIRECT_URI)
+          return Response.json({ error: 'invalid_redirect_uri' }, { status: 400 });
+        return Response.json(
+          { client_id: 'loopback-client', token_endpoint_auth_method: 'none', redirect_uris: [redirect] },
+          { status: 201 },
+        );
+      }
+      assert.equal(target, `${issuer}/token`);
+      exchanges.push(new URLSearchParams(init.body));
+      return Response.json({ token_type: 'Bearer', access_token: 'loopback-access', expires_in: 3600 });
+    },
+  });
+  const oauth = createWorkspaceMcpOAuth(service, network, discovery.discover);
+  const begin = async () => {
+    const integration = await f.service.create(f.one.id, member, {
+      requestId: randomUUID(),
+      name: 'Loopback integration',
+      ownership: 'personal',
+      endpoint,
+      credential: { kind: 'none' },
+    });
+    const result = await oauth.begin(f.one.id, member.userId, session, integration.id, { kind: 'oauth' });
+    assert.equal(result.kind, 'oauth-paste');
+    const url = new URL(result.authorizationUrl);
+    assert.equal(url.searchParams.get('redirect_uri'), MCP_OAUTH_LOOPBACK_REDIRECT_URI);
+    return { integration, state: url.searchParams.get('state') };
+  };
+  try {
+    const hosted = await begin();
+    await assert.rejects(oauth.complete(member.userId, session, { state: hosted.state, code: 'hosted-code' }), {
+      code: 'mcp-oauth-binding-denied',
+    });
+    assert.equal(exchanges.length, 0);
+
+    const pasted = await begin();
+    assert.deepEqual(
+      await oauth.complete(
+        member.userId,
+        session,
+        { state: pasted.state, code: 'pasted-code' },
+        MCP_OAUTH_LOOPBACK_REDIRECT_URI,
+      ),
+      { workspaceId: f.one.id, integrationId: pasted.integration.id },
+    );
+    assert.equal(exchanges.length, 1);
+    assert.equal(exchanges[0].get('redirect_uri'), MCP_OAUTH_LOOPBACK_REDIRECT_URI);
+    assert.equal((await service.status(f.one.id, member, pasted.integration.id)).authMethod, 'oauth');
   } finally {
     await f.close();
   }

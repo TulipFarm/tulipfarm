@@ -10,7 +10,9 @@ import {
   mcpCallbackSchema,
   mcpIntegrationParams,
   mcpHttpId,
+  mcpPastedSignInSchema,
   mcpWorkspaceParams,
+  parsePastedSignIn,
   workspaceMcpHttp,
   type McpHttpAuth,
 } from './workspace-mcp-http.ts';
@@ -64,7 +66,10 @@ function classify(error: unknown) {
         return new McpHttpError(`mcp-${error.code}`, 409);
     }
   }
-  if (error instanceof McpNetworkError) return new McpHttpError('mcp-network-unavailable', 503);
+  if (error instanceof McpNetworkError)
+    return error.code === 'oauth-registration-rejected'
+      ? new McpHttpError('mcp-oauth-registration-rejected', 422)
+      : new McpHttpError('mcp-network-unavailable', 503);
   return null;
 }
 
@@ -460,6 +465,33 @@ export function registerWorkspaceMcp(
           mcpCallbackSchema.parse(request.query),
         );
         return mcpCallbackRedirect(reply, { outcome: 'connected', ...result });
+      },
+    );
+    // Servers that only register loopback redirects send the member to a page that can't load; they paste its address.
+    routes.post(
+      `${base}/oauth/complete`,
+      {
+        logLevel: 'silent',
+        bodyLimit: 32768,
+        schema: http.schema(
+          'completeWorkspaceMcpPastedOAuthV1',
+          z.strictObject({ workspaceId: mcpHttpId, integrationId: mcpHttpId }),
+          mcpWorkspaceParams,
+          mcpPastedSignInSchema,
+        ),
+      },
+      async request => {
+        const { workspaceId } = mcpWorkspaceParams.parse(request.params);
+        const session = http.session(request);
+        const pasted = parsePastedSignIn(workspaceId, mcpPastedSignInSchema.parse(request.body).address);
+        try {
+          return await api().oauth.complete(session.userId, session.sessionId, pasted.input, pasted.landedAt);
+        } catch (error) {
+          // An unknown, used or expired sign-in reads as "not found" elsewhere, which would hide the whole page.
+          if (error instanceof McpError && error.code === 'oauth-conflict')
+            throw new McpHttpError('mcp-sign-in-expired', 410);
+          throw error;
+        }
       },
     );
   });

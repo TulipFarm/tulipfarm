@@ -2,7 +2,7 @@ import { useRef, useState } from 'react';
 import type { McpApi } from './api';
 import type { Integration, SetupResult } from './contracts';
 import { sameEndpoint } from './setup';
-import { markMcpConnected, startMcpSignIn } from './sign-in';
+import { markMcpConnected, startMcpPasteSignIn, startMcpSignIn, useMcpPasteSignIn } from './sign-in';
 import { useMcpCommand } from './state';
 
 export const mcpStatusLabel: Record<Integration['status'], string> = {
@@ -36,6 +36,7 @@ const credentialOf = (headers: { name: string; value: string }[]) => {
 /**
  * One click to connect a remote server: it saves the connection and goes straight to the provider's sign-in.
  * Servers that don't register apps automatically come back asking for a client ID, kept in `registration`.
+ * Servers that only sign in to a local address return `paste`: show `McpPasteSignIn` with it.
  */
 export function useMcpConnect({
   api,
@@ -59,8 +60,12 @@ export function useMcpConnect({
   const [registration, setRegistration] = useState<Registration | null>(null);
   const [clientId, setClientId] = useState('');
   const [clientSecret, setClientSecret] = useState('');
+  const [pasting, setPasting] = useState<string | null>(null);
   const command = useMcpCommand();
   const current = registration?.integration ?? existing;
+  const pasteId = pasting ?? current?.id;
+  const pasteUrl = useMcpPasteSignIn(pasteId);
+  const paste = pasteId && pasteUrl ? { integrationId: pasteId, authorizationUrl: pasteUrl } : null;
   const request = useRef<{ key: string; id: string } | null>(null);
   const connect = (ownership: Ownership) => {
     // A retry after a lost response reuses its request id, so it can't create a second connection.
@@ -109,6 +114,10 @@ export function useMcpConnect({
         request.current = null;
         opened?.(result);
         if (result.kind === 'oauth') return startMcpSignIn(result.authorizationUrl);
+        if (result.kind === 'oauth-paste') {
+          startMcpPasteSignIn(result.integration.id, result.authorizationUrl);
+          setPasting(result.integration.id);
+        }
         setRegistration(result.kind === 'registration-required' ? result : null);
         if (result.kind === 'saved') markMcpConnected(result.integration.id);
         await refresh();
@@ -116,5 +125,5 @@ export function useMcpConnect({
       () => {},
     );
   };
-  return { connect, command, current, registration, clientId, setClientId, clientSecret, setClientSecret };
+  return { connect, command, current, registration, paste, clientId, setClientId, clientSecret, setClientSecret };
 }

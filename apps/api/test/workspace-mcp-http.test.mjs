@@ -4,7 +4,7 @@ import Fastify from 'fastify';
 import { z } from 'zod';
 import { AccessDenied } from '@tulipfarm/access';
 import { authConfig } from '../src/auth.ts';
-import { mcpCallbackSchema, McpHttpError, workspaceMcpHttp } from '../src/workspace-mcp-http.ts';
+import { mcpCallbackSchema, McpHttpError, parsePastedSignIn, workspaceMcpHttp } from '../src/workspace-mcp-http.ts';
 
 test('workspace MCP HTTP boundary authenticates before parsing and conceals diagnostics', async () => {
   const logs = [];
@@ -175,4 +175,23 @@ test('workspace MCP OAuth callback returns the browser to the web app instead of
   } finally {
     await app.close();
   }
+});
+
+test('a pasted sign-in address must be a loopback callback for this workspace', () => {
+  const workspaceId = '6f1c2a9e-4b7d-4c1e-9a2f-3d5e8b7c1a04';
+  const state = `${workspaceId}_${'s'.repeat(43)}`;
+  assert.deepEqual(
+    parsePastedSignIn(workspaceId, ` http://127.0.0.1:53817/callback?state=${state}&code=private-code&extra=1 `),
+    { input: { state, code: 'private-code' }, landedAt: 'http://127.0.0.1:53817/callback' },
+  );
+  for (const address of [
+    'not an address',
+    `https://evil.example/callback?state=${state}&code=private-code`,
+    `https://127.0.0.1:53817/callback?state=${state}&code=private-code`,
+    `http://user:pass@127.0.0.1:53817/callback?state=${state}&code=private-code`,
+    `http://127.0.0.1:53817/callback?state=${state}&code=one&code=two`,
+    `http://127.0.0.1:53817/callback?state=${'0'.repeat(36)}_${'s'.repeat(43)}&code=private-code`,
+    'http://127.0.0.1:53817/callback',
+  ])
+    assert.throws(() => parsePastedSignIn(workspaceId, address), { code: 'mcp-sign-in-address-invalid' }, address);
 });
