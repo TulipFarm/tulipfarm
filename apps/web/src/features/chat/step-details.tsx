@@ -1,3 +1,4 @@
+import { useRef } from 'react';
 import { Link, useParams } from '@tanstack/react-router';
 import { Button } from '@tulipfarm/sprout/button';
 import { MessageResponse } from '@tulipfarm/sprout/message-response';
@@ -24,6 +25,23 @@ export function StepNarration({ text }: { text: string }) {
       >
         {text}
       </MessageResponse>
+    </div>
+  );
+}
+
+/** The reply's live text under its timeline header. A thought stays until the next one starts, and only a new thought fades in. */
+export function LiveNarration({ text, saved }: { text: string; saved: string }) {
+  const seen = useRef({ text: '', id: 0 });
+  // The saved text bridges the gap while its own tool runs; it never brings back an older thought.
+  const thought = text || (saved && seen.current.text.startsWith(saved.trim()) ? saved : '');
+  if (thought && !thought.startsWith(seen.current.text) && !seen.current.text.startsWith(thought)) seen.current.id++;
+  if (thought) seen.current.text = thought;
+  if (!thought) return null;
+  return (
+    <div data-live-narration className="ml-7">
+      <div key={seen.current.id} className="animate-in fade-in duration-500">
+        <StepNarration text={thought} />
+      </div>
     </div>
   );
 }

@@ -49,7 +49,7 @@ import { useSidebar } from '@tulipfarm/sprout/sidebar';
 import { MessageActions, type MessageActionsStats } from '@tulipfarm/sprout/message-actions';
 import { ToolActivity } from '@tulipfarm/sprout/tool-activity';
 import { toolActivityItems, visibleActivityTools } from './tool-labels';
-import { StepNarration } from './step-details';
+import { LiveNarration, StepNarration } from './step-details';
 import { newestTools, reconcileLiveTools, succeeded, unclaimedToolTurns } from './live-tools';
 import { useCurrentReply, useRotatingLabel, type OutgoingMessage } from './current-reply';
 import { useSmoothText } from './smooth-text';
@@ -111,8 +111,15 @@ const LayoutReply = lazyCard(() => import('./layout-reply').then(module => modul
 const LayoutPreview = lazyCard(() => import('./layout-reply').then(module => module.LayoutPreview));
 const RecordChangesCard = lazyCard(() => import('./records-canvas').then(module => module.RecordChangesCard));
 const RowViewCard = lazyCard(() => import('./records-canvas').then(module => module.RowViewCard));
-const RowViewResponse = lazyCard(() => import('./records-canvas').then(module => module.RowViewResponse));
-const GitHubChatResponse = lazyCard(() => import('./github-download').then(module => module.GitHubChatResponse));
+// An answer never shows blank while its renderer downloads.
+const RowViewResponse = lazyCard(
+  () => import('./records-canvas').then(module => module.RowViewResponse),
+  ({ children }) => children,
+);
+const GitHubChatResponse = lazyCard(
+  () => import('./github-download').then(module => module.GitHubChatResponse),
+  ({ children }) => <p className="whitespace-pre-wrap break-words">{children}</p>,
+);
 const SubagentFanout = lazyCard(() => import('./subagent-fanout').then(module => module.SubagentFanout));
 const InteractionCard = lazyCard(() => import('./interaction-card').then(module => module.InteractionCard));
 const AuthoringDraftCard = lazyCard(() => import('./authoring-draft-card').then(module => module.AuthoringDraftCard));
@@ -1003,6 +1010,7 @@ function ConversationDetail({
     turn,
     thinking,
     narration,
+    savedNarration,
     answerText,
     layoutJson,
     activity,
@@ -1038,6 +1046,11 @@ function ConversationDetail({
   const activityLabel = useRotatingLabel(baseActivityLabel);
   // A reply resumed by an answer continues below the question, so its progress shows there, not above it.
   const continuesBelow = !!turn && replyContinuesBelow(data?.messages ?? [], turn.id);
+  // The answer first renders when the reply ends, so its lazy parts load while the live text streams.
+  const live = !!narration;
+  useEffect(() => {
+    if (live) void Promise.all([RowViewResponse.preload(), GitHubChatResponse.preload()]);
+  }, [live]);
   const empty = data?.messages.length === 0 && !pending && incomingTurns.length === 0 && !packages.active;
   // Typing re-renders this component, so saved entries get stable props and skip rendering again.
   const commands: { retryHandoff: (compactionId: string) => void; control: ControlTurn } = {
@@ -1374,6 +1387,9 @@ function ConversationDetail({
                                   }
                                   onToggle={() => inspectActivity(thinking && !!turn && message.turn?.id === turn.id)}
                                 />
+                                {message.turn?.id === turn?.id && !continuesBelow && (
+                                  <LiveNarration text={narration} saved={savedNarration} />
+                                )}
                                 {message.turn?.status === 'waiting' &&
                                   (() => {
                                     const note = message.tools.filter(tool => tool.narration).at(-1)?.narration;
@@ -1561,7 +1577,7 @@ function ConversationDetail({
                               {continuesBelow && (
                                 <ToolActivity variant="transcript" items={[]} active activityLabel={activityLabel} />
                               )}
-                              {narration && <StepNarration text={narration} />}
+                              {continuesBelow && <LiveNarration text={narration} saved={savedNarration} />}
                               {slowTurn && (
                                 <div className="flex flex-wrap items-center gap-3">
                                   <p role="status" className="text-sm text-muted-foreground">

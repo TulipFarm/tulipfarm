@@ -63,7 +63,12 @@ export function currentReply({ messages, outgoing, command, stream }: ReplyInput
     (!preview || layoutState.identity.step >= preview.identity.step)
       ? layoutState.text
       : '';
-  const answerText = stepText || layoutJson ? '' : previewText;
+  // The worker only knows text was the answer once the model stops, so text stays narration until then.
+  const live = !!previewText && !layoutJson && turn?.status === 'processing' && progress?.status !== 'done';
+  const shown = live || !!stepText;
+  // Once a tool is saved with this text, the timeline shows it there.
+  const narration = shown && !tools.some(tool => tool.narration?.includes(previewText.trim())) ? previewText : '';
+  const answerText = shown || layoutJson ? '' : previewText;
   const activity = thinkingOf(running, tools.length > 0, progress);
   const queuedKey = turn?.status === 'queued' ? `${turn.id}:${turn.generation}` : null;
   const processingKey =
@@ -91,7 +96,9 @@ export function currentReply({ messages, outgoing, command, stream }: ReplyInput
     queueLabel,
     unconfirmed,
     since: replying?.createdAt ?? pending?.at,
-    narration: stepText,
+    narration,
+    /** The newest narration saved with a tool, held on screen while that tool runs. */
+    savedNarration: [...tools].reverse().find(tool => tool.narration)?.narration ?? '',
     answerText,
     /** The streaming `reply.render` arguments of the current reply, drawn as a layout preview. */
     layoutJson,
