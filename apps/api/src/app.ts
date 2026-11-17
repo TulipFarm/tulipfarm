@@ -137,7 +137,7 @@ export function buildApp(
             repositories: appHosting?.repositories ?? null,
             publisher: () => appHosting?.publisher,
             builders: () => appBuilders(appBuilder(), appHost()),
-            sitesDomain: appHosting?.sites?.domain ?? null,
+            sitesDomain: appHosting?.domain ?? null,
           });
           if (previewDomain)
             registerPreviewTickets(business, auth.auth, { pool: auth.pool, runtime: storage }, previewDomain);

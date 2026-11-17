@@ -112,4 +112,37 @@ test('a registered publisher without a sites domain serves no app sites', async 
   );
   assert.equal(typeof hosting.publisher.serve, 'function');
   assert.equal(hosting.sites, undefined);
+  assert.equal(hosting.domain, undefined);
+});
+
+test('a registered publisher that serves sites elsewhere still names the sites domain', async t => {
+  t.after(resetExtensions);
+  const none = async function* () {};
+  await registerExtension(
+    {
+      name: 'edge-publisher-fixture',
+      register(slots) {
+        slots.appPublisher({
+          stage: async () => {},
+          apply: async () => {},
+          remove: async () => {},
+          discard: async () => {},
+          list: none,
+          releases: none,
+          usage: none,
+        });
+      },
+    },
+    { app: 'api', env: {} },
+  );
+  const hosting = appHostingFromEnvironment(
+    {
+      TULIPFARM_OBJECT_STORAGE_APPS_BUCKET: 'apps',
+      TULIPFARM_OBJECT_STORAGE_REGION: 'us-east-1',
+      TULIPFARM_APP_SITES_DOMAIN: 'Apps.Example.Test',
+    },
+    () => undefined,
+  );
+  assert.equal(hosting.sites, undefined);
+  assert.equal(hosting.domain, 'apps.example.test');
 });
