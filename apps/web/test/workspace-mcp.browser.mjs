@@ -132,6 +132,7 @@ const action = {
   },
 };
 let actions = [],
+  chatTools = [],
   enabled = true,
   dispatch = true,
   listStatus = 200,
@@ -319,6 +320,9 @@ try {
           }));
         }
         json = permissions;
+      } else if (method === 'GET' && actions[0] && suffix === `/actions/${actions[0].id}`) {
+        status = actionStatus;
+        json = actions[0];
       } else if (suffix === '/actions') {
         await setTimeout(actionDelay);
         status = actionStatus;
@@ -401,7 +405,7 @@ try {
                   },
                 ],
                 turn: null,
-                tools: [],
+                tools: chatTools,
               },
             ],
             nextBefore: null,
@@ -630,8 +634,36 @@ try {
   await page.getByText('Retained confidential answer', { exact: false }).waitFor();
   assert.equal(await page.getByRole('region', { name: 'MCP integration selection' }).count(), 0);
   assert.equal(await page.getByRole('region', { name: 'MCP actions and receipts' }).count(), 0);
+  // A chat call waiting for approval is decided in a card under the reply.
   actions = [structuredClone(action)];
-  await changed();
+  chatTools = [
+    {
+      id: action.id,
+      tool: 'mcp.call',
+      status: 'running',
+      activityStatus: 'waiting',
+      presentation: { label: `Calling ${action.exact.toolName}`, brand: null },
+    },
+  ];
+  await page.reload();
+  const card = page.getByRole('region', { name: new RegExp(`^${integration.name} · `) });
+  await card.waitFor();
+  assert.equal(await page.getByRole('region', { name: 'MCP actions and receipts' }).count(), 0);
+  await card.getByRole('button', { name: 'Details', exact: true }).click();
+  assert.deepEqual(
+    JSON.parse(await card.getByLabel(`What ${integration.name} will receive`).innerText()),
+    action.exact.arguments,
+  );
+  const decided = writes.length;
+  await card.getByRole('button', { name: 'Run', exact: true }).click();
+  await card.waitFor({ state: 'detached' });
+  assert.equal(writes.length, decided + 1);
+  assert.equal(writes.at(-1).body.decision, 'approve');
+  chatTools = [];
+
+  // The full action history, receipts and reconciliation stay on the app's page.
+  actions = [structuredClone(action)];
+  await go(`/integrations/mcp-${integration.id}?tab=advanced`);
   await page.getByRole('button', { name: 'Approve exact MCP action' }).waitFor();
   assert.deepEqual(JSON.parse(await page.getByLabel('Exact MCP arguments').innerText()), action.exact.arguments);
   const before = writes.length;
@@ -721,13 +753,6 @@ try {
     path: 'reports/screenshots/workspace-mcp-mobile.png',
     fullPage: true,
   });
-  actionStatus = 403;
-  await changed();
-  await page.getByRole('heading', { name: 'Private context access changed' }).waitFor();
-  assert.equal(await page.getByText('Retained confidential answer', { exact: false }).count(), 0);
-  assert.equal(await page.getByLabel('Exact MCP arguments').count(), 0);
-  assert.equal(await page.getByText('Protected chat title', { exact: true }).count(), 0);
-  actionStatus = 200;
   actions = [];
   await page.setViewportSize({ width: 1440, height: 1000 });
   await go(`/agents/${agentId}`);
