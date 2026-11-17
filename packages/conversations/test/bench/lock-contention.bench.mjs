@@ -3,18 +3,21 @@
  *   TEST_ADMIN_DATABASE_URL=postgresql://postgres:PASSWORD@127.0.0.1:5432/postgres \
  *     HOLD=read BENCH_CONNECTIONS=3 node --test packages/conversations/test/bench/lock-contention.bench.mjs
  * HOLD is the mode the slow transaction takes: `read` or `write`.
+ * BUD=<n> also sends n Bud `sync` commands during the burst, as open browser windows do.
  */
 import { randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import { test } from 'node:test';
 import { lockAuthorization } from '@tulipfarm/access';
 import { commonCompatibility, createWorkspaceRuntime } from '@tulipfarm/workspace-storage/runtime';
+import { createBudAssistant } from '../../src/bud-assistant.ts';
 import { createConversations } from '../../src/index.ts';
 import { conversationFixture } from '../fixture.mjs';
 
 const sends = Number(process.env.BENCH_SENDS ?? 200);
 const holdSeconds = Number(process.env.BENCH_HOLD_SECONDS ?? 3);
 const connections = Number(process.env.BENCH_CONNECTIONS ?? 3);
+const budSyncs = Number(process.env.BUD ?? 0);
 const hold = process.env.HOLD === 'write' ? 'write' : 'read';
 const percentile = (sorted, p) => sorted[Math.min(sorted.length - 1, Math.ceil(p * sorted.length) - 1)];
 
@@ -36,6 +39,8 @@ test('sends while a slow transaction holds the workspace lock', { timeout: 10 * 
     const chats = Array.from({ length: sends }, () => randomUUID());
     for (const chatId of chats) await store.create(w.id, w.userId, { chatId, commandId: randomUUID() });
 
+    const bud = createBudAssistant(api);
+    if (budSyncs) await bud.command(w.id, w.userId, { kind: 'bootstrap' });
     let held;
     const locked = new Promise(resolve => (held = resolve));
     const holder = worker.transaction(w.id, commonCompatibility, async tx => {
@@ -46,6 +51,9 @@ test('sends while a slow transaction holds the workspace lock', { timeout: 10 * 
     await locked;
 
     const started = performance.now();
+    const syncs = Promise.allSettled(
+      Array.from({ length: budSyncs }, () => bud.command(w.id, w.userId, { kind: 'sync' })),
+    );
     const results = await Promise.allSettled(
       chats.map(async chatId => {
         const at = performance.now();
@@ -57,6 +65,7 @@ test('sends while a slow transaction holds the workspace lock', { timeout: 10 * 
         return performance.now() - at;
       }),
     );
+    const budFailed = (await syncs).filter(result => result.status === 'rejected').length;
     const total = performance.now() - started;
     await holder;
 
@@ -74,6 +83,8 @@ test('sends while a slow transaction holds the workspace lock', { timeout: 10 * 
         connections,
         holdSeconds,
         sends,
+        budSyncs,
+        budFailed,
         saved: ok.length,
         failed: failed.length,
         reasons,

@@ -116,8 +116,12 @@ export function createBudAssistant(runtime: ConversationRuntime) {
   ) {
     denyMcpEgress();
     return runtime.transaction(z.uuid().parse(workspaceId), budCompatibility, async tx => {
-      await lockAuthorization(tx, write ? 'write' : 'read');
+      await lockAuthorization(tx, 'read');
       const actor = await resolveHuman(tx, userId);
+      if (write)
+        await tx.client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 648299))', [
+          `${tx.schema}:${actor.membershipId}`,
+        ]);
       return operation(tx, actor);
     });
   }
