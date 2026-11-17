@@ -74,9 +74,17 @@ export async function captureEvidence(page, path) {
 }
 
 /** A model picker row: its accessible name starts with the model's name, then any unavailable note and its cost meter. */
+const escapeRegExp = text => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/** The composer's model menu button, optionally for one chosen model; its name also says where the model runs. */
+export function modelPicker(page, name) {
+  return page.getByRole('button', { name: new RegExp(`^Model: ${name ? `${escapeRegExp(name)}(, on .+)?$` : ''}`) });
+}
+
+/** A model in the composer's model menu: a choice, or a submenu when several sources offer it. */
 export function modelOption(page, name) {
-  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return page.getByRole('option', { name: new RegExp(`^${escaped}(?= Unavailable| Speed| Cost|$)`) });
+  const label = new RegExp(`^${escapeRegExp(name)}(?=,| Unavailable|$)`);
+  return page.getByRole('menuitemradio', { name: label }).or(page.getByRole('menuitem', { name: label }));
 }
 
 /** Open the chat list through the sidebar's Chats link, expanding the collapsed mobile sidebar first. */

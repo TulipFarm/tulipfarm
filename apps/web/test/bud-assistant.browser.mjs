@@ -9,7 +9,7 @@ import { budGreeting } from '@tulipfarm/conversations/bud-contracts';
 import { fallbackRecommendations } from '@tulipfarm/recommendations';
 import { chatCatalog } from './chat-catalog.fixture.mjs';
 import { membership, credits, notifyChange } from './chat-query.fixture.mjs';
-import { clearEditor } from './browser-controls.mjs';
+import { clearEditor, modelPicker } from './browser-controls.mjs';
 
 test(
   'Bud has a compact drag-only popup, retaining chat, approvals and preference consent',
@@ -346,7 +346,7 @@ test(
         0,
         'full chat has no empty Canvas',
       );
-      await page.getByRole('combobox', { name: /^Model:/ }).waitFor();
+      await modelPicker(page).waitFor();
       await page.getByRole('button', { name: 'Add files and more', exact: true }).waitFor();
       await clearEditor(composer);
       await page.goBack();

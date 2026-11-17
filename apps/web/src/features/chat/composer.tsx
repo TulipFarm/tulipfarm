@@ -36,12 +36,11 @@ import {
   DropdownMenuTrigger,
 } from '@tulipfarm/sprout/dropdown-menu';
 import { Popover, PopoverContent, PopoverTrigger } from '@tulipfarm/sprout/popover';
-import { ModelSelector, type ModelSelectorModel } from '@tulipfarm/sprout/model-selector';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@tulipfarm/sprout/tooltip';
 import { type Model, type Agent, type Mode, type Persona } from './composer-options';
 import type { PlanProvider } from '@/features/models/chatgpt-plan-api';
-import { planLabels } from './reply-failure-copy';
-import { planUsageStatus, type PlanUsage } from './plan-usage';
+import { ModelPicker } from './model-picker';
+import type { PlanUsage } from './plan-usage';
 
 /**
  * `plan` marks a model billed to the member's own or a shared ChatGPT, Claude or Copilot plan; `planUsage` is what
@@ -394,68 +393,6 @@ function PersonaPicker({
       </PopoverContent>
     </Popover>
   );
-}
-
-function ModelPicker({
-  model,
-  models,
-  disabled,
-  onModelChange,
-}: {
-  model: ComposerModel | null;
-  models: readonly ComposerModel[];
-  disabled: boolean;
-  onModelChange: (id: string) => void;
-}) {
-  // A chosen model stays named on the trigger while the list is briefly empty, such as while a default saves.
-  const listed = model && !models.some(candidate => candidate.id === model.id) ? [model, ...models] : models;
-  const off = disabled || models.length === 0;
-  return (
-    <Tooltip>
-      <ModelSelector
-        models={listed.map(selectorModel)}
-        value={model?.id}
-        onValueChange={onModelChange}
-        emptyMessage="No models found."
-        disabled={off}
-        side="top"
-        align="end"
-        // The tooltip trigger drops the native `disabled` the selector sets, so the button takes it directly.
-        render={<TooltipTrigger render={<InputGroupButton size="md" variant="ghost" disabled={off} />} />}
-      />
-      <TooltipContent>AI model that writes replies</TooltipContent>
-    </Tooltip>
-  );
-}
-
-function selectorModel(model: ComposerModel): ModelSelectorModel {
-  const usage = model.plan && model.planUsage ? planUsageStatus(model.plan, model.planUsage) : null;
-  return {
-    id: model.id,
-    label: model.label,
-    // A plan at its usage limit marks the model's logo with a warning dot; the model stays selectable.
-    brand: usage?.warning ? undefined : (model.brand ?? undefined),
-    icon: usage?.warning ? (
-      <span className="relative inline-flex">
-        <model.logo size={16} aria-hidden="true" />
-        <span
-          aria-hidden="true"
-          className="absolute -top-1 -right-1 size-2 rounded-full bg-warning ring-2 ring-popover"
-        />
-      </span>
-    ) : model.brand ? undefined : (
-      <model.logo size={16} aria-hidden="true" />
-    ),
-    description: model.disabled
-      ? `Unavailable: ${model.unavailableReason ?? 'not offered here'}`
-      : usage
-        ? `${usage.plan} · ${usage.status}`
-        : model.plan
-          ? `${planLabels[model.plan]} plan`
-          : undefined,
-    disabled: model.disabled,
-    cost: model.cost,
-  };
 }
 
 /** The `+` menu. Upload is the only choice today; the menu leaves room for more. */

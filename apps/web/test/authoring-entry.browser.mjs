@@ -6,7 +6,7 @@ import { startBuiltApp, builderBrowserOptions, captureBrowserFailure } from './b
 import { createWorkspaceFixture, workspaceShellReads } from './workspace.fixture.mjs';
 import { membership, credits } from './chat-query.fixture.mjs';
 import { catalogFixture } from '../src/features/models/catalog-fixture.ts';
-import { modelOption } from './browser-controls.mjs';
+import { modelOption, modelPicker } from './browser-controls.mjs';
 
 const createdAt = '2026-10-01T00:00:00Z';
 const cases = [
@@ -169,7 +169,7 @@ test(
           await page.waitForFunction(() => document.activeElement?.getAttribute('role') === 'textbox');
           assert.equal(await message.evaluate(element => element === document.activeElement), true);
           state.releaseCatalog();
-          await page.getByRole('combobox', { name: 'Model: Grok 4.3 Fast', exact: true }).waitFor();
+          await modelPicker(page, 'Grok 4.3 Fast').waitFor();
           assert.equal(state.sends.length, 0);
           await screenshot(page, `${entry.page}-${mobile ? 'mobile' : 'desktop'}-composer`);
           await page.keyboard.type(entry.description);
@@ -213,24 +213,24 @@ test('authoring uses an available fallback and keeps explicit model choices', { 
       page.setDefaultTimeout(30000);
       await fixture(page, { defaultAvailable: false });
       await page.goto(`${server.origin}/acme?intent=create-${entry.page === 'agents' ? 'agent' : 'skill'}`);
-      await page.getByRole('combobox', { name: 'Model: Kimi K2.6', exact: true }).waitFor();
+      await modelPicker(page, 'Kimi K2.6').waitFor();
       await page.close();
     }
     page = await browser.newPage();
     page.setDefaultTimeout(30000);
     await fixture(page);
     await page.goto(`${server.origin}/acme`);
-    await page.getByRole('combobox', { name: 'Model: DeepSeek V4 Pro', exact: true }).waitFor();
+    await modelPicker(page, 'DeepSeek V4 Pro').waitFor();
     await page.close();
 
     page = await browser.newPage();
     page.setDefaultTimeout(30000);
     const state = await fixture(page);
     await page.goto(`${server.origin}/acme?intent=create-agent`);
-    const picker = page.getByRole('combobox', { name: 'Model: Grok 4.3 Fast', exact: true });
+    const picker = modelPicker(page, 'Grok 4.3 Fast');
     await picker.click();
     await modelOption(page, 'Kimi K2.6').click();
-    await page.getByRole('combobox', { name: 'Model: Kimi K2.6', exact: true }).waitFor();
+    await modelPicker(page, 'Kimi K2.6').waitFor();
     const message = page.getByRole('textbox', { name: 'Message', exact: true });
     await message.fill('Answer questions about customers');
     const sent = page.waitForResponse(

@@ -4,7 +4,7 @@ import { writeFile } from 'node:fs/promises';
 import { setTimeout as delay } from 'node:timers/promises';
 import { chromium } from 'playwright';
 import { chat, draftText, id, isAuthority, messageText, startFixture, workspace } from './query-loading.fixture.mjs';
-import { openChatList } from './browser-controls.mjs';
+import { modelPicker, openChatList } from './browser-controls.mjs';
 
 const mode = process.argv[2] ?? 'baseline';
 assert.ok(
@@ -148,7 +148,7 @@ try {
     async function usableChat() {
       await page.getByRole('heading', { name: chat.title, exact: true }).waitFor();
       await page.getByText(messageText, { exact: true }).waitFor();
-      await page.getByRole('combobox', { name: 'Model: Claude Sonnet 5', exact: true }).waitFor();
+      await modelPicker(page, 'Claude Sonnet 5').waitFor();
       await input.fill(draftText);
       await page.waitForFunction(() => document.querySelector('button[aria-label="Send message"]')?.disabled === false);
     }
