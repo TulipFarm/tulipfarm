@@ -112,10 +112,6 @@ const LayoutPreview = lazyCard(() => import('./layout-reply').then(module => mod
 const RecordChangesCard = lazyCard(() => import('./records-canvas').then(module => module.RecordChangesCard));
 const RowViewCard = lazyCard(() => import('./records-canvas').then(module => module.RowViewCard));
 // An answer never shows blank while its renderer downloads.
-const RowViewResponse = lazyCard(
-  () => import('./records-canvas').then(module => module.RowViewResponse),
-  ({ children }) => children,
-);
 const GitHubChatResponse = lazyCard(
   () => import('./github-download').then(module => module.GitHubChatResponse),
   ({ children }) => <p className="whitespace-pre-wrap break-words">{children}</p>,
@@ -1049,7 +1045,7 @@ function ConversationDetail({
   // The answer first renders when the reply ends, so its lazy parts load while the live text streams.
   const live = !!narration;
   useEffect(() => {
-    if (live) void Promise.all([RowViewResponse.preload(), GitHubChatResponse.preload()]);
+    if (live) void GitHubChatResponse.preload();
   }, [live]);
   const empty = data?.messages.length === 0 && !pending && incomingTurns.length === 0 && !packages.active;
   // Typing re-renders this component, so saved entries get stable props and skip rendering again.
@@ -1966,11 +1962,14 @@ function AssistantText({
   const shown = useSmoothText(text, streaming);
   return (
     <MessageBubble variant="ghost">
-      <RowViewResponse references={rowViews}>
-        <GitHubChatResponse workspaceId={workspaceId} chatId={chatId} streaming={streaming}>
-          {shown}
-        </GitHubChatResponse>
-      </RowViewResponse>
+      <GitHubChatResponse
+        workspaceId={workspaceId}
+        chatId={chatId}
+        streaming={streaming}
+        boundedTables={rowViews.length > 0}
+      >
+        {shown}
+      </GitHubChatResponse>
     </MessageBubble>
   );
 }

@@ -677,9 +677,8 @@ test(
       await popup.getByRole('button', { name: 'Approve action', exact: true }).waitFor();
       assert.equal(decisions.length, 0, 'showing a proposal never approves it');
       await popup.getByRole('button', { name: 'Decline', exact: true }).click();
-      assert.equal(decisions.length, 1, 'decline submits one decision');
       await popup.getByText('The proposed action was declined.', { exact: true }).waitFor();
-      assert.equal(decisions.length, 1);
+      assert.equal(decisions.length, 1, 'decline submits one decision');
       assert.equal(decisions[0].decision, 'reject');
       assert.equal(decisions[0].expectedRevision, 1);
       assert.equal(new URL(page.url()).pathname, '/acme/chat', 'approval is handled inline');

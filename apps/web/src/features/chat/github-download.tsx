@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useParams } from '@tanstack/react-router';
 import { Button } from '@tulipfarm/sprout/button';
-import { MessageResponse } from '@tulipfarm/sprout/message-response';
+import { MessageResponse, MessageTableViewport } from '@tulipfarm/sprout/message-response';
 import { apiOrigin } from '@/lib/auth';
 import { KnowledgeCitation, knowledgeCitationId } from './knowledge-citation';
 
@@ -82,16 +82,19 @@ export function GitHubChatResponse({
   children,
   task = false,
   streaming = false,
+  boundedTables,
 }: {
   workspaceId: string;
   chatId: string;
   children: string;
   task?: boolean;
   streaming?: boolean;
+  /** Wraps the reply's tables in a chat viewport, bounded when the reply also shows table rows. */
+  boundedTables?: boolean;
 }) {
   const prefix = `/v1/workspaces/${workspaceId}/github/${task ? 'tasks' : 'chats'}/${chatId}/downloads/`;
   const workspaceSlug = useParams({ strict: false }).workspaceSlug;
-  return (
+  const response = (
     <MessageResponse
       streaming={streaming}
       renderLink={(href, label) => {
@@ -126,5 +129,10 @@ export function GitHubChatResponse({
     >
       {children}
     </MessageResponse>
+  );
+  return boundedTables === undefined ? (
+    response
+  ) : (
+    <MessageTableViewport bounded={boundedTables}>{response}</MessageTableViewport>
   );
 }
