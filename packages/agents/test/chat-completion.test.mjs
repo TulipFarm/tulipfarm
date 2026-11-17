@@ -1298,6 +1298,8 @@ test("an app chat's reply cannot deny its tools or claim a build or edit no tool
     'When the build succeeded, the app was published.',
     'Here is what I changed in the code:',
     'I wrote the CSS for you below.',
+    'The server I built listens on port 3000.',
+    'The page will not change until I have rebuilt the app.',
     'I updated src/server.js earlier, then rebuilt the app.',
     'The tool picker shows which parts are missing.',
     'Your app lists tools that are not available to members.',

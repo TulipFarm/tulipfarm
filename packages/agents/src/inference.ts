@@ -2238,8 +2238,8 @@ const toolsDenied =
   /\b(?:my|(?:file|write|writing|edit|editing|build|building)(?: or \w+)?(?: \w+)?) tools?\b[^.]*\b(?:not available|unavailable|not offered)\b|(?:\b(?:no|not have|without)|n['’]t have)(?: a| any| the)? (?:file|write|editing|build)\b[\w\s-]{0,24}\btools?\b/i;
 const firstPerson = /\b(?:i|we|my)\b/i;
 const buildClaim =
-  /^(?:and |so )?(?:the |your )?(?:re)?build (?:succeeded|passed|worked|completed|finished)\b|\b(?:i|we)(?:'|’)?(?:ve| have)? (?:re)?built\b|^(?:re)?built (?:the|your|this) (?:app|server|site)\b/i;
-const conditional = /^(?:if|when|once|after|whether|unless|until)\b/i;
+  /^(?:and |so )?(?:the |your )?(?:re)?build (?:succeeded|passed|worked|completed|finished)\b|^(?:and |so )?(?:i|we) (?:re)?built\b|\b(?:i|we)(?:(?:'|’)ve| have) (?:re)?built\b|^(?:re)?built (?:the|your|this) (?:app|server|site)\b/i;
+const conditional = /\b(?:if|when|once|after|whether|unless|until)\b/i;
 const editClaim =
   /\b(?:i|we)(?:'|’)?(?:ve| have)? (?:updated|edited|changed|modified|rewrote|replaced|inserted|deleted|removed)\b/i;
 const toReader = /\b(?:below|for you|here(?:'|’)?s|here is|here are)\b/i;
@@ -2259,8 +2259,9 @@ export function unbackedAppClaim(candidate: string, apps: AppKind | undefined, r
       reason: `This app's chat always has ${appTools[apps]}. Call them to do the work.`,
     };
   if (apps === 'private') return undefined;
-  const unbacked = clauses(sentences.filter(sentence => !earlierOutcome.test(sentence))).find(clause => {
-    if (conditional.test(clause) || toReader.test(clause)) return false;
+  const settled = sentences.filter(sentence => !earlierOutcome.test(sentence) && !conditional.test(sentence));
+  const unbacked = clauses(settled).find(clause => {
+    if (toReader.test(clause)) return false;
     const build = buildClaim.exec(clause);
     if (build && !negatedClaim(clause, build)) return !ran.has(buildTool);
     const edit = editClaim.exec(clause);
