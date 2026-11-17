@@ -20,7 +20,7 @@
     "url": "https://mcp.cloud.cdata.com/mcp",
     "transport": "streamable-http",
     "auth": "oauth",
-    "checked": "2026-11-14"
+    "checked": "2026-11-17"
   },
   "registryName": "com.cdata/cdata-connect-ai",
   "icons": {

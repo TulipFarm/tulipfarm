@@ -21,7 +21,7 @@
     "url": "https://mcp.jina.ai/v1",
     "transport": "streamable-http",
     "auth": "none",
-    "checked": "2026-11-14"
+    "checked": "2026-11-17"
   },
   "icons": {
     "lobehub": "Jina",

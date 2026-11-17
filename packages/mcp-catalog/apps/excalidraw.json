@@ -21,7 +21,7 @@
     "url": "https://mcp.excalidraw.com/mcp",
     "transport": "streamable-http",
     "auth": "none",
-    "checked": "2026-11-14"
+    "checked": "2026-11-17"
   },
   "icons": {
     "simpleIcons": "excalidraw",

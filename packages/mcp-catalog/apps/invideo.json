@@ -16,7 +16,7 @@
     "url": "https://mcp.invideo.io/mcp",
     "transport": "streamable-http",
     "auth": "oauth",
-    "checked": "2026-11-14"
+    "checked": "2026-11-17"
   },
   "icons": {
     "color": "#5D4BFF"

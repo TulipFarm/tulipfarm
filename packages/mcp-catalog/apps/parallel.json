@@ -17,7 +17,7 @@
     "url": "https://search.parallel.ai/mcp",
     "transport": "streamable-http",
     "auth": "none",
-    "checked": "2026-11-14"
+    "checked": "2026-11-17"
   },
   "registryName": "ai.parallel/search-mcp",
   "icons": {

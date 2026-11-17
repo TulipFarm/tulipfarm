@@ -20,7 +20,7 @@
     "url": "https://mcp.mailerlite.com/mcp",
     "transport": "streamable-http",
     "auth": "oauth",
-    "checked": "2026-11-14"
+    "checked": "2026-11-17"
   },
   "icons": {
     "color": "#09C269"

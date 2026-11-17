@@ -16,7 +16,7 @@
     "url": "https://connect.composio.dev/mcp",
     "transport": "streamable-http",
     "auth": "oauth",
-    "checked": "2026-11-14"
+    "checked": "2026-11-17"
   },
   "registryName": "io.github.ComposioHQ/composio",
   "icons": {

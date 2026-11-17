@@ -24,7 +24,7 @@
         "description": "Sonatype Guide API token"
       }
     ],
-    "checked": "2026-11-14"
+    "checked": "2026-11-17"
   },
   "registryName": "com.sonatype/dependency-management-mcp-server",
   "icons": {

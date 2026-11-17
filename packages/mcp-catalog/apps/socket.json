@@ -17,7 +17,7 @@
     "url": "https://mcp.socket.dev/",
     "transport": "streamable-http",
     "auth": "oauth",
-    "checked": "2026-11-16"
+    "checked": "2026-11-17"
   },
   "icons": {
     "simpleIcons": "socket",
