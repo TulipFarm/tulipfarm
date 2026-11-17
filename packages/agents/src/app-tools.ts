@@ -29,6 +29,7 @@ import {
   type AppRepositories,
   type AppTransaction,
 } from '@tulipfarm/apps/store';
+import { listDataViews, type DataViewEntry } from '@tulipfarm/tables/data-view-store';
 import { activeMembers } from './members.ts';
 import { withHuman } from './saved-policy.ts';
 import type { AgentStorage, AgentTransaction } from './store.ts';
@@ -74,13 +75,34 @@ export const appRecipeExamples = [
   ],
 ] as const satisfies readonly (readonly [string, z.input<typeof appRecipeSchema>])[];
 
+/** A data view as the app's code calls it: the fields it may send and receive by id, and the parameters it passes. */
+function codeView(view: DataViewEntry) {
+  const fields = new Map(view.table?.fields.map(field => [field.id, field]));
+  const parameters = view.predicate.all.flatMap(test =>
+    'operand' in test && test.operand.kind === 'parameter' ? [test.operand.name] : [],
+  );
+  return {
+    id: view.id,
+    table: view.table?.label ?? null,
+    actions: view.actions,
+    fields: view.fieldIds.flatMap(id => {
+      const field = fields.get(id);
+      return field ? [{ id, label: field.label, kind: field.kind }] : [];
+    }),
+    parameters: [...new Set(parameters)],
+    blockers: view.blockers,
+  };
+}
+
+const dataGuide =
+  "A server app reads and changes workspace table rows only through these views, and only while it answers a visitor's request. For each call, POST JSON to `${process.env.TULIPFARM_API_URL}/v1/app-data/views/<view id>/<operation>` with the content-type: application/json header and the TulipFarm-Request header copied from the visitor's request. A call made outside a visitor's request fails. Operations: list takes {parameters, query: {limit}} and returns {records}; read takes {parameters, recordId} and returns {record}; mutate takes {parameters, kind: 'create', recordId: a new UUID, values}, {parameters, kind: 'update', recordId, expectedToken: the record's token, values} or {parameters, kind: 'delete', recordId, expectedToken}, and returns {record}. parameters names a value for each of the view's parameters. Values are keyed by field id as {kind, value}, such as {\"kind\": \"text\", \"value\": \"Hello\"}. A 401 means the visitor's request has closed and a 403 means the view does not allow the call. Only people create and approve views; a view with blockers does not answer yet.";
+
 const recipeGuide = `An optional app.json at the app root says how to build it; without one the files are served as they are. It takes one of these shapes and no other keys; install is optional. ${appRecipeExamples
   .map(([use, recipe]) => `${use}: ${JSON.stringify(recipe)}.`)
   .join(' ')}`;
 
 export const appToolDescriptions: Record<AppToolName, string> = {
-  'apps.status':
-    'Read the state of the app this chat edits: its draft (empty, editing, building, built, failed or saved), draft revision, live release and edge status, and the newest build of the draft. Changes nothing.',
+  'apps.status': `Read the state of the app this chat edits: its draft (empty, editing, building, built, failed or saved), draft revision, live release and edge status, the newest build of the draft, and the data views the app may use. Changes nothing. ${dataGuide}`,
   'apps.files.list':
     'List the files of the app this chat edits, with their sizes: the saved draft plus changes not yet saved. Pass prefix to list one folder. Changes nothing.',
   'apps.files.read':
@@ -160,7 +182,7 @@ export function createAppEditing(runtime: AgentStorage, options: AppEditingOptio
   /** Runs `action` for the app this chat edits, or refuses when the chat may not edit one. */
   async function withApp<T>(
     chat: AppChat,
-    action: (tx: AppTransaction, appId: AppId, raw: AgentTransaction) => Promise<T>,
+    action: (tx: AppTransaction, appId: AppId, raw: AgentTransaction & { commonVersion: number }) => Promise<T>,
   ): Promise<T | Failure> {
     if (!(await options.enabled(chat.workspaceId)))
       return failure({ code: 'forbidden', message: 'App hosting is off in this workspace', retryable: false });
@@ -248,7 +270,7 @@ export function createAppEditing(runtime: AgentStorage, options: AppEditingOptio
   }
 
   async function status(chat: AppChat) {
-    return withApp(chat, async (tx, appId) => {
+    return withApp(chat, async (tx, appId, raw) => {
       const app = (await readApp(tx, appId))!;
       const draft = (await readDraft(tx, appId))!;
       const [newest] = (
@@ -266,6 +288,7 @@ export function createAppEditing(runtime: AgentStorage, options: AppEditingOptio
         revision: draft.revision,
         live: live ? { release: live.number, edge: edgeStatus(app.stops) } : null,
         build: build ? { id: build.id, ...build.status } : null,
+        data: (await listDataViews({ ...raw, workspaceId: chat.workspaceId }, appId)).map(codeView),
       };
     });
   }

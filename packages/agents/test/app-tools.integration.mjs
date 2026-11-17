@@ -4,19 +4,23 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { inTransaction } from '@tulipfarm/workspace-storage/provisioning';
 import { createWorkspaceRuntime } from '@tulipfarm/workspace-storage/runtime';
 import { workspaceTableMigrations } from '@tulipfarm/workspaces/table-migrations';
 import { appRepositories, createApp, finishBuild, putAppGrant, requestBuild } from '../../apps/src/store/index.ts';
 import { startObjectStore } from '../../apps/test/object-store.mjs';
-import { fixture } from '../../workspace-storage/test/integration/fixture.mjs';
+import { createDataView } from '../../tables/src/data-view-store.ts';
+import { activateGeneration, createGeneration } from '../../tables/src/store.ts';
+import { connect, fixture } from '../../workspace-storage/test/integration/fixture.mjs';
 import { createAppEditing } from '../src/app-tools.ts';
 
 test('an app chat edits its app in a draft that only a finished turn saves', { timeout: 120000 }, async t => {
   const db = await fixture();
   const objects = await startObjectStore();
   const root = await mkdtemp(join(tmpdir(), 'app-tools-'));
-  let runtime;
+  let runtime, migration;
   t.after(async () => {
+    await migration?.end();
     await runtime?.close();
     await objects.close();
     await rm(root, { recursive: true, force: true });
@@ -137,7 +141,53 @@ test('an app chat edits its app in a draft that only a finished turn saves', { t
       revision: 3,
       live: null,
       build: null,
+      data: [],
     });
+  });
+
+  await t.test('status names each data view by the ids and parameters its code sends', async () => {
+    const field = label => ({ id: randomUUID(), label, required: false, kind: 'text', maxLength: 200 });
+    const title = field('Title');
+    const author = field('Author');
+    const tableId = randomUUID();
+    const teamId = randomUUID();
+    await db.platform.query(`INSERT INTO ${table('tf_teams')}(id,name) VALUES($1,'Support')`, [teamId]);
+    migration = await connect(db.login(w, 'migration'));
+    await inTransaction(migration, async client => {
+      await client.query(`SET LOCAL ROLE "${w.names.customOwner}"`);
+      const tx = { client, schema };
+      const definition = {
+        formatVersion: 2,
+        id: tableId,
+        owningTeamId: teamId,
+        label: 'Posts',
+        fields: [title, author],
+        uniqueKeys: [],
+      };
+      const generation = await createGeneration(tx, { definition, revision: 'a'.repeat(40) });
+      await activateGeneration(tx, { generationId: generation.id, expectedActiveGenerationId: null });
+    });
+    const migrations = (await workspaceTableMigrations()).length;
+    const view = await runtime.transaction(w.id, { minimum: migrations, maximum: migrations }, tx =>
+      createDataView({ ...tx, workspaceId: w.id }, owner, {
+        appId,
+        tableId,
+        fieldIds: [title.id],
+        predicate: { all: [{ fieldId: author.id, op: 'eq', operand: { kind: 'parameter', name: 'author' } }] },
+        actions: ['read', 'create'],
+      }),
+    );
+    const { data } = await apps.invoke(ownerChat, { tool: 'apps.status' });
+    assert.deepEqual(data, [
+      {
+        id: view.id,
+        table: 'Posts',
+        actions: ['read', 'create'],
+        fields: [{ id: title.id, label: 'Title', kind: 'text' }],
+        parameters: ['author'],
+        blockers: ['app-not-serving', 'not-approved'],
+      },
+    ]);
   });
 
   await t.test('a second editor gets draft-busy while another chat holds the draft', async () => {
