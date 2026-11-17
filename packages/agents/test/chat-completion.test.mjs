@@ -1285,7 +1285,16 @@ test("an app chat's reply cannot deny its tools or claim a build or edit no tool
     unbackedAppClaim('I updated src/server.js with the view id.', 'public', new Set(['apps.files.write'])),
     undefined,
   );
+  assert.equal(
+    unbackedAppClaim('I updated src/server.js and rebuilt the app.', 'public', new Set(['apps.files.write']))?.status,
+    'continue',
+  );
   for (const text of [
+    'Your Tools page is missing a header, so I added one in the plan below.',
+    'The tool picker shows which parts are missing.',
+    'Your app lists tools that are not available to members.',
+    'I have put together a short summary of the files below.',
+    'I changed my recommendation: use a view instead.',
     'The app has one data view, on the Posts table.',
     'The build failed: npm install found no package.json.',
     'The last build succeeded earlier, before this change.',

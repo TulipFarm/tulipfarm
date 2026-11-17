@@ -2235,11 +2235,13 @@ const appTools = {
   private: 'apps.page.read, apps.page.replace and apps.page.check',
 } satisfies Record<AppKind, string>;
 const toolsDenied =
-  /\btools?\b[^.]*\b(?:not available|unavailable|not offered|missing)\b|(?:\b(?:no|not have|without)|n['’]t have)(?: a| any| the)? (?:file|write|editing|build)\b[\w\s-]{0,24}\btools?\b/i;
+  /\b(?:my|(?:file|write|writing|edit|editing|build|building)(?: or \w+)?(?: \w+)?) tools?\b[^.]*\b(?:not available|unavailable|not offered)\b|(?:\b(?:no|not have|without)|n['’]t have)(?: a| any| the)? (?:file|write|editing|build)\b[\w\s-]{0,24}\btools?\b/i;
 const buildClaim =
-  /\b(?:re)?build (?:succeeded|passed|worked|completed|finished)\b|\b(?:i|we)(?:'|’)?(?:ve| have)? (?:re)?built\b/i;
+  /\b(?:re)?build (?:succeeded|passed|worked|completed|finished)\b|\b(?:i|we)(?:'|’)?(?:ve| have)? (?:re)?built\b|^(?:re)?built (?:the|your|this) (?:app|server|site)\b/i;
 const editClaim =
-  /\b(?:i|we)(?:'|’)?(?:ve| have)? (?:updated|edited|changed|modified|rewrote|replaced|inserted|put|wrote|deleted|removed)\b/i;
+  /\b(?:i|we)(?:'|’)?(?:ve| have)? (?:updated|edited|changed|modified|rewrote|replaced|inserted|wrote|deleted|removed)\b/i;
+const codeObject =
+  /\b(?:files?|code|server|routes?|handlers?|html|css|scripts?|components?)\b|[\w-]+\/[\w./-]+|\b[\w-]+\.(?:m?js|tsx?|jsx|html|css|json)\b/i;
 
 /**
  * Why an app chat's reply must do more work: it says its own tools are missing, which they never are in the app's chat,
@@ -2254,19 +2256,18 @@ export function unbackedAppClaim(candidate: string, apps: AppKind | undefined, r
       reason: `This app's chat always has ${appTools[apps]}. Call them to do the work.`,
     };
   if (apps === 'private') return undefined;
-  const claimed = clauses(sentences.filter(sentence => !earlierOutcome.test(sentence))).find(clause => {
-    const claim = buildClaim.exec(clause) ?? editClaim.exec(clause);
-    return !!claim && !negatedClaim(clause, claim);
+  const unbacked = clauses(sentences.filter(sentence => !earlierOutcome.test(sentence))).find(clause => {
+    const build = buildClaim.exec(clause);
+    if (build && !negatedClaim(clause, build)) return !ran.has(buildTool);
+    const edit = editClaim.exec(clause);
+    if (!edit || negatedClaim(clause, edit) || !codeObject.test(clause)) return false;
+    return !ran.has('apps.files.write') && !ran.has('apps.files.delete');
   });
-  if (!claimed) return undefined;
-  const backed = buildClaim.test(claimed)
-    ? ran.has(buildTool)
-    : ran.has('apps.files.write') || ran.has('apps.files.delete');
-  return backed
+  return unbacked === undefined
     ? undefined
     : {
         status: 'continue' as const,
-        reason: `The reply says "${claimed.slice(0, 60)}", but no app tool in this turn did that. Do it with apps.files.write or ${buildTool}, or say plainly that it was not done.`,
+        reason: `The reply says "${unbacked.slice(0, 60)}", but no app tool in this turn did that. Do it with apps.files.write or ${buildTool}, or say plainly that it was not done.`,
       };
 }
 
