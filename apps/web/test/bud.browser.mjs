@@ -6,7 +6,7 @@ import { chromium } from 'playwright';
 import { startBudDemo } from './bud-demo.mjs';
 
 test(
-  'Bud in the real chat shows its monster through completion, cancellation, and mobile',
+  'Bud in the real chat shows its mark through completion, cancellation, and mobile',
   { timeout: 120000 },
   async () => {
     let finish;
@@ -33,12 +33,12 @@ test(
       const errors = [];
       page.on('pageerror', error => errors.push(error.message));
       await page.goto(`${demo.origin}/bud-demo`);
-      const monsters = page.locator('[data-slot="monster-avatar"]');
-      const launcher = page.getByRole('button', { name: /Open quick chat$/ }).locator('[data-slot="monster-avatar"]');
-      const portrait = monsters.and(page.locator(':not(button) > span > [data-slot="monster-avatar"]'));
+      const marks = page.locator('[data-slot="agent-mark"]');
+      const launcher = page.getByRole('button', { name: /Open quick chat$/ }).locator('[data-slot="agent-mark"]');
+      const portrait = marks.and(page.locator(':not(button) > span > [data-slot="agent-mark"]'));
       await page.getByRole('heading', { level: 2 }).waitFor();
       // A new chat greets with text only; Bud is the launcher until the chat has a reply.
-      assert.equal(await monsters.count(), 1, 'only the launcher Bud');
+      assert.equal(await marks.count(), 1, 'only the launcher Bud');
       assert.equal(await launcher.count(), 1);
       assert.equal(await portrait.count(), 0);
       assert.equal(await page.locator('canvas').count(), 0, 'Bud draws no canvas');

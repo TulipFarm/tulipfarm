@@ -554,14 +554,7 @@ export function AgentBuilder({
             previewOpen={previewOpen}
             onPreviewOpenChange={setPreviewOpen}
             preview={
-              <AgentBuilderPreview
-                agentId={id}
-                name={draft.definition.name}
-                team={team}
-                tab={tab}
-                onTab={setTab}
-                summary={summary}
-              >
+              <AgentBuilderPreview name={draft.definition.name} team={team} tab={tab} onTab={setTab} summary={summary}>
                 <BuilderTestChat chat={chat} disabled={locked || improving} />
               </AgentBuilderPreview>
             }

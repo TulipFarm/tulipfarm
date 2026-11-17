@@ -10,6 +10,10 @@ One version identifies all apps and images of a release.
 
 ### Changed
 
+- Agents and Bud show one still image, the TulipFarm tulip in a circle,
+  instead of Sprout's animated monster avatars: in the agent list and editor,
+  the builder preview, chat, subagent fan-out, workflow diagrams and the
+  sign-in page.
 - Member plans are switched by workspace feature flags instead of deployment
   settings: `chatgpt-plan` and `copilot-plan` (on by default) and
   `claude-plan` (off by default). `CHATGPT_PLAN`, `CLAUDE_PLAN` and
