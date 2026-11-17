@@ -1,4 +1,5 @@
 import { modelFallbackReasons, type ModelFallbackReason } from '@tulipfarm/config/model-fallback';
+import type { ConversationMessage } from './conversation-api.ts';
 
 // Copy for a failed reply. Model failures use `model-<reason>`; provider messages and internal codes never reach the page.
 
@@ -54,7 +55,7 @@ export const chatGptUsageUrl = 'https://chatgpt.com/settings/usage';
 export const planUsageUrls = {
   chatgpt: chatGptUsageUrl,
   claude: 'https://claude.ai/settings/usage',
-  copilot: 'https://github.com/settings/copilot/features',
+  copilot: 'https://github.com/settings/copilot',
 } as const;
 export const planLabels = { chatgpt: 'ChatGPT', claude: 'Claude', copilot: 'GitHub Copilot' } as const;
 
@@ -197,7 +198,102 @@ export function fallbackNote(
   return `Answered by ${name(family)} because ${replaced ?? 'the chat model'} was unavailable.`;
 }
 
+export type FallbackTone = 'warning' | 'info' | 'action';
+export type FallbackSummary = {
+  /** The family that answered, and the chat model the member had chosen. */
+  family: string;
+  chosen: string | undefined;
+  answered: string;
+  replaced: string;
+  plan: keyof typeof planLabels | undefined;
+  reason: ModelFallbackReason | undefined;
+  own: boolean;
+  tone: FallbackTone;
+  /** A few words on why, for the chip. */
+  short: string;
+  /** The full sentence, for its details. */
+  detail: string;
+};
+
+/** Why the fallback model answered a completed reply, in short and in full, or null when the chat model answered. */
+export function fallbackSummary(
+  status: string,
+  code: string | null | undefined,
+  chatModel?: string,
+  name: (id: string) => string = id => id,
+): FallbackSummary | null {
+  const fallback = status === 'completed' ? fallbackCode(code) : null;
+  const detail = fallbackNote(status, code, chatModel, name);
+  if (!fallback || !detail) return null;
+  const { family, reason, own } = fallback;
+  const prefix = /^(chatgpt|claude-plan|copilot)-/.exec(chatModel ?? '')?.[1];
+  const plan = prefix === 'claude-plan' ? 'claude' : (prefix as keyof typeof planLabels | undefined);
+  const chosen = chatModel && chatModel !== family ? chatModel : undefined;
+  const replaced = chosen ? name(chosen) : 'The chat model';
+  const source = plan ? planLabels[plan] : replaced;
+  const whose = own ? 'Your' : 'The';
+  const shortByReason: Record<ModelFallbackReason, string> = {
+    quota: plan ? `${whose} ${source} plan limit is reached` : `${source} has no quota left`,
+    'rate-limit': `${source} is limiting requests`,
+    outage: `${source} isn't responding`,
+    timeout: `${source} took too long`,
+    'model-unavailable': plan
+      ? `${replaced} isn't on ${own ? 'your' : 'the'} ${source} plan`
+      : `${replaced} isn't available`,
+    'sign-in': plan
+      ? own
+        ? `${source} needs reconnecting`
+        : `The ${source} plan needs reconnecting`
+      : `${source} sign-in failed`,
+  };
+  // Only a plan's owner can reconnect it, so a shared plan's sign-in is a heads-up rather than an action.
+  const tone: FallbackTone =
+    reason === 'sign-in' && own && plan
+      ? 'action'
+      : reason === 'quota' || reason === 'model-unavailable' || reason === 'sign-in'
+        ? 'warning'
+        : 'info';
+  return {
+    family,
+    chosen,
+    answered: name(family),
+    replaced,
+    plan,
+    reason,
+    own,
+    tone,
+    short: reason ? shortByReason[reason] : `${replaced} was unavailable`,
+    detail,
+  };
+}
+
 /** The model family that wrote a reply: the configured fallback when it answered, else the chat model. */
 export function replyModel(model: string | undefined, code: string | null | undefined): string | undefined {
   return fallbackCode(code)?.family ?? model;
+}
+
+type Turn = NonNullable<ConversationMessage['turn']>;
+
+/**
+ * For each reply the fallback model wrote, the turn it answered, when that reply starts a fallback: a run of replies
+ * answered by the same fallback for the same chosen model shows its chip once, above the first of them.
+ */
+export function fallbackStarts(messages: readonly ConversationMessage[]): Map<string, Turn> {
+  const starts = new Map<string, Turn>();
+  let pending: Turn | null = null;
+  let previous: string | null = null;
+  for (const message of messages) {
+    if (message.turn) {
+      pending = message.turn;
+      continue;
+    }
+    if (message.author !== 'assistant' || !pending) continue;
+    const turn = pending;
+    pending = null;
+    const code = turn.status === 'completed' && turn.errorCode?.startsWith('model-fallback:') ? turn.errorCode : null;
+    const run = code ? `${turn.stats?.model ?? ''}>${code.split(':')[1]}` : null;
+    if (run && run !== previous) starts.set(message.id, turn);
+    if (turn.status === 'completed') previous = run;
+  }
+  return starts;
 }

@@ -57,7 +57,7 @@ function trustedResolution({ modelFamilyId }, modelId, mappingRevision = initial
   });
 }
 
-function fixture(t, eligible, resolve = trustedResolution, snapshot) {
+function fixture(t, eligible, resolve = trustedResolution, snapshot, extra = {}) {
   const state = {
     signedIn: true,
     member: true,
@@ -129,6 +129,7 @@ function fixture(t, eligible, resolve = trustedResolution, snapshot) {
       state.projected = true;
       return snapshot(id);
     };
+  Object.assign(dependencies, extra);
   app.register(async routes => registerModelCatalog(routes, dependencies), { prefix: '/v1' });
   return {
     state,
@@ -605,4 +606,42 @@ test('paused families stay listed as temporarily unavailable and keep fallback o
   assert.equal(opus.unavailableReason, 'model-family-paused');
   assert.deepEqual(opus.fallbackFor, []);
   assert.deepEqual(families.find(family => family.id === 'gpt-astra').fallbackFor, ['claude-opus']);
+});
+
+test('plan models carry the usage status of the plan each runs on; models the workspace pays for carry none', async t => {
+  const { createModelConfiguration } = await import('../src/model-configuration.ts');
+  const pool = { query: async () => assert.fail('configuration must not query the database') };
+  const { modelCatalogSnapshot } = createModelConfiguration({ pool, env: { OPENAI_API_KEY: 'k' } });
+  const limited = {
+    plan: 'shared',
+    status: 'limit-reached',
+    limitedAt: '2026-01-02T03:04:05.000Z',
+    premiumRequests: null,
+  };
+  const counted = {
+    plan: 'own',
+    status: 'available',
+    limitedAt: null,
+    premiumRequests: { remaining: 212, entitlement: 300 },
+  };
+  const { request } = fixture(t, undefined, null, modelCatalogSnapshot, {
+    planModels: async (id, user, provider) => {
+      assert.deepEqual([id, user], [workspaceId, userId]);
+      if (provider === 'chatgpt')
+        return [
+          { slug: 'gpt-6.1-sol', label: 'GPT-6.1 Sol', usage: limited },
+          { slug: 'gpt-7', label: 'GPT-7', usage: limited },
+        ];
+      if (provider === 'copilot') return [{ slug: 'gpt-6-luna', label: 'GPT-6 Luna', usage: counted }];
+      return [];
+    },
+  });
+  const response = await request();
+  assert.equal(response.statusCode, 200);
+  const families = modelCatalogSchema.parse(response.json()).families;
+  const usage = Object.fromEntries(
+    families.filter(family => family.planUsage).map(family => [family.id, family.planUsage]),
+  );
+  assert.deepEqual(usage, { 'chatgpt-sol': limited, 'chatgpt-gpt-7': limited, 'copilot-gpt-luna': counted });
+  assert.equal('planUsage' in families.find(family => family.id === 'gpt-sol'), false);
 });

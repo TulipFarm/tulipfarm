@@ -41,9 +41,18 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@tulip
 import { type Model, type Agent, type Mode, type Persona } from './composer-options';
 import type { PlanProvider } from '@/features/models/chatgpt-plan-api';
 import { planLabels } from './reply-failure-copy';
+import { planUsageStatus, type PlanUsage } from './plan-usage';
 
-/** `plan` marks a model billed to the member's own ChatGPT, Claude or Copilot plan. */
-export type ComposerModel = Model & { disabled?: boolean; unavailableReason?: string; plan?: PlanProvider };
+/**
+ * `plan` marks a model billed to the member's own or a shared ChatGPT, Claude or Copilot plan; `planUsage` is what
+ * that plan's replies last said about its usage limit.
+ */
+export type ComposerModel = Model & {
+  disabled?: boolean;
+  unavailableReason?: string;
+  plan?: PlanProvider;
+  planUsage?: PlanUsage | undefined;
+};
 
 type ComposerProps = {
   compact?: boolean;
@@ -420,16 +429,30 @@ function ModelPicker({
 }
 
 function selectorModel(model: ComposerModel): ModelSelectorModel {
+  const usage = model.plan && model.planUsage ? planUsageStatus(model.plan, model.planUsage) : null;
   return {
     id: model.id,
     label: model.label,
-    brand: model.brand ?? undefined,
-    icon: model.brand ? undefined : <model.logo size={16} aria-hidden="true" />,
+    // A plan at its usage limit marks the model's logo with a warning dot; the model stays selectable.
+    brand: usage?.warning ? undefined : (model.brand ?? undefined),
+    icon: usage?.warning ? (
+      <span className="relative inline-flex">
+        <model.logo size={16} aria-hidden="true" />
+        <span
+          aria-hidden="true"
+          className="absolute -top-1 -right-1 size-2 rounded-full bg-warning ring-2 ring-popover"
+        />
+      </span>
+    ) : model.brand ? undefined : (
+      <model.logo size={16} aria-hidden="true" />
+    ),
     description: model.disabled
       ? `Unavailable: ${model.unavailableReason ?? 'not offered here'}`
-      : model.plan
-        ? `${planLabels[model.plan]} plan`
-        : undefined,
+      : usage
+        ? `${usage.plan} · ${usage.status}`
+        : model.plan
+          ? `${planLabels[model.plan]} plan`
+          : undefined,
     disabled: model.disabled,
     cost: model.cost,
   };

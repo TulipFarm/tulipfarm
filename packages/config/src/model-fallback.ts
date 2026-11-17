@@ -29,3 +29,14 @@ export function modelFallbackReason(failure: string | undefined): ModelFallbackR
     return 'model-unavailable';
   return undefined;
 }
+
+/**
+ * Reasons that last until the member acts, such as a plan's usage limit or a sign-in to renew. A chat that fell back for
+ * one of these keeps the fallback model, so later replies don't try the failed model again; a passing outage, timeout or
+ * rate limit doesn't switch it.
+ */
+export const stickyFallbackReasons = Object.freeze([
+  'quota',
+  'model-unavailable',
+  'sign-in',
+] as const satisfies readonly ModelFallbackReason[]);
