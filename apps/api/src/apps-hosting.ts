@@ -23,11 +23,13 @@ export function appHostingFromEnvironment(env: NodeJS.ProcessEnv, platform: () =
       return pool.query(text, values);
     },
   });
-  const domain = env.TULIPFARM_APP_SITES_DOMAIN?.trim().toLowerCase();
+  const domain = env.TULIPFARM_APP_SITES_DOMAIN?.trim().toLowerCase() || undefined;
   const sites = publisher && 'serve' in publisher ? (publisher as HostHeaderPublisher) : undefined;
   return {
     publisher,
     repositories: appRepositories({ root: join(tmpdir(), 'tulipfarm-api-apps'), storage: { client, bucket } }),
+    // A registered publisher can serve its sites elsewhere, so the domain is known without a host-header publisher.
+    domain: publisher ? domain : undefined,
     sites: sites && domain ? { publisher: sites, domain } : undefined,
   };
 }
