@@ -472,7 +472,13 @@ export function toolPresentation(storedTool: string, call?: unknown, storedActiv
     else if (actions.length > 1) label = `Preparing ${parsed.data.actions.length} GitHub changes for review`;
   }
   if (tool === 'api.request') label = apiCallLabel(call) ?? label;
+  if (tool === 'mcp.search') label = mcpSearchLabel(call) ?? label;
   return { label: [...label].slice(0, 240).join(''), brand };
+}
+
+function mcpSearchLabel(call: unknown) {
+  const query = z.object({ query: z.string() }).safeParse(call).data?.query.replace(/\s+/g, ' ').trim();
+  return query ? `Finding tools: ${query.slice(0, 80)}` : null;
 }
 
 const apiCallShape = z.object({ method: z.string().regex(/^[A-Z]{3,7}$/), url: z.string() });
