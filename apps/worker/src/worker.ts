@@ -67,6 +67,7 @@ import { configuredSkillClient } from '@tulipfarm/workflow-snippets/client';
 import { createSkillExecutionFactory } from '@tulipfarm/agents/skill-execution';
 import { createChatExecution, type ChatExecution } from '@tulipfarm/agents/chat-execution';
 import { codingRunsFactory, createCodingRunActivities, createCodingRunDispatcher } from './coding-runs.ts';
+import { createWorkflowCodingActivities, createWorkflowCodingDispatcher } from './workflow-coding-steps.ts';
 import { slackActionsFromEnvironment } from '@tulipfarm/agents/slack-environment';
 import { createRecommendationComposition } from './recommendation-activities.ts';
 import { createMemberProfileComposition } from './member-profile-composition.ts';
@@ -132,6 +133,7 @@ async function run() {
   let modelBundles: ReturnType<typeof createModelBundleRegistry> | undefined;
   let taskDispatch: ReturnType<typeof createTaskDispatcher> | undefined;
   let codingDispatch: ReturnType<typeof createCodingRunDispatcher> | undefined;
+  let workflowCoding: ReturnType<typeof createWorkflowCodingDispatcher> | undefined;
   let appBuilds: ReturnType<typeof createAppBuildDispatcher> | undefined;
   let planDispatch: ReturnType<typeof createPlanDispatcher> | undefined;
   let documentDispatch: ReturnType<typeof createPlanDocumentDispatcher> | undefined;
@@ -335,6 +337,7 @@ async function run() {
         ? createSkillActivities(guarded, chatObjects, () => skillClient?.available?.() ?? false)
         : undefined;
     codingDispatch = coreResources && coding ? createCodingRunDispatcher() : undefined;
+    workflowCoding = coreResources && coding ? createWorkflowCodingDispatcher() : undefined;
     const codingRuns =
       coding && codingDispatch
         ? codingRunsFactory(coding.backend, coding.configuration, codingDispatch.start)
@@ -368,6 +371,7 @@ async function run() {
           advanceWorkflow: createWorkflows(coreResources.runtime, {
             ...(workflowSlack ? { slackActions: workflowSlack } : {}),
             ...(snippets ? { snippets } : {}),
+            ...(workflowCoding ? { codingRuns: workflowCoding.runner } : {}),
             ...(agentTasks
               ? {
                   agentTasks: createWorkflowAgentTasks(
@@ -420,6 +424,9 @@ async function run() {
                     coding.configuration,
                     chatObjects ? createFiles(coreResources.runtime, chatObjects) : undefined,
                   )
+                : {}),
+              ...(coreResources && coding
+                ? createWorkflowCodingActivities(coreResources.runtime, coding.backend, coding.configuration)
                 : {}),
             },
             ...workerTelemetry(telemetry),
@@ -566,6 +573,7 @@ async function run() {
     await modelBundles?.close();
     await taskDispatch?.close();
     await codingDispatch?.close();
+    await workflowCoding?.close();
     await appBuilds?.close();
     await planDispatch?.close();
     await documentDispatch?.close();

@@ -73,6 +73,7 @@ export function createStorageServices(app: FastifyInstance, dependencies: Storag
   const workflows = createWorkflows(runtime, {
     keyring: integrationCredentialKeyring(),
     codeSteps: workflowCodeStepsEnabled(),
+    codingSteps: workflowCodeStepsEnabled(),
     agentSteps: true,
     agentResultReadable: createAgentTasks(runtime).resultReadable,
     wake,
@@ -108,6 +109,7 @@ export function createStorageServices(app: FastifyInstance, dependencies: Storag
     workflows: {
       keyring: integrationCredentialKeyring(),
       codeSteps: workflowCodeStepsEnabled(),
+      codingSteps: workflowCodeStepsEnabled(),
       agentSteps: true,
     },
     skillRuntimeAvailable: configuredSkillRuntimeProbe(),

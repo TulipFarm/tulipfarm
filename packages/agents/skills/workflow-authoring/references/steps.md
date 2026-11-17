@@ -28,6 +28,14 @@ Limits default to 100 tool calls, 300000 active milliseconds, and 100 credits. T
 
 An agent step is not a native provider action. It can use only the agent's permitted tools and their provider approval rules. Do not promise unattended Slack messages just because an agent has a Slack tool. If no eligible agent exists, explain what must be set up; do not invent an agent ID or send a one-off message instead.
 
+## Coding step
+
+`{"id","kind":"coding","agent":"claude-code", "codex" or "copilot","repository":value,"prompt":value,"context"?:value,"triggerContext"?:boolean,"branch"?:value,"pullRequest"?:boolean,"title"?:value}` runs a vendor coding agent on a GitHub repository in a fresh sandbox and waits up to 45 minutes. `repository` must resolve to `owner/name`, such as a GitHub trigger's `repository`. `prompt` must resolve to nonempty text; the agent sees nothing else from the run except `context`, or the trigger's payload with `triggerContext`. `branch` is the branch to start from, the default branch when absent. `pullRequest` defaults to true: the change is pushed to a new branch and a pull request is opened into the starting branch, titled with `title` or the prompt's first line.
+
+Its output is `{"status":"changed" or "unchanged","agent","repository","base","message","files","diffTruncated","branch","pullRequest":{"number","url"} or null}`.
+
+The run uses the plan for that agent and a GitHub account that can push to the repository, both belonging to the person who started the run or who turned on an unattended run. Without them, the run fails with `coding-plan-required` or `coding-github-account-required`. Coding steps are offered only when the workspace can run them; do not invent another way to change code.
+
 ## HTTP step
 
 `{"id","kind":"http","method":"GET", "POST", "PUT", "PATCH" or "DELETE","url":HTTPS URL,"headers"?:{header:value},"body"?:value,"credential"?:{"integrationId","header"?:header name}}` makes a request and outputs `{"status","headers","body"}`.
