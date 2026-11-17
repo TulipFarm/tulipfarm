@@ -19,15 +19,8 @@
   "remote": {
     "url": "https://api.polaranalytics.com/mcp",
     "transport": "streamable-http",
-    "auth": "api-key",
-    "headers": [
-      {
-        "name": "Authorization",
-        "value": "Bearer {key}",
-        "description": "Token from app.polaranalytics.com/mcp"
-      }
-    ],
-    "checked": "2026-11-14"
+    "auth": "oauth",
+    "checked": "2026-11-17"
   },
   "registryName": "com.polaranalytics/polar",
   "icons": {

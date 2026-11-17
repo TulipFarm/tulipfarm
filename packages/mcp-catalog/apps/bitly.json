@@ -16,7 +16,7 @@
     "url": "https://api-ssl.bitly.com/v4/mcp",
     "transport": "streamable-http",
     "auth": "oauth",
-    "checked": "2026-11-14"
+    "checked": "2026-11-17"
   },
   "registryName": "com.bitly/mcp",
   "icons": {

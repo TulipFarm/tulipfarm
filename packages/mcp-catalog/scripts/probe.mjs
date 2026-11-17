@@ -2,7 +2,8 @@
 // - `remote.checked` moves to today when the server answers.
 // - `remote.unreachableSince` is set when it doesn't, and cleared when it answers again.
 // - `remote.auth` is filled in when it is `unknown`. A different answer for a known value is only reported,
-//   because a person chose it.
+//   because a person chose it. A server that answers without a token but also offers OAuth isn't reported:
+//   that answer can't tell whether its tools need a key, OAuth or nothing.
 // Servers whose address differs per account (`remote.variables`) are skipped.
 // Usage: node scripts/probe.mjs [app-id ...]
 import { appendFileSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
@@ -42,7 +43,7 @@ const protectedResource = async url => {
   return Boolean(legacy?.ok && (await legacy.json().catch(() => null))?.authorization_endpoint);
 };
 
-/** @returns {Promise<'oauth' | 'api-key' | 'none' | 'unreachable'>} */
+/** @returns {Promise<'oauth' | 'oauth-optional' | 'api-key' | 'none' | 'unreachable'>} */
 export const probe = async ({ url: template, transport }) => {
   const url = template.replaceAll('{key}', 'probe');
   const response =
@@ -61,7 +62,7 @@ export const probe = async ({ url: template, transport }) => {
   }
   if (!response.ok) return 'unreachable';
   // Some servers answer without a token but offer sign-in for their full tools, or require it on each call.
-  return (await protectedResource(url)) ? 'oauth' : 'none';
+  return (await protectedResource(url)) ? 'oauth-optional' : 'none';
 };
 
 const notes = [];
@@ -80,8 +81,8 @@ const work = async () => {
     } else {
       remote.checked = today;
       delete remote.unreachableSince;
-      if (remote.auth === 'unknown') remote.auth = found;
-      else if (remote.auth !== found && !(remote.auth === 'api-key' && found === 'none'))
+      if (remote.auth === 'unknown') remote.auth = found === 'oauth-optional' ? 'oauth' : found;
+      else if (remote.auth !== found && found !== 'oauth-optional' && !(remote.auth === 'api-key' && found === 'none'))
         notes.push(`- ${app.name}: listed as ${remote.auth}, but the server answered like ${found}`);
     }
     writeFileSync(path, `${JSON.stringify({ ...app, remote }, null, 2)}\n`);

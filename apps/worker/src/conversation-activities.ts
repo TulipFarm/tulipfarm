@@ -611,6 +611,7 @@ export function meteredReply(
           await plans?.retire('reconnect');
         throw error;
       });
+      if (!answer.fallback) await plans?.answered();
       return answer.fallbackReason && plans?.own() ? { ...answer, fallbackOwnPlan: true as const } : answer;
     } finally {
       session.close();

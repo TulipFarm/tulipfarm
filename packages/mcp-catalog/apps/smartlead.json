@@ -16,7 +16,7 @@
     "url": "https://mcp.smartlead.ai/mcp",
     "transport": "streamable-http",
     "auth": "oauth",
-    "checked": "2026-11-14"
+    "checked": "2026-11-17"
   },
   "icons": {
     "color": "#5B3CF5"

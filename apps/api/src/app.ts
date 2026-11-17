@@ -30,6 +30,7 @@ import type { TokenPlan, TokenPlanProvider } from '@tulipfarm/integrations/token
 import { planModelFamilyId, planProviders, type PlanProvider } from '@tulipfarm/config';
 import { registerSubscriptions } from './subscriptions.ts';
 import { createSubscriptions } from '@tulipfarm/integrations/subscriptions';
+import { createPlanUsage } from './plan-usage.ts';
 import { registerGitHubInvestigation } from './github-investigation.ts';
 import { createGitHubInvestigation } from '@tulipfarm/github/investigation';
 import { createGitHubBotGrants } from '@tulipfarm/github/bot';
@@ -183,6 +184,7 @@ export function buildApp(
         registerTokenPlan(business, auth.auth, 'claude', tokenPlans.claude);
         registerTokenPlan(business, auth.auth, 'copilot', tokenPlans.copilot);
         const subscriptions = runtime ? createSubscriptions({ runtime }) : null;
+        const planUsage = createPlanUsage({ copilotToken: copilot?.accessToken });
         registerSubscriptions(business, auth.auth, subscriptions, (provider, slug) => {
           const id = planModelFamilyId(provider, slug);
           return id !== null && models.catalog.model(id) !== undefined;
@@ -211,7 +213,7 @@ export function buildApp(
               ? {
                   planModels: async (workspaceId: string, userId: string, provider: PlanProvider) =>
                     (provider === 'chatgpt' ? chatGpt : tokenPlans[provider])
-                      ? subscriptions.models(workspaceId, userId, provider)
+                      ? planUsage(workspaceId, provider, await subscriptions.models(workspaceId, userId, provider))
                       : [],
                 }
               : {}),

@@ -30,6 +30,14 @@ export function stepValueEntries(step: Step): { value: Value; path: (string | nu
         { value: step.prompt, path: ['prompt'] },
         ...(step.context ? [{ value: step.context, path: ['context'] }] : []),
       ];
+    case 'coding':
+      return [
+        { value: step.repository, path: ['repository'] },
+        { value: step.prompt, path: ['prompt'] },
+        ...(step.context ? [{ value: step.context, path: ['context'] }] : []),
+        ...(step.branch ? [{ value: step.branch, path: ['branch'] }] : []),
+        ...(step.title ? [{ value: step.title, path: ['title'] }] : []),
+      ];
     case 'slack-message':
       return step.text.kind === 'template'
         ? Object.entries(step.text.values).map(([key, value]) => ({ value, path: ['text', 'values', key] }))
@@ -140,6 +148,19 @@ export function stepOutputShapes(steps: readonly Step[], tables: readonly Output
         break;
       case 'agent':
         shape = object({ taskId: scalar, result: scalar });
+        break;
+      case 'coding':
+        shape = object({
+          status: scalar,
+          agent: scalar,
+          repository: scalar,
+          base: scalar,
+          message: scalar,
+          files: array(scalar),
+          diffTruncated: scalar,
+          branch: scalar,
+          pullRequest: object({ number: scalar, url: scalar }),
+        });
         break;
       case 'slack-message':
         shape = object({ provider: scalar, actionId: scalar, status: scalar, sentMessageTs: scalar });

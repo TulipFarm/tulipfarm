@@ -101,7 +101,9 @@ export type CodingRunResult =
     };
 
 const summarySchema = z.object({
-  stage: z.enum(['clone', 'agent', 'done']),
+  stage: z.enum(['clone', 'agent', 'push', 'done']),
+  base: z.string().default(''),
+  pushed: z.boolean().default(false),
   exitCode: z.number().int().nullable(),
   message: z.string(),
   files: z.array(z.string()),
@@ -130,19 +132,20 @@ else message = read('message.txt', ${messageBytes})[0];
 const exit = read('agent.exit', 16)[0].trim();
 const [diff, diffTruncated] = read('diff.patch', ${diffBytes});
 process.stdout.write(${JSON.stringify(marker)} + JSON.stringify({
-  stage, exitCode: exit === '' ? null : Number(exit), message: message.slice(0, ${messageBytes}),
+  stage, base: read('base.txt', 256)[0].trim(), pushed: read('pushed', 4)[0].trim() === '1', exitCode: exit === '' ? null : Number(exit), message: message.slice(0, ${messageBytes}),
   files: read('files.txt', 65536)[0].split('\\n').filter(Boolean).slice(0, 500), diff, diffTruncated,
-  log: stage === 'clone' ? tail('clone.log', 2048) : tail('agent.log', 2048),
+  log: stage === 'clone' ? tail('clone.log', 2048) : stage === 'push' ? tail('push.log', 2048) : tail('agent.log', 2048),
 }) + '\\n');
 `;
 
 /**
  * The run script. Its arguments are the repository, task, branch (or empty), agent and the agent's time limit in
- * seconds; none is ever interpolated. The agent stops before the job does, so the diff is still collected.
+ * seconds, then optionally a branch to push the changes to with the commit's author name, email and message; none is
+ * ever interpolated. The agent stops before the job does, so the diff is still collected.
  */
 export function codingRunScript(agent: CodingAgent) {
   return [
-    'repo=$1 task=$2 branch=$3 agent=$4 limit=$5',
+    'repo=$1 task=$2 branch=$3 agent=$4 limit=$5 push=$6 name=$7 email=$8 message=$9',
     'work=$PWD out=$PWD/.tulipfarm-run',
     'mkdir -p "$out"',
     'export GIT_TERMINAL_PROMPT=0',
@@ -152,6 +155,7 @@ export function codingRunScript(agent: CodingAgent) {
     'if git "${args[@]}" -- "https://github.com/$repo.git" "$work/repo" >"$out/clone.log" 2>&1; then',
     '  cd "$work/repo"',
     '  start=$(git rev-parse HEAD)',
+    '  git rev-parse --abbrev-ref HEAD >"$out/base.txt" 2>/dev/null',
     '  stage=agent',
     `  run=${shellQuote(commands[agent])}`,
     '  export task out',
@@ -161,6 +165,14 @@ export function codingRunScript(agent: CodingAgent) {
     '  git -c core.quotePath=false diff --binary "$start" >"$out/diff.patch" 2>/dev/null',
     '  git -c core.quotePath=false diff --name-only "$start" >"$out/files.txt" 2>/dev/null',
     '  stage=done',
+    // The agent may have committed on its own; whatever differs from the start is pushed as one more commit.
+    '  if [ -n "$push" ] && [ -s "$out/files.txt" ]; then',
+    '    stage=push',
+    '    git add --all >"$out/push.log" 2>&1',
+    '    if git diff --cached --quiet || git -c user.name="$name" -c user.email="$email" commit --quiet --no-verify -m "$message" >>"$out/push.log" 2>&1; then',
+    '      if git push --quiet origin "HEAD:refs/heads/$push" >>"$out/push.log" 2>&1; then echo 1 >"$out/pushed"; stage=done; fi',
+    '    fi',
+    '  fi',
     'fi',
     `node -e ${shellQuote(summary)} "$out" "$stage" "$agent"`,
   ].join('\n');
@@ -299,68 +311,132 @@ export function createCodingRuns(
         turnId: run.turnId,
       });
       if (!github) return githubRequired;
-      const conversationId = run.conversationId;
-      // Clone and diff share the run's time with the agent.
-      const agentSeconds = Math.floor(codingRunLimitMs / 1000) - Math.min(300, Math.floor(codingRunLimitMs / 4000));
-      const result = await runIsolated(
+      const {
+        base: _base,
+        pushed: _pushed,
+        ...result
+      } = await runCodingJob(
         backend,
         configuration,
         {
-          areaId: conversationId,
-          command: {
-            program: 'bash',
-            args: [
-              '-c',
-              codingRunScript(call.agent),
-              'coding-run',
-              call.repository,
-              call.task,
-              call.branch ?? '',
-              call.agent,
-              String(agentSeconds),
-            ],
-          },
-          // Coding runs have their own limit; the policy's job limit stays for ordinary jobs.
-          limitMs: codingRunLimitMs,
-          template: call.agent,
-          secrets: codingRunSecrets(call.agent, plan.token, github),
-          outputBytes,
+          areaId: run.conversationId,
+          repository: call.repository,
+          task: call.task,
+          branch: call.branch ?? null,
+          agent: call.agent,
+          planToken: plan.token,
+          githubToken: github,
         },
         signal,
       );
-      const line = result.stdout.split('\n').find(item => item.startsWith(marker));
-      const parsed = line ? summarySchema.safeParse(JSON.parse(line.slice(marker.length))) : undefined;
-      if (!parsed?.success)
-        return {
-          status: result.state === 'timed-out' || result.state === 'cancelled' ? result.state : 'failed',
-          ...(result.exitCode === undefined ? {} : { exitCode: result.exitCode }),
-          message: '',
-          files: [],
-          diff: '',
-          diffTruncated: false,
-          fullDiff: '',
-          log: result.stderr.slice(-2048),
-        };
-      const value = parsed.data;
-      const bytes = Buffer.from(value.diff);
-      const shown = bytes.subarray(0, shownDiffBytes).toString('utf8');
-      return {
-        status:
-          value.stage === 'clone'
-            ? 'clone-failed'
-            : value.exitCode === 124 || value.exitCode === 137
-              ? 'timed-out'
-              : value.exitCode === 0
-                ? 'completed'
-                : 'failed',
-        ...(value.exitCode === null ? {} : { exitCode: value.exitCode }),
-        message: value.message,
-        files: value.files,
-        diff: shown,
-        diffTruncated: value.diffTruncated || bytes.length > shownDiffBytes,
-        fullDiff: value.diff,
-        ...(value.exitCode === 0 ? {} : { log: value.log }),
-      };
+      // Chat runs never push, so a push failure cannot happen here.
+      return { ...result, status: result.status === 'push-failed' ? 'failed' : result.status };
     },
+  };
+}
+
+export type CodingJob = {
+  /** The area whose machines the job shares, such as the chat or the workflow run. */
+  areaId: string;
+  repository: string;
+  task: string;
+  branch: string | null;
+  agent: CodingAgent;
+  planToken: string;
+  githubToken: string;
+  /** Commits whatever changed and pushes it to a new branch. Without it, nothing leaves the machine. */
+  push?: { branch: string; name: string; email: string; message: string };
+};
+export type CodingJobOutcome = {
+  status: 'completed' | 'failed' | 'timed-out' | 'cancelled' | 'clone-failed' | 'push-failed';
+  exitCode?: number;
+  message: string;
+  files: string[];
+  diff: string;
+  diffTruncated: boolean;
+  /** The whole diff, up to 512 KiB. */
+  fullDiff: string;
+  /** The branch the agent started from, or null when the clone failed. */
+  base: string | null;
+  pushed: boolean;
+  log?: string;
+};
+
+/** Runs a vendor coding agent on a GitHub repository in a fresh machine, with the given plan and GitHub tokens. */
+export async function runCodingJob(
+  backend: ExecutionBackend,
+  configuration: RunnableConfiguration,
+  job: CodingJob,
+  signal?: AbortSignal,
+): Promise<CodingJobOutcome> {
+  // Clone, diff and push share the run's time with the agent.
+  const agentSeconds = Math.floor(codingRunLimitMs / 1000) - Math.min(300, Math.floor(codingRunLimitMs / 4000));
+  const push = job.push ? [job.push.branch, job.push.name, job.push.email, job.push.message] : [];
+  const result = await runIsolated(
+    backend,
+    configuration,
+    {
+      areaId: job.areaId,
+      command: {
+        program: 'bash',
+        args: [
+          '-c',
+          codingRunScript(job.agent),
+          'coding-run',
+          job.repository,
+          job.task,
+          job.branch ?? '',
+          job.agent,
+          String(agentSeconds),
+          ...push,
+        ],
+      },
+      // Coding runs have their own limit; the policy's job limit stays for ordinary jobs.
+      limitMs: codingRunLimitMs,
+      template: job.agent,
+      secrets: codingRunSecrets(job.agent, job.planToken, job.githubToken),
+      outputBytes,
+    },
+    signal,
+  );
+  const line = result.stdout.split('\n').find(item => item.startsWith(marker));
+  const parsed = line ? summarySchema.safeParse(JSON.parse(line.slice(marker.length))) : undefined;
+  if (!parsed?.success)
+    return {
+      status: result.state === 'timed-out' || result.state === 'cancelled' ? result.state : 'failed',
+      ...(result.exitCode === undefined ? {} : { exitCode: result.exitCode }),
+      message: '',
+      files: [],
+      diff: '',
+      diffTruncated: false,
+      fullDiff: '',
+      base: null,
+      pushed: false,
+      log: result.stderr.slice(-2048),
+    };
+  const value = parsed.data;
+  const bytes = Buffer.from(value.diff);
+  const shown = bytes.subarray(0, shownDiffBytes).toString('utf8');
+  const status =
+    value.stage === 'clone'
+      ? 'clone-failed'
+      : value.exitCode === 124 || value.exitCode === 137
+        ? 'timed-out'
+        : value.exitCode !== 0
+          ? 'failed'
+          : value.stage === 'push'
+            ? 'push-failed'
+            : 'completed';
+  return {
+    status,
+    ...(value.exitCode === null ? {} : { exitCode: value.exitCode }),
+    message: value.message,
+    files: value.files,
+    diff: shown,
+    diffTruncated: value.diffTruncated || bytes.length > shownDiffBytes,
+    fullDiff: value.diff,
+    base: value.base || null,
+    pushed: value.pushed,
+    ...(status === 'completed' ? {} : { log: value.log }),
   };
 }

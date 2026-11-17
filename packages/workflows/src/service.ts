@@ -76,6 +76,13 @@ import {
   waitUntilInstant,
   workflowSchema,
   workSchema,
+  codingBranchSchema,
+  codingReceiptSchema,
+  codingStepJobSchema,
+  codingStepResultSchema,
+  workflowRepositorySchema,
+  type CodingStepJob,
+  type CodingStepResult,
   type GitHubTrigger,
   type Progress,
   type Trigger,
@@ -239,6 +246,10 @@ type AgentTaskClient = {
     pauseReason?: string | null;
   }>;
 };
+/** Runs coding steps outside the workflow's short activities. A job reports back through `recordCodingResult`. */
+export type CodingStepRunner = {
+  start(workspaceId: string, runId: string, stepId: string, jobId: string): Promise<void>;
+};
 type SlackClient = {
   workflow(
     workspaceId: string,
@@ -264,6 +275,9 @@ export function createWorkflows(
     agentTasks?: AgentTaskClient;
     agentSteps?: boolean;
     agentResultReadable?: AgentResultReadable;
+    /** Starts the durable job for a coding step; starting the same job again changes nothing. */
+    codingRuns?: CodingStepRunner;
+    codingSteps?: boolean;
     slackActions?: SlackClient;
     wake?: (work: Work) => Promise<void>;
     webhookToleranceSeconds?: number;
@@ -276,9 +290,12 @@ export function createWorkflows(
   // The API composes no runner client, so it learns from configuration whether the worker can execute code steps.
   const codeStepsAvailable = options.codeSteps ?? options.snippets !== undefined;
   const agentStepsAvailable = options.agentSteps ?? options.agentTasks !== undefined;
+  const codingStepsAvailable = options.codingSteps ?? options.codingRuns !== undefined;
   function requireCodeRunner(definition: z.infer<typeof definitionSchema>) {
     if (!codeStepsAvailable && definition.steps.some(step => step.kind === 'code'))
       throw new WorkflowConflict('code-steps-unavailable');
+    if (!codingStepsAvailable && definition.steps.some(step => step.kind === 'coding'))
+      throw new WorkflowConflict('coding-steps-unavailable');
   }
   function requireAgentRunner(definition: z.infer<typeof definitionSchema>) {
     if (!agentStepsAvailable && definition.steps.some(step => step.kind === 'agent'))
@@ -2896,58 +2913,66 @@ export function createWorkflows(
       return 'failed';
     }
   }
+  // Shared lock, so only the trigger-row locks and request_key uniqueness serialize sweeps. Two overlapping sweepers (a rolling deploy) can briefly overshoot run limits; isolated() absorbs a duplicate admission.
   async function due(workspaceId: string) {
-    return transaction(workspaceId, async tx => {
-      // A sponsor or workflow at its run limit waits without holding admission slots that others could use.
-      const belowRunLimits = `w.sponsor_membership_id NOT IN (SELECT r.membership_id FROM ${table(tx, 'tf_workflow_runs')} r WHERE r.status IN ('queued','running','waiting') AND r.membership_id IS NOT NULL AND NOT ${parked(tx, 'r')} GROUP BY r.membership_id HAVING count(*)>=$1)
+    return transaction(
+      workspaceId,
+      async tx => {
+        // A sponsor or workflow at its run limit waits without holding admission slots that others could use.
+        const belowRunLimits = `w.sponsor_membership_id NOT IN (SELECT r.membership_id FROM ${table(tx, 'tf_workflow_runs')} r WHERE r.status IN ('queued','running','waiting') AND r.membership_id IS NOT NULL AND NOT ${parked(tx, 'r')} GROUP BY r.membership_id HAVING count(*)>=$1)
         AND w.id NOT IN (SELECT r.workflow_id FROM ${table(tx, 'tf_workflow_runs')} r WHERE r.status IN ('queued','running','waiting') AND r.sponsorship_id IS NOT NULL GROUP BY r.workflow_id HAVING count(*) FILTER (WHERE NOT ${parked(tx, 'r')})>=$2 OR count(*) FILTER (WHERE ${parked(tx, 'r')})>=$3)
         AND w.id NOT IN (SELECT e.subject_id FROM ${table(tx, 'tf_audit_events')} e WHERE e.operation='workflow.sweep-failed' AND e.created_at>clock_timestamp()-interval '${failedSweepRetry}')`;
-      const events = (
-        await tx.client.query(
-          `SELECT e.workflow_id,e.revision,e.trigger_id,e.fired_trigger_ids,e.event_key,e.payload,e.github_repository_id,r.definition,ARRAY(SELECT t.trigger_id FROM ${table(tx, 'tf_workflow_triggers')} t WHERE t.workflow_id=e.workflow_id AND t.enabled) AS enabled_ids FROM ${table(tx, 'tf_provider_events')} e JOIN ${table(tx, 'tf_workflows')} w ON w.id=e.workflow_id AND w.active_revision=e.revision JOIN ${table(tx, 'tf_workflow_revisions')} r ON r.workflow_id=w.id AND r.id=e.revision WHERE w.enabled AND NOT e.admitted AND ${belowRunLimits} ORDER BY e.created_at,e.event_key LIMIT 20`,
-          [workflowLimits.member, workflowLimits.workflow, workflowLimits.parked],
-        )
-      ).rows;
-      const failed = new Set<string>();
-      for (const event of events) {
-        const workflowId = idSchema.parse(event.workflow_id);
-        if (failed.has(workflowId)) continue;
-        const outcome = await isolated(tx, workflowId, () => admitProviderEvent(tx, workflowId, event));
-        if (outcome === 'failed') failed.add(workflowId);
-        if (outcome === 'workspace-limit') break;
-      }
-      const sweptAt = await databaseNow(tx);
-      const schedules = (
-        await tx.client.query(
-          `SELECT w.id,w.active_revision AS revision,r.definition FROM (SELECT t.workflow_id,min(t.next_run_at) AS first FROM ${table(tx, 'tf_workflow_triggers')} t WHERE t.next_run_at<=$4::timestamptz GROUP BY t.workflow_id) d JOIN ${table(tx, 'tf_workflows')} w ON w.id=d.workflow_id JOIN ${table(tx, 'tf_workflow_revisions')} r ON r.workflow_id=w.id AND r.id=w.active_revision WHERE w.enabled AND ${belowRunLimits} ORDER BY d.first,w.id LIMIT 20`,
-          [workflowLimits.member, workflowLimits.workflow, workflowLimits.parked, sweptAt.toISOString()],
-        )
-      ).rows;
-      for (const row of schedules) {
-        const workflowId = idSchema.parse(row.id);
-        if ((await isolated(tx, workflowId, () => fireWorkflow(tx, row, sweptAt))) === 'workspace-limit') break;
-      }
-      // A parked run needs no redispatch until its due time, when it stops counting as parked.
-      const rows = (
-        await tx.client.query(
-          `SELECT r.id FROM ${table(tx, 'tf_workflow_runs')} r WHERE r.status IN ('queued','running','waiting') ORDER BY ${parked(tx, 'r')},r.dispatched_at NULLS FIRST,r.created_at,r.id LIMIT 20`,
-        )
-      ).rows;
-      const result = rows.map(row => workSchema.parse({ workspaceId, runId: row.id }));
-      for (const work of result)
-        await tx.client.query(
-          `UPDATE ${table(tx, 'tf_workflow_runs')} SET dispatched_at=clock_timestamp() WHERE id=$1`,
-          [work.runId],
-        );
-      return result;
-    });
+        const events = (
+          await tx.client.query(
+            `SELECT e.workflow_id,e.revision,e.trigger_id,e.fired_trigger_ids,e.event_key,e.payload,e.github_repository_id,r.definition,ARRAY(SELECT t.trigger_id FROM ${table(tx, 'tf_workflow_triggers')} t WHERE t.workflow_id=e.workflow_id AND t.enabled) AS enabled_ids FROM ${table(tx, 'tf_provider_events')} e JOIN ${table(tx, 'tf_workflows')} w ON w.id=e.workflow_id AND w.active_revision=e.revision JOIN ${table(tx, 'tf_workflow_revisions')} r ON r.workflow_id=w.id AND r.id=e.revision WHERE w.enabled AND NOT e.admitted AND ${belowRunLimits} ORDER BY e.created_at,e.event_key LIMIT 20 FOR UPDATE OF e SKIP LOCKED`,
+            [workflowLimits.member, workflowLimits.workflow, workflowLimits.parked],
+          )
+        ).rows;
+        const failed = new Set<string>();
+        for (const event of events) {
+          const workflowId = idSchema.parse(event.workflow_id);
+          if (failed.has(workflowId)) continue;
+          const outcome = await isolated(tx, workflowId, () => admitProviderEvent(tx, workflowId, event));
+          if (outcome === 'failed') failed.add(workflowId);
+          if (outcome === 'workspace-limit') break;
+        }
+        const sweptAt = await databaseNow(tx);
+        const schedules = (
+          await tx.client.query(
+            `SELECT w.id,w.active_revision AS revision,r.definition FROM (SELECT t.workflow_id,min(t.next_run_at) AS first FROM ${table(tx, 'tf_workflow_triggers')} t WHERE t.next_run_at<=$4::timestamptz GROUP BY t.workflow_id) d JOIN ${table(tx, 'tf_workflows')} w ON w.id=d.workflow_id JOIN ${table(tx, 'tf_workflow_revisions')} r ON r.workflow_id=w.id AND r.id=w.active_revision WHERE w.enabled AND ${belowRunLimits} ORDER BY d.first,w.id LIMIT 20`,
+            [workflowLimits.member, workflowLimits.workflow, workflowLimits.parked, sweptAt.toISOString()],
+          )
+        ).rows;
+        for (const row of schedules) {
+          const workflowId = idSchema.parse(row.id);
+          if ((await isolated(tx, workflowId, () => fireWorkflow(tx, row, sweptAt))) === 'workspace-limit') break;
+        }
+        // A parked run needs no redispatch until its due time, when it stops counting as parked.
+        const rows = (
+          await tx.client.query(
+            `SELECT r.id FROM ${table(tx, 'tf_workflow_runs')} r WHERE r.status IN ('queued','running','waiting') ORDER BY ${parked(tx, 'r')},r.dispatched_at NULLS FIRST,r.created_at,r.id LIMIT 20`,
+          )
+        ).rows;
+        const result = rows.map(row => workSchema.parse({ workspaceId, runId: row.id }));
+        for (const work of result)
+          await tx.client.query(
+            `UPDATE ${table(tx, 'tf_workflow_runs')} SET dispatched_at=clock_timestamp() WHERE id=$1`,
+            [work.runId],
+          );
+        return result;
+      },
+      'read',
+    );
   }
   // A run marked running sleeps only when its wake signal was lost, so the sweep wakes it again.
+  // It only reads, so it takes the shared lock: an exclusive one every 2 s per workspace would stall every reader behind it.
   async function resumable(workspaceId: string) {
-    return transaction(workspaceId, async tx => {
-      const slack =
-        tx.commonVersion >= 1
-          ? `OR r.status='waiting' AND EXISTS (
+    return transaction(
+      workspaceId,
+      async tx => {
+        const slack =
+          tx.commonVersion >= 1
+            ? `OR r.status='waiting' AND EXISTS (
         SELECT 1 FROM ${table(tx, 'tf_workflow_steps')} s
         JOIN ${table(tx, 'tf_workflow_revisions')} revision ON revision.workflow_id=r.workflow_id AND revision.id=r.revision
         LEFT JOIN ${table(tx, 'tf_slack_workflow_actions')} o ON o.run_id=s.run_id AND o.step_id=s.step_id
@@ -2961,13 +2986,15 @@ export function createWorkflows(
             OR a.expires_at<=clock_timestamp() OR e.state<>'pending' AND e.next_attempt_at<=clock_timestamp()
             OR e.state='pending' AND (c.action_id IS NULL OR c.state='retry' AND c.next_attempt_at<=clock_timestamp()))
       )`
-          : '';
-      return (
-        await tx.client.query(
-          `SELECT r.id FROM ${table(tx, 'tf_workflow_runs')} r WHERE r.status='running' ${slack} ORDER BY r.created_at,r.id LIMIT 20`,
-        )
-      ).rows.map(row => workSchema.parse({ workspaceId, runId: row.id }));
-    });
+            : '';
+        return (
+          await tx.client.query(
+            `SELECT r.id FROM ${table(tx, 'tf_workflow_runs')} r WHERE r.status='running' ${slack} ORDER BY r.created_at,r.id LIMIT 20`,
+          )
+        ).rows.map(row => workSchema.parse({ workspaceId, runId: row.id }));
+      },
+      'read',
+    );
   }
   type CodeWork = { kind: 'code'; job: SnippetJob };
   type AgentWork = {
@@ -2993,7 +3020,8 @@ export function createWorkflows(
     body?: string | undefined;
   };
   type SlackWork = { kind: 'slack'; workspaceId: string; runId: string; stepId: string; actionId: string };
-  const isProgress = (work: Progress | CodeWork | AgentWork | HttpWork | SlackWork): work is Progress =>
+  type CodingWork = { kind: 'coding'; workspaceId: string; runId: string; stepId: string; jobId: string };
+  const isProgress = (work: Progress | CodeWork | AgentWork | HttpWork | SlackWork | CodingWork): work is Progress =>
     work.kind === 'continue' || work.kind === 'wait' || work.kind === 'done';
   const agentRequestId = (runId: string, stepId: string) => {
     const hash = createHash('sha256').update(`${runId}:${stepId}`).digest('hex');
@@ -3010,7 +3038,8 @@ export function createWorkflows(
     },
     http?: { work: HttpWork; result?: Awaited<ReturnType<typeof requestHttp>>; error?: string },
     slack?: { work: SlackWork; result: Awaited<ReturnType<SlackClient['workflow']>> },
-  ): Promise<Progress | CodeWork | AgentWork | HttpWork | SlackWork> {
+    coding?: { work: CodingWork; started: boolean },
+  ): Promise<Progress | CodeWork | AgentWork | HttpWork | SlackWork | CodingWork> {
     const work = workSchema.parse(value);
     return transaction(work.workspaceId, async tx => {
       const raw = (
@@ -3233,6 +3262,85 @@ export function createWorkflows(
           return { kind: 'wait', seconds: 2 };
         }
         return { kind: 'code', job };
+      }
+      if (step.kind === 'coding') {
+        const fail = async (error: string): Promise<Progress> => {
+          await tx.client.query(`UPDATE ${table(tx, 'tf_workflow_runs')} SET status='failed',error=$2 WHERE id=$1`, [
+            work.runId,
+            error,
+          ]);
+          return { kind: 'done' };
+        };
+        if (!codingStepsAvailable) return fail('coding-runner-unavailable');
+        const jobId = agentRequestId(work.runId, step.id);
+        const pending: CodingWork = {
+          kind: 'coding',
+          workspaceId: work.workspaceId,
+          runId: work.runId,
+          stepId: step.id,
+          jobId,
+        };
+        if (!receipt) {
+          let job: CodingStepJob;
+          try {
+            const input = payloadSchema.parse(raw.input);
+            let prompt = z
+              .string()
+              .trim()
+              .min(1)
+              .max(agentTextLimit)
+              .parse(resolveValue(step.prompt, input, outputs));
+            const context = step.context ? resolveValue(step.context, input, outputs) : input;
+            if (step.triggerContext) prompt = withAgentContext(prompt, triggerContext(startedBy, context));
+            else if (step.context) prompt = withAgentContext(prompt, context);
+            const branch = step.branch ? resolveValue(step.branch, input, outputs) : null;
+            const title = step.title ? resolveValue(step.title, input, outputs) : null;
+            job = codingStepJobSchema.parse({
+              agent: step.agent,
+              repository: workflowRepositorySchema.parse(resolveValue(step.repository, input, outputs)),
+              branch: branch === null || branch === '' ? null : codingBranchSchema.parse(branch),
+              prompt,
+              pullRequest: step.pullRequest,
+              title: typeof title === 'string' && title.trim() ? Array.from(title.trim()).slice(0, 256).join('') : null,
+            });
+          } catch {
+            return fail('coding-input-invalid');
+          }
+          // The job is fixed now, so a retried start or a later run detail always describes the same work.
+          await tx.client.query(
+            `INSERT INTO ${table(tx, 'tf_workflow_steps')} (run_id,step_id,ordinal,status,output,due_at) VALUES ($1,$2,$3,'waiting',$4,clock_timestamp()+interval '45 minutes')`,
+            [work.runId, step.id, ordinal, JSON.stringify({ jobId, state: 'starting', job })],
+          );
+          await tx.client.query(`UPDATE ${table(tx, 'tf_workflow_runs')} SET status='waiting' WHERE id=$1`, [
+            work.runId,
+          ]);
+          return pending;
+        }
+        const stored = codingReceiptSchema.safeParse(receipt.output);
+        if (!stored.success || stored.data.jobId !== jobId) return fail('coding-input-invalid');
+        const result = stored.data.result;
+        if (result?.kind === 'completed') {
+          await tx.client.query(
+            `UPDATE ${table(tx, 'tf_workflow_steps')} SET status='completed',output=$3 WHERE run_id=$1 AND step_id=$2`,
+            [work.runId, step.id, JSON.stringify(result.output)],
+          );
+          await tx.client.query(`UPDATE ${table(tx, 'tf_workflow_runs')} SET status='running' WHERE id=$1`, [
+            work.runId,
+          ]);
+          return { kind: 'continue' };
+        }
+        if (result?.kind === 'failed') return fail(`coding-${result.error}`);
+        if (z.number().parse(receipt.remaining) <= 0) return fail('coding-deadline');
+        if (coding?.work.jobId === jobId && coding.started && stored.data.state === 'starting') {
+          await tx.client.query(
+            `UPDATE ${table(tx, 'tf_workflow_steps')} SET output=output||'{"state":"running"}'::jsonb WHERE run_id=$1 AND step_id=$2`,
+            [work.runId, step.id],
+          );
+          return { kind: 'wait', seconds: 30 };
+        }
+        // A start that did not reach the runner is tried again; a started job reports back on its own.
+        if (stored.data.state === 'starting' && !coding) return pending;
+        return { kind: 'wait', seconds: stored.data.state === 'starting' ? 5 : 30 };
       }
       if (step.kind === 'agent') {
         const fail = async (error: string): Promise<Progress> => {
@@ -3492,6 +3600,25 @@ export function createWorkflows(
       const next = await advanceTransaction(value, undefined, undefined, undefined, { work: progress, result });
       return isProgress(next) ? next : { kind: 'wait', seconds: 5 };
     }
+    if (progress.kind === 'coding') {
+      let started = false;
+      try {
+        if (!options.codingRuns) throw new Error('coding-runner-unavailable');
+        await options.codingRuns.start(progress.workspaceId, progress.runId, progress.stepId, progress.jobId);
+        started = true;
+      } catch (error) {
+        log('warn', 'activity', 'call_failed', {
+          operation: 'workflow.coding.start',
+          outcome: 'error',
+          'error.type': error instanceof Error ? error.message.slice(0, 100) : 'unknown',
+        });
+      }
+      const next = await advanceTransaction(value, undefined, undefined, undefined, undefined, {
+        work: progress,
+        started,
+      });
+      return isProgress(next) ? next : { kind: 'wait', seconds: 5 };
+    }
     if (progress.kind === 'agent') {
       try {
         if (progress.request) {
@@ -3539,6 +3666,62 @@ export function createWorkflows(
     }
     const next = await advanceTransaction(value, { job: progress.job, result });
     return isProgress(next) ? next : { kind: 'continue' };
+  }
+  /**
+   * The job of a coding step still waiting for it, with the member whose plan and GitHub account it uses: the
+   * sponsor for unattended runs, the requester for manual ones. Null once the run has moved on or lost its authority.
+   */
+  async function codingJob(workspaceId: string, runId: string, stepId: string, jobId: string) {
+    return transaction(
+      workspaceId,
+      async tx => {
+        const row = (
+          await tx.client.query(
+            `SELECT r.membership_id,m.user_id,r.workflow_id,r.sponsorship_id,r.request_key,s.output,w.enabled,w.sponsor_membership_id,w.sponsorship_id AS current_sponsorship_id,d.definition->>'name' AS name
+             FROM ${table(tx, 'tf_workflow_runs')} r
+             JOIN ${table(tx, 'tf_memberships')} m ON m.id=r.membership_id AND m.removed_at IS NULL
+             JOIN ${table(tx, 'tf_workflow_steps')} s ON s.run_id=r.id AND s.step_id=$2 AND s.status='waiting'
+             JOIN ${table(tx, 'tf_workflows')} w ON w.id=r.workflow_id
+             JOIN ${table(tx, 'tf_workflow_revisions')} d ON d.workflow_id=r.workflow_id AND d.id=r.revision
+             WHERE r.id=$1 AND r.status IN ('running','waiting')`,
+            [idSchema.parse(runId), stepId],
+          )
+        ).rows[0];
+        if (!row?.membership_id || !row.enabled) return null;
+        const authorized =
+          (await hasGrant(tx, row.membership_id, row.workflow_id, 'invoke')) &&
+          (row.sponsorship_id
+            ? row.sponsorship_id === row.current_sponsorship_id && row.membership_id === row.sponsor_membership_id
+            : /^(manual|event):/.test(row.request_key));
+        const stored = codingReceiptSchema.safeParse(row.output);
+        if (!authorized || !stored.success || stored.data.jobId !== jobId || stored.data.result) return null;
+        return {
+          membershipId: idSchema.parse(row.membership_id),
+          userId: z.string().parse(row.user_id),
+          workflowName: z.string().parse(row.name),
+          job: stored.data.job,
+        };
+      },
+      'read',
+    );
+  }
+  /** Records a coding job's result on its waiting step once; the run picks it up on its next advance. */
+  async function recordCodingResult(
+    workspaceId: string,
+    runId: string,
+    stepId: string,
+    jobId: string,
+    value: CodingStepResult,
+  ) {
+    const result = codingStepResultSchema.parse(value);
+    return wakeAfter(workspaceId, async (tx, woken) => {
+      const updated = await tx.client.query(
+        `UPDATE ${table(tx, 'tf_workflow_steps')} SET output=output||jsonb_build_object('result',$4::jsonb) WHERE run_id=$1 AND step_id=$2 AND status='waiting' AND output->>'jobId'=$3 AND NOT output ? 'result'`,
+        [idSchema.parse(runId), stepId, jobId, JSON.stringify(result)],
+      );
+      if (updated.rowCount) woken.add(idSchema.parse(runId));
+      return (updated.rowCount ?? 0) > 0;
+    });
   }
   async function activity(value: unknown): Promise<Progress> {
     try {
@@ -3593,6 +3776,8 @@ export function createWorkflows(
     resumable,
     advance,
     activity,
+    codingJob,
+    recordCodingResult,
     providers,
     candidates,
     grants,

@@ -22,3 +22,30 @@ test('own tells whether the plan tried last belongs to the caller', async () => 
   assert.equal(await plans.next('usage-limit'), 'token-teammate');
   assert.equal(plans.own(), false);
 });
+
+test('a usage-limit refusal marks the plan limited and the plan that answers clears its own limit', async () => {
+  process.env.FEATURE_FLAG_CLAUDE_PLAN = 'true';
+  const calls = [];
+  const candidate = owner => ({ connectionId: `c-${owner}`, ownerMembershipId: owner, models: [], disabled: [] });
+  const plans = await memberPlans({
+    provider: 'claude',
+    credentials: { accessToken: async (_, owner) => `token-${owner}`, requireReconnect: async () => undefined },
+    subscriptions: {
+      eligible: async () => [candidate('me'), candidate('teammate'), candidate('team')],
+      markUsed: async () => undefined,
+      coolDown: async (_, connectionId, _retry, usageLimit) => calls.push(['coolDown', connectionId, usageLimit]),
+      answered: async (_, connectionId) => calls.push(['answered', connectionId]),
+    },
+    workspaceId: 'w',
+    caller: 'me',
+    model: 'claude-sonnet-5',
+  });
+  await plans.next('usage-limit');
+  await plans.next('rate-limit');
+  await plans.answered();
+  assert.deepEqual(calls, [
+    ['coolDown', 'c-me', true],
+    ['coolDown', 'c-teammate', false],
+    ['answered', 'c-team'],
+  ]);
+});

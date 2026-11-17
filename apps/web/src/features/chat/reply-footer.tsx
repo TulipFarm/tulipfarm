@@ -6,7 +6,6 @@ import type { ConversationMessage } from './conversation-api';
 import { compactsOnRetry, contextFailure } from './compaction-copy';
 import {
   planFailureAction,
-  fallbackNote,
   proposalKeptNote,
   replyFailure,
   replyRetrying,
@@ -32,7 +31,6 @@ export function ReplyFooter({
   skillName,
   disabled,
   control,
-  modelName,
   workspaceSlug,
 }: {
   turn: NonNullable<ConversationMessage['turn']>;
@@ -40,25 +38,21 @@ export function ReplyFooter({
   skillName?: string | undefined;
   disabled: boolean;
   control: (kind: 'retry' | 'cancel') => void;
-  modelName?: ((id: string) => string) | undefined;
   workspaceSlug?: string | undefined;
 }) {
   const retrying = replyRetrying(turn.status, turn.errorCode);
-  const answeredBy = fallbackNote(turn.status, turn.errorCode, turn.stats?.model, modelName);
   const proposalKept = turn.status === 'failed' ? proposalKeptNote(tools) : null;
-  const quiet = ['queued', 'processing', 'completed', 'cancelled'].includes(turn.status) && !retrying && !answeredBy;
+  const quiet = ['queued', 'processing', 'completed', 'cancelled'].includes(turn.status) && !retrying;
   if (quiet) return null;
   return (
     <MessageFooter>
       <div className="space-y-2">
-        {answeredBy && <p className="text-xs text-muted-foreground">{answeredBy}</p>}
         {retrying && (
           <p role="status" className="text-xs text-muted-foreground">
             {retrying}
           </p>
         )}
-        {!answeredBy &&
-          !retrying &&
+        {!retrying &&
           (turn.status === 'failed' && proposalKept ? (
             <p role="status" className="text-sm text-muted-foreground">
               {proposalKept}

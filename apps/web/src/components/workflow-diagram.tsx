@@ -25,6 +25,7 @@ import { MessageEdit } from 'reicon-react/icons/MessageEdit';
 import { Play } from 'reicon-react/icons/Play';
 import { Plug } from 'reicon-react/icons/Plug';
 import { Sparkle } from 'reicon-react/icons/Sparkle';
+import { TerminalSquare } from 'reicon-react/icons/TerminalSquare';
 import { Users } from 'reicon-react/icons/Users';
 import { Badge } from '@tulipfarm/sprout/badge';
 import { BrandIcon, type Brand } from '@tulipfarm/sprout/brand-icon';
@@ -40,6 +41,7 @@ export type WorkflowNodeKind =
   | 'human'
   | 'code'
   | 'agent'
+  | 'coding'
   | 'http'
   | 'slack-message'
   | 'find-rows'
@@ -113,6 +115,7 @@ const icons: Record<WorkflowNodeKind, ComponentType<{ size?: number }>> = {
   human: Users,
   code: Code,
   agent: Sparkle,
+  coding: TerminalSquare,
   http: Globe,
   'slack-message': MessageEdit,
   'find-rows': Database,
@@ -128,6 +131,7 @@ export const workflowKindLabels: Record<WorkflowNodeKind, string> = {
   human: 'Human decision',
   code: 'Code',
   agent: 'Agent task',
+  coding: 'Coding agent',
   http: 'HTTP request',
   'slack-message': 'Slack message',
   'find-rows': 'Find rows',

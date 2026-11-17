@@ -167,6 +167,12 @@ export const agentTaskLimitsSchema = z.strictObject({
   activeMilliseconds: z.number().int().min(1000).max(3600000).default(300000),
   credits: z.number().int().min(1).max(10000).default(100),
 });
+/** Vendor coding agents a coding step can run, each on the sponsor's own plan for it. */
+export const workflowCodingAgents = ['claude-code', 'codex', 'copilot'] as const;
+export const workflowRepositorySchema = z
+  .string()
+  .regex(/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})\/[A-Za-z0-9._-]{1,100}$/)
+  .refine(value => !['.', '..'].includes(value.split('/')[1]!), 'Expected owner/name');
 export const stepSchema = z.discriminatedUnion('kind', [
   // ifMet and otherwise name later steps. A listed step runs only when this condition ran and chose its branch; unlisted steps always run.
   z.strictObject({
@@ -209,6 +215,23 @@ export const stepSchema = z.discriminatedUnion('kind', [
     activationId: idSchema.optional(),
     limits: agentTaskLimitsSchema.default({ toolCalls: 100, activeMilliseconds: 300000, credits: 100 }),
   }),
+  z.strictObject({
+    id: name,
+    kind: z.literal('coding'),
+    agent: z.enum(workflowCodingAgents),
+    /** Resolves to a GitHub repository as owner/name, such as a GitHub trigger's `repository`. */
+    repository: valueSchema,
+    /** What the coding agent should do; it sees nothing else from the workflow except `context`. */
+    prompt: valueSchema,
+    context: valueSchema.optional(),
+    triggerContext: z.boolean().optional(),
+    /** Branch to start from; the repository's default branch when absent. */
+    branch: valueSchema.optional(),
+    /** Pushes the change to a new branch and opens a pull request into the starting branch. */
+    pullRequest: z.boolean().default(true),
+    /** Pull request title; the prompt's first line when absent. */
+    title: valueSchema.optional(),
+  }),
   httpStepSchema,
   z
     .strictObject({
@@ -246,6 +269,73 @@ export type TableStep = Extract<Step, { kind: 'find-rows' | 'create-row' | 'upda
 export const isTableStep = (step: Step): step is TableStep =>
   step.kind === 'find-rows' || step.kind === 'create-row' || step.kind === 'update-row';
 export type AgentStep = Extract<Step, { kind: 'agent' }>;
+export type CodingStep = Extract<Step, { kind: 'coding' }>;
+export const codingBranchSchema = z
+  .string()
+  .min(1)
+  .max(255)
+  .regex(/^[A-Za-z0-9._/-]+$/)
+  .refine(
+    value =>
+      !value.startsWith('-') &&
+      !value.startsWith('/') &&
+      !value.endsWith('/') &&
+      !value.endsWith('.lock') &&
+      !value.includes('..') &&
+      !value.includes('//'),
+    'Expected a branch name',
+  );
+/** The resolved work of one coding step, fixed when the step starts so retries run the same job. */
+export const codingStepJobSchema = z.strictObject({
+  agent: z.enum(workflowCodingAgents),
+  repository: workflowRepositorySchema,
+  branch: codingBranchSchema.nullable(),
+  prompt: z.string().min(1).max(16000),
+  pullRequest: z.boolean(),
+  title: z.string().min(1).max(256).nullable(),
+});
+export type CodingStepJob = z.infer<typeof codingStepJobSchema>;
+export const codingStepOutputSchema = z.strictObject({
+  status: z.enum(['changed', 'unchanged']),
+  agent: z.enum(workflowCodingAgents),
+  repository: workflowRepositorySchema,
+  base: z.string().max(255).nullable(),
+  message: z.string().max(4000),
+  files: z.array(z.string().max(1024)).max(100),
+  diffTruncated: z.boolean(),
+  branch: z.string().max(255).nullable(),
+  pullRequest: z.strictObject({ number: z.number().int().positive(), url: z.string().max(2048) }).nullable(),
+});
+export type CodingStepOutput = z.infer<typeof codingStepOutputSchema>;
+export const codingStepErrors = [
+  'unavailable',
+  'plan-required',
+  'github-account-required',
+  'clone-failed',
+  'agent-failed',
+  'timed-out',
+  'push-failed',
+  'pull-request-failed',
+  'interrupted',
+] as const;
+export type CodingStepError = (typeof codingStepErrors)[number];
+export const codingStepResultSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('completed'), output: codingStepOutputSchema }),
+  z.strictObject({
+    kind: z.literal('failed'),
+    error: z.enum(codingStepErrors),
+    message: z.string().max(4000).default(''),
+    log: z.string().max(4096).optional(),
+  }),
+]);
+export type CodingStepResult = z.infer<typeof codingStepResultSchema>;
+/** A waiting coding step's receipt: its job, whether the job was handed to the runner, and the runner's result. */
+export const codingReceiptSchema = z.object({
+  jobId: z.string().regex(/^[a-f0-9-]{36}$/),
+  state: z.enum(['starting', 'running']),
+  job: codingStepJobSchema,
+  result: codingStepResultSchema.optional(),
+});
 /** Every value a step reads from the run input or earlier steps. */
 export function stepValues(step: Step): z.infer<typeof valueSchema>[] {
   return stepValueEntries(step).map(entry => entry.value);

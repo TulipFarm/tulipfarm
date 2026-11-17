@@ -302,10 +302,11 @@ test('Calls reject unsafe repositories and branches', () => {
   assert.equal(parse({ agent: 'gemini' }), false);
 });
 
-test('The run script clones, runs the agent and reports its message, files and diff', t => {
+/** A bare `octo/app` origin with one commit on main, a fake Claude Code that edits two files, and the script runner. */
+function scriptFixture(t) {
   const root = mkdtempSync(join(import.meta.dirname, '.coding-run-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
-  const git = (cwd, ...args) => execFileSync('git', args, { cwd, stdio: 'pipe' });
+  const git = (cwd, ...args) => execFileSync('git', args, { cwd, stdio: 'pipe', encoding: 'utf8' });
   const origin = join(root, 'octo', 'app.git');
   const seed = join(root, 'seed');
   mkdirSync(seed);
@@ -328,31 +329,63 @@ test('The run script clones, runs the agent and reports its message, files and d
   tool('timeout', 'shift 2; exec "$@"');
   const work = join(root, 'work');
   mkdirSync(work);
-  const run = spawnSync(
-    'bash',
-    ['-c', codingRunScript('claude-code'), 'coding-run', 'octo/app', 'it\'s "quoted" $(true)', '', 'claude-code', '60'],
-    {
-      cwd: work,
-      encoding: 'utf8',
-      env: {
-        PATH: `${bin}:${process.env.PATH}`,
-        HOME: root,
-        GIT_CONFIG_NOSYSTEM: '1',
-        GIT_CONFIG_COUNT: '1',
-        GIT_CONFIG_KEY_0: `url.${root}/.insteadOf`,
-        GIT_CONFIG_VALUE_0: 'https://github.com/',
+  const run = (task, ...push) => {
+    const output = spawnSync(
+      'bash',
+      ['-c', codingRunScript('claude-code'), 'coding-run', 'octo/app', task, '', 'claude-code', '60', ...push],
+      {
+        cwd: work,
+        encoding: 'utf8',
+        env: {
+          PATH: `${bin}:${process.env.PATH}`,
+          HOME: root,
+          GIT_CONFIG_NOSYSTEM: '1',
+          GIT_CONFIG_COUNT: '1',
+          GIT_CONFIG_KEY_0: `url.${root}/.insteadOf`,
+          GIT_CONFIG_VALUE_0: 'https://github.com/',
+        },
       },
-    },
-  );
-  assert.equal(run.status, 0, run.stderr);
-  const line = run.stdout.split('\n').find(item => item.startsWith('TULIPFARM_CODING_RUN '));
-  const result = JSON.parse(line.slice('TULIPFARM_CODING_RUN '.length));
+    );
+    assert.equal(output.status, 0, output.stderr);
+    const line = output.stdout.split('\n').find(item => item.startsWith('TULIPFARM_CODING_RUN '));
+    return JSON.parse(line.slice('TULIPFARM_CODING_RUN '.length));
+  };
+  return { root, origin, git, run };
+}
+
+test('The run script clones, runs the agent and reports its message, files and diff', t => {
+  const { run } = scriptFixture(t);
+  const result = run('it\'s "quoted" $(true)');
   assert.equal(result.stage, 'done');
   assert.equal(result.exitCode, 0);
+  assert.equal(result.base, 'main');
+  assert.equal(result.pushed, false);
   assert.equal(result.message, `done: it's "quoted" $(true)`);
   assert.deepEqual(result.files, ['a.txt', 'b.txt']);
   assert.match(result.diff, /\+two/);
   assert.match(result.diff, /new file mode/);
+});
+
+test('With a push branch, the script commits the changes as the given author and pushes them', t => {
+  const { root, origin, git, run } = scriptFixture(t);
+  const result = run('fix it', 'tulipfarm/fix-it', 'Ada $(x)', 'ada@example.com', 'Fix "it"');
+  assert.equal(result.stage, 'done');
+  assert.equal(result.pushed, true);
+  assert.equal(
+    git(root, `--git-dir=${origin}`, 'log', '-1', '--format=%an <%ae> %s', 'tulipfarm/fix-it').trim(),
+    'Ada $(x) <ada@example.com> Fix "it"',
+  );
+  assert.equal(git(root, `--git-dir=${origin}`, 'diff', '--name-only', 'main', 'tulipfarm/fix-it'), 'a.txt\nb.txt\n');
+});
+
+test('A rejected push reports the push stage with its log', t => {
+  const { origin, run } = scriptFixture(t);
+  writeFileSync(join(origin, 'hooks', 'pre-receive'), '#!/bin/bash\necho protected branch >&2\nexit 1\n');
+  chmodSync(join(origin, 'hooks', 'pre-receive'), 0o755);
+  const result = run('fix it', 'tulipfarm/fix-it', 'Ada', 'ada@example.com', 'Fix it');
+  assert.equal(result.stage, 'push');
+  assert.equal(result.pushed, false);
+  assert.match(result.log, /protected branch/);
 });
 
 test('The run script reports a failed clone', t => {

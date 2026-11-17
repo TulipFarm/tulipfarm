@@ -25,6 +25,12 @@ export type FeatureFlagDefinition = {
 };
 
 export const featureFlags = {
+  'bud-quick-chat': {
+    description: "Bud's quick chat: its launcher in the header or corner, and the suggestions that open it.",
+    default: false,
+    scope: 'user',
+    env: 'FEATURE_FLAG_BUD_QUICK_CHAT',
+  },
   'app-hosting': {
     description: 'Build and publish workspace apps, public on their own name or private to members.',
     default: false,
@@ -140,7 +146,7 @@ export const featureFlags = {
   },
   'coding-runs': {
     description:
-      "Chat offers Run coding agent: Claude Code, Codex or Copilot CLI works on a GitHub repository in a fresh sandbox on the member's own plan, after the member approves. Needs an execution backend with held secrets and the agent templates.",
+      "Chat offers Run coding agent: Claude Code, Codex or Copilot CLI works on a GitHub repository in a fresh sandbox on the member's own plan, after the member approves. Also lets workflow coding steps run; off fails them with coding-unavailable. Needs an execution backend with held secrets and the agent templates.",
     default: false,
     scope: 'workspace',
     env: 'FEATURE_FLAG_CODING_RUNS',

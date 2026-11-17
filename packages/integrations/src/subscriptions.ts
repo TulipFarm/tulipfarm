@@ -36,9 +36,21 @@ export type SubscriptionCandidate = {
   models: readonly string[];
   /** Models the owner turned off. They are skipped even when `models` is empty. */
   disabled: readonly string[];
+  /** The caller owns the plan. */
+  own: boolean;
+  /** When the plan last refused a reply for its usage limit; null once it answers again. */
+  limitedAt: Date | null;
 };
 
 export type SubscriptionModel = { slug: string; label: string };
+
+/** The plan a model runs on for the caller, and what its replies last said about its usage limit. */
+export type SubscriptionModelPlan = {
+  connectionId: string;
+  ownerMembershipId: string;
+  own: boolean;
+  limitedAt: Date | null;
+};
 
 export type SharedSubscription = {
   connectionId: string;
@@ -75,6 +87,11 @@ const candidateRow = z.object({
   owner_membership_id: z.uuid(),
   models: z.unknown(),
   disabled_models: z.array(z.string()),
+  usage_limited_at: z
+    .union([z.date(), z.string()])
+    .transform(value => new Date(value))
+    .nullable(),
+  rank: z.coerce.number().int(),
 });
 const connectionRow = z.object({
   id: z.uuid(),
@@ -112,6 +129,10 @@ function granteeKey(grantee: SubscriptionGrant['grantee']) {
       : `member:${grantee.membershipId}`;
 }
 
+// Workspaces still below this common migration have no usage-limit column, so their plans show no learned status.
+const usageLimitVersion = 85;
+const hasUsageLimit = (tx: object) => ((tx as { commonVersion?: number }).commonVersion ?? 0) >= usageLimitVersion;
+
 /**
  * The SQL rank of a connection for `$2` (the caller's membership, or null for memberless runs): 1 own, 2 shared with
  * the caller, 3 shared with one of the caller's teams, 4 shared with the workspace. Null when the caller can't use it.
@@ -146,18 +167,26 @@ export function createSubscriptions(options: { runtime: Runtime }) {
     });
   }
 
-  /** Connected plans of `provider` that `caller` may use, in the order they are tried. */
-  async function eligibleIn(tx: AuthorizationTransaction, provider: SubscriptionProvider, caller: string | null) {
+  /**
+   * Connected plans of `provider` that `caller` may use, in the order they are tried. A plan cooling down after a refusal
+   * is skipped, unless `coolingDown` lists it last so the models on it stay selectable.
+   */
+  async function eligibleIn(
+    tx: AuthorizationTransaction,
+    provider: SubscriptionProvider,
+    caller: string | null,
+    coolingDown = false,
+  ) {
     const rows = await tx.client.query(
-      `SELECT c.id, c.owner_membership_id, c.models, c.disabled_models, ${rankSql(tx)} AS rank
+      `SELECT c.id, c.owner_membership_id, c.models, c.disabled_models, ${hasUsageLimit(tx) ? 'c.usage_limited_at' : 'NULL::timestamptz AS usage_limited_at'}, ${rankSql(tx)} AS rank
          FROM ${connections(tx)} c
          JOIN ${memberships(tx)} m ON m.id = c.owner_membership_id AND m.removed_at IS NULL
          LEFT JOIN ${grants(tx)} g ON g.connection_id = c.id
         WHERE c.provider = $1 AND c.state = 'connected'
-          AND (c.cooldown_until IS NULL OR c.cooldown_until <= clock_timestamp())
+          ${coolingDown ? '' : 'AND (c.cooldown_until IS NULL OR c.cooldown_until <= clock_timestamp())'}
         GROUP BY c.id
        HAVING ${rankSql(tx)} IS NOT NULL
-        ORDER BY rank, c.last_used_at NULLS FIRST, c.id`,
+        ORDER BY COALESCE(c.cooldown_until > clock_timestamp(), false), rank, c.last_used_at NULLS FIRST, c.id`,
       [provider, caller === null ? null : uuid.parse(caller)],
     );
     return rows.rows.flatMap(raw => {
@@ -173,6 +202,8 @@ export function createSubscriptions(options: { runtime: Runtime }) {
           ownerMembershipId: row.owner_membership_id,
           models,
           disabled: row.disabled_models,
+          own: row.rank === 1,
+          limitedAt: row.usage_limited_at,
           labels: stored.filter(model => models.includes(model.slug)),
         } satisfies SubscriptionCandidate & { labels: SubscriptionModel[] },
       ];
@@ -230,13 +261,28 @@ export function createSubscriptions(options: { runtime: Runtime }) {
       });
     },
 
-    /** Skips a plan that reported its usage limit until `retryAfterMs` (15 minutes when unknown) has passed. */
-    async coolDown(workspaceId: string, connectionId: string, retryAfterMs?: number) {
+    /**
+     * Tries a plan that refused a reply last until `retryAfterMs` (15 minutes when unknown) has passed. With
+     * `usageLimit`, the refusal was its usage limit, which the plan's status shows until it answers again.
+     */
+    async coolDown(workspaceId: string, connectionId: string, retryAfterMs?: number, usageLimit = false) {
       const ms = Math.min(Math.max(retryAfterMs ?? defaultCooldownMs, 60_000), maxCooldownMs);
       await runtime.transaction(uuid.parse(workspaceId), commonCompatibility, async tx => {
         await tx.client.query(
-          `UPDATE ${connections(tx)} SET cooldown_until = clock_timestamp() + $2 * interval '1 millisecond' WHERE id = $1`,
+          `UPDATE ${connections(tx)} SET cooldown_until = clock_timestamp() + $2 * interval '1 millisecond'
+             ${usageLimit && hasUsageLimit(tx) ? ', usage_limited_at = clock_timestamp()' : ''} WHERE id = $1`,
           [uuid.parse(connectionId), ms],
+        );
+      });
+    },
+
+    /** Records that a plan answered a reply, which clears a usage limit it reported earlier. */
+    async answered(workspaceId: string, connectionId: string) {
+      await runtime.transaction(uuid.parse(workspaceId), commonCompatibility, async tx => {
+        if (!hasUsageLimit(tx)) return;
+        await tx.client.query(
+          `UPDATE ${connections(tx)} SET usage_limited_at = NULL WHERE id = $1 AND usage_limited_at IS NOT NULL`,
+          [uuid.parse(connectionId)],
         );
       });
     },
@@ -270,13 +316,30 @@ export function createSubscriptions(options: { runtime: Runtime }) {
       });
     },
 
-    /** Models of `provider` the signed-in member can pick, with the provider's names: those of every plan they may use. */
-    async models(workspaceId: string, userId: string, provider: SubscriptionProvider): Promise<SubscriptionModel[]> {
+    /**
+     * Models of `provider` the signed-in member can pick, with the provider's names: those of every plan they may use.
+     * Each names the plan it runs on: the first that has not reported its usage limit, or else the first plan.
+     */
+    async models(
+      workspaceId: string,
+      userId: string,
+      provider: SubscriptionProvider,
+    ): Promise<(SubscriptionModel & { plan: SubscriptionModelPlan })[]> {
       try {
         return await authorized(workspaceId, userId, 'read', async (tx, actor) => {
-          const models = new Map<string, SubscriptionModel>();
-          for (const candidate of await eligibleIn(tx, provider, actor.membershipId))
-            for (const model of candidate.labels) if (!models.has(model.slug)) models.set(model.slug, model);
+          const models = new Map<string, SubscriptionModel & { plan: SubscriptionModelPlan }>();
+          for (const candidate of await eligibleIn(tx, provider, actor.membershipId, true)) {
+            const plan = {
+              connectionId: candidate.connectionId,
+              ownerMembershipId: candidate.ownerMembershipId,
+              own: candidate.own,
+              limitedAt: candidate.limitedAt,
+            };
+            for (const model of candidate.labels) {
+              const known = models.get(model.slug);
+              if (!known || (known.plan.limitedAt && !plan.limitedAt)) models.set(model.slug, { ...model, plan });
+            }
+          }
           return [...models.values()];
         });
       } catch (error) {

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   authoredDefinitionSchema,
+  codingBranchSchema,
   ConditionIncomparable,
   definitionSchema,
   evaluateCondition,
@@ -15,6 +16,7 @@ import {
   transform,
   triggerSummary,
   waitUntilInstant,
+  workflowRepositorySchema,
 } from '../src/contracts.ts';
 import { githubWorkflowPayload } from '../src/github-triggers.ts';
 
@@ -309,6 +311,32 @@ test('agent steps use a prior value as a bounded task prompt', () => {
     ]),
     false,
   );
+});
+
+test('coding steps open a pull request by default and accept only plain repositories and branch names', () => {
+  const step = definitionSchema.parse({
+    version: 1,
+    name: 'Fix',
+    triggers: [],
+    steps: [
+      {
+        id: 'fix',
+        kind: 'coding',
+        agent: 'codex',
+        repository: { kind: 'literal', value: 'octo/app' },
+        prompt: { kind: 'literal', value: 'Fix it' },
+      },
+    ],
+  }).steps[0];
+  assert.equal(step.pullRequest, true);
+  for (const repository of ['octo/app', 'Octo-1/app.js_x'])
+    assert.ok(workflowRepositorySchema.safeParse(repository).success, repository);
+  for (const repository of ['octo', 'octo/..', '-octo/app', 'octo/app/extra', 'octo/app b', '../app'])
+    assert.equal(workflowRepositorySchema.safeParse(repository).success, false, repository);
+  for (const branch of ['main', 'release/2.0', 'fix-1'])
+    assert.ok(codingBranchSchema.safeParse(branch).success, branch);
+  for (const branch of ['--upload-pack=x', 'a..b', 'a b', '/x', 'x/', 'x.lock', 'a//b'])
+    assert.equal(codingBranchSchema.safeParse(branch).success, false, branch);
 });
 
 test('HTTP steps require HTTPS, keep credential values out of definitions, and read earlier request values', () => {

@@ -280,6 +280,27 @@ function describeStep(step: Step, sources: TableStepSources, workspaceId: string
           </p>
         ),
       };
+    case 'coding':
+      return {
+        summary: `${name}: ask ${{ 'claude-code': 'Claude Code', codex: 'Codex', copilot: 'Copilot' }[step.agent]} to ${describeValue(step.prompt)} in ${describeValue(step.repository)}`,
+        detail: (
+          <>
+            <ReviewValues
+              values={[
+                ...(step.branch ? [{ name: 'Starts from', value: describeValue(step.branch) }] : []),
+                {
+                  name: 'Result',
+                  value: step.pullRequest ? 'Opens a pull request' : 'Returns the changes; pushes nothing',
+                },
+              ]}
+            />
+            <p>
+              Runs up to 30 minutes on the plan and GitHub account of whoever turned this workflow on, or of the person
+              who runs it. Turning the workflow on approves every run.
+            </p>
+          </>
+        ),
+      };
     case 'slack-message':
       return {
         summary: `${name}: send a Slack message`,

@@ -79,20 +79,21 @@ export type ModelCatalogDependencies = {
   modelFamilyResolution?: ModelFamilyResolution;
   modelCatalogSnapshot?: (workspaceId: string) => Promise<ModelCatalogSnapshot>;
   /**
-   * The models of `provider` the member may use on their own or a shared plan, with the provider's names; absent when
-   * no plan provider is on. Every model listed here is offered, whether or not the catalog names it.
+   * The models of `provider` the member may use on their own or a shared plan, with the provider's names and the usage
+   * status of the plan each runs on; absent when no plan provider is on. Every model listed here is offered, whether or
+   * not the catalog names it.
    */
-  planModels?: (
-    workspaceId: string,
-    userId: string,
-    provider: PlanProvider,
-  ) => Promise<readonly { slug: string; label: string }[]>;
+  planModels?: (workspaceId: string, userId: string, provider: PlanProvider) => Promise<readonly PlanModelChoice[]>;
 };
+
+export type PlanUsage = NonNullable<ModelCatalogFamily['planUsage']>;
+export type PlanModelChoice = { slug: string; label: string; usage?: PlanUsage };
+type OfferedPlanModel = { provider: PlanProvider; slug: string; label: string; usage?: PlanUsage | undefined };
 
 /** The plan models of plans whose feature flag, such as `copilot-plan`, is on for the workspace. */
 async function offeredPlanModels(
   transaction: Parameters<typeof plansOn>[0],
-  planModels: Map<string, { provider: PlanProvider; slug: string; label: string }>,
+  planModels: Map<string, OfferedPlanModel>,
 ) {
   if (!planModels.size) return planModels;
   const on = await plansOn(transaction);
@@ -108,7 +109,7 @@ function projectCatalog(
   paused: (familyId: string) => boolean,
   disabled: Set<string>,
   hidden: ReadonlySet<string> = new Set(),
-  planModels: ReadonlyMap<string, { provider: PlanProvider; slug: string; label: string }> = new Map(),
+  planModels: ReadonlyMap<string, OfferedPlanModel> = new Map(),
 ): ModelCatalog {
   // Models that are not selectable serve their roles and existing chats, but are never offered. Hidden models are
   // behind a workspace feature flag that is off. Plan models are offered only to a member who may use a connected
@@ -125,12 +126,22 @@ function projectCatalog(
       isPlanProvider(model.route.type) ? [`${model.route.type}:${model.route.model}`] : [],
     ),
   );
+  // The plan model each offered family runs as, keyed by family id, for its usage status.
+  const planOf = new Map<string, OfferedPlanModel>();
+  for (const model of listed)
+    if (isPlanProvider(model.route.type)) {
+      const offered = planModels.get(`${model.route.type}:${model.route.model}`);
+      if (offered) planOf.set(model.id, offered);
+    }
   const selectable = [
     ...listed,
-    ...[...planModels.entries()].flatMap(([key, { provider, slug, label }]) => {
+    ...[...planModels.entries()].flatMap(([key, offered]) => {
+      const { provider, slug, label } = offered;
       const id = named.has(key) ? null : planModelFamilyId(provider, slug);
       const model = id ? catalog.model(id) : undefined;
-      return model && !hidden.has(model.id) ? [{ ...model, name: planModelName(slug, label) }] : [];
+      if (!model || hidden.has(model.id)) return [];
+      planOf.set(model.id, offered);
+      return [{ ...model, name: planModelName(slug, label) }];
     }),
   ];
   const resolutions = new Map(
@@ -169,6 +180,7 @@ function projectCatalog(
         quality: family.quality,
         imageInput: resolveModelCapabilities(family.route.type, family.capabilities).imageInput,
         imageModelId: family.imageModel,
+        ...(planOf.get(family.id)?.usage ? { planUsage: planOf.get(family.id)!.usage } : {}),
       };
       return modelCatalogFamilySchema.parse(
         resolution
@@ -281,7 +293,7 @@ export function registerModelCatalog(app: FastifyInstance, dependencies: ModelCa
                 await Promise.all(
                   planProviderNames.map(async provider =>
                     (await dependencies.planModels!(workspaceId, userId, provider)).map(
-                      ({ slug, label }) => [`${provider}:${slug}`, { provider, slug, label }] as const,
+                      ({ slug, label, usage }) => [`${provider}:${slug}`, { provider, slug, label, usage }] as const,
                     ),
                   ),
                 )

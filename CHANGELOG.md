@@ -14,6 +14,10 @@ One version identifies all apps and images of a release.
   instead of Sprout's animated monster avatars: in the agent list and editor,
   the builder preview, chat, subagent fan-out, workflow diagrams and the
   sign-in page.
+- Bud's quick chat is hidden behind the `bud-quick-chat` feature flag, off by
+  default: its launcher in the header or corner and the suggestions that open
+  it. Bud's chat still opens as a full chat. Use
+  `FEATURE_FLAG_BUD_QUICK_CHAT=true` to show it without a flag provider.
 - Member plans are switched by workspace feature flags instead of deployment
   settings: `chatgpt-plan` and `copilot-plan` (on by default) and
   `claude-plan` (off by default). `CHATGPT_PLAN`, `CLAUDE_PLAN` and

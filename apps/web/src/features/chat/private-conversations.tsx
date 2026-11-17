@@ -99,6 +99,8 @@ import { CompactionStatus, SentCompact } from './compaction';
 import { ChatMaintenance } from './maintenance';
 import { compactCommand, compactCommandError } from './compaction-copy';
 import { ReplyFooter, turnLabels } from './reply-footer';
+import { FallbackChip } from './fallback-chip';
+import { fallbackStarts } from './reply-failure-copy';
 import { replyStats } from './reply-stats';
 import { MoveToProjectDialog, ProjectScopeSelect, useWorkspaceProjects } from '@/features/projects/project-scope';
 import { Bud } from './bud';
@@ -1069,6 +1071,14 @@ function ConversationDetail({
   const retryHandoff = useCallback((compactionId: string) => entryCommands.current.retryHandoff(compactionId), []);
   const controlEntry = useCallback<ControlTurn>((message, kind) => entryCommands.current.control(message, kind), []);
   const entryModelName = useCallback((id: string) => modelName(modelFamilies, id), [modelFamilies]);
+  const fallbackControls = useMemo<FallbackControls>(
+    () => ({
+      currentModel: models.model?.id,
+      canSwitchTo: id => models.choices.some(choice => choice.id === id && !choice.disabled),
+      switchModel: models.select,
+    }),
+    [models.model?.id, models.choices, models.select],
+  );
   startScreen.current = !compact && empty;
   const latestId = pending?.id ?? data?.messages.at(-1)?.id;
   const firstId = data?.messages.at(0)?.id;
@@ -1339,6 +1349,12 @@ function ConversationDetail({
                                   rowViews={entryDetails(history.messages, modelFamilies).rowViews[index]!}
                                   stats={entryDetails(history.messages, modelFamilies).stats[index]}
                                   modelName={entryModelName}
+                                  fallbackTurn={entryDetails(history.messages, modelFamilies).fallbacks.get(message.id)}
+                                  fallbackControls={
+                                    entryDetails(history.messages, modelFamilies).fallbacks.has(message.id)
+                                      ? fallbackControls
+                                      : undefined
+                                  }
                                   disabled={locked}
                                   retryHandoff={retryHandoff}
                                   control={controlEntry}
@@ -1914,11 +1930,17 @@ function answerOnly(message: ConversationMessage) {
 type ModelFamilies = Parameters<typeof replyStats>[2];
 const noModelFamilies: never[] = [];
 type ControlTurn = (message: ConversationMessage, kind: 'retry' | 'cancel') => void;
+type FallbackControls = Pick<Parameters<typeof FallbackChip>[0], 'currentModel' | 'canSwitchTo' | 'switchModel'>;
 
 // Each entry's row views and reply stats stay the same objects while the history does, so entries can skip rendering.
 const entryDetailsCache = new WeakMap<
   ConversationMessage[],
-  { families: ModelFamilies; rowViews: RowView[][]; stats: (MessageActionsStats | undefined)[] }
+  {
+    families: ModelFamilies;
+    rowViews: RowView[][];
+    stats: (MessageActionsStats | undefined)[];
+    fallbacks: ReturnType<typeof fallbackStarts>;
+  }
 >();
 function entryDetails(messages: ConversationMessage[], families: ModelFamilies) {
   const cached = entryDetailsCache.get(messages);
@@ -1927,6 +1949,7 @@ function entryDetails(messages: ConversationMessage[], families: ModelFamilies) 
     families,
     rowViews: messages.map(message => rowViewsForMessage(messages, message)),
     stats: messages.map((_, index) => replyStats(messages, index, families)),
+    fallbacks: fallbackStarts(messages),
   };
   entryDetailsCache.set(messages, details);
   return details;
@@ -2045,7 +2068,11 @@ const ConversationEntry = memo(function ConversationEntry({
   control,
   stats,
   modelName,
+  fallbackTurn,
+  fallbackControls,
 }: {
+  fallbackTurn?: NonNullable<ConversationMessage['turn']> | undefined;
+  fallbackControls?: FallbackControls | undefined;
   api: ConversationApi;
   chatId: string;
   slug: string;
@@ -2077,6 +2104,17 @@ const ConversationEntry = memo(function ConversationEntry({
   if (message.parts.every(part => part.kind === 'request' || part.kind === 'response')) return null;
   return (
     <div className="space-y-3">
+      {fallbackTurn && fallbackControls && (
+        <FallbackChip
+          turn={fallbackTurn}
+          answeredAt={message.createdAt}
+          modelName={modelName}
+          slug={slug}
+          currentModel={fallbackControls.currentModel}
+          canSwitchTo={fallbackControls.canSwitchTo}
+          switchModel={fallbackControls.switchModel}
+        />
+      )}
       <Message align={message.author === 'human' ? 'end' : 'start'}>
         <MessageContent ref={entry}>
           {message.author === 'assistant' && <span className="sr-only">TulipFarm said</span>}
@@ -2212,7 +2250,6 @@ const ConversationEntry = memo(function ConversationEntry({
               skillName={skill?.name}
               disabled={disabled}
               control={controlTurn}
-              modelName={modelName}
               workspaceSlug={slug}
             />
           )}
