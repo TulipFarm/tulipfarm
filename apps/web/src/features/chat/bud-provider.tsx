@@ -17,6 +17,7 @@ import { Maximize2Icon, MinusIcon } from 'lucide-react';
 import { useLocation, useNavigate, useRouter } from '@tanstack/react-router';
 import { budStateSchema, type BudState } from '@tulipfarm/conversations/bud-contracts';
 import { apiOrigin } from '@/lib/auth';
+import { useFlag } from '@/lib/feature-flags';
 import { jsonResponse, readJson, requestSignal, responseError } from '@/lib/http';
 import { featureKey, freshness, useFeatureRead } from '@/lib/query';
 import { useFeatureContext } from '@/lib/query/provider';
@@ -88,6 +89,7 @@ export function BudProvider({ children, headerActions }: { children: ReactNode; 
   const router = useRouter();
   const pathname = useLocation({ select: location => location.pathname });
   const globalHeader = useContext(ChatHeaderContext);
+  const quickChat = useFlag('bud-quick-chat');
   // The calendar, new-chat home and open chats keep controls at the bottom, so the launcher sits in the header instead.
   const docked =
     pathname === `/${workspace.slug}/calendar` ||
@@ -136,7 +138,7 @@ export function BudProvider({ children, headerActions }: { children: ReactNode; 
     () => false,
   );
   useViewportInset(dock, position.corner.startsWith('top') ? '--floating-top-inset' : '--floating-bottom-inset', {
-    enabled: !docked && !full,
+    enabled: quickChat && !docked && !full,
     gap: 32,
   });
   const returnFromSetup = useCallback(() => {
@@ -325,7 +327,7 @@ export function BudProvider({ children, headerActions }: { children: ReactNode; 
       </Button>
     </div>
   );
-  const launcherDock = !full && (
+  const launcherDock = quickChat && !full && (
     <aside
       ref={dock}
       aria-label="Bud assistant"

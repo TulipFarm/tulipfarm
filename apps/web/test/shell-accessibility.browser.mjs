@@ -226,6 +226,7 @@ for (const mobile of [false, true])
         await page.route('**/*', async route => {
           const url = new URL(route.request().url());
           if (!url.pathname.startsWith('/v1/')) return url.origin === origin ? route.continue() : route.abort();
+          if (url.pathname === '/v1/feature-flags') return route.fulfill({ json: { 'bud-quick-chat': true } });
           if (await serveWorkspaceShellEvent(route, workspace)) return;
           if (reads.has(url.pathname)) return route.fulfill({ json: reads.get(url.pathname) });
           return route.fulfill({ status: 503, json: { error: 'unavailable' } });

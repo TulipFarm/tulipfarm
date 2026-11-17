@@ -25,6 +25,12 @@ export type FeatureFlagDefinition = {
 };
 
 export const featureFlags = {
+  'bud-quick-chat': {
+    description: "Bud's quick chat: its launcher in the header or corner, and the suggestions that open it.",
+    default: false,
+    scope: 'user',
+    env: 'FEATURE_FLAG_BUD_QUICK_CHAT',
+  },
   'app-hosting': {
     description: 'Build and publish workspace apps, public on their own name or private to members.',
     default: false,
