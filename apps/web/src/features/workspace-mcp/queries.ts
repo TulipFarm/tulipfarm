@@ -25,6 +25,7 @@ export const mcpKeys = {
       { agentId: origin.agentId ?? null, activationId: origin.activationId ?? null },
     ] as const,
   actions: ['workspace-mcp', 'actions'] as const,
+  action: (id: string) => ['workspace-mcp', 'actions', 'one', id] as const,
   actionPages: (kind: 'chat' | 'task' | 'integration', id: string) => ['workspace-mcp', 'actions', kind, id] as const,
   actionPage: (kind: 'chat' | 'task' | 'integration', id: string, cursor: string) =>
     [...mcpKeys.actionPages(kind, id), { cursor }] as const,
@@ -195,4 +196,12 @@ export function useMcpPrepareChat(api: McpApi, origin: SelectionOrigin, prepareC
   return useCallback(async () => {
     if (prepareChat) await api.prepareSelection(origin, AbortSignal.timeout(15000), prepareChat);
   }, [api, origin.kind, origin.id, origin.agentId, origin.activationId, prepareChat]);
+}
+
+export function useMcpAction(api: McpApi, id: string) {
+  return useFeatureRead({
+    key: mcpKeys.action(id),
+    load: signal => api.action(id, signal),
+    pollWhile: action => action.status === 'ready' || action.status === 'dispatched',
+  });
 }

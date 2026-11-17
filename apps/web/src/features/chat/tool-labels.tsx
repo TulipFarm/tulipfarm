@@ -177,7 +177,7 @@ function toolActivityItem(tool: Tool, viewer: Viewer): ToolActivityItem {
               : status === 'unknown'
                 ? 'The outcome is unconfirmed. Check the action status before requesting it again.'
                 : status === 'waiting'
-                  ? tool.tool === 'api.request'
+                  ? tool.tool === 'api.request' || tool.tool === 'mcp.call'
                     ? 'Waiting for your approval.'
                     : 'Waiting for approval or another action. Review the action details below.'
                   : undefined,

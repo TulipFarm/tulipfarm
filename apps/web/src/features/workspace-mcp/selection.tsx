@@ -53,13 +53,6 @@ export function McpPrivateContext({
     </McpGate>
   );
 }
-export function McpChatActions({ workspaceId, chatId }: { workspaceId: string; chatId: string }) {
-  return (
-    <McpGate workspaceId={workspaceId}>
-      {(api, capabilities) => <McpActions api={api} capabilities={capabilities} kind="chat" originId={chatId} />}
-    </McpGate>
-  );
-}
 function McpSelection({
   api,
   capabilities,
