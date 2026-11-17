@@ -94,6 +94,11 @@ test('API call activity names the method, host and path but never the query', ()
     'GET api.example.com/v1/events',
   );
   assert.equal(toolPresentation('api.request').label, 'Calling an API');
+  assert.equal(
+    toolPresentation('mcp.search', { query: '  aws   cost explorer ' }).label,
+    'Finding tools: aws cost explorer',
+  );
+  assert.equal(toolPresentation('mcp.search', { query: ' ' }).label, 'Finding tools in connected apps');
 });
 
 test('API call receipts keep only the HTTP status or error code, and every failure has a short message', () => {
