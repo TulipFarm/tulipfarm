@@ -153,6 +153,9 @@ export function mcpApi(workspaceId: string, accessLost: (status: number) => void
           signal,
         ),
       ),
+    action: async (id: string, signal: AbortSignal) =>
+      // A missing action only hides its chat card; it does not mean the chat lost access.
+      actionSchema.parse(await request(`/actions/${part(id)}`, 'GET', undefined, signal, false)),
     decide: async (id: string, input: { requestId: string; digest: string; decision: 'approve' | 'reject' }) =>
       actionSchema.parse(await request(`/actions/${part(id)}/decision`, 'POST', input)),
     reconcile: async (

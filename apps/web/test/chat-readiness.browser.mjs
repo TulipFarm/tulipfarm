@@ -118,6 +118,8 @@ test('chat readiness and relevant GitHub approvals', async t => {
           sends: [],
           batchReads: 0,
           chats: new Set([id]),
+          mcpAction: null,
+          mcpDecisions: [],
         };
         await page.route('**/v1/**', async route => {
           const request = route.request();
@@ -154,7 +156,13 @@ test('chat readiness and relevant GitHub approvals', async t => {
               status: state.modelStatus,
               json: state.modelStatus === 200 ? chatCatalog : { error: 'unavailable' },
             });
-          } else if (path.endsWith('/batches')) {
+          } else if (state.mcpAction && path.endsWith(`/workspace-mcp/actions/${state.mcpAction.id}/decision`)) {
+            state.mcpDecisions.push(request.postDataJSON().decision);
+            state.mcpAction.status = 'ready';
+            json = state.mcpAction;
+          } else if (state.mcpAction && path.endsWith(`/workspace-mcp/actions/${state.mcpAction.id}`))
+            json = state.mcpAction;
+          else if (path.endsWith('/batches')) {
             state.batchReads++;
             await state.batchGate?.promise;
             return route.fulfill({
@@ -285,6 +293,35 @@ test('chat readiness and relevant GitHub approvals', async t => {
                 { exact: true },
               )
               .waitFor();
+            // A waiting connected-app call is approved inline under the reply, not in a panel above the chat.
+            f.state.mcpAction = {
+              id: '33333333-3333-4333-8333-333333333333',
+              digest: id,
+              integrationId: id,
+              integrationName: 'Grafana',
+              status: 'awaiting-approval',
+              expiresAt: '2099-01-01T00:00:00.000Z',
+              canDecide: true,
+              canReconcile: false,
+              integrationPaused: false,
+              reconciliation: null,
+              receipt: null,
+              visibility: 'full',
+              exact: {
+                origin: { kind: 'chat', id },
+                requester: 'Ada',
+                endpoint: 'https://mcp.example.test',
+                accountLabel: null,
+                package: null,
+                authorizationEpoch: 1,
+                toolName: 'search_documents',
+                toolRevision: id,
+                arguments: { query: 'quarterly plan' },
+                sourceLabels: [],
+                outboundConsentRequired: false,
+                standingExceptionApplied: false,
+              },
+            };
             f.state.tools = [
               {
                 id: toolId,
@@ -315,6 +352,18 @@ test('chat readiness and relevant GitHub approvals', async t => {
               0,
               'waiting for approval does not spin',
             );
+            await activity.getByText('Waiting for your approval.', { exact: true }).waitFor();
+            const card = f.page.getByRole('region', { name: 'Grafana · Search documents', exact: true });
+            await card.waitFor({ timeout: coldLoad });
+            assert.equal(await f.page.getByText('Connected-tool actions and receipts').count(), 0);
+            await card.getByRole('button', { name: 'Details', exact: true }).click();
+            await card
+              .getByLabel('What Grafana will receive')
+              .getByText(/quarterly plan/)
+              .waitFor();
+            await card.getByRole('button', { name: 'Run', exact: true }).click();
+            await card.waitFor({ state: 'detached' });
+            assert.deepEqual(f.state.mcpDecisions, ['approve']);
             f.state.tools[2].activityStatus = 'unknown';
             await notifyChange(f.page, workspace.id, 'ada', 'chat', id);
             await activity

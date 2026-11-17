@@ -92,7 +92,7 @@ import { TableHandoffNotice, useTableHandoff } from './table-handoff';
 import { SlackAction } from '@/features/agents/slack-action';
 import { ApprovalDock, ApprovalDockProvider } from './approval-dock';
 import { PendingQuestionsProvider, usePendingQuestion } from './pending-question';
-import { McpChatActions } from '@/features/workspace-mcp/selection';
+import { McpCallReviewCard } from '@/features/workspace-mcp/call-review-card';
 import { IntegrationLinks } from './integration-links';
 import { UpcomingMeetings, showAllMeetingsPrompt } from './upcoming-meetings';
 import { CompactionStatus, SentCompact } from './compaction';
@@ -1279,7 +1279,6 @@ function ConversationDetail({
                 </div>
               </form>
             )}
-            {!draft && <McpChatActions workspaceId={workspace.id} chatId={chatId} />}
             <ConversationRead
               state={read.state.kind === 'ready' && data ? { ...read.state, data } : read.state}
               refresh={read.refresh}
@@ -2382,6 +2381,11 @@ function ConversationTools({
         .filter(tool => tool.tool === 'api.request' && tool.api?.review)
         .map(tool => (
           <ApiCallReviewCard key={`api:${tool.id}`} workspaceId={workspace.id} callId={tool.id} />
+        ))}
+      {message.tools
+        .filter(tool => tool.tool === 'mcp.call' && tool.activityStatus === 'waiting')
+        .map(tool => (
+          <McpCallReviewCard key={`mcp:${tool.id}`} workspaceId={workspace.id} actionId={tool.id} onSettled={changed} />
         ))}
       {codingRuns &&
         message.tools
