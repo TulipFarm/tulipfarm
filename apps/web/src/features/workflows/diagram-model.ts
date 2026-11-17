@@ -54,12 +54,14 @@ const stepTitles: Record<Step['kind'], string> = {
   human: 'Ask for a decision',
   code: 'Run code',
   agent: 'Run an agent task',
+  coding: 'Run a coding agent',
   http: 'Make a request',
   'slack-message': 'Send a Slack message',
   'find-rows': 'Find matching rows',
   'create-row': 'Create a row',
   'update-row': 'Update a row',
 };
+const codingAgentNames = { 'claude-code': 'Claude Code', codex: 'Codex', copilot: 'Copilot' };
 export const triggerTitles: Record<Trigger['kind'], string> = {
   webhook: 'Webhook received',
   event: 'Event received',
@@ -113,6 +115,8 @@ function sourceText(step: Step, labels: WorkflowLabels, timezone: string): strin
       return codeLanguages[step.language].name;
     case 'agent':
       return labels.agents?.[step.agentId] ?? 'Agent name unavailable';
+    case 'coding':
+      return `${codingAgentNames[step.agent]} · ${step.repository.kind === 'literal' ? String(step.repository.value) : describeValue(step.repository)}`;
     case 'http':
       return `${step.method} ${new URL(step.url).hostname}`;
     case 'slack-message':
@@ -214,6 +218,13 @@ function stepFacts(step: Step, labels: WorkflowLabels): WorkflowStepDetails['fac
       ];
     case 'agent':
       return [{ label: 'Task', value: describeValue(step.prompt) }];
+    case 'coding':
+      return [
+        { label: 'Repository', value: describeValue(step.repository) },
+        { label: 'Task', value: describeValue(step.prompt) },
+        ...(step.branch ? [{ label: 'Starts from', value: describeValue(step.branch) }] : []),
+        { label: 'Result', value: step.pullRequest ? 'Opens a pull request' : 'Returns the changes; pushes nothing' },
+      ];
     case 'slack-message':
       return [
         { label: 'Message', value: describeSlackText(step.text) },
@@ -345,7 +356,8 @@ export function workflowGraph(
     });
     const summary = labels.steps?.[step.id]?.summary ?? sourceText(step, labels, timezone);
     const actor = step.kind === 'agent' ? (labels.agents?.[step.agentId] ?? 'Agent unavailable') : labels.actor;
-    const brand = step.kind === 'slack-message' ? 'slack' : labels.steps?.[step.id]?.brand;
+    const brand =
+      step.kind === 'slack-message' ? 'slack' : step.kind === 'coding' ? 'github' : labels.steps?.[step.id]?.brand;
     nodes.push({
       id: step.id,
       kind: step.kind,

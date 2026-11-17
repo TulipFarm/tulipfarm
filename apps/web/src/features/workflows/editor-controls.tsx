@@ -32,6 +32,8 @@ export function stepTitle(step: Definition['steps'][number]) {
   switch (step.kind) {
     case 'agent':
       return 'Run an agent task';
+    case 'coding':
+      return 'Run a coding agent';
     case 'slack-message':
       return 'Send a Slack message';
     case 'human':

@@ -17,6 +17,7 @@ export { knowledgeIngest } from './knowledge-workflows.ts';
 export { skillImport } from './skill-workflows.ts';
 export { workspaceMcpDiscovery } from './workspace-mcp-workflows.ts';
 export { codingRun } from './coding-run-workflows.ts';
+export { workflowCodingStepV1 } from './workflow-coding-step-workflows.ts';
 export {
   appBuild,
   appPublish,
