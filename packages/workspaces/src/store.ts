@@ -31,9 +31,11 @@ export class WorkspaceConflict extends Error {}
 export class WorkspaceNotFound extends Error {}
 export class WorkspaceDiscoveryUnavailable extends Error {}
 
-async function isMember(store: WorkspaceStore, workspaceId: string, userId: string) {
+// The list skips the authorization lock: one workspace holding it must not fail the list for every user.
+async function isMember(store: WorkspaceStore, workspaceId: string, userId: string, locked = true) {
   return store.runtime.transaction(workspaceId, commonCompatibility, async ({ client, schema }) => {
-    await client.query(`SELECT id FROM ${qualified(schema, commonTables.authorizationLock)} WHERE id = 1 FOR SHARE`);
+    if (locked)
+      await client.query(`SELECT id FROM ${qualified(schema, commonTables.authorizationLock)} WHERE id = 1 FOR SHARE`);
     const result = await client.query(
       `SELECT id FROM ${qualified(schema, commonTables.memberships)} WHERE user_id = $1 AND removed_at IS NULL`,
       [userId],
@@ -157,7 +159,7 @@ export async function listWorkspaces(store: WorkspaceStore, userId: string) {
     const batch = await Promise.allSettled(
       candidates
         .slice(offset, offset + 4)
-        .map(async row => ((await isMember(store, row.id, userId)) ? workspace(row) : null)),
+        .map(async row => ((await isMember(store, row.id, userId, false)) ? workspace(row) : null)),
     );
     const rejected = batch.find((item): item is PromiseRejectedResult => item.status === 'rejected');
     if (rejected)

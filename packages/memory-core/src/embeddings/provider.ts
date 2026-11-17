@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto';
+import { createRequire } from 'node:module';
+import { Worker } from 'node:worker_threads';
 import { z } from 'zod';
 import type {
   EmbeddingError,
@@ -9,21 +11,68 @@ import type {
   EmbeddingUsage,
 } from '../ports/embedding-provider.js';
 
-// Building the cl100k tokenizer costs a new process a few hundred milliseconds of CPU, so it loads on first use.
-let tokenizer: Promise<{ encode(text: string, allowed: [], disallowed: []): number[] }> | undefined;
-const loadTokenizer = () => (tokenizer ??= import('js-tiktoken').then(({ getEncoding }) => getEncoding('cl100k_base')));
+// cl100k BPE in js-tiktoken is quadratic on long letter runs: an 8 KB run takes about 20 s. It runs in a
+// worker so a hostile input can never block the event loop, and each input gets a time limit.
+export const tokenizerTimeoutMs = 2_000;
+const tokenizerSource = `
+const { parentPort, workerData } = require('node:worker_threads');
+const encoder = require(workerData).getEncoding('cl100k_base');
+parentPort.on('message', text => parentPort.postMessage(encoder.encode(text, [], []).length));
+parentPort.postMessage('ready');`;
+let tokenizer: Promise<Worker> | undefined;
+let tokenizerQueue: Promise<unknown> = Promise.resolve();
+function loadTokenizer() {
+  return (tokenizer ??= new Promise<Worker>((resolve, reject) => {
+    const worker = new Worker(tokenizerSource, {
+      eval: true,
+      workerData: createRequire(import.meta.url).resolve('js-tiktoken'),
+    });
+    worker.unref();
+    worker.once('message', () => resolve(worker));
+    worker.once('error', reject);
+    worker.once('exit', () => {
+      tokenizer = undefined;
+      reject(new Error('Tokenizer stopped'));
+    });
+  }));
+}
+function countTokens(text: string) {
+  const run = tokenizerQueue.then(async () => {
+    const worker = await loadTokenizer();
+    return new Promise<number>((resolve, reject) => {
+      const settle = (error: Error | undefined, count = 0) => {
+        clearTimeout(timer);
+        worker.off('message', onMessage).off('exit', onExit);
+        if (error) reject(error);
+        else resolve(count);
+      };
+      const onMessage = (count: number) => settle(undefined, count);
+      const onExit = () => settle(new Error('Tokenizer stopped'));
+      const timer = setTimeout(() => {
+        tokenizer = undefined;
+        void worker.terminate();
+        settle(new Error('Tokenizer time limit'));
+      }, tokenizerTimeoutMs);
+      worker.on('message', onMessage).on('exit', onExit);
+      worker.postMessage(text);
+    });
+  });
+  tokenizerQueue = run.catch(() => undefined);
+  return run;
+}
 const tokenCount = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const usageEnvelope = z.object({ usage: z.object({ prompt_tokens: tokenCount, total_tokens: tokenCount }) });
 
 export async function prepareEmbeddingInputs(inputs: readonly string[], profile: EmbeddingProfile) {
   const parsed = z.array(z.string().min(1)).min(1).max(profile.maxBatchInputs).safeParse(inputs);
   if (!parsed.success) throw new Error('Invalid knowledge embedding input');
-  const encoder = await loadTokenizer();
   let inputTokensUpperBound = 0;
   for (const text of parsed.data) {
     if (!text.trim() || /[\uD800-\uDFFF]/u.test(text) || Buffer.byteLength(text, 'utf8') > profile.maxInputBytes)
       throw new Error('Invalid knowledge embedding input');
-    const tokens = encoder.encode(text, [], []).length;
+    const tokens = await countTokens(text).catch(() => {
+      throw new Error('Invalid knowledge embedding input');
+    });
     if (tokens > profile.maxInputTokens) throw new Error('Invalid knowledge embedding input');
     inputTokensUpperBound += tokens;
   }
