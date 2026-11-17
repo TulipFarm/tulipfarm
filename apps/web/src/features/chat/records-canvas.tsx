@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from '@tanstack/react-router';
 import type { RowView } from '@tulipfarm/conversations/row-view';
 import { AddCircle } from 'reicon-react/icons/AddCircle';
@@ -13,7 +13,6 @@ import { ResultCard } from '@tulipfarm/sprout/result-card';
 import { Database } from 'reicon-react/icons/Database';
 import { CanvasSection } from '@tulipfarm/sprout/canvas';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
-import { MessageTableViewport } from '@tulipfarm/sprout/message-response';
 import { Table, type TableColumn } from '@tulipfarm/sprout/table';
 import { tableApi, type TableApi, type DefinitionState, type TableDefinition } from '@/features/tables/api';
 import { TableRead } from '@/features/tables/feedback';
@@ -24,10 +23,6 @@ import { viewSearch, type TableRowsSearch } from '@/features/tables/table-view';
 import { workspaceRoute } from '@/router';
 import { useCanvas } from './canvas-state';
 import { recordChangesSummary, type RecordChanges } from './record-changes';
-
-export function RowViewResponse({ references, children }: { references: RowView[]; children: ReactNode }) {
-  return <MessageTableViewport bounded={references.length > 0}>{children}</MessageTableViewport>;
-}
 
 export function RowViewCard({ reference }: { reference: RowView }) {
   const { workspace } = workspaceRoute.useRouteContext();

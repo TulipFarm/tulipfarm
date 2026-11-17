@@ -195,7 +195,7 @@ test('saved history selects the first runnable turn and removes streamed text on
   const completed = message({ turn: { id: 'done', generation: 0, status: 'completed' } });
   assert.equal(reply({ messages: [first, active, completed] }).turn, first.turn);
   const streamed = stream({ previews: new Map([['turn', preview()]]) });
-  assert.equal(reply({ stream: streamed }).answerText, 'Reply text');
+  assert.equal(reply({ stream: streamed }).narration, 'Reply text');
   for (const status of ['completed', 'failed', 'blocked', 'cancelled', 'waiting', 'reconciling'] as const) {
     const result = reply({ messages: [message({ turn: { id: 'turn', generation: 2, status } })], stream: streamed });
     assert.equal(result.answerText, '');
@@ -294,7 +294,7 @@ test('streamed text and progress must each match the saved generation', () => {
         progress: new Map([['turn', progress(generation, 3, 4)]]),
       }),
     });
-    assert.equal(oldProgress.answerText, 'Reply text');
+    assert.equal(oldProgress.narration, 'Reply text');
     assert.equal(oldProgress.activity.label, 'Thinking');
     const oldText = reply({
       stream: stream({
@@ -319,15 +319,26 @@ test('running tools and later decisions turn streamed text into narration, not a
   const between = reply({ stream: stream({ ...streamed, progress: new Map([['turn', progress(2, 1, 2)]]) }) });
   assert.equal(between.narration, 'Reply text');
   assert.equal(between.answerText, '');
+  const streaming = stream({ ...streamed, previews: new Map([['turn', preview(2, 1, 'Final answer')]]) });
+  const unfinished = reply({ stream: stream({ ...streaming, progress: new Map([['turn', progress(2, 1, 2)]]) }) });
+  assert.equal(unfinished.narration, 'Final answer', 'text stays narration until the worker says the reply is done');
+  assert.equal(unfinished.answerText, '');
   const final = reply({
-    stream: stream({
-      ...streamed,
-      previews: new Map([['turn', preview(2, 1, 'Final answer')]]),
-      progress: new Map([['turn', progress(2, 1, 2)]]),
-    }),
+    stream: stream({ ...streaming, progress: new Map([['turn', status({ status: 'done', round: 2 }, 1)]]) }),
   });
   assert.equal(final.narration, '');
   assert.equal(final.answerText, 'Final answer');
+});
+
+test('a step saved with its tool leaves the timeline instead of the live narration', () => {
+  const streamed = stream({ previews: new Map([['turn', preview()]]) });
+  const saved = reply({
+    messages: [message({ tools: [tool({ status: 'running', narration: 'Reply text' })] })],
+    stream: streamed,
+  });
+  assert.equal(saved.narration, '');
+  assert.equal(saved.savedNarration, 'Reply text');
+  assert.equal(saved.answerText, '');
 });
 
 test('one running-tool interpretation controls both narration and all existing activity labels', () => {
@@ -348,11 +359,11 @@ test('one running-tool interpretation controls both narration and all existing a
   }
   const overridden = reply({
     messages: [message({ tools: [tool({ status: 'running', activityStatus: 'completed' })] })],
-    stream: streamed,
+    stream: stream({ ...streamed, progress: new Map([['turn', status({ status: 'done' })]]) }),
   });
   assert.equal(overridden.narration, '');
   assert.equal(overridden.answerText, 'Reply text');
-  assert.equal(overridden.activity.label, 'Planning next step');
+  assert.equal(overridden.activity.label, 'Finishing up');
 });
 
 test('thinking names planning between tools and counts decisions only after the first', () => {
@@ -427,7 +438,8 @@ test('only saved completion ends the spinner, while the visible answer survives 
     stream: stream({ ...answered, progress: new Map([['turn', status({ status: 'finishing', round: 2 }, 1)]]) }),
   });
   assert.equal(finishing.thinking, true);
-  assert.equal(finishing.answerText, 'Hello!', 'a status of the answer step keeps streamed text an answer');
+  assert.equal(finishing.answerText, '', 'streamed text stays narration until the reply is done');
+  assert.equal(finishing.narration, 'Hello!');
   const unseen = reply({ stream: stream({ progress: new Map([['turn', status({ status: 'done' })]]) }) });
   assert.equal(unseen.thinking, true, 'without a visible answer, as in project chats, progress stays until saved');
   assert.equal(unseen.activity.label, 'Finishing up');
