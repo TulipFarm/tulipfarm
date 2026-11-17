@@ -1291,6 +1291,14 @@ test("an app chat's reply cannot deny its tools or claim a build or edit no tool
   );
   for (const text of [
     'Your Tools page is missing a header, so I added one in the plan below.',
+    'The app has no file upload tool yet.',
+    'Members without a build tool cannot publish.',
+    'Your build tools are not available on the free plan.',
+    'If the build succeeded, you will see a green check.',
+    'When the build succeeded, the app was published.',
+    'Here is what I changed in the code:',
+    'I wrote the CSS for you below.',
+    'I updated src/server.js earlier, then rebuilt the app.',
     'The tool picker shows which parts are missing.',
     'Your app lists tools that are not available to members.',
     'I have put together a short summary of the files below.',
