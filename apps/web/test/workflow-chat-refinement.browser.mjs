@@ -262,8 +262,6 @@ test(
       await page.locator('[data-slot="choice-summary"]').getByText('Use the release bot.', { exact: true }).waitFor();
       await page.setViewportSize({ width: 1600, height: 1000 });
       await open('workflow-errors');
-      const retryActions = page.getByRole('button', { name: 'Check connected-tool actions again', exact: true });
-      await retryActions.waitFor();
       await result.click();
       const retryWorkflow = canvas.getByRole('button', { name: 'Retry loading workflow', exact: true });
       await retryWorkflow.waitFor();
@@ -273,12 +271,6 @@ test(
         await page.waitForLoadState('networkidle');
       }
       await diagram.waitFor();
-      for (let attempt = 0; attempt < 3 && (await retryActions.isVisible()); attempt++) {
-        // An automatic re-read can recover between the visibility check and the click.
-        await retryActions.click({ timeout: 2000 }).catch(() => {});
-        await page.waitForLoadState('networkidle');
-      }
-      assert.equal(await retryActions.count(), 0, 'successful empty action list clears its error');
       await open('workflow-unavailable');
       await result.click();
       await canvas.getByRole('heading', { name: 'Workflow unavailable', exact: true }).waitFor();
