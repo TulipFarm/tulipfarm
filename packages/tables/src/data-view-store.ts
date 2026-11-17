@@ -11,7 +11,7 @@ import {
   type TablePermission,
 } from '@tulipfarm/access';
 import { table, type TableTransaction } from './service-store.ts';
-import { TableValidationError, type TableDefinition } from './definition.ts';
+import { TableValidationError, type TableDefinition, type TableField } from './definition.ts';
 import {
   dataViewDraftSchema,
   dataViewSchema,
@@ -54,6 +54,8 @@ export type DataViewEntry = DataView & {
   approvedBy: string | null;
   approvedAt: Date | null;
   blockers: DataViewBlocker[];
+  /** The table's title and the fields the view lists or tests, for people deciding about the view; null when it is gone. */
+  table: { label: string; fields: TableField[] } | null;
 };
 
 /** Sharing a view needs authority over its table: schema management plus every row permission the view uses. */
@@ -83,6 +85,12 @@ async function shareableDefinition(tx: TableTransaction, tableId: string): Promi
 async function resolves(tx: TableTransaction, view: DataView) {
   const definition = await shareableDefinition(tx, view.tableId);
   return definition !== null && unresolvedDataViewField(view, definition) === undefined;
+}
+
+function viewTable(view: DataView, definition: TableDefinition | null) {
+  if (!definition) return null;
+  const used = new Set([...view.fieldIds, ...view.predicate.all.map(comparison => comparison.fieldId)]);
+  return { label: definition.label, fields: definition.fields.filter(field => used.has(field.id)) };
 }
 
 async function requireShareable(tx: TableTransaction, view: DataView) {
@@ -260,6 +268,7 @@ export async function listDataViews(tx: TableTransaction, appId: string, viewId?
       approvedBy: grant.approved_by,
       approvedAt: grant.approved_at,
       blockers: await viewBlockers(tx, view, grant.approved_by !== null),
+      table: viewTable(view, await shareableDefinition(tx, view.tableId)),
     });
   }
   return entries;

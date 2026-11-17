@@ -86,9 +86,15 @@ test('members create, share, approve and revoke an app data view over HTTP', { t
         approvedBy: null,
         approvedAt: null,
         blockers: ['not-approved'],
+        table: { label: 'Posts', fields: [fields.title, fields.owner] },
       },
     );
     assert.deepEqual(await http(lead, 'POST', views, view), first);
+    assert.deepEqual(
+      (await http(editor, 'GET', views)).body.views[0].table,
+      first.body.table,
+      'an app editor without rights over the table still sees what the view uses',
+    );
     assert.equal((await http(lead, 'POST', views, { ...view, actions: ['read', 'create'] })).status, 409);
   });
 
