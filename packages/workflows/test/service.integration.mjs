@@ -5,8 +5,9 @@ import { test } from 'node:test';
 import { fixture, connect, denied } from '../../workspace-storage/test/integration/fixture.mjs';
 import { workspaceTableMigrations } from '../../workspaces/src/table-migrations.ts';
 import { createWorkspaceRuntime, qualified } from '@tulipfarm/workspace-storage/runtime';
-import { AccessDenied } from '@tulipfarm/access';
+import { AccessDenied, lockAuthorization } from '@tulipfarm/access';
 import { createWorkflows, WorkflowConflict } from '../src/service.ts';
+import { workflowCompatibility } from '../src/authorization.ts';
 import { providerSetupFetch } from './provider-fixture.mjs';
 import { activate } from './commands.fixture.mjs';
 
@@ -368,6 +369,49 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
         10,
         "the failed workflow's events are admitted up to its run cap once the failure clears",
       );
+    } finally {
+      await runtime?.close();
+      await db.close();
+    }
+  },
+);
+
+test(
+  'the resumable sweep shares the workspace lock instead of queueing behind readers',
+  { timeout: 60000 },
+  async () => {
+    const db = await fixture();
+    let runtime;
+    try {
+      await db.platform.query(`SET search_path TO app; DROP TABLE IF EXISTS app.accounts;
+${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', import.meta.url), 'utf8')}`);
+      const w = await db.create(await workspaceTableMigrations());
+      runtime = createWorkspaceRuntime({
+        replicaCount: 1,
+        reservedConnections: 2,
+        databaseConnectionBudget: 20,
+        resolveCredential: async id => ({ workspaceId: id, generation: 1, connectionString: db.login(w) }),
+      });
+      const service = createWorkflows(runtime);
+      let release, held;
+      const locked = new Promise(resolve => (held = resolve)),
+        done = new Promise(resolve => (release = resolve));
+      const reader = runtime.transaction(w.id, workflowCompatibility, async tx => {
+        await lockAuthorization(tx, 'read');
+        held();
+        await done;
+      });
+      await locked;
+      try {
+        const outcome = await Promise.race([
+          service.resumable(w.id),
+          new Promise(resolve => setTimeout(resolve, 5000, 'blocked')),
+        ]);
+        assert.deepEqual(outcome, [], 'resumable finishes while a shared holder keeps the lock');
+      } finally {
+        release();
+        await reader;
+      }
     } finally {
       await runtime?.close();
       await db.close();

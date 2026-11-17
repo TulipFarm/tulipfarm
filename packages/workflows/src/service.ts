@@ -2943,11 +2943,14 @@ export function createWorkflows(
     });
   }
   // A run marked running sleeps only when its wake signal was lost, so the sweep wakes it again.
+  // It only reads, so it takes the shared lock: an exclusive one every 2 s per workspace would stall every reader behind it.
   async function resumable(workspaceId: string) {
-    return transaction(workspaceId, async tx => {
-      const slack =
-        tx.commonVersion >= 1
-          ? `OR r.status='waiting' AND EXISTS (
+    return transaction(
+      workspaceId,
+      async tx => {
+        const slack =
+          tx.commonVersion >= 1
+            ? `OR r.status='waiting' AND EXISTS (
         SELECT 1 FROM ${table(tx, 'tf_workflow_steps')} s
         JOIN ${table(tx, 'tf_workflow_revisions')} revision ON revision.workflow_id=r.workflow_id AND revision.id=r.revision
         LEFT JOIN ${table(tx, 'tf_slack_workflow_actions')} o ON o.run_id=s.run_id AND o.step_id=s.step_id
@@ -2961,13 +2964,15 @@ export function createWorkflows(
             OR a.expires_at<=clock_timestamp() OR e.state<>'pending' AND e.next_attempt_at<=clock_timestamp()
             OR e.state='pending' AND (c.action_id IS NULL OR c.state='retry' AND c.next_attempt_at<=clock_timestamp()))
       )`
-          : '';
-      return (
-        await tx.client.query(
-          `SELECT r.id FROM ${table(tx, 'tf_workflow_runs')} r WHERE r.status='running' ${slack} ORDER BY r.created_at,r.id LIMIT 20`,
-        )
-      ).rows.map(row => workSchema.parse({ workspaceId, runId: row.id }));
-    });
+            : '';
+        return (
+          await tx.client.query(
+            `SELECT r.id FROM ${table(tx, 'tf_workflow_runs')} r WHERE r.status='running' ${slack} ORDER BY r.created_at,r.id LIMIT 20`,
+          )
+        ).rows.map(row => workSchema.parse({ workspaceId, runId: row.id }));
+      },
+      'read',
+    );
   }
   type CodeWork = { kind: 'code'; job: SnippetJob };
   type AgentWork = {
