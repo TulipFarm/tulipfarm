@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import { fixture, loadPlatformBaseline } from '../../workspace-storage/test/integration/fixture.mjs';
 import { createWorkspaceRuntime, qualified } from '@tulipfarm/workspace-storage/runtime';
@@ -292,5 +293,103 @@ test('approved Slack scope upgrades preserve identity and require current manage
   } finally {
     await runtime?.close();
     await db.close();
+  }
+});
+
+test('a new installation is open to every member and managed by every admin until a manager narrows it', async t => {
+  withImages(t, false);
+  const f = await installationFixture();
+  try {
+    const members = { member: randomUUID(), admin: randomUUID(), reader: randomUUID() };
+    for (const [role, userId] of Object.entries(members))
+      await f.db.platform.query(`INSERT INTO ${f.table('tf_memberships')} (id,user_id,role) VALUES ($1,$2,$3)`, [
+        randomUUID(),
+        userId,
+        role === 'admin' ? 'admin' : 'member',
+      ]);
+    await f.db.platform.query(
+      `INSERT INTO ${f.table('tf_member_teams')} (membership_id,team_id) SELECT m.id,t.id FROM ${f.table('tf_memberships')} m, ${f.table('tf_teams')} t WHERE m.user_id=$1 AND t.name='_admin'`,
+      [members.admin],
+    );
+    const installations = createSlackInstallations({
+      pool: f.db.platform,
+      runtime: f.runtime,
+      cipher: slackCredentialCipher({ activeKeyId: 'test', keys: { test: 'ab'.repeat(32) } }),
+      config: {
+        appId: 'ATEST',
+        clientId: 'client',
+        clientSecret: 'synthetic',
+        signingSecret: 'synthetic-signing-secret',
+        redirectUri: 'https://api.example.test/oauth',
+        scopeApproval: { reference: 'fixture-approved-scopes', botScopes: ['chat:write'] },
+      },
+      fetcher: async () =>
+        Response.json({
+          ok: true,
+          app_id: 'ATEST',
+          team: { id: 'TONE' },
+          token_type: 'bot',
+          bot_user_id: 'UBOT',
+          access_token: 'xoxb-synthetic',
+          scope: 'chat:write',
+        }),
+    });
+    const url = new URL((await installations.begin(f.w.id, members.member, 'member-session')).url);
+    await installations.complete('code', url.searchParams.get('state'), 'member-session', members.member);
+
+    // Any member may connect Slack; once connected every member may use it and every admin may manage it.
+    const asReader = await installations.status(f.w.id, members.reader);
+    assert.equal(asReader.state, 'active');
+    assert.equal(asReader.canManage, false);
+    const asAdmin = await installations.status(f.w.id, members.admin);
+    assert.equal(asAdmin.state, 'active');
+    assert.equal(asAdmin.canManage, true);
+
+    const sharing = await installations.grants(f.w.id, members.admin);
+    assert.deepEqual(
+      sharing.teams.map(team => team.name),
+      ['Everyone', 'Admin'],
+    );
+    const [everyone, admins] = sharing.teams.map(team => team.id);
+    assert.deepEqual(sharing.use.teamIds, [everyone]);
+    assert.deepEqual(sharing.managers.teamIds, [admins]);
+
+    await installations.grants(f.w.id, members.admin, {
+      use: { memberIds: [], teamIds: [admins] },
+      managers: sharing.managers,
+      expectedVersion: sharing.expectedVersion,
+    });
+    assert.equal((await installations.status(f.w.id, members.admin)).state, 'active');
+    assert.equal((await installations.status(f.w.id, members.reader)).state, 'unavailable');
+  } finally {
+    await f.close();
+  }
+});
+
+test('the default-sharing migration opens installations made before it', async t => {
+  withImages(t, false);
+  const f = await installationFixture();
+  try {
+    const installationId = randomUUID();
+    await f.db.platform.query(
+      `INSERT INTO ${f.table('tf_slack_installations')} (id,app_id,team_id,bot_user_id,generation,state,scopes,accepts_events_after) VALUES ($1,'ATEST','TONE','UBOT',1,'revoked','{chat:write}',0)`,
+      [installationId],
+    );
+    const sql = await readFile(
+      new URL('../../workspace-storage/common/0086_slack_default_sharing.sql', import.meta.url),
+      'utf8',
+    );
+    for (let run = 0; run < 2; run++) await f.db.platform.query(sql.replaceAll('{{schema}}', f.w.names.schema));
+    const granted = async name =>
+      (
+        await f.db.platform.query(
+          `SELECT t.name FROM ${f.table(name)} g JOIN ${f.table('tf_teams')} t ON t.id=g.team_id WHERE g.installation_id=$1`,
+          [installationId],
+        )
+      ).rows.map(row => row.name);
+    assert.deepEqual(await granted('tf_slack_installation_grants'), ['_everyone']);
+    assert.deepEqual(await granted('tf_slack_installation_managers'), ['_admin']);
+  } finally {
+    await f.close();
   }
 });

@@ -1,7 +1,7 @@
 import type { SlackChannelSetting, SlackChannelSettings } from './slack-channel-settings-api';
 
 // Dev-only preview of Slack channel settings. No provider or server calls; reloading resets state.
-// `?scenario=loading|error|empty|many|save-error|conflict|read-only` picks a state.
+// `?scenario=loading|error|empty|many|save-error|conflict|read-only|not-shared` picks a state.
 if (
   import.meta.env.DEV &&
   ['localhost', '127.0.0.1'].includes(window.location.hostname) &&
@@ -96,6 +96,17 @@ if (
       this.readyState = 2;
     }
   }
+  const everyone = '55555555-5555-4555-8555-555555555555',
+    admins = '66666666-6666-4666-8666-666666666666';
+  let grants = {
+    use: { memberIds: [id], teamIds: [everyone] },
+    managers: { memberIds: [id], teamIds: [admins] },
+    expectedVersion: 'v1',
+    teams: [
+      { id: everyone, name: 'Everyone' },
+      { id: admins, name: 'Admin' },
+    ],
+  };
   window.EventSource = MockEvents as unknown as typeof EventSource;
   window.fetch = async (input, init) => {
     const url = new URL(input instanceof Request ? input.url : String(input), window.location.origin);
@@ -160,7 +171,39 @@ if (
         missingScopes: [],
       });
     if (path.endsWith('/slack/status'))
-      return Response.json({ state: 'active', teamId: 'TACME', canManage: true, linked: true, scopes: [] });
+      return Response.json(
+        scenario === 'not-shared'
+          ? { state: 'unavailable', teamId: null, canManage: false, linked: false, scopes: [] }
+          : { state: 'active', teamId: 'TACME', canManage: true, linked: true, scopes: [] },
+      );
+    if (path.endsWith('/governance/directory'))
+      return Response.json({
+        members: [
+          { id, name: 'Ada Lovelace', email: 'ada@example.test', image: null },
+          {
+            id: '33333333-3333-4333-8333-333333333333',
+            name: 'Grace Hopper',
+            email: 'grace@example.test',
+            image: null,
+          },
+        ],
+        teams: [{ id: '44444444-4444-4444-8444-444444444444', name: 'Support' }],
+      });
+    if (path.endsWith('/integrations/collaborators'))
+      return Response.json({
+        members: [
+          { id: id, name: 'Ada Lovelace' },
+          { id: '33333333-3333-4333-8333-333333333333', name: 'Grace Hopper' },
+        ],
+        teams: [{ id: '44444444-4444-4444-8444-444444444444', name: 'Support' }],
+      });
+    if (path.endsWith('/slack/grants')) {
+      if (method === 'PUT') {
+        const body = JSON.parse(String(init?.body)) as Omit<typeof grants, 'teams'>;
+        grants = { ...grants, use: body.use, managers: body.managers, expectedVersion: crypto.randomUUID() };
+      }
+      return Response.json(grants);
+    }
     if (path.endsWith('/slack/channels'))
       return Response.json({
         channels: settings.channels

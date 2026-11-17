@@ -222,6 +222,9 @@ export function SlackKnowledge({ workspaceId }: { workspaceId: string }) {
 
 const recipients = z.object({ memberIds: z.array(z.uuid()), teamIds: z.array(z.uuid()) });
 const grantsSchema = z.object({ use: recipients, managers: recipients, expectedVersion: z.string() });
+const grantsResponseSchema = grantsSchema.extend({
+  teams: z.array(z.object({ id: z.uuid(), name: z.string() })).default([]),
+});
 async function slackGrants(workspaceId: string, signal?: AbortSignal, body?: z.infer<typeof grantsSchema>) {
   const response = await jsonResponse(`${apiOrigin}/v1/workspaces/${workspaceId}/slack/grants`, {
     method: body ? 'PUT' : 'GET',
@@ -230,7 +233,7 @@ async function slackGrants(workspaceId: string, signal?: AbortSignal, body?: z.i
     body,
   });
   if (!response.ok) throw new IntegrationRequestError(response.status);
-  return grantsSchema.parse(await readJson(response));
+  return grantsResponseSchema.parse(await readJson(response));
 }
 function SlackGrants({ workspaceId }: { workspaceId: string }) {
   const read = useFeatureRead({
@@ -238,7 +241,7 @@ function SlackGrants({ workspaceId }: { workspaceId: string }) {
     load: signal => slackGrants(workspaceId, signal),
   });
   const people = useIntegrationAdministration(workspaceId);
-  const [draft, setDraft] = useState<z.infer<typeof grantsSchema> | null>(null);
+  const [draft, setDraft] = useState<z.infer<typeof grantsResponseSchema> | null>(null);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [writeError, setWriteError] = useState(false);
@@ -270,7 +273,14 @@ function SlackGrants({ workspaceId }: { workspaceId: string }) {
       </StatePanel>
     );
   const value = draft ?? read.state.data;
-  const collaborators = people.state.data;
+  const available = people.state.data;
+  const collaborators = {
+    members: available.members,
+    teams: [
+      ...read.state.data.teams.filter(team => !available.teams.some(other => other.id === team.id)),
+      ...available.teams,
+    ],
+  };
   const conflict = value.expectedVersion !== read.state.data.expectedVersion;
   const dirty = draft !== null && JSON.stringify(draft) !== JSON.stringify(read.state.data);
   const refreshing = read.state.refreshing || people.state.refreshing;
