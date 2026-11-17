@@ -276,6 +276,8 @@ jobs:
         run: pnpm --filter @tulipfarm/api exec node --experimental-test-module-mocks --test --test-concurrency=1 test/agent-tasks.integration.mjs
       - name: Check that authorization lock readers share and writers queue fairly
         run: pnpm --filter @tulipfarm/access exec node --test --test-concurrency=1 test/authorization-lock.integration.mjs
+      - name: Check that one locked workspace does not block workspace discovery
+        run: pnpm --filter @tulipfarm/workspaces exec node --test --test-concurrency=1 test/discovery-lock.integration.mjs
       - name: Check workspace route admission and membership revocation
         run: |
           pnpm --filter @tulipfarm/api exec node --test --test-name-pattern='workspace HTTP conceals' test/governance.integration.mjs

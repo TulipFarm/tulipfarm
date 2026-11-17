@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { createEmbeddingProvider, prepareEmbeddingInputs } from '../dist/embeddings/provider.js';
+import { createEmbeddingProvider, prepareEmbeddingInputs, tokenizerTimeoutMs } from '../dist/embeddings/provider.js';
 
 const profile = Object.freeze({
   id: 'test-profile',
@@ -135,4 +135,22 @@ test('response validation uses the supplied model and dimensions and retains kno
     assert.equal(result.usage.kind, 'known');
     assert.deepEqual(result.result, { kind: 'error', code });
   }
+});
+
+test('a slow tokenizer input is rejected at the time limit without blocking the event loop', async () => {
+  const wide = { ...profile, maxInputTokens: 8192, maxBatchTokens: 8192, maxInputBytes: 131072 };
+  const letters = Array.from({ length: 16_000 }, (_, index) => String.fromCharCode(97 + ((index * 7919) % 26))).join(
+    '',
+  );
+  let ticks = 0;
+  const interval = setInterval(() => ticks++, 100);
+  const started = performance.now();
+  try {
+    await assert.rejects(prepareEmbeddingInputs([letters], wide), /Invalid knowledge embedding input/);
+  } finally {
+    clearInterval(interval);
+  }
+  assert.ok(performance.now() - started < tokenizerTimeoutMs + 3_000);
+  assert.ok(ticks >= 5);
+  assert.equal((await prepareEmbeddingInputs(['hello world'], wide)).inputTokensUpperBound, 2);
 });
