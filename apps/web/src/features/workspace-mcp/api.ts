@@ -30,6 +30,13 @@ export class McpRequestError extends TableRequestError {
     super(status, code, message);
   }
 }
+const codeMessages: Record<string, string> = {
+  'mcp-oauth-registration-rejected': 'This app doesn’t allow TulipFarm to sign in yet.',
+  'mcp-sign-in-address-invalid':
+    'That isn’t the address from the sign-in tab. Copy the full address from its address bar and try again.',
+  'mcp-sign-in-expired': 'That sign-in expired or was already used. Start connecting again.',
+  'mcp-authorization-denied': 'Sign-in was cancelled. Nothing was connected.',
+};
 export type PrepareMcpChat = (signal: AbortSignal, create: (requestId: string) => Promise<unknown>) => Promise<void>;
 export function mcpApi(workspaceId: string, accessLost: (status: number) => void = () => {}) {
   const base = `${apiOrigin}/v1/workspaces/${encodeURIComponent(workspaceId)}/workspace-mcp`;
@@ -52,15 +59,17 @@ export function mcpApi(workspaceId: string, accessLost: (status: number) => void
       throw new McpRequestError(
         response.status,
         error?.error ?? 'mcp-unavailable',
-        [401, 403, 404].includes(response.status)
-          ? 'MCP access changed. Previously loaded protected content has been removed.'
-          : response.status === 409
-            ? 'This item changed. Check current status and review your retained edits before saving again.'
-            : response.status === 410
-              ? 'This review expired or was invalidated. Request a fresh proposal.'
-              : response.status === 422
-                ? 'Review the marked fields and try again.'
-                : 'The MCP operation could not be confirmed. Check current status before continuing.',
+        error?.error && error.error in codeMessages
+          ? codeMessages[error.error]!
+          : [401, 403, 404].includes(response.status)
+            ? 'MCP access changed. Previously loaded protected content has been removed.'
+            : response.status === 409
+              ? 'This item changed. Check current status and review your retained edits before saving again.'
+              : response.status === 410
+                ? 'This review expired or was invalidated. Request a fresh proposal.'
+                : response.status === 422
+                  ? 'Review the marked fields and try again.'
+                  : 'The MCP operation could not be confirmed. Check current status before continuing.',
         error?.fieldErrors,
       );
     }
@@ -91,6 +100,11 @@ export function mcpApi(workspaceId: string, accessLost: (status: number) => void
       integrationDetailSchema.parse(await request(`/integrations/${part(id)}`, 'GET', undefined, signal)),
     setup: async (input: SetupInput, id?: string) =>
       setupResultSchema.parse(await request(id ? `/integrations/${part(id)}/setup` : '/integrations', 'POST', input)),
+    /** Finishes a sign-in from the address its provider redirected to. */
+    completeSignIn: async (address: string) =>
+      z
+        .object({ workspaceId: z.uuid(), integrationId: z.uuid() })
+        .parse(await request('/oauth/complete', 'POST', { address }, undefined, false)),
     integrationCommand: async (id: string, command: 'discover' | 'tools' | 'grants' | 'descriptor', input: unknown) =>
       integrationDetailSchema.parse(
         await request(

@@ -178,6 +178,8 @@ export const mcpSetupSchema = z.strictObject({
 export const mcpSetupResultSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('saved'), integration: mcpIntegrationSchema }),
   z.strictObject({ kind: z.literal('oauth'), integration: mcpIntegrationSchema, authorizationUrl: z.url() }),
+  /** Sign-in redirects to a loopback address; the member pastes that address back to finish. */
+  z.strictObject({ kind: z.literal('oauth-paste'), integration: mcpIntegrationSchema, authorizationUrl: z.url() }),
   z.strictObject({
     kind: z.literal('registration-required'),
     integration: mcpIntegrationSchema,

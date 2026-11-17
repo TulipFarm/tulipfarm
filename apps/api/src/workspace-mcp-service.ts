@@ -143,7 +143,19 @@ export function createWorkspaceMcpApi(options: Options) {
       .parse((await options.identity.query('SELECT id,name,email FROM app.users WHERE id=ANY($1)', [userIds])).rows);
     return new Map(rows.map(row => [row.id, row]));
   }
-  async function detail(workspaceId: string, userId: string, integrationId: string) {
+  // A sign-in or discovery can change the integration mid-read; a read retries a fresh snapshot instead of failing.
+  async function freshRead<T>(read: () => Promise<T>): Promise<T> {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await read();
+      } catch (failure) {
+        if (attempt >= 3 || !(failure instanceof McpHttpError) || failure.code !== 'mcp-conflict') throw failure;
+      }
+    }
+  }
+  const detail = (workspaceId: string, userId: string, integrationId: string) =>
+    freshRead(() => readDetail(workspaceId, userId, integrationId));
+  async function readDetail(workspaceId: string, userId: string, integrationId: string) {
     const row = await service.status(workspaceId, userId, integrationId);
     const tools = await service.tools(workspaceId, userId, integrationId);
     const grants =
@@ -294,11 +306,11 @@ export function createWorkspaceMcpApi(options: Options) {
       return options.catalog.search(input.search, input.cursor);
     },
     async integrations(workspaceId: string, userId: string) {
-      return {
+      return freshRead(async () => ({
         integrations: await Promise.all(
           (await service.list(workspaceId, userId)).map(row => readyIntegration(workspaceId, userId, row)),
         ),
-      };
+      }));
     },
     detail,
     async setup(

@@ -40,7 +40,7 @@ const secret = (secretId, name, value) => ({
 
 const authorizationUrl = 'https://oauth.posthog.com/oauth/authorize?client_id=tulipfarm';
 
-async function withCard(authentication, steps) {
+async function withCard(authentication, steps, { paste = false } = {}) {
   const server = spawn(
     process.execPath,
     ['node_modules/vite/bin/vite.js', '--host', '127.0.0.1', '--port', String(port), '--strictPort'],
@@ -66,6 +66,7 @@ async function withCard(authentication, steps) {
     page.on('pageerror', error => errors.push(String(error)));
     const integrations = [];
     const setups = [];
+    const completions = [];
     await page.route('**/v1/**', async route => {
       if (await serveWorkspaceShellEvent(route, workspace)) return;
       const request = route.request(),
@@ -100,8 +101,12 @@ async function withCard(authentication, steps) {
         integrations.push(integration);
         json =
           authentication === 'oauth'
-            ? { kind: 'oauth', integration, authorizationUrl }
+            ? { kind: paste ? 'oauth-paste' : 'oauth', integration, authorizationUrl }
             : { kind: 'saved', integration };
+      } else if (path.endsWith('/workspace-mcp/oauth/complete') && method === 'POST') {
+        completions.push(request.postDataJSON());
+        integrations[0] = { ...integrations[0], status: 'ready' };
+        json = { workspaceId: workspace.id, integrationId: savedId };
       } else if (path.endsWith(`/workspace-mcp/integrations/${savedId}`))
         json = {
           integration: integrations[0],
@@ -173,7 +178,7 @@ async function withCard(authentication, steps) {
     await page.goto(`${origin}/${workspace.slug}/chat/${id}`);
     const card = page.getByRole('region', { name: 'Connect PostHog' });
     await card.getByRole('group', { name: 'Who can use it' }).waitFor();
-    await steps({ page, card, integrations, setups });
+    await steps({ page, card, integrations, setups, completions });
     assert.deepEqual(errors, []);
   } finally {
     await browser?.close();
@@ -223,4 +228,38 @@ test(
       await connected.getByText('Connected', { exact: true }).waitFor();
       await connected.getByText(/Ask away/).waitFor();
     }),
+);
+
+test('a chat OAuth proposal for a loopback-only server finishes from the pasted address', { timeout: 120000 }, () =>
+  withCard(
+    'oauth',
+    async ({ page, card, completions }) => {
+      await card.locator('[data-slot="button"]', { hasText: 'Connect PostHog' }).click();
+      const signIn = page.getByRole('region', { name: 'Sign in to PostHog' });
+      const link = signIn.getByRole('link', { name: 'Sign in to PostHog' });
+      await link.waitFor();
+      assert.equal(page.url().startsWith(origin), true, 'the chat stays open');
+      assert.equal(await link.getAttribute('target'), '_blank');
+      assert.equal(await link.getAttribute('rel'), 'noopener noreferrer');
+      assert.equal(
+        await signIn.evaluate(section => {
+          const steps = section.querySelector('ol');
+          const anchor = section.querySelector('a');
+          return Boolean(steps.compareDocumentPosition(anchor) & Node.DOCUMENT_POSITION_FOLLOWING);
+        }),
+        true,
+        'the steps come before the sign-in link',
+      );
+
+      const address = 'http://127.0.0.1:53817/callback?state=pasted-state&code=pasted-code';
+      await signIn.getByLabel('Address from the PostHog tab').evaluate((input, text) => {
+        const clipboardData = new DataTransfer();
+        clipboardData.setData('text', text);
+        input.dispatchEvent(new ClipboardEvent('paste', { clipboardData, bubbles: true, cancelable: true }));
+      }, address);
+      await page.getByRole('region', { name: 'PostHog connection' }).waitFor();
+      assert.deepEqual(completions, [{ address }]);
+    },
+    { paste: true },
+  ),
 );

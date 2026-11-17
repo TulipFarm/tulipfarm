@@ -3,6 +3,8 @@ import { z } from 'zod';
 import { McpError, type WorkspaceMcpService } from '@tulipfarm/workspace-mcp';
 import {
   createOAuthOperations,
+  isLoopbackRedirectUri,
+  isMcpOAuthRedirectUri,
   MCP_OAUTH_CLIENT_ID,
   MCP_OAUTH_REDIRECT_URI,
   McpNetworkError,
@@ -27,14 +29,23 @@ const clientSchema = z.strictObject({
   clientSecret: z.string().optional(),
   authMethod: z.enum(['none', 'client_secret_post', 'client_secret_basic']),
   issuer: z.url(),
+  redirectUri: z.string().refine(isLoopbackRedirectUri).optional(),
 });
-const materialSchema = z.strictObject({
-  binding: bindingSchema,
-  client: clientSchema,
-  verifier: z.string(),
-  redirectUri: z.literal(MCP_OAUTH_REDIRECT_URI),
-  scopes: z.array(z.string()),
-});
+// Attempts saved before loopback sign-in have no client `redirectUri`, which means the hosted callback.
+const materialSchema = z
+  .strictObject({
+    binding: bindingSchema,
+    client: clientSchema,
+    verifier: z.string(),
+    redirectUri: z.string().refine(isMcpOAuthRedirectUri),
+    scopes: z.array(z.string()),
+  })
+  .refine(material => material.redirectUri === (material.client.redirectUri ?? MCP_OAUTH_REDIRECT_URI));
+/** Where a sign-in landed: a redirect's origin and path, without its query. */
+const landing = (redirectUri: string) => {
+  const url = new URL(redirectUri);
+  return `${url.origin}${url.pathname}`;
+};
 type OAuthInput = Extract<z.infer<typeof mcpAuthenticationSchema>, { kind: 'oauth' }>;
 
 export function createWorkspaceMcpOAuth(
@@ -103,7 +114,7 @@ export function createWorkspaceMcpOAuth(
         binding,
         client,
         state: randomBytes(32).toString('base64url'),
-        redirectUri: MCP_OAUTH_REDIRECT_URI,
+        redirectUri: client.redirectUri ?? MCP_OAUTH_REDIRECT_URI,
       });
       const material = materialSchema.parse({
         binding,
@@ -115,9 +126,21 @@ export function createWorkspaceMcpOAuth(
       const attempt = await service.beginOAuth(workspaceId, userId, integrationId, { sessionId, material });
       const url = new URL(authorization.authorizationUrl);
       url.searchParams.set('state', `${mcpHttpId.parse(workspaceId)}_${attempt.state}`);
-      return { kind: 'oauth' as const, authorizationUrl: url.href };
+      // A loopback redirect lands on a page that can't load, so the member pastes its address back instead.
+      return client.redirectUri
+        ? { kind: 'oauth-paste' as const, authorizationUrl: url.href }
+        : { kind: 'oauth' as const, authorizationUrl: url.href };
     },
-    async complete(userId: string, sessionId: string, input: z.infer<typeof mcpCallbackSchema>) {
+    /**
+     * Finishes a sign-in from the address the provider redirected to. `landedAt` is that address's origin and path; it
+     * must match the attempt's redirect, so a hosted callback can't finish a loopback sign-in or the reverse.
+     */
+    async complete(
+      userId: string,
+      sessionId: string,
+      input: z.infer<typeof mcpCallbackSchema>,
+      landedAt: string = MCP_OAUTH_REDIRECT_URI,
+    ) {
       const match = /^([0-9a-f-]{36})_([A-Za-z0-9_-]{32,256})$/.exec(input.state);
       if (!match) throw new McpHttpError('invalid-request', 400);
       const workspaceId = mcpHttpId.parse(match[1]);
@@ -129,15 +152,16 @@ export function createWorkspaceMcpOAuth(
         if (
           material.binding.resource !== attempt.endpoint ||
           material.client.issuer !== material.binding.issuer ||
+          landing(material.redirectUri) !== landing(landedAt) ||
           (input.iss !== undefined && input.iss !== material.binding.issuer)
         )
           throw new McpHttpError('mcp-oauth-binding-denied', 400);
         if ('error' in input) throw new McpHttpError('mcp-authorization-denied', 400);
         const { registrationEndpoint, ...binding } = material.binding;
-        const { clientSecret, ...client } = material.client;
+        const { clientSecret, redirectUri, ...client } = material.client;
         const tokens = await network.exchangeOAuthCode({
           binding: { ...binding, ...(registrationEndpoint ? { registrationEndpoint } : {}) },
-          client: { ...client, ...(clientSecret ? { clientSecret } : {}) },
+          client: { ...client, ...(clientSecret ? { clientSecret } : {}), ...(redirectUri ? { redirectUri } : {}) },
           verifier: material.verifier,
           redirectUri: material.redirectUri,
           scope: material.scopes,

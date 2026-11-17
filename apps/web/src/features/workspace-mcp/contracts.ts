@@ -163,6 +163,7 @@ export type SetupInput = z.infer<typeof setupInputSchema>;
 export const setupResultSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('saved'), integration: integrationSchema }),
   z.object({ kind: z.literal('oauth'), integration: integrationSchema, authorizationUrl: z.url() }),
+  z.object({ kind: z.literal('oauth-paste'), integration: integrationSchema, authorizationUrl: z.url() }),
   z.object({
     kind: z.literal('registration-required'),
     integration: integrationSchema,

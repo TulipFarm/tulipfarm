@@ -264,6 +264,7 @@ test('v1 documentation describes the routes and their response contracts', async
         '/v1/workspaces/{workspaceId}/workspace-mcp/actions/{actionId}/decision',
         '/v1/workspaces/{workspaceId}/workspace-mcp/actions/{actionId}/cancel',
         '/v1/workspaces/{workspaceId}/workspace-mcp/actions/{actionId}/reconciliation',
+        '/v1/workspaces/{workspaceId}/workspace-mcp/oauth/complete',
         '/v1/workspaces/{workspaceId}/atlassian/accounts',
         '/v1/workspaces/{workspaceId}/atlassian/accounts/begin',
         '/v1/workspaces/{workspaceId}/atlassian/accounts/{accountId}',

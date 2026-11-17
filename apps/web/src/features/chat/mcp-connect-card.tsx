@@ -7,6 +7,7 @@ import { Input } from '@tulipfarm/sprout/input';
 import { ToggleGroup, ToggleGroupItem } from '@tulipfarm/sprout/toggle-group';
 import { McpGate, useMcpCommand } from '@/features/workspace-mcp/state';
 import { McpSetup } from '@/features/workspace-mcp/setup';
+import { McpPasteSignIn } from '@/features/workspace-mcp/paste-sign-in';
 import { connectionFor, mcpStatusLabel, useMcpConnect, type Ownership } from '@/features/workspace-mcp/connect';
 import { useMcpIntegration, useMcpIntegrations } from '@/features/workspace-mcp/queries';
 import { markMcpConnected, takeMcpConnected } from '@/features/workspace-mcp/sign-in';
@@ -49,6 +50,7 @@ function Connect({
     command,
     current,
     registration,
+    paste,
     clientId,
     setClientId,
     clientSecret,
@@ -71,7 +73,7 @@ function Connect({
       title={`Connect ${card.name}`}
       badge={{ label: registration ? 'One more step' : 'Suggested', variant: 'secondary' }}
       actions={
-        capabilities.integrationsEnabled && !open ? (
+        capabilities.integrationsEnabled && !open && !paste ? (
           <Button aria-busy={command.busy} disabled={command.busy} onClick={connect}>
             {command.busy ? 'Connecting…' : registration ? 'Continue' : `Connect ${card.name}`}
           </Button>
@@ -144,6 +146,15 @@ function Connect({
             onChange={event => setClientSecret(event.target.value)}
           />
         </section>
+      )}
+      {paste && (
+        <McpPasteSignIn
+          api={api}
+          name={card.name}
+          signIn={paste}
+          finished={read.refresh}
+          restart={() => run(ownership)}
+        />
       )}
       {open && (
         <McpSetup

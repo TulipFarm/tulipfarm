@@ -9,6 +9,32 @@ const apiOrigin = new URL(process.env.BETTER_AUTH_URL ?? 'http://localhost:3001'
 const webOrigin = new URL(process.env.WEB_ORIGIN ?? 'http://localhost:5173').origin;
 export const MCP_OAUTH_REDIRECT_URI = `${apiOrigin}/v1/workspace-mcp/oauth/callback`;
 export const MCP_OAUTH_CLIENT_ID = `${apiOrigin}/.well-known/mcp-client.json`;
+/**
+ * Some servers refuse to register a hosted redirect but accept a loopback one. Nothing listens there: the provider's
+ * redirect fails in the member's browser and they paste that address back into TulipFarm.
+ */
+export const MCP_OAUTH_LOOPBACK_PORT = 53817;
+export const MCP_OAUTH_LOOPBACK_REDIRECT_URI = `http://127.0.0.1:${MCP_OAUTH_LOOPBACK_PORT}/callback`;
+const loopbackHosts = new Set(['127.0.0.1', 'localhost', '[::1]']);
+
+/** An `http:` redirect on this machine, with no credentials, query or fragment. */
+export function isLoopbackRedirectUri(value: string): boolean {
+  if (value.length > 2048 || !URL.canParse(value)) return false;
+  const url = new URL(value);
+  return (
+    url.protocol === 'http:' &&
+    loopbackHosts.has(url.hostname) &&
+    !url.username &&
+    !url.password &&
+    !url.search &&
+    !url.hash &&
+    !value.includes('#')
+  );
+}
+
+/** The hosted callback, or a loopback redirect a server registered for the paste-the-address sign-in. */
+export const isMcpOAuthRedirectUri = (value: string) =>
+  value === MCP_OAUTH_REDIRECT_URI || isLoopbackRedirectUri(value);
 export const MCP_OAUTH_CLIENT_METADATA = Object.freeze({
   client_id: MCP_OAUTH_CLIENT_ID,
   client_name: 'TulipFarm',
@@ -68,6 +94,8 @@ export type OAuthClient = {
   clientSecret?: string;
   authMethod: 'none' | 'client_secret_post' | 'client_secret_basic';
   issuer: string;
+  /** Set only for a loopback registration; absent means `MCP_OAUTH_REDIRECT_URI`. */
+  redirectUri?: string;
 };
 export type OAuthTokens = {
   accessToken: string;
@@ -102,7 +130,8 @@ function validateClient(binding: OAuthBinding, client: OAuthClient): void {
     client.clientId.length > 4096 ||
     !binding.authMethods.includes(client.authMethod) ||
     (client.authMethod !== 'none' && !client.clientSecret) ||
-    (client.authMethod === 'none' && client.clientSecret)
+    (client.authMethod === 'none' && client.clientSecret) ||
+    (client.redirectUri !== undefined && !isLoopbackRedirectUri(client.redirectUri))
   )
     throw new McpNetworkError('oauth-binding-denied');
 }
@@ -111,12 +140,13 @@ export function createOAuthOperations({
   fetcher = publicHttpsFetch,
   now = () => new Date(),
 }: { fetcher?: typeof fetch; now?: () => Date } = {}) {
-  async function document(url: string, init?: RequestInit): Promise<unknown> {
+  async function document(url: string, init?: RequestInit, answered?: (status: number) => void): Promise<unknown> {
     const response = await fetcher(normalizeEndpoint(url), {
       ...init,
       redirect: 'error',
       signal: AbortSignal.any([...(init?.signal ? [init.signal] : []), AbortSignal.timeout(30000)]),
     });
+    answered?.(response.status);
     if (!response.ok || !/^application\/json(?:\s*;|$)/i.test(response.headers.get('content-type') ?? '')) {
       await response.body?.cancel();
       throw new McpNetworkError('oauth-discovery-failed');
@@ -237,28 +267,60 @@ export function createOAuthOperations({
       }
       if (binding.metadataDocumentSupported && binding.authMethods.includes('none'))
         return { clientId: MCP_OAUTH_CLIENT_ID, authMethod: 'none', issuer: binding.issuer };
-      if (!binding.registrationEndpoint) throw new McpNetworkError('oauth-registration-required');
-      const raw = clientSchema.parse(
-        await document(binding.registrationEndpoint, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json', accept: 'application/json' },
-          body: JSON.stringify({
-            client_name: MCP_OAUTH_CLIENT_METADATA.client_name,
-            client_uri: MCP_OAUTH_CLIENT_METADATA.client_uri,
-            redirect_uris: MCP_OAUTH_CLIENT_METADATA.redirect_uris,
-            grant_types: MCP_OAUTH_CLIENT_METADATA.grant_types,
-            response_types: MCP_OAUTH_CLIENT_METADATA.response_types,
-            token_endpoint_auth_method: 'none',
-          }),
-        }),
-      );
-      if (!raw.redirect_uris || raw.redirect_uris.length !== 1 || raw.redirect_uris[0] !== MCP_OAUTH_REDIRECT_URI)
-        throw new McpNetworkError('oauth-binding-denied');
+      const registrationEndpoint = binding.registrationEndpoint;
+      if (!registrationEndpoint) throw new McpNetworkError('oauth-registration-required');
+      // A 4xx or non-JSON answer means the server refused this redirect; rate limits and outages stay retryable failures.
+      const register = async (redirectUri: string) => {
+        let status = 0;
+        try {
+          return clientSchema.parse(
+            await document(
+              registrationEndpoint,
+              {
+                method: 'POST',
+                headers: { 'content-type': 'application/json', accept: 'application/json' },
+                body: JSON.stringify({
+                  client_name: MCP_OAUTH_CLIENT_METADATA.client_name,
+                  client_uri: MCP_OAUTH_CLIENT_METADATA.client_uri,
+                  redirect_uris: [redirectUri],
+                  grant_types: MCP_OAUTH_CLIENT_METADATA.grant_types,
+                  response_types: MCP_OAUTH_CLIENT_METADATA.response_types,
+                  token_endpoint_auth_method: 'none',
+                }),
+              },
+              answered => (status = answered),
+            ),
+          );
+        } catch (failure) {
+          if (
+            failure instanceof McpNetworkError &&
+            failure.code === 'oauth-discovery-failed' &&
+            status !== 429 &&
+            status < 500
+          )
+            return null;
+          throw failure;
+        }
+      };
+      const hosted = await register(MCP_OAUTH_REDIRECT_URI);
+      let raw = hosted;
+      let redirectUri: string | undefined;
+      if (!hosted || hosted.redirect_uris?.length !== 1 || hosted.redirect_uris[0] !== MCP_OAUTH_REDIRECT_URI) {
+        const loopback = await register(MCP_OAUTH_LOOPBACK_REDIRECT_URI);
+        // Some servers swap in their own loopback redirect; any loopback address still works for pasting.
+        const returned = loopback?.redirect_uris;
+        if (!loopback || returned?.length !== 1 || !isLoopbackRedirectUri(returned[0]!))
+          throw new McpNetworkError('oauth-registration-rejected');
+        raw = loopback;
+        redirectUri = returned[0]!;
+      }
+      if (!raw) throw new McpNetworkError('oauth-registration-rejected');
       const client: OAuthClient = {
         clientId: raw.client_id,
         authMethod: raw.token_endpoint_auth_method,
         issuer: binding.issuer,
         ...(raw.client_secret ? { clientSecret: raw.client_secret } : {}),
+        ...(redirectUri ? { redirectUri } : {}),
       };
       validateClient(binding, client);
       return client;
@@ -276,10 +338,8 @@ export function createOAuthOperations({
   }) {
     const binding = validatedBinding(input.binding);
     validateClient(binding, input.client);
-    if (
-      !/^[A-Za-z0-9_-]{32,256}$/.test(input.state) ||
-      (input.redirectUri && input.redirectUri !== MCP_OAUTH_REDIRECT_URI)
-    )
+    const redirectUri = input.client.redirectUri ?? MCP_OAUTH_REDIRECT_URI;
+    if (!/^[A-Za-z0-9_-]{32,256}$/.test(input.state) || (input.redirectUri && input.redirectUri !== redirectUri))
       throw new McpNetworkError('oauth-binding-denied');
     const verifier = randomBytes(32).toString('base64url');
     const challenge = createHash('sha256').update(verifier).digest('base64url');
@@ -302,7 +362,7 @@ export function createOAuthOperations({
     for (const [key, value] of Object.entries({
       client_id: input.client.clientId,
       response_type: 'code',
-      redirect_uri: MCP_OAUTH_REDIRECT_URI,
+      redirect_uri: redirectUri,
       state: input.state,
       code_challenge: challenge,
       code_challenge_method: 'S256',
@@ -313,7 +373,7 @@ export function createOAuthOperations({
     return {
       authorizationUrl: url.href,
       verifier,
-      redirectUri: MCP_OAUTH_REDIRECT_URI,
+      redirectUri,
       state: input.state,
       issuer: binding.issuer,
       resource: binding.resource,
@@ -384,8 +444,9 @@ export function createOAuthOperations({
     scope?: string[];
     responseIssuer?: string;
   }): Promise<OAuthTokens> {
+    const redirectUri = input.client.redirectUri ?? MCP_OAUTH_REDIRECT_URI;
     if (
-      (input.redirectUri && input.redirectUri !== MCP_OAUTH_REDIRECT_URI) ||
+      (input.redirectUri && input.redirectUri !== redirectUri) ||
       !/^[A-Za-z0-9._~-]{43,128}$/.test(input.verifier) ||
       !input.code ||
       input.code.length > 8192 ||
@@ -400,7 +461,7 @@ export function createOAuthOperations({
         grant_type: 'authorization_code',
         code: input.code,
         code_verifier: input.verifier,
-        redirect_uri: MCP_OAUTH_REDIRECT_URI,
+        redirect_uri: redirectUri,
       }),
       [input.code, input.verifier],
       input.scope ?? input.binding.scopes,

@@ -11,6 +11,7 @@ export type McpNetworkErrorCode =
   | 'oauth-binding-denied'
   | 'oauth-registration-required'
   | 'oauth-registration-failed'
+  | 'oauth-registration-rejected'
   | 'oauth-token-failed'
   | 'catalog-failed'
   | 'catalog-timeout'
