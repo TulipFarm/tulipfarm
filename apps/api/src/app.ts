@@ -54,7 +54,7 @@ import { requestHandleKey } from '@tulipfarm/apps/store';
 import { appBuilder, appHost } from '@tulipfarm/extensions';
 import type { Pool } from 'pg';
 import { registerPreviewTickets } from './app-preview-tickets.ts';
-import { appDataLookupConnections, registerAppData } from './app-data.ts';
+import { appDataLookupPool, registerAppData } from './app-data.ts';
 import { createIdentityPool } from './identity-pool.ts';
 import { createTableService } from '@tulipfarm/tables/service';
 
@@ -225,7 +225,7 @@ export function buildApp(
           commonCompatibility,
         );
         registerAppData(data, {
-          lookups: createIdentityPool(data, appDataLookupConnections),
+          lookups: createIdentityPool(data, appDataLookupPool),
           handles: requestHandleKey(process.env),
           tables,
         });
