@@ -20,7 +20,7 @@
     "url": "https://mcp.pscale.dev/mcp/planetscale",
     "transport": "streamable-http",
     "auth": "oauth",
-    "checked": "2026-11-14"
+    "checked": "2026-11-17"
   },
   "icons": {
     "simpleIcons": "planetscale",

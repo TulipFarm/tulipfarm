@@ -17,7 +17,7 @@
     "url": "https://api.raygun.com/v3/mcp",
     "transport": "streamable-http",
     "auth": "oauth",
-    "checked": "2026-11-14"
+    "checked": "2026-11-17"
   },
   "registryName": "io.github.MindscapeHQ/mcp-server-raygun",
   "icons": {

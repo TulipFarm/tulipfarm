@@ -20,7 +20,7 @@
     "url": "https://public-api.wordpress.com/wpcom/v2/mcp/v1",
     "transport": "streamable-http",
     "auth": "oauth",
-    "checked": "2026-11-14"
+    "checked": "2026-11-17"
   },
   "icons": {
     "simpleIcons": "wordpress",
