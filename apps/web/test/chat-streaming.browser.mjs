@@ -748,10 +748,13 @@ test('chat reply streaming and polling fallback in Chromium', { timeout: 240000 
         history[0].turn.stats = { model: 'deepseek-pro', firstTextMs: 900, durationMs: 1800 };
         await open();
         await page.getByText('Hello from the fallback model.', { exact: true }).waitFor();
+        assert.equal(await page.getByRole('alert').count(), 0);
+        await page
+          .getByRole('button', { name: 'Using Kimi K2.6. DeepSeek V4 Pro was unavailable. Show details' })
+          .click();
         await page
           .getByText('Answered by Kimi K2.6 because DeepSeek V4 Pro was unavailable.', { exact: true })
           .waitFor();
-        assert.equal(await page.getByRole('alert').count(), 0);
         await screenshot(page, 'fallback-model-reply');
       },
     );
@@ -764,10 +767,13 @@ test('chat reply streaming and polling fallback in Chromium', { timeout: 240000 
         history[0].turn.stats = { model: 'deepseek-pro', firstTextMs: 900, durationMs: 1800 };
         await open();
         await page.getByText('Hello from the fallback model.', { exact: true }).waitFor();
+        assert.equal(await page.getByRole('alert').count(), 0);
+        await page
+          .getByRole('button', { name: 'Using Kimi K2.6. DeepSeek V4 Pro took too long. Show details' })
+          .click();
         await page
           .getByText('DeepSeek V4 Pro took too long to respond, so Kimi K2.6 answered.', { exact: true })
           .waitFor();
-        assert.equal(await page.getByRole('alert').count(), 0);
         await screenshot(page, 'fallback-model-reply-reason');
       },
     );
