@@ -585,6 +585,28 @@ test('an app server reaches an approved view only while a visitor request is ope
     },
   );
 
+  await t.test("replaying closed handles from 1000 apps does not push out another app's verdicts", async () => {
+    let looked = 0;
+    const platform = {
+      query: (sql, values) => {
+        looked++;
+        return values[1] === appId ? pool.query(sql, values) : { rows: [] };
+      },
+    };
+    const server = await build(undefined, platform);
+    const cleanup = await open();
+    await closeRequestHandle(pool, cleanup);
+    const stale = Array.from({ length: 1000 }, () => signRequestHandle(handles, randomUUID()));
+    for (const handle of stale) assert.equal((await inject(server, handle)).status, 401);
+    assert.equal((await inject(server, cleanup)).status, 401);
+    const before = looked;
+    for (const handle of stale.slice(1)) assert.equal((await inject(server, handle)).status, 401);
+    assert.equal(looked, before, 'the replay is answered from memory');
+    assert.equal((await inject(server, signRequestHandle(handles, randomUUID()))).status, 401);
+    assert.equal((await inject(server, cleanup)).status, 401);
+    assert.equal(looked, before + 1, "the app's closed verdict is still held");
+  });
+
   const stallingProxy = async target => {
     const sockets = new Set();
     const server = createServer(client => {

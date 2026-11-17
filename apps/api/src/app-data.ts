@@ -112,11 +112,12 @@ export function registerAppData(
   // keeping a live one that long marks its long stream as seen across the gateway's 20 s renewals.
   const verdictMs = 120_000;
   // A lost verdict can cost its app old lookups and then its unseen long streams, so each app keeps its own 500
-  // newest verdicts, which only its own handles push out. Each call keeps its app's verdicts tracked for 2 more
-  // minutes. Pushing them out takes calls from 1,000 other apps since, each with handles the gateway signed for it. An
-  // entry takes 200 to 450 bytes, so the verdicts take at most about 230 MB.
+  // newest verdicts, which only its own handles push out. A lookup or a live verdict keeps its app's verdicts tracked
+  // for 2 more minutes, and a call refused from memory does not, so a replayed closed handle moves no app. Pushing an
+  // app out takes lookups for 1,000 other apps since, each with handles the gateway signed for it. An entry takes 200
+  // to 450 bytes, so the verdicts take at most about 230 MB.
   const verdicts = createExpiringMap<Verdicts>({ ttlMs: verdictMs, entries: 1_000 });
-  const verdictsOf = (appId: string) => {
+  const keepVerdicts = (appId: string) => {
     const held = verdicts.get(appId) ?? createExpiringMap<Verdict>({ ttlMs: verdictMs, entries: 500 });
     verdicts.set(appId, held);
     return held;
@@ -130,7 +131,7 @@ export function registerAppData(
   // cap bounds its memory then, and a call past it is refused at once.
   const slots = createFairSlots({ slots: appDataLookupPool.max, perKey: 2, waitMs: 100, queue: 1_000 });
   const inFlight = new Map<string, Promise<LiveAppRequest | null | typeof busy>>();
-  const lookUp = (signed: SignedRequestHandle, digest: string, unseenOld: boolean, held: Verdicts) => {
+  const lookUp = (signed: SignedRequestHandle, digest: string, unseenOld: boolean) => {
     let lookup = inFlight.get(digest);
     if (lookup) return lookup;
     lookup = slots
@@ -138,7 +139,7 @@ export function registerAppData(
         // Calls that waited for this slot passed the budget check before the lookups ahead of them spent it.
         if (unseenOld && oldClosed.wait(signed.appId) > 0) return busy;
         const found = await resolveRequestHandle(dependencies.lookups, signed);
-        held.set(digest, found ? { live: found, checkedAt: Date.now() } : { live: null });
+        keepVerdicts(signed.appId).set(digest, found ? { live: found, checkedAt: Date.now() } : { live: null });
         if (!found && unseenOld) oldClosed.spend(signed.appId);
         return found;
       })
@@ -190,8 +191,7 @@ export function registerAppData(
       if (!signed) return closed(reply);
       const digest = createHash('sha256').update(signed.handle).digest('base64url');
       const { appId } = signed;
-      const held = verdictsOf(appId);
-      const verdict = held.get(digest);
+      const verdict = verdicts.get(appId)?.get(digest);
       if (verdict && !verdict.live) return closed(reply);
       const unseenOld = !verdict && Date.now() / 1000 - signed.mintedAt > freshSeconds;
       const wait = Math.max(
@@ -201,10 +201,9 @@ export function registerAppData(
         unseenOld ? oldClosed.wait(appId) : 0,
       );
       if (wait > 0) return tooMany(reply, wait);
-      const live =
-        verdict?.live && Date.now() - verdict.checkedAt < liveMs
-          ? verdict.live
-          : await lookUp(signed, digest, unseenOld, held);
+      const cached = verdict?.live && Date.now() - verdict.checkedAt < liveMs ? verdict.live : null;
+      if (cached) keepVerdicts(appId);
+      const live = cached ?? (await lookUp(signed, digest, unseenOld));
       if (live === busy) {
         const spent = unseenOld ? oldClosed.wait(appId) : 0;
         if (spent > 0) return tooMany(reply, spent);
