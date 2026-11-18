@@ -1,12 +1,15 @@
 import { z } from 'zod';
 import type { QueryKey } from '@tanstack/react-query';
+import { creditSummarySchema } from '@tulipfarm/workspace-storage/credits-contracts';
 import type { EarlyRead } from '@/lib/query/early-reads';
 import type { PersistedRead } from '@/lib/query/persisted-reads';
+import { creditKeys } from '@/lib/credit-keys';
 import { chatGptConnectionSchema } from '@/features/models/chatgpt-plan-api';
 import { tokenConnectionSchema } from '@/features/models/token-plan-api';
 import { projectApi, projectListSchema } from '@/features/projects/api';
 import { projectKeys } from '@/features/projects/queries';
 import { integrationDirectoryPersistedReads, integrationDirectoryReads } from '@/features/integrations/directory-reads';
+import { ownRecentSections, recentItemsSchema, recentKey } from '@/features/navigation/recent-queries';
 import { chatHistorySchema, chatListSchema, conversationApi } from './conversation-api';
 import { conversationKeys } from './queries';
 
@@ -64,6 +67,9 @@ const historyKey = z.tuple([
   z.strictObject({ pages: z.literal(1) }),
 ]);
 const projectsKey = z.tuple([z.literal('projects'), z.literal('list')]);
+const pinnedKey = z.tuple([z.literal('conversations'), z.literal('list'), z.literal('pinned')]);
+const creditsKey = JSON.stringify(creditKeys.balance());
+const recentKeys = new Set(ownRecentSections.map(section => JSON.stringify(recentKey(section))));
 // The Models page rail reads each plan connection; keeping the last answer lets a reload show it at once.
 const chatGptKey = z.tuple([z.literal('models'), z.literal('chatgpt-connection')]);
 const tokenPlanKey = z.tuple([z.literal('models'), z.enum(['claude-connection', 'copilot-connection'])]);
@@ -74,6 +80,14 @@ export const persistedPageReads: PersistedRead[] = [
   { name: 'chat-list', limit: 4, match: matches(listKey), schema: chatListSchema },
   { name: 'chat-history', limit: 12, match: matches(historyKey), schema: chatHistorySchema },
   { name: 'projects', limit: 1, match: matches(projectsKey), schema: projectListSchema },
+  { name: 'pinned-chats', limit: 1, match: matches(pinnedKey), schema: chatListSchema.shape.chats },
+  {
+    name: 'sidebar-recents',
+    limit: ownRecentSections.length,
+    match: key => recentKeys.has(JSON.stringify(key)),
+    schema: recentItemsSchema,
+  },
+  { name: 'credits', limit: 1, match: key => JSON.stringify(key) === creditsKey, schema: creditSummarySchema },
   { name: 'chatgpt-connection', limit: 1, match: matches(chatGptKey), schema: chatGptConnectionSchema.nullable() },
   { name: 'token-plan-connection', limit: 2, match: matches(tokenPlanKey), schema: tokenConnectionSchema.nullable() },
   ...integrationDirectoryPersistedReads,

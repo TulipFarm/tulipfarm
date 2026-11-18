@@ -43,6 +43,8 @@ export function createFeatureClient(
   const account: FeatureScope = { kind: 'account', userId: identity.userId };
   const catalog = createCatalogPersistence();
   const persistTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  // Workspaces whose persisted reads this client has already shown, from a provisional admission or after one.
+  const restored = new Set<string>();
   /** The workspace scope and feature key of a cached read that may persist, if it is one. */
   const persistedTarget = (queryKey: QueryKey) => {
     const [user, userId, workspace, workspaceId, membership, membershipId, ...key] = queryKey;
@@ -263,11 +265,34 @@ export function createFeatureClient(
      */
     restorePersisted(scope: WorkspaceScope) {
       if (!isCurrent(scope)) return;
-      for (const read of persistedReads.provisionalReads(identity, scope)) {
+      const reads = persistedReads.provisionalReads(identity, scope);
+      if (reads.length) restored.add(hashKey(scopeKey(scope)));
+      for (const read of reads) {
         const fullKey = featureKey(scope, read.key);
         const existing = client.getQueryState(fullKey);
         if (existing && (existing.error || existing.fetchStatus !== 'idle' || existing.dataUpdatedAt >= read.updatedAt))
           continue;
+        client.setQueryData(fullKey, read.data, { updatedAt: read.updatedAt });
+        void client.invalidateQueries({ queryKey: fullKey, exact: true, refetchType: 'none' });
+      }
+    },
+    /**
+     * Once per workspace, after a confirmed admission that was not shown from disk, fills persisted reads
+     * the network has not answered yet. A read still in flight keeps going and replaces the disk copy.
+     */
+    async restoreAdmitted(scope: WorkspaceScope) {
+      const hash = hashKey(scopeKey(scope));
+      if (restored.has(hash) || persistedReads.unconfirmed(scope)) return;
+      restored.add(hash);
+      await persistedReads.untilConfigured();
+      const current = fence(scope, () => memberships.get(scope.workspaceId)?.membershipId === scope.membershipId);
+      if (!current()) return;
+      const reads = await persistedReads.restore(scope);
+      if (!current()) return;
+      for (const read of reads) {
+        const fullKey = featureKey(scope, read.key);
+        const existing = client.getQueryState(fullKey);
+        if (existing && (existing.error || existing.data !== undefined)) continue;
         client.setQueryData(fullKey, read.data, { updatedAt: read.updatedAt });
         void client.invalidateQueries({ queryKey: fullKey, exact: true, refetchType: 'none' });
       }

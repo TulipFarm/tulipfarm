@@ -199,7 +199,11 @@ client. StrictMode cleanup does not broadcast a false logout.
 the network answers. Only reads listed in `persistedPageReads`
 (`features/chat/early-reads.ts`) persist: the first page of the active chat list
 per project filter (up to 4), the first history page of the 12 most recently
-saved chats, and the project list. Each definition matches keys with a zod
+saved chats, the project list, the pinned chats, the sidebar's own Recents
+sections (agents, agent tasks, workflows, tables and files), the credits
+balance, the Models page plan connections and the integrations directory. The
+sidebar's chat and project Recents reuse the chat list and project list reads,
+so they need no copy of their own. Each definition matches keys with a zod
 schema and validates data with the response schema its feature API already uses.
 
 Each record's envelope holds version, user, workspace, membership, name, key and
@@ -221,6 +225,11 @@ with their original timestamps, marked stale, so queries refetch in the
 background. The real session and admission check runs alongside. `holdWrites`
 in `lib/http.ts` makes every non-GET request wait for it, and fails them unless
 the check returns the same user, session, workspace and membership.
+
+When a workspace is admitted without that provisional step, for example because
+the snapshot took longer than 300 ms, `restoreAdmitted` reads the same records
+once per workspace and fills only the queries the network has not answered yet,
+again with their original timestamps and marked stale.
 
 When the check confirms the snapshot, the router swaps in the confirmed context
 and saves the current reads. Any other result clears that workspace's persisted
