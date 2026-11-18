@@ -205,7 +205,10 @@ balance, the Models page plan connections, the integrations directory, and the
 unsearched first page of each top-level list in `persistedListReads`
 (`features/navigation/persisted-lists.ts`): agents and their authoring context,
 tasks, workflows, tables, skills, apps, personal knowledge, and files at a
-section root or in a folder. The
+section root or in a folder, plus the 15 most recently opened records of each
+kind in `persistedDetailReads` (`features/navigation/persisted-details.ts`):
+agents and their policies, task summaries, saved workflow definitions, table
+definitions, projects and apps. The
 sidebar's chat and project Recents reuse the chat list and project list reads,
 so they need no copy of their own. Each definition matches keys with a zod
 schema and validates data with the response schema its feature API already uses.
@@ -215,7 +218,9 @@ data timestamp. Records older than 24 hours, future-dated, corrupt, wrong-scope
 or failing their schema are rejected and pruned. A record over 1 MB is not saved,
 and a user's records are capped at 10 MB, evicting the oldest first. Saves are
 debounced, fenced by the current membership, and skipped while the scope is
-unconfirmed. Values written with `setQueryData` are not persisted. IndexedDB
+unconfirmed. Values a feature writes with `setQueryData`, such as an edit or a
+streamed reply, persist the same way, so a reload shows what the person last
+saw; values put back from disk are not saved again. IndexedDB
 failures leave normal network and memory reads available.
 
 On admission the router saves the workspace snapshot (user, workspace, workspace

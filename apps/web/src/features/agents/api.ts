@@ -34,7 +34,7 @@ import {
   type PublishAgentSetup,
 } from '@tulipfarm/agents/setup-contracts';
 
-const webAgentDetailSchema = agentDetailSchema.extend({ definition: webAgentDefinitionSchema });
+export const webAgentDetailSchema = agentDetailSchema.extend({ definition: webAgentDefinitionSchema });
 export type AgentDetail = z.infer<typeof webAgentDetailSchema>;
 export type AgentContext = z.infer<typeof agentContextSchema>;
 export type AgentInput = Omit<z.infer<typeof saveAgentSchema>, 'definition'> & {

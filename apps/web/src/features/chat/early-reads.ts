@@ -10,6 +10,7 @@ import { projectApi, projectListSchema } from '@/features/projects/api';
 import { projectKeys } from '@/features/projects/queries';
 import { integrationDirectoryPersistedReads, integrationDirectoryReads } from '@/features/integrations/directory-reads';
 import { ownRecentSections, recentItemsSchema, recentKey } from '@/features/navigation/recent-queries';
+import { persistedDetailReads } from '@/features/navigation/persisted-details';
 import { persistedListReads } from '@/features/navigation/persisted-lists';
 import { chatHistorySchema, chatListSchema, conversationApi } from './conversation-api';
 import { conversationKeys } from './queries';
@@ -93,4 +94,5 @@ export const persistedPageReads: PersistedRead[] = [
   { name: 'token-plan-connection', limit: 2, match: matches(tokenPlanKey), schema: tokenConnectionSchema.nullable() },
   ...integrationDirectoryPersistedReads,
   ...persistedListReads,
+  ...persistedDetailReads,
 ];

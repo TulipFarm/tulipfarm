@@ -45,6 +45,13 @@ export function createFeatureClient(
   const persistTimers = new Map<string, ReturnType<typeof setTimeout>>();
   // Workspaces whose persisted reads this client has already shown, from a provisional admission or after one.
   const restored = new Set<string>();
+  // Values put back from disk, so writing them into the cache does not save them again.
+  const fromDisk = new WeakSet<object>();
+  const restoreRead = (fullKey: QueryKey, read: { data: unknown; updatedAt: number }) => {
+    if (typeof read.data === 'object' && read.data !== null) fromDisk.add(read.data);
+    client.setQueryData(fullKey, read.data, { updatedAt: read.updatedAt });
+    void client.invalidateQueries({ queryKey: fullKey, exact: true, refetchType: 'none' });
+  };
   /** The workspace scope and feature key of a cached read that may persist, if it is one. */
   const persistedTarget = (queryKey: QueryKey) => {
     const [user, userId, workspace, workspaceId, membership, membershipId, ...key] = queryKey;
@@ -272,8 +279,7 @@ export function createFeatureClient(
         const existing = client.getQueryState(fullKey);
         if (existing && (existing.error || existing.fetchStatus !== 'idle' || existing.dataUpdatedAt >= read.updatedAt))
           continue;
-        client.setQueryData(fullKey, read.data, { updatedAt: read.updatedAt });
-        void client.invalidateQueries({ queryKey: fullKey, exact: true, refetchType: 'none' });
+        restoreRead(fullKey, read);
       }
     },
     /**
@@ -293,8 +299,7 @@ export function createFeatureClient(
         const fullKey = featureKey(scope, read.key);
         const existing = client.getQueryState(fullKey);
         if (existing && (existing.error || existing.data !== undefined)) continue;
-        client.setQueryData(fullKey, read.data, { updatedAt: read.updatedAt });
-        void client.invalidateQueries({ queryKey: fullKey, exact: true, refetchType: 'none' });
+        restoreRead(fullKey, read);
       }
     },
     /** Saves a scope's current reads once its provisional admission is confirmed. */
@@ -346,8 +351,10 @@ export function createFeatureClient(
           const parsed = modelCatalogSchema.safeParse(event.query.state.data);
           if (entry?.current() && parsed.success)
             void catalog.save(entry.scope, parsed.data, event.query.state.dataUpdatedAt, entry.current);
-          // Values a feature writes into the cache itself are not server reads, so only fetched ones persist.
-          if (!event.action.manual) persist(event.query.queryHash, event.query.queryKey);
+          // A feature's own edits persist too, so a reload shows what the person last saw; disk restores don't.
+          const data = event.query.state.data;
+          if (!event.action.manual || typeof data !== 'object' || data === null || !fromDisk.has(data))
+            persist(event.query.queryHash, event.query.queryKey);
         }
         polling.touch(event.query.queryHash);
       });

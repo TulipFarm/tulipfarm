@@ -65,7 +65,7 @@ const draftSchema = z.discriminatedUnion('state', [
 ]);
 export type AppDraftState = z.infer<typeof draftSchema>['state'];
 
-const appDetailSchema = appSummarySchema.extend({
+export const appDetailSchema = appSummarySchema.extend({
   draft: draftSchema,
   liveRelease: z.object({ id: z.uuid(), number: z.number(), commit: z.string() }).nullable(),
   /** The domain public apps are served under, or null when this server does not serve app sites. */

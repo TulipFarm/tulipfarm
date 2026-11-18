@@ -47,12 +47,16 @@ const fileAudienceSchema = z.object({
     ]),
   ),
 });
-const detailSchema = z.object({ project: projectSchema, members: z.array(memberSchema), files: z.array(fileSchema) });
+export const projectDetailSchema = z.object({
+  project: projectSchema,
+  members: z.array(memberSchema),
+  files: z.array(fileSchema),
+});
 const sourceSchema = z.object({ title: z.string(), filename: z.string(), content: z.string() });
 export type Project = z.infer<typeof projectSchema>;
 export type ProjectMember = z.infer<typeof memberSchema>;
 export type ProjectFile = z.infer<typeof fileSchema>;
-export type ProjectDetail = z.infer<typeof detailSchema>;
+export type ProjectDetail = z.infer<typeof projectDetailSchema>;
 export type ProjectEdit = { expectedRevision: number; name: string; instructions: string; archived: boolean };
 
 const messages: Record<string, string> = {
@@ -96,7 +100,7 @@ export function projectApi(workspaceId: string) {
   return {
     list: async (signal: AbortSignal) => z.array(projectSchema).parse(await request('', 'GET', undefined, signal)),
     read: async (id: string, signal: AbortSignal) =>
-      detailSchema.parse(await request(`/${id}`, 'GET', undefined, signal)),
+      projectDetailSchema.parse(await request(`/${id}`, 'GET', undefined, signal)),
     // Any member may read the collaboration directory: names, avatars, and email addresses only.
     candidates: async (signal: AbortSignal) =>
       (await loadCollaborationDirectory(workspaceId, signal)).members.map(member => ({
