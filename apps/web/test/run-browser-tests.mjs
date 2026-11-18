@@ -1,6 +1,7 @@
 // Runs the browser tests. Many share fixed ports and Vite's dependency cache, so they run one at a time unless
 // --jobs is above 1. Then each test runs in its own Linux network namespace (unshare), where its ports cannot
 // collide, with its worker's own Vite cache, and reaches TEST_ADMIN_DATABASE_URL through a forwarded socket.
+// A test that measures timings opts out of running beside others with a `// browser-tests: run alone` comment.
 // Usage: node test/run-browser-tests.mjs [--shard=<index>/<count>] [--jobs=<count>] [test/name.browser.mjs ...]
 import { spawn, spawnSync } from 'node:child_process';
 import { readdirSync, readFileSync, rmSync } from 'node:fs';
@@ -10,7 +11,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
-const timeout = 10 * 60_000;
+const timeout = 5 * 60_000;
 const args = process.argv.slice(2);
 const option = name => args.find(arg => arg.startsWith(`--${name}=`))?.slice(name.length + 3);
 const shard = option('shard');
@@ -22,10 +23,25 @@ if (!files.length)
     .filter(name => name.endsWith('.browser.mjs'))
     .sort()
     .map(name => `test/${name}`);
+const alone = new Set(
+  files.filter(file => readFileSync(`${root}/${file}`, 'utf8').includes('// browser-tests: run alone')),
+);
+// Seconds each test took on CI with --jobs=4, so shards get similar totals and long tests start first. A test
+// that runs alone holds every worker. New tests count as the median until they are added.
+const durations = JSON.parse(readFileSync(`${root}/test/browser-test-durations.json`, 'utf8'));
+const known = Object.values(durations).sort((a, b) => a - b);
+const duration = file => durations[file] ?? known[Math.floor(known.length / 2)] ?? 1;
+const cost = file => duration(file) * (alone.has(file) ? jobs : 1);
+files.sort((a, b) => cost(b) - cost(a) || a.localeCompare(b));
 if (shard) {
   const [index, count] = shard.split('/').map(Number);
   if (!(index >= 1 && index <= count)) throw new Error(`Invalid shard ${shard}`);
-  files = files.filter((_, position) => position % count === index - 1);
+  const totals = Array.from({ length: count }, () => 0);
+  files = files.filter(file => {
+    const least = totals.indexOf(Math.min(...totals));
+    totals[least] += cost(file);
+    return least === index - 1;
+  });
 }
 
 const isolate = jobs > 1;
@@ -126,12 +142,12 @@ function run(file, worker) {
   });
 }
 
+const queue = [...files.filter(file => alone.has(file)), ...files.filter(file => !alone.has(file))];
 const failed = [];
-let next = 0;
 let finished = 0;
-async function work(worker) {
-  while (next < files.length) {
-    const file = files[next++];
+async function work(worker, once = false) {
+  while (queue.length) {
+    const file = queue.shift();
     const started = Date.now();
     const { code, output } = await run(file, worker);
     const label = `[${++finished}/${files.length}] ${file} (${Math.round((Date.now() - started) / 1000)}s)`;
@@ -140,9 +156,24 @@ async function work(worker) {
       failed.push(file);
       console.log(`::group::FAIL ${label}\n${output}\n::endgroup::`);
     }
+    if (once) return;
   }
 }
-await Promise.all(Array.from({ length: Math.min(jobs, files.length) }, (_, worker) => work(worker + 1)));
+// Tests that run alone go first, one at a time, before the workers share the rest.
+while (alone.has(queue[0])) await work(1, true);
+await Promise.all(Array.from({ length: Math.min(jobs, queue.length) }, (_, worker) => work(worker + 1)));
+// Contention can push a test past its waits, so a test that failed beside others gets one more try alone.
+if (isolate && failed.length) {
+  const retries = failed.splice(0);
+  for (const file of retries) {
+    const { code, output } = await run(file, 1);
+    if (code === 0) console.log(`::warning file=apps/web/${file}::${file} failed beside other tests and passed alone`);
+    else {
+      failed.push(file);
+      console.log(`::group::FAIL again alone ${file}\n${output}\n::endgroup::`);
+    }
+  }
+}
 isolation?.close();
 if (failed.length) {
   console.log(`\n${failed.length} of ${files.length} browser tests failed:\n${failed.join('\n')}`);

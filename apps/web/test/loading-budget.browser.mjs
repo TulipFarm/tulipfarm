@@ -1,3 +1,4 @@
+// browser-tests: run alone, since it measures timings that other tests running beside it would slow.
 import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { setTimeout as delay } from 'node:timers/promises';
