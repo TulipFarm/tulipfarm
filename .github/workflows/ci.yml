@@ -104,8 +104,8 @@ jobs:
           pnpm exec turbo run build --filter='@tulipfarm/web^...' --concurrency=2
           pnpm --filter @tulipfarm/web test:shell-accessibility
 
-  # Every apps/web/test/*.browser.mjs, run one at a time in each shard: tests share Vite's dependency cache and
-  # fixed ports, and some read and write a disposable database.
+  # Every apps/web/test/*.browser.mjs. Tests share fixed ports, so each shard runs four at a time, each in its own
+  # network namespace; see apps/web/test/run-browser-tests.mjs.
   web-browser:
     name: web-browser (${{ matrix.shard }}/6)
     needs: changes
@@ -164,10 +164,13 @@ jobs:
         run: |
           pnpm exec turbo run build --filter='@tulipfarm/web^...' --filter=@tulipfarm/api --filter=@tulipfarm/worker --concurrency=2
           VITE_API_URL= pnpm --filter @tulipfarm/web build
+      # Ubuntu's AppArmor blocks the unprivileged user namespaces the runner isolates each test in.
+      - name: Allow unprivileged network namespaces
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - name: Run browser tests
         env:
           SHARD: ${{ matrix.shard }}/6
-        run: pnpm --filter @tulipfarm/web test:browser --shard="$SHARD"
+        run: pnpm --filter @tulipfarm/web test:browser --shard="$SHARD" --jobs=4
       - name: Upload failure screenshots
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -230,11 +233,16 @@ jobs:
   # A release starts its code before workspace-rollout applies its common migrations to every workspace. This runs
   # chats and background jobs against a workspace one migration short, so a missing table (42P01) fails the build.
   behind-workspace:
-    name: behind-workspace
+    name: behind-workspace (${{ matrix.group }})
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # The checks run serially against one database, so they are split across two runners.
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [workspace, apps]
     services:
       postgres:
         image: pgvector/pgvector:0.8.2-pg18
@@ -271,18 +279,24 @@ jobs:
       - name: Create the local database roles
         run: psql "$TEST_ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -f infra/postgres/init.sql
       - name: Run chats and jobs against a workspace behind the release
+        if: matrix.group == 'workspace'
         run: pnpm run test:behind-workspace
       - name: Check private task reads and access revocation
+        if: matrix.group == 'workspace'
         run: pnpm --filter @tulipfarm/api exec node --experimental-test-module-mocks --test --test-concurrency=1 test/agent-tasks.integration.mjs
       - name: Check that authorization lock readers share and writers queue fairly
+        if: matrix.group == 'workspace'
         run: pnpm --filter @tulipfarm/access exec node --test --test-concurrency=1 test/authorization-lock.integration.mjs
       - name: Check that one locked workspace does not block workspace discovery
+        if: matrix.group == 'workspace'
         run: pnpm --filter @tulipfarm/workspaces exec node --test --test-concurrency=1 test/discovery-lock.integration.mjs
       - name: Check workspace route admission and membership revocation
+        if: matrix.group == 'workspace'
         run: |
           pnpm --filter @tulipfarm/api exec node --test --test-name-pattern='workspace HTTP conceals' test/governance.integration.mjs
           pnpm --filter @tulipfarm/workspace-storage exec node --test --test-name-pattern='membership admission' test/integration/runtime.test.mjs
       - name: Check app tables, app credits, app names and app data views
+        if: matrix.group == 'apps'
         run: |
           pnpm --filter @tulipfarm/tables exec node --test --test-concurrency=1 test/integration/data-views.test.mjs
           pnpm --filter @tulipfarm/workspace-storage exec node --test --test-concurrency=1 test/integration/apps.test.mjs test/integration/app-credits.test.mjs
@@ -291,30 +305,39 @@ jobs:
           pnpm --filter @tulipfarm/worker run test:apps
           pnpm --filter @tulipfarm/api run test:apps
       - name: Check that one chat at a time edits an app and only a finished turn saves
+        if: matrix.group == 'apps'
         run: pnpm --filter @tulipfarm/agents exec node --test --test-concurrency=1 test/app-tools.integration.mjs
       - name: Check that an app chat replaces pages only at the revision it read
+        if: matrix.group == 'apps'
         run: pnpm --filter @tulipfarm/agents exec node --test --test-concurrency=1 test/app-page-tools.integration.mjs
       - name: Check that an app chat turn saves its app edits only when it completes
+        if: matrix.group == 'apps'
         run: pnpm --filter @tulipfarm/worker exec node --test --test-concurrency=1 test/app-editing.integration.mjs
       - name: Check row and project review drafts
+        if: matrix.group == 'workspace'
         env:
           XAI_API_KEY: synthetic-not-secret
         run: pnpm --filter @tulipfarm/agents exec node --test --test-concurrency=1 test/row-drafts.integration.mjs test/project-drafts.integration.mjs
       - name: Check API call approvals and per-turn limits
+        if: matrix.group == 'workspace'
         env:
           XAI_API_KEY: synthetic-not-secret
         run: |
           pnpm --filter @tulipfarm/conversations exec node --test --test-concurrency=1 test/integration/api-calls.test.mjs
           pnpm --filter @tulipfarm/agents exec node --test --test-concurrency=1 test/api-calls-task.integration.mjs
       - name: Check table approvals and workspace skill sources
+        if: matrix.group == 'workspace'
         run: |
           pnpm --filter @tulipfarm/agents exec node --test --test-concurrency=1 test/table-approval.integration.mjs
           pnpm --filter @tulipfarm/tables exec node --test --test-concurrency=1 test/integration/activation-retry.test.mjs
       - name: Check agent table access
+        if: matrix.group == 'workspace'
         run: |
           pnpm --filter @tulipfarm/agents exec node --test --test-concurrency=1 test/task-data-scope.integration.mjs
           pnpm --filter @tulipfarm/agents exec node --test --test-name-pattern='table enrollment' test/setup.integration.mjs
       - name: Check activation replacement and running-task authority
+        if: matrix.group == 'workspace'
         run: pnpm --filter @tulipfarm/agents exec node --test --test-concurrency=1 test/activation-replacement.integration.mjs
       - name: Check private task ordering and paging
+        if: matrix.group == 'workspace'
         run: pnpm --filter @tulipfarm/agents exec node --test --test-concurrency=1 test/tasks.integration.mjs
