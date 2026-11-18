@@ -22,6 +22,7 @@ export function useWorkflowEditingSession({
   link,
   onLink,
   workflows,
+  workflowsRefreshing = false,
   archivedWorkflows,
   archivedOpened,
   archivedState,
@@ -35,6 +36,8 @@ export function useWorkflowEditingSession({
   link: WorkflowLink;
   onLink: (link: WorkflowLink) => void;
   workflows: Workflow[] | null;
+  /** The list shown may be an earlier answer, such as one kept from a previous visit, while it reloads. */
+  workflowsRefreshing?: boolean;
   archivedWorkflows: Workflow[] | null;
   archivedOpened: boolean;
   archivedState: 'loading' | 'ready' | 'error' | 'unavailable';
@@ -110,7 +113,8 @@ export function useWorkflowEditingSession({
       if (restoring.view && !(found.archivedAt && restoring.view === 'settings')) setView(restoring.view);
       if (restoring.run) openRun(restoring.run);
       setRestoring(null);
-    } else if (!archivedOpened) onArchiveLookup();
+    } else if (workflowsRefreshing) return;
+    else if (!archivedOpened) onArchiveLookup();
     else if (archivedState === 'ready' || archivedState === 'error') {
       onMessage(
         archivedState === 'error'
@@ -119,7 +123,7 @@ export function useWorkflowEditingSession({
       );
       setRestoring(null);
     }
-  }, [restoring, workflows, archivedWorkflows, archivedOpened, archivedState]);
+  }, [restoring, workflows, workflowsRefreshing, archivedWorkflows, archivedOpened, archivedState]);
   useEffect(() => {
     if (linkKey === shownLink.current) return;
     shownLink.current = linkKey;

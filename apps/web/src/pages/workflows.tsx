@@ -154,6 +154,7 @@ function WorkflowPage({
     link,
     onLink,
     workflows,
+    workflowsRefreshing: read.state.kind === 'ready' && read.state.refreshing,
     archivedWorkflows,
     archivedOpened,
     archivedState: archivedRead.state.kind,
