@@ -1,5 +1,5 @@
 import { createHmac } from 'node:crypto';
-import { createBackgroundJob } from '@tulipfarm/observability';
+import { createBackgroundJob, observeStep } from '@tulipfarm/observability';
 import { normalizeIP } from '@fastify/rate-limit';
 import { fromNodeHeaders } from 'better-auth/node';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
@@ -226,7 +226,9 @@ export function registerAbuseHooks(
     }
     const policy = mutations.get(request.routeOptions.schema?.operationId ?? '');
     if (!policy) return;
-    const session = await auth.api.getSession({ headers: fromNodeHeaders(request.headers) });
+    const session = await observeStep('auth.session.get', () =>
+      auth.api.getSession({ headers: fromNodeHeaders(request.headers) }),
+    );
     if (session && !(await enforce(reply, { ...policy, max: policy.max * userLimitMultiplier }, session.user.id)))
       return reply;
   });

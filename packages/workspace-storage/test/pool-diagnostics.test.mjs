@@ -80,7 +80,10 @@ function setup(t, { failQuery, failConnect, rollbackFailure, denied = false } = 
     advance: ms => {
       clock += ms;
     },
-    timings: () => spans.map(span => [span.name, span.attributes.outcome, span.attributes.duration_ms, span.ended]),
+    timings: () =>
+      spans
+        .filter(span => span.name.startsWith('workspace.connection.'))
+        .map(span => [span.name, span.attributes.outcome, span.attributes.duration_ms, span.ended]),
   };
 }
 
@@ -91,6 +94,10 @@ test('non-chat transactions measure checkout and the whole hold through reset an
     return 42;
   });
   assert.equal(result, 42);
+  assert.deepEqual(
+    fixture.spans.filter(span => !span.name.startsWith('workspace.connection.')).map(span => span.name),
+    ['workspace.admission.wait', 'workspace.credential.resolve', 'workspace.runtime.claim'],
+  );
   assert.deepEqual(fixture.timings(), [
     ['workspace.connection.wait', 'success', 250, 1],
     ['workspace.connection.hold', 'success', 1350, 1],

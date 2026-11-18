@@ -7,6 +7,7 @@ import {
   observeChatDetail,
   observeChatTransaction,
   observeWorkspaceAdmission,
+  observeStep,
   observeWorkspaceConnection,
   recordWorkspaceAdmissionRejection,
   transientStorageFailure,
@@ -558,10 +559,16 @@ export function createWorkspaceRuntime(
     let pooled = false;
     let entry: Entry | undefined;
     try {
-      await observeChatDetail('storage-admission', () => admit(deadline, background));
+      await observeChatDetail('storage-admission', () =>
+        observeStep('workspace.admission.wait', () => admit(deadline, background)),
+      );
       admitted = true;
-      const credential = await observeChatDetail('storage-credentials', () => credentialFor(workspaceId, deadline));
-      entry = await observeChatDetail('storage-pool', () => claim(credential, deadline));
+      const credential = await observeChatDetail('storage-credentials', () =>
+        observeStep('workspace.credential.resolve', () => credentialFor(workspaceId, deadline)),
+      );
+      entry = await observeChatDetail('storage-pool', () =>
+        observeStep('workspace.runtime.claim', () => claim(credential, deadline)),
+      );
       const pool = entry.pool;
       const claimed = entry;
       const client = await observeWorkspaceConnection('wait', () =>
