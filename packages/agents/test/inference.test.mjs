@@ -7,7 +7,7 @@ import { createServer } from 'node:http';
 import { once } from 'node:events';
 import { test } from 'node:test';
 import { z } from 'zod';
-import { inferDecision, inferText, inferWithTools, measureToolRequest } from '../dist/inference.js';
+import { appChatPrompt, inferDecision, inferText, inferWithTools, measureToolRequest } from '../dist/inference.js';
 import { inferDecision as inferSourceDecision } from '../src/inference.ts';
 import Ajv2020 from '../../provider-mcp/node_modules/ajv/dist/2020.js';
 import {
@@ -3262,6 +3262,30 @@ test('project instructions follow the cached chat prompt as an escaped second sy
         [true, false, false],
       );
   }
+});
+
+test('an app chat tells the model which app tools read and change the app', async t => {
+  const { received } = await boundary(t, (_req, res) => {
+    res.writeHead(200);
+    res.end(JSON.stringify(nativeReply('azure', { text: 'Done.' })));
+  });
+  const systemFor = async apps => {
+    await inferWithTools(
+      routes.azure,
+      [{ role: 'user', text: 'Did you build it?' }],
+      async () => ({}),
+      undefined,
+      false,
+      null,
+      { earlierMessages: false, sources: () => [], ...(apps ? { apps } : {}) },
+    );
+    return promptParts('azure', received.at(-1).body).system;
+  };
+  assert.ok((await systemFor('public')).includes(appChatPrompt.public));
+  assert.ok(appChatPrompt.public.includes('Never ask the person to paste or upload'));
+  assert.ok((await systemFor('private')).includes(appChatPrompt.private));
+  const plain = await systemFor(undefined);
+  assert.equal(plain.includes('This chat edits one'), false);
 });
 
 test('native-tool reminders omit duplicated tool descriptions', () => {

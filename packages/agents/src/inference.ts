@@ -2236,6 +2236,12 @@ const appTools = {
   public: `apps.status, apps.files.list, apps.files.read, apps.files.write, apps.files.delete and ${buildTool}`,
   private: 'apps.page.read, apps.page.replace and apps.page.check',
 } satisfies Record<AppKind, string>;
+/** What an app's chat is for. Earlier turns' tool results may be gone, so the model reads the app instead of asking for it. */
+export const appChatPrompt = {
+  public: `This chat edits one app. Tool results from earlier turns may not be shown here, so check the app itself before answering about it: apps.status for the draft and its newest build, apps.files.list and apps.files.read for its current files. Make changes with apps.files.write and apps.files.delete, and run ${buildTool} when a change needs a build or the person asks for one. Never ask the person to paste or upload this app's files, and never say you cannot read, edit or build it.`,
+  private:
+    "This chat edits one private app's pages. Tool results from earlier turns may not be shown here, so read the pages with apps.page.read before answering about them, change them with apps.page.replace and check them with apps.page.check. Never ask the person to paste the pages, and never say you cannot read or edit them.",
+} satisfies Record<AppKind, string>;
 const toolsDenied =
   /\b(?:my|(?:file|write|writing|edit|editing|build|building)(?: or \w+)?(?: \w+)?) tools?\b[^.]*\b(?:not available|unavailable|not offered)\b|(?:\b(?:no|not have|without)|n['’]t have)(?: a| any| the)? (?:file|write|editing|build)\b[\w\s-]{0,24}\btools?\b/i;
 const firstPerson = /\b(?:i|we|my)\b/i;
@@ -4826,6 +4832,7 @@ export async function inferWithTools(
         ];
   const roundBlocks = () => [
     ...chatSystemBlocks(tools?.projectInstructions, tools?.chatFiles),
+    ...(tools?.apps ? [appChatPrompt[tools.apps]] : []),
     ...(catalog?.discovery ? [catalog.discovery] : []),
     ...(webWithheld ? [webWithheldPrompt] : []),
     ...(mcpOffered ? [mcpCatalogPrompt] : []),
