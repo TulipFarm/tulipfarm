@@ -15,6 +15,9 @@ const repeatableTools = new Set<string>([
   'workflows.read',
   'workflows.providers',
 ]);
+// These act on whatever the earlier writes left, so a later write makes a repeat a new action.
+// eslint-disable-next-line tulipfarm/product-copy -- A tool name, not user-facing copy.
+const rerunAfterWrite = new Set<string>(['apps.preview.build']);
 const repeatable = (call: { tool: string; method?: unknown }) => repeatableTools.has(call.tool) || readOnlyCall(call);
 const fingerprint = (value: unknown) => createHash('sha256').update(canonicalJson(value)).digest('hex');
 
@@ -69,6 +72,7 @@ export function createChatToolGuard(
         return;
       }
       if (!repeatable(call)) {
+        if (!rerunAfterWrite.has(call.tool)) for (const tool of rerunAfterWrite) writes.delete(fingerprint({ tool }));
         writes.add(fingerprint(call));
         reads.clear();
         idleRounds = 0;

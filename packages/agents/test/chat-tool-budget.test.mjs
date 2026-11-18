@@ -139,6 +139,17 @@ test('successful external reads do not reopen the own-address refusal allowance'
   assert.equal(guard.apiFailuresSpent, true);
 });
 
+test('an app can be built again after a file changes, but not twice in a row', () => {
+  // eslint-disable-next-line tulipfarm/product-copy -- A tool name, not user-facing copy.
+  const build = { tool: 'apps.preview.build' };
+  const guard = createChatToolGuard([build]);
+  assert.equal(guard.duplicate(build), true);
+  guard.record({ tool: 'apps.files.write', path: 'src/server.js', content: 'fixed' }, '{"status":"written"}');
+  assert.equal(guard.duplicate(build), false);
+  guard.record(build, '{"status":"failed"}');
+  assert.equal(guard.duplicate(build), true);
+});
+
 test('a successfully sent API change gets a duplicate receipt, never a failure reply', async t => {
   const call = { ...apiCall(0), method: 'POST' };
   let requests = 0;
