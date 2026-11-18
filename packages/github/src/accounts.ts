@@ -351,35 +351,40 @@ export function createGitHubAccounts(options: {
       }
     },
     async disconnect(workspaceId: string, userId: string, id: string) {
-      return authorized(workspaceId, userId, async (tx, actor) => {
-        const row = await load(tx, actor, id);
-        if (row.state !== 'disconnected') {
-          const recommendations = await watchIntegrationRecommendations(tx, row.id, () =>
-            githubRecommendations(tx, row.id),
-          );
-          await tx.client.query(
-            `UPDATE ${relation(tx, 'accounts')} SET state='disconnected',generation=generation+1,credential=NULL,refresh_credential=NULL,access_expires_at=NULL,expires_at=NULL WHERE id=$1`,
-            [row.id],
-          );
-          await tx.client.query(
-            `UPDATE ${relation(tx, 'account_attempts')} SET state='consumed',verifier=NULL WHERE account_id=$1`,
-            [row.id],
-          );
-          // A Copilot connection that uses this account signs out with it, and its shares end.
-          const connections = qualified(tx.schema, 'tf_subscription_connections');
-          await tx.client.query(
-            `DELETE FROM ${qualified(tx.schema, 'tf_subscription_grants')} WHERE connection_id IN (SELECT id FROM ${connections} WHERE github_account_id=$1)`,
-            [row.id],
-          );
-          await tx.client.query(
-            `UPDATE ${connections} SET state='signed-out',github_account_id=NULL,models=NULL,models_fetched_at=NULL,updated_at=clock_timestamp() WHERE github_account_id=$1`,
-            [row.id],
-          );
-          await audit(tx, actor, row.id, 'disconnect');
-          await recommendations();
-        }
-        return { account: metadata(await load(tx, actor, id)), providerRevocation: 'manual-required' as const };
-      });
+      return authorized(
+        workspaceId,
+        userId,
+        async (tx, actor) => {
+          const row = await load(tx, actor, id);
+          if (row.state !== 'disconnected') {
+            const recommendations = await watchIntegrationRecommendations(tx, row.id, () =>
+              githubRecommendations(tx, row.id),
+            );
+            await tx.client.query(
+              `UPDATE ${relation(tx, 'accounts')} SET state='disconnected',generation=generation+1,credential=NULL,refresh_credential=NULL,access_expires_at=NULL,expires_at=NULL WHERE id=$1`,
+              [row.id],
+            );
+            await tx.client.query(
+              `UPDATE ${relation(tx, 'account_attempts')} SET state='consumed',verifier=NULL WHERE account_id=$1`,
+              [row.id],
+            );
+            // A Copilot connection that uses this account signs out with it, and its shares end.
+            const connections = qualified(tx.schema, 'tf_subscription_connections');
+            await tx.client.query(
+              `DELETE FROM ${qualified(tx.schema, 'tf_subscription_grants')} WHERE connection_id IN (SELECT id FROM ${connections} WHERE github_account_id=$1)`,
+              [row.id],
+            );
+            await tx.client.query(
+              `UPDATE ${connections} SET state='signed-out',github_account_id=NULL,models=NULL,models_fetched_at=NULL,updated_at=clock_timestamp() WHERE github_account_id=$1`,
+              [row.id],
+            );
+            await audit(tx, actor, row.id, 'disconnect');
+            await recommendations();
+          }
+          return { account: metadata(await load(tx, actor, id)), providerRevocation: 'manual-required' as const };
+        },
+        'write',
+      );
     },
     async withCredential<T>(
       workspaceId: string,
@@ -398,7 +403,7 @@ export function createGitHubAccounts(options: {
         row.access_expires_at !== null &&
         row.access_expires_at.getTime() <= Date.now() + margin;
       const reject = async (tx: AuthorizationTransaction, actor: HumanActor, read: Row) => {
-        const row = shared ? await load(tx, actor, read.id) : read;
+        const row = await load(tx, actor, read.id);
         // A concurrent refresh may have replaced the credential this read used; only the one that failed is rejected.
         if (row.generation !== read.generation || !isDeepStrictEqual(row.credential, read.credential))
           return { kind: 'retry' as const };
@@ -413,14 +418,16 @@ export function createGitHubAccounts(options: {
         await recommendations();
         return { kind: 'rejected' as const };
       };
+      // A rejection revokes the account, so it takes the exclusive lock in a transaction of its own.
+      const revoke = (row: Row) => authorized(workspaceId, principal, (tx, actor) => reject(tx, actor, row), 'write');
       const available = (row: Row) =>
         row.state === 'active' &&
         row.identity !== null &&
         (expectedGeneration === undefined || row.generation === expectedGeneration);
       // A refresh token is single-use, so the row lock held here serializes concurrent refreshes. It keeps
       // `generation` unchanged because Knowledge bindings, selections and batches are pinned to it.
-      const renew = () =>
-        authorized(workspaceId, principal, async (tx, actor) => {
+      const renew = async () => {
+        const outcome = await authorized(workspaceId, principal, async (tx, actor) => {
           const row = await load(tx, actor, id);
           if (!available(row) || !row.refresh_credential) throw new GitHubAccountError('account-reconnect-required');
           if (!staleAccess(row, 30 * 60 * 1000)) return { kind: 'renewed' as const };
@@ -435,7 +442,7 @@ export function createGitHubAccounts(options: {
               remoteSourceCheckDeadline(),
             );
           } catch (error) {
-            if (error instanceof GitHubCredentialRejected) return reject(tx, actor, row);
+            if (error instanceof GitHubCredentialRejected) return { kind: 'reject' as const, row };
             throw error;
           }
           await tx.client.query(
@@ -450,8 +457,10 @@ export function createGitHubAccounts(options: {
           );
           return { kind: 'renewed' as const };
         });
+        return outcome.kind === 'reject' ? revoke(outcome.row) : outcome;
+      };
       for (let renewals = 0; ; renewals++) {
-        const result = await authorized(workspaceId, principal, async (tx, actor) => {
+        const attempt = await authorized(workspaceId, principal, async (tx, actor) => {
           await beforeAccount?.(tx, actor);
           const row = await load(tx, actor, id, !shared);
           if (!available(row)) throw new GitHubAccountError('account-reconnect-required');
@@ -459,7 +468,7 @@ export function createGitHubAccounts(options: {
             row.config_hash !== configurationHash(configuration) ||
             (row.expires_at && row.expires_at.getTime() <= Date.now())
           )
-            return reject(tx, actor, row);
+            return { kind: 'reject' as const, row };
           if (renewals === 0 && staleAccess(row, 30 * 60 * 1000)) return { kind: 'renew' as const };
           const accessToken = cipher.decrypt(binding(workspaceId, row, 'token'), row.credential);
           try {
@@ -478,10 +487,11 @@ export function createGitHubAccounts(options: {
               ),
             };
           } catch (error) {
-            if (error instanceof GitHubCredentialRejected) return reject(tx, actor, row);
+            if (error instanceof GitHubCredentialRejected) return { kind: 'reject' as const, row };
             throw error;
           }
         });
+        const result = attempt.kind === 'reject' ? await revoke(attempt.row) : attempt;
         if (result.kind === 'renew') {
           if ((await renew()).kind !== 'renewed') throw new GitHubAccountError('account-reconnect-required');
           continue;

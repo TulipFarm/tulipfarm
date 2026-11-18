@@ -315,10 +315,14 @@ export function createGitHubKnowledge({
   // is migrated, its sources index every selected kind except commits.
   const storesCommits = (tx: Tx) => ((tx as { commonVersion?: number }).commonVersion ?? 0) >= 7;
   const storesOwner = (tx: Tx) => ((tx as { commonVersion?: number }).commonVersion ?? 0) >= 48;
-  async function transaction<T>(workspaceId: string, operation: (tx: Tx) => Promise<T>) {
+  async function transaction<T>(
+    workspaceId: string,
+    operation: (tx: Tx) => Promise<T>,
+    mode: 'read' | 'write' = 'write',
+  ) {
     return runtime.transaction(uuidSchema.parse(workspaceId), commonCompatibility, async raw => {
       const tx = store.bind(raw);
-      await lockAuthorization(tx, 'write');
+      await lockAuthorization(tx, mode);
       return operation(tx);
     });
   }
@@ -1125,14 +1129,16 @@ export function createGitHubKnowledge({
    */
   async function due(workspaceId: string, changes?: GitHubKnowledgeChanges): Promise<GitHubKnowledgeWork[]> {
     const held = gate ? await gate(workspaceId) : [];
-    return transaction(workspaceId, async tx => {
-      await tx.client.query(
-        `UPDATE ${table(tx, 'github_sources')} SET generation=generation+1,lease_token=NULL,lease_until=NULL WHERE lease_until<=clock_timestamp()`,
-      );
-      const ids = changes?.repositories.filter(id => /^[1-9][0-9]{0,19}$/.test(id)) ?? [];
-      if (changes && (changes.all || ids.length))
+    return transaction(
+      workspaceId,
+      async tx => {
         await tx.client.query(
-          `UPDATE ${table(tx, 'github_sources')} g SET next_attempt_at=clock_timestamp() FROM ${table(tx, 'sources')} s
+          `UPDATE ${table(tx, 'github_sources')} SET generation=generation+1,lease_token=NULL,lease_until=NULL WHERE lease_until<=clock_timestamp()`,
+        );
+        const ids = changes?.repositories.filter(id => /^[1-9][0-9]{0,19}$/.test(id)) ?? [];
+        if (changes && (changes.all || ids.length))
+          await tx.client.query(
+            `UPDATE ${table(tx, 'github_sources')} g SET next_attempt_at=clock_timestamp() FROM ${table(tx, 'sources')} s
           WHERE s.id=g.source_id AND s.state='active' AND g.sync_state<>'failed' AND g.failure IS DISTINCT FROM 'rate-limited'
           AND (g.next_attempt_at>clock_timestamp() OR g.lease_token IS NOT NULL)
           AND ($1 OR EXISTS (SELECT 1 FROM ${table(tx, 'github_repositories')} r WHERE r.source_id=g.source_id AND NOT r.excluded AND r.repository_id=ANY($2::text[])
@@ -1140,36 +1146,40 @@ export function createGitHubKnowledge({
             OR (g.selection->>'scope'='all' AND EXISTS (SELECT 1 FROM unnest($2::text[]) u(id)
               WHERE NOT EXISTS (SELECT 1 FROM ${table(tx, 'github_repositories')} r WHERE r.source_id=g.source_id AND r.repository_id=u.id)
                 AND NOT EXISTS (${ownerOf(tx, 'g.source_id', 'u.id')}))))`,
-          [changes.all, ids],
-        );
-      const rows = z
-        .array(z.object({ source_id: uuidSchema, generation: z.number() }))
-        .parse(
-          (
-            await tx.client.query(
-              `SELECT g.source_id,g.generation FROM ${table(tx, 'github_sources')} g JOIN ${table(tx, 'sources')} s ON s.id=g.source_id WHERE s.state='active' AND g.lease_token IS NULL AND g.next_attempt_at<=clock_timestamp() AND NOT g.source_id=ANY($1::uuid[]) ORDER BY g.next_attempt_at,g.source_id LIMIT 20`,
-              [held],
-            )
-          ).rows,
-        );
-      return rows.map(row => ({ workspaceId, sourceId: row.source_id, generation: row.generation }));
-    });
+            [changes.all, ids],
+          );
+        const rows = z
+          .array(z.object({ source_id: uuidSchema, generation: z.number() }))
+          .parse(
+            (
+              await tx.client.query(
+                `SELECT g.source_id,g.generation FROM ${table(tx, 'github_sources')} g JOIN ${table(tx, 'sources')} s ON s.id=g.source_id WHERE s.state='active' AND g.lease_token IS NULL AND g.next_attempt_at<=clock_timestamp() AND NOT g.source_id=ANY($1::uuid[]) ORDER BY g.next_attempt_at,g.source_id LIMIT 20`,
+                [held],
+              )
+            ).rows,
+          );
+        return rows.map(row => ({ workspaceId, sourceId: row.source_id, generation: row.generation }));
+      },
+      'read',
+    );
   }
   async function health(workspaceId: string) {
-    return transaction(workspaceId, async tx =>
-      z
-        .object({
-          failedItems: z.number(),
-          failedSources: z.number(),
-          stalledSources: z.number(),
-          reconnectSources: z.number(),
-          permissionRepositories: z.number(),
-          lostRepositories: z.number(),
-        })
-        .parse(
-          (
-            await tx.client.query(
-              `
+    return transaction(
+      workspaceId,
+      async tx =>
+        z
+          .object({
+            failedItems: z.number(),
+            failedSources: z.number(),
+            stalledSources: z.number(),
+            reconnectSources: z.number(),
+            permissionRepositories: z.number(),
+            lostRepositories: z.number(),
+          })
+          .parse(
+            (
+              await tx.client.query(
+                `
       SELECT (SELECT count(*)::int FROM ${table(tx, 'github_items')} i JOIN ${table(tx, 'sources')} s ON s.id=i.source_id
         WHERE s.state='active' AND i.failure IS NOT NULL AND i.failure<>$1) AS "failedItems",
       (SELECT count(DISTINCT (r.source_id,r.repository_id))::int FROM ${table(tx, 'github_repositories')} r JOIN ${table(tx, 'sources')} s ON s.id=r.source_id
@@ -1186,10 +1196,11 @@ export function createGitHubKnowledge({
         WHERE r.source_id=g.source_id AND r.state='unavailable' AND NOT EXISTS (${ownerOf(tx, 'r.source_id', 'r.repository_id')})))::int AS "failedSources",
       count(*) FILTER (WHERE g.sync_state IN ('queued','syncing','ready') AND g.next_attempt_at<clock_timestamp()-interval '15 minutes')::int AS "stalledSources"
       FROM ${table(tx, 'github_sources')} g JOIN ${table(tx, 'sources')} s ON s.id=g.source_id WHERE s.state='active'`,
-              [deniedFailure],
-            )
-          ).rows[0],
-        ),
+                [deniedFailure],
+              )
+            ).rows[0],
+          ),
+      'read',
     );
   }
   async function fenced<T>(
@@ -1197,18 +1208,22 @@ export function createGitHubKnowledge({
     token: string,
     operation: (tx: Tx, s: Source, actor: HumanActor) => Promise<T>,
   ) {
-    return transaction(work.workspaceId, async tx => {
-      const s = await source(tx, work.sourceId);
-      const owned = await tx.client.query(
-        `SELECT 1 FROM ${table(tx, 'github_sources')} WHERE source_id=$1 AND generation=$2 AND lease_token=$3 AND lease_until>clock_timestamp()`,
-        [work.sourceId, work.generation, token],
-      );
-      if (!owned.rowCount || s.state !== 'active') throw new KnowledgeError('superseded');
-      const actor: HumanActor = { kind: 'human', membershipId: s.owner_membership_id, userId: s.owner_user_id };
-      await currentMember(tx, actor);
-      await store.source(tx, actor, s.source_id, true);
-      return operation(tx, s, actor);
-    });
+    return transaction(
+      work.workspaceId,
+      async tx => {
+        const s = await source(tx, work.sourceId);
+        const owned = await tx.client.query(
+          `SELECT 1 FROM ${table(tx, 'github_sources')} WHERE source_id=$1 AND generation=$2 AND lease_token=$3 AND lease_until>clock_timestamp() FOR NO KEY UPDATE`,
+          [work.sourceId, work.generation, token],
+        );
+        if (!owned.rowCount || s.state !== 'active') throw new KnowledgeError('superseded');
+        const actor: HumanActor = { kind: 'human', membershipId: s.owner_membership_id, userId: s.owner_user_id };
+        await currentMember(tx, actor);
+        await store.source(tx, actor, s.source_id, true);
+        return operation(tx, s, actor);
+      },
+      'read',
+    );
   }
   async function clear(tx: Tx, documentId: string, tombstone = false) {
     await tx.client.query(
@@ -1689,42 +1704,44 @@ export function createGitHubKnowledge({
     const work = githubKnowledgeWorkSchema.parse(value);
     const token = randomUUID();
     if (gate && (await gate(work.workspaceId)).includes(work.sourceId)) return { disposition: 'stale' };
-    const claimed = await transaction(work.workspaceId, async tx => {
-      const s = await source(tx, work.sourceId);
-      if (s.generation !== work.generation || s.state !== 'active') return 'stale' as const;
-      if (s.lease_token) return 'busy' as const;
-      if (s.next_attempt_at.getTime() > clock.now()) return 'busy' as const;
-      // After the owner reconnects the same GitHub identity, sync resumes with the account's new generation.
-      const account = await ownerAccount(tx, s);
-      if (
-        account?.live &&
-        account.login &&
-        (account.id !== s.binding.accountId || account.generation !== s.binding.accountGeneration)
-      ) {
-        s.binding = githubCorpusBindingSchema.parse({
-          ...s.binding,
-          accountId: account.id,
-          accountGeneration: account.generation,
-          login: account.login,
-        });
-        await tx.client.query(`UPDATE ${table(tx, 'github_sources')} SET binding=$2 WHERE source_id=$1`, [
-          s.source_id,
-          s.binding,
-        ]);
-      }
-      // The exact next_attempt_at at claim. A later value at the end of the pass means a change arrived during it.
-      const marker = z
-        .string()
-        .parse(
-          (
-            await tx.client.query(
-              `UPDATE ${table(tx, 'github_sources')} SET lease_token=$2,lease_until=clock_timestamp()+$3::double precision*interval '1 millisecond',sync_state='syncing' WHERE source_id=$1 RETURNING next_attempt_at::text AS marker`,
-              [s.source_id, token, leaseMs],
-            )
-          ).rows[0]?.marker,
-        );
-      return { ...s, marker };
-    });
+    const claimed = await transaction(
+      work.workspaceId,
+      async tx => {
+        const s = await source(tx, work.sourceId);
+        if (s.generation !== work.generation || s.state !== 'active') return 'stale' as const;
+        if (s.lease_token) return 'busy' as const;
+        if (s.next_attempt_at.getTime() > clock.now()) return 'busy' as const;
+        // After the owner reconnects the same GitHub identity, sync resumes with the account's new generation.
+        const account = await ownerAccount(tx, s);
+        if (
+          account?.live &&
+          account.login &&
+          (account.id !== s.binding.accountId || account.generation !== s.binding.accountGeneration)
+        ) {
+          s.binding = githubCorpusBindingSchema.parse({
+            ...s.binding,
+            accountId: account.id,
+            accountGeneration: account.generation,
+            login: account.login,
+          });
+          await tx.client.query(`UPDATE ${table(tx, 'github_sources')} SET binding=$2 WHERE source_id=$1`, [
+            s.source_id,
+            s.binding,
+          ]);
+        }
+        // The exact next_attempt_at at claim. A later value at the end of the pass means a change arrived during it.
+        const claimedRow = (
+          await tx.client.query(
+            `UPDATE ${table(tx, 'github_sources')} SET lease_token=$2,lease_until=clock_timestamp()+$3::double precision*interval '1 millisecond',sync_state='syncing' WHERE source_id=$1 AND lease_token IS NULL RETURNING next_attempt_at::text AS marker`,
+            [s.source_id, token, leaseMs],
+          )
+        ).rows[0];
+        if (!claimedRow) return 'busy' as const;
+        const marker = z.string().parse(claimedRow.marker);
+        return { ...s, marker };
+      },
+      'read',
+    );
     if (typeof claimed === 'string') return { disposition: claimed };
     const claim = claimed;
     const cursor = claim.cursor;
@@ -2114,46 +2131,57 @@ export function createGitHubKnowledge({
     } catch (error) {
       // A rate limit pauses the pass: the cursor is kept and the run resumes at GitHub's reset time.
       if (rateLimited(error) && cursorSchema.safeParse(cursor).success) {
-        const paused = await transaction(work.workspaceId, async tx => {
-          const current = await source(tx, work.sourceId);
-          if (current.generation !== work.generation || current.lease_token !== token) return false;
-          await tx.client.query(
-            `UPDATE ${table(tx, 'github_sources')} SET cursor=$2,generation=generation+1,lease_token=NULL,lease_until=NULL,sync_state='syncing',failure='rate-limited',next_attempt_at=clock_timestamp()+$3::double precision*interval '1 millisecond' WHERE source_id=$1`,
-            [work.sourceId, cursor, Math.max(1000, error.retryAfterMs ?? 60_000)],
-          );
-          return true;
-        });
+        const paused = await transaction(
+          work.workspaceId,
+          async tx => {
+            const current = await source(tx, work.sourceId);
+            if (current.generation !== work.generation || current.lease_token !== token) return false;
+            const ended = await tx.client.query(
+              `UPDATE ${table(tx, 'github_sources')} SET cursor=$2,generation=generation+1,lease_token=NULL,lease_until=NULL,sync_state='syncing',failure='rate-limited',next_attempt_at=clock_timestamp()+$3::double precision*interval '1 millisecond' WHERE source_id=$1 AND generation=$4 AND lease_token=$5`,
+              [work.sourceId, cursor, Math.max(1000, error.retryAfterMs ?? 60_000), work.generation, token],
+            );
+            return ended.rowCount === 1;
+          },
+          'read',
+        );
         return { disposition: paused ? 'rate-limited' : 'stale' };
       }
-      const result = await transaction(work.workspaceId, async tx => {
-        const current = await source(tx, work.sourceId);
-        if (current.generation !== work.generation || current.lease_token !== token)
-          return { disposition: 'stale' as const };
-        const failure =
-          error instanceof GitHubCorpusError
-            ? error.code
-            : error instanceof KnowledgeError
+      const result = await transaction(
+        work.workspaceId,
+        async tx => {
+          const current = await source(tx, work.sourceId);
+          if (current.generation !== work.generation || current.lease_token !== token)
+            return { disposition: 'stale' as const };
+          const failure =
+            error instanceof GitHubCorpusError
               ? error.code
-              : error instanceof AccessDenied
-                ? 'not-linked'
-                : 'provider';
-        if (denial(error) || error instanceof AccessDenied)
-          await tx.client.query(`UPDATE ${table(tx, 'sources')} SET access_epoch=access_epoch+1 WHERE id=$1`, [
-            work.sourceId,
-          ]);
-        const invalidCursor = failure === 'invalid-cursor';
-        await tx.client.query(
-          `UPDATE ${table(tx, 'github_sources')} SET generation=generation+1,lease_token=NULL,lease_until=NULL,sync_state='failed',failure=$2,next_attempt_at=clock_timestamp()+$3::double precision*interval '1 millisecond',cursor=CASE WHEN $4 THEN $5::jsonb ELSE cursor END,reconciliation=reconciliation+CASE WHEN $4 THEN 1 ELSE 0 END WHERE source_id=$1`,
-          [
-            work.sourceId,
-            failure,
-            Math.max(30000, error instanceof GitHubCorpusError ? (error.retryAfterMs ?? 0) : 0),
-            invalidCursor,
-            initialCursor(),
-          ],
-        );
-        return { disposition: 'retry' as const };
-      });
+              : error instanceof KnowledgeError
+                ? error.code
+                : error instanceof AccessDenied
+                  ? 'not-linked'
+                  : 'provider';
+          const invalidCursor = failure === 'invalid-cursor';
+          const ended = await tx.client.query(
+            `UPDATE ${table(tx, 'github_sources')} SET generation=generation+1,lease_token=NULL,lease_until=NULL,sync_state='failed',failure=$2,next_attempt_at=clock_timestamp()+$3::double precision*interval '1 millisecond',cursor=CASE WHEN $4 THEN $5::jsonb ELSE cursor END,reconciliation=reconciliation+CASE WHEN $4 THEN 1 ELSE 0 END WHERE source_id=$1 AND generation=$6 AND lease_token=$7`,
+            [
+              work.sourceId,
+              failure,
+              Math.max(30000, error instanceof GitHubCorpusError ? (error.retryAfterMs ?? 0) : 0),
+              invalidCursor,
+              initialCursor(),
+              work.generation,
+              token,
+            ],
+          );
+          if (!ended.rowCount) return { disposition: 'stale' as const };
+          if (denial(error) || error instanceof AccessDenied)
+            await tx.client.query(`UPDATE ${table(tx, 'sources')} SET access_epoch=access_epoch+1 WHERE id=$1`, [
+              work.sourceId,
+            ]);
+          return { disposition: 'retry' as const };
+        },
+        'read',
+      );
       if (result.disposition === 'retry')
         telemetry.recordImport(
           'source',
