@@ -20,6 +20,7 @@ import {
 
 const item = workspaceSkillSummarySchema;
 const page = z.object({ workspace: z.array(item), nextCursor: z.string().nullable() });
+export const skillListSchema = page;
 const detail = z.object({
   id: z.uuid(),
   revision: z.string(),

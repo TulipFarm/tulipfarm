@@ -34,7 +34,7 @@ const stopsSchema = z.object({
   budgetPausedAt: z.string().nullable(),
 });
 
-const appSummarySchema = z.object({
+export const appSummarySchema = z.object({
   id: z.uuid(),
   kind: z.enum(['public', 'private']),
   slug: z.string(),

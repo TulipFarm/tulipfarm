@@ -27,7 +27,7 @@ const tableSchema = z.object({
   definition: tableDefinitionSchema,
   systemKind: z.literal('workspace-members').optional(),
 });
-const listSchema = z.object({
+export const tableListSchema = z.object({
   tables: z.array(tableSchema.extend({ appliedAt: z.iso.datetime().nullable(), recordCount: z.string() })),
   nextCursor: z.string().nullable(),
 });
@@ -367,7 +367,7 @@ export function tableApi(workspaceId: string) {
     archived = false,
     sort?: TableListSort,
   ) {
-    return listSchema.parse(
+    return tableListSchema.parse(
       await request(
         `?limit=50${after ? `&after=${encodeURIComponent(after)}` : ''}${search ? `&search=${encodeURIComponent(search)}` : ''}${archived ? '&archived=true' : ''}${sort ? `&sort=${sort.by}&direction=${sort.direction}` : ''}`,
         signal,

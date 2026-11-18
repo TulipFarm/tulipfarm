@@ -11,7 +11,7 @@ export const knowledgeGapsSchema = z.object({
   items: z.array(z.object({ kind: z.string(), reason: z.string(), label: z.string() })),
 });
 
-const documentSchema = z.object({
+export const knowledgeEntrySchema = z.object({
   documentId: z.uuid(),
   revisionId: z.uuid(),
   title: z.string(),
@@ -23,7 +23,7 @@ const documentSchema = z.object({
   fileId: z.uuid().optional(),
   noteText: z.string().optional(),
 });
-export type KnowledgeEntry = z.infer<typeof documentSchema>;
+export type KnowledgeEntry = z.infer<typeof knowledgeEntrySchema>;
 
 const messages: Record<string, string> = {
   'knowledge-not-found': 'You can’t open this entry anymore, or it was removed.',
@@ -73,14 +73,14 @@ export function knowledgeApi(workspaceId: string) {
     return readJson(response);
   }
   const get = async (documentId: string, signal: AbortSignal) =>
-    documentSchema.parse(await request(`/${documentId}`, 'GET', signal));
+    knowledgeEntrySchema.parse(await request(`/${documentId}`, 'GET', signal));
   return {
     list: async (signal: AbortSignal) => {
       const entries: KnowledgeEntry[] = [];
       let cursor: string | null = null;
       do {
         const page = z
-          .object({ items: z.array(documentSchema), nextCursor: z.uuid().nullable().default(null) })
+          .object({ items: z.array(knowledgeEntrySchema), nextCursor: z.uuid().nullable().default(null) })
           .parse(await request(cursor ? `?cursor=${cursor}` : '', 'GET', signal));
         entries.push(...page.items);
         cursor = page.nextCursor;
@@ -105,7 +105,7 @@ export function knowledgeApi(workspaceId: string) {
       return refreshed;
     },
     add: async (input: { documentId: string; commandId: string; title: string; fileId: string }, signal: AbortSignal) =>
-      documentSchema.parse(
+      knowledgeEntrySchema.parse(
         await request(`/${input.documentId}`, 'PUT', signal, {
           commandId: input.commandId,
           expectedRevisionId: null,
@@ -114,7 +114,7 @@ export function knowledgeApi(workspaceId: string) {
         }),
       ),
     save: async ({ documentId, ...body }: KnowledgeSave, signal: AbortSignal) =>
-      documentSchema.parse(await request(`/${documentId}`, 'PUT', signal, body)),
+      knowledgeEntrySchema.parse(await request(`/${documentId}`, 'PUT', signal, body)),
     remove: async (entry: KnowledgeEntry, commandId: string, signal: AbortSignal) =>
       request(`/${entry.documentId}/remove`, 'POST', signal, {
         commandId,
@@ -135,7 +135,7 @@ export function knowledgeApi(workspaceId: string) {
       return knowledgeSearchResultSchema.parse(await readJson(response));
     },
     retry: async (entry: KnowledgeEntry, commandId: string, signal: AbortSignal) =>
-      documentSchema.parse(
+      knowledgeEntrySchema.parse(
         await request(`/${entry.documentId}/retry`, 'POST', signal, {
           commandId,
           expectedRevisionId: entry.revisionId,
