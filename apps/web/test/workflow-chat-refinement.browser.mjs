@@ -1,3 +1,4 @@
+// browser-tests: run alone, since beside other tests its waits time out.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
