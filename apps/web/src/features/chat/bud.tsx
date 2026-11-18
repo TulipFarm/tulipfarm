@@ -1,9 +1,9 @@
-import { MonsterAvatar } from '@tulipfarm/sprout/monster-avatar';
+import { AgentMark } from '@/components/agent-mark';
 
-export function Bud({ size = 40 }: { size?: number }) {
+export function Bud({ size = 40 }: { size?: 24 | 32 | 40 }) {
   return (
     <span className="flex shrink-0">
-      <MonsterAvatar agentId="bud" size={size} />
+      <AgentMark size={size} />
     </span>
   );
 }

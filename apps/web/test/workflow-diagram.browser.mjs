@@ -109,8 +109,8 @@ test('workflow page and chat show inspectable, immutable diagrams', async t => {
       await load('agent', 'running');
       await fit();
       await page.locator('.workflow-path-marker').waitFor();
-      await page.locator('.workflow-node[data-step-id="research"] [data-slot="monster-avatar"]').waitFor();
-      await inspect.locator('[data-slot="monster-avatar"]').waitFor();
+      await page.locator('.workflow-node[data-step-id="research"] [data-slot="agent-mark"]').waitFor();
+      await inspect.locator('[data-slot="agent-mark"]').waitFor();
       await page.getByRole('button', { name: 'Zoom In', exact: true }).click();
       await delay(300);
       const zoomed = await viewport();

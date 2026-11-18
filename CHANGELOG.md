@@ -10,6 +10,10 @@ One version identifies all apps and images of a release.
 
 ### Changed
 
+- Agents and Bud show one still image, the TulipFarm tulip in a circle,
+  instead of Sprout's animated monster avatars: in the agent list and editor,
+  the builder preview, chat, subagent fan-out, workflow diagrams and the
+  sign-in page.
 - Bud's quick chat is hidden behind the `bud-quick-chat` feature flag, off by
   default: its launcher in the header or corner and the suggestions that open
   it. Bud's chat still opens as a full chat. Use

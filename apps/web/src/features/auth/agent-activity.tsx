@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { CheckCircle } from 'reicon-react/icons/CheckCircle';
-import { MonsterAvatar } from '@tulipfarm/sprout/monster-avatar';
+import { AgentMark } from '@/components/agent-mark';
 import {
   GradientBanner,
   GradientBannerBadge,
@@ -84,7 +84,7 @@ export function AgentActivity() {
           <GradientBannerPanel>
             <div className="grid w-full gap-4 py-1">
               <div className="flex items-center gap-3">
-                <MonsterAvatar agentId={agent.id} size={40} />
+                <AgentMark size={40} />
                 <div className="min-w-0 flex-1">
                   <p className="font-medium">{agent.name}</p>
                   <p className="truncate text-sm opacity-70">{agent.task}</p>
@@ -124,7 +124,7 @@ export function AgentActivity() {
                 index === active ? 'transition-opacity duration-500' : 'opacity-40 transition-opacity duration-500'
               }
             >
-              <MonsterAvatar agentId={item.id} size={24} />
+              <AgentMark size={24} />
             </span>
           ))}
         </div>

@@ -29,7 +29,7 @@ import { TerminalSquare } from 'reicon-react/icons/TerminalSquare';
 import { Users } from 'reicon-react/icons/Users';
 import { Badge } from '@tulipfarm/sprout/badge';
 import { BrandIcon, type Brand } from '@tulipfarm/sprout/brand-icon';
-import { MonsterAvatar } from '@tulipfarm/sprout/monster-avatar';
+import { AgentMark } from '@/components/agent-mark';
 import { LanguageLogo, type LogoLanguage } from './language-logo';
 
 export type WorkflowNodeKind =
@@ -153,7 +153,7 @@ export function WorkflowStepIcon({
   if (identity?.kind === 'agent')
     return (
       <span className="workflow-step-identity" aria-hidden="true">
-        <MonsterAvatar agentId={identity.agentId} size={32} />
+        <AgentMark size={32} />
       </span>
     );
   if (identity?.kind === 'app')
