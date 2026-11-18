@@ -459,12 +459,7 @@ export function TokenPlanPane({ workspaceId, provider }: { workspaceId: string; 
                   : `Use @${account.login}`}
               </Button>
             ))}
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => void signInWithGitHub()}
-              disabled={busy}
-            >
+            <Button size="sm" variant="outline" onClick={() => void signInWithGitHub()} disabled={busy}>
               {!usable.length && <BrandIcon brand="github" size="inline" />}
               {phase.kind === 'starting'
                 ? 'Opening GitHub…'
