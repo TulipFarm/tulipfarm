@@ -6,7 +6,7 @@ import { chromium } from 'playwright';
 import { skillImportFixture } from './skill-import.fixture.mjs';
 import { catalogFamily } from '../src/features/models/catalog-fixture.ts';
 import { notifyChange } from './chat-query.fixture.mjs';
-import { modelOption, modelPicker } from './browser-controls.mjs';
+import { modelOption, modelPicker, modelPickerSaved } from './browser-controls.mjs';
 import { startBuiltApp, captureBrowserFailure } from './built-app.fixture.mjs';
 
 test('refused import links stay editable and missing imports offer a neutral restart', { timeout: 60000 }, async () => {
@@ -285,7 +285,7 @@ test(
       await modelPicker(page, 'DeepSeek V4 Pro').waitFor();
       await modelPicker(page, 'DeepSeek V4 Pro').click();
       await modelOption(page, 'Grok 4.3 Fast').click();
-      await page.getByText('Saving your default model…', { exact: true }).waitFor({ state: 'hidden' });
+      await modelPickerSaved(page, 'Grok 4.3 Fast');
       await message.fill('Summarize this week.');
       await message.press('Enter');
       await page.waitForFunction(

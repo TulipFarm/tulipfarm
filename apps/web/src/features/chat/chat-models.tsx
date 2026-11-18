@@ -199,13 +199,14 @@ export function ChatModelStatus({
       ? `Your last model is no longer available. New messages use ${catalog.replacedModel}.`
       : null;
   const plan = family?.available ? familyPlan(family) : null;
-  const usage = !message && plan && family?.planUsage ? planUsageStatus(plan, family.planUsage) : null;
+  const status = !message && plan && family?.planUsage ? planUsageStatus(plan, family.planUsage) : null;
+  const usage = status?.warning ? status : null;
   return (
     <>
       {usage && (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
-          <p role="status">
-            {usage.using} · <span className={usage.warning ? 'text-warning' : undefined}>{usage.status}</span>
+          <p role="status" className="text-warning">
+            {usage.status}
           </p>
           <Button
             size="sm"
@@ -243,11 +244,6 @@ export function ChatModelStatus({
             </>
           )}
         </div>
-      )}
-      {catalog.preferenceSave === 'saving' && (
-        <p role="status" className="text-sm text-muted-foreground">
-          Saving your default model…
-        </p>
       )}
     </>
   );
