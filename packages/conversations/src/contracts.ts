@@ -108,6 +108,11 @@ export const sendMessageSchema = z.strictObject({
   messageId: uuidSchema,
   /** Model family of the reply; the server's default model when absent. */
   model: conversationModelSchema.optional(),
+  /**
+   * For a plan model: the plan account (subscription connection) the member picked to answer first. The member's other
+   * accounts on for chats, then plans shared with them, answer when it is unavailable or out of usage.
+   */
+  planConnectionId: uuidSchema.optional(),
   mode: z.enum(['normal', 'plan']).optional(),
   timeZone: timeZoneSchema.optional(),
   parts: z
@@ -282,6 +287,20 @@ export const turnSummarySchema = z.object({
   epoch: z.number().int().nonnegative().optional(),
   errorCode: z.string().nullable().optional(),
   mode: z.literal('plan').optional(),
+  /**
+   * Set when the reply moved off a plan connection to another one, such as when the first hit its usage limit.
+   * Account labels are the GitHub login or email, shown to the turn's requester only.
+   */
+  planSwitch: z
+    .object({
+      fromConnectionId: uuidSchema,
+      fromAccount: z.string().nullable().optional(),
+      toConnectionId: uuidSchema,
+      toAccount: z.string().nullable().optional(),
+      reason: z.enum(['usage-limit', 'reconnect', 'not-eligible']).nullable().optional(),
+    })
+    .nullable()
+    .optional(),
   /** How the reply was produced: its model, milliseconds from the send to the first word and to the end, and kept trace. */
   stats: z
     .object({

@@ -1,6 +1,14 @@
 import { useId } from 'react';
 import { X } from 'reicon-react/icons/X';
 import { Button } from '@tulipfarm/sprout/button';
+import {
+  Combobox,
+  ComboboxContent,
+  ComboboxEmpty,
+  ComboboxInput,
+  ComboboxItem,
+  ComboboxList,
+} from '@tulipfarm/sprout/combobox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@tulipfarm/sprout/select';
 import type { SecretGrant } from '@/features/secrets/contracts';
 import { Labelled } from '@/features/secrets/fields';
@@ -148,28 +156,42 @@ export function GrantsEditor({
       </ul>
       {candidates.length > 0 && (
         <Labelled id={`${id}-add`} label={addLabel}>
-          <Select
-            value=""
+          <Combobox<string>
+            items={candidates.map(candidate => candidate.key)}
+            value={null}
+            autoHighlight
             disabled={disabled}
+            itemToStringLabel={key => candidates.find(item => item.key === key)?.label ?? ''}
+            filter={(key, query) => {
+              const candidate = candidates.find(item => item.key === key);
+              const needle = query.trim().toLowerCase();
+              return !needle || !!candidate?.label.toLowerCase().includes(needle);
+            }}
             onValueChange={key => {
               const candidate = candidates.find(item => item.key === key);
               if (candidate) onChange([...value, candidate.grant]);
             }}
           >
-            <SelectTrigger id={`${id}-add`} width="full">
-              <SelectValue>Choose a person or team</SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              {candidates.map(candidate => (
-                <SelectItem key={candidate.key} value={candidate.key}>
-                  <span className="flex flex-col">
-                    <span>{candidate.label}</span>
-                    <span className="text-xs text-muted-foreground">{candidate.hint}</span>
-                  </span>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            <ComboboxInput id={`${id}-add`} placeholder="Search people and teams" disabled={disabled} />
+            <ComboboxContent>
+              <ComboboxEmpty>No people or teams match.</ComboboxEmpty>
+              <ComboboxList>
+                {(key: string) => {
+                  const candidate = candidates.find(item => item.key === key);
+                  return (
+                    candidate && (
+                      <ComboboxItem key={key} value={key}>
+                        <span className="flex flex-col">
+                          <span>{candidate.label}</span>
+                          <span className="text-xs text-muted-foreground">{candidate.hint}</span>
+                        </span>
+                      </ComboboxItem>
+                    )
+                  );
+                }}
+              </ComboboxList>
+            </ComboboxContent>
+          </Combobox>
         </Labelled>
       )}
     </div>

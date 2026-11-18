@@ -34,6 +34,7 @@ import {
   type Configuration,
 } from './provider.ts';
 import { credentialCipher } from './credentials.ts';
+import { chatUseFilter } from './selection.ts';
 import { watchIntegrationRecommendations, type DefaultKnowledgeHook } from '@tulipfarm/integrations/authorization';
 import { githubRecommendations } from './recommendations.ts';
 
@@ -53,6 +54,10 @@ const rowSchema = z.object({
   expires_at: z.date().nullable(),
   refresh_credential: z.unknown(),
   access_expires_at: z.date().nullable(),
+  // Absent before common migration 88.
+  use_for_chat: z.boolean().default(true),
+  use_for_coding: z.boolean().default(true),
+  primary_for_knowledge: z.boolean().default(false),
 });
 type Row = z.infer<typeof rowSchema>;
 const attemptSchema = z.object({
@@ -61,6 +66,10 @@ const attemptSchema = z.object({
   verifier: z.unknown(),
 });
 const relation = (tx: AuthorizationTransaction, name: string) => qualified(tx.schema, `tf_github_${name}`);
+// Workspaces below this common migration have no per-account uses: every account serves chats and coding.
+const hasAccountUses = (tx: object) => chatUseFilter(tx) !== '';
+/** A member's account a coding run can clone with. */
+export type CodingAccount = { accountId: string; login: string; githubUserId: string };
 export type GitHubCredential = {
   accessToken: string;
   accountId: string;
@@ -132,12 +141,26 @@ export function createGitHubAccounts(options: {
       identity: row.identity,
       generation: row.generation,
       scopes: row.scopes,
+      useForChat: row.use_for_chat,
+      useForCoding: row.use_for_coding,
+      primaryForKnowledge: row.primary_for_knowledge,
     });
   }
   async function audit(tx: AuthorizationTransaction, actor: HumanActor, id: string, operation: string) {
     await tx.client.query(
       `INSERT INTO ${qualified(tx.schema, 'tf_audit_events')} (id,actor_id,operation,subject_id) VALUES ($1,$2,$3,$4)`,
       [randomUUID(), actor.membershipId, `github-account.${operation}`, id],
+    );
+  }
+  /** Makes the member's oldest active account their primary for Knowledge when none of their accounts is. */
+  async function settlePrimary(tx: AuthorizationTransaction, membershipId: string) {
+    if (!hasAccountUses(tx)) return;
+    await tx.client.query(
+      `UPDATE ${relation(tx, 'accounts')} SET primary_for_knowledge=true
+        WHERE id=(SELECT id FROM ${relation(tx, 'accounts')} WHERE owner_membership_id=$1 AND state='active' AND identity IS NOT NULL
+                   ORDER BY created_at,id LIMIT 1)
+          AND NOT EXISTS (SELECT 1 FROM ${relation(tx, 'accounts')} WHERE owner_membership_id=$1 AND primary_for_knowledge)`,
+      [membershipId],
     );
   }
   async function reserve(workspaceId: string, userId: string, sessionId: string, existingId?: string) {
@@ -330,6 +353,7 @@ export function createGitHubAccounts(options: {
             [row.id, row.generation],
           );
           await audit(tx, actor, row.id, 'connected');
+          await settlePrimary(tx, actor.membershipId);
           await recommendations();
           if (automatic && row.identity === null) {
             const recorded = await automatic.record(tx, {
@@ -361,9 +385,10 @@ export function createGitHubAccounts(options: {
               githubRecommendations(tx, row.id),
             );
             await tx.client.query(
-              `UPDATE ${relation(tx, 'accounts')} SET state='disconnected',generation=generation+1,credential=NULL,refresh_credential=NULL,access_expires_at=NULL,expires_at=NULL WHERE id=$1`,
+              `UPDATE ${relation(tx, 'accounts')} SET state='disconnected',generation=generation+1,credential=NULL,refresh_credential=NULL,access_expires_at=NULL,expires_at=NULL${hasAccountUses(tx) ? ',primary_for_knowledge=false' : ''} WHERE id=$1`,
               [row.id],
             );
+            await settlePrimary(tx, actor.membershipId);
             await tx.client.query(
               `UPDATE ${relation(tx, 'account_attempts')} SET state='consumed',verifier=NULL WHERE account_id=$1`,
               [row.id],
@@ -385,6 +410,76 @@ export function createGitHubAccounts(options: {
         },
         'write',
       );
+    },
+    /**
+     * Turns the member's own connected account on or off for chats and for coding, or makes it their primary account
+     * for Knowledge in place of their earlier one.
+     */
+    async setUses(
+      workspaceId: string,
+      userId: string,
+      id: string,
+      uses: { chat?: boolean | undefined; coding?: boolean | undefined; primaryForKnowledge?: true | undefined },
+    ) {
+      await authorized(
+        workspaceId,
+        userId,
+        async (tx, actor) => {
+          const row = await load(tx, actor, id);
+          if (row.state === 'disconnected' || row.identity === null)
+            throw new GitHubAccountError('account-reconnect-required');
+          if (!hasAccountUses(tx)) throw new GitHubAccountError('account-unavailable');
+          const sets = [
+            ...(uses.chat === undefined ? [] : [`use_for_chat=${uses.chat ? 'true' : 'false'}`]),
+            ...(uses.coding === undefined ? [] : [`use_for_coding=${uses.coding ? 'true' : 'false'}`]),
+          ];
+          if (sets.length)
+            await tx.client.query(`UPDATE ${relation(tx, 'accounts')} SET ${sets.join(',')} WHERE id=$1`, [row.id]);
+          if (uses.primaryForKnowledge && !row.primary_for_knowledge) {
+            // Two statements: the partial unique index is checked row by row, so the old primary is cleared first.
+            await tx.client.query(
+              `UPDATE ${relation(tx, 'accounts')} SET primary_for_knowledge=false WHERE owner_membership_id=$1 AND primary_for_knowledge`,
+              [actor.membershipId],
+            );
+            await tx.client.query(`UPDATE ${relation(tx, 'accounts')} SET primary_for_knowledge=true WHERE id=$1`, [
+              row.id,
+            ]);
+          }
+          await audit(tx, actor, row.id, 'uses');
+        },
+        'write',
+      );
+      return accounts.list(workspaceId, userId);
+    },
+    /**
+     * The member's account a coding run uses: the one named by `login` if it is turned on for coding, else their oldest
+     * active account turned on for coding. Null when the named login is not one of their connected accounts or is off
+     * for coding, or when none of their accounts is on for coding.
+     */
+    async codingAccount(
+      workspaceId: string,
+      principal: string | HumanActor,
+      login?: string | null,
+    ): Promise<CodingAccount | null> {
+      return authorized(workspaceId, principal, async (tx, actor) => {
+        const rows = z
+          .array(rowSchema)
+          .max(20)
+          .parse(
+            (
+              await tx.client.query(
+                `SELECT * FROM ${relation(tx, 'accounts')} WHERE owner_membership_id=$1 AND state<>'disconnected' AND identity IS NOT NULL ORDER BY created_at,id LIMIT 21`,
+                [actor.membershipId],
+              )
+            ).rows,
+          )
+          .filter(item => item.use_for_coding);
+        const row = login
+          ? rows.find(item => item.identity?.login.toLowerCase() === login.toLowerCase())
+          : (rows.find(item => item.state === 'active') ?? rows[0]);
+        if (!row?.identity) return null;
+        return { accountId: row.id, login: row.identity.login, githubUserId: row.identity.id };
+      });
     },
     async withCredential<T>(
       workspaceId: string,

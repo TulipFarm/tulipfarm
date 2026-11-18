@@ -52,22 +52,41 @@ export const codingRunCallSchema = z.strictObject({
   task: z.string().trim().min(1).max(16000).describe('What the coding agent should do, in full.'),
   agent: z.enum(codingAgents).describe('claude-code runs on Claude, codex on ChatGPT and copilot on GitHub Copilot.'),
   branch: branchSchema.optional().describe('Branch to start from. Defaults to the repository default branch.'),
+  githubAccount: z
+    .string()
+    .regex(/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/)
+    .optional()
+    .describe(
+      "Login of one of the person's own GitHub accounts to clone with. Omit to use their first account turned on for coding.",
+    ),
 });
 export type CodingRunCall = z.infer<typeof codingRunCallSchema>;
 
 /** A plan connection the member may use, with a current token. */
 export type CodingRunPlan = { connectionId: string; ownerMembershipId: string; token: string };
 export type CodingRunServices = {
-  /** The first eligible plan of `provider` for the member, in the subscription resolver's order, or null. */
-  plan(workspaceId: string, membershipId: string, provider: CodingPlanProvider): Promise<CodingRunPlan | null>;
+  /**
+   * The first plan of `provider` the member may use for coding that gives a token, in the subscription resolver's order,
+   * or null. `preferredConnectionId` is tried first when it is one of those plans; the others follow when it is not usable.
+   */
+  plan(
+    workspaceId: string,
+    membershipId: string,
+    provider: CodingPlanProvider,
+    preferredConnectionId?: string | null,
+  ): Promise<CodingRunPlan | null>;
   /** Whether the member could use any plan of `provider`, without reading a token. */
   hasPlan(workspaceId: string, membershipId: string, provider: CodingPlanProvider): Promise<boolean>;
-  /** The token of the personal GitHub account selected for this chat, or null when none is. */
+  /**
+   * The token and login of the member's GitHub account named by `login`, else their first account turned on for coding.
+   * Null when the named login is not theirs or is off for coding, or when none is on for coding.
+   */
   github(
     workspaceId: string,
     actor: HumanActor,
     origin: { conversationId: string; turnId: string },
-  ): Promise<string | null>;
+    login?: string | null,
+  ): Promise<{ token: string; login: string } | null>;
   /** Records the exact run for the member's decision; proposing the same run again changes nothing. */
   propose(workspaceId: string, run: CodingRunRecord): Promise<void>;
   /** Whether the workspace's `coding-runs` flag is on. */
@@ -228,13 +247,18 @@ export function codingRunDigest(call: CodingRunCall, planOwnerMembershipId: stri
 
 /** What the member is told when no plan of the agent's provider is theirs to use. */
 export const planRequiredMessage = (agent: CodingAgent) =>
-  `Connect your ${providerLabels[codingAgentProviders[agent]]} plan in Settings → Models to use ${codingAgentLabels[agent]}.`;
+  `Connect your ${providerLabels[codingAgentProviders[agent]]} plan in Settings → Models and turn on Use for coding to use ${codingAgentLabels[agent]}.`;
 
 const githubRequired = {
   status: 'github-account-required',
   instruction:
-    'Ask the person to choose a personal GitHub account for this chat with github.personal.account, then run again.',
+    'Ask the person to connect a personal GitHub account and turn on Use for coding for it in Settings → Integrations, then run again.',
 } as const;
+const namedGitHubRequired = (login: string) =>
+  ({
+    status: 'github-account-required',
+    instruction: `@${login} is not one of the person's connected GitHub accounts. Ask them to add it in Settings → Integrations, or run again without githubAccount.`,
+  }) as const;
 
 type RunnableConfiguration = Exclude<ExecutionConfiguration, { mode: 'off' }>;
 
@@ -272,7 +296,8 @@ export function createCodingRuns(
       const provider = codingAgentProviders[call.agent];
       const plan = await services.plan(workspaceId, actor.membershipId, provider);
       if (!plan) return { status: 'plan-required', message: planRequiredMessage(call.agent) };
-      if (!(await services.github(workspaceId, actor, { conversationId, turnId }))) return githubRequired;
+      const github = await services.github(workspaceId, actor, { conversationId, turnId }, call.githubAccount);
+      if (!github) return call.githubAccount ? namedGitHubRequired(call.githubAccount) : githubRequired;
       await services.propose(workspaceId, {
         id: context.callId,
         actor,
@@ -284,6 +309,7 @@ export function createCodingRuns(
         agent: call.agent,
         task: call.task,
         planOwnerMembershipId: plan.ownerMembershipId,
+        githubLogin: github.login,
         digest: codingRunDigest(call, plan.ownerMembershipId),
       });
       return { provider: 'coding-run', kind: 'waiting', runId: context.callId };
@@ -306,11 +332,14 @@ export function createCodingRuns(
           status: 'plan-changed',
           message: 'The plan this run would use changed after it was approved, so nothing ran. Ask again to run it.',
         };
-      const github = await services.github(workspaceId, run.actor, {
-        conversationId: run.conversationId,
-        turnId: run.turnId,
-      });
-      if (!github) return githubRequired;
+      // The run clones with the account its member approved, even if their marks changed since.
+      const github = await services.github(
+        workspaceId,
+        run.actor,
+        { conversationId: run.conversationId, turnId: run.turnId },
+        run.githubLogin,
+      );
+      if (!github) return run.githubLogin ? namedGitHubRequired(run.githubLogin) : githubRequired;
       const {
         base: _base,
         pushed: _pushed,
@@ -325,7 +354,7 @@ export function createCodingRuns(
           branch: call.branch ?? null,
           agent: call.agent,
           planToken: plan.token,
-          githubToken: github,
+          githubToken: github.token,
         },
         signal,
       );

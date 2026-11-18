@@ -38,7 +38,11 @@ test('Copilot uses a personal GitHub account without copying its token', async (
     available = models;
     assert.equal(await copilot.useGitHubAccount(workspace, user, accountId), true);
     assert.deepEqual(verified, ['synthetic-access-token', 'synthetic-access-token']);
-    assert.deepEqual(await copilot.status(workspace, user), {
+    const status = await copilot.status(workspace, user);
+    assert.equal(status.connections.length, 1);
+    const [{ connectionId, createdAt, ...connected }] = status.connections;
+    assert.ok(createdAt);
+    assert.deepEqual(connected, {
       state: 'connected',
       account: 'person-7',
       githubAccountId: accountId,
@@ -46,7 +50,7 @@ test('Copilot uses a personal GitHub account without copying its token', async (
       models,
     });
     assert.deepEqual(await connections(), [{ state: 'connected', credential: null, github_account_id: accountId }]);
-    assert.equal(await copilot.accessToken(workspace, f.member.membershipId), 'synthetic-access-token');
+    assert.equal(await copilot.accessToken(workspace, connectionId), 'synthetic-access-token');
 
     const other = await f.connect(8);
     assert.equal(await copilot.useGitHubAccount(workspace, user, other, true), false);
@@ -55,14 +59,14 @@ test('Copilot uses a personal GitHub account without copying its token', async (
 
     await f.service.disconnect(workspace, user, accountId);
     assert.deepEqual(await connections(), [{ state: 'signed-out', credential: null, github_account_id: null }]);
-    assert.equal((await copilot.status(workspace, user)).state, 'signed-out');
+    assert.deepEqual(await copilot.status(workspace, user), { connections: [] });
     await assert.rejects(
-      copilot.accessToken(workspace, f.member.membershipId),
+      copilot.accessToken(workspace, connectionId),
       error => error instanceof TokenPlanError && error.code === 'not-connected',
     );
 
     assert.equal(await copilot.useGitHubAccount(workspace, user, other, true), true);
-    assert.equal((await copilot.status(workspace, user)).account, 'person-8');
+    assert.equal((await copilot.status(workspace, user)).connections[0].account, 'person-8');
   } finally {
     await f.close();
   }

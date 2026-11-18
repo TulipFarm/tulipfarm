@@ -9,6 +9,7 @@ import {
   authorizationSchema,
   beginSchema,
   callbackSchema,
+  accountUsesSchema,
   completionSchema,
   disconnectionSchema,
   uuidSchema,
@@ -247,6 +248,22 @@ export function registerGitHubAccounts(
             : accounts.disconnect(workspaceId, userId, accountId);
         },
       );
+    routes.put(
+      `${base}/:accountId/uses`,
+      {
+        logLevel: 'silent',
+        schema: {
+          ...schema('setGitHubAccountUsesV1', accountListSchema),
+          params: json(accountParams),
+          body: json(accountUsesSchema),
+        },
+      },
+      async request => {
+        const { accounts, userId } = context(request);
+        const { workspaceId, accountId } = accountParams.parse(request.params);
+        return accounts.setUses(workspaceId, userId, accountId, accountUsesSchema.parse(request.body));
+      },
+    );
     routes.post(
       '/github/oauth/callback',
       {

@@ -26,7 +26,12 @@ function stubFetch(t, respond) {
 function accounts(list) {
   return {
     list: async () => ({
-      accounts: list.map(([id, state, login]) => ({ id, state, identity: login ? { login, id: `${id}-uid` } : null })),
+      accounts: list.map(([id, state, login, useForCoding = true]) => ({
+        id,
+        state,
+        useForCoding,
+        identity: login ? { login, id: `${id}-uid` } : null,
+      })),
     }),
     memberAccessToken: async (_workspaceId, _membershipId, id) => {
       if (id === 'broken') throw new Error('revoked');
@@ -61,6 +66,19 @@ test('a reader is enough only when the step opens no pull request', async t => {
   const list = accounts([['reader', 'active', 'ada']]);
   assert.equal(await repositoryAccount(list, 'w', member, job), null);
   assert.equal((await repositoryAccount(list, 'w', member, { ...job, pullRequest: false })).login, 'ada');
+});
+
+test('a step uses only logins on for coding, and a named login only when it is on for coding', async t => {
+  stubFetch(t, () => [200, { permissions: { push: true } }]);
+  const list = accounts([
+    ['off', 'active', 'ada', false],
+    ['first', 'active', 'grace'],
+    ['second', 'active', 'linus'],
+  ]);
+  assert.equal((await repositoryAccount(list, 'w', member, job)).login, 'grace');
+  assert.equal((await repositoryAccount(list, 'w', member, { ...job, githubAccount: 'Linus' })).login, 'linus');
+  assert.equal((await repositoryAccount(list, 'w', member, { ...job, githubAccount: 'ada' })).login, 'grace');
+  assert.equal(await repositoryAccount(accounts([['off', 'active', 'ada', false]]), 'w', member, job), null);
 });
 
 test('a pull request is titled from the first non-empty prompt line, and a retry finds the one already open', async t => {

@@ -52,13 +52,19 @@ export function codingRunServices(
     enabled: workspaceId => isFeatureEnabled('coding-runs', null, { id: workspaceId }),
     async hasPlan(workspaceId, membershipId, provider) {
       if (!(await planOn(workspaceId, provider))) return false;
-      return (await subscriptions.eligible(workspaceId, provider, membershipId)).length > 0;
+      return (await subscriptions.eligible(workspaceId, provider, membershipId, 'coding')).length > 0;
     },
-    async plan(workspaceId, membershipId, provider) {
+    async plan(workspaceId, membershipId, provider, preferredConnectionId) {
       if (!(await planOn(workspaceId, provider))) return null;
-      for (const candidate of await subscriptions.eligible(workspaceId, provider, membershipId)) {
+      for (const candidate of await subscriptions.eligible(
+        workspaceId,
+        provider,
+        membershipId,
+        'coding',
+        preferredConnectionId ?? null,
+      )) {
         try {
-          const token = await credentials(provider).accessToken(workspaceId, candidate.ownerMembershipId);
+          const token = await credentials(provider).accessToken(workspaceId, candidate.connectionId);
           await subscriptions.markUsed(workspaceId, candidate.connectionId).catch(() => undefined);
           return { connectionId: candidate.connectionId, ownerMembershipId: candidate.ownerMembershipId, token };
         } catch (error) {
@@ -69,7 +75,8 @@ export function codingRunServices(
     },
     github:
       options.github ??
-      ((workspaceId, actor, origin) => (reads ??= githubChatReads(runtime)).cloneToken(workspaceId, actor, origin)),
+      ((workspaceId, actor, origin, login) =>
+        (reads ??= githubChatReads(runtime)).cloneToken(workspaceId, actor, origin, login)),
     propose: (workspaceId, run) => proposeCodingRun(runtime, workspaceId, run),
   };
 }

@@ -9,7 +9,7 @@ import { registerExtension } from '@tulipfarm/extensions';
 import { creditAccountExtension } from '@tulipfarm/workspace-storage/credit-account';
 import { integrationCredentialKeyring } from '@tulipfarm/integrations';
 import { createTokenPlan } from '@tulipfarm/integrations/token-plans';
-import { planSessionsForTest } from '@tulipfarm/agents/plan-sessions';
+import { PlanSessionError, planSessionsForTest } from '@tulipfarm/agents/plan-sessions';
 import { useModelCatalog } from './model-catalog-fixture.mjs';
 
 await registerExtension(creditAccountExtension, { app: 'worker', env: {} });
@@ -161,6 +161,95 @@ test(
         );
         assert.ok(BigInt(row.list_pico_usd) > 0n, 'a plan call is valued at the model’s list price');
       }
+    } finally {
+      await f.close();
+    }
+  },
+);
+
+test(
+  'a reply moves off the picked Claude account at its usage limit and the turn shows the switch',
+  { timeout: 120000 },
+  async t => {
+    t.after(
+      useEnv({
+        FEATURE_FLAG_CLAUDE_PLAN: 'true',
+        ANTHROPIC_API_KEY: 'synthetic-only',
+        INTEGRATION_CREDENTIAL_KEY: randomBytes(32).toString('hex'),
+        INTEGRATION_CREDENTIAL_KEY_ID: 'plan-chat',
+      }),
+    );
+    t.after(useModelCatalog(['claude-haiku', 'claude-sonnet', 'claude-plan-sonnet']));
+    t.mock.method(globalThis, 'fetch', async () => {
+      throw new Error('Unexpected fetch');
+    });
+    const work = `sk-ant-oat01-${'w0rk_T0ken-'.repeat(4)}`;
+    const home = `sk-ant-oat01-${'h0me_T0ken-'.repeat(4)}`;
+    const usage = { input: 40, output: 10, cacheRead: 0, cacheWrite: 0 };
+    planSessionsForTest.useVendors(async (_provider, used, _model, _system, tools) => {
+      const select = tools.find(tool => tool.name === 'select_action');
+      return {
+        send: async () => {
+          if (used === work) throw new PlanSessionError(429, 'plan_usage_limit', 'Claude usage limit reached', 60);
+          if (select)
+            return {
+              kind: 'calls',
+              text: '',
+              calls: [
+                { id: 'check', name: select.name, input: { decision: { status: 'completed', reason: 'Answered.' } } },
+              ],
+              usage,
+            };
+          return { kind: 'answer', text: 'Answered on the other plan.', usage };
+        },
+        resume: async () => ({ kind: 'answer', text: 'Answered on the other plan.', usage }),
+        close: () => {},
+      };
+    });
+    t.after(() => {
+      planSessionsForTest.useVendors();
+      planSessionsForTest.sessions.clear();
+    });
+    const f = await conversationFixture();
+    try {
+      const w = f.workspace;
+      const plan = createTokenPlan({
+        provider: 'claude',
+        runtime: f.runtime,
+        keyring: integrationCredentialKeyring(),
+        verify: async token => ({
+          models: [{ slug: 'claude-sonnet-5', label: 'Claude Sonnet' }],
+          account: token === work ? 'work@example.com' : 'home@example.com',
+        }),
+      });
+      await plan.connectToken(w.id, w.userId, work);
+      const { connections } = await plan.connectToken(w.id, w.userId, home);
+      const idOf = account => connections.find(connection => connection.account === account).connectionId;
+      const [workId, homeId] = [idOf('work@example.com'), idOf('home@example.com')];
+      const chatId = randomUUID();
+      await f.store.create(w.id, w.userId, { chatId, commandId: randomUUID() });
+      const turn = await f.store.send(w.id, w.userId, chatId, {
+        commandId: randomUUID(),
+        messageId: randomUUID(),
+        model: 'claude-plan-sonnet',
+        planConnectionId: workId,
+        parts: [{ kind: 'text', text: 'Hello?' }],
+      });
+      const outcome = await createConversationActivities(f.runtime).processConversationReply({
+        workspaceId: w.id,
+        conversationId: chatId,
+        turnId: turn.turnId,
+        generation: 0,
+      });
+      assert.equal(outcome, 'completed');
+      const [asked] = (await f.store.history(w.id, w.userId, chatId)).messages;
+      assert.deepEqual(asked.turn.planSwitch, {
+        fromConnectionId: workId,
+        fromAccount: 'work@example.com',
+        toConnectionId: homeId,
+        toAccount: 'home@example.com',
+        reason: 'usage-limit',
+      });
     } finally {
       await f.close();
     }

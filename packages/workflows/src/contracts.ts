@@ -3,6 +3,9 @@ import { sourceSchema, snippetPayloadSchema } from '@tulipfarm/workflow-snippets
 import { canonical } from '@tulipfarm/workflow-snippets/canonical';
 import { providerTriggerSchema } from './provider-contracts.ts';
 import { outputPathIssues, stepValueEntries } from './output-fields.ts';
+
+/** A GitHub login, such as `octocat`. */
+const githubLoginSchema = z.string().regex(/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/, 'Expected a GitHub login');
 export {
   stepValueEntries,
   outputAt,
@@ -231,6 +234,16 @@ export const stepSchema = z.discriminatedUnion('kind', [
     pullRequest: z.boolean().default(true),
     /** Pull request title; the prompt's first line when absent. */
     title: valueSchema.optional(),
+    /**
+     * Login of the owner's own GitHub account to clone and push with, used only while it is on for coding. When absent
+     * or off, the owner's first account on for coding that can push to the repository.
+     */
+    githubAccount: githubLoginSchema.optional(),
+    /**
+     * The owner's plan account (subscription connection) the agent runs on first. When absent, off for coding or out of
+     * usage, the owner's other plan accounts on for coding are tried in order.
+     */
+    planConnectionId: idSchema.optional(),
   }),
   httpStepSchema,
   z
@@ -293,6 +306,10 @@ export const codingStepJobSchema = z.strictObject({
   prompt: z.string().min(1).max(16000),
   pullRequest: z.boolean(),
   title: z.string().min(1).max(256).nullable(),
+  /** The GitHub login the step named; null to use the owner's first suitable account on for coding. */
+  githubAccount: githubLoginSchema.nullable().default(null),
+  /** The plan connection the step named to try first; null to use the owner's plans on for coding in order. */
+  planConnectionId: idSchema.nullable().default(null),
 });
 export type CodingStepJob = z.infer<typeof codingStepJobSchema>;
 export const codingStepOutputSchema = z.strictObject({

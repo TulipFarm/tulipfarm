@@ -24,7 +24,11 @@ const pullSchema = z.object({ number: z.number().int().positive(), html_url: z.s
 
 type Account = { token: string; login: string; id: string };
 
-/** The member's first active GitHub account that can push to the repository, or, without a pull request, read it. */
+/**
+ * The member's GitHub account for the step, among their accounts on for coding: the login it names when that one is on
+ * for coding, else the first that can push to the repository, or, without a pull request, read it. A named account on
+ * for coding that cannot do so gives null instead of another account.
+ */
 export async function repositoryAccount(
   accounts: ReturnType<typeof createGitHubAccounts>,
   workspaceId: string,
@@ -32,8 +36,12 @@ export async function repositoryAccount(
   job: CodingStepJob,
 ): Promise<Account | null> {
   const listed = await accounts.list(workspaceId, member.userId);
+  const usable = listed.accounts.filter(account => account.state !== 'disconnected' && account.useForCoding);
+  const named = job.githubAccount?.toLowerCase();
+  const chosen = named ? usable.filter(account => account.identity?.login.toLowerCase() === named) : [];
+  const candidates = chosen.length ? chosen : usable;
   let reader: Account | null = null;
-  for (const account of listed.accounts) {
+  for (const account of candidates) {
     if (account.state !== 'active' || !account.identity) continue;
     const token = await accounts.memberAccessToken(workspaceId, member.membershipId, account.id).catch(() => null);
     if (!token) continue;
@@ -123,7 +131,12 @@ export function createWorkflowCodingActivities(
     const { job } = found;
     if (!agents.includes(job.agent) || !(await services.enabled(workspaceId)))
       return { kind: 'failed', error: 'unavailable', message: '' } satisfies CodingStepResult;
-    const plan = await services.plan(workspaceId, found.membershipId, codingAgentProviders[job.agent]);
+    const plan = await services.plan(
+      workspaceId,
+      found.membershipId,
+      codingAgentProviders[job.agent],
+      job.planConnectionId,
+    );
     if (!plan) return { kind: 'failed', error: 'plan-required', message: '' } satisfies CodingStepResult;
     const account = await repositoryAccount(accounts, workspaceId, found, job);
     if (!account) return { kind: 'failed', error: 'github-account-required', message: '' } satisfies CodingStepResult;

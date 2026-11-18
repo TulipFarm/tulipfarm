@@ -3302,6 +3302,8 @@ export function createWorkflows(
               prompt,
               pullRequest: step.pullRequest,
               title: typeof title === 'string' && title.trim() ? Array.from(title.trim()).slice(0, 256).join('') : null,
+              githubAccount: step.githubAccount ?? null,
+              planConnectionId: step.planConnectionId ?? null,
             });
           } catch {
             return fail('coding-input-invalid');

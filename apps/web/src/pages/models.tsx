@@ -17,8 +17,7 @@ import { ModelAvailability } from '@/features/models/availability';
 import { ModelSetupLink } from '@/features/models/model-setup';
 import { ImageSettingsSection } from '@/features/models/image-settings';
 import { useFlag } from '@/lib/feature-flags';
-import { ChatGptPlanPane } from '@/features/models/chatgpt-plan';
-import { TokenPlanPane } from '@/features/models/token-plan';
+import { ProviderPanel } from '@/features/models/provider-panel';
 import { familyPlan } from '@/features/models/chatgpt-plan-api';
 import { ApiKeysPane, ModelSources, SharedPlanPane, type ModelSource } from '@/features/models/model-sources';
 
@@ -171,11 +170,14 @@ function WorkspaceModels({ workspaceId, userId }: { workspaceId: string; userId:
             />
           </div>
         )}
-        {source === 'chatgpt' && (
-          <ChatGptPlanPane workspaceId={workspaceId} outcome={chatGptOutcome} clearOutcome={clearChatGptOutcome} />
-        )}
-        {(source === 'claude' || source === 'copilot') && (
-          <TokenPlanPane key={source} workspaceId={workspaceId} provider={source} />
+        {(source === 'chatgpt' || source === 'claude' || source === 'copilot') && (
+          <ProviderPanel
+            key={source}
+            workspaceId={workspaceId}
+            provider={source}
+            outcome={source === 'chatgpt' ? chatGptOutcome : undefined}
+            clearOutcome={clearChatGptOutcome}
+          />
         )}
         {source === 'keys' && <ApiKeysPane />}
         {source.startsWith('plan:') && (

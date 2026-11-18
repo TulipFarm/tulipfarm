@@ -9,6 +9,8 @@ import {
 import { googleAppScopes } from '@tulipfarm/google-workspace/public-contracts';
 import type { Integration } from './catalog';
 import { accountConnectionState, slackConnectionState } from './connection-state';
+import { useChatGptConnection, useTokenConnection } from '@/features/models/plan-connections';
+import { useFlag } from '@/lib/feature-flags';
 
 export type Status =
   | { kind: 'loading' }
@@ -20,7 +22,12 @@ export type Status =
   | { kind: 'error'; detail: string; accessLost: boolean };
 /** The provider has no app credentials on this server, so nobody in any workspace can connect it. */
 export const notSetUp = 'Not set up on this server';
-export type Statuses = Record<'google' | 'slack' | 'github' | 'github-personal' | 'atlassian' | 'trello', Status>;
+/** A provider that is still rolling out and isn't on for this member yet. */
+export const notYet = 'Not available to you yet';
+export type Statuses = Record<
+  'google' | 'slack' | 'github' | 'github-personal' | 'atlassian' | 'trello' | 'chatgpt' | 'claude',
+  Status
+>;
 const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? '' : 's'}`;
 function status<T>(state: ReadState<T>, present: (data: T) => Status): Status {
   if (state.kind === 'loading') return { kind: 'loading' };
@@ -43,13 +50,36 @@ export function useIntegrationStatus(workspaceId: string, provider?: keyof Statu
   const github = useManagedIntegrations(workspaceId, !provider || provider === 'github');
   const personal = useGitHubAccounts(workspaceId, !provider || provider === 'github-personal');
   const atlassian = useAtlassianAccounts(workspaceId, !provider || provider === 'atlassian' || provider === 'trello');
+  const chatgptOn = useFlag('chatgpt-plan');
+  const claudeOn = useFlag('claude-plan');
+  const chatgpt = useChatGptConnection(workspaceId, chatgptOn && (!provider || provider === 'chatgpt'));
+  const claude = useTokenConnection(workspaceId, 'claude', claudeOn && (!provider || provider === 'claude'));
+  const off: Status = { kind: 'unavailable', detail: notYet };
+  // A plan app is connected while any of the member's accounts is, and needs attention when only stale ones are left.
+  const plan = (connections: readonly { state: string }[] | undefined): Status => {
+    if (!connections) return { kind: 'unavailable', detail: notSetUp };
+    const active = connections.filter(connection => connection.state === 'connected').length;
+    const lapsed = connections.filter(
+      connection => connection.state === 'reconnect-required' || connection.state === 'plan-disabled',
+    ).length;
+    // One lapsed account is enough to need attention: it may be the one coding or chats rely on.
+    if (lapsed)
+      return {
+        kind: 'attention',
+        detail: active
+          ? `${plural(lapsed, 'account')} ${lapsed === 1 ? 'needs' : 'need'} sign-in again`
+          : 'Plan sign-in needed',
+      };
+    if (active) return { kind: 'connected', detail: plural(active, 'account') };
+    return { kind: 'off', canConnect: true };
+  };
   const pickAtlassian = (trello: boolean) =>
     status(atlassian.state, ({ accounts, providers }) => {
       const mine = accounts.filter(account => account.protocol === (trello ? 'trello' : 'atlassian-mcp'));
       const active = mine.filter(account => accountConnectionState(account) === 'connected').length;
       if (active) return { kind: 'connected', detail: plural(active, 'account') };
       if (mine.some(account => accountConnectionState(account) === 'attention'))
-        return { kind: 'attention', detail: 'Access expired. Reconnect.' };
+        return { kind: 'attention', detail: 'Access expired' };
       return providers.some(
         provider => provider.protocol === (trello ? 'trello' : 'atlassian-mcp') && provider.configured,
       )
@@ -61,7 +91,7 @@ export function useIntegrationStatus(workspaceId: string, provider?: keyof Statu
       status.status === 'connected'
         ? { kind: 'connected', detail: status.email, granted: status.scopes }
         : status.status === 'reconnect-required'
-          ? { kind: 'attention', detail: 'Access expired. Reconnect.' }
+          ? { kind: 'attention', detail: 'Access expired' }
           : configured
             ? { kind: 'off', canConnect: true }
             : { kind: 'unavailable', detail: notSetUp },
@@ -77,15 +107,15 @@ export function useIntegrationStatus(workspaceId: string, provider?: keyof Statu
             ? { kind: 'off', canConnect: value.canManage }
             : {
                 kind: 'attention',
-                detail: value.canManage ? 'Reconnect the workspace.' : 'Ask an integration manager to reconnect.',
+                detail: value.canManage ? 'Slack access expired' : 'Ask an integration manager to reconnect.',
               },
     ),
     github: status(github.state, ({ integrations }) => {
       const enabled = integrations.filter(item => item.enabled).length;
       return enabled
-        ? { kind: 'connected', detail: plural(enabled, 'integration') }
+        ? { kind: 'connected', detail: plural(enabled, 'connection') }
         : integrations.length
-          ? { kind: 'attention', detail: 'All integrations are turned off.' }
+          ? { kind: 'attention', detail: 'All connections turned off' }
           : { kind: 'off', canConnect: true };
     }),
     'github-personal': status(personal.state, ({ configured, accounts }) => {
@@ -94,14 +124,27 @@ export function useIntegrationStatus(workspaceId: string, provider?: keyof Statu
       return active
         ? { kind: 'connected', detail: plural(active, 'private account') }
         : accounts.some(account => accountConnectionState(account) === 'attention')
-          ? { kind: 'attention', detail: 'Complete fresh GitHub consent.' }
+          ? { kind: 'attention', detail: 'New GitHub approval needed' }
           : { kind: 'off', canConnect: true };
     }),
     atlassian: pickAtlassian(false),
     trello: pickAtlassian(true),
+    chatgpt: chatgptOn ? status(chatgpt.state, data => plan(data?.connections)) : off,
+    claude: claudeOn ? status(claude.state, data => plan(data?.connections)) : off,
   };
-  const byProvider = { google, slack, github, 'github-personal': personal, atlassian, trello: atlassian };
-  const readers = provider ? [byProvider[provider]] : [google, slack, github, personal, atlassian];
+  const byProvider = {
+    google,
+    slack,
+    github,
+    'github-personal': personal,
+    atlassian,
+    trello: atlassian,
+    chatgpt,
+    claude,
+  };
+  const readers = provider
+    ? [byProvider[provider]]
+    : [google, slack, github, personal, atlassian, ...(chatgptOn ? [chatgpt] : []), ...(claudeOn ? [claude] : [])];
   return {
     statuses,
     refreshing: readers.some(

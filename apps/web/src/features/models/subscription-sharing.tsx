@@ -48,6 +48,10 @@ const subscriptionSchema = z.object({
   disabledModels: z.array(z.string()),
   canShare: z.boolean(),
   grants: z.array(grantSchema).nullable(),
+  plan: z.string().nullable(),
+  useForChat: z.boolean(),
+  useForCoding: z.boolean(),
+  createdAt: z.string(),
 });
 export type Subscription = z.infer<typeof subscriptionSchema>;
 
@@ -85,6 +89,10 @@ function subscriptionsApi(workspaceId: string) {
     setModels: async (connectionId: string, disabledModels: string[], signal: AbortSignal) => {
       await request(`/${encodeURIComponent(connectionId)}/models`, signal, 'PUT', { disabledModels });
     },
+    /** Turns the connection's chat or coding use on or off. */
+    setUses: async (connectionId: string, uses: { chat?: boolean; coding?: boolean }, signal: AbortSignal) => {
+      await request(`/${encodeURIComponent(connectionId)}/uses`, signal, 'PUT', uses);
+    },
   };
 }
 
@@ -109,13 +117,13 @@ export function usePeople(workspaceId: string): People {
   };
 }
 
-export function useSubscriptions(workspaceId: string) {
+export function useSubscriptions(workspaceId: string, enabled = true) {
   const api = useMemo(() => subscriptionsApi(workspaceId), [workspaceId]);
-  return { api, read: useFeatureRead({ key: subscriptionsKey, load: api.list }) };
+  return { api, read: useFeatureRead({ key: subscriptionsKey, load: api.list, enabled }) };
 }
 
 export function audience(grants: readonly SecretGrant[], people: People) {
-  if (!grants.length) return 'No one else';
+  if (!grants.length) return 'no one';
   return grants
     .map(grant =>
       grant.grantee.kind === 'workspace'
@@ -131,39 +139,59 @@ export function audience(grants: readonly SecretGrant[], people: People) {
 const askKey = (workspaceId: string, provider: Subscription['provider']) =>
   `tulipfarm:ask-to-share:${workspaceId}:${provider}`;
 
+/** The member's own connections of `provider`, oldest first. */
+export function ownPlans(subscriptions: readonly Subscription[] | null, provider: Subscription['provider']) {
+  return (subscriptions ?? []).filter(item => item.provider === provider && item.mine && item.state !== 'signed-out');
+}
+
 /**
- * Remembers that the member started connecting a plan, so the share question opens once it connects. Sign-in can leave
- * the page, so the note lives in session storage.
+ * Remembers that the member started connecting a plan account, and which accounts were already connected, so the share
+ * question opens once a new one connects. Sign-in can leave the page, so the note lives in session storage.
  */
-export function expectNewPlan(workspaceId: string, provider: Subscription['provider'], own: Subscription | undefined) {
-  if (own?.state === 'connected') return;
+export function expectNewPlan(workspaceId: string, provider: Subscription['provider'], owns: readonly Subscription[]) {
   try {
-    sessionStorage.setItem(askKey(workspaceId, provider), '1');
+    sessionStorage.setItem(
+      askKey(workspaceId, provider),
+      JSON.stringify(owns.filter(item => item.state === 'connected').map(item => item.connectionId)),
+    );
   } catch {
     // Without storage the member can still share from the Share button.
   }
 }
 
-/** Whether to ask who can use a plan the member just connected. `ready` holds the question back, such as behind a welcome. */
+/**
+ * The account to ask about sharing: one the member just connected that is shared with no one. `ready` holds the
+ * question back, such as behind a welcome.
+ */
 export function useAskToShare(
   workspaceId: string,
   provider: Subscription['provider'],
-  own: Subscription | undefined,
+  owns: readonly Subscription[],
   ready = true,
 ) {
-  const [asking, setAsking] = useState(false);
+  const [asking, setAsking] = useState<Subscription | null>(null);
   useEffect(() => {
-    if (!ready || own?.state !== 'connected') return;
+    if (!ready) return;
     const key = askKey(workspaceId, provider);
+    let known: unknown;
     try {
-      if (!sessionStorage.getItem(key)) return;
+      const stored = sessionStorage.getItem(key);
+      if (!stored) return;
+      known = JSON.parse(stored);
+    } catch {
+      return;
+    }
+    const before = new Set(Array.isArray(known) ? known : []);
+    const added = owns.find(item => item.state === 'connected' && !before.has(item.connectionId));
+    if (!added) return;
+    try {
       sessionStorage.removeItem(key);
     } catch {
       return;
     }
-    if (own.mine && own.canShare && !own.grants?.length) setAsking(true);
-  }, [workspaceId, provider, own, ready]);
-  return [asking, () => setAsking(false)] as const;
+    if (added.canShare && !added.grants?.length) setAsking(added);
+  }, [workspaceId, provider, owns, ready]);
+  return [asking, () => setAsking(null)] as const;
 }
 
 export function ShareDialog({

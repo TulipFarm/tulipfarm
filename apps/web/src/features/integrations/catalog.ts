@@ -2,7 +2,17 @@ import { googleAppScopes, type GoogleApp } from '@tulipfarm/google-workspace/pub
 import type { Brand } from '@tulipfarm/sprout/brand-icon';
 import { currentIntegrationId } from './former-ids';
 
-export type Provider = 'google' | 'slack' | 'github' | 'github-personal' | 'atlassian' | 'trello' | 'workflow' | 'soon';
+export type Provider =
+  | 'google'
+  | 'slack'
+  | 'github'
+  | 'github-personal'
+  | 'atlassian'
+  | 'trello'
+  | 'workflow'
+  | 'chatgpt'
+  | 'claude'
+  | 'soon';
 /** `alsoNeeds` names another Google app whose access this permission depends on. */
 export type Permission = { text: string; asksFirst?: boolean; scope?: string; alsoNeeds?: GoogleApp };
 
@@ -51,6 +61,14 @@ export const providers: Record<Exclude<Provider, 'soon'>, { audience: string; ca
     audience: 'People and teams an integration manager shares it with.',
     can: [{ text: 'Watch for new items to start workflows' }],
   },
+  chatgpt: {
+    audience: 'Only you, until you share it.',
+    can: [{ text: 'Use your ChatGPT plan’s models in chats' }, { text: 'Run Codex for coding' }],
+  },
+  claude: {
+    audience: 'Only you, until you share it.',
+    can: [{ text: 'Use your Claude plan’s models in chats' }, { text: 'Run Claude Code for coding' }],
+  },
 };
 
 const makers: Partial<Record<Provider, string>> = {
@@ -60,6 +78,8 @@ const makers: Partial<Record<Provider, string>> = {
   'github-personal': 'GitHub',
   atlassian: 'Atlassian',
   trello: 'Atlassian',
+  chatgpt: 'OpenAI',
+  claude: 'Anthropic',
 };
 export const makerOf = (app: Integration) =>
   makers[app.provider] ?? (app.brand.startsWith('google') ? 'Google' : app.name);
@@ -169,6 +189,24 @@ export const integrations: Integration[] = [
     blurb: 'Repos, issues & PRs',
     prompts: ['What changed in main this week?', 'List my open pull requests', 'Find issues assigned to me'],
     recommended: true,
+  },
+  {
+    id: 'chatgpt',
+    name: 'ChatGPT',
+    brand: 'openai',
+    category: 'AI and media',
+    provider: 'chatgpt',
+    blurb: 'Chat & Codex',
+    prompts: [],
+  },
+  {
+    id: 'claude',
+    name: 'Claude',
+    brand: 'claude',
+    category: 'AI and media',
+    provider: 'claude',
+    blurb: 'Chat & Claude Code',
+    prompts: [],
   },
   {
     id: 'jira',

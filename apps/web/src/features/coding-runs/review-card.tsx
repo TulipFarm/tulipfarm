@@ -148,8 +148,9 @@ export function CodingRunReview({
       <div className="space-y-0.5">
         <Heading id={`${id}-title`} run={run} />
         <p className="text-xs text-muted-foreground">
-          Runs for up to 30 minutes on {run.ownPlan ? 'your' : 'a shared'} plan, with your selected GitHub account.
-          Nothing is pushed.
+          Runs for up to 30 minutes on {run.ownPlan ? 'your' : 'a shared'} plan, with{' '}
+          {run.githubLogin ? `your GitHub account @${run.githubLogin}` : 'your selected GitHub account'}. Nothing is
+          pushed.
         </p>
       </div>
       <Collapsible>

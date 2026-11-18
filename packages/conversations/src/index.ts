@@ -75,6 +75,7 @@ import { recordConversationActivity } from './activity.ts';
 import { readMaintenance, resumeMaintenance } from './maintenance.ts';
 import { insertSkillPart, type ChatSkills, type InvokedSkill } from './skill-invocations.ts';
 import { turnImageModelsVersion, type TurnImageModels } from './turn-image-models.ts';
+
 import {
   archiveChatSchema,
   pinChatSchema,
@@ -102,6 +103,18 @@ import {
   modelFallbackCodePrefix,
 } from './contracts.ts';
 import { conversationEventChannel, subagentResultSchema, type ConversationNotification } from './events.ts';
+
+/** Common migration 0089 adds the plan account a member picked for a turn. */
+const turnPlanConnectionVersion = 89;
+/**
+ * A turn's move from one plan connection to another, as JSON for its history row. Account labels are the GitHub login or
+ * email of each connection, and only the turn's requester ($3) sees them.
+ */
+const planSwitch = (tx: AuthorizationTransaction) => {
+  const label = (column: string) =>
+    `CASE WHEN m.membership_id = $3 THEN (SELECT COALESCE(a.identity->>'login', c.email) FROM ${table(tx, 'tf_subscription_connections')} c LEFT JOIN ${table(tx, 'tf_github_accounts')} a ON a.id = c.github_account_id WHERE c.id = t.${column}) END`;
+  return `CASE WHEN t.plan_switched_from IS NOT NULL AND t.plan_connection_used IS NOT NULL THEN jsonb_build_object('fromConnectionId', t.plan_switched_from, 'fromAccount', ${label('plan_switched_from')}, 'toConnectionId', t.plan_connection_used, 'toAccount', ${label('plan_connection_used')}, 'reason', t.plan_switch_reason) END`;
+};
 
 export {
   ConversationConflict,
@@ -569,16 +582,32 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
         const turnId = randomUUID();
         // Measured on this process's monotonic clock and anchored to the database clock that stamps the saved message.
         const requested = arrivedAt !== undefined && tx.commonVersion >= 3;
+        // Workspaces below the plan-accounts migration answer on their plans in the usual order.
+        const picked = input.planConnectionId && tx.commonVersion >= turnPlanConnectionVersion;
+        const columns = [
+          'id',
+          'conversation_id',
+          'source_message_id',
+          'accepted_sequence',
+          'responder',
+          ...(input.mode === 'plan' ? ['planning_mode'] : []),
+          ...(requested ? ['timing_requested_at'] : []),
+          ...(picked ? ['plan_connection_id'] : []),
+        ];
+        const values: unknown[] = [turnId, chatId, input.messageId, chat.nextSequence, responder];
+        const expressions = values.map((_, index) => `$${index + 1}`);
+        if (input.mode === 'plan') expressions.push('true');
+        if (requested) {
+          values.push(Math.max(0, performance.now() - arrivedAt));
+          expressions.push(`clock_timestamp() - make_interval(secs => $${values.length}::double precision / 1000)`);
+        }
+        if (picked) {
+          values.push(input.planConnectionId);
+          expressions.push(`$${values.length}`);
+        }
         await tx.client.query(
-          `INSERT INTO ${table(tx, 'tf_conversation_turns')} (id, conversation_id, source_message_id, accepted_sequence, responder${input.mode === 'plan' ? ', planning_mode' : ''}${requested ? ', timing_requested_at' : ''}) VALUES ($1,$2,$3,$4,$5${input.mode === 'plan' ? ', true' : ''}${requested ? ', clock_timestamp() - make_interval(secs => $6::double precision / 1000)' : ''})`,
-          [
-            turnId,
-            chatId,
-            input.messageId,
-            chat.nextSequence,
-            responder,
-            ...(requested ? [Math.max(0, performance.now() - arrivedAt)] : []),
-          ],
+          `INSERT INTO ${table(tx, 'tf_conversation_turns')} (${columns.join(', ')}) VALUES (${expressions.join(',')})`,
+          values,
         );
         if (!packageInstall && admission.pinTurn && tx.commonVersion >= turnImageModelsVersion) {
           const pinned = await admission.pinTurn(
@@ -789,12 +818,16 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
           await tx.client.query(
             `SELECT m.id, m.sequence, m.author_kind AS author, m.created_at AS "createdAt",
         (SELECT jsonb_agg(CASE p.kind WHEN 'text' THEN jsonb_strip_nulls(jsonb_build_object('kind', p.kind, 'text', p.text, 'content', p.rich_content)) WHEN 'attachment' THEN jsonb_build_object('kind', p.kind, 'attachmentId', to_jsonb(p)->>'attachment_id') WHEN 'file' THEN jsonb_build_object('kind', p.kind, 'fileId', to_jsonb(p)->>'file_id') WHEN 'google-file' THEN jsonb_build_object('kind', p.kind, 'fileId', to_jsonb(p)->'google_file'->>'fileId', 'name', to_jsonb(p)->'google_file'->>'name', 'mimeType', to_jsonb(p)->'google_file'->>'mimeType') WHEN 'request' THEN jsonb_build_object('kind', p.kind, 'requestId', to_jsonb(p)->>'request_id') WHEN 'response' THEN jsonb_build_object('kind', p.kind, 'responseId', to_jsonb(p)->>'response_id') WHEN 'layout' THEN jsonb_build_object('kind', p.kind, 'text', p.text, 'layout', to_jsonb(p)->'layout') WHEN 'layout-action' THEN jsonb_build_object('kind', p.kind, 'action', to_jsonb(p)->'layout_action') WHEN 'skill' THEN ${skillReference} WHEN 'skill-use' THEN ${skillReference} ${compactionParts(tx)} ELSE jsonb_build_object('kind', p.kind, 'approvalId', to_jsonb(p)->>'approval_id') END ORDER BY p.ordinal) FROM ${table(tx, 'tf_conversation_parts')} p WHERE p.message_id = m.id) AS parts,
-        CASE WHEN t.id IS NULL THEN NULL ELSE jsonb_strip_nulls(jsonb_build_object('id', t.id, 'status', t.status, 'generation', t.generation, 'epoch', t.attempt_epoch, 'errorCode', t.error_code, 'mode', CASE WHEN (to_jsonb(t)->>'planning_mode')::boolean THEN 'plan' END, 'stats', ${turnStats})) END AS turn
+        CASE WHEN t.id IS NULL THEN NULL ELSE jsonb_strip_nulls(jsonb_build_object('id', t.id, 'status', t.status, 'generation', t.generation, 'epoch', t.attempt_epoch, 'errorCode', t.error_code, 'mode', CASE WHEN (to_jsonb(t)->>'planning_mode')::boolean THEN 'plan' END, 'stats', ${turnStats}${tx.commonVersion >= turnPlanConnectionVersion ? `, 'planSwitch', ${planSwitch(tx)}` : ''})) END AS turn
         ${tx.commonVersion >= followUpsVersion ? `,(SELECT jsonb_build_object('id', f.id, 'instruction', f.instruction, 'requestedAt', to_char(f.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')) FROM ${table(tx, 'tf_follow_ups')} f WHERE f.fired_message_id = m.id) AS "followUp"` : ''}
         ,(SELECT st.id FROM ${table(tx, 'tf_conversation_results')} r JOIN ${table(tx, 'tf_conversation_turns')} st ON st.id = r.turn_id WHERE r.message_id = m.id AND st.status = 'cancelled' AND m.author_kind = 'assistant') AS "stoppedTurnId"
         FROM ${table(tx, 'tf_conversation_messages')} m LEFT JOIN ${table(tx, 'tf_conversation_turns')} t ON t.source_message_id = m.id
         WHERE m.conversation_id = $1 AND ($2::integer IS NULL OR m.sequence < $2) ORDER BY m.sequence DESC LIMIT 51`,
-            [chatId, input.before ?? null],
+            [
+              chatId,
+              input.before ?? null,
+              ...(tx.commonVersion >= turnPlanConnectionVersion ? [actor.membershipId] : []),
+            ],
           )
         ).rows,
       );
@@ -1421,7 +1454,7 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
         if (operation === 'cancel' && tx.commonVersion >= chatExecutionVersion)
           await cancelExecutionTurn(tx, chatId, turnId);
         await tx.client.query(
-          `UPDATE ${table(tx, 'tf_conversation_turns')} SET status = $2, generation = $3, attempt_epoch = attempt_epoch + 1, attempts = CASE WHEN $2 = 'queued' THEN 0 ELSE attempts END, lease_until = NULL, retry_at = NULL, error_code = NULL WHERE id = $1`,
+          `UPDATE ${table(tx, 'tf_conversation_turns')} SET status = $2, generation = $3, attempt_epoch = attempt_epoch + 1, attempts = CASE WHEN $2 = 'queued' THEN 0 ELSE attempts END, lease_until = NULL, retry_at = NULL, error_code = NULL${operation === 'retry' && tx.commonVersion >= turnPlanConnectionVersion ? ', plan_connection_used = NULL, plan_switched_from = NULL, plan_switch_reason = NULL' : ''} WHERE id = $1`,
           [turnId, status, generation],
         );
         await interruptToolReceipts(tx, turnId, 'failed');

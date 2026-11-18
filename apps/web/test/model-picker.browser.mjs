@@ -213,6 +213,80 @@ try {
         `${mobile ? 'Mobile' : 'Desktop'} ${theme}: pricing, persisted user choice, workspace switching, account isolation, save recovery, unavailable preference, keyboard, search, loading, empty and retry passed.`,
       );
     }
+  // A plan model with several of the member's own chat accounts lists them; the one picked answers the message.
+  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, reducedMotion: 'reduce' });
+  activePage = page;
+  const astra = catalog.find(family => family.displayName === 'GPT-6 Astra');
+  const planFamily = { ...astra, id: 'chatgpt-astra', displayName: 'GPT-6 Astra', provider: 'chatgpt' };
+  const account = (connectionId, email) => ({
+    connectionId,
+    provider: 'chatgpt',
+    ownerMembershipId: membership.membershipId,
+    account: email,
+    state: 'connected',
+    mine: true,
+    models: [{ slug: 'gpt-6-astra', label: 'GPT-6 Astra' }],
+    disabledModels: [],
+    canShare: true,
+    grants: [],
+    plan: null,
+    useForChat: true,
+    useForCoding: true,
+    createdAt: '2026-10-01T00:00:00Z',
+  });
+  const first = '33333333-3333-4333-8333-333333333333';
+  const second = '44444444-4444-4444-8444-444444444444';
+  let subscriptions = [account(first, 'ada@example.com')];
+  const sends = [];
+  await page.route('**/v1/**', async route => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    if (path.endsWith('/governance/me')) return route.fulfill({ json: membership });
+    if (path.endsWith('/credits')) return route.fulfill({ json: credits });
+    if (path.endsWith('/model-catalog'))
+      return route.fulfill({ json: { families: [planFamily, ...catalog], defaultChatFamilyId } });
+    if (path.endsWith('/subscriptions')) return route.fulfill({ json: { subscriptions } });
+    if (request.method() === 'PUT' && /\/conversations\/[^/]+$/.test(path))
+      return route.fulfill({ json: { id: path.split('/').at(-1) } });
+    if (request.method() === 'PUT' && path.includes('/messages/')) {
+      sends.push(request.postDataJSON());
+      return route.fulfill({ json: { messageId: path.split('/').at(-1), turnId: crypto.randomUUID(), sequence: 1 } });
+    }
+    const json =
+      path === '/v1/auth/get-session'
+        ? {
+            session: { id: 'fixture-plan', userId: 'plan' },
+            user: { id: 'plan', name: 'Ada', email: 'plan@example.com', lastModelFamilyId: 'chatgpt-astra' },
+          }
+        : path === '/v1/workspaces'
+          ? [workspace]
+          : path === '/v1/workspaces/acme'
+            ? workspace
+            : {};
+    await route.fulfill({ json });
+  });
+  await page.goto(`${origin}/acme`);
+  await modelPicker(page, 'GPT-6 Astra').click();
+  await modelOption(page, 'GPT-6 Astra').first().waitFor();
+  assert.equal(await page.getByText('ChatGPT account', { exact: true }).count(), 0);
+  await page.keyboard.press('Escape');
+  subscriptions = [account(first, 'ada@example.com'), account(second, 'ada@work.example')];
+  await page.reload();
+  await modelPicker(page, 'GPT-6 Astra').click();
+  await page.getByText('ChatGPT account', { exact: true }).waitFor();
+  assert.equal(await page.getByRole('menuitemradio', { name: 'ada@example.com', exact: true }).isChecked(), true);
+  await page.getByRole('menuitemradio', { name: 'ada@work.example', exact: true }).click();
+  await page.keyboard.press('Escape');
+  await page.getByRole('menu').waitFor({ state: 'hidden' });
+  await page.getByRole('textbox', { name: 'Message', exact: true }).fill('Use my work account');
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  for (let attempt = 0; attempt < 100 && !sends.length; attempt++) await delay(50);
+  assert.deepEqual(
+    sends.map(body => [body.model, body.planConnectionId]),
+    [['chatgpt-astra', second]],
+  );
+  await page.close();
+  console.log('Plan account: a single account hides the choice; the picked account is sent with the message.');
 } catch (error) {
   await captureBrowserFailure(activePage, 'model-picker');
   throw error;

@@ -3,6 +3,7 @@ import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { Badge } from '@tulipfarm/sprout/badge';
 import { BrandIcon } from '@tulipfarm/sprout/brand-icon';
 import { Button } from '@tulipfarm/sprout/button';
+import { RadioGroup, RadioGroupItem } from '@tulipfarm/sprout/radio-group';
 import { Skeleton } from '@tulipfarm/sprout/skeleton';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
 import { githubApi, githubConsent, githubError } from '@/lib/github';
@@ -11,6 +12,8 @@ import { GitHubKnowledgeSources } from './github-knowledge';
 import { githubMockEnabled } from './github-mock-api';
 import { GitHubBotGrants } from './github-bot-grants';
 import { accountConnectionState } from './connection-state';
+import { cn } from 'cn';
+import { AccountColumnHeads, UseSwitch, accountColumns } from '@/features/models/plan-accounts';
 
 export function GitHubAccounts({
   workspaceId,
@@ -27,6 +30,22 @@ export function GitHubAccounts({
   const [busy, setBusy] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [turning, setTurning] = useState<Record<string, boolean>>({});
+  const turn = async (id: string, uses: { chat?: boolean; coding?: boolean; primaryForKnowledge?: true }) => {
+    const [use, on] = Object.entries(uses)[0] ?? [];
+    if (!use) return;
+    const key = `${id}:${use}`;
+    setTurning(current => ({ ...current, [key]: on === true }));
+    setFailure(null);
+    try {
+      await githubApi.setUses(workspaceId, id, uses);
+      await changes.authority('github-personal');
+    } catch (error) {
+      setFailure(githubError(error));
+    } finally {
+      setTurning(({ [key]: _done, ...rest }) => rest);
+    }
+  };
   const visibleAccounts =
     state.kind === 'ready'
       ? state.data.accounts.filter(account => account.identity || account.state !== 'disconnected')
@@ -80,32 +99,36 @@ export function GitHubAccounts({
   );
   const ready = state.kind === 'ready' ? state : null;
   const locked = !!busy || !!ready?.error;
+  const turningPrimary = Object.keys(turning)
+    .find(key => key.endsWith(':primaryForKnowledge'))
+    ?.split(':')[0];
   return (
     <section aria-labelledby="github-accounts-title" className="space-y-4">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div className="min-w-0 space-y-1">
+      <div className="space-y-1">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 id="github-accounts-title" className="text-base font-semibold text-foreground">
-            GitHub logins
+            Accounts
           </h2>
-          <p className="max-w-prose text-sm text-muted-foreground">
-            Agents act with the access of these logins. Connect another login to reach repositories it can see.
-          </p>
+          {ready && visibleAccounts.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {ready.data.configured && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={locked}
+                  aria-busy={busy === 'new'}
+                  onClick={() => void run('connect')}
+                >
+                  {busy === 'new' ? 'Opening GitHub…' : 'Add another account'}
+                </Button>
+              )}
+            </div>
+          )}
         </div>
-        {ready && visibleAccounts.length > 0 && (
-          <div className="flex flex-wrap gap-2">
-            {!failure && !ready.error && check('ghost')}
-            {ready.data.configured && (
-              <Button
-                variant="outline"
-                disabled={locked}
-                aria-busy={busy === 'new'}
-                onClick={() => void run('connect')}
-              >
-                {busy === 'new' ? 'Opening GitHub…' : 'Connect another login'}
-              </Button>
-            )}
-          </div>
-        )}
+        <p className="max-w-prose text-sm text-muted-foreground">
+          Agents work with the access of these GitHub logins. Turn on Chat or Coding for each login, and pick one login
+          for Knowledge imports.
+        </p>
       </div>
       {state.kind === 'loading' && (
         <div role="status" className="space-y-2 rounded-lg border p-4">
@@ -165,72 +188,116 @@ export function GitHubAccounts({
         </StatePanel>
       )}
       {ready && visibleAccounts.length > 0 && (
-        <ul aria-label="GitHub accounts" className="divide-y rounded-lg border">
-          {visibleAccounts.map(account => {
-            const login = account.identity ? `@${account.identity.login}` : null;
-            return (
-              <li key={account.id} className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3">
-                <BrandIcon brand="github" size="sm" />
-                <div className="min-w-0 flex-1 space-y-0.5">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="min-w-0 break-all text-sm font-medium text-foreground">
-                      {login ?? 'Unfinished integration'}
-                    </p>
-                    <Badge
-                      variant={
-                        accountConnectionState(account) === 'connected'
-                          ? 'success'
-                          : accountConnectionState(account) === 'attention'
-                            ? 'warning'
-                            : 'secondary'
-                      }
-                    >
-                      {account.state === 'active'
-                        ? 'Connected'
-                        : !account.identity
-                          ? 'Not connected'
-                          : account.state === 'disconnected'
-                            ? 'Disconnected'
-                            : 'Reconnect required'}
-                    </Badge>
-                  </div>
-                  {account.state !== 'active' && account.state !== 'disconnected' && (
-                    <p className="text-sm text-muted-foreground">
-                      {account.identity
-                        ? 'Reconnect with this same GitHub login to restore access.'
-                        : 'GitHub sign-in was not completed. Finish connecting or dismiss this attempt.'}
-                    </p>
-                  )}
-                </div>
-                <div className="flex flex-wrap gap-1">
-                  {account.state !== 'disconnected' && (
-                    <Button
-                      variant={account.state === 'active' ? 'ghost' : 'outline'}
-                      size="sm"
-                      disabled={locked || !ready.data.configured}
-                      aria-busy={busy === account.id}
-                      aria-label={login ? `Reconnect ${login}` : undefined}
-                      onClick={() => void run('reconnect', account.id)}
-                    >
-                      {login ? 'Reconnect' : 'Finish connecting'}
-                    </Button>
-                  )}
-                  {(account.identity ? account.state !== 'disconnected' : true) && (
-                    <Button
-                      variant="ghost-destructive"
-                      size="sm"
-                      disabled={locked}
-                      aria-label={login ? `Disconnect ${login}` : undefined}
-                      onClick={() => void run('disconnect', account.id)}
-                    >
-                      {login ? 'Disconnect' : 'Dismiss attempt'}
-                    </Button>
-                  )}
-                </div>
-              </li>
-            );
-          })}
-        </ul>
+        <div className="space-y-2">
+          <AccountColumnHeads uses={['Chat', 'Coding', 'Knowledge']} layout="github" />
+          <RadioGroup
+            aria-label="Login for Knowledge imports"
+            value={turningPrimary ?? visibleAccounts.find(account => account.primaryForKnowledge)?.id ?? ''}
+            disabled={locked || turningPrimary !== undefined}
+            onValueChange={value => {
+              if (typeof value === 'string' && value) void turn(value, { primaryForKnowledge: true });
+            }}
+          >
+            <ul aria-label="GitHub accounts" className="divide-y rounded-lg border">
+              {visibleAccounts.map(account => {
+                const login = account.identity ? `@${account.identity.login}` : null;
+                const usable = !!login && account.state !== 'disconnected';
+                return (
+                  <li
+                    key={account.id}
+                    className={cn('flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3', accountColumns('github'))}
+                  >
+                    <div className="flex min-w-0 basis-full items-center gap-3 sm:basis-auto">
+                      <BrandIcon brand="github" size="sm" />
+                      <div className="min-w-0 flex-1 space-y-0.5">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="min-w-0 break-all text-sm font-medium text-foreground">
+                            {login ?? 'Unfinished integration'}
+                          </p>
+                          <Badge
+                            variant={
+                              accountConnectionState(account) === 'connected'
+                                ? 'success'
+                                : accountConnectionState(account) === 'attention'
+                                  ? 'warning'
+                                  : 'secondary'
+                            }
+                          >
+                            {account.state === 'active'
+                              ? 'Connected'
+                              : !account.identity
+                                ? 'Not connected'
+                                : account.state === 'disconnected'
+                                  ? 'Disconnected'
+                                  : 'Reconnect required'}
+                          </Badge>
+                        </div>
+                        {account.state !== 'active' && account.state !== 'disconnected' && (
+                          <p className="text-sm text-muted-foreground">
+                            {account.identity
+                              ? 'Reconnect with this same GitHub login to restore access.'
+                              : 'GitHub sign-in was not completed. Finish connecting or dismiss this attempt.'}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    {usable ? (
+                      <>
+                        {(['chat', 'coding'] as const).map(use => {
+                          const pendingUse = turning[`${account.id}:${use}`];
+                          return (
+                            <UseSwitch
+                              key={use}
+                              use={use === 'chat' ? 'Chat' : 'Coding'}
+                              account={login}
+                              checked={pendingUse ?? (use === 'chat' ? account.useForChat : account.useForCoding)}
+                              disabled={locked || pendingUse !== undefined}
+                              busy={pendingUse !== undefined}
+                              onChange={on => void turn(account.id, { [use]: on })}
+                            />
+                          );
+                        })}
+                        <span className="flex items-center gap-2 sm:justify-center">
+                          <RadioGroupItem value={account.id} aria-label={`Use ${login} for Knowledge imports`} />
+                          <span aria-hidden="true" className="text-sm text-muted-foreground sm:hidden">
+                            Knowledge
+                          </span>
+                        </span>
+                      </>
+                    ) : (
+                      <span className="hidden sm:col-span-3 sm:block" />
+                    )}
+                    <div className="ml-auto flex flex-wrap justify-end gap-1">
+                      {account.state !== 'disconnected' && (
+                        <Button
+                          variant={account.state === 'active' ? 'ghost' : 'outline'}
+                          size="sm"
+                          disabled={locked || !ready.data.configured}
+                          aria-busy={busy === account.id}
+                          aria-label={login ? `Reconnect ${login}` : undefined}
+                          onClick={() => void run('reconnect', account.id)}
+                        >
+                          {login ? 'Reconnect' : 'Finish connecting'}
+                        </Button>
+                      )}
+                      {(account.identity ? account.state !== 'disconnected' : true) && (
+                        <Button
+                          variant="ghost-destructive"
+                          size="sm"
+                          disabled={locked}
+                          aria-label={login ? `Disconnect ${login}` : undefined}
+                          onClick={() => void run('disconnect', account.id)}
+                        >
+                          {login ? 'Disconnect' : 'Dismiss attempt'}
+                        </Button>
+                      )}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          </RadioGroup>
+        </div>
       )}
       {ready && visibleAccounts.some(account => account.identity) && (
         <p className="text-xs text-muted-foreground">

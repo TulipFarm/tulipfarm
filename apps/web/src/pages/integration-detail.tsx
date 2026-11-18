@@ -25,6 +25,7 @@ import {
 import { connector } from '@/features/integrations/connect';
 import { DefaultKnowledge, useDefaultKnowledge } from '@/features/integrations/default-knowledge';
 import { GitHubAccounts, GitHubKnowledge } from '@/features/integrations/github-accounts';
+import { ProviderPanel } from '@/features/models/provider-panel';
 import {
   GitHubRepositoryContentPrototype,
   githubRepositoryPrototypeEnabled,
@@ -115,7 +116,12 @@ function Detail({ app, workspaceId, slug }: { app: Integration; workspaceId: str
   const provider = app.provider === 'soon' || app.provider === 'workflow' ? undefined : app.provider;
   const { statuses, refresh, refreshing } = useIntegrationStatus(workspaceId, provider ?? 'google');
   const status = provider ? statusOf(statuses, app) : null;
-  const tabs = tabsFor(app, admin);
+  // GitHub's Accounts tab appears once a login is connected; until then the header's Connect is the one action.
+  // A reload or failed read after a change keeps the last answer, so the open tab doesn't vanish mid-change.
+  const [linked, setLinked] = useState(false);
+  const linkedNow = status?.kind === 'connected' || status?.kind === 'attention';
+  if (status?.kind !== 'loading' && status?.kind !== 'error' && linked !== linkedNow) setLinked(linkedNow);
+  const tabs = tabsFor(app, admin).filter(name => name !== 'accounts' || app.provider !== 'github-personal' || linked);
   const tab: IntegrationTab = search.tab && tabs.includes(search.tab) ? search.tab : 'overview';
   const setTab = (next: IntegrationTab) =>
     void navigate({
@@ -146,19 +152,20 @@ function Detail({ app, workspaceId, slug }: { app: Integration; workspaceId: str
   const action = actionFor(app, status, admin);
   const hint = action.kind === 'none' ? action.hint : undefined;
   const accessLost = app.provider === 'google' && status?.kind === 'error' && status.accessLost;
-  const primary =
-    action.kind === 'connect' ? (
-      <Button disabled={busy} aria-busy={busy} aria-label={`${action.label} ${app.name}`} onClick={() => void start()}>
-        {busy && <Spinner aria-hidden="true" />}
-        {action.label}
-      </Button>
-    ) : action.kind === 'settings' ? (
-      <Button aria-label={`${action.label} ${app.name}`} onClick={() => setTab('settings')}>
-        {action.label}
-      </Button>
-    ) : app.provider === 'soon' ? (
-      <Button disabled>Coming soon</Button>
-    ) : null;
+  // Plan apps connect from their Overview, next to the uses each account serves.
+  const plan = app.provider === 'chatgpt' || app.provider === 'claude';
+  const primary = plan ? null : action.kind === 'connect' ? (
+    <Button disabled={busy} aria-busy={busy} aria-label={`${action.label} ${app.name}`} onClick={() => void start()}>
+      {busy && <Spinner aria-hidden="true" />}
+      {action.label}
+    </Button>
+  ) : action.kind === 'settings' ? (
+    <Button aria-label={`${action.label} ${app.name}`} onClick={() => setTab('settings')}>
+      {action.label}
+    </Button>
+  ) : app.provider === 'soon' ? (
+    <Button disabled>Coming soon</Button>
+  ) : null;
 
   return (
     <PageContent>
@@ -376,6 +383,7 @@ function Overview({
   onTab: (tab: IntegrationTab) => void;
   tabs: IntegrationTab[];
 }) {
+  const copilot = useFlag('copilot-plan');
   const info = app.provider === 'soon' ? null : providers[app.provider];
   const granted = status?.kind === 'connected' || status?.kind === 'off' ? status.granted : undefined;
   const needed =
@@ -390,10 +398,19 @@ function Overview({
             <AlertDescription>{hint}</AlertDescription>
           </Alert>
         )}
-        {info && (
+        {(app.provider === 'chatgpt' || app.provider === 'claude') && (
+          <ProviderPanel workspaceId={workspaceId} provider={app.provider} header={false} />
+        )}
+        {info && app.provider !== 'chatgpt' && app.provider !== 'claude' && (
           <Panel title="What it can do" id="integration-can">
             <ul className="divide-y divide-border rounded-xl border border-border">
-              {[...(app.can ?? []), ...info.can].map(item => {
+              {[
+                ...(app.can ?? []),
+                ...info.can,
+                ...(app.provider === 'github-personal' && copilot
+                  ? [{ text: 'Use your Copilot plan for chat models and coding' }]
+                  : []),
+              ].map(item => {
                 const needs = dependency(item, granted);
                 return (
                   <li key={item.text} className="flex min-h-12 items-center justify-between gap-3 px-4 py-2.5">
@@ -595,6 +612,7 @@ function Accounts({
   onChanged: () => void;
   primary: ReactNode;
 }) {
+  const copilot = useFlag('copilot-plan');
   const empty = (status?.kind === 'off' || status?.kind === 'unavailable') && (
     <StatePanel
       kind="empty"
@@ -628,7 +646,14 @@ function Accounts({
   }
   if (app.provider === 'slack') return <SlackAccount workspaceId={workspaceId} knowledge={false} />;
   if (app.provider === 'github-personal')
-    return <GitHubAccounts workspaceId={workspaceId} workspaceSlug={slug} onChanged={onChanged} />;
+    return (
+      <div className="space-y-10">
+        <GitHubAccounts workspaceId={workspaceId} workspaceSlug={slug} onChanged={onChanged} />
+        {copilot && (
+          <ProviderPanel workspaceId={workspaceId} provider="copilot" header={false} nested="Copilot plans" />
+        )}
+      </div>
+    );
   if (app.provider === 'atlassian' || app.provider === 'trello')
     return (
       <AtlassianIntegrations

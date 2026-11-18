@@ -496,14 +496,19 @@ button together; repository configuration belongs in a separate panel.
 Default badges have a tinted green fill and green text. Feedback
 variants use the corresponding semantic colors.
 
-Integrations is a directory, not a sheet. The list page has a `SearchField`, then
-a category rail beside a card grid. The rail lists Your apps, Needs attention
-(with a count) and each category that has apps, with fixed-width counts; the
-open view lives in the `view` search param and switching it replaces the
-history entry. On phones the rail becomes a sideways strip. Cards are links with
-a `BrandIcon`, name, one-line blurb or owner, and a status line in a fixed
-position, so cards never move while statuses load. Searching replaces the
-current view with results across every category.
+Integrations is a directory, not a sheet. The list page has two tabs, Your apps
+and Browse, each with a count, beside a `SearchField`; both stay sticky while
+the list scrolls. The open tab lives in the `view` search param (`yours` or
+`browse`) and switching it replaces the history entry; with no param, Your apps
+opens when anything is connected. With nothing connected there are no tabs: the
+page is Browse with its search. Your apps shows bordered cards, apps needing
+attention first. Browse shows the apps this member can connect, then "Not
+available to connect" for apps nobody here can connect, each with its reason in
+a tooltip. Every row has a logo, a name that links to the app's page, a
+subtitle and one outlined action (Manage, Connect, Set up); urgent actions
+(Reconnect, Finish setup, Review tools) use `secondary`. A connected row's
+subtitle starts with a `Status` mark and the word "Connected" or "Needs
+attention", so state never rests on colour alone. Searching filters both tabs.
 
 Adding an app that isn't listed opens one setup dialog (`SetupDialog`, Sprout
 `Dialog` size `form`, placement `top`), from the header's "Add custom app"

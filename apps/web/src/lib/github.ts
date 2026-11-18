@@ -107,6 +107,8 @@ export const githubApi = {
   begin: (workspaceId: string) => request(`${base(workspaceId)}/begin`, authorizationSchema, 'POST', {}),
   reconnect: (workspaceId: string, id: string) =>
     request(`${base(workspaceId)}/${id}/reconnect`, authorizationSchema, 'POST'),
+  setUses: (workspaceId: string, id: string, uses: { chat?: boolean; coding?: boolean; primaryForKnowledge?: true }) =>
+    request(`${base(workspaceId)}/${id}/uses`, accountListSchema, 'PUT', uses),
   disconnect: (workspaceId: string, id: string) =>
     request(`${base(workspaceId)}/${id}/disconnect`, disconnectionSchema, 'POST'),
   complete: (body: unknown) => request('/github/oauth/callback', completionSchema, 'POST', body),
@@ -130,6 +132,12 @@ export const githubApi = {
 };
 export function githubConsent(url: string) {
   const parsed = new URL(url);
+  // Local plan mocks send GitHub sign-in to their own fake page instead.
+  const mocked = import.meta.env.DEV ? parsed.searchParams.get('tfMock') : null;
+  if (mocked?.startsWith(`${window.location.origin}/mock-provider`)) {
+    window.location.assign(mocked);
+    return;
+  }
   if (
     parsed.origin !== 'https://github.com' ||
     parsed.pathname !== '/login/oauth/authorize' ||

@@ -12,6 +12,7 @@ import {
 import { commonCompatibility, qualified, type createWorkspaceRuntime } from '@tulipfarm/workspace-storage/runtime';
 import type { IntegrationKeyring } from './credentials.ts';
 import { planTokenCipher } from './plan-cipher.ts';
+import { hasPlanAccounts, liveAccounts, maxPlanAccounts, nextGeneration } from './plan-accounts.ts';
 
 /** Sign in with ChatGPT: each member connects their own ChatGPT account so their own chats can run on their plan. */
 export const chatGptIssuer = 'https://auth.openai.com';
@@ -53,6 +54,7 @@ export const chatGptPlanErrorCodes = [
   'reconnect-required',
   'plan-disabled',
   'rate-limited',
+  'too-many-accounts',
   'unavailable',
 ] as const;
 export type ChatGptPlanErrorCode = (typeof chatGptPlanErrorCodes)[number];
@@ -73,11 +75,13 @@ export type ChatGptConnectionState =
   | 'signed-out';
 export type ChatGptModel = { slug: string; label: string };
 export type ChatGptConnectionStatus = {
+  connectionId: string;
   state: ChatGptConnectionState;
   email: string | null;
   planUsage: boolean;
   welcomePending: boolean;
   models: ChatGptModel[];
+  createdAt: string;
 };
 export type ChatGptAttemptStatus = { status: 'pending' | 'completed' | 'failed'; errorCode: string | null };
 export type ChatGptPlanRuntime = Pick<ReturnType<typeof createWorkspaceRuntime>, 'transaction'>;
@@ -99,6 +103,7 @@ const connectionRow = z.object({
   welcome_acknowledged_at: z.date().nullable(),
   models: z.unknown(),
   models_fetched_at: z.date().nullable(),
+  created_at: z.date(),
 });
 type ConnectionRow = z.infer<typeof connectionRow>;
 const attemptRow = z.object({
@@ -111,6 +116,8 @@ const attemptRow = z.object({
   status: z.enum(['pending', 'exchanging', 'completed', 'failed']),
   error_code: z.string().nullable(),
   expires_at: z.date(),
+  // Absent before the plan-accounts migration.
+  connection_id: z.uuid().nullish(),
 });
 const storedModels = z.array(z.object({ slug: z.string(), label: z.string() })).max(200);
 const credentialSchema = z.object({ accessToken: z.string(), refreshToken: z.string(), idToken: z.string() });
@@ -284,28 +291,45 @@ export function createChatGptPlan(options: {
     });
   }
 
-  async function loadConnection(tx: AuthorizationTransaction, membershipId: string, lock = false) {
+  /** One connection by id, optionally only when `membershipId` owns it. */
+  async function loadConnection(
+    tx: AuthorizationTransaction,
+    connectionId: string,
+    membershipId: string | null,
+    lock = false,
+  ) {
     return connectionRow
       .optional()
       .parse(
         (
           await tx.client.query(
-            `SELECT * FROM ${table(tx, 'connections')} WHERE owner_membership_id=$1 AND provider='chatgpt' ${lock ? 'FOR UPDATE' : ''}`,
-            [membershipId],
+            `SELECT * FROM ${table(tx, 'connections')} WHERE id=$1 AND provider='chatgpt' AND ($2::uuid IS NULL OR owner_membership_id=$2::uuid) ${lock ? 'FOR UPDATE' : ''}`,
+            [uuid.parse(connectionId), membershipId],
           )
         ).rows[0],
       );
   }
 
-  function statusOf(row: ConnectionRow | undefined): ChatGptConnectionStatus {
-    if (!row) return { state: 'not-connected', email: null, planUsage: false, welcomePending: false, models: [] };
+  /** The member's signed-in ChatGPT connections, oldest first. */
+  async function loadConnections(tx: AuthorizationTransaction, membershipId: string) {
+    return (
+      await tx.client.query(
+        `SELECT * FROM ${table(tx, 'connections')} WHERE owner_membership_id=$1 AND provider='chatgpt' AND state<>'signed-out' ORDER BY created_at, id`,
+        [membershipId],
+      )
+    ).rows.map(row => connectionRow.parse(row));
+  }
+
+  function statusOf(row: ConnectionRow): ChatGptConnectionStatus {
     const planUsage = row.state === 'connected';
     return {
+      connectionId: row.id,
       state: row.state,
       email: row.email,
       planUsage,
       welcomePending: planUsage && row.welcome_acknowledged_at === null,
       models: planUsage ? (storedModels.safeParse(row.models).data ?? []) : [],
+      createdAt: row.created_at.toISOString(),
     };
   }
 
@@ -320,12 +344,12 @@ export function createChatGptPlan(options: {
   }
 
   /**
-   * The member's access token, refreshed when it expires within five minutes. The connection row stays locked during
+   * A connection's access token, refreshed when it expires within five minutes. The connection row stays locked during
    * the refresh because refresh tokens rotate: a second concurrent refresh would reuse a spent token.
    */
-  async function accessToken(workspaceId: string, membershipId: string) {
+  async function accessToken(workspaceId: string, connectionId: string) {
     const outcome = await options.runtime.transaction(uuid.parse(workspaceId), commonCompatibility, async tx => {
-      const row = await loadConnection(tx, membershipId, true);
+      const row = await loadConnection(tx, connectionId, null, true);
       if (!row || row.state === 'signed-out') return { error: 'not-connected' as const };
       if (row.state === 'reconnect-required') return { error: 'reconnect-required' as const };
       if (row.state === 'plan-disabled') return { error: 'plan-disabled' as const };
@@ -341,8 +365,8 @@ export function createChatGptPlan(options: {
       if (!refreshed.ok) {
         if (refreshed.error && terminalRefreshErrors.has(refreshed.error)) {
           await tx.client.query(
-            `UPDATE ${table(tx, 'connections')} SET state='reconnect-required',credential=NULL,expires_at=NULL,scopes='{}',updated_at=clock_timestamp() WHERE owner_membership_id=$1 AND provider='chatgpt'`,
-            [membershipId],
+            `UPDATE ${table(tx, 'connections')} SET state='reconnect-required',credential=NULL,expires_at=NULL,scopes='{}',updated_at=clock_timestamp() WHERE id=$1`,
+            [row.id],
           );
           return { error: 'reconnect-required' as const };
         }
@@ -356,9 +380,9 @@ export function createChatGptPlan(options: {
       const scopes = refreshed.token.scope ? refreshed.token.scope.split(' ').filter(Boolean) : row.scopes;
       const planUsage = scopes.includes(planScope);
       await tx.client.query(
-        `UPDATE ${table(tx, 'connections')} SET state=$2,credential=$3,scopes=$4,expires_at=clock_timestamp()+$5*interval '1 second',updated_at=clock_timestamp() WHERE owner_membership_id=$1 AND provider='chatgpt'`,
+        `UPDATE ${table(tx, 'connections')} SET state=$2,credential=$3,scopes=$4,expires_at=clock_timestamp()+$5*interval '1 second',updated_at=clock_timestamp() WHERE id=$1`,
         [
-          membershipId,
+          row.id,
           planUsage ? 'connected' : 'plan-disabled',
           cipher.encrypt(credentialBinding(workspaceId, row), next),
           scopes,
@@ -372,42 +396,59 @@ export function createChatGptPlan(options: {
     return { accessToken: outcome.token, row: outcome.row };
   }
 
-  async function refreshModels(workspaceId: string, membershipId: string) {
-    const { accessToken: token } = await accessToken(workspaceId, membershipId);
+  async function refreshModels(workspaceId: string, connectionId: string) {
+    const { accessToken: token } = await accessToken(workspaceId, connectionId);
     const models = await fetchModels(token);
     if (!models) return null;
     await options.runtime.transaction(workspaceId, commonCompatibility, async tx => {
       await tx.client.query(
-        `UPDATE ${table(tx, 'connections')} SET models=$2,models_fetched_at=clock_timestamp() WHERE owner_membership_id=$1 AND provider='chatgpt' AND state='connected'`,
-        [membershipId, JSON.stringify(models)],
+        `UPDATE ${table(tx, 'connections')} SET models=$2,models_fetched_at=clock_timestamp() WHERE id=$1 AND state='connected'`,
+        [connectionId, JSON.stringify(models)],
       );
     });
     return models;
   }
 
-  const service = {
-    async status(workspaceId: string, userId: string) {
-      const { row, membershipId } = await authorized(workspaceId, userId, async (tx, actor) => ({
-        row: await loadConnection(tx, actor.membershipId),
-        membershipId: actor.membershipId,
-      }));
-      const status = statusOf(row);
-      const stale =
-        row?.state === 'connected' &&
-        (!row.models_fetched_at || Date.now() - row.models_fetched_at.getTime() > modelsMaxAgeMs);
-      if (!stale) return status;
-      try {
-        const models = await refreshModels(workspaceId, membershipId);
-        return models ? { ...status, models } : status;
-      } catch (error) {
-        if (error instanceof ChatGptPlanError && error.code !== 'unavailable')
-          return statusOf(await authorized(workspaceId, userId, (tx, actor) => loadConnection(tx, actor.membershipId)));
-        return status;
+  /** A connection's status, with its model list refreshed when it is older than an hour. */
+  async function freshStatus(workspaceId: string, userId: string, row: ConnectionRow) {
+    const status = statusOf(row);
+    const stale =
+      row.state === 'connected' &&
+      (!row.models_fetched_at || Date.now() - row.models_fetched_at.getTime() > modelsMaxAgeMs);
+    if (!stale) return status;
+    try {
+      const models = await refreshModels(workspaceId, row.id);
+      return models ? { ...status, models } : status;
+    } catch (error) {
+      if (error instanceof ChatGptPlanError && error.code !== 'unavailable') {
+        const latest = await authorized(workspaceId, userId, (tx, actor) =>
+          loadConnection(tx, row.id, actor.membershipId),
+        );
+        return latest && latest.state !== 'signed-out' ? statusOf(latest) : null;
       }
+      return status;
+    }
+  }
+
+  const service = {
+    /** The member's signed-in ChatGPT accounts, oldest first. */
+    async status(workspaceId: string, userId: string): Promise<{ connections: ChatGptConnectionStatus[] }> {
+      const rows = await authorized(workspaceId, userId, (tx, actor) => loadConnections(tx, actor.membershipId));
+      const statuses = await Promise.all(rows.map(row => freshStatus(workspaceId, userId, row)));
+      return { connections: statuses.filter(status => status !== null) };
     },
 
-    /** Starts a sign-in. The authorize URL carries no tokens, so it may reach the browser. */
-    async begin(workspaceId: string, userId: string, mode: ChatGptConnectionMode, redirectUri: string) {
+    /**
+     * Starts a sign-in. `connect` adds an account, or replaces the sign-in of the same account; `reconnect` and
+     * `enable-plan` sign one connection in again. The authorize URL carries no tokens, so it may reach the browser.
+     */
+    async begin(
+      workspaceId: string,
+      userId: string,
+      mode: ChatGptConnectionMode,
+      redirectUri: string,
+      connectionId?: string,
+    ) {
       workspaceId = uuid.parse(workspaceId);
       if (!redirectPattern.test(redirectUri)) throw new Error('ChatGPT redirect must be a 127.0.0.1 loopback callback');
       if (!options.hostId) throw new Error('ChatGPT sign-in needs the deployment host id');
@@ -431,12 +472,21 @@ export function createChatGptPlan(options: {
               ).rows[0],
             );
           if (recent.count >= 20) throw new ChatGptPlanError('rate-limited');
-          const row = await loadConnection(tx, actor.membershipId);
-          if (mode !== 'connect' && !row?.client_id) throw new ChatGptPlanError('not-connected');
+          const accounts = hasPlanAccounts(tx);
+          let row: ConnectionRow | undefined;
+          if (mode !== 'connect') {
+            row = connectionId
+              ? await loadConnection(tx, connectionId, actor.membershipId)
+              : (await loadConnections(tx, actor.membershipId))[0];
+            if (!row?.client_id || row.state === 'signed-out') throw new ChatGptPlanError('not-connected');
+          } else if (accounts && (await liveAccounts(tx, actor.membershipId, 'chatgpt')) >= maxPlanAccounts)
+            throw new ChatGptPlanError('too-many-accounts');
+          else if (!accounts) row = (await loadConnections(tx, actor.membershipId))[0];
+          // Each new account registers its own client; a reconnect reuses the connection's registration.
           const clientId = row?.client_id ?? dynamicClient;
           await tx.client.query(
-            `INSERT INTO ${table(tx, 'connection_attempts')} (id,provider,membership_id,state_hash,mode,client_id,redirect_uri,secret,status,expires_at)
-             VALUES ($1,'chatgpt',$2,$3,$4,$5,$6,$7,'pending',clock_timestamp()+$8*interval '1 minute')`,
+            `INSERT INTO ${table(tx, 'connection_attempts')} (id,provider,membership_id,state_hash,mode,client_id,redirect_uri,secret,status,expires_at${accounts ? ',connection_id' : ''})
+             VALUES ($1,'chatgpt',$2,$3,$4,$5,$6,$7,'pending',clock_timestamp()+$8*interval '1 minute'${accounts ? ',$9' : ''})`,
             [
               attemptId,
               actor.membershipId,
@@ -449,6 +499,7 @@ export function createChatGptPlan(options: {
                 nonce,
               }),
               attemptMinutes,
+              ...(accounts ? [mode === 'connect' ? null : (row?.id ?? null)] : []),
             ],
           );
           return { clientId, loginHint: mode === 'connect' ? null : row?.email };
@@ -541,13 +592,7 @@ export function createChatGptPlan(options: {
           clientId = issued.data;
         } else if (callback.clientId && callback.clientId !== attempt.client_id) return close('client-mismatch');
         const secret = cipher.decrypt(attemptBinding(workspaceId, attempt), attempt.secret, attemptSecretSchema);
-        // The issued client id is saved before the exchange so a retry after a failed exchange reuses it.
-        await tx.client.query(
-          `INSERT INTO ${table(tx, 'connections')} (id,provider,owner_membership_id,state,client_id) VALUES ($3,'chatgpt',$1,'signed-out',$2)
-           ON CONFLICT (owner_membership_id,provider) DO UPDATE SET client_id=EXCLUDED.client_id,updated_at=clock_timestamp()
-           WHERE ${table(tx, 'connections')}.client_id IS NULL OR ${table(tx, 'connections')}.client_id=EXCLUDED.client_id OR ${table(tx, 'connections')}.state IN ('signed-out','reconnect-required')`,
-          [attempt.membership_id, clientId, randomUUID()],
-        );
+        // The issued client id is kept on the attempt; the connection records it once the account is known.
         await tx.client.query(
           `UPDATE ${table(tx, 'connection_attempts')} SET status='exchanging',secret=NULL,client_id=$2 WHERE id=$1`,
           [attempt.id, clientId],
@@ -587,67 +632,112 @@ export function createChatGptPlan(options: {
         idToken: token.id_token,
       };
       const saved = await options.runtime.transaction(workspaceId, commonCompatibility, async tx => {
-        const row = await loadConnection(tx, attempt.membership_id, true);
-        if (!row) return 'attempt-not-found' as const;
-        // Reauthorization must return the same ChatGPT account; a fresh connect may switch accounts.
-        if (attempt.mode !== 'connect' && row.subject !== null && row.subject !== identity.subject)
-          return 'account-mismatch' as const;
-        if (row.client_id !== clientId) return 'client-mismatch' as const;
-        const generation = row.generation + 1;
-        await tx.client.query(
-          `UPDATE ${table(tx, 'connections')} SET generation=$2,state=$3,subject=$4,email=$5,scopes=$6,credential=$7,
-             expires_at=clock_timestamp()+$8*interval '1 second',models=NULL,models_fetched_at=NULL,
-             welcome_acknowledged_at=CASE WHEN subject IS DISTINCT FROM $4 THEN NULL ELSE welcome_acknowledged_at END,
-             updated_at=clock_timestamp()
-           WHERE owner_membership_id=$1 AND provider='chatgpt'`,
-          [
-            attempt.membership_id,
-            generation,
-            planUsage ? 'connected' : 'plan-disabled',
-            identity.subject,
-            identity.email,
-            scopes,
-            cipher.encrypt(
-              credentialBinding(workspaceId, { owner_membership_id: row.owner_membership_id, generation }),
-              credential,
-            ),
-            token.expires_in ?? 3600,
-          ],
+        const owner = attempt.membership_id;
+        const accounts = hasPlanAccounts(tx);
+        let row: ConnectionRow | undefined;
+        if (attempt.connection_id) {
+          row = await loadConnection(tx, attempt.connection_id, owner, true);
+          if (!row) return { error: 'attempt-not-found' as const };
+          // Reauthorization must return the same ChatGPT account; another account is added with Add another account.
+          if (row.subject !== null && row.subject !== identity.subject) return { error: 'account-mismatch' as const };
+        } else {
+          // Signing in again with an account the member already connected replaces that connection's sign-in.
+          row = connectionRow
+            .optional()
+            .parse(
+              (
+                await tx.client.query(
+                  `SELECT * FROM ${table(tx, 'connections')} WHERE owner_membership_id=$1 AND provider='chatgpt' AND ${accounts ? 'subject=$2' : '$2::text IS NOT NULL'} ORDER BY created_at LIMIT 1 FOR UPDATE`,
+                  [owner, identity.subject],
+                )
+              ).rows[0],
+            );
+          if (!row && accounts && (await liveAccounts(tx, owner, 'chatgpt')) >= maxPlanAccounts)
+            return { error: 'too-many-accounts' as const };
+          if (!accounts && attempt.mode !== 'connect' && row?.subject && row.subject !== identity.subject)
+            return { error: 'account-mismatch' as const };
+        }
+        if (row && attempt.mode !== 'connect' && row.client_id !== clientId)
+          return { error: 'client-mismatch' as const };
+        const id = row?.id ?? randomUUID();
+        const generation = row ? row.generation + 1 : await nextGeneration(tx, owner, 'chatgpt');
+        const encrypted = cipher.encrypt(
+          credentialBinding(workspaceId, { owner_membership_id: owner, generation }),
+          credential,
         );
+        if (!row)
+          await tx.client.query(
+            `INSERT INTO ${table(tx, 'connections')} (id,provider,owner_membership_id,generation,state,client_id,subject,email,scopes,credential,expires_at)
+             VALUES ($1,'chatgpt',$2,$3,$4,$5,$6,$7,$8,$9,clock_timestamp()+$10*interval '1 second')`,
+            [
+              id,
+              owner,
+              generation,
+              planUsage ? 'connected' : 'plan-disabled',
+              clientId,
+              identity.subject,
+              identity.email,
+              scopes,
+              encrypted,
+              token.expires_in ?? 3600,
+            ],
+          );
+        else
+          await tx.client.query(
+            `UPDATE ${table(tx, 'connections')} SET generation=$2,state=$3,client_id=$4,subject=$5,email=$6,scopes=$7,credential=$8,
+               expires_at=clock_timestamp()+$9*interval '1 second',models=NULL,models_fetched_at=NULL,
+               welcome_acknowledged_at=CASE WHEN subject IS DISTINCT FROM $5 THEN NULL ELSE welcome_acknowledged_at END,
+               updated_at=clock_timestamp()
+             WHERE id=$1`,
+            [
+              id,
+              generation,
+              planUsage ? 'connected' : 'plan-disabled',
+              clientId,
+              identity.subject,
+              identity.email,
+              scopes,
+              encrypted,
+              token.expires_in ?? 3600,
+            ],
+          );
         await tx.client.query(`UPDATE ${table(tx, 'connection_attempts')} SET status='completed' WHERE id=$1`, [
           attempt.id,
         ]);
-        return null;
+        return { id };
       });
-      if (saved) throw await fail(workspaceId, attempt.id, saved);
-      if (planUsage) await refreshModels(workspaceId, attempt.membership_id).catch(() => null);
-      return { workspaceId };
+      if ('error' in saved) throw await fail(workspaceId, attempt.id, saved.error);
+      if (planUsage) await refreshModels(workspaceId, saved.id).catch(() => null);
+      return { workspaceId, connectionId: saved.id };
     },
 
-    async acknowledgeWelcome(workspaceId: string, userId: string) {
+    async acknowledgeWelcome(workspaceId: string, userId: string, connectionId: string) {
       await authorized(
         workspaceId,
         userId,
         async (tx, actor) => {
           await tx.client.query(
-            `UPDATE ${table(tx, 'connections')} SET welcome_acknowledged_at=clock_timestamp() WHERE owner_membership_id=$1 AND provider='chatgpt' AND welcome_acknowledged_at IS NULL`,
-            [actor.membershipId],
+            `UPDATE ${table(tx, 'connections')} SET welcome_acknowledged_at=clock_timestamp() WHERE id=$1 AND owner_membership_id=$2 AND provider='chatgpt' AND welcome_acknowledged_at IS NULL`,
+            [uuid.parse(connectionId), actor.membershipId],
           );
         },
         'write',
       );
     },
 
-    /** Revokes the refresh token, then clears the tokens. The client id and account stay for the next sign-in. */
-    async disconnect(workspaceId: string, userId: string) {
+    /**
+     * Revokes one connection's refresh token, then clears its tokens and shares. Its defaults move to the member's
+     * oldest other account. The client id and account stay for the next sign-in.
+     */
+    async disconnect(workspaceId: string, userId: string, connectionId: string) {
       const found = await authorized(workspaceId, userId, async (tx, actor) => {
-        const row = await loadConnection(tx, actor.membershipId);
+        const row = await loadConnection(tx, connectionId, actor.membershipId);
         if (!row) return null;
         const credential =
           row.credential === null
             ? null
             : cipher.decrypt(credentialBinding(workspaceId, row), row.credential, credentialSchema);
-        return { membershipId: actor.membershipId, clientId: row.client_id, credential };
+        return { id: row.id, membershipId: actor.membershipId, clientId: row.client_id, credential };
       });
       if (!found) return { revoked: true };
       let revoked = found.credential === null;
@@ -680,13 +770,13 @@ export function createChatGptPlan(options: {
         userId,
         async tx => {
           await tx.client.query(
-            `UPDATE ${table(tx, 'connections')} SET state='signed-out',credential=NULL,expires_at=NULL,scopes='{}',models=NULL,models_fetched_at=NULL,updated_at=clock_timestamp() WHERE owner_membership_id=$1 AND provider='chatgpt'`,
-            [found.membershipId],
+            `UPDATE ${table(tx, 'connections')} SET state='signed-out',credential=NULL,expires_at=NULL,scopes='{}',models=NULL,models_fetched_at=NULL,updated_at=clock_timestamp() WHERE id=$1`,
+            [found.id],
           );
           // Signing out ends every share: a later sign-in starts private again.
           await tx.client.query(
-            `DELETE FROM ${qualified(tx.schema, 'tf_subscription_grants')} WHERE connection_id IN (SELECT id FROM ${table(tx, 'connections')} WHERE owner_membership_id=$1 AND provider='chatgpt')`,
-            [found.membershipId],
+            `DELETE FROM ${qualified(tx.schema, 'tf_subscription_grants')} WHERE connection_id=$1`,
+            [found.id],
           );
         },
         'write',
@@ -694,28 +784,30 @@ export function createChatGptPlan(options: {
       return { revoked };
     },
 
-    /** The live ChatGPT model slugs a member may pick, or an empty list when they can't use their plan. */
+    /** The live ChatGPT model slugs a member may pick from their own accounts, or an empty list. */
     async memberModels(workspaceId: string, userId: string) {
       try {
-        const status = await service.status(workspaceId, userId);
-        return status.planUsage ? status.models.map(model => model.slug) : [];
+        const { connections } = await service.status(workspaceId, userId);
+        return [
+          ...new Set(connections.flatMap(status => (status.planUsage ? status.models.map(model => model.slug) : []))),
+        ];
       } catch (error) {
         if (error instanceof AccessDenied || error instanceof ChatGptPlanError) return [];
         throw error;
       }
     },
 
-    /** For a reply worker: the requesting member's current access token, refreshed when needed. */
-    async accessToken(workspaceId: string, membershipId: string) {
-      return (await accessToken(workspaceId, uuid.parse(membershipId))).accessToken;
+    /** For a reply worker: a connection's current access token, refreshed when needed. */
+    async accessToken(workspaceId: string, connectionId: string) {
+      return (await accessToken(workspaceId, uuid.parse(connectionId))).accessToken;
     },
 
-    /** Marks a connection whose token OpenAI rejected so the member is asked to reconnect. */
-    async requireReconnect(workspaceId: string, membershipId: string) {
+    /** Marks a connection whose token OpenAI rejected so its owner is asked to reconnect. */
+    async requireReconnect(workspaceId: string, connectionId: string) {
       await options.runtime.transaction(uuid.parse(workspaceId), commonCompatibility, async tx => {
         await tx.client.query(
-          `UPDATE ${table(tx, 'connections')} SET state='reconnect-required',credential=NULL,expires_at=NULL,scopes='{}',updated_at=clock_timestamp() WHERE owner_membership_id=$1 AND provider='chatgpt' AND state='connected'`,
-          [uuid.parse(membershipId)],
+          `UPDATE ${table(tx, 'connections')} SET state='reconnect-required',credential=NULL,expires_at=NULL,scopes='{}',updated_at=clock_timestamp() WHERE id=$1 AND provider='chatgpt' AND state='connected'`,
+          [uuid.parse(connectionId)],
         );
       });
     },

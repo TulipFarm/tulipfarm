@@ -4,8 +4,8 @@ import { creditSummarySchema } from '@tulipfarm/workspace-storage/credits-contra
 import type { EarlyRead } from '@/lib/query/early-reads';
 import type { PersistedRead } from '@/lib/query/persisted-reads';
 import { creditKeys } from '@/lib/credit-keys';
-import { chatGptConnectionSchema } from '@/features/models/chatgpt-plan-api';
-import { tokenConnectionSchema } from '@/features/models/token-plan-api';
+import { chatGptConnectionsSchema } from '@/features/models/chatgpt-plan-api';
+import { tokenConnectionsSchema } from '@/features/models/token-plan-api';
 import { projectApi, projectListSchema } from '@/features/projects/api';
 import { projectKeys } from '@/features/projects/queries';
 import { integrationDirectoryPersistedReads, integrationDirectoryReads } from '@/features/integrations/directory-reads';
@@ -90,8 +90,8 @@ export const persistedPageReads: PersistedRead[] = [
     schema: recentItemsSchema,
   },
   { name: 'credits', limit: 1, match: key => JSON.stringify(key) === creditsKey, schema: creditSummarySchema },
-  { name: 'chatgpt-connection', limit: 1, match: matches(chatGptKey), schema: chatGptConnectionSchema.nullable() },
-  { name: 'token-plan-connection', limit: 2, match: matches(tokenPlanKey), schema: tokenConnectionSchema.nullable() },
+  { name: 'chatgpt-connection', limit: 1, match: matches(chatGptKey), schema: chatGptConnectionsSchema.nullable() },
+  { name: 'token-plan-connection', limit: 2, match: matches(tokenPlanKey), schema: tokenConnectionsSchema.nullable() },
   ...integrationDirectoryPersistedReads,
   ...persistedListReads,
   ...persistedDetailReads,

@@ -30,10 +30,12 @@ export function actionFor(app: Integration, status: Status | null, admin: boolea
     case 'off':
     case 'attention': {
       const label = status.kind === 'attention' ? 'Reconnect' : status.granted ? 'Grant access' : 'Connect';
+      // Plan apps connect on their own page, where the member also picks which account serves each use.
+      if (app.provider === 'chatgpt' || app.provider === 'claude') return { kind: 'settings', label };
       if (app.provider === 'github')
         return admin ? { kind: 'settings', label } : { kind: 'none', hint: 'Ask a workspace admin to connect GitHub.' };
       if (app.provider === 'slack' && status.kind === 'off' && !status.canConnect)
-        return { kind: 'none', hint: 'Ask an integration manager for Slack access.' };
+        return { kind: 'none', hint: 'Ask an integration manager to share Slack with you.' };
       return { kind: 'connect', label };
     }
   }
@@ -66,6 +68,7 @@ const administered = new Set<Integration['provider']>(['slack', 'github']);
 /** The tabs an integration page shows, in order. */
 export function tabsFor(app: Integration, admin: boolean): IntegrationTab[] {
   if (app.provider === 'soon') return ['overview'];
+  if (app.provider === 'chatgpt' || app.provider === 'claude') return ['overview', 'advanced'];
   return [
     'overview',
     'tools',

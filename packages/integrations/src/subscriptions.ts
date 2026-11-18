@@ -8,6 +8,9 @@ import {
   type HumanActor,
 } from '@tulipfarm/access';
 import { commonCompatibility, qualified, type createWorkspaceRuntime } from '@tulipfarm/workspace-storage/runtime';
+import { hasPlanAccounts, setUses, useColumn, type PlanUse } from './plan-accounts.ts';
+
+export { maxPlanAccounts, planUses, type PlanUse } from './plan-accounts.ts';
 
 /**
  * Subscription connections: a member's own ChatGPT, Claude or Copilot plan, which model calls can run on for its owner
@@ -68,6 +71,13 @@ export type SharedSubscription = {
   canShare: boolean;
   /** Present only when `canShare`. */
   grants: SubscriptionGrant[] | null;
+  /** The provider's plan name, such as Plus or Max, when it reports one. */
+  plan: string | null;
+  /** The owner turned the connection on for chats. Signed-out connections keep it but are not used. */
+  useForChat: boolean;
+  /** The owner turned the connection on for coding runs and Workflow coding steps. */
+  useForCoding: boolean;
+  createdAt: string;
 };
 
 export class SubscriptionError extends Error {
@@ -98,6 +108,10 @@ const connectionRow = z.object({
   provider: z.enum(subscriptionProviders),
   owner_membership_id: z.uuid(),
   email: z.string().nullable(),
+  plan: z.string().nullable(),
+  use_for_chat: z.boolean(),
+  use_for_coding: z.boolean(),
+  created_at: z.union([z.date(), z.string()]).transform(value => new Date(value)),
   state: z.enum(['connected', 'plan-disabled', 'reconnect-required', 'signed-out']),
   models: z.unknown(),
   disabled_models: z.array(z.string()),
@@ -168,26 +182,32 @@ export function createSubscriptions(options: { runtime: Runtime }) {
   }
 
   /**
-   * Connected plans of `provider` that `caller` may use, in the order they are tried. A plan cooling down after a refusal
-   * is skipped, unless `coolingDown` lists it last so the models on it stay selectable.
+   * Connected plans of `provider` that `caller` may use, in the order they are tried. Only plans their owner turned on
+   * for `use` are included. `preferred` comes first when eligible, then the caller's own plans oldest first, then those
+   * shared with them. A plan cooling down after a refusal is skipped, unless `coolingDown` lists it last so the models
+   * on it stay selectable.
    */
   async function eligibleIn(
     tx: AuthorizationTransaction,
     provider: SubscriptionProvider,
     caller: string | null,
     coolingDown = false,
+    use: PlanUse = 'chat',
+    preferred: string | null = null,
   ) {
+    const enabled = hasPlanAccounts(tx) ? `AND c.${useColumn(use)}` : '';
     const rows = await tx.client.query(
       `SELECT c.id, c.owner_membership_id, c.models, c.disabled_models, ${hasUsageLimit(tx) ? 'c.usage_limited_at' : 'NULL::timestamptz AS usage_limited_at'}, ${rankSql(tx)} AS rank
          FROM ${connections(tx)} c
          JOIN ${memberships(tx)} m ON m.id = c.owner_membership_id AND m.removed_at IS NULL
          LEFT JOIN ${grants(tx)} g ON g.connection_id = c.id
-        WHERE c.provider = $1 AND c.state = 'connected'
+        WHERE c.provider = $1 AND c.state = 'connected' ${enabled}
           ${coolingDown ? '' : 'AND (c.cooldown_until IS NULL OR c.cooldown_until <= clock_timestamp())'}
         GROUP BY c.id
        HAVING ${rankSql(tx)} IS NOT NULL
-        ORDER BY COALESCE(c.cooldown_until > clock_timestamp(), false), rank, c.last_used_at NULLS FIRST, c.id`,
-      [provider, caller === null ? null : uuid.parse(caller)],
+        ORDER BY COALESCE(c.cooldown_until > clock_timestamp(), false), (c.id = $3::uuid) IS TRUE DESC, rank,
+                 CASE WHEN c.owner_membership_id = $2::uuid THEN c.created_at END, c.last_used_at NULLS FIRST, c.id`,
+      [provider, caller === null ? null : uuid.parse(caller), uuid.safeParse(preferred).data ?? null],
     );
     return rows.rows.flatMap(raw => {
       const row = candidateRow.parse(raw);
@@ -213,7 +233,9 @@ export function createSubscriptions(options: { runtime: Runtime }) {
   /** The connections visible to the actor: their own, and every one shared with them, their teams or the workspace. */
   async function visible(tx: AuthorizationTransaction, actor: HumanActor, admin: boolean) {
     const rows = await tx.client.query(
-      `SELECT c.id, c.provider, c.owner_membership_id, c.email, c.state, c.models, c.disabled_models,
+      `SELECT c.id, c.provider, c.owner_membership_id, c.email, c.plan, c.state, c.models, c.disabled_models,
+              c.created_at,
+              ${hasPlanAccounts(tx) ? 'c.use_for_chat, c.use_for_coding' : 'true AS use_for_chat, true AS use_for_coding'},
               c.owner_membership_id = $1::uuid AS mine,
               (c.owner_membership_id = $1::uuid OR $2::boolean
                 OR bool_or(g.role = 'manage' AND g.membership_id = $1::uuid)) AS manage
@@ -247,9 +269,21 @@ export function createSubscriptions(options: { runtime: Runtime }) {
   }
 
   return {
-    /** For a model call: the plans `caller` may use, best first. A null caller (Slack, workflows) gets workspace shares. */
-    async eligible(workspaceId: string, provider: SubscriptionProvider, caller: string | null) {
-      return runtime.transaction(uuid.parse(workspaceId), commonCompatibility, tx => eligibleIn(tx, provider, caller));
+    /**
+     * For a model call: the plans `caller` may use for `use`, best first. `preferredConnectionId`, the account the chat or
+     * coding run picked, comes first when it is still eligible; the rest are its fallbacks. A null caller (Slack,
+     * workflows) gets workspace shares.
+     */
+    async eligible(
+      workspaceId: string,
+      provider: SubscriptionProvider,
+      caller: string | null,
+      use: PlanUse = 'chat',
+      preferredConnectionId: string | null = null,
+    ) {
+      return runtime.transaction(uuid.parse(workspaceId), commonCompatibility, tx =>
+        eligibleIn(tx, provider, caller, false, use, preferredConnectionId),
+      );
     },
 
     /** Records that a plan answered, so ties go to the plan used least recently. */
@@ -312,6 +346,10 @@ export function createSubscriptions(options: { runtime: Runtime }) {
           disabledModels: row.disabled_models,
           canShare: row.manage,
           grants: row.manage ? (shared.get(row.id) ?? []) : null,
+          plan: row.plan,
+          useForChat: row.use_for_chat,
+          useForCoding: row.use_for_coding,
+          createdAt: row.created_at.toISOString(),
         }));
       });
     },
@@ -346,6 +384,22 @@ export function createSubscriptions(options: { runtime: Runtime }) {
         if (error instanceof AccessDenied) return [];
         throw error;
       }
+    },
+
+    /** Turns one of the owner's connections on or off for chats, coding runs or both. Owner only; not while signed out. */
+    async setUses(
+      workspaceId: string,
+      userId: string,
+      connectionId: string,
+      uses: { chat?: boolean | undefined; coding?: boolean | undefined },
+    ) {
+      return authorized(workspaceId, userId, 'write', async (tx, actor, admin) => {
+        const row = (await visible(tx, actor, admin)).find(item => item.id === uuid.parse(connectionId));
+        if (!row) throw new SubscriptionError('not-found');
+        if (!row.mine) throw new AccessDenied();
+        if (row.state === 'signed-out' || !hasPlanAccounts(tx)) throw new SubscriptionError('not-connected');
+        await setUses(tx, row.id, uses);
+      });
     },
 
     /** Sets which of the owner's plan models are off, for the owner and everyone it is shared with. Owner only. */

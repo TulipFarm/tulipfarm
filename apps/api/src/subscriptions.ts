@@ -27,9 +27,18 @@ const subscriptionSchema = z.object({
   disabledModels: z.array(z.string()),
   canShare: z.boolean(),
   grants: z.array(subscriptionGrantSchema).nullable(),
+  plan: z.string().nullable(),
+  /** Whether its owner turned the connection on for chats, and for coding runs and Workflow coding steps. */
+  useForChat: z.boolean(),
+  useForCoding: z.boolean(),
+  createdAt: z.string(),
 });
 const listSchema = z.object({ subscriptions: z.array(subscriptionSchema) });
 const grantsBody = z.strictObject({ grants: z.array(subscriptionGrantSchema).max(200) });
+const usesBody = z
+  .strictObject({ chat: z.boolean().optional(), coding: z.boolean().optional() })
+  .refine(body => body.chat !== undefined || body.coding !== undefined);
+const emptySchema = z.strictObject({});
 const modelsBody = z.strictObject({ disabledModels: z.array(z.string().min(1).max(200)).max(200) });
 const validation = routeValidation({
   target: 'openapi-3.0',
@@ -108,6 +117,21 @@ export function registerSubscriptions(
             disabledModels,
           ),
         };
+      },
+    );
+    routes.put(
+      '/workspaces/:workspaceId/subscriptions/:connectionId/uses',
+      {
+        schema: {
+          ...schema('setSubscriptionUsesV1', emptySchema),
+          params: json(connectionParams),
+          body: json(usesBody),
+        },
+      },
+      async request => {
+        const { workspaceId, connectionId } = connectionParams.parse(request.params);
+        await subscriptions.setUses(workspaceId, user(request), connectionId, usesBody.parse(request.body));
+        return {};
       },
     );
     routes.put(

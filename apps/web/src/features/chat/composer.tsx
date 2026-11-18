@@ -39,6 +39,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@tulipfarm/sprout/popov
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@tulipfarm/sprout/tooltip';
 import { type Model, type Agent, type Mode, type Persona } from './composer-options';
 import type { PlanProvider } from '@/features/models/chatgpt-plan-api';
+import type { PlanAccountChoice } from './plan-account';
 import { ModelPicker } from './model-picker';
 import type { PlanUsage } from './plan-usage';
 
@@ -73,6 +74,8 @@ type ComposerProps = {
   model: ComposerModel | null;
   models: readonly ComposerModel[];
   onModelChange: (id: string) => void;
+  /** The plan account a plan model answers with first. */
+  planAccount?: PlanAccountChoice | undefined;
   persona?: {
     value: Persona | null;
     modes: readonly Mode[];
@@ -121,6 +124,7 @@ export function Composer({
   model,
   models,
   onModelChange,
+  planAccount,
   persona,
   mode,
   scope,
@@ -250,6 +254,7 @@ export function Composer({
                       model={model}
                       models={models}
                       onModelChange={onModelChange}
+                      account={planAccount}
                       disabled={disabled || sending}
                     />
                   )}

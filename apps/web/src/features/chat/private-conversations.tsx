@@ -80,6 +80,7 @@ import { emptyChatDocument } from './editor-extensions';
 import { ChatKeywords, RichMessage } from './rich-message';
 import { useIntegrationKeywords } from '@/features/integrations/keywords';
 import { ChatModelStatus, useChatModelFor, useChatModels } from './chat-models';
+import { usePlanAccount } from './plan-account';
 import { useFlag } from '@/lib/feature-flags';
 import { StartingTasks } from './starting-tasks';
 import { ChatPlans } from './plans';
@@ -481,6 +482,7 @@ function ConversationDetail({
   const read = useConversationHistory(api, chatId, pages, stream);
   const savedData = read.state.kind === 'ready' ? read.state.data : null;
   const models = useChatModelFor(workspaceModels, draft ? null : (savedData?.chat.model ?? null), chatId);
+  const planAccount = usePlanAccount(workspace.id, models.model?.plan);
   const packages = useChatPackages(
     workspace.id,
     chatId,
@@ -936,6 +938,7 @@ function ConversationDetail({
         commandId: crypto.randomUUID(),
         messageId,
         ...(models.model ? { model: models.model.id } : {}),
+        ...(models.model?.plan && planAccount?.value ? { planConnectionId: planAccount.value } : {}),
         parts,
         timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         mode,
@@ -1860,6 +1863,7 @@ function ConversationDetail({
                 model={models.model}
                 models={models.choices}
                 onModelChange={models.select}
+                planAccount={planAccount}
               />
             </div>
             <ChatModelStatus

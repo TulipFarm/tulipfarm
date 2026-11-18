@@ -4,6 +4,7 @@ import { qualified } from '@tulipfarm/workspace-storage/runtime';
 import { batchDecisionSchema, GitHubBatchError, type BatchView } from './batch-contracts.ts';
 import { batchAccess, batchTable, batchView, loadBatch } from './batch-store.ts';
 import { createGitHubBatches, type BatchOptions } from './batches.ts';
+import { chatUseFilter } from './selection.ts';
 import { requireGitHubOrigin, contextColumn, contextId, selectionTable, type GitHubContext } from './origin.ts';
 
 export function createGitHubBatchDecision(
@@ -32,7 +33,7 @@ export function createGitHubBatchDecision(
         const row = await loadBatch(tx, actor, conversationId, id);
         if (row.expired || decision.digest !== row.digest) throw new GitHubBatchError('batch-conflict');
         const selected = await tx.client.query(
-          `SELECT a.id FROM ${batchTable(tx, 'accounts')} a JOIN ${qualified(tx.schema, selectionTable(conversationId))} s ON s.account_id=a.id WHERE a.id=$1 AND a.owner_membership_id=$2 AND a.generation=$3 AND a.state='active' AND (a.expires_at IS NULL OR a.expires_at>clock_timestamp()) AND s.${contextColumn(conversationId)}=$4 AND s.account_generation=$3 AND s.version=$5`,
+          `SELECT a.id FROM ${batchTable(tx, 'accounts')} a JOIN ${qualified(tx.schema, selectionTable(conversationId))} s ON s.account_id=a.id WHERE a.id=$1 AND a.owner_membership_id=$2 AND a.generation=$3 AND a.state='active' AND (a.expires_at IS NULL OR a.expires_at>clock_timestamp())${typeof conversationId === 'string' ? chatUseFilter(tx) : ''} AND s.${contextColumn(conversationId)}=$4 AND s.account_generation=$3 AND s.version=$5`,
           [
             row.snapshot.accountId,
             actor.membershipId,

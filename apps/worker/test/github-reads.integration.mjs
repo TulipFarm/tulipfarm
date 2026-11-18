@@ -195,6 +195,30 @@ test('one active account is used without asking; several accounts make the model
   ]);
   assert.match(JSON.stringify(f.modelRequests.at(-1)), /github\.personal\.account/);
 });
+test('a chat stops reading through an account turned off for chats and moves to the only one left on', async t => {
+  const f = await githubChatFixture();
+  t.after(() => f.close());
+  const first = await f.connect(123),
+    second = await f.connect(456),
+    chatId = await f.chat();
+  await f.reads.select(f.one.id, f.member.userId, chatId, { accountId: first, expectedVersion: 0 });
+  await f.service.setUses(f.one.id, f.member.userId, first, { chat: false });
+  f.decide([call]);
+  assert.equal((await f.send(chatId)).status, 'completed');
+  assert.ok(f.providerCalls.length > 0);
+  assert.deepEqual(await f.reads.selection(f.one.id, f.member.userId, chatId), {
+    accountId: second,
+    generation: 1,
+    version: 2,
+  });
+
+  // With no account left on for chats, the chat reads nothing.
+  await f.service.setUses(f.one.id, f.member.userId, second, { chat: false });
+  const calls = f.providerCalls.length;
+  f.decide([call], 'Select an account.');
+  assert.equal((await f.send(chatId)).status, 'completed');
+  assert.equal(f.providerCalls.length, calls);
+});
 test('the chat lists the selected account repositories and explains a withheld search page', async t => {
   const f = await githubChatFixture();
   t.after(() => f.close());

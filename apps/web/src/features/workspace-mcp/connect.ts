@@ -6,9 +6,9 @@ import { markMcpConnected, startMcpPasteSignIn, startMcpSignIn, useMcpPasteSignI
 import { useMcpCommand } from './state';
 
 export const mcpStatusLabel: Record<Integration['status'], string> = {
-  setup: 'One more step',
-  'oauth-pending': 'Finish sign-in',
-  'registration-required': 'One more step',
+  setup: 'Setup not finished',
+  'oauth-pending': 'Sign-in not finished',
+  'registration-required': 'Needs more details',
   discovering: 'Connecting',
   'review-required': 'Tools changed',
   ready: 'Connected',

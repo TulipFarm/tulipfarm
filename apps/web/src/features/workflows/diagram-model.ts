@@ -223,6 +223,12 @@ function stepFacts(step: Step, labels: WorkflowLabels): WorkflowStepDetails['fac
         { label: 'Repository', value: describeValue(step.repository) },
         { label: 'Task', value: describeValue(step.prompt) },
         ...(step.branch ? [{ label: 'Starts from', value: describeValue(step.branch) }] : []),
+        {
+          label: 'GitHub login',
+          value: step.githubAccount
+            ? `@${step.githubAccount}`
+            : 'First login with Coding on that can push to the repository',
+        },
         { label: 'Result', value: step.pullRequest ? 'Opens a pull request' : 'Returns the changes; pushes nothing' },
       ];
     case 'slack-message':
