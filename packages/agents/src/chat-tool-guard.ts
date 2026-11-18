@@ -15,6 +15,9 @@ const repeatableTools = new Set<string>([
   'workflows.read',
   'workflows.providers',
 ]);
+// These act on whatever the earlier writes left, so a later write makes a repeat a new action.
+// eslint-disable-next-line tulipfarm/product-copy -- A tool name, not user-facing copy.
+const rerunAfterWrite = new Set<string>(['apps.preview.build']);
 const repeatable = (call: { tool: string; method?: unknown }) => repeatableTools.has(call.tool) || readOnlyCall(call);
 const fingerprint = (value: unknown) => createHash('sha256').update(canonicalJson(value)).digest('hex');
 
@@ -22,12 +25,15 @@ export function createChatToolGuard(
   priorCalls: readonly unknown[] = [],
   priorResults: readonly { call: unknown; output: unknown }[] = [],
 ) {
-  const writes = new Set(
-    priorCalls.flatMap(value => {
-      const call = z.object({ tool: z.string() }).passthrough().parse(value);
-      return repeatable(call) ? [] : [fingerprint(call)];
-    }),
-  );
+  const writes = new Set<string>();
+  const wrote = (call: { tool: string }) => {
+    if (!rerunAfterWrite.has(call.tool)) for (const tool of rerunAfterWrite) writes.delete(fingerprint({ tool }));
+    writes.add(fingerprint(call));
+  };
+  for (const value of priorCalls) {
+    const call = z.object({ tool: z.string() }).passthrough().parse(value);
+    if (!repeatable(call)) wrote(call);
+  }
   const reads = new Set<string>();
   const api = createApiCallGuard(priorCalls, priorResults);
   let idleRounds = 0;
@@ -69,7 +75,7 @@ export function createChatToolGuard(
         return;
       }
       if (!repeatable(call)) {
-        writes.add(fingerprint(call));
+        wrote(call);
         reads.clear();
         idleRounds = 0;
       } else {

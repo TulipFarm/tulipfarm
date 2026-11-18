@@ -1275,6 +1275,7 @@ test("an app chat's reply cannot deny its tools or claim a build or edit no tool
   for (const text of [
     'The build succeeded. The updated server now tracks prevHandle.',
     'I rebuilt the app with the new view id.',
+    'The rebuild is complete, and the page shows the new heading.',
   ]) {
     assert.equal(unbackedAppClaim(text, 'public', none)?.status, 'continue', text);
     // eslint-disable-next-line tulipfarm/product-copy -- A tool name, not user-facing copy.
@@ -1285,6 +1286,8 @@ test("an app chat's reply cannot deny its tools or claim a build or edit no tool
     unbackedAppClaim('I updated src/server.js with the view id.', 'public', new Set(['apps.files.write'])),
     undefined,
   );
+  assert.equal(unbackedAppClaim('The text change is saved.', 'public', none)?.status, 'continue');
+  assert.equal(unbackedAppClaim('The text change is saved.', 'public', new Set(['apps.files.write'])), undefined);
   assert.equal(
     unbackedAppClaim('I updated src/server.js and rebuilt the app.', 'public', new Set(['apps.files.write']))?.status,
     'continue',
@@ -1311,6 +1314,8 @@ test("an app chat's reply cannot deny its tools or claim a build or edit no tool
     'Should I rebuild the app?',
     'Nothing was built yet.',
     'I will build the app once you confirm.',
+    'The change was not saved, because the build failed.',
+    'The build is not complete yet.',
   ])
     assert.equal(unbackedAppClaim(text, 'public', none), undefined, text);
   assert.equal(unbackedAppClaim('The required file tools are not available.', undefined, none), undefined);

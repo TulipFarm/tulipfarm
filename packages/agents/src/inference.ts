@@ -2246,10 +2246,12 @@ const toolsDenied =
   /\b(?:my|(?:file|write|writing|edit|editing|build|building)(?: or \w+)?(?: \w+)?) tools?\b[^.]*\b(?:not available|unavailable|not offered)\b|(?:\b(?:no|not have|without)|n['’]t have)(?: a| any| the)? (?:file|write|editing|build)\b[\w\s-]{0,24}\btools?\b/i;
 const firstPerson = /\b(?:i|we|my)\b/i;
 const buildClaim =
-  /^(?:and |so )?(?:the |your )?(?:re)?build (?:succeeded|passed|worked|completed|finished)\b|^(?:and |so )?(?:i|we) (?:re)?built\b|\b(?:i|we)(?:(?:'|’)ve| have) (?:re)?built\b|^(?:re)?built (?:the|your|this) (?:app|server|site)\b/i;
+  /^(?:and |so )?(?:the |your )?(?:re)?build (?:succeeded|passed|worked|completed|finished|(?:is|was) (?:complete|done|finished|successful))\b|^(?:and |so )?(?:i|we) (?:re)?built\b|\b(?:i|we)(?:(?:'|’)ve| have) (?:re)?built\b|^(?:re)?built (?:the|your|this) (?:app|server|site)\b/i;
 const conditional = /\b(?:if|when|once|after|whether|unless|until)\b/i;
 const editClaim =
   /\b(?:i|we)(?:'|’)?(?:ve| have)? (?:updated|edited|changed|modified|rewrote|replaced|inserted|deleted|removed)\b/i;
+const savedClaim =
+  /^(?:and |so )?(?:the |your )?(?:[\w-]+ )?(?:changes?|edits?|updates?|fix(?:es)?) (?:is|are|was|were|has been|have been) (?:saved|applied|made|done|in place)\b/i;
 const toReader = /\b(?:below|for you|here(?:'|’)?s|here is|here are)\b/i;
 const codeObject =
   /\b(?:files?|code|server|routes?|handlers?|html|css|scripts?|components?)\b|[\w-]+\/[\w./-]+|\b[\w-]+\.(?:m?js|tsx?|jsx|html|css|json)\b/i;
@@ -2272,7 +2274,9 @@ export function unbackedAppClaim(candidate: string, apps: AppKind | undefined, r
     if (toReader.test(clause)) return false;
     const build = buildClaim.exec(clause);
     if (build && !negatedClaim(clause, build)) return !ran.has(buildTool);
+    const saved = savedClaim.exec(clause);
     const edit = editClaim.exec(clause);
+    if (saved && !negatedClaim(clause, saved)) return !ran.has('apps.files.write') && !ran.has('apps.files.delete');
     if (!edit || negatedClaim(clause, edit) || !codeObject.test(clause)) return false;
     return !ran.has('apps.files.write') && !ran.has('apps.files.delete');
   });
