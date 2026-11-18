@@ -50,8 +50,7 @@ export const featureFlags = {
     env: 'FEATURE_FLAG_SOUL_REPOSITORY_EXPLORER',
   },
   'usage-explorer': {
-    description:
-      'Settings > Usage explorer: model usage by model, payment source, member and agent, with tokens, credits and list-price cost.',
+    description: 'Settings > Usage explorer for model tokens, credits and cost.',
     default: 'development',
     scope: 'workspace',
     env: 'FEATURE_FLAG_USAGE_EXPLORER',

@@ -42,7 +42,7 @@ import { accountCallbackResultSchema } from '@tulipfarm/atlassian/callback-contr
 import { googleCallbackResultSchema } from '@tulipfarm/google-workspace/callback-contracts';
 import { workflowPageSearch } from '@/features/workflows/page-search';
 import { calendarSearchSchema } from '@/features/calendar/search';
-import { usageSearchSchema } from '@/features/usage/search';
+import type { UsageSearch } from '@/features/usage/search';
 import { useFlag } from '@/lib/feature-flags';
 import { agentTabValues } from '@/features/agents/tab-values';
 import { createWorkspaceAccess } from '@/lib/workspace-access';
@@ -957,7 +957,8 @@ function UsageRoute() {
 const workspaceUsageRoute = createRoute({
   getParentRoute: () => workspaceRoute,
   path: 'settings/usage',
-  validateSearch: search => usageSearchSchema.parse(search),
+  // The explorer checks these values itself, which keeps its schema out of the startup bundle.
+  validateSearch: (search: Record<string, unknown>) => search as UsageSearch,
   component: UsageRoute,
 });
 export const tablesRoute = createRoute({

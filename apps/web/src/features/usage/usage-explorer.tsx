@@ -51,7 +51,7 @@ import { ModelRead } from '@/features/models/read';
 import { planLabels, planUsageUrls } from '@/features/chat/reply-failure-copy';
 import { timeAgo } from '@/features/chat/plan-usage';
 import { useMemberDirectory } from '@/features/secrets/queries';
-import type { UsageSearch } from './search.ts';
+import { usageSearchSchema, type UsageSearch } from './search.ts';
 import { useUsageReport } from './queries.ts';
 import { usageDimensions, type Member, type UsageDimensions } from './usage-dimensions.tsx';
 import {
@@ -109,7 +109,8 @@ type Context = {
 };
 
 export function UsageExplorer({ workspaceId }: { workspaceId: string }) {
-  const search = useSearch({ from: '/$workspaceSlug/settings/usage' });
+  const raw = useSearch({ from: '/$workspaceSlug/settings/usage' });
+  const search = useMemo(() => usageSearchSchema.parse(raw), [raw]);
   const state = useMemo(() => readExplorerState(search), [search]);
   const query = useMemo(() => reportQuery(state), [state]);
   const { state: read, refresh } = useUsageReport(workspaceId, query);
