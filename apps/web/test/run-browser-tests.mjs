@@ -175,6 +175,7 @@ if (isolate && failed.length) {
   }
 }
 isolation?.close();
+for (const file of failed) console.log(`::error file=apps/web/${file}::${file} failed`);
 if (failed.length) {
   console.log(`\n${failed.length} of ${files.length} browser tests failed:\n${failed.join('\n')}`);
   process.exit(1);
