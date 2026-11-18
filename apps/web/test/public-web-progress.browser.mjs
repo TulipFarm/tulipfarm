@@ -8,6 +8,7 @@ import { chromium } from 'playwright';
 import { conversationFixture } from '../../../packages/conversations/test/fixture.mjs';
 import { createConversationExecutor } from '../../../packages/conversations/src/runtime.ts';
 import { createChatTools, isExternalTool } from '../../../packages/agents/src/tools.ts';
+import { publicNetwork } from '../../../packages/agents/src/web-fetch.ts';
 import { chatCatalog } from './chat-catalog.fixture.mjs';
 import { credits } from './chat-query.fixture.mjs';
 
@@ -16,6 +17,8 @@ process.env.ANTHROPIC_API_KEY ??= 'test-key';
 const port = Number(process.env.PUBLIC_WEB_PROGRESS_PORT ?? 5497);
 const origin = `http://127.0.0.1:${port}`;
 const url = 'https://www.cloudflare.com/products/artifacts/';
+// The public-address check would otherwise need real DNS.
+publicNetwork.resolve = async () => ['104.16.123.96'];
 const report = new URL('../../../reports/public-web/progress/', import.meta.url);
 await mkdir(report, { recursive: true });
 const providerStarted = Promise.withResolvers();

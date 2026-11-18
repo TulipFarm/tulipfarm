@@ -106,6 +106,8 @@ export default defineConfig(({ command }) => {
       ? readBuildInfo('web', new URL('./version.json', import.meta.url), true)
       : developmentBuild('web');
   return {
+    // Parallel browser tests give each worker its own dependency cache, so one server's re-optimize can't break another's.
+    ...(process.env.TULIPFARM_VITE_CACHE_DIR ? { cacheDir: process.env.TULIPFARM_VITE_CACHE_DIR } : {}),
     define: { __BUILD_INFO__: JSON.stringify(identity) },
     plugins: [
       react(),

@@ -8,7 +8,7 @@ import { chromium } from 'playwright';
 
 test(
   'chat owns activity and results; detailed views open only on request without losing work',
-  { timeout: 240000 },
+  { timeout: 360000 },
   async () => {
     const port = process.env.CANVAS_STEPPER_PORT ?? '5853';
     const cdp = process.env.CANVAS_STEPPER_CDP_PORT;

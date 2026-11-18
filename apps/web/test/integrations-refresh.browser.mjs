@@ -1,3 +1,4 @@
+// browser-tests: run alone, since beside other tests its waits time out.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -547,9 +548,12 @@ test('integration status recovery and Google review lifecycle', { timeout: 480_0
       await account(page);
       assert.equal(await checkbox.isChecked(), true);
       assert.equal(await approve.isDisabled(), true);
+      // The status alert offers Check again once every retry of the catalog read has failed. The fault stays until
+      // then, so a slow retry cannot succeed first.
+      const checkAgain = main.getByRole('button', { name: 'Check again', exact: true });
+      await checkAgain.waitFor({ timeout: 60_000 });
       faults.google = 200;
-      // The status alert offers Check again once every retry of the catalog read has failed.
-      await main.getByRole('button', { name: 'Check again', exact: true }).click({ timeout: 60_000 });
+      await checkAgain.click();
       await page.waitForFunction(() =>
         [...document.querySelectorAll('button')].some(
           button => button.textContent === 'Approve exact Google action' && !button.matches(':disabled'),

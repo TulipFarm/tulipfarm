@@ -1,3 +1,4 @@
+// browser-tests: run alone, since it measures timings that other tests running beside it would slow.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { execFileSync } from 'node:child_process';

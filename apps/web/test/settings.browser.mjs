@@ -84,7 +84,7 @@ async function eventually(read, expected) {
   assert.equal(await read(), expected);
 }
 
-test('workspace settings in the real Vite app with HTTP fixtures', { timeout: 240_000 }, async t => {
+test('workspace settings in the real Vite app with HTTP fixtures', { timeout: 360_000 }, async t => {
   const port = Number(process.env.SETTINGS_BROWSER_PORT ?? 5203);
   const origin = `http://127.0.0.1:${port}`;
   let state = fixture();
