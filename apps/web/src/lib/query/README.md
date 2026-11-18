@@ -201,7 +201,11 @@ the network answers. Only reads listed in `persistedPageReads`
 per project filter (up to 4), the first history page of the 12 most recently
 saved chats, the project list, the pinned chats, the sidebar's own Recents
 sections (agents, agent tasks, workflows, tables and files), the credits
-balance, the Models page plan connections and the integrations directory. The
+balance, the Models page plan connections, the integrations directory, and the
+unsearched first page of each top-level list in `persistedListReads`
+(`features/navigation/persisted-lists.ts`): agents and their authoring context,
+tasks, workflows, tables, skills, apps, personal knowledge, and files at a
+section root or in a folder. The
 sidebar's chat and project Recents reuse the chat list and project list reads,
 so they need no copy of their own. Each definition matches keys with a zod
 schema and validates data with the response schema its feature API already uses.
@@ -209,7 +213,7 @@ schema and validates data with the response schema its feature API already uses.
 Each record's envelope holds version, user, workspace, membership, name, key and
 data timestamp. Records older than 24 hours, future-dated, corrupt, wrong-scope
 or failing their schema are rejected and pruned. A record over 1 MB is not saved,
-and a user's records are capped at 3 MB, evicting the oldest first. Saves are
+and a user's records are capped at 10 MB, evicting the oldest first. Saves are
 debounced, fenced by the current membership, and skipped while the scope is
 unconfirmed. Values written with `setQueryData` are not persisted. IndexedDB
 failures leave normal network and memory reads available.

@@ -15,6 +15,7 @@ import { TableRequestError } from '@/features/tables/request-state';
 export { taskStatusLabels, taskStatusLabel, taskStatusStates, taskNextStep } from './status';
 
 export type TaskSummary = z.infer<typeof taskSummarySchema>;
+export const taskListSchema = z.object({ tasks: z.array(taskSummarySchema), nextCursor: z.string().nullable() });
 export type TaskSources = z.infer<typeof startTaskSchema>['sources'];
 export type TaskCommand =
   | {
@@ -98,14 +99,12 @@ export function taskApi(workspaceId: string) {
       throw new Error('Task history exceeds the supported view.');
     },
     list: async (signal: AbortSignal, after?: string, search = '') =>
-      z
-        .object({ tasks: z.array(taskSummarySchema), nextCursor: z.string().nullable() })
-        .parse(
-          await request(
-            `?${new URLSearchParams({ ...(after ? { after } : {}), ...(search ? { search } : {}) })}`,
-            signal,
-          ),
+      taskListSchema.parse(
+        await request(
+          `?${new URLSearchParams({ ...(after ? { after } : {}), ...(search ? { search } : {}) })}`,
+          signal,
         ),
+      ),
     read: async (id: string, signal: AbortSignal) => taskSummarySchema.parse(await request(`/${id}`, signal)),
     history: async (id: string, signal: AbortSignal, after = -1) => {
       taskHistoryQuerySchema.parse({ after });

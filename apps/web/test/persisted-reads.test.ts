@@ -32,7 +32,7 @@ const scope: WorkspaceScope = { kind: 'workspace', userId: 'alice', workspaceId:
 const chats = z.object({ items: z.array(z.string()) });
 const definitions: PersistedRead[] = [
   { name: 'chats', limit: 2, match: key => key[0] === 'chats', schema: chats },
-  { name: 'large', limit: 10, match: key => key[0] === 'large', schema: z.string() },
+  { name: 'large', limit: 20, match: key => key[0] === 'large', schema: z.string() },
 ];
 const admission = z.object({ workspace: z.string() });
 
@@ -110,12 +110,14 @@ test('per-read limits and the per-user size cap evict the oldest saves first', a
   assert.deepEqual(kept, [2, 3]);
 
   await persistence.save(scope, ['large', 'too big'], 'x'.repeat(1_000_001), updatedAt, () => true);
-  for (const name of ['first', 'second', 'third', 'fourth']) {
+  // Twelve 0.9 MB reads exceed the 10 MB cap by one.
+  const names = Array.from({ length: 12 }, (_, index) => `read ${String(index).padStart(2, '0')}`);
+  for (const name of names) {
     await persistence.save(scope, ['large', name], 'x'.repeat(900_000), updatedAt, () => true);
     await delay(2);
   }
   const large = (await persistence.restore(scope)).filter(read => read.key[0] === 'large').map(read => read.key[1]);
-  assert.deepEqual(large.sort(), ['fourth', 'second', 'third']);
+  assert.deepEqual(large.sort(), names.slice(1));
 });
 
 test('clearing removes reads and admission snapshots for one workspace, one user or everyone', async () => {

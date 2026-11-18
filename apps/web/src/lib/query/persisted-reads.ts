@@ -10,7 +10,7 @@ export type AdmissionSnapshot<T> = { sessionId: string; expiresAt: number; updat
 
 // Sizes count JSON characters. Larger reads are not worth the disk or the parse on the next load.
 const maxReadSize = 1_000_000;
-const maxUserSize = 3_000_000;
+const maxUserSize = 10_000_000;
 // Rewrite an unchanged admission this often, so a daily visitor keeps one younger than the maximum age.
 const admissionRefresh = 60 * 60_000;
 
