@@ -29,6 +29,9 @@ if (shard) {
 }
 
 const isolate = jobs > 1;
+// Chromium reports navigator.onLine false without a non-loopback route, which disables the app's send controls.
+const namespaceSetup =
+  'ip link set lo up && ip link add tf0 type dummy && ip link set tf0 up && ip addr add 10.255.0.1/24 dev tf0 && ip route add default dev tf0';
 const isolation = isolate ? await isolatedNetwork() : undefined;
 
 const children = new Set();
@@ -47,7 +50,7 @@ function killGroup(pid) {
 
 // Checks that unprivileged network namespaces work, and forwards the test database into them.
 async function isolatedNetwork() {
-  const probe = spawnSync('unshare', ['--user', '--map-root-user', '--net', 'sh', '-c', 'ip link set lo up'], {
+  const probe = spawnSync('unshare', ['--user', '--map-root-user', '--net', 'sh', '-c', namespaceSetup], {
     encoding: 'utf8',
   });
   if (probe.status !== 0)
@@ -89,7 +92,7 @@ function run(file, worker) {
       '--net',
       'sh',
       '-c',
-      'ip link set lo up && exec "$@"',
+      `${namespaceSetup} && exec "$@"`,
       'sh',
       command[0],
       '--import',

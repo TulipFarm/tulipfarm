@@ -278,6 +278,9 @@ jobs:
         run: pnpm install --frozen-lockfile --store-dir "$HOME/.pnpm-store"
       - name: Create the local database roles
         run: psql "$TEST_ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -f infra/postgres/init.sql
+      - name: Build the API and worker dependencies
+        if: matrix.group == 'apps'
+        run: pnpm exec turbo run build --filter='@tulipfarm/api^...' --filter='@tulipfarm/worker^...'
       - name: Run chats and jobs against a workspace behind the release
         if: matrix.group == 'workspace'
         run: pnpm run test:behind-workspace
