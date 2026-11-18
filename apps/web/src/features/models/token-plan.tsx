@@ -449,6 +449,7 @@ export function TokenPlanPane({ workspaceId, provider }: { workspaceId: string; 
               <Button
                 key={account.id}
                 size="sm"
+                variant="outline"
                 onClick={() => void connectWithAccount(account.id, account.login)}
                 disabled={busy}
               >
@@ -460,7 +461,7 @@ export function TokenPlanPane({ workspaceId, provider }: { workspaceId: string; 
             ))}
             <Button
               size="sm"
-              variant={usable.length ? 'outline' : 'default'}
+              variant="outline"
               onClick={() => void signInWithGitHub()}
               disabled={busy}
             >
@@ -486,7 +487,7 @@ export function TokenPlanPane({ workspaceId, provider }: { workspaceId: string; 
             <li>Share it with others if you like. Until you do, only you can use it.</li>
           </ol>
           <div className="flex flex-wrap items-center gap-2">
-            <Button size="sm" onClick={() => void beginDevice()} disabled={busy}>
+            <Button size="sm" variant="outline" onClick={() => void beginDevice()} disabled={busy}>
               <BrandIcon brand="github" size="inline" />
               {phase.kind === 'starting' ? 'Starting sign-in…' : 'Sign in with GitHub'}
             </Button>
