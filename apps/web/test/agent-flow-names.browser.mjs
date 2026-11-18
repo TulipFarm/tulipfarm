@@ -601,6 +601,8 @@ test('agent flows resolve permitted names without changing commands or approvals
       }
       noActivations = false;
       agentDelay = width === 1440 ? 1000 : 0;
+      // A return visit shows the saved agent at once; drop it so this visit loads the names cold.
+      if (width === 1440) await forgetSavedReads(page, 'agent');
       await page.goto(`${origin}/agent-proof/chat/${chatId}`);
       const review = page.getByRole('region', { name: 'Review workflow draft', exact: true });
       await review.getByRole('button', { name: 'View diagram', exact: true }).click();
@@ -648,3 +650,31 @@ test('agent flows resolve permitted names without changing commands or approvals
     await server.close();
   }
 });
+
+function forgetSavedReads(page, name) {
+  return page.evaluate(
+    name =>
+      new Promise((resolve, reject) => {
+        const request = indexedDB.open('tulipfarm-query-cache', 1);
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => {
+          const db = request.result;
+          const transaction = db.transaction(['reads', 'index'], 'readwrite');
+          for (const store of ['reads', 'index']) {
+            const cursor = transaction.objectStore(store).openCursor();
+            cursor.onsuccess = () => {
+              if (!cursor.result) return;
+              if (cursor.result.value.name === name) cursor.result.delete();
+              cursor.result.continue();
+            };
+          }
+          transaction.oncomplete = () => {
+            db.close();
+            resolve();
+          };
+          transaction.onerror = () => reject(transaction.error);
+        };
+      }),
+    name,
+  );
+}

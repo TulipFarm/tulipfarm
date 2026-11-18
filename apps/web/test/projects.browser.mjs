@@ -631,6 +631,53 @@ test(
   },
 );
 
+const savedReads = page =>
+  page.evaluate(
+    () =>
+      new Promise((resolve, reject) => {
+        const request = indexedDB.open('tulipfarm-query-cache', 1);
+        // Leave creating the database to the app; until it has, nothing is saved.
+        request.onupgradeneeded = () => request.transaction?.abort();
+        request.onerror = () => resolve([]);
+        request.onsuccess = () => {
+          const db = request.result;
+          const reads = db.transaction('reads', 'readonly').objectStore('reads').getAll();
+          reads.onsuccess = () => {
+            db.close();
+            resolve(reads.result.map(read => ({ name: read.name, data: read.data })));
+          };
+          reads.onerror = () => reject(reads.error);
+        };
+      }),
+  );
+
+test('an opened project and an edit shown before the server confirms it are saved for the next visit', async () => {
+  const api = projectServer();
+  const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, reducedMotion: 'reduce' });
+  await context.route('**/v1/**', api.handle);
+  try {
+    const { page, errors } = await open(context, settingsPath);
+    const savedName = async () =>
+      (await savedReads(page)).find(read => read.name === 'project')?.data.project.name ?? null;
+    await until(async () => (await savedName()) === 'Spring launch', 'the opened project is saved');
+    const release = api.hold('edit');
+    await page.getByRole('textbox', { name: 'Project name' }).fill('Autumn launch');
+    await page.getByRole('button', { name: 'Save changes' }).click();
+    await until(() => api.state.edits.length === 1, 'the rename starts');
+    await until(
+      async () => (await savedName()) === 'Autumn launch',
+      'the rename shown on screen is saved while the server is still answering',
+    );
+    assert.equal(api.state.project.name, 'Spring launch');
+    release();
+    await until(() => api.state.project.name === 'Autumn launch', 'the rename finishes');
+    assert.deepEqual(api.state.unexpected, []);
+    assert.deepEqual(errors, []);
+  } finally {
+    await context.close();
+  }
+});
+
 test(
   'a draft that conflicts with a newer version waits for the person to keep or discard it',
   { timeout: 120000 },

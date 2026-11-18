@@ -52,7 +52,7 @@ const schemaHistoryEntrySchema = z.object({
   revertedChanges: z.array(z.string()).nullable().default(null),
 });
 const schemaHistorySchema = z.object({ entries: z.array(schemaHistoryEntrySchema), nextCursor: z.uuid().nullable() });
-const definitionStateSchema = z.object({
+export const tableStateSchema = z.object({
   id: z.uuid(),
   systemKind: z.literal('workspace-members').optional(),
   saved: schemaHistoryEntrySchema.nullable(),
@@ -112,7 +112,7 @@ const reverseRecordsSchema = z.object({
   nextCursor: z.uuid().nullable(),
 });
 export type SchemaHistoryEntry = z.infer<typeof schemaHistoryEntrySchema>;
-export type DefinitionState = z.infer<typeof definitionStateSchema>;
+export type DefinitionState = z.infer<typeof tableStateSchema>;
 export type DeletedRecord = z.infer<typeof deletedRecordSchema>;
 export const recordSchema = z.object({
   id: z.uuid(),
@@ -375,7 +375,7 @@ export function tableApi(workspaceId: string) {
     );
   }
   async function detail(id: string, signal: AbortSignal) {
-    return definitionStateSchema.parse(await request(`/${encodeURIComponent(id)}`, signal));
+    return tableStateSchema.parse(await request(`/${encodeURIComponent(id)}`, signal));
   }
   return {
     list,
