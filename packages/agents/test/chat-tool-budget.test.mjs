@@ -148,6 +148,9 @@ test('an app can be built again after a file changes, but not twice in a row', (
   assert.equal(guard.duplicate(build), false);
   guard.record(build, '{"status":"failed"}');
   assert.equal(guard.duplicate(build), true);
+  const write = { tool: 'apps.files.write', path: 'index.html', content: 'fixed' };
+  assert.equal(createChatToolGuard([build, write]).duplicate(build), false);
+  assert.equal(createChatToolGuard([write, build]).duplicate(build), true);
 });
 
 test('a successfully sent API change gets a duplicate receipt, never a failure reply', async t => {

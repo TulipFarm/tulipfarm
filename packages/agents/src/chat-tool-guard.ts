@@ -25,12 +25,15 @@ export function createChatToolGuard(
   priorCalls: readonly unknown[] = [],
   priorResults: readonly { call: unknown; output: unknown }[] = [],
 ) {
-  const writes = new Set(
-    priorCalls.flatMap(value => {
-      const call = z.object({ tool: z.string() }).passthrough().parse(value);
-      return repeatable(call) ? [] : [fingerprint(call)];
-    }),
-  );
+  const writes = new Set<string>();
+  const wrote = (call: { tool: string }) => {
+    if (!rerunAfterWrite.has(call.tool)) for (const tool of rerunAfterWrite) writes.delete(fingerprint({ tool }));
+    writes.add(fingerprint(call));
+  };
+  for (const value of priorCalls) {
+    const call = z.object({ tool: z.string() }).passthrough().parse(value);
+    if (!repeatable(call)) wrote(call);
+  }
   const reads = new Set<string>();
   const api = createApiCallGuard(priorCalls, priorResults);
   let idleRounds = 0;
@@ -72,8 +75,7 @@ export function createChatToolGuard(
         return;
       }
       if (!repeatable(call)) {
-        if (!rerunAfterWrite.has(call.tool)) for (const tool of rerunAfterWrite) writes.delete(fingerprint({ tool }));
-        writes.add(fingerprint(call));
+        wrote(call);
         reads.clear();
         idleRounds = 0;
       } else {
