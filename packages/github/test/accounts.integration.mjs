@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import { test } from 'node:test';
-import { AccessDenied } from '@tulipfarm/access';
+import { AccessDenied, lockAuthorization } from '@tulipfarm/access';
 import { GitHubCredentialRejected, githubCompatibility } from '@tulipfarm/github';
 import { credentialCipher } from '../src/credentials.ts';
 import { githubFixture } from './fixture.mjs';
@@ -28,6 +28,37 @@ test('repeated cancelled first consent reuses one account instead of exhausting 
     assert.equal((await f.service.status(f.one.id, f.member.userId, accountId)).state, 'active');
     await f.service.disconnect(f.one.id, f.member.userId, accountId);
     assert.notEqual((await f.begin()).accountId, accountId);
+  } finally {
+    await f.close();
+  }
+});
+
+test('disconnecting an account waits for shared holders of the workspace lock', async () => {
+  const f = await githubFixture();
+  try {
+    const started = await f.begin();
+    await f.complete(started);
+    let free, held;
+    const locked = new Promise(resolve => (held = resolve)),
+      done = new Promise(resolve => (free = resolve));
+    const reader = f.runtime.transaction(f.one.id, githubCompatibility, async tx => {
+      await lockAuthorization(tx, 'read');
+      held();
+      await done;
+    });
+    await locked;
+    try {
+      const disconnect = f.service.disconnect(f.one.id, f.member.userId, started.accountId);
+      assert.equal(
+        await Promise.race([disconnect, new Promise(resolve => setTimeout(resolve, 1000, 'waiting'))]),
+        'waiting',
+      );
+      free();
+      await reader;
+      assert.equal((await disconnect).account.state, 'disconnected');
+    } finally {
+      free();
+    }
   } finally {
     await f.close();
   }
