@@ -26,14 +26,11 @@ export type WebSlots = {
   analytics: BrowserAnalytics;
   /** Credit balance in the workspace sidebar footer. */
   credits: ComponentType<SidebarCreditsProps>;
-  /** The workspace Settings → Usage page. `null` removes the route and its navigation entries. */
-  usage: ComponentType | null;
 };
 
 export const overrides = createOverrideRegistry<WebSlots>({
   analytics: noopBrowserAnalytics,
   credits: UnlimitedCredits,
-  usage: null,
 });
 overrides.apply(webExtensions);
 

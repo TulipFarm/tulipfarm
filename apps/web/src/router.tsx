@@ -43,13 +43,12 @@ import { googleCallbackResultSchema } from '@tulipfarm/google-workspace/callback
 import { workflowPageSearch } from '@/features/workflows/page-search';
 import { calendarSearchSchema } from '@/features/calendar/search';
 import type { UsageSearch } from '@/features/usage/search';
-import { useFlag } from '@/lib/feature-flags';
 import { agentTabValues } from '@/features/agents/tab-values';
 import { createWorkspaceAccess } from '@/lib/workspace-access';
 import type { FeatureScope } from '@/lib/query/scope';
 import { measureWorkspaceAdmission } from '@/lib/navigation-performance';
 import type { WorkspaceContext } from '@/session-layer';
-import { analytics, overrides } from '@/extensions';
+import { analytics } from '@/extensions';
 import { isAssetLoadError, reloadOnceForAssetError } from '@/lib/asset-recovery';
 import { routeErrorEvent, routeErrorProperties } from '@/lib/route-error-report';
 import { onWindowReturn } from '@/lib/window-return';
@@ -946,20 +945,12 @@ const workspaceSecretsRoute = createRoute({
   path: 'settings/secrets',
   component: SecretsSettingsPage,
 });
-// The usage explorer when its flag is on for the workspace; otherwise a web extension's Usage page, if one is installed.
-const ExtensionUsagePage = overrides.get('usage');
-function UsageRoute() {
-  const explorer = useFlag('usage-explorer');
-  if (explorer) return <UsagePage />;
-  if (ExtensionUsagePage) return <ExtensionUsagePage />;
-  return <WorkspaceNotFoundPage />;
-}
 const workspaceUsageRoute = createRoute({
   getParentRoute: () => workspaceRoute,
   path: 'settings/usage',
   // The explorer checks these values itself, which keeps its schema out of the startup bundle.
   validateSearch: (search: Record<string, unknown>) => search as UsageSearch,
-  component: UsageRoute,
+  component: UsagePage,
 });
 export const tablesRoute = createRoute({
   getParentRoute: () => workspaceRoute,
