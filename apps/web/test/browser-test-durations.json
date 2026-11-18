@@ -112,7 +112,7 @@
   "test/model-branding.browser.mjs": 26,
   "test/model-picker.browser.mjs": 115,
   "test/model-retry.browser.mjs": 51,
-  "test/models.browser.mjs": 275,
+  "test/models.browser.mjs": 130,
   "test/navigation-performance.browser.mjs": 8,
   "test/onboarding-chat.browser.mjs": 29,
   "test/onboarding.browser.mjs": 63,

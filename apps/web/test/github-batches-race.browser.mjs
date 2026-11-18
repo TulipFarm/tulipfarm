@@ -5,6 +5,7 @@ import { chromium } from 'playwright';
 
 const port = 5237,
   origin = `http://127.0.0.1:${port}`;
+const deps = `/${process.env.TULIPFARM_VITE_CACHE_DIR ?? 'node_modules/.vite'}/deps`;
 const server = spawn('pnpm', ['exec', 'vite', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
   cwd: new URL('..', import.meta.url),
   stdio: 'ignore',
@@ -75,8 +76,8 @@ try {
       contentType: 'text/html',
       body: `<html><body><div id="root"></div><script type="module">
     import RefreshRuntime from '/@react-refresh'; RefreshRuntime.injectIntoGlobalHook(window); window.$RefreshReg$=()=>{}; window.$RefreshSig$=()=>type=>type; window.__vite_plugin_react_preamble_installed__=true;
-    const React=(await import('/node_modules/.vite/deps/react.js')).default;
-    const {createRoot}=(await import('/node_modules/.vite/deps/react-dom_client.js')).default;
+    const React=(await import('${deps}/react.js')).default;
+    const {createRoot}=(await import('${deps}/react-dom_client.js')).default;
     const {GitHubBatches}=await import('/src/features/chat/github-batches.tsx');
     const {SessionQueryProvider,WorkspaceQueryProvider}=await import('/src/lib/query/index.ts');
     const root=createRoot(document.getElementById('root')); let revision=0;

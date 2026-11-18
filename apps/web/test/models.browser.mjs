@@ -1,3 +1,4 @@
+// browser-tests: run alone, since beside other tests it nears its own five-minute limit.
 import assert from 'node:assert/strict';
 import { stripVTControlCharacters } from 'node:util';
 import { spawn } from 'node:child_process';

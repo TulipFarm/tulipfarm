@@ -107,7 +107,7 @@ jobs:
   # Every apps/web/test/*.browser.mjs, split by recorded duration. Tests share fixed ports, so each shard runs four
   # at a time, each in its own network namespace; see apps/web/test/run-browser-tests.mjs.
   web-browser:
-    name: web-browser (${{ matrix.shard }}/12)
+    name: web-browser (${{ matrix.shard }}/14)
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
@@ -115,7 +115,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
     services:
       postgres:
         image: pgvector/pgvector:0.8.2-pg18
@@ -156,8 +156,9 @@ jobs:
           key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: |
             playwright-${{ runner.os }}-${{ runner.arch }}-
+      # The runner image already has Chrome's system libraries, so skip the slower apt step of --with-deps.
       - name: Install Chromium
-        run: pnpm --filter @tulipfarm/web exec playwright install --with-deps chromium
+        run: pnpm --filter @tulipfarm/web exec playwright install chromium
       - name: Create the local database roles
         run: psql "$TEST_ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -f infra/postgres/init.sql
       - name: Build the web app and the API and worker code the tests run
@@ -169,7 +170,7 @@ jobs:
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - name: Run browser tests
         env:
-          SHARD: ${{ matrix.shard }}/12
+          SHARD: ${{ matrix.shard }}/14
         run: pnpm --filter @tulipfarm/web test:browser --shard="$SHARD" --jobs=4
       - name: Upload failure screenshots
         if: failure()
