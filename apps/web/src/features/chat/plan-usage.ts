@@ -29,7 +29,6 @@ export function planUsageStatus(plan: PlanProvider, usage: PlanUsage, now = Date
       : 'Available';
   return {
     plan: `${own ? 'Your' : 'The'} ${planLabels[plan]} plan`,
-    using: `Using ${own ? 'your' : 'the'} ${planLabels[plan]} plan`,
     status,
     warning: limited || premium?.remaining === 0,
     manageUrl: planUsageUrls[plan],

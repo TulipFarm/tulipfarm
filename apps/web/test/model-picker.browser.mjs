@@ -4,7 +4,7 @@ import { chromium } from 'playwright';
 import { catalogFixture } from '../src/features/models/catalog-fixture.ts';
 import { membership, credits, notifyChange } from './chat-query.fixture.mjs';
 import { startBuiltApp, builderBrowserOptions, captureBrowserFailure } from './built-app.fixture.mjs';
-import { modelOption, modelPicker } from './browser-controls.mjs';
+import { modelOption, modelPicker, modelPickerSaved } from './browser-controls.mjs';
 
 const server = await startBuiltApp();
 const { origin } = server;
@@ -116,11 +116,10 @@ try {
       holdSave = Promise.withResolvers();
       await modelOption(page, 'Grok 4.3 Fast').click();
       await modelPicker(page, 'Grok 4.3 Fast').waitFor();
-      await page.getByText('Saving your default model…', { exact: true }).waitFor();
       assert.equal(await modelPicker(page, 'Grok 4.3 Fast').isDisabled(), true);
       holdSave.resolve();
       holdSave = null;
-      await page.getByText('Saving your default model…', { exact: true }).waitFor({ state: 'hidden' });
+      await modelPickerSaved(page, 'Grok 4.3 Fast');
       assert.equal(preferences.get('ada'), 'grok-fast');
       await page.reload();
       await modelPicker(page, 'Grok 4.3 Fast').waitFor();
@@ -148,7 +147,7 @@ try {
       await modelPicker(page, 'Grok 4.3 Fast').click();
       saveStatus = 503;
       await modelOption(page, 'Claude Haiku 4.5').click();
-      await page.getByText('Saving your default model…', { exact: true }).waitFor({ state: 'hidden' });
+      await modelPickerSaved(page, 'Claude Haiku 4.5');
       assert.equal(await page.getByText(/Could not save your default model/).count(), 0);
       assert.equal(await page.getByRole('button', { name: 'Retry saving default', exact: true }).count(), 0);
       await modelPicker(page, 'Claude Haiku 4.5').waitFor();
@@ -156,7 +155,7 @@ try {
       saveStatus = 200;
       await modelPicker(page, 'Claude Haiku 4.5').click();
       await modelOption(page, 'Claude Haiku 4.5').click();
-      await page.getByText('Saving your default model…', { exact: true }).waitFor({ state: 'hidden' });
+      await modelPickerSaved(page, 'Claude Haiku 4.5');
       assert.equal(preferences.get('ada'), 'claude-haiku');
       await page.reload();
       await modelPicker(page, 'Claude Haiku 4.5').waitFor();

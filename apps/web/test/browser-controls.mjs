@@ -81,6 +81,12 @@ export function modelPicker(page, name) {
   return page.getByRole('button', { name: new RegExp(`^Model: ${name ? `${escapeRegExp(name)}(, on .+)?$` : ''}`) });
 }
 
+/** Wait until a chosen model's default has finished saving: the picker is disabled while it saves. */
+export async function modelPickerSaved(page, name) {
+  const handle = await modelPicker(page, name).elementHandle();
+  await page.waitForFunction(button => !button.disabled, handle);
+}
+
 /** A model in the composer's model menu: a choice, or a submenu when several sources offer it. */
 export function modelOption(page, name) {
   const label = new RegExp(`^${escapeRegExp(name)}(?=,| Unavailable|$)`);

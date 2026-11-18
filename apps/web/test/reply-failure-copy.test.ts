@@ -255,7 +255,6 @@ test('a plan model says whose plan it runs on and what is left of it', () => {
   const usage = { plan: 'own', status: 'available', limitedAt: null, premiumRequests: null } as const;
   assert.deepEqual(planUsageStatus('chatgpt', usage, now), {
     plan: 'Your ChatGPT plan',
-    using: 'Using your ChatGPT plan',
     status: 'Available',
     warning: false,
     manageUrl: 'https://chatgpt.com/settings/usage',
