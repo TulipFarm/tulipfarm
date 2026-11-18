@@ -196,12 +196,7 @@ function usePreloadSidebarCode(slug: string) {
   }, [slug]);
 }
 const models: Page = { label: 'Models', to: '/$workspaceSlug/settings/models', icon: Cpu };
-const usageEntry: Page = { label: 'Usage', to: '/$workspaceSlug/settings/usage', icon: ChartBar };
-const usage = [usageEntry];
-/** Usage is listed when its explorer is on for the workspace, or a web extension supplies the page. */
-function useUsageListed() {
-  return useFlag('usage-explorer') || !!overrides.get('usage');
-}
+const usage: Page = { label: 'Usage', to: '/$workspaceSlug/settings/usage', icon: ChartBar };
 const soul: Page = { label: 'Soul repository', to: '/$workspaceSlug/settings/soul', icon: Files };
 const tableAccess: Page = { label: 'Table access', to: '/$workspaceSlug/grants', icon: ShieldUser };
 const administrationPages: Page[] = [members, teams, tableAccess];
@@ -210,7 +205,7 @@ const settingsPages: Page[] = [
   membersAndTeams,
   tableAccess,
   models,
-  ...usage,
+  usage,
   soul,
 ];
 // Pages without a sidebar entry still resolve as the current page, so New chat isn't marked current on them.
@@ -229,7 +224,7 @@ const pages = [
   account,
   secrets,
   models,
-  ...usage,
+  usage,
   soul,
   settings,
   { label: 'Help and support', to: '/$workspaceSlug/help' } satisfies Page,
@@ -244,7 +239,7 @@ export const searchPages = [
   settings,
   ...administrationPages,
   models,
-  ...usage,
+  usage,
   account,
 ];
 
@@ -496,7 +491,6 @@ function useSettingsMode() {
 function SettingsNavigation() {
   const { workspace } = workspaceRoute.useRouteContext();
   const soulEnabled = useFlag('soul-repository-explorer');
-  const usageListed = useUsageListed();
   const settings = useWorkspaceSettings(workspace.id);
   const soulVisible =
     soulEnabled &&
@@ -537,7 +531,7 @@ function SettingsNavigation() {
             <SidebarGroupLabel>{workspace.name}</SidebarGroupLabel>
             <SidebarMenu>
               {settingsPages
-                .filter(page => (page !== soul || soulVisible) && (page !== usageEntry || usageListed))
+                .filter(page => page !== soul || soulVisible)
                 .map(page => (
                   <NavItem key={page.to} page={page} />
                 ))}
@@ -742,7 +736,6 @@ export function WorkspaceShell() {
 function WorkspaceShellContent() {
   const { user, workspace, workspaceStale, membershipId } = workspaceRoute.useRouteContext();
   const appsEnabled = useFlag('app-hosting');
-  const usageListed = useUsageListed();
   // Integration pages explain the stale state themselves and pause their controls.
   const onIntegrations = useLocation({
     select: location =>
@@ -853,7 +846,7 @@ function WorkspaceShellContent() {
           <SearchPalette
             open={searchOpen}
             onOpenChange={setSearchOpen}
-            pages={searchPages.filter(page => (appsEnabled || page !== apps) && (usageListed || page !== usageEntry))}
+            pages={searchPages.filter(page => appsEnabled || page !== apps)}
             onOpen={to => void navigate({ to, params: { workspaceSlug: workspace.slug } })}
           />
         </SidebarProvider>

@@ -20,7 +20,6 @@ import {
   planModelOfFamily,
   servedModelBundle,
 } from '@tulipfarm/config';
-import { isFeatureEnabled } from '@tulipfarm/observability';
 import { creditBalance } from '@tulipfarm/workspace-storage/credits';
 import { modelUsageReport, usageConnections } from '@tulipfarm/workspace-storage/model-usage';
 import {
@@ -199,8 +198,6 @@ export function registerUsage(
       if (!query || !(span > 0) || span > maxRangeMs || new Set(query.group).size !== query.group.length)
         return reply.code(400).send({ error: 'invalid-usage-query' });
       try {
-        if (!(await isFeatureEnabled('usage-explorer', null, { id: workspaceId })))
-          return reply.code(404).send({ error: 'not-found' });
         const read = await dependencies.runtime.transaction(workspaceId, commonCompatibility, async tx => {
           await lockAuthorization(tx);
           const actor = await resolveHuman(tx, session.user.id);

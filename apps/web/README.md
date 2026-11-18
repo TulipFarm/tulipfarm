@@ -42,7 +42,6 @@ development builds, off in production builds.
 | ----------- | ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
 | `analytics` | `noopBrowserAnalytics`: no consent banner, script, or request | A `BrowserAnalytics` client (product analytics, error reports). The app calls it through `guardBrowserAnalytics`.                        |
 | `credits`   | Renders nothing; self-hosted workspaces are unmetered         | A sidebar credit balance component (`{ workspaceId, slug }`). Use `creditsAreUnlimited` to hide it when `available`/`granted` is `null`. |
-| `usage`     | `null`: no Settings → Usage route or navigation entry         | A page component; the route `/$workspaceSlug/settings/usage` and its navigation entries appear.                                          |
 
 Extensions are chosen at build time. `VITE_TULIPFARM_WEB_EXTENSIONS` lists module specifiers
 (package names resolvable from `apps/web`, or paths relative to `apps/web`), each default-exporting

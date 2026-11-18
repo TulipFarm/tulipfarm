@@ -6,15 +6,6 @@ import { AccessDenied } from '@tulipfarm/access';
 import { StorageUnavailableError } from '@tulipfarm/workspace-storage/runtime';
 import { canonicalModels, registerUsage } from '../src/usage.ts';
 
-function useFlag(value) {
-  const previous = process.env.FEATURE_FLAG_USAGE_EXPLORER;
-  process.env.FEATURE_FLAG_USAGE_EXPLORER = value;
-  return () => {
-    if (previous === undefined) delete process.env.FEATURE_FLAG_USAGE_EXPLORER;
-    else process.env.FEATURE_FLAG_USAGE_EXPLORER = previous;
-  };
-}
-
 test('one model groups under one id however it was paid and whichever route served it', () => {
   for (const env of [
     { OPENAI_API_KEY: 'synthetic' },
@@ -30,7 +21,7 @@ test('one model groups under one id however it was paid and whichever route serv
   }
 });
 
-test('the usage route signs in, validates its query, honours its flag and hides workspaces', async t => {
+test('the usage route signs in, validates its query and hides workspaces', async t => {
   let failure;
   const transactions = [];
   const app = Fastify();
@@ -54,7 +45,6 @@ test('the usage route signs in, validates its query, honours its flag and hides 
     });
 
   assert.equal((await read({}, null)).statusCode, 401);
-  t.after(useFlag('true'));
   for (const query of [
     { group: 'model,paidBy,member' },
     { group: 'model,model' },
@@ -71,15 +61,10 @@ test('the usage route signs in, validates its query, honours its flag and hides 
   assert.deepEqual(transactions, [], 'nothing invalid reaches the workspace');
 
   failure = new AccessDenied();
-  let response = await read({ group: 'model,paidBy', filters: JSON.stringify({ paidBy: ['plan'] }) });
+  const response = await read({ group: 'model,paidBy', filters: JSON.stringify({ paidBy: ['plan'] }) });
   assert.equal(response.statusCode, 404, response.body);
   assert.equal(response.headers['cache-control'], 'no-store');
   failure = new StorageUnavailableError('queue_full');
   assert.equal((await read({})).statusCode, 503);
   assert.deepEqual(transactions, [workspaceId, workspaceId]);
-
-  useFlag('false');
-  response = await read({});
-  assert.equal(response.statusCode, 404);
-  assert.equal(transactions.length, 2, 'a workspace without the flag is not read');
 });
