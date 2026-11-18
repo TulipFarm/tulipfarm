@@ -76,12 +76,14 @@ export function TableRead<T>({
           </StatePanel>
         )
       }
-      refreshError={message => (
+      refreshError={(message, refreshing) => (
         <div className="space-y-2">
           <ReadError message={`${message} The last loaded data is still shown.`}>
-            <Button variant="outline" onClick={() => void refresh()}>
-              Retry refresh
-            </Button>
+            {!refreshing && (
+              <Button variant="outline" onClick={() => void refresh()}>
+                Retry refresh
+              </Button>
+            )}
           </ReadError>
         </div>
       )}

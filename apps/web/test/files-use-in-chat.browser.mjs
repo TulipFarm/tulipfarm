@@ -462,6 +462,26 @@ test(
           await shot('draft');
 
           await page.goto(`${origin}${workspace.slug}/files/${plan.id}`);
+          // An opened file is saved, so the next visit shows it without waiting on the access check.
+          await page.waitForFunction(
+            name =>
+              new Promise(resolve => {
+                const request = indexedDB.open('tulipfarm-query-cache', 1);
+                request.onupgradeneeded = () => request.transaction?.abort();
+                request.onerror = () => resolve(false);
+                request.onsuccess = () => {
+                  const db = request.result;
+                  const reads = db.transaction('reads', 'readonly').objectStore('reads').getAll();
+                  reads.onsuccess = () => {
+                    db.close();
+                    resolve(reads.result.some(read => read.name === 'file' && read.data.name === name));
+                  };
+                  reads.onerror = () => resolve(false);
+                };
+              }),
+            plan.name,
+            { polling: 200 },
+          );
           if (mobile) {
             await page.getByRole('button', { name: 'File actions', exact: true }).click();
             await page.getByRole('menuitem', { name: 'Use in chat' }).click();
