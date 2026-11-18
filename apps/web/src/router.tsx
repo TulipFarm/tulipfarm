@@ -27,6 +27,7 @@ import {
   safeAuthRedirect,
   sessionIdentity,
 } from '@/lib/auth';
+import { devAutoSignIn } from '@/lib/dev-auto-sign-in';
 import { forgetSession } from '@/lib/last-workspace';
 import { loadSignedInSession, requireProfile } from '@/lib/profile-guard';
 import { loadSessionLayer, useSessionLayer } from '@/lib/session-layer';
@@ -500,7 +501,10 @@ const loginRoute = createRoute({
     ...authSearch(search),
     ...(typeof search.error === 'string' && { error: search.error }),
   }),
-  beforeLoad: redirectAuthenticated,
+  beforeLoad: async options => {
+    await redirectAuthenticated(options);
+    if (!options.search.error) await devAutoSignIn(safeAuthRedirect(options.search.redirect));
+  },
 });
 const registerRoute = createRoute({
   getParentRoute: () => rootRoute,

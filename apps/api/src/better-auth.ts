@@ -27,6 +27,11 @@ export function devSessionsAllowed(env: NodeJS.ProcessEnv = process.env) {
   );
 }
 
+/** Local development signs the web app in as the mock dev user unless DEV_AUTO_SIGN_IN=false. */
+export function devAutoSignInAllowed(env: NodeJS.ProcessEnv = process.env) {
+  return devSessionsAllowed(env) && env.DEV_AUTO_SIGN_IN?.trim().toLowerCase() !== 'false';
+}
+
 /** The methods AUTH_METHODS allows, or undefined when unset so each method follows its credentials. */
 function allowedAuthMethods(value = process.env.AUTH_METHODS) {
   if (!value?.trim()) return undefined;

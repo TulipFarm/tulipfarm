@@ -1319,6 +1319,16 @@ export const settings: readonly Setting[] = [
     selfHost: { section: 'turnstile', commented: true },
   },
   {
+    name: 'DEV_AUTO_SIGN_IN',
+    group: 'Sign-in',
+    services: ['api'],
+    requirement: 'optional',
+    secret: false,
+    default: 'true',
+    description:
+      'Local development only: the web app signs in as the mock dev user (`dev@tulipfarm.test`) instead of showing the login page. `false` shows the login page. Never applies in production, with an email transport, or off loopback.',
+  },
+  {
     name: 'AUTH_METHODS',
     group: 'Sign-in',
     services: ['api'],
