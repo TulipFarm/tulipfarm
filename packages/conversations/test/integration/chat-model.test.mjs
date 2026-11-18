@@ -34,6 +34,94 @@ test('a chat keeps the model of its latest reply for turns sent without one', as
       [opus],
     );
     assert.equal(await responder((await send(opus)).turnId), 'claude-sonnet');
+
+    // The plan account the member picked is kept on the turn, for the reply to try first.
+    const planConnectionId = randomUUID();
+    const picked = await f.store.send(w.id, w.userId, fresh, {
+      commandId: randomUUID(),
+      messageId: randomUUID(),
+      parts: [{ kind: 'text', text: 'Answer on my other plan.' }],
+      model: 'claude-opus',
+      planConnectionId,
+    });
+    const pickedPlan = async () =>
+      (
+        await f.db.platform.query(`SELECT plan_connection_id FROM ${f.table('tf_conversation_turns')} WHERE id=$1`, [
+          picked.turnId,
+        ])
+      ).rows[0].plan_connection_id;
+    assert.equal(await pickedPlan(), planConnectionId);
+
+    // Retrying the failed reply queues the same turn again, so it still starts on the picked plan.
+    const failed = await f.db.platform.query(
+      `UPDATE ${f.table('tf_conversation_turns')} SET status='failed', error_code='transient-failure' WHERE id=$1 RETURNING generation`,
+      [picked.turnId],
+    );
+    await f.store.retry(w.id, w.userId, fresh, picked.turnId, {
+      commandId: randomUUID(),
+      expectedGeneration: failed.rows[0].generation,
+    });
+    assert.equal(await pickedPlan(), planConnectionId);
+  } finally {
+    await f.close();
+  }
+});
+
+test('a reply that moved to another plan account shows the switch, with account names for its requester only', async () => {
+  const f = await conversationFixture();
+  try {
+    const w = f.workspace;
+    const chatId = randomUUID();
+    await f.store.create(w.id, w.userId, { chatId, commandId: randomUUID() });
+    const [limited, answered] = [randomUUID(), randomUUID()];
+    for (const [id, email] of [
+      [limited, 'work@example.com'],
+      [answered, 'home@example.com'],
+    ])
+      await f.db.platform.query(
+        `INSERT INTO ${f.table('tf_subscription_connections')}
+           (id, provider, owner_membership_id, state, client_id, subject, email, credential, expires_at, models)
+         VALUES ($1, 'claude', $2, 'connected', 'client', $3, $3, '{}', now() + interval '1 hour', '[]')`,
+        [id, w.membershipId, email],
+      );
+    const { turnId } = await f.store.send(w.id, w.userId, chatId, {
+      commandId: randomUUID(),
+      messageId: randomUUID(),
+      parts: [{ kind: 'text', text: 'Answer on my work plan.' }],
+      model: 'claude-opus',
+      planConnectionId: limited,
+    });
+    const turn = async () =>
+      (await f.store.history(w.id, w.userId, chatId)).messages.find(message => message.turn?.id === turnId).turn;
+    assert.equal((await turn()).planSwitch, undefined);
+
+    await f.db.platform.query(
+      `UPDATE ${f.table('tf_conversation_turns')} SET plan_connection_used=$2,plan_switched_from=$3,plan_switch_reason='usage-limit' WHERE id=$1`,
+      [turnId, answered, limited],
+    );
+    assert.deepEqual((await turn()).planSwitch, {
+      fromConnectionId: limited,
+      fromAccount: 'work@example.com',
+      toConnectionId: answered,
+      toAccount: 'home@example.com',
+      reason: 'usage-limit',
+    });
+
+    // Someone other than the requester sees that the reply switched, but not whose accounts.
+    const other = randomUUID();
+    await f.db.platform.query(`INSERT INTO ${f.table('tf_memberships')} (id,user_id,role) VALUES ($1,$2,'member')`, [
+      other,
+      `other-${other}`,
+    ]);
+    await f.db.platform.query(
+      `UPDATE ${f.table('tf_conversation_messages')} SET membership_id=$2 WHERE id=(SELECT source_message_id FROM ${f.table('tf_conversation_turns')} WHERE id=$1)`,
+      [turnId, other],
+    );
+    assert.deepEqual((await turn()).planSwitch, {
+      fromConnectionId: limited,
+      toConnectionId: answered,
+      reason: 'usage-limit',
+    });
   } finally {
     await f.close();
   }

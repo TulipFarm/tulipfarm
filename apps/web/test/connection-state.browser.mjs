@@ -107,6 +107,8 @@ test(
         json = { account: accounts.find(account => path.includes(account.id)), providerRevocation: 'manual-required' };
       } else if (path === `${base}/atlassian/sources`)
         json = { sources: [], mcp: { enabled: false, explanation: 'Not enabled' } };
+      else if (path === `${base}/chatgpt/connection`) json = { connections: [] };
+      else if (path === `${base}/claude/connection`) json = { connections: [], deviceSignIn: false };
       else if (path === `${base}/slack/status`) json = slack;
       else if (path === `${base}/slack/install`) {
         slack = { ...slack, state: 'authorizing' };
@@ -135,6 +137,11 @@ test(
       assert.equal(await page.getByLabel('Integration authorization', { exact: true }).count(), 0);
       assert.equal(await summary.getByText('Needs attention', { exact: true }).count(), 0);
     };
+    // With nothing connected the directory has no Your apps tab: the page is just Browse.
+    const untabbed = async () => {
+      await page.getByRole('button', { name: 'Connect GitHub', exact: true }).waitFor();
+      assert.equal(await page.getByRole('tablist', { name: 'Show apps', exact: true }).count(), 0);
+    };
     try {
       for (const id of Object.keys(appNames)) {
         await visit(id);
@@ -146,7 +153,7 @@ test(
       }
       assert.equal(external.length, 5);
       await visit();
-      await page.getByRole('tab', { name: 'Needs attention 0', exact: true }).waitFor();
+      await untabbed();
       const search = page.getByRole('searchbox', { name: 'Search apps', exact: true });
       for (const name of Object.values(appNames)) {
         await search.fill(name);
@@ -156,8 +163,6 @@ test(
       }
       await search.fill('');
       await page.screenshot({ path: '/tmp/connection-state-directory.png' });
-      await page.getByRole('tab', { name: 'Needs attention 0', exact: true }).click();
-      await page.getByText('Nothing needs attention', { exact: true }).waitFor();
 
       github[0].state = 'reconnect-required';
       accounts = accounts.map(account => ({ ...account, state: 'reconnect-required' }));
@@ -174,11 +179,10 @@ test(
       assert.equal(githubBegins, 1, 'retry resumes the existing disconnected attempt');
       await visit('github');
       await neutral('github');
+      // An unfinished attempt adds no Accounts tab; Connect above resumes it.
       await visit('github', 'accounts');
-      await page.getByRole('button', { name: 'Finish connecting', exact: true }).waitFor();
-      await page.getByRole('button', { name: 'Dismiss attempt', exact: true }).click();
       await neutral('github');
-      await page.getByText('No personal GitHub accounts', { exact: true }).waitFor();
+      assert.equal(await page.getByRole('tab', { name: 'Accounts', exact: true }).count(), 0);
       await visit('trello', 'accounts');
       await page.getByRole('button', { name: 'Previous integrations (1)', exact: true }).click();
       await page.getByRole('button', { name: 'Finish connecting', exact: true }).waitFor();
@@ -207,7 +211,7 @@ test(
       );
       slack = { ...slack, state: 'reconnect-required', teamId: 'TEXISTING', scopes: ['chat:write'] };
       await visit(undefined, undefined, true);
-      await page.getByRole('tab', { name: 'Needs attention 4', exact: true }).waitFor();
+      await page.getByRole('tab', { name: 'Your apps 4', exact: true }).waitFor();
       await page.getByLabel('Integration authorization', { exact: true }).waitFor();
       for (const id of ['github', 'slack', 'jira', 'confluence']) {
         await visit(id);
@@ -223,7 +227,7 @@ test(
       await visit('slack', undefined, true);
       await neutral('slack');
       await visit();
-      await page.getByRole('tab', { name: 'Needs attention 0', exact: true }).waitFor();
+      await untabbed();
       assert.deepEqual(errors, []);
     } catch (error) {
       await page.screenshot({ path: '/tmp/connection-state-failure.png' });

@@ -13,14 +13,18 @@ export function familyPlan(family: Pick<ModelCatalogFamily, 'provider'>): PlanPr
     : null;
 }
 
-export const chatGptConnectionSchema = z.object({
+const chatGptConnectionSchema = z.object({
+  connectionId: z.uuid(),
   state: z.enum(['not-connected', 'connected', 'plan-disabled', 'reconnect-required', 'signed-out']),
   email: z.string().nullable(),
   planUsage: z.boolean(),
   welcomePending: z.boolean(),
   models: z.array(z.object({ slug: z.string(), label: z.string() })),
+  createdAt: z.string(),
 });
 export type ChatGptConnection = z.infer<typeof chatGptConnectionSchema>;
+export const chatGptConnectionsSchema = z.object({ connections: z.array(chatGptConnectionSchema) });
+export type ChatGptConnections = z.infer<typeof chatGptConnectionsSchema>;
 export type ChatGptConnectionMode = 'connect' | 'reconnect' | 'enable-plan';
 
 const beginSchema = z.object({
@@ -44,7 +48,10 @@ const messages: Record<string, string> = {
   'authorization-failed': 'ChatGPT could not complete the sign-in. Start again.',
   'registration-incomplete': 'ChatGPT did not finish registering TulipFarm. Start again.',
   'client-mismatch': 'That address belongs to a different sign-in. Start again.',
-  'account-mismatch': 'You signed in with a different ChatGPT account. Disconnect first to use another account.',
+  'account-mismatch':
+    'You signed in with a different ChatGPT account than the one you’re reconnecting. To add that account, select Add another account.',
+  'too-many-accounts': 'You can connect up to 5 ChatGPT accounts. Disconnect one to add another.',
+  'not-connected': 'This ChatGPT account is no longer connected. Reload to see your accounts.',
   'code-rejected': 'ChatGPT rejected this sign-in code. Start again.',
   'exchange-failed': 'ChatGPT could not finish the sign-in. Try again in a moment.',
   'identity-invalid': 'ChatGPT returned an identity TulipFarm could not verify. Start again.',
@@ -76,24 +83,27 @@ export function chatGptPlanApi(workspaceId: string) {
   }
   return {
     /** Null when this deployment turned ChatGPT plan usage off. */
-    connection: async (signal: AbortSignal): Promise<ChatGptConnection | null> => {
+    connection: async (signal: AbortSignal): Promise<ChatGptConnections | null> => {
       try {
-        return chatGptConnectionSchema.parse(await request('', signal));
+        return chatGptConnectionsSchema.parse(await request('', signal));
       } catch (error) {
         if (error instanceof TableRequestError && error.code === 'chatgpt-plan-disabled') return null;
         throw error;
       }
     },
-    begin: async (mode: ChatGptConnectionMode, signal: AbortSignal) =>
-      beginSchema.parse(await request('/begin', signal, { mode })),
+    /** Without `connectionId`, `connect` adds an account; with it, the sign-in renews that connection. */
+    begin: async (mode: ChatGptConnectionMode, connectionId: string | undefined, signal: AbortSignal) =>
+      beginSchema.parse(await request('/begin', signal, connectionId ? { mode, connectionId } : { mode })),
     attempt: async (attemptId: string, signal: AbortSignal) =>
       attemptSchema.parse(await request(`/attempts/${encodeURIComponent(attemptId)}`, signal)),
     complete: async (callbackUrl: string, signal: AbortSignal) =>
-      chatGptConnectionSchema.parse(await request('/complete', signal, { callbackUrl })),
-    acknowledgeWelcome: async (signal: AbortSignal) => {
-      await request('/welcome', signal, {});
+      chatGptConnectionsSchema.parse(await request('/complete', signal, { callbackUrl })),
+    acknowledgeWelcome: async (connectionId: string, signal: AbortSignal) => {
+      await request(`/${encodeURIComponent(connectionId)}/welcome`, signal, {});
     },
-    disconnect: async (signal: AbortSignal) =>
-      z.object({ revoked: z.boolean() }).parse(await request('/disconnect', signal, {})),
+    disconnect: async (connectionId: string, signal: AbortSignal) =>
+      z
+        .object({ revoked: z.boolean() })
+        .parse(await request(`/${encodeURIComponent(connectionId)}/disconnect`, signal, {})),
   };
 }

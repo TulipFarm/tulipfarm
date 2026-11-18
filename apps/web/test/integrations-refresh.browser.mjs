@@ -174,6 +174,9 @@ test('integration status recovery and Google review lifecycle', { timeout: 480_0
       status = faults.github;
       json = status === 200 ? { configured: true, accounts: [] } : { error: 'account-unavailable' };
     } else if (path.endsWith('/integrations')) json = { integrations: [] };
+    // The directory lists ChatGPT and Claude plans with the apps.
+    else if (path.endsWith('/chatgpt/connection')) json = { connections: [] };
+    else if (path.endsWith('/claude/connection')) json = { connections: [], deviceSignIn: false };
     else if (path.endsWith('/atlassian/accounts')) json = { accounts: [], providers: [] };
     else if (path.endsWith('/slack/status'))
       json = { state: 'disconnected', teamId: null, canManage: false, linked: false, scopes: [] };
@@ -204,6 +207,8 @@ test('integration status recovery and Google review lifecycle', { timeout: 480_0
     if ((await tab.getAttribute('aria-selected')) !== 'true') await tab.click();
   }
   const listRow = app => page.getByRole('listitem').filter({ has: page.getByRole('link', { name: app, exact: true }) });
+  // Your apps lists what's connected; apps not connected, or not checked, are under Browse.
+  const show = view => page.getByRole('tab', { name: new RegExp(`^${view}`) }).click();
   async function focusRefresh() {
     const reads = [];
     const observe = request => {
@@ -240,19 +245,21 @@ test('integration status recovery and Google review lifecycle', { timeout: 480_0
     await mkdir(shots, { recursive: true });
     await t.test('named failure, slow repeated retry, recovery, and connected Google tiles', async () => {
       faults.delay = 500;
-      await page.goto(`${origin}/qa-integrations/integrations`);
+      await page.goto(`${origin}/qa-integrations/integrations?view=browse`);
       await listRow('GitHub')
         .getByRole('status', { name: 'Checking GitHub', exact: true })
         .waitFor({ timeout: 30_000 });
       await page.getByRole('button', { name: 'Check again', exact: true }).waitFor({ timeout: 30_000 });
       assert.match(await statusErrors.innerText(), /Couldn’t check GitHub/);
-      await listRow('GitHub').getByText('Not checked', { exact: true }).waitFor();
+      // An app that couldn't be checked may still be connected, so it's listed with Your apps.
+      await show('Your apps');
+      await listRow('GitHub').getByText('Couldn’t check', { exact: true }).waitFor();
       // A connected app's row names the account it uses.
       for (const app of ['Gmail', 'Google Calendar', 'Google Drive', 'Google Sheets', 'Google Docs', 'Google Slides']) {
         assert.equal(await listRow(app).getByText('qa@example.test', { exact: true }).count(), 1);
         assert.equal(
           await listRow(app)
-            .getByRole('link', { name: `Configure ${app}`, exact: true })
+            .getByRole('link', { name: `Manage ${app}`, exact: true })
             .count(),
           1,
         );
@@ -270,6 +277,7 @@ test('integration status recovery and Google review lifecycle', { timeout: 480_0
       faults.scopes = ['openid', auth('userinfo.email'), auth('calendar')];
       await page.goto(`${origin}/qa-integrations/integrations`);
       await listRow('Google Calendar').getByText('qa@example.test', { exact: true }).waitFor();
+      await show('Browse');
       await listRow('Gmail').getByRole('button', { name: 'Connect Gmail', exact: true }).waitFor();
       assert.equal(await listRow('Gmail').getByText('qa@example.test', { exact: true }).count(), 0);
       await listRow('Gmail').getByRole('link', { name: 'Gmail', exact: true }).click();

@@ -64,6 +64,17 @@ const turnSchema = z.object({
       traceId: z.string().optional(),
     })
     .optional(),
+  /** Mirrors `turnSummarySchema.planSwitch`: the reply moved off the picked plan account. Labels only for the sender. */
+  planSwitch: z
+    .object({
+      fromConnectionId: z.uuid(),
+      fromAccount: z.string().nullable().optional(),
+      toConnectionId: z.uuid(),
+      toAccount: z.string().nullable().optional(),
+      reason: z.enum(['usage-limit', 'reconnect', 'not-eligible']).nullable().optional(),
+    })
+    .nullable()
+    .optional(),
 });
 const attachmentSchema = z.object({
   id: z.uuid(),
@@ -252,6 +263,7 @@ export type ConversationCommand =
       commandId: string;
       messageId: string;
       model?: string;
+      planConnectionId?: string;
       parts: ConversationPart[];
       timeZone?: string;
       mode?: 'normal' | 'plan';
@@ -728,6 +740,7 @@ export function conversationApi(workspaceId: string, denied: (status: number) =>
             await request(`${path}/messages/${command.messageId}`, 'PUT', signal, {
               commandId,
               model: command.model,
+              ...(command.planConnectionId ? { planConnectionId: command.planConnectionId } : {}),
               parts: command.parts,
               timeZone: command.timeZone,
               mode: command.mode,

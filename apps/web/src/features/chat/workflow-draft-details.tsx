@@ -289,6 +289,12 @@ function describeStep(step: Step, sources: TableStepSources, workspaceId: string
               values={[
                 ...(step.branch ? [{ name: 'Starts from', value: describeValue(step.branch) }] : []),
                 {
+                  name: 'GitHub login',
+                  value: step.githubAccount
+                    ? `@${step.githubAccount}`
+                    : 'First login with Coding on that can push to the repository',
+                },
+                {
                   name: 'Result',
                   value: step.pullRequest ? 'Opens a pull request' : 'Returns the changes; pushes nothing',
                 },

@@ -248,17 +248,18 @@ try {
       continue;
     }
 
-    // Old sheet links open the integration's own page on its Accounts tab.
-    for (const [hash, id, name] of [
-      ['github-integrations', 'github', 'GitHub'],
-      ['atlassian-heading', 'jira', 'Jira'],
+    // Old sheet links open the integration's own page on its Accounts tab. GitHub has that tab only once a login is
+    // connected, so with none it stays on Overview.
+    for (const [hash, id, name, selected] of [
+      ['github-integrations', 'github', 'GitHub', 'Overview'],
+      ['atlassian-heading', 'jira', 'Jira', 'Accounts'],
     ]) {
       await page.goto(`${origin}/acme/integrations#${hash}`);
       await page.waitForURL(`${origin}/acme/integrations/${id}?tab=accounts`);
       assert.equal(
         await page
           .getByRole('tablist', { name: `${name} sections` })
-          .getByRole('tab', { name: 'Accounts', exact: true })
+          .getByRole('tab', { name: selected, exact: true })
           .getAttribute('aria-selected'),
         'true',
       );

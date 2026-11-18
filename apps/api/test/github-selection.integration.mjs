@@ -50,4 +50,23 @@ test('HTTP selection is owner-only, versioned, origin checked and never inferred
   assert.equal(selected.headers['cache-control'], 'no-store');
   assert.equal((await request({ method: 'PUT', payload: { accountId: null, expectedVersion: 0 } })).statusCode, 409);
   assert.deepEqual((await request({})).json(), { accountId, generation: 1, version: 1 });
+
+  // A login turned off for chats can't be chosen for one.
+  const uses = payload =>
+    app.inject({
+      method: 'PUT',
+      url: `/v1/workspaces/${f.one.id}/github/accounts/${accountId}/uses`,
+      headers: { origin, cookie: 'owner' },
+      payload,
+    });
+  assert.equal((await uses({})).statusCode, 400);
+  assert.equal((await uses({ primaryForKnowledge: false })).statusCode, 400);
+  const off = await uses({ chat: false });
+  assert.equal(off.statusCode, 200, off.body);
+  assert.deepEqual(
+    off.json().accounts.map(account => [account.useForChat, account.useForCoding, account.primaryForKnowledge]),
+    [[false, true, true]],
+  );
+  assert.equal((await request({ method: 'PUT', payload: { accountId: null, expectedVersion: 1 } })).statusCode, 200);
+  assert.equal((await request({ method: 'PUT', payload: { accountId, expectedVersion: 2 } })).statusCode, 409);
 });

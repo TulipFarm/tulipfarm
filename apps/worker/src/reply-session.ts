@@ -45,6 +45,8 @@ import type { ConversationInventory } from './conversation-inventory.ts';
 import { keepReplyLease } from './reply-lease.ts';
 
 type Tx = ReplyTransaction;
+// The common migration that records a turn's plan connection and the plan it switched from.
+const turnPlanSwitchVersion = 89;
 /** The member whose accepted message started the turn. Typed as a person, so member-only tools cannot receive another actor kind. */
 type Requester = Awaited<ReturnType<typeof turnRequester>>;
 type Inventory = Awaited<ReturnType<typeof readWorkspaceInventory>>['inventory'];
@@ -282,6 +284,24 @@ export async function beginReplySession(input: {
     await recordModelUsage(
       tx,
       known.map(({ call, usage }) => usageRecord(call, usage)),
+    );
+    await recordTurnPlan(tx, current);
+  }
+
+  /** Keeps on the turn the plan connection that answered and the one it moved off with why, for the chat to show. */
+  async function recordTurnPlan(tx: Tx, current: Hold) {
+    if (tx.commonVersion < turnPlanSwitchVersion || !current.calls.some(call => call.source.paidBy === 'plan')) return;
+    const source = input.planSource?.();
+    if (!source?.connectionId) return;
+    await tx.client.query(
+      `UPDATE ${qualified(tx.schema, 'tf_conversation_turns')} SET plan_connection_used=$3,plan_switched_from=$4,plan_switch_reason=$5 WHERE id=$1 AND generation=$2`,
+      [
+        fence.turnId,
+        fence.generation,
+        source.connectionId,
+        source.switched?.from ?? null,
+        source.switched?.failure ?? null,
+      ],
     );
   }
 

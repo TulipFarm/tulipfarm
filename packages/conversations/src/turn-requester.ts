@@ -50,3 +50,22 @@ export async function standaloneTurn(
     ).rowCount,
   );
 }
+
+/**
+ * The plan account (subscription connection) a turn's member picked to answer first; null when they picked none or the
+ * workspace is below common migration 0089, which adds it.
+ */
+export async function turnPlanConnection(
+  tx: AuthorizationTransaction & { commonVersion: number },
+  conversationId: string,
+  turnId: string,
+): Promise<string | null> {
+  if (tx.commonVersion < 89) return null;
+  const row = (
+    await tx.client.query<{ plan_connection_id: string | null }>(
+      `SELECT plan_connection_id FROM ${qualified(tx.schema, 'tf_conversation_turns')} WHERE id = $1 AND conversation_id = $2`,
+      [turnId, conversationId],
+    )
+  ).rows[0];
+  return row?.plan_connection_id ?? null;
+}

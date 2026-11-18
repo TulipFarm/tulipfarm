@@ -56,7 +56,7 @@ export async function copilotPremiumRequests(
  * the model list for long: a count not back in time shows on a later request.
  */
 export function createPlanUsage(options: {
-  copilotToken?: ((workspaceId: string, ownerMembershipId: string) => Promise<string>) | undefined;
+  copilotToken?: ((workspaceId: string, connectionId: string) => Promise<string>) | undefined;
   fetcher?: typeof fetch;
 }) {
   const cache = new Map<string, { expires: number; value: Promise<PremiumRequests | null> }>();
@@ -70,7 +70,7 @@ export function createPlanUsage(options: {
     const key = `${workspaceId}:${plan.connectionId}`;
     let entry = cache.get(key);
     if (!entry || entry.expires <= Date.now()) {
-      const value = copilotToken(workspaceId, plan.ownerMembershipId)
+      const value = copilotToken(workspaceId, plan.connectionId)
         .then(token => copilotPremiumRequests(token, options.fetcher))
         .catch(() => null);
       entry = { expires: Date.now() + quotaTtlMs, value };

@@ -8,8 +8,7 @@ import { ArrowUpRight } from 'reicon-react/icons/ArrowUpRight';
 import { Compress } from 'reicon-react/icons/Compress';
 import { Image } from 'reicon-react/icons/Image';
 import { Key } from 'reicon-react/icons/Key';
-import { useChatGptConnection } from './chatgpt-plan';
-import { useTokenConnection } from './token-plan';
+import { useChatGptConnection, useTokenConnection } from './plan-connections';
 import type { TokenConnection } from './token-plan-api';
 import {
   PlanModels,
@@ -113,19 +112,15 @@ export function ModelSources({
   const { read } = useSubscriptions(workspaceId);
   const people = usePeople(workspaceId);
   const offered = !(chatGpt.state.kind === 'unavailable' || (chatGpt.state.kind === 'ready' && !chatGpt.state.data));
-  const connection = chatGpt.state.kind === 'ready' ? chatGpt.state.data : null;
   const shared =
     read.state.kind === 'ready' ? read.state.data.filter(item => !item.mine && item.state !== 'signed-out') : [];
   const chatGptDetail =
     chatGpt.state.kind === 'loading'
       ? 'Checking…'
-      : !connection || connection.state === 'not-connected' || connection.state === 'signed-out'
-        ? 'Not connected'
-        : connection.state === 'reconnect-required'
-          ? 'Needs sign-in again'
-          : connection.state === 'plan-disabled'
-            ? 'Plan usage off'
-            : (connection.email ?? 'Connected');
+      : railDetail(
+          chatGpt.state.kind === 'ready' ? (chatGpt.state.data?.connections ?? []) : [],
+          connection => connection.email,
+        );
   const claude = useTokenConnection(workspaceId, 'claude');
   const copilot = useTokenConnection(workspaceId, 'copilot');
   const tokenRail = (
@@ -133,18 +128,13 @@ export function ModelSources({
     read: typeof claude,
     brand: Brand,
     label: string,
-    account: (connection: TokenConnection) => string,
+    account: (connection: TokenConnection) => string | null,
   ) => {
     if (read.state.kind === 'unavailable' || (read.state.kind === 'ready' && !read.state.data)) return null;
-    const connection = read.state.kind === 'ready' ? read.state.data : null;
     const detail =
       read.state.kind === 'loading'
         ? 'Checking…'
-        : !connection || connection.state === 'not-connected' || connection.state === 'signed-out'
-          ? 'Not connected'
-          : connection.state === 'reconnect-required'
-            ? 'Needs reconnecting'
-            : account(connection);
+        : railDetail(read.state.kind === 'ready' ? (read.state.data?.connections ?? []) : [], account);
     return item(
       id,
       <Tile muted={detail === 'Not connected'}>
@@ -183,9 +173,9 @@ export function ModelSources({
               'ChatGPT',
               chatGptDetail,
             )}
-          {tokenRail('claude', claude, 'claude', 'Claude', () => 'Connected')}
+          {tokenRail('claude', claude, 'claude', 'Claude', connection => connection.account)}
           {tokenRail('copilot', copilot, 'github', 'GitHub Copilot', connection =>
-            connection.account ? `@${connection.account}` : 'Connected',
+            connection.account ? `@${connection.account}` : null,
           )}
         </RailGroup>
         {shared.length > 0 && (
@@ -328,4 +318,15 @@ export function ApiKeysPane() {
       </ul>
     </div>
   );
+}
+
+/** A provider's rail line: the one account, or how many, and whether any needs sign-in again. */
+function railDetail<T extends { state: string }>(connections: readonly T[], account: (connection: T) => string | null) {
+  const live = connections.filter(item => item.state !== 'not-connected' && item.state !== 'signed-out');
+  if (!live.length) return 'Not connected';
+  if (live.some(item => item.state === 'reconnect-required')) return 'Needs sign-in again';
+  if (live.length > 1) return `${live.length} accounts`;
+  const [only] = live;
+  if (only?.state === 'plan-disabled') return 'Plan usage off';
+  return (only && account(only)) ?? 'Connected';
 }

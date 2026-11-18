@@ -84,6 +84,7 @@ import {
   type PlanCredentials,
   subscriptionsFromEnvironment,
   turnCaller,
+  turnPreferredPlan,
 } from './member-plans.ts';
 import type { Subscriptions } from '@tulipfarm/integrations/subscriptions';
 import { conversationTitleActivity } from './conversation-title.ts';
@@ -235,14 +236,17 @@ export function meteredReply(
     // A plan model (ChatGPT, Claude or Copilot) runs on the first plan the requester may use: their own, then one shared with them, their
     // teams or the workspace. Slack and project chats use workspace shares only. When every plan is spent, the
     // workspace's fallback model answers. Tokens are read here, inside the activity, so they never enter workflow history.
+    const caller =
+      isPlanProvider(chat.route.provider) && !externalContext && !project ? await turnCaller(runtime, fence) : null;
     const plans = isPlanProvider(chat.route.provider)
       ? await memberPlans({
           provider: chat.route.provider,
           credentials: credentialsFor(chat.route.provider),
           subscriptions,
           workspaceId: fence.workspaceId,
-          caller: externalContext || project ? null : await turnCaller(runtime, fence),
+          caller,
           model: chat.route.model,
+          preferredConnectionId: caller ? await turnPreferredPlan(runtime, fence) : null,
         })
       : null;
     const validatedRoute = inferenceRouteSchema.parse(

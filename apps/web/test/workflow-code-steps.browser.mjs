@@ -40,7 +40,7 @@ after(async () => {
   }
 });
 
-async function open(t, current, { failWith } = {}) {
+async function open(t, current, { failWith, accounts = {} } = {}) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 1000 }, reducedMotion: 'reduce' });
   page.setDefaultTimeout(10000);
   const errors = [],
@@ -59,6 +59,7 @@ async function open(t, current, { failWith } = {}) {
       `/v1/workspaces/${workspace.id}/governance/me`,
       { membershipId, role: 'admin', teams: [], capabilities: { manageGovernance: true, canLeave: true } },
     ],
+    ...Object.entries(accounts),
   ]);
   await page.route('**/*', async route => {
     const request = route.request(),
@@ -163,4 +164,71 @@ test('the editor is hidden where code cannot run, and steps another step reads c
   await page.getByText('Bash · reads').waitFor();
   const remove = page.getByRole('button', { name: 'Remove score' });
   assert.equal(await remove.getAttribute('aria-disabled'), 'true');
+});
+
+test('a manager picks the plan account and GitHub login a coding step tries first', async t => {
+  const coding = {
+    id: 'fix',
+    kind: 'coding',
+    agent: 'claude-code',
+    repository: { kind: 'literal', value: 'acme/app' },
+    prompt: { kind: 'literal', value: 'Fix the failing test' },
+    pullRequest: true,
+  };
+  const plan = (connectionId, account, useForCoding) => ({
+    connectionId,
+    provider: 'claude',
+    ownerMembershipId: membershipId,
+    account,
+    state: 'connected',
+    mine: true,
+    models: [],
+    disabledModels: [],
+    canShare: true,
+    grants: [],
+    plan: null,
+    useForChat: true,
+    useForCoding,
+    createdAt: '2026-10-01T00:00:00Z',
+  });
+  const login = (n, name, useForCoding) => ({
+    id: id(n),
+    state: 'active',
+    configured: true,
+    identity: { id: n, login: name },
+    generation: 1,
+    scopes: ['repo'],
+    useForChat: false,
+    useForCoding,
+    primaryForKnowledge: false,
+  });
+  const { page, saves } = await open(t, workflowWith([prepare, coding]), {
+    accounts: {
+      [`/v1/workspaces/${workspace.id}/subscriptions`]: {
+        subscriptions: [plan(id('5'), 'ada@example.com', true), plan(id('6'), 'ada@work.example', true)],
+      },
+      [`/v1/workspaces/${workspace.id}/github/accounts`]: {
+        configured: true,
+        accounts: [login('7', 'ada-home', true), login('8', 'ada-work', true), login('9', 'ada-old', false)],
+      },
+    },
+  });
+  const section = page.getByRole('region', { name: 'Coding accounts' });
+  await section.getByText('acme/app').waitFor();
+  const claude = section.getByRole('combobox', { name: 'Claude account' });
+  await claude.click();
+  await page.getByRole('option', { name: 'ada@work.example', exact: true }).click();
+  await page.getByText('Account choice saved. Activate the saved revision to use it.').waitFor();
+  assert.equal(saves[0].definition.steps.at(-1).planConnectionId, id('6'));
+
+  await section.getByRole('combobox', { name: 'GitHub login' }).click();
+  assert.equal(await page.getByRole('option', { name: '@ada-old', exact: false }).count(), 0);
+  await page.getByRole('option', { name: '@ada-work', exact: true }).click();
+  for (let attempt = 0; attempt < 100 && saves.length < 2; attempt++) await page.waitForTimeout(50);
+  assert.equal(saves[1].expectedRevision, saves[0].revision);
+  assert.deepEqual(
+    [saves[1].definition.steps.at(-1).planConnectionId, saves[1].definition.steps.at(-1).githubAccount],
+    [id('6'), 'ada-work'],
+  );
+  assert.equal(await claude.textContent(), 'ada@work.example');
 });

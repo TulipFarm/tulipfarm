@@ -274,6 +274,27 @@ export function replyModel(model: string | undefined, code: string | null | unde
 
 type Turn = NonNullable<ConversationMessage['turn']>;
 
+const planSwitchReasons = {
+  'usage-limit': 'hit its usage limit',
+  reconnect: 'needs reconnecting',
+  'not-eligible': "can't use this model",
+} as const;
+
+/** Why a reply came from another of the member's plan accounts, or null when it came from the one they picked. */
+export function planSwitchSummary(turn: Turn) {
+  const moved = turn.planSwitch;
+  if (turn.status !== 'completed' || !moved) return null;
+  const from = moved.fromAccount ?? 'The chosen account';
+  const to = moved.toAccount ?? 'another account';
+  const why = moved.reason ? planSwitchReasons[moved.reason] : "couldn't answer";
+  return {
+    to,
+    own: moved.fromAccount != null,
+    short: `${from} ${why}`,
+    detail: `${from} ${why}, so ${to} answered instead.`,
+  };
+}
+
 /**
  * For each reply the fallback model wrote, the turn it answered, when that reply starts a fallback: a run of replies
  * answered by the same fallback for the same chosen model shows its chip once, above the first of them.
@@ -291,7 +312,12 @@ export function fallbackStarts(messages: readonly ConversationMessage[]): Map<st
     const turn = pending;
     pending = null;
     const code = turn.status === 'completed' && turn.errorCode?.startsWith('model-fallback:') ? turn.errorCode : null;
-    const run = code ? `${turn.stats?.model ?? ''}>${code.split(':')[1]}` : null;
+    const moved = turn.status === 'completed' ? turn.planSwitch : null;
+    const run = code
+      ? `${turn.stats?.model ?? ''}>${code.split(':')[1]}`
+      : moved
+        ? `${moved.fromConnectionId}>${moved.toConnectionId}`
+        : null;
     if (run && run !== previous) starts.set(message.id, turn);
     if (turn.status === 'completed') previous = run;
   }

@@ -20,7 +20,7 @@ import {
 import { batchDigest } from './write-provider.ts';
 import { requireGitHubTaskExecution } from '@tulipfarm/access';
 import { contextColumn, contextId, requireGitHubOrigin, type GitHubContext } from './origin.ts';
-import { githubSelection } from './selection.ts';
+import { chatUseFilter, githubSelection } from './selection.ts';
 import { botGranted } from './bot.ts';
 
 export const batchRange = commonCompatibility;
@@ -132,14 +132,18 @@ export async function freshBatch(tx: AuthorizationTransaction, actor: HumanActor
 }
 export async function selectOnlyAccount(tx: AuthorizationTransaction, actor: HumanActor, conversationId: string) {
   const accounts = await tx.client.query(
-    `SELECT id,generation FROM ${batchTable(tx, 'accounts')} WHERE owner_membership_id=$1 AND state='active' AND (expires_at IS NULL OR expires_at>clock_timestamp()) LIMIT 2 FOR SHARE`,
+    `SELECT id,generation FROM ${batchTable(tx, 'accounts')} WHERE owner_membership_id=$1 AND state='active' AND (expires_at IS NULL OR expires_at>clock_timestamp())${chatUseFilter(tx)} LIMIT 2 FOR SHARE`,
     [actor.membershipId],
   );
   const only =
     accounts.rows.length === 1 ? z.object({ id: z.uuid(), generation: z.number() }).parse(accounts.rows[0]) : null;
-  if (only)
-    await tx.client.query(
-      `INSERT INTO ${batchTable(tx, 'chat_selection')} (conversation_id,account_id,account_generation,version,context_start) VALUES ($1,$2,$3,1,1) ON CONFLICT (conversation_id) DO NOTHING`,
-      [conversationId, only.id, only.generation],
-    );
+  if (!only) return;
+  // A chat whose account was turned off for chats moves to the member's only account left on for chats.
+  const replaceChatOff = chatUseFilter(tx)
+    ? `DO UPDATE SET account_id=EXCLUDED.account_id,account_generation=EXCLUDED.account_generation,version=tf_github_chat_selection.version+1 WHERE NOT tf_github_chat_selection.investigation AND tf_github_chat_selection.integration_id IS NULL AND EXISTS (SELECT 1 FROM ${batchTable(tx, 'accounts')} a WHERE a.id=tf_github_chat_selection.account_id AND NOT a.use_for_chat)`
+    : 'DO NOTHING';
+  await tx.client.query(
+    `INSERT INTO ${batchTable(tx, 'chat_selection')} (conversation_id,account_id,account_generation,version,context_start) VALUES ($1,$2,$3,1,1) ON CONFLICT (conversation_id) ${replaceChatOff}`,
+    [conversationId, only.id, only.generation],
+  );
 }

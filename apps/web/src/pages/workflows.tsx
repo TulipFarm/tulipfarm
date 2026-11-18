@@ -52,6 +52,7 @@ import { AgentStepStatus } from '@/features/workflows/agent-step-status';
 import { runIsLive, runNote } from '@/features/workflows/run-notes';
 import { webhookTriggers } from '@/features/workflows/webhook-status';
 import { TriggerList } from '@/features/workflows/trigger-list';
+import { CodingStepAccounts } from '@/features/workflows/coding-step-accounts';
 import { CodeSteps } from '@/features/workflows/code-steps';
 import {
   knownTriggers,
@@ -750,6 +751,25 @@ function WorkflowPage({
                             : workflow.enabled
                               ? 'Step saved. Activate the saved revision to use it.'
                               : 'Step saved.',
+                        );
+                      }}
+                    />
+                  </div>
+                  <div className="max-w-3xl pt-6 empty:hidden">
+                    <CodingStepAccounts
+                      key={`${selected.id}/${selected.revision}`}
+                      workspaceId={workspaceId}
+                      workflow={selected}
+                      blocked={blocked}
+                      onDenied={deny}
+                      onSaved={workflow => {
+                        selection.observed(workflow);
+                        void changes.saved(workflow.id);
+                        setError('');
+                        setMessage(
+                          workflow.enabled
+                            ? 'Account choice saved. Activate the saved revision to use it.'
+                            : 'Account choice saved.',
                         );
                       }}
                     />

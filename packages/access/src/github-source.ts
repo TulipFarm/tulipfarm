@@ -37,9 +37,11 @@ export async function requirePersonalGitHubSelection(
     return;
   }
   await requireOrdinaryGitHubChat(tx, actor, source.conversationId);
+  // From common migration 88 a member can turn an account off for chats; a chat then stops using it.
+  const chatUse = ((tx as { commonVersion?: number }).commonVersion ?? 0) >= 88 ? ' AND a.use_for_chat' : '';
   const allowed = await tx.client.query(
     `SELECT a.id FROM ${table(tx, 'tf_github_accounts')} a JOIN ${table(tx, 'tf_github_chat_selection')} s ON s.account_id=a.id
-    WHERE a.id=$1 AND a.owner_membership_id=$2 AND a.generation=$3 AND a.state='active' AND a.credential IS NOT NULL
+    WHERE a.id=$1 AND a.owner_membership_id=$2 AND a.generation=$3 AND a.state='active' AND a.credential IS NOT NULL${chatUse}
     AND (a.expires_at IS NULL OR a.expires_at>clock_timestamp()) AND s.conversation_id=$4 AND s.account_generation=a.generation AND s.version=$5 FOR UPDATE OF a FOR SHARE OF s`,
     [source.accountId, source.membershipId, source.generation, source.conversationId, source.selectionVersion],
   );

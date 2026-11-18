@@ -81,6 +81,7 @@ test('the integrations directory lists every app with one action per row', { tim
       json = { accounts: [], providers: ['atlassian-mcp', 'trello'].map(protocol => ({ protocol, configured: true })) };
     else if (path === `${base}/workspace-mcp/capabilities`)
       json = { enabled: true, canManageShared: true, integrationsEnabled: true, dispatchEnabled: false };
+    else if (path === `${base}/chatgpt/connection`) json = { connections: [] };
     else if (path === `${base}/workspace-mcp/integrations`) json = { integrations: [] };
     else if (path === `${base}/workspace-mcp/catalog`) {
       catalogSearches.push(url.searchParams.get('search'));
@@ -113,65 +114,64 @@ test('the integrations directory lists every app with one action per row', { tim
   const tab = name => page.getByRole('tab', { name });
   const row = name => page.getByRole('listitem').filter({ has: page.getByRole('link', { name, exact: true }) });
   const count = async view => Number((await tab(new RegExp(`^${view} \\d+$`)).innerText()).match(/\d+$/)[0]);
-  const rows = page
-    .getByRole('region', { name: /^(Apps|Search results)$/ })
-    .locator('ul')
-    .first()
-    .getByRole('listitem');
+  const yours = page.getByRole('list', { name: 'Your apps', exact: true }).getByRole('listitem');
   const search = page.getByRole('searchbox', { name: 'Search apps', exact: true });
 
   try {
     await page.goto(`${origin}/${workspace.slug}/integrations`);
     // The first visit waits for Vite to transform the whole app on a cold server.
-    await tab('Needs attention 1').waitFor({ timeout: 90000 });
+    await tab('Your apps 7').waitFor({ timeout: 90000 });
 
-    await t.test('tabs count the apps in each state and filter the list', async () => {
-      const [all, connected, available] = [await count('All'), await count('Connected'), await count('Available')];
-      assert.equal(connected, 6, 'every granted Google app is connected');
-      assert.ok(all >= connected + 1 + available, 'All includes every other tab');
-      assert.equal(await tab(/^All /).getAttribute('aria-selected'), 'true');
+    await t.test('Your apps lists connected apps and ones needing attention; Browse lists the rest', async () => {
+      assert.equal(await tab(/^Your apps /).getAttribute('aria-selected'), 'true');
       // Apps that need attention come first, then connected ones.
-      assert.equal(await rows.first().getByRole('link').first().innerText(), 'GitHub');
-      await tab(/^Connected /).click();
-      await page.waitForURL(/\?view=connected$/);
-      // The address changes before the list renders again.
-      await rows.nth(connected).waitFor({ state: 'detached' });
-      assert.equal(await rows.count(), connected);
-      await tab(/^Needs attention /).click();
-      await page.waitForURL(/\?view=attention$/);
-      await rows.nth(1).waitFor({ state: 'detached' });
-      assert.equal(await rows.count(), 1);
-      await tab(/^All /).click();
-      await page.waitForURL(url => !url.search);
+      assert.equal(await yours.first().getByRole('link').first().innerText(), 'GitHub');
+      assert.equal(await yours.count(), 7, 'GitHub and every granted Google app');
+      await row('GitHub').getByText('Needs attention', { exact: true }).waitFor();
+      await row('Gmail').getByText('Connected', { exact: true }).waitFor();
+      const browse = await count('Browse');
+      await tab(/^Browse /).click();
+      await page.waitForURL(/\?view=browse$/);
+      const connectable = page.getByRole('list', { name: 'Apps you can connect', exact: true }).getByRole('listitem');
+      await connectable.first().waitFor();
+      assert.equal(await connectable.count(), browse);
+      assert.equal(await row('Gmail').count(), 0, 'connected apps stay in Your apps');
+      await tab(/^Your apps /).click();
+      await page.waitForURL(/\?view=yours$/);
     });
 
     await t.test('the view comes from the address, including older links', async () => {
-      await page.goto(`${origin}/${workspace.slug}/integrations?view=attention`);
-      await tab('Needs attention 1').waitFor();
-      assert.equal(await tab(/^Needs attention /).getAttribute('aria-selected'), 'true');
-      await page.goto(`${origin}/${workspace.slug}/integrations?view=yours`);
-      await tab('Connected 6').waitFor();
-      assert.equal(await tab(/^Connected /).getAttribute('aria-selected'), 'true');
-      await page.goto(`${origin}/${workspace.slug}/integrations?view=email-and-calendar`);
-      await tab('Needs attention 1').waitFor();
-      assert.equal(await tab(/^All /).getAttribute('aria-selected'), 'true');
+      for (const [view, selected] of [
+        ['attention', 'Your apps'],
+        ['connected', 'Your apps'],
+        ['available', 'Browse'],
+        ['email-and-calendar', 'Your apps'],
+      ]) {
+        await page.goto(`${origin}/${workspace.slug}/integrations?view=${view}`);
+        await tab('Your apps 7').waitFor();
+        assert.equal(await tab(new RegExp(`^${selected} `)).getAttribute('aria-selected'), 'true', view);
+      }
     });
 
     await t.test('while searching, the counts are of the matching apps', async () => {
       await search.fill('google');
       // Gmail doesn't say Google; the other five Google apps do.
-      await tab('Connected 5').waitFor();
-      assert.equal(await count('Needs attention'), 0);
-      assert.equal(await count('All'), await rows.count());
+      await tab('Your apps 5').waitFor();
+      assert.equal(await yours.count(), 5);
+      assert.equal(await row('GitHub').count(), 0);
       await search.fill('');
-      await tab('Needs attention 1').waitFor();
+      await tab('Your apps 7').waitFor();
     });
 
-    await t.test('connected apps configure, apps needing attention reconnect, and none disconnect here', async () => {
-      await row('Gmail').getByRole('link', { name: 'Configure Gmail', exact: true }).waitFor();
+    await t.test('connected apps manage, apps needing attention reconnect, and none disconnect here', async () => {
+      await row('Gmail').getByRole('link', { name: 'Manage Gmail', exact: true }).waitFor();
       await row('Gmail').getByText('ada@example.test', { exact: true }).waitFor();
       await row('GitHub').getByRole('button', { name: 'Reconnect GitHub', exact: true }).waitFor();
+      await row('GitHub').getByText('New GitHub approval needed', { exact: true }).first().waitFor();
+      await tab(/^Browse /).click();
       await row('Jira').getByRole('button', { name: 'Connect Jira', exact: true }).waitFor();
+      // Plan apps connect on their own page, where the member also picks what each account is used for.
+      await row('ChatGPT').getByRole('link', { name: 'Connect ChatGPT', exact: true }).waitFor();
       assert.equal(
         await page
           .getByRole('main')
@@ -186,6 +186,7 @@ test('the integrations directory lists every app with one action per row', { tim
           .count(),
         0,
       );
+      await tab(/^Your apps /).click();
     });
 
     await t.test('clicking a row opens the app’s page, and its action stays a separate control', async () => {
@@ -193,23 +194,26 @@ test('the integrations directory lists every app with one action per row', { tim
       await page.mouse.click(box.x + box.width / 2, box.y + box.height - 8);
       await page.waitForURL(`${origin}/${workspace.slug}/integrations/google-drive`);
       await page.goBack();
-      await row('Gmail').getByRole('link', { name: 'Configure Gmail', exact: true }).click();
-      await page.waitForURL(`${origin}/${workspace.slug}/integrations/gmail`);
+      await row('Gmail').getByRole('link', { name: 'Manage Gmail', exact: true }).click();
+      await page.waitForURL(new RegExp(`${origin}/${workspace.slug}/integrations/gmail(\\?|$)`));
       await page.goBack();
-      await tab('Needs attention 1').waitFor();
+      await tab('Your apps 7').waitFor();
     });
 
-    await t.test('apps that are coming soon show a label, not a button', async () => {
+    await t.test('apps nobody here can connect show why instead of a button', async () => {
+      await tab(/^Browse /).click();
+      const unavailable = page.getByRole('region', { name: 'Not available to connect' });
       // Discord has no official MCP server to list instead.
-      const discord = page.getByRole('listitem').filter({ hasText: 'Discord' });
-      await discord.getByText('Soon', { exact: true }).waitFor();
+      const discord = unavailable.getByRole('listitem').filter({ hasText: 'Discord' });
+      await discord.getByText('Coming soon', { exact: true }).waitFor();
       assert.equal(await discord.getByRole('button').count(), 0);
       assert.equal(await discord.getByRole('link').count(), 0);
+      await unavailable.getByRole('link', { name: 'Slack', exact: true }).waitFor();
     });
 
     await t.test('an app that can’t be connected explains why on hover and on focus', async () => {
-      const reason = 'Ask an integration manager for Slack access.';
-      const label = row('Slack').getByText('Ask an admin', { exact: true });
+      const reason = 'Ask an integration manager to share Slack with you.';
+      const label = row('Slack').getByText('Ask for access', { exact: true });
       await label.hover();
       await page.getByRole('tooltip').getByText(reason).waitFor();
       await page.mouse.move(0, 0);

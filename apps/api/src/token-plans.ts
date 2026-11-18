@@ -110,17 +110,28 @@ export function tokenPlan(
 const errorSchema = z.object({ error: z.string() });
 const workspaceParams = z.strictObject({ workspaceId: uuidSchema });
 const attemptParams = workspaceParams.extend({ attemptId: uuidSchema });
+const connectionParams = workspaceParams.extend({ connectionId: uuidSchema });
 const connectionSchema = z.object({
-  state: z.enum(['not-connected', 'connected', 'reconnect-required', 'signed-out']),
-  account: z.string().nullable(),
-  /** For Copilot, the personal GitHub account the connection uses instead of a token of its own. */
-  githubAccountId: z.uuid().nullable().optional(),
-  planUsage: z.boolean(),
+  connections: z.array(
+    z.object({
+      connectionId: z.uuid(),
+      state: z.enum(['not-connected', 'connected', 'reconnect-required', 'signed-out']),
+      account: z.string().nullable(),
+      /** For Copilot, the personal GitHub account the connection uses instead of a token of its own. */
+      githubAccountId: z.uuid().nullable().optional(),
+      planUsage: z.boolean(),
+      models: z.array(z.object({ slug: z.string(), label: z.string() })),
+      createdAt: z.string(),
+    }),
+  ),
   /** Whether members can sign in through GitHub instead of pasting a token. Always false for Claude. */
   deviceSignIn: z.boolean(),
-  models: z.array(z.object({ slug: z.string(), label: z.string() })),
 });
-const tokenBody = z.strictObject({ token: z.string().min(1).max(1000) });
+/** Without `connectionId`, a sign-in adds an account or replaces the one with the same account. */
+const targetBody = z.strictObject({ connectionId: uuidSchema.optional() });
+const tokenBody = z.strictObject({ token: z.string().min(1).max(1000), connectionId: uuidSchema.optional() });
+const codeBody = z.strictObject({ code: z.string().min(1).max(4096) });
+const signInSchema = z.object({ attemptId: z.uuid(), authorizeUrl: z.string(), expiresInSeconds: z.number() });
 const githubAccountBody = z.strictObject({ accountId: uuidSchema });
 const deviceSchema = z.object({
   attemptId: z.uuid(),
@@ -143,6 +154,8 @@ const statuses: Record<string, number> = {
   'token-rejected': 409,
   'not-eligible': 409,
   'device-sign-in-unavailable': 409,
+  'too-many-accounts': 409,
+  'code-invalid': 400,
   'authorization-declined': 409,
   'authorization-failed': 409,
   'rate-limited': 429,
@@ -229,9 +242,40 @@ export function registerTokenPlan(
       },
       async request => {
         const { workspaceId } = workspaceParams.parse(request.params);
-        return withDevice(await plan.connectToken(workspaceId, user(request), tokenBody.parse(request.body).token));
+        const { token, connectionId } = tokenBody.parse(request.body);
+        return withDevice(await plan.connectToken(workspaceId, user(request), token, connectionId));
       },
     );
+    if (provider === 'claude') {
+      routes.post(
+        `${base}/begin`,
+        {
+          schema: {
+            ...schema('begin$SignIn', signInSchema),
+            params: json(workspaceParams),
+            body: json(targetBody),
+          },
+        },
+        async request => {
+          const { workspaceId } = workspaceParams.parse(request.params);
+          return plan.beginSignIn(workspaceId, user(request), targetBody.parse(request.body ?? {}).connectionId);
+        },
+      );
+      routes.post(
+        `${base}/complete`,
+        {
+          schema: {
+            ...schema('complete$SignIn', connectionSchema),
+            params: json(workspaceParams),
+            body: json(codeBody),
+          },
+        },
+        async request => {
+          const { workspaceId } = workspaceParams.parse(request.params);
+          return withDevice(await plan.completeSignIn(workspaceId, user(request), codeBody.parse(request.body).code));
+        },
+      );
+    }
     if (provider === 'copilot') {
       routes.post(
         `${base}/github-account`,
@@ -251,8 +295,19 @@ export function registerTokenPlan(
       );
       routes.post(
         `${base}/device`,
-        { schema: { ...schema('begin$DeviceSignIn', deviceSchema), params: json(workspaceParams) } },
-        async request => plan.beginDevice(workspaceParams.parse(request.params).workspaceId, user(request)),
+        {
+          schema: {
+            ...schema('begin$DeviceSignIn', deviceSchema),
+            params: json(workspaceParams),
+            body: json(targetBody),
+          },
+        },
+        async request =>
+          plan.beginDevice(
+            workspaceParams.parse(request.params).workspaceId,
+            user(request),
+            targetBody.parse(request.body ?? {}).connectionId,
+          ),
       );
       routes.get(
         `${base}/attempts/:attemptId`,
@@ -264,9 +319,12 @@ export function registerTokenPlan(
       );
     }
     routes.post(
-      `${base}/disconnect`,
-      { schema: { ...schema('disconnect$', disconnectSchema), params: json(workspaceParams) } },
-      async request => plan.disconnect(workspaceParams.parse(request.params).workspaceId, user(request)),
+      `${base}/:connectionId/disconnect`,
+      { schema: { ...schema('disconnect$', disconnectSchema), params: json(connectionParams) } },
+      async request => {
+        const { workspaceId, connectionId } = connectionParams.parse(request.params);
+        return plan.disconnect(workspaceId, user(request), connectionId);
+      },
     );
   });
 }

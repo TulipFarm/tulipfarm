@@ -62,7 +62,9 @@ export function GitHubSelectionForm({
   footerTarget: HTMLElement | null;
 }) {
   const formId = useId();
-  const [accountId, setAccountId] = useState(accounts[0]?.id ?? '');
+  const [accountId, setAccountId] = useState(
+    (accounts.find(account => account.primaryForKnowledge) ?? accounts[0])?.id ?? '',
+  );
   const [pendingAccount, setPendingAccount] = useState<string | null>(null);
   const [selected, setSelected] = useState<GitHubRepositoryChoice[]>([]);
   const [mode, setMode] = useState<'all' | 'chosen'>('all');

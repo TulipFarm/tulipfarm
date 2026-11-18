@@ -20,6 +20,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@tulipfarm/sprout/toolt
 import type { PlanProvider } from '@/features/models/chatgpt-plan-api';
 import type { ComposerModel } from './composer';
 import { planUsageStatus } from './plan-usage';
+import type { PlanAccountChoice } from './plan-account';
 
 /** Where a model runs: one of the member's own plans, or the workspace's credits. */
 export type ModelSource = PlanProvider | 'credits';
@@ -108,13 +109,15 @@ type Props = {
   models: readonly ComposerModel[];
   disabled: boolean;
   onModelChange: (id: string) => void;
+  /** The plan account the selected plan model answers with first; listed when the member has several on for chats. */
+  account?: PlanAccountChoice | undefined;
 };
 
 /**
  * The composer's model menu. Each model is listed once; when more than one source offers it, such as the member's
  * Claude plan, their GitHub Copilot plan and workspace credits, a submenu picks where it runs.
  */
-export function ModelPicker({ model, models, disabled, onModelChange }: Props) {
+export function ModelPicker({ model, models, disabled, onModelChange, account }: Props) {
   const groups = groupModels(models);
   const planGroups = groups.filter(group => group.offers.some(offer => offer.plan));
   const creditGroups = groups.filter(group => !group.offers.some(offer => offer.plan));
@@ -127,6 +130,8 @@ export function ModelPicker({ model, models, disabled, onModelChange }: Props) {
       groups.some(group => group.offers.length > 1 && group.offers.some(offer => offer.id === model!.id)))
       ? sources[source].name
       : null;
+  const accounts = model?.plan && account && account.options.length > 1 ? account : null;
+  const accountName = accounts?.options.find(option => option.id === accounts.value)?.label;
   const choose = (id: unknown) => onModelChange(String(id));
 
   // The right edge of every row holds at most one thing: a check, a chevron or "Paused".
@@ -246,7 +251,7 @@ export function ModelPicker({ model, models, disabled, onModelChange }: Props) {
                   size="md"
                   variant="ghost"
                   disabled={off}
-                  aria-label={`Model: ${model?.label ?? 'None'}${source ? `, on ${sources[source].name}` : ''}`}
+                  aria-label={`Model: ${model?.label ?? 'None'}${source ? `, on ${sources[source].name}` : ''}${accountName ? `, account ${accountName}` : ''}`}
                 />
               }
             />
@@ -259,7 +264,9 @@ export function ModelPicker({ model, models, disabled, onModelChange }: Props) {
             </span>
           )}
           <span className="max-w-20 truncate sm:max-w-40">{model?.label ?? 'Model'}</span>
-          {shownSource && <span className="hidden text-xs text-muted-foreground sm:inline">{`· ${shownSource}`}</span>}
+          {(accountName ?? shownSource) && (
+            <span className="hidden max-w-40 truncate text-xs text-muted-foreground sm:inline">{`· ${accountName ?? shownSource}`}</span>
+          )}
           <ChevronDown size={14} aria-hidden="true" />
         </TooltipTrigger>
         <TooltipContent>AI model that writes replies, and where it runs</TooltipContent>
@@ -268,6 +275,26 @@ export function ModelPicker({ model, models, disabled, onModelChange }: Props) {
         {section('Your plans', planGroups)}
         {planGroups.length > 0 && creditGroups.length > 0 && <DropdownMenuSeparator />}
         {section(planGroups.length > 0 ? 'Workspace credits' : 'Model', creditGroups)}
+        {accounts && model?.plan && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuGroup>
+              <DropdownMenuLabel>{`${sources[model.plan].name.replace(/ plan$/, '')} account`}</DropdownMenuLabel>
+              <DropdownMenuRadioGroup
+                value={accounts.value ?? ''}
+                onValueChange={value => {
+                  if (typeof value === 'string' && value) accounts.onChange(value);
+                }}
+              >
+                {accounts.options.map(option => (
+                  <DropdownMenuRadioItem key={option.id} value={option.id}>
+                    <span className="truncate">{option.label}</span>
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+            </DropdownMenuGroup>
+          </>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );

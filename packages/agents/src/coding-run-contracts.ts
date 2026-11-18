@@ -33,6 +33,8 @@ export const codingRunViewSchema = z.strictObject({
   digest: z.string(),
   /** Whether the run uses the member's own plan rather than one shared with them. */
   ownPlan: z.boolean(),
+  /** Login of the member's GitHub account the run clones with; null for runs proposed before it was stored. */
+  githubLogin: z.string().nullable(),
   status: z.enum(codingRunStatuses),
   expiresAt: z.string(),
   /** How a finished run ended, such as `completed` or `timed-out`. */

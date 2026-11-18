@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { AccessDenied } from '@tulipfarm/access';
 import { createTokenPlan, TokenPlanError } from '../dist/token-plans.js';
 import { fixture } from './fixture.mjs';
 
@@ -35,35 +36,34 @@ test(
         `${token.slice(0, 30)}\n  ${token.slice(30)}`,
       );
       assert.deepEqual(checked, [token]);
-      assert.deepEqual(status, { state: 'connected', account: 'owner@example.com', planUsage: true, models });
+      const [{ connectionId, createdAt, ...connected }] = status.connections;
+      assert.equal(status.connections.length, 1);
+      assert.ok(createdAt);
+      assert.deepEqual(connected, { state: 'connected', account: 'owner@example.com', planUsage: true, models });
 
       const [row] = await connections(db);
       assert.equal(row.owner_membership_id, db.actor.membershipId);
       assert.ok(row.credential.ciphertext);
       assert.ok(!JSON.stringify(row).includes(token.slice('sk-ant-oat01-'.length)));
-      assert.equal(await plan.accessToken(db.workspaceId, db.actor.membershipId), token);
+      assert.equal(await plan.accessToken(db.workspaceId, connectionId), token);
       assert.deepEqual(await plan.memberModels(db.workspaceId, db.actor.userId), [
         'claude-sonnet-5',
         'claude-haiku-4-5',
       ]);
 
-      assert.deepEqual(await plan.status(db.workspaceId, db.member.userId), {
-        state: 'not-connected',
-        account: null,
-        planUsage: false,
-        models: [],
-      });
+      assert.deepEqual(await plan.status(db.workspaceId, db.member.userId), { connections: [] });
       assert.deepEqual(await plan.memberModels(db.workspaceId, db.member.userId), []);
-      await plan.disconnect(db.workspaceId, db.member.userId);
-      assert.equal(await plan.accessToken(db.workspaceId, db.actor.membershipId), token);
+      await assert.rejects(plan.disconnect(db.workspaceId, db.member.userId, connectionId), AccessDenied);
+      assert.equal(await plan.accessToken(db.workspaceId, connectionId), token);
 
-      await plan.disconnect(db.workspaceId, db.actor.userId);
+      await plan.disconnect(db.workspaceId, db.actor.userId, connectionId);
       const [signedOut] = await connections(db);
       assert.equal(signedOut.state, 'signed-out');
       assert.equal(signedOut.credential, null);
-      assert.equal((await plan.status(db.workspaceId, db.actor.userId)).state, 'signed-out');
+      // A signed-out connection is no longer listed.
+      assert.deepEqual(await plan.status(db.workspaceId, db.actor.userId), { connections: [] });
       await assert.rejects(
-        plan.accessToken(db.workspaceId, db.actor.membershipId),
+        plan.accessToken(db.workspaceId, connectionId),
         error => error instanceof TokenPlanError && error.code === 'not-connected',
       );
     } finally {
@@ -92,7 +92,7 @@ test('a token the vendor refuses, or that is not a setup token, stores nothing',
       error => error instanceof TokenPlanError && error.code === 'token-invalid',
     );
     assert.deepEqual(await connections(db), []);
-    assert.equal((await plan.status(db.workspaceId, db.actor.userId)).state, 'not-connected');
+    assert.deepEqual(await plan.status(db.workspaceId, db.actor.userId), { connections: [] });
   } finally {
     await db.close();
   }
@@ -110,7 +110,7 @@ test(
       const fetchedAgo = () =>
         db.owner
           .query(
-            `SELECT EXTRACT(EPOCH FROM clock_timestamp()-models_fetched_at) AS seconds FROM ${db.table('tf_subscription_connections')}`,
+            `SELECT EXTRACT(EPOCH FROM clock_timestamp()-models_fetched_at) AS seconds FROM ${db.table('tf_subscription_connections')} WHERE state='connected'`,
           )
           .then(result => Number(result.rows[0].seconds));
       const expire = () =>
@@ -118,16 +118,17 @@ test(
           `UPDATE ${db.table('tf_subscription_connections')} SET models_fetched_at=clock_timestamp()-interval '2 hours'`,
         );
 
-      await plan.connectToken(db.workspaceId, db.actor.userId, token);
+      const [{ connectionId }] = (await plan.connectToken(db.workspaceId, db.actor.userId, token)).connections;
       assert.ok((await fetchedAgo()) < 60);
 
       await expire();
-      assert.deepEqual((await plan.status(db.workspaceId, db.actor.userId)).models, models);
+      assert.deepEqual((await plan.status(db.workspaceId, db.actor.userId)).connections[0].models, models);
       assert.ok((await fetchedAgo()) > 50 * 60);
 
       answers.push({ models: fallbackModels, fallback: true });
-      await plan.disconnect(db.workspaceId, db.actor.userId);
-      assert.deepEqual((await plan.connectToken(db.workspaceId, db.actor.userId, token)).models, fallbackModels);
+      await plan.disconnect(db.workspaceId, db.actor.userId, connectionId);
+      const reconnected = await plan.connectToken(db.workspaceId, db.actor.userId, token);
+      assert.deepEqual(reconnected.connections[0].models, fallbackModels);
       assert.ok((await fetchedAgo()) > 50 * 60);
     } finally {
       await db.close();

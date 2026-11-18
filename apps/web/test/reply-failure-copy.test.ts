@@ -5,6 +5,7 @@ import {
   fallbackNote,
   fallbackStarts,
   fallbackSummary,
+  planSwitchSummary,
   proposalKeptNote,
   replyFailure,
   replyRetrying,
@@ -275,4 +276,34 @@ test('a plan model says whose plan it runs on and what is left of it', () => {
     ['2026-01-02T11:59:30Z', '2026-01-02T11:15:00Z', '2025-12-30T12:00:00Z'].map(at => timeAgo(at, now)),
     ['just now', '45 min ago', '3 d ago'],
   );
+});
+
+test('a reply another plan account answered says which and why, naming accounts only for the sender', () => {
+  const ids = { from: '11111111-1111-4111-8111-111111111111', to: '22222222-2222-4222-8222-222222222222' };
+  const turn = (planSwitch: object | null, status = 'completed') =>
+    ({ id: ids.from, status, generation: 0, planSwitch }) as Parameters<typeof planSwitchSummary>[0];
+  const own = {
+    fromConnectionId: ids.from,
+    toConnectionId: ids.to,
+    fromAccount: 'ada@acme.co',
+    toAccount: 'bot@acme.co',
+  };
+  assert.deepEqual(planSwitchSummary(turn({ ...own, reason: 'usage-limit' })), {
+    to: 'bot@acme.co',
+    own: true,
+    short: 'ada@acme.co hit its usage limit',
+    detail: 'ada@acme.co hit its usage limit, so bot@acme.co answered instead.',
+  });
+  assert.equal(
+    planSwitchSummary(turn({ fromConnectionId: ids.from, toConnectionId: ids.to, reason: 'reconnect' }))?.detail,
+    'The chosen account needs reconnecting, so another account answered instead.',
+  );
+  assert.equal(planSwitchSummary(turn(null)), null);
+  assert.equal(planSwitchSummary(turn(own, 'processing')), null);
+
+  const messages = ['a', 'b', 'c'].flatMap(id => [
+    { id: `${id}-turn`, author: 'human', turn: turn(id === 'c' ? null : own) },
+    { id, author: 'assistant' },
+  ]);
+  assert.deepEqual([...fallbackStarts(messages as Parameters<typeof fallbackStarts>[0]).keys()], ['a']);
 });

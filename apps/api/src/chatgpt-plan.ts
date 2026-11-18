@@ -153,15 +153,23 @@ function loopbackListener(plan: ChatGptPlan, pool: Pool, log: FastifyBaseLogger)
 const errorSchema = z.object({ error: z.string() });
 const workspaceParams = z.strictObject({ workspaceId: uuidSchema });
 const attemptParams = workspaceParams.extend({ attemptId: uuidSchema });
+const connectionParams = workspaceParams.extend({ connectionId: uuidSchema });
 const modelSchema = z.object({ slug: z.string(), label: z.string() });
 const connectionSchema = z.object({
-  state: z.enum(['not-connected', 'connected', 'plan-disabled', 'reconnect-required', 'signed-out']),
-  email: z.string().nullable(),
-  planUsage: z.boolean(),
-  welcomePending: z.boolean(),
-  models: z.array(modelSchema),
+  connections: z.array(
+    z.object({
+      connectionId: z.uuid(),
+      state: z.enum(['not-connected', 'connected', 'plan-disabled', 'reconnect-required', 'signed-out']),
+      email: z.string().nullable(),
+      planUsage: z.boolean(),
+      welcomePending: z.boolean(),
+      models: z.array(modelSchema),
+      createdAt: z.string(),
+    }),
+  ),
 });
-const beginBody = z.strictObject({ mode: z.enum(chatGptConnectionModes) });
+/** Without `connectionId`, `connect` adds an account; with it, a reconnect targets that connection. */
+const beginBody = z.strictObject({ mode: z.enum(chatGptConnectionModes), connectionId: uuidSchema.optional() });
 const beginSchema = z.object({
   attemptId: z.uuid(),
   authorizeUrl: z.string(),
@@ -190,6 +198,8 @@ const statuses: Record<string, number> = {
   'not-connected': 409,
   'reconnect-required': 409,
   'plan-disabled': 409,
+  'account-mismatch': 409,
+  'too-many-accounts': 409,
   'rate-limited': 429,
   unavailable: 503,
 };
@@ -278,10 +288,10 @@ export function registerChatGptPlan(
       },
       async request => {
         const { workspaceId } = workspaceParams.parse(request.params);
-        const { mode } = beginBody.parse(request.body);
+        const { mode, connectionId } = beginBody.parse(request.body);
         const port = await loopback.open(10 * 60);
         const redirectUri = `http://127.0.0.1:${port ?? preferredPort}${callbackPath}`;
-        const started = await plan.begin(workspaceId, user(request), mode, redirectUri);
+        const started = await plan.begin(workspaceId, user(request), mode, redirectUri, connectionId);
         return {
           attemptId: started.attemptId,
           authorizeUrl: started.authorizeUrl,
@@ -311,17 +321,21 @@ export function registerChatGptPlan(
       },
     );
     routes.post(
-      `${base}/welcome`,
-      { schema: { ...schema('acknowledgeChatGptWelcomeV1', okSchema), params: json(workspaceParams) } },
+      `${base}/:connectionId/welcome`,
+      { schema: { ...schema('acknowledgeChatGptWelcomeV1', okSchema), params: json(connectionParams) } },
       async request => {
-        await plan.acknowledgeWelcome(workspaceParams.parse(request.params).workspaceId, user(request));
+        const { workspaceId, connectionId } = connectionParams.parse(request.params);
+        await plan.acknowledgeWelcome(workspaceId, user(request), connectionId);
         return { ok: true as const };
       },
     );
     routes.post(
-      `${base}/disconnect`,
-      { schema: { ...schema('disconnectChatGptV1', disconnectSchema), params: json(workspaceParams) } },
-      async request => plan.disconnect(workspaceParams.parse(request.params).workspaceId, user(request)),
+      `${base}/:connectionId/disconnect`,
+      { schema: { ...schema('disconnectChatGptV1', disconnectSchema), params: json(connectionParams) } },
+      async request => {
+        const { workspaceId, connectionId } = connectionParams.parse(request.params);
+        return plan.disconnect(workspaceId, user(request), connectionId);
+      },
     );
   });
 }

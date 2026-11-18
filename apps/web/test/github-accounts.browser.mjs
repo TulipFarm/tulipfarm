@@ -34,6 +34,10 @@ let beginCalls = 0,
 let accessLost = false,
   configured = true;
 const errors = [];
+const eventuallyUnchecked = async control => {
+  for (let attempt = 0; attempt < 100 && (await control.isChecked()); attempt++) await setTimeout(50);
+  assert.equal(await control.isChecked(), false);
+};
 const workspace = {
   id: f.one.id,
   slug: 'github-proof',
@@ -129,29 +133,38 @@ try {
   });
   const accountsPath = `/${workspace.slug}/integrations/github?tab=accounts`;
   const open = () => page.goto(origin + accountsPath);
-  const logins = page.getByRole('region', { name: 'GitHub logins' });
+  const logins = page.getByRole('region', { name: 'Accounts', exact: true });
+  const accountsTab = page.getByRole('tablist', { name: 'GitHub sections' }).getByRole('tab', { name: 'Accounts' });
+  const connect = page.getByRole('button', { name: 'Connect GitHub', exact: true });
   listDelay = 800;
   await open();
-  await page.getByText('Loading GitHub accounts…').waitFor({ state: 'attached' });
-  assert.equal(await page.getByText('No personal GitHub accounts', { exact: true }).count(), 0);
-  await page.getByText('No personal GitHub accounts', { exact: true }).waitFor();
+  // Until a login is connected, the header's Connect is the one action and there is no Accounts tab.
+  await page.getByRole('tab', { name: 'Overview' }).waitFor();
+  assert.equal(await connect.count(), 0);
+  await connect.waitFor();
+  assert.equal(await accountsTab.count(), 0);
   listDelay = 0;
   configured = false;
   await page.reload();
-  await page.getByRole('heading', { name: 'GitHub is not configured' }).waitFor();
-  assert.equal(await page.getByRole('button', { name: 'Connect GitHub account', exact: true }).count(), 0);
+  await page.getByText('Not set up on this server').first().waitFor();
+  assert.equal(await connect.count(), 0);
+  assert.equal(await accountsTab.count(), 0);
   configured = true;
   failList = true;
   await page.reload();
-  await page.getByRole('heading', { name: 'Could not load GitHub accounts' }).waitFor();
-  await logins.getByRole('button', { name: 'Check again', exact: true }).click();
+  // With no logins read yet, the summary reports the failure and offers Check again.
+  const summaryError = page.getByRole('main').getByText('Check again', { exact: true });
+  await summaryError.waitFor();
+  assert.equal(await accountsTab.count(), 0);
+  await summaryError.click();
   await setTimeout(4000);
-  await page.getByRole('heading', { name: 'Could not load GitHub accounts' }).waitFor();
+  await summaryError.waitFor();
   failList = false;
-  await logins.getByRole('button', { name: 'Check again', exact: true }).click();
-  await page.getByText('No personal GitHub accounts', { exact: true }).waitFor();
+  await summaryError.click();
+  await connect.waitFor();
+  assert.equal(await accountsTab.count(), 0);
   consentDelay = 600;
-  await page.getByRole('button', { name: 'Connect GitHub account', exact: true }).dblclick();
+  await connect.dblclick();
   await page.getByRole('heading', { name: 'Connected @octocat' }).waitFor();
   assert.equal(beginCalls, 1);
   assert.equal(callbackCalls, 1);
@@ -160,25 +173,40 @@ try {
   await page.getByText('@octocat', { exact: true }).waitFor();
   assert.equal(new URL(page.url()).pathname + new URL(page.url()).search, accountsPath);
   f.setProfile({ id: 456, login: 'second-person' });
-  await page.getByRole('button', { name: 'Connect another login', exact: true }).click();
+  await page.getByRole('button', { name: 'Add another account', exact: true }).click();
   await page.getByRole('heading', { name: 'Connected @second-person' }).waitFor();
   await page.getByRole('link', { name: 'Return to GitHub accounts' }).click();
   await page.getByText('@octocat', { exact: true }).waitFor();
   await page.getByText('@second-person', { exact: true }).waitFor();
   assert.equal((await f.service.list(f.one.id, f.member.userId)).accounts.length, 2);
+  const knowledge = page.getByRole('radiogroup', { name: 'Login for Knowledge imports' });
+  assert.equal(await knowledge.getByRole('radio', { name: 'Use @octocat for Knowledge imports' }).isChecked(), true);
   failList = true;
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
   await setTimeout(300);
-  assert.equal(await page.getByText(/Account status may be stale/).count(), 0);
-  await logins.getByRole('button', { name: 'Check again', exact: true }).click();
-  await page.getByText(/Account status may be stale/).waitFor();
+  assert.equal(await page.getByRole('heading', { name: 'Could not load GitHub accounts' }).count(), 0);
+  // The choice saves; when the list read after it fails, the Accounts tab stays open with Check again.
+  await knowledge.getByRole('radio', { name: 'Use @second-person for Knowledge imports' }).click();
+  await page.getByRole('heading', { name: 'Could not load GitHub accounts' }).waitFor();
+  assert.equal(await accountsTab.getAttribute('aria-selected'), 'true');
   assert.equal(
-    await page.getByRole('list', { name: 'GitHub accounts' }).getByText('@octocat', { exact: true }).isVisible(),
-    true,
+    (await f.service.list(f.one.id, f.member.userId)).accounts.find(account => account.primaryForKnowledge)?.identity
+      .login,
+    'second-person',
   );
   failList = false;
   await logins.getByRole('button', { name: 'Check again', exact: true }).click();
-  await page.getByText(/Account status may be stale/).waitFor({ state: 'hidden' });
+  await knowledge.getByRole('radio', { name: 'Use @second-person for Knowledge imports', checked: true }).waitFor();
+  // Turning a use off saves only that use.
+  const octocatChat = logins.getByRole('switch', { name: 'Use @octocat for chat', exact: true });
+  assert.equal(await octocatChat.isChecked(), true);
+  await octocatChat.click();
+  await eventuallyUnchecked(octocatChat);
+  const octocat = (await f.service.list(f.one.id, f.member.userId)).accounts.find(
+    account => account.identity.id === '123',
+  );
+  assert.deepEqual([octocat.useForChat, octocat.useForCoding, octocat.primaryForKnowledge], [false, true, false]);
+  assert.equal(await accountsTab.getAttribute('aria-selected'), 'true');
   failDisconnect = true;
   await page.getByRole('button', { name: 'Disconnect @octocat', exact: true }).click();
   await page.getByText(/The result could not be confirmed/).waitFor();
@@ -218,8 +246,10 @@ try {
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
   await page.screenshot({ path: '/tmp/github-accounts-mobile-dark.png', fullPage: true });
   accessLost = true;
-  await logins.getByRole('button', { name: 'Check again', exact: true }).click();
-  await page.getByRole('heading', { name: 'GitHub account access unavailable' }).waitFor();
+  await page.reload();
+  await page
+    .getByText('Status is unavailable to your current membership. Check your workspace access.', { exact: true })
+    .waitFor();
   assert.equal(await page.getByText('@renamed-octocat', { exact: true }).count(), 0);
   accessLost = false;
   callbackStatus = 400;

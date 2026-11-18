@@ -66,7 +66,7 @@ function fakeServices(overrides = {}) {
       enabled: async () => true,
       hasPlan: async () => true,
       plan: async () => ({ connectionId: randomUUID(), ownerMembershipId: actor.membershipId, token: planToken }),
-      github: async () => githubToken,
+      github: async () => ({ token: githubToken, login: 'octocat' }),
       propose: async (_workspaceId, run) => void proposals.push(run),
       ...overrides,
     },
@@ -136,9 +136,9 @@ test('Without an eligible plan the member is told to connect one, and nothing ru
   const { backend, calls } = fakeBackend();
   const { services, proposals } = fakeServices({ plan: async () => null });
   for (const [agent, message] of [
-    ['claude-code', 'Connect your Claude plan in Settings → Models to use Claude Code.'],
-    ['codex', 'Connect your ChatGPT plan in Settings → Models to use Codex.'],
-    ['copilot', 'Connect your GitHub Copilot plan in Settings → Models to use Copilot CLI.'],
+    ['claude-code', 'Connect your Claude plan in Settings → Models and turn on Use for coding to use Claude Code.'],
+    ['codex', 'Connect your ChatGPT plan in Settings → Models and turn on Use for coding to use Codex.'],
+    ['copilot', 'Connect your GitHub Copilot plan in Settings → Models and turn on Use for coding to use Copilot CLI.'],
   ]) {
     assert.equal(planRequiredMessage(agent), message);
     assert.deepEqual(await createCodingRuns(backend, configuration, services).run(context(), { ...call, agent }), {
@@ -169,6 +169,7 @@ test('Asking only records the run for approval; nothing starts until it is execu
       agent: 'claude-code',
       task: 'Fix the failing test',
       planOwnerMembershipId: actor.membershipId,
+      githubLogin: 'octocat',
       digest: undefined,
     },
   );
@@ -189,12 +190,12 @@ test('An approved run does not start when the plan behind it changed', async () 
   assert.equal(calls.length, 0);
 });
 
-test('A chat without a selected GitHub account is asked to choose one before the machine starts', async () => {
+test('A member without a GitHub account on for coding is asked to turn one on before the machine starts', async () => {
   const { backend, calls } = fakeBackend();
   const { services, proposals } = fakeServices({ github: async () => null });
   const result = await createCodingRuns(backend, configuration, services).run(context(), call);
   assert.equal(result.status, 'github-account-required');
-  assert.match(result.instruction, /github\.personal\.account/);
+  assert.match(result.instruction, /Use for coding/);
   assert.equal(proposals.length, 0);
   assert.equal(calls.length, 0);
 });

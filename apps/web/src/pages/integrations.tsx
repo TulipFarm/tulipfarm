@@ -2,7 +2,6 @@ import { cloneElement, useEffect, useId, useMemo, useRef, useState, type ReactEl
 import { Link, Navigate, useLinkProps, useLocation, useNavigate } from '@tanstack/react-router';
 import { Add } from 'reicon-react/icons/Add';
 import { InfoCircle } from 'reicon-react/icons/InfoCircle';
-import { Search } from 'reicon-react/icons/Search';
 import { Plug } from 'reicon-react/icons/Plug';
 import { Alert, AlertDescription } from '@tulipfarm/sprout/alert';
 import { Badge } from '@tulipfarm/sprout/badge';
@@ -27,7 +26,14 @@ import { connector } from '@/features/integrations/connect';
 import { actionFor, tabsFor } from '@/features/integrations/integration-state';
 import { mcpAppById, mcpAppForEndpoint, mcpApps, mcpPagePrefix, type McpApp } from '@/features/integrations/mcp-apps';
 import { useIntegrationChanges } from '@/features/integrations/queries';
-import { notSetUp, statusOf, useIntegrationStatus, type Status, type Statuses } from '@/features/integrations/status';
+import {
+  notSetUp,
+  notYet,
+  statusOf,
+  useIntegrationStatus,
+  type Status,
+  type Statuses,
+} from '@/features/integrations/status';
 import { WorkspaceRefreshNotice } from '@/features/integrations/workspace-refresh';
 import type { McpApi } from '@/features/workspace-mcp/api';
 import { useOwnershipChoice } from '@/features/workspace-mcp/app-page';
@@ -44,6 +50,15 @@ import { useFlag } from '@/lib/feature-flags';
 import { integrationsRoute, workspaceRoute } from '@/router';
 
 const available = integrations.filter(app => app.provider !== 'soon');
+/** The built-in apps this member can see: plan apps show only while their flag is on. */
+function useAvailableApps() {
+  const chatgpt = useFlag('chatgpt-plan');
+  const claude = useFlag('claude-plan');
+  return useMemo(
+    () => available.filter(app => (app.provider !== 'chatgpt' || chatgpt) && (app.provider !== 'claude' || claude)),
+    [chatgpt, claude],
+  );
+}
 // A 'soon' app whose maker now runs an MCP server is listed from the catalog instead.
 const upcoming = (app: Integration) => app.provider === 'soon' && !mcpAppById(app.id);
 export const isConnected = (status: Status | null) => status?.kind === 'connected' || status?.kind === 'installed';
@@ -86,14 +101,8 @@ type Entry =
   | { kind: 'app'; app: Integration }
   | { kind: 'curated'; app: McpApp }
   | { kind: 'server'; server: McpIntegration };
-type View = 'all' | 'connected' | 'attention' | 'available';
-type Group = Exclude<View, 'all'> | 'soon';
-const views: { value: View; label: string }[] = [
-  { value: 'all', label: 'All' },
-  { value: 'connected', label: 'Connected' },
-  { value: 'attention', label: 'Needs attention' },
-  { value: 'available', label: 'Available' },
-];
+type View = 'yours' | 'browse';
+type Group = 'connected' | 'attention' | 'available' | 'soon';
 function groupOf(entry: Entry, statuses: Statuses): Group {
   if (entry.kind === 'server') return mcpNeedsAttention(entry.server) ? 'attention' : 'connected';
   if (entry.kind === 'curated') return 'available';
@@ -102,6 +111,7 @@ function groupOf(entry: Entry, statuses: Statuses): Group {
   return needsAttention(status) ? 'attention' : isConnected(status) ? 'connected' : 'available';
 }
 const directoryPatience = 800;
+const turnedOff = 'Connecting apps is turned off here. Your workspace admins can’t change this.';
 const entryKey = (entry: Entry) => (entry.kind === 'server' ? entry.server.id : `${entry.kind}:${entry.app.id}`);
 const entryText = (entry: Entry) =>
   entry.kind === 'server'
@@ -125,16 +135,12 @@ function useMcpDirectory(workspaceId: string) {
 function IntegrationsContent({ workspaceId, slug }: { workspaceId: string; slug: string }) {
   const { workspaceStale, membership } = workspaceRoute.useRouteContext();
   const { returnChat, view: viewParam } = integrationsRoute.useSearch();
-  const { statuses, refresh, refreshing } = useIntegrationStatus(workspaceId);
+  const { statuses, refresh, refreshing } = useIntegrationStatus(workspaceId, undefined, true);
+  const apps = useAvailableApps();
   const navigate = useNavigate();
   const mcp = useMcpDirectory(workspaceId);
   const [query, setQuery] = useState('');
-  const [opened, setOpened] = useState(false);
-  const searching = opened || !!query;
   const searchId = useId();
-  useEffect(() => {
-    if (opened) document.getElementById(searchId)?.focus();
-  }, [opened, searchId]);
   const [setup, setSetup] = useState<Setup>(null);
   const hosted = useFlag('hosted-mcp') && !!mcp.capabilities?.hosted;
   const admin = membership?.role === 'admin';
@@ -150,18 +156,18 @@ function IntegrationsContent({ workspaceId, slug }: { workspaceId: string; slug:
   const holding = loading && patient && !needle;
   // Only providers with an app in the directory can be named in the notice.
   const errors = Object.entries(statuses).flatMap(([provider, status]) => {
-    const names = available.filter(app => app.provider === provider).map(app => app.name);
+    const names = apps.filter(app => app.provider === provider).map(app => app.name);
     return status.kind === 'error' && names.length ? [{ provider, names, detail: status.detail }] : [];
   });
   const checking = refreshing || mcp.refreshing;
   const servers = mcp.servers;
 
-  // One list, no categories: what needs attention, then what's connected, then everything else.
+  // What needs attention, then what's connected, then everything else.
   const entries = useMemo((): Entry[] => {
     const app = (item: Integration) => ({ kind: 'app', app: item }) as const;
     const server = (item: McpIntegration) => ({ kind: 'server', server: item }) as const;
-    const attention = available.filter(item => needsAttention(statusOf(statuses, item)));
-    const connected = available.filter(item => isConnected(statusOf(statuses, item)));
+    const attention = apps.filter(item => needsAttention(statusOf(statuses, item)));
+    const connected = apps.filter(item => isConnected(statusOf(statuses, item)));
     const linked = new Set([...attention, ...connected]);
     const brands = new Set(servers.filter(item => item.canManage || item.canUse).map(item => brandOf(item)?.id));
     return [
@@ -169,42 +175,84 @@ function IntegrationsContent({ workspaceId, slug }: { workspaceId: string; slug:
       ...servers.filter(mcpNeedsAttention).map(server),
       ...connected.map(app),
       ...servers.filter(item => !mcpNeedsAttention(item)).map(server),
-      ...available.filter(item => !linked.has(item)).map(app),
+      ...apps.filter(item => !linked.has(item)).map(app),
       ...(mcp.capabilities ? mcpApps.filter(item => !brands.has(item.id)) : []).map(
         item => ({ kind: 'curated', app: item }) as const,
       ),
       ...integrations.filter(upcoming).map(app),
     ];
-  }, [statuses, servers, mcp.capabilities]);
-  // Earlier links used `?view=yours` for connected apps; category views now show everything.
-  const view: View =
-    viewParam === 'yours' ? 'connected' : (views.find(item => item.value === viewParam)?.value ?? 'all');
-  const setView = (value: View) =>
-    void navigate({
-      to: '.',
-      search: previous => ({ ...previous, view: value === 'all' ? undefined : value }),
-      replace: true,
-    });
-  // While searching, the tab counts are of the matching apps.
+  }, [apps, statuses, servers, mcp.capabilities]);
+  // While searching, both tabs and their counts show only the matching apps.
   const matching = useMemo(
     () => (needle ? entries.filter(entry => entryText(entry).toLowerCase().includes(needle)) : entries),
     [needle, entries],
   );
-  const groups = useMemo(() => {
-    const counts: Record<View, number> = { all: matching.length, connected: 0, attention: 0, available: 0 };
-    const group = new Map<Entry, Group>();
+  // Your apps: connected or needing attention. Browse: what this member can connect, then what nobody here can.
+  const sorted = useMemo(() => {
+    const integrationsEnabled = !!mcp.capabilities?.integrationsEnabled;
+    const blocked = (entry: Entry) => {
+      if (entry.kind === 'curated') return !integrationsEnabled;
+      if (entry.kind !== 'app') return false;
+      const status = statusOf(statuses, entry.app);
+      return status?.kind === 'unavailable' || actionFor(entry.app, status, admin).kind === 'none';
+    };
+    const yours: Entry[] = [];
+    const connectable: Entry[] = [];
+    const unavailable: Entry[] = [];
     for (const entry of matching) {
-      const value = groupOf(entry, statuses);
-      group.set(entry, value);
-      if (value !== 'soon') counts[value] += 1;
+      const group = groupOf(entry, statuses);
+      if (group === 'connected' || group === 'attention') yours.push(entry);
+      else if (group === 'soon' || blocked(entry)) unavailable.push(entry);
+      else connectable.push(entry);
     }
-    return { counts, group };
-  }, [matching, statuses]);
-  const shown = useMemo(
-    () => (view === 'all' ? matching : matching.filter(entry => groups.group.get(entry) === view)),
-    [view, matching, groups],
+    return { yours, connectable, unavailable };
+  }, [matching, statuses, admin, mcp.capabilities]);
+  const owned = useMemo(
+    () => entries.some(entry => ['connected', 'attention'].includes(groupOf(entry, statuses))),
+    [entries, statuses],
   );
-  const results = needle ? shown : [];
+  // Earlier links named the category views; the ones about your own apps open Your apps.
+  const linked: View | null =
+    viewParam === 'browse' || viewParam === 'available'
+      ? 'browse'
+      : viewParam && ['yours', 'connected', 'attention'].includes(viewParam)
+        ? 'yours'
+        : null;
+  // With nothing connected there's no Your apps tab, so the page is just Browse.
+  const tabbed = holding || owned;
+  const view: View = tabbed ? (linked ?? 'yours') : 'browse';
+  const setView = (value: View) =>
+    void navigate({ to: '.', search: previous => ({ ...previous, view: value }), replace: true });
+  const renderEntry = (entry: Entry) =>
+    entry.kind === 'app' ? (
+      <AppRow
+        app={entry.app}
+        status={statusOf(statuses, entry.app)}
+        workspaceId={workspaceId}
+        slug={slug}
+        admin={admin}
+        returnChat={returnChat}
+      />
+    ) : entry.kind === 'curated' && mcp.capabilities ? (
+      <CuratedRow
+        app={entry.app}
+        api={mcp.api}
+        capabilities={mcp.capabilities}
+        slug={slug}
+        returnChat={returnChat}
+        refresh={mcp.refresh}
+      />
+    ) : entry.kind === 'server' && mcp.capabilities ? (
+      <ServerRow
+        server={entry.server}
+        api={mcp.api}
+        capabilities={mcp.capabilities}
+        slug={slug}
+        returnChat={returnChat}
+        refresh={mcp.refresh}
+      />
+    ) : null;
+  const searched = `“${query.trim()}”`;
 
   return (
     <PageContent>
@@ -285,29 +333,22 @@ function IntegrationsContent({ workspaceId, slug }: { workspaceId: string; slug:
             )}
             <Tabs value={view} onValueChange={value => setView(value as View)}>
               {/* Tabs and search stay in reach while the list scrolls. */}
-              <div className="sticky top-0 z-20 -mx-4 flex flex-col gap-2 bg-background px-4 pb-2 lg:flex-row lg:items-center lg:justify-between lg:gap-3">
-                <div className="flex min-w-0 items-center gap-1">
-                  <div className="scrollbar-none -mx-1 min-w-0 flex-1 overflow-x-auto px-1">
-                    <TabsList variant="line" aria-label="Show apps">
-                      {views.map(item => (
-                        <TabsTrigger key={item.value} value={item.value}>
-                          {item.label}
-                          {!holding && (
-                            <span className="text-muted-foreground tabular-nums"> {groups.counts[item.value]}</span>
-                          )}
-                        </TabsTrigger>
-                      ))}
-                    </TabsList>
-                  </div>
-                  {!searching && (
-                    <span className="lg:hidden">
-                      <Button variant="ghost" size="icon-sm" aria-label="Search apps" onClick={() => setOpened(true)}>
-                        <Search aria-hidden="true" />
-                      </Button>
-                    </span>
-                  )}
-                </div>
-                <div className={`w-full lg:block lg:max-w-xs ${searching ? 'block' : 'hidden'}`}>
+              <div className="sticky top-0 z-20 -mx-4 flex flex-col gap-2 bg-background px-4 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+                {tabbed && (
+                  <TabsList aria-label="Show apps">
+                    <TabsTrigger value="yours">
+                      Your apps
+                      {!holding && <span className="text-muted-foreground tabular-nums"> {sorted.yours.length}</span>}
+                    </TabsTrigger>
+                    <TabsTrigger value="browse">
+                      Browse
+                      {!holding && (
+                        <span className="text-muted-foreground tabular-nums"> {sorted.connectable.length}</span>
+                      )}
+                    </TabsTrigger>
+                  </TabsList>
+                )}
+                <div className={tabbed ? 'w-full sm:max-w-xs' : 'w-full sm:max-w-md'}>
                   <SearchField
                     id={searchId}
                     label="Search apps"
@@ -317,105 +358,94 @@ function IntegrationsContent({ workspaceId, slug }: { workspaceId: string; slug:
                   />
                 </div>
               </div>
-              <TabsContent value={view}>
-                {/* Room under the last row, so the floating chat button never covers it. */}
-                <section aria-label={needle ? 'Search results' : 'Apps'} className="space-y-3 pb-24">
-                  {holding ? (
-                    <DirectorySkeleton />
-                  ) : (
-                    shown.length > 0 && (
-                      <ul className={gridClass}>
-                        {shown.map(entry => (
-                          <li key={entryKey(entry)}>
-                            {entry.kind === 'app' ? (
-                              <AppRow
-                                app={entry.app}
-                                status={statusOf(statuses, entry.app)}
-                                workspaceId={workspaceId}
-                                slug={slug}
-                                admin={admin}
-                                returnChat={returnChat}
-                              />
-                            ) : entry.kind === 'curated' && mcp.capabilities ? (
-                              <CuratedRow
-                                app={entry.app}
-                                api={mcp.api}
-                                capabilities={mcp.capabilities}
-                                slug={slug}
-                                returnChat={returnChat}
-                                refresh={mcp.refresh}
-                              />
-                            ) : entry.kind === 'server' && mcp.capabilities ? (
-                              <ServerRow
-                                server={entry.server}
-                                api={mcp.api}
-                                capabilities={mcp.capabilities}
-                                slug={slug}
-                                returnChat={returnChat}
-                                refresh={mcp.refresh}
-                              />
-                            ) : null}
+              {holding ? (
+                <div className="pt-2">
+                  <DirectorySkeleton />
+                </div>
+              ) : (
+                <>
+                  <TabsContent value="yours">
+                    {sorted.yours.length > 0 ? (
+                      <ul aria-label="Your apps" className="grid gap-3 pt-2 lg:grid-cols-2">
+                        {sorted.yours.map(entry => (
+                          <li key={entryKey(entry)} className="min-w-0 rounded-2xl border bg-card">
+                            {renderEntry(entry)}
                           </li>
                         ))}
                       </ul>
-                    )
-                  )}
-                  {!holding && !needle && !shown.length && view !== 'all' && (
-                    <StatePanel
-                      kind="empty"
-                      heading="h3"
-                      icon={Plug}
-                      title={
-                        view === 'connected'
-                          ? 'No apps connected yet'
-                          : view === 'attention'
-                            ? 'Nothing needs attention'
-                            : 'Every app is connected'
-                      }
-                      description={
-                        view === 'attention'
-                          ? 'Every connected app is working.'
-                          : 'See all apps to find one to connect.'
-                      }
-                    >
-                      <Button variant="outline" onClick={() => setView('all')}>
-                        See all apps
-                      </Button>
-                    </StatePanel>
-                  )}
-                  {holding ? null : mcp.capabilities && view === 'all' ? (
-                    <McpMore
-                      api={mcp.api}
-                      capabilities={mcp.capabilities}
-                      slug={slug}
-                      query={needle}
-                      found={results.length > 0}
-                      clear={() => setQuery('')}
-                      setup={setSetup}
-                    />
-                  ) : (
-                    needle &&
-                    !results.length && (
+                    ) : (
                       <StatePanel
                         kind="empty"
                         heading="h3"
                         icon={Plug}
-                        title={`No apps match “${query.trim()}”`}
-                        description={
-                          view === 'all'
-                            ? 'Try another name or clear your search.'
-                            : 'Try another name, or search all apps.'
-                        }
+                        title={`None of your apps match ${searched}`}
+                        description="Try Browse to find apps you haven’t connected."
                       >
-                        <Button variant="outline" onClick={() => (view === 'all' ? setQuery('') : setView('all'))}>
-                          {view === 'all' ? 'Clear search' : 'Search all apps'}
+                        <Button variant="outline" onClick={() => setView('browse')}>
+                          Search Browse
                         </Button>
                       </StatePanel>
-                    )
-                  )}
-                </section>
-              </TabsContent>
+                    )}
+                  </TabsContent>
+                  <TabsContent value="browse">
+                    <div className="space-y-8 pt-2">
+                      {sorted.connectable.length > 0 ? (
+                        <ul aria-label={needle ? 'Search results' : 'Apps you can connect'} className={gridClass}>
+                          {sorted.connectable.map(entry => (
+                            <li key={entryKey(entry)}>{renderEntry(entry)}</li>
+                          ))}
+                        </ul>
+                      ) : (
+                        !needle && (
+                          <p className="text-sm text-muted-foreground">You’ve connected every app available to you.</p>
+                        )
+                      )}
+                      {sorted.unavailable.length > 0 && (
+                        <section aria-labelledby="section-unavailable" className="space-y-2">
+                          <h2 id="section-unavailable" className="text-sm font-medium text-muted-foreground">
+                            Not available to connect
+                          </h2>
+                          <ul className={gridClass}>
+                            {sorted.unavailable.map(entry => (
+                              <li key={entryKey(entry)}>{renderEntry(entry)}</li>
+                            ))}
+                          </ul>
+                        </section>
+                      )}
+                      {mcp.capabilities ? (
+                        <McpMore
+                          api={mcp.api}
+                          capabilities={mcp.capabilities}
+                          slug={slug}
+                          query={needle}
+                          found={sorted.connectable.length + sorted.unavailable.length > 0}
+                          clear={() => setQuery('')}
+                          setup={setSetup}
+                        />
+                      ) : (
+                        needle &&
+                        !sorted.connectable.length &&
+                        !sorted.unavailable.length && (
+                          <StatePanel
+                            kind="empty"
+                            heading="h3"
+                            icon={Plug}
+                            title={`No apps match ${searched}`}
+                            description="Try another name or clear your search."
+                          >
+                            <Button variant="outline" onClick={() => setQuery('')}>
+                              Clear search
+                            </Button>
+                          </StatePanel>
+                        )
+                      )}
+                    </div>
+                  </TabsContent>
+                </>
+              )}
             </Tabs>
+            {/* Room under the last section, so the floating chat button never covers it. */}
+            <div aria-hidden="true" className="h-18" />
           </div>
         </fieldset>
       </div>
@@ -621,7 +651,7 @@ function RegistryRow({
         link={null}
         actions={
           disabled ? (
-            <Unavailable label="Turned off" reason="Connecting apps is turned off on this server." />
+            <Unavailable label="Turned off" reason={turnedOff} />
           ) : oneClick && !failed ? (
             <Start
               label={flow.command.busy ? 'Connecting…' : 'Connect'}
@@ -630,7 +660,7 @@ function RegistryRow({
               onClick={choice.start}
             />
           ) : (
-            <Button variant="ghost" size="sm" aria-label={`Set up ${readableName(entry.name)}`} onClick={setUp}>
+            <Button variant="outline" size="sm" aria-label={`Set up ${readableName(entry.name)}`} onClick={setUp}>
               Set up
             </Button>
           )
@@ -671,6 +701,7 @@ function Row({
   link,
   title,
   actions,
+  connected = false,
 }: {
   icon: ReactNode;
   name: string;
@@ -679,14 +710,22 @@ function Row({
   tone?: Tone;
   link: LinkProps | null;
   actions?: ReactNode;
+  connected?: boolean;
 }) {
+  // A word beside the mark, so the state never rests on colour alone.
+  const state =
+    tone === 'warning'
+      ? { mark: 'warning' as const, label: 'Needs attention', text: 'text-warning' }
+      : connected && tone !== 'error'
+        ? { mark: 'success' as const, label: 'Connected', text: 'text-primary-text' }
+        : null;
   return (
     <div
       className={`app-row relative flex h-16 items-center gap-3 rounded-2xl px-4 transition-colors sm:h-20 sm:gap-4 ${link ? 'hover:bg-muted/60' : ''}`}
     >
       <span className="relative shrink-0">
         {icon}
-        {tone !== 'muted' && (
+        {tone !== 'muted' && !state && (
           <span className="absolute -top-1 -right-1 flex rounded-full bg-background p-0.5">
             <StatusMark state={tone} size="sm" aria-hidden="true" tooltip={false} />
           </span>
@@ -705,12 +744,21 @@ function Row({
             {name}
           </span>
         )}
-        <span
-          className={`block truncate text-sm ${tone === 'error' ? 'text-destructive' : 'text-muted-foreground'}`}
-          title={description}
-        >
-          {description}
-        </span>
+        {state ? (
+          <span className="flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground" title={description}>
+            <StatusMark state={state.mark} size="sm" aria-hidden="true" tooltip={false} />
+            <span className={`shrink-0 font-medium ${state.text}`}>{state.label}</span>
+            <span aria-hidden="true">·</span>
+            <span className="truncate">{description}</span>
+          </span>
+        ) : (
+          <span
+            className={`block truncate text-sm ${tone === 'error' ? 'text-destructive' : 'text-muted-foreground'}`}
+            title={description}
+          >
+            {description}
+          </span>
+        )}
       </span>
       {actions && <span className="relative z-10 flex shrink-0 items-center whitespace-nowrap">{actions}</span>}
     </div>
@@ -805,7 +853,7 @@ function Configure({
   id,
   name,
   tab,
-  label = 'Configure',
+  label = 'Manage',
   returnChat,
   reason,
   urgent = false,
@@ -822,7 +870,7 @@ function Configure({
   return (
     <Explained reason={reason}>
       <Button
-        variant={urgent ? 'secondary' : 'ghost'}
+        variant={urgent ? 'secondary' : 'outline'}
         size="sm"
         nativeButton={false}
         aria-label={`${label} ${name}`}
@@ -858,7 +906,7 @@ function Start({
   return (
     <Explained reason={reason}>
       <Button
-        variant={urgent ? 'secondary' : 'ghost'}
+        variant={urgent ? 'secondary' : 'outline'}
         size="sm"
         disabled={busy}
         aria-busy={busy}
@@ -926,7 +974,7 @@ function AppRow({
         name={app.name}
         description={app.blurb}
         link={null}
-        actions={<Badge variant="secondary">Soon</Badge>}
+        actions={<Badge variant="secondary">Coming soon</Badge>}
       />
     );
   if (status?.kind === 'loading')
@@ -953,23 +1001,27 @@ function AppRow({
         slug={slug}
         id={app.id}
         name={app.name}
-        tab="settings"
+        tab={settings}
         label={label}
         returnChat={returnChat}
         reason={reason}
         urgent={!!reason}
       />
     ) : (
-      <Unavailable label="Ask an admin" reason={hint ?? 'You can’t connect it here.'} />
+      <Unavailable
+        label={app.provider === 'slack' ? 'Ask for access' : 'Ask an admin'}
+        reason={hint ?? 'You can’t connect it here.'}
+      />
     );
   // The subtitle says what the app does, or which account it uses once connected.
   // A failed start replaces it until the next try.
-  const account = status?.kind === 'connected' ? status.detail : null;
+  const account = status?.kind === 'connected' ? status.detail : status?.kind === 'attention' ? status.detail : null;
   const row = (actions: ReactNode, tone: Tone = 'muted') => (
     <Row
+      connected={isConnected(status)}
       icon={icon}
       name={app.name}
-      description={failed ? `Couldn’t start ${app.name}. Try again.` : (account ?? app.blurb)}
+      description={failed ? `Couldn’t connect ${app.name}. Try again.` : (account ?? app.blurb)}
       tone={failed ? 'error' : tone}
       link={link}
       actions={actions}
@@ -990,12 +1042,21 @@ function AppRow({
       return row(begin('Reconnect', status.detail), 'warning');
     case 'error':
       return row(
-        <Unavailable label="Not checked" reason="Couldn’t check its status. Use Check again above." />,
+        <Unavailable label="Couldn’t check" reason="Couldn’t check this app. Select Check again at the top." />,
         'error',
       );
     case 'unavailable':
       return row(
-        <Unavailable label={status.detail === notSetUp ? 'Not set up' : 'Unavailable'} reason={`${status.detail}.`} />,
+        status.detail === notSetUp ? (
+          <Unavailable label="Not offered" reason="Not offered here. Your workspace admins can’t turn it on." />
+        ) : status.detail === notYet ? (
+          <Unavailable label="Unavailable" reason={`${notYet}.`} />
+        ) : (
+          <Unavailable
+            label={app.provider === 'slack' ? 'Ask for access' : 'Unavailable'}
+            reason={`${status.detail}.`}
+          />
+        ),
       );
     case 'off':
       return row(begin('Connect'));
@@ -1053,7 +1114,7 @@ function CuratedRow({
         link={link}
         actions={
           !capabilities.integrationsEnabled ? (
-            <Unavailable label="Turned off" reason="Connecting apps is turned off on this server." />
+            <Unavailable label="Turned off" reason={turnedOff} />
           ) : direct ? (
             <Start label="Connect" name={app.name} busy={flow.command.busy} onClick={choice.start} />
           ) : (
@@ -1108,7 +1169,7 @@ function ServerRow({
   const failed = flow.command.state.kind === 'error' ? flow.command.state.message : null;
   const label =
     server.reauthorizationRequired && server.status !== 'review-required'
-      ? 'Sign in again'
+      ? 'Sign-in expired'
       : mcpStatusLabel[server.status];
   // Once it works, the subtitle says whose account it is and who shares it.
   // Someone else's connection says only that it's shared; their account is theirs to show.
@@ -1116,7 +1177,7 @@ function ServerRow({
     ? 'Shared with you'
     : [
         server.accountLabel ?? (server.package ? packageLabel(server.package) : null),
-        server.ownership === 'shared' ? 'Shared' : 'Only you',
+        server.ownership === 'shared' ? 'Shared with workspace' : 'Only you',
       ]
         .filter(Boolean)
         .join(' · ');
@@ -1124,15 +1185,16 @@ function ServerRow({
     <Row
       icon={<AppIcon brand={brand?.brand} tile={brand?.tile} logo={brand?.logo} size="lg" />}
       name={name}
-      description={failed ? `Couldn’t connect. ${failed}` : attention ? (brand?.tagline ?? label) : about}
+      description={failed ? `Couldn’t connect. ${failed}` : attention ? label : about}
       tone={failed ? 'error' : attention ? 'warning' : server.status === 'discovering' ? 'pending' : 'muted'}
+      connected={!attention && server.status === 'ready'}
       link={link}
       actions={
         // One action per row, the most pressing first; the rest are on the server's page, which the row opens.
         signIn ? (
           capabilities.integrationsEnabled ? (
             <Start
-              label={lapsed ? 'Reconnect' : 'Finish'}
+              label={lapsed ? 'Reconnect' : server.status === 'oauth-pending' ? 'Finish sign-in' : 'Finish setup'}
               name={name}
               busy={flow.command.busy}
               reason={label}
@@ -1140,7 +1202,7 @@ function ServerRow({
               onClick={() => flow.connect(server.ownership)}
             />
           ) : (
-            <Unavailable label="Turned off" reason="Connecting apps is turned off on this server." />
+            <Unavailable label="Turned off" reason={turnedOff} />
           )
         ) : server.status === 'review-required' ? (
           <Configure
@@ -1148,7 +1210,7 @@ function ServerRow({
             id={id}
             name={name}
             tab="tools"
-            label="Review"
+            label="Review tools"
             returnChat={returnChat}
             reason={label}
             urgent

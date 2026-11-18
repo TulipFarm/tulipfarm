@@ -1,4 +1,4 @@
-import { turnRequester } from '@tulipfarm/conversations/turn-requester';
+import { turnPlanConnection, turnRequester } from '@tulipfarm/conversations/turn-requester';
 import type { ConversationRuntime, ReplyFence } from '@tulipfarm/conversations/runtime';
 import { AccessDenied } from '@tulipfarm/access';
 import { planProviders, type PlanProvider } from '@tulipfarm/config';
@@ -15,10 +15,10 @@ import type { PlanFailure } from '@tulipfarm/agents/inference';
 import { isFeatureEnabled, log } from '@tulipfarm/observability';
 import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 
-/** What a reply needs from a member's plan connection: a current token, and a way to ask the member to reconnect. */
+/** What a reply needs from a plan connection: a current token, and a way to ask its owner to reconnect. */
 export type PlanCredentials = {
-  accessToken(workspaceId: string, membershipId: string): Promise<string>;
-  requireReconnect(workspaceId: string, membershipId: string): Promise<unknown>;
+  accessToken(workspaceId: string, connectionId: string): Promise<string>;
+  requireReconnect(workspaceId: string, connectionId: string): Promise<unknown>;
 };
 
 /** The connections for `provider`'s plan. */
@@ -71,8 +71,16 @@ export async function turnCaller(runtime: ConversationRuntime, fence: ReplyFence
   }
 }
 
+/** The plan account the turn's member picked to answer first, if any. */
+export function turnPreferredPlan(runtime: ConversationRuntime, fence: ReplyFence) {
+  return runtime.transaction(fence.workspaceId, commonCompatibility, tx =>
+    turnPlanConnection(tx, fence.conversationId, fence.turnId),
+  );
+}
+
 /**
- * The plans of one provider a turn may run on, in the order they are tried: the caller's own, then those shared with them, their
+ * The plans of one provider a turn may run on, in the order they are tried: the plan the caller picked, then their other
+ * own plans on for chats, then those shared with them, their
  * teams and the workspace. `current` is the plan answering now; `next` retires it for the reason given and moves to the
  * next plan with a usable token, or returns null when none is left so the workspace's fallback model answers; `own`
  * tells whether the plan tried last is the caller's own; `answered` records that the current plan wrote the reply. Tokens
@@ -85,13 +93,23 @@ export async function memberPlans(input: {
   workspaceId: string;
   caller: string | null;
   model: string;
+  /** The caller's plan connection to try first; ignored when it is not one they may use for chats. */
+  preferredConnectionId?: string | null;
 }) {
   const { credentials, subscriptions, workspaceId } = input;
   // While the workspace's flag for the plan is off, no plan answers and the workspace's fallback model does.
   const offered =
     credentials && (await isFeatureEnabled(planProviders[input.provider].flag, null, { id: workspaceId }));
   const candidates: SubscriptionCandidate[] = offered
-    ? (await subscriptions.eligible(workspaceId, input.provider, input.caller)).filter(
+    ? (
+        await subscriptions.eligible(
+          workspaceId,
+          input.provider,
+          input.caller,
+          'chat',
+          input.preferredConnectionId ?? null,
+        )
+      ).filter(
         candidate =>
           !candidate.disabled.includes(input.model) &&
           (!candidate.models.length || candidate.models.includes(input.model)),
@@ -107,7 +125,7 @@ export async function memberPlans(input: {
     while (credentials && candidates.length) {
       const candidate = candidates.shift()!;
       try {
-        const token = await credentials.accessToken(workspaceId, candidate.ownerMembershipId);
+        const token = await credentials.accessToken(workspaceId, candidate.connectionId);
         current = { candidate, token };
         lastOwn = input.caller !== null && candidate.ownerMembershipId === input.caller;
         await subscriptions.markUsed(workspaceId, candidate.connectionId).catch(() => undefined);
@@ -129,7 +147,7 @@ export async function memberPlans(input: {
       outcome: failure,
     });
     if (failure === 'reconnect')
-      await credentials.requireReconnect(workspaceId, candidate.ownerMembershipId).catch(() => undefined);
+      await credentials.requireReconnect(workspaceId, candidate.connectionId).catch(() => undefined);
     else
       await subscriptions
         .coolDown(workspaceId, candidate.connectionId, retryAfterMs, failure === 'usage-limit')

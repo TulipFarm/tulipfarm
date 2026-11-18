@@ -25,12 +25,16 @@ function services(candidates, tokens) {
       {},
       {
         subscriptions: {
-          eligible: async (_workspaceId, provider, membershipId) => (asked.push([provider, membershipId]), candidates),
+          eligible: async (_workspaceId, provider, membershipId, use, preferred) => (
+            asked.push([provider, membershipId, use, preferred]),
+            candidates
+          ),
           markUsed: async (_workspaceId, connectionId) => void used.push(connectionId),
         },
         credentials: () => ({
-          accessToken: async (_workspaceId, owner) => {
-            const token = tokens[owner];
+          accessToken: async (_workspaceId, connectionId) => {
+            const token =
+              tokens[candidates.find(candidate => candidate.connectionId === connectionId).ownerMembershipId];
             if (token instanceof Error) throw token;
             return token;
           },
@@ -55,13 +59,13 @@ test('a coding run uses the first eligible plan that gives a token, in the resol
     [shared]: 'token',
   });
   assert.equal(await value.enabled(randomUUID()), true);
-  assert.deepEqual(await value.plan(randomUUID(), member, 'claude'), {
+  assert.deepEqual(await value.plan(randomUUID(), member, 'claude', 'own'), {
     connectionId: 'shared',
     ownerMembershipId: shared,
     token: 'token',
   });
   assert.deepEqual(used, ['shared']);
-  assert.deepEqual(asked, [['claude', member]]);
+  assert.deepEqual(asked, [['claude', member, 'coding', 'own']]);
   assert.equal(await value.hasPlan(randomUUID(), member, 'claude'), true);
 });
 

@@ -160,3 +160,67 @@ test(
     }
   },
 );
+
+test(
+  'any number of plan accounts can be on for chats or coding, and the picked one is tried first',
+  { timeout: 300000 },
+  async () => {
+    const db = await fixture();
+    try {
+      const subscriptions = createSubscriptions({ runtime: db.runtime });
+      const [first, second, off, shared] = [randomUUID(), randomUUID(), randomUUID(), randomUUID()];
+      const insert = (id, owner, at) =>
+        db.owner.query(
+          `INSERT INTO ${db.table('tf_subscription_connections')}
+           (id, provider, owner_membership_id, state, client_id, subject, credential, expires_at, models, created_at)
+         VALUES ($1, 'claude', $2, 'connected', 'client', $4, '{}', now() + interval '1 hour', '[]', now() - $3::interval)`,
+          [id, owner, at, id],
+        );
+      await insert(first, db.member.membershipId, '3 hours');
+      await insert(second, db.member.membershipId, '2 hours');
+      await insert(off, db.member.membershipId, '1 hour');
+      await insert(shared, db.actor.membershipId, '4 hours');
+      await db.owner.query(
+        `INSERT INTO ${db.table('tf_subscription_grants')} (connection_id, grantee, role, granted_by)
+       VALUES ($1, 'workspace', 'use', $2)`,
+        [shared, db.actor.membershipId],
+      );
+      const eligible = (use, preferred) =>
+        subscriptions
+          .eligible(db.workspaceId, 'claude', db.member.membershipId, use, preferred)
+          .then(plans => plans.map(plan => plan.connectionId));
+
+      await assert.rejects(subscriptions.setUses(db.workspaceId, db.actor.userId, off, { chat: false }), AccessDenied);
+      await subscriptions.setUses(db.workspaceId, db.member.userId, off, { chat: false, coding: false });
+      await subscriptions.setUses(db.workspaceId, db.actor.userId, shared, { coding: false });
+
+      assert.deepEqual(await eligible('chat'), [first, second, shared]);
+      assert.deepEqual(await eligible('chat', second), [second, first, shared]);
+      // A picked account that is off for the use, or not one the member may use, changes nothing.
+      assert.deepEqual(await eligible('chat', off), [first, second, shared]);
+      assert.deepEqual(await eligible('coding', shared), [first, second]);
+
+      const listed = Object.fromEntries(
+        (await subscriptions.list(db.workspaceId, db.member.userId)).map(row => [
+          row.connectionId,
+          [row.useForChat, row.useForCoding],
+        ]),
+      );
+      assert.deepEqual(listed[off], [false, false]);
+      assert.deepEqual(listed[first], [true, true]);
+      assert.deepEqual(listed[shared], [true, false]);
+
+      await db.owner.query(
+        `UPDATE ${db.table('tf_subscription_connections')} SET state = 'signed-out', credential = NULL WHERE id = $1`,
+        [second],
+      );
+      await assert.rejects(
+        subscriptions.setUses(db.workspaceId, db.member.userId, second, { chat: false }),
+        error => error instanceof SubscriptionError && error.code === 'not-connected',
+      );
+      assert.deepEqual(await eligible('chat', second), [first, shared]);
+    } finally {
+      await db.close();
+    }
+  },
+);

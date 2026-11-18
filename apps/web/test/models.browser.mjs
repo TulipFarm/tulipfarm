@@ -44,6 +44,10 @@ const plan = (connectionId, ownerMembershipId, mine) => ({
   disabledModels: [],
   canShare: mine,
   grants: mine ? [] : null,
+  plan: null,
+  useForChat: true,
+  useForCoding: true,
+  createdAt: timestamp,
 });
 const definition = {
   name: 'Research assistant',
@@ -150,7 +154,7 @@ function fixtureState() {
     agentCommands: new Map(),
     requests: [],
     errors: [],
-    chatGpt: { state: 'not-connected', email: null, planUsage: false, welcomePending: false, models: [] },
+    chatGpt: { connections: [] },
     subscriptions: [],
     tokenPlans: { claude: null, copilot: null },
     agent: {
@@ -369,12 +373,26 @@ test('models in the actual Vite app through a local HTTP API fixture', { timeout
         if (!body.token.startsWith('sk-ant-oat')) return send({ error: 'token-invalid' }, 400);
         current.tokenPlans.claude = {
           ...current.tokenPlans.claude,
-          state: 'connected',
-          planUsage: true,
-          models: [{ slug: 'claude-sonnet-5', label: 'Claude Sonnet 5' }],
+          connections: [
+            {
+              connectionId: ownPlanId,
+              state: 'connected',
+              account: null,
+              planUsage: true,
+              models: [{ slug: 'claude-sonnet-5', label: 'Claude Sonnet 5' }],
+              createdAt: timestamp,
+            },
+          ],
         };
         current.subscriptions = [{ ...plan(ownPlanId, membershipId, true), provider: 'claude' }];
         return send(current.tokenPlans.claude);
+      }
+      if (request.method === 'PUT' && path.startsWith(`${base}/subscriptions/`) && path.endsWith('/uses')) {
+        const plan = current.subscriptions.find(item => item.connectionId === path.split('/').at(-2));
+        if (!plan?.mine) return send({ error: 'subscription-not-found' }, 404);
+        if (body.chat !== undefined) plan.useForChat = body.chat;
+        if (body.coding !== undefined) plan.useForCoding = body.coding;
+        return send({});
       }
       if (request.method === 'PUT' && path.startsWith(`${base}/subscriptions/`) && path.endsWith('/models')) {
         const plan = current.subscriptions.find(item => item.connectionId === path.split('/').at(-2));
@@ -941,44 +959,75 @@ test('models in the actual Vite app through a local HTTP API fixture', { timeout
       assert.equal(await page.getByRole('link', { name: /^Compaction/ }).getAttribute('aria-current'), 'page');
     });
 
-    await scenario('a connected plan turns a model off; a shared plan stays read-only', async (page, fixture) => {
-      fixture.chatGpt = {
-        state: 'connected',
-        email: 'ada@example.com',
-        planUsage: true,
-        welcomePending: false,
-        models: planModels,
-      };
-      fixture.subscriptions = [plan(ownPlanId, membershipId, true), plan(sharedPlanId, graceId, false)];
-      await models(page, 'chatgpt');
-      const sources = page.getByRole('navigation', { name: 'Model sources' });
-      await sources.getByText('ada@example.com').waitFor();
-      await sources.getByText('Grace’s plan').waitFor();
-      const luna = page.getByRole('switch', { name: 'GPT-6 Luna' });
-      await eventually(() => luna.isChecked(), true);
-      await luna.click();
-      await eventually(() => luna.isChecked(), false);
-      assert.deepEqual(
-        writes(fixture).map(({ path, body }) => [path, body]),
-        [[`${base}/subscriptions/${ownPlanId}/models`, { disabledModels: ['gpt-6-luna'] }]],
-      );
-      await sources.getByText('Grace’s plan').click();
-      await page.getByText('Only Grace can turn these models on or off.').waitFor();
-      assert.equal(await page.getByRole('switch', { name: 'GPT-6 Sol' }).isDisabled(), true);
-      await sources.getByText('Add API key').click();
-      await page.getByRole('heading', { name: /API keys/ }).waitFor();
-    });
+    await scenario(
+      'a connected plan turns a use and a model off; a shared plan stays read-only',
+      async (page, fixture) => {
+        fixture.chatGpt = {
+          connections: [
+            {
+              connectionId: ownPlanId,
+              state: 'connected',
+              email: 'ada@example.com',
+              planUsage: true,
+              welcomePending: false,
+              models: planModels,
+              createdAt: timestamp,
+            },
+          ],
+        };
+        fixture.subscriptions = [plan(ownPlanId, membershipId, true), plan(sharedPlanId, graceId, false)];
+        await models(page, 'chatgpt');
+        const sources = page.getByRole('navigation', { name: 'Model sources' });
+        await sources.getByText('ada@example.com').waitFor();
+        await sources.getByText('Grace’s plan').waitFor();
+        await page
+          .getByText(
+            'Turn on Chat or Coding for each account. If one runs out of usage, the next account that’s on takes over.',
+          )
+          .waitFor();
+        const chat = page.getByRole('switch', { name: 'Use ada@example.com for chat', exact: true });
+        const coding = page.getByRole('switch', { name: 'Use ada@example.com for coding', exact: true });
+        await eventually(() => chat.isChecked(), true);
+        assert.equal(await coding.isChecked(), true);
+        await chat.click();
+        await eventually(() => chat.isChecked(), false);
+        assert.equal(await coding.isChecked(), true);
+        await page.getByRole('button', { name: 'More for ada@example.com', exact: true }).click();
+        await page.getByRole('menuitem', { name: 'Models', exact: true }).click();
+        const dialog = page.getByRole('dialog', { name: 'ada@example.com' });
+        const luna = dialog.getByRole('switch', { name: 'GPT-6 Luna' });
+        await eventually(() => luna.isChecked(), true);
+        await luna.click();
+        await eventually(() => luna.isChecked(), false);
+        assert.deepEqual(
+          writes(fixture).map(({ path, body }) => [path, body]),
+          [
+            [`${base}/subscriptions/${ownPlanId}/uses`, { chat: false }],
+            [`${base}/subscriptions/${ownPlanId}/models`, { disabledModels: ['gpt-6-luna'] }],
+          ],
+        );
+        await page.keyboard.press('Escape');
+        await dialog.waitFor({ state: 'hidden' });
+        await sources.getByText('Grace’s plan').click();
+        await page.getByText('Only Grace can turn these models on or off.').waitFor();
+        assert.equal(await page.getByRole('switch', { name: 'GPT-6 Sol' }).isDisabled(), true);
+        await sources.getByText('Add API key').click();
+        await page.getByRole('heading', { name: /API keys/ }).waitFor();
+      },
+    );
 
     await scenario(
       'members connect a Claude plan with a token, are asked who can use it; Copilot falls back to a token',
       async (page, fixture) => {
-        const empty = { state: 'not-connected', account: null, planUsage: false, deviceSignIn: false, models: [] };
+        const empty = { connections: [], deviceSignIn: false };
         fixture.tokenPlans = { claude: { ...empty }, copilot: { ...empty } };
         await models(page, 'claude');
         const sources = page.getByRole('navigation', { name: 'Model sources' });
         await sources.getByText('GitHub Copilot').waitFor();
         await page.getByText('Check Anthropic’s terms').waitFor();
-        const token = page.getByLabel('Claude Code token');
+        await page.getByRole('button', { name: 'Connect Claude', exact: true }).waitFor();
+        await page.getByRole('button', { name: 'Other ways to connect', exact: true }).click();
+        const token = page.getByLabel('Paste the token Claude Code printed');
         await token.fill('sk-ant-api-key');
         await page.getByRole('button', { name: 'Connect', exact: true }).click();
         await page.getByText('That does not look like a Claude Code token.', { exact: false }).waitFor();
@@ -989,10 +1038,12 @@ test('models in the actual Vite app through a local HTTP API fixture', { timeout
         assert.equal(await ask.getByRole('radio', { name: 'Only you' }).isChecked(), true);
         await ask.getByRole('button', { name: 'Not now' }).click();
         await ask.waitFor({ state: 'hidden' });
+        await page.getByText('Claude is connected.', { exact: true }).waitFor();
         await page
-          .getByText('Pick these models in chats, from the model menu under Claude plan.', { exact: false })
+          .getByRole('list', { name: 'Your Claude accounts' })
+          .getByText('Only you can use it', { exact: true })
           .waitFor();
-        await page.getByText('Shared with: No one else').waitFor();
+        await page.getByRole('switch', { name: 'Use Claude account for chat', exact: true }).waitFor();
         assert.equal(await page.getByText('Check Anthropic’s terms').count(), 0);
         assert.deepEqual(
           writes(fixture).map(({ path, body }) => [path, body]),
@@ -1002,7 +1053,8 @@ test('models in the actual Vite app through a local HTTP API fixture', { timeout
           ],
         );
         await sources.getByText('GitHub Copilot').click();
-        await page.getByText('This server can’t use GitHub sign-in.', { exact: false }).waitFor();
+        // Without GitHub sign-in or device codes on this server, connecting asks for a token.
+        await page.getByRole('button', { name: 'Connect GitHub Copilot', exact: true }).click();
         await page.getByLabel('Personal access token').waitFor();
         assert.equal(await page.getByRole('button', { name: 'Sign in with GitHub' }).count(), 0);
       },

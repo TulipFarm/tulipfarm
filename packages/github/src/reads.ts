@@ -37,7 +37,7 @@ import {
   requireGitHubSources,
   type GitHubContext,
 } from './origin.ts';
-import { githubSelection, writeGitHubSelection } from './selection.ts';
+import { chatUseFilter, githubSelection, writeGitHubSelection } from './selection.ts';
 
 const range = { ...commonCompatibility, minimum: 1 };
 type ReadOrigin = { conversationId: string; turnId: string } | { taskId: string; generation: number };
@@ -65,10 +65,15 @@ export function createGitHubReads(options: {
     });
   }
   async function selection(tx: AuthorizationTransaction, context: GitHubContext) {
+    // A chat stops reading through an account its member turned off for chats, as if none were selected.
+    const chatOff =
+      typeof context === 'string' && chatUseFilter(tx)
+        ? `AND NOT EXISTS (SELECT 1 FROM ${table(tx, 'tf_github_accounts')} a WHERE a.id=s.account_id AND NOT a.use_for_chat)`
+        : '';
     return selectionSchema.parse(
       (
         await tx.client.query(
-          `SELECT account_id AS "accountId",account_generation AS generation,version FROM ${table(tx, selectionTable(context))} WHERE ${contextColumn(context)}=$1`,
+          `SELECT CASE WHEN true ${chatOff} THEN s.account_id END AS "accountId",CASE WHEN true ${chatOff} THEN s.account_generation END AS generation,s.version FROM ${table(tx, selectionTable(context))} s WHERE s.${contextColumn(context)}=$1`,
           [contextId(context)],
         )
       ).rows[0] ?? { accountId: null, generation: null, version: 0 },
@@ -150,26 +155,43 @@ export function createGitHubReads(options: {
   }
   return {
     /**
-     * The access token of the account selected for this chat turn, for a coding run to clone with; null when no
-     * account is selected. The caller hands it only to an execution backend that keeps it out of the machine.
+     * The access token and login of the account a coding run in this chat turn clones with: the member's account named
+     * by `login` when it is on for coding, else their oldest active account on for coding. Null when the named login is
+     * not one of their accounts or is off for coding, or when none of their accounts is on for coding. The caller hands
+     * the token only to an execution backend that keeps it out of the machine.
      */
-    async cloneToken(workspaceId: string, actor: HumanActor, origin: { conversationId: string; turnId: string }) {
-      const source = await authorized(workspaceId, actor, origin.conversationId, tx =>
-        sourceFor(tx, actor, origin, 'coding.run').catch((error: unknown) => {
-          if (error instanceof GitHubReadError && error.code === 'selection-required') return null;
-          throw error;
-        }),
-      );
-      if (!source) return null;
-      return options.accounts.withCredential(
+    async cloneToken(
+      workspaceId: string,
+      actor: HumanActor,
+      origin: { conversationId: string; turnId: string },
+      login?: string | null,
+    ): Promise<{ token: string; login: string } | null> {
+      const chosen = await options.accounts.codingAccount(workspaceId, actor, login);
+      if (!chosen) return null;
+      const token = await options.accounts.withCredential(
         workspaceId,
         actor,
-        source.accountId,
+        chosen.accountId,
         async credential => credential.accessToken,
-        source.generation,
-        (tx, owner) => requireExecution(tx, owner, origin, source, 'coding.run'),
+        undefined,
+        async (tx, owner) => {
+          await requireGitHubOrigin(tx, owner, origin.conversationId);
+          if ((await githubSelection(tx, origin.conversationId)).investigation)
+            throw new GitHubReadError('read-forbidden');
+          await requireNoMcpDerived(tx, [{ kind: 'private-conversation', conversationId: origin.conversationId }]);
+          if (
+            !(
+              await tx.client.query(
+                `SELECT 1 FROM ${table(tx, 'tf_conversation_turns')} WHERE id=$1 AND conversation_id=$2 AND status='processing'`,
+                [origin.turnId, origin.conversationId],
+              )
+            ).rowCount
+          )
+            throw new AccessDenied();
+        },
         true,
       );
+      return { token, login: chosen.login };
     },
     async prepareDownload(workspaceId: string, actor: HumanActor, origin: ReadOrigin, callId: string, input: unknown) {
       denyMcpEgress();
@@ -300,7 +322,9 @@ export function createGitHubReads(options: {
     async select(workspaceId: string, userId: string, conversationId: GitHubContext, input: unknown) {
       const value = selectAccountSchema.parse(input);
       const account = value.accountId ? await options.accounts.status(workspaceId, userId, value.accountId) : null;
-      if (account && account.state !== 'active') throw new GitHubReadError('selection-conflict');
+      // Chats only pick accounts their member turned on for chats.
+      if (account && (account.state !== 'active' || !account.useForChat))
+        throw new GitHubReadError('selection-conflict');
       return authorized(workspaceId, userId, conversationId, async (tx, actor) => {
         await writeGitHubSelection(tx, actor, conversationId, {
           accountId: account?.id ?? null,

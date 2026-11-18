@@ -4,6 +4,12 @@ import { qualified } from '@tulipfarm/workspace-storage/runtime';
 import { GitHubReadError } from './read-contracts.ts';
 import { contextColumn, contextId, selectionTable, type GitHubContext } from './origin.ts';
 
+// Workspaces below this common migration have no per-account uses: every account serves chats.
+const accountUsesVersion = 88;
+/** SQL that keeps only accounts their member turned on for chats, where the workspace records it. */
+export const chatUseFilter = (tx: object) =>
+  ((tx as { commonVersion?: number }).commonVersion ?? 0) >= accountUsesVersion ? ' AND use_for_chat' : '';
+
 const rowSchema = z.object({
   accountId: z.uuid().nullable(),
   generation: z.number().int().positive().nullable(),
@@ -50,7 +56,7 @@ export async function writeGitHubSelection(
     value.accountId &&
     !(
       await tx.client.query(
-        `SELECT 1 FROM ${table('tf_github_accounts')} WHERE id=$1 AND owner_membership_id=$2 AND generation=$3 AND state='active' AND (expires_at IS NULL OR expires_at>clock_timestamp()) FOR SHARE`,
+        `SELECT 1 FROM ${table('tf_github_accounts')} WHERE id=$1 AND owner_membership_id=$2 AND generation=$3 AND state='active' AND (expires_at IS NULL OR expires_at>clock_timestamp())${chatUseFilter(tx)} FOR SHARE`,
         [value.accountId, actor.membershipId, value.generation],
       )
     ).rowCount

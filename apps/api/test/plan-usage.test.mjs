@@ -29,13 +29,13 @@ test("Copilot's premium requests come from the plan's quota snapshot, and only a
   assert.equal(await copilotPremiumRequests('t', async () => Response.json({ login: 'octocat' })), null);
 });
 
-test('plan usage reads one Copilot count per plan with its owner token and keeps it for later requests', async () => {
+test("plan usage reads one Copilot count per plan with that connection's token and keeps it for later requests", async () => {
   const tokens = [];
   const sent = [];
   const usage = createPlanUsage({
-    copilotToken: async (workspaceId, owner) => {
-      tokens.push([workspaceId, owner]);
-      return `token-${owner}`;
+    copilotToken: async (workspaceId, connectionId) => {
+      tokens.push([workspaceId, connectionId]);
+      return `token-${connectionId}`;
     },
     fetcher: async (url, init) => {
       sent.push([url, init.headers.authorization]);
@@ -80,12 +80,12 @@ test('plan usage reads one Copilot count per plan with its owner token and keeps
   );
   await usage('w', 'copilot', models);
   assert.deepEqual(tokens, [
-    ['w', 'me'],
-    ['w', 'teammate'],
+    ['w', 'c1'],
+    ['w', 'c2'],
   ]);
   assert.deepEqual(sent, [
-    ['https://api.github.com/copilot_internal/user', 'token token-me'],
-    ['https://api.github.com/copilot_internal/user', 'token token-teammate'],
+    ['https://api.github.com/copilot_internal/user', 'token token-c1'],
+    ['https://api.github.com/copilot_internal/user', 'token token-c2'],
   ]);
 
   // Other plans have no count to read.

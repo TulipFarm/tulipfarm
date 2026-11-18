@@ -467,6 +467,10 @@ test(
             });
           }
           if (path.endsWith('/github/accounts')) return route.fulfill({ json: { configured: true, accounts: [] } });
+          // The composer's ChatGPT and Claude keywords show whether the member has a plan connected.
+          if (path.endsWith('/chatgpt/connection')) return route.fulfill({ json: { connections: [] } });
+          if (path.endsWith('/claude/connection'))
+            return route.fulfill({ json: { connections: [], deviceSignIn: false } });
           if (path.endsWith(`/github/chats/${chatId}/selection`))
             return route.fulfill({ json: { accountId: null, generation: null, version: 0 } });
           if (path.endsWith(`/github/chats/${chatId}/batches`)) return route.fulfill({ json: { batches: [] } });

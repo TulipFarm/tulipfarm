@@ -555,6 +555,16 @@ test(
           }),
       );
 
+      await t.test('a new selection starts with the login chosen for Knowledge imports', () =>
+        fixture(async f => {
+          f.faults.accounts = [personal, { ...work, primaryForKnowledge: true }];
+          await f.open();
+          await f.choose();
+          assert.match(await f.page.getByLabel('Use GitHub account', { exact: true }).innerText(), /@octo-work/);
+          await f.page.getByRole('checkbox', { name: 'work/public-docs', exact: true }).waitFor();
+        }),
+      );
+
       await t.test('without an active account selection is unavailable and explains the next step', () =>
         fixture(async f => {
           f.faults.accounts = [{ ...personal, state: 'reconnect-required' }];
@@ -563,8 +573,10 @@ test(
           assert.equal(await f.page.getByRole('button', { name: 'Add repositories', exact: true }).isDisabled(), true);
           f.faults.configured = false;
           await f.page.reload();
-          await f.page.getByRole('tab', { name: 'Accounts' }).click();
-          await f.page.getByRole('heading', { name: 'GitHub is not configured' }).waitFor();
+          // With nothing to sign in to, there are no accounts to list; the overview says why.
+          await f.page.getByRole('tab', { name: 'Overview' }).click();
+          await f.page.getByText('Not set up on this server', { exact: true }).first().waitFor();
+          assert.equal(await f.page.getByRole('tab', { name: 'Accounts' }).count(), 0);
           await f.page.getByRole('tab', { name: 'Knowledge' }).click();
           await f.page.getByRole('region', { name: 'Automatic Knowledge', exact: true }).waitFor();
           assert.equal(

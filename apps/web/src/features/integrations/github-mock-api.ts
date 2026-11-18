@@ -19,6 +19,9 @@ if (githubMockEnabled) {
       identity: { id: '101', login: 'dev-user' },
       generation: 1,
       scopes: ['repo', 'read:org', 'read:user'],
+      useForChat: true,
+      useForCoding: true,
+      primaryForKnowledge: false,
     },
     ...(scenario === 'multiple'
       ? [
@@ -29,6 +32,9 @@ if (githubMockEnabled) {
             identity: { id: '102', login: 'dev-work' },
             generation: 1,
             scopes: ['repo', 'read:org', 'read:user'],
+            useForChat: true,
+            useForCoding: true,
+            primaryForKnowledge: false,
           },
         ]
       : []),
@@ -41,6 +47,9 @@ if (githubMockEnabled) {
             identity: null,
             generation: 1,
             scopes: [],
+            useForChat: true,
+            useForCoding: true,
+            primaryForKnowledge: false,
           },
         ]
       : []),
@@ -93,10 +102,20 @@ if (githubMockEnabled) {
     await new Promise(resolve => window.setTimeout(resolve, scenario === 'slow' ? 700 : 100));
     signal?.throwIfAborted();
     if (path.endsWith('/github/accounts') && method === 'GET') return Response.json({ configured: true, accounts });
+    if (path.endsWith('/uses') && method === 'PUT') {
+      const account = accounts.find(item => path.includes(item.id));
+      if (!account) return Response.json({ error: 'account-not-found' }, { status: 404 });
+      const uses = JSON.parse(String(init?.body)) as { chat?: boolean; coding?: boolean; primaryForKnowledge?: true };
+      if (uses.chat !== undefined) account.useForChat = uses.chat;
+      if (uses.coding !== undefined) account.useForCoding = uses.coding;
+      if (uses.primaryForKnowledge) for (const item of accounts) item.primaryForKnowledge = item === account;
+      return Response.json({ configured: true, accounts });
+    }
     if (path.endsWith('/disconnect')) {
       const account = accounts.find(item => path.includes(item.id));
       if (!account) return Response.json({ error: 'account-not-found' }, { status: 404 });
       account.state = 'disconnected';
+      account.primaryForKnowledge = false;
       return Response.json({ account, providerRevocation: 'manual-required' });
     }
     if (path.endsWith('/begin') || path.endsWith('/reconnect'))

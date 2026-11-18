@@ -14,6 +14,12 @@ export const accountSchema = z.strictObject({
   identity: identitySchema.nullable(),
   generation: z.number().int().positive(),
   scopes: scopesSchema,
+  /** Chats can pick this login for repository reads and changes. */
+  useForChat: z.boolean().default(true),
+  /** Coding runs and Workflow coding steps can pick this login to push with. */
+  useForCoding: z.boolean().default(true),
+  /** Knowledge imports start with this login; at most one of the member's logins has it. */
+  primaryForKnowledge: z.boolean().default(false),
 });
 export const accountListSchema = z.strictObject({
   configured: z.boolean(),
@@ -27,6 +33,16 @@ export const disconnectionSchema = z.strictObject({
   providerRevocation: z.literal('manual-required'),
 });
 export const beginSchema = z.strictObject({});
+/** Turns a login's uses on or off, or makes it the member's primary login for Knowledge. */
+export const accountUsesSchema = z
+  .strictObject({
+    chat: z.boolean().optional(),
+    coding: z.boolean().optional(),
+    primaryForKnowledge: z.literal(true).optional(),
+  })
+  .refine(value => Object.keys(value).length > 0);
+/** A GitHub login, as a coding run or Workflow coding step names the account to use. */
+export const githubLoginSchema = identitySchema.shape.login;
 const state = z.string().regex(/^[a-f0-9-]{36}\.[a-zA-Z0-9_-]{43}$/);
 const iss = z.literal('https://github.com/login/oauth').optional();
 export const callbackSchema = z.union([

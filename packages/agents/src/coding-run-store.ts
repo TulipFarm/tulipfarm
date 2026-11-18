@@ -31,6 +31,8 @@ export type CodingRunRecord = {
   branch: string | null;
   task: string;
   planOwnerMembershipId: string;
+  /** Login of the GitHub account the run clones with; null for runs proposed before it was stored. */
+  githubLogin: string | null;
   digest: string;
 };
 export type CodingRunOrigin = { conversationId: string; turnId: string; generation: number };
@@ -39,6 +41,8 @@ export type CodingRunOrigin = { conversationId: string; turnId: string; generati
 const runningGraceMs = 5 * 60 * 1000;
 
 const runTable = (tx: CodingRunTransaction) => qualified(tx.schema, 'tf_coding_runs');
+/** The common migration that stores the GitHub login a run clones with. */
+const githubLoginVersion = 88;
 
 const rowSchema = z.object({
   id: uuidSchema,
@@ -52,6 +56,7 @@ const rowSchema = z.object({
   branch: z.string().nullable(),
   task: z.string(),
   plan_owner_membership_id: uuidSchema,
+  github_login: z.string().nullable(),
   digest: z.string(),
   decision: z.enum(['pending', 'approved', 'denied']),
   decision_command_id: uuidSchema.nullable(),
@@ -68,10 +73,10 @@ async function loadRow(tx: CodingRunTransaction, id: string): Promise<Row | unde
     (
       await tx.client.query(
         `SELECT id, membership_id, user_id, conversation_id, turn_id, generation, agent, repository, branch, task,
-           plan_owner_membership_id, digest, decision, decision_command_id, status, expires_at, result,
+           plan_owner_membership_id, to_jsonb(r)->>'github_login' AS github_login, digest, decision, decision_command_id, status, expires_at, result,
            expires_at <= clock_timestamp() AS expired,
            COALESCE(deadline_at <= clock_timestamp(), false) AS overdue
-         FROM ${runTable(tx)} WHERE id = $1`,
+         FROM ${runTable(tx)} r WHERE id = $1`,
         [id],
       )
     ).rows[0],
@@ -89,6 +94,7 @@ const recordOf = (row: Row): CodingRunRecord => ({
   branch: row.branch,
   task: row.task,
   planOwnerMembershipId: row.plan_owner_membership_id,
+  githubLogin: row.github_login,
   digest: row.digest,
 });
 const originOf = (row: Row): CodingRunOrigin => ({
@@ -115,6 +121,7 @@ function viewOf(row: Row): CodingRunView {
     task: row.task,
     digest: row.digest,
     ownPlan: row.plan_owner_membership_id === row.membership_id,
+    githubLogin: row.github_login,
     status: statusOf(row),
     expiresAt: row.expires_at.toISOString(),
     outcome: outcomeOf(row),
@@ -123,10 +130,12 @@ function viewOf(row: Row): CodingRunView {
 
 /** Records a run for its member's decision. Proposing the same call again changes nothing. */
 export async function proposeCodingRun(storage: CodingRunStorage, workspaceId: string, run: CodingRunRecord) {
-  await storage.transaction(workspaceId, commonCompatibility, tx =>
-    tx.client.query(
-      `INSERT INTO ${runTable(tx)} (id, membership_id, user_id, conversation_id, turn_id, generation, agent, repository, branch, task, plan_owner_membership_id, digest, expires_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12, clock_timestamp() + $13 * interval '1 millisecond')
+  await storage.transaction(workspaceId, commonCompatibility, tx => {
+    // Workspaces below the migration have no github_login column; their runs keep the login unstored.
+    const login = ((tx as { commonVersion?: number }).commonVersion ?? 0) >= githubLoginVersion;
+    return tx.client.query(
+      `INSERT INTO ${runTable(tx)} (id, membership_id, user_id, conversation_id, turn_id, generation, agent, repository, branch, task, plan_owner_membership_id, digest, expires_at${login ? ', github_login' : ''})
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12, clock_timestamp() + $13 * interval '1 millisecond'${login ? ', $14' : ''})
        ON CONFLICT (id) DO NOTHING`,
       [
         run.id,
@@ -142,9 +151,10 @@ export async function proposeCodingRun(storage: CodingRunStorage, workspaceId: s
         run.planOwnerMembershipId,
         run.digest,
         CODING_RUN_APPROVAL_MS,
+        ...(login ? [run.githubLogin] : []),
       ],
-    ),
-  );
+    );
+  });
 }
 
 /** The member's own run. Anyone else reads `undefined`. */

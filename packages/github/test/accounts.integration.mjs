@@ -365,3 +365,41 @@ test('account limits serialize concurrent creation and permit recovery at capaci
     await f.close();
   }
 });
+
+test('logins are on or off for chats and coding, and one at a time is primary for Knowledge', async () => {
+  const f = await githubFixture();
+  try {
+    const [first, second, third] = [await f.connect(1), await f.connect(2), await f.connect(3)];
+    const uses = async () =>
+      Object.fromEntries(
+        (await f.service.list(f.one.id, f.member.userId)).accounts.map(account => [
+          account.id,
+          [account.useForChat, account.useForCoding, account.primaryForKnowledge],
+        ]),
+      );
+    assert.deepEqual(await uses(), {
+      [first]: [true, true, true],
+      [second]: [true, true, false],
+      [third]: [true, true, false],
+    });
+
+    await f.service.setUses(f.one.id, f.member.userId, first, { coding: false });
+    await f.service.setUses(f.one.id, f.member.userId, third, { chat: false, primaryForKnowledge: true });
+    assert.deepEqual(await uses(), {
+      [first]: [true, false, false],
+      [second]: [true, true, false],
+      [third]: [false, true, true],
+    });
+    const coding = async login => (await f.service.codingAccount(f.one.id, f.member.userId, login))?.login ?? null;
+    assert.equal(await coding(), 'person-2');
+    assert.equal(await coding('person-3'), 'person-3');
+    assert.equal(await coding('person-1'), null);
+
+    // When the primary account disconnects, the oldest remaining active one takes its place.
+    await f.service.disconnect(f.one.id, f.member.userId, third);
+    assert.deepEqual((await uses())[first], [true, false, true]);
+    await assert.rejects(f.service.setUses(f.one.id, f.member.userId, third, { chat: true }), /reconnect-required/);
+  } finally {
+    await f.close();
+  }
+});

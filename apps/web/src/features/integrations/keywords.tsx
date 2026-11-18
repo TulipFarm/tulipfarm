@@ -70,6 +70,7 @@ export function useIntegrationKeywords(
       : null;
   const selected = accounts.find(account => account.id === selectedId) ?? (accounts.length === 1 ? accounts[0] : null);
   const keywords: RichTextKeyword[] = integrations.flatMap(app => {
+    if (app.provider === 'chatgpt' || app.provider === 'claude') return [];
     const status = statusOf(statuses, app);
     const github = app.provider === 'github-personal' && accounts.length > 0;
     const slack = app.provider === 'slack' && slackChoice;

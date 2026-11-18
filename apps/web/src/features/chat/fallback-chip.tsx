@@ -15,7 +15,13 @@ import {
   PopoverTrigger,
 } from '@tulipfarm/sprout/popover';
 import type { ConversationMessage } from './conversation-api';
-import { fallbackSummary, planLabels, planUsageUrls, type FallbackSummary } from './reply-failure-copy';
+import {
+  fallbackSummary,
+  planLabels,
+  planSwitchSummary,
+  planUsageUrls,
+  type FallbackSummary,
+} from './reply-failure-copy';
 
 const badgeVariants = { warning: 'warning', info: 'info', action: 'default' } as const;
 
@@ -46,7 +52,7 @@ export function FallbackChip({
 }) {
   const [open, setOpen] = useState(false);
   const summary = fallbackSummary(turn.status, turn.errorCode, turn.stats?.model, modelName);
-  if (!summary) return null;
+  if (!summary) return <PlanSwitchChip turn={turn} answeredAt={answeredAt} slug={slug} />;
   const { chosen, plan } = summary;
   const time = new Date(answeredAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   const switchBack = chosen && chosen !== currentModel && canSwitchTo(chosen) ? chosen : null;
@@ -105,6 +111,55 @@ export function FallbackChip({
               </Button>
             )}
           </div>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/** A compact note above the first reply another of the member's plan accounts answered after the picked one couldn't. */
+function PlanSwitchChip({
+  turn,
+  answeredAt,
+  slug,
+}: {
+  turn: NonNullable<ConversationMessage['turn']>;
+  answeredAt: string;
+  slug: string;
+}) {
+  const summary = planSwitchSummary(turn);
+  if (!summary) return null;
+  const time = new Date(answeredAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  return (
+    <Popover>
+      <PopoverTrigger
+        nativeButton={false}
+        aria-label={`Using ${summary.to}. ${summary.short}. Show details`}
+        render={<Badge variant="info" size="chip" />}
+      >
+        <InfoCircle size={12} aria-hidden="true" />
+        <span className="text-foreground">
+          Using <span className="font-semibold">{summary.to}</span>
+          <span className="text-muted-foreground"> · {summary.short}</span>
+        </span>
+      </PopoverTrigger>
+      <PopoverContent align="start" side="bottom">
+        <div className="space-y-3">
+          <PopoverHeader>
+            <PopoverTitle>{summary.short}</PopoverTitle>
+            <PopoverDescription>{summary.detail}</PopoverDescription>
+          </PopoverHeader>
+          <p className="text-xs text-muted-foreground">{time}</p>
+          {summary.own && (
+            <Button
+              size="sm"
+              variant="outline"
+              nativeButton={false}
+              render={<Link to="/$workspaceSlug/settings/models" params={{ workspaceSlug: slug }} />}
+            >
+              Manage accounts
+            </Button>
+          )}
         </div>
       </PopoverContent>
     </Popover>
