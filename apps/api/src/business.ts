@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { fromNodeHeaders } from 'better-auth/node';
 import { z } from 'zod';
+import { observeStep } from '@tulipfarm/observability';
 import { WorkspaceMembershipDenied } from '@tulipfarm/access';
 import { commonCompatibility, qualified, type createWorkspaceRuntime } from '@tulipfarm/workspace-storage/runtime';
 import { workflowWebhookOperations } from './abuse.ts';
@@ -39,28 +40,30 @@ export function protectWorkspaceRequests(
   app.addHook('onRequest', async (request, reply) => {
     if (!protectedRequest(request)) return;
     reply.header('Cache-Control', 'no-store');
-    const session = await auth.api.getSession({ headers: fromNodeHeaders(request.headers) });
+    const session = await observeStep('auth.session.get', () =>
+      auth.api.getSession({ headers: fromNodeHeaders(request.headers) }),
+    );
     if (!session) return reply.code(401).send({ error: 'sign-in-required' });
     if (rejectChangedSession(request, reply, session)) return reply;
     const params = workspaceParams.safeParse(request.params);
     if (!params.success) return reply.code(404).send({ error: 'not-found' });
     try {
       const workspaceId = params.data.workspaceId.toLowerCase();
-      const member = await runtime
-        .hasCurrentMember(workspaceId, session.user.id)
-        .catch(() =>
-          runtime.transaction(
-            workspaceId,
-            commonCompatibility,
-            async transaction =>
-              (
-                await transaction.client.query(
-                  `SELECT 1 FROM ${qualified(transaction.schema, 'tf_memberships')} WHERE user_id = $1 AND removed_at IS NULL LIMIT 1`,
-                  [session.user.id],
-                )
-              ).rowCount === 1,
-          ),
-        );
+      const member = await observeStep('workspace.request.member_check', () =>
+        runtime.hasCurrentMember(workspaceId, session.user.id),
+      ).catch(() =>
+        runtime.transaction(
+          workspaceId,
+          commonCompatibility,
+          async transaction =>
+            (
+              await transaction.client.query(
+                `SELECT 1 FROM ${qualified(transaction.schema, 'tf_memberships')} WHERE user_id = $1 AND removed_at IS NULL LIMIT 1`,
+                [session.user.id],
+              )
+            ).rowCount === 1,
+        ),
+      );
       if (!member) return reply.code(404).send({ error: 'not-found' });
       admitted.set(request, session.user.id);
     } catch (error) {

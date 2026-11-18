@@ -1233,6 +1233,35 @@ export async function observeWorkspaceConnection<T>(phase: 'wait' | 'hold', call
 }
 
 /**
+ * Spans one step of a request so time spent there is not left unattributed. The span carries only its name, the build
+ * commit and an outcome: `success`, the error's string `code` when it has one, or `error`. No metrics, no logs.
+ */
+export async function observeStep<T>(name: string, call: () => Promise<T>): Promise<T> {
+  let span: Span | undefined;
+  try {
+    span = trace.getTracer(scope).startSpan(name, { attributes: { 'build.commit': buildCommit } });
+  } catch {
+    /* Diagnostics must not prevent the step. */
+  }
+  let outcome = 'success';
+  try {
+    return await call();
+  } catch (error) {
+    const code = error instanceof Error && 'code' in error ? error.code : undefined;
+    outcome = typeof code === 'string' ? code : 'error';
+    throw error;
+  } finally {
+    try {
+      span?.setAttribute('outcome', outcome);
+      if (outcome !== 'success') span?.setStatus({ code: SpanStatusCode.ERROR });
+      span?.end();
+    } catch {
+      /* Export failures must not replace the step's result. */
+    }
+  }
+}
+
+/**
  * Event-loop delay and utilisation, heap and CPU for this process: one series each, read at every export.
  * Event-loop delay covers only the interval since the previous export.
  */
