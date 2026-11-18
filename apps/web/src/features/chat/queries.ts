@@ -1,19 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
-import {
-  featureReadOptions,
-  freshness,
-  useFeatureChanges,
-  useFeatureRead,
-  useLoadedWindow,
-  useOptimisticUpdate,
-} from '@/lib/query';
+import { freshness, useFeatureChanges, useFeatureRead, useLoadedWindow, useOptimisticUpdate } from '@/lib/query';
 import { useFeatureContext } from '@/lib/query/provider';
 import { scopeKey } from '@/lib/query/scope';
 import { creditKeys } from '@/lib/credit-keys';
 import { modelKeys } from '@/features/models/queries';
 import { editChat, editList, type ChatEdit } from './chat-edits';
 import {
-  conversationApi,
   type Chat,
   type ChatHistoryPage,
   type ChatListPage,
@@ -174,36 +166,6 @@ export function listChanges(history: ConversationHistory) {
     ),
     ...(history.chat ? [`title:${history.chat.titleRevision}`] : []),
   ];
-}
-
-/**
- * Starts reading a chat's first page before it opens, under the same key and freshness its
- * history query uses. A failed read is dropped, so opening the chat reads again and shows the
- * usual denial or error.
- */
-export function useConversationPrefetch(workspaceId: string) {
-  const { runtime, scope, current } = useFeatureContext();
-  const api = useMemo(() => conversationApi(workspaceId, () => {}), [workspaceId]);
-  return useCallback(
-    (chatId: string) => {
-      const options = featureReadOptions(
-        runtime,
-        scope,
-        {
-          key: conversationKeys.history(chatId, 1),
-          load: signal => api.history(chatId, signal, 1),
-          staleTime: freshness.chat,
-        },
-        current,
-      );
-      if (!options.enabled) return;
-      void runtime.client.prefetchQuery(options).then(() => {
-        if (runtime.client.getQueryState(options.queryKey)?.status === 'error')
-          runtime.client.removeQueries({ queryKey: options.queryKey, exact: true });
-      });
-    },
-    [runtime, scope, current, api],
-  );
 }
 
 export function useConversationHistory(

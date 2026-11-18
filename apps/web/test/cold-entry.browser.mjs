@@ -306,7 +306,7 @@ test('cold chat routes read during admission, reuse those reads and never show t
           [chats[0], button => button.hover()],
           [chats[1], button => button.focus()],
         ]) {
-          // The chat list's row, not the sidebar's recent-chat link, which does not preload.
+          // The chat list's row; the sidebar's recent-chat link preloads the same way.
           const button = run.page.getByRole('main').getByRole('link', { name: chat.title, exact: true });
           await button.waitFor();
           const prefetched = run.started(`/conversations/${chat.id}/messages`, `/conversations/${chat.id}`);
