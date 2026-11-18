@@ -1,7 +1,8 @@
 // Runs the browser tests. Many share fixed ports and Vite's dependency cache, so they run one at a time unless
 // --jobs is above 1. Then each test runs in its own Linux network namespace (unshare), where its ports cannot
 // collide, with its worker's own Vite cache, and reaches TEST_ADMIN_DATABASE_URL through a forwarded socket.
-// A test that measures timings opts out of running beside others with a `// browser-tests: run alone` comment.
+// A test that fails beside others is retried, then tried once alone. A test that measures timings, or that cannot
+// share the machine, opts out of running beside others with a `// browser-tests: run alone` comment.
 // Usage: node test/run-browser-tests.mjs [--shard=<index>/<count>] [--jobs=<count>] [test/name.browser.mjs ...]
 import { spawn, spawnSync } from 'node:child_process';
 import { readdirSync, readFileSync, rmSync } from 'node:fs';
@@ -144,6 +145,7 @@ function run(file, worker) {
 
 const queue = [...files.filter(file => alone.has(file)), ...files.filter(file => !alone.has(file))];
 const failed = [];
+const retried = new Set();
 let finished = 0;
 async function work(worker, once = false) {
   while (queue.length) {
@@ -151,8 +153,17 @@ async function work(worker, once = false) {
     const started = Date.now();
     const { code, output } = await run(file, worker);
     const label = `[${++finished}/${files.length}] ${file} (${Math.round((Date.now() - started) / 1000)}s)`;
-    if (code === 0) console.log(`ok ${label}`);
-    else {
+    if (code === 0) {
+      console.log(`ok ${label}`);
+      if (retried.has(file))
+        console.log(`::warning file=apps/web/${file}::${file} failed beside other tests and passed on retry`);
+    } else if (isolate && !once && !retried.has(file)) {
+      // Contention can push a test past its waits. Retrying it at once overlaps the retry with the other tests.
+      retried.add(file);
+      finished--;
+      queue.unshift(file);
+      console.log(`::group::FAIL, retrying ${label}\n${output}\n::endgroup::`);
+    } else {
       failed.push(file);
       console.log(`::group::FAIL ${label}\n${output}\n::endgroup::`);
     }
@@ -162,7 +173,7 @@ async function work(worker, once = false) {
 // Tests that run alone go first, one at a time, before the workers share the rest.
 while (alone.has(queue[0])) await work(1, true);
 await Promise.all(Array.from({ length: Math.min(jobs, queue.length) }, (_, worker) => work(worker + 1)));
-// Contention can push a test past its waits, so a test that failed beside others gets one more try alone.
+// A test that still failed gets one last try alone.
 if (isolate && failed.length) {
   const retries = failed.splice(0);
   for (const file of retries) {
