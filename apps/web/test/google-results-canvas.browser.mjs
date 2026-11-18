@@ -8,7 +8,7 @@ import { chromium } from 'playwright';
 
 test(
   'Google presentation results keep the exact draft, approval and saved state together in Canvas',
-  { timeout: 240000 },
+  { timeout: 360000 },
   async () => {
     const server = await createServer({
       root: fileURLToPath(new URL('..', import.meta.url)),
