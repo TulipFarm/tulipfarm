@@ -196,6 +196,9 @@ test(
               },
             });
           if (path === `${base}/files/${plan.id}`) return route.fulfill({ json: plan });
+          // Pointing at a row in the list starts reading that file.
+          const listed = [budget, notes, draft].find(item => path === `${base}/files/${item.id}`);
+          if (listed && method === 'GET') return route.fulfill({ json: listed });
           if (path === `${base}/files/${plan.id}/details`)
             return route.fulfill({
               json: {

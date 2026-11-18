@@ -39,6 +39,7 @@ import { Users } from 'reicon-react/icons/Users';
 import { preloadRouteCode, workspaceRoute } from '@/router';
 import { whenCodeQuiet } from '@/lib/code-quiet';
 import { WorkspaceSetup } from './workspace-setup';
+import { RecordLinkPrefetch } from '@/features/navigation/record-link-prefetch';
 import { StatePanel } from '@tulipfarm/sprout/state-panel';
 import { Spinner } from '@tulipfarm/sprout/spinner';
 import { rememberWorkspace } from '@/lib/last-workspace';
@@ -598,7 +599,7 @@ function WorkspaceNavigation({ onSearch }: { onSearch: () => void }) {
               </SidebarMenu>
             </SidebarHeader>
             <SidebarContent>
-              <nav aria-label="Workspace navigation">
+              <nav aria-label="Workspace navigation" data-record-links>
                 <SidebarGroup>
                   <SidebarMenu>
                     <NavItem page={newChat} />
@@ -775,6 +776,9 @@ function WorkspaceShellContent() {
   }, [user.id, workspace.id, workspace.slug]);
   return (
     <TooltipProvider>
+      {membershipId && workspace.status === 'ready' && (
+        <RecordLinkPrefetch workspaceId={workspace.id} slug={workspace.slug} />
+      )}
       <div className="workspace-viewport grid h-svh grid-rows-1 overflow-hidden">
         <SidebarProvider
           open={onCalendar ? calendarNavigationOpen : navigationOpen}

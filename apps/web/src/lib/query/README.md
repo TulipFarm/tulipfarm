@@ -131,6 +131,17 @@ and `scopeKey` construct full keys for direct QueryClient operations.
 authority fences for prefetching with `runtime.client.fetchQuery`. The runtime
 must be the provider's existing `FeatureClient`, never a second client.
 
+`usePrefetchRead()` (`./prefetch`) wraps that for intent prefetches. It skips a
+read fetched in the last 10 seconds and drops a failed read, so opening the page
+reads again and shows the usual denial or error. The workspace shell mounts
+`RecordLinkPrefetch` (`features/navigation/record-link-prefetch.tsx`). When
+someone pauses 100 ms on, or focuses, a link to a chat, project, agent, task,
+workflow, table or file in the current workspace, it starts that page's first
+read. Only links inside a `DataList` or a `data-record-links` container count,
+such as the workspace navigation; links in chats and cards are left alone.
+`record-reads.ts` maps each record to that read. It is loaded on first
+intent, so the shell doesn't bundle every feature's API.
+
 BroadcastChannel messages contain version, event ID, session ID, scoped identity,
 change kind, and key prefixes. They contain no response data. Receivers validate
 and deduplicate events without rebroadcast. Old-session logout cannot revoke a

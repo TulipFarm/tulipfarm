@@ -135,6 +135,7 @@
   "test/query-loading.browser.mjs": 218,
   "test/reauthorization-banner.browser.mjs": 44,
   "test/recommendations.browser.mjs": 42,
+  "test/record-link-prefetch.browser.mjs": 8,
   "test/result-cards.browser.mjs": 38,
   "test/route-code-preload.browser.mjs": 8,
   "test/runtime-context.browser.mjs": 35,
