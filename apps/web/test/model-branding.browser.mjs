@@ -4,6 +4,7 @@ import { chromium } from 'playwright';
 import { catalogFamily, catalogFixture } from '../src/features/models/catalog-fixture.ts';
 import { membership, credits, notifyChange } from './chat-query.fixture.mjs';
 import { governanceSnapshot } from './governance-snapshot.mjs';
+import { modelOption, modelPicker } from './browser-controls.mjs';
 import { startBuiltApp, builderBrowserOptions, captureBrowserFailure } from './built-app.fixture.mjs';
 
 // Operator catalog families (MODEL_CATALOG_FILE) carry their own names and vendors; unknown vendors get a neutral logo.
@@ -136,14 +137,13 @@ try {
     await routeApi(page, () => items);
 
     await page.goto(`${origin}/acme`);
-    await page.getByRole('combobox', { name: 'Model: Acme Chat 1', exact: true }).click();
-    await page.getByRole('option').first().waitFor();
-    assert.equal(await page.getByRole('option').count(), expected.length);
-    for (const [name, brand] of expected)
-      await logo(page.getByRole('option', { name: new RegExp(`^${name}\\b`) }), brand);
+    await modelPicker(page, 'Acme Chat 1').click();
+    await page.getByRole('menuitemradio').first().waitFor();
+    assert.equal(await page.getByRole('menuitemradio').count(), expected.length);
+    for (const [name, brand] of expected) await logo(modelOption(page, name), brand);
     await screenshot(page, 'composer-picker', theme);
     await page.keyboard.press('Escape');
-    await logo(page.getByRole('combobox', { name: 'Model: Acme Chat 1', exact: true }), 'neutral');
+    await logo(modelPicker(page, 'Acme Chat 1'), 'neutral');
 
     await page.goto(`${origin}/acme/agents/${agentId}`);
     await page.getByRole('tab', { name: 'Instructions', exact: true }).click();
@@ -166,7 +166,7 @@ try {
 
     const setupGuide = 'https://tulipfarm.ai/docs/self-hosting/models/';
     await page.goto(`${origin}/acme`);
-    await page.getByRole('combobox', { name: 'Model: Acme Chat 1', exact: true }).waitFor();
+    await modelPicker(page, 'Acme Chat 1').waitFor();
     items = catalogFixture([]);
     await notifyChange(page, workspace.id, 'ada', 'catalog');
     await page

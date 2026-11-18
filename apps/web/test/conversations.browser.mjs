@@ -6,7 +6,7 @@ import { chromium } from 'playwright';
 import { chatCatalog } from './chat-catalog.fixture.mjs';
 import { membership, credits, notifyChange } from './chat-query.fixture.mjs';
 import { conversationPages } from '../../api/src/conversation-pages.ts';
-import { modelOption, openChatList } from './browser-controls.mjs';
+import { modelOption, modelPicker, openChatList } from './browser-controls.mjs';
 
 const port = Number(process.env.CONVERSATION_BROWSER_PORT ?? 5293);
 const origin = `http://127.0.0.1:${port}`;
@@ -224,7 +224,7 @@ try {
   assert.equal(page.url(), `${origin}/acme`);
   assert.equal(writes.length, 0, 'Opening a workspace does not create a chat');
   assert.equal(await page.getByRole('region', { name: 'Chat list', exact: true }).count(), 0);
-  await page.getByRole('combobox', { name: 'Model: Claude Sonnet 5', exact: true }).click();
+  await modelPicker(page, 'Claude Sonnet 5').click();
   for (const name of ['DeepSeek V4 Pro', 'DeepSeek V4 Flash', 'Kimi K2.6', 'Kimi K2.7 Code']) {
     const option = modelOption(page, name);
     assert.equal(
@@ -233,7 +233,7 @@ try {
     );
   }
   await modelOption(page, 'Kimi K2.6').click();
-  await page.getByRole('combobox', { name: 'Model: Kimi K2.6', exact: true }).waitFor();
+  await modelPicker(page, 'Kimi K2.6').waitFor();
   await page.locator('[data-slot="model-selector-content"]').waitFor({ state: 'detached' });
   for (const theme of ['light', 'dark']) {
     await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' });
@@ -324,8 +324,8 @@ try {
   );
   assert.equal(sent.body.model, 'claude-sonnet');
   assert.equal(messages.get(chatId).length, 1);
-  await page.getByRole('combobox', { name: 'Model: Claude Sonnet 5', exact: true }).click();
-  assert.equal(await page.getByRole('option', { name: /Gemini 3.1 Pro/ }).count(), 0);
+  await modelPicker(page, 'Claude Sonnet 5').click();
+  assert.equal(await modelOption(page, 'Gemini 3.1 Pro').count(), 0);
   await modelOption(page, 'Claude Haiku 4.5').click();
   await page.getByLabel('Message', { exact: true }).fill('Second');
   await page.getByLabel('Message', { exact: true }).press('Shift+Enter');

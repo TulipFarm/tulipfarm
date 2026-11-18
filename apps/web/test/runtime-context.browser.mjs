@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { setTimeout } from 'node:timers/promises';
 import { chromium } from 'playwright';
 import { chatCatalog } from './chat-catalog.fixture.mjs';
-import { modelOption } from './browser-controls.mjs';
+import { modelOption, modelPicker } from './browser-controls.mjs';
 
 const port = Number(process.env.RUNTIME_CONTEXT_BROWSER_PORT ?? 5373);
 const origin = `http://127.0.0.1:${port}`;
@@ -102,7 +102,7 @@ try {
     });
   });
   await page.goto(`${origin}/acme/chat/${chat.id}`);
-  await page.getByRole('combobox', { name: /^Model:/ }).click();
+  await modelPicker(page).click();
   await modelOption(page, 'DeepSeek V4 Flash').click();
   await page.getByLabel('Message', { exact: true }).fill('Show my events for today.');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
@@ -120,7 +120,7 @@ try {
   const error =
     'The model could not produce a valid answer or tool request. Retry uses the original model. To use another model, select it and send a new message.';
   assert.equal(await page.getByRole('alert').filter({ hasText: error }).count(), 1);
-  await page.getByRole('combobox', { name: /^Model:/ }).click();
+  await modelPicker(page).click();
   // Chat composer model options show only the family label, without credit rates (cloud 9725b0ba features/chat/composer.tsx:296).
   await modelOption(page, 'Kimi K2.6').click();
   await page.getByRole('button', { name: 'Retry reply', exact: true }).click();

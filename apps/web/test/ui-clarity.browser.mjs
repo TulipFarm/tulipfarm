@@ -5,7 +5,7 @@ import { chromium } from 'playwright';
 import { normalizeQueryRequest } from '@tulipfarm/tables/query';
 import { governanceSnapshotSchema } from '@tulipfarm/workspaces/governance-contracts';
 import { catalogFamily } from '../src/features/models/catalog-fixture.ts';
-import { modelOption } from './browser-controls.mjs';
+import { modelOption, modelPicker } from './browser-controls.mjs';
 
 const port = Number(process.env.CLARITY_PORT ?? 5327);
 const origin = `http://127.0.0.1:${port}`;
@@ -288,23 +288,21 @@ try {
     }
     // The dev server compiles the app and chat module on first visit, which can exceed the default wait.
     await page.goto(`${origin}/acme`, { timeout: 30000 });
-    await page
-      .getByRole('combobox', { name: 'Model: Claude Sonnet', exact: true })
+    await modelPicker(page, 'Claude Sonnet')
       .click({ timeout: 30000 })
       .catch(async error => {
         console.error(await page.locator('body').innerText(), errors);
         throw error;
       });
-    await page.getByRole('option', { name: /Claude Sonnet/ }).waitFor();
+    await modelOption(page, 'Claude Sonnet').waitFor();
     await screenshot('selection');
     if (!before) {
-      assert.equal(await modelOption(page, 'Claude Sonnet').getAttribute('aria-selected'), 'true');
+      assert.equal(await modelOption(page, 'Claude Sonnet').getAttribute('aria-checked'), 'true');
       if (mobile)
-        for (const row of await page.getByRole('option').all()) assert.ok((await row.boundingBox()).height >= 44);
-      await page.getByRole('combobox', { name: 'Search models' }).fill('Gemini');
-      await page.keyboard.press('ArrowDown');
-      await page.keyboard.press('Enter');
-      await page.getByRole('combobox', { name: 'Model: Gemini Flash', exact: true }).waitFor();
+        for (const row of await page.getByRole('menuitemradio').all())
+          assert.ok((await row.boundingBox()).height >= 44);
+      await modelOption(page, 'Gemini Flash').click();
+      await modelPicker(page, 'Gemini Flash').waitFor();
     }
     await page.keyboard.press('Escape');
     const rows = page
