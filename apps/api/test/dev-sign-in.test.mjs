@@ -7,13 +7,14 @@ import { registerAuth } from '../src/auth.ts';
 // The app serves the shipped model catalog, which needs a provider key.
 process.env.ANTHROPIC_API_KEY ??= 'test-key';
 
-async function lookup(env) {
+async function lookup(env, url = '/v1/dev/sign-in-link?email=nobody@tulipfarm.test') {
   const saved = { ...process.env };
   Object.assign(process.env, { NODE_ENV: 'test', HOST: '127.0.0.1' }, env);
-  for (const key of ['ACS_CONNECTION_STRING', 'SMTP_HOST', 'EMAIL_PROVIDER']) if (!env[key]) delete process.env[key];
+  for (const key of ['ACS_CONNECTION_STRING', 'SMTP_HOST', 'EMAIL_PROVIDER', 'DEV_AUTO_SIGN_IN'])
+    if (!env[key]) delete process.env[key];
   const app = buildApp({ agentModel: null });
   try {
-    return (await app.inject('/v1/dev/sign-in-link?email=nobody@tulipfarm.test')).json();
+    return (await app.inject(url)).json();
   } finally {
     await app.close();
     process.env = saved;
@@ -26,6 +27,14 @@ test('dev sign-in link route exists only without an email sender', async () => {
     error: 'No sign-in link',
   });
   assert.notDeepEqual(await lookup({ SMTP_HOST: 'smtp.example.test' }), { error: 'No sign-in link' });
+});
+
+test('auth options offer local auto sign-in unless opted out or sending real email', async () => {
+  const offered = async env => (await lookup(env, '/v1/auth/options')).devAutoSignIn === true;
+  assert.equal(await offered({}), true);
+  assert.equal(await offered({ DEV_AUTO_SIGN_IN: 'false' }), false);
+  assert.equal(await offered({ SMTP_HOST: 'smtp.example.test' }), false);
+  assert.equal(await offered({ HOST: '0.0.0.0' }), false);
 });
 
 test('production auth starts with disabled email and with SMTP without any ACS configuration', async () => {

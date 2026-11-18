@@ -58,6 +58,12 @@ The shipped catalog ([`packages/config/catalog/models.json`](packages/config/cat
 skips models whose key is unset; `MODEL_CATALOG_FILE` or `MODEL_CATALOG`
 replaces it. See [`packages/config/README.md`](packages/config/README.md#configuration).
 
+Locally, the web app skips the login page and signs you in as the mock user
+`dev@tulipfarm.test` (Dev User). After you log out, that tab stays signed out so
+you can test sign-in; a new tab signs in again. To always see the login page,
+set `DEV_AUTO_SIGN_IN=false` in `apps/api/.env.local` and restart the API. Auto
+sign-in never runs in production, with an email transport, or off loopback.
+
 The `chatgpt-plan` feature flag (default on) lets each member connect their own ChatGPT plan
 in Models settings. Local development completes the sign-in on
 `http://127.0.0.1:1455/auth/callback`; see

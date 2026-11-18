@@ -1,7 +1,7 @@
 import type { Pool } from 'pg';
 import { authConfig, createAuth } from './better-auth.ts';
 
-export { devSessionsAllowed } from './better-auth.ts';
+export { devAutoSignInAllowed, devSessionsAllowed } from './better-auth.ts';
 
 export type DevSession = { user: { id: string; email: string; name: string }; cookies: string[]; cookieHeader: string };
 

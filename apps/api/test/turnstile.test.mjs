@@ -191,6 +191,7 @@ test('HTTP options expose only the public key and preflight permits challenge to
     TURNSTILE_SITE_KEY: config.siteKey,
     TURNSTILE_SECRET_KEY: config.secretKey,
     HOST: '127.0.0.1',
+    DEV_AUTO_SIGN_IN: 'false',
   });
   for (const name of [
     'EMAIL_PROVIDER',

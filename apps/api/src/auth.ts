@@ -2,7 +2,7 @@ import { createEmailDeliveryStore, emailDeliveryKeys } from '@tulipfarm/workspac
 import { fromNodeHeaders } from 'better-auth/node';
 import type { FastifyInstance } from 'fastify';
 import { turnstileConfig } from './turnstile.ts';
-import { createDevSessions, devSessionsAllowed, safeRedirectPath } from './dev-session.ts';
+import { createDevSessions, devAutoSignInAllowed, devSessionsAllowed, safeRedirectPath } from './dev-session.ts';
 import { authConfig, createAuth, emailTransportConfigured } from './better-auth.ts';
 import { registerAccountDetails } from './account-details.ts';
 import type { InvitationLinks } from './invitation-sign-in.ts';
@@ -17,6 +17,7 @@ export function registerAuth(app: FastifyInstance) {
   // Local development has no mail transport; keep the latest link per email so the login page can offer it.
   const devLinks = devSessionsAllowed() ? new Map<string, string>() : undefined;
   const { magicLink } = config;
+  const devAutoSignIn = devAutoSignInAllowed();
   for (const method of config.unavailableMethods)
     app.log.warn({ method }, `AUTH_METHODS lists ${method}, but its credentials are missing; it stays off`);
   const pool = createIdentityPool(app);
@@ -49,6 +50,7 @@ export function registerAuth(app: FastifyInstance) {
       turnstileSiteKey: turnstile?.siteKey ?? null,
       google: Boolean(config.google),
       magicLink,
+      ...(devAutoSignIn && { devAutoSignIn: true }),
       ...(config.emailPassword && { emailPassword: true, passwordResetEmail }),
     });
   });
