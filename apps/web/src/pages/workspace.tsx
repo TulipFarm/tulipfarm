@@ -599,7 +599,7 @@ function WorkspaceNavigation({ onSearch }: { onSearch: () => void }) {
               </SidebarMenu>
             </SidebarHeader>
             <SidebarContent>
-              <nav aria-label="Workspace navigation">
+              <nav aria-label="Workspace navigation" data-record-links>
                 <SidebarGroup>
                   <SidebarMenu>
                     <NavItem page={newChat} />

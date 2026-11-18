@@ -4,20 +4,22 @@ import type { RecordSection } from './record-reads';
 
 const record =
   /^\/([^/]+)\/(chat|projects|agents|agent-tasks|workflows|tables|files)\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\/|$)/i;
+// Lists and the workspace navigation, where people browse records. Links inside chats and cards are left alone.
+const browsing = '[data-slot="data-list"], [data-record-links]';
 // A short pause skips links the pointer only passes over.
 const hoverDelay = 100;
 
 function recordLink(target: EventTarget | null, slug: string) {
   const link = target instanceof Element ? target.closest('a[href]') : null;
-  if (!(link instanceof HTMLAnchorElement) || link.origin !== location.origin) return null;
+  if (!(link instanceof HTMLAnchorElement) || link.origin !== location.origin || !link.closest(browsing)) return null;
   const [, linkSlug, section, id] = record.exec(link.pathname) ?? [];
   if (!linkSlug || !section || !id || linkSlug !== encodeURIComponent(slug)) return null;
   return { link, section: section as RecordSection, id };
 }
 
 /**
- * Pointing at or focusing any link to a chat, project, agent, task, workflow, table or file in
- * this workspace starts the read its page opens with, so the page can show it at once.
+ * Pointing at or focusing a list or navigation link to a chat, project, agent, task, workflow, table
+ * or file in this workspace starts the read its page opens with, so the page can show it at once.
  */
 export function useRecordLinkPrefetch(workspaceId: string, slug: string) {
   const prefetch = usePrefetchRead();
