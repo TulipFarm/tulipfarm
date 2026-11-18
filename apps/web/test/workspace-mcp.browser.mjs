@@ -515,6 +515,8 @@ try {
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
   await setTimeout(300);
   assert.equal(mcpReads.length, beforeFocus, 'window focus does not bypass MCP query freshness');
+  // Registry results list under Browse, beside the apps this member can still connect.
+  await page.getByRole('tab', { name: /^Browse/ }).click();
   const directory = page.getByRole('searchbox', { name: 'Search apps' });
   catalogDelay = 500;
   await directory.fill('Registry customer');

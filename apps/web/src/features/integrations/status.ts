@@ -44,7 +44,8 @@ function status<T>(state: ReadState<T>, present: (data: T) => Status): Status {
   return present(state.data);
 }
 
-export function useIntegrationStatus(workspaceId: string, provider?: keyof Statuses) {
+/** All statuses, or just `provider`'s. AI plans load only when named or with `plans`, since chats never mention them. */
+export function useIntegrationStatus(workspaceId: string, provider?: keyof Statuses, plans = false) {
   const google = useGoogleIntegration(workspaceId, !provider || provider === 'google');
   const slack = useSlackIntegration(workspaceId, !provider || provider === 'slack');
   const github = useManagedIntegrations(workspaceId, !provider || provider === 'github');
@@ -52,8 +53,10 @@ export function useIntegrationStatus(workspaceId: string, provider?: keyof Statu
   const atlassian = useAtlassianAccounts(workspaceId, !provider || provider === 'atlassian' || provider === 'trello');
   const chatgptOn = useFlag('chatgpt-plan');
   const claudeOn = useFlag('claude-plan');
-  const chatgpt = useChatGptConnection(workspaceId, chatgptOn && (!provider || provider === 'chatgpt'));
-  const claude = useTokenConnection(workspaceId, 'claude', claudeOn && (!provider || provider === 'claude'));
+  const readChatgpt = chatgptOn && (provider ? provider === 'chatgpt' : plans);
+  const readClaude = claudeOn && (provider ? provider === 'claude' : plans);
+  const chatgpt = useChatGptConnection(workspaceId, readChatgpt);
+  const claude = useTokenConnection(workspaceId, 'claude', readClaude);
   const off: Status = { kind: 'unavailable', detail: notYet };
   // A plan app is connected while any of the member's accounts is, and needs attention when only stale ones are left.
   const plan = (connections: readonly { state: string }[] | undefined): Status => {
@@ -144,7 +147,7 @@ export function useIntegrationStatus(workspaceId: string, provider?: keyof Statu
   };
   const readers = provider
     ? [byProvider[provider]]
-    : [google, slack, github, personal, atlassian, ...(chatgptOn ? [chatgpt] : []), ...(claudeOn ? [claude] : [])];
+    : [google, slack, github, personal, atlassian, ...(readChatgpt ? [chatgpt] : []), ...(readClaude ? [claude] : [])];
   return {
     statuses,
     refreshing: readers.some(

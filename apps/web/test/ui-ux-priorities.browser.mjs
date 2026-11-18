@@ -449,7 +449,9 @@ try {
       // GitHub team integrations are retired; members connect their own GitHub account.
       await visit('/acme/integrations#github');
       await page.waitForURL('**/acme/integrations/github');
-      await tab('Accounts');
+      // With no login connected, the header's Connect is the one action; the Accounts tab appears after.
+      await page.getByRole('button', { name: 'Connect GitHub', exact: true }).first().waitFor();
+      assert.equal(await page.getByRole('tab', { name: 'Accounts', exact: true }).count(), 0);
       assert.equal(await page.getByRole('button', { name: 'Add GitHub integration', exact: true }).count(), 0);
       await visit('/acme/integrations#jira');
       await page.waitForURL('**/acme/integrations/jira');

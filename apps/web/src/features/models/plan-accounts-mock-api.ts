@@ -161,7 +161,15 @@ if (import.meta.env.DEV && local && param) {
   history.replaceState(history.state, '', clean);
 }
 
-export const planMockEnabled = import.meta.env.DEV && local && localStorage.getItem(storageKey) !== null;
+// Blocked storage throws here; the app must still start, just without the mock.
+const stored = () => {
+  try {
+    return localStorage.getItem(storageKey);
+  } catch {
+    return null;
+  }
+};
+export const planMockEnabled = import.meta.env.DEV && local && stored() !== null;
 
 const read = (): Mock => JSON.parse(localStorage.getItem(storageKey) ?? 'null') ?? scenario('empty');
 const write = (mock: Mock) => localStorage.setItem(storageKey, JSON.stringify(mock));

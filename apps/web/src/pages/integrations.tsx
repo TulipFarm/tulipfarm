@@ -135,7 +135,7 @@ function useMcpDirectory(workspaceId: string) {
 function IntegrationsContent({ workspaceId, slug }: { workspaceId: string; slug: string }) {
   const { workspaceStale, membership } = workspaceRoute.useRouteContext();
   const { returnChat, view: viewParam } = integrationsRoute.useSearch();
-  const { statuses, refresh, refreshing } = useIntegrationStatus(workspaceId);
+  const { statuses, refresh, refreshing } = useIntegrationStatus(workspaceId, undefined, true);
   const apps = useAvailableApps();
   const navigate = useNavigate();
   const mcp = useMcpDirectory(workspaceId);
