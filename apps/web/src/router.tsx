@@ -42,6 +42,8 @@ import { accountCallbackResultSchema } from '@tulipfarm/atlassian/callback-contr
 import { googleCallbackResultSchema } from '@tulipfarm/google-workspace/callback-contracts';
 import { workflowPageSearch } from '@/features/workflows/page-search';
 import { calendarSearchSchema } from '@/features/calendar/search';
+import type { UsageSearch } from '@/features/usage/search';
+import { useFlag } from '@/lib/feature-flags';
 import { agentTabValues } from '@/features/agents/tab-values';
 import { createWorkspaceAccess } from '@/lib/workspace-access';
 import type { FeatureScope } from '@/lib/query/scope';
@@ -131,6 +133,7 @@ const ModelsPage = lazyRouteComponent(routePage('models'), 'ModelsPage');
 const SettingsPage = lazyRouteComponent(routePage('settings'), 'SettingsPage');
 const AccountSettingsPage = lazyRouteComponent(routePage('accountSettings'), 'AccountSettingsPage');
 const SecretsSettingsPage = lazyRouteComponent(routePage('secretsSettings'), 'SecretsSettingsPage');
+const UsagePage = lazyRouteComponent(routePage('usage'), 'UsagePage');
 
 function NotFoundPanel() {
   return (
@@ -943,15 +946,20 @@ const workspaceSecretsRoute = createRoute({
   path: 'settings/secrets',
   component: SecretsSettingsPage,
 });
-// A web extension supplies the Usage page; without one the route does not exist.
-const UsagePage = overrides.get('usage');
+// The usage explorer when its flag is on for the workspace; otherwise a web extension's Usage page, if one is installed.
+const ExtensionUsagePage = overrides.get('usage');
+function UsageRoute() {
+  const explorer = useFlag('usage-explorer');
+  if (explorer) return <UsagePage />;
+  if (ExtensionUsagePage) return <ExtensionUsagePage />;
+  return <WorkspaceNotFoundPage />;
+}
 const workspaceUsageRoute = createRoute({
   getParentRoute: () => workspaceRoute,
   path: 'settings/usage',
-  beforeLoad: () => {
-    if (!UsagePage) throw notFound();
-  },
-  component: () => UsagePage && <UsagePage />,
+  // The explorer checks these values itself, which keeps its schema out of the startup bundle.
+  validateSearch: (search: Record<string, unknown>) => search as UsageSearch,
+  component: UsageRoute,
 });
 export const tablesRoute = createRoute({
   getParentRoute: () => workspaceRoute,

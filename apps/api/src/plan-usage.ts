@@ -61,7 +61,10 @@ export function createPlanUsage(options: {
 }) {
   const cache = new Map<string, { expires: number; value: Promise<PremiumRequests | null> }>();
 
-  async function premiumRequests(workspaceId: string, plan: SubscriptionModelPlan) {
+  async function premiumRequests(
+    workspaceId: string,
+    plan: Pick<SubscriptionModelPlan, 'connectionId' | 'ownerMembershipId'>,
+  ) {
     const { copilotToken } = options;
     if (!copilotToken) return null;
     const key = `${workspaceId}:${plan.connectionId}`;
@@ -77,7 +80,7 @@ export function createPlanUsage(options: {
     return Promise.race([entry.value, sleep(quotaWaitMs, null, { ref: false })]);
   }
 
-  return async (
+  const choices = async (
     workspaceId: string,
     provider: PlanProvider,
     models: readonly (SubscriptionModel & { plan: SubscriptionModelPlan })[],
@@ -100,4 +103,6 @@ export function createPlanUsage(options: {
       }),
     );
   };
+  /** The model choices of a plan with their usage status, and the Copilot premium requests left on one connection. */
+  return Object.assign(choices, { premiumRequests });
 }

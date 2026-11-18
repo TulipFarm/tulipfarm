@@ -47,6 +47,16 @@ export function planModelOfFamily(familyId: string): { provider: PlanProvider; m
   return null;
 }
 
+/**
+ * A provider model id in the form plans and the model's own API both reduce to; they differ in small ways, such as
+ * `claude-sonnet-4.5` and `claude-sonnet-4-5-20250929`.
+ */
+export const comparableProviderModel = (model: string) =>
+  model
+    .toLowerCase()
+    .replaceAll('.', '-')
+    .replace(/-\d{8}$/, '');
+
 const acronyms: Readonly<Record<string, string>> = Object.freeze({ gpt: 'GPT', ai: 'AI', gemini: 'Gemini' });
 
 /** A readable, versioned name from a provider model id: `claude-opus-5-5` is Claude Opus 5.5, `gpt-6.1-sol` GPT-6.1 Sol. */

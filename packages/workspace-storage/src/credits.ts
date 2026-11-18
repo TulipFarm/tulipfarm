@@ -367,18 +367,22 @@ function knowledgeActivity(tx: Transaction & { commonVersion?: number }, view: C
   };
 }
 
-export async function creditSummary(tx: Transaction & { commonVersion?: number }, view?: CreditUsageView) {
-  // The balance belongs to the registered credit gate; the default gate is unlimited (null).
+/** The workspace's credit balance from the registered credit gate; both null when credits are unlimited (the default gate). */
+export async function creditBalance(tx: Transaction) {
   const gate = creditGate();
   const account = gate.balance
     ? await gate.balance(tx)
     : await gate.available(tx).then(available => (available === null ? null : { available, granted: null }));
-  const balance = account
+  return account
     ? {
         available: credits(account.available.toString()),
         granted: account.granted === null ? null : credits(account.granted.toString()),
       }
     : { available: null, granted: null };
+}
+
+export async function creditSummary(tx: Transaction & { commonVersion?: number }, view?: CreditUsageView) {
+  const balance = await creditBalance(tx);
   const periodStart = `(((clock_timestamp() AT TIME ZONE 'UTC')::date-29)::timestamp AT TIME ZONE 'UTC')`;
   if (view?.kind === 'personal') {
     const flows = [...view.flowIds];

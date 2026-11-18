@@ -293,6 +293,7 @@ export function meteredReply(
         chat,
         fallback,
         completionCheck,
+        planSource: plans?.source,
         externalContext,
         slack,
         mcp,

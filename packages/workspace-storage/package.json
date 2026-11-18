@@ -31,6 +31,14 @@
       "types": "./dist/credits-contracts.d.ts",
       "default": "./dist/credits-contracts.js"
     },
+    "./model-usage": {
+      "types": "./dist/model-usage.d.ts",
+      "default": "./dist/model-usage.js"
+    },
+    "./model-usage-contracts": {
+      "types": "./dist/model-usage-contracts.d.ts",
+      "default": "./dist/model-usage-contracts.js"
+    },
     "./provisioning": {
       "types": "./dist/provisioning.d.ts",
       "default": "./dist/provisioning.js"
