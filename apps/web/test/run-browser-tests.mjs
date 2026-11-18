@@ -178,7 +178,8 @@ if (isolate && failed.length) {
   const retries = failed.splice(0);
   for (const file of retries) {
     const { code, output } = await run(file, 1);
-    if (code === 0) console.log(`::warning file=apps/web/${file}::${file} failed beside other tests and passed alone`);
+    const first = alone.has(file) ? 'failed once' : 'failed beside other tests';
+    if (code === 0) console.log(`::warning file=apps/web/${file}::${file} ${first} and passed alone`);
     else {
       failed.push(file);
       console.log(`::group::FAIL again alone ${file}\n${output}\n::endgroup::`);
