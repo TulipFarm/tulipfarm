@@ -19,7 +19,8 @@ import { AppGate, LoadFailed, Loading } from '../app-page';
 import { approvalLabel, canEdit, draftLabels, servingStatus } from '../labels';
 import { useAppApi, useAppChanges, useAppChat, useAppOperation, useAppReleases, useWatchedApp } from '../queries';
 import { AppPageView } from '../pages/page-view';
-import { DraftPreview } from './preview';
+import { DraftPreview, ServerDraft } from './preview';
+import { serverDraft } from './server-draft';
 
 const AppChat = lazy(() =>
   import('@/features/chat/private-conversations').then(module => ({ default: module.BudConversation })),
@@ -390,7 +391,11 @@ function PublicEditor({ app, appLink }: { app: AppDetail; appLink: ReactElement 
       <div className="flex min-h-0 flex-1 flex-col gap-4 lg:flex-row">
         <ChatPanel appId={app.id} />
         <div className="flex min-h-96 min-w-0 flex-1 flex-col">
-          <DraftPreview api={api} appId={app.id} appTitle={app.title} buildId={draft.previewBuildId} />
+          {serverDraft(draft) ? (
+            <ServerDraft live={draft.state === 'live'} webAddress={app.webAddress} />
+          ) : (
+            <DraftPreview api={api} appId={app.id} appTitle={app.title} buildId={draft.previewBuildId} />
+          )}
         </div>
       </div>
     </div>

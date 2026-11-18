@@ -184,3 +184,46 @@ export function DraftPreview({
     </section>
   );
 }
+
+/** A server app's built draft, which only runs once published. */
+export function ServerDraft({ live, webAddress }: { live: boolean; webAddress: string | null }) {
+  if (!live)
+    return (
+      <StatePanel
+        kind="empty"
+        heading="h2"
+        icon={Window}
+        title="This draft can’t run here yet"
+        description="Server apps run only after they’re published. Then this draft goes live at its web address, where anyone can visit it."
+      />
+    );
+  return (
+    <StatePanel
+      kind="empty"
+      heading="h2"
+      icon={Window}
+      title="This draft is live"
+      description={
+        webAddress ? (
+          <>
+            Server apps can’t run here yet. Anyone can visit it at{' '}
+            <span className="whitespace-nowrap">{webAddress}</span>.
+          </>
+        ) : (
+          'Server apps can’t run here yet. Anyone with its web address can visit it.'
+        )
+      }
+    >
+      {webAddress && (
+        <Button
+          variant="outline"
+          size="sm"
+          nativeButton={false}
+          render={<a href={`https://${webAddress}`} target="_blank" rel="noreferrer" />}
+        >
+          Open live app<span className="sr-only"> (opens in a new tab)</span>
+        </Button>
+      )}
+    </StatePanel>
+  );
+}
