@@ -119,6 +119,21 @@ export function createFeatureClient(
         query.setState({ data: undefined, dataUpdatedAt: 0, error: null, status: 'pending', fetchStatus: 'idle' });
         polling.revalidate(query.queryKey);
       }
+    } else if (scope.kind === 'workspace') {
+      // Only reads on screen refetch and save again, so drop the rest from disk; otherwise the next
+      // load shows their pre-change answer, such as a table that was archived from another page.
+      const shown = new Set(
+        keys.flatMap(queryKey =>
+          client
+            .getQueryCache()
+            .findAll({ queryKey, type: 'active' })
+            .flatMap(query => {
+              const target = persistedTarget(query.queryKey);
+              return target ? [hashKey(target.key)] : [];
+            }),
+        ),
+      );
+      void persistedReads.remove(scope, input.keys, shown);
     }
     return invalidate(keys);
   }

@@ -169,7 +169,8 @@ export function createReadPersistence(factory: () => IDBFactory | undefined = ()
       }
     },
     /** Drops persisted reads under these feature-key prefixes, such as after a concealing change or a denied read. */
-    async remove(scope: WorkspaceScope, prefixes: readonly QueryKey[]) {
+    /** Deletes reads under the prefixes, except the feature keys `keep` names. */
+    async remove(scope: WorkspaceScope, prefixes: readonly QueryKey[], keep: ReadonlySet<string> = new Set()) {
       try {
         const db = await open();
         const transaction = db.transaction(['reads', 'index'], 'readwrite');
@@ -181,7 +182,8 @@ export function createReadPersistence(factory: () => IDBFactory | undefined = ()
           if (
             !parsed.success ||
             (parsed.data.membershipId === scope.membershipId &&
-              prefixes.some(prefix => startsWith(parsed.data.key, prefix)))
+              prefixes.some(prefix => startsWith(parsed.data.key, prefix)) &&
+              !keep.has(hashKey(parsed.data.key)))
           ) {
             cursor.delete();
             transaction.objectStore('reads').delete(cursor.primaryKey);

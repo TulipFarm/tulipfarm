@@ -227,6 +227,35 @@ test('a confirmed admission shows saved reads once, as stale, without replacing 
   }
 });
 
+test('a change drops saved reads that are not on screen, so a reload does not show them as they were', async () => {
+  persistedReads.configure(definitions);
+  const updatedAt = Date.now() - 60_000;
+  await persistedReads.save(scope, ['chats', 1], { items: ['before'] }, updatedAt, () => true);
+  await persistedReads.save(scope, ['chats', 2], { items: ['before'] }, updatedAt, () => true);
+  const runtime = createFeatureClient({ userId: scope.userId, sessionId: 'session' });
+  runtime.start();
+  runtime.admit(scope);
+  const { QueryObserver } = await import('@tanstack/react-query');
+  const shown = new QueryObserver(
+    runtime.client,
+    featureReadOptions(runtime, scope, { key: ['chats', 2], load: async () => ({ items: ['after'] }) }),
+  );
+  const unsubscribe = shown.subscribe(() => {});
+  try {
+    await runtime.change(scope, { keys: [['chats']] });
+    await delay(2200);
+    assert.deepEqual(
+      (await persistedReads.restore(scope)).map(read => [read.key, read.data]),
+      [[['chats', 2], { items: ['after'] }]],
+      'The read on screen refetches and saves again; the other is gone',
+    );
+  } finally {
+    unsubscribe();
+    runtime.stop();
+    await persistedReads.clear();
+  }
+});
+
 test('the remembered session survives reloads; another user signing in or forgetting it clears the old cache', async t => {
   const storage = new Map<string, string>();
   Object.assign(globalThis, {

@@ -4,7 +4,8 @@ import { normalizeQueryRequest } from '@tulipfarm/tables/query';
 import { membership, credits } from './chat-query.fixture.mjs';
 import { startBuiltApp, builderBrowserOptions, captureBrowserFailure } from './built-app.fixture.mjs';
 
-// The table page names the workflows that block archiving, and opens an archived table read-only.
+// The table page names the workflows that block archiving, keeps an opened table and its rows for the
+// next visit, forgets that copy once archived, and opens an archived table read-only.
 const server = await startBuiltApp();
 const { origin } = server;
 const workspace = {
@@ -33,6 +34,7 @@ const workflows = [
   { id: '88888888-8888-4888-8888-888888888888', name: 'Ticket triage' },
 ];
 let archived = false,
+  archivable = false,
   blocking = [];
 
 async function routeApi(page) {
@@ -59,7 +61,25 @@ async function routeApi(page) {
         archived,
       });
     if (path === `${base}/workflows/using-table/${tableId}`) return json(blocking);
-    if (path.startsWith(`${base}/tables/${tableId}/archive/`)) return json({ error: 'workflow-active' }, 409);
+    if (path.startsWith(`${base}/tables/${tableId}/archive/`)) {
+      if (!archivable) return json({ error: 'workflow-active' }, 409);
+      archived = true;
+      return json({
+        id: '99999999-9999-4999-8999-999999999999',
+        digest: 'b'.repeat(64),
+        status: 'completed',
+        decision: 'approve',
+        cancelled: false,
+        expired: false,
+        plans: [
+          {
+            tableId,
+            receipt: { status: 'completed', executionId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', revision },
+            importProgress: null,
+          },
+        ],
+      });
+    }
     if (request.method() === 'POST' && path === `${base}/tables/${tableId}/query`)
       return json({
         mode: 'rows',
@@ -73,6 +93,33 @@ async function routeApi(page) {
     if (path === `${base}/tables`) return json({ tables: [], nextCursor: null });
     return json({ error: 'unavailable' }, 404);
   });
+}
+
+const savedReads = page =>
+  page.evaluate(
+    () =>
+      new Promise((resolve, reject) => {
+        const request = indexedDB.open('tulipfarm-query-cache', 1);
+        // Leave creating the database to the app; until it has, nothing is saved.
+        request.onupgradeneeded = () => request.transaction?.abort();
+        request.onerror = () => resolve([]);
+        request.onsuccess = () => {
+          const db = request.result;
+          const reads = db.transaction('reads', 'readonly').objectStore('reads').getAll();
+          reads.onsuccess = () => {
+            db.close();
+            resolve(reads.result.map(read => ({ name: read.name, data: read.data })));
+          };
+          reads.onerror = () => reject(reads.error);
+        };
+      }),
+  );
+async function until(check, message) {
+  const deadline = Date.now() + 10_000;
+  while (!(await check())) {
+    if (Date.now() > deadline) assert.fail(message);
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
 }
 
 let browser;
@@ -119,7 +166,23 @@ try {
   await dialog.getByRole('button', { name: 'Keep table', exact: true }).click();
   await dialog.waitFor({ state: 'detached' });
 
-  archived = true;
+  const saved = async name => (await savedReads(page)).filter(read => read.name === name);
+  await until(
+    async () =>
+      (await saved('table')).some(read => read.data.archived === false) && (await saved('table-rows')).length > 0,
+    'The opened table and its first rows are saved for the next visit',
+  );
+  archivable = true;
+  blocking = [];
+  await page.getByRole('button', { name: 'More table options', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Archive table', exact: true }).click();
+  await archive();
+  await page.waitForURL(`${origin}/acme/tables`);
+  await until(
+    async () => (await saved('table')).length === 0 && (await saved('table-rows')).length === 0,
+    'Archiving forgets the saved active copy, so a reload never shows it as active',
+  );
+
   await page.goto(`${origin}/acme/tables/${tableId}`);
   await page.getByText('This table is archived', { exact: true }).waitFor();
   await page
