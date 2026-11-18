@@ -68,7 +68,7 @@ export function useIntegrationStatus(workspaceId: string, provider?: keyof Statu
     ),
     slack: status(slack.state, value =>
       value === 'unavailable'
-        ? { kind: 'unavailable', detail: 'Slack isn’t available in this workspace' }
+        ? { kind: 'unavailable', detail: 'Ask an integration manager to share Slack with you' }
         : value.state === 'active'
           ? value.linked
             ? { kind: 'connected', detail: null }

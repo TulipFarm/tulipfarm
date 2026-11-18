@@ -12,7 +12,7 @@ export const providers: Record<Exclude<Provider, 'soon'>, { audience: string; ca
     can: [{ text: 'See your email address' }],
   },
   slack: {
-    audience: 'Selected people and teams. Integration managers control sharing.',
+    audience: 'Everyone in the workspace by default. Integration managers can narrow sharing.',
     can: [
       { text: 'Read messages in channels it’s added to' },
       { text: 'Post replies and direct messages' },

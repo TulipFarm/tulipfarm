@@ -10,6 +10,7 @@ import {
   type HumanActor,
 } from '@tulipfarm/access';
 import { qualified, type createWorkspaceRuntime, commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
+import { teamLabel } from '@tulipfarm/workspace-storage/team-labels';
 import { requiredBotScopes, slackConfigurationSchema, slackId, type SlackConfiguration } from './contracts.ts';
 import { isFeatureEnabled } from '@tulipfarm/observability';
 import { slackCredentialCipher, encryptSlackToken, storedCredentialSchema } from './credentials.ts';
@@ -376,6 +377,15 @@ export function createSlackInstallations(options: {
             `INSERT INTO ${qualified(tx.schema, 'tf_slack_installation_grants')} (installation_id,membership_id) VALUES ($1,$2)`,
             [link.installation_id, actor.membershipId],
           );
+          // Open by default: every member may use Slack and every admin may manage it, until a manager narrows sharing.
+          await tx.client.query(
+            `INSERT INTO ${qualified(tx.schema, 'tf_slack_installation_grants')} (installation_id,team_id) SELECT $1,id FROM ${qualified(tx.schema, 'tf_teams')} WHERE name='_everyone'`,
+            [link.installation_id],
+          );
+          await tx.client.query(
+            `INSERT INTO ${qualified(tx.schema, 'tf_slack_installation_managers')} (installation_id,team_id) SELECT $1,id FROM ${qualified(tx.schema, 'tf_teams')} WHERE name='_admin'`,
+            [link.installation_id],
+          );
           await tx.client.query(
             `INSERT INTO ${qualified(tx.schema, 'tf_audit_events')} (id,actor_id,operation,subject_id) VALUES ($1,$2,'slack-installation.create',$3)`,
             [randomUUID(), actor.membershipId, link.installation_id],
@@ -467,7 +477,13 @@ export function createSlackInstallations(options: {
         memberIds: z.array(z.uuid()).max(1000),
         teamIds: z.array(z.uuid()).max(1000),
       });
-      const schema = z.strictObject({ use: recipients, managers: recipients, expectedVersion: z.string() });
+      // `teams` only labels recipients in the read response; a read sent back unchanged must still save.
+      const schema = z.strictObject({
+        use: recipients,
+        managers: recipients,
+        expectedVersion: z.string(),
+        teams: z.unknown().optional(),
+      });
       const read = async () => {
         const result = {
           use: { memberIds: [] as string[], teamIds: [] as string[] },
@@ -494,7 +510,22 @@ export function createSlackInstallations(options: {
         }
         return { ...result, expectedVersion: hash(JSON.stringify(result)) };
       };
-      if (input === undefined) return read();
+      // Collaborator lists hide internal teams, so name the ones this manager may share with: Everyone, and Admin for admins.
+      const respond = async () => ({
+        ...(await read()),
+        teams: z
+          .array(z.object({ id: z.uuid(), name: z.string() }))
+          .parse(
+            (
+              await tx.client.query(
+                `SELECT t.id,t.name FROM ${qualified(tx.schema, 'tf_teams')} t JOIN ${qualified(tx.schema, 'tf_member_teams')} mt ON mt.team_id=t.id WHERE mt.membership_id=$1 AND t.name IN ('_everyone','_admin') ORDER BY t.name DESC`,
+                [actor.membershipId],
+              )
+            ).rows,
+          )
+          .map(team => ({ id: team.id, name: teamLabel(team.name) })),
+      });
+      if (input === undefined) return respond();
       const value = schema.parse(input);
       const current = await read();
       if (current.expectedVersion !== value.expectedVersion) throw new Error('slack-grants-conflict');
@@ -553,7 +584,7 @@ export function createSlackInstallations(options: {
         [randomUUID(), actor.membershipId, id],
       );
       await recommendations();
-      return read();
+      return respond();
     });
   }
   // The bot credential is shared, so reading through it follows the installation grants that status uses; workspace role grants nothing.
