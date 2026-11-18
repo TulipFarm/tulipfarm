@@ -163,6 +163,7 @@
                 "enum": [
                   "app-hosting",
                   "hosted-mcp",
+                  "usage-explorer",
                   "images",
                   "default-connection-knowledge",
                   "social-publishing",
@@ -523,6 +524,7 @@
                 "enum": [
                   "app-hosting",
                   "hosted-mcp",
+                  "usage-explorer",
                   "images",
                   "default-connection-knowledge",
                   "social-publishing",

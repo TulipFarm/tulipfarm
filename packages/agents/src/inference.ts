@@ -1407,6 +1407,8 @@ export type ToolModelMeter = (attempt: {
   maxOutputTokens: number;
   provider: string;
   model: string;
+  /** Why the chat model failed, when this call is on the fallback model that took over. */
+  fallbackReason?: ModelFallbackReason;
 }) => Promise<(usage: InferenceUsage, outcome?: { rejected: boolean }) => Promise<void>>;
 export type ToolInferenceContext = {
   /**
@@ -4336,7 +4338,7 @@ export async function inferWithTools(
       return await sendChatRequest(
         target,
         requestStep++,
-        meter,
+        meter && (attempt => meter({ ...attempt, ...(fallbackReason ? { fallbackReason } : {}) })),
         wire,
         select,
         refusedSourceBatch(items) ||

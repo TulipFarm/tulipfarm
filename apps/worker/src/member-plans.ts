@@ -100,6 +100,8 @@ export async function memberPlans(input: {
   let current: { candidate: SubscriptionCandidate; token: string } | null = null;
   // Whether the last plan that gave a token is the caller's own, so a fallback note can say "your plan".
   let lastOwn = false;
+  // The plan the turn moved off last and why, for the Usage page's fallback detail.
+  let switched: { from: string; failure: PlanFailure } | null = null;
 
   async function advance(): Promise<string | null> {
     while (credentials && candidates.length) {
@@ -138,9 +140,16 @@ export async function memberPlans(input: {
   return {
     token: first,
     async next(failure: PlanFailure, retryAfterMs?: number) {
+      const from = (current as { candidate: SubscriptionCandidate } | null)?.candidate.connectionId;
       await retire(failure, retryAfterMs);
+      if (from) switched = { from, failure };
       return advance();
     },
+    /** The plan connection answering now, and the plan the turn moved off last with why, for usage records. */
+    source: () => ({
+      connectionId: (current as { candidate: SubscriptionCandidate } | null)?.candidate.connectionId ?? null,
+      switched,
+    }),
     retire,
     /** Records that the plan answering now wrote the reply, which clears a usage limit it reported earlier. */
     async answered() {

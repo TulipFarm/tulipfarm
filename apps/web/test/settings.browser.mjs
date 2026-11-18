@@ -512,7 +512,7 @@ test('workspace settings in the real Vite app with HTTP fixtures', { timeout: 24
       f.readGate = gate();
       await page.goto(`${origin}/acme/settings`);
       await page.getByRole('status', { name: 'Loading workspace settings', exact: true }).waitFor();
-      assert.equal(await nav(page).getByRole('link').count(), 5);
+      assert.equal(await nav(page).getByRole('link').count(), 6);
       f.readGate.release();
       await page.getByLabel('Workspace name', { exact: true }).waitFor();
       assert.equal(
@@ -667,7 +667,7 @@ test('workspace settings in the real Vite app with HTTP fixtures', { timeout: 24
       await page.getByRole('heading', { name: 'workspace settings unavailable', exact: true }).waitFor();
       assert.equal(await page.getByLabel('Workspace name', { exact: true }).count(), 0);
       assert.equal(await page.getByLabel('Workspace ID', { exact: true }).count(), 0);
-      assert.equal(await nav(page).getByRole('link').count(), 5);
+      assert.equal(await nav(page).getByRole('link').count(), 6);
       f.settingsStatus = 200;
       await page.getByRole('button', { name: 'Reload workspace settings' }).click();
       await page.getByLabel('Workspace name', { exact: true }).waitFor();

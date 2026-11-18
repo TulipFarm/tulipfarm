@@ -1,6 +1,12 @@
 import { modelEnvironment } from '@tulipfarm/agents/model-environment';
 import type { InferenceRoute } from '@tulipfarm/agents/inference';
-import { loadModelCatalog, type ModelCatalogRole, type ResolvedModel } from '@tulipfarm/config';
+import {
+  comparableProviderModel,
+  isPlanProvider,
+  loadModelCatalog,
+  type ModelCatalogRole,
+  type ResolvedModel,
+} from '@tulipfarm/config';
 
 /** The resolved model a call is metered as, with the limits of its qualified route. */
 export type ModelPrice = {
@@ -67,4 +73,31 @@ export function chatFallbackModel(
     if (resolved) return resolved;
   }
   return undefined;
+}
+
+/**
+ * The metered catalog model a call on a member's plan (ChatGPT, Claude or Copilot) counts as on the Usage page: one with
+ * the same provider model. Its id groups the call with that model's other calls, and its list rates value the call.
+ * Null when the catalog serves none, so the call keeps its plan model id and shows no plan value.
+ */
+export function planListModel(
+  providerModel: string,
+  env: NodeJS.ProcessEnv = process.env,
+): { modelId: string; rates: ResolvedModel['rates'] } | null {
+  const wanted = comparableProviderModel(providerModel);
+  let models: ReturnType<typeof loadModelCatalog>['models'];
+  try {
+    models = loadModelCatalog(env).models;
+  } catch {
+    // A workspace that chats only on members' plans may serve no metered model at all.
+    return null;
+  }
+  const match = models.find(
+    model =>
+      !isPlanProvider(model.route.provider) &&
+      model.pricing !== 'unmetered' &&
+      comparableProviderModel(model.route.model) === wanted,
+  );
+  if (!match) return null;
+  return { modelId: conversationModel(match.id, env)?.price.modelId ?? match.id, rates: match.rates };
 }

@@ -120,6 +120,27 @@ test('streamed DeepSeek replies and titles settle credits on reported usage', { 
     assert.ok(BigInt(row.charged) < BigInt(row.reserved), `${row.id} settles below its reservation`);
   }
   assert.equal(logs.filter(line => line['error.type'] === 'usage-unknown').length, 0);
+  // The reply is also recorded for the Usage page: who asked, on which model, paid with credits, with its tokens.
+  const [recorded] = (
+    await f.db.platform.query(
+      `SELECT u.model_id, u.model_provider, u.paid_by, u.connection_id, u.input_tokens, u.output_tokens, u.cached_tokens,
+        u.list_pico_usd::text AS list, u.fallback, m.user_id
+      FROM ${f.table('tf_model_usage')} u JOIN ${f.table('tf_memberships')} m ON m.id = u.membership_id WHERE u.id = $1`,
+      [replyCall.id],
+    )
+  ).rows;
+  assert.deepEqual(recorded, {
+    model_id: 'deepseek-v4-flash',
+    model_provider: 'azure',
+    paid_by: 'credits',
+    connection_id: null,
+    input_tokens: '281',
+    output_tokens: '75',
+    cached_tokens: '256',
+    list: deepseekPicoUsd.toString(),
+    fallback: false,
+    user_id: w.userId,
+  });
 
   // Truly unknown usage keeps today's policy: the call settles at its reservation, and the gap is counted and logged.
   reportUsage = false;

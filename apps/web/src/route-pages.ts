@@ -33,6 +33,7 @@ export const models = () => import('@/pages/models');
 export const settings = () => import('@/pages/settings');
 export const accountSettings = () => import('@/pages/account-settings');
 export const secretsSettings = () => import('@/pages/secrets-settings');
+export const usage = () => import('@/pages/usage');
 export const help = () => import('@/pages/help');
 export const calendar = () => import('@/pages/calendar');
 export const skillsCreateForm = () => import('@/features/skills/create-form');

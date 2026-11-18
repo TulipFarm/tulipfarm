@@ -5,7 +5,8 @@ import type { SlackActionsFactory } from '@tulipfarm/agents/slack-actions';
 import { requireDraftSources } from '@tulipfarm/agents/draft-sources';
 import { coordinatorReplyBudget, recordCoordinatorReplyTime } from '@tulipfarm/agents/plan-runtime';
 import type { InferenceUsage, ToolModelMeter } from '@tulipfarm/agents/inference';
-import { calculateUsageCost, reserveModelCost, usageTokenCounts } from '@tulipfarm/config';
+import { calculateUsageCost, isPlanProvider, reserveModelCost, usageTokenCounts } from '@tulipfarm/config';
+import { modelFallbackReason } from '@tulipfarm/config/model-fallback';
 import {
   renewConversationReplyLease,
   type ConversationRuntime,
@@ -36,8 +37,10 @@ import {
   recoverReplyHolds,
   settleReplyCredits,
 } from '@tulipfarm/workspace-storage/credits';
+import { recordModelUsage, type ModelUsageRecord } from '@tulipfarm/workspace-storage/model-usage';
 import { commonCompatibility, qualified, StorageUnavailableError } from '@tulipfarm/workspace-storage/runtime';
-import type { ConversationModel } from './conversation-model.ts';
+import { planListModel, type ConversationModel } from './conversation-model.ts';
+import type { PlanFailure } from '@tulipfarm/agents/inference';
 import type { ConversationInventory } from './conversation-inventory.ts';
 import { keepReplyLease } from './reply-lease.ts';
 
@@ -57,6 +60,13 @@ type Call = {
   /** The provider refused the request before generating anything, so the call costs nothing. */
   rejected?: boolean;
   milliseconds?: number;
+  /** Who paid and what the call fell back from, for the Usage page. */
+  source: Pick<ModelUsageRecord, 'modelProvider' | 'paidBy' | 'connectionId' | 'fallback'> & { providerModel: string };
+};
+/** The member plan a plan chat runs on now, and the plan it moved off last with why. */
+export type PlanSource = () => {
+  connectionId: string | null;
+  switched: { from: string; failure: PlanFailure } | null;
 };
 type Hold = { id: string; held: bigint; calls: Call[] };
 type Plan = { attemptId: string; remainingUnits: bigint; remainingMilliseconds: number };
@@ -110,6 +120,8 @@ export async function beginReplySession(input: {
   fallback?: ConversationModel | undefined;
   /** The optional completion-check role's calls are authorized and billed like chat calls. */
   completionCheck?: ConversationModel | undefined;
+  /** For a chat on a member's plan, which plan connection each call runs on. */
+  planSource?: PlanSource | undefined;
   externalContext: ExternalConversationContext | undefined;
   slack: SlackActionsFactory | undefined;
   mcp: McpExecutionFactory | null | undefined;
@@ -267,6 +279,88 @@ export async function beginReplySession(input: {
           });
       },
     );
+    await recordModelUsage(
+      tx,
+      known.map(({ call, usage }) => usageRecord(call, usage)),
+    );
+  }
+
+  /**
+   * A settled call as the Usage page reads it. A plan call counts as the same model's own API: under its model id, valued
+   * at its list price.
+   */
+  function usageRecord(call: Call, usage: NonNullable<Call['usage']>): ModelUsageRecord {
+    const counts = usageTokenCounts(usage.tokens);
+    let modelId = call.modelId;
+    let listPicoUsd: string | null = usage.providerPicoUsd;
+    if (call.source.paidBy === 'plan') {
+      const listed = planListModel(call.source.providerModel);
+      listPicoUsd = null;
+      if (listed) {
+        modelId = listed.modelId;
+        try {
+          const cost = calculateUsageCost({
+            modelId: call.modelId,
+            pricingRevision: call.pricingRevision,
+            rates: listed.rates,
+            maxInputTokens: Number.MAX_SAFE_INTEGER,
+            maxOutputTokens: Number.MAX_SAFE_INTEGER,
+            usage: { kind: 'known', tokens: usage.tokens },
+            date: new Date().toISOString().slice(0, 10),
+          });
+          if (cost.kind === 'known') listPicoUsd = cost.providerPicoUsd;
+        } catch {
+          // A plan call whose list price can't be worked out shows no plan value.
+        }
+      }
+    }
+    return {
+      id: call.id,
+      activity: 'chat',
+      flowId: fence.conversationId,
+      membershipId: requester?.membershipId ?? null,
+      agentId: null,
+      modelId,
+      modelProvider: call.source.modelProvider,
+      paidBy: call.source.paidBy,
+      connectionId: call.source.connectionId,
+      inputTokens: counts.inputTokens,
+      outputTokens: counts.outputTokens,
+      cachedTokens: usage.tokens.cacheRead,
+      listPicoUsd,
+      pricingRevision: call.pricingRevision,
+      fallback: call.source.fallback,
+    };
+  }
+
+  /** Who pays for a call on `model`, and what it fell back from: the chat model, or a plan the turn moved off. */
+  function callSource(model: ConversationModel, attempt: Parameters<ToolModelMeter>[0]): Call['source'] {
+    const plan = isPlanProvider(model.route.provider);
+    const current = plan ? input.planSource?.() : undefined;
+    const switched = input.planSource?.().switched ?? null;
+    const onFallback = model === input.fallback && model !== chat;
+    const fallback: ModelUsageRecord['fallback'] = onFallback
+      ? {
+          reason:
+            attempt.fallbackReason ??
+            (switched ? (modelFallbackReason(`${chat.route.provider}-${switched.failure}`) ?? null) : null),
+          fromModel: chat.price.modelId,
+          fromConnection: switched?.from ?? null,
+        }
+      : plan && model === chat && switched
+        ? {
+            reason: modelFallbackReason(`${chat.route.provider}-${switched.failure}`) ?? null,
+            fromModel: chat.price.modelId,
+            fromConnection: switched.from,
+          }
+        : null;
+    return {
+      modelProvider: model.route.provider,
+      providerModel: model.route.model,
+      paidBy: plan ? 'plan' : 'credits',
+      connectionId: current?.connectionId ?? null,
+      fallback,
+    };
   }
 
   async function flushPlanTime(tx: Tx) {
@@ -429,6 +523,7 @@ export async function beginReplySession(input: {
       pricingRevision: model.price.pricingRevision,
       worst: need,
       started: performance.now(),
+      source: callSource(model, attempt),
     };
     hold!.calls.push(call);
     // Sub-agent calls use their own step range; the reply's checkpoints keep following the chat's own steps.

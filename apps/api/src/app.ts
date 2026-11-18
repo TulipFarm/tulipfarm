@@ -31,6 +31,7 @@ import { planModelFamilyId, planProviders, type PlanProvider } from '@tulipfarm/
 import { registerSubscriptions } from './subscriptions.ts';
 import { createSubscriptions } from '@tulipfarm/integrations/subscriptions';
 import { createPlanUsage } from './plan-usage.ts';
+import { registerUsage } from './usage.ts';
 import { registerGitHubInvestigation } from './github-investigation.ts';
 import { createGitHubInvestigation } from '@tulipfarm/github/investigation';
 import { createGitHubBotGrants } from '@tulipfarm/github/bot';
@@ -185,6 +186,7 @@ export function buildApp(
         registerTokenPlan(business, auth.auth, 'copilot', tokenPlans.copilot);
         const subscriptions = runtime ? createSubscriptions({ runtime }) : null;
         const planUsage = createPlanUsage({ copilotToken: copilot?.accessToken });
+        if (runtime) registerUsage(business, { runtime, auth: auth.auth, planUsage });
         registerSubscriptions(business, auth.auth, subscriptions, (provider, slug) => {
           const id = planModelFamilyId(provider, slug);
           return id !== null && models.catalog.model(id) !== undefined;

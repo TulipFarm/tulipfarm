@@ -49,6 +49,13 @@ export const featureFlags = {
     scope: 'user',
     env: 'FEATURE_FLAG_SOUL_REPOSITORY_EXPLORER',
   },
+  'usage-explorer': {
+    description:
+      'Settings > Usage explorer: model usage by model, payment source, member and agent, with tokens, credits and list-price cost.',
+    default: 'development',
+    scope: 'workspace',
+    env: 'FEATURE_FLAG_USAGE_EXPLORER',
+  },
   'public-tulipfarm-guide': {
     description: 'Public website guide, bounded model answers and inline signup.',
     default: 'development',

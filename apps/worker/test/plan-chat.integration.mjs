@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { test } from 'node:test';
 import { conversationFixture } from '../../../packages/conversations/test/fixture.mjs';
-import { createConversationActivities } from '../dist/conversation-activities.js';
+import { createConversationActivities } from '../src/conversation-activities.ts';
 import { creditSummary } from '@tulipfarm/workspace-storage/credits';
 import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import { registerExtension } from '@tulipfarm/extensions';
@@ -31,6 +31,7 @@ test(
     t.after(
       useEnv({
         FEATURE_FLAG_CLAUDE_PLAN: 'true',
+        ANTHROPIC_API_KEY: 'synthetic-only',
         INTEGRATION_CREDENTIAL_KEY: randomBytes(32).toString('hex'),
         INTEGRATION_CREDENTIAL_KEY_ID: 'plan-chat',
       }),
@@ -134,6 +135,32 @@ test(
       assert.equal(summary.used, 0);
       assert.equal(summary.held, 0);
       assert.deepEqual(await limitedAt(), [null]);
+      // Each plan call is recorded for the Usage page against the plan, under the metered model it stands in for.
+      const [connection] = (await f.db.platform.query(`SELECT id FROM ${f.table('tf_subscription_connections')}`)).rows;
+      const recorded = (
+        await f.db.platform.query(
+          `SELECT model_id, model_provider, paid_by, connection_id, input_tokens, output_tokens, list_pico_usd, fallback
+          FROM ${f.table('tf_model_usage')} WHERE flow_id = $1`,
+          [chatId],
+        )
+      ).rows;
+      assert.ok(recorded.length >= 2, 'the reply’s send and resume are both recorded');
+      for (const row of recorded) {
+        assert.deepEqual(
+          { ...row, list_pico_usd: undefined },
+          {
+            model_id: 'claude-sonnet-5',
+            model_provider: 'claude',
+            paid_by: 'plan',
+            connection_id: connection.id,
+            input_tokens: '40',
+            output_tokens: '10',
+            list_pico_usd: undefined,
+            fallback: false,
+          },
+        );
+        assert.ok(BigInt(row.list_pico_usd) > 0n, 'a plan call is valued at the model’s list price');
+      }
     } finally {
       await f.close();
     }
