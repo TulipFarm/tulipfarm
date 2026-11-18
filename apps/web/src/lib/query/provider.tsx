@@ -86,7 +86,10 @@ export function WorkspaceQueryProvider({
     if (admitted()) runtime.restorePersisted(scope);
   }, [runtime, scope.userId, scope.workspaceId, scope.membershipId, admitted]);
   useLayoutEffect(() => {
-    if (admitted()) runtime.admit(scope);
+    if (admitted()) {
+      runtime.admit(scope);
+      void runtime.restoreAdmitted(scope);
+    }
     let observing = admitted();
     const check = (event?: AdmissionEvent) => {
       if (admitted()) return;

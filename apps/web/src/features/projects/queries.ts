@@ -45,7 +45,6 @@ function editProject(data: unknown, key: readonly unknown[], id: string, edit: P
     }));
     return Array.isArray(next) && next[0] !== data.project ? { ...data, project: next[0] } : data;
   }
-  if (key[2] === 'sidebar') return editListed(data, id, item => (edit.archived ? null : { ...item, name: edit.name }));
   return editListed(data, id, project => ({
     ...project,
     name: edit.name,

@@ -239,7 +239,11 @@ test(
       await nav.getByRole('button', { name: 'More', exact: true }).click();
       await nav.getByRole('button', { name: 'Expand Tables', exact: true }).click();
       await list('Tables').getByRole('alert').waitFor();
-      assert.equal(await list('Tables').getByRole('link').count(), 0, 'initial error does not masquerade as empty');
+      assert.equal(
+        await list('Tables').getByRole('link').count(),
+        3,
+        'a reload keeps the saved entries beside the error',
+      );
       delete status.tables;
       await list('Tables').getByRole('button', { name: 'Try again', exact: true }).click();
       await list('Tables').getByRole('link').nth(2).waitFor();

@@ -24,6 +24,7 @@ const { persistedMaxAge } = await import('../src/lib/query/persistence.ts');
 const { forgetSession, lastSession, rememberSession } = await import('../src/lib/last-workspace.ts');
 const { createFeatureClient } = await import('../src/lib/query/client.ts');
 const { featureReadOptions } = await import('../src/lib/query/options.ts');
+const { featureKey } = await import('../src/lib/query/scope.ts');
 // `last-workspace` loads the read cache on demand, so its import still needs the resolver.
 after(() => hooks.deregister());
 
@@ -173,6 +174,51 @@ test('a read that succeeds before persisted reads are configured is saved once t
       (await persistedReads.restore(scope)).map(read => read.data),
       [{ items: ['early'] }],
     );
+  } finally {
+    runtime.stop();
+    await persistedReads.clear();
+  }
+});
+
+test('a confirmed admission shows saved reads once, as stale, without replacing what the network answered', async () => {
+  persistedReads.configure(definitions);
+  const updatedAt = Date.now() - 60_000;
+  await persistedReads.save(scope, ['chats', 1], { items: ['saved'] }, updatedAt, () => true);
+  await persistedReads.save(scope, ['chats', 2], { items: ['saved'] }, updatedAt, () => true);
+  const runtime = createFeatureClient({ userId: scope.userId, sessionId: 'session' });
+  runtime.start();
+  try {
+    const other = { ...scope, membershipId: 'other' };
+    runtime.admit(other);
+    await runtime.restoreAdmitted(scope);
+    assert.equal(
+      runtime.client.getQueryData(featureKey(scope, ['chats', 1])),
+      undefined,
+      'Another membership sees nothing',
+    );
+
+    const fresh = createFeatureClient({ userId: scope.userId, sessionId: 'session' });
+    fresh.start();
+    try {
+      fresh.admit(scope);
+      fresh.client.setQueryData(featureKey(scope, ['chats', 2]), { items: ['network'] });
+      await fresh.restoreAdmitted(scope);
+      const restored = fresh.client.getQueryState(featureKey(scope, ['chats', 1]));
+      assert.deepEqual(restored?.data, { items: ['saved'] });
+      assert.equal(restored?.dataUpdatedAt, updatedAt);
+      assert.equal(restored?.isInvalidated, true, 'The saved copy is refreshed as soon as it is read');
+      assert.deepEqual(fresh.client.getQueryData(featureKey(scope, ['chats', 2])), { items: ['network'] });
+
+      fresh.client.removeQueries({ queryKey: featureKey(scope, ['chats', 1]) });
+      await fresh.restoreAdmitted(scope);
+      assert.equal(
+        fresh.client.getQueryData(featureKey(scope, ['chats', 1])),
+        undefined,
+        'Restores once per workspace',
+      );
+    } finally {
+      fresh.stop();
+    }
   } finally {
     runtime.stop();
     await persistedReads.clear();

@@ -212,9 +212,9 @@ test('cold chat routes read during admission, reuse those reads and never show t
       return route.fulfill({ status: 404, json: { error: 'not-found' } });
     });
     const count = suffix => requests.filter(path => path === `/v1/workspaces/${workspace.id}${suffix}`).length;
-    // The sidebar's recent chats read the same first page of the list for themselves, so a page
-    // that reuses its admission read makes two list reads in all, and one that reads again makes three.
-    const listReads = () => count('/conversations') - 1;
+    // The sidebar's recent chats share the page's first list read, so a page that reuses its
+    // admission read makes one list read in all.
+    const listReads = () => count('/conversations');
     // Resolves once the reads have started while membership is still unanswered.
     const started = (...suffixes) =>
       Promise.all(
