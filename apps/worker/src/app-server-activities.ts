@@ -24,6 +24,8 @@ import {
   recordDraftHost,
   recordRuntimeCandidate,
   stopDraftHost,
+  expireDraftHostStarts,
+  draftHostStartMinutes,
   supersedeOperation,
   switchRelease,
   type AppOperationEnd,
@@ -66,6 +68,8 @@ export type AppServerTarget = {
 };
 
 type DraftInput = { readonly workspaceId: string; readonly appId: string; readonly generation: number };
+
+const lostStart = 'The app server did not start in time. Try again.';
 
 /** What a draft host must run: the draft head's server build, at the app's live size or the default size. */
 export type DraftHostTarget = {
@@ -330,7 +334,13 @@ export function createAppServerActivities(work: AppWork) {
       const provisioned = await heartbeating(signal =>
         within(SERVER_PROVISION_MS, signal, bounded =>
           host.provision(
-            { appId: input.appId, draftBuildId: input.buildId, size: input.size, output: input.output },
+            {
+              appId: input.appId,
+              draftBuildId: input.buildId,
+              draftGeneration: input.generation,
+              size: input.size,
+              output: input.output,
+            },
             bounded,
           ),
         ).catch(error => {
@@ -343,7 +353,7 @@ export function createAppServerActivities(work: AppWork) {
         return { ok: false };
       }
       if (!provisioned.ok) {
-        await failDraft(input, failure('host-unavailable', 'The app server did not start in time. Try again.', true));
+        await failDraft(input, failure('host-unavailable', lostStart, true));
         return { ok: false };
       }
       return { ok: true, hostRef: provisioned.value.hostRef };
@@ -373,7 +383,8 @@ export function createAppServerActivities(work: AppWork) {
      * Moves each server app's endpoint back to its live host when a lost race left it elsewhere, and removes hosts that
      * are not live, not a candidate, not the draft host, and belong to an app with no operation or draft host start in
      * flight. A draft host no editor opened for `DRAFT_HOST_IDLE_RETIRE_MS`, or whose build is no longer the draft head's
-     * newest build, is live, or belongs to an archived or disabled app, is stopped and removed. The endpoint only ever
+     * newest build, is live, or belongs to an archived or disabled app, is stopped and removed. A draft host start that
+     * recorded nothing for `draftHostStartMinutes` fails, and no longer holds the app's hosts. The endpoint only ever
      * moves to the live host. Apps of workspaces without app hosting, and hosts of apps no workspace knows, are left
      * alone. Every host of an app whose workspace was deleted is removed without reading that workspace. Makes at most
      * `SERVER_RECONCILE_BATCH` repairs of each kind.
@@ -427,7 +438,9 @@ export function createAppServerActivities(work: AppWork) {
             `SELECT a.id, r.host_ref, r.candidate_host_ref, r.endpoint_host_ref,
                EXISTS (SELECT 1 FROM ${table(tx, 'tf_app_operations')} o
                        WHERE o.app_id = a.id AND o.status IN ('admitted', 'staging')) AS busy,
-               h.host_ref AS draft_host_ref, COALESCE(h.state = 'starting', false) AS draft_starting,
+               h.host_ref AS draft_host_ref,
+               COALESCE(h.state = 'starting'
+                 AND h.updated_at > clock_timestamp() - make_interval(mins => $3), false) AS draft_starting,
                COALESCE(h.state = 'ready' AND (
                  h.opened_at <= clock_timestamp() - make_interval(secs => $2::double precision / 1000)
                  OR h.build_id IS DISTINCT FROM head.id
@@ -443,7 +456,7 @@ export function createAppServerActivities(work: AppWork) {
                  ? 'a.id = $1 FOR UPDATE OF a'
                  : `r.app_id IS NOT NULL OR h.state IN ('starting', 'ready') OR a.id::text = ANY($1::text[])`
              }`,
-            [only ?? appIds, DRAFT_HOST_IDLE_RETIRE_MS],
+            [only ?? appIds, DRAFT_HOST_IDLE_RETIRE_MS, draftHostStartMinutes],
           )
           .then(result => result.rows as Row[]);
 
@@ -452,7 +465,10 @@ export function createAppServerActivities(work: AppWork) {
         if (repairs >= SERVER_RECONCILE_BATCH && removals >= SERVER_RECONCILE_BATCH) break;
         try {
           if (!(await work.enabled(workspaceId))) continue;
-          const servers = await transact(workspaceId, tx => readServers(tx, [...listed.keys()]));
+          const servers = await transact(workspaceId, async tx => {
+            await expireDraftHostStarts(tx, failure('host-unavailable', lostStart, true));
+            return readServers(tx, [...listed.keys()]);
+          });
           await recordOwners(
             workspaceId,
             servers.map(app => app.id),

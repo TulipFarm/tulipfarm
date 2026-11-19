@@ -127,7 +127,8 @@ export async function requestDraftHost(
 
 /**
  * Records the host a start brought up. A start that a newer one replaced, or that already failed, gets its host back
- * to remove.
+ * to remove, unless the row already names that host: a retried recording, or a newer start that reached the same host,
+ * keeps it.
  */
 export async function recordDraftHost(
   tx: AppTransaction,
@@ -135,12 +136,31 @@ export async function recordDraftHost(
   generation: number,
   hostRef: string,
 ): Promise<{ readonly retiredHostRef: string | null }> {
-  const recorded = await tx.client.query(
-    `UPDATE ${table(tx, 'tf_app_draft_hosts')} SET state = 'ready', host_ref = $3, updated_at = clock_timestamp()
-     WHERE app_id = $1 AND generation = $2 AND state = 'starting'`,
-    [appId, generation, hostRef],
+  const [current] = await rows<{ generation: string; state: DraftHost['state']; host_ref: string | null }>(
+    tx,
+    `SELECT generation, state, host_ref FROM ${table(tx, 'tf_app_draft_hosts')} WHERE app_id = $1 FOR UPDATE`,
+    [appId],
   );
-  return { retiredHostRef: recorded.rowCount === 1 ? null : hostRef };
+  if (current?.host_ref === hostRef) return { retiredHostRef: null };
+  if (Number(current?.generation) !== generation || current?.state !== 'starting') return { retiredHostRef: hostRef };
+  await tx.client.query(
+    `UPDATE ${table(tx, 'tf_app_draft_hosts')} SET state = 'ready', host_ref = $2, updated_at = clock_timestamp()
+     WHERE app_id = $1`,
+    [appId, hostRef],
+  );
+  return { retiredHostRef: null };
+}
+
+/**
+ * Fails every start that recorded nothing for `draftHostStartMinutes`, so previews stop saying the server is starting
+ * and reconcile stops holding the app's hosts for it. A late recording of such a start gets its host back to remove.
+ */
+export async function expireDraftHostStarts(tx: AppTransaction, failure: AppFailure): Promise<void> {
+  await tx.client.query(
+    `UPDATE ${table(tx, 'tf_app_draft_hosts')} SET state = 'failed', failure = $2, updated_at = clock_timestamp()
+     WHERE state = 'starting' AND updated_at <= clock_timestamp() - make_interval(mins => $1)`,
+    [draftHostStartMinutes, JSON.stringify(failure)],
+  );
 }
 
 /** Ends a start that could not bring up its host. A start that a newer one replaced changes nothing. */

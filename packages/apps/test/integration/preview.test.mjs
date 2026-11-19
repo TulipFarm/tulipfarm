@@ -12,6 +12,7 @@ import {
   readPreviewSession,
   readPreviewTarget,
   recordDraftHost,
+  expireDraftHostStarts,
   failDraftHost,
   requestDraftHost,
   redeemPreviewTicket,
@@ -287,6 +288,63 @@ test(
     assert.equal((await hostRow(db, tx, app)).generation, 4);
   },
 );
+
+test('a replaced start that reached the newer start’s host leaves it in place', { timeout: 120000 }, async t => {
+  const { db, workspace, tx, app } = await setup(t);
+  const build = await serverHead(db, tx, app, workspace.membershipId, 'c'.repeat(40));
+  assert.deepEqual(await requestDraftHost(tx, app.id), { start: { generation: 1 } });
+  await db.platform.query(
+    `UPDATE "${tx.schema}".tf_app_draft_hosts SET updated_at = now() - interval '11 minutes' WHERE app_id = $1`,
+    [app.id],
+  );
+  assert.deepEqual(await requestDraftHost(tx, app.id), { start: { generation: 2 } });
+  assert.deepEqual(await recordDraftHost(tx, app.id, 2, 'host-x'), { retiredHostRef: null });
+  assert.deepEqual(await recordDraftHost(tx, app.id, 1, 'host-x'), { retiredHostRef: null });
+  assert.deepEqual(await recordDraftHost(tx, app.id, 2, 'host-x'), { retiredHostRef: null });
+  assert.deepEqual(await recordDraftHost(tx, app.id, 1, 'host-y'), { retiredHostRef: 'host-y' });
+  assert.deepEqual(await hostRow(db, tx, app), {
+    generation: 2,
+    build_id: build.id,
+    state: 'ready',
+    host_ref: 'host-x',
+    failure: null,
+  });
+});
+
+test('a start that recorded nothing for 10 minutes fails, and only that one', { timeout: 120000 }, async t => {
+  const { db, workspace, tx, app } = await setup(t);
+  const build = await serverHead(db, tx, app, workspace.membershipId, 'c'.repeat(40));
+  const lost = {
+    code: 'host-unavailable',
+    message: 'The app server did not start in time. Try again.',
+    retryable: true,
+  };
+  assert.deepEqual(await requestDraftHost(tx, app.id), { start: { generation: 1 } });
+  await expireDraftHostStarts(tx, lost);
+  assert.equal((await hostRow(db, tx, app)).state, 'starting');
+
+  await db.platform.query(
+    `UPDATE "${tx.schema}".tf_app_draft_hosts SET updated_at = now() - interval '11 minutes' WHERE app_id = $1`,
+    [app.id],
+  );
+  await expireDraftHostStarts(tx, lost);
+  assert.deepEqual(await hostRow(db, tx, app), {
+    generation: 1,
+    build_id: build.id,
+    state: 'failed',
+    host_ref: null,
+    failure: lost,
+  });
+  assert.deepEqual(await recordDraftHost(tx, app.id, 1, 'host-late'), { retiredHostRef: 'host-late' });
+  assert.deepEqual(
+    await readPreviewTarget(tx, {
+      workspaceId: workspace.id,
+      appId: app.id,
+      membershipId: workspace.membershipId,
+    }).then(read => read.target),
+    { kind: 'server', host: { state: 'failed', failure: lost } },
+  );
+});
 
 test('a server draft previews the state of its own draft host', { timeout: 120000 }, async t => {
   const { db, workspace, tx, app } = await setup(t);

@@ -59,7 +59,7 @@ function memoryObjects() {
 }
 
 /**
- * Hosts named by release or draft build and size, and one endpoint per app whose generation grows by one at each
+ * Hosts named by release, or by draft build and generation, and size, and one endpoint per app whose generation grows by one at each
  * switch.
  */
 function memoryHost() {
@@ -72,7 +72,7 @@ function memoryHost() {
       const hostRef =
         'releaseId' in runs
           ? `host-${runs.releaseId.slice(0, 8)}-${size.vcpu}x${size.memMiB}`
-          : `draft-${runs.draftBuildId.slice(0, 8)}-${size.vcpu}x${size.memMiB}`;
+          : `draft-${runs.draftBuildId.slice(0, 8)}-g${runs.draftGeneration}-${size.vcpu}x${size.memMiB}`;
       hosts.set(hostRef, { appId, artifact: output.artifact, size, draftBuildId: runs.draftBuildId });
       return { hostRef };
     },
@@ -957,7 +957,7 @@ test('server drafts run on draft hosts that reconcile keeps while used and retir
     return found && { generation: found.generation, state: found.state, hostRef: found.hostRef ?? null };
   };
   const hosts = () => [...host.hosts.keys()].sort();
-  const draftHost = buildId => `draft-${buildId.slice(0, 8)}-1x1024`;
+  const draftHost = (buildId, generation) => `draft-${buildId.slice(0, 8)}-g${generation}-1x1024`;
 
   const first = await draftAt({ 'server.js': 'listen(1)' });
   assert.equal(await open(), 1);
@@ -969,23 +969,23 @@ test('server drafts run on draft hosts that reconcile keeps while used and retir
   });
   assert.deepEqual(await servers.provisionDraftHost({ ...input(1), ...target }), {
     ok: true,
-    hostRef: draftHost(first),
+    hostRef: draftHost(first, 1),
   });
-  assert.equal(host.hosts.get(draftHost(first)).draftBuildId, first);
-  assert.deepEqual(await record(1, draftHost(first)), { retiredHostRef: null });
-  assert.deepEqual(await draft(), { generation: 1, state: 'ready', hostRef: draftHost(first) });
+  assert.equal(host.hosts.get(draftHost(first, 1)).draftBuildId, first);
+  assert.deepEqual(await record(1, draftHost(first, 1)), { retiredHostRef: null });
+  assert.deepEqual(await draft(), { generation: 1, state: 'ready', hostRef: draftHost(first, 1) });
 
   await servers.reconcileAppServers(signal());
-  assert.deepEqual(hosts(), [draftHost(first)], 'a draft host opened recently is kept');
+  assert.deepEqual(hosts(), [draftHost(first, 1)], 'a draft host opened recently is kept');
   assert.equal(host.endpoints.get(app.id), undefined, 'the endpoint never moves to a draft host');
 
   // A new draft build starts again. Until the start records its host, reconcile removes no host of the app.
   const second = await draftAt({ 'server.js': 'listen(2)' });
   assert.equal(await open(), 2);
   const secondHost = await bringUp(2);
-  assert.equal(secondHost, draftHost(second));
+  assert.equal(secondHost, draftHost(second, 2));
   await servers.reconcileAppServers(signal());
-  assert.deepEqual(hosts(), [draftHost(first), draftHost(second)].sort());
+  assert.deepEqual(hosts(), [draftHost(first, 1), draftHost(second, 2)].sort());
 
   // That start is lost; a later open starts again and the late recording removes its host.
   await db.platform.query(
@@ -994,11 +994,11 @@ test('server drafts run on draft hosts that reconcile keeps while used and retir
   );
   assert.equal(await open(), 3);
   assert.deepEqual(await record(2, secondHost), { retiredHostRef: secondHost });
-  assert.deepEqual(hosts(), [draftHost(first)]);
+  assert.deepEqual(hosts(), [draftHost(first, 1)]);
   assert.deepEqual(await record(3, await bringUp(3)), { retiredHostRef: null });
-  assert.deepEqual(await draft(), { generation: 3, state: 'ready', hostRef: draftHost(second) });
+  assert.deepEqual(await draft(), { generation: 3, state: 'ready', hostRef: draftHost(second, 3) });
   await servers.reconcileAppServers(signal());
-  assert.deepEqual(hosts(), [draftHost(second)], 'the replaced draft host is removed');
+  assert.deepEqual(hosts(), [draftHost(second, 3)], 'the replaced draft host is removed');
 
   // A draft host no editor opened for a day is retired.
   await db.platform.query(
@@ -1037,7 +1037,7 @@ test('server drafts run on draft hosts that reconcile keeps while used and retir
   assert.deepEqual(await telemetry.points('cloud_app_reconcile_repairs'), [{ kind: 'host-removed', value: 4 }]);
 
   // Without credits a draft host start fails before any host is brought up.
-  await draftAt({ 'server.js': 'listen(4)' });
+  const fourth = await draftAt({ 'server.js': 'listen(4)' });
   credits = 0n;
   assert.equal(await open(), 6);
   assert.equal(await servers.prepareDraftHost(input(6)), null);
@@ -1047,4 +1047,26 @@ test('server drafts run on draft hosts that reconcile keeps while used and retir
     message: 'The workspace has no credits left to run this draft.',
     retryable: false,
   });
+
+  // A start that never records its host holds the app's hosts for 10 minutes, then fails and lets reconcile remove it.
+  credits = null;
+  assert.equal(await open(), 7);
+  const stuck = await bringUp(7);
+  assert.equal(stuck, draftHost(fourth, 7));
+  await servers.reconcileAppServers(signal());
+  assert.deepEqual(hosts(), [stuck, live].sort());
+  assert.deepEqual(await draft(), { generation: 7, state: 'starting', hostRef: null });
+  await db.platform.query(
+    `UPDATE "${schema}".tf_app_draft_hosts SET updated_at = now() - interval '11 minutes' WHERE app_id = $1`,
+    [app.id],
+  );
+  await servers.reconcileAppServers(signal());
+  assert.deepEqual(hosts(), [live]);
+  assert.deepEqual(await draft(), { generation: 7, state: 'failed', hostRef: null });
+  assert.deepEqual((await transact(tx => readDraftHost(tx, app.id))).failure, {
+    code: 'host-unavailable',
+    message: 'The app server did not start in time. Try again.',
+    retryable: true,
+  });
+  assert.equal(await open(), 8, 'the next open starts again');
 });
