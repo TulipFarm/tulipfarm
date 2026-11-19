@@ -276,7 +276,6 @@ try {
   await page.getByText('ChatGPT account', { exact: true }).waitFor();
   assert.equal(await page.getByRole('menuitemradio', { name: 'ada@example.com', exact: true }).isChecked(), true);
   await page.getByRole('menuitemradio', { name: 'ada@work.example', exact: true }).click();
-  await page.keyboard.press('Escape');
   await page.getByRole('menu').waitFor({ state: 'hidden' });
   await page.getByRole('textbox', { name: 'Message', exact: true }).fill('Use my work account');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
@@ -286,7 +285,9 @@ try {
     [['chatgpt-astra', second]],
   );
   await page.close();
-  console.log('Plan account: a single account hides the choice; the picked account is sent with the message.');
+  console.log(
+    'Plan account: a single account hides the choice; picking an account closes the menu and is sent with the message.',
+  );
 } catch (error) {
   await captureBrowserFailure(activePage, 'model-picker');
   throw error;
