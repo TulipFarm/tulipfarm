@@ -426,7 +426,7 @@ test('chat sends reconcile transport failures and recover without reloading', { 
     );
 
     await scenario(
-      "a new chat's first message is sent after a newer page load cancels the previous access check",
+      "a new chat's first message is sent at once in a confirmed workspace, while the access check is still pending",
       async ({ page, state, composer, send }) => {
         let release;
         state.accessReads = new Promise(resolve => (release = resolve));
@@ -436,16 +436,39 @@ test('chat sends reconcile transport failures and recover without reloading', { 
         await send.click();
         // Sending moves the draft to its chat page, a newer load that cancels the reads the new-chat page started.
         await page.waitForURL(url => /^\/acme\/chat\/[0-9a-f-]{36}$/.test(url.pathname));
-        await new Promise(resolve => setTimeout(resolve, 300));
-        assert.deepEqual(state.newChatWrites, [], 'Writes wait for the access check');
+        await page.getByText('Reply in the new chat', { exact: true }).waitFor();
+        assert.notEqual(state.accessReads, null, 'The access check is still pending');
         state.accessReads = null;
         release();
-        await page.getByText('Reply in the new chat', { exact: true }).waitFor();
         assert.deepEqual(
           state.newChatWrites.map(write => write.kind),
           ['create', 'send'],
         );
         assert.equal(await page.getByText('Could not confirm your workspace access', { exact: false }).count(), 0);
+      },
+    );
+
+    await scenario(
+      'a sidebar click inside a confirmed workspace does not hold writes behind the pending access check',
+      async ({ page, state }) => {
+        const release = (() => {
+          let release;
+          state.accessReads = new Promise(resolve => (release = resolve));
+          return () => {
+            state.accessReads = null;
+            release();
+          };
+        })();
+        await page
+          .getByRole('navigation', { name: 'Workspace navigation' })
+          .getByRole('link', { name: 'Chats', exact: true })
+          .click();
+        await page.getByRole('heading', { name: 'Chats', exact: true }).waitFor({ timeout: 1500 });
+        assert.equal(
+          await page.evaluate(() => import('/src/lib/http.ts').then(m => m.writesAllowed().then(() => 'allowed'))),
+          'allowed',
+        );
+        release();
       },
     );
 
