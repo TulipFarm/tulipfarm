@@ -11,6 +11,7 @@ import {
 } from 'react';
 import { ChevronRight } from 'lucide-react';
 import { Link, Outlet, useLocation, useNavigate, useRouter } from '@tanstack/react-router';
+import { Toaster } from '@tulipfarm/sprout/toast';
 import { Add } from 'reicon-react/icons/Add';
 import { BranchDown } from 'reicon-react/icons/BranchDown';
 import { LockKeyhole } from 'reicon-react/icons/LockKeyhole';
@@ -855,6 +856,7 @@ function WorkspaceShellContent() {
           />
         </SidebarProvider>
       </div>
+      <Toaster />
     </TooltipProvider>
   );
 }

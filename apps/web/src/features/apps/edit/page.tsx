@@ -345,6 +345,9 @@ function PublicEditor({ app, appLink }: { app: AppDetail; appLink: ReactElement 
               : 'The draft becomes the current version when publishing finishes.'
             : draftNote(draft, chatId, canBuild)}
         </span>
+        <span className="text-muted-foreground">
+          This draft can’t use workspace data. Data from shared views appears after you publish.
+        </span>
       </div>
       {isBuilt(draft) && !approved && (
         <Alert>
