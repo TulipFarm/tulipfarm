@@ -1500,6 +1500,7 @@ test("an app chat reply's edit claim needs a write in any common wording, and a 
     unbackedAppClaim(
       'I rebuilt the app and made sure the page loads correctly.',
       'public',
+      // eslint-disable-next-line tulipfarm/product-copy -- A tool name, not user-facing copy.
       new Set(['apps.preview.build']),
       'Rebuild the app.',
     ),
