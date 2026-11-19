@@ -84,7 +84,7 @@ export type CodingRunServices = {
   github(
     workspaceId: string,
     actor: HumanActor,
-    origin: { conversationId: string; turnId: string },
+    origin: { conversationId: string; turnId: string; runId?: string },
     login?: string | null,
   ): Promise<{ token: string; login: string } | null>;
   /** Records the exact run for the member's decision; proposing the same run again changes nothing. */
@@ -336,7 +336,7 @@ export function createCodingRuns(
       const github = await services.github(
         workspaceId,
         run.actor,
-        { conversationId: run.conversationId, turnId: run.turnId },
+        { conversationId: run.conversationId, turnId: run.turnId, runId: run.id },
         run.githubLogin,
       );
       if (!github) return run.githubLogin ? namedGitHubRequired(run.githubLogin) : githubRequired;

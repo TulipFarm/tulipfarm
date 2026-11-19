@@ -158,12 +158,14 @@ export function createGitHubReads(options: {
      * The access token and login of the account a coding run in this chat turn clones with: the member's account named
      * by `login` when it is on for coding, else their oldest active account on for coding. Null when the named login is
      * not one of their accounts or is off for coding, or when none of their accounts is on for coding. The caller hands
-     * the token only to an execution backend that keeps it out of the machine.
+     * the token only to an execution backend that keeps it out of the machine. Without `runId` the turn must be
+     * processing; with it, the turn waits on that run, so the run must be the member's approved run of this turn and
+     * be running.
      */
     async cloneToken(
       workspaceId: string,
       actor: HumanActor,
-      origin: { conversationId: string; turnId: string },
+      origin: { conversationId: string; turnId: string; runId?: string },
       login?: string | null,
     ): Promise<{ token: string; login: string } | null> {
       const chosen = await options.accounts.codingAccount(workspaceId, actor, login);
@@ -179,15 +181,16 @@ export function createGitHubReads(options: {
           if ((await githubSelection(tx, origin.conversationId)).investigation)
             throw new GitHubReadError('read-forbidden');
           await requireNoMcpDerived(tx, [{ kind: 'private-conversation', conversationId: origin.conversationId }]);
-          if (
-            !(
-              await tx.client.query(
+          const live = origin.runId
+            ? await tx.client.query(
+                `SELECT 1 FROM ${table(tx, 'tf_coding_runs')} WHERE id=$1 AND conversation_id=$2 AND turn_id=$3 AND membership_id=$4 AND decision='approved' AND status='running'`,
+                [z.uuid().parse(origin.runId), origin.conversationId, origin.turnId, owner.membershipId],
+              )
+            : await tx.client.query(
                 `SELECT 1 FROM ${table(tx, 'tf_conversation_turns')} WHERE id=$1 AND conversation_id=$2 AND status='processing'`,
                 [origin.turnId, origin.conversationId],
-              )
-            ).rowCount
-          )
-            throw new AccessDenied();
+              );
+          if (!live.rowCount) throw new AccessDenied();
         },
         true,
       );
