@@ -57,12 +57,15 @@ export function DraftPreview({
   appId,
   appTitle,
   buildId,
+  server = false,
 }: {
   api: AppApi;
   appId: string;
   appTitle: string;
   /** The build to show, or null when the draft has never been built. */
   buildId: string | null;
+  /** A server app's draft runs on its own host, which gets no workspace data until the app is published. */
+  server?: boolean;
 }) {
   const frame = useRef<HTMLIFrameElement>(null);
   const origin = useRef<string | null>(null);
@@ -139,6 +142,11 @@ export function DraftPreview({
           </Button>
         </div>
       </div>
+      {server && (
+        <p className="text-sm text-muted-foreground">
+          This draft runs without your workspace data. Data appears after you publish.
+        </p>
+      )}
       {tabFailure && (
         <Alert variant="destructive">
           <AlertDescription>{tabFailure}</AlertDescription>
@@ -182,48 +190,5 @@ export function DraftPreview({
         />
       </div>
     </section>
-  );
-}
-
-/** A server app's built draft, which only runs once published. */
-export function ServerDraft({ live, webAddress }: { live: boolean; webAddress: string | null }) {
-  if (!live)
-    return (
-      <StatePanel
-        kind="empty"
-        heading="h2"
-        icon={Window}
-        title="This draft can’t run here yet"
-        description="Server apps run only after they’re published. Then this draft goes live at its web address, where anyone can visit it."
-      />
-    );
-  return (
-    <StatePanel
-      kind="empty"
-      heading="h2"
-      icon={Window}
-      title="This draft is live"
-      description={
-        webAddress ? (
-          <>
-            Server apps can’t run here yet. Anyone can visit it at{' '}
-            <span className="whitespace-nowrap">{webAddress}</span>.
-          </>
-        ) : (
-          'Server apps can’t run here yet. Anyone with its web address can visit it.'
-        )
-      }
-    >
-      {webAddress && (
-        <Button
-          variant="outline"
-          size="sm"
-          nativeButton={false}
-          render={<a href={`https://${webAddress}`} target="_blank" rel="noreferrer" />}
-        >
-          Open live app<span className="sr-only"> (opens in a new tab)</span>
-        </Button>
-      )}
-    </StatePanel>
   );
 }
