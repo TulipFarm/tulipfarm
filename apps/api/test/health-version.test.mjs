@@ -199,3 +199,47 @@ test('Huntsman health sends its token without scraping and optional storage chec
   }
   assert.equal((await app.inject('/health')).statusCode, 404);
 });
+
+test('a slow but healthy public web answer keeps health ok', async t => {
+  t.mock.method(Pool.prototype, 'query', async () => ({ rows: [{ value: 1 }] }));
+  const names = ['HUNTSMAN_ENDPOINT', 'HUNTSMAN_TOKEN', 'HUNTSMAN_TOKEN_FILE', 'SEARXNG_ENDPOINT', 'TEMPORAL_UI_URL'];
+  const previous = Object.fromEntries(names.map(name => [name, process.env[name]]));
+  t.after(() => {
+    for (const [name, value] of Object.entries(previous))
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+  });
+  for (const name of names) delete process.env[name];
+  process.env.HUNTSMAN_ENDPOINT = 'https://huntsman.example.com';
+  process.env.HUNTSMAN_TOKEN = 'test-huntsman-token';
+  process.env.TEMPORAL_UI_URL = '';
+  t.mock.method(
+    globalThis,
+    'fetch',
+    (_url, { signal }) =>
+      new Promise((resolve, reject) => {
+        const timer = setTimeout(() => resolve(new Response('{}')), 2500);
+        signal.addEventListener('abort', () => {
+          clearTimeout(timer);
+          reject(signal.reason);
+        });
+      }),
+  );
+  const app = Fastify();
+  t.after(() => app.close());
+  await app.register(
+    async app =>
+      registerHealth(app, {
+        namespace: 'test',
+        connection: {
+          withDeadline: (_deadline, callback) => callback(),
+          workflowService: { describeNamespace: async () => ({}) },
+        },
+        client: { workflow: { execute: async () => 'ok' } },
+      }),
+    { prefix: '/v1' },
+  );
+  const response = await app.inject('/v1/health');
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.json().services.publicWeb.status, 'ok');
+});

@@ -23,6 +23,9 @@ export function registerRoot(app: FastifyInstance) {
   });
 }
 
+// A stack without its own public web reaches a shared one over the internet, where a healthy answer can take over 1s.
+const PUBLIC_WEB_TIMEOUT_MS = 5000;
+
 export function registerHealth(
   app: FastifyInstance,
   { connection, namespace, client }: ReturnType<typeof createTemporalClient>,
@@ -93,7 +96,7 @@ export function registerHealth(
                   const response = await fetch(new URL(service.healthPath, service.endpoint), {
                     headers: service.headers,
                     redirect: 'error',
-                    signal: AbortSignal.timeout(2000),
+                    signal: AbortSignal.timeout(PUBLIC_WEB_TIMEOUT_MS),
                   });
                   await response.body?.cancel();
                   if (!response.ok) throw new Error(`Public web service returned ${response.status}`);
