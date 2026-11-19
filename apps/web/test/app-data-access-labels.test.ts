@@ -129,15 +129,6 @@ test('the first blocker decides the status and its next step', () => {
     tone: 'secondary',
     sentence: 'This view isn’t shared with the app.',
   });
-  assert.deepEqual(viewStatus(view({ blockers: ['view-unresolvable'] }), app, orders), {
-    badge: 'Not in use',
-    tone: 'warning',
-    sentence: 'Orders changed, and this view no longer matches it. Create a new data view, then stop sharing this one.',
-  });
-  assert.equal(
-    viewStatus(view({ table: null, blockers: ['view-unresolvable'] }), app, null).sentence,
-    'The table was deleted. Stop sharing it, then create a new data view from another table.',
-  );
   // Only the first blocker shows, so the reader fixes things in order.
   assert.equal(
     viewStatus(
@@ -146,6 +137,28 @@ test('the first blocker decides the status and its next step', () => {
       orders,
     ).sentence,
     'The app isn’t approved as a public app yet.',
+  );
+});
+
+test('a broken view says so whatever else blocks it, since no other step fixes it', () => {
+  const changed = {
+    badge: 'Not in use',
+    tone: 'warning',
+    sentence: 'Orders changed, and this view no longer matches it. Create a new data view, then stop sharing this one.',
+  };
+  // The API lists blockers as app-not-serving, not-approved, view-unresolvable.
+  for (const blockers of [
+    ['view-unresolvable'],
+    ['not-approved', 'view-unresolvable'],
+    ['app-not-serving', 'not-approved', 'view-unresolvable'],
+  ] as const) {
+    assert.deepEqual(viewStatus(view({ blockers: [...blockers] }), app, orders), changed);
+    assert.deepEqual(viewStatus(view({ sharedBy: null, blockers: [...blockers] }), app, orders), changed);
+  }
+  assert.equal(
+    viewStatus(view({ table: null, blockers: ['app-not-serving', 'not-approved', 'view-unresolvable'] }), app, null)
+      .sentence,
+    'The table was deleted. Stop sharing it, then create a new data view from another table.',
   );
 });
 

@@ -44,6 +44,7 @@ const tables = {
   orders: { id: id('7a', 1), label: 'Orders', fields: [text(1, 'Order number'), text(2, 'Customer email')] },
   customers: { id: id('7a', 2), label: 'Customers', fields: [text(3, 'Name')] },
   feedback: { id: id('7a', 3), label: 'Feedback', fields: [text(4, 'Message')] },
+  returns: { id: id('7a', 4), label: 'Returns', fields: [text(5, 'Reason')] },
 };
 const tableList = {
   tables: [tables.orders].map(({ id: tableId, label, fields }) => ({
@@ -85,7 +86,15 @@ const initialViews = () => [
     approvedAt: null,
     blockers: ['not-approved'],
   }),
-  dataView(3, null, { blockers: ['view-unresolvable'] }),
+  // The API lists blockers in this order: app-not-serving, not-approved, view-unresolvable.
+  dataView(3, null, { approvedBy: null, approvedAt: null, blockers: ['not-approved', 'view-unresolvable'] }),
+  dataView(5, tables.returns, {
+    sharedBy: null,
+    sharedAt: null,
+    approvedBy: null,
+    approvedAt: null,
+    blockers: ['app-not-serving', 'not-approved', 'view-unresolvable'],
+  }),
 ];
 
 async function open({ role = 'admin', appRole = 'edit', failingList = false } = {}) {
@@ -98,7 +107,8 @@ async function open({ role = 'admin', appRole = 'edit', failingList = false } = 
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, reducedMotion: 'reduce' });
   const page = await context.newPage();
   page.setDefaultTimeout(15000);
-  const state = { views: initialViews(), writes: [], errors: [], failing: failingList };
+  // refusals maps a view id to the view as it stands when the API refuses a share or approval with 404.
+  const state = { views: initialViews(), writes: [], errors: [], failing: failingList, refusals: new Map() };
   const summary = { ...app, role: appRole };
   page.on('pageerror', error => state.errors.push(error.message));
   await page.route('**/v1/**', async route => {
@@ -146,6 +156,10 @@ async function open({ role = 'admin', appRole = 'edit', failingList = false } = 
       state.writes.push({ method, path: `${kind}:${viewId}` });
       const index = state.views.findIndex(entry => entry.id === viewId);
       const current = state.views[index];
+      if (state.refusals.has(viewId)) {
+        state.views[index] = state.refusals.get(viewId)(current);
+        return route.fulfill({ status: 404, json: { error: 'not-found' } });
+      }
       const next =
         method === 'DELETE'
           ? {
@@ -220,11 +234,20 @@ test(
       await feedback.getByText('Shared by Grace on Nov 12, 2026').waitFor();
       await feedback.getByRole('button', { name: 'Approve Feedback data view' }).waitFor();
 
+      // A broken view says so before any other blocker and offers only Stop sharing.
       const deleted = card(page, 'Unavailable table');
       await deleted
         .getByText('The table was deleted. Stop sharing it, then create a new data view from another table.')
         .waitFor();
       await deleted.getByRole('button', { name: 'Stop sharing Unavailable table data view' }).waitFor();
+      assert.equal(await deleted.getByRole('button', { name: 'Approve Unavailable table data view' }).count(), 0);
+      const returns = card(page, 'Returns');
+      await returns
+        .getByText(
+          'Returns changed, and this view no longer matches it. Create a new data view, then stop sharing this one.',
+        )
+        .waitFor();
+      assert.equal(await returns.getByRole('button', { name: 'Share with this app' }).count(), 0);
 
       // Create a view on Orders: it starts unshared and gives the app nothing.
       await page.getByRole('button', { name: 'Create data view' }).click();
@@ -273,6 +296,61 @@ test(
         state.writes.map(write => `${write.method} ${write.method === 'POST' ? 'create' : write.path}`),
         ['POST create', `PUT share:${created4}`, `PUT approval:${created4}`, `DELETE share:${id('d0', 1)}`],
       );
+      assert.deepEqual(state.errors, []);
+    } finally {
+      await run.close();
+    }
+  },
+);
+
+test(
+  'a share or approval refused because the view broke says so, not that rights are missing',
+  { timeout: 120_000 },
+  async () => {
+    const run = await open();
+    const { page, state } = run;
+    try {
+      await run.goto('/data-access');
+      await page.getByRole('list', { name: 'Data views' }).waitFor();
+      const broke = view => ({ ...view, blockers: [...view.blockers, 'view-unresolvable'] });
+      const changed = 'This data view or its table was removed or changed. The list now shows its current state.';
+
+      // The feedback table changes while the admin reads the list.
+      state.refusals.set(id('d0', 2), broke);
+      const feedback = card(page, 'Feedback');
+      await feedback.getByRole('button', { name: 'Approve Feedback data view' }).click();
+      const approval = page.getByRole('alertdialog', { name: 'Approve Feedback data view?' });
+      await approval.getByRole('button', { name: 'Approve' }).click();
+      await approval.getByText(changed).waitFor();
+      await approval.getByRole('button', { name: 'Cancel' }).click();
+      await feedback.getByText('Feedback changed, and this view no longer matches it.', { exact: false }).waitFor();
+      assert.equal(await feedback.getByRole('button', { name: 'Approve Feedback data view' }).count(), 0);
+
+      // An unchanged view refused with 404 means the sharer lacks rights on the table.
+      state.views[0] = {
+        ...state.views[0],
+        sharedBy: null,
+        sharedAt: null,
+        approvedBy: null,
+        approvedAt: null,
+        blockers: ['not-approved'],
+      };
+      state.refusals.set(id('d0', 1), view => view);
+      await page.reload();
+      const customers = card(page, 'Customers');
+      await customers.getByRole('button', { name: 'Share with this app' }).click();
+      const share = page.getByRole('alertdialog', { name: 'Share Customers data view with this app?' });
+      await share.getByRole('button', { name: 'Share' }).click();
+      await share.getByText('You can’t share this table.', { exact: false }).waitFor();
+      await share.getByRole('button', { name: 'Cancel' }).click();
+
+      // The same refusal after the table was deleted names the change instead.
+      state.refusals.set(id('d0', 1), view => ({ ...broke(view), table: null }));
+      await customers.getByRole('button', { name: 'Share with this app' }).click();
+      await share.getByRole('button', { name: 'Share' }).click();
+      await share.getByText(changed).waitFor();
+      await share.getByRole('button', { name: 'Cancel' }).click();
+      await card(page, 'Unavailable table').first().waitFor();
       assert.deepEqual(state.errors, []);
     } finally {
       await run.close();

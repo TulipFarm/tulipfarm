@@ -23,6 +23,7 @@ import {
   fieldLabel,
   opLabels,
   tableName,
+  unresolvable,
   valueText,
   viewStatus,
   viewSummary,
@@ -64,6 +65,7 @@ const noRights =
   'You can’t share this table. You need Manage schema on it, plus Read rows, Create rows, Update rows or Delete rows for each action you allow. Ask a workspace admin for access.';
 const noEditAction = 'You need edit access to this app to share or stop sharing data views. Ask an editor of this app.';
 const adminOnly = 'Only a workspace admin can approve data access.';
+const viewChanged = 'This data view or its table was removed or changed. The list now shows its current state.';
 
 function DataAccess({ app }: { app: AppDetail }) {
   const { workspace } = workspaceRoute.useRouteContext();
@@ -184,14 +186,16 @@ function ViewCard({
   const actions = actionPhrase(view.actions);
   const shared = view.sharedBy !== null;
   const approved = view.approvedBy !== null;
+  const broken = unresolvable(view);
 
   /** Runs a change, refreshes the list either way, and names a refusal the dialog can show. */
-  const attempt = async (work: () => Promise<unknown>, refusals: Record<string, string>) => {
+  const attempt = async (work: () => Promise<unknown>, refusals: Record<string, string | (() => Promise<string>)>) => {
     try {
       await work();
       return null;
     } catch (error) {
-      if (error instanceof TableRequestError && refusals[error.code]) return refusals[error.code]!;
+      const refusal = error instanceof TableRequestError ? refusals[error.code] : undefined;
+      if (refusal) return typeof refusal === 'string' ? refusal : await refusal();
       return error instanceof TableRequestError
         ? 'Nothing has changed. Try again.'
         : 'We couldn’t confirm the change. Check the list before trying again.';
@@ -208,7 +212,12 @@ function ViewCard({
       destructive: false,
       run: async () => {
         const reason = await attempt(() => api.shareDataView(app.id, view.id), {
-          'not-found': noRights,
+          // The API refuses a missing or broken view the same way as a sharer without rights, so look again.
+          'not-found': async () => {
+            const views = await api.dataViews(app.id, AbortSignal.timeout(15_000)).catch(() => []);
+            const fresh = views.find(entry => entry.id === view.id);
+            return fresh && !unresolvable(fresh) ? noRights : viewChanged;
+          },
           forbidden: noEditAction,
         });
         if (reason === null) toast.add({ title: 'Shared. Waiting for a workspace admin to approve.', type: 'success' });
@@ -228,7 +237,7 @@ function ViewCard({
           async () => {
             approver = (await api.approveDataView(app.id, view.id)).approvedBy;
           },
-          { forbidden: adminOnly },
+          { 'not-found': viewChanged, forbidden: adminOnly },
         );
         if (reason === null)
           toast.add({
@@ -263,12 +272,12 @@ function ViewCard({
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          {!shared && editor && (
+          {!shared && !broken && editor && (
             <Button variant="outline" size="sm" onClick={share}>
               Share with this app
             </Button>
           )}
-          {shared && !approved && admin && (
+          {shared && !approved && !broken && admin && (
             <Button size="sm" aria-label={`Approve ${name} data view`} onClick={approve}>
               Approve
             </Button>

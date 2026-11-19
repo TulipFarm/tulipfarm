@@ -75,9 +75,20 @@ export function valueText(table: ViewTable, comparison: Extract<DataViewComparis
 
 type ViewStatus = { badge: string; tone: BadgeVariant; sentence: string };
 
-/** What the first blocker means for this view, or that the app can use it now. */
+/** Whether the view's table was deleted or changed so the view no longer matches it. Nothing else can fix that. */
+export const unresolvable = (view: DataView) => view.blockers.includes('view-unresolvable');
+
+/** What stops this view serving, a broken table first since no other step fixes it, or that the app can use it now. */
 export function viewStatus(view: DataView, app: AppSummary, table: ViewTable): ViewStatus {
   const notInUse = (sentence: string): ViewStatus => ({ badge: 'Not in use', tone: 'secondary', sentence });
+  if (unresolvable(view))
+    return {
+      badge: 'Not in use',
+      tone: 'warning',
+      sentence: table
+        ? `${table.label} changed, and this view no longer matches it. Create a new data view, then stop sharing this one.`
+        : 'The table was deleted. Stop sharing it, then create a new data view from another table.',
+    };
   switch (view.blockers[0]) {
     case undefined:
       return { badge: 'In use', tone: 'success', sentence: 'The app can use this data view now.' };
@@ -88,17 +99,9 @@ export function viewStatus(view: DataView, app: AppSummary, table: ViewTable): V
         serving && serving.tone !== 'success' ? `${serving.label}.` : 'The app isn’t open to visitors right now.',
       );
     }
-    case 'not-approved':
+    default:
       return view.sharedBy === null
         ? notInUse('This view isn’t shared with the app.')
         : { badge: 'Not in use yet', tone: 'info', sentence: 'Waiting for a workspace admin to approve.' };
-    default:
-      return {
-        badge: 'Not in use',
-        tone: 'warning',
-        sentence: table
-          ? `${table.label} changed, and this view no longer matches it. Create a new data view, then stop sharing this one.`
-          : 'The table was deleted. Stop sharing it, then create a new data view from another table.',
-      };
   }
 }
