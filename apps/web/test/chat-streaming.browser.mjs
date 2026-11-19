@@ -726,6 +726,34 @@ test('chat reply streaming and polling fallback in Chromium', { timeout: 240000 
     );
 
     await scenario(
+      'a message sent after a failed reply explains it waits for retry or cancel',
+      async ({ page, history, open }) => {
+        await page.clock.install();
+        history[0].parts = [{ kind: 'text', text: 'Build a small Node.js server app, then build it.' }];
+        history[0].turn = { ...history[0].turn, generation: 1, status: 'failed', errorCode: 'attempts-exhausted' };
+        history.push({
+          id: randomUUID(),
+          sequence: 2,
+          author: 'human',
+          createdAt: new Date().toISOString(),
+          parts: [{ kind: 'text', text: "Change the greeting to 'Hello again' and rebuild the app." }],
+          turn: { id: randomUUID(), generation: 0, status: 'queued' },
+        });
+        await open();
+        await page
+          .getByText('The reply above stopped. Retry or cancel it, and this message will be answered next.', {
+            exact: true,
+          })
+          .waitFor();
+        await page.getByRole('button', { name: 'Remove queued message', exact: true }).waitFor();
+        await page.clock.fastForward(120_001);
+        assert.equal(await page.getByText('Reply is taking too long', { exact: true }).count(), 0);
+        assert.equal(await page.getByRole('button', { name: 'Stop reply', exact: true }).count(), 0);
+        await screenshot(page, 'queued-behind-failed');
+      },
+    );
+
+    await scenario(
       'a reply whose model is unavailable ends with a clear error and a retry, not a spinner',
       async ({ page, state, workspace, chatId, history, open }) => {
         await open();
