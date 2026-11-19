@@ -1461,7 +1461,38 @@ const questions = [
   'Did the last build pass?',
   'When was the last release?',
   'Is it live? What does the heading say?',
+  "What's in index.html?",
+  'Why is the logo so small?',
 ];
+
+test("an app chat reply's edit claim needs a write in any common wording, and a question's answer needs none", () => {
+  const ask = 'Change the heading to Orders.';
+  const read = new Set(['apps.files.read']);
+  const wrote = new Set(['apps.files.read', 'apps.files.write']);
+  for (const reply of [
+    'I made the heading bold.',
+    "I've made the footer blue.",
+    "I've also added a footer.",
+    'I just updated the heading.',
+    "I've now updated the heading.",
+    "I've successfully updated the button.",
+    "Done! I've gone ahead and updated the heading.",
+    'I went ahead and changed the footer text.',
+    'The heading has been updated to Orders.',
+    'The heading was changed to Orders.',
+    'The footer has been changed.',
+    "I've updated the title to Orders.",
+    'I changed the title to Orders.',
+    "I've updated the copy.",
+    'Updated the heading to Orders.',
+    'Changed the footer color to blue.',
+  ]) {
+    assert.equal(unbackedAppClaim(reply, 'public', read, ask)?.missing, 'edit', reply);
+    assert.equal(unbackedAppClaim(reply, 'public', wrote, ask), undefined, reply);
+  }
+  for (const reply of ['The heading was created in the first commit.', 'The footer has been changed twice this month.'])
+    assert.equal(unbackedAppClaim(reply, 'public', read, 'Where did the heading come from?'), undefined, reply);
+});
 
 test('an app chat request counts as a question only when it plainly asks about the app', () => {
   for (const request of changeRequests) assert.equal(appQuestionAsked(request), false, request);

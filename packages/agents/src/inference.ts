@@ -2252,8 +2252,13 @@ const firstPerson = /\b(?:i|we|my)\b/i;
 const buildClaim =
   /^(?:and |so )?(?:the |your )?(?:re)?build (?:succeeded|passed|worked|completed|finished|(?:is|was) (?:complete|done|finished|successful))\b|^(?:and |so )?(?:i|we) (?:re)?built\b|\b(?:i|we)(?:(?:'|’)ve| have) (?:re)?built\b|^(?:re)?built (?:the|your|this) (?:app|server|site)\b/i;
 const conditional = /\b(?:if|when|once|after|whether|unless|until)\b/i;
-const editClaim =
-  /\b(?:i|we)(?:'|’)?(?:ve| have)? (?:updated|edited|changed|modified|rewrote|wrote|replaced|inserted|deleted|removed|added|created|implemented|fixed|corrected|put(?! together)|renamed|moved|set|swapped|switched|hid|hidden|appended|restyled|translated|enabled|disabled)\b/i;
+const editVerb = String.raw`(?:updated|edited|changed|modified|rewrote|wrote|replaced|inserted|deleted|removed|added|created|implemented|fixed|corrected|put(?! together)|renamed|moved|set|swapped|switched|hid|hidden|appended|restyled|translated|enabled|disabled|made|tweaked|adjusted|increased|decreased|styled|bolded)`;
+const editClaim = new RegExp(String.raw`\b(?:i|we)(?:'|’)?(?:ve| have)?${adverbs} ${editVerb}\b`, 'i');
+/** "The heading was changed" or "Updated the heading": an edit with no one named, so only a change request makes it a claim. */
+const unnamedEditClaim = new RegExp(
+  String.raw`\b(?:has|have|was|were)${adverbs} (?:been${adverbs} )?${editVerb}\b|^(?:and |then )?(?:(?:also|just|now|\w+ly) )?${editVerb}\b`,
+  'i',
+);
 const savedClaim =
   /^(?:and |so )?(?:the |your )?(?:[\w-]+ )?(?:changes?|edits?|updates?|fix(?:es)?) (?:is|are|was|were|has been|have been) (?:saved|applied|made|done|in place|complete|completed|finished|live)\b/i;
 /** A clause that says how the app reads now: a change claim when the person asked for one, otherwise a state report. */
@@ -2281,7 +2286,7 @@ const auxiliary = String.raw`(?:is|are|was|were|does|do|did|has|have|can|could|w
 /** The opening of a question that reads the app: an allowlist, so any other message may ask for a change. */
 const readQuestion = new RegExp(
   [
-    String.raw`^(?:what|which|who|whose)\s+(?!if\b|about\b)\w`,
+    String.raw`^(?:what|which|who|whose)\s+(?!if\b|about\b)\w|^(?:what|who)(?:'|’)s\b`,
     String.raw`^(?:is|are|was|were|does|did|has)\s+${subject}\b`,
     // "Do it" and "Have the heading say…" ask for changes; "Do you…" and "Have you…" ask about them.
     String.raw`^(?:do|have)\s+${person}\b`,
@@ -2293,7 +2298,7 @@ const readQuestion = new RegExp(
 );
 // A second clause can ask for a change in any words ("check the heading and capitalize it"), and asking whether
 // something is possible asks for it, so neither reads as a plain question.
-const clauseAfter = /\b(?:and|then|if|so)\b|,\s*\w|;/i;
+const clauseAfter = /\b(?:and|then|if|so that)\b|,\s*\w|;/i;
 const possibleAsk =
   /\b(?:is it possible to|is there a way to|(?:are|am|is) (?:we|you|i|it) able to|(?:can|could) (?:we|i) have|would it be possible)\b/i;
 const pleasantry = /^(?:(?:thanks|thank you|ok(?:ay)?|great|cool|nice|perfect|hi|hello|hey)(?:[\s,!.]+|$))+/i;
@@ -2317,7 +2322,7 @@ export const appQuestionAsked = (request: string) => {
   );
 };
 const codeObject =
-  /\b(?:files?|code|server|routes?|handlers?|html|css|scripts?|components?|pages?|forms?|buttons?|headings?|headers?|footers?|sections?|banners?|links?|images?|styles?|layout|nav(?:igation)?|menus?|endpoints?|login|dark mode|features?)\b|[\w-]+\/[\w./-]+|\b[\w-]+\.(?:m?js|tsx?|jsx|html|css|json)\b/i;
+  /\b(?:files?|code|server|routes?|handlers?|html|css|scripts?|components?|pages?|forms?|buttons?|headings?|headers?|footers?|sections?|banners?|links?|images?|styles?|layout|nav(?:igation)?|menus?|endpoints?|login|dark mode|features?|titles?|text|copy|colou?rs?|fonts?)\b|[\w-]+\/[\w./-]+|\b[\w-]+\.(?:m?js|tsx?|jsx|html|css|json)\b/i;
 
 /**
  * Why an app chat's reply must do more work: it says its own tools are missing, which they never are in the app's chat,
@@ -2326,7 +2331,11 @@ const codeObject =
 export function unbackedAppClaim(candidate: string, apps: AppKind | undefined, ran: ReadonlySet<string>, request = '') {
   if (!apps) return undefined;
   // A sentence can end inside a quote or bracket, as in: The heading now reads 'Orders.' The build succeeded.
-  const sentences = candidate.split(/(?<=[.!?]['"’”)\]]?)\s+|\n+/).filter(sentence => !sentence.trim().endsWith('?'));
+  // "I went ahead and updated it" is one claim, not a clause ending at "and".
+  const sentences = candidate
+    .split(/(?<=[.!?]['"’”)\]]?)\s+|\n+/)
+    .filter(sentence => !sentence.trim().endsWith('?'))
+    .map(sentence => sentence.replace(/\b(?:gone|went|go) ahead and /gi, ''));
   if (sentences.some(sentence => firstPerson.test(sentence) && toolsDenied.test(sentence)))
     return {
       status: 'continue' as const,
@@ -2353,7 +2362,7 @@ export function unbackedAppClaim(candidate: string, apps: AppKind | undefined, r
       if (asked) return 'change';
       return looked ? undefined : 'read';
     }
-    const edit = editClaim.exec(clause);
+    const edit = editClaim.exec(clause) ?? (asked ? unnamedEditClaim.exec(clause) : null);
     if (!edit || negatedClaim(clause, edit) || !codeObject.test(clause)) return undefined;
     return changed ? undefined : 'edit';
   };
