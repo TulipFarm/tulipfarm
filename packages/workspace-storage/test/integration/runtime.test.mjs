@@ -8,6 +8,41 @@ import { qualified } from '../../src/provisioning.ts';
 import { fixture } from './fixture.mjs';
 import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 
+test('membership pre-check does not wait for an admission slot', async t => {
+  const db = await fixture();
+  const workspace = await db.create();
+  const other = await db.create();
+  const hold = Promise.withResolvers();
+  const entered = Promise.withResolvers();
+  const runtime = createWorkspaceRuntime({
+    maxPools: 1,
+    connectionsPerPool: 2,
+    maxConcurrentTransactions: 1,
+    connectionTimeoutMs: 3000,
+    replicaCount: 1,
+    reservedConnections: 0,
+    databaseConnectionBudget: 10,
+    resolveCredential: async id => ({ workspaceId: id, generation: 1, connectionString: db.login(workspace) }),
+  });
+  t.after(async () => {
+    hold.resolve();
+    try {
+      await runtime.close();
+    } finally {
+      await db.close();
+    }
+  });
+  const held = runtime.transaction(workspace.id, commonCompatibility, async () => {
+    entered.resolve();
+    await hold.promise;
+  });
+  await entered.promise;
+  assert.equal(await runtime.hasCurrentMember(workspace.id, workspace.userId), true);
+  assert.equal(await runtime.hasCurrentMember(workspace.id, other.userId), false);
+  hold.resolve();
+  await held;
+});
+
 test('membership admission uses one pooled read and isolates unknown, removed and other-workspace users', async t => {
   const db = await fixture();
   let router;
