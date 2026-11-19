@@ -18,6 +18,7 @@ import {
   unbackedCardClaim,
   unbackedImportClaim,
   unbackedAppClaim,
+  appChangeRequested,
   unbackedWriteClaim,
   uncheckedTableQuestion,
   waitingCardMisdescribed,
@@ -1331,14 +1332,16 @@ test("an app chat's reply cannot state the app's new or current contents that no
   // eslint-disable-next-line tulipfarm/product-copy -- A tool name, not user-facing copy.
   assert.equal(unbackedAppClaim(quoted, 'public', new Set([...wrote, 'apps.preview.build'])), undefined);
   assert.equal(unbackedAppClaim(quoted, 'public', wrote)?.missing, 'build');
-  for (const text of [
-    "The heading is now 'Orders v3'.",
-    'The greeting change is complete.',
-    'The page now shows the new footer.',
-    'Done. The server now returns ok on /health.',
+  // Asked for a change, a reply saying the app now reads that way claims the change, which only a write backs.
+  const ask = 'Change the heading to Orders v3 and add a footer.';
+  for (const [text, missing] of [
+    ["The heading is now 'Orders v3'.", 'change'],
+    ['The greeting change is complete.', 'edit'],
+    ['The page now shows the new footer.', 'change'],
+    ['Done. The server now returns ok on /health.', 'change'],
   ]) {
-    assert.equal(unbackedAppClaim(text, 'public', status)?.missing, 'change', text);
-    assert.equal(unbackedAppClaim(text, 'public', wrote), undefined, text);
+    assert.equal(unbackedAppClaim(text, 'public', status, ask)?.missing, missing, text);
+    assert.equal(unbackedAppClaim(text, 'public', wrote, ask), undefined, text);
   }
   const already = 'The app already has the /health route, returning ok.';
   assert.equal(unbackedAppClaim(already, 'public', status)?.missing, 'read');
@@ -1350,6 +1353,47 @@ test("an app chat's reply cannot state the app's new or current contents that no
     'The app has no /health route yet.',
   ])
     assert.equal(unbackedAppClaim(text, 'public', none), undefined, text);
+});
+
+test("an app chat's answer about the app's current state is backed by reading it, never by a write", () => {
+  const status = new Set(['apps.status']);
+  const read = new Set(['apps.status', 'apps.files.read']);
+  for (const text of [
+    'The heading now reads "Orders v2".',
+    'Your app is now live at release 3.',
+    'The app now has three files: index.html, app.js and style.css.',
+    'Yes, the server now returns ok on /health.',
+    'The app is now in the editing state.',
+    'The draft is now built and release 4 is live.',
+  ]) {
+    for (const request of ['', 'What does the app look like right now?', 'Is the server up?'])
+      for (const ran of [status, read]) assert.equal(unbackedAppClaim(text, 'public', ran, request), undefined, text);
+    // Nothing read the app in this reply, so the answer reads it first; it never writes for it.
+    assert.equal(unbackedAppClaim(text, 'public', new Set(), 'What is the heading?')?.missing, 'read', text);
+  }
+  // An explicit edit claim with no write in this reply still needs the write.
+  const edit = "I updated the heading in index.html to 'Orders v3'.";
+  assert.equal(unbackedAppClaim(edit, 'public', read, 'Change the heading to Orders v3.')?.missing, 'edit');
+  assert.equal(unbackedAppClaim(edit, 'public', new Set([...read, 'apps.files.write'])), undefined);
+});
+
+test('an app chat request asks for a change only when it tells the app to change', () => {
+  for (const request of [
+    'Change the heading to Orders v2.',
+    'Now change it to Orders v3 and rebuild.',
+    'Thanks. Please add a footer.',
+    'Can you rename the page to Orders?',
+    'ok, fix the /health route',
+  ])
+    assert.equal(appChangeRequested(request), true, request);
+  for (const request of [
+    'What does the heading say?',
+    'Did you change the heading?',
+    'Is the app live?',
+    'Which files does the app have?',
+    '',
+  ])
+    assert.equal(appChangeRequested(request), false, request);
 });
 
 test('an import presented for review needs a pending proposal receipt from this reply', () => {

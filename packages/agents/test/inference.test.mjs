@@ -3289,7 +3289,7 @@ test('an app chat tells the model which app tools read and change the app', asyn
 });
 
 /** Runs one app chat turn against a scripted model; `script` answers each reply round, by round index. */
-async function appTurn(t, script) {
+async function appTurn(t, script, request = 'Now change it to Orders v3 and rebuild.') {
   const rounds = [];
   const ran = [];
   const wire = await boundary(t, (_req, res) => {
@@ -3302,7 +3302,7 @@ async function appTurn(t, script) {
     [
       { role: 'user', text: 'Change the heading to Orders v2.' },
       { role: 'assistant', text: 'The heading now reads Orders v2. The build succeeded.' },
-      { role: 'user', text: 'Now change it to Orders v3 and rebuild.' },
+      { role: 'user', text: request },
     ],
     async call => {
       ran.push(call.tool);
@@ -3319,7 +3319,7 @@ async function appTurn(t, script) {
 }
 
 test('every app chat turn starts by reading the app, so later turns call app tools instead of restating', async t => {
-  const claim = "The heading is now 'Orders v3'.";
+  const claim = "I updated the heading in index.html to 'Orders v3'.";
   // The scripted model complies with each forced tool; its claim stands once a write in this reply backs it.
   const compliant = await appTurn(
     t,
@@ -3336,6 +3336,45 @@ test('every app chat turn starts by reading the app, so later turns call app too
   assert.deepEqual(compliant.choices, ['apps_status', 'auto', 'apps_files_read', 'auto', 'apps_files_write', 'auto']);
   assert.deepEqual(compliant.ran, ['apps.status', 'apps.files.read', 'apps.files.write']);
   assert.equal(compliant.result.text, claim);
+});
+
+test("an app chat answer about the app's current state stands once the app was read, with no forced read or write", async t => {
+  for (const answer of [
+    'The heading now reads "Orders v2".',
+    'Your app is now live at release 3.',
+    'The app now has three files: index.html, app.js and style.css.',
+    'Yes, the server now returns ok on /health.',
+    'The app is now in the editing state.',
+    'The draft is now built and release 4 is live.',
+  ])
+    await t.test(answer, async t => {
+      const turn = await appTurn(
+        t,
+        round => (round === 0 ? { calls: [use('apps.status')] } : { text: answer }),
+        'What state is the app in right now?',
+      );
+      assert.deepEqual(turn.choices, ['apps_status', 'auto']);
+      assert.deepEqual(turn.ran, ['apps.status']);
+      assert.equal(turn.result.text, answer);
+    });
+});
+
+test('an app chat reply that says the app reads as asked, with no write, is read first but never forced to write', async t => {
+  const claim = "The heading is now 'Orders v3'.";
+  const turn = await appTurn(
+    t,
+    round =>
+      [{ calls: [use('apps.status')] }, { text: claim }, { calls: [use('apps.files.read', { path: 'index.html' })] }][
+        round
+      ] ?? { text: claim },
+  );
+  assert.deepEqual(turn.ran, ['apps.status', 'apps.files.read']);
+  assert.deepEqual(turn.choices.slice(0, 3), ['apps_status', 'auto', 'apps_files_read']);
+  assert.ok(
+    turn.choices.slice(3).every(choice => choice === 'auto'),
+    String(turn.choices),
+  );
+  assert.match(turn.result.text, /^I stopped before changing or building the app, so nothing in it changed/);
 });
 
 test('an app chat reply that keeps claiming an edit no tool made ends with a stop, never under the claim', async t => {
