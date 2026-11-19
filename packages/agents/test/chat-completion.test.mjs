@@ -1393,6 +1393,20 @@ const changeRequests = [
   'Now change it to Orders v3 and rebuild.',
   'Can you rename the page to Orders?',
   '',
+  'Do it',
+  'Do it.',
+  'Do the same for the footer.',
+  'Do the same on the about page',
+  'Have the heading say Orders v2',
+  'Have the footer show the year',
+  'Tell visitors we are closed on Sundays in the banner',
+  'List our opening hours on the homepage',
+  'Show me a dark theme',
+  'How about a blue button',
+  'How about a blue button?',
+  'Where it says Hello, put Welcome',
+  'Show me the files',
+  'list the routes',
 ];
 const questions = [
   'what does the heading say?',
@@ -1402,8 +1416,12 @@ const questions = [
   'Is the app live?',
   'Which files does the app have?',
   'Thanks! What is on the page now?',
-  'Show me the files',
-  'list the routes',
+  'What is the heading',
+  'is it live',
+  'Does the page have a footer',
+  'How many files does the app have',
+  'Where is the login form',
+  'Can you show me the files?',
 ];
 
 test('an app chat request counts as a question only when it plainly asks about the app', () => {
@@ -1421,6 +1439,7 @@ test('an app chat reply cannot say the app now has what a change request asked f
     );
     assert.equal(unbackedAppClaim('I added a form to index.html.', 'public', read, request)?.missing, 'edit', request);
     assert.equal(unbackedAppClaim('I added a contact form.', 'public', read, request)?.missing, 'edit', request);
+    assert.equal(unbackedAppClaim("I've added the contact form.", 'public', read, request)?.missing, 'edit', request);
     assert.equal(unbackedAppClaim('I created the login page.', 'public', read, request)?.missing, 'edit', request);
     assert.equal(unbackedAppClaim('I implemented dark mode.', 'public', read, request)?.missing, 'edit', request);
     assert.equal(

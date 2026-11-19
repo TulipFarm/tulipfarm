@@ -3338,6 +3338,25 @@ test('every app chat turn starts by reading the app, so later turns call app too
   assert.equal(compliant.result.text, claim);
 });
 
+test('a confirmation like "Do it" still makes an unbacked edit claim read, then write, the files', async t => {
+  const claim = "I've added the contact form.";
+  const turn = await appTurn(
+    t,
+    round =>
+      [
+        { calls: [use('apps.status')] },
+        { text: claim },
+        { calls: [use('apps.files.read', { path: 'index.html' })] },
+        { text: claim },
+        { calls: [use('apps.files.write', { path: 'index.html', content: '<form></form>' })] },
+      ][round] ?? { text: claim },
+    'Do it',
+  );
+  assert.deepEqual(turn.choices, ['apps_status', 'auto', 'apps_files_read', 'auto', 'apps_files_write', 'auto']);
+  assert.deepEqual(turn.ran, ['apps.status', 'apps.files.read', 'apps.files.write']);
+  assert.equal(turn.result.text, claim);
+});
+
 test("an app chat answer about the app's current state stands once the app was read, with no forced read or write", async t => {
   for (const answer of [
     'The heading now reads "Orders v2".',
@@ -3364,6 +3383,7 @@ test('an app chat reply that says the app reads as asked, with no write, is read
     ['Now change it to Orders v3 and rebuild.', "The heading is now 'Orders v3'."],
     ['Create a contact form', 'Your app now has a contact form.'],
     ['Go ahead', 'Your app now has a contact form.'],
+    ['Do it', 'Your app now has a contact form.'],
   ])
     await t.test(request, async t => {
       const turn = await appTurn(

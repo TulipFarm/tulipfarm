@@ -2270,9 +2270,11 @@ const pastQuestion = new RegExp(
   String.raw`\b(?:did|have|has|had) (?:you|we|i|it|they|that)(?: already| just)? ${changeVerb}\b`,
   'gi',
 );
-// "Show me" asks to see the app; "show a banner" asks to change it.
-const questionStart =
-  /^(?:what|how|does|do|did|is|are|was|were|has|have|show me|tell|list|which|where|when|why|who|whose)\b/i;
+// Without a question mark, only a plain interrogative asks; "Do it", "Have the heading say…" and "List our hours" ask for changes.
+const interrogative =
+  /^(?:(?:what|which|when|why|who|whose)\b(?! about\b)|(?:is|are|was|were|does|did)\s+(?:it|this|that|these|those|the|my|our|your|its|there|they|we|you|he|she|any|anything|everything|all)\b|how\s+(?:is|are|does|do|did|many|much)\b|where\s+(?:is|are|does|do|did)\b)/i;
+// "How about a blue button?" suggests a change.
+const suggestion = /^(?:how|what) about\b/i;
 /**
  * Whether the person's latest message only asks about the app. Anything else, a confirmation like "go ahead"
  * included, may ask for a change, so a reply saying the app now reads some way must have made one.
@@ -2284,7 +2286,8 @@ export const appQuestionAsked = (request: string) => {
     .filter(Boolean);
   const last = sentences.at(-1) ?? '';
   return (
-    (last.endsWith('?') || questionStart.test(last)) &&
+    (last.endsWith('?') || interrogative.test(last)) &&
+    !suggestion.test(last) &&
     !sentences.some(sentence => changeWord.test(sentence.replace(pastQuestion, '')))
   );
 };
