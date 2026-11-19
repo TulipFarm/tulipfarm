@@ -1,4 +1,5 @@
 import { Pool } from 'pg';
+import { databasePools } from '@tulipfarm/config/database-connections';
 import { z } from 'zod';
 import { modelBundleStore } from '@tulipfarm/agents/model-bundles';
 import { log } from '@tulipfarm/observability';
@@ -7,7 +8,7 @@ import { log } from '@tulipfarm/observability';
 export function createModelBundleRegistry(env: NodeJS.ProcessEnv = process.env) {
   const pool = new Pool({
     connectionString: z.url().parse(env.WORKSPACE_AUTHORING_DATABASE_URL),
-    max: 1,
+    max: databasePools.modelBundles,
     connectionTimeoutMillis: 5000,
     statement_timeout: 10000,
     options: '-c search_path=pg_catalog',

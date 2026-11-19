@@ -1,4 +1,5 @@
 import { Pool } from 'pg';
+import { databasePools } from '@tulipfarm/config/database-connections';
 import { z } from 'zod';
 import { parseKnowledgeEmbeddingsConfig } from '@tulipfarm/config';
 import { createKnowledgeAgentTools, createKnowledgeEmbeddings, createKnowledgeSearch } from '@tulipfarm/knowledge';
@@ -17,7 +18,7 @@ function capacityPool(env: NodeJS.ProcessEnv) {
   if (!sharedPool) {
     sharedPool = new Pool({
       connectionString: z.url().parse(env.WORKSPACE_AUTHORING_DATABASE_URL),
-      max: 2,
+      max: databasePools.knowledgeCapacity,
       connectionTimeoutMillis: 5000,
       statement_timeout: 10000,
       allowExitOnIdle: true,

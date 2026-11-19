@@ -1,4 +1,5 @@
 import { Pool } from 'pg';
+import { databasePools } from '@tulipfarm/config/database-connections';
 import { Client, Connection, WorkflowExecutionAlreadyStartedError } from '@temporalio/client';
 import { temporalConnectionOptions } from '@tulipfarm/config/temporal';
 import { createEmailSender, emailSenderConfigured, emailSenderConfigFromEnv, renderEmail } from '@tulipfarm/email';
@@ -20,7 +21,7 @@ export async function createEmailDeliveryComposition(
   const keys = emailDeliveryKeys();
   const pool = new Pool({
     connectionString: z.string().min(1).parse(process.env.EMAIL_DELIVERY_DATABASE_URL),
-    max: 2,
+    max: databasePools.emailDelivery,
     connectionTimeoutMillis: 5000,
     statement_timeout: 10000,
   });

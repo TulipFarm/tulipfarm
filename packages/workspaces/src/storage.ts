@@ -1,5 +1,6 @@
 import type { Pool } from 'pg';
 import { z } from 'zod';
+import { databaseConnectionFleet, fleetConnections } from '@tulipfarm/config/database-connections';
 import {
   createWorkspaceRuntime,
   runtimeCredentialSchema,
@@ -23,6 +24,13 @@ export function isolatedStorageEnabled() {
 export function workspaceRuntime(pool: Pool) {
   const key = credentialKeyring('runtime');
   const rowSchema = z.object({ generation: z.number().int(), runtime_credential: z.unknown() });
+  const databaseConnectionBudget = Number(process.env.WORKSPACE_DATABASE_CONNECTION_BUDGET ?? 120);
+  const fleet = databaseConnectionFleet();
+  const needed = fleet && fleetConnections(fleet);
+  if (needed && needed > databaseConnectionBudget)
+    throw new Error(
+      `The deployment's ${needed} database connections exceed its connection budget of ${databaseConnectionBudget}`,
+    );
   return createWorkspaceRuntime({
     maxPools: optionalNumber('WORKSPACE_STORAGE_MAX_POOLS'),
     connectionsPerPool: optionalNumber('WORKSPACE_STORAGE_CONNECTIONS_PER_POOL'),
@@ -31,9 +39,11 @@ export function workspaceRuntime(pool: Pool) {
     reservedBackgroundTransactions: optionalNumber('WORKSPACE_STORAGE_RESERVED_BACKGROUND_TRANSACTIONS'),
     maxQueue: optionalNumber('WORKSPACE_STORAGE_MAX_QUEUE'),
     idleTimeoutMs: optionalNumber('WORKSPACE_STORAGE_IDLE_TIMEOUT_MS'),
-    replicaCount: Number(process.env.WORKSPACE_RUNTIME_REPLICAS ?? 4),
-    reservedConnections: 40,
-    databaseConnectionBudget: Number(process.env.WORKSPACE_DATABASE_CONNECTION_BUDGET ?? 120),
+    // A declared fleet was checked above; without one, assume every replica holds this process's pools plus 40.
+    ...(fleet
+      ? { replicaCount: 1, reservedConnections: 0 }
+      : { replicaCount: Number(process.env.WORKSPACE_RUNTIME_REPLICAS ?? 4), reservedConnections: 40 }),
+    databaseConnectionBudget,
     async resolveCredential(workspaceId) {
       const result = await pool.query(
         `SELECT generation, runtime_credential, stage FROM app.workspace_storage

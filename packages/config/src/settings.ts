@@ -711,7 +711,16 @@ export const settings: readonly Setting[] = [
     requirement: 'optional',
     secret: false,
     default: '4',
-    description: 'Runtime replicas that share the connection budget.',
+    description: 'Runtime replicas that share the connection budget. Ignored when DATABASE_CONNECTION_FLEET is set.',
+  },
+  {
+    name: 'DATABASE_CONNECTION_FLEET',
+    group: 'Workspace storage',
+    services: apps,
+    requirement: 'optional',
+    secret: false,
+    description:
+      'JSON map of each deployed service to its most tasks and workspace pool limits, e.g. {"api":{"tasks":2}}. When set, startup charges the connection budget per task from the declared pools of every service.',
   },
   {
     name: 'WORKSPACE_STORAGE_MAX_POOLS',

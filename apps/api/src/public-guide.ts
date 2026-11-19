@@ -3,6 +3,7 @@ import { normalizeIP } from '@fastify/rate-limit';
 import { APIError } from 'better-auth/api';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { Pool } from 'pg';
+import { databasePools } from '@tulipfarm/config/database-connections';
 import { z } from 'zod';
 import { isFeatureEnabled } from '@tulipfarm/observability';
 import { canonicalEmail } from '@tulipfarm/workspaces/canonical-email';
@@ -311,7 +312,7 @@ export function registerPublicGuide(app: FastifyInstance, { auth, pool: authPool
   const tokens = guideTokens(config.secret);
   const pool = new Pool({
     connectionString: authPool.options.connectionString,
-    max: guideLimits.concurrent + 2,
+    max: databasePools.publicGuide,
     connectionTimeoutMillis: 2000,
     statement_timeout: 2000,
     query_timeout: 3000,

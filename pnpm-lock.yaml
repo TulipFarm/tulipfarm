@@ -1917,6 +1917,9 @@ importers:
       '@tulipfarm/atlassian':
         specifier: workspace:*
         version: link:../atlassian
+      '@tulipfarm/config':
+        specifier: workspace:*
+        version: link:../config
       '@tulipfarm/conversations':
         specifier: workspace:*
         version: link:../conversations

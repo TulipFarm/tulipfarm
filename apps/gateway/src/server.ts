@@ -1,5 +1,6 @@
 import '@tulipfarm/config/load-secret-files';
 import { Pool } from 'pg';
+import { databasePools } from '@tulipfarm/config/database-connections';
 import { readBuildInfo } from '@tulipfarm/build-info/node';
 import { shutdownExtensions, startExtensions } from '@tulipfarm/extensions';
 import { captureException, log, registerFlagSubjectResolver, startTelemetry } from '@tulipfarm/observability';
@@ -23,7 +24,7 @@ const pool = new Pool({
   connectionString: process.env.DATABASE_URL ?? 'postgresql://tulipfarm:local-tulipfarm@127.0.0.1:5432/tulipfarm',
   options: '-c search_path=app',
   connectionTimeoutMillis: 5000,
-  max: 10,
+  max: databasePools.gateway,
 });
 pool.on('error', () => log('error', 'dependency', 'database_connection_failed'));
 registerFlagSubjectResolver(workspaceFlagSubjects(pool));

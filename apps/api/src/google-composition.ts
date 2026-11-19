@@ -1,4 +1,5 @@
 import { Pool } from 'pg';
+import { databasePools } from '@tulipfarm/config/database-connections';
 import { z } from 'zod';
 import { integrationCredentialKeyring } from '@tulipfarm/integrations';
 import { createGoogleWorkspaceService } from '@tulipfarm/google-workspace';
@@ -35,7 +36,7 @@ export function googleConfirmation(runtime: Parameters<typeof createGoogleApprov
     throw new Error('Confirmation registry requires a separate login');
   const pool = new Pool({
     connectionString,
-    max: 2,
+    max: databasePools.googleConfirmation,
     connectionTimeoutMillis: 5000,
     statement_timeout: 10000,
     options: '-c search_path=pg_catalog',

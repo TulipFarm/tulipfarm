@@ -1,4 +1,5 @@
 import { Pool } from 'pg';
+import { databasePools } from '@tulipfarm/config/database-connections';
 import { z } from 'zod';
 import { createTableApprovalResolver } from '@tulipfarm/tables/conversation-approvals';
 import { createConfirmationCredentialResolver } from './capabilities.ts';
@@ -19,7 +20,7 @@ export function createWorkspaceTableConfirmation(runtime: WorkspaceRuntime) {
   }
   const pool = new Pool({
     connectionString,
-    max: 2,
+    max: databasePools.tableConfirmation,
     connectionTimeoutMillis: 5000,
     statement_timeout: 10000,
     options: '-c search_path=pg_catalog',

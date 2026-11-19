@@ -4,6 +4,7 @@ import { normalizeIP } from '@fastify/rate-limit';
 import { fromNodeHeaders } from 'better-auth/node';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { Pool } from 'pg';
+import { databasePools } from '@tulipfarm/config/database-connections';
 import { z } from 'zod';
 import { canonicalEmail } from '@tulipfarm/workspaces/canonical-email';
 import { idSchema } from '@tulipfarm/workflows/contracts';
@@ -115,7 +116,7 @@ export function createAbuseLimiter(pool: Pool, secret: string) {
 export function registerAbuseProtection(app: FastifyInstance, auth: ReturnType<typeof registerAuth>['auth']) {
   const pool = new Pool({
     connectionString: process.env.DATABASE_URL ?? 'postgresql://tulipfarm:local-tulipfarm@127.0.0.1:5432/tulipfarm',
-    max: 2,
+    max: databasePools.abuse,
     connectionTimeoutMillis: 2_000,
     statement_timeout: 2_000,
     query_timeout: 3_000,
