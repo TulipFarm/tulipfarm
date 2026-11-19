@@ -14,6 +14,7 @@ import {
   previewKeyPattern,
   previewSessionSeconds,
   type AppResult,
+  type DraftServer,
   type PreviewBuild,
   type PreviewSession,
   type PreviewTarget,
@@ -100,8 +101,18 @@ function cookieValue(header: string | undefined, name: string) {
 
 const escapeHtml = (text: string) => text.replace(/[&<>"']/g, char => `&#${char.charCodeAt(0)};`);
 
-/** A gateway page. Its only script posts one message to the shell, or confirms the cookie first. */
-function page(reply: FastifyReply, shellOrigin: string, status: number, title: string, script?: string) {
+/**
+ * A gateway page. Its only script posts one message to the shell, or confirms the cookie first. With `refreshS`, the
+ * page reloads itself after that many seconds.
+ */
+function page(
+  reply: FastifyReply,
+  shellOrigin: string,
+  status: number,
+  title: string,
+  options: { readonly script?: string; readonly refreshS?: number } = {},
+) {
+  const { script, refreshS } = options;
   const nonce = randomBytes(16).toString('base64');
   reply
     .code(status)
@@ -111,7 +122,9 @@ function page(reply: FastifyReply, shellOrigin: string, status: number, title: s
       `default-src 'none'; script-src 'nonce-${nonce}'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors ${shellOrigin}`,
     );
   return reply.send(
-    `<!doctype html><meta charset="utf-8"><title>${escapeHtml(title)}</title><p>${escapeHtml(title)}</p>` +
+    `<!doctype html><meta charset="utf-8">` +
+      (refreshS === undefined ? '' : `<meta http-equiv="refresh" content="${refreshS}">`) +
+      `<title>${escapeHtml(title)}</title><p>${escapeHtml(title)}</p>` +
       (script ? `<script nonce="${nonce}">${script}</script>` : ''),
   );
 }
@@ -123,7 +136,7 @@ const notify = (shellOrigin: string, type: string) =>
 type Access =
   | { readonly kind: 'denied'; readonly status: number; readonly title: string }
   | { readonly kind: 'files'; readonly build: PreviewBuild | null }
-  | { readonly kind: 'server'; readonly appId: string; readonly hostRef: string | null };
+  | { readonly kind: 'server'; readonly appId: string; readonly host: DraftServer };
 
 const ended: Access = {
   kind: 'denied',
@@ -132,7 +145,20 @@ const ended: Access = {
 };
 const notEditor: Access = { kind: 'denied', status: 403, title: 'You can no longer edit this app' };
 const nothing: Access = { kind: 'denied', status: 404, title: 'There is no draft at this address' };
-const notRunning = "This draft's server is not running. Publish the app to start it.";
+/** Seconds a page about a starting draft server waits before it reloads. */
+const startingRefreshS = 5;
+
+/** The page for a draft server that is not ready to answer. */
+function notReady(host: Exclude<DraftServer, { state: 'ready' }>) {
+  switch (host.state) {
+    case 'starting':
+      return "This draft's server is starting. This page will refresh in a few seconds.";
+    case 'failed':
+      return `This draft's server could not start. ${host.failure.message}`;
+    case 'stopped':
+      return "This draft's server is stopped. Reload the draft in TulipFarm to start it.";
+  }
+}
 // A WebSocket close frame with status 1008, policy violation.
 const policyClose = Buffer.from([0x88, 0x02, 0x03, 0xf0]);
 const safeMethods = new Set(['GET', 'HEAD', 'OPTIONS']);
@@ -222,7 +248,7 @@ export function buildPreviewGateway(dependencies: PreviewGatewayDependencies, se
       let still = false;
       try {
         const now = await timeout(access(headers), checkTimeoutMs);
-        still = now.kind === 'server' && now.hostRef === hostRef;
+        still = now.kind === 'server' && now.host.state === 'ready' && now.host.hostRef === hostRef;
       } catch {
         // A failed check counts as lost access.
       }
@@ -292,21 +318,17 @@ export function buildPreviewGateway(dependencies: PreviewGatewayDependencies, se
           shellOrigin,
           403,
           'Your sign-in to the draft expired. Open the draft again from TulipFarm.',
-          notify(shellOrigin, expiredMessage),
+          { script: notify(shellOrigin, expiredMessage) },
         );
       reply.header(
         'Set-Cookie',
         `${previewCookie}=${redeemed.token}; Path=/; Max-Age=${previewSessionSeconds}; Secure; HttpOnly; SameSite=None; Partitioned`,
       );
-      return page(
-        reply,
-        shellOrigin,
-        200,
-        'Opening draft…',
-        `fetch(${JSON.stringify(previewCheckPath)}, { credentials: 'same-origin' })
+      return page(reply, shellOrigin, 200, 'Opening draft…', {
+        script: `fetch(${JSON.stringify(previewCheckPath)}, { credentials: 'same-origin' })
     .then(response => { if (!response.ok) throw new Error('blocked'); window.location.replace('/'); })
     .catch(() => { ${notify(shellOrigin, blockedMessage)} });`,
-      );
+      });
     });
 
     routes.get(previewCheckPath, async (request, reply) => {
@@ -332,8 +354,18 @@ export function buildPreviewGateway(dependencies: PreviewGatewayDependencies, se
         const found = await access(request.headers);
         if (found.kind === 'denied') return page(reply, shellOrigin, found.status, found.title);
         if (found.kind === 'server') {
-          const { appId, hostRef } = found;
-          if (hostRef === null) return page(reply, shellOrigin, 503, notRunning);
+          const { appId, host } = found;
+          if (host.state !== 'ready') {
+            if (host.state === 'starting') reply.header('Retry-After', String(startingRefreshS));
+            return page(
+              reply,
+              shellOrigin,
+              503,
+              notReady(host),
+              host.state === 'starting' ? { refreshS: startingRefreshS } : {},
+            );
+          }
+          const { hostRef } = host;
           const forwarded = await relay.request(request, reply, client, destination(appId, hostRef), null);
           if (forwarded.kind === 'answer')
             return answer(request, reply, forwarded.answer, {
@@ -390,8 +422,9 @@ export function buildPreviewGateway(dependencies: PreviewGatewayDependencies, se
     }
     if (found.kind === 'denied') return rawStatus(socket, found.status);
     if (found.kind !== 'server') return rawStatus(socket, 404);
-    const { appId, hostRef } = found;
-    if (hostRef === null) return rawStatus(socket, 503);
+    const { appId, host } = found;
+    if (host.state !== 'ready') return rawStatus(socket, 503);
+    const { hostRef } = host;
     const relayed = await relay.upgrade(request, socket, head, client, destination(appId, hostRef), null, draftCookies);
     if (!relayed) return;
     const { app, frames } = relayed;
