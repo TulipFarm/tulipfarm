@@ -73,7 +73,7 @@ export const appDetailSchema = appSummarySchema.extend({
 });
 export type AppDetail = z.infer<typeof appDetailSchema>;
 
-const releaseSchema = z.object({
+export const appReleaseSchema = z.object({
   id: z.uuid(),
   number: z.number(),
   /** The public app's code; private apps have no code, only a definition. */
@@ -82,7 +82,7 @@ const releaseSchema = z.object({
   live: z.boolean(),
   createdAt: z.string(),
 });
-export type AppRelease = z.infer<typeof releaseSchema>;
+export type AppRelease = z.infer<typeof appReleaseSchema>;
 
 const granteeSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('workspace') }),
@@ -90,8 +90,12 @@ const granteeSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('team'), teamId: z.string(), name: z.string() }),
 ]);
 export type AppGrantee = z.infer<typeof granteeSchema>;
-const grantSchema = z.object({ grantee: granteeSchema, role: z.enum(['use', 'edit']), grantedBy: z.string() });
-export type AppGrant = z.infer<typeof grantSchema>;
+export const appGrantSchema = z.object({
+  grantee: granteeSchema,
+  role: z.enum(['use', 'edit']),
+  grantedBy: z.string(),
+});
+export type AppGrant = z.infer<typeof appGrantSchema>;
 export type AppRole = AppGrant['role'];
 
 const operationSchema = z.object({
@@ -191,7 +195,7 @@ export function appApi(workspaceId: string) {
       appSummarySchema.parse(await request(`/${appId}`, 'PATCH', input)),
     releases: async (appId: string, signal: AbortSignal) =>
       z
-        .object({ releases: z.array(releaseSchema) })
+        .object({ releases: z.array(appReleaseSchema) })
         .parse(await request(`/${appId}/releases`, 'GET', undefined, signal)).releases,
     chat: async (appId: string) => z.object({ chatId: z.uuid() }).parse(await request(`/${appId}/chat`, 'POST')).chatId,
     build: async (appId: string) =>
@@ -209,10 +213,12 @@ export function appApi(workspaceId: string) {
     operation: async (appId: string, operationId: string, signal: AbortSignal) =>
       operation.parse(await request(`/${appId}/operations/${operationId}`, 'GET', undefined, signal)).operation,
     grants: async (appId: string, signal: AbortSignal) =>
-      z.object({ grants: z.array(grantSchema) }).parse(await request(`/${appId}/grants`, 'GET', undefined, signal))
+      z.object({ grants: z.array(appGrantSchema) }).parse(await request(`/${appId}/grants`, 'GET', undefined, signal))
         .grants,
     grant: async (appId: string, grantee: AppGrantee, role: AppRole) =>
-      grantSchema.parse(await request(`/${appId}/grants/${encodeURIComponent(granteeKey(grantee))}`, 'PUT', { role })),
+      appGrantSchema.parse(
+        await request(`/${appId}/grants/${encodeURIComponent(granteeKey(grantee))}`, 'PUT', { role }),
+      ),
     revoke: async (appId: string, grantee: AppGrantee) =>
       request(`/${appId}/grants/${encodeURIComponent(granteeKey(grantee))}`, 'DELETE'),
     nameAvailability: async (name: string, signal: AbortSignal) =>
