@@ -36,6 +36,8 @@ import type { AgentStorage, AgentTransaction } from './store.ts';
 
 const readChars = 32_000;
 const listedFiles = 500;
+/** How many files the status lists; apps.files.list pages through the rest. */
+const statusFiles = 100;
 
 export const appToolCallSchemas = [
   z.strictObject({ tool: z.literal('apps.status') }),
@@ -102,7 +104,7 @@ const recipeGuide = `An optional app.json at the app root says how to build it; 
   .join(' ')}`;
 
 export const appToolDescriptions: Record<AppToolName, string> = {
-  'apps.status': `Read the state of the app this chat edits: its draft (empty, editing, building, built, failed or saved), draft revision, live release and edge status, the newest build of the draft, and the data views the app may use. Changes nothing. ${dataGuide}`,
+  'apps.status': `Read the state of the app this chat edits: its draft (empty, editing, building, built, failed or saved), draft revision, live release and edge status, the newest build of the draft, its files with sizes including changes not yet saved, and the data views the app may use. Changes nothing. ${dataGuide}`,
   'apps.files.list':
     'List the files of the app this chat edits, with their sizes: the saved draft plus changes not yet saved. Pass prefix to list one folder. Changes nothing.',
   'apps.files.read':
@@ -282,12 +284,18 @@ export function createAppEditing(runtime: AgentStorage, options: AppEditingOptio
       ).rows as { id: AppBuildId }[];
       const build = newest ? await readBuild(tx, newest.id) : null;
       const live = app.liveReleaseId ? await readRelease(tx, app.liveReleaseId) : null;
+      const { sizes } = await workingTree(chat, tx, appId, draft);
+      const files = [...sizes]
+        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+        .map(([path, bytes]) => ({ path, bytes }));
       return {
         title: app.title,
         draft: draftState(draft, build, live),
         revision: draft.revision,
         live: live ? { release: live.number, edge: edgeStatus(app.stops) } : null,
         build: build ? { id: build.id, ...build.status } : null,
+        files: files.slice(0, statusFiles),
+        ...(files.length > statusFiles ? { filesTruncated: true, totalFiles: files.length } : {}),
         data: (await listDataViews({ ...raw, workspaceId: chat.workspaceId }, appId)).map(codeView),
       };
     });

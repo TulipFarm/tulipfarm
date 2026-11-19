@@ -3288,6 +3288,69 @@ test('an app chat tells the model which app tools read and change the app', asyn
   assert.equal(plain.includes('This chat edits one'), false);
 });
 
+/** Runs one app chat turn against a scripted model; `script` answers each reply round, by round index. */
+async function appTurn(t, script) {
+  const rounds = [];
+  const ran = [];
+  const wire = await boundary(t, (_req, res) => {
+    rounds.push(wire.received.at(-1).body);
+    res.writeHead(200);
+    res.end(JSON.stringify(nativeReply('azure', script(rounds.length - 1))));
+  });
+  const result = await inferWithTools(
+    routes.azure,
+    [
+      { role: 'user', text: 'Change the heading to Orders v2.' },
+      { role: 'assistant', text: 'The heading now reads Orders v2. The build succeeded.' },
+      { role: 'user', text: 'Now change it to Orders v3 and rebuild.' },
+    ],
+    async call => {
+      ran.push(call.tool);
+      return call.tool === 'apps.status'
+        ? { draft: { state: 'built' }, files: [{ path: 'index.html', bytes: 40 }] }
+        : {};
+    },
+    undefined,
+    false,
+    null,
+    { earlierMessages: false, sources: () => [], apps: 'public' },
+  );
+  return { result, ran, choices: rounds.map(body => body.tool_choice?.function?.name ?? body.tool_choice) };
+}
+
+test('every app chat turn starts by reading the app, so later turns call app tools instead of restating', async t => {
+  const claim = "The heading is now 'Orders v3'.";
+  // The scripted model complies with each forced tool; its claim stands once a write in this reply backs it.
+  const compliant = await appTurn(
+    t,
+    round =>
+      [
+        { calls: [use('apps.status')] },
+        { text: claim },
+        { calls: [use('apps.files.read', { path: 'index.html' })] },
+        { text: claim },
+        { calls: [use('apps.files.write', { path: 'index.html', content: '<h1>Orders v3</h1>' })] },
+        { text: claim },
+      ][round] ?? { text: claim },
+  );
+  assert.deepEqual(compliant.choices, ['apps_status', 'auto', 'apps_files_read', 'auto', 'apps_files_write', 'auto']);
+  assert.deepEqual(compliant.ran, ['apps.status', 'apps.files.read', 'apps.files.write']);
+  assert.equal(compliant.result.text, claim);
+});
+
+test('an app chat reply that keeps claiming an edit no tool made ends with a stop, never under the claim', async t => {
+  const claim = "The paragraph now reads 'Second edit from chat.' The rebuild succeeded.";
+  const stuck = await appTurn(t, round => (round === 0 ? { calls: [use('apps.status')] } : { text: claim }));
+  assert.deepEqual(stuck.ran, ['apps.status']);
+  assert.equal(stuck.choices[0], 'apps_status');
+  assert.ok(
+    stuck.choices.slice(2).every(choice => choice === 'apps_files_read'),
+    String(stuck.choices),
+  );
+  assert.equal(stuck.result.text.includes('Second edit'), false, stuck.result.text);
+  assert.match(stuck.result.text, /^I stopped before changing or building the app, so nothing in it changed/);
+});
+
 test('native-tool reminders omit duplicated tool descriptions', () => {
   const data = context => JSON.parse(runtimeReminder(context).split('\n')[2]);
   assert.equal('tools' in data({ kind: 'tools' }), false);

@@ -43,6 +43,7 @@ import {
   retryRateLimitedModel,
   observeChatDetailSync,
   recordChatCompletionCheck,
+  recordChatAppTurn,
   recordChatContextCompaction,
   recordChatDiscovery,
   recordChatRequestSizes,
@@ -2014,6 +2015,9 @@ const unfinishedNote =
 const unfinishedReply =
   'I stopped before finishing this request. Check Tool activity for what ran, then ask me to continue.';
 const unfinishedNoToolsReply = "I stopped before finishing this request. Ask me to continue when you're ready.";
+/** Ends an app chat's reply that claimed an edit or build it did not make; nothing in the app changed in it. */
+const appUnchangedReply =
+  "I stopped before changing or building the app, so nothing in it changed in this reply. Ask me to continue when you're ready.";
 const agentAuthoringRefusal = (text: string) =>
   /\b(?:i|we) (?:cannot|can't|can’t|could not|couldn't|couldn’t|am unable to|are unable to) (?:draft|prepare|create|build|set up) (?:this|the|an?|your) agent(?: draft| setup)?(?: (?:in|from|through) (?:this|the) chat)?(?:[.!](?=\s|$)|$)/i.test(
     text,
@@ -2238,7 +2242,7 @@ const appTools = {
 } satisfies Record<AppKind, string>;
 /** What an app's chat is for. Earlier turns' tool results may be gone, so the model reads the app instead of asking for it. */
 export const appChatPrompt = {
-  public: `This chat edits one app. Tool results from earlier turns may not be shown here, so check the app itself before answering about it: apps.status for the draft and its newest build, apps.files.list and apps.files.read for its current files. Make changes with apps.files.write and apps.files.delete, and run ${buildTool} when a change needs a build or the person asks for one. Never ask the person to paste or upload this app's files, and never say you cannot read, edit or build it.`,
+  public: `This chat edits one app. Tool results from earlier turns may not be shown here, so check the app itself before answering about it: apps.status for the draft, its files and its newest build, apps.files.list for one folder's files and apps.files.read for a file's current contents. Make changes with apps.files.write and apps.files.delete, and run ${buildTool} when a change needs a build or the person asks for one. Never ask the person to paste or upload this app's files, and never say you cannot read, edit or build it.`,
   private:
     "This chat edits one private app's pages. Tool results from earlier turns may not be shown here, so read the pages with apps.page.read before answering about them, change them with apps.page.replace and check them with apps.page.check. Never ask the person to paste the pages, and never say you cannot read or edit them.",
 } satisfies Record<AppKind, string>;
@@ -2251,7 +2255,13 @@ const conditional = /\b(?:if|when|once|after|whether|unless|until)\b/i;
 const editClaim =
   /\b(?:i|we)(?:'|’)?(?:ve| have)? (?:updated|edited|changed|modified|rewrote|replaced|inserted|deleted|removed)\b/i;
 const savedClaim =
-  /^(?:and |so )?(?:the |your )?(?:[\w-]+ )?(?:changes?|edits?|updates?|fix(?:es)?) (?:is|are|was|were|has been|have been) (?:saved|applied|made|done|in place)\b/i;
+  /^(?:and |so )?(?:the |your )?(?:[\w-]+ )?(?:changes?|edits?|updates?|fix(?:es)?) (?:is|are|was|were|has been|have been) (?:saved|applied|made|done|in place|complete|completed|finished|live)\b/i;
+/** A clause that says the app reads some way now, which only a change in this reply could make true. */
+const nowClaim =
+  /\b(?:is|are) now (?!(?:being|going|about|able|ready to|waiting)\b)|\bnow (?:reads?|says?|shows?|displays?|returns?|responds?|renders?|contains?|includes?|has|uses?|serves?)\b/i;
+/** A clause that says the app already holds something, which only reading its files in this reply could show. */
+const alreadyClaim =
+  /\balready (?:has|have|contains?|includes?|serves?|returns?|responds?|exposes?|defines?|handles?|reads?|says?|shows?|uses?)\b/i;
 const toReader = /\b(?:below|for you|here(?:'|’)?s|here is|here are)\b/i;
 const codeObject =
   /\b(?:files?|code|server|routes?|handlers?|html|css|scripts?|components?)\b|[\w-]+\/[\w./-]+|\b[\w-]+\.(?:m?js|tsx?|jsx|html|css|json)\b/i;
@@ -2262,29 +2272,54 @@ const codeObject =
  */
 export function unbackedAppClaim(candidate: string, apps: AppKind | undefined, ran: ReadonlySet<string>) {
   if (!apps) return undefined;
-  const sentences = candidate.split(/(?<=[.!?])\s+|\n+/).filter(sentence => !sentence.trim().endsWith('?'));
+  // A sentence can end inside a quote or bracket, as in: The heading now reads 'Orders.' The build succeeded.
+  const sentences = candidate.split(/(?<=[.!?]['"’”)\]]?)\s+|\n+/).filter(sentence => !sentence.trim().endsWith('?'));
   if (sentences.some(sentence => firstPerson.test(sentence) && toolsDenied.test(sentence)))
     return {
       status: 'continue' as const,
       reason: `This app's chat always has ${appTools[apps]}. Call them to do the work.`,
+      missing: 'tools' as const,
     };
   if (apps === 'private') return undefined;
-  const settled = sentences.filter(sentence => !earlierOutcome.test(sentence) && !conditional.test(sentence));
-  const unbacked = clauses(settled).find(clause => {
-    if (toReader.test(clause)) return false;
+  const changed = ran.has('apps.files.write') || ran.has('apps.files.delete');
+  const unconditional = sentences.filter(sentence => !conditional.test(sentence));
+  const settled = unconditional.filter(sentence => !earlierOutcome.test(sentence));
+  const missing = (clause: string): 'change' | 'build' | 'read' | undefined => {
+    if (toReader.test(clause)) return undefined;
     const build = buildClaim.exec(clause);
-    if (build && !negatedClaim(clause, build)) return !ran.has(buildTool);
+    if (build && !negatedClaim(clause, build)) return ran.has(buildTool) ? undefined : 'build';
     const saved = savedClaim.exec(clause);
+    if (saved && !negatedClaim(clause, saved)) return changed ? undefined : 'change';
+    const now = nowClaim.exec(clause);
+    if (now && !negatedClaim(clause, now)) return changed || ran.has(buildTool) ? undefined : 'change';
     const edit = editClaim.exec(clause);
-    if (saved && !negatedClaim(clause, saved)) return !ran.has('apps.files.write') && !ran.has('apps.files.delete');
-    if (!edit || negatedClaim(clause, edit) || !codeObject.test(clause)) return false;
-    return !ran.has('apps.files.write') && !ran.has('apps.files.delete');
-  });
+    if (!edit || negatedClaim(clause, edit) || !codeObject.test(clause)) return undefined;
+    return changed ? undefined : 'change';
+  };
+  const claims = [
+    ...clauses(settled).map(clause => ({ clause, missing: missing(clause) })),
+    // "Already has" names the app's current files, so a read of them in this reply backs it.
+    ...clauses(unconditional).map(clause => {
+      const already = alreadyClaim.exec(clause);
+      return {
+        clause,
+        missing:
+          already && !negatedClaim(clause, already) && !toReader.test(clause) && !changed && !ran.has('apps.files.read')
+            ? ('read' as const)
+            : undefined,
+      };
+    }),
+  ];
+  const unbacked = claims.find(claim => claim.missing);
   return unbacked === undefined
     ? undefined
     : {
         status: 'continue' as const,
-        reason: `The reply says "${unbacked.slice(0, 60)}", but no app tool in this turn did that. Do it with apps.files.write or ${buildTool}, or say plainly that it was not done. If it describes an earlier turn, say so.`,
+        reason:
+          unbacked.missing === 'read'
+            ? `The reply says "${unbacked.clause.slice(0, 60)}", but no app file was read in this turn. Read it with apps.files.read before saying what the app has.`
+            : `The reply says "${unbacked.clause.slice(0, 60)}", but no app tool in this turn did that. Do it with apps.files.write or ${buildTool}, or say plainly that it was not done. If it describes an earlier turn, say so.`,
+        missing: unbacked.missing!,
       };
 }
 
@@ -4088,6 +4123,13 @@ export async function inferWithTools(
   /** A tool the model must call in its next round, where the route accepts a forced tool choice. */
   let forceTool: string | undefined;
   /**
+   * Earlier turns reach the model as text alone, so an app chat's reply first reads the app's state: its files and
+   * newest build. That puts a real tool exchange at the start of every turn, rather than a run of text-only replies.
+   */
+  let appStateRead = !(tools?.apps === 'public' && !tools.priorToolCalls?.length);
+  let appStateForced = false;
+  let appClaimReplaced = false;
+  /**
    * Table tools the next rounds must call, one per round, until a row change is tried. They are set once per model,
    * when a row request's reply made no tool call and was sent back.
    */
@@ -4263,6 +4305,16 @@ export async function inferWithTools(
     layout?: { layout: ReplyRenderInput } | { layoutFailed: true },
   ) => {
     report(checked ? 'done' : 'finishing');
+    if (tools?.apps === 'public') {
+      const ran = appToolsRan(items);
+      const changed = ran.has('apps.files.write') || ran.has('apps.files.delete');
+      const built = ran.has(buildTool);
+      recordChatAppTurn({
+        tools: changed && built ? 'changed_built' : changed ? 'changed' : built ? 'built' : ran.size ? 'read' : 'none',
+        stateRead: ran.has('apps.status'),
+        claimReplaced: appClaimReplaced,
+      });
+    }
     return {
       text,
       ...layout,
@@ -5259,6 +5311,18 @@ export async function inferWithTools(
       let answerStep = requestStep;
       const currentReminder = reminder;
       let activeCatalog = catalog!;
+      if (!appStateRead && !finalizing) {
+        appStateRead = true;
+        const appStatus = nativeToolName('apps.status');
+        if (!forceTool && !forceRender && catalog?.tools.some(tool => tool.name === appStatus)) {
+          forceTool = appStatus;
+          appStateForced = routeCapabilities(config).toolChoice !== 'auto';
+          log('info', 'activity', 'call_completed', {
+            operation: 'chat.app-state',
+            outcome: appStateForced ? 'forced' : 'not_forced',
+          });
+        }
+      }
       // A forced tool choice is sent only to routes whose deployment accepts one; others are asked in the message alone.
       const required =
         !finalizing && routeCapabilities(config).toolChoice !== 'auto'
@@ -5679,11 +5743,13 @@ export async function inferWithTools(
       const otherTableSkipped = rowCards.length ? undefined : rowRequestSkipped(items, request, rowCards, waitingRows);
       const unbacked = otherTableSkipped ? undefined : (importUnbacked ?? unbackedCardClaim(candidate, items, waiting));
       // A resumed turn's earlier receipts are in its history, not in this reply's items.
-      const writeUnbacked =
-        otherTableSkipped || tools?.priorCalls || tools?.priorToolCalls?.length
-          ? undefined
-          : (unbackedWriteClaim(candidate, wroteInReply(items), !fileCheckNeeded) ??
-            unbackedAppClaim(candidate, tools?.apps, appToolsRan(items)));
+      const claimChecked = !(otherTableSkipped || tools?.priorCalls || tools?.priorToolCalls?.length);
+      const dataUnbacked = claimChecked
+        ? unbackedWriteClaim(candidate, wroteInReply(items), !fileCheckNeeded)
+        : undefined;
+      const appUnbacked =
+        claimChecked && !dataUnbacked ? unbackedAppClaim(candidate, tools?.apps, appToolsRan(items)) : undefined;
+      const writeUnbacked = dataUnbacked ?? appUnbacked;
       const invitesUnchecked = unbacked || writeUnbacked ? undefined : uncheckedInvitationClaim(candidate, items);
       if (directoryExpected && directoryAttempted && !directorySucceeded)
         return finish(directoryUnavailableReply, true);
@@ -6123,6 +6189,17 @@ export async function inferWithTools(
         // Asking the person which table, after looking tables up, writes nothing and is a safe place to stop.
         if (checked.tableLookupRequired !== true && (idAsked || (asksAboutTable(candidate) && lookedUpTable(items))))
           return accept();
+        // An app reply that still claims an edit or build no tool made ends without the claim, never above a note.
+        if (appUnbacked && appUnbacked.missing !== 'tools') {
+          appClaimReplaced = true;
+          const ran = appToolsRan(items);
+          return finish(
+            ran.has('apps.files.write') || ran.has('apps.files.delete') || ran.has(buildTool)
+              ? unfinishedReply
+              : appUnchangedReply,
+            true,
+          );
+        }
         // The last answer is kept only when it neither promises work nor reports an outcome no tool produced.
         const answer = candidate.trim();
         const grounded =
@@ -6136,6 +6213,23 @@ export async function inferWithTools(
         // Tool activity is only shown once a tool ran in this turn.
         if (!calls) return finish(grounded ? `${answer}\n\n${unfinishedNoToolsReply}` : unfinishedNoToolsReply, true);
         return finish(grounded ? `${answer}\n\n${unfinishedNote}` : unfinishedReply, true);
+      }
+      // An app reply that claimed work no tool did must call the next app tool that work needs.
+      if (appUnbacked && !forceTool) {
+        const ran = appToolsRan(items);
+        // A claimed build runs the build, which saves the draft first; any other claim reads, then writes, the files.
+        const next =
+          appUnbacked.missing === 'build'
+            ? buildTool
+            : ran.has('apps.files.read') && appUnbacked.missing === 'change'
+              ? 'apps.files.write'
+              : 'apps.files.read';
+        forceTool = nativeToolName(next);
+        log('info', 'activity', 'call_completed', {
+          operation: 'chat.app-tool-forced',
+          outcome: routeCapabilities(config).toolChoice === 'auto' ? 'asked' : 'forced',
+          tool: next,
+        });
       }
       items.push(
         { kind: 'turn', turn: { role: 'assistant', text: candidate } },

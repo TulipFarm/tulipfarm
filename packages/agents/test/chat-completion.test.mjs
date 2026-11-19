@@ -1321,6 +1321,37 @@ test("an app chat's reply cannot deny its tools or claim a build or edit no tool
   assert.equal(unbackedAppClaim('The required file tools are not available.', undefined, none), undefined);
 });
 
+test("an app chat's reply cannot state the app's new or current contents that no tool in it made or read", () => {
+  const none = new Set();
+  const status = new Set(['apps.status']);
+  const wrote = new Set(['apps.status', 'apps.files.read', 'apps.files.write']);
+  // A sentence ending inside a quote still ends there, so the build claim after it is checked.
+  const quoted = "The paragraph now reads 'Second edit from chat.' The rebuild succeeded.";
+  assert.equal(unbackedAppClaim(quoted, 'public', status)?.status, 'continue');
+  // eslint-disable-next-line tulipfarm/product-copy -- A tool name, not user-facing copy.
+  assert.equal(unbackedAppClaim(quoted, 'public', new Set([...wrote, 'apps.preview.build'])), undefined);
+  assert.equal(unbackedAppClaim(quoted, 'public', wrote)?.missing, 'build');
+  for (const text of [
+    "The heading is now 'Orders v3'.",
+    'The greeting change is complete.',
+    'The page now shows the new footer.',
+    'Done. The server now returns ok on /health.',
+  ]) {
+    assert.equal(unbackedAppClaim(text, 'public', status)?.missing, 'change', text);
+    assert.equal(unbackedAppClaim(text, 'public', wrote), undefined, text);
+  }
+  const already = 'The app already has the /health route, returning ok.';
+  assert.equal(unbackedAppClaim(already, 'public', status)?.missing, 'read');
+  assert.equal(unbackedAppClaim(already, 'public', new Set(['apps.status', 'apps.files.read'])), undefined);
+  for (const text of [
+    'The heading is not changed yet.',
+    'Once the build is done, the page now shows the footer.',
+    'Should the heading now read Orders?',
+    'The app has no /health route yet.',
+  ])
+    assert.equal(unbackedAppClaim(text, 'public', none), undefined, text);
+});
+
 test('an import presented for review needs a pending proposal receipt from this reply', () => {
   const pending = [
     {

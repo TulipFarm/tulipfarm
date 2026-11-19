@@ -245,6 +245,9 @@ const spanAttributes = new Set([
   'chat.reply.db_seconds',
   'chat.reply.overhead_seconds',
   'chat.stop.reason',
+  'chat.app.tools',
+  'chat.app.state_read',
+  'chat.app.claim_replaced',
   'attempt',
   'provider',
   'status_class',
@@ -392,6 +395,8 @@ function safeAttribute(key: string, value: unknown, logLine = false): boolean {
   if (key === 'dependency.endpoint') return typeof value === 'string' && endpoints.has(value);
   if (key === 'title_generation') return typeof value === 'string' && titleGenerationOutcomes.has(value);
   if (key === 'chat.stop.reason') return (chatStopReasons as readonly unknown[]).includes(value);
+  if (key === 'chat.app.tools') return (chatAppTurnTools as readonly unknown[]).includes(value);
+  if (key === 'chat.app.state_read' || key === 'chat.app.claim_replaced') return value === 'true' || value === 'false';
   if (key === 'http.response.status_code' || key.startsWith('catalog.')) return safeDiagnosticNumber(key, value);
   if (key.startsWith('media.')) return safeMediaAttribute(key, value);
   return true;
@@ -2423,6 +2428,26 @@ export function recordChatCompletionCheck(outcome: ChatCompletionCheckOutcome, r
     outcome,
     ...(reason ? { 'completion.reason': reason } : {}),
   });
+}
+
+/** What an app chat's reply did to its app: changed and built it, changed it, built it, only read it, or nothing. */
+const chatAppTurnTools = ['changed_built', 'changed', 'built', 'read', 'none'] as const;
+export type ChatAppTurnTools = (typeof chatAppTurnTools)[number];
+/**
+ * One finished reply of an app's chat. `stateRead` says whether the reply started by reading the app's state, and
+ * `claimReplaced` whether an edit or build the reply claimed, but no tool made, was replaced by a plain stop.
+ */
+export function recordChatAppTurn(turn: { tools: ChatAppTurnTools; stateRead: boolean; claimReplaced: boolean }) {
+  const attributes = {
+    'chat.app.tools': turn.tools,
+    'chat.app.state_read': String(turn.stateRead),
+    'chat.app.claim_replaced': String(turn.claimReplaced),
+  };
+  metrics
+    .getMeter(scope)
+    .createCounter('cloud_chat_app_turns')
+    .add(1, { ...dimensions, ...attributes });
+  log('info', 'inference', 'call_completed', { operation: 'chat.app-turn', ...attributes });
 }
 
 export function recordChatDiscovery(counts: { offered: number; loaded: number; added: number; matched: number }) {

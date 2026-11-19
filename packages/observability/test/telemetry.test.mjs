@@ -24,6 +24,7 @@ import {
   recordDispatchSkip,
   recordAgentSetup,
   recordChatCompletionCheck,
+  recordChatAppTurn,
   errorType,
   log,
   observeCall,
@@ -559,6 +560,8 @@ test('HTTP, nested work and inference export counts, seconds, status and correla
         recordChatCompletionCheck('skipped_no_tools');
         recordChatCompletionCheck('continue');
         recordChatCompletionCheck('done');
+        recordChatAppTurn({ tools: 'changed_built', stateRead: true, claimReplaced: false });
+        recordChatAppTurn({ tools: 'none', stateRead: true, claimReplaced: true });
       });
       await withChatMeasurements(() =>
         assert.rejects(
@@ -937,6 +940,19 @@ test('HTTP, nested work and inference export counts, seconds, status and correla
         'service',
         'service_version',
       ]);
+    const appTurns = data.find(metric => metric.descriptor.name === 'cloud_chat_app_turns');
+    assert.deepEqual(
+      appTurns.dataPoints.map(p => [
+        p.attributes['chat.app.tools'],
+        p.attributes['chat.app.state_read'],
+        p.attributes['chat.app.claim_replaced'],
+        p.value,
+      ]),
+      [
+        ['changed_built', 'true', 'false', 1],
+        ['none', 'true', 'true', 1],
+      ],
+    );
     for (const metric of [details, sizes, requests]) {
       for (const point of metric.dataPoints) assert.equal(point.attributes['chat.request.sequence'], undefined);
     }
