@@ -24,7 +24,12 @@ import {
 } from '@/features/integrations/catalog';
 import { connector } from '@/features/integrations/connect';
 import { DefaultKnowledge, useDefaultKnowledge } from '@/features/integrations/default-knowledge';
-import { GitHubAccounts, GitHubKnowledge } from '@/features/integrations/github-accounts';
+import {
+  GitHubAccounts,
+  GitHubKnowledge,
+  UnfinishedGitHubSignIn,
+  useUnfinishedGitHubSignIn,
+} from '@/features/integrations/github-accounts';
 import { ProviderPanel } from '@/features/models/provider-panel';
 import {
   GitHubRepositoryContentPrototype,
@@ -154,11 +159,20 @@ function Detail({ app, workspaceId, slug }: { app: Integration; workspaceId: str
   const accessLost = app.provider === 'google' && status?.kind === 'error' && status.accessLost;
   // Plan apps connect from their Overview, next to the uses each account serves.
   const plan = app.provider === 'chatgpt' || app.provider === 'claude';
+  // Connect resumes an unfinished GitHub sign-in, so it says so and offers a way to drop the attempt.
+  const unfinished = useUnfinishedGitHubSignIn(
+    workspaceId,
+    app.provider === 'github-personal' && status?.kind === 'off' && action.kind === 'connect',
+  );
+  const connectLabel = unfinished ? 'Finish connecting' : action.kind === 'connect' ? action.label : '';
   const primary = plan ? null : action.kind === 'connect' ? (
-    <Button disabled={busy} aria-busy={busy} aria-label={`${action.label} ${app.name}`} onClick={() => void start()}>
-      {busy && <Spinner aria-hidden="true" />}
-      {action.label}
-    </Button>
+    <>
+      <Button disabled={busy} aria-busy={busy} aria-label={`${connectLabel} ${app.name}`} onClick={() => void start()}>
+        {busy && <Spinner aria-hidden="true" />}
+        {connectLabel}
+      </Button>
+      {unfinished && <UnfinishedGitHubSignIn workspaceId={workspaceId} accountId={unfinished.id} disabled={busy} />}
+    </>
   ) : action.kind === 'settings' ? (
     <Button aria-label={`${action.label} ${app.name}`} onClick={() => setTab('settings')}>
       {action.label}
