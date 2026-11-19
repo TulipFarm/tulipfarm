@@ -48,6 +48,7 @@ test(
           'tf_app_data_view_grants',
           'tf_app_data_views',
           'tf_app_draft_changes',
+          'tf_app_draft_hosts',
           'tf_app_drafts',
           'tf_app_grants',
           'tf_app_operations',

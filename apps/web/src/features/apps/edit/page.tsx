@@ -19,7 +19,7 @@ import { AppGate, LoadFailed, Loading } from '../app-page';
 import { approvalLabel, canEdit, draftLabels, servingStatus } from '../labels';
 import { useAppApi, useAppChanges, useAppChat, useAppOperation, useAppReleases, useWatchedApp } from '../queries';
 import { AppPageView } from '../pages/page-view';
-import { DraftPreview, ServerDraft } from './preview';
+import { DraftPreview } from './preview';
 import { serverDraft } from './server-draft';
 
 const AppChat = lazy(() =>
@@ -394,11 +394,13 @@ function PublicEditor({ app, appLink }: { app: AppDetail; appLink: ReactElement 
       <div className="flex min-h-0 flex-1 flex-col gap-4 lg:flex-row">
         <ChatPanel appId={app.id} />
         <div className="flex min-h-96 min-w-0 flex-1 flex-col">
-          {serverDraft(draft) ? (
-            <ServerDraft live={draft.state === 'live'} webAddress={app.webAddress} />
-          ) : (
-            <DraftPreview api={api} appId={app.id} appTitle={app.title} buildId={draft.previewBuildId} />
-          )}
+          <DraftPreview
+            api={api}
+            appId={app.id}
+            appTitle={app.title}
+            buildId={serverDraft(draft) ? draft.buildId : draft.previewBuildId}
+            server={serverDraft(draft)}
+          />
         </div>
       </div>
     </div>

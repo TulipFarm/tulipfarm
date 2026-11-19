@@ -26,6 +26,7 @@ export {
   appServerPublish,
   appServerRollback,
   appServerResize,
+  appDraftHost,
 } from './app-workflows.ts';
 
 const { ping } = proxyActivities<typeof activities>({

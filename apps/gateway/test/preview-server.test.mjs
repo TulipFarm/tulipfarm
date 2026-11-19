@@ -79,7 +79,13 @@ async function draftServer(t) {
 
 async function previewFor(t, options = {}) {
   const upstream = await draftServer(t);
-  const access = { role: 'edit', hostRef: 'host-1', app: true, enabled: true, failing: false };
+  const access = {
+    role: 'edit',
+    host: { state: 'ready', hostRef: 'host-1' },
+    app: true,
+    enabled: true,
+    failing: false,
+  };
   const calls = { targets: 0, connects: 0 };
   const gateway = buildGateway({
     preview: {
@@ -93,7 +99,7 @@ async function previewFor(t, options = {}) {
         if (access.failing) throw new Error('connect ECONNREFUSED');
         if (!access.app) return { ok: false, failure: { code: 'not-found', message: 'App not found' } };
         if (access.role !== 'edit') return { ok: false, failure: { code: 'forbidden', message: 'Edit is required' } };
-        return { ok: true, target: { kind: 'server', hostRef: access.hostRef } };
+        return { ok: true, target: { kind: 'server', host: access.host } };
       },
       object: async () => null,
       async connectHost(input) {
@@ -391,14 +397,66 @@ test('a streamed response ends soon after the session loses access', async t => 
   assert.ok(elapsed < 1_000, `ended after ${elapsed} ms`);
 });
 
-test('a draft whose server is not running says so without contacting a host', async t => {
+test('a draft whose server is starting asks the page to refresh without contacting a host', async t => {
   const { port, upstream, access, calls } = await previewFor(t);
-  access.hostRef = null;
+  access.host = { state: 'starting' };
 
   const response = await call(port, { headers: { accept: 'text/html' } });
   assert.equal(response.status, 503);
-  assert.match(response.body, /This draft&#39;s server is not running\. Publish the app to start it\./);
+  assert.equal(response.headers['retry-after'], '5');
+  assert.match(response.body, /<meta http-equiv="refresh" content="5">/);
+  assert.match(
+    response.body,
+    /<p>This draft&#39;s server is starting\. This page will refresh in a few seconds\.<\/p>/,
+  );
+  assert.match(response.headers['content-security-policy'], /^default-src 'none'; script-src 'nonce-/);
   assert.match(response.headers['content-security-policy'], /frame-ancestors https:\/\/app\.tulipfarm\.test$/);
+  const [, nonce] = response.headers['content-security-policy'].match(/style-src 'nonce-([^']+)'/);
+  const [, style] = response.body.match(/<style nonce="([^"]+)">([^<]*)<\/style>/).slice(1);
+  assert.equal(response.body.match(/<style nonce="([^"]+)">/)[1], nonce);
+  assert.match(style, /font:14px\/1\.5 ui-sans-serif,system-ui,.*sans-serif;/);
+  assert.match(style, /padding:16px/);
+  assert.match(style, /color:#737373/);
+  assert.equal((await connect(port)).status, 503);
+  assert.equal(calls.connects, 0);
+  assert.equal(upstream.requests, 0);
+});
+
+test('a draft whose server could not start shows why without contacting a host', async t => {
+  const { port, upstream, access, calls } = await previewFor(t);
+  access.host = {
+    state: 'failed',
+    failure: {
+      code: 'host-unavailable',
+      message: 'The app server did not start in time. Try <again>.',
+      retryable: true,
+    },
+  };
+
+  const response = await call(port, { headers: { accept: 'text/html' } });
+  assert.equal(response.status, 503);
+  assert.equal(response.headers['retry-after'], undefined);
+  assert.doesNotMatch(response.body, /http-equiv/);
+  assert.match(
+    response.body,
+    /<p>This draft&#39;s server could not start\. The app server did not start in time\. Try &#60;again&#62;\.<\/p>/,
+  );
+  assert.equal((await connect(port)).status, 503);
+  assert.equal(calls.connects, 0);
+  assert.equal(upstream.requests, 0);
+});
+
+test('a draft whose server is stopped says how to start it without contacting a host', async t => {
+  const { port, upstream, access, calls } = await previewFor(t);
+  access.host = { state: 'stopped' };
+
+  const response = await call(port, { headers: { accept: 'text/html' } });
+  assert.equal(response.status, 503);
+  assert.doesNotMatch(response.body, /http-equiv/);
+  assert.match(
+    response.body,
+    /<p>This draft&#39;s server is stopped\. Reload the draft in TulipFarm to start it\.<\/p>/,
+  );
   assert.equal((await connect(port)).status, 503);
   assert.equal(calls.connects, 0);
   assert.equal(upstream.requests, 0);

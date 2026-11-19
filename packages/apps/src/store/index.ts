@@ -1,6 +1,7 @@
 export * from './app-keys.ts';
 export * from './apps.ts';
 export * from './builds.ts';
+export * from './draft-hosts.ts';
 export * from './drafts.ts';
 export * from './grants.ts';
 export * from './live-requests.ts';

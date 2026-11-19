@@ -22,15 +22,22 @@ const { failAppOperation, switchAppRelease, projectAppEdge } = proxyActivities<A
   retry: { maximumAttempts: 10, initialInterval: '2 seconds' },
 });
 
-const { prepareAppServer, recordAppServerCandidate, failAppServerOperation, removeAppHost } =
-  proxyActivities<AppServerActivities>({
-    startToCloseTimeout: '1 minute',
-    heartbeatTimeout: '30 seconds',
-    retry: { maximumAttempts: 10, initialInterval: '2 seconds' },
-  });
+const {
+  prepareAppServer,
+  recordAppServerCandidate,
+  failAppServerOperation,
+  removeAppHost,
+  prepareDraftHost,
+  recordDraftHost,
+  failDraftHost,
+} = proxyActivities<AppServerActivities>({
+  startToCloseTimeout: '1 minute',
+  heartbeatTimeout: '30 seconds',
+  retry: { maximumAttempts: 10, initialInterval: '2 seconds' },
+});
 
 // Each call bounds the host's own retries below these timeouts, then fails the operation itself.
-const { provisionAppServer } = proxyActivities<AppServerActivities>({
+const { provisionAppServer, provisionDraftHost } = proxyActivities<AppServerActivities>({
   startToCloseTimeout: '7 minutes',
   heartbeatTimeout: '30 seconds',
   retry: { maximumAttempts: 3, initialInterval: '5 seconds' },
@@ -126,4 +133,29 @@ export async function appServerRollback(input: AppInput & { readonly operationId
 /** Started as `app-resize-<appId>-<operationId>`. Brings up the live release at the new size. */
 export async function appServerResize(input: AppInput & { readonly operationId: string }) {
   return serve(input);
+}
+
+/**
+ * Started as `app-draft-host-<appId>-<generation>` when an editor opens a server app's draft. Brings up a host that runs
+ * the draft and records it; a newer start or a failure in between removes the host again.
+ */
+export async function appDraftHost(input: AppInput & { readonly appId: string; readonly generation: number }) {
+  const giveUp = async () => {
+    await failDraftHost({ ...input, message: 'The app server could not start. Try again.' });
+    return 'failed';
+  };
+  let hostRef: string;
+  try {
+    const target = await prepareDraftHost(input);
+    if (!target) return 'ended';
+    const provisioned = await provisionDraftHost({ ...input, ...target });
+    if (!provisioned.ok) return 'failed';
+    hostRef = provisioned.hostRef;
+  } catch (error) {
+    if (!(error instanceof ActivityFailure)) throw error;
+    return giveUp();
+  }
+  const recorded = await recordDraftHost({ ...input, hostRef });
+  await retire(input.appId, recorded.retiredHostRef);
+  return recorded.retiredHostRef === null ? 'ready' : 'superseded';
 }
