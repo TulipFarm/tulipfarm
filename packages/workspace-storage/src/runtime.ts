@@ -495,16 +495,15 @@ export function createWorkspaceRuntime(
     const workspaceId = workspaceIdSchema.parse(workspaceIdInput);
     const deadline = new TransactionDeadline();
     const background = isBackground();
-    let admitted = false;
+    if (closed) throw new StorageUnavailableError('closed');
     let pooled = false;
     let entry: Entry | undefined;
     try {
-      await admit(deadline, background);
-      admitted = true;
       entry = await claim(await credentialFor(workspaceId, deadline), deadline);
       await acquireConnection(entry, deadline, background);
       pooled = true;
       deadline.started();
+      // Takes no admission slot, so a saturated transaction queue cannot block it; pool connections bound it.
       // This unlocked read only admits requests to their normal, fully fenced authorization transaction.
       return (
         (
@@ -522,7 +521,6 @@ export function createWorkspaceRuntime(
           if (!entry.claims && entry.retiring) await remove(entry);
         }
       } finally {
-        if (admitted) releaseAdmission(background);
         deadline.dispose();
       }
     }
