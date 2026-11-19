@@ -81,14 +81,21 @@ export const unresolvable = (view: DataView) => view.blockers.includes('view-unr
 /** What stops this view serving, a broken table first since no other step fixes it, or that the app can use it now. */
 export function viewStatus(view: DataView, app: AppSummary, table: ViewTable): ViewStatus {
   const notInUse = (sentence: string): ViewStatus => ({ badge: 'Not in use', tone: 'secondary', sentence });
-  if (unresolvable(view))
+  if (unresolvable(view)) {
+    const shared = view.sharedBy !== null;
+    const changed = shared
+      ? 'Create a new data view, then stop sharing this one.'
+      : 'Create a new data view to share instead.';
     return {
       badge: 'Not in use',
       tone: 'warning',
       sentence: table
-        ? `${table.label} changed, and this view no longer matches it. Create a new data view, then stop sharing this one.`
-        : 'The table was deleted. Stop sharing it, then create a new data view from another table.',
+        ? `${table.label} changed, and this view no longer matches it. ${changed}`
+        : shared
+          ? 'The table was deleted. Stop sharing this view, then create a new data view from another table.'
+          : 'The table was deleted, so this view can’t be shared. Create a new data view from another table.',
     };
+  }
   switch (view.blockers[0]) {
     case undefined:
       return { badge: 'In use', tone: 'success', sentence: 'The app can use this data view now.' };

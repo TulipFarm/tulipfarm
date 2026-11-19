@@ -237,15 +237,13 @@ test(
       // A broken view says so before any other blocker and offers only Stop sharing.
       const deleted = card(page, 'Unavailable table');
       await deleted
-        .getByText('The table was deleted. Stop sharing it, then create a new data view from another table.')
+        .getByText('The table was deleted. Stop sharing this view, then create a new data view from another table.')
         .waitFor();
       await deleted.getByRole('button', { name: 'Stop sharing Unavailable table data view' }).waitFor();
       assert.equal(await deleted.getByRole('button', { name: 'Approve Unavailable table data view' }).count(), 0);
       const returns = card(page, 'Returns');
       await returns
-        .getByText(
-          'Returns changed, and this view no longer matches it. Create a new data view, then stop sharing this one.',
-        )
+        .getByText('Returns changed, and this view no longer matches it. Create a new data view to share instead.')
         .waitFor();
       assert.equal(await returns.getByRole('button', { name: 'Share with this app' }).count(), 0);
 
@@ -323,7 +321,11 @@ test(
       await approval.getByRole('button', { name: 'Approve' }).click();
       await approval.getByText(changed).waitFor();
       await approval.getByRole('button', { name: 'Cancel' }).click();
-      await feedback.getByText('Feedback changed, and this view no longer matches it.', { exact: false }).waitFor();
+      await feedback
+        .getByText(
+          'Feedback changed, and this view no longer matches it. Create a new data view, then stop sharing this one.',
+        )
+        .waitFor();
       assert.equal(await feedback.getByRole('button', { name: 'Approve Feedback data view' }).count(), 0);
 
       // An unchanged view refused with 404 means the sharer lacks rights on the table.
@@ -350,7 +352,9 @@ test(
       await share.getByRole('button', { name: 'Share' }).click();
       await share.getByText(changed).waitFor();
       await share.getByRole('button', { name: 'Cancel' }).click();
-      await card(page, 'Unavailable table').first().waitFor();
+      await card(page, 'Unavailable table')
+        .getByText('The table was deleted, so this view can’t be shared. Create a new data view from another table.')
+        .waitFor();
       assert.deepEqual(state.errors, []);
     } finally {
       await run.close();

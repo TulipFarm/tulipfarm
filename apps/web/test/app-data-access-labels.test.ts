@@ -141,25 +141,30 @@ test('the first blocker decides the status and its next step', () => {
 });
 
 test('a broken view says so whatever else blocks it, since no other step fixes it', () => {
-  const changed = {
-    badge: 'Not in use',
-    tone: 'warning',
-    sentence: 'Orders changed, and this view no longer matches it. Create a new data view, then stop sharing this one.',
-  };
+  const broken = (sentence: string) => ({ badge: 'Not in use', tone: 'warning', sentence });
   // The API lists blockers as app-not-serving, not-approved, view-unresolvable.
   for (const blockers of [
     ['view-unresolvable'],
     ['not-approved', 'view-unresolvable'],
     ['app-not-serving', 'not-approved', 'view-unresolvable'],
   ] as const) {
-    assert.deepEqual(viewStatus(view({ blockers: [...blockers] }), app, orders), changed);
-    assert.deepEqual(viewStatus(view({ sharedBy: null, blockers: [...blockers] }), app, orders), changed);
+    assert.deepEqual(
+      viewStatus(view({ blockers: [...blockers] }), app, orders),
+      broken('Orders changed, and this view no longer matches it. Create a new data view, then stop sharing this one.'),
+    );
+    assert.deepEqual(
+      viewStatus(view({ sharedBy: null, blockers: [...blockers] }), app, orders),
+      broken('Orders changed, and this view no longer matches it. Create a new data view to share instead.'),
+    );
+    assert.deepEqual(
+      viewStatus(view({ table: null, blockers: [...blockers] }), app, null),
+      broken('The table was deleted. Stop sharing this view, then create a new data view from another table.'),
+    );
+    assert.deepEqual(
+      viewStatus(view({ table: null, sharedBy: null, blockers: [...blockers] }), app, null),
+      broken('The table was deleted, so this view can’t be shared. Create a new data view from another table.'),
+    );
   }
-  assert.equal(
-    viewStatus(view({ table: null, blockers: ['app-not-serving', 'not-approved', 'view-unresolvable'] }), app, null)
-      .sentence,
-    'The table was deleted. Stop sharing it, then create a new data view from another table.',
-  );
 });
 
 test('an app that is not serving says why', () => {
