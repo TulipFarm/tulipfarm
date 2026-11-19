@@ -793,6 +793,15 @@ export const settings: readonly Setting[] = [
   ...keyring('EMAIL_DELIVERY', 'queued sign-in links and invitations', apps, true),
   ...keyring('INTEGRATION_CREDENTIAL', 'connected-integration tokens', apps, true),
   {
+    name: 'TULIPFARM_APP_KEY_ROOT',
+    group: 'Encryption keys',
+    services: apiWorker,
+    requirement: 'optional',
+    secret: true,
+    description:
+      "Root of each server app release's app key: comma-separated 64-character hex keys, the current one first. The app host gives each release's sandbox a key derived from it, and the API checks that key on app data calls. Unset checks no key.",
+  },
+  {
     name: 'SLACK_CREDENTIAL_KEYS',
     group: 'Encryption keys',
     services: apiWorker,
