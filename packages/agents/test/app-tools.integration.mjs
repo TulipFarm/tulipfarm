@@ -141,6 +141,7 @@ test('an app chat edits its app in a draft that only a finished turn saves', { t
       revision: 3,
       live: null,
       build: null,
+      files: [{ path: 'index.html', bytes: 15 }],
       data: [],
     });
   });

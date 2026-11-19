@@ -18,6 +18,7 @@ import {
   unbackedCardClaim,
   unbackedImportClaim,
   unbackedAppClaim,
+  appQuestionAsked,
   unbackedWriteClaim,
   uncheckedTableQuestion,
   waitingCardMisdescribed,
@@ -1319,6 +1320,227 @@ test("an app chat's reply cannot deny its tools or claim a build or edit no tool
   ])
     assert.equal(unbackedAppClaim(text, 'public', none), undefined, text);
   assert.equal(unbackedAppClaim('The required file tools are not available.', undefined, none), undefined);
+});
+
+test("an app chat's reply cannot state the app's new or current contents that no tool in it made or read", () => {
+  const none = new Set();
+  const status = new Set(['apps.status']);
+  const wrote = new Set(['apps.status', 'apps.files.read', 'apps.files.write']);
+  // A sentence ending inside a quote still ends there, so the build claim after it is checked.
+  const quoted = "The paragraph now reads 'Second edit from chat.' The rebuild succeeded.";
+  assert.equal(unbackedAppClaim(quoted, 'public', status)?.status, 'continue');
+  // eslint-disable-next-line tulipfarm/product-copy -- A tool name, not user-facing copy.
+  assert.equal(unbackedAppClaim(quoted, 'public', new Set([...wrote, 'apps.preview.build'])), undefined);
+  assert.equal(unbackedAppClaim(quoted, 'public', wrote)?.missing, 'build');
+  // Asked for a change, a reply saying the app now reads that way claims the change, which only a write backs.
+  const ask = 'Change the heading to Orders v3 and add a footer.';
+  for (const [text, missing] of [
+    ["The heading is now 'Orders v3'.", 'change'],
+    ['The greeting change is complete.', 'edit'],
+    ['The page now shows the new footer.', 'change'],
+    ['Done. The server now returns ok on /health.', 'change'],
+  ]) {
+    assert.equal(unbackedAppClaim(text, 'public', status, ask)?.missing, missing, text);
+    assert.equal(unbackedAppClaim(text, 'public', wrote, ask), undefined, text);
+  }
+  const already = 'The app already has the /health route, returning ok.';
+  assert.equal(unbackedAppClaim(already, 'public', status)?.missing, 'read');
+  assert.equal(unbackedAppClaim(already, 'public', new Set(['apps.status', 'apps.files.read'])), undefined);
+  for (const text of [
+    'The heading is not changed yet.',
+    'Once the build is done, the page now shows the footer.',
+    'Should the heading now read Orders?',
+    'The app has no /health route yet.',
+  ])
+    assert.equal(unbackedAppClaim(text, 'public', none), undefined, text);
+});
+
+test("an app chat's answer about the app's current state is backed by reading it, never by a write", () => {
+  const status = new Set(['apps.status']);
+  const read = new Set(['apps.status', 'apps.files.read']);
+  for (const text of [
+    'The heading now reads "Orders v2".',
+    'Your app is now live at release 3.',
+    'The app now has three files: index.html, app.js and style.css.',
+    'Yes, the server now returns ok on /health.',
+    'The app is now in the editing state.',
+    'The draft is now built and release 4 is live.',
+  ]) {
+    for (const request of ['what does the heading say?', 'is it live?', 'What does the app look like right now?'])
+      for (const ran of [status, read]) assert.equal(unbackedAppClaim(text, 'public', ran, request), undefined, text);
+    // Nothing read the app in this reply, so the answer reads it first; it never writes for it.
+    assert.equal(unbackedAppClaim(text, 'public', new Set(), 'What is the heading?')?.missing, 'read', text);
+  }
+  // An explicit edit claim with no write in this reply still needs the write.
+  const edit = "I updated the heading in index.html to 'Orders v3'.";
+  assert.equal(unbackedAppClaim(edit, 'public', read, 'Change the heading to Orders v3.')?.missing, 'edit');
+  assert.equal(unbackedAppClaim(edit, 'public', new Set([...read, 'apps.files.write'])), undefined);
+});
+
+const changeRequests = [
+  'Create a contact form',
+  'Write a landing page',
+  'Implement login',
+  'Turn the button blue',
+  'Can we add dark mode?',
+  'Let us add dark mode',
+  'I want the button blue',
+  'The heading should say Orders v2',
+  'Yes, do it',
+  'Go ahead',
+  'yes please',
+  'Change the heading to Orders v2.',
+  'Now change it to Orders v3 and rebuild.',
+  'Can you rename the page to Orders?',
+  '',
+  'Do it',
+  'Do it.',
+  'Do the same for the footer.',
+  'Do the same on the about page',
+  'Have the heading say Orders v2',
+  'Have the footer show the year',
+  'Tell visitors we are closed on Sundays in the banner',
+  'List our opening hours on the homepage',
+  'Show me a dark theme',
+  'How about a blue button',
+  'How about a blue button?',
+  'Where it says Hello, put Welcome',
+  'Show me the files',
+  'list the routes',
+  'Can you put a footer on the page?',
+  'Can you put my phone number in the footer?',
+  'Could you try adding a footer?',
+  'Could you look into adding a footer?',
+  'Can we get a footer?',
+  'Can you include a footer?',
+  'Could the page include a footer?',
+  'Can you give the page a footer?',
+  'Put a footer on it. Is it live?',
+  'When you get a chance, put our phone number in the footer',
+  'Why not put a footer on it',
+  'What if the footer showed the year',
+  'What if the button were blue',
+  'Can you show a banner?',
+  'Can you check that the footer shows the year?',
+  'Can you check the spelling on the homepage and correct any typos?',
+  'Could you check the heading and capitalize it?',
+  'Can you check the footer and append the year?',
+  'Could you check the logo and enlarge it?',
+  'Can you check the links and repair the broken ones?',
+  'Can you check the contact form and clean it up?',
+  'Can you read the about page and shorten it?',
+  'Could you check the price and increase it to 20?',
+  'Can you check the buttons and bump the font size?',
+  'Can you check the heading and revert it?',
+  'Can you check the page and undo my last change?',
+  'Can you check it and do the same for the footer?',
+  'Can you check the footer, then append our phone number',
+  'Could you please check the footer exists, and if missing, append one',
+  'Is it possible to have a dark mode?',
+  'Are we able to have a footer?',
+  'Is there a way to have the year in the footer?',
+];
+const questions = [
+  'what does the heading say?',
+  'is it live?',
+  'What does the heading say?',
+  'Did you change the heading?',
+  'Is the app live?',
+  'Which files does the app have?',
+  'Thanks! What is on the page now?',
+  'What is the heading',
+  'is it live',
+  'Does the page have a footer',
+  'How many files does the app have',
+  'Where is the login form',
+  'Can you show me the files?',
+  'Did you add the footer?',
+  'Have you changed the heading?',
+  'Thanks, what is the heading?',
+  'How long does the build take?',
+  'Did the last build pass?',
+  'When was the last release?',
+  'Is it live? What does the heading say?',
+  "What's in index.html?",
+  'Why is the logo so small?',
+];
+
+test("an app chat reply's edit claim needs a write in any common wording, and a question's answer needs none", () => {
+  const ask = 'Change the heading to Orders.';
+  const read = new Set(['apps.files.read']);
+  const wrote = new Set(['apps.files.read', 'apps.files.write']);
+  for (const reply of [
+    'I made the heading bold.',
+    "I've made the footer blue.",
+    "I've also added a footer.",
+    'I just updated the heading.',
+    "I've now updated the heading.",
+    "I've successfully updated the button.",
+    "Done! I've gone ahead and updated the heading.",
+    'I went ahead and changed the footer text.',
+    'The heading has been updated to Orders.',
+    'The heading was changed to Orders.',
+    'The footer has been changed.',
+    "I've updated the title to Orders.",
+    'I changed the title to Orders.',
+    "I've updated the copy.",
+    'Updated the heading to Orders.',
+    'Changed the footer color to blue.',
+  ]) {
+    assert.equal(unbackedAppClaim(reply, 'public', read, ask)?.missing, 'edit', reply);
+    assert.equal(unbackedAppClaim(reply, 'public', wrote, ask), undefined, reply);
+  }
+  for (const reply of ['The heading was created in the first commit.', 'The footer has been changed twice this month.'])
+    assert.equal(unbackedAppClaim(reply, 'public', read, 'Where did the heading come from?'), undefined, reply);
+  assert.equal(
+    unbackedAppClaim('I checked the code and made sure the button works.', 'public', read, 'Check the button works.'),
+    undefined,
+  );
+  assert.equal(
+    unbackedAppClaim(
+      'I rebuilt the app and made sure the page loads correctly.',
+      'public',
+      // eslint-disable-next-line tulipfarm/product-copy -- A tool name, not user-facing copy.
+      new Set(['apps.preview.build']),
+      'Rebuild the app.',
+    ),
+    undefined,
+  );
+});
+
+test('an app chat request counts as a question only when it plainly asks about the app', () => {
+  for (const request of changeRequests) assert.equal(appQuestionAsked(request), false, request);
+  for (const request of questions) assert.equal(appQuestionAsked(request), true, request);
+});
+
+test('an app chat reply cannot say the app now has what a change request asked for after only reading it', () => {
+  const read = new Set(['apps.status', 'apps.files.read']);
+  for (const request of changeRequests) {
+    for (const claim of [
+      'I fixed the broken link in index.html.',
+      'I corrected the typo in the heading.',
+      "I've put your phone number in the footer.",
+    ]) {
+      assert.equal(unbackedAppClaim(claim, 'public', read, request)?.missing, 'edit', `${request} / ${claim}`);
+      assert.equal(
+        unbackedAppClaim(claim, 'public', new Set([...read, 'apps.files.write']), request),
+        undefined,
+        `${request} / ${claim}`,
+      );
+    }
+    for (const claim of ['Your app now has a contact form.', 'Your app now has a footer.'])
+      assert.equal(unbackedAppClaim(claim, 'public', read, request)?.missing, 'change', `${request} / ${claim}`);
+    assert.equal(unbackedAppClaim('I added a form to index.html.', 'public', read, request)?.missing, 'edit', request);
+    assert.equal(unbackedAppClaim('I added a contact form.', 'public', read, request)?.missing, 'edit', request);
+    assert.equal(unbackedAppClaim("I've added the contact form.", 'public', read, request)?.missing, 'edit', request);
+    assert.equal(unbackedAppClaim('I created the login page.', 'public', read, request)?.missing, 'edit', request);
+    assert.equal(unbackedAppClaim('I implemented dark mode.', 'public', read, request)?.missing, 'edit', request);
+    assert.equal(
+      unbackedAppClaim('Your app now has a contact form.', 'public', new Set([...read, 'apps.files.write']), request),
+      undefined,
+      request,
+    );
+  }
 });
 
 test('an import presented for review needs a pending proposal receipt from this reply', () => {
