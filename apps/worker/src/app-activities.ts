@@ -251,7 +251,7 @@ export function createAppActivities(work: AppWork) {
         return { status: status === 'succeeded' ? ('succeeded' as const) : ('failed' as const), now: false };
       await finishBuild(tx, build.id, outcome);
       if (units > 0n) await work.credits.debit(tx, units, { id: `app-build:${build.id}`, activity: 'app-build' });
-      // The draft preview serves files; a server build has none.
+      // A file draft previews its build's files. A server build has none; its draft previews through a draft host.
       if (outcome.ok && build.recipe.kind !== 'server') await setPreviewBuild(tx, build.id);
       return { status: outcome.ok ? ('succeeded' as const) : ('failed' as const), now: true };
     });

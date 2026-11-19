@@ -177,3 +177,87 @@ test('server app workflows give up a host that loses and replay the same way', {
     await native.close();
   }
 });
+
+test(
+  'the draft host workflow records its host, gives up a lost start and replays the same way',
+  { timeout: 60000 },
+  async () => {
+    const address = process.env.TASK_TEST_TEMPORAL_ADDRESS;
+    assert.ok(address, 'Owned Temporal is required');
+    const taskQueue = `app-draft-host-${randomUUID()}`;
+    const calls = [];
+    const target = { buildId: 'b'.repeat(64), size: { vcpu: 1, memMiB: 1024 }, output: {} };
+    const activities = {
+      async prepareDraftHost(input) {
+        calls.push(['prepare', input.appId]);
+        if (input.appId === 'broken') throw ApplicationFailure.nonRetryable('output missing');
+        return input.appId === 'ended' ? null : target;
+      },
+      async provisionDraftHost(input) {
+        calls.push(['provision', input.appId]);
+        assert.equal(input.buildId, target.buildId);
+        if (input.appId === 'no-start') throw ApplicationFailure.nonRetryable('boot failed');
+        if (input.appId === 'refused') return { ok: false };
+        return { ok: true, hostRef: `host-${input.appId}` };
+      },
+      async recordDraftHost(input) {
+        calls.push(['record', input.appId]);
+        return { retiredHostRef: input.generation === 1 ? input.hostRef : null };
+      },
+      async failDraftHost(input) {
+        calls.push(['fail', input.appId, input.message]);
+      },
+      async removeAppHost(input) {
+        calls.push(['remove', input.hostRef]);
+      },
+    };
+    const native = await NativeConnection.connect({ address });
+    const connection = await Connection.connect({ address });
+    try {
+      const client = new Client({ connection });
+      const workflowsPath = fileURLToPath(new URL('../dist/app-workflows.js', import.meta.url));
+      const worker = await Worker.create({ connection: native, taskQueue, workflowsPath, activities });
+      await worker.runUntil(async () => {
+        const run = (appId, generation = 2) =>
+          client.workflow.start('appDraftHost', {
+            taskQueue,
+            workflowId: `app-draft-host-${appId}-${generation}`,
+            args: [{ workspaceId: 'workspace-1', appId, generation }],
+          });
+        const handles = await Promise.all([
+          run('good'),
+          run('late', 1),
+          run('ended'),
+          run('refused'),
+          run('no-start'),
+          run('broken'),
+        ]);
+        assert.deepEqual(await Promise.all(handles.map(handle => handle.result())), [
+          'ready',
+          'superseded',
+          'ended',
+          'failed',
+          'failed',
+          'failed',
+        ]);
+        const count = calls.length;
+        for (const handle of handles) await Worker.runReplayHistory({ workflowsPath }, await handle.fetchHistory());
+        assert.equal(calls.length, count, 'replay never repeats activity work');
+      });
+      const of = id => calls.filter(([, subject]) => subject === id || subject === `host-${id}`).map(([kind]) => kind);
+      assert.deepEqual(of('good'), ['prepare', 'provision', 'record']);
+      assert.deepEqual(of('late'), ['prepare', 'provision', 'record', 'remove']);
+      assert.deepEqual(of('ended'), ['prepare']);
+      assert.deepEqual(of('refused'), ['prepare', 'provision']);
+      assert.deepEqual(of('no-start'), ['prepare', 'provision', 'fail']);
+      assert.deepEqual(of('broken'), ['prepare', 'fail']);
+      assert.deepEqual(
+        calls.filter(([kind]) => kind === 'fail').map(([, , message]) => message),
+        ['The app server could not start. Try again.', 'The app server could not start. Try again.'],
+      );
+    } finally {
+      await connection.close();
+      await native.close();
+    }
+  },
+);
