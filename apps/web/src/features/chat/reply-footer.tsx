@@ -3,15 +3,8 @@ import { Danger } from 'reicon-react/icons/Danger';
 import { Button } from '@tulipfarm/sprout/button';
 import { MessageFooter } from '@tulipfarm/sprout/message';
 import type { ConversationMessage } from './conversation-api';
-import { compactsOnRetry, contextFailure } from './compaction-copy';
-import {
-  planFailureAction,
-  proposalKeptNote,
-  replyFailure,
-  replyRetrying,
-  retryHelps,
-  retryLabel,
-} from './reply-failure-copy';
+import { contextFailure } from './compaction-copy';
+import { planFailureAction, proposalKeptNote, replyFailure, replyRetrying, retryAction } from './reply-failure-copy';
 
 export const turnLabels = {
   queued: 'Reply queued',
@@ -42,6 +35,7 @@ export function ReplyFooter({
 }) {
   const retrying = replyRetrying(turn.status, turn.errorCode);
   const proposalKept = turn.status === 'failed' ? proposalKeptNote(tools) : null;
+  const retry = turn.status === 'failed' ? retryAction(turn, tools) : null;
   const quiet = ['queued', 'processing', 'completed', 'cancelled'].includes(turn.status) && !retrying;
   if (quiet) return null;
   return (
@@ -79,8 +73,8 @@ export function ReplyFooter({
           {turn.status === 'failed' && contextFailure(turn.errorCode) && (
             <p role="alert">{contextFailure(turn.errorCode)}</p>
           )}
-          {turn.status === 'failed' && !contextFailure(turn.errorCode) && replyFailure(turn.errorCode) && (
-            <p role="alert">{replyFailure(turn.errorCode)}</p>
+          {turn.status === 'failed' && !contextFailure(turn.errorCode) && replyFailure(turn.errorCode, retry) && (
+            <p role="alert">{replyFailure(turn.errorCode, retry)}</p>
           )}
           {turn.status === 'failed' && <PlanFailureAction code={turn.errorCode} slug={workspaceSlug} />}
           {turn.status === 'failed' && turn.errorCode === 'skill-unavailable' && (
@@ -89,13 +83,9 @@ export function ReplyFooter({
               workspace admin to enable it, then retry, or send a new message without it.
             </p>
           )}
-          {turn.status === 'failed' && retryHelps(turn.errorCode) && (
+          {retry && (
             <Button size="sm" variant="outline" disabled={disabled} onClick={() => control('retry')}>
-              {retryLabel(
-                turn.errorCode,
-                tools.some(tool => tool.status === 'completed'),
-                compactsOnRetry(turn.errorCode),
-              )}
+              {retry.label}
             </Button>
           )}
           {turn.status === 'failed' && (

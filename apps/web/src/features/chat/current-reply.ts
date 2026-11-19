@@ -6,6 +6,7 @@ import type { ConversationMessage, SkillReference } from './conversation-api';
 import type { CommandState } from './conversation-state';
 import type { ConversationStreamSnapshot } from './conversation-stream';
 import type { FileReference } from './draft-files';
+import { retryAction } from './reply-failure-copy.ts';
 
 export type OutgoingMessage = {
   id: string;
@@ -42,9 +43,10 @@ export function currentReply({ messages, outgoing, command, stream }: ReplyInput
   const queuedMessages =
     messages?.filter(message => message.turn?.status === 'queued' && first && message.sequence > first.sequence) ?? [];
   const pendingQueued = !!pending && !!first && !unconfirmed;
+  const failedRetry = first?.turn?.status === 'failed' ? retryAction(first.turn, first.tools) : null;
   const queueLabel =
     first?.turn?.status === 'failed'
-      ? 'The reply above stopped. Retry or cancel it, and this message will be answered next.'
+      ? `The reply above stopped. ${failedRetry ? `${failedRetry.verb} or cancel` : 'Cancel'} it, and this message will be answered next.`
       : first?.turn && ['waiting', 'reconciling'].includes(first.turn.status)
         ? 'Waiting for your answer above. This message will be answered next.'
         : 'This message will be answered after the reply above.';

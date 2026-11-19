@@ -725,33 +725,51 @@ test('chat reply streaming and polling fallback in Chromium', { timeout: 240000 
       },
     );
 
-    await scenario(
-      'a message sent after a failed reply explains it waits for retry or cancel',
-      async ({ page, history, open }) => {
-        await page.clock.install();
-        history[0].parts = [{ kind: 'text', text: 'Build a small Node.js server app, then build it.' }];
-        history[0].turn = { ...history[0].turn, generation: 1, status: 'failed', errorCode: 'attempts-exhausted' };
-        history.push({
-          id: randomUUID(),
-          sequence: 2,
-          author: 'human',
-          createdAt: new Date().toISOString(),
-          parts: [{ kind: 'text', text: "Change the greeting to 'Hello again' and rebuild the app." }],
-          turn: { id: randomUUID(), generation: 0, status: 'queued' },
-        });
-        await open();
-        await page
-          .getByText('The reply above stopped. Retry or cancel it, and this message will be answered next.', {
-            exact: true,
-          })
-          .waitFor();
-        await page.getByRole('button', { name: 'Remove queued message', exact: true }).waitFor();
-        await page.clock.fastForward(120_001);
-        assert.equal(await page.getByText('Reply is taking too long', { exact: true }).count(), 0);
-        assert.equal(await page.getByRole('button', { name: 'Stop reply', exact: true }).count(), 0);
-        await screenshot(page, 'queued-behind-failed');
+    for (const { action, verb, next, tools, shot } of [
+      { action: 'Retry reply', verb: 'Retry', next: 'Retry the reply.', tools: [], shot: 'queued-behind-failed' },
+      {
+        action: 'Continue',
+        verb: 'Continue',
+        next: 'Your completed work is kept. Continue the reply.',
+        tools: [{ id: randomUUID(), tool: 'tables.list', status: 'completed' }],
+        shot: 'queued-behind-failed-continue',
       },
-    );
+    ])
+      await scenario(
+        `a message sent after a failed reply names its ${action} action as the way to unblock it`,
+        async ({ page, history, open }) => {
+          await page.clock.install();
+          history[0].parts = [{ kind: 'text', text: 'Build a small Node.js server app, then build it.' }];
+          history[0].turn = { ...history[0].turn, generation: 1, status: 'failed', errorCode: 'attempts-exhausted' };
+          history[0].tools = tools;
+          history.push({
+            id: randomUUID(),
+            sequence: 2,
+            author: 'human',
+            createdAt: new Date().toISOString(),
+            parts: [{ kind: 'text', text: "Change the greeting to 'Hello again' and rebuild the app." }],
+            turn: { id: randomUUID(), generation: 0, status: 'queued' },
+          });
+          await open();
+          await page
+            .getByText(`The reply above stopped. ${verb} or cancel it, and this message will be answered next.`, {
+              exact: true,
+            })
+            .waitFor();
+          await page.getByRole('button', { name: action, exact: true }).waitFor();
+          await page
+            .getByRole('alert')
+            .filter({
+              hasText: `The reply kept hitting a temporary problem, so no answer was written. TulipFarm retried automatically. ${next}`,
+            })
+            .waitFor();
+          await page.getByRole('button', { name: 'Remove queued message', exact: true }).waitFor();
+          await page.clock.fastForward(120_001);
+          assert.equal(await page.getByText('Reply is taking too long', { exact: true }).count(), 0);
+          assert.equal(await page.getByRole('button', { name: 'Stop reply', exact: true }).count(), 0);
+          await screenshot(page, shot);
+        },
+      );
 
     await scenario(
       'a reply whose model is unavailable ends with a clear error and a retry, not a spinner',

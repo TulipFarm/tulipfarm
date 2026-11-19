@@ -1,4 +1,5 @@
 import { modelFallbackReasons, type ModelFallbackReason } from '@tulipfarm/config/model-fallback';
+import { compactsOnRetry } from './compaction-copy.ts';
 import type { ConversationMessage } from './conversation-api.ts';
 
 // Copy for a failed reply. Model failures use `model-<reason>`; provider messages and internal codes never reach the page.
@@ -78,7 +79,6 @@ const stopReasons: Record<string, string> = {
   'transient-failure': unknownStop,
   'reply-interrupted': `The reply stopped before it finished. ${kept}`,
   'database-conflict': `The reply stopped because another change was saving at the same time. ${kept}`,
-  'attempts-exhausted': `The reply kept hitting a temporary problem, so no answer was written. TulipFarm retried automatically. ${kept} Continue or retry the reply.`,
   'github-rate-limited': `GitHub is limiting requests. Wait a minute, then retry. ${kept}`,
   'access-denied': `The reply stopped because access to something it needed was denied. ${kept}`,
   'tool-unavailable': `The reply stopped because it asked for a tool that isn't available. ${kept}`,
@@ -88,9 +88,19 @@ const stopReasons: Record<string, string> = {
 // These codes have their own message in the chat.
 const explainedElsewhere = new Set(['credits-exhausted', 'plan-budget', 'skill-unavailable']);
 
-/** In-chat text for why a failed reply stopped, or null when the chat explains the code with its own message. */
-export function replyFailure(code: string | null | undefined): string | null {
+/**
+ * In-chat text for why a failed reply stopped, or null when the chat explains the code with its own message. Copy
+ * that tells the person what to do next names only the retry the reply offers.
+ */
+export function replyFailure(code: string | null | undefined, retry: RetryAction | null = null): string | null {
   if (code?.startsWith(modelFallbackPrefix)) return null;
+  if (code === 'attempts-exhausted')
+    return [
+      'The reply kept hitting a temporary problem, so no answer was written. TulipFarm retried automatically.',
+      retry && `${retry.resumes ? `${kept} ` : ''}${retry.verb} the reply.`,
+    ]
+      .filter(Boolean)
+      .join(' ');
   if (code?.startsWith('model-')) return replyFailures[code] ?? genericFailure;
   if (code && explainedElsewhere.has(code)) return null;
   return (code && stopReasons[code]) || unknownStop;
@@ -114,10 +124,25 @@ export function retryHelps(code: string | null | undefined): boolean {
   return !code || !repeatsOnRetry.has(code);
 }
 
-/** A failed reply with completed tool calls continues from them; otherwise it is retried from the start. */
-export function retryLabel(code: string | null | undefined, resumes: boolean, compacts: boolean): string {
-  if (compacts) return 'Compact and retry';
-  return resumes ? 'Continue' : 'Retry reply';
+// Compacting is part of retrying, so prose names it with the Retry verb.
+const retryActions = {
+  compact: { label: 'Compact and retry', verb: 'Retry', resumes: false },
+  resume: { label: 'Continue', verb: 'Continue', resumes: true },
+  restart: { label: 'Retry reply', verb: 'Retry', resumes: false },
+};
+export type RetryAction = (typeof retryActions)[keyof typeof retryActions];
+
+/**
+ * The retry a failed reply offers, or null when none helps: its button label, the verb that names it in prose, and
+ * whether it continues from completed tool calls rather than starting over.
+ */
+export function retryAction(
+  turn: { errorCode?: string | null | undefined },
+  tools: readonly { status: string }[],
+): RetryAction | null {
+  if (!retryHelps(turn.errorCode)) return null;
+  if (compactsOnRetry(turn.errorCode)) return retryActions.compact;
+  return tools.some(tool => tool.status === 'completed') ? retryActions.resume : retryActions.restart;
 }
 
 /** Shown while a reply whose model call failed waits for its automatic retry, so it is never a silent spinner. */

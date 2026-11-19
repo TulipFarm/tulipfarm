@@ -268,6 +268,21 @@ test('a follow-up behind a failed reply waits for retry or cancel without lookin
     blocked.queueLabel,
     'The reply above stopped. Retry or cancel it, and this message will be answered next.',
   );
+  failed.tools = [tool()];
+  assert.equal(
+    currentReply(input({ messages })).queueLabel,
+    'The reply above stopped. Continue or cancel it, and this message will be answered next.',
+  );
+  failed.turn!.errorCode = 'context-limit';
+  assert.equal(
+    currentReply(input({ messages })).queueLabel,
+    'The reply above stopped. Retry or cancel it, and this message will be answered next.',
+  );
+  failed.turn!.errorCode = 'model-refusal';
+  assert.equal(
+    currentReply(input({ messages })).queueLabel,
+    'The reply above stopped. Cancel it, and this message will be answered next.',
+  );
   failed.turn!.status = 'cancelled';
   const next = currentReply(input({ messages }));
   assert.equal(next.turn, queued.turn);

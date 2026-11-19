@@ -9,8 +9,8 @@ import {
   proposalKeptNote,
   replyFailure,
   replyRetrying,
+  retryAction,
   retryHelps,
-  retryLabel,
   unknownStop,
 } from '../src/features/chat/reply-failure-copy.ts';
 import { planUsageStatus, timeAgo } from '../src/features/chat/plan-usage.ts';
@@ -80,9 +80,35 @@ test('a reply that stopped for a non-model cause says why in plain words', () =>
 });
 
 test('a failed reply with completed tool calls offers Continue', () => {
-  assert.equal(retryLabel('transient-failure', true, false), 'Continue');
-  assert.equal(retryLabel('transient-failure', false, false), 'Retry reply');
-  assert.equal(retryLabel('context-limit', true, true), 'Compact and retry');
+  const completed = [{ status: 'completed' }];
+  assert.deepEqual(retryAction({ errorCode: 'transient-failure' }, completed), {
+    label: 'Continue',
+    verb: 'Continue',
+    resumes: true,
+  });
+  assert.deepEqual(retryAction({ errorCode: 'transient-failure' }, [{ status: 'failed' }]), {
+    label: 'Retry reply',
+    verb: 'Retry',
+    resumes: false,
+  });
+  assert.deepEqual(retryAction({ errorCode: 'context-limit' }, completed), {
+    label: 'Compact and retry',
+    verb: 'Retry',
+    resumes: false,
+  });
+  assert.equal(retryAction({ errorCode: 'model-refusal' }, completed), null);
+});
+
+test('a reply that ran out of attempts names only the retry it offers', () => {
+  const code = 'attempts-exhausted';
+  const stopped =
+    'The reply kept hitting a temporary problem, so no answer was written. TulipFarm retried automatically.';
+  assert.equal(
+    replyFailure(code, retryAction({ errorCode: code }, [{ status: 'completed' }])),
+    `${stopped} Your completed work is kept. Continue the reply.`,
+  );
+  assert.equal(replyFailure(code, retryAction({ errorCode: code }, [])), `${stopped} Retry the reply.`);
+  assert.equal(replyFailure(code), stopped);
 });
 
 test('a reply the provider would reject again offers no retry and says to reword it', () => {
