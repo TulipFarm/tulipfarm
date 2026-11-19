@@ -2263,32 +2263,50 @@ const nowClaim =
 const alreadyClaim =
   /\balready (?:has|have|contains?|includes?|serves?|returns?|responds?|exposes?|defines?|handles?|reads?|says?|shows?|uses?)\b/i;
 const toReader = /\b(?:below|for you|here(?:'|’)?s|here is|here are)\b/i;
-const changeVerb = String.raw`(?:add|change|create|write|implement|turn|make|build|rebuild|set|rename|replace|remove|delete|fix|rewrite|insert|move|swap|publish|deploy|update|edit|switch|style|restyle|redesign|refactor|convert|hook|wire|drop|hide|enable|disable|translate|resize|center|align)`;
-const changeWord = new RegExp(String.raw`\b${changeVerb}\b`, 'i');
-// "Did you change it?" asks about earlier work, so its verb is no request.
-const pastQuestion = new RegExp(
-  String.raw`\b(?:did|have|has|had) (?:you|we|i|it|they|that)(?: already| just)? ${changeVerb}\b`,
+/** Verbs that ask for a change, in any inflection. */
+const changeVerb = String.raw`(?:add(?:s|ed|ing)?|chang(?:e|es|ed|ing)|creat(?:e|es|ed|ing)|writ(?:e|es|ing)|wrote|written|rewrit(?:e|es|ing)|rewrote|implement(?:s|ed|ing)?|turn(?:s|ed|ing)?|mak(?:e|es|ing)|made|(?:re)?build(?:s|ing)?|(?:re)?built|set(?:s|ting)?|renam(?:e|es|ed|ing)|replac(?:e|es|ed|ing)|remov(?:e|es|ed|ing)|delet(?:e|es|ed|ing)|fix(?:es|ed|ing)?|insert(?:s|ed|ing)?|mov(?:e|es|ed|ing)|swap(?:s|ped|ping)?|publish(?:es|ed|ing)?|deploy(?:s|ed|ing)?|updat(?:e|es|ed|ing)|edit(?:s|ed|ing)?|switch(?:es|ed|ing)?|(?:re)?styl(?:e|es|ed|ing)|redesign(?:s|ed|ing)?|refactor(?:s|ed|ing)?|convert(?:s|ed|ing)?|hook(?:s|ed|ing)?|wir(?:e|es|ed|ing)|drop(?:s|ped|ping)?|hid(?:e|es|ing)|hidden|enabl(?:e|es|ed|ing)|disabl(?:e|es|ed|ing)|translat(?:e|es|ed|ing)|resiz(?:e|es|ed|ing)|cent(?:er|re)(?:s|ed|ing)?|align(?:s|ed|ing)?|put(?:s|ting)?|includ(?:e|es|ed|ing)|giv(?:e|es|ing)|gave|given|get(?:s|ting)?|got|us(?:e|es|ed|ing)|show(?:s|ed|ing|n)?)`;
+// After "the" or "latest", "change" or "build" names a thing, not a request.
+const changeWord = new RegExp(
+  String.raw`(?<!\b(?:the|a|an|last|latest|newest|new|this|that|my|your|our|its) )\b${changeVerb}\b`,
+  'i',
+);
+// "Did you add it?" asks about earlier work, and "show me" asks to see; neither asks for a change.
+const notAsked = new RegExp(
+  String.raw`\b(?:did|have|has|had) (?:you|we|i|it|they|that)(?: already| just)? ${changeVerb}\b|\b(?:show|tell) (?:me|us)\b`,
   'gi',
 );
-// Without a question mark, only a plain interrogative asks; "Do it", "Have the heading say…" and "List our hours" ask for changes.
-const interrogative =
-  /^(?:(?:what|which|when|why|who|whose)\b(?! about\b)|(?:is|are|was|were|does|did)\s+(?:it|this|that|these|those|the|my|our|your|its|there|they|we|you|he|she|any|anything|everything|all)\b|how\s+(?:is|are|does|do|did|many|much)\b|where\s+(?:is|are|does|do|did)\b)/i;
-// "How about a blue button?" suggests a change.
-const suggestion = /^(?:how|what) about\b/i;
+const subject = String.raw`(?:it|this|that|these|those|the|my|our|your|its|there|they|we|you|i|he|she|any|anything|everything|all|a|an)`;
+const person = String.raw`(?:you|we|i|they)`;
+const auxiliary = String.raw`(?:is|are|was|were|does|do|did|has|have|can|could|will|would|should)`;
+/** The opening of a question that reads the app: an allowlist, so any other message may ask for a change. */
+const readQuestion = new RegExp(
+  [
+    String.raw`^(?:what|which|who|whose)\s+(?!if\b|about\b)\w`,
+    String.raw`^(?:is|are|was|were|does|did|has)\s+${subject}\b`,
+    // "Do it" and "Have the heading say…" ask for changes; "Do you…" and "Have you…" ask about them.
+    String.raw`^(?:do|have)\s+${person}\b`,
+    String.raw`^how\s+(?:is|are|does|do|did|many|much|long)\b`,
+    String.raw`^(?:where|when|why)\s+${auxiliary}\b`,
+    String.raw`^(?:can|could|would|will)\s+${person}\s+(?:please\s+)?(?:show|tell|list|check|read|see|explain|describe)\b`,
+  ].join('|'),
+  'i',
+);
+const pleasantry = /^(?:(?:thanks|thank you|ok(?:ay)?|great|cool|nice|perfect|hi|hello|hey)(?:[\s,!.]+|$))+/i;
 /**
- * Whether the person's latest message only asks about the app. Anything else, a confirmation like "go ahead"
- * included, may ask for a change, so a reply saying the app now reads some way must have made one.
+ * Whether the person's latest message only asks about the app: every sentence is a read question, and none asks for a
+ * change. Anything else, "go ahead" or "can you put a footer on it?" included, may ask for a change, so a reply saying
+ * the app now reads some way must have made one.
  */
 export const appQuestionAsked = (request: string) => {
   const sentences = request
     .trim()
     .split(/(?<=[.!?])\s+|\n+/)
+    .map(sentence => sentence.trim().replace(pleasantry, ''))
     .filter(Boolean);
-  const last = sentences.at(-1) ?? '';
   return (
-    (last.endsWith('?') || interrogative.test(last)) &&
-    !suggestion.test(last) &&
-    !sentences.some(sentence => changeWord.test(sentence.replace(pastQuestion, '')))
+    sentences.length > 0 &&
+    sentences.every(sentence => readQuestion.test(sentence)) &&
+    !sentences.some(sentence => changeWord.test(sentence.replace(notAsked, '')))
   );
 };
 const codeObject =
