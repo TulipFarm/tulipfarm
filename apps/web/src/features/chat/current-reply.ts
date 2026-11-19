@@ -34,17 +34,20 @@ export function currentReply({ messages, outgoing, command, stream }: ReplyInput
   const unconfirmed = command.kind === 'checking' || command.kind === 'uncertain';
   // A message queued while the workspace updates shows as sent, labelled, without a reply indicator.
   const waiting = !!pending && command.kind === 'sending' && !!command.waiting;
+  // Mirrors the server queue: later turns wait until the earliest unsettled turn completes, is cancelled or blocks.
   const first = messages?.find(
-    message => message.turn && ['queued', 'processing', 'waiting', 'reconciling'].includes(message.turn.status),
+    message => message.turn && !['completed', 'cancelled', 'blocked'].includes(message.turn.status),
   );
   const replying = first?.turn && ['queued', 'processing'].includes(first.turn.status) ? first : undefined;
   const queuedMessages =
     messages?.filter(message => message.turn?.status === 'queued' && first && message.sequence > first.sequence) ?? [];
   const pendingQueued = !!pending && !!first && !unconfirmed;
   const queueLabel =
-    first?.turn && ['waiting', 'reconciling'].includes(first.turn.status)
-      ? 'Waiting for your answer above. This message will be answered next.'
-      : 'This message will be answered after the reply above.';
+    first?.turn?.status === 'failed'
+      ? 'The reply above stopped. Retry or cancel it, and this message will be answered next.'
+      : first?.turn && ['waiting', 'reconciling'].includes(first.turn.status)
+        ? 'Waiting for your answer above. This message will be answered next.'
+        : 'This message will be answered after the reply above.';
   const turn = replying?.turn;
   const tools = replying?.tools ?? [];
   const preview = turn && stream.previews.get(turn.id);
