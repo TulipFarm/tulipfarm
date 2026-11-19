@@ -444,7 +444,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
                     'stripe-signature': `t=${timestamp},v1=${createHmac('sha256', secret).update(`${timestamp}.${raw}`).digest('hex')}`,
                   };
                 })()
-              : { authorization: ['Bear', 'er', secret].join(' ') };
+              : { authorization: `Bearer ${secret}` };
         const send = (body, extra = {}) => {
           const raw = typeof body === 'string' ? body : JSON.stringify(body);
           return app.inject({
@@ -527,6 +527,23 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
           `A trigger cannot copy ${header}, which history readers could replay`,
         );
       }
+      for (const header of ['tulipfarm-app-key', 'tulipfarm-request'])
+        for (const payload of [
+          { mode: 'raw', dedupe: { source: 'hash' }, headers: ['x-github-event', header] },
+          { mode: 'raw', dedupe: { source: 'header', name: header } },
+        ]) {
+          const appServerCopy = await app.inject({
+            method: 'PUT',
+            url: `${base}/${randomUUID()}`,
+            headers,
+            payload: {
+              revision: randomUUID(),
+              expectedRevision: null,
+              definition: definition({ kind: 'webhook', payload }),
+            },
+          });
+          assert.equal(appServerCopy.statusCode, 400, `A trigger cannot read ${header} from an app server's call`);
+        }
 
       const stripe = await receiver({ mode: 'raw', dedupe: { source: 'body', path: ['id'] }, headers: ['x-attempt'] });
       const stripeEvent = {
@@ -634,7 +651,7 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
       });
       assert.equal(form.statusCode, 200, form.body);
       const githubRuns = await github.runs();
-      assert.equal(githubRuns.length, 2);
+      assert.equal(githubRuns.length, 3);
       assert.deepEqual(
         githubRuns.find(run => run.id === pushed.json().runId).input,
         { body: push, headers: { 'x-github-event': 'push' } },
@@ -644,6 +661,33 @@ ${await readFile(new URL('../../database/migrations/0001_baseline.sql', import.m
         body: { state: 'paid', tag: ['first', 'second'] },
         headers: {},
       });
+      const appKey = `tfk_${randomBytes(24).toString('base64url')}`,
+        requestHandle = `tfr_${randomBytes(24).toString('base64url')}`;
+      const fromApp = await github.send(push, {
+        'x-github-delivery': randomUUID(),
+        'x-github-event': 'push',
+        'tulipfarm-app-key': appKey,
+        'tulipfarm-request': requestHandle,
+      });
+      assert.equal(fromApp.statusCode, 200, fromApp.body);
+      assert.deepEqual(
+        (await github.runs()).find(run => run.id === fromApp.json().runId).input,
+        { body: push, headers: { 'x-github-event': 'push' } },
+        "An app server's key and request handle never reach run input",
+      );
+      const appDeliveries = (
+        await db.databaseAdmin.query(
+          `SELECT row_to_json(d)::text AS row FROM ${escapeIdentifier(w.names.schema)}.tf_workflow_webhook_deliveries d WHERE workflow_id=$1`,
+          [github.id],
+        )
+      ).rows.map(row => row.row);
+      assert.ok(appDeliveries.length > 0);
+      for (const secret of [appKey, requestHandle])
+        assert.equal(
+          appDeliveries.some(row => row.includes(secret)),
+          false,
+          "An app server's key and request handle never reach the delivery log",
+        );
 
       const legacy = await receiver(
         { mode: 'raw', dedupe: { source: 'header', name: 'x-github-delivery' }, headers: ['x-github-event'] },

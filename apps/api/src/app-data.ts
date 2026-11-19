@@ -281,6 +281,7 @@ export function registerAppData(
       routes.post(
         `/app-data/views/:viewId/${name}`,
         {
+          config: { appServerHeaders: true },
           schema: {
             operationId: operation.operationId,
             hide: true,

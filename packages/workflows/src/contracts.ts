@@ -408,14 +408,13 @@ export const rowChangeSchema = z.object({
   token: z.uuid(),
   fieldIds: z.array(z.string()),
 });
-// The bearer key arrives in Authorization, so credential headers can never be copied into run input.
+// The bearer key arrives in Authorization, and an app server's calls carry its app key and request handle, so
+// credential headers can never be copied into run input or kept as a delivery's identifier.
+const credentialHeaders = ['authorization', 'cookie', 'proxy-authorization', 'tulipfarm-app-key', 'tulipfarm-request'];
 const headerNameSchema = z
   .string()
   .regex(/^[a-z0-9][a-z0-9-]{0,63}$/)
-  .refine(
-    header => !['authorization', 'cookie', 'proxy-authorization'].includes(header),
-    'Credential headers cannot be copied',
-  );
+  .refine(header => !credentialHeaders.includes(header), 'Credential headers cannot be copied');
 export const webhookDedupeSchema = z.discriminatedUnion('source', [
   z.strictObject({ source: z.literal('header'), name: headerNameSchema }),
   z.strictObject({ source: z.literal('body'), path: z.array(z.string().min(1).max(100)).min(1).max(16) }),

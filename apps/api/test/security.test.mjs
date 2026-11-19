@@ -155,6 +155,32 @@ test('security headers cover successes, errors, missing routes, and Swagger rema
   assert.equal((await real.inject('/v1/docs/static/swagger-ui-bundle.js')).statusCode, 200);
 });
 
+test("only routes that check them receive an app server's key and request handle", async t => {
+  const app = Fastify({ logger: false });
+  t.after(() => app.close());
+  registerSecurity(app, 'http://localhost:5173');
+  const echo = async request => ({
+    key: request.headers['tulipfarm-app-key'] ?? null,
+    handle: request.headers['tulipfarm-request'] ?? null,
+    event: request.headers['x-event'] ?? null,
+  });
+  app.post('/v1/hook', echo);
+  app.register(async scoped => scoped.post('/scoped', echo), { prefix: '/v1/workspaces' });
+  app.post('/v1/checked', { config: { appServerHeaders: true } }, echo);
+  const headers = { 'tulipfarm-app-key': 'tfk_key', 'TulipFarm-Request': 'tfr_handle', 'x-event': 'push' };
+  for (const url of ['/v1/hook', '/v1/workspaces/scoped'])
+    assert.deepEqual((await app.inject({ method: 'POST', url, headers })).json(), {
+      key: null,
+      handle: null,
+      event: 'push',
+    });
+  assert.deepEqual((await app.inject({ method: 'POST', url: '/v1/checked', headers })).json(), {
+    key: 'tfk_key',
+    handle: 'tfr_handle',
+    event: 'push',
+  });
+});
+
 test('request parser rejects malformed, oversized, unsupported, and poisoned bodies', async t => {
   const app = fixture();
   t.after(() => app.close());

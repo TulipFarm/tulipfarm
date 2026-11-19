@@ -144,6 +144,23 @@ test('saving rejects copied signature and secret headers but stored revisions st
   }
 });
 
+test("no trigger reads an app server's key or request handle", () => {
+  const webhook = payload => ({
+    version: 1,
+    name: 'App calls',
+    triggers: [{ id: 'webhook', kind: 'webhook', payload }],
+    steps: [{ id: 'note', kind: 'transform', fields: { event: { kind: 'input', path: [] } } }],
+  });
+  for (const header of ['tulipfarm-app-key', 'tulipfarm-request'])
+    for (const payload of [
+      { mode: 'raw', dedupe: { source: 'hash' }, headers: ['x-event', header] },
+      { mode: 'raw', dedupe: { source: 'header', name: header } },
+    ]) {
+      assert.equal(authoredDefinitionSchema.safeParse(webhook(payload)).success, false, `authored ${header}`);
+      assert.equal(definitionSchema.safeParse(webhook(payload)).success, false, `stored ${header}`);
+    }
+});
+
 test('saving rejects a nonexistent earlier output field but historical definitions remain readable', () => {
   const source = { id: 'source', kind: 'transform', fields: { total: { kind: 'literal', value: 12 } } };
   const copy = {

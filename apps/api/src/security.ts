@@ -6,6 +6,20 @@ import { z } from 'zod';
 import { StorageUnavailableError, transientStorageError } from '@tulipfarm/workspace-storage/runtime';
 import { publicGuideOrigins } from './public-guide-config.ts';
 
+declare module 'fastify' {
+  interface FastifyContextConfig {
+    /** This route checks the app key and request handle that app servers send, so it receives both headers. */
+    appServerHeaders?: boolean;
+  }
+}
+
+/**
+ * An app sandbox's egress proxy adds the release's app key to every call its server makes to this host, on any path,
+ * and app code copies the visitor's request handle into its calls. Only the routes that check them may read either:
+ * any other route, such as a webhook that copies headers into run input, could hand the key back to app code.
+ */
+const appServerHeaders = ['tulipfarm-app-key', 'tulipfarm-request'];
+
 export function securityServerOptions(): FastifyServerOptions {
   const proxy = z
     .enum(['direct', 'reverse-proxy', 'azure-container-apps'])
@@ -78,6 +92,11 @@ export function requestBoundaryError(error: unknown, reply: FastifyReply): boole
 }
 
 export function registerSecurity(app: FastifyInstance, webOrigin: string) {
+  app.addHook('onRequest', (request, _reply, done) => {
+    if (request.routeOptions.config?.appServerHeaders !== true)
+      for (const name of appServerHeaders) delete request.raw.headers[name];
+    done();
+  });
   app.register(helmet, {
     contentSecurityPolicy: {
       useDefaults: false,
