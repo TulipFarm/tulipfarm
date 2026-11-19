@@ -1492,6 +1492,19 @@ test("an app chat reply's edit claim needs a write in any common wording, and a 
   }
   for (const reply of ['The heading was created in the first commit.', 'The footer has been changed twice this month.'])
     assert.equal(unbackedAppClaim(reply, 'public', read, 'Where did the heading come from?'), undefined, reply);
+  assert.equal(
+    unbackedAppClaim('I checked the code and made sure the button works.', 'public', read, 'Check the button works.'),
+    undefined,
+  );
+  assert.equal(
+    unbackedAppClaim(
+      'I rebuilt the app and made sure the page loads correctly.',
+      'public',
+      new Set(['apps.preview.build']),
+      'Rebuild the app.',
+    ),
+    undefined,
+  );
 });
 
 test('an app chat request counts as a question only when it plainly asks about the app', () => {

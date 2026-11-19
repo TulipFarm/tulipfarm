@@ -2252,7 +2252,7 @@ const firstPerson = /\b(?:i|we|my)\b/i;
 const buildClaim =
   /^(?:and |so )?(?:the |your )?(?:re)?build (?:succeeded|passed|worked|completed|finished|(?:is|was) (?:complete|done|finished|successful))\b|^(?:and |so )?(?:i|we) (?:re)?built\b|\b(?:i|we)(?:(?:'|’)ve| have) (?:re)?built\b|^(?:re)?built (?:the|your|this) (?:app|server|site)\b/i;
 const conditional = /\b(?:if|when|once|after|whether|unless|until)\b/i;
-const editVerb = String.raw`(?:updated|edited|changed|modified|rewrote|wrote|replaced|inserted|deleted|removed|added|created|implemented|fixed|corrected|put(?! together)|renamed|moved|set|swapped|switched|hid|hidden|appended|restyled|translated|enabled|disabled|made|tweaked|adjusted|increased|decreased|styled|bolded)`;
+const editVerb = String.raw`(?:updated|edited|changed|modified|rewrote|wrote|replaced|inserted|deleted|removed|added|created|implemented|fixed|corrected|put(?! together)|renamed|moved|set|swapped|switched|hid|hidden|appended|restyled|translated|enabled|disabled|made(?! sure\b)|tweaked|adjusted|increased|decreased|styled|bolded)`;
 const editClaim = new RegExp(String.raw`\b(?:i|we)(?:'|’)?(?:ve| have)?${adverbs} ${editVerb}\b`, 'i');
 /** "The heading was changed" or "Updated the heading": an edit with no one named, so only a change request makes it a claim. */
 const unnamedEditClaim = new RegExp(
