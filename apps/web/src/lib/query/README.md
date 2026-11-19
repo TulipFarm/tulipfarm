@@ -219,7 +219,17 @@ tasks, workflows, tables, skills, apps, personal knowledge, and files at a
 section root or in a folder, plus the 15 most recently opened records of each
 kind in `persistedDetailReads` (`features/navigation/persisted-details.ts`):
 agents and their policies, task summaries, saved workflow definitions, table
-definitions with their unsearched first page of rows, files, projects and apps. The
+definitions with their unsearched first page of rows, files, projects and apps.
+`persistedPanelReads` (`features/navigation/persisted-panels.ts`) adds the panels
+and settings those pages show beside the record, for the same 15 records:
+newest task history and proposals, unfiltered newest workflow runs, run details
+and provider status, skills with their newest history, runtime, provenance and
+sharing, app releases and grants, GitHub and MCP integration details, MCP agent
+permissions, chat plans, file details, versions and sharing, and agent workflow
+links. Task context and plan documents keep 5, since they can be large. It also
+keeps account sign-in methods, Models page plan subscriptions, archived
+workflows, workflow providers and agent sharing candidates. File bytes, model
+policy editors, later pages, filters and searches stay memory-only. The
 sidebar's chat and project Recents reuse the chat list and project list reads,
 so they need no copy of their own. Each definition matches keys with a zod
 schema and validates data with the response schema its feature API already uses.
@@ -343,7 +353,7 @@ The browser test exercises React providers and two actual BroadcastChannels.
 Return-visit checks:
 
 ```sh
-pnpm --filter @tulipfarm/web exec node --test test/persisted-reads.test.ts test/http.test.ts
+pnpm --filter @tulipfarm/web exec node --test test/persisted-reads.test.ts test/persisted-panels.test.ts test/http.test.ts
 VITE_API_URL= pnpm --filter @tulipfarm/web build
 pnpm --filter @tulipfarm/web exec node --test test/provisional-workspace.browser.mjs
 ```

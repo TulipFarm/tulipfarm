@@ -21,7 +21,7 @@ import {
 const item = workspaceSkillSummarySchema;
 const page = z.object({ workspace: z.array(item), nextCursor: z.string().nullable() });
 export const skillListSchema = page;
-const detail = z.object({
+export const skillDetailSchema = z.object({
   id: z.uuid(),
   revision: z.string(),
   definition: workspaceSkillDefinitionSchema,
@@ -31,7 +31,7 @@ const detail = z.object({
   lifecycle: z.enum(['active', 'archived']).default('active'),
   canManageLifecycle: z.boolean().default(false),
 });
-export type SkillDetail = z.infer<typeof detail>;
+export type SkillDetail = z.infer<typeof skillDetailSchema>;
 export type SkillReceipt = z.infer<typeof workspaceSkillReceiptSchema>;
 export type SkillListView = Exclude<z.infer<typeof workspaceSkillQuerySchema>['view'], 'reviewed'>;
 export type SkillCommand = { requestId: string; expectedVersion: number } & (
@@ -118,7 +118,8 @@ export function skillApi(workspaceId: string) {
           signal,
         ),
       ),
-    read: async (id: string, signal: AbortSignal) => detail.parse(await request(`/${id}`, 'GET', undefined, signal)),
+    read: async (id: string, signal: AbortSignal) =>
+      skillDetailSchema.parse(await request(`/${id}`, 'GET', undefined, signal)),
     deletion: async (id: string, signal: AbortSignal) =>
       workspaceSkillDeletionSchema.parse(await request(`/${id}/deletion`, 'GET', undefined, signal)),
     send: async (id: string, command: SkillCommand) => {

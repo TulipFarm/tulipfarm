@@ -24,36 +24,13 @@ import { TableRequestError } from '@/features/tables/request-state';
 import { planModelVendor } from './model-brand';
 import { ModelLogo } from './model-logo';
 import { modelKeys } from './queries';
+import { subscriptionSchema, type Subscription } from './subscriptions';
+
+export type { Subscription };
 
 export const subscriptionsKey = ['models', 'subscriptions'] as const;
 
 export const providerLabels = { chatgpt: 'ChatGPT', claude: 'Claude', copilot: 'GitHub Copilot' } as const;
-
-const grantSchema = z.object({
-  grantee: z.discriminatedUnion('kind', [
-    z.object({ kind: z.literal('member'), membershipId: z.uuid() }),
-    z.object({ kind: z.literal('team'), teamId: z.uuid() }),
-    z.object({ kind: z.literal('workspace') }),
-  ]),
-  role: z.enum(['use', 'manage']),
-});
-const subscriptionSchema = z.object({
-  connectionId: z.uuid(),
-  provider: z.enum(['chatgpt', 'claude', 'copilot']),
-  ownerMembershipId: z.uuid(),
-  account: z.string().nullable(),
-  state: z.enum(['connected', 'plan-disabled', 'reconnect-required', 'signed-out']),
-  mine: z.boolean(),
-  models: z.array(z.object({ slug: z.string(), label: z.string() })),
-  disabledModels: z.array(z.string()),
-  canShare: z.boolean(),
-  grants: z.array(grantSchema).nullable(),
-  plan: z.string().nullable(),
-  useForChat: z.boolean(),
-  useForCoding: z.boolean(),
-  createdAt: z.string(),
-});
-export type Subscription = z.infer<typeof subscriptionSchema>;
 
 const errors: Record<string, string> = {
   'subscription-not-found': 'This plan is no longer connected. Reload to see the current plans.',
