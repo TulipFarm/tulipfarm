@@ -80,7 +80,7 @@ export function useConversationCommand(
       // The command ID makes each retry safe: the server applies the command once.
       for (let attempt = 1; ; attempt++) {
         try {
-          await api.command(command, AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]));
+          await api.command(command, controller.signal);
           break;
         } catch (error) {
           if (!workspaceUpdating(error) || attempt >= updatingRetries || controller.signal.aborted) throw error;

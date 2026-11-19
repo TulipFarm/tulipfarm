@@ -671,7 +671,8 @@ export function conversationApi(workspaceId: string, denied: (status: number) =>
     async layoutFunction(chatId: string, replyId: string, call: unknown, signal: AbortSignal) {
       return request(`/${chatId}/layouts/${replyId}/functions`, 'POST', signal, call, true);
     },
-    async command(command: ConversationCommand, signal: AbortSignal) {
+    async command(command: ConversationCommand, userSignal: AbortSignal) {
+      const signal = AbortSignal.any([userSignal, AbortSignal.timeout(15000)]);
       const path = `/${command.chatId}`;
       const commandId = command.commandId;
       switch (command.kind) {

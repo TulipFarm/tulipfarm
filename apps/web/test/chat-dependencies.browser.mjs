@@ -557,3 +557,52 @@ test(
       assert.equal(writes, 1);
     }),
 );
+
+test('a draft chat gives its create and its first send a separate 15 second clock each', { timeout: 30000 }, async () =>
+  fixture(async (browser, url) => {
+    const page = await browser.newPage();
+    await page.goto(url);
+    const result = await page.evaluate(async () => {
+      const f = await import('/test/chat-query-browser-fixture.tsx');
+      const id = '11111111-1111-4111-8111-111111111111';
+      const clocks = [];
+      const sent = [];
+      AbortSignal.timeout = () => {
+        const clock = new AbortController();
+        clocks.push(clock);
+        return clock.signal;
+      };
+      window.fetch = async (_url, init) => {
+        sent.push({ method: init.method, signal: init.signal });
+        return Response.json(sent.length === 1 ? { id } : { messageId: id, turnId: id, sequence: 1 });
+      };
+      const draft = f.draftConversationApi(
+        f.conversationApi('11111111-1111-4111-8111-222222222222', () => {}),
+        id,
+      );
+      await draft.command(
+        {
+          kind: 'send',
+          chatId: id,
+          commandId: 'c',
+          messageId: id,
+          model: 'm',
+          parts: [],
+          timeZone: 'UTC',
+          mode: 'chat',
+        },
+        new AbortController().signal,
+      );
+      clocks[0]?.abort(new Error('create clock fired'));
+      const afterCreateClock = sent[1].signal.aborted;
+      clocks[1]?.abort(new Error('send clock fired'));
+      return {
+        methods: sent.map(request => request.method),
+        clocks: clocks.length,
+        afterCreateClock,
+        afterSendClock: sent[1].signal.aborted,
+      };
+    });
+    assert.deepEqual(result, { methods: ['PUT', 'PUT'], clocks: 2, afterCreateClock: false, afterSendClock: true });
+  }),
+);

@@ -525,12 +525,13 @@ export async function admitWorkspace({
         result.workspace,
         result.workspaces,
       ]);
-    holdWrites(
-      verification.then(result => {
-        if (result.workspace.id !== shownContext.workspace.id || result.membershipId !== shownContext.membershipId)
-          throw new Error('Workspace access changed');
-      }),
-    );
+    if (unconfirmed)
+      holdWrites(
+        verification.then(result => {
+          if (result.workspace.id !== shownContext.workspace.id || result.membershipId !== shownContext.membershipId)
+            throw new Error('Workspace access changed');
+        }),
+      );
     void verification
       .then(
         // A provisional or stale admission is replaced once confirmed, even when nothing else changed.
