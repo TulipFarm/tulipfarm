@@ -411,6 +411,12 @@ test('a draft whose server is starting asks the page to refresh without contacti
   );
   assert.match(response.headers['content-security-policy'], /^default-src 'none'; script-src 'nonce-/);
   assert.match(response.headers['content-security-policy'], /frame-ancestors https:\/\/app\.tulipfarm\.test$/);
+  const [, nonce] = response.headers['content-security-policy'].match(/style-src 'nonce-([^']+)'/);
+  const [, style] = response.body.match(/<style nonce="([^"]+)">([^<]*)<\/style>/).slice(1);
+  assert.equal(response.body.match(/<style nonce="([^"]+)">/)[1], nonce);
+  assert.match(style, /font:14px\/1\.5 ui-sans-serif,system-ui,.*sans-serif;/);
+  assert.match(style, /padding:16px/);
+  assert.match(style, /color:#737373/);
   assert.equal((await connect(port)).status, 503);
   assert.equal(calls.connects, 0);
   assert.equal(upstream.requests, 0);

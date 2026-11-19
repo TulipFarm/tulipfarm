@@ -102,6 +102,13 @@ function cookieValue(header: string | undefined, name: string) {
 const escapeHtml = (text: string) => text.replace(/[&<>"']/g, char => `&#${char.charCodeAt(0)};`);
 
 /**
+ * Gateway pages show inside the Edit pane, so they use its system font and spacing, with muted text that reads on light
+ * and dark themes.
+ */
+const pageStyle =
+  'body{margin:0;padding:16px;font:14px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;color:#737373}p{margin:0}';
+
+/**
  * A gateway page. Its only script posts one message to the shell, or confirms the cookie first. With `refreshS`, the
  * page reloads itself after that many seconds.
  */
@@ -119,10 +126,11 @@ function page(
     .type('text/html; charset=utf-8')
     .header(
       'Content-Security-Policy',
-      `default-src 'none'; script-src 'nonce-${nonce}'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors ${shellOrigin}`,
+      `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors ${shellOrigin}`,
     );
   return reply.send(
-    `<!doctype html><meta charset="utf-8">` +
+    `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">` +
+      `<style nonce="${nonce}">${pageStyle}</style>` +
       (refreshS === undefined ? '' : `<meta http-equiv="refresh" content="${refreshS}">`) +
       `<title>${escapeHtml(title)}</title><p>${escapeHtml(title)}</p>` +
       (script ? `<script nonce="${nonce}">${script}</script>` : ''),
