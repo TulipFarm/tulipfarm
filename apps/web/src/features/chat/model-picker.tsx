@@ -287,7 +287,7 @@ export function ModelPicker({ model, models, disabled, onModelChange, account }:
                 }}
               >
                 {accounts.options.map(option => (
-                  <DropdownMenuRadioItem key={option.id} value={option.id}>
+                  <DropdownMenuRadioItem key={option.id} value={option.id} closeOnClick>
                     <span className="truncate">{option.label}</span>
                   </DropdownMenuRadioItem>
                 ))}
