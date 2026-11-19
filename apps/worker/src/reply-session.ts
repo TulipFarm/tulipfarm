@@ -82,6 +82,21 @@ const holdSlackBytes = 128 * 1024;
 /** Tools that can change the workspace inventory the runtime reminder lists. Other tools never re-read it. */
 const inventoryTools = ['tables.', 'schema.', 'agents.', 'workflows.', 'skills.'];
 
+/** Room for tokenization to differ where a request extends the previous one, and for its replaced runtime reminder. */
+const followUpSlackTokens = 4096;
+/**
+ * A call's most prompt tokens: every request byte as a token plus 4096. A reply round that extends the previous round
+ * on the same model is bounded tighter by the tokens the provider reported for that round plus a token for every byte
+ * and the image bound added since, so later rounds of a long reply need little more than their first.
+ */
+function promptBound(attempt: Pick<Parameters<ToolModelMeter>[0], 'inputBytes' | 'imageInputTokens' | 'previous'>) {
+  const bytes = attempt.inputBytes + attempt.imageInputTokens + 4096;
+  const { previous } = attempt;
+  if (!previous || attempt.inputBytes < previous.inputBytes) return bytes;
+  const added =
+    attempt.inputBytes - previous.inputBytes + Math.max(0, attempt.imageInputTokens - previous.imageInputTokens);
+  return Math.min(bytes, previous.inputTokens + added + followUpSlackTokens);
+}
 const units = (providerPicoUsd: string) => creditUnitsForProviderCost(BigInt(providerPicoUsd));
 /** A call's worst-case provider cost, as its own reservation quoted it. */
 const quote = (model: ConversationModel, maxInputTokens: number, maxOutputTokens: number) =>
@@ -526,7 +541,7 @@ export async function beginReplySession(input: {
     // Request bytes bound the hold, never the context: the reply loop compacts by estimated tokens, so size never fails it.
     // Image data is left out of the bytes and bounded by the model's image token limit instead.
     const inputBound = attempt.inputBytes + attempt.imageInputTokens;
-    const maxInputTokens = Math.min(inputBound + 4096, model.price.maxInputTokens);
+    const maxInputTokens = Math.min(promptBound(attempt), model.price.maxInputTokens);
     const needCost = quote(model, maxInputTokens, attempt.maxOutputTokens);
     const need = units(needCost.toString());
     const overPlan =

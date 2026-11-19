@@ -304,3 +304,125 @@ test(
     }
   },
 );
+
+/**
+ * A two-round reply (a tool round, then the answer) on a request of about 120 KB. `usage` gives each request's reported
+ * usage from its body size and the rounds before it; completion checks report the fixture's small usage.
+ */
+async function longReply(t, { credits, usage }) {
+  const f = await conversationFixture();
+  const rounds = [];
+  let checks = 0;
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    assert.equal(new URL(url).hostname, 'api.anthropic.com');
+    const request = JSON.parse(options.body);
+    if (isCompletionRequest(request)) {
+      checks++;
+      return Response.json(completionReply('anthropic'));
+    }
+    const round = { bytes: Buffer.byteLength(options.body) };
+    round.usage = usage(round, rounds);
+    rounds.push(round);
+    const decision =
+      rounds.length === 1
+        ? { kind: 'tool', call: { tool: 'tables.definitions' } }
+        : { kind: 'answer', text: 'Here is the summary.' };
+    return Response.json({ ...anthropicChat(decision), usage: round.usage });
+  });
+  const old = process.env.ANTHROPIC_API_KEY;
+  process.env.ANTHROPIC_API_KEY = 'synthetic-only';
+  t.after(useModelCatalog());
+  t.after(async () => {
+    if (old === undefined) delete process.env.ANTHROPIC_API_KEY;
+    else process.env.ANTHROPIC_API_KEY = old;
+    await f.close();
+  });
+  const w = f.workspace;
+  await f.db.platform.query(`UPDATE ${f.table('tf_credit_account')} SET available=$1`, [
+    (BigInt(credits) * 10n ** 12n).toString(),
+  ]);
+  const chatId = randomUUID();
+  await f.store.create(w.id, w.userId, { chatId, commandId: randomUUID() });
+  const turn = await f.store.send(w.id, w.userId, chatId, {
+    commandId: randomUUID(),
+    messageId: randomUUID(),
+    model: 'claude-sonnet',
+    // With the system prompt and tool schemas, about 120 KB of request.
+    parts: [
+      { kind: 'text', text: `Summarise these notes.\n${'Meeting notes, action items and owners. '.repeat(450)}` },
+    ],
+  });
+  const work = { workspaceId: w.id, conversationId: chatId, turnId: turn.turnId, generation: 0 };
+  const outcome = await createConversationActivities(f.runtime).processConversationReply(work);
+  const reply = (await f.store.history(w.id, w.userId, chatId)).messages.at(-1);
+  const holds = (
+    await f.db.platform.query(
+      `SELECT reserved::text, charged::text, provider_pico_usd::text FROM ${f.table('tf_credit_usage')} WHERE flow_id=$1`,
+      [chatId],
+    )
+  ).rows;
+  return { outcome, reply, rounds, checks, holds };
+}
+
+/** Anthropic usage that bills the whole prompt as one-hour cache writes, Sonnet's dearest prompt tokens. */
+const cacheWritten = (prompt, output) => ({
+  input_tokens: 0,
+  output_tokens: output,
+  cache_read_input_tokens: 0,
+  cache_creation_input_tokens: prompt,
+  cache_creation: { ephemeral_5m_input_tokens: 0, ephemeral_1h_input_tokens: prompt },
+});
+
+test(
+  'a long reply runs its next round when the balance covers what that round can cost',
+  { timeout: 60000 },
+  async t => {
+    // Every request byte as a token, Sonnet's first round needs about 67 credits. 70 covers it, and after it the balance
+    // still covers the second round bounded by the first round's reported tokens, though not by its bytes again.
+    const { outcome, reply, rounds } = await longReply(t, {
+      credits: 70,
+      usage: ({ bytes }) => ({
+        input_tokens: Math.ceil(bytes / 4),
+        output_tokens: 40,
+        cache_read_input_tokens: 0,
+        cache_creation_input_tokens: 0,
+      }),
+    });
+    assert.equal(reply.turn?.errorCode, undefined, `stopped after ${rounds.length} round(s)`);
+    assert.equal(outcome, 'completed');
+    assert.equal(reply.parts[0].text, 'Here is the summary.');
+    assert.equal(rounds.length, 2);
+    assert.ok(Math.abs(rounds[0].bytes - 120_000) < 5_000, `the first request carries ${rounds[0].bytes} bytes`);
+  },
+);
+
+test(
+  'a later round bounded by the previous round reported tokens still holds its whole charge',
+  { timeout: 60000 },
+  async t => {
+    // The second round reports every byte added since the first as a token, plus the 4096-token allowance, all at the
+    // dearest prompt rate with a full output: the most the tighter bound allows.
+    const { outcome, rounds, checks, holds } = await longReply(t, {
+      credits: 200,
+      usage: ({ bytes }, before) =>
+        before.length
+          ? cacheWritten(before[0].usage.cache_creation_input_tokens + (bytes - before[0].bytes) + 4096, 16384)
+          : cacheWritten(Math.ceil(bytes / 4), 40),
+    });
+    assert.equal(outcome, 'completed');
+    assert.equal(rounds.length, 2);
+    for (const hold of holds) assert.ok(BigInt(hold.charged) <= BigInt(hold.reserved), JSON.stringify(hold));
+    // Sonnet bills $4 per million one-hour cache writes and $10 per million output tokens; each completion check
+    // reports 100 input tokens at $2 and 20 output tokens. A call priced above its bound would be charged its whole
+    // reservation instead, so the exact total shows every call was held for what it cost.
+    const picoUsd = rounds.reduce(
+      (sum, { usage }) =>
+        sum + BigInt(usage.cache_creation_input_tokens) * 4_000_000n + BigInt(usage.output_tokens) * 10_000_000n,
+      BigInt(checks) * 400_000_000n,
+    );
+    assert.equal(
+      holds.reduce((sum, hold) => sum + BigInt(hold.provider_pico_usd), 0n),
+      picoUsd,
+    );
+  },
+);

@@ -1409,6 +1409,11 @@ export type ToolModelMeter = (attempt: {
   model: string;
   /** Why the chat model failed, when this call is on the fallback model that took over. */
   fallbackReason?: ModelFallbackReason;
+  /**
+   * The reply's previous round request, which this one extends, with the prompt tokens the provider reported for it.
+   * Only set for a reply round on the same provider and model, and never after the context was compacted.
+   */
+  previous?: { inputBytes: number; imageInputTokens: number; inputTokens: number };
 }) => Promise<(usage: InferenceUsage, outcome?: { rejected: boolean }) => Promise<void>>;
 export type ToolInferenceContext = {
   /**
@@ -4348,7 +4353,22 @@ export async function inferWithTools(
       return await sendChatRequest(
         target,
         requestStep++,
-        meter && (attempt => meter({ ...attempt, ...(fallbackReason ? { fallbackReason } : {}) })),
+        meter &&
+          (attempt =>
+            meter({
+              ...attempt,
+              ...(fallbackReason ? { fallbackReason } : {}),
+              // Only a reply round (the requests that report `settled`) extends the round before it.
+              ...(settled && baseline?.provider === attempt.provider && baseline.model === attempt.model
+                ? {
+                    previous: {
+                      inputBytes: baseline.inputBytes,
+                      imageInputTokens: baseline.imageInputTokens,
+                      inputTokens: baseline.tokens,
+                    },
+                  }
+                : {}),
+            })),
         wire,
         select,
         refusedSourceBatch(items) ||
@@ -4785,7 +4805,7 @@ export async function inferWithTools(
     ].join('\n'),
   });
   /** The provider's prompt tokens for the last reply round, and that request's measure. */
-  let baseline: (RequestMeasure & { tokens: number }) | undefined;
+  let baseline: (RequestMeasure & { tokens: number; provider: string; model: string }) | undefined;
   /** The last reply-round request's measure, so a rejected one can recalibrate the estimate. */
   let lastRequest: RequestMeasure = { inputBytes: 0, imageInputTokens: 0 };
   /**
@@ -5309,6 +5329,8 @@ export async function inferWithTools(
                 usage.kind === 'known'
                   ? {
                       ...measure,
+                      provider: target.provider,
+                      model: target.model,
                       tokens:
                         usage.input + usage.cacheRead + usage.cacheWrite + usage.cacheWrite5m + usage.cacheWrite1h,
                     }
