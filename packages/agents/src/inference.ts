@@ -1,4 +1,5 @@
 import { setTimeout as sleep } from 'node:timers/promises';
+import { createHash } from 'node:crypto';
 import { outsideContentBatchReply, waitingCardChange } from './chat-row-guard.ts';
 import {
   directoryAnswerExpected,
@@ -1285,6 +1286,25 @@ function measureRequest(route: CapableRoute, serialized: string, turns: Iterable
     imageInputTokens: images.length && images.length * modelImageLimits(route.provider, route.model).imageInputTokens,
   };
 }
+/**
+ * A reply round's request as two parts: everything sent but the loop items (route, system blocks, reminder, tools and
+ * forced tool), and the loop items, which later rounds only append to. `items` counts them and `prefix` digests them.
+ */
+type RoundShape = { fixed: string; items: number; prefix: string };
+const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('base64url');
+function roundShape(route: CapableRoute, fixed: unknown, items: readonly LoopItem[]): RoundShape {
+  return { fixed: digest([route.provider, route.model, fixed]), items: items.length, prefix: digest(items) };
+}
+/**
+ * Whether a round's request is the earlier round's request with loop items appended and nothing else changed, so the
+ * tokens reported for the earlier one still count every byte the two share.
+ */
+function extendsRound(earlier: RoundShape, later: RoundShape, items: readonly LoopItem[]) {
+  if (earlier.fixed !== later.fixed || items.length < earlier.items) return false;
+  return items.length === earlier.items
+    ? earlier.prefix === later.prefix
+    : earlier.prefix === digest(items.slice(0, earlier.items));
+}
 /** The provider wire content of a turn. A text turn keeps its plain string. */
 function turnContent(route: CapableRoute, turn: ChatTurn): string | object[] {
   if ('text' in turn) return turn.text;
@@ -1411,7 +1431,8 @@ export type ToolModelMeter = (attempt: {
   fallbackReason?: ModelFallbackReason;
   /**
    * The reply's previous round request, which this one extends, with the prompt tokens the provider reported for it.
-   * Only set for a reply round on the same provider and model, and never after the context was compacted.
+   * Only set for a reply round whose request strictly extends the previous one: the same provider and model, system
+   * blocks, reminder and tools, with every earlier item unchanged and only new items appended.
    */
   previous?: { inputBytes: number; imageInputTokens: number; inputTokens: number };
 }) => Promise<(usage: InferenceUsage, outcome?: { rejected: boolean }) => Promise<void>>;
@@ -4347,6 +4368,7 @@ export async function inferWithTools(
     answerText?: ToolInferenceContext['answerText'],
     target = config,
     settled?: (measure: RequestMeasure, usage: InferenceUsage) => void,
+    previous?: Parameters<ToolModelMeter>[0]['previous'],
   ) => {
     signal?.throwIfAborted();
     try {
@@ -4358,16 +4380,7 @@ export async function inferWithTools(
             meter({
               ...attempt,
               ...(fallbackReason ? { fallbackReason } : {}),
-              // Only a reply round (the requests that report `settled`) extends the round before it.
-              ...(settled && baseline?.provider === attempt.provider && baseline.model === attempt.model
-                ? {
-                    previous: {
-                      inputBytes: baseline.inputBytes,
-                      imageInputTokens: baseline.imageInputTokens,
-                      inputTokens: baseline.tokens,
-                    },
-                  }
-                : {}),
+              ...(previous ? { previous } : {}),
             })),
         wire,
         select,
@@ -4805,7 +4818,7 @@ export async function inferWithTools(
     ].join('\n'),
   });
   /** The provider's prompt tokens for the last reply round, and that request's measure. */
-  let baseline: (RequestMeasure & { tokens: number; provider: string; model: string }) | undefined;
+  let baseline: (RequestMeasure & { tokens: number; provider: string; model: string; shape: RoundShape }) | undefined;
   /** The last reply-round request's measure, so a rejected one can recalibrate the estimate. */
   let lastRequest: RequestMeasure = { inputBytes: 0, imageInputTokens: 0 };
   /**
@@ -5299,15 +5312,20 @@ export async function inferWithTools(
         );
         return withFallback(target => {
           answerStep = requestStep;
+          const blocks = roundBlocks();
+          const forced = required && routeCapabilities(target).toolChoice !== 'auto' ? required : undefined;
+          const shape = roundShape(target, [blocks, currentReminder, offered, forced ?? null], items);
+          const previous =
+            baseline && extendsRound(baseline.shape, shape, items)
+              ? {
+                  inputBytes: baseline.inputBytes,
+                  imageInputTokens: baseline.imageInputTokens,
+                  inputTokens: baseline.tokens,
+                }
+              : undefined;
           return send(
             observeChatDetailSync('serialize', () =>
-              nativeRequest(
-                target,
-                roundBlocks(),
-                [{ kind: 'turn', turn: currentReminder }, ...items],
-                offered,
-                required && routeCapabilities(target).toolChoice !== 'auto' ? required : undefined,
-              ),
+              nativeRequest(target, blocks, [{ kind: 'turn', turn: currentReminder }, ...items], offered, forced),
             ),
             body => {
               const selected = nativeStep(target, body);
@@ -5331,11 +5349,13 @@ export async function inferWithTools(
                       ...measure,
                       provider: target.provider,
                       model: target.model,
+                      shape,
                       tokens:
                         usage.input + usage.cacheRead + usage.cacheWrite + usage.cacheWrite5m + usage.cacheWrite1h,
                     }
                   : undefined;
             },
+            previous,
           );
         }, unusableStep);
       };
