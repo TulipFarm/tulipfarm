@@ -1083,6 +1083,20 @@ export function recordAppUsageReadFailure(source: 'traffic' | 'compute') {
     .add(1, { ...dimensions, source });
 }
 
+export const appKeyOutcomes = ['valid', 'invalid', 'missing', 'missing-refused', 'unconfigured'] as const;
+export type AppKeyOutcome = (typeof appKeyOutcomes)[number];
+
+/**
+ * Counts each app data call by what its app key showed. `missing` calls come from releases started without a key and
+ * are still served; once none are left, refusing them is safe. `unconfigured` means this process has no root key.
+ */
+export function recordAppKeyCheck(outcome: AppKeyOutcome) {
+  metrics
+    .getMeter(scope)
+    .createCounter('cloud_app_key_checks', { description: 'App data calls by app key outcome' })
+    .add(1, { ...dimensions, outcome });
+}
+
 export interface KnowledgeSyncSnapshot {
   failedItems: number;
   failedSources: number;

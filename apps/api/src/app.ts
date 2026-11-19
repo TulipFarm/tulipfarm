@@ -52,7 +52,7 @@ import { registerApps } from './apps.ts';
 import { appHostingFromEnvironment, temporalAppWorkflows } from './apps-hosting.ts';
 import { routeAppSites } from './apps-sites.ts';
 import { appBuilders } from '@tulipfarm/apps';
-import { requestHandleKey } from '@tulipfarm/apps/store';
+import { appKeyRoot, requestHandleKey } from '@tulipfarm/apps/store';
 import { appBuilder, appHost } from '@tulipfarm/extensions';
 import type { Pool } from 'pg';
 import { registerPreviewTickets } from './app-preview-tickets.ts';
@@ -231,6 +231,7 @@ export function buildApp(
         registerAppData(data, {
           lookups: createIdentityPool(data, appDataLookupPool),
           handles: requestHandleKey(process.env),
+          appKeys: appKeyRoot(process.env),
           tables,
         });
       });

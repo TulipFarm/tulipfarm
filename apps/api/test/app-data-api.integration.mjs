@@ -4,6 +4,8 @@ import { connect, createServer } from 'node:net';
 import test from 'node:test';
 import Fastify from 'fastify';
 import {
+  appKeyRoot,
+  appReleaseKey,
   closeRequestHandle,
   mintRequestHandle,
   renewRequestHandle,
@@ -36,7 +38,7 @@ test('an app server reaches an approved view only while a visitor request is ope
   const handles = requestHandleKey({ WORKSPACE_RUNTIME_KEY_ID: 'app-data', WORKSPACE_RUNTIME_KEY: 'cd'.repeat(32) });
   let queries = 0;
   const counted = { query: (...args) => (queries++, pool.query(...args)) };
-  const build = async (limits, platform = counted) => {
+  const build = async (limits, platform = counted, appKeys = null) => {
     const app = Fastify({ trustProxy: true });
     const perAddress = process.env.API_RATE_LIMIT_PER_MINUTE;
     process.env.API_RATE_LIMIT_PER_MINUTE = '5';
@@ -52,6 +54,7 @@ test('an app server reaches an approved view only while a visitor request is ope
         registerAppData(routes, {
           lookups: platform,
           handles,
+          appKeys,
           tables: service,
           limits,
         }),
@@ -61,7 +64,8 @@ test('an app server reaches an approved view only while a visitor request is ope
     await app.ready();
     return app;
   };
-  const serve = async (limits, platform) => (await build(limits, platform)).listen({ host: '127.0.0.1', port: 0 });
+  const serve = async (limits, platform, appKeys) =>
+    (await build(limits, platform, appKeys)).listen({ host: '127.0.0.1', port: 0 });
   const address = await serve();
 
   const approvedView = async app => {
@@ -197,6 +201,47 @@ test('an app server reaches an approved view only while a visitor request is ope
       );
     assert.equal(queries - before, 0, 'forged handles cost no database work');
     assert.equal((await call(handle, 'list', list, {}, viewId, server)).status, 200, 'the live request still works');
+  });
+
+  await t.test("with app keys, a call must carry its release's key", async () => {
+    const root = appKeyRoot({ TULIPFARM_APP_KEY_ROOT: 'ef'.repeat(32) });
+    const server = await serve(undefined, undefined, root);
+    const keyed = key => ({ ...nat, 'tulipfarm-app-key': key });
+    const invalid = { status: 401, body: { error: 'app-key-invalid' } };
+    assert.equal((await call(handle, 'list', list, keyed(appReleaseKey(root, live)), viewId, server)).status, 200);
+    for (const [label, key] of [
+      ["another release's key", appReleaseKey(root, randomUUID())],
+      ["another root's key", appReleaseKey(appKeyRoot({ TULIPFARM_APP_KEY_ROOT: '01'.repeat(32) }), live)],
+      ['a malformed key', 'tfk_not-a-key'],
+      ['an empty key', ''],
+    ])
+      assert.deepEqual(outcome(await call(handle, 'list', list, keyed(key), viewId, server)), invalid, label);
+    assert.deepEqual(
+      outcome(await call(await open(randomUUID()), 'list', list, keyed(appReleaseKey(root, live)), viewId, server)),
+      invalid,
+      "a handle from another release is refused with this sandbox's key",
+    );
+    assert.equal(
+      (await call(handle, 'list', list, nat, viewId, server)).status,
+      200,
+      'a release started without a key is served while keys are not required',
+    );
+    process.env.FEATURE_FLAG_APP_KEY_REQUIRED = 'true';
+    try {
+      const strict = await serve(undefined, undefined, root);
+      assert.deepEqual(outcome(await call(handle, 'list', list, nat, viewId, strict)), {
+        status: 401,
+        body: { error: 'app-key-required' },
+      });
+      assert.equal((await call(handle, 'list', list, keyed(appReleaseKey(root, live)), viewId, strict)).status, 200);
+    } finally {
+      delete process.env.FEATURE_FLAG_APP_KEY_REQUIRED;
+    }
+    assert.equal(
+      (await call(handle, 'list', list, keyed('tfk_not-a-key'), viewId)).status,
+      200,
+      'without a root no key is checked',
+    );
   });
 
   await t.test('a view the app has no approval for is denied without saying why', async () => {

@@ -37,6 +37,13 @@ export const featureFlags = {
     scope: 'workspace',
     env: 'FEATURE_FLAG_APP_HOSTING',
   },
+  'app-key-required': {
+    description:
+      "Refuse a public app's data calls that carry no app key. Off, calls from releases started before app keys existed still work.",
+    default: false,
+    scope: 'workspace',
+    env: 'FEATURE_FLAG_APP_KEY_REQUIRED',
+  },
   'hosted-mcp': {
     description: 'Set up MCP connections that run an npm or PyPI package on a sandbox host.',
     default: false,

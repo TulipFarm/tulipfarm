@@ -6,14 +6,17 @@ import { AccessDenied, type AppActor } from '@tulipfarm/access';
 import {
   liveRequestSeconds,
   resolveRequestHandle,
+  verifyAppKey,
   verifyRequestHandle,
+  type AppKeyRoot,
   type LiveAppRequest,
   type RequestHandleKey,
   type SignedRequestHandle,
 } from '@tulipfarm/apps/store';
 import { TableValidationError } from '@tulipfarm/tables/definition';
 import type { createTableService } from '@tulipfarm/tables/service';
-import { featureFlagAnswer } from '@tulipfarm/observability';
+import type { FeatureFlag } from '@tulipfarm/config/feature-flags';
+import { featureFlagAnswer, log, recordAppKeyCheck } from '@tulipfarm/observability';
 import { busy, createFairSlots } from './app-data-slots.ts';
 import { createExpiringMap, createWindows } from './app-data-windows.ts';
 import { routeValidation } from './route-validation.ts';
@@ -87,12 +90,19 @@ type Verdicts = ReturnType<typeof createExpiringMap<Verdict>>;
  * minute, and once they are spent the app's unseen old handles get 429. Only a live request spends its own call
  * limit, then its app's, and only its refusals count towards the app's `refusals` a minute. Every limit lives in this
  * process.
+ *
+ * With `appKeys`, a call must also carry the `TulipFarm-App-Key` of the release serving its request, which only that
+ * release's sandbox can send, so a handle copied out of one sandbox is refused from anywhere else. A wrong key gets 401
+ * `app-key-invalid`. A missing key is served, for releases started before keys existed, until the workspace's
+ * `app-key-required` flag is on; then it gets 401 `app-key-required` and republishing the app fixes it. Without
+ * `appKeys` no key is checked.
  */
 export function registerAppData(
   app: FastifyInstance,
   dependencies: {
     lookups: Pick<Pool, 'query'>;
     handles: RequestHandleKey;
+    appKeys?: AppKeyRoot | null;
     tables: ViewTables;
     limits?: { request?: number; app?: number; refusals?: number; oldLookups?: number };
   },
@@ -148,26 +158,51 @@ export function registerAppData(
     return lookup;
   };
   // The flag provider may evaluate remotely, so each workspace's answer is kept for 30 s and shared by calls in flight.
-  // Turning app hosting on or off takes effect within that. A fallback after a failure is not kept.
-  const hosting = createExpiringMap<Promise<boolean>>({ ttlMs: 30_000, entries: 10_000 });
-  const appHosting = (workspaceId: string) => {
-    const held = hosting.get(workspaceId);
-    if (held) return held;
-    const forget = () => {
-      if (hosting.get(workspaceId) === enabled) hosting.delete(workspaceId);
+  // Turning a flag on or off takes effect within that. A fallback after a failure is not kept.
+  const workspaceFlag = (flag: FeatureFlag) => {
+    const answers = createExpiringMap<Promise<boolean>>({ ttlMs: 30_000, entries: 10_000 });
+    return (workspaceId: string) => {
+      const held = answers.get(workspaceId);
+      if (held) return held;
+      const forget = () => {
+        if (answers.get(workspaceId) === enabled) answers.delete(workspaceId);
+      };
+      const enabled = featureFlagAnswer(flag, null, { id: workspaceId }).then(
+        answer => {
+          if (!answer.fromProvider) forget();
+          return answer.enabled;
+        },
+        error => {
+          forget();
+          throw error;
+        },
+      );
+      answers.set(workspaceId, enabled);
+      return enabled;
     };
-    const enabled = featureFlagAnswer('app-hosting', null, { id: workspaceId }).then(
-      answer => {
-        if (!answer.fromProvider) forget();
-        return answer.enabled;
-      },
-      error => {
-        forget();
-        throw error;
-      },
-    );
-    hosting.set(workspaceId, enabled);
-    return enabled;
+  };
+  const appHosting = workspaceFlag('app-hosting');
+  const appKeyRequired = workspaceFlag('app-key-required');
+  const appKeys = dependencies.appKeys ?? null;
+  if (!appKeys) log('warn', 'lifecycle', 'integration_unconfigured', { provider: 'app-key-root', status: 'missing' });
+
+  /** Null when the call may go on, or the error it is refused with. The presented key is never logged. */
+  const checkAppKey = async (live: LiveAppRequest, presented: unknown) => {
+    if (!appKeys) {
+      recordAppKeyCheck('unconfigured');
+      return null;
+    }
+    if (presented !== undefined) {
+      const valid = verifyAppKey(appKeys, live.releaseId, presented);
+      recordAppKeyCheck(valid ? 'valid' : 'invalid');
+      return valid ? null : 'app-key-invalid';
+    }
+    if (await appKeyRequired(live.workspaceId)) {
+      recordAppKeyCheck('missing-refused');
+      return 'app-key-required';
+    }
+    recordAppKeyCheck('missing');
+    return null;
   };
 
   app.register(async routes => {
@@ -218,6 +253,11 @@ export function registerAppData(
       if (!(await appHosting(live.workspaceId))) {
         appRefusals.spend(live.appId);
         return reply.code(403).send({ error: 'denied' });
+      }
+      const keyed = await checkAppKey(live, request.headers['tulipfarm-app-key']);
+      if (keyed) {
+        appRefusals.spend(live.appId);
+        return reply.code(401).send({ error: keyed });
       }
       serving.set(request, live);
     });
