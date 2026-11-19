@@ -2253,7 +2253,7 @@ const buildClaim =
   /^(?:and |so )?(?:the |your )?(?:re)?build (?:succeeded|passed|worked|completed|finished|(?:is|was) (?:complete|done|finished|successful))\b|^(?:and |so )?(?:i|we) (?:re)?built\b|\b(?:i|we)(?:(?:'|’)ve| have) (?:re)?built\b|^(?:re)?built (?:the|your|this) (?:app|server|site)\b/i;
 const conditional = /\b(?:if|when|once|after|whether|unless|until)\b/i;
 const editClaim =
-  /\b(?:i|we)(?:'|’)?(?:ve| have)? (?:updated|edited|changed|modified|rewrote|wrote|replaced|inserted|deleted|removed|added|created|implemented)\b/i;
+  /\b(?:i|we)(?:'|’)?(?:ve| have)? (?:updated|edited|changed|modified|rewrote|wrote|replaced|inserted|deleted|removed|added|created|implemented|fixed|corrected|put(?! together)|renamed|moved|set|swapped|switched|hid|hidden|appended|restyled|translated|enabled|disabled)\b/i;
 const savedClaim =
   /^(?:and |so )?(?:the |your )?(?:[\w-]+ )?(?:changes?|edits?|updates?|fix(?:es)?) (?:is|are|was|were|has been|have been) (?:saved|applied|made|done|in place|complete|completed|finished|live)\b/i;
 /** A clause that says how the app reads now: a change claim when the person asked for one, otherwise a state report. */
@@ -2291,10 +2291,15 @@ const readQuestion = new RegExp(
   ].join('|'),
   'i',
 );
+// A second clause can ask for a change in any words ("check the heading and capitalize it"), and asking whether
+// something is possible asks for it, so neither reads as a plain question.
+const clauseAfter = /\b(?:and|then|if|so)\b|,\s*\w|;/i;
+const possibleAsk =
+  /\b(?:is it possible to|is there a way to|(?:are|am|is) (?:we|you|i|it) able to|(?:can|could) (?:we|i) have|would it be possible)\b/i;
 const pleasantry = /^(?:(?:thanks|thank you|ok(?:ay)?|great|cool|nice|perfect|hi|hello|hey)(?:[\s,!.]+|$))+/i;
 /**
- * Whether the person's latest message only asks about the app: every sentence is a read question, and none asks for a
- * change. Anything else, "go ahead" or "can you put a footer on it?" included, may ask for a change, so a reply saying
+ * Whether the person's latest message only asks about the app: every sentence is a single read question, and none asks
+ * for a change. Anything else, "go ahead" or "can you put a footer on it?" included, may ask for a change, so a reply saying
  * the app now reads some way must have made one.
  */
 export const appQuestionAsked = (request: string) => {
@@ -2305,7 +2310,9 @@ export const appQuestionAsked = (request: string) => {
     .filter(Boolean);
   return (
     sentences.length > 0 &&
-    sentences.every(sentence => readQuestion.test(sentence)) &&
+    sentences.every(
+      sentence => readQuestion.test(sentence) && !clauseAfter.test(sentence) && !possibleAsk.test(sentence),
+    ) &&
     !sentences.some(sentence => changeWord.test(sentence.replace(notAsked, '')))
   );
 };

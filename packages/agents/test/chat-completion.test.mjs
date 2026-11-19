@@ -1422,6 +1422,23 @@ const changeRequests = [
   'What if the button were blue',
   'Can you show a banner?',
   'Can you check that the footer shows the year?',
+  'Can you check the spelling on the homepage and correct any typos?',
+  'Could you check the heading and capitalize it?',
+  'Can you check the footer and append the year?',
+  'Could you check the logo and enlarge it?',
+  'Can you check the links and repair the broken ones?',
+  'Can you check the contact form and clean it up?',
+  'Can you read the about page and shorten it?',
+  'Could you check the price and increase it to 20?',
+  'Can you check the buttons and bump the font size?',
+  'Can you check the heading and revert it?',
+  'Can you check the page and undo my last change?',
+  'Can you check it and do the same for the footer?',
+  'Can you check the footer, then append our phone number',
+  'Could you please check the footer exists, and if missing, append one',
+  'Is it possible to have a dark mode?',
+  'Are we able to have a footer?',
+  'Is there a way to have the year in the footer?',
 ];
 const questions = [
   'what does the heading say?',
@@ -1454,6 +1471,18 @@ test('an app chat request counts as a question only when it plainly asks about t
 test('an app chat reply cannot say the app now has what a change request asked for after only reading it', () => {
   const read = new Set(['apps.status', 'apps.files.read']);
   for (const request of changeRequests) {
+    for (const claim of [
+      'I fixed the broken link in index.html.',
+      'I corrected the typo in the heading.',
+      "I've put your phone number in the footer.",
+    ]) {
+      assert.equal(unbackedAppClaim(claim, 'public', read, request)?.missing, 'edit', `${request} / ${claim}`);
+      assert.equal(
+        unbackedAppClaim(claim, 'public', new Set([...read, 'apps.files.write']), request),
+        undefined,
+        `${request} / ${claim}`,
+      );
+    }
     for (const claim of ['Your app now has a contact form.', 'Your app now has a footer.'])
       assert.equal(unbackedAppClaim(claim, 'public', read, request)?.missing, 'change', `${request} / ${claim}`);
     assert.equal(unbackedAppClaim('I added a form to index.html.', 'public', read, request)?.missing, 'edit', request);
