@@ -113,7 +113,8 @@ export type AppWorkflow =
   | 'appProjectEdge'
   | 'appServerPublish'
   | 'appServerRollback'
-  | 'appServerResize';
+  | 'appServerResize'
+  | 'appDraftHost';
 
 export type AppRouteDependencies = {
   readonly auth: { api: Pick<ReturnType<typeof registerAuth>['auth']['api'], 'getSession'> };
@@ -121,7 +122,11 @@ export type AppRouteDependencies = {
   /** The platform database, which holds the public name table. */
   readonly platform: Pick<Pool, 'query' | 'connect'>;
   /** Starts a workflow once per id; starting an id that already exists does nothing. */
-  readonly start: (workflow: AppWorkflow, workflowId: string, input: Record<string, string>) => Promise<void>;
+  readonly start: (
+    workflow: AppWorkflow,
+    workflowId: string,
+    input: Readonly<Record<string, string | number>>,
+  ) => Promise<void>;
   /** The app source cache, or null when no apps bucket is configured. */
   readonly repositories: AppRepositories | null;
   readonly publisher: () => AppPublisher | undefined;

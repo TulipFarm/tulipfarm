@@ -131,18 +131,19 @@ export function buildApp(
         workspaceStorage = storage;
         if (storage) {
           appPlatform = auth.pool;
+          const start = temporalAppWorkflows(temporal);
           registerApps(business, {
             auth: auth.auth,
             runtime: storage,
             platform: auth.pool,
-            start: temporalAppWorkflows(temporal),
+            start,
             repositories: appHosting?.repositories ?? null,
             publisher: () => appHosting?.publisher,
             builders: () => appBuilders(appBuilder(), appHost()),
             sitesDomain: appHosting?.domain ?? null,
           });
           if (previewDomain)
-            registerPreviewTickets(business, auth.auth, { pool: auth.pool, runtime: storage }, previewDomain);
+            registerPreviewTickets(business, auth.auth, { pool: auth.pool, runtime: storage }, previewDomain, start);
         }
         registerFeatureFlags(
           business,
