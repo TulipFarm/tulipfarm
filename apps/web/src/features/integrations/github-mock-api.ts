@@ -11,49 +11,63 @@ if (githubMockEnabled) {
   const scenario = new URLSearchParams(window.location.search).get('githubMock');
   const id = '11111111-1111-4111-8111-111111111111';
   const secondId = '22222222-2222-4222-8222-222222222222';
-  const accounts: GitHubAccount[] = [
-    {
-      id,
-      state: 'active',
-      configured: true,
-      identity: { id: '101', login: 'dev-user' },
-      generation: 1,
-      scopes: ['repo', 'read:org', 'read:user'],
-      useForChat: true,
-      useForCoding: true,
-      primaryForKnowledge: false,
-    },
-    ...(scenario === 'multiple'
-      ? [
+  const unfinished: GitHubAccount = {
+    id,
+    state: 'authorizing',
+    configured: true,
+    identity: null,
+    generation: 1,
+    scopes: [],
+    useForChat: true,
+    useForCoding: true,
+    primaryForKnowledge: false,
+  };
+  const accounts: GitHubAccount[] =
+    scenario === 'unfinished'
+      ? [unfinished]
+      : [
           {
-            id: secondId,
-            state: 'active' as const,
+            id,
+            state: 'active',
             configured: true,
-            identity: { id: '102', login: 'dev-work' },
+            identity: { id: '101', login: 'dev-user' },
             generation: 1,
             scopes: ['repo', 'read:org', 'read:user'],
             useForChat: true,
             useForCoding: true,
             primaryForKnowledge: false,
           },
-        ]
-      : []),
-    ...(scenario === 'pending'
-      ? [
-          {
-            id: secondId,
-            state: 'reconnect-required' as const,
-            configured: true,
-            identity: null,
-            generation: 1,
-            scopes: [],
-            useForChat: true,
-            useForCoding: true,
-            primaryForKnowledge: false,
-          },
-        ]
-      : []),
-  ];
+          ...(scenario === 'multiple'
+            ? [
+                {
+                  id: secondId,
+                  state: 'active' as const,
+                  configured: true,
+                  identity: { id: '102', login: 'dev-work' },
+                  generation: 1,
+                  scopes: ['repo', 'read:org', 'read:user'],
+                  useForChat: true,
+                  useForCoding: true,
+                  primaryForKnowledge: false,
+                },
+              ]
+            : []),
+          ...(scenario === 'pending'
+            ? [
+                {
+                  id: secondId,
+                  state: 'reconnect-required' as const,
+                  configured: true,
+                  identity: null,
+                  generation: 1,
+                  scopes: [],
+                  useForChat: true,
+                  useForCoding: true,
+                  primaryForKnowledge: false,
+                },
+              ]
+            : []),
+        ];
   const repositories: GitHubRepositoryChoice[] = [
     ...Array.from({ length: 247 }, (_, index) => ({
       repositoryId: String(index + 1),

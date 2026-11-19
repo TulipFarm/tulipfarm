@@ -130,10 +130,11 @@ test(
         }, href);
       else await page.goto(`${origin.replace(/\/$/, '')}${href}`);
     };
-    const neutral = async id => {
+    // An unfinished GitHub sign-in stays Not connected; its Connect says it resumes the attempt.
+    const neutral = async (id, action = 'Connect') => {
       const summary = page.getByRole('region', { name: `${appNames[id]} summary`, exact: true });
       await summary.getByText('Not connected', { exact: true }).waitFor();
-      await summary.getByRole('button', { name: `Connect ${appNames[id]}`, exact: true }).waitFor();
+      await summary.getByRole('button', { name: `${action} ${appNames[id]}`, exact: true }).waitFor();
       assert.equal(await page.getByLabel('Integration authorization', { exact: true }).count(), 0);
       assert.equal(await summary.getByText('Needs attention', { exact: true }).count(), 0);
     };
@@ -149,7 +150,7 @@ test(
         await page.getByRole('button', { name: `Connect ${appNames[id]}`, exact: true }).click();
         await page.getByRole('heading', { name: 'Provider sign-in' }).waitFor();
         await visit(id);
-        await neutral(id);
+        await neutral(id, id === 'github' ? 'Finish connecting' : 'Connect');
       }
       assert.equal(external.length, 5);
       await visit();
@@ -170,7 +171,7 @@ test(
       await visit(undefined, undefined, true);
       for (const id of Object.keys(appNames)) {
         await visit(id);
-        await neutral(id);
+        await neutral(id, id === 'github' ? 'Finish connecting' : 'Connect');
       }
       github[0].state = 'disconnected';
       await visit('github', undefined, true);
@@ -178,11 +179,15 @@ test(
       await page.getByRole('heading', { name: 'Provider sign-in' }).waitFor();
       assert.equal(githubBegins, 1, 'retry resumes the existing disconnected attempt');
       await visit('github');
-      await neutral('github');
-      // An unfinished attempt adds no Accounts tab; Connect above resumes it.
+      await neutral('github', 'Finish connecting');
+      // An unfinished attempt adds no Accounts tab; Finish connecting above resumes it.
       await visit('github', 'accounts');
-      await neutral('github');
+      await neutral('github', 'Finish connecting');
       assert.equal(await page.getByRole('tab', { name: 'Accounts', exact: true }).count(), 0);
+      await page.getByText('Sign-in not finished.', { exact: true }).waitFor();
+      await page.getByRole('button', { name: 'Dismiss unfinished GitHub sign-in', exact: true }).click();
+      await neutral('github');
+      assert.equal(await page.getByText('Sign-in not finished.', { exact: true }).count(), 0);
       await visit('trello', 'accounts');
       await page.getByRole('button', { name: 'Previous integrations (1)', exact: true }).click();
       await page.getByRole('button', { name: 'Finish connecting', exact: true }).waitFor();

@@ -313,6 +313,59 @@ export function GitHubAccounts({
   );
 }
 
+/** The GitHub sign-in someone started but never finished, while no login is connected yet. */
+export function useUnfinishedGitHubSignIn(workspaceId: string, enabled: boolean) {
+  const { state } = useGitHubAccounts(workspaceId, enabled);
+  if (!enabled || state.kind !== 'ready') return null;
+  return state.data.accounts.find(account => !account.identity && account.state !== 'disconnected') ?? null;
+}
+
+export function UnfinishedGitHubSignIn({
+  workspaceId,
+  accountId,
+  disabled,
+}: {
+  workspaceId: string;
+  accountId: string;
+  disabled: boolean;
+}) {
+  const changes = useIntegrationChanges();
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
+  const dismiss = async () => {
+    setBusy(true);
+    setFailure(null);
+    try {
+      await githubApi.disconnect(workspaceId, accountId);
+      await changes.authority('github-personal');
+    } catch (error) {
+      setFailure(githubError(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
+      <span>Sign-in not finished.</span>
+      <Button
+        variant="ghost"
+        size="sm"
+        disabled={disabled || busy}
+        aria-busy={busy}
+        aria-label="Dismiss unfinished GitHub sign-in"
+        onClick={() => void dismiss()}
+      >
+        {busy ? 'Dismissing…' : 'Dismiss'}
+      </Button>
+      {failure && (
+        <span role="alert" className="basis-full text-destructive">
+          {failure}
+        </span>
+      )}
+    </div>
+  );
+}
+
 /** Repositories in Knowledge, with reconnect for a login whose access expired. */
 export function GitHubKnowledge({ workspaceId }: { workspaceId: string }) {
   const { state } = useGitHubAccounts(workspaceId);
