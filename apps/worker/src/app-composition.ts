@@ -8,6 +8,7 @@ import { errorAttributes, isFeatureEnabled, log } from '@tulipfarm/observability
 import { objectStorageClient } from '@tulipfarm/workspaces/object-storage';
 import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import { Pool } from 'pg';
+import { databasePools } from '@tulipfarm/config/database-connections';
 import { z } from 'zod';
 import { createAppActivities, namedWorkspaces, type AppWork } from './app-activities.ts';
 import { createAppServerActivities } from './app-server-activities.ts';
@@ -31,7 +32,10 @@ export function createAppComposition(options: {
   if (!bucket) return undefined;
   const client = objectStorageClient(env);
   const objects = s3AppStorage(client, bucket);
-  const platform = new Pool({ connectionString: z.url().parse(env.WORKSPACE_AUTHORING_DATABASE_URL), max: 4 });
+  const platform = new Pool({
+    connectionString: z.url().parse(env.WORKSPACE_AUTHORING_DATABASE_URL),
+    max: databasePools.appPlatform,
+  });
   const transact = <T>(workspaceId: string, action: (tx: AppTransaction) => Promise<T>) =>
     options.runtime.transaction(workspaceId, commonCompatibility, action);
   const repositories = appRepositories({ root: join(tmpdir(), 'tulipfarm-apps'), storage: { client, bucket } });

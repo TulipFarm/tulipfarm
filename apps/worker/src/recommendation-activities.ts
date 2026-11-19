@@ -1,4 +1,5 @@
 import { Pool } from 'pg';
+import { databasePools } from '@tulipfarm/config/database-connections';
 import { createBackgroundJob } from '@tulipfarm/observability';
 import { z } from 'zod';
 import { AccessDenied, lockAuthorization, type HumanActor } from '@tulipfarm/access';
@@ -257,7 +258,7 @@ export function createRecommendationComposition(
   const pool = config
     ? new Pool({
         connectionString: config.databaseUrl,
-        max: 2,
+        max: databasePools.recommendationBudget,
         connectionTimeoutMillis: 5000,
         statement_timeout: 10000,
       })

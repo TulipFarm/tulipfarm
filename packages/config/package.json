@@ -79,6 +79,11 @@
       "types": "./dist/temporal.d.ts",
       "default": "./dist/temporal.js"
     },
+    "./database-connections": {
+      "types": "./dist/database-connections.d.ts",
+      "default": "./dist/database-connections.js"
+    },
+    "./database-connections.json": "./src/database-connections.json",
     "./public-web": {
       "types": "./dist/public-web.d.ts",
       "default": "./dist/public-web.js"

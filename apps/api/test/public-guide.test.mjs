@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import Fastify from 'fastify';
 import { shippedModelCatalogPath } from '@tulipfarm/config';
+import { databasePools } from '@tulipfarm/config/database-connections';
 import { registerSecurity, securityServerOptions } from '../src/security.ts';
 import { registerPublicGuideRoutes } from '../src/public-guide.ts';
 import { guideTokens, GuideUnavailable } from '../src/public-guide-access.ts';
@@ -463,4 +464,8 @@ test('the guide family comes from the public-guide role and needs an Azure chat-
   assert.deepEqual(publicGuideWarnings(openai), [
     'Public guide model gpt-luna is not served on an Azure chat-completions route; the guide is unavailable.',
   ]);
+});
+
+test('the guide pool holds a connection for every concurrent turn plus two', () => {
+  assert.equal(databasePools.publicGuide, guideLimits.concurrent + 2);
 });

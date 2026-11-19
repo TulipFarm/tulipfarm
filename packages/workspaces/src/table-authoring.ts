@@ -1,4 +1,5 @@
 import { Pool } from 'pg';
+import { databasePools } from '@tulipfarm/config/database-connections';
 import { z } from 'zod';
 import { prepareSoulRevision, readVerifiedProjection, type SoulChange } from './soul-revisions.ts';
 import { definitionSchema } from '@tulipfarm/tables/definition';
@@ -21,7 +22,7 @@ const flagWorkspaceRow = z.object({ slug: z.string(), name: z.string(), created_
 export function createWorkspaceTableAuthoring() {
   const pool = new Pool({
     connectionString: z.url().parse(process.env.WORKSPACE_AUTHORING_DATABASE_URL),
-    max: 2,
+    max: databasePools.tableAuthoring,
     connectionTimeoutMillis: 5000,
     statement_timeout: 10000,
     options: '-c search_path=pg_catalog',

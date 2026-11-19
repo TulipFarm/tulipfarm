@@ -135,6 +135,7 @@
     "@aws-sdk/client-s3": "3.1141.0",
     "@tulipfarm/access": "workspace:*",
     "@tulipfarm/atlassian": "workspace:*",
+    "@tulipfarm/config": "workspace:*",
     "@tulipfarm/conversations": "workspace:*",
     "@tulipfarm/extensions": "workspace:*",
     "@tulipfarm/files": "workspace:*",

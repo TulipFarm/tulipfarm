@@ -1,4 +1,5 @@
 import { Pool } from 'pg';
+import { databasePools } from '@tulipfarm/config/database-connections';
 import { z } from 'zod';
 import { requireDraftSources } from '@tulipfarm/agents/draft-sources';
 import { requireAgentPermission } from '@tulipfarm/agents/saved-service';
@@ -70,7 +71,7 @@ export function socialPosts(
       return null;
     pool = new Pool({
       connectionString,
-      max: 2,
+      max: databasePools.socialPosts,
       connectionTimeoutMillis: 5000,
       statement_timeout: 10000,
       options: '-c search_path=pg_catalog',

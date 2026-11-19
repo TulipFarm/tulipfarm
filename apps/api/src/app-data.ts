@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Pool } from 'pg';
+import { databasePools } from '@tulipfarm/config/database-connections';
 import { z } from 'zod';
 import { AccessDenied, type AppActor } from '@tulipfarm/access';
 import {
@@ -64,7 +65,7 @@ const operations = {
  * gets no answer in 2 s fails and its connection is dropped, so a half-dead connection cannot hold a slot.
  */
 export const appDataLookupPool = {
-  max: 3,
+  max: databasePools.appDataLookups,
   query_timeout: 2_000,
   statement_timeout: 2_000,
   keepAlive: true,

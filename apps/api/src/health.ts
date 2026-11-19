@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { createTemporalClient } from './temporal.ts';
 import type { FastifyInstance } from 'fastify';
 import { Pool } from 'pg';
+import { databasePools } from '@tulipfarm/config/database-connections';
 import { healthSchema, livenessSchema, rootSchema } from './health-schema.ts';
 import { isolatedStorageEnabled } from '@tulipfarm/workspaces/storage';
 import { log, observeCall } from '@tulipfarm/observability';
@@ -35,7 +36,7 @@ export function registerHealth(
     connectionTimeoutMillis: 2000,
     query_timeout: 2000,
     statement_timeout: 2000,
-    max: 3,
+    max: databasePools.health,
     // Health checks arrive minutes apart; keep one connection so latencyMs measures a query, not a TLS handshake.
     min: 1,
   });

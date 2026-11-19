@@ -1,4 +1,5 @@
 import { Pool } from 'pg';
+import { databasePools } from '@tulipfarm/config/database-connections';
 import { Client, Connection } from '@temporalio/client';
 import { temporalConnectionOptions } from '@tulipfarm/config/temporal';
 import { z } from 'zod';
@@ -113,7 +114,7 @@ export async function createSlackPromptComposition(
   const compactor = conversationCompactor(runtime, family => conversationModel(family));
   const pool = new Pool({
     connectionString: z.url().parse(process.env.WORKSPACE_AUTHORING_DATABASE_URL),
-    max: 1,
+    max: databasePools.slackPrompts,
     connectionTimeoutMillis: 5000,
     statement_timeout: 10000,
   });

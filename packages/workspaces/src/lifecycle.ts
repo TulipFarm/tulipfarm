@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { Pool } from 'pg';
+import { databasePools } from '@tulipfarm/config/database-connections';
 import { z } from 'zod';
 import { emitHook } from '@tulipfarm/extensions';
 import { identifyWorkspace, trackEvent } from '@tulipfarm/observability';
@@ -47,7 +48,7 @@ export function createWorkspaceMaintenance(options: { migrations: readonly Migra
     throw new Error('Workspace capability keys must be independent');
   const pool = new Pool({
     connectionString,
-    max: 2,
+    max: databasePools.workspaceMaintenance,
     connectionTimeoutMillis: 5000,
     statement_timeout: 60000,
     options: '-c search_path=pg_catalog',

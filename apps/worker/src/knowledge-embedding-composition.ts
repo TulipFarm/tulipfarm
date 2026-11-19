@@ -2,6 +2,7 @@ import { extname } from 'node:path';
 import { workerTelemetry, type WorkerTelemetry } from './telemetry.ts';
 import { fileURLToPath } from 'node:url';
 import { Pool } from 'pg';
+import { databasePools } from '@tulipfarm/config/database-connections';
 import { z } from 'zod';
 import { Worker, type NativeConnection } from '@temporalio/worker';
 import { parseKnowledgeEmbeddingsConfig } from '@tulipfarm/config';
@@ -41,7 +42,7 @@ export async function createKnowledgeEmbeddingWorker(dependencies: {
     dependencies.pool ??
     new Pool({
       connectionString: z.url().parse(env.WORKSPACE_AUTHORING_DATABASE_URL),
-      max: 2,
+      max: databasePools.knowledgeEmbeddings,
       connectionTimeoutMillis: 5000,
       statement_timeout: 10000,
     });

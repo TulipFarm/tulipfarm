@@ -1,4 +1,5 @@
 import { Pool } from 'pg';
+import { databasePools } from '@tulipfarm/config/database-connections';
 import { z } from 'zod';
 import { createTableCleanup } from '@tulipfarm/tables/cleanup';
 import type { AttachmentBytes } from '@tulipfarm/conversations/attachments';
@@ -64,7 +65,7 @@ export function createObjectCleanupSweep(
 ) {
   const registry = new Pool({
     connectionString: z.url().parse(process.env.WORKSPACE_AUTHORING_DATABASE_URL),
-    max: 1,
+    max: databasePools.objectCleanup,
     connectionTimeoutMillis: 5000,
     statement_timeout: 10000,
     options: '-c search_path=pg_catalog',

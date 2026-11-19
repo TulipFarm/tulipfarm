@@ -10,6 +10,7 @@ import { NativeConnection, Runtime, Worker } from '@temporalio/worker';
 import { createWorkspaceMaintenance } from '@tulipfarm/workspaces/lifecycle';
 import { createMigrationCredentialResolver } from '@tulipfarm/workspaces/capabilities';
 import { Pool } from 'pg';
+import { databasePools } from '@tulipfarm/config/database-connections';
 import { z } from 'zod';
 import { workspaceTableMigrations } from '@tulipfarm/workspaces/table-migrations';
 import { createInvitationExpirySweep } from '@tulipfarm/workspaces/invitation-expiry';
@@ -25,7 +26,7 @@ async function run() {
   const maintenance = createWorkspaceMaintenance({ migrations: await workspaceTableMigrations() });
   const registry = new Pool({
     connectionString: z.url().parse(process.env.WORKSPACE_MIGRATION_REGISTRY_DATABASE_URL),
-    max: 2,
+    max: databasePools.migrationRegistry,
     connectionTimeoutMillis: 5000,
     statement_timeout: 10000,
     options: '-c search_path=pg_catalog',

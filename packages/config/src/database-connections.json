@@ -1,0 +1,64 @@
+{
+  "workspaceDefaults": { "maxPools": 8, "connectionsPerPool": 2 },
+  "pools": {
+    "identity": 10,
+    "appDataLookups": 3,
+    "health": 3,
+    "abuse": 2,
+    "publicGuide": 10,
+    "googleConfirmation": 2,
+    "socialPosts": 2,
+    "tableConfirmation": 2,
+    "gateway": 10,
+    "emailDelivery": 2,
+    "tableAuthoring": 2,
+    "modelBundles": 1,
+    "objectCleanup": 1,
+    "appPlatform": 4,
+    "slackPrompts": 1,
+    "recommendationBudget": 2,
+    "knowledgeCapacity": 2,
+    "knowledgeEmbeddings": 2,
+    "subagentStops": 1,
+    "migrationRegistry": 2,
+    "workspaceMaintenance": 2,
+    "maintenanceSessions": 3
+  },
+  "services": {
+    "api": {
+      "workspaceRuntimes": 1,
+      "pools": [
+        "identity",
+        "appDataLookups",
+        "health",
+        "abuse",
+        "publicGuide",
+        "googleConfirmation",
+        "socialPosts",
+        "tableConfirmation"
+      ]
+    },
+    "api-jobs": { "workspaceRuntimes": 1, "pools": ["identity", "health", "tableConfirmation"] },
+    "worker": {
+      "workspaceRuntimes": 1,
+      "pools": [
+        "emailDelivery",
+        "tableAuthoring",
+        "modelBundles",
+        "objectCleanup",
+        "appPlatform",
+        "slackPrompts",
+        "recommendationBudget",
+        "knowledgeCapacity",
+        "knowledgeEmbeddings",
+        "subagentStops"
+      ]
+    },
+    "knowledge-worker": { "workspaceRuntimes": 1, "pools": ["tableAuthoring", "knowledgeEmbeddings"] },
+    "storage-worker": {
+      "workspaceRuntimes": 0,
+      "pools": ["migrationRegistry", "workspaceMaintenance", "maintenanceSessions"]
+    },
+    "gateway": { "workspaceRuntimes": 1, "pools": ["gateway"] }
+  }
+}
