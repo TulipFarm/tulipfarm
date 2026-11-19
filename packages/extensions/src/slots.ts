@@ -439,14 +439,17 @@ export type AppServerSize = { readonly vcpu: number; readonly memMiB: number };
  * unavailable and every call fails with `AppHostUnavailableError`.
  */
 export type AppHost = {
-  /** Boots the release's build output at this size and waits until it answers on `output.port`. Idempotent per input. */
+  /**
+   * Boots a build output at this size and waits until it answers on `output.port`. Idempotent per input. A host for
+   * `releaseId` may serve the app's endpoint; a host for `draftBuildId` runs the app's unpublished draft, is reached
+   * only through `connectHost`, is never pointed at by the endpoint, and may idle more aggressively than a live host.
+   */
   provision(
     input: {
       readonly appId: string;
-      readonly releaseId: string;
       readonly size: AppServerSize;
       readonly output: AppServerBuildOutput;
-    },
+    } & ({ readonly releaseId: string } | { readonly draftBuildId: string }),
     signal: AbortSignal,
   ): Promise<{ readonly hostRef: string }>;
   /**

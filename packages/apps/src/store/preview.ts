@@ -1,7 +1,9 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import type { Readable } from 'node:stream';
 import { GetObjectCommand, NoSuchKey } from '@aws-sdk/client-s3';
+import type { AppFailure } from '../app.ts';
 import type { AppBuildId, AppId, MembershipId } from '../ids.ts';
+import { draftServerOf, type DraftHost, type DraftServer } from './draft-hosts.ts';
 import { appRole } from './grants.ts';
 import type { AppSourceStorage } from './repository.ts';
 import { failed, rows, table, type AppResult, type AppTransaction, type SqlClient } from './sql.ts';
@@ -151,17 +153,17 @@ export async function readPreviewSession(
 export type PreviewBuild = { readonly buildId: AppBuildId; readonly manifestKey: string };
 
 /**
- * What a draft preview serves. A draft whose head commit builds a server previews that server, which runs only while
- * a publish of that commit has brought it up as the app's candidate host; `hostRef` is null otherwise. Any other
- * draft previews the files of its previewed build, or nothing before its first build.
+ * What a draft preview serves. A draft whose head commit's newest build is a server build previews that server: its
+ * draft host, or the live host when the head is what is live. Any other draft previews the files of its previewed
+ * build, or nothing before its first build.
  */
 export type PreviewTarget =
   | { readonly kind: 'files'; readonly build: PreviewBuild | null }
-  | { readonly kind: 'server'; readonly hostRef: string | null };
+  | { readonly kind: 'server'; readonly host: DraftServer };
 
 /**
  * What a preview session may serve right now, while the member is current and still holds `edit` and the app is
- * neither archived nor disabled.
+ * neither archived nor disabled. A server draft of an app paused for credits fails, so the editor learns why.
  */
 export async function readPreviewTarget(
   tx: AppTransaction,
@@ -173,23 +175,46 @@ export async function readPreviewTarget(
     id: string | null;
     manifest_key: string | null;
     head_kind: string | null;
-    candidate_host_ref: string | null;
+    budget_paused: boolean;
+    live_host_ref: string | null;
+    state: DraftHost['state'] | null;
+    host_ref: string | null;
+    failure: AppFailure | null;
   }>(
     tx,
-    `SELECT b.id, b.manifest_key,
-       (SELECT h.recipe->>'kind' FROM ${table(tx, 'tf_app_builds')} h WHERE h.app_id = a.id AND h.commit = d.head_commit
-         ORDER BY h.created_at DESC LIMIT 1) AS head_kind,
-       (SELECT r.candidate_host_ref FROM ${table(tx, 'tf_app_runtimes')} r
-         JOIN ${table(tx, 'tf_app_releases')} c ON c.id = r.candidate_release_id
-         WHERE r.app_id = a.id AND c.commit = d.head_commit) AS candidate_host_ref
+    `SELECT b.id, b.manifest_key, head.recipe->>'kind' AS head_kind, a.budget_paused_at IS NOT NULL AS budget_paused,
+       (SELECT r.host_ref FROM ${table(tx, 'tf_app_runtimes')} r
+         JOIN ${table(tx, 'tf_app_releases')} l ON l.id = r.live_release_id
+         WHERE r.app_id = a.id AND r.live_release_id = a.live_release_id AND l.build_id = head.id) AS live_host_ref,
+       h.state, h.host_ref, h.failure
      FROM ${table(tx, 'tf_apps')} a
      JOIN ${table(tx, 'tf_app_drafts')} d ON d.app_id = a.id
      LEFT JOIN ${table(tx, 'tf_app_builds')} b ON b.id = d.preview_build_id AND b.status = 'succeeded'
+     LEFT JOIN LATERAL (SELECT n.id, n.recipe FROM ${table(tx, 'tf_app_builds')} n
+                        WHERE n.app_id = a.id AND n.commit = d.head_commit
+                        ORDER BY n.created_at DESC LIMIT 1) head ON true
+     LEFT JOIN ${table(tx, 'tf_app_draft_hosts')} h ON h.app_id = a.id AND h.build_id = head.id
      WHERE a.id = $1 AND a.archived_at IS NULL AND a.disabled_at IS NULL`,
     [session.appId],
   );
   if (!row) return failed('not-found', 'App not found');
-  if (row.head_kind === 'server') return { ok: true, target: { kind: 'server', hostRef: row.candidate_host_ref } };
+  if (row.head_kind === 'server') {
+    const host: DraftServer = row.budget_paused
+      ? {
+          state: 'failed',
+          failure: {
+            code: 'budget-exhausted',
+            message: 'This app is paused until it has credits to run.',
+            retryable: false,
+          },
+        }
+      : row.live_host_ref !== null
+        ? { state: 'ready', hostRef: row.live_host_ref }
+        : row.state === null
+          ? { state: 'stopped' }
+          : draftServerOf({ state: row.state, host_ref: row.host_ref, failure: row.failure });
+    return { ok: true, target: { kind: 'server', host } };
+  }
   return {
     ok: true,
     target: {
