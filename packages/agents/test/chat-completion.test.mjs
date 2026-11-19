@@ -18,7 +18,7 @@ import {
   unbackedCardClaim,
   unbackedImportClaim,
   unbackedAppClaim,
-  appChangeRequested,
+  appQuestionAsked,
   unbackedWriteClaim,
   uncheckedTableQuestion,
   waitingCardMisdescribed,
@@ -1366,7 +1366,7 @@ test("an app chat's answer about the app's current state is backed by reading it
     'The app is now in the editing state.',
     'The draft is now built and release 4 is live.',
   ]) {
-    for (const request of ['', 'What does the app look like right now?', 'Is the server up?'])
+    for (const request of ['what does the heading say?', 'is it live?', 'What does the app look like right now?'])
       for (const ran of [status, read]) assert.equal(unbackedAppClaim(text, 'public', ran, request), undefined, text);
     // Nothing read the app in this reply, so the answer reads it first; it never writes for it.
     assert.equal(unbackedAppClaim(text, 'public', new Set(), 'What is the heading?')?.missing, 'read', text);
@@ -1377,23 +1377,58 @@ test("an app chat's answer about the app's current state is backed by reading it
   assert.equal(unbackedAppClaim(edit, 'public', new Set([...read, 'apps.files.write'])), undefined);
 });
 
-test('an app chat request asks for a change only when it tells the app to change', () => {
-  for (const request of [
-    'Change the heading to Orders v2.',
-    'Now change it to Orders v3 and rebuild.',
-    'Thanks. Please add a footer.',
-    'Can you rename the page to Orders?',
-    'ok, fix the /health route',
-  ])
-    assert.equal(appChangeRequested(request), true, request);
-  for (const request of [
-    'What does the heading say?',
-    'Did you change the heading?',
-    'Is the app live?',
-    'Which files does the app have?',
-    '',
-  ])
-    assert.equal(appChangeRequested(request), false, request);
+const changeRequests = [
+  'Create a contact form',
+  'Write a landing page',
+  'Implement login',
+  'Turn the button blue',
+  'Can we add dark mode?',
+  'Let us add dark mode',
+  'I want the button blue',
+  'The heading should say Orders v2',
+  'Yes, do it',
+  'Go ahead',
+  'yes please',
+  'Change the heading to Orders v2.',
+  'Now change it to Orders v3 and rebuild.',
+  'Can you rename the page to Orders?',
+  '',
+];
+const questions = [
+  'what does the heading say?',
+  'is it live?',
+  'What does the heading say?',
+  'Did you change the heading?',
+  'Is the app live?',
+  'Which files does the app have?',
+  'Thanks! What is on the page now?',
+  'Show me the files',
+  'list the routes',
+];
+
+test('an app chat request counts as a question only when it plainly asks about the app', () => {
+  for (const request of changeRequests) assert.equal(appQuestionAsked(request), false, request);
+  for (const request of questions) assert.equal(appQuestionAsked(request), true, request);
+});
+
+test('an app chat reply cannot say the app now has what a change request asked for after only reading it', () => {
+  const read = new Set(['apps.status', 'apps.files.read']);
+  for (const request of changeRequests) {
+    assert.equal(
+      unbackedAppClaim('Your app now has a contact form.', 'public', read, request)?.missing,
+      'change',
+      request,
+    );
+    assert.equal(unbackedAppClaim('I added a form to index.html.', 'public', read, request)?.missing, 'edit', request);
+    assert.equal(unbackedAppClaim('I added a contact form.', 'public', read, request)?.missing, 'edit', request);
+    assert.equal(unbackedAppClaim('I created the login page.', 'public', read, request)?.missing, 'edit', request);
+    assert.equal(unbackedAppClaim('I implemented dark mode.', 'public', read, request)?.missing, 'edit', request);
+    assert.equal(
+      unbackedAppClaim('Your app now has a contact form.', 'public', new Set([...read, 'apps.files.write']), request),
+      undefined,
+      request,
+    );
+  }
 });
 
 test('an import presented for review needs a pending proposal receipt from this reply', () => {

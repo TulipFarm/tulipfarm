@@ -2253,7 +2253,7 @@ const buildClaim =
   /^(?:and |so )?(?:the |your )?(?:re)?build (?:succeeded|passed|worked|completed|finished|(?:is|was) (?:complete|done|finished|successful))\b|^(?:and |so )?(?:i|we) (?:re)?built\b|\b(?:i|we)(?:(?:'|’)ve| have) (?:re)?built\b|^(?:re)?built (?:the|your|this) (?:app|server|site)\b/i;
 const conditional = /\b(?:if|when|once|after|whether|unless|until)\b/i;
 const editClaim =
-  /\b(?:i|we)(?:'|’)?(?:ve| have)? (?:updated|edited|changed|modified|rewrote|replaced|inserted|deleted|removed)\b/i;
+  /\b(?:i|we)(?:'|’)?(?:ve| have)? (?:updated|edited|changed|modified|rewrote|wrote|replaced|inserted|deleted|removed|added|created|implemented)\b/i;
 const savedClaim =
   /^(?:and |so )?(?:the |your )?(?:[\w-]+ )?(?:changes?|edits?|updates?|fix(?:es)?) (?:is|are|was|were|has been|have been) (?:saved|applied|made|done|in place|complete|completed|finished|live)\b/i;
 /** A clause that says how the app reads now: a change claim when the person asked for one, otherwise a state report. */
@@ -2263,16 +2263,33 @@ const nowClaim =
 const alreadyClaim =
   /\balready (?:has|have|contains?|includes?|serves?|returns?|responds?|exposes?|defines?|handles?|reads?|says?|shows?|uses?)\b/i;
 const toReader = /\b(?:below|for you|here(?:'|’)?s|here is|here are)\b/i;
-const changeVerb = String.raw`(?:change|update|edit|set|rename|replace|add|remove|delete|fix|make|rewrite|insert|move|swap|rebuild|build|publish)`;
-const changeAsk = new RegExp(
-  String.raw`^(?:(?:please|now|ok(?:ay)?|and|then|also|so|next)[,\s]+)*${changeVerb}\b|\b(?:can|could|would|will) you (?:please )?${changeVerb}\b|\b(?:please|i want you to|i(?:'|’)d like you to) ${changeVerb}\b`,
-  'i',
+const changeVerb = String.raw`(?:add|change|create|write|implement|turn|make|build|rebuild|set|rename|replace|remove|delete|fix|rewrite|insert|move|swap|publish|deploy|update|edit|switch|style|restyle|redesign|refactor|convert|hook|wire|drop|hide|enable|disable|translate|resize|center|align)`;
+const changeWord = new RegExp(String.raw`\b${changeVerb}\b`, 'i');
+// "Did you change it?" asks about earlier work, so its verb is no request.
+const pastQuestion = new RegExp(
+  String.raw`\b(?:did|have|has|had) (?:you|we|i|it|they|that)(?: already| just)? ${changeVerb}\b`,
+  'gi',
 );
-/** Whether the person's message asks for the app to change, rather than asking about it. */
-export const appChangeRequested = (request: string) =>
-  request.split(/(?<=[.!?])\s+|\n+/).some(sentence => changeAsk.test(sentence.trim()));
+// "Show me" asks to see the app; "show a banner" asks to change it.
+const questionStart =
+  /^(?:what|how|does|do|did|is|are|was|were|has|have|show me|tell|list|which|where|when|why|who|whose)\b/i;
+/**
+ * Whether the person's latest message only asks about the app. Anything else, a confirmation like "go ahead"
+ * included, may ask for a change, so a reply saying the app now reads some way must have made one.
+ */
+export const appQuestionAsked = (request: string) => {
+  const sentences = request
+    .trim()
+    .split(/(?<=[.!?])\s+|\n+/)
+    .filter(Boolean);
+  const last = sentences.at(-1) ?? '';
+  return (
+    (last.endsWith('?') || questionStart.test(last)) &&
+    !sentences.some(sentence => changeWord.test(sentence.replace(pastQuestion, '')))
+  );
+};
 const codeObject =
-  /\b(?:files?|code|server|routes?|handlers?|html|css|scripts?|components?)\b|[\w-]+\/[\w./-]+|\b[\w-]+\.(?:m?js|tsx?|jsx|html|css|json)\b/i;
+  /\b(?:files?|code|server|routes?|handlers?|html|css|scripts?|components?|pages?|forms?|buttons?|headings?|headers?|footers?|sections?|banners?|links?|images?|styles?|layout|nav(?:igation)?|menus?|endpoints?|login|dark mode|features?)\b|[\w-]+\/[\w./-]+|\b[\w-]+\.(?:m?js|tsx?|jsx|html|css|json)\b/i;
 
 /**
  * Why an app chat's reply must do more work: it says its own tools are missing, which they never are in the app's chat,
@@ -2291,7 +2308,7 @@ export function unbackedAppClaim(candidate: string, apps: AppKind | undefined, r
   if (apps === 'private') return undefined;
   const changed = ran.has('apps.files.write') || ran.has('apps.files.delete');
   const looked = changed || ran.has(buildTool) || ran.has('apps.status') || ran.has('apps.files.read');
-  const asked = appChangeRequested(request);
+  const asked = !appQuestionAsked(request);
   const unconditional = sentences.filter(sentence => !conditional.test(sentence));
   const settled = unconditional.filter(sentence => !earlierOutcome.test(sentence));
   // 'edit' is an explicit edit claim, the only kind a forced write can back; 'change' says the app reads as asked.
@@ -6242,7 +6259,7 @@ export async function inferWithTools(
             ? buildTool
             : !ran.has('apps.files.read')
               ? 'apps.files.read'
-              : appUnbacked.missing === 'edit' && appChangeRequested(fileRequest)
+              : appUnbacked.missing === 'edit' && !appQuestionAsked(fileRequest)
                 ? 'apps.files.write'
                 : undefined;
         if (next) {

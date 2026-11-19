@@ -3351,7 +3351,7 @@ test("an app chat answer about the app's current state stands once the app was r
       const turn = await appTurn(
         t,
         round => (round === 0 ? { calls: [use('apps.status')] } : { text: answer }),
-        'What state is the app in right now?',
+        'is it live?',
       );
       assert.deepEqual(turn.choices, ['apps_status', 'auto']);
       assert.deepEqual(turn.ran, ['apps.status']);
@@ -3360,21 +3360,30 @@ test("an app chat answer about the app's current state stands once the app was r
 });
 
 test('an app chat reply that says the app reads as asked, with no write, is read first but never forced to write', async t => {
-  const claim = "The heading is now 'Orders v3'.";
-  const turn = await appTurn(
-    t,
-    round =>
-      [{ calls: [use('apps.status')] }, { text: claim }, { calls: [use('apps.files.read', { path: 'index.html' })] }][
-        round
-      ] ?? { text: claim },
-  );
-  assert.deepEqual(turn.ran, ['apps.status', 'apps.files.read']);
-  assert.deepEqual(turn.choices.slice(0, 3), ['apps_status', 'auto', 'apps_files_read']);
-  assert.ok(
-    turn.choices.slice(3).every(choice => choice === 'auto'),
-    String(turn.choices),
-  );
-  assert.match(turn.result.text, /^I stopped before changing or building the app, so nothing in it changed/);
+  for (const [request, claim] of [
+    ['Now change it to Orders v3 and rebuild.', "The heading is now 'Orders v3'."],
+    ['Create a contact form', 'Your app now has a contact form.'],
+    ['Go ahead', 'Your app now has a contact form.'],
+  ])
+    await t.test(request, async t => {
+      const turn = await appTurn(
+        t,
+        round =>
+          [
+            { calls: [use('apps.status')] },
+            { text: claim },
+            { calls: [use('apps.files.read', { path: 'index.html' })] },
+          ][round] ?? { text: claim },
+        request,
+      );
+      assert.deepEqual(turn.ran, ['apps.status', 'apps.files.read']);
+      assert.deepEqual(turn.choices.slice(0, 3), ['apps_status', 'auto', 'apps_files_read']);
+      assert.ok(
+        turn.choices.slice(3).every(choice => choice === 'auto'),
+        String(turn.choices),
+      );
+      assert.match(turn.result.text, /^I stopped before changing or building the app, so nothing in it changed/);
+    });
 });
 
 test('an app chat reply that keeps claiming an edit no tool made ends with a stop, never under the claim', async t => {
