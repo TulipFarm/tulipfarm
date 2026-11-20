@@ -43,7 +43,11 @@ export class PlanSessionError extends Error {
 const idleMs = 10 * 60_000;
 /** An answered session only continues for a correction in the same reply; the next reply starts its own. */
 const answeredIdleMs = 60_000;
-const maxSessions = 200;
+/**
+ * Each open session keeps a Claude Code or Copilot process of about 200 MB alive, so a worker keeps only a few. Busy
+ * sessions are never closed, so more than this may run at once; idle ones close to make room.
+ */
+const maxSessions = 2;
 
 /** Answers one request of a Claude or Copilot plan route, in that provider's wire format. */
 export async function planSessionFetch(
@@ -457,6 +461,7 @@ class Session {
   pending: Call[] = [];
   busy = false;
   closed = false;
+  releasedAt = 0;
   private timer: NodeJS.Timeout | undefined;
 
   readonly key: string;
@@ -518,9 +523,11 @@ class Session {
 
   release() {
     this.busy = false;
+    this.releasedAt = Date.now();
     clearTimeout(this.timer);
     this.timer = setTimeout(() => this.close(), this.pending.length ? idleMs : answeredIdleMs);
     this.timer.unref?.();
+    makeRoom(0);
   }
 
   close() {
@@ -562,16 +569,21 @@ async function claim(provider: PlanSessionProvider, token: string, conversation:
       session.busy = true;
       return session;
     }
-  const total = [...sessions.values()].reduce((sum, set) => sum + set.size, 0);
-  if (total >= maxSessions) {
-    const idle = [...sessions.values()].flatMap(set => [...set]).find(session => !session.busy);
-    idle?.close();
-  }
+  makeRoom(1);
   const vendor = await openVendor(provider, token, conversation.model, startSystem(conversation), conversation.tools);
   const session = new Session(key, provider, vendor);
   session.busy = true;
   pool.add(session);
   return session;
+}
+
+/** Closes idle sessions, answered ones first and then the oldest, until `opening` more fit under maxSessions. */
+function makeRoom(opening: number) {
+  const open = [...sessions.values()].flatMap(set => [...set]);
+  const idle = open
+    .filter(session => !session.busy)
+    .sort((a, b) => Math.sign(a.pending.length) - Math.sign(b.pending.length) || a.releasedAt - b.releasedAt);
+  for (let excess = open.length + opening - maxSessions; excess > 0 && idle.length; excess--) idle.shift()!.close();
 }
 
 /** A new session carries the earlier conversation in its instructions and continues from the last message. */
@@ -1184,6 +1196,7 @@ export const planSessionsForTest = {
   claudeError,
   copilotError,
   sessions,
+  maxSessions,
   /** Replaces the vendor SDKs; pass nothing to restore them. */
   useVendors(fake?: OpenVendor) {
     openVendor = fake ?? vendors;

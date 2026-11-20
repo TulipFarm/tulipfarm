@@ -338,3 +338,42 @@ test('a Claude plan tool call that arrives after its step settled is the next st
   assert.equal(answer.stop_reason, 'end_turn');
   assert.deepEqual(answer.content, [{ type: 'text', text: 'Two tables.' }]);
 });
+
+test('idle plan sessions close so a worker keeps only a few Claude Code processes open', async t => {
+  const asks = 5;
+  const log = scripted(
+    t,
+    Array.from({ length: asks }, (_, index) => ({ kind: 'answer', words: [`Reply ${index}`] })),
+  );
+  for (let index = 0; index < asks; index++) {
+    const response = await planSessionFetch('claude', 'token', claudeBody([{ role: 'user', content: `Ask ${index}` }]));
+    assert.equal((await read(response, 'anthropic')).error, null);
+  }
+  const open = [...planSessionsForTest.sessions.values()].reduce((sum, set) => sum + set.size, 0);
+  assert.equal(open, planSessionsForTest.maxSessions);
+  assert.equal(log.filter(entry => entry.close).length, asks - planSessionsForTest.maxSessions);
+});
+
+test('a session waiting for tool results outlives answered ones when room is needed', async t => {
+  const log = scripted(t, [
+    { kind: 'calls', calls: [{ id: 'c1', name: tool.name, input: {} }] },
+    { kind: 'answer', words: ['One'] },
+    { kind: 'answer', words: ['Two'] },
+    { kind: 'answer', words: ['Done'] },
+  ]);
+  const first = [{ role: 'user', content: 'List tables' }];
+  const calls = await read(await planSessionFetch('claude', 'token', claudeBody(first)), 'anthropic');
+  for (const ask of ['Other one', 'Other two'])
+    await read(await planSessionFetch('claude', 'token', claudeBody([{ role: 'user', content: ask }])), 'anthropic');
+  const resumed = [
+    ...first,
+    { role: 'assistant', content: calls.body.content },
+    { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'c1', content: '[]' }] },
+  ];
+  const answer = await read(await planSessionFetch('claude', 'token', claudeBody(resumed)), 'anthropic');
+  assert.equal(answer.error, null);
+  assert.ok(
+    log.some(entry => entry.resume),
+    'the paused session resumed instead of reopening',
+  );
+});
