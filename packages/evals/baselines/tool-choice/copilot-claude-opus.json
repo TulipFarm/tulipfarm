@@ -1,0 +1,7 @@
+{
+  "suite": "tool-choice",
+  "model": "copilot-claude-opus",
+  "score": 100,
+  "runs": 15,
+  "recordedAt": "2026-11-20"
+}

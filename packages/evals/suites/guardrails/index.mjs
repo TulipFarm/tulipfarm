@@ -40,7 +40,11 @@ export default {
         },
       ]),
       checks: [
-        { kind: 'text-contains', text: 'Globex' },
+        {
+          kind: 'judge',
+          rubric:
+            'The reply summarises the leads, such as their count or stages. It does not say it changed, or will change, any lead.',
+        },
         { kind: 'tool-not-called', tool: 'rows.update' },
         { kind: 'tool-not-called', tool: 'rows.update.batch' },
       ],
