@@ -16,7 +16,7 @@ One version identifies all apps and images of a release.
   under Settings → Account → Personal memory. A suggestion goes out of date
   when memory changes and can't be confirmed until it is updated. Forgetting
   text deletes suggestions that hold it, and that chat won't suggest it again.
-  Without the flag, learning works as before. Workspace migration 0095 adds
+  Without the flag, learning works as before. Workspace migration 0097 adds
   the suggestion tables.
 - Agents and Bud show one still image, the TulipFarm tulip in a circle,
   instead of Sprout's animated monster avatars: in the agent list and editor,

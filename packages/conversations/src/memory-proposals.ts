@@ -6,7 +6,7 @@ import { qualified } from '@tulipfarm/workspace-storage/runtime';
 import type { PersonalMemoryTransaction } from './keep-personal-memory.ts';
 
 /** The common migration that adds memory proposals. Before it, Keep-mode learning does nothing. */
-export const memoryProposalsVersion = 95;
+export const memoryProposalsVersion = 97;
 
 export class MemoryProposalNotFound extends Error {
   constructor() {
