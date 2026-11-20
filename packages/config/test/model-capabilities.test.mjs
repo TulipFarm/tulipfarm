@@ -23,7 +23,7 @@ const shipped = {
   'gpt-sol': { reasoningEffort: 'none', imageInput: true },
   'gpt-astra': { api: 'responses', reasoningEffort: 'low', imageInput: true },
   grok: { reasoningEffort: 'minimal', reasoningTokensInOutput: true, imageInput: true },
-  'grok-fast': { reasoningEffort: 'none', reasoningTokensInOutput: true },
+  'grok-fast': { reasoningEffort: 'low', reasoningTokensInOutput: true },
   'deepseek-pro': { reasoningEffort: 'none' },
   'deepseek-flash': { reasoningEffort: 'none' },
   kimi: { reasoningEffort: 'none', imageInput: true },
