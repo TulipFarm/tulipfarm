@@ -92,6 +92,10 @@ One version identifies all apps and images of a release.
 
 ### Fixed
 
+- Long Knowledge documents reach Keep again. Each call now sends at most 32
+  chunks (128 KiB) instead of 256, so Keep finishes embedding them within the
+  delivery timeout even while it indexes a large backfill. Before, such
+  documents timed out on every retry and stayed out of Keep search.
 - In a Slack thread, the member who saved a workflow or skill from a chat that
   used their personal memory can now read it, and their later turns in that
   thread keep working. Anyone else is still refused: the tool now returns a

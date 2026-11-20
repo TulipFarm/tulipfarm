@@ -21,9 +21,10 @@ const deliveryTimeoutMs = 30000;
 const searchTimeoutMs = 5000;
 const searchLimit = 30;
 const searchBudgetTokens = 8000;
-// Keep refuses request bodies over 1 MiB, so a document's chunks are sent in batches well under that.
-const batchBytes = 512 * 1024;
-const batchEpisodes = 256;
+// Keep refuses request bodies over 1 MiB and embeds every chunk before it answers, so a document's chunks
+// are sent in small batches: each call must finish within the delivery timeout even while Keep is busy.
+const batchBytes = 128 * 1024;
+const batchEpisodes = 32;
 const metadataValueBytes = 1024;
 
 export type KnowledgeKeepDependencies = {
