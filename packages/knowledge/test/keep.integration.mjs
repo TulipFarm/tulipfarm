@@ -201,6 +201,28 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       assert.ok([...stored.episodes.values()].every(text => !text.includes('deadline')));
     });
 
+    await t.test('a long document is sent in small batches; only the first replaces the earlier revision', async () => {
+      const w = await setup();
+      const text = Array.from({ length: 400 }, (_, index) =>
+        `Section ${index}. Clause ${index} covers supplier term ${index} in detail. `.repeat(12),
+      ).join('\n\n');
+      const doc = await w.note(text, 'Long supplier policy');
+      assert.equal((await w.drain())[0].status, 'delivered');
+      const ingests = w.keep.calls.filter(call => call.op === 'ingest');
+      assert.ok(ingests.length > 1);
+      assert.equal(ingests[0].replace, true);
+      assert.ok(ingests.slice(1).every(call => call.replace === undefined));
+      for (const call of ingests) {
+        assert.ok(call.episodes.length <= 32);
+        assert.ok(Buffer.byteLength(JSON.stringify(call.episodes)) <= 160 * 1024);
+      }
+      const stored = w.keep.corpora.get(keepWorkspaceKnowledgeScope(w.ws.id).user).get(doc.documentId);
+      assert.equal(
+        stored.episodes.size,
+        ingests.reduce((sum, call) => sum + call.episodes.length, 0),
+      );
+    });
+
     await t.test('removal makes Keep forget the document; a repeated forget is harmless', async () => {
       const w = await setup();
       const doc = await w.note('supplier payment deadline', 'Supplier policy');
