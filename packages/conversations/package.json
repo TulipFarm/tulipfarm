@@ -51,6 +51,10 @@
       "types": "./dist/row-view.d.ts",
       "default": "./dist/row-view.js"
     },
+    "./keep-chat-recall": {
+      "types": "./dist/keep-chat-recall.d.ts",
+      "default": "./dist/keep-chat-recall.js"
+    },
     "./personal-memory": {
       "types": "./dist/personal-memory.d.ts",
       "default": "./dist/personal-memory.js"

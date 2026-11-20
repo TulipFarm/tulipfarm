@@ -8,7 +8,8 @@ import type { createAttachments } from '@tulipfarm/conversations/attachments';
 import { createConversationRequests } from '@tulipfarm/conversations/requests';
 import { workspaceSchemaPending } from '@tulipfarm/workspace-storage/runtime';
 import { registerChatLatency } from './chat-latency.ts';
-import { createConversationMaintenance } from '@tulipfarm/conversations/maintenance';
+import { createConversationMaintenance, maintenanceCompatibility } from '@tulipfarm/conversations/maintenance';
+import { createKeepChatRecallDelivery } from '@tulipfarm/conversations/keep-chat-recall';
 import { errorAttributes, log } from '@tulipfarm/observability';
 
 // The send route does not await its start; these deadlines bound background work and shutdown, not the send.
@@ -168,4 +169,29 @@ export function registerConversationDispatch(
   backgroundSweep(app, sweep, 'Conversation discovery will retry', 'conversation-discovery', {
     intervalMs: sweepIntervals.recovery,
   });
+  const recall = createKeepChatRecallDelivery(runtime, maintenanceCompatibility);
+  let recallAfter: string | null = null;
+  backgroundSweep(
+    app,
+    async stopped => {
+      const rows = await readyWorkspaces(pool, recallAfter, 100);
+      for (const row of rows) {
+        if (stopped()) return;
+        try {
+          await recall.sync(row.workspace_id, stopped);
+        } catch (error) {
+          if (!workspaceSchemaPending(error))
+            app.log.error(
+              { workspaceId: row.workspace_id, ...errorAttributes(error) },
+              'Chat recall delivery will retry',
+            );
+        }
+        recallAfter = row.workspace_id;
+      }
+      if (rows.length < 100) recallAfter = null;
+    },
+    'Chat recall delivery will retry',
+    'chat-recall-delivery',
+    { intervalMs: sweepIntervals.sync },
+  );
 }

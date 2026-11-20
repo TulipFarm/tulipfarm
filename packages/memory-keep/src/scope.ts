@@ -34,5 +34,13 @@ export function keepWorkspaceKnowledgeScope(workspaceId: string): KeepScope {
   return { user: `${keepWorkspaceUser(workspaceId)}-kb` };
 }
 
+/**
+ * The Keep scope of one chat's earlier messages, which compaction moved out of the live context. Only that chat's own
+ * replies search it. The `-c-` infix and fixed-width ids keep it apart from member and Knowledge scopes.
+ */
+export function keepConversationScope(workspaceId: string, conversationId: string): KeepScope {
+  return { user: `${keepWorkspaceUser(workspaceId)}-c-${id(conversationId, 'conversationId')}` };
+}
+
 /** The file that holds a member's personal memory: Keep's "You" profile, always considered for context. */
 export const keepProfilePath = '/profile.md';
