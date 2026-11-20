@@ -95,3 +95,73 @@ test(
     }
   },
 );
+
+test('suggested memory changes can be confirmed, dismissed, or shown as out of date', { timeout: 90000 }, async () => {
+  const server = await createServer({
+    root: new URL('..', import.meta.url).pathname,
+    server: { host: '127.0.0.1', port: 0 },
+    logLevel: 'error',
+  });
+  await server.listen();
+  const browser = await chromium.launch({ headless: true });
+  // Set MEMORY_SHOTS to a directory to save screenshots of each state.
+  const shot = async (page, name) => {
+    if (!process.env.MEMORY_SHOTS) return;
+    await page.getByRole('region', { name: 'Suggested changes' }).screenshot({
+      path: `${process.env.MEMORY_SHOTS}/${name}.png`,
+    });
+  };
+  try {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 1400 }, reducedMotion: 'reduce' });
+    page.setDefaultTimeout(10000);
+    const errors = [];
+    page.on('pageerror', error => errors.push(String(error)));
+    const url = `http://127.0.0.1:${server.httpServer.address().port}/memory-mock/settings/account?memoryScenario=keep`;
+    const editor = page.getByRole('textbox', { name: 'Your preferences', exact: true });
+    const list = page.getByRole('list', { name: 'Suggested changes' });
+    const card = name => list.getByRole('region', { name: `Suggested change: ${name}` });
+
+    await page.goto(`${url}&proposalScenario=pending`);
+    await card('Add to your memory').waitFor();
+    await list.getByText('“Please always use British spelling.”').waitFor();
+    await list.getByText('From the chat “Launch plan”').waitFor();
+    await shot(page, 'pending');
+    await editor.fill('Unsaved edit.');
+    await card('Add to your memory').getByText('Save or discard your edits first.').waitFor();
+    assert.ok(await card('Add to your memory').getByRole('button', { name: 'Confirm', exact: true }).isDisabled());
+    await page.getByRole('button', { name: 'Discard changes', exact: true }).click();
+    await card('Add to your memory').getByRole('button', { name: 'Confirm', exact: true }).click();
+    await page.getByText('Memory updated. Your next private replies will use it.', { exact: true }).waitFor();
+    assert.match(await editor.inputValue(), /Answer in British English\.$/);
+    await card('Change your memory').getByRole('button', { name: 'Dismiss', exact: true }).click();
+    await page.getByText('Suggestion dismissed. Your memory didn’t change.', { exact: true }).waitFor();
+    await page.getByText('No suggestions right now.', { exact: true }).waitFor();
+    await shot(page, 'empty');
+
+    await page.goto(`${url}&proposalScenario=outdated`);
+    const outdated = card('Change your memory');
+    await outdated.getByText('Out of date', { exact: true }).waitFor();
+    assert.equal(await outdated.getByRole('button', { name: 'Confirm', exact: true }).count(), 0);
+    await shot(page, 'outdated');
+    await outdated.getByRole('button', { name: 'Update suggestion', exact: true }).click();
+    await outdated.getByText('This suggestion no longer fits your memory. Dismiss it.', { exact: true }).waitFor();
+    await shot(page, 'outdated-no-longer-fits');
+    await outdated.getByRole('button', { name: 'Dismiss', exact: true }).click();
+    await page.getByText('Suggestion dismissed. Your memory didn’t change.', { exact: true }).waitFor();
+
+    await page.goto(`${url}&proposalScenario=error`);
+    await page.getByRole('heading', { name: 'Suggestions could not load', exact: true }).waitFor();
+    await shot(page, 'error');
+    await page.getByRole('button', { name: 'Retry', exact: true }).click();
+    await page.getByText('No suggestions right now.', { exact: true }).waitFor();
+
+    await page.goto(url.replace('memoryScenario=keep', 'memoryScenario=empty'));
+    await editor.waitFor();
+    assert.equal(await page.getByRole('heading', { name: 'Suggested changes' }).count(), 0);
+    await page.getByText(/Closed chats are checked in the background\.$/).waitFor();
+    assert.deepEqual(errors, []);
+  } finally {
+    await browser.close();
+    await server.close();
+  }
+});

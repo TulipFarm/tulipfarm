@@ -10,6 +10,14 @@ One version identifies all apps and images of a release.
 
 ### Changed
 
+- With the `keep-memory` flag on, background learning from private chats no
+  longer writes personal memory. It suggests edits instead, each quoting the
+  member's own words and naming the chat, and members confirm or dismiss them
+  under Settings → Account → Personal memory. A suggestion goes out of date
+  when memory changes and can't be confirmed until it is updated. Forgetting
+  text deletes suggestions that hold it, and that chat won't suggest it again.
+  Without the flag, learning works as before. Workspace migration 0098 adds
+  the suggestion tables.
 - Agents and Bud show one still image, the TulipFarm tulip in a circle,
   instead of Sprout's animated monster avatars: in the agent list and editor,
   the builder preview, chat, subagent fan-out, workflow diagrams and the

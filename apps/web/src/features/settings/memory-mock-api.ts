@@ -21,6 +21,39 @@ if (import.meta.env.DEV && /^\/memory-mock(?:\/|$)/.test(window.location.pathnam
         : 'Use short, friendly replies with emojis when they help.\n\nGreet me for my time of day. Explain unfamiliar terms in plain words.',
     revision: 1,
   };
+  // With `keep`, `proposalScenario=pending|outdated|empty|error` sets the suggested changes.
+  const proposalScenario = new URLSearchParams(window.location.search).get('proposalScenario') ?? 'empty';
+  const suggestion = (n: number, kind: 'add' | 'change' | 'remove', before: string | null, after: string | null) => ({
+    id: `7${n}7${n}7${n}7${n}-7${n}7${n}-4${n}7${n}-8${n}7${n}-7${n}7${n}7${n}7${n}7${n}7${n}`,
+    kind,
+    before,
+    after,
+    conversationId: id,
+    createdAt: '2026-10-14T10:00:00.000Z',
+  });
+  let proposals =
+    proposalScenario === 'pending' || proposalScenario === 'outdated'
+      ? [
+          {
+            ...suggestion(1, 'add', null, 'Answer in British English.'),
+            quote: 'Please always use British spelling.',
+            conversationTitle: 'Launch plan',
+            outdated: false,
+          },
+          {
+            ...suggestion(
+              2,
+              'change',
+              'Use short, friendly replies with emojis when they help.',
+              'Use short replies without emojis.',
+            ),
+            quote: 'Stop using emojis, keep it short.',
+            conversationTitle: 'Weekly update',
+            outdated: proposalScenario === 'outdated',
+          },
+        ]
+      : [];
+  let proposalFailures = 0;
   let previous = '';
   let failed = false;
   let readFailures = 0;
@@ -42,6 +75,30 @@ if (import.meta.env.DEV && /^\/memory-mock(?:\/|$)/.test(window.location.pathnam
             history: { trashed: false, undo: true },
           };
       return Response.json(memory);
+    }
+    if (keep && path.endsWith('/personal-memory/proposals') && method === 'GET') {
+      if (proposalScenario === 'error' && proposalFailures < 3) {
+        proposalFailures++;
+        return Response.json({ error: 'personal-memory-unavailable' }, { status: 503 });
+      }
+      return Response.json({ memory, proposals });
+    }
+    const decision = /\/personal-memory\/proposals\/([^/]+)\/(confirm|dismiss|refresh)$/.exec(path);
+    if (keep && decision && method === 'POST') {
+      const proposal = proposals.find(item => item.id === decision[1]);
+      if (!proposal) return Response.json({ error: 'memory-proposal-not-found' }, { status: 404 });
+      if (decision[2] === 'refresh' || (decision[2] === 'confirm' && proposal.outdated))
+        return Response.json({ error: 'memory-proposal-outdated' }, { status: 409 });
+      proposals = proposals.filter(item => item !== proposal);
+      if (decision[2] === 'confirm')
+        memory = {
+          content: proposal.before
+            ? memory.content.replace(proposal.before, proposal.after ?? '').trim()
+            : `${memory.content}\n${proposal.after}`,
+          revision: memory.revision + 1,
+          history: { trashed: false, undo: true },
+        };
+      return Response.json({ memory, proposals });
     }
     if (path.endsWith('/personal-memory')) {
       if (scenario === 'denied') return Response.json({ error: 'personal-memory-not-found' }, { status: 404 });

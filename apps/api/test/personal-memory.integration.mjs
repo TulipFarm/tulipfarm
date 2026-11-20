@@ -98,6 +98,19 @@ test(
       assert.equal((await request('PUT', { content: 'resurrect', expectedRevision: 1 })).statusCode, 409);
       response = await request('PUT', { content: ' \n ', expectedRevision: 2 });
       assert.deepEqual(response.json(), { content: '', revision: 3 });
+      const proposal = (action, user = memberUser, origin = authConfig().webOrigin, id = randomUUID()) =>
+        app.inject({
+          method: action ? 'POST' : 'GET',
+          url: `${url}/proposals${action ? `/${id}/${action}` : ''}`,
+          headers: { ...(user ? { 'x-test-user': user } : {}), origin },
+        });
+      assert.equal((await proposal(undefined, null)).statusCode, 401);
+      assert.equal((await proposal('confirm', null)).statusCode, 401);
+      assert.equal((await proposal('confirm', memberUser, 'https://attacker.example')).statusCode, 403);
+      assert.equal((await proposal('dismiss', memberUser, authConfig().webOrigin, 'not-a-uuid')).statusCode, 400);
+      // Suggestions exist only with Keep; the workspace store keeps writing learned preferences directly.
+      for (const action of [undefined, 'confirm', 'dismiss', 'refresh'])
+        assert.equal((await proposal(action)).statusCode, 409);
       await db.platform.query(
         `UPDATE ${qualified(w.names.schema, 'tf_memberships')} SET removed_at=now() WHERE id=$1`,
         [memberId],
@@ -105,6 +118,7 @@ test(
       assert.equal((await request('GET')).statusCode, 404);
       assert.equal((await request('DELETE', { expectedRevision: 3 })).statusCode, 404);
       assert.equal((await request('PUT', { content: 'no longer a member', expectedRevision: 3 })).statusCode, 404);
+      assert.equal((await proposal()).statusCode, 404);
     } finally {
       await app?.close();
       await runtime?.close();

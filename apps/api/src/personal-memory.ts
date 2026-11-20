@@ -7,6 +7,9 @@ import {
   personalMemorySchema,
   savePersonalMemorySchema,
   deletePersonalMemorySchema,
+  memoryProposalsSchema,
+  MemoryProposalNotFound,
+  MemoryProposalOutdated,
   PersonalMemoryConflict,
   PersonalMemoryRejected,
   PersonalMemoryUnavailable,
@@ -18,6 +21,7 @@ import { routeValidation } from './route-validation.ts';
 import { requestBoundaryError } from './security.ts';
 
 const params = z.strictObject({ workspaceId: z.uuid() });
+const proposalParams = z.strictObject({ workspaceId: z.uuid(), proposalId: z.uuid() });
 const validation = routeValidation({
   missing: 'Missing personal memory request validator',
   invalid: () => new Error('invalid-request'),
@@ -28,15 +32,20 @@ const failure = {
   required: ['error'],
   additionalProperties: false,
 };
-function schema(operationId: string, summary: string, body?: z.ZodType) {
+function schema(
+  operationId: string,
+  summary: string,
+  body?: z.ZodType,
+  options: { params?: z.ZodType; response?: z.ZodType } = {},
+) {
   return {
     operationId,
     summary,
     tags: ['Personal memory'],
-    params: validation.json(params),
+    params: validation.json(options.params ?? params),
     ...(body ? { body: validation.json(body) } : {}),
     response: {
-      200: validation.json(personalMemorySchema),
+      200: validation.json(options.response ?? personalMemorySchema),
       400: failure,
       401: failure,
       403: failure,
@@ -63,6 +72,8 @@ export function registerPersonalMemory(
     routes.setErrorHandler((error, _request, reply) => {
       if (requestBoundaryError(error, reply)) return;
       if (error instanceof AccessDenied) return reply.code(404).send({ error: 'personal-memory-not-found' });
+      if (error instanceof MemoryProposalNotFound) return reply.code(404).send({ error: error.message });
+      if (error instanceof MemoryProposalOutdated) return reply.code(409).send({ error: error.message });
       if (error instanceof PersonalMemoryConflict) return reply.code(409).send({ error: error.message });
       // Hidden memory is kept but not shown while Keep is off; it is not a temporary failure.
       if (error instanceof PersonalMemoryUnavailable && error.reason === 'hidden')
@@ -118,5 +129,44 @@ export function registerPersonalMemory(
       },
       request => dependencies.service.forget(params.parse(request.params).workspaceId, user(request), request.body),
     );
+    const proposals = `${base}/proposals`;
+    routes.get(
+      proposals,
+      {
+        schema: schema(
+          'listMemoryProposalsV1',
+          'List edits suggested for your personal memory. Needs history.',
+          undefined,
+          {
+            response: memoryProposalsSchema,
+          },
+        ),
+      },
+      request => dependencies.service.proposals(params.parse(request.params).workspaceId, user(request)),
+    );
+    for (const [action, operationId, summary] of [
+      ['confirm', 'confirmMemoryProposalV1', 'Apply a suggested edit to your personal memory'],
+      ['dismiss', 'dismissMemoryProposalV1', 'Discard a suggested edit'],
+      [
+        'refresh',
+        'refreshMemoryProposalV1',
+        'Update an outdated suggested edit to your current memory, if it still fits',
+      ],
+    ] as const)
+      routes.post(
+        `${proposals}/:proposalId/${action}`,
+        {
+          schema: schema(operationId, summary, undefined, { params: proposalParams, response: memoryProposalsSchema }),
+        },
+        request => {
+          const { workspaceId, proposalId } = proposalParams.parse(request.params);
+          const service = dependencies.service;
+          return action === 'confirm'
+            ? service.confirmProposal(workspaceId, user(request), proposalId)
+            : action === 'dismiss'
+              ? service.dismissProposal(workspaceId, user(request), proposalId)
+              : service.refreshProposal(workspaceId, user(request), proposalId);
+        },
+      );
   });
 }

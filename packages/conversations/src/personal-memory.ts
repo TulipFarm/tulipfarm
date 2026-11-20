@@ -16,12 +16,17 @@ import type { ConversationRuntime } from './runtime.ts';
 import {
   savePersonalMemorySchema,
   deletePersonalMemorySchema,
+  type MemoryProposals,
   type PersonalMemory,
 } from './personal-memory-contracts.ts';
 import {
   forgetKeepMemory,
   keepMemoryContext,
+  keepMemoryState,
+  keepRevision,
   personalMemoryMode,
+  readKeepProfile,
+  type KeepProfile,
   PersonalMemoryUnavailable,
   PersonalMemoryUnsupported,
   readKeepMemory,
@@ -30,7 +35,22 @@ import {
   undoKeepMemory,
   type PersonalMemoryTransaction,
 } from './keep-personal-memory.ts';
+import {
+  applyMemoryEdit,
+  blockLearningSource,
+  deleteMemoryProposal,
+  lockMemoryLearning,
+  lockMemoryProposal,
+  memoryProposalRecords,
+  memoryProposalsInstalled,
+  MemoryProposalOutdated,
+  rebindMemoryProposal,
+  recordDirectMemoryChange,
+  scrubMemoryProposals,
+  type MemoryProposalRecord,
+} from './memory-proposals.ts';
 export * from './personal-memory-contracts.ts';
+export { MemoryProposalNotFound, MemoryProposalOutdated } from './memory-proposals.ts';
 export { PersonalMemoryConflict } from '@tulipfarm/memory-core/memory/personal-memory';
 export {
   configureKeepPersonalMemory,
@@ -121,6 +141,7 @@ export async function replacePersonalMemory(
   const mode = await keepMode(tx, actor);
   if (mode.kind === 'legacy') return legacyPersonalMemory.replace(tx, actor, nextContent, expectedRevision);
   savePersonalMemorySchema.parse({ content: nextContent, expectedRevision });
+  await lockMemoryLearning(tx, actor);
   return changed(tx, actor, await replaceKeepMemory(mode, nextContent, expectedRevision));
 }
 
@@ -154,12 +175,25 @@ export async function replaceOwnPersonalMemory(
 ) {
   const result = await replacePersonalMemory(tx, actor, nextContent, expectedRevision);
   await clearBudPreferences(tx, actor);
+  await directKeepChange(tx, actor);
   return result;
+}
+
+/** With Keep, a change the member made themselves resets where background learning reads from. */
+async function directKeepChange(tx: PersonalMemoryTransaction, actor: HumanActor) {
+  if ((await personalMemoryMode(tx, actor)).kind === 'keep') await recordDirectMemoryChange(tx, actor);
 }
 
 async function keepOnly(tx: PersonalMemoryTransaction, actor: HumanActor) {
   const mode = await keepMode(tx, actor);
   if (mode.kind !== 'keep') throw new PersonalMemoryUnsupported();
+  return mode;
+}
+
+/** Keep only, for a change: holds off background learning until the transaction ends. */
+async function keepChange(tx: PersonalMemoryTransaction, actor: HumanActor) {
+  const mode = await keepOnly(tx, actor);
+  await lockMemoryLearning(tx, actor);
   return mode;
 }
 
@@ -169,8 +203,9 @@ export async function undoOwnPersonalMemory(
   actor: HumanActor,
   expectedRevision: number,
 ) {
-  const result = await changed(tx, actor, await undoKeepMemory(await keepOnly(tx, actor), expectedRevision));
+  const result = await changed(tx, actor, await undoKeepMemory(await keepChange(tx, actor), expectedRevision));
   await clearBudPreferences(tx, actor);
+  await recordDirectMemoryChange(tx, actor);
   return result;
 }
 
@@ -184,9 +219,96 @@ export async function forgetOwnPersonalMemory(
   expectedRevision: number,
   text?: string,
 ) {
-  const result = await changed(tx, actor, await forgetKeepMemory(await keepOnly(tx, actor), expectedRevision, text));
+  const result = await changed(tx, actor, await forgetKeepMemory(await keepChange(tx, actor), expectedRevision, text));
   await clearBudPreferences(tx, actor);
+  await scrubMemoryProposals(tx, actor, text === undefined ? undefined : { text, memory: result.content });
+  await recordDirectMemoryChange(tx, actor);
   return result;
+}
+
+const profileText = (profile: KeepProfile) => (profile.kind === 'active' ? profile.text : '');
+const profileBase = (profile: KeepProfile) => ({
+  revision: keepRevision(profile),
+  revisionId: profile.kind === 'empty' ? null : profile.head.revisionId,
+});
+
+async function proposalsView(
+  tx: PersonalMemoryTransaction,
+  actor: HumanActor,
+  profile: KeepProfile,
+): Promise<MemoryProposals> {
+  const revision = keepRevision(profile);
+  const records = (await memoryProposalsInstalled(tx)) ? await memoryProposalRecords(tx, actor) : [];
+  return {
+    memory: keepMemoryState(profile),
+    proposals: records.map(record => ({
+      id: record.id,
+      kind: record.kind,
+      before: record.before,
+      after: record.after,
+      quote: record.quote,
+      conversationId: record.conversationId,
+      conversationTitle: record.conversationTitle,
+      createdAt: record.createdAt,
+      outdated: record.baseRevision !== revision || applyMemoryEdit(profileText(profile), record) === undefined,
+    })),
+  };
+}
+
+/** Keep only: the member's memory with the edits background learning suggested for it. */
+export async function listMemoryProposals(tx: PersonalMemoryTransaction, actor: HumanActor) {
+  return proposalsView(tx, actor, await readKeepProfile(await keepOnly(tx, actor)));
+}
+
+async function proposalMode(tx: PersonalMemoryTransaction, actor: HumanActor) {
+  const mode = await keepChange(tx, actor);
+  if (!(await memoryProposalsInstalled(tx))) throw new PersonalMemoryUnavailable('updating');
+  return mode;
+}
+
+/**
+ * Applies a suggested edit with a compare-and-swap write on the revision it was made against. Like the member's own
+ * edit, it drops their Bud preference records and refreshes recommendations. Other suggestions made against the same
+ * memory move to the new revision when they still fit it.
+ */
+export async function confirmMemoryProposal(tx: PersonalMemoryTransaction, actor: HumanActor, id: string) {
+  const mode = await proposalMode(tx, actor);
+  const proposal = await lockMemoryProposal(tx, actor, id);
+  const profile = await readKeepProfile(mode);
+  const revision = keepRevision(profile);
+  const next = proposal.baseRevision === revision ? applyMemoryEdit(profileText(profile), proposal) : undefined;
+  if (next === undefined) throw new MemoryProposalOutdated();
+  await changed(tx, actor, await replaceKeepMemory(mode, next, revision));
+  await clearBudPreferences(tx, actor);
+  await deleteMemoryProposal(tx, actor, proposal.id);
+  const updated = await readKeepProfile(mode);
+  for (const other of await memoryProposalRecords(tx, actor))
+    if (other.baseRevision === revision && applyMemoryEdit(profileText(updated), other) !== undefined)
+      await rebindMemoryProposal(tx, actor, other.id, profileBase(updated));
+  return proposalsView(tx, actor, updated);
+}
+
+/** Discards a suggestion. Learning does not suggest the same words from that chat again. */
+export async function dismissMemoryProposal(tx: PersonalMemoryTransaction, actor: HumanActor, id: string) {
+  const mode = await proposalMode(tx, actor);
+  const proposal: MemoryProposalRecord = await lockMemoryProposal(tx, actor, id);
+  await deleteMemoryProposal(tx, actor, proposal.id);
+  await blockLearningSource(tx, actor, proposal);
+  return proposalsView(tx, actor, await readKeepProfile(mode));
+}
+
+/**
+ * Moves an outdated suggestion to the current memory when its edit still fits there. Throws
+ * {@link MemoryProposalOutdated} when it no longer fits; the member can only dismiss it then.
+ */
+export async function refreshMemoryProposal(tx: PersonalMemoryTransaction, actor: HumanActor, id: string) {
+  const mode = await proposalMode(tx, actor);
+  const proposal = await lockMemoryProposal(tx, actor, id);
+  const profile = await readKeepProfile(mode);
+  if (applyMemoryEdit(profileText(profile), proposal) === undefined) throw new MemoryProposalOutdated();
+  if (proposal.baseRevision !== keepRevision(profile))
+    await rebindMemoryProposal(tx, actor, proposal.id, profileBase(profile));
+  return proposalsView(tx, actor, profile);
 }
 
 export function createPersonalMemoryService(runtime: ConversationRuntime) {
@@ -240,6 +362,15 @@ export function createPersonalMemoryService(runtime: ConversationRuntime) {
       const input = deletePersonalMemorySchema.parse(value);
       return change(workspaceId, userId, (tx, actor) => undoOwnPersonalMemory(tx, actor, input.expectedRevision));
     },
+    /** Keep only: the edits background learning suggested, for the member to confirm or dismiss. */
+    proposals: (workspaceId: string, userId: string) =>
+      human(workspaceId, userId, (tx, actor) => listMemoryProposals(tx, actor)),
+    confirmProposal: (workspaceId: string, userId: string, id: string) =>
+      human(workspaceId, userId, (tx, actor) => confirmMemoryProposal(tx, actor, uuidSchema.parse(id))),
+    dismissProposal: (workspaceId: string, userId: string, id: string) =>
+      human(workspaceId, userId, (tx, actor) => dismissMemoryProposal(tx, actor, uuidSchema.parse(id))),
+    refreshProposal: (workspaceId: string, userId: string, id: string) =>
+      human(workspaceId, userId, (tx, actor) => refreshMemoryProposal(tx, actor, uuidSchema.parse(id))),
     /** Keep only: permanently erases the whole memory, including its history and trash. */
     forget: (workspaceId: string, userId: string, value: unknown) => {
       const input = deletePersonalMemorySchema.parse(value);

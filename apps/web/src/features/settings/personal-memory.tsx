@@ -22,6 +22,7 @@ import {
 import { UnsavedChanges } from '@/features/tables/feedback';
 import { TableRequestError } from '@/features/tables/request-state';
 import { settingsRequest } from './api';
+import { MemoryProposals } from './memory-proposals';
 
 type State =
   | { kind: 'loading' }
@@ -240,182 +241,197 @@ export function PersonalMemoryEditor({ workspaceId, workspaceName }: { workspace
           description="Check your workspace access before editing your preferences."
         />
       ) : (
-        <Form
-          label="Personal memory"
-          disabled={pending}
-          onSubmit={() => {
-            if (
-              !savePersonalMemorySchema.safeParse({ content: draft, expectedRevision: saved?.revision ?? 0 }).success
-            ) {
-              setInvalid(true);
-              return 'invalid';
-            }
-            void save();
-          }}
-        >
-          <div className="grid gap-4">
-            {saved?.content === '' && !history?.trashed && (
-              <p className="text-sm text-muted-foreground">
-                No preferences saved yet. Add your own, or tell Bud how you like replies. Closed chats are checked in
-                the background.
-              </p>
-            )}
-            <Field
-              id="personal-memory"
-              label="Your preferences"
-              optional
-              counter={`${characters.toLocaleString()} / 10,000`}
-              helper="Markdown is supported. For example: Use short replies with emojis. Greet me for my time of day."
-              error={
-                invalid || characters > personalMemoryMaximumCharacters
-                  ? 'Use valid text with no more than 10,000 characters.'
-                  : undefined
+        <>
+          <Form
+            label="Personal memory"
+            disabled={pending}
+            onSubmit={() => {
+              if (
+                !savePersonalMemorySchema.safeParse({ content: draft, expectedRevision: saved?.revision ?? 0 }).success
+              ) {
+                setInvalid(true);
+                return 'invalid';
               }
-            >
-              <Textarea
-                value={draft}
-                readOnly={unresolved}
-                onChange={event => {
-                  setDraft(event.target.value);
-                  if (state.kind === 'saved' || state.kind === 'changed' || state.kind === 'error')
-                    setState({ kind: 'ready' });
-                  if (invalid)
-                    setInvalid(
-                      !savePersonalMemorySchema.safeParse({
-                        content: event.target.value,
-                        expectedRevision: saved?.revision ?? 0,
-                      }).success,
-                    );
-                }}
-              />
-            </Field>
-            {state.kind === 'saved' && (
-              <p role="status" className="text-sm text-muted-foreground">
-                Memory saved. Your next private replies will use it.
-              </p>
-            )}
-            {state.kind === 'changed' && (
-              <p role="status" className="text-sm text-muted-foreground">
-                {state.message}
-              </p>
-            )}
-            {history?.trashed && (
-              <Alert>
-                <p>Your memory is deleted. You can restore it for 7 days after deleting it.</p>
-                <div className="mt-3">
-                  <Button variant="outline" disabled={pending || unresolved} onClick={() => void change('undo')}>
-                    Restore memory
-                  </Button>
-                </div>
-              </Alert>
-            )}
-            {state.kind === 'uncertain' && (
-              <Alert>
-                <p>
-                  We could not confirm your save, or memory changed while you were editing. Your draft is kept. Check
-                  the saved version before trying again.
+              void save();
+            }}
+          >
+            <div className="grid gap-4">
+              {saved?.content === '' && !history?.trashed && (
+                <p className="text-sm text-muted-foreground">
+                  No preferences saved yet. Add your own, or tell Bud how you like replies.{' '}
+                  {history
+                    ? 'Closed chats are checked in the background, and changes are suggested below for you to review.'
+                    : 'Closed chats are checked in the background.'}
                 </p>
-                <div className="mt-3">
-                  <Button variant="outline" onClick={() => void read(true)}>
-                    Check saved memory
-                  </Button>
-                </div>
-              </Alert>
-            )}
-            {state.kind === 'conflict' && (
-              <Alert>
-                <p>Review the latest saved memory before replacing it with your draft.</p>
-                <pre className="my-3 max-h-48 overflow-auto whitespace-pre-wrap break-words text-sm">
-                  {state.latest.content || 'No saved preferences.'}
-                </pre>
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      accept(state.latest);
+              )}
+              <Field
+                id="personal-memory"
+                label="Your preferences"
+                optional
+                counter={`${characters.toLocaleString()} / 10,000`}
+                helper="Markdown is supported. For example: Use short replies with emojis. Greet me for my time of day."
+                error={
+                  invalid || characters > personalMemoryMaximumCharacters
+                    ? 'Use valid text with no more than 10,000 characters.'
+                    : undefined
+                }
+              >
+                <Textarea
+                  value={draft}
+                  readOnly={unresolved}
+                  onChange={event => {
+                    setDraft(event.target.value);
+                    if (state.kind === 'saved' || state.kind === 'changed' || state.kind === 'error')
                       setState({ kind: 'ready' });
-                    }}
-                  >
-                    Use saved version
-                  </Button>
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      setSaved(state.latest);
-                      setState({ kind: 'ready' });
-                    }}
-                  >
-                    Keep my draft
-                  </Button>
-                </div>
-              </Alert>
-            )}
-            <FormFooter
-              dirty={dirty}
-              submit={{
-                label: 'Save memory',
-                pendingLabel: state.kind === 'checking' ? 'Checking memory...' : 'Saving memory...',
-                state: pending
-                  ? { kind: 'busy' }
-                  : unresolved
-                    ? { kind: 'blocked', reason: 'Resolve the saved version before saving.' }
-                    : { kind: 'ready' },
-              }}
-              cancel={
-                unresolved
-                  ? undefined
-                  : {
-                      kind: 'reset',
-                      label: 'Discard changes',
-                      onReset: () => {
-                        if (saved) {
-                          accept(saved);
-                          setState({ kind: 'ready' });
-                        }
-                      },
-                    }
-              }
-              note={
-                history
-                  ? 'Manual changes take priority over older chats. Memory keeps a history of changes, so you can undo them.'
-                  : 'Manual changes take priority over older chats. To clear memory, remove the text and save. New chats can add new preferences.'
-              }
-              error={
-                state.kind === 'error' ? state.message : invalid ? 'Fix the memory text before saving.' : undefined
-              }
-            />
-            {history && !history.trashed && saved?.content !== '' && (
-              <div role="group" aria-label="Memory history" className="flex flex-wrap gap-2">
-                {history.undo && (
+                    if (invalid)
+                      setInvalid(
+                        !savePersonalMemorySchema.safeParse({
+                          content: event.target.value,
+                          expectedRevision: saved?.revision ?? 0,
+                        }).success,
+                      );
+                  }}
+                />
+              </Field>
+              {state.kind === 'saved' && (
+                <p role="status" className="text-sm text-muted-foreground">
+                  Memory saved. Your next private replies will use it.
+                </p>
+              )}
+              {state.kind === 'changed' && (
+                <p role="status" className="text-sm text-muted-foreground">
+                  {state.message}
+                </p>
+              )}
+              {history?.trashed && (
+                <Alert>
+                  <p>Your memory is deleted. You can restore it for 7 days after deleting it.</p>
+                  <div className="mt-3">
+                    <Button variant="outline" disabled={pending || unresolved} onClick={() => void change('undo')}>
+                      Restore memory
+                    </Button>
+                  </div>
+                </Alert>
+              )}
+              {state.kind === 'uncertain' && (
+                <Alert>
+                  <p>
+                    We could not confirm your save, or memory changed while you were editing. Your draft is kept. Check
+                    the saved version before trying again.
+                  </p>
+                  <div className="mt-3">
+                    <Button variant="outline" onClick={() => void read(true)}>
+                      Check saved memory
+                    </Button>
+                  </div>
+                </Alert>
+              )}
+              {state.kind === 'conflict' && (
+                <Alert>
+                  <p>Review the latest saved memory before replacing it with your draft.</p>
+                  <pre className="my-3 max-h-48 overflow-auto whitespace-pre-wrap break-words text-sm">
+                    {state.latest.content || 'No saved preferences.'}
+                  </pre>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        accept(state.latest);
+                        setState({ kind: 'ready' });
+                      }}
+                    >
+                      Use saved version
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setSaved(state.latest);
+                        setState({ kind: 'ready' });
+                      }}
+                    >
+                      Keep my draft
+                    </Button>
+                  </div>
+                </Alert>
+              )}
+              <FormFooter
+                dirty={dirty}
+                submit={{
+                  label: 'Save memory',
+                  pendingLabel: state.kind === 'checking' ? 'Checking memory...' : 'Saving memory...',
+                  state: pending
+                    ? { kind: 'busy' }
+                    : unresolved
+                      ? { kind: 'blocked', reason: 'Resolve the saved version before saving.' }
+                      : { kind: 'ready' },
+                }}
+                cancel={
+                  unresolved
+                    ? undefined
+                    : {
+                        kind: 'reset',
+                        label: 'Discard changes',
+                        onReset: () => {
+                          if (saved) {
+                            accept(saved);
+                            setState({ kind: 'ready' });
+                          }
+                        },
+                      }
+                }
+                note={
+                  history
+                    ? 'Manual changes take priority over older chats. Memory keeps a history of changes, so you can undo them.'
+                    : 'Manual changes take priority over older chats. To clear memory, remove the text and save. New chats can add new preferences.'
+                }
+                error={
+                  state.kind === 'error' ? state.message : invalid ? 'Fix the memory text before saving.' : undefined
+                }
+              />
+              {history && !history.trashed && saved?.content !== '' && (
+                <div role="group" aria-label="Memory history" className="flex flex-wrap gap-2">
+                  {history.undo && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={pending || unresolved || dirty}
+                      onClick={() => void change('undo')}
+                    >
+                      Undo last change
+                    </Button>
+                  )}
                   <Button
                     type="button"
                     variant="outline"
                     disabled={pending || unresolved || dirty}
-                    onClick={() => void change('undo')}
+                    onClick={() => void change('delete')}
                   >
-                    Undo last change
+                    Delete memory
                   </Button>
-                )}
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={pending || unresolved || dirty}
-                  onClick={() => void change('delete')}
-                >
-                  Delete memory
-                </Button>
-                <Button
-                  type="button"
-                  variant="destructive"
-                  disabled={pending || unresolved || dirty}
-                  onClick={() => setForgetting(true)}
-                >
-                  Forget permanently
-                </Button>
-              </div>
-            )}
-          </div>
-        </Form>
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    disabled={pending || unresolved || dirty}
+                    onClick={() => setForgetting(true)}
+                  >
+                    Forget permanently
+                  </Button>
+                </div>
+              )}
+            </div>
+          </Form>
+          {history && saved && (
+            <MemoryProposals
+              path={path}
+              revision={saved.revision}
+              blocked={dirty || pending || unresolved}
+              onMemory={value => {
+                accept(value);
+                setState({ kind: 'ready' });
+              }}
+            />
+          )}
+        </>
       )}
       {forgetting && (
         <AlertDialog
