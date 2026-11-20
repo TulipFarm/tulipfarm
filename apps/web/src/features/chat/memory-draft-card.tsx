@@ -33,7 +33,7 @@ export function memoryLineDiff(before: string, after: string): DiffLine[] {
   return lines;
 }
 
-function MemoryDiff({ before, after }: { before: string; after: string }) {
+export function MemoryDiff({ before, after }: { before: string; after: string }) {
   const lines = memoryLineDiff(before, after);
   return (
     <div

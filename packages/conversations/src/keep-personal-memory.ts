@@ -228,7 +228,10 @@ export async function readKeepMemory(keep: Keep): Promise<PersonalMemory> {
 
 /** The member's memory and what Keep's history can do with it. */
 export async function readKeepMemoryState(keep: Keep) {
-  const profile = await readKeepProfile(keep);
+  return keepMemoryState(await readKeepProfile(keep));
+}
+
+export function keepMemoryState(profile: KeepProfile) {
   return {
     content: profile.kind === 'active' ? profile.text : '',
     revision: keepRevision(profile),
