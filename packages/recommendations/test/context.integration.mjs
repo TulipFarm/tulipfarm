@@ -5,13 +5,15 @@ import { resolveHuman } from '@tulipfarm/access';
 import { commonCompatibility } from '@tulipfarm/workspace-storage/runtime';
 import { createFiles } from '@tulipfarm/files';
 import { createProjects } from '@tulipfarm/conversations/projects';
-import { createPersonalMemoryService } from '@tulipfarm/conversations/personal-memory';
+import { configureKeepPersonalMemory, createPersonalMemoryService } from '@tulipfarm/conversations/personal-memory';
+import { fakeKeep } from '../../conversations/test/fake-keep.mjs';
 import { conversationFixture } from '../../conversations/test/fixture.mjs';
 import { createLocalKnowledge } from '../../knowledge/dist/index.js';
 import {
   collectRecommendationContext,
   fallbackRecommendations,
   readSavedRecommendations,
+  recommend,
   recommendationPolicy,
 } from '../dist/index.js';
 
@@ -276,3 +278,23 @@ test(
     }
   },
 );
+
+test('memory that cannot be reached leaves personalization unknown, not missing', { timeout: 60000 }, async t => {
+  const { client } = fakeKeep();
+  client.available = false;
+  t.after(configureKeepPersonalMemory({ enabled: async () => true, client }));
+  const f = await conversationFixture();
+  t.after(() => f.close());
+  const { signals, context } = await f.runtime.transaction(f.workspace.id, commonCompatibility, async tx =>
+    collectRecommendationContext(tx, await resolveHuman(tx, f.workspace.userId)),
+  );
+  assert.equal(signals.personalized, undefined);
+  assert.equal(
+    context.entries.some(entry => entry.kind === 'memory'),
+    false,
+  );
+  assert.equal(
+    recommend(signals).items.some(item => item.id === 'personalize-bud'),
+    false,
+  );
+});

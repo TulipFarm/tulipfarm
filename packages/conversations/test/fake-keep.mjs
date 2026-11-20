@@ -14,6 +14,8 @@ export function fakeKeep() {
   };
   const client = {
     available: true,
+    /** Set to a result to make the next write answer with it instead of writing. */
+    failWrite: undefined,
     async history({ scope }) {
       calls.push('history');
       if (!client.available) return { status: 'unavailable', reason: 'unreachable' };
@@ -49,6 +51,11 @@ export function fakeKeep() {
     async write({ scope, text, expectedRevisionId }) {
       calls.push('write');
       if (!client.available) return { status: 'unavailable', reason: 'unreachable' };
+      if (client.failWrite) {
+        const failure = client.failWrite;
+        client.failWrite = undefined;
+        return failure;
+      }
       let file = files.get(key(scope));
       if (file ? expectedRevisionId !== head(file).revisionId : expectedRevisionId !== undefined)
         return { status: 'conflict', ...(file ? { current: headOf(file) } : {}) };

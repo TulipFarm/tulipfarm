@@ -47,7 +47,9 @@ import { createFileShareDrafts } from './file-share-drafts.ts';
 import { createKnowledgeDrafts } from './knowledge-drafts.ts';
 import { applyMemory, forgetMemoryText, memoryStale, requireMemoryChat } from './memory-drafts.ts';
 import {
+  keepForgetScrubVersion,
   personalMemoryMode,
+  PersonalMemoryUnavailable,
   readPersonalMemory,
   replaceOwnPersonalMemory,
 } from '@tulipfarm/conversations/personal-memory';
@@ -1082,6 +1084,13 @@ export function createAuthoringDrafts(
         `INSERT INTO ${relation(tx, 'tf_chat_authoring_decisions')} (draft_id,membership_id,command_id,input,outcome) VALUES ($1,$2,$3,$4,$5)`,
         [id, actor.membershipId, input.commandId, input, outcome],
       );
+      // Confirmed or not, the card stops holding the text the member asked to forget.
+      if (
+        row.proposal.kind === 'memory' &&
+        row.proposal.input.operation === 'forget' &&
+        ((tx as { commonVersion?: number }).commonVersion ?? 0) >= keepForgetScrubVersion
+      )
+        await tx.client.query(`SELECT ${relation(tx, 'tf_clear_memory_forget')}($1)`, [id]);
       return outcome;
     });
     if (!decided) throw new AccessDenied();
@@ -1116,17 +1125,14 @@ export function createAuthoringDrafts(
       const next = forgetMemoryText(current.content, text);
       if (next === undefined) return undefined;
       const permanent = (await personalMemoryMode(tx, actor)).kind === 'keep';
+      // The card could not drop the forgotten text once decided, so wait for the workspace's update.
+      if (permanent && ((tx as { commonVersion?: number }).commonVersion ?? 0) < keepForgetScrubVersion)
+        throw new PersonalMemoryUnavailable('updating');
       const saved = permanent ? current : await replaceOwnPersonalMemory(tx, actor, next, current.revision);
       const proposal = authoringProposalSchema.parse({
         kind: 'memory',
         input: permanent
-          ? {
-              operation: 'forget',
-              expectedRevision: current.revision,
-              previousContent: current.content,
-              content: next,
-              forgotten: text,
-            }
+          ? { operation: 'forget', expectedRevision: current.revision, forgotten: text }
           : {
               operation: 'restore',
               expectedRevision: saved.revision,
@@ -1145,7 +1151,10 @@ export function createAuthoringDrafts(
           actor.membershipId,
           actor.userId,
           proposal,
-          createHash('sha256').update(canonicalJson(proposal)).digest('hex'),
+          // A permanent forget's digest must not depend on the text, which is blanked once the card is decided.
+          createHash('sha256')
+            .update(canonicalJson(permanent ? { id, operation: 'forget', revision: current.revision } : proposal))
+            .digest('hex'),
           JSON.stringify(sources),
         ],
       );

@@ -34,6 +34,7 @@ export * from './personal-memory-contracts.ts';
 export { PersonalMemoryConflict } from '@tulipfarm/memory-core/memory/personal-memory';
 export {
   configureKeepPersonalMemory,
+  keepForgetScrubVersion,
   personalMemoryMode,
   PersonalMemoryRejected,
   PersonalMemoryUnavailable,

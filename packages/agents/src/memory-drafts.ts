@@ -63,6 +63,8 @@ export async function applyMemory(
   proposal: MemoryProposal,
 ): Promise<DraftOutcome> {
   const { input } = proposal;
+  // A decided forget card no longer holds its text, so it can never be applied again.
+  if (input.operation === 'forget' && !input.forgotten) throw new AgentError('draft-stale');
   try {
     const saved =
       input.operation === 'forget'
