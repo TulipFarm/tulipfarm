@@ -1578,7 +1578,13 @@ type ToolRejection =
   | 'ungrounded-outbound';
 type NativeStep =
   | { kind: 'step'; text: string; calls: NativeCall[]; raw: unknown }
-  | { kind: 'failure'; reason: InferenceFailure; rejection?: ResponseRejection };
+  | {
+      kind: 'failure';
+      reason: InferenceFailure;
+      rejection?: ResponseRejection;
+      /** On an output limit: whether the response had begun a tool call before it was cut off. */
+      callStarted?: boolean;
+    };
 
 /** A successful response the reply loop cannot use: malformed or empty, or tool requests written as text. */
 const unusableStep = (step: NativeStep) =>
@@ -1696,7 +1702,12 @@ function nativeStep(route: CapableRoute, body: unknown): NativeStep {
       const data = parsed.data;
       if (data.stop_reason === 'refusal') return { kind: 'failure', reason: 'refusal' };
       if (data.stop_reason === 'model_context_window_exceeded') return { kind: 'failure', reason: 'context-overflow' };
-      if (data.stop_reason === 'max_tokens') return { kind: 'failure', reason: 'output-limit' };
+      if (data.stop_reason === 'max_tokens')
+        return {
+          kind: 'failure',
+          reason: 'output-limit',
+          callStarted: data.content.some(block => block.type === 'tool_use'),
+        };
       if (!['end_turn', 'tool_use', 'stop_sequence'].includes(data.stop_reason)) return invalid('finish-reason');
       const calls = data.content.flatMap(block =>
         block.type === 'tool_use' ? [{ id: block.id, name: block.name, input: block.input, providerId: true }] : [],
@@ -1713,7 +1724,12 @@ function nativeStep(route: CapableRoute, body: unknown): NativeStep {
         const parsed = responsesNativeSchema.safeParse(body);
         if (!parsed.success) return invalid('schema');
         const data = parsed.data;
-        if (data.incomplete_details?.reason === 'max_output_tokens') return { kind: 'failure', reason: 'output-limit' };
+        if (data.incomplete_details?.reason === 'max_output_tokens')
+          return {
+            kind: 'failure',
+            reason: 'output-limit',
+            callStarted: data.output.some(item => item.type === 'function_call'),
+          };
         if (
           data.incomplete_details?.reason === 'content_filter' ||
           data.output.some(item => item.type === 'message' && item.content.some(part => part.type === 'refusal'))
@@ -1744,7 +1760,8 @@ function nativeStep(route: CapableRoute, body: unknown): NativeStep {
       if (!choice) return invalid('schema');
       if (choice.message.refusal || choice.finish_reason === 'content_filter')
         return { kind: 'failure', reason: 'refusal' };
-      if (choice.finish_reason === 'length') return { kind: 'failure', reason: 'output-limit' };
+      if (choice.finish_reason === 'length')
+        return { kind: 'failure', reason: 'output-limit', callStarted: Boolean(choice.message.tool_calls?.length) };
       if (!['tool_calls', 'stop'].includes(choice.finish_reason)) return invalid('finish-reason');
       const calls: NativeCall[] = [];
       for (const call of choice.message.tool_calls ?? []) {
@@ -1771,8 +1788,13 @@ function nativeStep(route: CapableRoute, body: unknown): NativeStep {
         )
       )
         return { kind: 'failure', reason: 'refusal' };
-      if (candidate.finishReason === 'MAX_TOKENS') return { kind: 'failure', reason: 'output-limit' };
       const content = googleNativeContentSchema.safeParse(candidate.content);
+      if (candidate.finishReason === 'MAX_TOKENS')
+        return {
+          kind: 'failure',
+          reason: 'output-limit',
+          callStarted: content.success && content.data.parts.some(part => part.functionCall),
+        };
       if (candidate.finishReason !== 'STOP') return invalid('finish-reason');
       if (!content.success) return invalid('schema');
       const parts = content.data.parts;
@@ -5572,9 +5594,16 @@ export async function inferWithTools(
       let selected = await sendRound();
       /**
        * Some routes write plain text before a forced call and can repeat it until the output limit without ever making
-       * the call. That text is never the answer, so the round is sent once more with the choice left to the model.
+       * the call. That text is never the answer, so the round is sent once more with the choice left to the model. A
+       * round cut off inside its call needed more room than the limit gives, and is not sent again.
        */
-      if (required && !rowTool && selected.kind === 'failure' && selected.reason === 'output-limit') {
+      if (
+        required &&
+        !rowTool &&
+        selected.kind === 'failure' &&
+        selected.reason === 'output-limit' &&
+        selected.callStarted === false
+      ) {
         log('warn', 'activity', 'call_failed', { operation: 'chat.forced-tool-overrun', tool: required });
         try {
           answerText?.({ step: answerStep, text: '' });

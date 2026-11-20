@@ -3272,9 +3272,10 @@ async function appTurn(t, script, request = 'Now change it to Orders v3 and rebu
   const ran = [];
   const wire = await boundary(t, (_req, res) => {
     rounds.push(wire.received.at(-1).body);
-    const { finish, ...reply } = script(rounds.length - 1);
+    const { finish, cut, ...reply } = script(rounds.length - 1);
     const body = nativeReply('azure', reply);
     if (finish) body.choices[0].finish_reason = finish;
+    if (cut) body.choices[0].message.tool_calls = [{ id: 'call_0', type: 'function', function: cut }];
     res.writeHead(200);
     res.end(JSON.stringify(body));
   });
@@ -3317,6 +3318,30 @@ test('a forced app round that runs to the output limit without its call is sent 
   assert.deepEqual(turn.limits, [1284, 8192, 8192]);
   assert.deepEqual(turn.ran, ['apps.status']);
   assert.equal(turn.result.text, answer);
+});
+
+test('a forced app write cut off inside its arguments is not sent again', async t => {
+  const claim = 'I changed the paragraph and rebuilt the app.';
+  const rounds = [];
+  await assert.rejects(
+    appTurn(t, round => {
+      rounds.push(round);
+      return (
+        [
+          { calls: [use('apps.status')] },
+          { text: claim },
+          { calls: [use('apps.files.read', { path: 'index.html' })] },
+          { text: claim },
+          {
+            finish: 'length',
+            cut: { name: 'apps_files_write', arguments: '{"path":"index.html","content":"<h1>Orders v3</h1><p>' },
+          },
+        ][round] ?? { text: claim }
+      );
+    }),
+    { message: 'model-output-limit' },
+  );
+  assert.deepEqual(rounds, [0, 1, 2, 3, 4]);
 });
 
 test('every app chat turn starts by reading the app, so later turns call app tools instead of restating', async t => {
