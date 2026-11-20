@@ -149,13 +149,34 @@ test('with Keep, chat forget asks first and is permanent, and project chats neve
   const { tool, decide, memory, chats, runtime, w } = await setup(t);
   const saved = await memory.save(w.id, w.userId, { content: '- Lives in Berlin\n- Prefers tea', expectedRevision: 0 });
 
+  const stored = draftId =>
+    runtime.transaction(w.id, commonCompatibility, async tx =>
+      JSON.stringify(
+        (
+          await tx.client.query(`SELECT proposal,digest FROM "${tx.schema}".tf_chat_authoring_drafts WHERE id=$1`, [
+            draftId,
+          ])
+        ).rows[0],
+      ),
+    );
+
   const asked = await tool({ tool: 'memory.forget', text: 'Lives in Berlin' });
   assert.equal(asked.status, 'confirm');
   assert.equal((await memory.read(w.id, w.userId)).content, saved.content);
+  const pending = await stored(asked.draftId);
+  assert.ok(pending.includes('Lives in Berlin'));
+  assert.equal(pending.includes('Prefers tea'), false, 'the card holds no copy of the memory');
   const forgotten = await decide(asked.draftId);
   assert.equal(forgotten.status, 'saved');
   assert.equal(forgotten.outcome.operation, 'forget');
+  assert.equal(forgotten.proposal.input.forgotten, '');
+  assert.equal((await stored(asked.draftId)).includes('Lives in Berlin'), false);
   assert.equal((await memory.read(w.id, w.userId)).content.includes('Lives in Berlin'), false);
+
+  const declined = await tool({ tool: 'memory.forget', text: 'Prefers tea' });
+  assert.equal((await decide(declined.draftId, 'dismiss')).status, 'dismissed');
+  assert.equal((await stored(declined.draftId)).includes('Prefers tea'), false);
+  assert.match((await memory.read(w.id, w.userId)).content, /Prefers tea/);
 
   const projectId = randomUUID(),
     projectChat = randomUUID();
