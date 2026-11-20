@@ -42,7 +42,7 @@ test('configured flags resolve env override, then FEATURE_FLAGS_OFF, then defaul
   );
   assert.equal(
     configuredFeatureFlag('images', {
-      FEATURE_FLAGS_OFF: 'images',
+      FEATURE_FLAGS_OFF: 'other, images',
     }),
     false,
   );

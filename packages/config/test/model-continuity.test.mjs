@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { legacyModels, resolveModelFamily, initialModelMapping, modelFamilyIdSchema } from '../src/model-continuity.ts';
+import { legacyModels, resolveModelFamily, initialModelMapping } from '../src/model-continuity.ts';
 import { modelFamilyIdSchema as identifier, modelIdentifierSchema } from '../src/model-identifier.ts';
 import { modelCatalogFamilySchema } from '../src/model-catalog.ts';
 import { parseModelResolution } from '../src/model-bundle.ts';
@@ -40,7 +40,6 @@ const usage = tokens => ({
 });
 
 test('catalog identities use the same lightweight schema without changing accepted identifiers', () => {
-  assert.equal(identifier, modelFamilyIdSchema);
   const family = {
     displayName: 'Model',
     vendor: 'acme',
@@ -223,7 +222,6 @@ test('Grok exposes two Azure models and prices the Fast deployment as 4.3', () =
     }).providerPicoUsd,
     '3950000000',
   );
-  assert.throws(() => resolveModelFamily({ ...input, familyId: 'grok-fast-reasoning' }), /unknown-family/);
 });
 
 test('unknown formats, prices, families and cross-family replacements fail closed', () => {
@@ -255,7 +253,7 @@ test('unknown formats, prices, families and cross-family replacements fail close
   );
 });
 
-test('Kimi resolves to the deployed Azure model while removed GLM families are rejected', () => {
+test('Kimi resolves to the deployed Azure model', () => {
   const resolved = resolveModelFamily({
     ...input,
     familyId: 'kimi',
@@ -281,13 +279,6 @@ test('Kimi resolves to the deployed Azure model while removed GLM families are r
     }).providerPicoUsd,
     '5110000000',
   );
-  for (const familyId of ['glm', 'glm-fast']) {
-    assert.equal(
-      initialModelMapping.families.some(family => family.id === familyId),
-      false,
-    );
-    assert.throws(() => resolveModelFamily({ ...input, familyId }), /unknown-family/);
-  }
 });
 
 test('promotion and rollback produce new snapshots without changing earlier resolution', () => {

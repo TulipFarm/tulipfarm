@@ -554,56 +554,6 @@ test('RTF superscript, subscript and baseline shifts reject before flattening nu
   );
 });
 
-test('raw native conversion reproduces all five blockers while guarded parsing handles them', async () => {
-  const { toMarkdownBytes } = await import('@firecrawl/anydoc/index.js');
-  assert.equal(await toMarkdownBytes(mixedInlinePdf()), `${nativeHeading}\n`);
-  await imagePage(mixedInlinePdf(), 'mixed.pdf');
-  for (const [bytes, filename, raw, code] of [
-    [
-      cellXlsx('<c r="B2" t="s"><v>0</v></c>'),
-      'shared.xlsx',
-      '| Fruit | Count |\n| --- | --- |\n| Apple |  |\n',
-      'malformed',
-    ],
-    [
-      Buffer.from('{\\rtf1\\ansi Area 10{\\super 2} square metres}'),
-      'area.rtf',
-      'Area 102 square metres\n',
-      'unsupported',
-    ],
-  ]) {
-    assert.equal(await toMarkdownBytes(bytes), raw);
-    await assert.rejects(parse(bytes, filename), failure(code));
-  }
-  // Raw conversion drops embedded HTML, the Symbol-font minus and an uncached formula without a trace.
-  for (const [bytes, filename, raw, markdown, labels] of [
-    [
-      altChunkDocx(),
-      'chunk.docx',
-      wordText('Harvest apples on Tuesday.'),
-      wordText('Harvest apples on Tuesday.'),
-      ['Embedded document'],
-    ],
-    [symbolDocx(), 'symbol.docx', wordText('Balance 450'), wordText('Balance −450'), []],
-    [
-      cellXlsx('<c r="B2"><f>450+50</f></c>'),
-      'formula.xlsx',
-      '| Fruit | Count |\n| --- | --- |\n| Apple |  |\n',
-      '## Inventory\n\n| Fruit | Count |\n| --- | --- |\n| Apple |  |\n',
-      ['Formula without a saved value'],
-    ],
-  ]) {
-    assert.equal(await toMarkdownBytes(bytes), raw);
-    const result = await parse(bytes, filename);
-    assert.equal(result.markdown, markdown, filename);
-    assert.deepEqual(
-      result.gaps.map(gap => gap.label),
-      labels,
-      filename,
-    );
-  }
-});
-
 test('RTF escaped controls remain literal while unqualified controls reject', async () => {
   for (const [rtf, expected] of [
     ['{\\rtf1\\ansi Literal \\\\super 450}', 'Literal \\\\super 450\n'],

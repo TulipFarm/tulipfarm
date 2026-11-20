@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { xTextLimits, xWeightedLength } from '../dist/x-text.js';
+import { xWeightedLength } from '../dist/x-text.js';
 
 test('Latin text and general punctuation weigh 1', () => {
   assert.equal(xWeightedLength(''), 0);
@@ -32,8 +32,4 @@ test('URLs count 23 whatever their length, without trailing punctuation', () => 
 
 test('text is NFC-normalized before counting', () => {
   assert.equal(xWeightedLength('e\u0301'), 1);
-});
-
-test('limits are 280 standard and 25,000 for long posts', () => {
-  assert.deepEqual(xTextLimits, { standard: 280, premium: 25000 });
 });

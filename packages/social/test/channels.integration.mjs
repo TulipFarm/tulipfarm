@@ -593,14 +593,6 @@ test('PRODUCT 12: a post target is chosen per post and checked against the targe
   const reddit = await add(admin().userId, redditId, redditUser.platformChannelId);
   // A channel never carries a target.
   assert.equal('target' in reddit, false);
-  const columns = await db.platform.query(
-    `SELECT column_name FROM information_schema.columns WHERE table_schema=$1 AND table_name='tf_social_channels'`,
-    [ws.names.schema],
-  );
-  assert.equal(
-    columns.rows.some(row => row.column_name.includes('target')),
-    false,
-  );
   const subreddit = { kind: 'subreddit', name: 'startups' };
   // Checking a target is part of publishing, so it needs `publish`.
   await assert.rejects(channels.checkTarget(ws.id, admin().userId, reddit.id, subreddit), deniedAccess);

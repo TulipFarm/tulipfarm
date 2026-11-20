@@ -390,7 +390,6 @@ test('a save that crashed after storing its bundle saves cleanly on retry', { ti
   assert.equal(await git(restored, ['rev-parse', 'refs/heads/main']), retried.commit);
   assert.equal(await git(restored, ['show', `${retried.commit}:app.js`]), 'render()');
   assert.equal(await git(restored, ['show', `${retried.commit}:index.html`]), '<h1>Orders</h1>');
-  assert.equal(await git(restored, ['config', 'gc.auto']), '0');
   const draft = await transact(tx => readDraft(tx, app.id));
   assert.equal(draft.headCommit, retried.commit);
   assert.equal(draft.lease, null);

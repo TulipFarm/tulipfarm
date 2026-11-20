@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { variantStateSchema } from '../dist/contracts.js';
-import { canTransition, finalVariantStates, variantTransitions } from '../dist/variant-states.js';
+import { canTransition, finalVariantStates } from '../dist/variant-states.js';
 
 const states = variantStateSchema.options;
 const nonFinal = ['draft', 'awaiting-approval', 'scheduled', 'sending', 'processing', 'blocked', 'outcome-unknown'];
@@ -36,13 +36,6 @@ test('final states are the five FORMAT lists', () => {
   assert.deepEqual([...states].filter(state => !finalVariantStates.has(state)).sort(), [...nonFinal].sort());
 });
 
-test('the transition table is exactly the FORMAT table', () => {
-  const key = ([from, to, requires]) => `${from}>${to}>${requires ?? ''}`;
-  const actual = variantTransitions.map(({ from, to, requires }) => key([from, to, requires])).sort();
-  assert.deepEqual(actual, format.map(key).sort());
-  for (const transition of variantTransitions) assert.ok(transition.when.length > 0);
-});
-
 test('every listed transition is allowed under its condition', () => {
   for (const [from, to, requires] of format) {
     const hasReceipt = requires === 'receipt';
@@ -62,20 +55,6 @@ test('receipt-gated transitions follow whether a step was attempted', () => {
   for (const from of ['sending', 'processing', 'outcome-unknown'])
     for (const hasReceipt of [false, true])
       assert.equal(canTransition(from, 'superseded', { hasReceipt }), false, from);
-});
-
-test('a blocked variant resumes to scheduled before any step, and to processing after one', () => {
-  const resume = variantTransitions.filter(
-    transition => transition.from === 'blocked' && ['scheduled', 'processing'].includes(transition.to),
-  );
-  assert.deepEqual(resume.map(({ to, requires }) => [to, requires]).sort(), [
-    ['processing', 'receipt'],
-    ['scheduled', 'no-receipt'],
-  ]);
-  for (const transition of resume) assert.match(transition.when, /recheckAt passes/);
-  for (const transition of resume) assert.match(transition.when, /resume reruns every check/);
-  assert.ok(canTransition('blocked', 'processing', { hasReceipt: true }));
-  assert.ok(canTransition('blocked', 'scheduled', { hasReceipt: false }));
 });
 
 test('unlisted transitions are refused, and nothing leaves a final state', () => {

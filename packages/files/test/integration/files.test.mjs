@@ -601,10 +601,7 @@ test('Files migration composes once with the default aggregate and runtime admit
   try {
     await db.platform.query(`SET search_path TO app; DROP TABLE IF EXISTS app.accounts;
 ${await readFile(new URL('../../../../apps/database/migrations/0001_baseline.sql', import.meta.url), 'utf8')}`);
-    const main = await workspaceTableMigrations();
-    const migrations = main;
-    assert.deepEqual(migrations, main);
-    assert.equal(migrations.length, commonCompatibility.maximum);
+    const migrations = await workspaceTableMigrations();
     const w = await db.create(migrations);
     runtime = createWorkspaceRuntime({
       replicaCount: 1,

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { chatSendFailedEvent, chatSendFailureProperties } from '../src/features/chat/send-failure-report.ts';
+import { chatSendFailureProperties } from '../src/features/chat/send-failure-report.ts';
 
 class RequestError extends Error {
   readonly status: number;
@@ -13,7 +13,6 @@ class RequestError extends Error {
 }
 
 test('a message left not sent is reported by reason, status and code only', () => {
-  assert.equal(chatSendFailedEvent, 'chat_send_failed');
   const refused = new RequestError(403, 'access-denied', 'You cannot post in Acme Payroll');
   assert.deepEqual(chatSendFailureProperties({ kind: 'rejected', status: 403 }, refused), {
     reason: 'rejected',

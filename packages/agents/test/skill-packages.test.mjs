@@ -98,4 +98,8 @@ test('legacy definition hashes remain canonical and unchanged', () => {
     skillDefinitionRevision({ name: 'Example', instructions: 'Do the task.' }),
     skillDefinitionRevision({ instructions: 'Do the task.', name: 'Example' }),
   );
+  assert.equal(
+    skillDefinitionRevision({ name: 'Example', instructions: 'Do the task.' }),
+    '8cae1091839eb3072ee8f87d8333cf2406ea18f39849a3e550324075ea2ba297',
+  );
 });

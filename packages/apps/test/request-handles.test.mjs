@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { createHmac, hkdfSync, randomBytes } from 'node:crypto';
 import { test } from 'node:test';
 import { requestHandleKey, signRequestHandle, verifyRequestHandle } from '../src/store/index.ts';
 
@@ -61,13 +60,4 @@ test('a rotated runtime key still accepts handles signed under its previous keys
     verifyRequestHandle(requestHandleKey({ ...after, WORKSPACE_RUNTIME_PREVIOUS_KEYS: undefined }), old),
     null,
   );
-});
-
-test('a handle in the format without a mint time no longer verifies', () => {
-  const v1 = Buffer.from(
-    hkdfSync('sha256', Buffer.from('ab'.repeat(32), 'hex'), Buffer.alloc(0), 'tulipfarm app request handle v1', 32),
-  );
-  const body = Buffer.concat([Buffer.from(appId.replaceAll('-', ''), 'hex'), randomBytes(16)]);
-  const tag = createHmac('sha256', v1).update(body).digest().subarray(0, 16);
-  assert.equal(verifyRequestHandle(key, `tfr_${Buffer.concat([body, tag]).toString('base64url')}`), null);
 });

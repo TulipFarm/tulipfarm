@@ -29,7 +29,7 @@ import { z } from 'zod';
 import { conversationModel, type ConversationModel } from './conversation-model.ts';
 
 /** Changes whenever the prompt or the response format changes; part of the parser profile and the cache key. */
-export const mediaRecognitionPromptVersion = 'media-v1';
+const mediaRecognitionPromptVersion = 'media-v1';
 export const mediaRecognitionOutputTokens = 4096;
 
 export const mediaRecognitionSystemPrompt = `You read one image taken from a document so that its content can be searched and quoted.

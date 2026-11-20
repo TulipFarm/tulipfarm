@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { toMarkdownBytes } from '@firecrawl/anydoc/index.js';
 import { PDFDocument, PDFName, PDFString } from 'pdf-lib';
 import { KnowledgeParseError, parseKnowledgeDocument } from '../dist/parser.js';
 import { annotationPdf } from './fixtures/parser-completeness.mjs';
@@ -31,9 +30,7 @@ export const qualifiedRtf = [
 
 for (const [source, expected] of qualifiedRtf) {
   test(`qualified RTF preserves literal output ${source}`, async () => {
-    const bytes = Buffer.from(source);
-    assert.equal(await toMarkdownBytes(bytes), expected);
-    assert.equal((await parse(bytes, 'rtf')).markdown, expected);
+    assert.equal((await parse(Buffer.from(source), 'rtf')).markdown, expected);
   });
 }
 
@@ -117,8 +114,6 @@ for (const subtype of ['Text', 'FreeText', 'Stamp', 'Link', 'Widget']) {
   for (const appearance of [true, false]) {
     test(`PDF rejects ${subtype} annotation with ${appearance ? 'distinct appearance' : 'no appearance'}`, async () => {
       const bytes = await (await annotatedPdf(subtype, appearance)).save();
-      if (appearance && subtype !== 'Widget')
-        assert.equal(await toMarkdownBytes(bytes), 'Native heading and explanatory budget policy text\n');
       await assert.rejects(parse(bytes, 'pdf'), unsupported);
     });
   }
@@ -176,9 +171,7 @@ export const qualifiedOdt = [
 
 for (const [body, properties, expected] of qualifiedOdt) {
   test(`ODT qualified content preserves facts ${body} ${properties}`, async () => {
-    const bytes = semanticOdt(body, properties);
-    assert.equal(await toMarkdownBytes(bytes), expected);
-    assert.equal((await parse(bytes, 'odt')).markdown, expected);
+    assert.equal((await parse(semanticOdt(body, properties), 'odt')).markdown, expected);
   });
 }
 

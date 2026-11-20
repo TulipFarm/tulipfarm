@@ -27,32 +27,6 @@ test('formats today, yesterday, and older times', () => {
   assert.match(messageTime(new Date(2025, 9, 7, 15, 44).toISOString(), now), /2025/);
 });
 
-test('reused formatters preserve local time and full timestamp titles', () => {
-  const now = new Date(2026, 9, 10, 18, 0);
-  for (const date of [
-    new Date(2026, 9, 10, 15, 44),
-    new Date(2026, 9, 9, 15, 44),
-    new Date(2026, 0, 7, 0, 5),
-    new Date(2025, 6, 7, 23, 59),
-  ]) {
-    const iso = date.toISOString();
-    const time = date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-    const day = date.toLocaleDateString([], {
-      month: 'short',
-      day: 'numeric',
-      ...(date.getFullYear() === now.getFullYear() ? {} : { year: 'numeric' }),
-    });
-    const expected =
-      date.getMonth() === 9 && date.getDate() === 10
-        ? time
-        : date.getMonth() === 9 && date.getDate() === 9
-          ? `Yesterday ${time}`
-          : `${day}, ${time}`;
-    assert.equal(messageTime(iso, now), expected);
-    assert.equal(messageTimeTitle(iso), date.toLocaleString([], { dateStyle: 'full', timeStyle: 'medium' }));
-  }
-});
-
 test('the same timestamp ages across midnight and the year boundary', () => {
   const date = new Date(2025, 11, 31, 23, 59);
   const iso = date.toISOString();

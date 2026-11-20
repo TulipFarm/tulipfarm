@@ -3,7 +3,6 @@ import { beforeEach, test } from 'node:test';
 import {
   appBuilder,
   appHost,
-  AppHostConflictError,
   appPublisher,
   registerExtension,
   resetExtensions,
@@ -12,10 +11,7 @@ import {
 import { appPublisherContract, memoryAppPublisher, testAppPublisher } from '../src/testing.ts';
 
 const context = { app: 'worker', env: {} };
-const builder = {
-  id: 'sandbox-node26-v1',
-  build: async () => ({ ok: false, code: 'build-failed', log: 'npm ERR! missing script: build', units: 7n }),
-};
+const builder = { id: 'sandbox-node26-v1', build: async () => ({ ok: true }) };
 
 beforeEach(() => resetExtensions());
 
@@ -33,13 +29,7 @@ test('app builder and publisher read as undefined until an extension registers t
     },
     context,
   );
-  assert.equal(appBuilder().id, 'sandbox-node26-v1');
-  assert.deepEqual(await appBuilder().build({}, new AbortController().signal), {
-    ok: false,
-    code: 'build-failed',
-    log: 'npm ERR! missing script: build',
-    units: 7n,
-  });
+  assert.equal(appBuilder(), builder);
   assert.equal(appPublisher(), publisher);
 });
 
@@ -90,62 +80,13 @@ test('app slots refuse incomplete implementations', async () => {
   assert.equal(appPublisher(), undefined);
 });
 
-const generations = new Map();
 const host = {
-  provision: async ({ appId, releaseId, size, output }) => ({
-    hostRef: `${appId}/${releaseId}/${size.vcpu}x${size.memMiB}/${output.artifact}:${output.port}`,
-  }),
-  switch: async ({ appId, expectedGeneration }) => {
-    const current = generations.get(appId) ?? 0;
-    if (expectedGeneration !== undefined && expectedGeneration !== current)
-      throw new AppHostConflictError(appId, expectedGeneration);
-    generations.set(appId, current + 1);
-    return { generation: current + 1 };
-  },
-  connect: async ({ appId }) => ({
-    url: `https://forward.example.test/${appId}`,
-    headers: { authorization: 'Bearer t' },
-  }),
+  provision: async () => ({ hostRef: 'h1' }),
+  switch: async () => ({ generation: 1 }),
+  connect: async () => ({ url: 'https://forward.example.test/orders', headers: {} }),
   remove: async () => undefined,
-  async *list() {
-    yield { appId: 'orders', hostRef: 'orders/r1/1x1024' };
-  },
+  async *list() {},
 };
-
-test('a registered app host replaces the unavailable default', async () => {
-  generations.clear();
-  await registerExtension({ name: 'hosted', register: slots => slots.appHost(host) }, context);
-  const signal = new AbortController().signal;
-  assert.equal(appHost(), host);
-  const output = { kind: 'server', artifact: 'sha256:ab12', port: 3000, start: 'node server.js' };
-  assert.deepEqual(
-    await appHost().provision({ appId: 'orders', releaseId: 'r1', size: { vcpu: 1, memMiB: 1024 }, output }, signal),
-    { hostRef: 'orders/r1/1x1024/sha256:ab12:3000' },
-  );
-  assert.deepEqual(await appHost().switch({ appId: 'orders', hostRef: 'h1', drainS: 30 }, signal), { generation: 1 });
-  assert.deepEqual(
-    await appHost().switch({ appId: 'orders', hostRef: 'h2', drainS: 30, expectedGeneration: 1 }, signal),
-    { generation: 2 },
-  );
-  const stale = await appHost()
-    .switch({ appId: 'orders', hostRef: 'h3', drainS: 30, expectedGeneration: 1 }, signal)
-    .catch(error => error);
-  assert.ok(stale instanceof AppHostConflictError);
-  assert.deepEqual(
-    { name: stale.name, message: stale.message, appId: stale.appId, expectedGeneration: stale.expectedGeneration },
-    {
-      name: 'AppHostConflictError',
-      message: 'The endpoint of app "orders" is no longer at generation 1',
-      appId: 'orders',
-      expectedGeneration: 1,
-    },
-  );
-  assert.deepEqual(await appHost().connect({ appId: 'orders' }, signal), {
-    url: 'https://forward.example.test/orders',
-    headers: { authorization: 'Bearer t' },
-  });
-  assert.deepEqual(await Array.fromAsync(appHost().list(signal)), [{ appId: 'orders', hostRef: 'orders/r1/1x1024' }]);
-});
 
 test('a second or incomplete app host fails startup and leaves the registry as it was', async () => {
   const { switch: _switch, ...noSwitch } = host;

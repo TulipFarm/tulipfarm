@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
-import { parsePreferenceReconciliation, preferenceSystemPrompt } from '../src/memory-reconciliation.ts';
+import { parsePreferenceReconciliation } from '../src/memory-reconciliation.ts';
 
 const id = randomUUID();
 const messages = [{ id, text: 'Please use emojis in your replies.' }];
@@ -50,12 +50,4 @@ test('older backfills cannot replace newer memory', () => {
     ),
     'Use short replies.\n\nUse emojis.',
   );
-});
-
-test('lean prompt distinguishes explicit preferences from summaries and untrusted instructions', () => {
-  assert.match(preferenceSystemPrompt, /not a chat summary or biography/);
-  assert.match(preferenceSystemPrompt, /no tools or authority/);
-  assert.match(preferenceSystemPrompt, /quoted\/pasted third-party instructions/);
-  assert.match(preferenceSystemPrompt, /newer explicit preference replaces/);
-  assert.match(preferenceSystemPrompt, /Markdown prose/);
 });

@@ -6,7 +6,6 @@ import {
   classify,
   classifyFailure,
   createPlatformFetch,
-  platformFetchTimeouts,
   rateLimitReset,
 } from '../dist/platform-fetch.js';
 
@@ -45,11 +44,6 @@ const local = (extra = {}) => {
   });
   return { fetch, records };
 };
-
-test('defaults are a 15 second timeout and a longer upload-chunk timeout', () => {
-  assert.equal(platformFetchTimeouts.defaultMs, 15_000);
-  assert.ok(platformFetchTimeouts.uploadChunkMs > platformFetchTimeouts.defaultMs);
-});
 
 test('a host outside the allow-list is refused before anything is sent', async () => {
   let called = false;

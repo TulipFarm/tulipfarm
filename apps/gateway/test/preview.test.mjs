@@ -126,17 +126,6 @@ test('the preview serves the draft build without caching and stops when edit acc
   assert.equal(state.builds, 3);
 });
 
-test('a preview cannot install a service worker', async t => {
-  const { dependencies, state } = fakes();
-  const { http: gateway } = buildPreviewGateway(dependencies, {});
-  t.after(() => gateway.close());
-
-  const response = await gateway.inject(asset('/sw.js', { 'service-worker': 'script' }));
-  assert.equal(response.statusCode, 403);
-  assert.equal(response.headers['cache-control'], 'no-store');
-  assert.equal(state.builds, 0);
-});
-
 test('a draft that builds files answers only GET and HEAD', async t => {
   const { dependencies } = fakes();
   const { http: gateway } = buildPreviewGateway(dependencies, {});

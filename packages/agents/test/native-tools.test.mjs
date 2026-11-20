@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { deferredToolIndex, discoveryBytes, nativeChatTools, nativeToolName } from '../src/native-tools.ts';
 import { createMcpCatalog } from '../src/mcp-catalog.ts';
@@ -437,13 +436,4 @@ test('the catalog follows MCP content and loaded tools between calls', () => {
   const before = nativeChatTools(undefined, false, loaded).tools.length;
   loaded.add('rows_create');
   assert.notEqual(nativeChatTools(undefined, false, loaded).tools.length, before);
-});
-
-test('reply setup steps use their own chat detail spans', () => {
-  const worker = readFileSync(new URL('../../../apps/worker/src/conversation-activities.ts', import.meta.url), 'utf8');
-  const phases = readFileSync(new URL('../../observability/src/index.ts', import.meta.url), 'utf8');
-  for (const phase of ['publisher-open', 'feature-flag', 'subagent-pool']) {
-    assert.ok(worker.includes(`'${phase}'`), phase);
-    assert.ok(phases.includes(`| '${phase}'`), phase);
-  }
 });

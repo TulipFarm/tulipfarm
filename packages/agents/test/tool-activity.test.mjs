@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { frameworkCallSchema } from '../src/tools.ts';
-import { googleOperationCatalog } from '../../google-workspace/src/operation-contracts.ts';
 import { githubReadSchema, githubDownloadSchema } from '../../access/src/github-read.ts';
 import { githubWriteSchema } from '../../github/src/batch-contracts.ts';
 import { providerOperationSchema } from '../../atlassian/src/operation-browser-contracts.ts';
@@ -28,7 +27,6 @@ test('every registered tool and provider operation has an activity label', () =>
       assert.ok(value.brand, kind);
       assert.notEqual(value.label, toolActivityLabels['atlassian.read'], kind);
     }
-  assert.ok(googleOperationCatalog.length > 50);
 });
 
 test('labels and brands use operation identity, never private arguments or model prose', () => {

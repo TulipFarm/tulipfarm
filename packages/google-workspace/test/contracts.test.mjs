@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
 import { googleCredentialCipher } from '../src/credentials.ts';
-import { googleWorkspaceConfig, googleWorkspaceScopes, callbackSchema } from '../src/contracts.ts';
+import { googleWorkspaceConfig, callbackSchema } from '../src/contracts.ts';
 import { googleProvider } from '../src/provider.ts';
 
 const keyring = { activeKeyId: 'one', keys: { one: 'ab'.repeat(32) } };
@@ -73,7 +73,6 @@ test('configuration requires the separate exact OAuth settings and callback rout
       message: 'not-configured',
     });
   }
-  assert.equal(googleWorkspaceScopes.length, 9);
   assert.equal(callbackSchema.safeParse({ state: 'state', code: 'code', error: 'denied' }).success, false);
 });
 

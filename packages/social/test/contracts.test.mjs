@@ -420,7 +420,7 @@ const shapes = {
         expectedChannelVersion: 1,
         kind: 'reply',
         inReplyTo: '1',
-        text: 'a'.repeat(c.engagementTextMaximum + 1),
+        text: 'a'.repeat(63207),
       },
     ],
   ],
@@ -542,10 +542,6 @@ test('only Pinterest and Reddit posts take a target, of their own kind', () => {
   }
 });
 
-test('connection limits are exported constants', () => {
-  assert.deepEqual(c.socialAccountLimits, { workspace: 100, personal: 20, business: 50 });
-});
-
 test('prepare input takes 1 to 10 variants on distinct channels and bounds publishAt by now', () => {
   const now = new Date('2026-06-01T12:00:00.000Z');
   const schema = c.prepareInputSchema(now);
@@ -557,9 +553,8 @@ test('prepare input takes 1 to 10 variants on distinct channels and bounds publi
   assert.equal(schema.safeParse(input(distinct(11))).success, false);
   assert.equal(schema.safeParse(input([variantInput(), variantInput()])).success, false);
   const at = ms => new Date(now.getTime() + ms).toISOString();
-  const { minimumMs, maximumMs } = c.publishAtBounds;
-  assert.equal(minimumMs, 2 * 60 * 1000);
-  assert.equal(maximumMs, 180 * 24 * 60 * 60 * 1000);
+  const minimumMs = 2 * 60 * 1000;
+  const maximumMs = 180 * 24 * 60 * 60 * 1000;
   assert.ok(schema.safeParse(input([variantInput('x', { publishAt: at(minimumMs) })])).success);
   assert.ok(schema.safeParse(input([variantInput('x', { publishAt: at(maximumMs) })])).success);
   assert.equal(c.publishAtIssue(at(minimumMs - 1), now), 'publish-at-too-soon');
@@ -764,7 +759,6 @@ test('media items carry no kind; it comes from the File', () => {
 });
 
 test('engagement text is checked against the adapter limit, within the storage maximum', () => {
-  assert.equal(c.engagementTextMaximum, 63206);
   assert.equal(c.engagementTextIssue(text(280), 280), null);
   assert.equal(c.engagementTextIssue(text(281), 280), 'text-too-long');
   assert.equal(c.engagementTextIssue('hi', undefined), 'engagement-unsupported');

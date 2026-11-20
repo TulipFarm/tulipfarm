@@ -8,7 +8,7 @@ import { taskActionWake, taskWake } from '../src/task-dispatch.ts';
 import { registerAgentTasks } from '../src/agent-tasks.ts';
 import { apiRole, apiTelemetryService } from '../src/api-role.ts';
 
-test('workspace discovery retains the original error and safe stage without changing the query', async () => {
+test('workspace discovery retains the original error and safe stage', async () => {
   const failure = Object.freeze(
     new Error('PRIVATE integration context', {
       cause: Object.assign(new Error('PRIVATE SQL'), { code: '08006' }),
@@ -17,10 +17,7 @@ test('workspace discovery retains the original error and safe stage without chan
   await assert.rejects(
     readyWorkspaces(
       {
-        query: async (sql, parameters) => {
-          assert.match(sql, /FROM app\.workspace_storage WHERE stage = 'ready'/);
-          assert.match(sql, /LIMIT 100$/);
-          assert.deepEqual(parameters, [null]);
+        query: async () => {
           throw failure;
         },
       },

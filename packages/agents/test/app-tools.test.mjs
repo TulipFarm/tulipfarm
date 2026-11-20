@@ -54,15 +54,8 @@ test('the file write tool shows the model one app.json that builds for each kind
   const write = nativeChatTools(undefined, false, new Set(), false, false, 'public').tools.find(
     tool => tool.name === 'apps_files_write',
   );
-  assert.ok(
-    write.description.endsWith(
-      'An optional app.json at the app root says how to build it; without one the files are served as they are. It takes one of these shapes and no other keys; install is optional. ' +
-        'Serve a folder as it is: {"kind":"copy","root":"site"}. ' +
-        'Run a build, then serve its output folder: {"kind":"command","runtime":"node26","install":"npm install","command":"npm run build","output":"dist"}. ' +
-        'Run a Node server that listens on serve.port: {"kind":"server","runtime":"node26","install":"npm install","serve":{"port":8080,"start":"node server.js"}}.',
-    ),
-    write.description,
-  );
+  for (const [use, recipe] of appRecipeExamples)
+    assert.ok(write.description.includes(`${use}: ${JSON.stringify(recipe)}.`), use);
   assert.deepEqual(
     appRecipeExamples.map(([, recipe]) => readAppRecipe(JSON.stringify(recipe))),
     appRecipeExamples.map(([, recipe]) => ({ ok: true, recipe })),

@@ -13,7 +13,6 @@ const repositories = count =>
   Array.from({ length: count }, (_, index) => `acme/repo-${String(index).padStart(4, '0')}`).sort();
 
 test('a GitHub selection names up to 1,000 repositories and indexes full history without a cutoff', () => {
-  assert.equal(githubCorpusLimits.repositories, 1000);
   const selection = githubCorpusSelectionSchema.parse({ repositories: repositories(1000), kinds: ['docs'] });
   assert.equal(selection.repositories.length, 1000);
   assert.equal(selection.after, undefined);

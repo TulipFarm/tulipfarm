@@ -167,12 +167,24 @@ test('schemas and Zod accept surrounding label spaces and uppercase UUIDs', () =
   assert.equal(tableDocumentSchema.safeParse(document).success, true);
 });
 
+const precisionBounds = [
+  [1, 20],
+  [1, 21],
+  [2, 22],
+  [3, 23],
+  [4, 24],
+  [5, 25],
+  [6, 26],
+  [7, 27],
+  [8, 28],
+  [9, 29],
+  [10, 30],
+];
+
 test('numeric precision bounds are correct for every scale from 0 through 10', () => {
   const validateDefinition = ajvValidator(tableDefinitionJsonSchema());
   const validateDocument = ajvValidator(tableDocumentJsonSchema());
-  for (let scale = 0; scale <= 10; scale++) {
-    const minimum = Math.max(1, scale);
-    const maximum = Math.min(30, scale + 20);
+  for (const [scale, [minimum, maximum]] of precisionBounds.entries()) {
     for (const precision of new Set([minimum, maximum])) {
       const input = definition();
       input.fields[1].precision = precision;
@@ -239,16 +251,6 @@ test('numeric constraints and unsafe labels fail both JSON Schema and Zod', () =
   }
 });
 
-test('Ajv accepts duplicate field IDs while the Zod definition validator rejects them', () => {
-  const input = definition();
-  input.fields[1].id = input.fields[0].id;
-  const validateDefinition = ajvValidator(tableDefinitionJsonSchema());
-  const validateDocument = ajvValidator(tableDocumentJsonSchema());
-  assert.equal(validateDefinition(input), true, JSON.stringify(validateDefinition.errors));
-  assert.equal(validateDocument(soulDocument(input)), true, JSON.stringify(validateDocument.errors));
-  assert.equal(definitionSchema.safeParse(input).success, false);
-});
-
 function resolveReference(schema, root) {
   let result = schema;
   while (typeof result?.$ref === 'string' && result.$ref.startsWith('#/$defs/')) {
@@ -279,7 +281,6 @@ test('every property in both generated schemas has a description', () => {
   assertEveryPropertyHasDescription(tableDocumentJsonSchema());
 });
 
-const labelPattern = String.raw`^(?!\s*$)(?![\s\S]*\u0000)[\s\S]*$`;
 const revision = 'a'.repeat(40);
 
 function proposal(target = definition()) {
@@ -296,20 +297,19 @@ function collect(value, found = []) {
   return found;
 }
 
-test('the model-facing proposal schema carries the label pattern and numeric precision rules', () => {
-  const nodes = collect(tableProposalJsonSchema());
-  assert.ok(nodes.some(node => node.pattern === labelPattern));
-  const scales = nodes
-    .filter(node => node.if?.properties?.scale && node.then?.properties?.precision)
-    .map(node => [
-      node.if.properties.scale.const,
-      node.then.properties.precision.minimum,
-      node.then.properties.precision.maximum,
-    ]);
-  assert.deepEqual(
-    scales,
-    Array.from({ length: 11 }, (_, scale) => [scale, Math.max(1, scale), Math.min(30, scale + 20)]),
-  );
+test('the model-facing proposal schema enforces numeric precision bounds for every scale', () => {
+  const validate = ajvValidator(tableProposalJsonSchema());
+  const accepts = (precision, scale) => {
+    const target = definition();
+    Object.assign(target.fields[1], { precision, scale });
+    return validate(proposal(target));
+  };
+  for (const [scale, [minimum, maximum]] of precisionBounds.entries()) {
+    assert.equal(accepts(minimum, scale), true, `precision ${minimum}, scale ${scale}`);
+    assert.equal(accepts(maximum, scale), true, `precision ${maximum}, scale ${scale}`);
+    if (minimum > 1) assert.equal(accepts(minimum - 1, scale), false, `precision below minimum at scale ${scale}`);
+    if (maximum < 30) assert.equal(accepts(maximum + 1, scale), false, `precision above maximum at scale ${scale}`);
+  }
 });
 
 test('the model-facing proposal schema reuses definitions and stays small', () => {
@@ -335,6 +335,7 @@ test('the model-facing proposal schema agrees with Zod on numeric and label erro
   for (const [name, change] of [
     ['scale exceeds precision', input => Object.assign(input.fields[1], { precision: 2, scale: 3 })],
     ['precision minus scale exceeds 20 digits', input => Object.assign(input.fields[1], { precision: 30, scale: 0 })],
+    ['label contains a null byte', input => (input.label = 'Bad\u0000label')],
     ['label contains only spaces', input => (input.label = '   ')],
   ]) {
     const target = definition();

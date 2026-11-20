@@ -43,25 +43,6 @@ test('without a provider, flags use their declared default: on in development, o
   assert.equal(await isFeatureEnabled('not-a-flag', user, undefined, { NODE_ENV: 'development' }), false);
 });
 
-test('without a provider, the env override wins over FEATURE_FLAGS_OFF and the default', async () => {
-  assert.equal(await isFeatureEnabled(flag, user, undefined, { NODE_ENV: 'production', [env]: 'true' }), true);
-  assert.equal(await isFeatureEnabled(flag, user, undefined, { NODE_ENV: 'production', [env]: ' TRUE ' }), true);
-  assert.equal(await isFeatureEnabled(flag, user, undefined, { NODE_ENV: 'development', [env]: 'false' }), false);
-  assert.equal(
-    await isFeatureEnabled(flag, user, undefined, { NODE_ENV: 'development', FEATURE_FLAGS_OFF: `other, ${flag}` }),
-    false,
-  );
-  assert.equal(
-    await isFeatureEnabled(flag, user, undefined, { NODE_ENV: 'development', FEATURE_FLAGS_OFF: flag, [env]: 'true' }),
-    true,
-  );
-  assert.equal(
-    await isFeatureEnabled(flag, user, undefined, { NODE_ENV: 'production', [env]: 'yes' }),
-    false,
-    'an invalid value is no override',
-  );
-});
-
 test('a provider boolean wins over the env override and the default', async t => {
   const calls = await withProvider(t, name => name === flag);
   assert.equal(

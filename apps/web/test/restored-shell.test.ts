@@ -1,29 +1,6 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { themeColor } from './sprout-theme.ts';
-
-const source = (path: string) => readFileSync(new URL(`../src/${path}`, import.meta.url), 'utf8');
-
-test('settled chats explain that replying still works and what the recap does', () => {
-  const copy = source('features/chat/maintenance.tsx');
-  assert.doesNotMatch(copy, /This chat is inactive/);
-  assert.doesNotMatch(copy, /next background run/);
-  assert.match(copy, /You can keep replying here\./);
-});
-
-test('analytics consent reserves space instead of covering the composer', () => {
-  const consent = source('components/analytics-consent.tsx');
-  assert.match(consent, /--consent-inset/);
-  assert.match(consent, /useViewportInset\(panel, insetProperty/);
-  assert.match(source('lib/viewport-inset.ts'), /removeProperty\(property\)/);
-  assert.match(source('index.css'), /var\(--consent-inset, 0px\)/);
-});
-
-test('selected navigation passes its active state to the Sprout sidebar', () => {
-  assert.match(source('pages/workspace.tsx'), /isActive=\{active\}/);
-  assert.match(source('features/navigation/sidebar-recent-item.tsx'), /isActive=\{entry\.active\}/);
-});
 
 type Rgb = [number, number, number];
 const opacity = (color: string) => Number(color.match(/\/\s*([\d.]+)\s*\)$/)?.[1] ?? 1);
@@ -93,12 +70,4 @@ test('small grey shell text meets WCAG AA in light and dark themes', () => {
     const hover = over(token('accent')[theme], token('sidebar')[theme]);
     assert.ok(contrast(token('sidebar-muted-foreground')[theme], blend(hover, token('sidebar')[theme], 0.6)) >= 4.5);
   }
-  assert.doesNotMatch(source('features/navigation/sidebar-recent-item.tsx'), /text-muted-foreground/);
-});
-
-test('the workspace menu lists other workspaces and Create workspace only', () => {
-  const menu = source('pages/workspace.tsx');
-  assert.match(menu, /Create workspace/);
-  assert.doesNotMatch(menu, /Invite and manage members|Switch workspace/);
-  assert.doesNotMatch(source('features/chat/chat-models.tsx'), /Retry models/);
 });

@@ -48,7 +48,6 @@ test('saved commits restore from their bundles alone into an empty cache', { tim
   const restored = await reader.open(workspaceId, appId, second.commit, bundles);
   assert.equal(await git(restored, ['rev-parse', 'refs/heads/main']), second.commit);
   assert.equal(await git(restored, ['show', `${second.commit}:src/table.js`]), 'export {}');
-  assert.equal(await git(restored, ['config', 'gc.auto']), '0');
   assert.deepEqual(Object.fromEntries(await reader.tree(restored, second.commit)), {
     'index.html': 15,
     'src/table.js': 9,

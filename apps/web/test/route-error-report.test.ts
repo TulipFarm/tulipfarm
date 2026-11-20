@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { routeErrorEvent, routeErrorProperties } from '../src/lib/route-error-report.ts';
+import { routeErrorProperties } from '../src/lib/route-error-report.ts';
 
 class RequestError extends Error {
   readonly status: number;
@@ -11,7 +11,6 @@ class RequestError extends Error {
 }
 
 test('route error reports classify the failure without its message', () => {
-  assert.equal(routeErrorEvent, 'route_error_shown');
   assert.deepEqual(routeErrorProperties(new RequestError(502, 'Bad gateway for me@example.com'), false), {
     kind: 'request',
     status: 502,

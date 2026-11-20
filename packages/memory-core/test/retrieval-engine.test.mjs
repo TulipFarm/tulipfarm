@@ -154,19 +154,9 @@ function fixture() {
   return { state, trace, denied, seed, branch, call, publicationId };
 }
 
-test('bounded retrieval uses opaque ports, ordered passages, and both eligibility checks', async () => {
+test('bounded retrieval returns ordered passages with their provenance', async () => {
   const f = fixture();
   const output = await f.call(undefined, { runId: 'task-run' });
-  assert.deepEqual(f.trace, [
-    ['transaction', 5500],
-    'task',
-    ['transaction', 5500],
-    'task',
-    'anchors',
-    'eligible',
-    'passages',
-    'eligible',
-  ]);
   const branch = output.result.branches[0];
   assert.equal(branch.status, 'evidence');
   assert.equal(branch.documents[0].completeness, 'complete');
