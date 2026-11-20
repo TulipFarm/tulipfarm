@@ -105,6 +105,7 @@ function recordingRuntime({ fail = () => false, hold = () => null } = {}) {
       open++;
       concurrent = Math.max(concurrent, open);
       const attempt = attempts++;
+      const startedAt = Date.now();
       try {
         const sent = [];
         await hold(attempt);
@@ -121,7 +122,7 @@ function recordingRuntime({ fail = () => false, hold = () => null } = {}) {
         transactions.push({
           workspaceId,
           range,
-          at: Date.now(),
+          startedAt,
           sent: sent.map(textUpdate).map(({ step, seq, text, reset }) => ({ step, seq, text, reset })),
         });
       } finally {
@@ -158,7 +159,7 @@ test('publisher coalesces bursts, throttles, starts each step at seq 0, and flus
   assert.deepEqual(runtime.transactions[0].range, commonCompatibility);
   assert.equal(runtime.transactions[0].workspaceId, address.workspaceId);
   assert.ok(
-    runtime.transactions[1].at - runtime.transactions[0].at >= 95,
+    runtime.transactions[1].startedAt - runtime.transactions[0].startedAt >= 95,
     'publications start at least one interval apart',
   );
 });
