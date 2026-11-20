@@ -9,6 +9,7 @@ import {
 import { publicWebReceiptSchema } from '@tulipfarm/conversations/public-web';
 import { knowledgeActivitySchema } from '@tulipfarm/conversations/knowledge-activity';
 import { rowChangeSchema, rowViewSchema } from '@tulipfarm/conversations/row-view';
+import { transcriptOrder } from '@tulipfarm/conversations/transcript-order';
 import { calendarHistoryResultSchema } from '@tulipfarm/google-workspace/calendar-events';
 import { draftViewSchema, draftOutcomeSchema, type draftDecisionSchema } from '@tulipfarm/agents/draft-contracts';
 import { chatDocumentSchema } from '@tulipfarm/conversations/rich-content';
@@ -191,6 +192,7 @@ const messageSchema = z.object({
   calendarResults: z.array(calendarHistoryResultSchema).default([]),
   followUp: firedFollowUpSchema.nullable().optional(),
   stoppedTurnId: z.uuid().optional(),
+  turnSequence: z.number().int().positive().optional(),
 });
 const historySchema = z.object({
   messages: z.array(messageSchema),
@@ -653,7 +655,7 @@ export function conversationApi(workspaceId: string, denied: (status: number) =>
       if (!chat) throw new Error('Missing chat metadata');
       return {
         chat,
-        messages: [...messages.values()].sort((a, b) => a.sequence - b.sequence),
+        messages: transcriptOrder([...messages.values()]),
         nextBefore,
         hasGitHubProposals,
       };

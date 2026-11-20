@@ -58,7 +58,7 @@ test('queued B receives completed A before its own source, never later C or anot
     const history = await f.store.history(f.workspace.id, f.workspace.userId, chat.conversationId);
     assert.deepEqual(
       history.messages.map(message => message.parts[0].text),
-      ['A', 'B', 'C', 'A answer', 'B answer'],
+      ['A', 'A answer', 'B', 'B answer', 'C'],
     );
     assert.deepEqual(
       (await executor.due(f.workspace.id)).filter(work => work.conversationId === chat.conversationId),

@@ -411,11 +411,11 @@ test(
       let history = await store.history(w.id, w.userId, chat);
       assert.deepEqual(
         history.messages.map(message => message.parts.map(part => part.text).join('')),
-        ['hello 👨‍👩‍👧‍👦 e\u0301', 'second', 'e\u0301 👨‍👩‍👧‍👦 olleh', 'dnoces'],
+        ['hello 👨‍👩‍👧‍👦 e\u0301', 'e\u0301 👨‍👩‍👧‍👦 olleh', 'second', 'dnoces'],
       );
       assert.deepEqual(
         history.messages.map(message => message.author),
-        ['human', 'human', 'assistant', 'assistant'],
+        ['human', 'assistant', 'human', 'assistant'],
       );
 
       const c = await send('retry me');
@@ -620,6 +620,49 @@ test('publication database failure rolls back content and persists a bounded ret
       ).rows,
       [{ status: 'failed', attempts: 5 }],
     );
+  } finally {
+    await f.close();
+  }
+});
+
+test('a retried reply stays under the message it answers when a later message was sent meanwhile', async () => {
+  const f = await conversationFixture();
+  try {
+    const w = f.workspace,
+      chatId = randomUUID();
+    await f.store.create(w.id, w.userId, { chatId, commandId: randomUUID() });
+    const send = text =>
+      f.store.send(w.id, w.userId, chatId, {
+        commandId: randomUUID(),
+        messageId: randomUUID(),
+        parts: [{ kind: 'text', text }],
+      });
+    const first = await send('First question');
+    const failing = createConversationExecutor(f.runtime, async () => {
+      throw new Error('model-incomplete-response');
+    });
+    const work = turnId => ({ workspaceId: w.id, conversationId: chatId, turnId, generation: 0 });
+    assert.equal(await failing.process(work(first.turnId)), 'failed');
+    const second = await send('Second question');
+    const retried = await f.store.retry(w.id, w.userId, chatId, first.turnId, {
+      commandId: randomUUID(),
+      expectedGeneration: 1,
+    });
+    const answering = createConversationExecutor(
+      f.runtime,
+      async ({ messages }) => `Answer to ${messages.at(-1).text}`,
+    );
+    assert.equal(await answering.process({ ...work(first.turnId), generation: retried.generation }), 'completed');
+    assert.equal(await answering.process(work(second.turnId)), 'completed');
+    const transcript = (await f.store.history(w.id, w.userId, chatId)).messages.map(
+      message => `${message.author}: ${message.parts[0].text}`,
+    );
+    assert.deepEqual(transcript, [
+      'human: First question',
+      'assistant: Answer to First question',
+      'human: Second question',
+      'assistant: Answer to Second question',
+    ]);
   } finally {
     await f.close();
   }

@@ -446,6 +446,8 @@ export const messageSchema = z.object({
   followUp: z.object({ id: uuidSchema, instruction: z.string(), requestedAt: z.string() }).nullable().optional(),
   /** The stopped turn whose streamed text this partial assistant reply keeps. */
   stoppedTurnId: uuidSchema.optional(),
+  /** The sequence of the turn this message belongs to; the transcript orders by it before `sequence`. */
+  turnSequence: z.number().int().positive().optional(),
 });
 export const historySchema = z.object({
   messages: z.array(messageSchema),

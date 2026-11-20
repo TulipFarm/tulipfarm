@@ -100,6 +100,8 @@ export function currentReply({ messages, outgoing, command, stream }: ReplyInput
     queuedMessages,
     queueLabel,
     unconfirmed,
+    /** The index of the last saved message of the replying turn; the live reply renders right after it. */
+    replyAfter: replying && messages ? lastOfTurn(messages, replying.sequence) : null,
     since: replying?.createdAt ?? pending?.at,
     narration,
     /** The newest narration saved with a tool, held on screen while that tool runs. */
@@ -113,6 +115,14 @@ export function currentReply({ messages, outgoing, command, stream }: ReplyInput
     queuedKey,
     processingKey,
   };
+}
+
+function lastOfTurn(messages: readonly ConversationMessage[], sequence: number) {
+  let at = -1;
+  messages.forEach((message, index) => {
+    if ((message.turnSequence ?? message.sequence) <= sequence) at = index;
+  });
+  return at;
 }
 
 type Activity = { activity: SpinnerActivity; label: string };
