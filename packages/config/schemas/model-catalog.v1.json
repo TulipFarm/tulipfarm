@@ -176,7 +176,8 @@
                   "chatgpt-plan",
                   "claude-plan",
                   "copilot-plan",
-                  "coding-runs"
+                  "coding-runs",
+                  "keep-memory"
                 ]
               },
               {
@@ -537,7 +538,8 @@
                   "chatgpt-plan",
                   "claude-plan",
                   "copilot-plan",
-                  "coding-runs"
+                  "coding-runs",
+                  "keep-memory"
                 ]
               },
               {

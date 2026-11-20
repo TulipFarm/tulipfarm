@@ -27,6 +27,7 @@ import { createTableService } from '@tulipfarm/tables/service';
 import { createConversationEventHub } from './conversation-events.ts';
 import { registerProjects } from './projects.ts';
 import { registerPersonalMemory } from './personal-memory.ts';
+import { createKeepMemory, withKeepProbe } from './keep-memory.ts';
 import { registerBud } from './bud.ts';
 import { createBudAssistant } from '@tulipfarm/conversations/bud-assistant';
 import { createPersonalMemoryService } from '@tulipfarm/conversations/personal-memory';
@@ -109,7 +110,10 @@ export function registerStorageComposition(
   const { confirmation, approvalRequests, replies, conversations, followUps, gmail } = services;
   registerCredits(app, { runtime, auth: dependencies.auth });
   registerRecommendations(app, { runtime, auth: dependencies.auth });
-  registerPersonalMemory(app, { auth: dependencies.auth, service: createPersonalMemoryService(runtime) });
+  registerPersonalMemory(app, {
+    auth: dependencies.auth,
+    service: withKeepProbe(createPersonalMemoryService(runtime), createKeepMemory()),
+  });
   registerBud(app, { auth: dependencies.auth, service: createBudAssistant(runtime) });
   registerSkills(app, { runtime, auth: dependencies.auth });
   const wakeTask = taskWake(app, temporal);

@@ -37,6 +37,7 @@ export const settingGroups = [
   'Object storage',
   'Temporal',
   'Models',
+  'Memory',
   'Sign-in',
   'Email',
   'GitHub',
@@ -1287,6 +1288,23 @@ export const settings: readonly Setting[] = [
     default: '1536',
     description: 'Must equal 1536 when set.',
     selfHost: { section: 'embeddings', example: '1536', commented: true },
+  },
+  {
+    name: 'KEEP_ENDPOINT',
+    group: 'Memory',
+    services: ['api'],
+    requirement: 'optional',
+    secret: false,
+    description:
+      'Origin (no path or credentials) of an optional [Keep](https://github.com/TulipFarm/keep) memory service. Unset reports Keep as not configured. Used only while the `keep-memory` flag is on, to probe `GET /v1/health/ready`.',
+  },
+  {
+    name: 'KEEP_TOKEN',
+    group: 'Memory',
+    services: ['api'],
+    requirement: 'optional',
+    secret: true,
+    description: "Bearer token for Keep's memory routes. Never sent to its health routes. Accepts KEEP_TOKEN_FILE.",
   },
 
   {

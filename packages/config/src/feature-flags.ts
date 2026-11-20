@@ -158,6 +158,13 @@ export const featureFlags = {
     scope: 'workspace',
     env: 'FEATURE_FLAG_CODING_RUNS',
   },
+  'keep-memory': {
+    description:
+      'Checks that the optional Keep memory service (KEEP_ENDPOINT) answers when a member reads personal memory, and records its availability. Replies, prompts and personal memory are unchanged; personal memory stays the source of truth.',
+    default: false,
+    scope: 'workspace',
+    env: 'FEATURE_FLAG_KEEP_MEMORY',
+  },
 } as const satisfies Record<string, FeatureFlagDefinition>;
 
 export type FeatureFlag = keyof typeof featureFlags;
