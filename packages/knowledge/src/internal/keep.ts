@@ -15,7 +15,7 @@ import { z } from 'zod';
 import { knowledgeTenantRuntime, type KnowledgeRuntime, type KnowledgeTransaction } from '../storage-ports.ts';
 
 /** The common migration that adds tf_keep_knowledge. */
-export const keepKnowledgeVersion = 92;
+export const keepKnowledgeVersion = 93;
 const deliveryTimeoutMs = 30000;
 const searchTimeoutMs = 5000;
 const searchLimit = 30;
