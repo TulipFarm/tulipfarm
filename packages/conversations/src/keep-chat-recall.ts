@@ -20,7 +20,7 @@ import type { ChatMessage } from './compaction.ts';
  */
 
 /** The common migration that adds tf_conversation_keep. */
-export const keepChatRecallVersion = 94;
+export const keepChatRecallVersion = 95;
 const recallTimeoutMs = 1500;
 const deliveryTimeoutMs = 30000;
 const recallLimit = 4;
