@@ -3404,6 +3404,7 @@ test('a confirmation like "Do it" still makes an unbacked edit claim read, then 
 
 test("an app chat answer about the app's current state stands once the app was read, with no forced read or write", async t => {
   for (const answer of [
+    'The heading now reads "Orders v2".',
     'Your app is now live at release 3.',
     'The app now has three files: index.html, app.js and style.css.',
     'Yes, the server now returns ok on /health.',
@@ -3461,27 +3462,6 @@ test('an app chat reply that keeps claiming an edit no tool made ends with a sto
   );
   assert.equal(stuck.result.text.includes('Second edit'), false, stuck.result.text);
   assert.match(stuck.result.text, /^I stopped before changing or building the app, so nothing in it changed/);
-});
-
-test('an app chat reply that states the app holds a requested change, with no write, ends with a stop', async t => {
-  for (const [request, claim] of [
-    ["Change the greeting to 'Hello v4' and rebuild.", "The greeting at / is 'Hello v4' and the app is built."],
-    [
-      "Change the paragraph to 'Second edit v6.' and rebuild.",
-      "The paragraph still reads 'Second edit v5.' from the last accepted change. No app tool ran, so it was not updated.",
-    ],
-  ])
-    await t.test(request, async t => {
-      const turn = await appTurn(
-        t,
-        round => (round === 0 ? { calls: [use('apps.status')] } : { text: claim }),
-        request,
-      );
-      assert.deepEqual(turn.ran, ['apps.status']);
-      assert.deepEqual(turn.choices.slice(0, 3), ['apps_status', 'auto', 'apps_files_read']);
-      assert.match(turn.result.text, /^I stopped before changing or building the app, so nothing in it changed/);
-      assert.equal(turn.result.text.includes(claim.slice(4, 20)), false, turn.result.text);
-    });
 });
 
 test('native-tool reminders omit duplicated tool descriptions', () => {

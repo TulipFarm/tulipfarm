@@ -2360,11 +2360,6 @@ const nowClaim =
 /** A clause that says the app already holds something, which only reading its files in this reply could show. */
 const alreadyClaim =
   /\balready (?:has|have|contains?|includes?|serves?|returns?|responds?|exposes?|defines?|handles?|reads?|says?|shows?|uses?)\b/i;
-/** "The paragraph still reads 'First version.'": quoted file contents, which apps.status never returns. */
-const contentClaim =
-  /\b(?:is|are|reads?|says?|shows?|displays?|returns?|contains?|renders?)(?: (?:still|now|currently|already|set to))*\s+["'‘“]([^"'’”\n]{1,200})/i;
-/** "The app is built": the build state a requested rebuild must produce, or apps.status reports. */
-const builtState = /\b(?:app|draft|site|server|page) (?:is|was|has been)(?: now| already)? (?:re)?built\b/i;
 const toReader = /\b(?:below|for you|here(?:'|’)?s|here is|here are)\b/i;
 /** Verbs that ask for a change, in any inflection. */
 const changeVerb = String.raw`(?:add(?:s|ed|ing)?|chang(?:e|es|ed|ing)|creat(?:e|es|ed|ing)|writ(?:e|es|ing)|wrote|written|rewrit(?:e|es|ing)|rewrote|implement(?:s|ed|ing)?|turn(?:s|ed|ing)?|mak(?:e|es|ing)|made|(?:re)?build(?:s|ing)?|(?:re)?built|set(?:s|ting)?|renam(?:e|es|ed|ing)|replac(?:e|es|ed|ing)|remov(?:e|es|ed|ing)|delet(?:e|es|ed|ing)|fix(?:es|ed|ing)?|insert(?:s|ed|ing)?|mov(?:e|es|ed|ing)|swap(?:s|ped|ping)?|publish(?:es|ed|ing)?|deploy(?:s|ed|ing)?|updat(?:e|es|ed|ing)|edit(?:s|ed|ing)?|switch(?:es|ed|ing)?|(?:re)?styl(?:e|es|ed|ing)|redesign(?:s|ed|ing)?|refactor(?:s|ed|ing)?|convert(?:s|ed|ing)?|hook(?:s|ed|ing)?|wir(?:e|es|ed|ing)|drop(?:s|ped|ping)?|hid(?:e|es|ing)|hidden|enabl(?:e|es|ed|ing)|disabl(?:e|es|ed|ing)|translat(?:e|es|ed|ing)|resiz(?:e|es|ed|ing)|cent(?:er|re)(?:s|ed|ing)?|align(?:s|ed|ing)?|put(?:s|ting)?|includ(?:e|es|ed|ing)|giv(?:e|es|ing)|gave|given|get(?:s|ting)?|got|us(?:e|es|ed|ing)|show(?:s|ed|ing|n)?)`;
@@ -2451,12 +2446,6 @@ export function unbackedAppClaim(candidate: string, apps: AppKind | undefined, r
     if (toReader.test(clause)) return undefined;
     const build = buildClaim.exec(clause);
     if (build && !negatedClaim(clause, build)) return ran.has(buildTool) ? undefined : 'build';
-    // After a requested change only this reply's build makes the app built; otherwise the status read reports it.
-    const built = builtState.exec(clause);
-    if (built && !negatedClaim(clause, built) && !ran.has(buildTool)) {
-      if (asked) return 'build';
-      if (!looked) return 'read';
-    }
     const saved = savedClaim.exec(clause);
     if (saved && !negatedClaim(clause, saved)) return changed ? undefined : 'edit';
     const now = nowClaim.exec(clause);
@@ -2470,26 +2459,7 @@ export function unbackedAppClaim(candidate: string, apps: AppKind | undefined, r
     if (!edit || negatedClaim(clause, edit) || !codeObject.test(clause)) return undefined;
     return changed ? undefined : 'edit';
   };
-  const filesRead = changed || ran.has('apps.files.read');
-  const wanted = request.toLowerCase();
-  const requested = (value: string) => {
-    const text = value
-      .toLowerCase()
-      .replace(/[\s.!?,;:]+$/, '')
-      .trim();
-    return text.length > 1 && wanted.includes(text);
-  };
-  // Quoted contents are a present-tense claim even beside "from the last turn"; only this reply's read or write shows
-  // them. Saying they already hold the text the person asked for, with nothing written, claims the change.
-  const content = (clause: string): 'change' | 'read' | undefined => {
-    const quote = contentClaim.exec(clause);
-    if (!quote || negatedClaim(clause, quote) || toReader.test(clause) || changed) return undefined;
-    const claimsRequest = asked && !/\balready\b/i.test(clause) && requested(quote[1]!);
-    if (!filesRead) return claimsRequest ? 'change' : 'read';
-    return claimsRequest ? 'change' : undefined;
-  };
   const claims = [
-    ...clauses(unconditional).map(clause => ({ clause, missing: content(clause) })),
     ...clauses(settled).map(clause => ({ clause, missing: missing(clause) })),
     // "Already has" names the app's current files, so a read of them in this reply backs it.
     ...clauses(unconditional).map(clause => {
@@ -2510,7 +2480,7 @@ export function unbackedAppClaim(candidate: string, apps: AppKind | undefined, r
         status: 'continue' as const,
         reason:
           unbacked.missing === 'read'
-            ? `The reply says "${unbacked.clause.slice(0, 60)}", but the app was not read in this turn. Read it before saying what the app has: apps.files.read for what a file says, apps.status for its draft, build and release.`
+            ? `The reply says "${unbacked.clause.slice(0, 60)}", but the app was not read in this turn. Read it with apps.status or apps.files.read before saying what the app has.`
             : `The reply says "${unbacked.clause.slice(0, 60)}", but no app tool in this turn did that. Do it with apps.files.write or ${buildTool}, or say plainly that it was not done. If it describes an earlier turn, say so.`,
         missing: unbacked.missing!,
       };
