@@ -247,18 +247,61 @@ export async function blockLearningSource(
 }
 
 /**
- * After a forget: deletes every pending suggestion holding the forgotten text (or all of them when the whole memory was
- * forgotten), and blocks their sources from being suggested again.
+ * Serializes a member's memory changes with background learning until the transaction ends. Take it before calling
+ * Keep, so learning never saves suggestions read from memory that a concurrent change replaced or forgot.
  */
-export async function scrubMemoryProposals(tx: PersonalMemoryTransaction, actor: HumanActor, text?: string) {
+export async function lockMemoryLearning(tx: PersonalMemoryTransaction, actor: HumanActor) {
+  await tx.client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 761041))', [
+    `${tx.schema}:${actor.membershipId}`,
+  ]);
+}
+
+const overlaps = (field: string | null, text: string) => {
+  const value = field?.trim();
+  return !!value && (value.includes(text) || text.includes(value));
+};
+
+/**
+ * After a forget: deletes every pending suggestion whose words overlap the forgotten text either way, or whose edit no
+ * longer fits the memory left (all of them when the whole memory was forgotten), and blocks their sources from being
+ * suggested again.
+ */
+export async function scrubMemoryProposals(
+  tx: PersonalMemoryTransaction,
+  actor: HumanActor,
+  forgotten?: { text: string; memory: string },
+) {
   if (!(await memoryProposalsInstalled(tx))) return;
-  const removed = await tx.client.query<{ conversation_id: string; quote: string; after_text: string | null }>(
-    `DELETE FROM ${table(tx, 'tf_memory_proposals')} WHERE membership_id=$1 AND ($2::text IS NULL
-      OR strpos(quote,$2)>0 OR strpos(COALESCE(before_text,''),$2)>0 OR strpos(COALESCE(after_text,''),$2)>0)
-    RETURNING conversation_id,quote,after_text`,
-    [actor.membershipId, text ?? null],
+  const rows = await tx.client.query<{
+    id: string;
+    conversation_id: string;
+    kind: MemoryEdit['kind'];
+    before_text: string | null;
+    after_text: string | null;
+    quote: string;
+  }>(
+    `SELECT id,conversation_id,kind,before_text,after_text,quote FROM ${table(tx, 'tf_memory_proposals')}
+    WHERE membership_id=$1 FOR UPDATE`,
+    [actor.membershipId],
   );
-  for (const row of removed.rows)
+  const text = forgotten?.text.trim();
+  const removed = rows.rows.filter(
+    row =>
+      !forgotten ||
+      !text ||
+      [row.quote, row.before_text, row.after_text].some(field => overlaps(field, text)) ||
+      applyMemoryEdit(forgotten.memory, {
+        kind: row.kind,
+        before: row.before_text,
+        after: row.after_text,
+      } as MemoryEdit) === undefined,
+  );
+  if (removed.length === 0) return;
+  await tx.client.query(`DELETE FROM ${table(tx, 'tf_memory_proposals')} WHERE membership_id=$1 AND id=ANY($2)`, [
+    actor.membershipId,
+    removed.map(row => row.id),
+  ]);
+  for (const row of removed)
     await blockLearningSource(tx, actor, {
       conversationId: row.conversation_id,
       quote: row.quote,

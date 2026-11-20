@@ -39,6 +39,7 @@ import {
   applyMemoryEdit,
   blockLearningSource,
   deleteMemoryProposal,
+  lockMemoryLearning,
   lockMemoryProposal,
   memoryProposalRecords,
   memoryProposalsInstalled,
@@ -140,6 +141,7 @@ export async function replacePersonalMemory(
   const mode = await keepMode(tx, actor);
   if (mode.kind === 'legacy') return legacyPersonalMemory.replace(tx, actor, nextContent, expectedRevision);
   savePersonalMemorySchema.parse({ content: nextContent, expectedRevision });
+  await lockMemoryLearning(tx, actor);
   return changed(tx, actor, await replaceKeepMemory(mode, nextContent, expectedRevision));
 }
 
@@ -188,13 +190,20 @@ async function keepOnly(tx: PersonalMemoryTransaction, actor: HumanActor) {
   return mode;
 }
 
+/** Keep only, for a change: holds off background learning until the transaction ends. */
+async function keepChange(tx: PersonalMemoryTransaction, actor: HumanActor) {
+  const mode = await keepOnly(tx, actor);
+  await lockMemoryLearning(tx, actor);
+  return mode;
+}
+
 /** Undoes the member's last memory change in Keep: a deleted memory comes back, an edit is reverted as a new revision. */
 export async function undoOwnPersonalMemory(
   tx: PersonalMemoryTransaction,
   actor: HumanActor,
   expectedRevision: number,
 ) {
-  const result = await changed(tx, actor, await undoKeepMemory(await keepOnly(tx, actor), expectedRevision));
+  const result = await changed(tx, actor, await undoKeepMemory(await keepChange(tx, actor), expectedRevision));
   await clearBudPreferences(tx, actor);
   await recordDirectMemoryChange(tx, actor);
   return result;
@@ -210,9 +219,9 @@ export async function forgetOwnPersonalMemory(
   expectedRevision: number,
   text?: string,
 ) {
-  const result = await changed(tx, actor, await forgetKeepMemory(await keepOnly(tx, actor), expectedRevision, text));
+  const result = await changed(tx, actor, await forgetKeepMemory(await keepChange(tx, actor), expectedRevision, text));
   await clearBudPreferences(tx, actor);
-  await scrubMemoryProposals(tx, actor, text);
+  await scrubMemoryProposals(tx, actor, text === undefined ? undefined : { text, memory: result.content });
   await recordDirectMemoryChange(tx, actor);
   return result;
 }
@@ -252,7 +261,7 @@ export async function listMemoryProposals(tx: PersonalMemoryTransaction, actor: 
 }
 
 async function proposalMode(tx: PersonalMemoryTransaction, actor: HumanActor) {
-  const mode = await keepOnly(tx, actor);
+  const mode = await keepChange(tx, actor);
   if (!(await memoryProposalsInstalled(tx))) throw new PersonalMemoryUnavailable('updating');
   return mode;
 }

@@ -12,6 +12,7 @@ import { legacyPersonalMemory, personalMemoryMode } from './personal-memory.ts';
 import { keepRevision, readKeepProfile } from './keep-personal-memory.ts';
 import {
   lastDirectMemoryChange,
+  lockMemoryLearning,
   memoryProposalsInstalled,
   parseMemoryEdits,
   proposalSystemPrompt,
@@ -149,6 +150,8 @@ async function proposeMaintenanceMemory(
       await repository(tx).complete([fence.jobId]);
       return true;
     }
+    // Under the lock a concurrent change or forget has either committed, and is seen below, or waits for this one.
+    await lockMemoryLearning(tx, actor);
     const profile = await readKeepProfile(keep);
     // The member changed their memory meanwhile: suggest again against what they have now.
     if (keepRevision(profile) !== input.revision || (await lastDirectMemoryChange(tx, actor)) !== input.manualAt) {

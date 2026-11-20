@@ -305,6 +305,101 @@ test(
   },
 );
 
+/** Forgets the exact text from the member's memory, as a confirmed chat forget does. */
+async function forgetText({ f, w }, text, revision) {
+  await f.runtime.transaction(w.id, commonCompatibility, async tx => {
+    await lockAuthorization(tx, 'read');
+    const actor = await resolveHuman(tx, w.userId);
+    await currentMember(tx, actor);
+    await forgetOwnPersonalMemory(tx, actor, revision, text);
+  });
+}
+
+test(
+  'forgetting deletes suggestions whose words sit inside the forgotten text, and those it leaves unable to apply',
+  { timeout: 60000 },
+  async t => {
+    const context = await setup(t);
+    const { w, memory, learn, count } = context;
+    await memory.save(w.id, w.userId, {
+      content: '- Use emojis.\n- Be brief.\n- Greet by name.\n- Use tables.',
+      expectedRevision: 0,
+    });
+    await learn('Use emojis sparingly. Stop being brief. Greet me by first name. Reply in French.', () => [
+      { kind: 'change', before: '- Use emojis.', after: '- Use emojis sparingly.', quote: 'Use emojis sparingly' },
+      { kind: 'remove', before: '- Be brief.', after: null, quote: 'Stop being brief' },
+      { kind: 'change', before: '- Greet by name.', after: '- Greet by first name.', quote: 'Greet me by first name' },
+      { kind: 'add', before: null, after: '- Reply in French.', quote: 'Reply in French' },
+    ]);
+    assert.equal(await count('tf_memory_proposals'), 4);
+
+    await forgetText(context, '- Use emojis.\n- Be brief.', (await memory.read(w.id, w.userId)).revision);
+    assert.deepEqual(
+      (await memory.proposals(w.id, w.userId)).proposals.map(proposal => proposal.after),
+      ['- Greet by first name.', '- Reply in French.'],
+      'a suggestion whose words lie inside the forgotten text is deleted',
+    );
+
+    await forgetText(context, 'name.\n- Use', (await memory.read(w.id, w.userId)).revision);
+    assert.doesNotMatch((await memory.read(w.id, w.userId)).content, /Greet by name/);
+    assert.deepEqual(
+      (await memory.proposals(w.id, w.userId)).proposals.map(proposal => proposal.after),
+      ['- Reply in French.'],
+      'a partial-line forget deletes a suggestion that no longer fits, even without shared words',
+    );
+    assert.doesNotMatch(
+      JSON.stringify(
+        (await context.f.db.platform.query(`SELECT * FROM ${context.f.table('tf_memory_proposals')}`)).rows,
+      ),
+      /emojis|brief|Greet/,
+    );
+  },
+);
+
+test(
+  'a forget that races background learning waits for it, then deletes the suggestions it saved',
+  { timeout: 60000 },
+  async t => {
+    const context = await setup(t);
+    const { w, keep, memory, learn } = context;
+    await memory.save(w.id, w.userId, { content: '- No emojis.', expectedRevision: 0 });
+    const revision = (await memory.read(w.id, w.userId)).revision;
+    let armed = false;
+    let forgetting;
+    const order = [];
+    const history = keep.client.history;
+    // Learning's last step reads Keep under its lock; a forget starts right then and must wait for learning to commit.
+    keep.client.history = async input => {
+      const result = await history(input);
+      if (armed) {
+        armed = false;
+        forgetting = forgetText(context, 'emojis', revision);
+        order.push(
+          await Promise.race([
+            forgetting.then(() => 'forget finished first'),
+            new Promise(resolve => setTimeout(() => resolve('forget waited'), 500)),
+          ]),
+        );
+      }
+      return result;
+    };
+    await learn('Use emojis now. Reply in French.', () => {
+      armed = true;
+      return [
+        { kind: 'change', before: '- No emojis.', after: '- Use emojis.', quote: 'Use emojis now' },
+        { kind: 'add', before: null, after: '- Reply in French.', quote: 'Reply in French' },
+      ];
+    });
+    await forgetting;
+    assert.deepEqual(order, ['forget waited']);
+    assert.deepEqual(
+      (await memory.proposals(w.id, w.userId)).proposals.map(proposal => proposal.after),
+      ['- Reply in French.'],
+      'no suggestion holding the forgotten text survives the race',
+    );
+  },
+);
+
 test(
   'hidden memory is not learned from, and project chats never feed personal learning',
   { timeout: 60000 },
