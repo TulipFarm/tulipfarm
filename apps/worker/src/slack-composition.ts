@@ -23,6 +23,7 @@ import { createSlackDirectMessages } from '@tulipfarm/slack';
 import { createConversationExecutor } from '@tulipfarm/conversations/runtime';
 import { createSlackChannelAgents } from '@tulipfarm/agents/slack-channels';
 import { createSlackDefault } from '@tulipfarm/agents/slack-default';
+import { createInboxSlackNotifier } from '@tulipfarm/agents/inbox-slack';
 import { meteredReply } from './conversation-activities.ts';
 import { conversationCompactor } from './conversation-compactor.ts';
 import { conversationModel } from './conversation-model.ts';
@@ -146,6 +147,12 @@ export async function createSlackPromptComposition(
         reply: (guard, slack) => meteredReply(runtime, { externalContext: guard, slack, compactor, workspaceSlug }),
       })
     : undefined;
+  const inboxSlack = createInboxSlackNotifier({
+    runtime,
+    appId: settings.config.appId,
+    cipher: settings.cipher,
+    rowLink,
+  });
   const replies = createConversationExecutor(runtime);
   const installations = createSlackInstallationDiscovery(pool, runtime, settings.config.appId);
   let connection: Connection;
@@ -174,6 +181,13 @@ export async function createSlackPromptComposition(
       try {
         if (!(await installations.installed(workspaceId))) continue;
         await recovery.refresh(workspaceId);
+        // Inbox items reach members as Slack direct messages while assignable tasks are on.
+        try {
+          if (await isFeatureEnabled('assignable-tasks', null, { id: workspaceId }))
+            await inboxSlack.notify(workspaceId);
+        } catch (error) {
+          report(error, 'inbox-slack');
+        }
         if (channels)
           try {
             for (const work of [...(await channels.due(workspaceId)), ...((await defaults?.due(workspaceId)) ?? [])]) {

@@ -162,7 +162,14 @@ export function RowThreadPanel({
           </div>
         )}
       </div>
-      {assignment?.reason && <p className="text-sm text-muted-foreground">{assignment.reason}</p>}
+      {assignment?.reason === 'Waiting for approval' ? (
+        <p className="flex flex-wrap items-center gap-1 text-sm text-muted-foreground">
+          Waiting for approval from
+          <ActorName workspaceId={workspaceId} actor={{ type: 'member', id: assignment.sponsorMembershipId }} compact />
+        </p>
+      ) : (
+        assignment?.reason && <p className="text-sm text-muted-foreground">{assignment.reason}</p>
+      )}
       {assignment?.wakeAt && (
         <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
           <span>Wakes {time(assignment.wakeAt)}</span>

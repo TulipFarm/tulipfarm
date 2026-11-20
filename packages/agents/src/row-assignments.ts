@@ -1,13 +1,15 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { AccessDenied } from '@tulipfarm/access';
+import { AccessDenied, definitionGrantPredicate, requireTablePermission } from '@tulipfarm/access';
 import { activeGeneration, readRecord, writeRunState } from '@tulipfarm/tables/store';
 import { taskFields, type RunState } from '@tulipfarm/tables/tasks-table';
 import type { TableDefinition, TableValues } from '@tulipfarm/tables/definition';
 import { agentCompatibility, relation, type AgentStorage, type AgentTransaction } from './store.ts';
+import { lockTask } from './task-approval-gate.ts';
 
 /** Run limits for one wake: the agent's usual defaults. */
 const runLimits = { toolCalls: 100, activeMilliseconds: 300000, credits: 100 };
+const creditUnit = '1000000000000';
 const defaultAgentConcurrency = 3;
 const defaultWorkspaceConcurrency = 10;
 /** A claim whose run never got recorded, such as after a worker crash, is retried after this long. */
@@ -109,6 +111,21 @@ function displayValue(definition: TableDefinition, fieldId: string, values: Tabl
 export async function rowExists(tx: AgentTransaction, tableId: string, rowId: string) {
   const generation = await activeGeneration(tx, tableId).catch(() => null);
   return Boolean(generation && (await readRecord(tx, generation, rowId)));
+}
+
+/** A row's title, from Tasks' Title or the table's first text field, and its table's name. */
+export async function rowTitle(tx: AgentTransaction, tableId: string, rowId: string) {
+  const generation = await activeGeneration(tx, tableId);
+  const row = await readRecord(tx, generation, rowId);
+  if (!row) return null;
+  const { definition } = generation;
+  const field =
+    definition.fields.find(candidate => candidate.id === taskFields.title) ??
+    definition.fields.find(candidate => candidate.kind === 'text');
+  return {
+    table: definition.label,
+    title: field ? (displayValue(definition, field.id, row.values)?.slice(0, 200) ?? null) : null,
+  };
 }
 
 async function runBrief(tx: AgentTransaction, tableId: string, rowId: string, agentName: string) {
@@ -225,6 +242,46 @@ async function notifySponsor(
  * Turns row assignments into agent runs. One `step` per workspace settles finished runs, stops runs whose assignment
  * changed, and starts queued rows within the agent and workspace limits.
  */
+/**
+ * Why a row's agent can't work for its sponsor any more: the agent is off or deleted, or the sponsor left, lost edit
+ * access to the row or can no longer invoke the agent. Null when the run may go on.
+ */
+async function blocker(
+  tx: AgentTransaction,
+  row: { table_id: string; agent_id: string; sponsor_membership_id: string },
+) {
+  const facts = z
+    .object({ agent_usable: z.boolean(), user_id: z.string().nullable(), may_invoke: z.boolean().nullable() })
+    .optional()
+    .parse(
+      (
+        await tx.client.query(
+          `SELECT (ag.saved_revision IS NOT NULL AND ag.deleted_at IS NULL AND ag.enabled) AS agent_usable,m.user_id,
+            ${definitionGrantPredicate(tx, 'agent', 'ag.id', '$2::uuid', "'invoke'")} AS may_invoke
+          FROM ${relation(tx, 'tf_agents')} ag
+          LEFT JOIN ${relation(tx, 'tf_memberships')} m ON m.id=$2 AND m.removed_at IS NULL
+          WHERE ag.id=$1`,
+          [row.agent_id, row.sponsor_membership_id],
+        )
+      ).rows[0],
+    );
+  if (!facts?.agent_usable) return 'Agent unavailable';
+  if (!facts.user_id || !facts.may_invoke) return 'Needs reassignment';
+  const canEdit = await requireTablePermission(
+    tx,
+    { kind: 'human', userId: facts.user_id, membershipId: row.sponsor_membership_id },
+    row.table_id,
+    'table.row.update',
+  ).then(
+    () => true,
+    error => {
+      if (error instanceof AccessDenied) return false;
+      throw error;
+    },
+  );
+  return canEdit ? null : 'Needs reassignment';
+}
+
 export function createRowAssignments(options: {
   runtime: AgentStorage;
   start: Starter;
@@ -256,12 +313,13 @@ export function createRowAssignments(options: {
             pause_reason: z.string().nullable(),
             run_generation: z.coerce.number().nullable(),
             owner_user: z.string().nullable(),
+            flow_id: z.string().nullable(),
           }),
         )
         .parse(
           (
             await tx.client.query(
-              `SELECT a.*,t.status,t.pause_reason,r.generation AS run_generation,t.owner_user_id AS owner_user
+              `SELECT a.*,t.status,t.pause_reason,r.generation AS run_generation,t.owner_user_id AS owner_user,t.flow_id::text AS flow_id
               FROM ${relation(tx, 'tf_row_assignments')} a
               LEFT JOIN ${relation(tx, 'tf_agent_tasks')} t ON t.id=a.current_task_id
               LEFT JOIN ${relation(tx, 'tf_row_assignment_runs')} r ON r.task_id=a.current_task_id
@@ -296,6 +354,20 @@ export function createRowAssignments(options: {
           if (await rowExists(tx, row.table_id, row.row_id))
             await postNote(tx, row, taskId, 'event', { type: 'run-stopped' });
           if (row.run_state === 'stopped') await syncRunState(tx, row.table_id, row.row_id, 'stopped');
+          continue;
+        }
+        const active = ['pending', 'waiting-approval', 'waiting-clarification'].includes(row.status ?? '');
+        const blocked = active ? await blocker(tx, row) : null;
+        if (blocked) {
+          if (row.owner_user) stops.push({ taskId, userId: row.owner_user });
+          await close('stopped', 'waiting', blocked);
+          await tx.client.query(
+            `UPDATE ${relation(tx, 'tf_row_assignments')} SET pending_wakes=0 WHERE table_id=$1 AND row_id=$2`,
+            [row.table_id, row.row_id],
+          );
+          await postNote(tx, row, taskId, 'event', { type: 'run-stopped' });
+          await syncRunState(tx, row.table_id, row.row_id, 'waiting');
+          await notifySponsor(tx, row, 'waiting', taskId, blocked);
           continue;
         }
         if (row.status === 'pending') {
@@ -347,6 +419,19 @@ export function createRowAssignments(options: {
           [outcome, state, reason] = ['waiting', 'waiting', pauseReasons[row.pause_reason ?? ''] ?? 'Paused'];
         else [outcome, state, reason] = ['failed', 'failed', 'The run failed'];
         await close(outcome, state, reason);
+        // A comment delivered after the run's last model call never reached the model, so one more run reads it.
+        const unseen = (
+          await tx.client.query(
+            `SELECT 1 FROM ${relation(tx, 'tf_agent_task_messages')} m WHERE m.task_id=$1 AND m.role='owner' AND m.sequence>0
+              AND m.created_at>COALESCE((SELECT max(u.created_at) FROM ${relation(tx, 'tf_credit_usage')} u WHERE u.flow_id=$2),'-infinity')`,
+            [taskId, row.flow_id],
+          )
+        ).rowCount;
+        if (unseen)
+          await tx.client.query(
+            `UPDATE ${relation(tx, 'tf_row_assignments')} SET pending_wakes=pending_wakes+1 WHERE table_id=$1 AND row_id=$2`,
+            [row.table_id, row.row_id],
+          );
         if (parsed.wakeAt && row.status === 'completed')
           await tx.client.query(
             `UPDATE ${relation(tx, 'tf_row_assignments')} SET wake_at=$3 WHERE table_id=$1 AND row_id=$2`,
@@ -365,14 +450,43 @@ export function createRowAssignments(options: {
     return runtime.transaction(workspaceId, agentCompatibility, async tx => {
       await tx.client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 648301))', [`${tx.schema}:assignments`]);
       const limits = z
-        .object({ workspace: z.number().nullable() })
+        .object({ workspace: z.number().nullable(), daily_credits: z.number().nullable(), day_start: z.date() })
         .parse(
           (
             await tx.client.query(
-              `SELECT (SELECT concurrent FROM ${relation(tx, 'tf_workspace_assignment_limits')}) AS workspace`,
+              `SELECT l.concurrent AS workspace,l.daily_credits,
+                date_trunc('day',clock_timestamp() AT TIME ZONE COALESCE(l.time_zone,'UTC')) AT TIME ZONE COALESCE(l.time_zone,'UTC') AS day_start
+              FROM (SELECT 1) one LEFT JOIN ${relation(tx, 'tf_workspace_assignment_limits')} l ON true`,
             )
           ).rows[0],
         );
+      // Credits each agent's row runs used today, in whole credits. A working run counts everything its budget still
+      // allows, so runs started in later rounds can't push the day past its cap.
+      const spent = z.array(z.object({ agent_id: z.uuid(), credits: z.coerce.number() })).parse(
+        (
+          await tx.client.query(
+            `WITH runs AS (
+                SELECT r.agent_id,t.flow_id::text AS flow,(t.limits->>'credits')::numeric*${creditUnit} AS budget,
+                  (a.run_state='working' AND a.current_task_id=r.task_id) AS working
+                FROM ${relation(tx, 'tf_row_assignment_runs')} r
+                JOIN ${relation(tx, 'tf_agent_tasks')} t ON t.id=r.task_id
+                LEFT JOIN ${relation(tx, 'tf_row_assignments')} a ON a.table_id=r.table_id AND a.row_id=r.row_id
+                WHERE (a.run_state='working' AND a.current_task_id=r.task_id)
+                  OR t.flow_id::text IN (SELECT flow_id FROM ${relation(tx, 'tf_credit_usage')} WHERE created_at>=$1)
+              )
+              SELECT runs.agent_id,(sum(CASE WHEN runs.working THEN GREATEST(runs.budget-used.before,used.today) ELSE used.today END)/${creditUnit})::float8 AS credits
+              FROM runs CROSS JOIN LATERAL (
+                SELECT COALESCE(sum(COALESCE(u.charged,u.reserved)) FILTER (WHERE u.created_at>=$1),0) AS today,
+                  COALESCE(sum(COALESCE(u.charged,u.reserved)) FILTER (WHERE u.created_at<$1),0) AS before
+                FROM ${relation(tx, 'tf_credit_usage')} u WHERE u.flow_id=runs.flow
+              ) used
+              GROUP BY runs.agent_id`,
+            [limits.day_start],
+          )
+        ).rows,
+      );
+      const creditsToday = new Map(spent.map(row => [row.agent_id, row.credits]));
+      let workspaceCredits = spent.reduce((sum, row) => sum + row.credits, 0);
       const working = z
         .array(z.object({ agent_id: z.uuid(), count: z.number() }))
         .parse(
@@ -388,9 +502,9 @@ export function createRowAssignments(options: {
         .array(
           assignmentSchema.extend({
             agent_name: z.string(),
-            agent_usable: z.boolean(),
             agent_limit: z.number().nullable(),
             daily_runs: z.number().nullable(),
+            daily_credits: z.number().nullable(),
             runs_today: z.number(),
             sponsor_user: z.string().nullable(),
             run_count: z.number(),
@@ -400,9 +514,8 @@ export function createRowAssignments(options: {
           (
             await tx.client.query(
               `SELECT a.*,ag.display_name AS agent_name,
-                (ag.saved_revision IS NOT NULL AND ag.deleted_at IS NULL AND ag.enabled) AS agent_usable,
-                l.concurrent AS agent_limit,l.daily_runs,
-                (SELECT count(*)::integer FROM ${relation(tx, 'tf_row_assignment_runs')} r WHERE r.agent_id=a.agent_id AND r.started_at>=date_trunc('day',clock_timestamp())) AS runs_today,
+                l.concurrent AS agent_limit,l.daily_runs,l.daily_credits,
+                (SELECT count(*)::integer FROM ${relation(tx, 'tf_row_assignment_runs')} r WHERE r.agent_id=a.agent_id AND r.started_at>=$1) AS runs_today,
                 (SELECT count(*)::integer FROM ${relation(tx, 'tf_row_assignment_runs')} r WHERE r.table_id=a.table_id AND r.row_id=a.row_id AND r.generation=a.generation) AS run_count,
                 m.user_id AS sponsor_user
               FROM ${relation(tx, 'tf_row_assignments')} a
@@ -411,6 +524,7 @@ export function createRowAssignments(options: {
               LEFT JOIN ${relation(tx, 'tf_memberships')} m ON m.id=a.sponsor_membership_id AND m.removed_at IS NULL
               WHERE a.run_state='queued' AND a.current_task_id IS NULL
               ORDER BY a.queued_at,a.table_id,a.row_id LIMIT 50 FOR UPDATE OF a`,
+              [limits.day_start],
             )
           ).rows,
         );
@@ -422,7 +536,9 @@ export function createRowAssignments(options: {
         userId: string;
         requestId: string;
         text: string;
+        credits: number;
       }[] = [];
+      const startedToday = new Map<string, number>();
       const hold = async (row: (typeof queued)[number], state: 'queued' | 'waiting', reason: string) => {
         await tx.client.query(
           `UPDATE ${relation(tx, 'tf_row_assignments')} SET run_state=$3,reason=$4,pending_wakes=CASE WHEN $3='waiting' THEN 0 ELSE pending_wakes END,updated_at=clock_timestamp() WHERE table_id=$1 AND row_id=$2`,
@@ -434,12 +550,9 @@ export function createRowAssignments(options: {
         }
       };
       for (const row of queued) {
-        if (!row.agent_usable) {
-          await hold(row, 'waiting', 'Agent unavailable');
-          continue;
-        }
-        if (!row.sponsor_user) {
-          await hold(row, 'waiting', 'Needs reassignment');
+        const blocked = row.sponsor_user ? await blocker(tx, row) : 'Needs reassignment';
+        if (blocked || !row.sponsor_user) {
+          await hold(row, 'waiting', blocked ?? 'Needs reassignment');
           continue;
         }
         const agentLimit = row.agent_limit ?? defaultAgentConcurrency;
@@ -447,8 +560,19 @@ export function createRowAssignments(options: {
           await hold(row, 'queued', `Waiting: ${row.agent_name} is working on ${agentLimit} rows`);
           continue;
         }
-        if (row.daily_runs !== null && row.runs_today >= row.daily_runs) {
+        if (row.daily_runs !== null && row.runs_today + (startedToday.get(row.agent_id) ?? 0) >= row.daily_runs) {
           await hold(row, 'queued', `Waiting: ${row.agent_name} reached its daily run limit`);
+          continue;
+        }
+        const agentLeft =
+          row.daily_credits === null ? Infinity : row.daily_credits - (creditsToday.get(row.agent_id) ?? 0);
+        if (agentLeft < 1) {
+          await hold(row, 'queued', `Waiting: ${row.agent_name} reached its daily credit limit`);
+          continue;
+        }
+        const workspaceLeft = limits.daily_credits === null ? Infinity : limits.daily_credits - workspaceCredits;
+        if (workspaceLeft < 1) {
+          await hold(row, 'queued', 'Waiting: the workspace reached its daily credit limit for assigned work');
           continue;
         }
         if (total >= (limits.workspace ?? defaultWorkspaceConcurrency)) {
@@ -462,6 +586,11 @@ export function createRowAssignments(options: {
         }
         perAgent.set(row.agent_id, (perAgent.get(row.agent_id) ?? 0) + 1);
         total += 1;
+        startedToday.set(row.agent_id, (startedToday.get(row.agent_id) ?? 0) + 1);
+        // A run may spend no more than what is left of today's caps.
+        const credits = Math.floor(Math.min(runLimits.credits, agentLeft, workspaceLeft));
+        creditsToday.set(row.agent_id, (creditsToday.get(row.agent_id) ?? 0) + credits);
+        workspaceCredits += credits;
         await tx.client.query(
           `UPDATE ${relation(tx, 'tf_row_assignments')} SET run_state='working',reason=NULL,pending_wakes=0,updated_at=clock_timestamp() WHERE table_id=$1 AND row_id=$2`,
           [row.table_id, row.row_id],
@@ -475,6 +604,7 @@ export function createRowAssignments(options: {
           userId: row.sponsor_user,
           requestId: requestId(`${row.table_id}:${row.row_id}:${row.generation}:${row.run_count}`),
           text,
+          credits,
         });
       }
       return claims;
@@ -534,7 +664,7 @@ export function createRowAssignments(options: {
           requestId: claimed.requestId,
           agentId: claimed.agentId,
           text: claimed.text,
-          limits: runLimits,
+          limits: { ...runLimits, credits: claimed.credits },
         });
       } catch (error) {
         const code = error instanceof Error ? ('code' in error ? String(error.code) : error.name) : '';
@@ -571,4 +701,55 @@ export async function wakeRow(tx: AgentTransaction, tableId: string, rowId: stri
   );
   if (changed.rowCount && !changed.rows[0]?.current_task_id) await syncRunState(tx, tableId, rowId, 'queued');
   return Boolean(changed.rowCount);
+}
+
+/**
+ * Gives a new comment to the row's working run, which reads it before its next step. Without a working run, the
+ * comment wakes the agent instead.
+ */
+export async function deliverComment(
+  tx: AgentTransaction,
+  tableId: string,
+  rowId: string,
+  authorMembershipId: string,
+  body: string,
+) {
+  const working = z
+    .object({ current_task_id: z.uuid() })
+    .optional()
+    .parse(
+      (
+        await tx.client.query(
+          `SELECT current_task_id FROM ${relation(tx, 'tf_row_assignments')} WHERE table_id=$1 AND row_id=$2 AND run_state='working' AND current_task_id IS NOT NULL FOR UPDATE`,
+          [tableId, rowId],
+        )
+      ).rows[0],
+    );
+  if (working) {
+    await lockTask(tx, working.current_task_id);
+    const task = z
+      .object({ generation: z.number() })
+      .optional()
+      .parse(
+        (
+          await tx.client.query(
+            `SELECT generation FROM ${relation(tx, 'tf_agent_tasks')} WHERE id=$1 AND status='pending'`,
+            [working.current_task_id],
+          )
+        ).rows[0],
+      );
+    if (task) {
+      await tx.client.query(
+        `INSERT INTO ${relation(tx, 'tf_agent_task_messages')}(task_id,sequence,generation,role,text,sources)
+        SELECT $1,COALESCE(max(sequence)+1,0),$2,'owner',$3,'[]' FROM ${relation(tx, 'tf_agent_task_messages')} WHERE task_id=$1`,
+        [
+          working.current_task_id,
+          task.generation,
+          `New comment on the row from member ${authorMembershipId}:\n${body.slice(0, 20000)}`,
+        ],
+      );
+      return true;
+    }
+  }
+  return wakeRow(tx, tableId, rowId);
 }

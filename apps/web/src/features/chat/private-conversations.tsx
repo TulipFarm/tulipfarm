@@ -285,7 +285,7 @@ function ConversationWorkspace({ api }: { api: ConversationApi }) {
   const intent = skillIntent.intent;
   const tableHandoff = useTableHandoff(
     workspace.id,
-    intent === 'edit-table' || intent === 'add-rows' ? intent : null,
+    intent === 'edit-table' || intent === 'add-rows' || intent === 'add-status' ? intent : null,
     searchIntent.tableId ?? null,
   );
   const workflowHandoff = useWorkflowHandoff(workspace.id, intent === 'edit-workflow', searchIntent.workflowId ?? null);

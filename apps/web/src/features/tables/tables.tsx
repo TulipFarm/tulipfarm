@@ -1334,7 +1334,13 @@ function TaskPresets({
           size="sm"
           variant="ghost"
           nativeButton={false}
-          render={<Link to="/$workspaceSlug/tables/$tableId/edit" params={{ workspaceSlug, tableId: table.id }} />}
+          render={
+            <Link
+              to="/$workspaceSlug"
+              params={{ workspaceSlug }}
+              search={{ intent: 'add-status', tableId: table.id }}
+            />
+          }
         >
           Add a Status field to group tasks
         </Button>

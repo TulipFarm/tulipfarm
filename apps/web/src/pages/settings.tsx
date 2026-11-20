@@ -28,6 +28,7 @@ import { EntityAvatar } from '@tulipfarm/sprout/avatar';
 import { useFlag } from '@/lib/feature-flags';
 import { KnowledgeSettings } from '@/features/files/knowledge-settings';
 import { AssignmentLimitsSettings } from '@/features/tables/assignment-limits';
+import { InboxSlackSettings } from '@/features/inbox/inbox-slack';
 
 export function SettingsPage() {
   const { workspace, user, membershipId } = workspaceRoute.useRouteContext();
@@ -367,6 +368,7 @@ function GeneralSettings({ workspaceId, slug, userId }: { workspaceId: string; s
                 </SettingsRow>
               </SettingsGroup>
             )}
+            {assignable && <InboxSlackSettings workspaceId={workspaceId} />}
             {admin && <KnowledgeSettings workspaceId={workspaceId} />}
             {admin && assignable && <AssignmentLimitsSettings workspaceId={workspaceId} />}
             {admin && (
