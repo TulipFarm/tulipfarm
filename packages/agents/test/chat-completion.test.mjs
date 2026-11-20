@@ -1410,6 +1410,49 @@ test("an app chat's reply cannot quote a file it did not read, or say a requeste
   assert.equal(unbackedAppClaim("The paragraph is not 'Second edit v6.' yet.", 'public', status, paragraph), undefined);
 });
 
+test("an app chat's honest reply that quotes a request, an old value, code, a framework or a status is not a claim", () => {
+  const status = new Set(['apps.status']);
+  const read = new Set(['apps.status', 'apps.files.read']);
+  const rename = "Rename the heading from 'Orders' to 'Sales'.";
+  assert.equal(
+    unbackedAppClaim(
+      "You want the heading to read 'Sales'. Should the page title change too?",
+      'public',
+      status,
+      rename,
+    ),
+    undefined,
+  );
+  assert.equal(
+    unbackedAppClaim(
+      "The heading still reads 'Orders'. Should I change it now?",
+      'public',
+      read,
+      rename,
+      '<h1>Orders</h1>',
+    ),
+    undefined,
+  );
+  assert.equal(
+    unbackedAppClaim("The heading reads 'Sales', so it needed no change.", 'public', read, rename, '<h1>Sales</h1>'),
+    undefined,
+  );
+  const hello = 'Add a /hello route.';
+  const snippet = "I'd add this handler to server.js:\n\n```js\napp.get('/hello', () => {\n  return 'hello';\n});\n```";
+  assert.equal(unbackedAppClaim(snippet, 'public', status, hello), undefined);
+  assert.equal(unbackedAppClaim("Add this:\n\n    return 'hello';", 'public', status, hello), undefined);
+  assert.equal(unbackedAppClaim('The server is built with Express.', 'public', status, hello), undefined);
+  assert.equal(
+    unbackedAppClaim("The build is 'failed', so I haven't released it.", 'public', status, hello),
+    undefined,
+  );
+  // The requested value with no write still claims the change; a read of the old value does not back it.
+  assert.equal(
+    unbackedAppClaim("The heading reads 'Sales'.", 'public', read, rename, '<h1>Orders</h1>')?.missing,
+    'change',
+  );
+});
+
 const changeRequests = [
   'Create a contact form',
   'Write a landing page',

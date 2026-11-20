@@ -2362,8 +2362,19 @@ const alreadyClaim =
 /** "The paragraph still reads 'First version.'": quoted file contents, which apps.status never returns. */
 const contentClaim =
   /\b(?:is|are|reads?|says?|shows?|displays?|returns?|contains?|renders?)(?: (?:still|now|currently|already|set to))*\s+["'‘“]([^"'’”\n]{1,200})/i;
+/** What a quoted value must describe to need a file read; "the build is 'failed'" is a status apps.status reports. */
+const contentSubject =
+  /\b(?:files?|pages?|paragraphs?|headings?|headers?|footers?|titles?|text|copy|greetings?|messages?|buttons?|labels?|links?|captions?|h[1-6]|html|code)\b|\/|\b[\w-]+\.(?:m?js|tsx?|jsx|html|css|json|md)\b/i;
+/** A clause that restates the person's request rather than saying what the app holds. */
+const restated = /\b(?:you (?:want|wanted|asked|requested|said|wrote|mentioned)|your (?:message|request))\b/i;
+/** Where a request names its new value: "change it to 'X'", "replace A with 'X'", "make it say 'X'". */
+const requestTarget =
+  /\b(?:to|into|with|as|says?|reads?|shows?|displays?)\s+(?:["'‘“]([^"'’”\n]+)|([^"'‘’“”,;.!?\n]+))/gi;
+/** Fenced blocks and indented lines are code the reply shows, not claims it makes. */
+const codeBlock = /```[\s\S]*?(?:```|(?![\s\S]))|^(?: {4}|\t)(?![-*+] |\d+[.)] ).*$/gm;
 /** "The app is built": the build state a requested rebuild must produce, or apps.status reports. */
-const builtState = /\b(?:app|draft|site|server|page) (?:is|was|has been)(?: now| already)? (?:re)?built\b/i;
+const builtState =
+  /\b(?:app|draft|site|server|page) (?:is|was|has been)(?: now| already)? (?:re)?built\b(?!\s+(?:with|on|using|in|from|around|for)\b)/i;
 const toReader = /\b(?:below|for you|here(?:'|’)?s|here is|here are)\b/i;
 /** Verbs that ask for a change, in any inflection. */
 const changeVerb = String.raw`(?:add(?:s|ed|ing)?|chang(?:e|es|ed|ing)|creat(?:e|es|ed|ing)|writ(?:e|es|ing)|wrote|written|rewrit(?:e|es|ing)|rewrote|implement(?:s|ed|ing)?|turn(?:s|ed|ing)?|mak(?:e|es|ing)|made|(?:re)?build(?:s|ing)?|(?:re)?built|set(?:s|ting)?|renam(?:e|es|ed|ing)|replac(?:e|es|ed|ing)|remov(?:e|es|ed|ing)|delet(?:e|es|ed|ing)|fix(?:es|ed|ing)?|insert(?:s|ed|ing)?|mov(?:e|es|ed|ing)|swap(?:s|ped|ping)?|publish(?:es|ed|ing)?|deploy(?:s|ed|ing)?|updat(?:e|es|ed|ing)|edit(?:s|ed|ing)?|switch(?:es|ed|ing)?|(?:re)?styl(?:e|es|ed|ing)|redesign(?:s|ed|ing)?|refactor(?:s|ed|ing)?|convert(?:s|ed|ing)?|hook(?:s|ed|ing)?|wir(?:e|es|ed|ing)|drop(?:s|ped|ping)?|hid(?:e|es|ing)|hidden|enabl(?:e|es|ed|ing)|disabl(?:e|es|ed|ing)|translat(?:e|es|ed|ing)|resiz(?:e|es|ed|ing)|cent(?:er|re)(?:s|ed|ing)?|align(?:s|ed|ing)?|put(?:s|ting)?|includ(?:e|es|ed|ing)|giv(?:e|es|ing)|gave|given|get(?:s|ting)?|got|us(?:e|es|ed|ing)|show(?:s|ed|ing|n)?)`;
@@ -2425,11 +2436,18 @@ const codeObject =
  * Why an app chat's reply must do more work: it says its own tools are missing, which they never are in the app's chat,
  * or it reports a build or file change that no successful app tool call in this reply made. `ran` names those calls.
  */
-export function unbackedAppClaim(candidate: string, apps: AppKind | undefined, ran: ReadonlySet<string>, request = '') {
+export function unbackedAppClaim(
+  candidate: string,
+  apps: AppKind | undefined,
+  ran: ReadonlySet<string>,
+  request = '',
+  read = '',
+) {
   if (!apps) return undefined;
   // A sentence can end inside a quote or bracket, as in: The heading now reads 'Orders.' The build succeeded.
   // "I went ahead and updated it" is one claim, not a clause ending at "and".
   const sentences = candidate
+    .replace(codeBlock, '')
     .split(/(?<=[.!?]['"’”)\]]?)\s+|\n+/)
     .filter(sentence => !sentence.trim().endsWith('?'))
     .map(sentence => sentence.replace(/\b(?:gone|went|go) ahead and /gi, ''));
@@ -2470,20 +2488,24 @@ export function unbackedAppClaim(candidate: string, apps: AppKind | undefined, r
     return changed ? undefined : 'edit';
   };
   const filesRead = changed || ran.has('apps.files.read');
-  const wanted = request.toLowerCase();
-  const requested = (value: string) => {
-    const text = value
+  const targets = [...request.toLowerCase().matchAll(requestTarget)].map(match => match[1] ?? match[2]!);
+  const shown = read.toLowerCase();
+  const plain = (value: string) =>
+    value
       .toLowerCase()
       .replace(/[\s.!?,;:]+$/, '')
       .trim();
-    return text.length > 1 && wanted.includes(text);
-  };
+  const requested = (value: string) => value.length > 1 && targets.some(target => target.includes(value));
   // Quoted contents are a present-tense claim even beside "from the last turn"; only this reply's read or write shows
   // them. Saying they already hold the text the person asked for, with nothing written, claims the change.
   const content = (clause: string): 'change' | 'read' | undefined => {
     const quote = contentClaim.exec(clause);
-    if (!quote || negatedClaim(clause, quote) || toReader.test(clause) || changed) return undefined;
-    const claimsRequest = asked && !/\balready\b/i.test(clause) && requested(quote[1]!);
+    if (!quote || negatedClaim(clause, quote) || toReader.test(clause) || restated.test(clause) || changed)
+      return undefined;
+    if (!contentSubject.test(clause.slice(0, quote.index))) return undefined;
+    const value = plain(quote[1]!);
+    if (filesRead && value && shown.includes(value)) return undefined;
+    const claimsRequest = asked && !/\balready\b/i.test(clause) && requested(value);
     if (!filesRead) return claimsRequest ? 'change' : 'read';
     return claimsRequest ? 'change' : undefined;
   };
@@ -2738,6 +2760,16 @@ const appToolsRan = (items: readonly LoopItem[]) =>
         : [],
     ),
   );
+
+/** What this reply's successful file reads returned. */
+const appFilesRead = (items: readonly LoopItem[]) =>
+  items
+    .flatMap(item =>
+      item.kind === 'results'
+        ? item.results.filter(result => !result.error && result.name === 'apps_files_read').map(result => result.output)
+        : [],
+    )
+    .join('\n');
 
 // A clause that says this reply just made a card, as opposed to pointing at one that already waits.
 const newCardClaim =
@@ -6003,7 +6035,7 @@ export async function inferWithTools(
         : undefined;
       const appUnbacked =
         claimChecked && !dataUnbacked
-          ? unbackedAppClaim(candidate, tools?.apps, appToolsRan(items), fileRequest)
+          ? unbackedAppClaim(candidate, tools?.apps, appToolsRan(items), fileRequest, appFilesRead(items))
           : undefined;
       const writeUnbacked = dataUnbacked ?? appUnbacked;
       const invitesUnchecked = unbacked || writeUnbacked ? undefined : uncheckedInvitationClaim(candidate, items);

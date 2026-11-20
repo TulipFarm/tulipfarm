@@ -3466,10 +3466,7 @@ test('an app chat reply that keeps claiming an edit no tool made ends with a sto
 test('an app chat reply that states the app holds a requested change, with no write, ends with a stop', async t => {
   for (const [request, claim] of [
     ["Change the greeting to 'Hello v4' and rebuild.", "The greeting at / is 'Hello v4' and the app is built."],
-    [
-      "Change the paragraph to 'Second edit v6.' and rebuild.",
-      "The paragraph still reads 'Second edit v5.' from the last accepted change. No app tool ran, so it was not updated.",
-    ],
+    ["Change the paragraph to 'Second edit v6.' and rebuild.", "The paragraph is 'Second edit v6.' now."],
   ])
     await t.test(request, async t => {
       const turn = await appTurn(
@@ -3482,6 +3479,18 @@ test('an app chat reply that states the app holds a requested change, with no wr
       assert.match(turn.result.text, /^I stopped before changing or building the app, so nothing in it changed/);
       assert.equal(turn.result.text.includes(claim.slice(4, 20)), false, turn.result.text);
     });
+});
+
+test('an app chat reply that honestly says nothing changed stands unchanged', async t => {
+  const answer = 'No app tool ran, so it was not updated.';
+  const turn = await appTurn(
+    t,
+    round => (round === 0 ? { calls: [use('apps.status')] } : { text: answer }),
+    "Change the paragraph to 'Second edit v6.' and rebuild.",
+  );
+  assert.deepEqual(turn.choices, ['apps_status', 'auto']);
+  assert.deepEqual(turn.ran, ['apps.status']);
+  assert.equal(turn.result.text, answer);
 });
 
 test('native-tool reminders omit duplicated tool descriptions', () => {
