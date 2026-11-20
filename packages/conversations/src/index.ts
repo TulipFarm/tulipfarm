@@ -1,3 +1,4 @@
+import { forgetChatInKeep } from './keep-chat-recall.ts';
 import { loadModelCatalog } from '@tulipfarm/config';
 import { stickyFallbackReasons } from '@tulipfarm/config/model-fallback';
 import {
@@ -1407,6 +1408,7 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
             `UPDATE ${table(tx, 'tf_conversations')} SET deleted_at = clock_timestamp() WHERE id = $1`,
             [chatId],
           );
+          await forgetChatInKeep(tx, chatId);
           await clearBudConversation(tx, chatId, workspaceId);
           return { deleted: true as const };
         },

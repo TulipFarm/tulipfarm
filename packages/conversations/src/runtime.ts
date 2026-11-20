@@ -132,6 +132,7 @@ import {
   omittedBlock,
   refersToEarlierMessages,
   summaryBlock,
+  readConversationMessage,
   updateBreaker,
   type ChatMessage,
   type CompactionError,
@@ -144,6 +145,13 @@ import {
   type WorkingSummary,
 } from './compaction.ts';
 import { pinnedImageModels } from './turn-image-models.ts';
+import {
+  keepChatRecallOn,
+  keepSentThrough,
+  queueCompactedMessages,
+  recalledBlock,
+  searchEarlierMessages,
+} from './keep-chat-recall.ts';
 import {
   readTurnFiles,
   turnRecognition,
@@ -1119,6 +1127,8 @@ export function createConversationExecutor(
     generateTitle: boolean;
     timeZone: string | null;
     inherited: SourceDependency[];
+    /** Chat recall on Keep is on: messages this compaction covers are queued for Keep. */
+    keepRecall?: boolean;
   };
   const rethrown = (error: unknown) =>
     error instanceof CreditsExhausted ||
@@ -1159,6 +1169,7 @@ export function createConversationExecutor(
     render: (messages: readonly ContextMessage[], cleaned: ReadonlySet<string>) => ChatMessage[],
     hasFile: (id: string) => boolean,
     tail: readonly ChatMessage[],
+    recalled: readonly ChatMessage[] = [],
   ): Promise<ChatMessage[] | 'stale'> {
     let summary = state.summary;
     let wording = state.wording;
@@ -1174,7 +1185,7 @@ export function createConversationExecutor(
       );
     const build = () =>
       observeChatDetailSync('render', () => [
-        ...(summary ? [summaryBlock(summary.summary, wording)] : []),
+        ...(summary ? [summaryBlock(summary.summary, wording), ...recalled] : []),
         ...(omitted.length ? [omittedBlock(omitted)] : []),
         ...render(shown(), cleaned),
         ...tail,
@@ -1264,6 +1275,7 @@ export function createConversationExecutor(
           }))
         )
           throw new Error('conversation-turn-stale');
+        if (next && source.keepRecall) await queueCompactedMessages(tx, fence.conversationId, next.coveredThrough);
         await recordCleanups(tx, fence.conversationId, record.id, [...cleaned]);
         if (!state.requested) await updateBreaker(tx, fence.conversationId, outcome);
         await insertStatusMessage(tx, fence.conversationId, chat.next_message_sequence, record.id);
@@ -1336,6 +1348,54 @@ export function createConversationExecutor(
   }
 
   /** A `/compact` turn: compacts everything before the latest completed exchange and writes a separate handoff. It never calls the chat responder. */
+  /**
+   * Passages of the chat's compacted messages that Keep finds for the newest message, as one labelled block. Only
+   * messages the requester may still read are kept. Recall is best effort: any failure is logged and leaves it out.
+   */
+  async function recallEarlier(
+    fence: ReplyFence,
+    query: string,
+    verbatim: readonly { id: string }[],
+  ): Promise<ChatMessage[]> {
+    try {
+      if (!(await transaction(fence.workspaceId, tx => keepSentThrough(tx, fence.conversationId)))) return [];
+      const excerpts = await searchEarlierMessages({
+        workspaceId: fence.workspaceId,
+        conversationId: fence.conversationId,
+        query,
+        exclude: new Set(verbatim.map(item => item.id)),
+      });
+      if (!excerpts.length) return [];
+      const visible = await transaction(fence.workspaceId, async tx => {
+        const actor = await turnRequester(tx, fence.conversationId, fence.turnId);
+        const roles = new Map<string, 'user' | 'assistant' | null>();
+        for (const messageId of new Set(excerpts.map(excerpt => excerpt.messageId))) {
+          try {
+            roles.set(
+              messageId,
+              (await readConversationMessage(tx, actor, fence.conversationId, messageId))?.result.role ?? null,
+            );
+          } catch (error) {
+            if (!(error instanceof AccessDenied)) throw error;
+            roles.set(messageId, null);
+          }
+        }
+        return excerpts.flatMap(excerpt => {
+          const role = roles.get(excerpt.messageId);
+          return role ? [{ ...excerpt, role }] : [];
+        });
+      });
+      return visible.length ? [recalledBlock(visible)] : [];
+    } catch (error) {
+      log('warn', 'dependency', 'call_failed', {
+        ...errorAttributes(error),
+        operation: 'keep.chat.recall',
+        outcome: 'failed',
+      });
+      return [];
+    }
+  }
+
   async function compactTurn(
     fence: ReplyFence,
     source: CompactionSource & {
@@ -1514,6 +1574,7 @@ export function createConversationExecutor(
         }))
       )
         throw new Error('conversation-turn-stale');
+      if (next && source.keepRecall) await queueCompactedMessages(tx, fence.conversationId, next.coveredThrough);
       if (written)
         await tx.client.query(
           `INSERT INTO ${table(tx, 'tf_conversation_handoffs')} (compaction_id, conversation_id, status, prompt, text, model_family_id, fallback_from_family_id, error_code, attempts, sources) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,1,$9)`,
@@ -2065,12 +2126,17 @@ export function createConversationExecutor(
       ),
     );
     if (!source) return 'stale';
+    // Only private chats keep a working summary, so only they are sent to Keep or recall from it.
+    const keepRecall = source.compaction ? keepChatRecallOn(fence.workspaceId) : Promise.resolve(false);
     if (source.compaction?.command && compactor && source.compactionPolicy) {
       const {
         compaction: { command },
         compactionPolicy,
       } = source;
-      return staged('compaction', () => compactTurn(fence, source, command, compactionPolicy, compactor));
+      const keepRecallOn = await keepRecall;
+      return staged('compaction', () =>
+        compactTurn(fence, { ...source, keepRecall: keepRecallOn }, command, compactionPolicy, compactor),
+      );
     }
     const durable = source.durable;
     const interactiveChat = source.interactiveChat;
@@ -2992,23 +3058,29 @@ export function createConversationExecutor(
         const tail = [...pendingGoogle, ...tableOutcomes, ...procedure, ...replay];
         return { describedHandles, sourceMessages, render, tail };
       });
+      const keepRecallOn = await keepRecall;
+      const recalled =
+        source.compaction?.summary && keepRecallOn
+          ? await recallEarlier(fence, source.currentMessage.text, source.messages)
+          : [];
       const prepared =
         source.compaction && source.compactionPolicy && compactor
           ? await staged('compaction', () =>
               automaticContext(
                 fence,
-                source,
+                { ...source, keepRecall: keepRecallOn },
                 source.compaction!,
                 source.compactionPolicy!,
                 compactor,
                 render,
                 id => Boolean(fileContext(id)),
                 tail,
+                recalled,
               ),
             )
           : observeChatDetailSync('render', () => [
               ...(source.compaction?.summary
-                ? [summaryBlock(source.compaction.summary.summary, source.compaction.wording)]
+                ? [summaryBlock(source.compaction.summary.summary, source.compaction.wording), ...recalled]
                 : []),
               ...render(source.messages, new Set()),
               ...tail,

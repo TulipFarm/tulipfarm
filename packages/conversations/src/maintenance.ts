@@ -1,3 +1,4 @@
+import { keepChatRecallOn, queueCompactedMessages } from './keep-chat-recall.ts';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { knowledgeEmbeddingProfile } from '@tulipfarm/config';
@@ -490,6 +491,7 @@ export function createConversationMaintenance(runtime: ConversationRuntime) {
             );
         });
         if (generated.nextChunk !== null) return 'queued';
+        const keepRecall = await keepChatRecallOn(work.workspaceId);
         const recap = await handoff(
           compactor,
           fence,
@@ -530,6 +532,7 @@ export function createConversationMaintenance(runtime: ConversationRuntime) {
             }))
           )
             throw new Error('maintenance-stale');
+          if (keepRecall) await queueCompactedMessages(tx, work.conversationId, current.job.covered_through!);
           await tx.client.query(
             `INSERT INTO ${table(tx, 'tf_conversation_handoffs')} (compaction_id,conversation_id,status,text,model_family_id,fallback_from_family_id,attempts,sources)
             VALUES ($1,$2,'completed',$3,$4,$5,1,$6)`,

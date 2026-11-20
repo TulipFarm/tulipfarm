@@ -40,6 +40,7 @@ export const commonTables = {
   personalMemory: 'tf_personal_memory',
   keepMemory: 'tf_keep_memory',
   keepKnowledge: 'tf_keep_knowledge',
+  conversationKeep: 'tf_conversation_keep',
   budState: 'tf_bud_state',
   budNudges: 'tf_bud_nudges',
   budPreferences: 'tf_bud_preferences',

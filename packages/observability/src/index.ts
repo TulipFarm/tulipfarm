@@ -1492,6 +1492,7 @@ export const backgroundJobs = [
   'app-reconcile',
   'app-usage',
   'row-assignments',
+  'chat-recall-delivery',
 ] as const;
 export type BackgroundJob = (typeof backgroundJobs)[number];
 

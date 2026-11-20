@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { createKeepClient, keepMemberScope, keepWorkspaceKnowledgeScope } from '../dist/index.js';
+import {
+  createKeepClient,
+  keepConversationScope,
+  keepMemberScope,
+  keepWorkspaceKnowledgeScope,
+} from '../dist/index.js';
 
 const endpoint = new URL('http://keep.test');
 const json = (status, body) =>
@@ -201,6 +206,20 @@ test('member scopes are keyed by workspace and membership and reject other ids',
   assert.ok(keepMemberScope(widest, widest).user.length <= 64);
   assert.throws(() => keepMemberScope(workspaceId, '../other'), TypeError);
   assert.throws(() => keepMemberScope('ws', membershipId), TypeError);
+});
+
+test('conversation scopes are distinct from member and Knowledge scopes and reject other ids', () => {
+  const workspaceId = '11111111-2222-4333-8444-555555555555';
+  const id = 'AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE';
+  assert.deepEqual(keepConversationScope(workspaceId, id), {
+    user: 'ws-10dgnsy3z9iusugm9nn175rh1-c-a3qmm1chven4q4l58suabghda',
+  });
+  assert.notEqual(keepConversationScope(workspaceId, id).user, keepMemberScope(workspaceId, id).user);
+  assert.notEqual(keepConversationScope(workspaceId, id).user, keepWorkspaceKnowledgeScope(workspaceId).user);
+  const widest = 'ffffffff-ffff-4fff-bfff-ffffffffffff';
+  assert.ok(keepConversationScope(widest, widest).user.length <= 64);
+  assert.throws(() => keepConversationScope(workspaceId, '../other'), TypeError);
+  assert.throws(() => keepConversationScope('ws', id), TypeError);
 });
 
 test('knowledge ingest, search and forget_source send snake_case bodies and map answers', async () => {
