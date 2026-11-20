@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { setTimeout as delay } from 'node:timers/promises';
 import { isDeepStrictEqual } from 'node:util';
 import { Client, escapeIdentifier } from 'pg';
 import { z } from 'zod';
@@ -112,15 +113,19 @@ export async function applyCommonMigrations(
 ) {
   const names = workspaceNames(workspaceId);
   await lockWorkspaceMigration(client, workspaceId);
+  const authorizationLock = qualified(names.schema, 'tf_authorization_lock');
+  const authorized = Boolean(
+    (await client.query('SELECT to_regclass($1) AS relation', [authorizationLock])).rows[0]?.relation,
+  );
+  // Joins lockAuthorization's arrival-order queue before any table lock. A bare FOR UPDATE starves behind
+  // overlapping shared holders, and queueing after the ledger lock could deadlock with a reader of the ledger.
+  if (authorized) await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 518204))', [names.schema]);
   const ledger = qualified(names.schema, 'tf_common_migrations');
   await client.query(
     `CREATE TABLE IF NOT EXISTS ${ledger} (name text PRIMARY KEY, checksum text NOT NULL, applied_at timestamptz NOT NULL DEFAULT now())`,
   );
   await client.query(`LOCK TABLE ${ledger} IN ACCESS EXCLUSIVE MODE`);
-  const authorizationLock = qualified(names.schema, 'tf_authorization_lock');
-  if ((await client.query('SELECT to_regclass($1) AS relation', [authorizationLock])).rows[0]?.relation) {
-    await client.query(`SELECT id FROM ${authorizationLock} WHERE id = 1 FOR UPDATE`);
-  }
+  if (authorized) await client.query(`SELECT id FROM ${authorizationLock} WHERE id = 1 FOR UPDATE`);
   return applyMigrationStream(client, {
     migrations,
     ledger,
@@ -222,6 +227,21 @@ export async function connectMaintenance(connectionString: string) {
 
 export type RolloutResult = { workspaceId: string; status: 'applied' | 'failed' | 'blocked'; errorCode: string | null };
 
+const rolloutLockAttempts = 3;
+
+/** Retries a workspace's rollout when a busy workspace keeps it waiting past the lock timeout or deadlocks it. */
+async function retryLockWaits(apply: () => Promise<void>) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await apply();
+    } catch (error) {
+      const code = (error as { code?: unknown } | null)?.code;
+      if (attempt >= rolloutLockAttempts || (code !== '55P03' && code !== '40P01')) throw error;
+      await delay(1_000 * attempt);
+    }
+  }
+}
+
 export async function rolloutCommonMigrations(options: {
   connectionString: string;
   migrations: readonly Migration[];
@@ -257,13 +277,15 @@ export async function rolloutCommonMigrations(options: {
               );
               let result: RolloutResult;
               try {
-                await inTransaction(client, async transaction => {
-                  await applyCommonMigrations(transaction, workspaceId, options.migrations);
-                  await transaction.query(
-                    "UPDATE database_management.common_rollouts SET status = 'applied', error_code = NULL, attempts = attempts + 1, updated_at = now() WHERE target = $1 AND workspace_id = $2",
-                    [target, workspaceId],
-                  );
-                });
+                await retryLockWaits(() =>
+                  inTransaction(client, async transaction => {
+                    await applyCommonMigrations(transaction, workspaceId, options.migrations);
+                    await transaction.query(
+                      "UPDATE database_management.common_rollouts SET status = 'applied', error_code = NULL, attempts = attempts + 1, updated_at = now() WHERE target = $1 AND workspace_id = $2",
+                      [target, workspaceId],
+                    );
+                  }),
+                );
                 result = { workspaceId, status: 'applied', errorCode: null };
               } catch (error) {
                 const status =
