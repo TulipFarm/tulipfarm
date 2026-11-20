@@ -3305,19 +3305,38 @@ async function appTurn(t, script, request = 'Now change it to Orders v3 and rebu
   };
 }
 
-test('a forced app round that runs to the output limit without its call is sent again unforced, on a smaller limit', async t => {
+test('a forced app status round that runs to the output limit without its call reads the app itself', async t => {
   const claim = 'I changed the paragraph and rebuilt the app. ';
-  const answer = 'The draft is built; the paragraph reads as asked.';
+  const answer = 'Your app is now live at release 3.';
   const turn = await appTurn(
     t,
-    round => [{ text: claim.repeat(40), finish: 'length' }, { calls: [use('apps.status')] }][round] ?? { text: answer },
-    'Rebuild the app.',
+    round => (round === 0 ? { text: claim.repeat(40), finish: 'length' } : { text: answer }),
+    'is it live?',
     { ...routes.azure, maxOutputTokens: 8192, capabilities: { reasoningEffort: 'none' } },
   );
-  assert.deepEqual(turn.choices, ['apps_status', 'auto', 'auto']);
-  assert.deepEqual(turn.limits, [1284, 8192, 8192]);
+  assert.deepEqual(turn.choices, ['apps_status', 'auto']);
+  assert.deepEqual(turn.limits, [1284, 8192]);
   assert.deepEqual(turn.ran, ['apps.status']);
   assert.equal(turn.result.text, answer);
+});
+
+test('any other forced app round that runs to the output limit without its call is sent again unforced', async t => {
+  const claim = "The heading is now 'Orders v3'.";
+  const turn = await appTurn(
+    t,
+    round =>
+      [
+        { calls: [use('apps.status')] },
+        { text: claim },
+        { text: claim.repeat(200), finish: 'length' },
+        { calls: [use('apps.files.read', { path: 'index.html' })] },
+        { calls: [use('apps.files.write', { path: 'index.html', content: '<h1>Orders v3</h1>' })] },
+      ][round] ?? { text: claim },
+    'Now change it to Orders v3.',
+  );
+  assert.deepEqual(turn.choices, ['apps_status', 'auto', 'apps_files_read', 'auto', 'auto', 'auto']);
+  assert.deepEqual(turn.ran, ['apps.status', 'apps.files.read', 'apps.files.write']);
+  assert.equal(turn.result.text, claim);
 });
 
 test('a forced app write cut off inside its arguments is not sent again', async t => {
@@ -3385,7 +3404,6 @@ test('a confirmation like "Do it" still makes an unbacked edit claim read, then 
 
 test("an app chat answer about the app's current state stands once the app was read, with no forced read or write", async t => {
   for (const answer of [
-    'The heading now reads "Orders v2".',
     'Your app is now live at release 3.',
     'The app now has three files: index.html, app.js and style.css.',
     'Yes, the server now returns ok on /health.',
@@ -3443,6 +3461,27 @@ test('an app chat reply that keeps claiming an edit no tool made ends with a sto
   );
   assert.equal(stuck.result.text.includes('Second edit'), false, stuck.result.text);
   assert.match(stuck.result.text, /^I stopped before changing or building the app, so nothing in it changed/);
+});
+
+test('an app chat reply that states the app holds a requested change, with no write, ends with a stop', async t => {
+  for (const [request, claim] of [
+    ["Change the greeting to 'Hello v4' and rebuild.", "The greeting at / is 'Hello v4' and the app is built."],
+    [
+      "Change the paragraph to 'Second edit v6.' and rebuild.",
+      "The paragraph still reads 'Second edit v5.' from the last accepted change. No app tool ran, so it was not updated.",
+    ],
+  ])
+    await t.test(request, async t => {
+      const turn = await appTurn(
+        t,
+        round => (round === 0 ? { calls: [use('apps.status')] } : { text: claim }),
+        request,
+      );
+      assert.deepEqual(turn.ran, ['apps.status']);
+      assert.deepEqual(turn.choices.slice(0, 3), ['apps_status', 'auto', 'apps_files_read']);
+      assert.match(turn.result.text, /^I stopped before changing or building the app, so nothing in it changed/);
+      assert.equal(turn.result.text.includes(claim.slice(4, 20)), false, turn.result.text);
+    });
 });
 
 test('native-tool reminders omit duplicated tool descriptions', () => {
