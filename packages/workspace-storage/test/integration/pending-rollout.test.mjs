@@ -145,3 +145,44 @@ test(
     }
   },
 );
+
+test('a rollout queues for the authorization lock in arrival order instead of starving behind readers', async () => {
+  const db = await fixture();
+  const first = await connect(db.connectionString);
+  const later = await connect(db.connectionString);
+  try {
+    const workspace = await db.create();
+    const sql = 'CREATE TABLE {{schema}}.tf_queue_probe (id integer)';
+    const stream = [
+      ...db.baseline,
+      { name: '9999_queue_probe.sql', sql, checksum: createHash('sha256').update(sql).digest('hex') },
+    ];
+    const read = client =>
+      client.query(
+        `SELECT a.id FROM (SELECT pg_advisory_xact_lock_shared(hashtextextended($1, 518204))) q, ${qualified(workspace.names.schema, 'tf_authorization_lock')} a WHERE a.id = 1 FOR SHARE OF a`,
+        [workspace.names.schema],
+      );
+    await first.query('BEGIN');
+    await read(first);
+    const rollout = rolloutCommonMigrations({
+      connectionString: db.connectionString,
+      migrations: stream,
+      concurrency: 1,
+      listWorkspaceIds: async () => [workspace.id],
+    });
+    for (let i = 0; i < 100; i++) {
+      const waiting = await db.platform.query("SELECT 1 FROM pg_locks WHERE locktype = 'advisory' AND NOT granted");
+      if (waiting.rowCount) break;
+      await delay(20);
+    }
+    await later.query("BEGIN; SET LOCAL lock_timeout = '300ms'");
+    await assert.rejects(read(later), { code: '55P03' });
+    await later.query('ROLLBACK');
+    await first.query('COMMIT');
+    assert.deepEqual((await rollout).results, [{ workspaceId: workspace.id, status: 'applied', errorCode: null }]);
+  } finally {
+    await first.end();
+    await later.end();
+    await db.close();
+  }
+});
