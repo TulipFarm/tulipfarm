@@ -1,6 +1,9 @@
 import type { HumanActor } from '@tulipfarm/access';
 import {
+  forgetOwnPersonalMemory,
   PersonalMemoryConflict,
+  PersonalMemoryRejected,
+  PersonalMemoryUnavailable,
   readPersonalMemory,
   replaceOwnPersonalMemory,
 } from '@tulipfarm/conversations/personal-memory';
@@ -47,7 +50,11 @@ export async function requireMemoryChat(tx: AgentTransaction, actor: HumanActor,
 }
 
 export async function memoryStale(tx: AgentTransaction, actor: HumanActor, proposal: MemoryProposal) {
-  return (await readPersonalMemory(tx, actor)).revision !== proposal.input.expectedRevision;
+  try {
+    return (await readPersonalMemory(tx, actor)).revision !== proposal.input.expectedRevision;
+  } catch (error) {
+    throw memoryError(error);
+  }
 }
 
 export async function applyMemory(
@@ -55,11 +62,22 @@ export async function applyMemory(
   actor: HumanActor,
   proposal: MemoryProposal,
 ): Promise<DraftOutcome> {
+  const { input } = proposal;
   try {
-    const saved = await replaceOwnPersonalMemory(tx, actor, proposal.input.content, proposal.input.expectedRevision);
-    return { kind: 'memory', operation: proposal.input.operation, revision: saved.revision };
+    const saved =
+      input.operation === 'forget'
+        ? await forgetOwnPersonalMemory(tx, actor, input.expectedRevision, input.forgotten)
+        : await replaceOwnPersonalMemory(tx, actor, input.content, input.expectedRevision);
+    return { kind: 'memory', operation: input.operation, revision: saved.revision };
   } catch (error) {
-    if (error instanceof PersonalMemoryConflict) throw new AgentError('draft-stale');
-    throw error;
+    throw memoryError(error);
   }
+}
+
+/** Keep's typed failures as the errors chat tools and cards report. */
+export function memoryError(error: unknown) {
+  if (error instanceof PersonalMemoryConflict) return new AgentError('draft-stale');
+  if (error instanceof PersonalMemoryUnavailable) return new AgentError('memory-service-unavailable', 503);
+  if (error instanceof PersonalMemoryRejected) return new AgentError('memory-rejected');
+  return error;
 }

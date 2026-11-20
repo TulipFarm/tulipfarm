@@ -4,7 +4,7 @@ import { AccessDenied } from '@tulipfarm/access';
 import { StorageUnavailableError } from '@tulipfarm/workspace-storage/runtime';
 import { BudConflict, type createBudAssistant } from '@tulipfarm/conversations/bud-assistant';
 import { budCommandSchema, budStateSchema } from '@tulipfarm/conversations/bud-contracts';
-import { PersonalMemoryConflict } from '@tulipfarm/conversations/personal-memory';
+import { PersonalMemoryConflict, PersonalMemoryUnavailable } from '@tulipfarm/conversations/personal-memory';
 import { ConversationConflict } from '@tulipfarm/conversations';
 import { authConfig, type registerAuth } from './auth.ts';
 import { authenticateRoutes } from './authenticated-routes.ts';
@@ -57,7 +57,8 @@ export function registerBud(
       if (error instanceof BudConflict || error instanceof PersonalMemoryConflict)
         return reply.code(409).send({ error: error.message });
       if (error instanceof ConversationConflict) return reply.code(409).send({ error: error.code });
-      if (error instanceof StorageUnavailableError) return reply.code(503).send({ error: 'bud-unavailable' });
+      if (error instanceof StorageUnavailableError || error instanceof PersonalMemoryUnavailable)
+        return reply.code(503).send({ error: 'bud-unavailable' });
       if (error instanceof z.ZodError || (typeof error === 'object' && error !== null && 'validation' in error))
         return reply.code(400).send({ error: 'invalid-request' });
       app.log.error('Bud operation failed');

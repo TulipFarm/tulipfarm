@@ -225,6 +225,7 @@
     "@tulipfarm/google-workspace": "workspace:*",
     "@tulipfarm/media": "workspace:*",
     "@tulipfarm/memory-core": "workspace:*",
+    "@tulipfarm/memory-keep": "workspace:*",
     "@tulipfarm/memory-postgres": "workspace:*",
     "@tulipfarm/observability": "workspace:*",
     "@tulipfarm/sprout": "0.18.0",

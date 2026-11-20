@@ -1292,16 +1292,16 @@ export const settings: readonly Setting[] = [
   {
     name: 'KEEP_ENDPOINT',
     group: 'Memory',
-    services: ['api'],
+    services: ['api', 'worker'],
     requirement: 'optional',
     secret: false,
     description:
-      'Origin (no path or credentials) of an optional [Keep](https://github.com/TulipFarm/keep) memory service. Unset reports Keep as not configured. Used only while the `keep-memory` flag is on, to probe `GET /v1/health/ready`.',
+      'Origin (no path or credentials) of an optional [Keep](https://github.com/TulipFarm/keep) memory service. Unset reports Keep as not configured. Used only in workspaces where the `keep-memory` flag is on, where personal memory lives in Keep.',
   },
   {
     name: 'KEEP_TOKEN',
     group: 'Memory',
-    services: ['api'],
+    services: ['api', 'worker'],
     requirement: 'optional',
     secret: true,
     description: "Bearer token for Keep's memory routes. Never sent to its health routes. Accepts KEEP_TOKEN_FILE.",

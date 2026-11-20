@@ -5,9 +5,10 @@ import { test } from 'node:test';
 import { commonCompatibility, createWorkspaceRuntime } from '@tulipfarm/workspace-storage/runtime';
 import { workspaceTableMigrations } from '@tulipfarm/workspaces/table-migrations';
 import { createConversations } from '../../conversations/src/index.ts';
-import { createPersonalMemoryService } from '../../conversations/src/personal-memory.ts';
+import { configureKeepPersonalMemory, createPersonalMemoryService } from '../../conversations/src/personal-memory.ts';
 import { createProjects } from '../../conversations/src/projects.ts';
 import { createConversationExecutor } from '../../conversations/src/runtime.ts';
+import { fakeKeep } from '../../conversations/test/fake-keep.mjs';
 import { fixture } from '../../workspace-storage/test/integration/fixture.mjs';
 import { createAuthoringDrafts } from '../src/drafts.ts';
 import { createChatTools } from '../src/tools.ts';
@@ -137,4 +138,34 @@ test('memory tools refuse project chats', async t => {
   ])
     assert.equal((await tool(call, projectChat)).error, 'memory-unavailable');
   assert.equal((await memory.read(w.id, w.userId)).content, 'Private note.');
+});
+
+test('with Keep, chat forget asks first and is permanent, and project chats never reach Keep', async t => {
+  const { client, calls } = fakeKeep();
+  const options = { enabled: async () => true, client };
+  // The tools load the built conversations package; the test's service loads its source. Both must use the fake.
+  t.after(configureKeepPersonalMemory(options));
+  t.after((await import('@tulipfarm/conversations/personal-memory')).configureKeepPersonalMemory(options));
+  const { tool, decide, memory, chats, runtime, w } = await setup(t);
+  const saved = await memory.save(w.id, w.userId, { content: '- Lives in Berlin\n- Prefers tea', expectedRevision: 0 });
+
+  const asked = await tool({ tool: 'memory.forget', text: 'Lives in Berlin' });
+  assert.equal(asked.status, 'confirm');
+  assert.equal((await memory.read(w.id, w.userId)).content, saved.content);
+  const forgotten = await decide(asked.draftId);
+  assert.equal(forgotten.status, 'saved');
+  assert.equal(forgotten.outcome.operation, 'forget');
+  assert.equal((await memory.read(w.id, w.userId)).content.includes('Lives in Berlin'), false);
+
+  const projectId = randomUUID(),
+    projectChat = randomUUID();
+  await createProjects(runtime).create(w.id, w.userId, { id: projectId, name: 'Shared' });
+  await chats.create(w.id, w.userId, { chatId: projectChat, commandId: randomUUID(), projectId });
+  const before = calls.length;
+  assert.equal((await tool({ tool: 'memory.read' }, projectChat)).error, 'memory-unavailable');
+  assert.equal(calls.length, before);
+  const legacy = await runtime.transaction(w.id, commonCompatibility, tx =>
+    tx.client.query(`SELECT count(*)::int AS n FROM "${tx.schema}".tf_personal_memory`),
+  );
+  assert.equal(legacy.rows[0].n, 0);
 });

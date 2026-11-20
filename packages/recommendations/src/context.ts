@@ -16,7 +16,7 @@ import {
   type HumanActor,
   type SourceDependency,
 } from '@tulipfarm/access';
-import { readPersonalMemory } from '@tulipfarm/conversations/personal-memory';
+import { PersonalMemoryUnavailable, readPersonalMemory } from '@tulipfarm/conversations/personal-memory';
 import { projectReaders } from '@tulipfarm/conversations/project-membership';
 import { projectSourceFile, recheckProjectContext } from '@tulipfarm/conversations/projects';
 import { requireReadableFile } from '@tulipfarm/files';
@@ -311,8 +311,12 @@ export async function collectRecommendationContext(transaction: Transaction, act
     content: teammates ? 'A teammate or pending invitation exists.' : 'There are no teammates or pending invitations.',
   });
 
-  const memory = await readPersonalMemory(tx, actor);
-  if (memory.content.trim())
+  // Memory that is hidden or cannot be reached is left out rather than read as empty.
+  const memory = await readPersonalMemory(tx, actor).catch((error: unknown) => {
+    if (error instanceof PersonalMemoryUnavailable) return undefined;
+    throw error;
+  });
+  if (memory?.content.trim())
     add('memory', {
       id: actor.membershipId,
       label: 'My personal memory',
@@ -791,7 +795,7 @@ export async function collectRecommendationContext(transaction: Transaction, act
     connected: entries.some(entry => entry.kind === 'integration'),
     gmail: capability('gmail.read'),
     googleCalendar: capability('calendar.read'),
-    personalized: memory.content.trim().length > 0,
+    personalized: Boolean(memory?.content.trim()),
     indexedProviders,
     indexableProviders: [
       ...(github.some(row => row.scopes.includes('repo') || row.scopes.includes('public_repo')) ? ['github'] : []),

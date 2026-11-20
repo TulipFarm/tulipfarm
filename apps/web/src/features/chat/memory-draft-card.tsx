@@ -92,7 +92,44 @@ export function MemoryDraftCard({
   checkStatus: ReactNode;
 }) {
   const { input } = proposal;
-  const restore = input.operation === 'restore';
+  const operation = input.operation;
+  const restore = operation === 'restore';
+  const forget = operation === 'forget';
+  const copy = {
+    edit: {
+      label: 'Review memory change',
+      title: 'Update your memory',
+      save: 'Save memory',
+      dismiss: 'Not now',
+      stale: 'Your memory changed after this draft. Nothing was saved. Ask chat for a fresh draft.',
+      failed: 'Nothing was saved. Ask chat to retry.',
+      preparing: 'Saving your memory…',
+      saved: 'Saved. Chat follows it from your next message.',
+      dismissed: 'Draft dismissed. Your memory didn’t change.',
+    },
+    restore: {
+      label: 'Forgotten memory',
+      title: 'Forgot part of your memory',
+      save: 'Undo',
+      dismiss: 'Keep it forgotten',
+      stale: 'Your memory changed after this, so it can’t be undone here. You can edit it in Settings.',
+      failed: 'Nothing was restored. Ask chat to retry.',
+      preparing: 'Restoring your memory…',
+      saved: 'Restored. Your memory is back as it was.',
+      dismissed: 'Kept forgotten.',
+    },
+    forget: {
+      label: 'Forget memory permanently',
+      title: 'Forget part of your memory permanently?',
+      save: 'Forget permanently',
+      dismiss: 'Not now',
+      stale: 'Your memory changed after this request. Nothing was forgotten. Ask chat again.',
+      failed: 'Nothing was forgotten. Ask chat to retry.',
+      preparing: 'Forgetting…',
+      saved: 'Forgotten permanently, including from your memory’s history. This can’t be undone.',
+      dismissed: 'Nothing was forgotten.',
+    },
+  }[operation];
   const badge = restore
     ? ({
         pending: { label: 'Forgotten', variant: 'info' },
@@ -103,43 +140,47 @@ export function MemoryDraftCard({
         failed: { label: 'Not restored', variant: 'destructive' },
         continued: { label: 'Continued in builder', variant: 'secondary' },
       } as const)
-    : ({
-        pending: { label: 'Needs approval', variant: 'warning' },
-        preparing: { label: 'Saving', variant: 'secondary' },
-        saved: { label: 'Saved', variant: 'info' },
-        dismissed: { label: 'Dismissed', variant: 'secondary' },
-        stale: { label: 'Out of date', variant: 'warning' },
-        failed: { label: 'Not saved', variant: 'destructive' },
-        continued: { label: 'Continued in builder', variant: 'secondary' },
-      } as const);
+    : forget
+      ? ({
+          pending: { label: 'Needs confirmation', variant: 'warning' },
+          preparing: { label: 'Forgetting', variant: 'secondary' },
+          saved: { label: 'Forgotten', variant: 'info' },
+          dismissed: { label: 'Kept', variant: 'secondary' },
+          stale: { label: 'Out of date', variant: 'warning' },
+          failed: { label: 'Not forgotten', variant: 'destructive' },
+          continued: { label: 'Continued in builder', variant: 'secondary' },
+        } as const)
+      : ({
+          pending: { label: 'Needs approval', variant: 'warning' },
+          preparing: { label: 'Saving', variant: 'secondary' },
+          saved: { label: 'Saved', variant: 'info' },
+          dismissed: { label: 'Dismissed', variant: 'secondary' },
+          stale: { label: 'Out of date', variant: 'warning' },
+          failed: { label: 'Not saved', variant: 'destructive' },
+          continued: { label: 'Continued in builder', variant: 'secondary' },
+        } as const);
   return (
     <ReviewCard
-      label={restore ? 'Forgotten memory' : 'Review memory change'}
-      icon={restore ? <Trash size={16} /> : <Edit size={16} />}
-      title={restore ? 'Forgot part of your memory' : 'Update your memory'}
+      label={copy.label}
+      icon={restore || forget ? <Trash size={16} /> : <Edit size={16} />}
+      title={copy.title}
       badge={badge[draft.status]}
       settled={draft.status === 'saved' || draft.status === 'dismissed' || draft.status === 'failed'}
       actions={
         draft.status === 'pending' ? (
-          restore ? (
-            <>
-              <Button variant="outline" disabled={locked} aria-busy={sending} onClick={() => decide('save')}>
-                Undo
-              </Button>
-              <Button variant="ghost" disabled={locked} onClick={() => decide('dismiss')}>
-                Keep it forgotten
-              </Button>
-            </>
-          ) : (
-            <>
-              <Button disabled={locked} aria-busy={sending} onClick={() => decide('save')}>
-                Save memory
-              </Button>
-              <Button variant="ghost" disabled={locked} onClick={() => decide('dismiss')}>
-                Not now
-              </Button>
-            </>
-          )
+          <>
+            <Button
+              variant={restore ? 'outline' : forget ? 'destructive' : 'default'}
+              disabled={locked}
+              aria-busy={sending}
+              onClick={() => decide('save')}
+            >
+              {copy.save}
+            </Button>
+            <Button variant="ghost" disabled={locked} onClick={() => decide('dismiss')}>
+              {copy.dismiss}
+            </Button>
+          </>
         ) : undefined
       }
       status={
@@ -148,11 +189,7 @@ export function MemoryDraftCard({
           <div ref={result} tabIndex={-1} className="text-sm">
             {draft.status === 'stale' && (
               <div className="space-y-2">
-                <p role="status">
-                  {restore
-                    ? 'Your memory changed after this, so it can’t be undone here. You can edit it in Settings.'
-                    : 'Your memory changed after this draft. Nothing was saved. Ask chat for a fresh draft.'}
-                </p>
+                <p role="status">{copy.stale}</p>
                 {!draft.outcome && (
                   <Button variant="ghost" disabled={locked} onClick={() => decide('dismiss')}>
                     Dismiss
@@ -160,22 +197,10 @@ export function MemoryDraftCard({
                 )}
               </div>
             )}
-            {draft.status === 'failed' && (
-              <p role="status">Nothing was {restore ? 'restored' : 'saved'}. Ask chat to retry.</p>
-            )}
-            {draft.status === 'preparing' && (
-              <p role="status">{restore ? 'Restoring your memory…' : 'Saving your memory…'}</p>
-            )}
-            {draft.status === 'saved' && (
-              <p role="status">
-                {restore
-                  ? 'Restored. Your memory is back as it was.'
-                  : 'Saved. Chat follows it from your next message.'}
-              </p>
-            )}
-            {draft.status === 'dismissed' && (
-              <p role="status">{restore ? 'Kept forgotten.' : 'Draft dismissed. Your memory didn’t change.'}</p>
-            )}
+            {draft.status === 'failed' && <p role="status">{copy.failed}</p>}
+            {draft.status === 'preparing' && <p role="status">{copy.preparing}</p>}
+            {draft.status === 'saved' && <p role="status">{copy.saved}</p>}
+            {draft.status === 'dismissed' && <p role="status">{copy.dismissed}</p>}
           </div>
           {feedback}
         </>
@@ -185,6 +210,9 @@ export function MemoryDraftCard({
         <MemoryDiff before={input.content} after={input.previousContent} />
       ) : (
         <MemoryDiff before={input.previousContent} after={input.content} />
+      )}
+      {forget && (
+        <p className="text-sm">This erases the removed text from your memory and its history. You can’t undo it.</p>
       )}
       <p className="text-xs text-muted-foreground">
         Only you can see your memory. Chat uses it in your private chats outside projects.
