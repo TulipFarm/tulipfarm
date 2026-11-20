@@ -668,7 +668,7 @@
       },
       "capabilities": {
         "reasoningTokensInOutput": true,
-        "reasoningEffort": "none"
+        "reasoningEffort": "low"
       },
       "pricing": [
         {
@@ -683,7 +683,7 @@
         "Prices (azure, eastus_global, reviewed 2026-09-29): https://prices.azure.com/api/retail/prices?$filter=serviceName%20eq%20'Foundry%20Models'%20and%20armRegionName%20eq%20'eastus'%20and%20priceType%20eq%20'Consumption'",
         "Azure Foundry catalog limits inspected on 2026-09-29: 200k context and 8.2k output. Direct xAI API limits do not apply to this Azure entry.",
         "Azure eastus Global retail meters inspected on 2026-09-29: input 0fd50016-7575-52b1-950e-55409436edcf, output ed4effc9-2624-5b61-9b1c-df3fd534c166, cached input 20997616-2637-5de8-8d4f-f16fc712e5c8. Rates are $1.25/$2.50/$0.20 per million tokens.",
-        "Live Azure requests to deployment grok-4.3 succeeded with low and none reasoning effort. One model entry represents both modes; this catalog does not select runtime effort.",
+        "Live Azure requests to deployment grok-4.3 succeeded with low and none reasoning effort. Tool requests need low: with none, Grok 4.3 copies earlier edit claims from history as text instead of calling tools (0/8 edits applied against 8/8 with low, replayed app-chat turns, 2026-11-20).",
         "Prices (xai, standard_global, reviewed 2026-09-29): https://docs.x.ai/docs/models",
         "Direct xAI API. Rates recorded equal to the Azure entry grok-4.3."
       ]
