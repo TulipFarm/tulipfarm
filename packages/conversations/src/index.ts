@@ -15,6 +15,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { budCompatibility, clearBudConversation } from './bud-assistant.ts';
 import { z } from 'zod';
 import { withoutTrailingControlMarker } from './reply-text.ts';
+import { transcriptOrder } from './transcript-order.ts';
 import { googleToolActivity } from './google-tool-activity.ts';
 import { apiCallReceipt, executionReceipt, toolPresentation } from './tool-activity.ts';
 import { storedToolActivity, storedToolPresentation, waitingRowDraft } from './tool-activity-history.ts';
@@ -172,6 +173,20 @@ const followUpsVersion = 27;
 /** The first common migration with chat pins. A workspace still on an older migration has no pins yet. */
 const pinsVersion = 43;
 const hasPins = (tx: object) => Number((tx as { commonVersion?: number }).commonVersion ?? 0) >= pinsVersion;
+/** The accepted sequence of the turn a message belongs to: its own turn, the turn it replies to, the turn whose question it asks or answers, or the turn whose compaction it reports. */
+const turnSequenceColumn = (tx: AuthorizationTransaction) => `COALESCE(t.accepted_sequence,
+  (SELECT min(rt.accepted_sequence) FROM ${table(tx, 'tf_conversation_turns')} rt WHERE rt.conversation_id = m.conversation_id AND rt.response_message_id = m.id),
+  (SELECT min(rt.accepted_sequence) FROM ${table(tx, 'tf_conversation_results')} r JOIN ${table(tx, 'tf_conversation_turns')} rt ON rt.id = r.turn_id WHERE r.message_id = m.id),
+  (SELECT min(rt.accepted_sequence) FROM ${table(tx, 'tf_conversation_parts')} p
+    JOIN ${table(tx, 'tf_conversation_requests')} q ON q.conversation_id = p.conversation_id
+      AND (q.id = p.request_id OR q.id = (SELECT a.request_id FROM ${table(tx, 'tf_conversation_responses')} a WHERE a.id = p.response_id))
+    JOIN ${table(tx, 'tf_conversation_turns')} rt ON rt.id = q.turn_id WHERE p.message_id = m.id),
+  (SELECT min(rt.accepted_sequence) FROM ${table(tx, 'tf_conversation_parts')} p
+    JOIN ${table(tx, 'tf_conversation_approval_requests')} q ON q.conversation_id = p.conversation_id AND q.id = p.approval_id
+    JOIN ${table(tx, 'tf_conversation_turns')} rt ON rt.id = q.turn_id WHERE p.message_id = m.id),
+  (SELECT min(rt.accepted_sequence) FROM ${table(tx, 'tf_conversation_parts')} p
+    JOIN ${table(tx, 'tf_conversation_compactions')} c ON c.id = (to_jsonb(p)->>'compaction_id')::uuid
+    JOIN ${table(tx, 'tf_conversation_turns')} rt ON rt.id = c.turn_id WHERE p.message_id = m.id AND p.kind = 'compaction'))`;
 const pinnedColumn = (tx: AuthorizationTransaction, membership: string) =>
   hasPins(tx)
     ? `EXISTS (SELECT 1 FROM ${table(tx, 'tf_conversation_pins')} pin WHERE pin.conversation_id = c.id AND pin.membership_id = ${membership}) AS pinned`
@@ -813,38 +828,45 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
     return human(workspaceId, userId, async (tx, actor) => {
       const chat = await owned(tx, actor, chatId);
       await requireConversationMcpSources(tx, actor, chatId);
-      const rows = z.array(messageSchema.extend({ createdAt: z.date(), stoppedTurnId: uuidSchema.nullable() })).parse(
-        (
-          await tx.client.query(
-            `SELECT m.id, m.sequence, m.author_kind AS author, m.created_at AS "createdAt",
+      const rows = z
+        .array(
+          messageSchema.extend({
+            createdAt: z.date(),
+            stoppedTurnId: uuidSchema.nullable(),
+            turnSequence: z.number().int().positive().nullable(),
+          }),
+        )
+        .parse(
+          (
+            await tx.client.query(
+              `SELECT m.id, m.sequence, m.author_kind AS author, m.created_at AS "createdAt",
         (SELECT jsonb_agg(CASE p.kind WHEN 'text' THEN jsonb_strip_nulls(jsonb_build_object('kind', p.kind, 'text', p.text, 'content', p.rich_content)) WHEN 'attachment' THEN jsonb_build_object('kind', p.kind, 'attachmentId', to_jsonb(p)->>'attachment_id') WHEN 'file' THEN jsonb_build_object('kind', p.kind, 'fileId', to_jsonb(p)->>'file_id') WHEN 'google-file' THEN jsonb_build_object('kind', p.kind, 'fileId', to_jsonb(p)->'google_file'->>'fileId', 'name', to_jsonb(p)->'google_file'->>'name', 'mimeType', to_jsonb(p)->'google_file'->>'mimeType') WHEN 'request' THEN jsonb_build_object('kind', p.kind, 'requestId', to_jsonb(p)->>'request_id') WHEN 'response' THEN jsonb_build_object('kind', p.kind, 'responseId', to_jsonb(p)->>'response_id') WHEN 'layout' THEN jsonb_build_object('kind', p.kind, 'text', p.text, 'layout', to_jsonb(p)->'layout') WHEN 'layout-action' THEN jsonb_build_object('kind', p.kind, 'action', to_jsonb(p)->'layout_action') WHEN 'skill' THEN ${skillReference} WHEN 'skill-use' THEN ${skillReference} ${compactionParts(tx)} ELSE jsonb_build_object('kind', p.kind, 'approvalId', to_jsonb(p)->>'approval_id') END ORDER BY p.ordinal) FROM ${table(tx, 'tf_conversation_parts')} p WHERE p.message_id = m.id) AS parts,
         CASE WHEN t.id IS NULL THEN NULL ELSE jsonb_strip_nulls(jsonb_build_object('id', t.id, 'status', t.status, 'generation', t.generation, 'epoch', t.attempt_epoch, 'errorCode', t.error_code, 'mode', CASE WHEN (to_jsonb(t)->>'planning_mode')::boolean THEN 'plan' END, 'stats', ${turnStats}${tx.commonVersion >= turnPlanConnectionVersion ? `, 'planSwitch', ${planSwitch(tx)}` : ''})) END AS turn
         ${tx.commonVersion >= followUpsVersion ? `,(SELECT jsonb_build_object('id', f.id, 'instruction', f.instruction, 'requestedAt', to_char(f.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')) FROM ${table(tx, 'tf_follow_ups')} f WHERE f.fired_message_id = m.id) AS "followUp"` : ''}
         ,(SELECT st.id FROM ${table(tx, 'tf_conversation_results')} r JOIN ${table(tx, 'tf_conversation_turns')} st ON st.id = r.turn_id WHERE r.message_id = m.id AND st.status = 'cancelled' AND m.author_kind = 'assistant') AS "stoppedTurnId"
+        ,${turnSequenceColumn(tx)} AS "turnSequence"
         FROM ${table(tx, 'tf_conversation_messages')} m LEFT JOIN ${table(tx, 'tf_conversation_turns')} t ON t.source_message_id = m.id
         WHERE m.conversation_id = $1 AND ($2::integer IS NULL OR m.sequence < $2) ORDER BY m.sequence DESC LIMIT 51`,
-            [
-              chatId,
-              input.before ?? null,
-              ...(tx.commonVersion >= turnPlanConnectionVersion ? [actor.membershipId] : []),
-            ],
-          )
-        ).rows,
-      );
-      const messages = rows
-        .slice(0, 50)
-        .reverse()
-        .map(({ stoppedTurnId, ...row }) => ({
-          ...row,
-          parts:
-            row.author === 'assistant'
-              ? row.parts.map(part =>
-                  part.kind === 'text' ? { ...part, text: withoutTrailingControlMarker(part.text) } : part,
-                )
-              : row.parts,
-          createdAt: row.createdAt.toISOString(),
-          ...(stoppedTurnId ? { stoppedTurnId } : {}),
-        }));
+              [
+                chatId,
+                input.before ?? null,
+                ...(tx.commonVersion >= turnPlanConnectionVersion ? [actor.membershipId] : []),
+              ],
+            )
+          ).rows,
+        );
+      const messages = transcriptOrder(rows.slice(0, 50)).map(({ stoppedTurnId, turnSequence, ...row }) => ({
+        ...row,
+        parts:
+          row.author === 'assistant'
+            ? row.parts.map(part =>
+                part.kind === 'text' ? { ...part, text: withoutTrailingControlMarker(part.text) } : part,
+              )
+            : row.parts,
+        createdAt: row.createdAt.toISOString(),
+        ...(stoppedTurnId ? { stoppedTurnId } : {}),
+        ...(turnSequence ? { turnSequence } : {}),
+      }));
       const calendar = await calendarResultsForHistory(
         tx,
         actor,
@@ -1109,7 +1131,7 @@ export function createConversations(runtime: Runtime, skills?: ChatSkills, admis
             );
           }
         }
-      return { messages, nextBefore: rows.length > 50 ? (messages[0]?.sequence ?? null) : null, hasGitHubProposals };
+      return { messages, nextBefore: rows.length > 50 ? rows[49]!.sequence : null, hasGitHubProposals };
     });
   }
 

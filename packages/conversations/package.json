@@ -43,6 +43,10 @@
       "types": "./dist/layout-contracts.d.ts",
       "default": "./dist/layout-contracts.js"
     },
+    "./transcript-order": {
+      "types": "./dist/transcript-order.d.ts",
+      "default": "./dist/transcript-order.js"
+    },
     "./row-view": {
       "types": "./dist/row-view.d.ts",
       "default": "./dist/row-view.js"

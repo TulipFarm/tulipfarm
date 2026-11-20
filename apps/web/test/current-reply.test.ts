@@ -290,6 +290,22 @@ test('a follow-up behind a failed reply waits for retry or cancel without lookin
   assert.equal(next.queuedKey, 'follow-up-turn:0');
 });
 
+test('a retried reply streams under its own turn, above a message sent while it was failed', () => {
+  const retried = message({ turn: { id: 'retried-turn', generation: 2, status: 'processing' } });
+  const question = message({ id: 'question', sequence: 2, author: 'assistant', turn: null, turnSequence: 1 });
+  const queued = message({
+    id: 'follow-up',
+    sequence: 3,
+    turn: { id: 'follow-up-turn', generation: 0, status: 'queued' },
+  });
+  const earlier = message({ id: 'earlier-reply', sequence: 4, author: 'assistant', turn: null, turnSequence: 1 });
+  assert.equal(currentReply(input({ messages: [retried, question, queued] })).replyAfter, 1);
+  assert.equal(currentReply(input({ messages: [retried, earlier, queued] })).replyAfter, 1);
+  assert.equal(currentReply(input({ messages: [retried] })).replyAfter, 0);
+  retried.turn!.status = 'completed';
+  assert.equal(currentReply(input({ messages: [retried, earlier, queued] })).replyAfter, 2);
+});
+
 test('streamed text and progress must each match the saved generation', () => {
   for (const generation of [1, 3]) {
     const mismatched = reply({

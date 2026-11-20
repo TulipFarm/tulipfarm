@@ -80,8 +80,8 @@ test(
         [
           [{ kind: 'text', text: 'Inspect this privately' }],
           [{ kind: 'request', requestId: a.requestId }],
-          [{ kind: 'text', text: 'This is not an answer' }],
           [{ kind: 'response', responseId: winner.responseId }],
+          [{ kind: 'text', text: 'This is not an answer' }],
         ],
       );
       await assert.rejects(requests.create(fence, question()), AccessDenied);
@@ -115,8 +115,8 @@ test(
         'completed',
       );
       assert.deepEqual(
-        (await f.store.history(w.id, w.userId, chatId)).messages.slice(-2).map(message => message.parts[0].text),
-        ['yletavirp siht tcepsnI', 'rewsna na ton si sihT'],
+        (await f.store.history(w.id, w.userId, chatId)).messages.slice(-3).map(message => message.parts[0].text),
+        ['yletavirp siht tcepsnI', 'This is not an answer', 'rewsna na ton si sihT'],
       );
     } finally {
       await restarted?.close();

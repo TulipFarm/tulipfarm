@@ -1007,6 +1007,7 @@ function ConversationDetail({
     queuedMessages,
     queueLabel,
     unconfirmed,
+    replyAfter,
     draftSent,
     turn,
     thinking,
@@ -1107,6 +1108,69 @@ function ConversationDetail({
     observer.observe(element);
     return () => observer.disconnect();
   }, []);
+  // The live reply renders after the replying turn's saved messages, so a message sent meanwhile stays below it.
+  const liveReply = (messages: ConversationMessage[], at: number) =>
+    layoutJson && turn ? (
+      <li key="live-reply" aria-busy={!read.uncertain}>
+        <span className="sr-only">TulipFarm said</span>
+        <LayoutPreview chatId={chatId} turnId={turn.id} json={layoutJson} />
+      </li>
+    ) : answerText ? (
+      <li key="live-reply" aria-busy={!read.uncertain}>
+        <Message align="start">
+          <MessageContent>
+            <span className="sr-only">TulipFarm said</span>
+            <AssistantText
+              workspaceId={workspace.id}
+              chatId={chatId}
+              text={answerText}
+              streaming={!read.uncertain}
+              rowViews={entryDetails(messages, modelFamilies).rowViews[at] ?? []}
+            />
+          </MessageContent>
+        </Message>
+        {!waiting && !pendingQueued && !turn && !incomingTurns.length && (
+          <ToolActivity
+            key="activity"
+            variant="transcript"
+            items={[]}
+            active={thinking && !read.uncertain}
+            activityLabel={activityLabel}
+          />
+        )}
+      </li>
+    ) : (
+      thinking &&
+      !read.uncertain && (
+        <li key="live-reply" aria-busy="true" className="space-y-2">
+          {continuesBelow && <ToolActivity variant="transcript" items={[]} active activityLabel={activityLabel} />}
+          {continuesBelow && <LiveNarration text={narration} saved={savedNarration} />}
+          {slowTurn && (
+            <div className="flex flex-wrap items-center gap-3">
+              <p role="status" className="text-sm text-muted-foreground">
+                This step is taking longer than usual. The reply continues, or you can stop it.
+              </p>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={locked}
+                onClick={() =>
+                  submit({
+                    kind: 'cancel',
+                    chatId,
+                    commandId: crypto.randomUUID(),
+                    turnId: slowTurn.id,
+                    expectedGeneration: slowTurn.generation,
+                  })
+                }
+              >
+                Stop reply
+              </Button>
+            </div>
+          )}
+        </li>
+      )
+    );
   return (
     <ChatKeywords value={integrations.keywords}>
       <div className="flex min-h-0 flex-1 flex-col">
@@ -1331,7 +1395,7 @@ function ConversationDetail({
                     >
                       <ol aria-label="Messages" className={compact ? 'space-y-3' : 'space-y-8'}>
                         {[
-                          ...history.messages.map((message, index) =>
+                          ...history.messages.flatMap((message, index) => [
                             answerOnly(message) ? null : (
                               <li
                                 key={
@@ -1463,7 +1527,8 @@ function ConversationDetail({
                                   )}
                               </li>
                             ),
-                          ),
+                            index === replyAfter ? liveReply(history.messages, index) : null,
+                          ]),
                           pending ? (
                             <li
                               key="pending"
@@ -1555,69 +1620,7 @@ function ConversationDetail({
                             </li>
                           )),
                         ]}
-                        {layoutJson && turn ? (
-                          <li aria-busy={!read.uncertain}>
-                            <span className="sr-only">TulipFarm said</span>
-                            <LayoutPreview chatId={chatId} turnId={turn.id} json={layoutJson} />
-                          </li>
-                        ) : answerText ? (
-                          <li aria-busy={!read.uncertain}>
-                            <Message align="start">
-                              <MessageContent>
-                                <span className="sr-only">TulipFarm said</span>
-                                <AssistantText
-                                  workspaceId={workspace.id}
-                                  chatId={chatId}
-                                  text={answerText}
-                                  streaming={!read.uncertain}
-                                  rowViews={entryDetails(history.messages, modelFamilies).rowViews.at(-1) ?? []}
-                                />
-                              </MessageContent>
-                            </Message>
-                            {!waiting && !pendingQueued && !turn && !incomingTurns.length && (
-                              <ToolActivity
-                                key="activity"
-                                variant="transcript"
-                                items={[]}
-                                active={thinking && !read.uncertain}
-                                activityLabel={activityLabel}
-                              />
-                            )}
-                          </li>
-                        ) : (
-                          thinking &&
-                          !read.uncertain && (
-                            <li aria-busy="true" className="space-y-2">
-                              {continuesBelow && (
-                                <ToolActivity variant="transcript" items={[]} active activityLabel={activityLabel} />
-                              )}
-                              {continuesBelow && <LiveNarration text={narration} saved={savedNarration} />}
-                              {slowTurn && (
-                                <div className="flex flex-wrap items-center gap-3">
-                                  <p role="status" className="text-sm text-muted-foreground">
-                                    This step is taking longer than usual. The reply continues, or you can stop it.
-                                  </p>
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    disabled={locked}
-                                    onClick={() =>
-                                      submit({
-                                        kind: 'cancel',
-                                        chatId,
-                                        commandId: crypto.randomUUID(),
-                                        turnId: slowTurn.id,
-                                        expectedGeneration: slowTurn.generation,
-                                      })
-                                    }
-                                  >
-                                    Stop reply
-                                  </Button>
-                                </div>
-                              )}
-                            </li>
-                          )
-                        )}
+                        {replyAfter === null && liveReply(history.messages, history.messages.length - 1)}
                         {read.uncertain && (
                           <li>
                             <Alert>
@@ -1964,10 +1967,8 @@ function rowViewsForMessage(messages: ConversationMessage[], message: Conversati
     message.author === 'human'
       ? message
       : messages
-          .filter(
-            item =>
-              item.sequence <= message.sequence && (item.author === 'human' || item.tools.some(tool => tool.rowView)),
-          )
+          .slice(0, messages.indexOf(message) + 1)
+          .filter(item => item.author === 'human' || item.tools.some(tool => tool.rowView))
           .at(-1);
   return source?.tools.flatMap(tool => (tool.status === 'completed' && tool.rowView ? [tool.rowView] : [])) ?? [];
 }
