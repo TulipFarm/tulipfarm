@@ -1,8 +1,11 @@
-/** An in-memory Keep knowledge corpus: per-scope sources of episodes, keyword search and forget. */
+/**
+ * An in-memory Keep knowledge corpus: per-scope sources of episodes, keyword search and forget. `state.timeouts` holds
+ * source ids whose ingest times out, and `state.beforeIngest` runs before each ingest.
+ */
 export function fakeKnowledgeKeep() {
   const corpora = new Map();
   const calls = [];
-  const state = { available: true };
+  const state = { available: true, timeouts: new Set(), beforeIngest: undefined };
   const corpus = scope => {
     if (!corpora.has(scope.user)) corpora.set(scope.user, new Map());
     return corpora.get(scope.user);
@@ -11,7 +14,9 @@ export function fakeKnowledgeKeep() {
   const client = {
     async ingestKnowledge(input) {
       calls.push({ op: 'ingest', ...input });
+      await state.beforeIngest?.(input);
       if (!state.available) return down;
+      if (state.timeouts.has(input.sourceId)) return { status: 'unavailable', reason: 'timeout' };
       const sources = corpus(input.scope);
       const existing = sources.get(input.sourceId);
       const source =

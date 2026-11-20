@@ -38,6 +38,8 @@ export {
   keepKnowledgeVersion,
   KnowledgeKeepUnavailable,
   type KnowledgeKeepDependencies,
+  keepKnowledgeMaxAttempts,
+  type KnowledgeKeepFailureKind,
   type KnowledgeKeepFeed,
   type KnowledgeKeepOutcome,
   type KnowledgeKeepWork,

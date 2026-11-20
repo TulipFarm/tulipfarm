@@ -13,6 +13,7 @@ import {
   createKnowledgeKeepIndex,
   createKnowledgeSearch,
   createLocalKnowledge,
+  keepKnowledgeMaxAttempts,
   KnowledgeKeepUnavailable,
   KnowledgeSearchUnavailable,
 } from '../dist/index.js';
@@ -107,7 +108,39 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       const publication = async documentId =>
         (await db.platform.query(`SELECT lexical_publication_id FROM ${table('documents')} WHERE id=$1`, [documentId]))
           .rows[0].lexical_publication_id;
-      return { ws, local, keep, flag, feed, search, tools, actor, note, drain, member, row, publication };
+      // The statement connectors run when a document loses read access or its content is no longer supported.
+      const unpublish = documentId =>
+        db.platform.query(
+          `UPDATE ${table('documents')} SET lexical_publication_id=NULL,vector_publication_id=NULL WHERE id=$1`,
+          [documentId],
+        );
+      const republish = (documentId, publicationId) =>
+        db.platform.query(`UPDATE ${table('documents')} SET lexical_publication_id=$2 WHERE id=$1`, [
+          documentId,
+          publicationId,
+        ]);
+      const ready = documentId =>
+        db.platform.query(`UPDATE ${table('tf_keep_knowledge')} SET next_attempt_at=now() WHERE document_id=$1`, [
+          documentId,
+        ]);
+      return {
+        ws,
+        local,
+        keep,
+        flag,
+        feed,
+        search,
+        tools,
+        actor,
+        note,
+        drain,
+        member,
+        row,
+        publication,
+        unpublish,
+        republish,
+        ready,
+      };
     }
     const ask = (w, query, actor = w.actor) => w.tools.search(w.ws.id, actor, { query }, { commandId: randomUUID() });
 
@@ -187,6 +220,122 @@ ${await readFile(new URL('../../../apps/database/migrations/0001_baseline.sql', 
       assert.equal(await w.row(doc.documentId), undefined);
       assert.deepEqual(await w.feed.sync(w.ws.id, doc.documentId), { status: 'skipped' });
       assert.deepEqual(await w.feed.due(w.ws.id, null, 100), []);
+    });
+
+    await t.test(
+      'losing read access or supported coverage without a tombstone forgets the document; republishing replaces it',
+      async () => {
+        const w = await setup();
+        const lost = await w.note('supplier payment deadline', 'Supplier policy');
+        const unsupported = await w.note('warehouse floor plan', 'Floor plan');
+        await w.drain();
+        const lostPublication = await w.publication(lost.documentId);
+        // A connector that can no longer read a document, or no longer supports its content, clears its publication.
+        await w.unpublish(lost.documentId);
+        await w.unpublish(unsupported.documentId);
+        const outcomes = await w.drain();
+        assert.deepEqual(
+          outcomes.map(outcome => [outcome.document_id, outcome.action, outcome.status]).toSorted(),
+          [
+            [lost.documentId, 'forget', 'forgotten'],
+            [unsupported.documentId, 'forget', 'forgotten'],
+          ].toSorted(),
+        );
+        assert.equal(w.keep.corpora.get(keepWorkspaceKnowledgeScope(w.ws.id).user).size, 0);
+        assert.equal(await w.row(lost.documentId), undefined);
+
+        await w.republish(lost.documentId, lostPublication);
+        assert.deepEqual(await w.drain(), [
+          { document_id: lost.documentId, action: 'deliver', status: 'delivered', publicationId: lostPublication },
+        ]);
+        assert.equal(w.keep.calls.at(-1).replace, true);
+      },
+    );
+
+    await t.test(
+      'a failing document backs off, does not hold up later documents, and is pinned after repeated failures',
+      async () => {
+        const w = await setup();
+        const [failing, healthy] = [
+          await w.note('supplier payment deadline', 'Supplier policy'),
+          await w.note('warehouse floor plan', 'Floor plan'),
+        ].toSorted((a, b) => a.documentId.localeCompare(b.documentId));
+        w.keep.state.timeouts.add(failing.documentId);
+        const run = async () => {
+          const outcomes = [];
+          for (const work of await w.feed.due(w.ws.id, null, 100)) {
+            try {
+              outcomes.push([work.document_id, (await w.feed.sync(w.ws.id, work.document_id)).status]);
+            } catch (error) {
+              assert.ok(error instanceof KnowledgeKeepUnavailable);
+              assert.equal(error.scope, 'document');
+              await w.feed.recordFailure(w.ws.id, work.document_id, error.message, error.scope);
+              outcomes.push([work.document_id, 'failed']);
+            }
+          }
+          return outcomes;
+        };
+        assert.deepEqual(await run(), [
+          [failing.documentId, 'failed'],
+          [healthy.documentId, 'delivered'],
+        ]);
+        const backedOff = await w.row(failing.documentId);
+        assert.equal(backedOff.attempts, 1);
+        assert.equal(backedOff.last_error, 'Keep unavailable: timeout');
+        assert.ok(backedOff.next_attempt_at > new Date(), 'the document waits before it is sent again');
+        assert.equal(backedOff.lease_token, null);
+        assert.deepEqual(await w.feed.due(w.ws.id, null, 100), [], 'a backed-off document is not due');
+
+        for (let attempt = 2; attempt <= keepKnowledgeMaxAttempts; attempt++) {
+          await w.ready(failing.documentId);
+          assert.deepEqual(await run(), [[failing.documentId, 'failed']]);
+        }
+        const pinned = await w.row(failing.documentId);
+        assert.equal(pinned.attempts, keepKnowledgeMaxAttempts);
+        assert.equal(pinned.failed_publication_id, await w.publication(failing.documentId));
+        await w.ready(failing.documentId);
+        assert.deepEqual(await w.feed.due(w.ws.id, null, 100), [], 'a pinned publication is not sent again');
+
+        w.keep.state.timeouts.clear();
+        await w.note('supplier prepayment', 'Supplier policy', failing.documentId, failing.revisionId);
+        assert.deepEqual(await run(), [[failing.documentId, 'delivered']], 'a new revision is sent again');
+        const delivered = await w.row(failing.documentId);
+        assert.equal(delivered.attempts, 0);
+        assert.equal(delivered.next_attempt_at, null);
+      },
+    );
+
+    await t.test('a Keep outage is recorded without backoff so the document is sent once Keep is back', async () => {
+      const w = await setup();
+      const doc = await w.note('supplier payment deadline', 'Supplier policy');
+      w.keep.state.available = false;
+      const error = await w.feed.sync(w.ws.id, doc.documentId).catch(caught => caught);
+      assert.ok(error instanceof KnowledgeKeepUnavailable);
+      assert.equal(error.scope, 'keep');
+      await w.feed.recordFailure(w.ws.id, doc.documentId, error.message, error.scope);
+      assert.equal((await w.row(doc.documentId)).next_attempt_at, null);
+      assert.deepEqual(await w.feed.due(w.ws.id, null, 100), [{ document_id: doc.documentId, action: 'deliver' }]);
+    });
+
+    await t.test('two syncs of one document never send it at the same time', async () => {
+      const w = await setup();
+      const doc = await w.note('supplier payment deadline', 'Supplier policy');
+      let release;
+      const gate = new Promise(resolve => (release = resolve));
+      let entered;
+      const started = new Promise(resolve => (entered = resolve));
+      w.keep.state.beforeIngest = async () => {
+        entered();
+        await gate;
+      };
+      const first = w.feed.sync(w.ws.id, doc.documentId);
+      await started;
+      w.keep.state.beforeIngest = undefined;
+      assert.deepEqual(await w.feed.sync(w.ws.id, doc.documentId), { status: 'busy' });
+      release();
+      assert.equal((await first).status, 'delivered');
+      assert.equal(w.keep.calls.filter(call => call.op === 'ingest').length, 1);
+      assert.equal((await w.row(doc.documentId)).lease_token, null, 'the lease is released');
     });
 
     await t.test('turning the flag on backfills every published document, page by page', async () => {
