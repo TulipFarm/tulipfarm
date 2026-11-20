@@ -1359,7 +1359,6 @@ test("an app chat's answer about the app's current state is backed by reading it
   const status = new Set(['apps.status']);
   const read = new Set(['apps.status', 'apps.files.read']);
   for (const text of [
-    'The heading now reads "Orders v2".',
     'Your app is now live at release 3.',
     'The app now has three files: index.html, app.js and style.css.',
     'Yes, the server now returns ok on /health.',
@@ -1371,10 +1370,44 @@ test("an app chat's answer about the app's current state is backed by reading it
     // Nothing read the app in this reply, so the answer reads it first; it never writes for it.
     assert.equal(unbackedAppClaim(text, 'public', new Set(), 'What is the heading?')?.missing, 'read', text);
   }
+  // The status lists files, never their contents, so quoting a file needs a read of it.
+  const heading = 'The heading now reads "Orders v2".';
+  assert.equal(unbackedAppClaim(heading, 'public', status, 'what does the heading say?')?.missing, 'read');
+  assert.equal(unbackedAppClaim(heading, 'public', read, 'what does the heading say?'), undefined);
   // An explicit edit claim with no write in this reply still needs the write.
   const edit = "I updated the heading in index.html to 'Orders v3'.";
   assert.equal(unbackedAppClaim(edit, 'public', read, 'Change the heading to Orders v3.')?.missing, 'edit');
   assert.equal(unbackedAppClaim(edit, 'public', new Set([...read, 'apps.files.write'])), undefined);
+});
+
+test("an app chat's reply cannot quote a file it did not read, or say a requested change or build holds when none ran", () => {
+  const status = new Set(['apps.status']);
+  const read = new Set(['apps.status', 'apps.files.read']);
+  // eslint-disable-next-line tulipfarm/product-copy -- A tool name, not user-facing copy.
+  const done = new Set([...read, 'apps.files.write', 'apps.preview.build']);
+  const greeting = "Change the greeting to 'Hello v4' and rebuild.";
+  const stated = "The greeting at / is 'Hello v4' and the app is built.";
+  assert.equal(unbackedAppClaim(stated, 'public', status, greeting)?.missing, 'change');
+  assert.equal(unbackedAppClaim(stated, 'public', read, greeting)?.missing, 'change');
+  assert.equal(unbackedAppClaim(stated, 'public', done, greeting), undefined);
+  assert.equal(
+    unbackedAppClaim('The app is built.', 'public', new Set([...read, 'apps.files.write']), greeting)?.missing,
+    'build',
+  );
+  assert.equal(unbackedAppClaim('The app is built.', 'public', status, 'is it live?'), undefined);
+  const paragraph = "Change the paragraph to 'Second edit v6.' and rebuild.";
+  for (const text of [
+    "The paragraph still reads 'Second edit v5.' from the last accepted change.",
+    "I made sure the heading is 'Hello static v2'.",
+  ]) {
+    assert.equal(unbackedAppClaim(text, 'public', new Set(), paragraph)?.missing, 'read', text);
+    assert.equal(unbackedAppClaim(text, 'public', status, paragraph)?.missing, 'read', text);
+    assert.equal(unbackedAppClaim(text, 'public', read, paragraph), undefined, text);
+  }
+  // Read, the requested text may already be there.
+  const already = "The paragraph already reads 'Second edit v6.'";
+  assert.equal(unbackedAppClaim(already, 'public', read, paragraph), undefined);
+  assert.equal(unbackedAppClaim("The paragraph is not 'Second edit v6.' yet.", 'public', status, paragraph), undefined);
 });
 
 const changeRequests = [
