@@ -191,6 +191,10 @@
       "types": "./dist/row-work.d.ts",
       "default": "./dist/row-work.js"
     },
+    "./inbox-slack": {
+      "types": "./dist/inbox-slack.d.ts",
+      "default": "./dist/inbox-slack.js"
+    },
     "./tasks": {
       "types": "./dist/tasks.d.ts",
       "default": "./dist/tasks.js"

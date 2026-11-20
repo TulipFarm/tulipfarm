@@ -9,7 +9,7 @@ import {
   resolveHuman,
   type HumanActor,
 } from '@tulipfarm/access';
-import { rowExists, wakeRow } from './row-assignments.ts';
+import { deliverComment, rowExists, wakeRow } from './row-assignments.ts';
 import { relation, type AgentTransaction } from './store.ts';
 
 const runStateSchema = z.enum(['queued', 'working', 'waiting', 'done', 'failed', 'stopped']);
@@ -77,16 +77,49 @@ export const inboxSchema = z.object({
 });
 export type Inbox = z.infer<typeof inboxSchema>;
 
+const dailyCreditsSchema = z.number().int().min(1).max(1000000).nullable();
 export const assignmentLimitsSchema = z.object({
   workspace: z.number().int().min(1).max(100),
+  timeZone: z.string().min(1).max(64),
+  dailyCredits: dailyCreditsSchema,
   agents: z.array(
     z.object({
       agentId: z.uuid(),
       name: z.string(),
       concurrent: z.number().int().min(1).max(20),
       dailyRuns: z.number().int().min(1).max(10000).nullable(),
+      dailyCredits: dailyCreditsSchema,
     }),
   ),
+});
+const inboxKinds = ['assigned', 'waiting', 'finished', 'mention'] as const;
+export const inboxSlackSchema = z.object({
+  connected: z.boolean(),
+  kinds: z.object(
+    Object.fromEntries(inboxKinds.map(kind => [kind, z.boolean()])) as Record<
+      (typeof inboxKinds)[number],
+      z.ZodBoolean
+    >,
+  ),
+});
+export type InboxSlack = z.infer<typeof inboxSlackSchema>;
+export const inboxSlackInputSchema = z.strictObject({ kinds: inboxSlackSchema.shape.kinds.strict() });
+
+/** What admins send. Fields left out keep their saved values, so an older web app can't clear the newer caps. */
+export const assignmentLimitsInputSchema = z.strictObject({
+  workspace: assignmentLimitsSchema.shape.workspace,
+  timeZone: assignmentLimitsSchema.shape.timeZone.optional(),
+  dailyCredits: dailyCreditsSchema.optional(),
+  agents: z
+    .array(
+      z.strictObject({
+        agentId: z.uuid(),
+        concurrent: z.number().int().min(1).max(20),
+        dailyRuns: z.number().int().min(1).max(10000).nullable(),
+        dailyCredits: dailyCreditsSchema.optional(),
+      }),
+    )
+    .max(500),
 });
 export type AssignmentLimits = z.infer<typeof assignmentLimitsSchema>;
 
@@ -254,7 +287,7 @@ export function createRowWork(runtime: Runtime, compatibility: unknown) {
           [id, tableId, rowId, actor.membershipId, input.body, input.mentions],
         );
         await notifyMentions(tx, actor, tableId, rowId, id, input.mentions);
-        await wakeRow(tx, tableId, rowId);
+        await deliverComment(tx, tableId, rowId, actor.membershipId, input.body);
         return readThread(tx, actor, tableId, rowId);
       }),
 
@@ -360,6 +393,24 @@ export function createRowWork(runtime: Runtime, compatibility: unknown) {
         if (!changed.rowCount) throw new AccessDenied();
       }),
 
+    slackPreferences: (workspaceId: string, userId: string) =>
+      as(workspaceId, userId, (tx, actor) => readSlackPreferences(tx, actor.membershipId)),
+
+    setSlackPreferences: (workspaceId: string, userId: string, value: unknown) =>
+      as(workspaceId, userId, async (tx, actor) => {
+        const { kinds } = inboxSlackInputSchema.parse(value);
+        await tx.client.query(`DELETE FROM ${relation(tx, 'tf_inbox_slack_muted')} WHERE membership_id=$1`, [
+          actor.membershipId,
+        ]);
+        const muted = inboxKinds.filter(kind => !kinds[kind]);
+        if (muted.length)
+          await tx.client.query(
+            `INSERT INTO ${relation(tx, 'tf_inbox_slack_muted')}(membership_id,kind) SELECT $1,unnest($2::text[])`,
+            [actor.membershipId, muted],
+          );
+        return readSlackPreferences(tx, actor.membershipId);
+      }),
+
     limits: (workspaceId: string, userId: string) =>
       as(workspaceId, userId, async (tx, actor) => {
         if ((await currentMember(tx, actor)).role !== 'admin') throw new AccessDenied();
@@ -369,23 +420,32 @@ export function createRowWork(runtime: Runtime, compatibility: unknown) {
     setLimits: (workspaceId: string, userId: string, value: unknown) =>
       as(workspaceId, userId, async (tx, actor) => {
         if ((await currentMember(tx, actor)).role !== 'admin') throw new AccessDenied();
-        const input = assignmentLimitsSchema
-          .omit({ agents: true })
-          .extend({
-            agents: z.array(assignmentLimitsSchema.shape.agents.element.omit({ name: true })).max(500),
-          })
-          .parse(value);
+        const input = assignmentLimitsInputSchema.parse(value);
+        if (
+          input.timeZone !== undefined &&
+          !(await tx.client.query('SELECT 1 FROM pg_timezone_names WHERE name=$1', [input.timeZone])).rowCount
+        )
+          throw new AssignmentLimitsError('unknown-time-zone');
         await tx.client.query(
-          `INSERT INTO ${relation(tx, 'tf_workspace_assignment_limits')}(singleton,concurrent) VALUES(true,$1)
-          ON CONFLICT (singleton) DO UPDATE SET concurrent=EXCLUDED.concurrent`,
-          [input.workspace],
+          `INSERT INTO ${relation(tx, 'tf_workspace_assignment_limits')}(singleton,concurrent,time_zone,daily_credits) VALUES(true,$1,COALESCE($2,'UTC'),$3)
+          ON CONFLICT (singleton) DO UPDATE SET concurrent=EXCLUDED.concurrent,
+            time_zone=COALESCE($2,${relation(tx, 'tf_workspace_assignment_limits')}.time_zone),
+            daily_credits=CASE WHEN $4 THEN EXCLUDED.daily_credits ELSE ${relation(tx, 'tf_workspace_assignment_limits')}.daily_credits END`,
+          [input.workspace, input.timeZone ?? null, input.dailyCredits ?? null, input.dailyCredits !== undefined],
         );
         for (const agent of input.agents)
           await tx.client.query(
-            `INSERT INTO ${relation(tx, 'tf_agent_assignment_limits')}(agent_id,concurrent,daily_runs)
-            SELECT id,$2,$3 FROM ${relation(tx, 'tf_agents')} WHERE id=$1
-            ON CONFLICT (agent_id) DO UPDATE SET concurrent=EXCLUDED.concurrent,daily_runs=EXCLUDED.daily_runs`,
-            [agent.agentId, agent.concurrent, agent.dailyRuns],
+            `INSERT INTO ${relation(tx, 'tf_agent_assignment_limits')}(agent_id,concurrent,daily_runs,daily_credits)
+            SELECT id,$2,$3,$4 FROM ${relation(tx, 'tf_agents')} WHERE id=$1
+            ON CONFLICT (agent_id) DO UPDATE SET concurrent=EXCLUDED.concurrent,daily_runs=EXCLUDED.daily_runs,
+              daily_credits=CASE WHEN $5 THEN EXCLUDED.daily_credits ELSE ${relation(tx, 'tf_agent_assignment_limits')}.daily_credits END`,
+            [
+              agent.agentId,
+              agent.concurrent,
+              agent.dailyRuns,
+              agent.dailyCredits ?? null,
+              agent.dailyCredits !== undefined,
+            ],
           );
         return readLimits(tx);
       }),
@@ -393,14 +453,54 @@ export function createRowWork(runtime: Runtime, compatibility: unknown) {
 }
 
 async function readLimits(tx: AgentTransaction): Promise<AssignmentLimits> {
-  const workspace = (await tx.client.query(`SELECT concurrent FROM ${relation(tx, 'tf_workspace_assignment_limits')}`))
-    .rows[0]?.concurrent;
+  const workspace = (
+    await tx.client.query(
+      `SELECT concurrent,time_zone AS "timeZone",daily_credits AS "dailyCredits" FROM ${relation(tx, 'tf_workspace_assignment_limits')}`,
+    )
+  ).rows[0];
   const agents = (
     await tx.client.query(
-      `SELECT a.id AS "agentId",a.display_name AS name,COALESCE(l.concurrent,3) AS concurrent,l.daily_runs AS "dailyRuns"
+      `SELECT a.id AS "agentId",a.display_name AS name,COALESCE(l.concurrent,3) AS concurrent,l.daily_runs AS "dailyRuns",
+        l.daily_credits AS "dailyCredits"
       FROM ${relation(tx, 'tf_agents')} a LEFT JOIN ${relation(tx, 'tf_agent_assignment_limits')} l ON l.agent_id=a.id
       WHERE a.saved_revision IS NOT NULL AND a.deleted_at IS NULL ORDER BY lower(a.display_name),a.id`,
     )
   ).rows;
-  return assignmentLimitsSchema.parse({ workspace: workspace ?? 10, agents });
+  return assignmentLimitsSchema.parse({
+    workspace: workspace?.concurrent ?? 10,
+    timeZone: workspace?.timeZone ?? 'UTC',
+    dailyCredits: workspace?.dailyCredits ?? null,
+    agents,
+  });
+}
+
+async function readSlackPreferences(tx: AgentTransaction, membershipId: string): Promise<InboxSlack> {
+  const muted = new Set(
+    (
+      await tx.client.query(`SELECT kind FROM ${relation(tx, 'tf_inbox_slack_muted')} WHERE membership_id=$1`, [
+        membershipId,
+      ])
+    ).rows.map(row => String(row.kind)),
+  );
+  const connected = Boolean(
+    (
+      await tx.client.query(
+        `SELECT 1 FROM ${relation(tx, 'tf_slack_identities')} i JOIN ${relation(tx, 'tf_slack_installations')} s
+          ON s.id=i.installation_id AND s.generation=i.generation AND s.state='active'
+        WHERE i.membership_id=$1 AND i.state<>'revoked'`,
+        [membershipId],
+      )
+    ).rowCount,
+  );
+  return inboxSlackSchema.parse({
+    connected,
+    kinds: Object.fromEntries(inboxKinds.map(kind => [kind, !muted.has(kind)])),
+  });
+}
+
+export class AssignmentLimitsError extends Error {
+  constructor(readonly code: 'unknown-time-zone') {
+    super(code);
+    this.name = 'AssignmentLimitsError';
+  }
 }

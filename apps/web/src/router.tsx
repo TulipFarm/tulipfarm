@@ -620,6 +620,7 @@ export const newChatSearch = chatScopeSearch.extend({
       'create-table',
       'edit-table',
       'add-rows',
+      'add-status',
       'create-skill',
       'edit-skill',
       'use-skill',

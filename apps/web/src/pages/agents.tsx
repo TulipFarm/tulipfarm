@@ -27,6 +27,8 @@ import { AgentPolicy } from '@/features/agents/policy';
 import { AgentTriggerWorkflows } from '@/features/agents/agent-workflows';
 import { AgentEvals } from '@/features/agents/evals';
 import { useFlag } from '@/lib/feature-flags';
+import { AssignmentLimitsSettings } from '@/features/tables/assignment-limits';
+import { useOwnMembership } from '@/features/governance/queries';
 import { AgentChat } from '@/features/agents/chat';
 import { AgentArchive, AgentDelete } from '@/features/agents/delete';
 import { AgentActivations } from '@/features/agents/activations';
@@ -474,6 +476,9 @@ function AgentPage({
   const can = (capability: string) => !!detail?.capabilities.includes(capability);
   const concealed = !ready || (!!detail && !can('edit'));
   const evalsOn = useFlag('agent-evals');
+  const assignable = useFlag('assignable-tasks');
+  const membership = useOwnMembership(workspaceId);
+  const admin = membership.state.kind === 'ready' && membership.state.data.role === 'admin';
   const tabs = detail ? visibleTabs(detail.capabilities).filter(item => item.value !== 'evals' || evalsOn) : [];
   const [suggestedModel, setSuggestedModel] = useState<{ id: string; at: number } | null>(null);
   const active = tabs.some(item => item.value === tab) ? tab : 'overview';
@@ -778,6 +783,9 @@ function AgentPage({
                           <dd>{detail.definitionRevision}</dd>
                         </dl>
                       </Disclosure>
+                      {ready && admin && assignable && (
+                        <AssignmentLimitsSettings workspaceId={workspaceId} agentId={id} />
+                      )}
                       <AgentArchive
                         api={api}
                         id={id}

@@ -2,10 +2,14 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { AccessDenied } from '@tulipfarm/access';
 import {
+  AssignmentLimitsError,
+  assignmentLimitsInputSchema,
   assignmentLimitsSchema,
   commentInputSchema,
   createRowWork,
   inboxSchema,
+  inboxSlackInputSchema,
+  inboxSlackSchema,
   rowThreadSchema,
 } from '@tulipfarm/agents/row-work';
 import { isFeatureEnabled } from '@tulipfarm/observability';
@@ -28,18 +32,6 @@ export function registerRowWork(
   const row = workspace.extend({ tableId: z.uuid(), rowId: z.uuid() });
   const comment = row.extend({ itemId: z.uuid() });
   const inboxItem = workspace.extend({ itemId: z.uuid() });
-  const limitsInput = z.object({
-    workspace: z.number().int().min(1).max(100),
-    agents: z
-      .array(
-        z.object({
-          agentId: z.uuid(),
-          concurrent: z.number().int().min(1).max(20),
-          dailyRuns: z.number().int().min(1).max(10000).nullable(),
-        }),
-      )
-      .max(500),
-  });
   const validation = routeValidation({
     missing: 'Missing row work validator',
     invalid: () => new Error('invalid-request'),
@@ -57,6 +49,7 @@ export function registerRowWork(
     routes.setErrorHandler((error, _request, reply) => {
       if (requestBoundaryError(error, reply)) return;
       if (error instanceof AccessDenied) return reply.code(404).send({ error: 'not-found' });
+      if (error instanceof AssignmentLimitsError) return reply.code(400).send({ error: error.code });
       if (error instanceof StorageUnavailableError) return reply.code(503).send({ error: 'workspace-unavailable' });
       if (error instanceof z.ZodError || (typeof error === 'object' && error !== null && 'validation' in error))
         return reply.code(400).send({ error: 'invalid-request' });
@@ -165,6 +158,32 @@ export function registerRowWork(
         return { ok: true as const };
       },
     );
+    const slack = { 200: validation.json(inboxSlackSchema), ...errors };
+    routes.get(
+      '/workspaces/:workspaceId/inbox/slack',
+      { schema: { operationId: 'inboxSlack', params: validation.json(workspace), response: slack } },
+      async request => {
+        const p = workspace.parse(request.params);
+        await enabled(p.workspaceId);
+        return service.slackPreferences(p.workspaceId, user(request));
+      },
+    );
+    routes.put(
+      '/workspaces/:workspaceId/inbox/slack',
+      {
+        schema: {
+          operationId: 'inboxSlackUpdate',
+          params: validation.json(workspace),
+          body: validation.json(inboxSlackInputSchema),
+          response: slack,
+        },
+      },
+      async request => {
+        const p = workspace.parse(request.params);
+        await enabled(p.workspaceId);
+        return service.setSlackPreferences(p.workspaceId, user(request), request.body);
+      },
+    );
     const limits = { 200: validation.json(assignmentLimitsSchema), ...errors };
     routes.get(
       '/workspaces/:workspaceId/assignment-limits',
@@ -181,7 +200,7 @@ export function registerRowWork(
         schema: {
           operationId: 'assignmentLimitsUpdate',
           params: validation.json(workspace),
-          body: validation.json(limitsInput),
+          body: validation.json(assignmentLimitsInputSchema),
           response: limits,
         },
       },

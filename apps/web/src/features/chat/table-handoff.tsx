@@ -6,12 +6,14 @@ import { tableApi } from '@/features/tables/api';
 import { failedRead, type ReadState } from '@/features/tables/request-state';
 import { requestSignal } from '@/lib/http';
 
-export type TableHandoffIntent = 'edit-table' | 'add-rows';
+export type TableHandoffIntent = 'edit-table' | 'add-rows' | 'add-status';
 export type TableHandoffTarget = { id: string; label: string | null; revision: string | null };
 
 export function tableHandoffPrompt(intent: TableHandoffIntent, table: TableHandoffTarget) {
   const name = table.label ? `the “${table.label}” table` : 'this table';
   const identity = table.revision ? `table ID ${table.id}, current revision ${table.revision}` : `table ID ${table.id}`;
+  if (intent === 'add-status')
+    return `Add a single-select field named Status to ${name} (${identity}) with the options To do, In progress and Done, then propose the schema change for my review.`;
   return intent === 'edit-table'
     ? `Help me change the fields of ${name} (${identity}). Read its current fields first, ask what I want to change, then propose the schema change for my review.`
     : `Help me add rows to ${name} (${identity}). Read its current fields first, ask which rows I want to add, then prepare them for my review.`;
@@ -115,7 +117,12 @@ export function TableHandoffNotice({ handoff, workspaceSlug }: { handoff: TableH
       </div>
     );
   if (handoff.kind !== 'failed') return null;
-  const request = handoff.intent === 'edit-table' ? 'change this table’s fields' : 'add rows to this table';
+  const request =
+    handoff.intent === 'add-rows'
+      ? 'add rows to this table'
+      : handoff.intent === 'add-status'
+        ? 'add a Status field to this table'
+        : 'change this table’s fields';
   return (
     <div className="space-y-2">
       <Alert key={handoff.attempt}>
