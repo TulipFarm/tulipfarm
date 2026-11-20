@@ -20,7 +20,7 @@ import type { ChatMessage } from './compaction.ts';
  */
 
 /** The common migration that adds tf_conversation_keep. */
-export const keepChatRecallVersion = 95;
+export const keepChatRecallVersion = 96;
 const recallTimeoutMs = 1500;
 const deliveryTimeoutMs = 30000;
 const recallLimit = 4;
@@ -32,6 +32,8 @@ const batchBytes = 512 * 1024;
 const batchEpisodes = 200;
 const episodeMaximumCharacters = 100_000;
 const deliveryBatch = 20;
+// Long enough for a full batch of sends to finish before another replica may claim the same chats.
+const leaseSeconds = 600;
 
 type Dependencies = {
   /** The Keep client for one purpose, or undefined when this deployment has no Keep endpoint. */
@@ -213,6 +215,7 @@ const dueSchema = z.object({
   covered_through: z.coerce.number(),
   sent_through: z.coerce.number(),
   held: z.boolean(),
+  hold_count: z.coerce.number(),
   forget: z.boolean(),
   attempts: z.number().int(),
 });
@@ -240,19 +243,31 @@ export function createKeepChatRecallDelivery(runtime: Runtime, compatibility: { 
   const transaction = <T>(workspaceId: string, operation: (tx: Transaction) => Promise<T>) =>
     runtime.transaction(workspaceId, compatibility, operation);
 
+  /**
+   * Claims a batch of due chats by pushing their next attempt past a lease, so other replicas skip them until this one
+   * finishes or the lease runs out. Deleting a chat makes its row due at once, so a forget can still overlap a send.
+   */
   async function due(workspaceId: string, deliver: boolean, limit: number) {
     return transaction(workspaceId, async tx => {
       if (!installed(tx)) return [];
       const { rows } = await tx.client.query(
-        `SELECT k.conversation_id, k.covered_through, k.sent_through, k.held,
-          (k.forget OR c.id IS NULL OR c.deleted_at IS NOT NULL) AS forget, k.attempts
-        FROM ${keepTable(tx)} k LEFT JOIN ${table(tx, 'tf_conversations')} c ON c.id = k.conversation_id
-        WHERE k.next_attempt_at <= clock_timestamp()
-          AND (k.forget OR c.id IS NULL OR c.deleted_at IS NOT NULL OR ($1 AND k.covered_through > k.sent_through))
-        ORDER BY k.next_attempt_at, k.conversation_id LIMIT $2`,
-        [deliver, limit],
+        `WITH claimed AS (
+          SELECT k.conversation_id, (k.forget OR c.id IS NULL OR c.deleted_at IS NOT NULL) AS forget
+          FROM ${keepTable(tx)} k LEFT JOIN ${table(tx, 'tf_conversations')} c ON c.id = k.conversation_id
+          WHERE k.next_attempt_at <= clock_timestamp()
+            AND (k.forget OR c.id IS NULL OR c.deleted_at IS NOT NULL OR ($1 AND k.covered_through > k.sent_through))
+          ORDER BY k.next_attempt_at, k.conversation_id LIMIT $2
+          FOR UPDATE OF k SKIP LOCKED
+        )
+        UPDATE ${keepTable(tx)} k SET next_attempt_at = clock_timestamp() + make_interval(secs => $3)
+        FROM claimed WHERE k.conversation_id = claimed.conversation_id
+        RETURNING k.conversation_id, k.covered_through, k.sent_through, k.held, k.hold_count, claimed.forget, k.attempts`,
+        [deliver, limit, leaseSeconds],
       );
-      return z.array(dueSchema).parse(rows);
+      return z
+        .array(dueSchema)
+        .parse(rows)
+        .sort((a, b) => a.conversation_id.localeCompare(b.conversation_id));
     });
   }
 
@@ -280,20 +295,22 @@ export function createKeepChatRecallDelivery(runtime: Runtime, compatibility: { 
   }
 
   async function settle(workspaceId: string, sql: string, values: unknown[]) {
-    await transaction(workspaceId, async tx => {
-      await tx.client.query(sql.replaceAll('$table', keepTable(tx)), values);
-    });
+    return transaction(
+      workspaceId,
+      async tx => (await tx.client.query(sql.replaceAll('$table', keepTable(tx)), values)).rowCount ?? 0,
+    );
   }
 
   /**
-   * Records that Keep may hold the chat, before and after every send. If the row was forgotten and removed meanwhile,
-   * it comes back marked for forgetting, so a send that lands after a forget is forgotten too.
+   * Records that Keep may hold the chat, before and after every send, and counts the send so a forget that looked
+   * at the row earlier leaves it alone. If the row was forgotten and removed meanwhile, it comes back marked for
+   * forgetting, so a send that lands after a forget is forgotten too.
    */
   async function hold(workspaceId: string, conversationId: string) {
     await settle(
       workspaceId,
-      `INSERT INTO $table (conversation_id, held, forget) VALUES ($1, true, true)
-      ON CONFLICT (conversation_id) DO UPDATE SET held = true`,
+      `INSERT INTO $table AS k (conversation_id, held, hold_count, forget) VALUES ($1, true, 1, true)
+      ON CONFLICT (conversation_id) DO UPDATE SET held = true, hold_count = k.hold_count + 1`,
       [conversationId],
     );
   }
@@ -321,8 +338,23 @@ export function createKeepChatRecallDelivery(runtime: Runtime, compatibility: { 
         return false;
       }
     }
-    await settle(workspaceId, `DELETE FROM $table WHERE conversation_id = $1`, [row.conversation_id]);
+    // A send that started since the claim may have put the chat back in Keep: keep the row for the next sweep.
+    if (
+      !(await settle(workspaceId, `DELETE FROM $table WHERE conversation_id = $1 AND hold_count = $2`, [
+        row.conversation_id,
+        row.hold_count,
+      ]))
+    ) {
+      await release(workspaceId, row.conversation_id);
+      return false;
+    }
     return true;
+  }
+
+  async function release(workspaceId: string, conversationId: string) {
+    await settle(workspaceId, `UPDATE $table SET next_attempt_at = clock_timestamp() WHERE conversation_id = $1`, [
+      conversationId,
+    ]);
   }
 
   async function deliver(keep: KeepClient, workspaceId: string, row: z.infer<typeof dueSchema>) {
@@ -362,7 +394,8 @@ export function createKeepChatRecallDelivery(runtime: Runtime, compatibility: { 
     }
     await settle(
       workspaceId,
-      `UPDATE $table SET sent_through = GREATEST(sent_through, $2), attempts = 0, last_error = NULL
+      `UPDATE $table SET sent_through = GREATEST(sent_through, $2), attempts = 0, last_error = NULL,
+        next_attempt_at = clock_timestamp()
       WHERE conversation_id = $1`,
       [row.conversation_id, row.covered_through],
     );

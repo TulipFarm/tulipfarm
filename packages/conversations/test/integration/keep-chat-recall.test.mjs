@@ -206,6 +206,95 @@ test('a failed send is retried later and never fails the reply', { timeout: 60_0
   }
 });
 
+/** A runtime whose first transaction (the claim) waits for the returned `go` before handing back its rows. */
+function pausedAfterClaim(runtime) {
+  let claimed, go;
+  const signals = {
+    claimed: new Promise(resolve => (claimed = resolve)),
+    go: () => go(),
+  };
+  const opened = new Promise(resolve => (go = resolve));
+  let first = true;
+  return {
+    signals,
+    runtime: {
+      transaction: async (...args) => {
+        const result = await runtime.transaction(...args);
+        if (first) {
+          first = false;
+          claimed();
+          await opened;
+        }
+        return result;
+      },
+    },
+  };
+}
+
+test('two replicas never claim the same due chat', { timeout: 60_000 }, async () => {
+  const f = await conversationFixture();
+  const keep = fakeKeep();
+  const restore = configureKeepChatRecall({ client: keep.client, enabled: async () => true });
+  try {
+    await compactedChat(f);
+    const a = pausedAfterClaim(f.runtime);
+    const sending = createKeepChatRecallDelivery(a.runtime, compatibility).sync(f.workspace.id);
+    await a.signals.claimed;
+    assert.deepEqual(
+      await createKeepChatRecallDelivery(f.runtime, compatibility).sync(f.workspace.id),
+      { sent: 0, forgotten: 0, failed: 0 },
+      'the other replica skips a claimed chat',
+    );
+    a.signals.go();
+    assert.deepEqual(await sending, { sent: 1, forgotten: 0, failed: 0 });
+    assert.equal(keep.calls.filter(call => call === 'ingest').length, 1);
+  } finally {
+    restore();
+    await f.close();
+  }
+});
+
+test(
+  'a forget that overlaps a send on another replica never leaves the deleted chat in Keep',
+  { timeout: 60_000 },
+  async () => {
+    const f = await conversationFixture();
+    const keep = fakeKeep();
+    const restore = configureKeepChatRecall({ client: keep.client, enabled: async () => true });
+    try {
+      const w = f.workspace;
+      const { chatId } = await compactedChat(f);
+      // Replica A claims the chat to send it, then the chat is deleted, which makes it due again at once.
+      const a = pausedAfterClaim(f.runtime);
+      const sending = createKeepChatRecallDelivery(a.runtime, compatibility).sync(w.id);
+      await a.signals.claimed;
+      await f.store.remove(w.id, w.userId, chatId, { commandId: randomUUID() });
+      // Replica B claims it to forget while nothing has been sent yet, then A sends before B finishes.
+      const b = pausedAfterClaim(f.runtime);
+      const forgetting = createKeepChatRecallDelivery(b.runtime, compatibility).sync(w.id);
+      await b.signals.claimed;
+      a.signals.go();
+      assert.deepEqual(await sending, { sent: 1, forgotten: 0, failed: 0 });
+      assert.equal(keep.sources.size, 1);
+      b.signals.go();
+      assert.deepEqual(await forgetting, { sent: 0, forgotten: 0, failed: 1 }, 'the stale forget keeps the row');
+      assert.equal((await row(f, chatId)).held, true);
+
+      assert.deepEqual(await createKeepChatRecallDelivery(f.runtime, compatibility).sync(w.id), {
+        sent: 0,
+        forgotten: 1,
+        failed: 0,
+      });
+      assert.equal(keep.calls.at(-1), 'forget_source');
+      assert.equal(keep.sources.size, 0);
+      assert.equal(await row(f, chatId), undefined);
+    } finally {
+      restore();
+      await f.close();
+    }
+  },
+);
+
 test(
   'with the keep-memory flag off, compaction, replies and deletion never call Keep',
   { timeout: 60_000 },
