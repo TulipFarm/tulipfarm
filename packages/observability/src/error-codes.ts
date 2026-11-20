@@ -223,6 +223,7 @@ const codes = new Set<string>([
   'already-disabled',
   'atlassian-unavailable',
   'code-steps-unavailable',
+  'coding-steps-unavailable',
   'delegation-tools',
   'dependency-cycle',
   'github-repository-not-connected',

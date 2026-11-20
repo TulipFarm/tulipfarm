@@ -39,6 +39,7 @@ export function activationFailureMessage(error: unknown, workflow: Workflow, sur
     'stale-generation': 'This workflow changed. Open the workflow to review its current state before activating.',
     'stale-revision': 'A newer revision of this workflow was saved. Open the workflow to review it before activating.',
     'code-steps-unavailable': 'Code steps cannot run until an execution backend is configured.',
+    'coding-steps-unavailable': 'Coding steps cannot run until an execution backend is configured.',
     'workflow-archived': 'This workflow is archived. Restore it before activating.',
   };
   const reason =

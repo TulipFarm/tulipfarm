@@ -143,7 +143,7 @@ test('drafts reject schedules the scheduler cannot run', () => {
   assert.equal(previewWorkflowRun(record, now), null, 'each row sets its own run time');
 });
 
-test('drafts reject code steps unless a code runner is configured', () => {
+test('drafts reject code and coding steps unless an execution backend is configured', () => {
   const now = new Date('2026-10-08T12:00:00Z');
   const code = {
     ...weekdayReview,
@@ -154,6 +154,20 @@ test('drafts reject code steps unless a code runner is configured', () => {
   assert.equal(workflowDefinitionProblem(code, now, false)?.error, 'code-steps-unavailable');
   assert.equal(workflowDefinitionProblem(code, now, true), null);
   assert.equal(workflowDefinitionProblem(weekdayReview, now, false), null);
+  const coding = {
+    ...weekdayReview,
+    steps: [
+      {
+        id: 'fix',
+        kind: 'coding',
+        agent: 'claude-code',
+        repository: { kind: 'literal', value: 'octo/app' },
+        prompt: { kind: 'literal', value: 'Fix the bug.' },
+      },
+    ],
+  };
+  assert.equal(workflowDefinitionProblem(coding, now, false)?.error, 'coding-steps-unavailable');
+  assert.equal(workflowDefinitionProblem(coding, now, true), null);
 });
 
 test('drafts accept Slack text that comes from HTTP or code output', () => {
