@@ -228,6 +228,24 @@ export async function connectMaintenance(connectionString: string) {
 export type RolloutResult = { workspaceId: string; status: 'applied' | 'failed' | 'blocked'; errorCode: string | null };
 
 const rolloutLockAttempts = 3;
+// A busy workspace's authorization holders finish within their own 30s statement and idle limits, so a rollout
+// waiting this long in the arrival-order queue always gets its turn.
+const rolloutTransactionSettings = { lockTimeoutMs: 60_000, statementTimeoutMs: 120_000 };
+
+/** Whether the workspace ledger already matches `migrations`, read without taking any rollout locks. */
+async function commonMigrationsCurrent(client: SqlClient, workspaceId: string, migrations: readonly Migration[]) {
+  const ledger = qualified(workspaceNames(workspaceId).schema, 'tf_common_migrations');
+  if (!(await client.query('SELECT to_regclass($1) AS relation', [ledger])).rows[0]?.relation) return false;
+  const installed = z
+    .array(receiptSchema)
+    .parse((await client.query(`SELECT name, checksum FROM ${ledger} ORDER BY name`)).rows);
+  return (
+    installed.length === migrations.length &&
+    installed.every(
+      (receipt, index) => receipt.name === migrations[index]?.name && receipt.checksum === migrations[index]?.checksum,
+    )
+  );
+}
 
 /** Retries a workspace's rollout when a busy workspace keeps it waiting past the lock timeout or deadlocks it. */
 async function retryLockWaits(apply: () => Promise<void>) {
@@ -276,16 +294,24 @@ export async function rolloutCommonMigrations(options: {
                 [target, workspaceId],
               );
               let result: RolloutResult;
-              try {
-                await retryLockWaits(() =>
-                  inTransaction(client, async transaction => {
-                    await applyCommonMigrations(transaction, workspaceId, options.migrations);
-                    await transaction.query(
-                      "UPDATE database_management.common_rollouts SET status = 'applied', error_code = NULL, attempts = attempts + 1, updated_at = now() WHERE target = $1 AND workspace_id = $2",
-                      [target, workspaceId],
-                    );
-                  }),
+              const applied = (transaction: SqlClient) =>
+                transaction.query(
+                  "UPDATE database_management.common_rollouts SET status = 'applied', error_code = NULL, attempts = attempts + 1, updated_at = now() WHERE target = $1 AND workspace_id = $2",
+                  [target, workspaceId],
                 );
+              try {
+                if (await commonMigrationsCurrent(client, workspaceId, options.migrations)) await applied(client);
+                else
+                  await retryLockWaits(() =>
+                    inTransaction(
+                      client,
+                      async transaction => {
+                        await applyCommonMigrations(transaction, workspaceId, options.migrations);
+                        await applied(transaction);
+                      },
+                      rolloutTransactionSettings,
+                    ),
+                  );
                 result = { workspaceId, status: 'applied', errorCode: null };
               } catch (error) {
                 const status =

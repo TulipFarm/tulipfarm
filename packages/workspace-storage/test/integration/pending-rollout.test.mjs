@@ -186,3 +186,29 @@ test('a rollout queues for the authorization lock in arrival order instead of st
     await db.close();
   }
 });
+
+test('a rollout skips a current workspace without waiting for its authorization lock', async () => {
+  const db = await fixture();
+  const writer = await connect(db.connectionString);
+  try {
+    const workspace = await db.create();
+    await writer.query('BEGIN');
+    await writer.query(
+      `SELECT a.id FROM (SELECT pg_advisory_xact_lock(hashtextextended($1, 518204))) q, ${qualified(workspace.names.schema, 'tf_authorization_lock')} a WHERE a.id = 1 FOR UPDATE OF a`,
+      [workspace.names.schema],
+    );
+    const started = performance.now();
+    const { results } = await rolloutCommonMigrations({
+      connectionString: db.connectionString,
+      migrations: db.baseline,
+      concurrency: 1,
+      listWorkspaceIds: async () => [workspace.id],
+    });
+    assert.deepEqual(results, [{ workspaceId: workspace.id, status: 'applied', errorCode: null }]);
+    assert.ok(performance.now() - started < 4000);
+  } finally {
+    await writer.query('ROLLBACK');
+    await writer.end();
+    await db.close();
+  }
+});
