@@ -34,9 +34,15 @@ written as 25 base-36 characters so the id fits Keep's 64-character limit.
 A workspace's Knowledge corpus is `keepWorkspaceKnowledgeScope(workspaceId)`,
 `{ user: 'ws-<workspaceId>-kb' }`. It holds every published Knowledge document
 in the workspace, so each search names the documents its reader may see.
+A chat's compacted messages are `keepConversationScope(workspaceId, conversationId)`,
+`{ user: 'ws-<workspaceId>-c-<conversationId>' }`, which never equals a member
+or Knowledge scope.
 
-The conversations package uses the client for personal memory in workspaces
-where the `keep-memory` flag (off by default) is on. See
-`packages/conversations/src/keep-personal-memory.ts`. In the same workspaces
-the knowledge package sends published Knowledge to Keep and searches it there;
-see `packages/knowledge/src/internal/keep.ts`.
+The conversations package uses the client in workspaces where the
+`keep-memory` flag (off by default) is on: for personal memory (see
+`packages/conversations/src/keep-personal-memory.ts`) and for chat recall,
+which sends messages that compaction moves out of a chat's context to Keep and
+searches them for later replies (see
+`packages/conversations/src/keep-chat-recall.ts`). In the same
+workspaces the knowledge package sends published Knowledge to Keep and
+searches it there; see `packages/knowledge/src/internal/keep.ts`.
