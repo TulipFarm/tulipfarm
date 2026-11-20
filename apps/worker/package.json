@@ -43,6 +43,7 @@
     "@tulipfarm/config": "workspace:*",
     "@tulipfarm/conversations": "workspace:*",
     "@tulipfarm/email": "workspace:*",
+    "@tulipfarm/evals": "workspace:*",
     "@tulipfarm/execution-contract": "workspace:*",
     "@tulipfarm/extensions": "workspace:*",
     "@tulipfarm/files": "workspace:*",

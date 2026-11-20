@@ -80,6 +80,7 @@ import { createGitHubWorkflowFanOut } from '@tulipfarm/workflows/github-triggers
 import { registerFiles } from './files.ts';
 import { registerKnowledgeRoutes } from './knowledge-composition.ts';
 import { createStorageServices, registerStorageSweeps } from './storage-services.ts';
+import { createAgentEvals, registerAgentEvals } from './agent-evals.ts';
 
 export function registerStorageComposition(
   app: FastifyInstance,
@@ -294,6 +295,11 @@ export function registerStorageComposition(
     runtime,
     modelFamilyEligibility,
     work: services.agents,
+  });
+  registerAgentEvals(app, {
+    auth: dependencies.auth,
+    evals: createAgentEvals(runtime, modelFamilyEligibility),
+    temporal,
   });
   dependencies.invitationLinks.current = registerGovernance(app, {
     auth: dependencies.auth,

@@ -291,6 +291,10 @@
       "types": "./dist/saved-service.d.ts",
       "default": "./dist/saved-service.js"
     },
+    "./eval-access": {
+      "types": "./dist/eval-access.d.ts",
+      "default": "./dist/eval-access.js"
+    },
     "./saved-contracts": {
       "types": "./dist/saved-contracts.d.ts",
       "default": "./dist/saved-contracts.js"

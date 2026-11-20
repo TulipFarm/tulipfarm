@@ -31,6 +31,7 @@ import { registerKnowledgeDispatch } from './knowledge-dispatch.ts';
 import { registerRecommendationDispatch } from './recommendation-dispatch.ts';
 import { registerWorkflowDispatch, workflowWake } from './workflow-dispatch.ts';
 import { registerSkillImportDispatch } from './skill-import-dispatch.ts';
+import { createAgentEvals, registerAgentEvalDispatch } from './agent-evals.ts';
 import { registerSystemPackageSweep } from './system-package-sweep.ts';
 import { registerGoogleHeartbeatDispatch } from './google-heartbeat-dispatch.ts';
 import { registerTableDispatch } from './table-dispatch.ts';
@@ -156,6 +157,7 @@ export function registerStorageSweeps(
   registerWorkflowDispatch(app, { pool, service: services.workflows, temporal });
   if (services.chatObjects)
     registerSkillImportDispatch(app, { runtime, pool, temporal, objects: services.chatObjects });
+  registerAgentEvalDispatch(app, { pool, temporal, evals: createAgentEvals(runtime) });
   registerKnowledgeSweeps(app, { pool, temporal }, services.knowledge);
   registerKnowledgeDispatch(app, { pool, service: services.knowledge.service, temporal });
   registerSystemPackageSweep(app, pool, services.systemPackages);

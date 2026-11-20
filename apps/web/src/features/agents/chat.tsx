@@ -14,17 +14,25 @@ import { AgentRead } from './feedback';
 import type { agentApi, AgentDetail } from './api';
 import { ModelReceipt } from './model-receipt';
 import { activationLabel } from './labels';
+import { SaveEvalDialog } from './evals';
 
 export function AgentChat({
   api,
+  workspaceId,
   detail,
   concealed,
+  canSaveEval,
 }: {
   api: ReturnType<typeof agentApi>;
+  workspaceId: string;
   detail: AgentDetail;
   concealed: boolean;
+  /** Offer "Save as eval" for a request this member sent from this page. */
+  canSaveEval: boolean;
 }) {
   const [prompt, setPrompt] = useState('');
+  const [sent, setSent] = useState<{ id: string; prompt: string } | null>(null);
+  const [savingEval, setSavingEval] = useState(false);
   const [activationId, setActivationId] = useState('');
   const [showErrors, setShowErrors] = useState(false);
   const activation = detail.activations.find(item => item.id === activationId);
@@ -85,7 +93,9 @@ export function AgentChat({
       return 'invalid';
     }
     setShowErrors(false);
-    void write.submit({ id: crypto.randomUUID(), activationId: activation.id, scope: activation.scope, prompt });
+    const id = crypto.randomUUID();
+    setSent({ id, prompt });
+    void write.submit({ id, activationId: activation.id, scope: activation.scope, prompt });
   }
   return (
     <FormSection
@@ -177,7 +187,7 @@ export function AgentChat({
               />
             )}
           </AgentRead>
-          <div>
+          <div className="flex flex-wrap gap-2">
             <Button
               variant="outline"
               disabled={read.state.kind === 'ready' && read.state.refreshing}
@@ -185,7 +195,22 @@ export function AgentChat({
             >
               Check request status
             </Button>
+            {canSaveEval && sent?.id === turnId && read.state.kind === 'ready' && !pending(read.state.data) && (
+              <Button variant="outline" onClick={() => setSavingEval(true)}>
+                Save as eval
+              </Button>
+            )}
           </div>
+          {savingEval && sent && (
+            <SaveEvalDialog
+              workspaceId={workspaceId}
+              agentId={detail.id}
+              tools={detail.definition.tools}
+              message={sent.prompt}
+              priorTurns={[]}
+              onClose={() => setSavingEval(false)}
+            />
+          )}
           {read.delayed && (
             <p role="status" className="text-sm">
               Automatic checks stopped. The request continues on the server.

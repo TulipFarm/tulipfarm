@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { createHash, randomUUID } from 'node:crypto';
 import { outsideContentBatchReply, waitingCardChange } from './chat-row-guard.ts';
@@ -4195,6 +4196,14 @@ const transientRetryPauseMs = 1_500;
 /** Plan failures retried once on the same plan before any fallback; see withFallback. */
 const planRetryClasses: ReadonlySet<ModelErrorClass> = new Set(['timeout', 'server_error', 'network']);
 
+/**
+ * Receives each completion decision of a chat reply, last one final. Only eval runs set it, to grade the completion
+ * status of a reply; production replies never do.
+ */
+export const completionStatusObserver = new AsyncLocalStorage<
+  (status: 'completed' | 'waiting' | 'refused' | 'blocked' | 'continue') => void
+>();
+
 export async function inferWithTools(
   route: InferenceRoute,
   messages: readonly ChatTurn[],
@@ -6328,6 +6337,7 @@ export async function inferWithTools(
           checked.status === 'continue' ? 'continue' : 'done',
           checked.status === 'continue' ? checked.reason : undefined,
         );
+      completionStatusObserver.getStore()?.(checked.status);
       if (checked.status !== 'continue') return accept();
       if (tableCheckNeeded) inventoryRecovery = true;
       preview('');

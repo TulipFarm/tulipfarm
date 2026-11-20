@@ -434,6 +434,10 @@ export function createSavedAgentService(runtime: AgentStorage, readProjection?: 
         `UPDATE ${relation(transaction, 'tf_agents')} SET deleted_at = now(), enabled = false, owning_team_id = NULL WHERE id = $1`,
         [agentId],
       );
+      // A deleted agent's eval set, cases, runs and results go with it.
+      await transaction.client.query(`DELETE FROM ${relation(transaction, 'tf_agent_eval_sets')} WHERE agent_id = $1`, [
+        agentId,
+      ]);
       await transaction.client.query(
         `UPDATE ${relation(transaction, 'tf_agent_activations')} SET revoked_at = now() WHERE agent_id = $1 AND revoked_at IS NULL`,
         [agentId],

@@ -25,6 +25,8 @@ import { ArchiveUp } from 'reicon-react/icons/ArchiveUp';
 import { AgentEditor } from '@/features/agents/editor';
 import { AgentPolicy } from '@/features/agents/policy';
 import { AgentTriggerWorkflows } from '@/features/agents/agent-workflows';
+import { AgentEvals } from '@/features/agents/evals';
+import { useFlag } from '@/lib/feature-flags';
 import { AgentChat } from '@/features/agents/chat';
 import { AgentArchive, AgentDelete } from '@/features/agents/delete';
 import { AgentActivations } from '@/features/agents/activations';
@@ -471,7 +473,9 @@ function AgentPage({
   const detail = creating ? null : (snapshot?.detail ?? null);
   const can = (capability: string) => !!detail?.capabilities.includes(capability);
   const concealed = !ready || (!!detail && !can('edit'));
-  const tabs = detail ? visibleTabs(detail.capabilities) : [];
+  const evalsOn = useFlag('agent-evals');
+  const tabs = detail ? visibleTabs(detail.capabilities).filter(item => item.value !== 'evals' || evalsOn) : [];
+  const [suggestedModel, setSuggestedModel] = useState<{ id: string; at: number } | null>(null);
   const active = tabs.some(item => item.value === tab) ? tab : 'overview';
   const open = (next: AgentTab, target: string) => {
     void onTab(next).then(() =>
@@ -703,7 +707,13 @@ function AgentPage({
                         </p>
                       </section>
                       <Disclosure title="Single-step request">
-                        <AgentChat api={api} detail={detail} concealed={!ready || !can('invoke')} />
+                        <AgentChat
+                          api={api}
+                          workspaceId={workspaceId}
+                          detail={detail}
+                          concealed={!ready || !can('invoke')}
+                          canSaveEval={evalsOn && can('edit')}
+                        />
                       </Disclosure>
                     </>,
                   )}
@@ -718,6 +728,7 @@ function AgentPage({
                       detail={detail}
                       concealed={concealed}
                       refresh={refresh}
+                      suggestedModel={suggestedModel}
                     />,
                   )}
                   {can('invoke') &&
@@ -741,6 +752,21 @@ function AgentPage({
                     )}
                   {can('manage') &&
                     panel('schedules', <AgentTriggerWorkflows agentId={id} workspaceId={workspaceId} slug={slug} />)}
+                  {evalsOn &&
+                    can('invoke') &&
+                    panel(
+                      'evals',
+                      <AgentEvals
+                        workspaceId={workspaceId}
+                        agentId={id}
+                        tools={detail.definition.tools}
+                        enabled={ready && active === 'evals'}
+                        onUseModel={model => {
+                          setSuggestedModel({ id: model, at: Date.now() });
+                          open('instructions', 'agent-model-family');
+                        }}
+                      />,
+                    )}
                   {panel(
                     'settings',
                     <>

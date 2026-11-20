@@ -165,6 +165,13 @@ export const featureFlags = {
     scope: 'workspace',
     env: 'FEATURE_FLAG_KEEP_MEMORY',
   },
+  'agent-evals': {
+    description:
+      "An Evals tab on saved agents: members write test cases, run them against the agent's model or up to three models, and see pass rates. Runs use workspace credits and never write to tables, tasks or chats.",
+    default: false,
+    scope: 'workspace',
+    env: 'FEATURE_FLAG_AGENT_EVALS',
+  },
 } as const satisfies Record<string, FeatureFlagDefinition>;
 
 export type FeatureFlag = keyof typeof featureFlags;
