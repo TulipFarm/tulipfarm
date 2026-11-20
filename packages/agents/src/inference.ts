@@ -1810,7 +1810,51 @@ function nativeRequest(
   required?: string,
 ) {
   const forced = required !== undefined && tools.some(tool => tool.name === required) ? required : undefined;
-  return { ...nativeWire(config, blocks, items, tools, forced), turns: loopTurns(items) };
+  const capabilities = routeCapabilities(config);
+  // Reasoning tokens count toward the limit, so only a route with reasoning off can be given a small one.
+  const reasoningOff =
+    (capabilities.reasoningEffort ?? (capabilities.reasoningOffForTools ? 'none' : undefined)) === 'none';
+  const bound = forced && reasoningOff && argumentTokenBound(tools.find(tool => tool.name === forced)!.parameters);
+  // A forced round only needs room for its call, so text a route writes before the call cannot run to the full limit.
+  const capped = bound ? { ...config, maxOutputTokens: Math.min(config.maxOutputTokens, bound + 1024) } : config;
+  return { ...nativeWire(capped, blocks, items, tools, forced), turns: loopTurns(items) };
+}
+
+/** The most tokens a call's arguments can take under `schema`, or undefined when any value is unbounded. */
+function argumentTokenBound(schema: unknown): number | undefined {
+  if (!isPlainRecord(schema)) return undefined;
+  if (Array.isArray(schema.enum) || 'const' in schema) return 16;
+  const options = schema.anyOf ?? schema.oneOf;
+  if (Array.isArray(options)) {
+    const bounds = options.map(argumentTokenBound);
+    return bounds.every(bound => bound !== undefined) ? Math.max(0, ...bounds) : undefined;
+  }
+  switch (schema.type) {
+    case 'string':
+      // A character can take more than one token, such as in escaped or non-Latin text.
+      return typeof schema.maxLength === 'number' ? schema.maxLength * 2 + 4 : undefined;
+    case 'number':
+    case 'integer':
+    case 'boolean':
+    case 'null':
+      return 16;
+    case 'array': {
+      const item = argumentTokenBound(schema.items);
+      return typeof schema.maxItems === 'number' && item !== undefined ? schema.maxItems * (item + 2) + 4 : undefined;
+    }
+    case 'object': {
+      if (!isPlainRecord(schema.properties) || schema.additionalProperties !== false) return undefined;
+      let total = 4;
+      for (const [name, property] of Object.entries(schema.properties)) {
+        const bound = argumentTokenBound(property);
+        if (bound === undefined) return undefined;
+        total += name.length + 4 + bound;
+      }
+      return total;
+    }
+    default:
+      return undefined;
+  }
 }
 function nativeWire(
   config: z.output<typeof inferenceRouteSchema>,
@@ -5427,7 +5471,7 @@ export async function inferWithTools(
         }
       }
       // A forced tool choice is sent only to routes whose deployment accepts one; others are asked in the message alone.
-      const required =
+      let required =
         !finalizing && routeCapabilities(config).toolChoice !== 'auto'
           ? forceRender && renderer
             ? renderer.name
@@ -5525,7 +5569,21 @@ export async function inferWithTools(
           );
         }
       };
-      const selected = await sendRound();
+      let selected = await sendRound();
+      /**
+       * Some routes write plain text before a forced call and can repeat it until the output limit without ever making
+       * the call. That text is never the answer, so the round is sent once more with the choice left to the model.
+       */
+      if (required && !rowTool && selected.kind === 'failure' && selected.reason === 'output-limit') {
+        log('warn', 'activity', 'call_failed', { operation: 'chat.forced-tool-overrun', tool: required });
+        try {
+          answerText?.({ step: answerStep, text: '' });
+        } catch {
+          /* Progress is a preview. */
+        }
+        required = undefined;
+        selected = await sendRound();
+      }
       outputProduced = true;
       return {
         selected,

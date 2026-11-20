@@ -3267,16 +3267,19 @@ test('an app chat tells the model which app tools read and change the app', asyn
 });
 
 /** Runs one app chat turn against a scripted model; `script` answers each reply round, by round index. */
-async function appTurn(t, script, request = 'Now change it to Orders v3 and rebuild.') {
+async function appTurn(t, script, request = 'Now change it to Orders v3 and rebuild.', route = routes.azure) {
   const rounds = [];
   const ran = [];
   const wire = await boundary(t, (_req, res) => {
     rounds.push(wire.received.at(-1).body);
+    const { finish, ...reply } = script(rounds.length - 1);
+    const body = nativeReply('azure', reply);
+    if (finish) body.choices[0].finish_reason = finish;
     res.writeHead(200);
-    res.end(JSON.stringify(nativeReply('azure', script(rounds.length - 1))));
+    res.end(JSON.stringify(body));
   });
   const result = await inferWithTools(
-    routes.azure,
+    route,
     [
       { role: 'user', text: 'Change the heading to Orders v2.' },
       { role: 'assistant', text: 'The heading now reads Orders v2. The build succeeded.' },
@@ -3293,8 +3296,28 @@ async function appTurn(t, script, request = 'Now change it to Orders v3 and rebu
     null,
     { earlierMessages: false, sources: () => [], apps: 'public' },
   );
-  return { result, ran, choices: rounds.map(body => body.tool_choice?.function?.name ?? body.tool_choice) };
+  return {
+    result,
+    ran,
+    choices: rounds.map(body => body.tool_choice?.function?.name ?? body.tool_choice),
+    limits: rounds.map(body => body.max_completion_tokens),
+  };
 }
+
+test('a forced app round that runs to the output limit without its call is sent again unforced, on a smaller limit', async t => {
+  const claim = 'I changed the paragraph and rebuilt the app. ';
+  const answer = 'The draft is built; the paragraph reads as asked.';
+  const turn = await appTurn(
+    t,
+    round => [{ text: claim.repeat(40), finish: 'length' }, { calls: [use('apps.status')] }][round] ?? { text: answer },
+    'Rebuild the app.',
+    { ...routes.azure, maxOutputTokens: 8192, capabilities: { reasoningEffort: 'none' } },
+  );
+  assert.deepEqual(turn.choices, ['apps_status', 'auto', 'auto']);
+  assert.deepEqual(turn.limits, [1284, 8192, 8192]);
+  assert.deepEqual(turn.ran, ['apps.status']);
+  assert.equal(turn.result.text, answer);
+});
 
 test('every app chat turn starts by reading the app, so later turns call app tools instead of restating', async t => {
   const claim = "I updated the heading in index.html to 'Orders v3'.";
